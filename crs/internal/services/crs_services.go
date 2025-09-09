@@ -738,6 +738,12 @@ func (s *defaultCRSService) SubmitLocalTask(taskDir string) error {
 		}
 
         log.Printf("Completed Task Detail, setting task detail to %v", taskDetail)
+
+        // save task detail to file, project_name.json
+        taskDetailFile := path.Join(taskDir, "task_detail.json")
+        if err := os.WriteFile(taskDetailFile, []byte(taskDetail.String()), 0644); err != nil {
+            log.Printf("Failed to save task detail to file: %v", err)
+        }
 	}
     //----------------------------------------------------------
 
@@ -7474,7 +7480,7 @@ func (s *defaultCRSService) runFuzzing(myFuzzer,taskDir string, taskDetail model
         s.submissionEndpoint = "http://localhost:7081"
         myFuzzer = allFuzzers[0]
         for _, f := range allFuzzers {
-            if strings.HasSuffix(f, "libxml2-address/html") ||  strings.HasSuffix(f, "tika-address/HtmlParserFuzzer")  ||  strings.HasSuffix(f, "zookeeper-address/MessageTrackerPeekReceivedFuzzer") ||  strings.HasSuffix(f, "apache-commons-compress-address/CompressZipFuzzer")  ||  strings.HasSuffix(f, "sqlite3-address/customfuzz3")  {
+            if strings.HasSuffix(f, "libxml2-address/xml") ||  strings.HasSuffix(f, "tika-address/HtmlParserFuzzer")  ||  strings.HasSuffix(f, "zookeeper-address/MessageTrackerPeekReceivedFuzzer") ||  strings.HasSuffix(f, "apache-commons-compress-address/CompressZipFuzzer")  ||  strings.HasSuffix(f, "sqlite3-address/customfuzz3")  {
                 myFuzzer = f
                 break
             }

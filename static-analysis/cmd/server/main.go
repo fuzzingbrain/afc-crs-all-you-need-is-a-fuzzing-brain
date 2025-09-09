@@ -461,6 +461,7 @@ func handleAnalysis(c *gin.Context, service *AnalysisService) {
 		var err error
 		taskResult,err = engine.TryLoadJsonResults(request.TaskID, request.Focus)
 		if err != nil {
+			log.Printf("Error loading task results: %v", err)
 			log.Printf("Task analysis not yet complete for TaskID: %v", request.TaskID)
 			c.JSON(http.StatusInternalServerError, models.AnalysisResponse{
 				Status:  "error",

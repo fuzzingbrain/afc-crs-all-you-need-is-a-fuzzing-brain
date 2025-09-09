@@ -5,11 +5,18 @@ mkdir -p logs
 DATE=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="logs/${DATE}.log"
 
-# original dataset path
-ORIGINAL_DATASET="/crs-workdir/local-test-integration-delta-01"
+# original dataset path -> as an input of user, set default value as /crs-workdir/FuzzingBrain-AIXCC-Challenges/c-challenges/local-test-libxml2-delta-02
+if [ -z "$ORIGINAL_DATASET" ]; then
+    ORIGINAL_DATASET="/crs-workdir/local-test-integration-delta-01"
+fi
+
+# last part of the original dataset path -> as an input of user, set default value as libxml2
+if [ -z "$PROJECT_NAME" ]; then
+    PROJECT_NAME=$(basename "$ORIGINAL_DATASET")
+fi
 
 # create new workspace directory
-NEW_WORKSPACE="/crs-workdir/workspace_${DATE}"
+NEW_WORKSPACE="/crs-workdir/workspace_${PROJECT_NAME}_${DATE}"
 
 echo "Starting CRS local run at $(date)" | tee "$LOG_FILE"
 echo "Log file: $LOG_FILE" | tee -a "$LOG_FILE"
