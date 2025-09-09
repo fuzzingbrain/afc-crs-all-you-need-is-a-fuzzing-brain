@@ -156,6 +156,8 @@ def main():
     -c, --reference-github-repo-version: reference github repo version
     -o, --oss-fuzz-link: oss-fuzz link, default: https://github.com/google/oss-fuzz
     -f, --oss-fuzz-version: oss-fuzz version
+    --output-dir: output directory for the task (default: ./output)
+    --zip-name: custom name for the output ZIP file (without .zip extension)
     """
     
     setup_logging()
@@ -192,12 +194,20 @@ def main():
     
     # Create timestamped task directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    task_dir = output_dir / f"task_{timestamp}"
+    if args.zip_name:
+        task_dir = args.zip_name
+    else:
+        task_dir = f"task_{timestamp}"
+    task_dir = output_dir / task_dir
     task_dir.mkdir(exist_ok=True)
     
     try:
         # Create the three required directories
-        repo_dir = task_dir / "repo"
+        # reponame = afc-{project_name}
+        repo_name = f"afc-{args.base_github_repo_link.split('/')[-1]}"
+        repo_name = repo_name.replace(".git", "")
+
+        repo_dir = task_dir / repo_name
         diff_dir = task_dir / "diff"
         fuzz_tooling_dir = task_dir / "fuzz-tooling"
         
@@ -255,7 +265,7 @@ def main():
         create_zip_archive(str(task_dir), str(zip_filename))
         
         # Clean up task directory
-        shutil.rmtree(task_dir)
+        # shutil.rmtree(task_dir)
         
         logging.info(f"Task built successfully: {zip_filename}")
         print(f"Task built successfully: {zip_filename}")
