@@ -738,12 +738,6 @@ func (s *defaultCRSService) SubmitLocalTask(taskDir string) error {
 		}
 
         log.Printf("Completed Task Detail, setting task detail to %v", taskDetail)
-
-        // save task detail to file, project_name.json
-        taskDetailFile := path.Join(taskDir, "task_detail.json")
-        if err := os.WriteFile(taskDetailFile, []byte(taskDetail.String()), 0644); err != nil {
-            log.Printf("Failed to save task detail to file: %v", err)
-        }
 	}
     //----------------------------------------------------------
 
