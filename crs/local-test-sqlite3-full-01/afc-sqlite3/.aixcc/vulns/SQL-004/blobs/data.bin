@@ -1,3 +1,0 @@
-CREATE TABLE t1 AS SELECT *,*,*,*,*,*,* FROM sqlite_schema;
-ALTER TABLE t1 ADD path GENERATED ALWAYS AS (no_such_function(1));
-SELECT * FROM t1;
