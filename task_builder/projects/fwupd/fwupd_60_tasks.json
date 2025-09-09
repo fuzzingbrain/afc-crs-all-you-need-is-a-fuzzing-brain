@@ -1,0 +1,602 @@
+[
+  {
+    "id": 1,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "55e669fafd2ea94151a0c02ff895be1c51795d46",
+    "challenge_repo_head_ref": "7c6986d89f9f1798f7a706cf432cc97fcd8e1d4a",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 2,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "90101d8bd69361290754bf4006795f9ebf190bb9",
+    "challenge_repo_head_ref": "55e669fafd2ea94151a0c02ff895be1c51795d46",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 3,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "8919ae5e31f91cb79fc5f92b73072969445f35b0",
+    "challenge_repo_head_ref": "90101d8bd69361290754bf4006795f9ebf190bb9",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 4,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "2e166c4bf70273217bf7d83e61310d7da77c380e",
+    "challenge_repo_head_ref": "8919ae5e31f91cb79fc5f92b73072969445f35b0",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 5,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "0e0575935a0ef4cc72cd01a50adc07e802a87088",
+    "challenge_repo_head_ref": "2e166c4bf70273217bf7d83e61310d7da77c380e",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 6,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "fef0f5addd1426de0c15c2349095c18a6995cd7c",
+    "challenge_repo_head_ref": "0e0575935a0ef4cc72cd01a50adc07e802a87088",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 7,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "1a3ef9be18609926e33eb49364b52bb29a87fdcd",
+    "challenge_repo_head_ref": "fef0f5addd1426de0c15c2349095c18a6995cd7c",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 8,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "b85d9619daa4fa7c12b230d3a66d6aeea7e8af00",
+    "challenge_repo_head_ref": "1a3ef9be18609926e33eb49364b52bb29a87fdcd",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 9,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "b0883bc8e34c51bd06f8015b04c0478460363d50",
+    "challenge_repo_head_ref": "b85d9619daa4fa7c12b230d3a66d6aeea7e8af00",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 10,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "330e2302465983eb17dee6f7eb146e7dcddf2e4e",
+    "challenge_repo_head_ref": "b0883bc8e34c51bd06f8015b04c0478460363d50",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 11,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "b74f7150461f6d211fdde7dae468caf56abae545",
+    "challenge_repo_head_ref": "330e2302465983eb17dee6f7eb146e7dcddf2e4e",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 12,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "c9d0450c49d056469d926028b2af89ec55dd2d27",
+    "challenge_repo_head_ref": "b74f7150461f6d211fdde7dae468caf56abae545",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 13,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "55d97323b8faeaab0754a31fb6a5cb8c64324dec",
+    "challenge_repo_head_ref": "c9d0450c49d056469d926028b2af89ec55dd2d27",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 14,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "d50cbdcbff3a61f9f309ac436230c9d322a4cc5d",
+    "challenge_repo_head_ref": "55d97323b8faeaab0754a31fb6a5cb8c64324dec",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 15,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "5ae6d3a747c5f1f79ae59f36f76c2d74faef45ec",
+    "challenge_repo_head_ref": "d50cbdcbff3a61f9f309ac436230c9d322a4cc5d",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 16,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "3f05a5d46e6fa628b796f0173d49214e723e345a",
+    "challenge_repo_head_ref": "5ae6d3a747c5f1f79ae59f36f76c2d74faef45ec",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 17,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "a7a627ab77904f5a10869a125fb3871ee2f3148e",
+    "challenge_repo_head_ref": "3f05a5d46e6fa628b796f0173d49214e723e345a",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 18,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "0c620e807269dde7d7deb49a01b3327e4c77f1f8",
+    "challenge_repo_head_ref": "a7a627ab77904f5a10869a125fb3871ee2f3148e",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 19,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "d2225616996b482bb81a5781f2a8a4e2c0c7177b",
+    "challenge_repo_head_ref": "0c620e807269dde7d7deb49a01b3327e4c77f1f8",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 20,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "bc7c8e830040a6ee4580f096ff345a57bd664d9f",
+    "challenge_repo_head_ref": "d2225616996b482bb81a5781f2a8a4e2c0c7177b",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 21,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "9d428e1d4518c0011e3e4704c21ab3f9ff212293",
+    "challenge_repo_head_ref": "bc7c8e830040a6ee4580f096ff345a57bd664d9f",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 22,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "1af7008bf0d5330a35d70cc51eb91bf78aba87c4",
+    "challenge_repo_head_ref": "9d428e1d4518c0011e3e4704c21ab3f9ff212293",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 23,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "60a7774f6c998b4be75e52bddbbd852442f0785c",
+    "challenge_repo_head_ref": "1af7008bf0d5330a35d70cc51eb91bf78aba87c4",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 24,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "b9adfd1d13cec244a4303041fabd83799aa00fd3",
+    "challenge_repo_head_ref": "60a7774f6c998b4be75e52bddbbd852442f0785c",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 25,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "9a8d3288af4b961989ad76aa56b73f8d37cdef45",
+    "challenge_repo_head_ref": "b9adfd1d13cec244a4303041fabd83799aa00fd3",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 26,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "13e028f1ae8248e3be22f3c6c3ce2302682ca0f3",
+    "challenge_repo_head_ref": "9a8d3288af4b961989ad76aa56b73f8d37cdef45",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 27,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "95dd89b5d67b96b8b77254f522ff04b1629b44ed",
+    "challenge_repo_head_ref": "13e028f1ae8248e3be22f3c6c3ce2302682ca0f3",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 28,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "c193f4e3e309a0161c9d7e44445cd1fde5ebafd8",
+    "challenge_repo_head_ref": "95dd89b5d67b96b8b77254f522ff04b1629b44ed",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 29,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "9d7ad6713a0929508c39c141927fdd2ae5e81f0c",
+    "challenge_repo_head_ref": "c193f4e3e309a0161c9d7e44445cd1fde5ebafd8",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 30,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "f103c3e0daeb8c1d3978003931d56cad430c77c9",
+    "challenge_repo_head_ref": "9d7ad6713a0929508c39c141927fdd2ae5e81f0c",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 31,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "59d8b5b9bd9625a6f09c8fd27f30fcd8cb91f4a6",
+    "challenge_repo_head_ref": "f103c3e0daeb8c1d3978003931d56cad430c77c9",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 32,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "7c1cfdec96d75db22112964cee27b567969c9a98",
+    "challenge_repo_head_ref": "59d8b5b9bd9625a6f09c8fd27f30fcd8cb91f4a6",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 33,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "51611d0bbeb3da0df4516475f18ddca710f92c4b",
+    "challenge_repo_head_ref": "7c1cfdec96d75db22112964cee27b567969c9a98",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 34,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "7e1ece17eef13d0e5b093e0b2907562a208f5193",
+    "challenge_repo_head_ref": "51611d0bbeb3da0df4516475f18ddca710f92c4b",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 35,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "5b99b000c42c7bd700b2c5ece4e12648c3bd717f",
+    "challenge_repo_head_ref": "7e1ece17eef13d0e5b093e0b2907562a208f5193",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 36,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "0731ac4730520b68adca26e8b06a26cc88b32ccb",
+    "challenge_repo_head_ref": "5b99b000c42c7bd700b2c5ece4e12648c3bd717f",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 37,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "b91ddfe1c501208db0aa8a0d5369817f3b2fb981",
+    "challenge_repo_head_ref": "0731ac4730520b68adca26e8b06a26cc88b32ccb",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 38,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "1e5e19942936bb968d6f5a96bdaaa6e169362274",
+    "challenge_repo_head_ref": "b91ddfe1c501208db0aa8a0d5369817f3b2fb981",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 39,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "3161c1ca988fde99f1077333b6e540487635a74d",
+    "challenge_repo_head_ref": "1e5e19942936bb968d6f5a96bdaaa6e169362274",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 40,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "302aa2b127b5ec2a05e437cfa8d31def971485d5",
+    "challenge_repo_head_ref": "3161c1ca988fde99f1077333b6e540487635a74d",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 41,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "d38c11feb25d0a35a1a712e5cb99b23df9a21c77",
+    "challenge_repo_head_ref": "302aa2b127b5ec2a05e437cfa8d31def971485d5",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 42,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "bc7a32351cee4b7855ed7ee473ce533d6be1d1f2",
+    "challenge_repo_head_ref": "d38c11feb25d0a35a1a712e5cb99b23df9a21c77",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 43,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "7a3f049c1be345bd9bb72a5da27575230dfa800e",
+    "challenge_repo_head_ref": "bc7a32351cee4b7855ed7ee473ce533d6be1d1f2",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 44,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "c6dd609646a36c5cbd008f1a3d061912ae9d3cbc",
+    "challenge_repo_head_ref": "7a3f049c1be345bd9bb72a5da27575230dfa800e",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 45,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "70fbf49c616a2bafe22037259b2856c3e78b200b",
+    "challenge_repo_head_ref": "c6dd609646a36c5cbd008f1a3d061912ae9d3cbc",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 46,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "eb966e0fb67b0b4e12d5443b2d7d562ef3d41243",
+    "challenge_repo_head_ref": "70fbf49c616a2bafe22037259b2856c3e78b200b",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 47,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "7959430100b6a27ef3b6a69ebce4fa5d7c7c380b",
+    "challenge_repo_head_ref": "eb966e0fb67b0b4e12d5443b2d7d562ef3d41243",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 48,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "5e2fc2c504a93cf78d6e6d425e7ced79d91814d7",
+    "challenge_repo_head_ref": "7959430100b6a27ef3b6a69ebce4fa5d7c7c380b",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 49,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "0929576507de58b44a8597608b3539be7046f183",
+    "challenge_repo_head_ref": "5e2fc2c504a93cf78d6e6d425e7ced79d91814d7",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 50,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "84075d1976a56d080fdf91ebe74a25009fc85716",
+    "challenge_repo_head_ref": "0929576507de58b44a8597608b3539be7046f183",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 51,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "d7b31731692e9be09dac96abaf968f4c67e39362",
+    "challenge_repo_head_ref": "84075d1976a56d080fdf91ebe74a25009fc85716",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 52,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "5f3d5a53a75a3813583c4be8233030625664cc4d",
+    "challenge_repo_head_ref": "d7b31731692e9be09dac96abaf968f4c67e39362",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 53,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "ed096075c02cc186a237a7710f256803c29b88ef",
+    "challenge_repo_head_ref": "5f3d5a53a75a3813583c4be8233030625664cc4d",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 54,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "ef7415d773739e4c2b66efd7743e7b50be18fad2",
+    "challenge_repo_head_ref": "ed096075c02cc186a237a7710f256803c29b88ef",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 55,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "a6090cef320853cf5f7aa6c3733b80295b32c9a4",
+    "challenge_repo_head_ref": "ef7415d773739e4c2b66efd7743e7b50be18fad2",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 56,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "19f35b970b6627058d1133fc6b37b24da22a2f4d",
+    "challenge_repo_head_ref": "a6090cef320853cf5f7aa6c3733b80295b32c9a4",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 57,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "6c4e874f3d247cb3a9d412575aefbb9b6b9b3239",
+    "challenge_repo_head_ref": "19f35b970b6627058d1133fc6b37b24da22a2f4d",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 58,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "b23eb7b0e41f9161d2d8402b73056b442f36b85c",
+    "challenge_repo_head_ref": "6c4e874f3d247cb3a9d412575aefbb9b6b9b3239",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 59,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "e76693a36bfce40f8bf4869bc54e03964ad73395",
+    "challenge_repo_head_ref": "b23eb7b0e41f9161d2d8402b73056b442f36b85c",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  },
+  {
+    "id": 60,
+    "challenge_repo_url": "https://github.com/fwupd/fwupd.git",
+    "challenge_repo_base_ref": "a0c2da9868f9bd242f49312d066089bbe562b6a0",
+    "challenge_repo_head_ref": "e76693a36bfce40f8bf4869bc54e03964ad73395",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "881cc790c923808a70b1895c16b98b47ce8b0711",
+    "fuzz_tooling_project_name": "fwupd",
+    "duration": 720
+  }
+]

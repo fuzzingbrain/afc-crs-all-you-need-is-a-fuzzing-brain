@@ -1,0 +1,602 @@
+[
+  {
+    "id": 1,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "1fd775b26620bde8918b1de38d9618fb427649e5",
+    "challenge_repo_head_ref": "b2f4d7f1c02cf1ca5ec7206c86dffde6806ae65c",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 2,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "16fbed86cb533f02b9d2bdc4cb9032c136da6dc8",
+    "challenge_repo_head_ref": "1fd775b26620bde8918b1de38d9618fb427649e5",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 3,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "9635f97c8d96aba53f4122b78d6e41a38d73b2d3",
+    "challenge_repo_head_ref": "16fbed86cb533f02b9d2bdc4cb9032c136da6dc8",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 4,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "bcb8fbcfa7dfaeed02a5f4472eae36513c716f29",
+    "challenge_repo_head_ref": "9635f97c8d96aba53f4122b78d6e41a38d73b2d3",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 5,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "3eb9ef3f404a76a1701ae34fd340a364b1d6e610",
+    "challenge_repo_head_ref": "bcb8fbcfa7dfaeed02a5f4472eae36513c716f29",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 6,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "c65b9aa15249be47126dee14374b5ddaceaeaa67",
+    "challenge_repo_head_ref": "3eb9ef3f404a76a1701ae34fd340a364b1d6e610",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 7,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "2a81653a0b82b7702a79e5d29052f53c9f431d45",
+    "challenge_repo_head_ref": "c65b9aa15249be47126dee14374b5ddaceaeaa67",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 8,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "0a479075422db53ef403d5b8712691732a40110f",
+    "challenge_repo_head_ref": "2a81653a0b82b7702a79e5d29052f53c9f431d45",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 9,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "ae51f314c191e5ee35351c91f60c5dcbcffa50b5",
+    "challenge_repo_head_ref": "0a479075422db53ef403d5b8712691732a40110f",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 10,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "a2dcaa8b07b91f86bc8ebcd7f1693e5f4dafe0c0",
+    "challenge_repo_head_ref": "ae51f314c191e5ee35351c91f60c5dcbcffa50b5",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 11,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "1499514f3e2b5d5543932ef9c2dda36c8ee0f38f",
+    "challenge_repo_head_ref": "a2dcaa8b07b91f86bc8ebcd7f1693e5f4dafe0c0",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 12,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "ffd3eeae6db4efe2cab60f467820eccc9fadeb28",
+    "challenge_repo_head_ref": "1499514f3e2b5d5543932ef9c2dda36c8ee0f38f",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 13,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "ea3ad176e59119abe6b336172dab92ce25c45e1d",
+    "challenge_repo_head_ref": "ffd3eeae6db4efe2cab60f467820eccc9fadeb28",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 14,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "62791a3a19d4fae5dbe49d28b24bf1040837de80",
+    "challenge_repo_head_ref": "ea3ad176e59119abe6b336172dab92ce25c45e1d",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 15,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "94058853ef23463198d730681c3f7ccbe1896260",
+    "challenge_repo_head_ref": "62791a3a19d4fae5dbe49d28b24bf1040837de80",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 16,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "6064a031f6d9ad45a23d0c663452b70522d4a196",
+    "challenge_repo_head_ref": "94058853ef23463198d730681c3f7ccbe1896260",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 17,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "6fb8397496adff4eab25d03e3d7c5c012e304834",
+    "challenge_repo_head_ref": "6064a031f6d9ad45a23d0c663452b70522d4a196",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 18,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "6af57e328b04ebf8af73f5c1b4508f4293d7a7a4",
+    "challenge_repo_head_ref": "6fb8397496adff4eab25d03e3d7c5c012e304834",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 19,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "6f25b860c91f0a94ae32d7eb70f88478edb895ce",
+    "challenge_repo_head_ref": "6af57e328b04ebf8af73f5c1b4508f4293d7a7a4",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 20,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "3f5ac56d256ef07eb5c660ca7b793cac3abe4583",
+    "challenge_repo_head_ref": "6f25b860c91f0a94ae32d7eb70f88478edb895ce",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 21,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "f10515714eb26cf7efe028866b5d4e98cce2a2ce",
+    "challenge_repo_head_ref": "3f5ac56d256ef07eb5c660ca7b793cac3abe4583",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 22,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "03e7e6e86d0fb88c70ca50ebca075b0b503ea33a",
+    "challenge_repo_head_ref": "f10515714eb26cf7efe028866b5d4e98cce2a2ce",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 23,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "b634a983f50f0f9a594b3ed0f3d98a5493dd8c06",
+    "challenge_repo_head_ref": "03e7e6e86d0fb88c70ca50ebca075b0b503ea33a",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 24,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "90852c630f7620eb2c1b3702c8b2aeac223f1e21",
+    "challenge_repo_head_ref": "b634a983f50f0f9a594b3ed0f3d98a5493dd8c06",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 25,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "a44c4c7ff6faa996eff10ddaea736d03def610ac",
+    "challenge_repo_head_ref": "90852c630f7620eb2c1b3702c8b2aeac223f1e21",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 26,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "40b84ab4906f8438ad76f580993a59a595d78ade",
+    "challenge_repo_head_ref": "a44c4c7ff6faa996eff10ddaea736d03def610ac",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 27,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "11378365c0148179b74b26881e0de5de2295885e",
+    "challenge_repo_head_ref": "40b84ab4906f8438ad76f580993a59a595d78ade",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 28,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "385829171772aaef8de730d94fde6d47312e3b11",
+    "challenge_repo_head_ref": "11378365c0148179b74b26881e0de5de2295885e",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 29,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "8dc92b42a6b72c3bc567b8fb3b9ddd58d3f0b072",
+    "challenge_repo_head_ref": "385829171772aaef8de730d94fde6d47312e3b11",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 30,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "8b81e3e37712ee3f0af48b67e6d015c7a4b137ed",
+    "challenge_repo_head_ref": "8dc92b42a6b72c3bc567b8fb3b9ddd58d3f0b072",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 31,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "425e6f074a2c35e3c9a720b4b9a8a89d73c6bc4d",
+    "challenge_repo_head_ref": "8b81e3e37712ee3f0af48b67e6d015c7a4b137ed",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 32,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "0150a9ce3e23ea58674318693a42db45425ba639",
+    "challenge_repo_head_ref": "425e6f074a2c35e3c9a720b4b9a8a89d73c6bc4d",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 33,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "209ca9bc4b47dcd0889f30d9d8c9b855b0f492f9",
+    "challenge_repo_head_ref": "0150a9ce3e23ea58674318693a42db45425ba639",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 34,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "a4d8f0a6e84b1793a054279276024541a5998280",
+    "challenge_repo_head_ref": "209ca9bc4b47dcd0889f30d9d8c9b855b0f492f9",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 35,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "16d599e36a62c221ae39b496b349cf30ed4e63bf",
+    "challenge_repo_head_ref": "a4d8f0a6e84b1793a054279276024541a5998280",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 36,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "c0124eec9a8ad2d16ddabbcab0802e39c12e283d",
+    "challenge_repo_head_ref": "16d599e36a62c221ae39b496b349cf30ed4e63bf",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 37,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "cb8b5965d67dd36d2adc676f595775236f68ee5c",
+    "challenge_repo_head_ref": "c0124eec9a8ad2d16ddabbcab0802e39c12e283d",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 38,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "65cb51a704dc7284718235f8424e9fe543d75246",
+    "challenge_repo_head_ref": "cb8b5965d67dd36d2adc676f595775236f68ee5c",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 39,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "f7c7b43367cef17dc34efd11b9639f5dfa5a62f3",
+    "challenge_repo_head_ref": "65cb51a704dc7284718235f8424e9fe543d75246",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 40,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "648df629f7c80e1486fcc1b7fa0f5afcf8db543c",
+    "challenge_repo_head_ref": "f7c7b43367cef17dc34efd11b9639f5dfa5a62f3",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 41,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "c50c977a1686731a4158915fe49f8b9b2d2dcfab",
+    "challenge_repo_head_ref": "648df629f7c80e1486fcc1b7fa0f5afcf8db543c",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 42,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "29087cd09a1aeb0ca4a1b490f1437af9826e146e",
+    "challenge_repo_head_ref": "c50c977a1686731a4158915fe49f8b9b2d2dcfab",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 43,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "187e713b7cb7c369a44f171fec4aa6ec085f0c70",
+    "challenge_repo_head_ref": "29087cd09a1aeb0ca4a1b490f1437af9826e146e",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 44,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "089ddde82352d222552408cb233288b1cb9a459b",
+    "challenge_repo_head_ref": "187e713b7cb7c369a44f171fec4aa6ec085f0c70",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 45,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "02a5288427e435ba43c95a4d9b3707712296d2a6",
+    "challenge_repo_head_ref": "089ddde82352d222552408cb233288b1cb9a459b",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 46,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "378629ea57ee631844c391237faa021d8652cbf4",
+    "challenge_repo_head_ref": "02a5288427e435ba43c95a4d9b3707712296d2a6",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 47,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "5819c1bcb3f8a5835867ccafd2f8901beff1ac9d",
+    "challenge_repo_head_ref": "378629ea57ee631844c391237faa021d8652cbf4",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 48,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "2b9db4b52dc78623c830131b8662de944c827cbc",
+    "challenge_repo_head_ref": "5819c1bcb3f8a5835867ccafd2f8901beff1ac9d",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 49,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "89462dfe86395214b79b6135b11f4d70bc1661fb",
+    "challenge_repo_head_ref": "2b9db4b52dc78623c830131b8662de944c827cbc",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 50,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "693c0caa4f1a67788867fc6fb81e649b1876888a",
+    "challenge_repo_head_ref": "89462dfe86395214b79b6135b11f4d70bc1661fb",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 51,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "5ed8bdee3ad2261f0c62225159b6d56c370bfb90",
+    "challenge_repo_head_ref": "693c0caa4f1a67788867fc6fb81e649b1876888a",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 52,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "e9e2707e3e881f31b615c5165b0b144fcead71c6",
+    "challenge_repo_head_ref": "5ed8bdee3ad2261f0c62225159b6d56c370bfb90",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 53,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "bb48c90c682825731ea6f4a96712cf517c7f0c7d",
+    "challenge_repo_head_ref": "e9e2707e3e881f31b615c5165b0b144fcead71c6",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 54,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "552af428369d3fc873c1d5daf2eb40197e1e8cc3",
+    "challenge_repo_head_ref": "bb48c90c682825731ea6f4a96712cf517c7f0c7d",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 55,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "7adb4c4d47e799d6137e13dafc03ea5e4da76a01",
+    "challenge_repo_head_ref": "552af428369d3fc873c1d5daf2eb40197e1e8cc3",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 56,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "d0c090cd6837ed23d0a542522c403fde30b2d8ef",
+    "challenge_repo_head_ref": "7adb4c4d47e799d6137e13dafc03ea5e4da76a01",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 57,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "6a92b9a7aedcbdf1e40ac93b88031e06cfa1a8c7",
+    "challenge_repo_head_ref": "d0c090cd6837ed23d0a542522c403fde30b2d8ef",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 58,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "dce0a61a0bf67be4926d42bf8dd8a475a20a52a7",
+    "challenge_repo_head_ref": "6a92b9a7aedcbdf1e40ac93b88031e06cfa1a8c7",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 59,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "93e9f4cdc3ff8caddefebc50a7cbfef4492e896c",
+    "challenge_repo_head_ref": "dce0a61a0bf67be4926d42bf8dd8a475a20a52a7",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  },
+  {
+    "id": 60,
+    "challenge_repo_url": "https://github.com/igraph/igraph.git",
+    "challenge_repo_base_ref": "09bc672c2d1221c0a3a78a312584fae8da3d0af6",
+    "challenge_repo_head_ref": "93e9f4cdc3ff8caddefebc50a7cbfef4492e896c",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "0ec14aafb616fed7ed2dd1aebbabe69b23b3e708",
+    "fuzz_tooling_project_name": "igraph",
+    "duration": 720
+  }
+]
