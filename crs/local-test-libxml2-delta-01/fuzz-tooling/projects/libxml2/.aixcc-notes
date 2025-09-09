@@ -1,2 +1,0 @@
-fuzz harness options are set in the project source at fuzz/
-and copied over in the build script at fuzz/oss-fuzz-build.sh

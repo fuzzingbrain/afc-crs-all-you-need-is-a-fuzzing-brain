@@ -1,4 +1,0 @@
-dist
-pysecsan.egg-info*
-build
-.venv

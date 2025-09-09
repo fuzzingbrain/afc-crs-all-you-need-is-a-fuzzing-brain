@@ -5,12 +5,30 @@ mkdir -p logs
 DATE=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="logs/${DATE}.log"
 
+# original dataset path
+ORIGINAL_DATASET="/crs-workdir/local-test-integration-delta-01"
+
+# create new workspace directory
+NEW_WORKSPACE="/crs-workdir/workspace_${DATE}"
+
 echo "Starting CRS local run at $(date)" | tee "$LOG_FILE"
 echo "Log file: $LOG_FILE" | tee -a "$LOG_FILE"
-echo "Command: go run ./cmd/local/main.go /crs-workdir/local-test-integration-delta-01/" | tee -a "$LOG_FILE"
+echo "Original dataset: $ORIGINAL_DATASET" | tee -a "$LOG_FILE"
+echo "New workspace: $NEW_WORKSPACE" | tee -a "$LOG_FILE"
+
+# create new workspace directory
+echo "Creating new workspace directory..." | tee -a "$LOG_FILE"
+mkdir -p "$NEW_WORKSPACE"
+
+# copy original dataset to new workspace
+echo "Copying original dataset to new workspace..." | tee -a "$LOG_FILE"
+cp -r "$ORIGINAL_DATASET"/* "$NEW_WORKSPACE/"
+
+# use the entire copied project directory
+echo "Command: go run ./cmd/local/main.go $NEW_WORKSPACE" | tee -a "$LOG_FILE"
 echo "===========================================" | tee -a "$LOG_FILE"
 
-go run ./cmd/local/main.go /crs-workdir/local-test-integration-delta-01/ 2>&1 | tee -a "$LOG_FILE"
+go run ./cmd/local/main.go "$NEW_WORKSPACE" 2>&1 | tee -a "$LOG_FILE"
 
 EXIT_CODE=${PIPESTATUS[0]}
 echo "===========================================" | tee -a "$LOG_FILE"
@@ -22,4 +40,6 @@ else
     echo "ERROR: CRS local run failed with exit code $EXIT_CODE" | tee -a "$LOG_FILE"
 fi
 
-echo "Full log saved to: $LOG_FILE"
+echo "===========================================" | tee -a "$LOG_FILE"
+echo "Workspace created at: $NEW_WORKSPACE" | tee -a "$LOG_FILE"
+echo "Full log saved to: $LOG_FILE" | tee -a "$LOG_FILE"
