@@ -655,6 +655,7 @@ func (s *defaultCRSService) SubmitLocalTask(taskDir string) error {
     myFuzzer := ""
     // --- ensure LOCAL_TEST mode is enabled ---
     if os.Getenv("LOCAL_TEST") == "" {
+        log.Printf("Setting LOCAL_TEST to 1")
         _ = os.Setenv("LOCAL_TEST", "1")
     }
     
@@ -724,6 +725,8 @@ func (s *defaultCRSService) SubmitLocalTask(taskDir string) error {
 			log.Printf("No 'diff' directory found, setting task type to 'full'")
 		}
 
+        log.Printf("Saving Task Detail")
+
 		taskDetail = models.TaskDetail{
 			TaskID:            uuid.New(),
 			ProjectName:       projectName,
@@ -733,10 +736,13 @@ func (s *defaultCRSService) SubmitLocalTask(taskDir string) error {
 			HarnessesIncluded: true,
 			Metadata:          make(map[string]string),
 		}
+
+        log.Printf("Completed Task Detail, setting task detail to %v", taskDetail)
 	}
     //----------------------------------------------------------
 
     // Get absolute paths
+    log.Printf("-------------------- Getting absolute task dir path ----------------------")
     absTaskDir, err := filepath.Abs(taskDir)
     if err != nil {
         return fmt.Errorf("failed to get absolute task dir path: %v", err)
@@ -764,6 +770,7 @@ func (s *defaultCRSService) SubmitLocalTask(taskDir string) error {
     }
 
     // Collect all fuzzers from all sanitizer builds and run them in parallel
+    log.Printf("-------------------- Collecting all fuzzers ----------------------")
     var allFuzzers []string
     sanitizerDirsCopy := make([]string, len(sanitizerDirs))
     copy(sanitizerDirsCopy, sanitizerDirs)
@@ -1432,12 +1439,15 @@ func (s *defaultCRSService) prepareTaskEnvironment(
 		sanitizerDir := fuzzerDir + "-" + sanitizer
 		sanitizerDirs = append(sanitizerDirs, sanitizerDir)
 
+        log.Printf("fuzzerDir: %s", fuzzerDir)
+        log.Printf("sanitizerDir: %s", sanitizerDir)
+
 		fuzzers, _ := s.findFuzzers(sanitizerDir)
 		// if err != nil {
 		// 	log.Printf("Warning: problem trying to find fuzzers in %s: %v", sanitizerDir, err)
 		// }
-
 		if len(fuzzers) == 0 {
+            log.Printf("-------------------- Building fuzzers ----------------------")
 			log.Printf("No fuzzers found in %s for sanitizer %s. Building...", sanitizerDir, sanitizer)
 			if err := s.buildFuzzersDocker(myFuzzer, taskDir, projectDir, sanitizerDir, sanitizer, cfg.Language, taskDetail); err != nil {
 				log.Printf("Error building fuzzers for sanitizer %s: %v", sanitizer, err)
@@ -4890,7 +4900,7 @@ func (s *defaultCRSService) runAdvancedPOVStrategiesWithTimeout(
     phase int,
     roundNum int,
 ) bool {
-    strategyDir := "/app/strategyx"
+    strategyDir := "/app/strategy"
     strategyFilePattern := "as*_delta.py"
     if taskDetail.Type == "full" {
         strategyFilePattern = "as*_full.py"
@@ -5381,7 +5391,7 @@ func (s *defaultCRSService) runXPatchingStrategiesWithoutPOV(
         log.Printf("Patch workspace fuzzer path: %s", patchFuzzerPath)
         
         // Find all strategy files under /app/strategy/
-        strategyDir := "/app/strategyx"
+        strategyDir := "/app/strategy"
         strategyFilePattern := "xpatch*_delta.py"
         if taskDetail.Type == "full" {
             strategyFilePattern = "xpatch*_full.py"
@@ -5422,7 +5432,7 @@ func (s *defaultCRSService) runXPatchingStrategiesWithoutPOV(
                 
                 {
                     // Create a symbolic link to the .env file in the task directory
-                    envFilePath := filepath.Join("/app/strategyx", ".env")
+                    envFilePath := filepath.Join("/app/strategy", ".env")
                     targetEnvPath := filepath.Join(taskDir, ".env")
                     os.Symlink(envFilePath, targetEnvPath)
                 }
@@ -5740,7 +5750,7 @@ func (s *defaultCRSService) runPatchingStrategies(myFuzzer,taskDir string, proje
     log.Printf("Patch workspace fuzzer path: %s", patchFuzzerPath)
     
     // Find all strategy files under /app/strategy/
-    strategyDir := "/app/strategyx"
+    strategyDir := "/app/strategy"
     strategyFilePattern := "patch*_delta.py"
     if taskDetail.Type == "full" {
         strategyFilePattern = "patch*_full.py"
@@ -5860,7 +5870,7 @@ func (s *defaultCRSService) runPatchingStrategies(myFuzzer,taskDir string, proje
                 {
                     // Create a symbolic link to the .env file in the task directory
                     var symlinkCreationErr error
-                    envFilePath := filepath.Join("/app/strategyx", ".env")
+                    envFilePath := filepath.Join("/app/strategy", ".env")
                     targetEnvPath := filepath.Join(taskDir, ".env")
                     linkFi, errLstat := os.Lstat(targetEnvPath)
                     if errLstat == nil { // Path exists
@@ -6137,7 +6147,7 @@ func (s *defaultCRSService) runPatchingStrategies(myFuzzer,taskDir string, proje
 
 func (s *defaultCRSService) runStrategies(myFuzzer, taskDir, projectDir, fuzzDir, language string, taskDetail models.TaskDetail, fullTask models.Task) bool {
     // Find all strategy files under /app/strategy/
-    strategyDir := "/app/strategyx"
+    strategyDir := "/app/strategy"
 
     strategyFilePattern := "xs*_delta.py"
     if taskDetail.Type == "full" {
@@ -6190,7 +6200,7 @@ func (s *defaultCRSService) runStrategies(myFuzzer, taskDir, projectDir, fuzzDir
             
             {
                 // Create a symbolic link to the .env file in the task directory
-                envFilePath := filepath.Join("/app/strategyx", ".env")
+                envFilePath := filepath.Join("/app/strategy", ".env")
                 targetEnvPath := filepath.Join(taskDir, ".env")
                 
                 // Remove existing symlink if it exists
@@ -7470,6 +7480,10 @@ func (s *defaultCRSService) runFuzzing(myFuzzer,taskDir string, taskDetail model
             }
         }
     }
+
+    log.Printf("=========================================== Current Fuzzer ===========================================")
+    log.Printf("myFuzzer: %s", myFuzzer)
+    log.Printf("=========================================== Current Fuzzer ===========================================")
 
     // for crs-worker: send each fuzzer to a worker node
     // for a worker node, run the fuzzer w/ all resources
