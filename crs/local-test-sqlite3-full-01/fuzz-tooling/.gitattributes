@@ -1,3 +1,0 @@
-# Check out Linux shell scripts with LF (necessary when using Docker setup on Windows)
-*.sh text eol=lf
-*.tar.gz filter=lfs diff=lfs merge=lfs -text
