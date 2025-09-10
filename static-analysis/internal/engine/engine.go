@@ -2640,12 +2640,8 @@ func BuildFuzzersWithRetry(taskDir, dockerfilePath, projectDir, sanitizerDir, sa
 	return fmt.Errorf("failed to build fuzzers with sanitizer %s after %d attempts", sanitizer, maxAttempts)
 }
 
-var (
-	WORK_DIR = "/crs-workdir"
-)
-
 func TryLoadQXJsonResults(taskID string, focus string) (*models.CodeqlAnalysisResults, error) {
-	taskDir := path.Join(WORK_DIR, taskID)
+	taskDir := path.Join(getWorkDir(), taskID)
 	outputJson := path.Join(taskDir, fmt.Sprintf("%s_qx.json", focus))
 	if !fileExists(outputJson) {
 		return nil, fmt.Errorf("The file %v does not exist", outputJson)
@@ -2701,10 +2697,23 @@ func loadResultsFromJsonContentQX(results *models.CodeqlAnalysisResults, outputJ
 	return err
 }
 
+var (
+	WORK_DIR = "/crs-workdir"
+)
+
+func getWorkDir() string {
+	if v := os.Getenv("CRS_WORK_DIR"); v != "" {
+		return v
+	}
+	return WORK_DIR
+}
+
 func TryLoadJsonResults(taskID string, focus string) (*models.AnalysisResults, error) {
-	taskDir := path.Join(WORK_DIR, taskID)
-	outputJson := path.Join(taskDir, fmt.Sprintf("%s.json", focus))
+	// taskDir := path.Join(getWorkDir(), taskID)
+	outputJson := path.Join(getWorkDir(), fmt.Sprintf("%s.json", focus))
 	if !fileExists(outputJson) {
+		log.Printf("Error")
+		log.Printf("The file %v does not exist", outputJson)
 		return nil, fmt.Errorf("The file %v does not exist", outputJson)
 	}
 
