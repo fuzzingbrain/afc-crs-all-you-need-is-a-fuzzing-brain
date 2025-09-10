@@ -2,3 +2,6 @@
 */.env
 
 */logs
+
+**/tmp_*
+**/test_*

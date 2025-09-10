@@ -1,39 +1,41 @@
 package engine
 
 import (
-	"syscall"
+	"bufio"
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"io"
+	"io/fs" // Needed for filepath.WalkDir
+	"log"
 	"math"
 	"math/rand"
-	"strconv"
-	"context"
-	"bytes"
-    "encoding/hex"
-    "gopkg.in/yaml.v3"
-	"os/exec"
-	"crypto/sha256"
-	"io/fs" // Needed for filepath.WalkDir
-	"io"
-	"log"
 	"net/http"
-	"reflect"
-	"regexp"
-	 "time"
-	"fmt"
-	"encoding/json"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
-	"sort"
-	"strings"
+	"reflect"
+	"regexp"
 	"runtime"
-	"sync"
-	"bufio"
-	"github.com/antlr4-go/antlr/v4"
+	"sort"
 	"static-analysis/internal/parser/c"
 	c_parser "static-analysis/internal/parser/c/grammar"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/antlr4-go/antlr/v4"
+	"gopkg.in/yaml.v3"
+
 	// "static-analysis/internal/parser/java"
-	java_parser "static-analysis/internal/parser/java/grammar"
 	"static-analysis/internal/engine/models"
+	java_parser "static-analysis/internal/parser/java/grammar"
 )
 
 // ---------------------------------------------------------------------------
@@ -47,58 +49,57 @@ func getTempDirLock(dir string) *sync.Mutex {
 	mu, _ := tempDirLocks.LoadOrStore(dir, &sync.Mutex{})
 	return mu.(*sync.Mutex)
 }
-// ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
 
 // CFunctionVisitor for C/C++ files
 type CFunctionVisitor struct {
-    *c_parser.BaseCListener // Use pointer to BaseCListener
-    Functions     map[string]*models.FunctionDefinition
-    CurrentFile   string
-    LineMap       map[int]c.LineInfo
-    SourceLines   []string
-    CurrentFunc   string
-    CurrentStart  int
-    InFunctionDef bool
+	*c_parser.BaseCListener // Use pointer to BaseCListener
+	Functions               map[string]*models.FunctionDefinition
+	CurrentFile             string
+	LineMap                 map[int]c.LineInfo
+	SourceLines             []string
+	CurrentFunc             string
+	CurrentStart            int
+	InFunctionDef           bool
 }
 
 func NewCFunctionVisitor(filePath string, lineMap map[int]c.LineInfo, sourceLines []string) *CFunctionVisitor {
-    return &CFunctionVisitor{
-        BaseCListener: new(c_parser.BaseCListener), // Use new() to create a pointer
-        Functions:     make(map[string]*models.FunctionDefinition),
-        CurrentFile:   filePath,
-        LineMap:       lineMap,
-        SourceLines:   sourceLines,
-    }
+	return &CFunctionVisitor{
+		BaseCListener: new(c_parser.BaseCListener), // Use new() to create a pointer
+		Functions:     make(map[string]*models.FunctionDefinition),
+		CurrentFile:   filePath,
+		LineMap:       lineMap,
+		SourceLines:   sourceLines,
+	}
 }
-
 
 // EnterFunctionDefinition is called when entering a function definition
 func (v *CFunctionVisitor) EnterFunctionDefinition(ctx *c_parser.FunctionDefinitionContext) {
-    
-    // Get function name from declarator
-    declarator := ctx.Declarator()
-    if declarator == nil {
-        return
-    }
-    // Extract function name - this is simplified and might need enhancement
-    funcText := declarator.GetText()
-    
-    // Use regex to extract the function name
-    namePattern := regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*)\s*\(`)
-    matches := namePattern.FindStringSubmatch(funcText)
-    
-    if len(matches) > 1 {
-        v.CurrentFunc = matches[1]
-    } else {
-        // Fallback to a simpler approach
-        v.CurrentFunc = fmt.Sprintf("func_%d", ctx.GetStart().GetLine())
-    }
-    
-    // Get start and end line numbers
-    startLine := ctx.GetStart().GetLine()
-    endLine := ctx.GetStop().GetLine()
-    
+
+	// Get function name from declarator
+	declarator := ctx.Declarator()
+	if declarator == nil {
+		return
+	}
+	// Extract function name - this is simplified and might need enhancement
+	funcText := declarator.GetText()
+
+	// Use regex to extract the function name
+	namePattern := regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*)\s*\(`)
+	matches := namePattern.FindStringSubmatch(funcText)
+
+	if len(matches) > 1 {
+		v.CurrentFunc = matches[1]
+	} else {
+		// Fallback to a simpler approach
+		v.CurrentFunc = fmt.Sprintf("func_%d", ctx.GetStart().GetLine())
+	}
+
+	// Get start and end line numbers
+	startLine := ctx.GetStart().GetLine()
+	endLine := ctx.GetStop().GetLine()
+
 	// MAIN PROBLEM: PREPROCESSING C SOURCE CODE
 	// C PARSER does not work very well
 	//  v.CurrentFunc LLVMFuzzerTestOneInput, startLine: 100, endLine: 105
@@ -106,250 +107,251 @@ func (v *CFunctionVisitor) EnterFunctionDefinition(ctx *c_parser.FunctionDefinit
 	// 	fmt.Printf(" v.CurrentFunc %s, startLine: %d, endLine: %d\n",  v.CurrentFunc,startLine, endLine)
 	// }
 
-    // Map to original line numbers if line map is available
-    if v.LineMap != nil {
-        if lineInfo, ok := v.LineMap[startLine]; ok {
-            startLine = lineInfo.Line
-        }
-        if lineInfo, ok := v.LineMap[endLine]; ok {
-            endLine = lineInfo.Line
-        }
-    }
-    
-    // Extract source code
-    sourceCode := ""
-    if startLine <= endLine && startLine <= len(v.SourceLines) && endLine <= len(v.SourceLines) {
-        // Adjust for 0-based array indexing
-        startIdx := startLine - 1
-        endIdx := endLine
-        if endIdx > len(v.SourceLines) {
-            endIdx = len(v.SourceLines)
-        }
-        sourceLines := v.SourceLines[startIdx:endIdx]
-        sourceCode = strings.Join(sourceLines, "\n")
-    }
-    
-    // Store the function definition immediately
+	// Map to original line numbers if line map is available
+	if v.LineMap != nil {
+		if lineInfo, ok := v.LineMap[startLine]; ok {
+			startLine = lineInfo.Line
+		}
+		if lineInfo, ok := v.LineMap[endLine]; ok {
+			endLine = lineInfo.Line
+		}
+	}
 
-    v.Functions[v.CurrentFile+"."+v.CurrentFunc] = &models.FunctionDefinition{
-        Name:       v.CurrentFunc,
-        FilePath:   v.CurrentFile,
-        StartLine:  startLine,
-        EndLine:    endLine,
-        SourceCode: sourceCode,
-    }
-    
-    // fmt.Printf("Found function: %s (lines %d-%d)\n", v.CurrentFunc, startLine, endLine)
-    
-    // We still set these in case ExitFunctionDefinition wants to use them
-    v.CurrentStart = startLine
-    v.InFunctionDef = true
+	// Extract source code
+	sourceCode := ""
+	if startLine <= endLine && startLine <= len(v.SourceLines) && endLine <= len(v.SourceLines) {
+		// Adjust for 0-based array indexing
+		startIdx := startLine - 1
+		endIdx := endLine
+		if endIdx > len(v.SourceLines) {
+			endIdx = len(v.SourceLines)
+		}
+		sourceLines := v.SourceLines[startIdx:endIdx]
+		sourceCode = strings.Join(sourceLines, "\n")
+	}
+
+	// Store the function definition immediately
+
+	v.Functions[v.CurrentFile+"."+v.CurrentFunc] = &models.FunctionDefinition{
+		Name:       v.CurrentFunc,
+		FilePath:   v.CurrentFile,
+		StartLine:  startLine,
+		EndLine:    endLine,
+		SourceCode: sourceCode,
+	}
+
+	// fmt.Printf("Found function: %s (lines %d-%d)\n", v.CurrentFunc, startLine, endLine)
+
+	// We still set these in case ExitFunctionDefinition wants to use them
+	v.CurrentStart = startLine
+	v.InFunctionDef = true
 }
 
 // ExitFunctionDefinition is called when exiting a function definition
 func (v *CFunctionVisitor) ExitFunctionDefinition(ctx *c_parser.FunctionDefinitionContext) {
-    if !v.InFunctionDef {
-        return
-    }
-    
-    endLine := ctx.GetStop().GetLine()
-    if v.LineMap != nil {
-        if lineInfo, ok := v.LineMap[endLine]; ok {
-            endLine = lineInfo.Line
-        }
-    }
-    
-    // Extract source code
-    sourceCode := ""
-    if v.CurrentStart <= endLine && v.CurrentStart <= len(v.SourceLines) && endLine <= len(v.SourceLines) {
-        // Adjust for 0-based array indexing
-        startIdx := v.CurrentStart - 1
-        endIdx := endLine
-        if endIdx > len(v.SourceLines) {
-            endIdx = len(v.SourceLines)
-        }
-        sourceLines := v.SourceLines[startIdx:endIdx]
-        sourceCode = strings.Join(sourceLines, "\n")
-    }
-    
-    // fmt.Printf("Completed function: %s (lines %d-%d)\n", v.CurrentFunc, v.CurrentStart, endLine)
-    v.Functions[v.CurrentFile+"."+v.CurrentFunc] = &models.FunctionDefinition{
-        Name:       v.CurrentFunc,
-        FilePath:   v.CurrentFile,
-        StartLine:  v.CurrentStart,
-        EndLine:    endLine,
-        SourceCode: sourceCode,
-    }
-    
-    v.InFunctionDef = false
+	if !v.InFunctionDef {
+		return
+	}
+
+	endLine := ctx.GetStop().GetLine()
+	if v.LineMap != nil {
+		if lineInfo, ok := v.LineMap[endLine]; ok {
+			endLine = lineInfo.Line
+		}
+	}
+
+	// Extract source code
+	sourceCode := ""
+	if v.CurrentStart <= endLine && v.CurrentStart <= len(v.SourceLines) && endLine <= len(v.SourceLines) {
+		// Adjust for 0-based array indexing
+		startIdx := v.CurrentStart - 1
+		endIdx := endLine
+		if endIdx > len(v.SourceLines) {
+			endIdx = len(v.SourceLines)
+		}
+		sourceLines := v.SourceLines[startIdx:endIdx]
+		sourceCode = strings.Join(sourceLines, "\n")
+	}
+
+	// fmt.Printf("Completed function: %s (lines %d-%d)\n", v.CurrentFunc, v.CurrentStart, endLine)
+	v.Functions[v.CurrentFile+"."+v.CurrentFunc] = &models.FunctionDefinition{
+		Name:       v.CurrentFunc,
+		FilePath:   v.CurrentFile,
+		StartLine:  v.CurrentStart,
+		EndLine:    endLine,
+		SourceCode: sourceCode,
+	}
+
+	v.InFunctionDef = false
 }
 
 // processCFile processes a C/C++ file and returns the functions found
 func processCFile(filePath string) (map[string]*models.FunctionDefinition, error) {
-    // Read the file
-    content, err := os.ReadFile(filePath)
-    if err != nil {
-        return nil, fmt.Errorf("error reading file: %v", err)
-    }
+	// Read the file
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading file: %v", err)
+	}
 
-	    // Skip preprocessing and use the original source directly
-		sourceContent := string(content)
-		sourceLines := strings.Split(sourceContent, "\n")
-		
-		// Create a simple line map that maps each line to itself
-		lineMap := make(map[int]c.LineInfo)
-		for i := range sourceLines {
-			lineMap[i+1] = c.LineInfo{
-				File: filePath,
-				Line: i+1,
-			}
+	// Skip preprocessing and use the original source directly
+	sourceContent := string(content)
+	sourceLines := strings.Split(sourceContent, "\n")
+
+	// Create a simple line map that maps each line to itself
+	lineMap := make(map[int]c.LineInfo)
+	for i := range sourceLines {
+		lineMap[i+1] = c.LineInfo{
+			File: filePath,
+			Line: i + 1,
 		}
-		
-		// Create input stream for ANTLR
-		input := antlr.NewInputStream(sourceContent)
-    // Create lexer
-    lexer := c_parser.NewCLexer(input)
-    tokens := antlr.NewCommonTokenStream(lexer, 0)
-    
-    // Create parser
-    parser := c_parser.NewCParser(tokens)
-    
-    // Create error listener
-    errorListener := &ErrorListener{FilePath: filePath}
-    parser.RemoveErrorListeners()
-    parser.AddErrorListener(errorListener)
-    
-    // Parse the input
-    tree := parser.CompilationUnit()
-  
-    // Create visitor
-    visitor := NewCFunctionVisitor(filePath, lineMap, sourceLines)
-    
-    // Walk the tree with our visitor
-    antlr.ParseTreeWalkerDefault.Walk(visitor, tree)
-    
-    return visitor.Functions, nil
+	}
+
+	// Create input stream for ANTLR
+	input := antlr.NewInputStream(sourceContent)
+	// Create lexer
+	lexer := c_parser.NewCLexer(input)
+	tokens := antlr.NewCommonTokenStream(lexer, 0)
+
+	// Create parser
+	parser := c_parser.NewCParser(tokens)
+
+	// Create error listener
+	errorListener := &ErrorListener{FilePath: filePath}
+	parser.RemoveErrorListeners()
+	parser.AddErrorListener(errorListener)
+
+	// Parse the input
+	tree := parser.CompilationUnit()
+
+	// Create visitor
+	visitor := NewCFunctionVisitor(filePath, lineMap, sourceLines)
+
+	// Walk the tree with our visitor
+	antlr.ParseTreeWalkerDefault.Walk(visitor, tree)
+
+	return visitor.Functions, nil
 }
 
 // ErrorListener is a custom error listener for ANTLR
 type ErrorListener struct {
-    antlr.DefaultErrorListener
-    FilePath string
-    Errors   []string
+	antlr.DefaultErrorListener
+	FilePath string
+	Errors   []string
 }
 
 // SyntaxError is called when a syntax error is encountered
 func (l *ErrorListener) SyntaxError(recognizer antlr.Recognizer, offendingSymbol interface{}, line, column int, msg string, e antlr.RecognitionException) {
-    l.Errors = append(l.Errors, fmt.Sprintf("Syntax error at %s:%d:%d: %s", l.FilePath, line, column, msg))
+	l.Errors = append(l.Errors, fmt.Sprintf("Syntax error at %s:%d:%d: %s", l.FilePath, line, column, msg))
 }
 
 // JavaFunctionVisitor for Java files
 type JavaFunctionVisitor struct {
-    *java_parser.BaseJavaParserListener // Embed the base listener
-    Functions     map[string]*models.FunctionDefinition
-    CurrentFile   string
-    SourceLines   []string
-    CurrentClass  string
-    CurrentFunc   string
-    CurrentStart  int
-    InFunctionDef bool
-	CallGraph     *models.CallGraph 
+	*java_parser.BaseJavaParserListener // Embed the base listener
+	Functions                           map[string]*models.FunctionDefinition
+	CurrentFile                         string
+	SourceLines                         []string
+	CurrentClass                        string
+	CurrentFunc                         string
+	CurrentStart                        int
+	InFunctionDef                       bool
+	CallGraph                           *models.CallGraph
 }
 
 func NewJavaFunctionVisitor(filePath string, sourceLines []string) *JavaFunctionVisitor {
-    return &JavaFunctionVisitor{
-        BaseJavaParserListener: &java_parser.BaseJavaParserListener{},
-        Functions:             make(map[string]*models.FunctionDefinition),
-        CurrentFile:           filePath,
-        SourceLines:           sourceLines,
-		CallGraph:             &models.CallGraph{Calls: []models.MethodCall{}},
-    }
+	return &JavaFunctionVisitor{
+		BaseJavaParserListener: &java_parser.BaseJavaParserListener{},
+		Functions:              make(map[string]*models.FunctionDefinition),
+		CurrentFile:            filePath,
+		SourceLines:            sourceLines,
+		CallGraph:              &models.CallGraph{Calls: []models.MethodCall{}},
+	}
 }
 
 func (v *JavaFunctionVisitor) EnterMethodCall(ctx *java_parser.MethodCallContext) {
-    if v.CurrentFunc == "" {
-        return // Not inside a method
-    }
-    
-    // Extract the called method name
-    if identifierCtx := ctx.Identifier(); identifierCtx != nil {
-        calledMethod := identifierCtx.GetText()
-        
+	if v.CurrentFunc == "" {
+		return // Not inside a method
+	}
+
+	// Extract the called method name
+	if identifierCtx := ctx.Identifier(); identifierCtx != nil {
+		calledMethod := identifierCtx.GetText()
+
 		//TODO: handle empty CurrentClass
 		//TODO: handle repeated call edge
 
-        // Add to call graph
-        v.CallGraph.Calls = append(v.CallGraph.Calls, models.MethodCall{
-            Caller: v.CurrentClass+"."+v.CurrentFunc,
-            Callee: calledMethod,
-        })
-        
-        // fmt.Printf("Found method call: %s -> %s\n", v.CurrentFunc, calledMethod)
-    }
+		// Add to call graph
+		v.CallGraph.Calls = append(v.CallGraph.Calls, models.MethodCall{
+			Caller: v.CurrentClass + "." + v.CurrentFunc,
+			Callee: calledMethod,
+		})
+
+		// fmt.Printf("Found method call: %s -> %s\n", v.CurrentFunc, calledMethod)
+	}
 }
 
 // EnterMethodDeclaration is called when entering a method declaration
 func (v *JavaFunctionVisitor) EnterMethodDeclaration(ctx *java_parser.MethodDeclarationContext) {
-    // Get method name directly from the identifier context
-    var methodName string
-    
-    // The method name is in the identifier child
-    if identifierCtx := ctx.Identifier(); identifierCtx != nil {
-        methodName = identifierCtx.GetText()
-    } else {
-        fmt.Println("Could not find method name")
-        return
-    }
-    
-    // // Prepend class name if present
-    // if v.CurrentClass != "" {
-    //     methodName = v.CurrentClass + "." + methodName
-    // }
+	// Get method name directly from the identifier context
+	var methodName string
 
-    startLine := ctx.GetStart().GetLine()
-    endLine := ctx.GetStop().GetLine()
+	// The method name is in the identifier child
+	if identifierCtx := ctx.Identifier(); identifierCtx != nil {
+		methodName = identifierCtx.GetText()
+	} else {
+		fmt.Println("Could not find method name")
+		return
+	}
+
+	// // Prepend class name if present
+	// if v.CurrentClass != "" {
+	//     methodName = v.CurrentClass + "." + methodName
+	// }
+
+	startLine := ctx.GetStart().GetLine()
+	endLine := ctx.GetStop().GetLine()
 
 	// fmt.Printf("Found method: %s lines [%d-%d]\n", v.CurrentClass+"."+methodName,startLine,endLine)
 
-    // Extract source code
-    sourceCode := ""
-    if startLine <= endLine && startLine <= len(v.SourceLines) {
-        sourceLines := v.SourceLines[startLine-1 : min(endLine, len(v.SourceLines))]
-        sourceCode = strings.Join(sourceLines, "\n")
-    }
-    
-    // Add to function definitions
-    v.Functions[v.CurrentFile+"."+methodName] = &models.FunctionDefinition{
-        Name:       methodName,
-        FilePath:   v.CurrentFile,
-        StartLine:  startLine,
-        EndLine:    endLine,
-        SourceCode: sourceCode,
-    }
-    
-    // Set current function info
-    v.CurrentFunc = methodName
-    v.CurrentStart = startLine
-    v.InFunctionDef = true
+	// Extract source code
+	sourceCode := ""
+	if startLine <= endLine && startLine <= len(v.SourceLines) {
+		sourceLines := v.SourceLines[startLine-1 : min(endLine, len(v.SourceLines))]
+		sourceCode = strings.Join(sourceLines, "\n")
+	}
+
+	// Add to function definitions
+	v.Functions[v.CurrentFile+"."+methodName] = &models.FunctionDefinition{
+		Name:       methodName,
+		FilePath:   v.CurrentFile,
+		StartLine:  startLine,
+		EndLine:    endLine,
+		SourceCode: sourceCode,
+	}
+
+	// Set current function info
+	v.CurrentFunc = methodName
+	v.CurrentStart = startLine
+	v.InFunctionDef = true
 }
 func (v *JavaFunctionVisitor) EnterClassDeclaration(ctx *java_parser.ClassDeclarationContext) {
-    // Extract class name directly from the identifier
-    if identifier := ctx.Identifier(); identifier != nil {
-        v.CurrentClass = identifier.GetText()
-        // fmt.Printf("Found class: %s\n", v.CurrentClass)
-    } else {
-        fmt.Println("Could not find class name")
-    }
+	// Extract class name directly from the identifier
+	if identifier := ctx.Identifier(); identifier != nil {
+		v.CurrentClass = identifier.GetText()
+		// fmt.Printf("Found class: %s\n", v.CurrentClass)
+	} else {
+		fmt.Println("Could not find class name")
+	}
 }
+
 // Add this method to reset class name when exiting a class
 func (v *JavaFunctionVisitor) ExitClassDeclaration(ctx *java_parser.ClassDeclarationContext) {
-    v.CurrentClass = ""
+	v.CurrentClass = ""
 }
 
 // dirHasFuzzerEntry returns true if the directory (recursively, depth≤2)
 // has a .java or C/C++ source file that references either
-//   • fuzzerTestOneInput            (Java)
-//   • LLVMFuzzerTestOneInput        (C/C++)
+//   - fuzzerTestOneInput            (Java)
+//   - LLVMFuzzerTestOneInput        (C/C++)
 func dirHasFuzzerEntry(dir string) bool {
 	targetFuncs := []string{"fuzzerTestOneInput", "LLVMFuzzerTestOneInput"}
 	validExt := map[string]struct{}{
@@ -389,7 +391,7 @@ func dirHasFuzzerEntry(dir string) bool {
 // findFuzzerSource locates the source code of the fuzzer by analyzing build scripts and source files
 func findFuzzerSource(fuzzerPath, projectDir, projectName string, language string) (string, string, error) {
 	fmt.Printf("Looking for source of fuzzer at %s\n", fuzzerPath)
-	
+
 	// Extract the fuzzer name from the path
 	fuzzerName := filepath.Base(fuzzerPath)
 	// Extract the working directory (everything before "fuzz-tooling")
@@ -408,8 +410,8 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 	// For Java fuzzers, first check for a direct match in the projects directory
 	if language == "java" {
 		projectsDir := filepath.Join(workDir, "fuzz-tooling/projects", projectName)
-		javaFuzzerPath := filepath.Join(projectsDir, fuzzerName + ".java")
-		
+		javaFuzzerPath := filepath.Join(projectsDir, fuzzerName+".java")
+
 		if _, err := os.Stat(javaFuzzerPath); err == nil {
 			content, err := os.ReadFile(javaFuzzerPath)
 			if err != nil {
@@ -421,7 +423,7 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 		}
 	}
 
-	// check if the oss project path contains fuzzer source 
+	// check if the oss project path contains fuzzer source
 
 	// Extract the base name without _fuzzer suffix if present
 	baseName := fuzzerName
@@ -431,7 +433,7 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 	// Collect potential source files
 	sourceFiles := make(map[string]string)
 	var extensions []string
-	
+
 	if language == "c" {
 		extensions = []string{".c", ".cc", ".cpp", ".h", ".hpp"}
 	} else {
@@ -439,7 +441,7 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 	}
 
 	// Look for fuzz directories
-	fuzzDirs := []string{}	
+	fuzzDirs := []string{}
 
 	//--------------------------------------------------------------------
 	// 1.  Look inside fuzz-tooling/projects/<proj>/pkgs for already
@@ -465,7 +467,7 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 			if !e.IsDir() && strings.HasSuffix(name, ".tar.gz") &&
 				strings.Contains(strings.ToLower(name), "fuzzer") {
 
-				dirName   := strings.TrimSuffix(name, ".tar.gz")
+				dirName := strings.TrimSuffix(name, ".tar.gz")
 				extracted := filepath.Join(pkgsDir, dirName)
 
 				// Already expanded once?  Just record the folder and continue.
@@ -476,16 +478,16 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 				}
 
 				cmd := exec.Command("tar", "-xzf", abs, "-C", pkgsDir, "--skip-old-files")
- 				if out, err := cmd.CombinedOutput(); err != nil {
- 					fmt.Printf("Error extracting %s: %v (%s)\n", abs, err, string(out))
- 				} else {
- 					fuzzDirs = append(fuzzDirs, extracted)
- 					fmt.Printf("Extracted %s to %s\n", abs, extracted)
- 				}
+				if out, err := cmd.CombinedOutput(); err != nil {
+					fmt.Printf("Error extracting %s: %v (%s)\n", abs, err, string(out))
+				} else {
+					fuzzDirs = append(fuzzDirs, extracted)
+					fmt.Printf("Extracted %s to %s\n", abs, extracted)
+				}
 			}
 		}
 	}
-	
+
 	// Search in fuzz-tooling/projects/{projectName}
 	projectPath := filepath.Join(workDir, "fuzz-tooling/projects", projectName)
 	if _, err := os.Stat(projectPath); err == nil {
@@ -543,55 +545,55 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 	} else {
 		fmt.Printf("Error walking project path: %v\n", err)
 	}
-	
+
 	// Look for any directory under the root path that contains "fuzz" in its name
 	err := filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		
+
 		// Skip very deep directories
 		if strings.Count(path, string(os.PathSeparator))-strings.Count(projectDir, string(os.PathSeparator)) > 5 {
 			return filepath.SkipDir
 		}
-		
+
 		if info.IsDir() && (strings.Contains(strings.ToLower(info.Name()), "fuzz") || strings.Contains(strings.ToLower(info.Name()), "/test")) {
 			if dirHasFuzzerEntry(path) && !contains(fuzzDirs, path) {
 				fuzzDirs = append(fuzzDirs, path)
 				fmt.Printf("Found fuzzer directory with entry point: %s\n", path)
-				if len(fuzzDirs) >=2 {
+				if len(fuzzDirs) >= 2 {
 					return filepath.SkipDir
 				}
 			}
 		}
 		return nil
 	})
-	
+
 	if err != nil {
 		fmt.Printf("Error walking for fuzz directories: %v\n", err)
 	}
-	
+
 	// If no fuzz directories found, look more broadly
 	if len(fuzzDirs) == 0 {
 		fuzzerRelatedDirs := []string{}
-		
+
 		err := filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
-			
+
 			// Skip very deep directories
 			if strings.Count(path, string(os.PathSeparator))-strings.Count(projectDir, string(os.PathSeparator)) > 7 {
 				return filepath.SkipDir
 			}
-			
+
 			if info.IsDir() {
 				lowerDir := strings.ToLower(info.Name())
 				if strings.Contains(lowerDir, "fuzz") || strings.Contains(lowerDir, "test") || strings.Contains(lowerDir, "harness") {
 					fuzzerRelatedDirs = append(fuzzerRelatedDirs, path)
 				}
 			}
-			
+
 			// Also check for directories containing fuzzer-related files
 			if info.IsDir() {
 				files, err := os.ReadDir(path)
@@ -606,20 +608,20 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 							}
 						}
 					}
-					
+
 					if hasFuzzerFiles {
 						fuzzerRelatedDirs = append(fuzzerRelatedDirs, path)
 					}
 				}
 			}
-			
+
 			return nil
 		})
-		
+
 		if err != nil {
 			fmt.Printf("Error walking for fuzzer-related directories: %v\n", err)
 		}
-		
+
 		// Add unique directories to our fuzzDirs list
 		for _, dirPath := range fuzzerRelatedDirs {
 			if !contains(fuzzDirs, dirPath) {
@@ -627,16 +629,16 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 			}
 		}
 	}
-	
+
 	fmt.Printf("Found %d potential fuzzer-related directories\n", len(fuzzDirs))
-	
+
 	// Search in fuzz directories
 	for _, fuzzDir := range fuzzDirs {
 		err := filepath.Walk(fuzzDir, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
-			
+
 			if !info.IsDir() {
 				ext := strings.ToLower(filepath.Ext(path))
 				for _, validExt := range extensions {
@@ -644,7 +646,7 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 						// Check if the file name matches common fuzzer naming patterns
 						fileName := filepath.Base(path)
 						fileBase := strings.TrimSuffix(fileName, filepath.Ext(fileName))
-						
+
 						// If we find a likely match, return it immediately
 						if isLikelySourceForFuzzer(fileBase, fuzzerName, baseName) {
 							_, err := os.ReadFile(path)
@@ -655,7 +657,7 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 								return fmt.Errorf("found:%s", path) // Use error to break out of walk
 							}
 						}
-						
+
 						// Otherwise, add to potential source files
 						content, err := os.ReadFile(path)
 						if err != nil {
@@ -669,7 +671,7 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 			}
 			return nil
 		})
-		
+
 		// Check if we found a likely match
 		if err != nil && strings.HasPrefix(err.Error(), "found:") {
 			path := strings.TrimPrefix(err.Error(), "found:")
@@ -677,9 +679,9 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 			return path, stripLicenseText(string(content)), nil
 		}
 	}
-	
+
 	fmt.Printf("Collected %d potential source files\n", len(sourceFiles))
-	
+
 	// If we only found one source file, just return it directly
 	if len(sourceFiles) == 1 {
 		for path, content := range sourceFiles {
@@ -687,11 +689,11 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 			return path, stripLicenseText(content), nil
 		}
 	}
-	
+
 	// If we have too many source files, filter them to the most likely candidates
 	if len(sourceFiles) > 20 {
 		filteredSourceFiles := make(map[string]string)
-		
+
 		// Prioritize files with names similar to the fuzzer
 		for path, content := range sourceFiles {
 			fileName := filepath.Base(path)
@@ -699,7 +701,7 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 				filteredSourceFiles[path] = content
 			}
 		}
-		
+
 		// If we still have too few, add files that mention the fuzzer name in their content
 		if len(filteredSourceFiles) < 5 {
 			count := 0
@@ -715,11 +717,11 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 				}
 			}
 		}
-		
+
 		sourceFiles = filteredSourceFiles
 		fmt.Printf("Filtered to %d most likely source files\n", len(sourceFiles))
 	}
-	
+
 	// ------------------------------------------------------------------
 	// Fallback-selection: pick the most plausible source file
 	// ------------------------------------------------------------------
@@ -745,7 +747,7 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 		}
 
 		// Remember first source file with the entry point as last-resort
-		if bestPath == "" && hasEntry && (strings.Contains(fileName,".c") || strings.Contains(fileName,".java")) {
+		if bestPath == "" && hasEntry && (strings.Contains(fileName, ".c") || strings.Contains(fileName, ".java")) {
 			bestPath = path
 		}
 
@@ -757,7 +759,7 @@ func findFuzzerSource(fuzzerPath, projectDir, projectName string, language strin
 		fmt.Printf("Last-resort fallback to: %s\n", bestPath)
 		return bestPath, stripLicenseText(sourceFiles[bestPath]), nil
 	}
-	
+
 	// If we still haven't found anything, return an error
 	return "", "// Could not find the source code for the fuzzer", fmt.Errorf("could not identify fuzzer source")
 }
@@ -768,62 +770,61 @@ func isLikelySourceForFuzzer(fileBase, fuzzerName, baseName string) bool {
 	if fileBase == fuzzerName || fileBase == baseName {
 		return true
 	}
-	
+
 	// Common fuzzer naming patterns
 	if fileBase == fuzzerName+"_fuzzer" || fileBase == baseName+"_fuzzer" {
 		return true
 	}
-	
+
 	if fileBase == "fuzz_"+fuzzerName || fileBase == "fuzz_"+baseName {
 		return true
 	}
-	
+
 	if fileBase == fuzzerName+"_fuzz" || fileBase == baseName+"_fuzz" {
 		return true
 	}
-	
+
 	// For Java fuzzers
-	if strings.HasSuffix(fileBase, "Fuzzer") && (
-		strings.Contains(fileBase, fuzzerName) || strings.Contains(fileBase, baseName)) {
+	if strings.HasSuffix(fileBase, "Fuzzer") && (strings.Contains(fileBase, fuzzerName) || strings.Contains(fileBase, baseName)) {
 		return true
 	}
-	
+
 	return false
 }
 
 // stripLicenseText removes license headers from source code
 func stripLicenseText(content string) string {
 	lines := strings.Split(content, "\n")
-	
+
 	// Skip license header if present
 	startLine := 0
 	inLicense := false
-	
+
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		
+
 		// Check for common license header patterns
 		if i == 0 && (strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "//")) {
 			inLicense = true
 		}
-		
+
 		// End of license block
 		if inLicense && (strings.HasSuffix(trimmed, "*/") || trimmed == "") {
 			startLine = i + 1
 			inLicense = false
 		}
-		
+
 		// If we've gone past the license and found actual code, break
 		if !inLicense && i > 10 && trimmed != "" && !strings.HasPrefix(trimmed, "//") && !strings.HasPrefix(trimmed, "/*") {
 			break
 		}
 	}
-	
+
 	// If we skipped too many lines, reset to beginning
 	if startLine > 20 {
 		startLine = 0
 	}
-	
+
 	return strings.Join(lines[startLine:], "\n")
 }
 
@@ -837,236 +838,234 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
-
-
 func downloadAndVerifySource(taskDir string, source models.SourceDetail) error {
 
-    outPath := path.Join(taskDir, fmt.Sprintf("%s.tar.gz", source.Type))
-    
-    maxRetries := 3
-    for attempt := 1; attempt <= maxRetries; attempt++ {
-        log.Printf("Downloading %s (attempt %d/%d): %s", source.Type, attempt, maxRetries, source.URL)
-        
-        // Create HTTP client with timeout
-        client := &http.Client{
-            Timeout: 5 * time.Minute,
-        }
+	outPath := path.Join(taskDir, fmt.Sprintf("%s.tar.gz", source.Type))
 
-        // Make request
-        resp, err := client.Get(source.URL)
-        if err != nil {
-            log.Printf("Download error: %v", err)
-            if attempt == maxRetries {
-                return fmt.Errorf("failed to download source after %d attempts: %v", maxRetries, err)
-            }
-            continue
-        }
-        defer resp.Body.Close()
+	maxRetries := 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		log.Printf("Downloading %s (attempt %d/%d): %s", source.Type, attempt, maxRetries, source.URL)
 
-        // Check response status
-        if resp.StatusCode != http.StatusOK {
-            log.Printf("Download failed with status %d", resp.StatusCode)
-            if attempt == maxRetries {
-                return fmt.Errorf("download failed with status %d after %d attempts", resp.StatusCode, maxRetries)
-            }
-            continue
-        }
+		// Create HTTP client with timeout
+		client := &http.Client{
+			Timeout: 5 * time.Minute,
+		}
 
-        // Check Content-Length
-        expectedSize := resp.ContentLength
-        // if expectedSize > 0 {
-        //     log.Printf("Expected file size: %d bytes", expectedSize)
-        //     // For repo.tar.gz, expect around 1.6MB
-        //     if source.Type == models.SourceTypeRepo && expectedSize < 1_000_000 {
-        //         log.Printf("Warning: repo.tar.gz seems too small (%d bytes)", expectedSize)
-        //         if attempt == maxRetries {
-        //             return fmt.Errorf("repo.tar.gz too small: %d bytes", expectedSize)
-        //         }
-        //         continue
-        //     }
-        // }
+		// Make request
+		resp, err := client.Get(source.URL)
+		if err != nil {
+			log.Printf("Download error: %v", err)
+			if attempt == maxRetries {
+				return fmt.Errorf("failed to download source after %d attempts: %v", maxRetries, err)
+			}
+			continue
+		}
+		defer resp.Body.Close()
 
-        // Create output file
-        out, err := os.Create(outPath)
-        if err != nil {
-            return fmt.Errorf("failed to create output file: %v", err)
-        }
-        defer out.Close()
+		// Check response status
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("Download failed with status %d", resp.StatusCode)
+			if attempt == maxRetries {
+				return fmt.Errorf("download failed with status %d after %d attempts", resp.StatusCode, maxRetries)
+			}
+			continue
+		}
 
-        // Calculate SHA256 while copying
-        h := sha256.New()
-        written, err := io.Copy(io.MultiWriter(out, h), resp.Body)
-        if err != nil {
-            log.Printf("Download incomplete: %v", err)
-            os.Remove(outPath) // Clean up partial file
-            if attempt == maxRetries {
-                return fmt.Errorf("failed to save file after %d attempts: %v", maxRetries, err)
-            }
-            continue
-        }
+		// Check Content-Length
+		expectedSize := resp.ContentLength
+		// if expectedSize > 0 {
+		//     log.Printf("Expected file size: %d bytes", expectedSize)
+		//     // For repo.tar.gz, expect around 1.6MB
+		//     if source.Type == models.SourceTypeRepo && expectedSize < 1_000_000 {
+		//         log.Printf("Warning: repo.tar.gz seems too small (%d bytes)", expectedSize)
+		//         if attempt == maxRetries {
+		//             return fmt.Errorf("repo.tar.gz too small: %d bytes", expectedSize)
+		//         }
+		//         continue
+		//     }
+		// }
 
-        // Verify downloaded size matches Content-Length
-        if expectedSize > 0 && written != expectedSize {
-            log.Printf("Size mismatch. Expected: %d, Got: %d", expectedSize, written)
-            os.Remove(outPath) // Clean up incomplete file
-            if attempt == maxRetries {
-                return fmt.Errorf("incomplete download after %d attempts. Expected: %d, Got: %d", 
-                    maxRetries, expectedSize, written)
-            }
-            continue
-        }
+		// Create output file
+		out, err := os.Create(outPath)
+		if err != nil {
+			return fmt.Errorf("failed to create output file: %v", err)
+		}
+		defer out.Close()
 
-        // Verify minimum size for repo.tar.gz
-        // if source.Type == models.SourceTypeRepo && written < 1_000_000 {
-        //     log.Printf("repo.tar.gz too small: %d bytes", written)
-        //     os.Remove(outPath) // Clean up suspicious file
-        //     if attempt == maxRetries {
-        //         return fmt.Errorf("repo.tar.gz too small after %d attempts: %d bytes", maxRetries, written)
-        //     }
-        //     continue
-        // }
+		// Calculate SHA256 while copying
+		h := sha256.New()
+		written, err := io.Copy(io.MultiWriter(out, h), resp.Body)
+		if err != nil {
+			log.Printf("Download incomplete: %v", err)
+			os.Remove(outPath) // Clean up partial file
+			if attempt == maxRetries {
+				return fmt.Errorf("failed to save file after %d attempts: %v", maxRetries, err)
+			}
+			continue
+		}
 
-        // Verify SHA256
-        downloadedHash := hex.EncodeToString(h.Sum(nil))
-        if downloadedHash != source.SHA256 {
-            log.Printf("SHA256 mismatch for %s\nExpected: %s\nGot:      %s", 
-                source.Type, source.SHA256, downloadedHash)
-            os.Remove(outPath) // Clean up invalid file
-            if attempt == maxRetries {
-                return fmt.Errorf("SHA256 mismatch for %s after %d attempts", source.Type, maxRetries)
-            }
-            continue
-        }
+		// Verify downloaded size matches Content-Length
+		if expectedSize > 0 && written != expectedSize {
+			log.Printf("Size mismatch. Expected: %d, Got: %d", expectedSize, written)
+			os.Remove(outPath) // Clean up incomplete file
+			if attempt == maxRetries {
+				return fmt.Errorf("incomplete download after %d attempts. Expected: %d, Got: %d",
+					maxRetries, expectedSize, written)
+			}
+			continue
+		}
 
-        // Verify the file on disk
-        if stat, err := os.Stat(outPath); err != nil {
-            log.Printf("Failed to stat downloaded file: %v", err)
-            if attempt == maxRetries {
-                return fmt.Errorf("failed to verify file after download: %v", err)
-            }
-            continue
-        } else {
-            log.Printf("Successfully downloaded %s: %s (%d bytes)", 
-                source.Type, outPath, stat.Size())
-        }
+		// Verify minimum size for repo.tar.gz
+		// if source.Type == models.SourceTypeRepo && written < 1_000_000 {
+		//     log.Printf("repo.tar.gz too small: %d bytes", written)
+		//     os.Remove(outPath) // Clean up suspicious file
+		//     if attempt == maxRetries {
+		//         return fmt.Errorf("repo.tar.gz too small after %d attempts: %d bytes", maxRetries, written)
+		//     }
+		//     continue
+		// }
 
-        return nil
-    }
+		// Verify SHA256
+		downloadedHash := hex.EncodeToString(h.Sum(nil))
+		if downloadedHash != source.SHA256 {
+			log.Printf("SHA256 mismatch for %s\nExpected: %s\nGot:      %s",
+				source.Type, source.SHA256, downloadedHash)
+			os.Remove(outPath) // Clean up invalid file
+			if attempt == maxRetries {
+				return fmt.Errorf("SHA256 mismatch for %s after %d attempts", source.Type, maxRetries)
+			}
+			continue
+		}
 
-    return fmt.Errorf("failed to download and verify %s after %d attempts", source.Type, maxRetries)
+		// Verify the file on disk
+		if stat, err := os.Stat(outPath); err != nil {
+			log.Printf("Failed to stat downloaded file: %v", err)
+			if attempt == maxRetries {
+				return fmt.Errorf("failed to verify file after download: %v", err)
+			}
+			continue
+		} else {
+			log.Printf("Successfully downloaded %s: %s (%d bytes)",
+				source.Type, outPath, stat.Size())
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("failed to download and verify %s after %d attempts", source.Type, maxRetries)
 }
 
 func extractSources(taskDir string, is_delta bool) error {
-    // Extract repo archive
-    repoCmd := exec.Command("tar", "-xzf", path.Join(taskDir, "repo.tar.gz"))
-    repoCmd.Dir = taskDir
-    var repoOutput bytes.Buffer
-    repoCmd.Stdout = &repoOutput
-    repoCmd.Stderr = &repoOutput
-    if err := repoCmd.Run(); err != nil {
-        log.Printf("Repo extraction output:\n%s", repoOutput.String())
-        return fmt.Errorf("failed to extract repo: %v", err)
-    }
+	// Extract repo archive
+	repoCmd := exec.Command("tar", "-xzf", path.Join(taskDir, "repo.tar.gz"))
+	repoCmd.Dir = taskDir
+	var repoOutput bytes.Buffer
+	repoCmd.Stdout = &repoOutput
+	repoCmd.Stderr = &repoOutput
+	if err := repoCmd.Run(); err != nil {
+		log.Printf("Repo extraction output:\n%s", repoOutput.String())
+		return fmt.Errorf("failed to extract repo: %v", err)
+	}
 
-							//for debug only
-							if os.Getenv("LOCAL_TEST") != "" {
-			
-								srcPath:="/crs-workdir/ccbe076c-eecf-40a5-81aa-eb2f99cc3ccd-20250609-182345/fuzz-tooling"
-								dstPath:="/crs-workdir/ccbe076c-eecf-40a5-81aa-eb2f99cc3ccd/fuzz-tooling"
+	//for debug only
+	if os.Getenv("LOCAL_TEST") != "" {
 
-								if err := robustCopyDir(srcPath, dstPath); err != nil {
-									log.Printf("[LOCAL_TEST SQLITE3] failed to copy fuzz-tooling files: %v", err)
-								} else {
-									log.Printf("[LOCAL_TEST SQLITE3] fuzz-tooling files copied to %s", dstPath)
-								}
-	
-							} else {
-    // Extract fuzz-tooling archive
-    toolingCmd := exec.Command("tar", "-xzf", path.Join(taskDir, "fuzz-tooling.tar.gz"))
-    toolingCmd.Dir = taskDir
-    var toolingOutput bytes.Buffer
-    toolingCmd.Stdout = &toolingOutput
-    toolingCmd.Stderr = &toolingOutput
-    if err := toolingCmd.Run(); err != nil {
-        log.Printf("Tooling extraction output:\n%s", toolingOutput.String())
-        return fmt.Errorf("failed to extract fuzz-tooling: %v", err)
-    }
-							}
-    if is_delta {
-        toolingCmd := exec.Command("tar", "-xzf", path.Join(taskDir, "diff.tar.gz"))
-        toolingCmd.Dir = taskDir
-        var toolingOutput bytes.Buffer
-        toolingCmd.Stdout = &toolingOutput
-        toolingCmd.Stderr = &toolingOutput
-        if err := toolingCmd.Run(); err != nil {
-            log.Printf("Tooling extraction output:\n%s", toolingOutput.String())
-            return fmt.Errorf("failed to extract diff: %v", err)
-        }
-    }
-    // Log directory contents for debugging
-    // s.logDirectoryContents(taskDir)
+		srcPath := "/crs-workdir/ccbe076c-eecf-40a5-81aa-eb2f99cc3ccd-20250609-182345/fuzz-tooling"
+		dstPath := "/crs-workdir/ccbe076c-eecf-40a5-81aa-eb2f99cc3ccd/fuzz-tooling"
 
-    return nil
+		if err := robustCopyDir(srcPath, dstPath); err != nil {
+			log.Printf("[LOCAL_TEST SQLITE3] failed to copy fuzz-tooling files: %v", err)
+		} else {
+			log.Printf("[LOCAL_TEST SQLITE3] fuzz-tooling files copied to %s", dstPath)
+		}
+
+	} else {
+		// Extract fuzz-tooling archive
+		toolingCmd := exec.Command("tar", "-xzf", path.Join(taskDir, "fuzz-tooling.tar.gz"))
+		toolingCmd.Dir = taskDir
+		var toolingOutput bytes.Buffer
+		toolingCmd.Stdout = &toolingOutput
+		toolingCmd.Stderr = &toolingOutput
+		if err := toolingCmd.Run(); err != nil {
+			log.Printf("Tooling extraction output:\n%s", toolingOutput.String())
+			return fmt.Errorf("failed to extract fuzz-tooling: %v", err)
+		}
+	}
+	if is_delta {
+		toolingCmd := exec.Command("tar", "-xzf", path.Join(taskDir, "diff.tar.gz"))
+		toolingCmd.Dir = taskDir
+		var toolingOutput bytes.Buffer
+		toolingCmd.Stdout = &toolingOutput
+		toolingCmd.Stderr = &toolingOutput
+		if err := toolingCmd.Run(); err != nil {
+			log.Printf("Tooling extraction output:\n%s", toolingOutput.String())
+			return fmt.Errorf("failed to extract diff: %v", err)
+		}
+	}
+	// Log directory contents for debugging
+	// s.logDirectoryContents(taskDir)
+
+	return nil
 }
 
 type ProjectConfig struct {
-    Sanitizers []string `yaml:"sanitizers"`
-    Language string  `yaml:"language"`
-    MainRepo string `yaml:"main_repo"`
-}
-func loadProjectConfig(projectYAMLPath string) (*ProjectConfig, error) {
-    data, err := os.ReadFile(projectYAMLPath)
-    if err != nil {
-        return nil, err
-    }
-    var cfg ProjectConfig
-    if err := yaml.Unmarshal(data, &cfg); err != nil {
-        return nil, err
-    }
-    return &cfg, nil
+	Sanitizers []string `yaml:"sanitizers"`
+	Language   string   `yaml:"language"`
+	MainRepo   string   `yaml:"main_repo"`
 }
 
+func loadProjectConfig(projectYAMLPath string) (*ProjectConfig, error) {
+	data, err := os.ReadFile(projectYAMLPath)
+	if err != nil {
+		return nil, err
+	}
+	var cfg ProjectConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
 
 // BuildFuzzerWithAFCImage builds the fuzzer harnesses for a project using helper.py
 func BuildFuzzerWithAFCImage(taskDir, projectName, sanitizer, sanitizerProjectDir string) (string, error) {
-    // Build the command to run helper.py for building fuzzers
-    buildCmd := exec.Command("python3",
-        filepath.Join(taskDir, "fuzz-tooling/infra/helper.py"),
-        "build_fuzzers",
-        "--clean",
-        "--sanitizer", sanitizer,
-        "--engine", "libfuzzer",
-        projectName,
-        sanitizerProjectDir,
-    )
-    
-    var cmdOutput bytes.Buffer
-    buildCmd.Stdout = &cmdOutput
-    buildCmd.Stderr = &cmdOutput
-    
-    log.Printf("Building fuzzer harnesses for %s with sanitizer %s\nCommand: %v", 
-        projectName, sanitizer, buildCmd.Args)
-    
-    if err := buildCmd.Run(); err != nil {
-        output := cmdOutput.String()
-        lines := strings.Split(output, "\n")
-        
-        // Truncate output if it's very long
-        if len(lines) > 30 {
-            firstLines := lines[:10]
-            lastLines := lines[len(lines)-20:]
-            
-            truncatedOutput := strings.Join(firstLines, "\n") + 
-                "\n\n[...TRUNCATED " + fmt.Sprintf("%d", len(lines)-30) + " LINES...]\n\n" + 
-                strings.Join(lastLines, "\n")
-            
-            output = truncatedOutput
-        }
-        
-        return output, err
-    }
-    
-    return cmdOutput.String(), nil
+	// Build the command to run helper.py for building fuzzers
+	buildCmd := exec.Command("python3",
+		filepath.Join(taskDir, "fuzz-tooling/infra/helper.py"),
+		"build_fuzzers",
+		"--clean",
+		"--sanitizer", sanitizer,
+		"--engine", "libfuzzer",
+		projectName,
+		sanitizerProjectDir,
+	)
+
+	var cmdOutput bytes.Buffer
+	buildCmd.Stdout = &cmdOutput
+	buildCmd.Stderr = &cmdOutput
+
+	log.Printf("Building fuzzer harnesses for %s with sanitizer %s\nCommand: %v",
+		projectName, sanitizer, buildCmd.Args)
+
+	if err := buildCmd.Run(); err != nil {
+		output := cmdOutput.String()
+		lines := strings.Split(output, "\n")
+
+		// Truncate output if it's very long
+		if len(lines) > 30 {
+			firstLines := lines[:10]
+			lastLines := lines[len(lines)-20:]
+
+			truncatedOutput := strings.Join(firstLines, "\n") +
+				"\n\n[...TRUNCATED " + fmt.Sprintf("%d", len(lines)-30) + " LINES...]\n\n" +
+				strings.Join(lastLines, "\n")
+
+			output = truncatedOutput
+		}
+
+		return output, err
+	}
+
+	return cmdOutput.String(), nil
 }
 
 // Inside the loop: for _, sanitizer := range cfg.Sanitizers { ... }
@@ -1074,86 +1073,85 @@ func buildFuzzersDocker(taskDir, projectDir, sanitizerDir string, sanitizer stri
 
 	sanitizerProjectDir := fmt.Sprintf("%s-%s", projectDir, sanitizer)
 
-    // Create the directory if it doesn't exist
-    if err := os.MkdirAll(sanitizerProjectDir, 0755); err != nil {
-        return fmt.Errorf("failed to create sanitizer-specific project directory: %v", err)
-    }
-    
-    // Copy the project files to the sanitizer-specific directory
-    // Using cp command for simplicity and to handle hidden files
-    cpCmd := exec.Command("cp", "-r", fmt.Sprintf("%s/.", projectDir), sanitizerProjectDir)
-    if err := cpCmd.Run(); err != nil {
-        return fmt.Errorf("failed to copy project files to sanitizer-specific directory: %v", err)
-    }
-	    
-    log.Printf("Created sanitizer-specific project directory: %s", sanitizerProjectDir)
+	// Create the directory if it doesn't exist
+	if err := os.MkdirAll(sanitizerProjectDir, 0755); err != nil {
+		return fmt.Errorf("failed to create sanitizer-specific project directory: %v", err)
+	}
 
-        // Check for build.patch in the project's directory
-        projectToolingDir := filepath.Join(taskDir, "fuzz-tooling", "projects", projectName)
-        buildPatchPath := filepath.Join(projectToolingDir, "build.patch")
-    
-        
-      // If build.patch exists, copy it to both the root and project subdirectory in the sanitizer directory
-      if _, err := os.Stat(buildPatchPath); err == nil {
-        log.Printf("Found build.patch at %s", buildPatchPath)
-        
-        // Copy to the root of the sanitizer directory
-        rootPatchPath := filepath.Join(sanitizerProjectDir, "build.patch")
-        cpRootPatchCmd := exec.Command("cp", buildPatchPath, rootPatchPath)
-        if err := cpRootPatchCmd.Run(); err != nil {
-            log.Printf("Warning: Failed to copy build.patch to root of sanitizer directory: %v", err)
-        } else {
-            log.Printf("Copied build.patch to %s", rootPatchPath)
-        }
-        
-        // Also copy to the project subdirectory within the sanitizer directory
-        // This handles cases where the patch needs to be in the project directory
-        projectSubdir := filepath.Join(sanitizerProjectDir, projectName)
-        if err := os.MkdirAll(projectSubdir, 0755); err != nil {
-            log.Printf("Warning: Failed to create project subdirectory in sanitizer directory: %v", err)
-        } else {
-            projectPatchPath := filepath.Join(projectSubdir, "build.patch")
-            cpProjectPatchCmd := exec.Command("cp", buildPatchPath, projectPatchPath)
-            if err := cpProjectPatchCmd.Run(); err != nil {
-                log.Printf("Warning: Failed to copy build.patch to project subdirectory: %v", err)
-            } else {
-                log.Printf("Copied build.patch to %s", projectPatchPath)
-            }
-        }
-    } 
-    
+	// Copy the project files to the sanitizer-specific directory
+	// Using cp command for simplicity and to handle hidden files
+	cpCmd := exec.Command("cp", "-r", fmt.Sprintf("%s/.", projectDir), sanitizerProjectDir)
+	if err := cpCmd.Run(); err != nil {
+		return fmt.Errorf("failed to copy project files to sanitizer-specific directory: %v", err)
+	}
+
+	log.Printf("Created sanitizer-specific project directory: %s", sanitizerProjectDir)
+
+	// Check for build.patch in the project's directory
+	projectToolingDir := filepath.Join(taskDir, "fuzz-tooling", "projects", projectName)
+	buildPatchPath := filepath.Join(projectToolingDir, "build.patch")
+
+	// If build.patch exists, copy it to both the root and project subdirectory in the sanitizer directory
+	if _, err := os.Stat(buildPatchPath); err == nil {
+		log.Printf("Found build.patch at %s", buildPatchPath)
+
+		// Copy to the root of the sanitizer directory
+		rootPatchPath := filepath.Join(sanitizerProjectDir, "build.patch")
+		cpRootPatchCmd := exec.Command("cp", buildPatchPath, rootPatchPath)
+		if err := cpRootPatchCmd.Run(); err != nil {
+			log.Printf("Warning: Failed to copy build.patch to root of sanitizer directory: %v", err)
+		} else {
+			log.Printf("Copied build.patch to %s", rootPatchPath)
+		}
+
+		// Also copy to the project subdirectory within the sanitizer directory
+		// This handles cases where the patch needs to be in the project directory
+		projectSubdir := filepath.Join(sanitizerProjectDir, projectName)
+		if err := os.MkdirAll(projectSubdir, 0755); err != nil {
+			log.Printf("Warning: Failed to create project subdirectory in sanitizer directory: %v", err)
+		} else {
+			projectPatchPath := filepath.Join(projectSubdir, "build.patch")
+			cpProjectPatchCmd := exec.Command("cp", buildPatchPath, projectPatchPath)
+			if err := cpProjectPatchCmd.Run(); err != nil {
+				log.Printf("Warning: Failed to copy build.patch to project subdirectory: %v", err)
+			} else {
+				log.Printf("Copied build.patch to %s", projectPatchPath)
+			}
+		}
+	}
+
 	// docker_image := fmt.Sprintf("gcr.io/oss-fuzz/%s", projectName)
 	docker_image := fmt.Sprintf("aixcc-afc/%s", projectName)
 
-    workDir := filepath.Join(taskDir, "fuzz-tooling", "build", "work", fmt.Sprintf("%s-%s", projectName, sanitizer))
-    cmdArgs := []string{
-        "run",
-        "--privileged",
-        "--shm-size=8g",
-        "--platform", "linux/amd64",
-        "--rm",
-        "-e", "FUZZING_ENGINE=libfuzzer",
-        "-e", fmt.Sprintf("SANITIZER=%s", sanitizer),
-        "-e", "ARCHITECTURE=x86_64",
-        "-e", fmt.Sprintf("PROJECT_NAME=%s", projectName),
-        "-e", "HELPER=True",
-        "-e", fmt.Sprintf("FUZZING_LANGUAGE=%s", language),
-        // Mount the original source directory
-        "-v", fmt.Sprintf("%s:/src/%s", sanitizerProjectDir, projectName),
-        // Mount your output directory (e.g., /out)
-        "-v", fmt.Sprintf("%s:/out", sanitizerDir),
-        // Mount a work directory
-        "-v", fmt.Sprintf("%s:/work", workDir),
+	workDir := filepath.Join(taskDir, "fuzz-tooling", "build", "work", fmt.Sprintf("%s-%s", projectName, sanitizer))
+	cmdArgs := []string{
+		"run",
+		"--privileged",
+		"--shm-size=8g",
+		"--platform", "linux/amd64",
+		"--rm",
+		"-e", "FUZZING_ENGINE=libfuzzer",
+		"-e", fmt.Sprintf("SANITIZER=%s", sanitizer),
+		"-e", "ARCHITECTURE=x86_64",
+		"-e", fmt.Sprintf("PROJECT_NAME=%s", projectName),
+		"-e", "HELPER=True",
+		"-e", fmt.Sprintf("FUZZING_LANGUAGE=%s", language),
+		// Mount the original source directory
+		"-v", fmt.Sprintf("%s:/src/%s", sanitizerProjectDir, projectName),
+		// Mount your output directory (e.g., /out)
+		"-v", fmt.Sprintf("%s:/out", sanitizerDir),
+		// Mount a work directory
+		"-v", fmt.Sprintf("%s:/work", workDir),
 		// "-v", "/usr/include:/usr/include",
-        "-t", docker_image,
-    }
+		"-t", docker_image,
+	}
 
 	docker_image_bear := fmt.Sprintf("%s-with-bear", projectName)
 
-    cmdArgs0 := cmdArgs
-	isBearUsed := false 
-	//for C/C++ projects only 
-	if strings.HasPrefix(language,"c") || strings.HasPrefix(language,"C") {
+	cmdArgs0 := cmdArgs
+	isBearUsed := false
+	//for C/C++ projects only
+	if strings.HasPrefix(language, "c") || strings.HasPrefix(language, "C") {
 		isBearUsed = true
 
 		//0. Create a temporary directory for the Dockerfile
@@ -1204,8 +1202,8 @@ func buildFuzzersDocker(taskDir, projectDir, sanitizerDir string, sanitizer stri
 			"-e", "HELPER=True",
 			"-e", fmt.Sprintf("FUZZING_LANGUAGE=%s", language),
 			"-v", fmt.Sprintf("%s:/src/%s", sanitizerProjectDir, projectName), // source
-			"-v", fmt.Sprintf("%s:/out", sanitizerDir),                         // /out
-			"-v", fmt.Sprintf("%s:/work", workDir),                             // /work
+			"-v", fmt.Sprintf("%s:/out", sanitizerDir), // /out
+			"-v", fmt.Sprintf("%s:/work", workDir), // /work
 			"-t", docker_image_bear,
 			"bash", "-c", fmt.Sprintf(`set -eu
 		cd /src/%[1]s
@@ -1228,22 +1226,22 @@ func buildFuzzersDocker(taskDir, projectDir, sanitizerDir string, sanitizer stri
 		fi`, projectName),
 		}
 	}
-    
-    buildCmd := exec.Command("docker", cmdArgs...)
 
-    // Optional: set the buildCmd working directory if you want
-    // buildCmd.Dir = projectDir
+	buildCmd := exec.Command("docker", cmdArgs...)
 
-    var buildOutput bytes.Buffer
-    buildCmd.Stdout = &buildOutput
-    buildCmd.Stderr = &buildOutput
+	// Optional: set the buildCmd working directory if you want
+	// buildCmd.Dir = projectDir
 
-    log.Printf("Running Docker build for sanitizer=%s, project=%s\nCommand: %v",
-        sanitizer, projectName, buildCmd.Args)
+	var buildOutput bytes.Buffer
+	buildCmd.Stdout = &buildOutput
+	buildCmd.Stderr = &buildOutput
 
-    if err := buildCmd.Run(); err != nil {
-		//try one more time 
-		//docker run --privileged --shm-size=2g --platform linux/amd64 --rm -i -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e PROJECT_NAME=freerdp -e HELPER=True -e FUZZING_LANGUAGE=c -v /crs-workdir/019771f9-5050-7160-b767-a88a490a106e/round-exhibition3-freerdp-address:/local-source-mount:ro -v /crs-workdir/019771f9-5050-7160-b767-a88a490a106e/fuzz-tooling/build/out/freerdp/:/out -v /crs-workdir/019771f9-5050-7160-b767-a88a490a106e/fuzz-tooling/build/work/freerdp:/work -t aixcc-afc/freerdp:latest /bin/bash -c 
+	log.Printf("Running Docker build for sanitizer=%s, project=%s\nCommand: %v",
+		sanitizer, projectName, buildCmd.Args)
+
+	if err := buildCmd.Run(); err != nil {
+		//try one more time
+		//docker run --privileged --shm-size=2g --platform linux/amd64 --rm -i -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e PROJECT_NAME=freerdp -e HELPER=True -e FUZZING_LANGUAGE=c -v /crs-workdir/019771f9-5050-7160-b767-a88a490a106e/round-exhibition3-freerdp-address:/local-source-mount:ro -v /crs-workdir/019771f9-5050-7160-b767-a88a490a106e/fuzz-tooling/build/out/freerdp/:/out -v /crs-workdir/019771f9-5050-7160-b767-a88a490a106e/fuzz-tooling/build/work/freerdp:/work -t aixcc-afc/freerdp:latest /bin/bash -c
 		//'pushd $SRC && rm -rf /src/FreeRDP && cp -r /local-source-mount /src/FreeRDP && popd && bear -o /out/compile_commands.json compile'
 		cmdArgs1 := []string{
 			"run",
@@ -1267,8 +1265,8 @@ func buildFuzzersDocker(taskDir, projectDir, sanitizerDir string, sanitizer stri
 			"-t", docker_image_bear,
 			// "bear", "-o", "/out/compile_commands.json", "compile",
 			"bash", "-c", fmt.Sprintf(
-				"pushd $SRC && rm -rf /src/%s && cp -r /local-source-mount /src/%s && popd && " +
-				"bear -o /out/compile_commands.json compile",
+				"pushd $SRC && rm -rf /src/%s && cp -r /local-source-mount /src/%s && popd && "+
+					"bear -o /out/compile_commands.json compile",
 				projectName, projectName),
 		}
 
@@ -1283,15 +1281,15 @@ func buildFuzzersDocker(taskDir, projectDir, sanitizerDir string, sanitizer stri
 		}
 
 		if isBearUsed {
-        	log.Printf("Bear failed. Build fuzzer output:\n%s", buildOutput.String())
+			log.Printf("Bear failed. Build fuzzer output:\n%s", buildOutput.String())
 		} else {
-        	log.Printf("Failed to build fuzzers with sanitizer=%s: %v\nOutput: %s",
+			log.Printf("Failed to build fuzzers with sanitizer=%s: %v\nOutput: %s",
 				sanitizer, err, buildOutput.String())
 			log.Printf("Docker command cmdArgs0: %v", cmdArgs0)
 		}
 
 		log.Printf("Try build fuzzers in the standard way with infra/helper.py ...\n")
-		buildCmd0 := exec.Command("python3", "fuzz-tooling/infra/helper.py", "build_fuzzers", "--sanitizer", sanitizer, "--engine", "libfuzzer", projectName,sanitizerProjectDir)		
+		buildCmd0 := exec.Command("python3", "fuzz-tooling/infra/helper.py", "build_fuzzers", "--sanitizer", sanitizer, "--engine", "libfuzzer", projectName, sanitizerProjectDir)
 		var buildOutput0 bytes.Buffer
 		buildCmd0.Dir = taskDir
 
@@ -1301,10 +1299,10 @@ func buildFuzzersDocker(taskDir, projectDir, sanitizerDir string, sanitizer stri
 			if isBearUsed {
 				log.Printf("Both Bear and standard fuzzer build failed! fuzzer output:\n%s", buildOutput0.String())
 				return fmt.Errorf("[BUG] Both Bear and standard fuzzer build failed. sanitizer=%s: %v\nOutput: %s",
-				sanitizer, err, buildOutput0.String())
+					sanitizer, err, buildOutput0.String())
 			} else {
 				return fmt.Errorf("[BUG] The standard fuzzer build failed. sanitizer=%s: %v\nOutput: %s",
-				sanitizer, err, buildOutput0.String())
+					sanitizer, err, buildOutput0.String())
 			}
 		} else {
 			//copy all files in ourdir to sanitizerDir
@@ -1318,20 +1316,20 @@ func buildFuzzersDocker(taskDir, projectDir, sanitizerDir string, sanitizer stri
 			log.Printf("Successfully copied all files from %s to %s", outDir, sanitizerDir)
 		}
 
-    }
+	}
 	//TESTING ONLY
 	if false {
 		//TODO BuildFuzzerWithAFCImage
 		buildOutput, err := BuildFuzzerWithAFCImage(taskDir, projectName, sanitizer, sanitizerProjectDir)
 		if err != nil {
 			log.Printf("BuildFuzzerWithAFCImage Failed to build fuzzers with sanitizer=%s: %v\nOutput: %s",
-			sanitizer, err, buildOutput)
+				sanitizer, err, buildOutput)
 		} else {
 			log.Printf("BuildFuzzerWithAFCImage Successfully built all fuzzers: %s", buildOutput)
 		}
 	}
 	currentUser := os.Getuid()
-	if currentUser != 0 { 
+	if currentUser != 0 {
 		// After Docker completes, fix permissions on the output directory
 		fixPermCmd := exec.Command("sudo", "chmod", "-R", "777", sanitizerDir)
 		if err := fixPermCmd.Run(); err != nil {
@@ -1344,526 +1342,527 @@ func buildFuzzersDocker(taskDir, projectDir, sanitizerDir string, sanitizer stri
 			log.Printf("Warning: Failed to fix permissions on %s: %v", workDir, err)
 		}
 	}
-    // log.Printf("Build fuzzer output:\n%s", buildOutput.String())
-    return nil
+	// log.Printf("Build fuzzer output:\n%s", buildOutput.String())
+	return nil
 }
 
 // CopyFilesFromDir copies all files from srcDir to dstDir
 func CopyFilesFromDir(srcDir, dstDir string) error {
-    // Ensure the destination directory exists
-    if err := os.MkdirAll(dstDir, 0755); err != nil {
-        return fmt.Errorf("failed to create destination directory: %w", err)
-    }
+	// Ensure the destination directory exists
+	if err := os.MkdirAll(dstDir, 0755); err != nil {
+		return fmt.Errorf("failed to create destination directory: %w", err)
+	}
 
-    // Read the source directory
-    entries, err := os.ReadDir(srcDir)
-    if err != nil {
-        return fmt.Errorf("failed to read source directory: %w", err)
-    }
+	// Read the source directory
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return fmt.Errorf("failed to read source directory: %w", err)
+	}
 
-    // Copy each file
-    for _, entry := range entries {
-        // Skip directories
-        if entry.IsDir() {
-            continue
-        }
+	// Copy each file
+	for _, entry := range entries {
+		// Skip directories
+		if entry.IsDir() {
+			continue
+		}
 
-        srcPath := filepath.Join(srcDir, entry.Name())
-        dstPath := filepath.Join(dstDir, entry.Name())
+		srcPath := filepath.Join(srcDir, entry.Name())
+		dstPath := filepath.Join(dstDir, entry.Name())
 
-        // Read source file
-        srcFile, err := os.Open(srcPath)
-        if err != nil {
-            return fmt.Errorf("failed to open source file %s: %w", srcPath, err)
-        }
-        defer srcFile.Close()
+		// Read source file
+		srcFile, err := os.Open(srcPath)
+		if err != nil {
+			return fmt.Errorf("failed to open source file %s: %w", srcPath, err)
+		}
+		defer srcFile.Close()
 
-        // Get file info for permissions
-        srcInfo, err := srcFile.Stat()
-        if err != nil {
-            return fmt.Errorf("failed to stat source file %s: %w", srcPath, err)
-        }
+		// Get file info for permissions
+		srcInfo, err := srcFile.Stat()
+		if err != nil {
+			return fmt.Errorf("failed to stat source file %s: %w", srcPath, err)
+		}
 
-        // Create destination file
-        dstFile, err := os.OpenFile(dstPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, srcInfo.Mode())
-        if err != nil {
-            return fmt.Errorf("failed to create destination file %s: %w", dstPath, err)
-        }
-        defer dstFile.Close()
+		// Create destination file
+		dstFile, err := os.OpenFile(dstPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, srcInfo.Mode())
+		if err != nil {
+			return fmt.Errorf("failed to create destination file %s: %w", dstPath, err)
+		}
+		defer dstFile.Close()
 
-        // Copy content
-        if _, err := io.Copy(dstFile, srcFile); err != nil {
-            return fmt.Errorf("failed to copy file content from %s to %s: %w", srcPath, dstPath, err)
-        }
-    }
+		// Copy content
+		if _, err := io.Copy(dstFile, srcFile); err != nil {
+			return fmt.Errorf("failed to copy file content from %s to %s: %w", srcPath, dstPath, err)
+		}
+	}
 
-    return nil
+	return nil
 }
 
 func findFuzzers(fuzzerDir string) ([]string, error) {
-    entries, err := os.ReadDir(fuzzerDir)
-    if err != nil {
-        return nil, fmt.Errorf("failed to read fuzzer directory: %v", err)
-    }
+	entries, err := os.ReadDir(fuzzerDir)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read fuzzer directory: %v", err)
+	}
 
-    // List of known non-fuzzer executables to skip
-    skipBinaries := map[string]bool{
-        "jazzer_agent_deploy.jar": true,
-        "jazzer_driver": true,
-        "jazzer_driver_with_sanitizer": true,
-        "jazzer_junit.jar": true,
-        "llvm-symbolizer": true,
-        "sancov":         true,  // coverage tool
-        "clang":          true,
-        "clang++":        true,
-    }
+	// List of known non-fuzzer executables to skip
+	skipBinaries := map[string]bool{
+		"jazzer_agent_deploy.jar":      true,
+		"jazzer_driver":                true,
+		"jazzer_driver_with_sanitizer": true,
+		"jazzer_junit.jar":             true,
+		"llvm-symbolizer":              true,
+		"sancov":                       true, // coverage tool
+		"clang":                        true,
+		"clang++":                      true,
+	}
 
-    // File extensions to skip
-    skipExtensions := map[string]bool{
-		".bin": true,  // Skip .bin files
-		".log": true,  // Skip log files
-        ".class": true,  // Skip Java class files
-        ".jar":   true,  // Skip Java JAR files (except specific fuzzer JARs)
-		".zip": true,
-		".dict": true,
+	// File extensions to skip
+	skipExtensions := map[string]bool{
+		".bin":     true, // Skip .bin files
+		".log":     true, // Skip log files
+		".class":   true, // Skip Java class files
+		".jar":     true, // Skip Java JAR files (except specific fuzzer JARs)
+		".zip":     true,
+		".dict":    true,
 		".options": true,
-		".bc": true,
-		".json": true,
-        ".o":     true,  // Skip object files
-        ".a":     true,  // Skip static libraries
-        ".so":    true,  // Skip shared libraries (unless they're specifically fuzzers)
-        ".h":     true,  // Skip header files
-        ".c":     true,  // Skip source files
-        ".cpp":   true,  // Skip source files
-        ".java":  true,  // Skip Java source files
-    }
+		".bc":      true,
+		".json":    true,
+		".o":       true, // Skip object files
+		".a":       true, // Skip static libraries
+		".so":      true, // Skip shared libraries (unless they're specifically fuzzers)
+		".h":       true, // Skip header files
+		".c":       true, // Skip source files
+		".cpp":     true, // Skip source files
+		".java":    true, // Skip Java source files
+	}
 
-    var fuzzers []string
-    for _, entry := range entries {
-        // Skip directories and non-executable files
-        if entry.IsDir() {
-            continue
-        }
-        
-        name := entry.Name()
-        
-        // Skip files with extensions we want to ignore
-        ext := filepath.Ext(name)
-        if skipExtensions[ext] {
-            continue
-        }
-        
-        // Skip known non-fuzzer binaries
-        if skipBinaries[name] {
-            continue
-        }
-        
-        info, err := entry.Info()
-        if err != nil {
-            continue
-        }
-        
-        // Check if file is executable
-        if info.Mode()&0111 != 0 {
-            fuzzers = append(fuzzers, name)
-        }
-    }
+	var fuzzers []string
+	for _, entry := range entries {
+		// Skip directories and non-executable files
+		if entry.IsDir() {
+			continue
+		}
 
-    if len(fuzzers) == 0 {
-        return nil, fmt.Errorf("no fuzzers found in %s", fuzzerDir)
-    }
-    
-    log.Printf("Found %d fuzzers in %s: %v", len(fuzzers), fuzzerDir, fuzzers)
-    return fuzzers, nil
+		name := entry.Name()
+
+		// Skip files with extensions we want to ignore
+		ext := filepath.Ext(name)
+		if skipExtensions[ext] {
+			continue
+		}
+
+		// Skip known non-fuzzer binaries
+		if skipBinaries[name] {
+			continue
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+
+		// Check if file is executable
+		if info.Mode()&0111 != 0 {
+			fuzzers = append(fuzzers, name)
+		}
+	}
+
+	if len(fuzzers) == 0 {
+		return nil, fmt.Errorf("no fuzzers found in %s", fuzzerDir)
+	}
+
+	log.Printf("Found %d fuzzers in %s: %v", len(fuzzers), fuzzerDir, fuzzers)
+	return fuzzers, nil
 }
 
 // Check if directory exists
 func dirExists(path string) bool {
-    info, err := os.Stat(path)
-    if err != nil {
-        if os.IsNotExist(err) {
-            return false // Directory doesn't exist
-        }
-        // If there's some other error (like permission denied),
-        // we'll also return false to be safe
-        return false
-    }
-    
-    // Make sure it's a directory, not a file
-    return info.IsDir()
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false // Directory doesn't exist
+		}
+		// If there's some other error (like permission denied),
+		// we'll also return false to be safe
+		return false
+	}
+
+	// Make sure it's a directory, not a file
+	return info.IsDir()
 }
+
 // Helper function to check if a file exists (not a directory)
 func fileExists(path string) bool {
-    info, err := os.Stat(path)
-    if err != nil {
-        if os.IsNotExist(err) {
-            return false
-        }
-        // Other errors like permission denied
-        fmt.Printf("Warning: Error checking file %s: %v\n", path, err)
-        return false
-    }
-    // Make sure it's a file, not a directory
-    return !info.IsDir()
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false
+		}
+		// Other errors like permission denied
+		fmt.Printf("Warning: Error checking file %s: %v\n", path, err)
+		return false
+	}
+	// Make sure it's a file, not a directory
+	return !info.IsDir()
 }
 
 // findAllPathsParallel finds paths from all fuzzers to reachable functions in parallel
 // with a maximum depth and timeout duration.
 func findAllPathsParallel(results *models.AnalysisResults, javaFuzzerSourceFiles []string, maxDepth int, timeoutDuration time.Duration) {
-    log.Printf("Starting parallel path finding with max depth %d and timeout %v", maxDepth, timeoutDuration)
-    startTime := time.Now()
+	log.Printf("Starting parallel path finding with max depth %d and timeout %v", maxDepth, timeoutDuration)
+	startTime := time.Now()
 
-    // Create a context with timeout
-    ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
-    
-    // Channel to collect paths from goroutines - use a large buffer
-    pathsChan := make(chan struct {
-        entryPoint string
-        targetFunc string
-        paths      [][]string
-    }, 10000) // Large buffer to reduce blocking
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), timeoutDuration)
 
-    // Wait group to track when all goroutines are done
-    var wg sync.WaitGroup
+	// Channel to collect paths from goroutines - use a large buffer
+	pathsChan := make(chan struct {
+		entryPoint string
+		targetFunc string
+		paths      [][]string
+	}, 10000) // Large buffer to reduce blocking
 
-    // Track all entry points and functions to process
-    var entryPoints []string
-    var allReachableFunctions []string
+	// Wait group to track when all goroutines are done
+	var wg sync.WaitGroup
 
-    // First pass: collect all entry points and reachable functions
-    log.Printf("Finding all reachable functions from entry points...")
-    firstPassStart := time.Now()
+	// Track all entry points and functions to process
+	var entryPoints []string
+	var allReachableFunctions []string
 
-    for _, fuzzerSourcePath := range javaFuzzerSourceFiles {
-        entryPoint := fuzzerSourcePath + "." + "fuzzerTestOneInput"
-        entryPoints = append(entryPoints, entryPoint)
-        
-        // Find reachable functions with a lower depth for speed
-        reachable := findReachableFunctions(results, entryPoint, 3)
-        log.Printf("Found %d reachable functions from entry point %s", len(reachable), entryPoint)
-        
-        for _, func_ := range reachable {
-            // Avoid duplicates
-            isDuplicate := false
-            for _, existing := range allReachableFunctions {
-                if existing == func_ {
-                    isDuplicate = true
-                    break
-                }
-            }
-            if !isDuplicate {
-                allReachableFunctions = append(allReachableFunctions, func_)
-            }
-        }
-    }
+	// First pass: collect all entry points and reachable functions
+	log.Printf("Finding all reachable functions from entry points...")
+	firstPassStart := time.Now()
 
-    log.Printf("Found total of %d unique reachable functions from %d entry points in %v",
-        len(allReachableFunctions), len(entryPoints), time.Since(firstPassStart))
+	for _, fuzzerSourcePath := range javaFuzzerSourceFiles {
+		entryPoint := fuzzerSourcePath + "." + "fuzzerTestOneInput"
+		entryPoints = append(entryPoints, entryPoint)
 
-    // Second pass: find paths for all functions in parallel with work queue
-    funcQueue := make(chan struct {
-        entryPoint string
-        targetFunc string
-    }, len(entryPoints)*len(allReachableFunctions))
+		// Find reachable functions with a lower depth for speed
+		reachable := findReachableFunctions(results, entryPoint, 3)
+		log.Printf("Found %d reachable functions from entry point %s", len(reachable), entryPoint)
 
-    // Create workers to process the queue
-    numPathWorkers := runtime.NumCPU() * 2 // Twice as many workers as CPUs
-    for i := 0; i < numPathWorkers; i++ {
-        wg.Add(1)
-        go func(workerID int) {
-            defer wg.Done()
-            
-            jobCount := 0
-            for {
-                select {
-                case <-ctx.Done():
-                    // Timeout or cancelation
-                    log.Printf("Worker %d stopping: context done (processed %d jobs)", workerID, jobCount)
-                    return
-                default:
-                    // Try to get a job
-                    select {
-                    case <-ctx.Done():
-                        log.Printf("Worker %d stopping: context done in job fetch (processed %d jobs)", workerID, jobCount)
-                        return
-                    case job, ok := <-funcQueue:
-                        if !ok {
-                            // Channel closed, no more work
-                            log.Printf("Worker %d stopping: queue closed (processed %d jobs)", workerID, jobCount)
-                            return
-                        }
-                        
-                        // Use a per-job timeout to prevent individual jobs from taking too long
-                        jobCtx, jobCancel := context.WithTimeout(ctx, 30*time.Second)
-                        
-                        // Create a done channel for the job
-                        jobDone := make(chan [][]string, 1)
-                        
-                        // Start the path finding in a separate goroutine
-                        go func() {
-                            // This will stop if the job context is canceled
-                            paths := findAllPathsWithContext(jobCtx, results, job.entryPoint, job.targetFunc, maxDepth)
-                            select {
-                            case <-jobCtx.Done():
-                                // Don't try to send results if context is done
-                            case jobDone <- paths:
-                                // Successfully sent paths
-                            }
-                        }()
-                        
-                        // Wait for the job to complete or timeout
-                        var paths [][]string
-                        select {
-                        case <-jobCtx.Done():
-                            log.Printf("Worker %d: Job timed out (%s -> %s)", 
-                                workerID, job.entryPoint, job.targetFunc)
-                        case paths = <-jobDone:
-                            // Successfully got paths
-                            if len(paths) > 0 {
-                                // Try to send results with timeout
-                                sendTimer := time.NewTimer(5 * time.Second)
-                                select {
-                                case <-ctx.Done():
-                                    sendTimer.Stop()
-                                    log.Printf("Worker %d: Main context done while sending results", workerID)
-                                    return
-                                case pathsChan <- struct {
-                                    entryPoint string
-                                    targetFunc string
-                                    paths      [][]string
-                                }{job.entryPoint, job.targetFunc, paths}:
-                                    sendTimer.Stop()
-                                    // Successfully sent
-                                case <-sendTimer.C:
-                                    log.Printf("Worker %d: Timed out sending results, discarding", workerID)
-                                }
-                            }
-                        }
-                        
-                        // Clean up the job context
-                        jobCancel()
-                        jobCount++
-                    }
-                }
-            }
-        }(i)
-    }
+		for _, func_ := range reachable {
+			// Avoid duplicates
+			isDuplicate := false
+			for _, existing := range allReachableFunctions {
+				if existing == func_ {
+					isDuplicate = true
+					break
+				}
+			}
+			if !isDuplicate {
+				allReachableFunctions = append(allReachableFunctions, func_)
+			}
+		}
+	}
 
-    // Feed the work queue with all entry point + target function combinations
-    log.Printf("Dispatching %d path finding tasks to %d workers...",
-        len(entryPoints)*len(allReachableFunctions), numPathWorkers)
-    
-    // Start a goroutine to feed the queue
-    queueFeederDone := make(chan struct{})
-    go func() {
-        defer close(queueFeederDone)
-        jobCount := 0
-        
-        for _, entryPoint := range entryPoints {
-            for _, targetFunc := range allReachableFunctions {
-                select {
-                case <-ctx.Done():
-                    log.Printf("Queue feeder stopping: context done after queueing %d jobs", jobCount)
-                    return
-                default:
-                    // Try to send with timeout to avoid blocking forever
-                    sendTimer := time.NewTimer(5 * time.Second)
-                    select {
-                    case <-ctx.Done():
-                        sendTimer.Stop()
-                        log.Printf("Queue feeder stopping: context done in job send after queueing %d jobs", jobCount)
-                        return
-                    case funcQueue <- struct {
-                        entryPoint string
-                        targetFunc string
-                    }{entryPoint, targetFunc}:
-                        sendTimer.Stop()
-                        jobCount++
-                        if jobCount % 1000 == 0 {
-                            log.Printf("Queued %d/%d jobs...", 
-                                jobCount, len(entryPoints)*len(allReachableFunctions))
-                        }
-                    case <-sendTimer.C:
-                        log.Printf("Queue feeder: Timed out sending job to queue after %d jobs", jobCount)
-                        return
-                    }
-                }
-            }
-        }
-        log.Printf("All %d jobs successfully queued", jobCount)
-    }()
+	log.Printf("Found total of %d unique reachable functions from %d entry points in %v",
+		len(allReachableFunctions), len(entryPoints), time.Since(firstPassStart))
 
-    // Collect results with timeout protection
-    resultCollector := make(chan struct{
-        count int
-        funcs int
-    }, 1)
-    
-    // Start a goroutine to collect results
-    go func() {
-        pathCount := 0
-        functionCount := 0
-        functionSet := make(map[string]bool)
-        
-        for {
-            select {
-            case <-ctx.Done():
-                // Context done, report what we have and exit
-                resultCollector <- struct{
-                    count int
-                    funcs int
-                }{pathCount, functionCount}
-                return
-                
-            case pathResult, ok := <-pathsChan:
-                if !ok {
-                    // Channel closed, we're done
-                    resultCollector <- struct{
-                        count int
-                        funcs int
-                    }{pathCount, functionCount}
-                    return
-                }
-                
-                if _, exists := results.Paths[pathResult.targetFunc]; !exists {
-                    // First time we're adding paths for this function
-                    functionSet[pathResult.targetFunc] = true
-                    functionCount++
-                }
-                
-                // Add all paths we found
-                results.Paths[pathResult.targetFunc] = append(
-                    results.Paths[pathResult.targetFunc],
-                    pathResult.paths...,
-                )
-                pathCount += len(pathResult.paths)
-                
-                // Periodically log progress
-                if pathCount % 1000 == 0 {
-                    log.Printf("Progress: Found %d paths to %d functions so far (%v elapsed)",
-                        pathCount, functionCount, time.Since(startTime))
-                }
-            }
-        }
-    }()
+	// Second pass: find paths for all functions in parallel with work queue
+	funcQueue := make(chan struct {
+		entryPoint string
+		targetFunc string
+	}, len(entryPoints)*len(allReachableFunctions))
 
-    // Wait for the queue feeder to finish or timeout
-    select {
-    case <-ctx.Done():
-        log.Printf("Main timeout occurred, stopping queue feeder")
-    case <-queueFeederDone:
-        log.Printf("Queue feeder completed successfully")
-    }
-    
-    // Always close the function queue
-    close(funcQueue)
-    
-    // Wait for workers to finish with a timeout
-    workersDone := make(chan struct{})
-    go func() {
-        wg.Wait()
-        close(workersDone)
-    }()
-    
-    // Use a separate timeout for waiting for workers
-    workerWaitTimeout := 30 * time.Second
-    select {
-    case <-time.After(workerWaitTimeout):
-        log.Printf("Workers didn't finish within %v after queue closure. Proceeding anyway.", 
-            workerWaitTimeout)
-    case <-workersDone:
-        log.Printf("All workers completed successfully")
-    }
-    
-    // Close the results channel to signal end of results
-    close(pathsChan)
-    
-    // Wait for result collector to report final counts
-    var finalCounts struct {
-        count int
-        funcs int
-    }
-    
-    // Use a timeout for getting final counts
-    select {
-    case finalCounts = <-resultCollector:
-        log.Printf("Result collector reported final counts: %d paths, %d functions", 
-            finalCounts.count, finalCounts.funcs)
-    case <-time.After(10 * time.Second):
-        log.Printf("Timed out waiting for result collector, proceeding with deduplication")
-    }
-    
-    // Always cancel the main context when we're done
-    cancel()
-    
-    // Remove any duplicate paths if we found any
-    log.Printf("Starting path deduplication...")
-    dedupStart := time.Now()
-    deduplicatedCount := dedupPathsInResults(results)
-    log.Printf("Deduplication completed in %v, removed %d duplicates", 
-        time.Since(dedupStart), deduplicatedCount)
-    
-    // Final summary
-    log.Printf("Path finding operation completed in %v", time.Since(startTime))
+	// Create workers to process the queue
+	numPathWorkers := runtime.NumCPU() * 2 // Twice as many workers as CPUs
+	for i := 0; i < numPathWorkers; i++ {
+		wg.Add(1)
+		go func(workerID int) {
+			defer wg.Done()
+
+			jobCount := 0
+			for {
+				select {
+				case <-ctx.Done():
+					// Timeout or cancelation
+					log.Printf("Worker %d stopping: context done (processed %d jobs)", workerID, jobCount)
+					return
+				default:
+					// Try to get a job
+					select {
+					case <-ctx.Done():
+						log.Printf("Worker %d stopping: context done in job fetch (processed %d jobs)", workerID, jobCount)
+						return
+					case job, ok := <-funcQueue:
+						if !ok {
+							// Channel closed, no more work
+							log.Printf("Worker %d stopping: queue closed (processed %d jobs)", workerID, jobCount)
+							return
+						}
+
+						// Use a per-job timeout to prevent individual jobs from taking too long
+						jobCtx, jobCancel := context.WithTimeout(ctx, 30*time.Second)
+
+						// Create a done channel for the job
+						jobDone := make(chan [][]string, 1)
+
+						// Start the path finding in a separate goroutine
+						go func() {
+							// This will stop if the job context is canceled
+							paths := findAllPathsWithContext(jobCtx, results, job.entryPoint, job.targetFunc, maxDepth)
+							select {
+							case <-jobCtx.Done():
+								// Don't try to send results if context is done
+							case jobDone <- paths:
+								// Successfully sent paths
+							}
+						}()
+
+						// Wait for the job to complete or timeout
+						var paths [][]string
+						select {
+						case <-jobCtx.Done():
+							log.Printf("Worker %d: Job timed out (%s -> %s)",
+								workerID, job.entryPoint, job.targetFunc)
+						case paths = <-jobDone:
+							// Successfully got paths
+							if len(paths) > 0 {
+								// Try to send results with timeout
+								sendTimer := time.NewTimer(5 * time.Second)
+								select {
+								case <-ctx.Done():
+									sendTimer.Stop()
+									log.Printf("Worker %d: Main context done while sending results", workerID)
+									return
+								case pathsChan <- struct {
+									entryPoint string
+									targetFunc string
+									paths      [][]string
+								}{job.entryPoint, job.targetFunc, paths}:
+									sendTimer.Stop()
+									// Successfully sent
+								case <-sendTimer.C:
+									log.Printf("Worker %d: Timed out sending results, discarding", workerID)
+								}
+							}
+						}
+
+						// Clean up the job context
+						jobCancel()
+						jobCount++
+					}
+				}
+			}
+		}(i)
+	}
+
+	// Feed the work queue with all entry point + target function combinations
+	log.Printf("Dispatching %d path finding tasks to %d workers...",
+		len(entryPoints)*len(allReachableFunctions), numPathWorkers)
+
+	// Start a goroutine to feed the queue
+	queueFeederDone := make(chan struct{})
+	go func() {
+		defer close(queueFeederDone)
+		jobCount := 0
+
+		for _, entryPoint := range entryPoints {
+			for _, targetFunc := range allReachableFunctions {
+				select {
+				case <-ctx.Done():
+					log.Printf("Queue feeder stopping: context done after queueing %d jobs", jobCount)
+					return
+				default:
+					// Try to send with timeout to avoid blocking forever
+					sendTimer := time.NewTimer(5 * time.Second)
+					select {
+					case <-ctx.Done():
+						sendTimer.Stop()
+						log.Printf("Queue feeder stopping: context done in job send after queueing %d jobs", jobCount)
+						return
+					case funcQueue <- struct {
+						entryPoint string
+						targetFunc string
+					}{entryPoint, targetFunc}:
+						sendTimer.Stop()
+						jobCount++
+						if jobCount%1000 == 0 {
+							log.Printf("Queued %d/%d jobs...",
+								jobCount, len(entryPoints)*len(allReachableFunctions))
+						}
+					case <-sendTimer.C:
+						log.Printf("Queue feeder: Timed out sending job to queue after %d jobs", jobCount)
+						return
+					}
+				}
+			}
+		}
+		log.Printf("All %d jobs successfully queued", jobCount)
+	}()
+
+	// Collect results with timeout protection
+	resultCollector := make(chan struct {
+		count int
+		funcs int
+	}, 1)
+
+	// Start a goroutine to collect results
+	go func() {
+		pathCount := 0
+		functionCount := 0
+		functionSet := make(map[string]bool)
+
+		for {
+			select {
+			case <-ctx.Done():
+				// Context done, report what we have and exit
+				resultCollector <- struct {
+					count int
+					funcs int
+				}{pathCount, functionCount}
+				return
+
+			case pathResult, ok := <-pathsChan:
+				if !ok {
+					// Channel closed, we're done
+					resultCollector <- struct {
+						count int
+						funcs int
+					}{pathCount, functionCount}
+					return
+				}
+
+				if _, exists := results.Paths[pathResult.targetFunc]; !exists {
+					// First time we're adding paths for this function
+					functionSet[pathResult.targetFunc] = true
+					functionCount++
+				}
+
+				// Add all paths we found
+				results.Paths[pathResult.targetFunc] = append(
+					results.Paths[pathResult.targetFunc],
+					pathResult.paths...,
+				)
+				pathCount += len(pathResult.paths)
+
+				// Periodically log progress
+				if pathCount%1000 == 0 {
+					log.Printf("Progress: Found %d paths to %d functions so far (%v elapsed)",
+						pathCount, functionCount, time.Since(startTime))
+				}
+			}
+		}
+	}()
+
+	// Wait for the queue feeder to finish or timeout
+	select {
+	case <-ctx.Done():
+		log.Printf("Main timeout occurred, stopping queue feeder")
+	case <-queueFeederDone:
+		log.Printf("Queue feeder completed successfully")
+	}
+
+	// Always close the function queue
+	close(funcQueue)
+
+	// Wait for workers to finish with a timeout
+	workersDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(workersDone)
+	}()
+
+	// Use a separate timeout for waiting for workers
+	workerWaitTimeout := 30 * time.Second
+	select {
+	case <-time.After(workerWaitTimeout):
+		log.Printf("Workers didn't finish within %v after queue closure. Proceeding anyway.",
+			workerWaitTimeout)
+	case <-workersDone:
+		log.Printf("All workers completed successfully")
+	}
+
+	// Close the results channel to signal end of results
+	close(pathsChan)
+
+	// Wait for result collector to report final counts
+	var finalCounts struct {
+		count int
+		funcs int
+	}
+
+	// Use a timeout for getting final counts
+	select {
+	case finalCounts = <-resultCollector:
+		log.Printf("Result collector reported final counts: %d paths, %d functions",
+			finalCounts.count, finalCounts.funcs)
+	case <-time.After(10 * time.Second):
+		log.Printf("Timed out waiting for result collector, proceeding with deduplication")
+	}
+
+	// Always cancel the main context when we're done
+	cancel()
+
+	// Remove any duplicate paths if we found any
+	log.Printf("Starting path deduplication...")
+	dedupStart := time.Now()
+	deduplicatedCount := dedupPathsInResults(results)
+	log.Printf("Deduplication completed in %v, removed %d duplicates",
+		time.Since(dedupStart), deduplicatedCount)
+
+	// Final summary
+	log.Printf("Path finding operation completed in %v", time.Since(startTime))
 }
 
 // findAllPathsWithContext is a context-aware version of findAllPaths
 func findAllPathsWithContext(ctx context.Context, results *models.AnalysisResults, source, target string, maxDepth int) [][]string {
-    // Check context frequently to allow cancellation
-    if ctx.Err() != nil {
-        return nil
-    }
-    
-    // Use a channel to get results from the original function
-    resultChan := make(chan [][]string, 1)
-    
-    go func() {
-        paths := findAllPaths(results, source, target, maxDepth)
-        select {
-        case <-ctx.Done():
-            // Context done, don't try to send results
-        case resultChan <- paths:
-            // Successfully sent results
-        }
-    }()
-    
-    // Wait for results or context cancellation
-    select {
-    case <-ctx.Done():
-        return nil
-    case paths := <-resultChan:
-        return paths
-    }
+	// Check context frequently to allow cancellation
+	if ctx.Err() != nil {
+		return nil
+	}
+
+	// Use a channel to get results from the original function
+	resultChan := make(chan [][]string, 1)
+
+	go func() {
+		paths := findAllPaths(results, source, target, maxDepth)
+		select {
+		case <-ctx.Done():
+			// Context done, don't try to send results
+		case resultChan <- paths:
+			// Successfully sent results
+		}
+	}()
+
+	// Wait for results or context cancellation
+	select {
+	case <-ctx.Done():
+		return nil
+	case paths := <-resultChan:
+		return paths
+	}
 }
 
 // dedupPathsInResults removes duplicate paths from results
 func dedupPathsInResults(results *models.AnalysisResults) int {
-    totalDuplicates := 0
-    for targetFunc, pathsList := range results.Paths {
-        if len(pathsList) <= 1 {
-            continue // No need to deduplicate 0 or 1 paths
-        }
-        
-        seen := make(map[string]bool)
-        unique := make([][]string, 0, len(pathsList))
-        
-        for _, path := range pathsList {
-            // Create a string key for the path
-            key := strings.Join(path, "|")
-            if !seen[key] {
-                seen[key] = true
-                unique = append(unique, path)
-            }
-        }
-        
-        duplicatesRemoved := len(pathsList) - len(unique)
-        totalDuplicates += duplicatesRemoved
-        
-        if duplicatesRemoved > 0 {
-            results.Paths[targetFunc] = unique
-        }
-    }
-    return totalDuplicates
+	totalDuplicates := 0
+	for targetFunc, pathsList := range results.Paths {
+		if len(pathsList) <= 1 {
+			continue // No need to deduplicate 0 or 1 paths
+		}
+
+		seen := make(map[string]bool)
+		unique := make([][]string, 0, len(pathsList))
+
+		for _, path := range pathsList {
+			// Create a string key for the path
+			key := strings.Join(path, "|")
+			if !seen[key] {
+				seen[key] = true
+				unique = append(unique, path)
+			}
+		}
+
+		duplicatesRemoved := len(pathsList) - len(unique)
+		totalDuplicates += duplicatesRemoved
+
+		if duplicatesRemoved > 0 {
+			results.Paths[targetFunc] = unique
+		}
+	}
+	return totalDuplicates
 }
 
 // Environment variables for API Keys (adjust as needed)
@@ -1875,18 +1874,18 @@ var (
 
 // LLMModels we want to compare; you can adapt these to real endpoints
 var (
-	CLAUDE_MODEL          = "claude-3-7-sonnet-latest"
-	OPENAI_MODEL          = "chatgpt-4o-latest"
-	GEMINI_MODEL_PRO_25   = "gemini-2.5-pro-preview-03-25"
-	GEMINI_MODEL          = "gemini-2.0-flash-thinking-exp-01-21"
+	CLAUDE_MODEL        = "claude-3-7-sonnet-latest"
+	OPENAI_MODEL        = "chatgpt-4o-latest"
+	GEMINI_MODEL_PRO_25 = "gemini-2.5-pro-preview-03-25"
+	GEMINI_MODEL        = "gemini-2.0-flash-thinking-exp-01-21"
 )
 
 var (
-	MODELS = []string{CLAUDE_MODEL,OPENAI_MODEL, GEMINI_MODEL_PRO_25, GEMINI_MODEL}
+	MODELS = []string{CLAUDE_MODEL, OPENAI_MODEL, GEMINI_MODEL_PRO_25, GEMINI_MODEL}
 )
 
 func invokeModel(modelName, prompt string) (string, error) {
-	
+
 	var client = &http.Client{}
 	var body []byte
 	var req *http.Request
@@ -1922,13 +1921,13 @@ func invokeModel(modelName, prompt string) (string, error) {
 		}
 		payload := map[string]interface{}{
 			"model":      modelName,
-            "max_tokens": 1024,
-            "messages": []map[string]string{
-                {"role": "user", "content": prompt},
-            },
+			"max_tokens": 1024,
+			"messages": []map[string]string{
+				{"role": "user", "content": prompt},
+			},
 		}
 		body, _ = json.Marshal(payload)
-        req, err = http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(body))
+		req, err = http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("x-api-key", apiKey)
 		req.Header.Set("anthropic-version", "2023-06-01")
@@ -1938,7 +1937,7 @@ func invokeModel(modelName, prompt string) (string, error) {
 		if apiKey == "" {
 			return responseText, fmt.Errorf("Missing GEMINI_API_KEY")
 		}
-		url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", modelName,apiKey)
+		url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", modelName, apiKey)
 		payload := map[string]interface{}{
 			"contents": []map[string]interface{}{
 				{
@@ -2011,7 +2010,7 @@ func invokeModel(modelName, prompt string) (string, error) {
 		} else {
 			responseText = respStr // Fallback to raw response
 		}
-	
+
 	case strings.HasPrefix(lowerName, "claude-"):
 		// Parse Anthropic response format
 		var anthropicResp struct {
@@ -2034,38 +2033,38 @@ func invokeModel(modelName, prompt string) (string, error) {
 				responseText = respStr // Fallback to raw response
 			}
 		}
-case strings.HasPrefix(lowerName, "gemini-"):
-    // Parse Gemini response format
-    var geminiResp struct {
-        Candidates []struct {
-            Content struct {
-                Parts []struct {
-                    Text string `json:"text"`
-                } `json:"parts"`
-            } `json:"content"`
-        } `json:"candidates"`
-    }
-    if err := json.Unmarshal(respBody, &geminiResp); err == nil && 
-       len(geminiResp.Candidates) > 0 && 
-       len(geminiResp.Candidates[0].Content.Parts) > 0 {
-        responseText = geminiResp.Candidates[0].Content.Parts[0].Text
-    } else {
-        responseText = respStr // Fallback to raw response
-    }
+	case strings.HasPrefix(lowerName, "gemini-"):
+		// Parse Gemini response format
+		var geminiResp struct {
+			Candidates []struct {
+				Content struct {
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				} `json:"content"`
+			} `json:"candidates"`
+		}
+		if err := json.Unmarshal(respBody, &geminiResp); err == nil &&
+			len(geminiResp.Candidates) > 0 &&
+			len(geminiResp.Candidates[0].Content.Parts) > 0 {
+			responseText = geminiResp.Candidates[0].Content.Parts[0].Text
+		} else {
+			responseText = respStr // Fallback to raw response
+		}
 
-default:
-    responseText = respStr
-}
+	default:
+		responseText = respStr
+	}
 
-if 	strings.HasPrefix(modelName, "claude-") {
-	fmt.Println("PROMPT:",prompt)
-	fmt.Println("RESPONSE:",responseText)
+	if strings.HasPrefix(modelName, "claude-") {
+		fmt.Println("PROMPT:", prompt)
+		fmt.Println("RESPONSE:", responseText)
 	}
 
 	return responseText, nil
 }
 
-func callLLM(modelToUse, prompt string) (string, error){
+func callLLM(modelToUse, prompt string) (string, error) {
 	var modifiedScriptContent string
 
 	modifiedScriptRaw, err := invokeModel(modelToUse, prompt)
@@ -2077,22 +2076,23 @@ func callLLM(modelToUse, prompt string) (string, error){
 	pattern := fmt.Sprintf("(?s)```(?i:(?:%s))?\\n(.*?)```", "bash|dockerfile")
 	re := regexp.MustCompile(pattern) // (?s) makes . match newline
 	matches := re.FindStringSubmatch(modifiedScriptRaw)
-	
+
 	if len(matches) > 1 {
 		modifiedScriptContent = strings.TrimSpace(matches[1])
 		log.Println("Successfully extracted modified script from LLM response.")
 	} else {
-        log.Printf("Warning: Could not extract bash code block from LLM response. Using raw response:\n%s", modifiedScriptRaw)
+		log.Printf("Warning: Could not extract bash code block from LLM response. Using raw response:\n%s", modifiedScriptRaw)
 		// Fallback: Try to use the raw response, maybe removing introductory lines
-        modifiedScriptContent = cleanLLMResponseFallback(modifiedScriptRaw)
-        if modifiedScriptContent == "" {
-            return modifiedScriptContent, fmt.Errorf("failed to extract usable script from LLM response")
-        }
+		modifiedScriptContent = cleanLLMResponseFallback(modifiedScriptRaw)
+		if modifiedScriptContent == "" {
+			return modifiedScriptContent, fmt.Errorf("failed to extract usable script from LLM response")
+		}
 	}
 
 	// log.Printf("======modifiedScriptContent=======\n%s", modifiedScriptContent)
 	return modifiedScriptContent, nil
 }
+
 // findScriptRecursive searches for a scriptName recursively within startDir.
 // Returns the full path if found, or an empty string otherwise.
 func findScriptRecursive(startDir, scriptName string) (string, error) {
@@ -2122,12 +2122,13 @@ func findScriptRecursive(startDir, scriptName string) (string, error) {
 
 	return foundPath, nil
 }
+
 // stripBashComments removes all Bash comments (lines starting with #) from a script.
 // It preserves shebang lines (#!/bin/bash) and only removes comments that start at the beginning of a line.
 func stripBashComments(script string) string {
 	lines := strings.Split(script, "\n")
 	var result []string
-	
+
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 		// Preserve shebang line
@@ -2135,19 +2136,19 @@ func stripBashComments(script string) string {
 			result = append(result, line)
 			continue
 		}
-		
+
 		// Skip comment lines (lines that start with #)
 		if strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		
+
 		// Keep non-comment lines
 		result = append(result, line)
 	}
-	
+
 	return strings.Join(result, "\n")
 }
-func SetupClang17Dockerfile(modelName,dockerfilePath,projectDir, history string) error {
+func SetupClang17Dockerfile(modelName, dockerfilePath, projectDir, history string) error {
 	log.Println("Setting up LLVM/Clang-17 Dockerfile environment...")
 	var err error
 	var modifiedScriptContent string
@@ -2186,10 +2187,10 @@ Original Dockerfile (%s):
 --- END DOCKERFILE ---
 
 %s`, dockerfileFullPath, dockerfileContent, history)
-	
-		modifiedScriptContent, err = callLLM(modelName,prompt)
+
+		modifiedScriptContent, err = callLLM(modelName, prompt)
 		if err != nil {
-			log.Printf("Error callLLM: %v",err.Error())
+			log.Printf("Error callLLM: %v", err.Error())
 			return err
 		} else {
 			log.Printf("Saving modified Dockerfile to %s", dockerfileFullPath)
@@ -2200,7 +2201,7 @@ Original Dockerfile (%s):
 	return nil
 }
 
-func SetupLLVMBitcodeEnvironment(modelName,dockerfilePath,projectDir, history string) (string, error) {
+func SetupLLVMBitcodeEnvironment(modelName, dockerfilePath, projectDir, history string) (string, error) {
 	log.Println("Setting up LLVM bitcode environment...")
 	var err error
 	var modifiedScriptContent string
@@ -2294,17 +2295,17 @@ func SetupLLVMBitcodeEnvironment(modelName,dockerfilePath,projectDir, history st
 	scriptToModifyContent = stripBashComments(scriptToModifyContent)
 
 	log.Printf("Asking LLM to modify script: %s", scriptToModifyPath)
-	//3. ask AI model to modify build.sh to emit LLVM bitcode files 
+	//3. ask AI model to modify build.sh to emit LLVM bitcode files
 	// if oss-fuzz-build.sh exist, modify oss-fuzz-build.sh instead
 	// note: make sure to use llvm-17.0.8
-	// callLLM(modelName, prompt string) 
-	
-//Ensure that necessary flags like '-flto', '-femit-llvm', or equivalent build system options are added for C/C++ projects. 
-//The goal is to produce bitcode suitable for static analysis.
+	// callLLM(modelName, prompt string)
 
-// Please use LLVM/Clang-17 to generate bitcode:
-// CC=clang-17
-// CXX=clang++-17
+	//Ensure that necessary flags like '-flto', '-femit-llvm', or equivalent build system options are added for C/C++ projects.
+	//The goal is to produce bitcode suitable for static analysis.
+
+	// Please use LLVM/Clang-17 to generate bitcode:
+	// CC=clang-17
+	// CXX=clang++-17
 	prompt := fmt.Sprintf(`Modify the following build script to generate LLVM bitcode files (.bc) alongside the regular build artifacts.
 Make sure your modified script will work successfully, e.g., avoid errors such as clang: error: -emit-llvm cannot be used when linking, and configure: error: C compiler cannot create executables.
 Do NOT add any explanations, comments, or introductory text. Only output the complete modified script content enclosed in a single bash markdown code block.
@@ -2317,11 +2318,11 @@ Original Script:
 %s
 `, scriptToModifyContent, history)
 
-	modifiedScriptContent, err = callLLM(modelName,prompt)
+	modifiedScriptContent, err = callLLM(modelName, prompt)
 
 	//4. save rewrite build.sh or oss-fuzz-build.sh
 	if err != nil {
-		fmt.Printf("Error callLLM: %v",err.Error())
+		fmt.Printf("Error callLLM: %v", err.Error())
 		return modifiedScriptContent, err
 	} else {
 		if !fileExists(backupPath) {
@@ -2382,38 +2383,39 @@ func copyFile(src, dst string) error {
 	defer destination.Close()
 
 	if _, err := io.Copy(destination, source); err != nil {
-        return err
-    }
-    // Preserve permissions
-    return os.Chmod(dst, sourceFileStat.Mode())
+		return err
+	}
+	// Preserve permissions
+	return os.Chmod(dst, sourceFileStat.Mode())
 }
+
 // cleanLLMResponseFallback tries to remove common introductory phrases.
 func cleanLLMResponseFallback(rawResponse string) string {
 	lines := strings.Split(rawResponse, "\n")
 	cleanedLines := []string{}
 	started := false
-    shebangFound := false
+	shebangFound := false
 
 	for _, line := range lines {
-         trimmedLine := strings.TrimSpace(line)
-         if strings.HasPrefix(trimmedLine, "#!/") {
-             shebangFound = true
-             started = true
-         }
-        // Skip common introductory phrases if we haven't found the shebang yet
-        if !started && (strings.HasPrefix(trimmedLine, "Here is the modified script") ||
-                         strings.HasPrefix(trimmedLine, "Okay, here's the modified") ||
-                         trimmedLine == "") {
-            continue
-        }
-        started = true // Start collecting lines once we pass the intro
+		trimmedLine := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmedLine, "#!/") {
+			shebangFound = true
+			started = true
+		}
+		// Skip common introductory phrases if we haven't found the shebang yet
+		if !started && (strings.HasPrefix(trimmedLine, "Here is the modified script") ||
+			strings.HasPrefix(trimmedLine, "Okay, here's the modified") ||
+			trimmedLine == "") {
+			continue
+		}
+		started = true // Start collecting lines once we pass the intro
 		cleanedLines = append(cleanedLines, line)
 	}
 
-     // If no shebang was found, the fallback might be risky, but return it anyway
-     if !shebangFound {
-         log.Println("Warning: Fallback cleaning did not find shebang. Using potentially incomplete response.")
-     }
+	// If no shebang was found, the fallback might be risky, but return it anyway
+	if !shebangFound {
+		log.Println("Warning: Fallback cleaning did not find shebang. Using potentially incomplete response.")
+	}
 
 	return strings.Join(cleanedLines, "\n")
 }
@@ -2421,75 +2423,75 @@ func cleanLLMResponseFallback(rawResponse string) string {
 // PullAFCDockerImage runs the helper.py script to build and pull Docker images for the project
 func PullAFCDockerImage(taskDir string, projectName string) (string, error) {
 
-    // Build the command to run helper.py
-    helperCmd := exec.Command("python3",
-        filepath.Join(taskDir, "fuzz-tooling/infra/helper.py"),
-        "build_image",
-        "--pull",
-        projectName,
-    )
-    
-    var cmdOutput bytes.Buffer
-    helperCmd.Stdout = &cmdOutput
-    helperCmd.Stderr = &cmdOutput
-    
-    log.Printf("Building and pulling Docker images for %s\nCommand: %v", projectName, helperCmd.Args)
-    
-    if err := helperCmd.Run(); err != nil {
-        output := cmdOutput.String()
-        lines := strings.Split(output, "\n")
-        
-        // Truncate output if it's very long
-        if len(lines) > 30 {
-            firstLines := lines[:10]
-            lastLines := lines[len(lines)-20:]
-            
-            truncatedOutput := strings.Join(firstLines, "\n") + 
-                "\n\n[...TRUNCATED " + fmt.Sprintf("%d", len(lines)-30) + " LINES...]\n\n" + 
-                strings.Join(lastLines, "\n")
-            
-            output = truncatedOutput
-        }
-        
-        return output, err
-    }
+	// Build the command to run helper.py
+	helperCmd := exec.Command("python3",
+		filepath.Join(taskDir, "fuzz-tooling/infra/helper.py"),
+		"build_image",
+		"--pull",
+		projectName,
+	)
 
-    dstImage := fmt.Sprintf("aixcc-afc/%s", projectName)
-    // Check if dstImage already exists
-    checkDstCmd := exec.Command("docker", "image", "inspect", dstImage)
-    if err := checkDstCmd.Run(); err != nil {
+	var cmdOutput bytes.Buffer
+	helperCmd.Stdout = &cmdOutput
+	helperCmd.Stderr = &cmdOutput
 
-        // Tag the image as aixcc-afc/<projectName>
-        srcImage := fmt.Sprintf("gcr.io/oss-fuzz/%s", projectName)
+	log.Printf("Building and pulling Docker images for %s\nCommand: %v", projectName, helperCmd.Args)
 
-        // Check if srcImage exists
-        checkSrcCmd := exec.Command("docker", "image", "inspect", srcImage)
-        if err := checkSrcCmd.Run(); err != nil {
-            log.Printf("Source image %s does not exist, cannot tag.", srcImage)
-            return cmdOutput.String() + "\nSource image does not exist.", fmt.Errorf("source image %s does not exist", srcImage)
-        }
+	if err := helperCmd.Run(); err != nil {
+		output := cmdOutput.String()
+		lines := strings.Split(output, "\n")
 
-        tagCmd := exec.Command("docker", "tag", srcImage, dstImage)
-        var tagOutput bytes.Buffer
-        tagCmd.Stdout = &tagOutput
-        tagCmd.Stderr = &tagOutput
-        if err := tagCmd.Run(); err != nil {
-            log.Printf("Failed to tag image: %s -> %s\nOutput: %s", srcImage, dstImage, tagOutput.String())
-            return cmdOutput.String() + "\n" + tagOutput.String(), err
-        }
-        log.Printf("Tagged image as %s", dstImage)
-    }    
-    return cmdOutput.String(), nil
+		// Truncate output if it's very long
+		if len(lines) > 30 {
+			firstLines := lines[:10]
+			lastLines := lines[len(lines)-20:]
+
+			truncatedOutput := strings.Join(firstLines, "\n") +
+				"\n\n[...TRUNCATED " + fmt.Sprintf("%d", len(lines)-30) + " LINES...]\n\n" +
+				strings.Join(lastLines, "\n")
+
+			output = truncatedOutput
+		}
+
+		return output, err
+	}
+
+	dstImage := fmt.Sprintf("aixcc-afc/%s", projectName)
+	// Check if dstImage already exists
+	checkDstCmd := exec.Command("docker", "image", "inspect", dstImage)
+	if err := checkDstCmd.Run(); err != nil {
+
+		// Tag the image as aixcc-afc/<projectName>
+		srcImage := fmt.Sprintf("gcr.io/oss-fuzz/%s", projectName)
+
+		// Check if srcImage exists
+		checkSrcCmd := exec.Command("docker", "image", "inspect", srcImage)
+		if err := checkSrcCmd.Run(); err != nil {
+			log.Printf("Source image %s does not exist, cannot tag.", srcImage)
+			return cmdOutput.String() + "\nSource image does not exist.", fmt.Errorf("source image %s does not exist", srcImage)
+		}
+
+		tagCmd := exec.Command("docker", "tag", srcImage, dstImage)
+		var tagOutput bytes.Buffer
+		tagCmd.Stdout = &tagOutput
+		tagCmd.Stderr = &tagOutput
+		if err := tagCmd.Run(); err != nil {
+			log.Printf("Failed to tag image: %s -> %s\nOutput: %s", srcImage, dstImage, tagOutput.String())
+			return cmdOutput.String() + "\n" + tagOutput.String(), err
+		}
+		log.Printf("Tagged image as %s", dstImage)
+	}
+	return cmdOutput.String(), nil
 }
 func BuildDockerImage(dockerfilePath, dockerfileFullPath, projectName string) (string, error) {
 
-	 // build docker image 
-	 buildCmd := exec.Command("docker", 
-	 "build",
-	 "--no-cache",
-	 "-t", "aixcc-afc/"+projectName,
-	 "--file", dockerfileFullPath,  
-	 dockerfilePath,
+	// build docker image
+	buildCmd := exec.Command("docker",
+		"build",
+		"--no-cache",
+		"-t", "aixcc-afc/"+projectName,
+		"--file", dockerfileFullPath,
+		dockerfilePath,
 	)
 	var buildOutput bytes.Buffer
 	buildCmd.Stdout = &buildOutput
@@ -2506,12 +2508,12 @@ func BuildDockerImage(dockerfilePath, dockerfileFullPath, projectName string) (s
 		if len(lines) > 30 { // if we have more than 30 lines (10 first + 20 last)
 			firstLines := lines[:10]
 			lastLines := lines[len(lines)-20:]
-			
+
 			// Join them with a notice about truncation
-			truncatedOutput := strings.Join(firstLines, "\n") + 
-				"\n\n[...TRUNCATED " + fmt.Sprintf("%d", len(lines)-30) + " LINES...]\n\n" + 
+			truncatedOutput := strings.Join(firstLines, "\n") +
+				"\n\n[...TRUNCATED " + fmt.Sprintf("%d", len(lines)-30) + " LINES...]\n\n" +
 				strings.Join(lastLines, "\n")
-			
+
 			dockerOutput = truncatedOutput
 		}
 
@@ -2522,130 +2524,129 @@ func BuildDockerImage(dockerfilePath, dockerfileFullPath, projectName string) (s
 
 }
 func BuildDockerImageWithRetry(dockerfilePath, dockerfileFullPath, projectName string, projectDir string) (string, error) {
-    history := ""
-    maxAttempts := 5
-    for _, modelName := range MODELS {
-        log.Printf("Trying model: %s", modelName)
-    for attempt := 1; attempt <= maxAttempts; attempt++ {
-        log.Printf("Attempt %d/%d: Setting up Clang 17 Dockerfile", attempt, maxAttempts)
-        err:= SetupClang17Dockerfile(modelName,dockerfilePath, projectDir, history)
-		if err !=nil {
-			break
-		}
-        
-		dockerOutput, err:= BuildDockerImage(dockerfilePath, dockerfileFullPath, projectName)
-		if err != nil {
-
-			formattedOutput := fmt.Sprintf("Docker build output:\n%s", dockerOutput)
-			history += fmt.Sprintf("Attempt %d failed:\n%s\n", attempt, formattedOutput)
-
-            log.Printf("Attempt %d failed: %v", attempt, err)
-            
-            if attempt == maxAttempts {
-                return dockerOutput, fmt.Errorf("failed to build Docker image after %d attempts: %v", 
-                    maxAttempts, err)
-            }
-            
-            // Wait before retrying
-            time.Sleep(2 * time.Second)
-            continue
-        }
-        
-        // If we reach here, the build succeeded
-        log.Printf("Docker build succeeded on attempt %d", attempt)
-        return dockerOutput, nil
-    }
-}
-    // Should never reach here, but just in case
-    return "", fmt.Errorf("failed to build Docker image after %d attempts", maxAttempts)
-}      
-
-
-func BuildFuzzersWithRetry(taskDir, dockerfilePath,projectDir, sanitizerDir, sanitizer, language string, projectName string) error {
-    history := ""
-    maxAttempts := 5
-    
-    for _, modelName := range MODELS {
-        log.Printf("Trying model: %s", modelName)
-    for attempt := 1; attempt <= maxAttempts; attempt++ {
-        log.Printf("Attempt %d/%d: Building fuzzers with --sanitizer=%s", attempt, maxAttempts, sanitizer)
-        
-        // Setup environment before each attempt, passing in history from previous failures
-        modifiedScriptContent, err:=SetupLLVMBitcodeEnvironment(modelName,dockerfilePath, projectDir, history)
-        
-		if err !=nil {
-			break
-		}
-		history += fmt.Sprintf("--- START MODIFIED SCRIPT (Attempt %d)---\n%s\n--- END MODIFIED SCRIPT ---\n\n",attempt, modifiedScriptContent)
-		
-        log.Printf("Building fuzzers with --sanitizer=%s", sanitizer)
-        
-        var errorOutput string
-        if err := buildFuzzersDocker(taskDir, projectDir, sanitizerDir, sanitizer, language, projectName); err != nil {
-			errorOutput = err.Error()
-			lines := strings.Split(errorOutput, "\n")
-			
-			// Truncate error output if it's very long
-			if len(lines) > 30 { // if we have more than 30 lines (10 first + 20 last)
-				firstLines := lines[:10]
-				lastLines := lines[len(lines)-20:]
-				
-				// Join them with a notice about truncation
-				truncatedOutput := strings.Join(firstLines, "\n") + 
-					"\n\n[...TRUNCATED " + fmt.Sprintf("%d", len(lines)-30) + " LINES...]\n\n" + 
-					strings.Join(lastLines, "\n")
-				
-				errorOutput = truncatedOutput
-			}
-			
-			log.Printf("Attempt %d failed: Error building fuzzers for sanitizer %s: %v", 
-				attempt, sanitizer, err)
-			
-			history += fmt.Sprintf("Attempt %d failed:\n%s\n", attempt, errorOutput)
-            
-            if attempt == maxAttempts {
-                return fmt.Errorf("failed to build fuzzers with sanitizer %s after %d attempts: %v", 
-                    sanitizer, maxAttempts, err)
-            }
-            
-            // Wait before retrying
-            time.Sleep(2 * time.Second)
-            continue
-        } else {
-
-			// Check if bitcode files are generated
-			bitcodeFiles, err := filepath.Glob(filepath.Join(taskDir, "**", "*.bc"))
+	history := ""
+	maxAttempts := 5
+	for _, modelName := range MODELS {
+		log.Printf("Trying model: %s", modelName)
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			log.Printf("Attempt %d/%d: Setting up Clang 17 Dockerfile", attempt, maxAttempts)
+			err := SetupClang17Dockerfile(modelName, dockerfilePath, projectDir, history)
 			if err != nil {
-				log.Printf("Error searching for bitcode files: %v", err)
-				history += fmt.Sprintf("Attempt %d failed: Error searching for bitcode files: %v\n", attempt, err)
+				break
+			}
+
+			dockerOutput, err := BuildDockerImage(dockerfilePath, dockerfileFullPath, projectName)
+			if err != nil {
+
+				formattedOutput := fmt.Sprintf("Docker build output:\n%s", dockerOutput)
+				history += fmt.Sprintf("Attempt %d failed:\n%s\n", attempt, formattedOutput)
+
+				log.Printf("Attempt %d failed: %v", attempt, err)
+
+				if attempt == maxAttempts {
+					return dockerOutput, fmt.Errorf("failed to build Docker image after %d attempts: %v",
+						maxAttempts, err)
+				}
+
+				// Wait before retrying
+				time.Sleep(2 * time.Second)
 				continue
 			}
 
-			if len(bitcodeFiles) == 0 {
-				history += fmt.Sprintf("Attempt %d failed: Bitcode files are not generated, please try a different approach\n", attempt)
-				log.Printf("Attempt %d failed: Bitcode files are not generated", attempt)
-				continue
-			}
-
-			log.Printf("Bitcode files: %v", bitcodeFiles)
+			// If we reach here, the build succeeded
+			log.Printf("Docker build succeeded on attempt %d", attempt)
+			return dockerOutput, nil
 		}
-        
-        // If we reach here, the build succeeded
-        log.Printf("Fuzzer build succeeded on attempt %d", attempt)
-        return nil
-    }
+	}
+	// Should never reach here, but just in case
+	return "", fmt.Errorf("failed to build Docker image after %d attempts", maxAttempts)
 }
-    // Should never reach here, but just in case
-    return fmt.Errorf("failed to build fuzzers with sanitizer %s after %d attempts", sanitizer, maxAttempts)
+
+func BuildFuzzersWithRetry(taskDir, dockerfilePath, projectDir, sanitizerDir, sanitizer, language string, projectName string) error {
+	history := ""
+	maxAttempts := 5
+
+	for _, modelName := range MODELS {
+		log.Printf("Trying model: %s", modelName)
+		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			log.Printf("Attempt %d/%d: Building fuzzers with --sanitizer=%s", attempt, maxAttempts, sanitizer)
+
+			// Setup environment before each attempt, passing in history from previous failures
+			modifiedScriptContent, err := SetupLLVMBitcodeEnvironment(modelName, dockerfilePath, projectDir, history)
+
+			if err != nil {
+				break
+			}
+			history += fmt.Sprintf("--- START MODIFIED SCRIPT (Attempt %d)---\n%s\n--- END MODIFIED SCRIPT ---\n\n", attempt, modifiedScriptContent)
+
+			log.Printf("Building fuzzers with --sanitizer=%s", sanitizer)
+
+			var errorOutput string
+			if err := buildFuzzersDocker(taskDir, projectDir, sanitizerDir, sanitizer, language, projectName); err != nil {
+				errorOutput = err.Error()
+				lines := strings.Split(errorOutput, "\n")
+
+				// Truncate error output if it's very long
+				if len(lines) > 30 { // if we have more than 30 lines (10 first + 20 last)
+					firstLines := lines[:10]
+					lastLines := lines[len(lines)-20:]
+
+					// Join them with a notice about truncation
+					truncatedOutput := strings.Join(firstLines, "\n") +
+						"\n\n[...TRUNCATED " + fmt.Sprintf("%d", len(lines)-30) + " LINES...]\n\n" +
+						strings.Join(lastLines, "\n")
+
+					errorOutput = truncatedOutput
+				}
+
+				log.Printf("Attempt %d failed: Error building fuzzers for sanitizer %s: %v",
+					attempt, sanitizer, err)
+
+				history += fmt.Sprintf("Attempt %d failed:\n%s\n", attempt, errorOutput)
+
+				if attempt == maxAttempts {
+					return fmt.Errorf("failed to build fuzzers with sanitizer %s after %d attempts: %v",
+						sanitizer, maxAttempts, err)
+				}
+
+				// Wait before retrying
+				time.Sleep(2 * time.Second)
+				continue
+			} else {
+
+				// Check if bitcode files are generated
+				bitcodeFiles, err := filepath.Glob(filepath.Join(taskDir, "**", "*.bc"))
+				if err != nil {
+					log.Printf("Error searching for bitcode files: %v", err)
+					history += fmt.Sprintf("Attempt %d failed: Error searching for bitcode files: %v\n", attempt, err)
+					continue
+				}
+
+				if len(bitcodeFiles) == 0 {
+					history += fmt.Sprintf("Attempt %d failed: Bitcode files are not generated, please try a different approach\n", attempt)
+					log.Printf("Attempt %d failed: Bitcode files are not generated", attempt)
+					continue
+				}
+
+				log.Printf("Bitcode files: %v", bitcodeFiles)
+			}
+
+			// If we reach here, the build succeeded
+			log.Printf("Fuzzer build succeeded on attempt %d", attempt)
+			return nil
+		}
+	}
+	// Should never reach here, but just in case
+	return fmt.Errorf("failed to build fuzzers with sanitizer %s after %d attempts", sanitizer, maxAttempts)
 }
 
 var (
-WORK_DIR = "/crs-workdir"
+	WORK_DIR = "/crs-workdir"
 )
 
 func TryLoadQXJsonResults(taskID string, focus string) (*models.CodeqlAnalysisResults, error) {
 	taskDir := path.Join(WORK_DIR, taskID)
-	outputJson :=  path.Join(taskDir, fmt.Sprintf("%s_qx.json", focus))
+	outputJson := path.Join(taskDir, fmt.Sprintf("%s_qx.json", focus))
 	if !fileExists(outputJson) {
 		return nil, fmt.Errorf("The file %v does not exist", outputJson)
 	}
@@ -2653,21 +2654,21 @@ func TryLoadQXJsonResults(taskID string, focus string) (*models.CodeqlAnalysisRe
 	log.Printf("outputJson %s, try loading...", outputJson)
 
 	results := models.CodeqlAnalysisResults{
-		Functions: make(map[string]*models.FunctionDefinition),
+		Functions:          make(map[string]*models.FunctionDefinition),
 		ReachableFunctions: make(map[string][]string),
-		Paths:     make(map[string]map[string][][]string),
+		Paths:              make(map[string]map[string][][]string),
 	}
 
 	// File exists, try to load it
-	err:= loadResultsFromJsonContentQX(&results, outputJson)
-	if err !=nil {
+	err := loadResultsFromJsonContentQX(&results, outputJson)
+	if err != nil {
 		return &results, err
 	}
-	
+
 	return &results, nil
 }
-	
-func loadResultsFromJsonContentQX(results *models.CodeqlAnalysisResults,outputJson string) error {
+
+func loadResultsFromJsonContentQX(results *models.CodeqlAnalysisResults, outputJson string) error {
 	log.Printf("Found existing analysis results at %s, loading...", outputJson)
 
 	// Read the file
@@ -2682,8 +2683,8 @@ func loadResultsFromJsonContentQX(results *models.CodeqlAnalysisResults,outputJs
 		} else {
 			// Successfully loaded existing results
 			log.Printf("Successfully loaded existing QX analysis results with %d functions, %d reachable function sections (fuzzers), and %d target paths",
-				len(results.Functions),len(results.ReachableFunctions), len(results.Paths))
-			
+				len(results.Functions), len(results.ReachableFunctions), len(results.Paths))
+
 			// Validate the loaded data
 			if results.Functions == nil {
 				results.Functions = make(map[string]*models.FunctionDefinition)
@@ -2702,31 +2703,30 @@ func loadResultsFromJsonContentQX(results *models.CodeqlAnalysisResults,outputJs
 
 func TryLoadJsonResults(taskID string, focus string) (*models.AnalysisResults, error) {
 	taskDir := path.Join(WORK_DIR, taskID)
-	outputJson :=  path.Join(taskDir, fmt.Sprintf("%s.json", focus))
+	outputJson := path.Join(taskDir, fmt.Sprintf("%s.json", focus))
 	if !fileExists(outputJson) {
 		return nil, fmt.Errorf("The file %v does not exist", outputJson)
 	}
 
 	log.Printf("outputJson %s, try loading...", outputJson)
 
-	
 	results := models.AnalysisResults{
-		Functions: make(map[string]*models.FunctionDefinition),
-		CallGraph: &models.CallGraph{Calls: []models.MethodCall{}},
+		Functions:          make(map[string]*models.FunctionDefinition),
+		CallGraph:          &models.CallGraph{Calls: []models.MethodCall{}},
 		ReachableFunctions: make(map[string][]string),
-		Paths:     make(map[string][][]string),
+		Paths:              make(map[string][][]string),
 	}
-	
+
 	// File exists, try to load it
-	err:= loadResultsFromJsonContent(&results, outputJson)
-	if err !=nil {
+	err := loadResultsFromJsonContent(&results, outputJson)
+	if err != nil {
 		return &results, err
 	}
-	
+
 	return &results, nil
 }
 
-func loadResultsFromJsonContent(results *models.AnalysisResults,outputJson string) error {
+func loadResultsFromJsonContent(results *models.AnalysisResults, outputJson string) error {
 	log.Printf("Found existing analysis results at %s, loading...", outputJson)
 
 	// Read the file
@@ -2741,8 +2741,8 @@ func loadResultsFromJsonContent(results *models.AnalysisResults,outputJson strin
 		} else {
 			// Successfully loaded existing results
 			log.Printf("Successfully loaded existing analysis results with %d functions, %d calls, %d reachable functions, and %d target paths",
-				len(results.Functions), len(results.CallGraph.Calls),len(results.ReachableFunctions), len(results.Paths))
-			
+				len(results.Functions), len(results.CallGraph.Calls), len(results.ReachableFunctions), len(results.Paths))
+
 			// Validate the loaded data
 			if results.Functions == nil {
 				results.Functions = make(map[string]*models.FunctionDefinition)
@@ -2766,7 +2766,7 @@ func loadResultsFromJsonContent(results *models.AnalysisResults,outputJson strin
 
 // Global map to hold a mutex for each taskDir being processed for cloning
 var (
-	taskDirCloningLocks     = make(map[string]*sync.Mutex)
+	taskDirCloningLocks   = make(map[string]*sync.Mutex)
 	taskDirCloningLocksMu sync.Mutex // Mutex to protect access to the taskDirCloningLocks map
 )
 
@@ -2829,7 +2829,7 @@ func runCommandAndStreamOutput(cmd *exec.Cmd, commandDesc string) error {
 
 func cloneOssFuzzAndMainRepoOnce(taskDir, projectName, sanitizerDir string) error {
 
-    // Acquire lock for this specific taskDir to synchronize cloning operations
+	// Acquire lock for this specific taskDir to synchronize cloning operations
 	cloningLock := getCloningLockForTaskDir(taskDir)
 	cloningLock.Lock()
 	fmt.Printf("[Go INFO] Acquired cloning lock for taskDir: %s\n", taskDir)
@@ -2838,23 +2838,23 @@ func cloneOssFuzzAndMainRepoOnce(taskDir, projectName, sanitizerDir string) erro
 		fmt.Printf("[Go INFO] Released cloning lock for taskDir: %s\n", taskDir)
 	}()
 
-    if _, err := os.Stat(sanitizerDir); os.IsNotExist(err) {
-        fmt.Printf("[Go INFO] Sanitizer directory %s not found. Creating... (taskDir: %s)\n", sanitizerDir, taskDir)
-        if errMkdir := os.MkdirAll(sanitizerDir, 0755); errMkdir != nil {
-            // Release lock before returning error if MkdirAll fails, as it's not a shared resource issue
-            // cloningLock.Unlock() // Consider if this specific error should bypass the main defer
-            // fmt.Printf("[Go INFO] Released cloning lock for taskDir: %s due to sanitizerDir creation error\n", taskDir)
-            return fmt.Errorf("failed to create sanitizer directory %s for taskDir %s: %v", sanitizerDir, taskDir, errMkdir)
-        }
-        fmt.Printf("[Go INFO] Successfully created sanitizer directory %s (taskDir: %s)\n", sanitizerDir, taskDir)
-    } else if err != nil {
-        // Release lock before returning error if Stat fails for sanitizerDir
-        // cloningLock.Unlock()
-        // fmt.Printf("[Go INFO] Released cloning lock for taskDir: %s due to sanitizerDir stat error\n", taskDir)
-        return fmt.Errorf("failed to stat sanitizer directory %s for taskDir %s: %v", sanitizerDir, taskDir, err)
-    } else {
-        fmt.Printf("[Go INFO] Sanitizer directory %s already exists. (taskDir: %s)\n", sanitizerDir, taskDir)
-    }
+	if _, err := os.Stat(sanitizerDir); os.IsNotExist(err) {
+		fmt.Printf("[Go INFO] Sanitizer directory %s not found. Creating... (taskDir: %s)\n", sanitizerDir, taskDir)
+		if errMkdir := os.MkdirAll(sanitizerDir, 0755); errMkdir != nil {
+			// Release lock before returning error if MkdirAll fails, as it's not a shared resource issue
+			// cloningLock.Unlock() // Consider if this specific error should bypass the main defer
+			// fmt.Printf("[Go INFO] Released cloning lock for taskDir: %s due to sanitizerDir creation error\n", taskDir)
+			return fmt.Errorf("failed to create sanitizer directory %s for taskDir %s: %v", sanitizerDir, taskDir, errMkdir)
+		}
+		fmt.Printf("[Go INFO] Successfully created sanitizer directory %s (taskDir: %s)\n", sanitizerDir, taskDir)
+	} else if err != nil {
+		// Release lock before returning error if Stat fails for sanitizerDir
+		// cloningLock.Unlock()
+		// fmt.Printf("[Go INFO] Released cloning lock for taskDir: %s due to sanitizerDir stat error\n", taskDir)
+		return fmt.Errorf("failed to stat sanitizer directory %s for taskDir %s: %v", sanitizerDir, taskDir, err)
+	} else {
+		fmt.Printf("[Go INFO] Sanitizer directory %s already exists. (taskDir: %s)\n", sanitizerDir, taskDir)
+	}
 
 	// 1. Define paths
 	ossFuzzDir := filepath.Join(taskDir, "oss-fuzz")
@@ -2872,7 +2872,7 @@ func cloneOssFuzzAndMainRepoOnce(taskDir, projectName, sanitizerDir string) erro
 		return fmt.Errorf("failed to stat OSS-Fuzz directory %s for taskDir %s: %v", ossFuzzDir, taskDir, err)
 	} else {
 		fmt.Printf("[Go INFO] OSS-Fuzz directory %s already exists. Skipping clone (taskDir: %s).\n", ossFuzzDir, taskDir)
-        return nil
+		return nil
 	}
 
 	// 3. Read project.yaml to get main_repo URL
@@ -2883,7 +2883,7 @@ func cloneOssFuzzAndMainRepoOnce(taskDir, projectName, sanitizerDir string) erro
 	maxYamlAttempts := 3
 	yamlAttemptDelay := 5 * time.Second
 
-    for attempt := 0; attempt < maxYamlAttempts; attempt++ {
+	for attempt := 0; attempt < maxYamlAttempts; attempt++ {
 		if _, err := os.Stat(projectYamlPath); err == nil {
 			yamlFile, errFile := os.ReadFile(projectYamlPath)
 			if errFile != nil {
@@ -2900,7 +2900,7 @@ func cloneOssFuzzAndMainRepoOnce(taskDir, projectName, sanitizerDir string) erro
 				return fmt.Errorf("main_repo URL is empty in %s on attempt %d (taskDir: %s)", projectYamlPath, attempt+1, taskDir)
 			}
 			fmt.Printf("[Go INFO] Successfully loaded and parsed %s on attempt %d. Main repo URL: %s (taskDir: %s)\n", projectYamlPath, attempt+1, mainRepoURL, taskDir)
-			break 
+			break
 		} else if os.IsNotExist(err) {
 			fmt.Printf("[Go INFO] Attempt %d/%d: %s not found. Waiting %s (taskDir: %s)...\n", attempt+1, maxYamlAttempts, projectYamlPath, yamlAttemptDelay, taskDir)
 			if attempt < maxYamlAttempts-1 {
@@ -2908,15 +2908,15 @@ func cloneOssFuzzAndMainRepoOnce(taskDir, projectName, sanitizerDir string) erro
 			} else {
 				return fmt.Errorf("failed to find %s after %d attempts (taskDir: %s): %v", projectYamlPath, maxYamlAttempts, taskDir, err)
 			}
-		} else { 
+		} else {
 			return fmt.Errorf("failed to stat %s on attempt %d (taskDir: %s): %v", projectYamlPath, attempt+1, taskDir, err)
 		}
 	}
-    if mainRepoURL == "" {
-        return fmt.Errorf("critical: could not determine main_repo URL from %s after all attempts (taskDir: %s)", projectYamlPath, taskDir)
-    }
+	if mainRepoURL == "" {
+		return fmt.Errorf("critical: could not determine main_repo URL from %s after all attempts (taskDir: %s)", projectYamlPath, taskDir)
+	}
 
-    	// 4. Clone Main Repo if it doesn't exist
+	// 4. Clone Main Repo if it doesn't exist
 	// This block is also protected by cloningLock
 	if _, err := os.Stat(mainRepoDir); os.IsNotExist(err) {
 		fmt.Printf("[Go INFO] Main project repository directory %s not found. Cloning from %s (taskDir: %s)...\n", mainRepoDir, mainRepoURL, taskDir)
@@ -2928,642 +2928,640 @@ func cloneOssFuzzAndMainRepoOnce(taskDir, projectName, sanitizerDir string) erro
 		return fmt.Errorf("failed to stat main project repository directory %s for taskDir %s: %v", mainRepoDir, taskDir, err)
 	} else {
 		fmt.Printf("[Go INFO] Main project repository directory %s already exists. Skipping clone (taskDir: %s).\n", mainRepoDir, taskDir)
-        return nil
+		return nil
 	}
 
 	// Cloning and setup part is done, lock will be released by defer.
 	fmt.Printf("[Go INFO] Repository setup complete for taskDir: %s. Proceeding to call Python script.\n", taskDir)
-    return nil
+	return nil
 }
 
 // robustCopyDir copies a directory recursively with fault tolerance,
 // continuing even if individual file operations fail
 func robustCopyDir(src, dst string) error {
-    var copyErrors []string
-    
-    // Get properties of source directory
-    srcInfo, err := os.Lstat(src)
-    if err != nil {
-        log.Printf("Warning: error getting stats for source directory %s: %v", src, err)
-        return fmt.Errorf("error getting stats for source directory: %w", err)
-    }
+	var copyErrors []string
 
-    // Check if source is a symlink
-    if srcInfo.Mode()&os.ModeSymlink != 0 {
-        // It's a symlink, read the link target
-        linkTarget, err := os.Readlink(src)
-        if err != nil {
-            log.Printf("Warning: error reading symlink %s: %v", src, err)
-            return fmt.Errorf("error reading symlink %s: %w", src, err)
-        }
-        
-        // Create a symlink at the destination with the same target
-        if err := os.Symlink(linkTarget, dst); err != nil {
-            log.Printf("Warning: error creating symlink %s -> %s: %v", dst, linkTarget, err)
-            return fmt.Errorf("error creating symlink: %w", err)
-        }
-        return nil
-    }
+	// Get properties of source directory
+	srcInfo, err := os.Lstat(src)
+	if err != nil {
+		log.Printf("Warning: error getting stats for source directory %s: %v", src, err)
+		return fmt.Errorf("error getting stats for source directory: %w", err)
+	}
 
-    // Create the destination directory with the same permissions
-    if err = os.MkdirAll(dst, srcInfo.Mode()); err != nil {
-        log.Printf("Warning: error creating destination directory %s: %v", dst, err)
-        return fmt.Errorf("error creating destination directory: %w", err)
-    }
+	// Check if source is a symlink
+	if srcInfo.Mode()&os.ModeSymlink != 0 {
+		// It's a symlink, read the link target
+		linkTarget, err := os.Readlink(src)
+		if err != nil {
+			log.Printf("Warning: error reading symlink %s: %v", src, err)
+			return fmt.Errorf("error reading symlink %s: %w", src, err)
+		}
 
-    // Read the source directory
-    entries, err := os.ReadDir(src)
-    if err != nil {
-        log.Printf("Warning: error reading source directory %s: %v", src, err)
-        return fmt.Errorf("error reading source directory: %w", err)
-    }
+		// Create a symlink at the destination with the same target
+		if err := os.Symlink(linkTarget, dst); err != nil {
+			log.Printf("Warning: error creating symlink %s -> %s: %v", dst, linkTarget, err)
+			return fmt.Errorf("error creating symlink: %w", err)
+		}
+		return nil
+	}
 
-    // Copy each entry
-    for _, entry := range entries {
-        srcPath := filepath.Join(src, entry.Name())
-        dstPath := filepath.Join(dst, entry.Name())
+	// Create the destination directory with the same permissions
+	if err = os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		log.Printf("Warning: error creating destination directory %s: %v", dst, err)
+		return fmt.Errorf("error creating destination directory: %w", err)
+	}
 
-        // Use Lstat instead of Stat to detect symlinks
-        entryInfo, err := os.Lstat(srcPath)
-        if err != nil {
-            log.Printf("Warning: skipping %s due to error: %v", srcPath, err)
-            copyErrors = append(copyErrors, fmt.Sprintf("error getting stats for %s: %v", srcPath, err))
-            continue // Skip this file but continue with others
-        }
+	// Read the source directory
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		log.Printf("Warning: error reading source directory %s: %v", src, err)
+		return fmt.Errorf("error reading source directory: %w", err)
+	}
 
-        // Handle different file types
-        if entryInfo.Mode()&os.ModeSymlink != 0 {
-            // It's a symlink, read the link target
-            linkTarget, err := os.Readlink(srcPath)
-            if err != nil {
-                log.Printf("Warning: skipping symlink %s due to error: %v", srcPath, err)
-                copyErrors = append(copyErrors, fmt.Sprintf("error reading symlink %s: %v", srcPath, err))
-                continue // Skip this symlink but continue with others
-            }
-            
-            // Create a symlink at the destination with the same target
-            if err := os.Symlink(linkTarget, dstPath); err != nil {
-                log.Printf("Warning: failed to create symlink %s -> %s: %v", dstPath, linkTarget, err)
-                copyErrors = append(copyErrors, fmt.Sprintf("error creating symlink %s: %v", dstPath, err))
-                // Continue despite the error
-            }
-        } else if entryInfo.IsDir() {
-            // Recursively copy the subdirectory
-            if err = robustCopyDir(srcPath, dstPath); err != nil {
-                log.Printf("Warning: error copying directory %s: %v", srcPath, err)
-                copyErrors = append(copyErrors, fmt.Sprintf("error copying directory %s: %v", srcPath, err))
-                // Continue despite the error
-            }
-        } else {
-            // Copy the regular file
-            if err = copyFile(srcPath, dstPath); err != nil {
-                log.Printf("Warning: error copying file %s: %v", srcPath, err)
-                copyErrors = append(copyErrors, fmt.Sprintf("error copying file %s: %v", srcPath, err))
-                // Continue despite the error
-            }
-        }
-    }
+	// Copy each entry
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
 
-    // If we had any errors, return a summary but only after completing as much as possible
-    if len(copyErrors) > 0 {
-        return fmt.Errorf("completed with %d errors: %s", len(copyErrors), strings.Join(copyErrors[:min(5, len(copyErrors))], "; "))
-    }
+		// Use Lstat instead of Stat to detect symlinks
+		entryInfo, err := os.Lstat(srcPath)
+		if err != nil {
+			log.Printf("Warning: skipping %s due to error: %v", srcPath, err)
+			copyErrors = append(copyErrors, fmt.Sprintf("error getting stats for %s: %v", srcPath, err))
+			continue // Skip this file but continue with others
+		}
 
-    return nil
+		// Handle different file types
+		if entryInfo.Mode()&os.ModeSymlink != 0 {
+			// It's a symlink, read the link target
+			linkTarget, err := os.Readlink(srcPath)
+			if err != nil {
+				log.Printf("Warning: skipping symlink %s due to error: %v", srcPath, err)
+				copyErrors = append(copyErrors, fmt.Sprintf("error reading symlink %s: %v", srcPath, err))
+				continue // Skip this symlink but continue with others
+			}
+
+			// Create a symlink at the destination with the same target
+			if err := os.Symlink(linkTarget, dstPath); err != nil {
+				log.Printf("Warning: failed to create symlink %s -> %s: %v", dstPath, linkTarget, err)
+				copyErrors = append(copyErrors, fmt.Sprintf("error creating symlink %s: %v", dstPath, err))
+				// Continue despite the error
+			}
+		} else if entryInfo.IsDir() {
+			// Recursively copy the subdirectory
+			if err = robustCopyDir(srcPath, dstPath); err != nil {
+				log.Printf("Warning: error copying directory %s: %v", srcPath, err)
+				copyErrors = append(copyErrors, fmt.Sprintf("error copying directory %s: %v", srcPath, err))
+				// Continue despite the error
+			}
+		} else {
+			// Copy the regular file
+			if err = copyFile(srcPath, dstPath); err != nil {
+				log.Printf("Warning: error copying file %s: %v", srcPath, err)
+				copyErrors = append(copyErrors, fmt.Sprintf("error copying file %s: %v", srcPath, err))
+				// Continue despite the error
+			}
+		}
+	}
+
+	// If we had any errors, return a summary but only after completing as much as possible
+	if len(copyErrors) > 0 {
+		return fmt.Errorf("completed with %d errors: %s", len(copyErrors), strings.Join(copyErrors[:min(5, len(copyErrors))], "; "))
+	}
+
+	return nil
 }
 func EngineMainAnalysis(taskDetail models.TaskDetail) (models.AnalysisResults, error) {
 
 	taskID := taskDetail.TaskID.String()
 	taskDir := path.Join(WORK_DIR, taskID)
-	return EngineMainAnalysisCore(taskDetail,taskDir)
+	return EngineMainAnalysisCore(taskDetail, taskDir)
 }
 
 func EngineMainAnalysisCore(taskDetail models.TaskDetail, taskDir string) (models.AnalysisResults, error) {
-	
-	outputJson :=  path.Join(taskDir, fmt.Sprintf("%s.json", taskDetail.Focus))
+
+	outputJson := path.Join(taskDir, fmt.Sprintf("%s.json", taskDetail.Focus))
 
 	results := models.AnalysisResults{
-		Functions: make(map[string]*models.FunctionDefinition),
-		CallGraph: &models.CallGraph{Calls: []models.MethodCall{}},
+		Functions:          make(map[string]*models.FunctionDefinition),
+		CallGraph:          &models.CallGraph{Calls: []models.MethodCall{}},
 		ReachableFunctions: make(map[string][]string),
-		Paths:     make(map[string][][]string),
+		Paths:              make(map[string][][]string),
 	}
 
-
-    // Check if the output JSON file already exists
-    if fileExists(outputJson) {
-        // File exists, try to load it
-		err:=loadResultsFromJsonContent(&results,outputJson)
-		if err!=nil{
-			return results,nil
+	// Check if the output JSON file already exists
+	if fileExists(outputJson) {
+		// File exists, try to load it
+		err := loadResultsFromJsonContent(&results, outputJson)
+		if err != nil {
+			return results, nil
 		}
-        // If we reach here, loading failed, so we'll continue with a fresh analysis
-        log.Printf("Proceeding with fresh analysis due to loading errors")
-    } else {
-        log.Printf("No existing analysis results found at %s, performing fresh analysis", outputJson)
-    }
+		// If we reach here, loading failed, so we'll continue with a fresh analysis
+		log.Printf("Proceeding with fresh analysis due to loading errors")
+	} else {
+		log.Printf("No existing analysis results found at %s, performing fresh analysis", outputJson)
+	}
 
 	var language string
 
-		startTime := time.Now()
+	startTime := time.Now()
 
-		dockerfilePath := path.Join(taskDir, "fuzz-tooling/projects",taskDetail.ProjectName)
-		dockerfileFullPath := path.Join(dockerfilePath, "Dockerfile")
-		fuzzerDir := path.Join(taskDir, "fuzz-tooling/build/out", taskDetail.ProjectName)
-		projectDir := path.Join(taskDir, taskDetail.Focus)
+	dockerfilePath := path.Join(taskDir, "fuzz-tooling/projects", taskDetail.ProjectName)
+	dockerfileFullPath := path.Join(dockerfilePath, "Dockerfile")
+	fuzzerDir := path.Join(taskDir, "fuzz-tooling/build/out", taskDetail.ProjectName)
+	projectDir := path.Join(taskDir, taskDetail.Focus)
 
-		var sanitizerDirs []string
+	var sanitizerDirs []string
 
-		var cfg *ProjectConfig        
-        if !dirExists(taskDir) {
-			if err := os.MkdirAll(taskDir, 0755); err != nil {
-                return results, fmt.Errorf("failed to create task directory: %v", err)
-            }
+	var cfg *ProjectConfig
+	if !dirExists(taskDir) {
+		if err := os.MkdirAll(taskDir, 0755); err != nil {
+			return results, fmt.Errorf("failed to create task directory: %v", err)
+		}
 
-            log.Printf("Created task directory: %s", taskDir)
+		log.Printf("Created task directory: %s", taskDir)
 
-			// download all code 
-			for _, source := range taskDetail.Source {
-				if len(source.URL) > 0 {
-					if err := downloadAndVerifySource(taskDir, source); err != nil {
-						return results, fmt.Errorf("failed to download source %s: %v", source.Type, err)
-					}
+		// download all code
+		for _, source := range taskDetail.Source {
+			if len(source.URL) > 0 {
+				if err := downloadAndVerifySource(taskDir, source); err != nil {
+					return results, fmt.Errorf("failed to download source %s: %v", source.Type, err)
 				}
 			}
+		}
 
-			is_delta := (taskDetail.Type == "delta")
-            // 1. Extract archives first
-            if err := extractSources(taskDir,is_delta); err != nil {
-                return results, fmt.Errorf("failed to extract sources: %v", err)
-            }
-			projectYAMLPath := filepath.Join(dockerfilePath, "project.yaml")
-			var err error
-			cfg, err = loadProjectConfig(projectYAMLPath)
-			if err != nil {
-				log.Printf("Warning: Could not parse project.yaml (%v). Defaulting to address sanitizer.", err)
-				cfg = &ProjectConfig{Sanitizers: []string{"address"}}
-			}
-			if cfg.Language == "java" || cfg.Language == "jvm" {
-				language = "java"
+		is_delta := (taskDetail.Type == "delta")
+		// 1. Extract archives first
+		if err := extractSources(taskDir, is_delta); err != nil {
+			return results, fmt.Errorf("failed to extract sources: %v", err)
+		}
+		projectYAMLPath := filepath.Join(dockerfilePath, "project.yaml")
+		var err error
+		cfg, err = loadProjectConfig(projectYAMLPath)
+		if err != nil {
+			log.Printf("Warning: Could not parse project.yaml (%v). Defaulting to address sanitizer.", err)
+			cfg = &ProjectConfig{Sanitizers: []string{"address"}}
+		}
+		if cfg.Language == "java" || cfg.Language == "jvm" {
+			language = "java"
+		} else {
+			language = "c"
+		}
+
+		// if len(cfg.Sanitizers) == 0 {
+		// 	log.Printf("No sanitizers listed in project.yaml; defaulting to address sanitizer.")
+		// 	cfg.Sanitizers = []string{"address"}
+		// }
+		//only do address
+		cfg.Sanitizers = []string{"address"}
+		for _, sanitizer := range cfg.Sanitizers {
+			sanitizerDir := fuzzerDir + "-" + sanitizer
+			// Keep track of each sanitizer's output path
+			sanitizerDirs = append(sanitizerDirs, sanitizerDir)
+		}
+
+		if is_delta {
+			// apply diff if appliable
+			diffPath := filepath.Join(taskDir, "diff", "ref.diff")
+
+			applyCmd := exec.Command("git", "apply", diffPath)
+			applyCmd.Dir = projectDir // Use projectDir instead of taskDir
+
+			var applyOutput bytes.Buffer
+			applyCmd.Stdout = &applyOutput
+			applyCmd.Stderr = &applyOutput
+
+			log.Printf("Applying diff in directory: %s", applyCmd.Dir)
+
+			if err := applyCmd.Run(); err != nil {
+				log.Printf("Git apply failed, trying standard patch command instead...")
+
+				// Reset the output buffer
+				applyOutput.Reset()
+
+				// Try using the standard patch command instead
+				patchCmd := exec.Command("patch", "-p1", "-i", diffPath)
+				patchCmd.Dir = projectDir
+				patchCmd.Stdout = &applyOutput
+				patchCmd.Stderr = &applyOutput
+
+				if patchErr := patchCmd.Run(); patchErr != nil {
+					// Try to list files in the directory to debug
+					log.Printf("Directory contents of %s:", applyCmd.Dir)
+					files, _ := os.ReadDir(applyCmd.Dir)
+					for _, file := range files {
+						log.Printf("  %s", file.Name())
+					}
+
+					log.Printf("Git apply and patch command both failed.\nGit apply output:\n%s\nPatch output:\n%s",
+						err.Error(), applyOutput.String())
+					return results, fmt.Errorf("failed to apply diff with both git apply and patch: %v\nOutput: %s",
+						patchErr, applyOutput.String())
+				}
+
+				log.Printf("Successfully applied diff using standard patch command to %s", patchCmd.Dir)
 			} else {
-				language = "c"
+				log.Printf("Successfully applied diff using git apply to %s", applyCmd.Dir)
 			}
+		}
 
-			// if len(cfg.Sanitizers) == 0 {
-			// 	log.Printf("No sanitizers listed in project.yaml; defaulting to address sanitizer.")
-			// 	cfg.Sanitizers = []string{"address"}
-			// }
-			//only do address
-			cfg.Sanitizers = []string{"address"}
-			for _, sanitizer := range cfg.Sanitizers {
-				sanitizerDir := fuzzerDir + "-" + sanitizer
-				// Keep track of each sanitizer's output path
-				sanitizerDirs = append(sanitizerDirs, sanitizerDir)
+		if false {
+			//TODO: WHENe PULL IMAGE IS FASTER
+			buildOutput, err := PullAFCDockerImage(taskDir, taskDetail.ProjectName)
+			if err != nil {
+				log.Printf("Docker image pull build failed: %s", buildOutput)
+				log.Printf("Trying Docker build instead: %s", dockerfileFullPath)
+				buildOutput, err := BuildDockerImage(dockerfilePath, dockerfileFullPath, taskDetail.ProjectName)
+				if err != nil {
+					log.Printf("Docker build failed: %s", buildOutput)
+					return results, fmt.Errorf("failed to build Docker image: %w\nOutput: %s", err, buildOutput)
+				} else {
+					log.Printf("Docker build successful!")
+				}
+
+			} else {
+				log.Printf("Docker image pull successful: %s", buildOutput)
 			}
+		} else {
 
-            if is_delta {
-				// apply diff if appliable
-                diffPath := filepath.Join(taskDir, "diff", "ref.diff")
-                
-                applyCmd := exec.Command("git", "apply", diffPath)
-                applyCmd.Dir = projectDir  // Use projectDir instead of taskDir
-                
-                var applyOutput bytes.Buffer
-                applyCmd.Stdout = &applyOutput
-                applyCmd.Stderr = &applyOutput
-                
-                log.Printf("Applying diff in directory: %s", applyCmd.Dir)
-                
-                if err := applyCmd.Run(); err != nil {
-                    log.Printf("Git apply failed, trying standard patch command instead...")
-                    
-                    // Reset the output buffer
-                    applyOutput.Reset()
-                    
-                    // Try using the standard patch command instead
-                    patchCmd := exec.Command("patch", "-p1", "-i", diffPath)
-                    patchCmd.Dir = projectDir
-                    patchCmd.Stdout = &applyOutput
-                    patchCmd.Stderr = &applyOutput
-                    
-                    if patchErr := patchCmd.Run(); patchErr != nil {
-                        // Try to list files in the directory to debug
-                        log.Printf("Directory contents of %s:", applyCmd.Dir)
-                        files, _ := os.ReadDir(applyCmd.Dir)
-                        for _, file := range files {
-                            log.Printf("  %s", file.Name())
-                        }
-                        
-                        log.Printf("Git apply and patch command both failed.\nGit apply output:\n%s\nPatch output:\n%s", 
-                                err.Error(), applyOutput.String())
-                        return results, fmt.Errorf("failed to apply diff with both git apply and patch: %v\nOutput: %s", 
-                                        patchErr, applyOutput.String())
-                    }
-                    
-                    log.Printf("Successfully applied diff using standard patch command to %s", patchCmd.Dir)
-                } else {
-                    log.Printf("Successfully applied diff using git apply to %s", applyCmd.Dir)
-                }
-            }
-			
-			if false {
-				//TODO: WHENe PULL IMAGE IS FASTER
-				buildOutput, err := PullAFCDockerImage(taskDir, taskDetail.ProjectName) 
-					if err != nil {
-						log.Printf("Docker image pull build failed: %s", buildOutput)
-						log.Printf("Trying Docker build instead: %s", dockerfileFullPath)
-						buildOutput, err := BuildDockerImage(dockerfilePath, dockerfileFullPath, taskDetail.ProjectName)
-						if err != nil {
-							log.Printf("Docker build failed: %s", buildOutput)
-							return results, fmt.Errorf("failed to build Docker image: %w\nOutput: %s", err, buildOutput)
-						} else {
-							log.Printf("Docker build successful!")	
-						}
-
+			if !taskDetail.HarnessesIncluded || !fileExists(dockerfileFullPath) {
+				if !fileExists(dockerfileFullPath) {
+					cloneOssFuzzAndMainRepoOnce(taskDir, taskDetail.ProjectName, fuzzerDir)
+					dockerfilePath_x := path.Join(taskDir, "oss-fuzz/projects", taskDetail.ProjectName)
+					if dirExists(dockerfilePath_x) {
+						dockerfilePath = dockerfilePath_x
+						dockerfileFullPath = path.Join(dockerfilePath_x, "Dockerfile")
 					} else {
-						log.Printf("Docker image pull successful: %s", buildOutput)	
-					}
-			} else {
+						log.Printf("Failed to clone oss-fuzz and main repo for unharnessed task %s %s", taskDetail.ProjectName, taskDetail.TaskID)
 
+						if taskDetail.ProjectName == "integration-test" {
+							srcPath := "/app/strategyx/jeff/integration-test"
+							log.Printf("[INTEGRATION_TEST] dockerfilePath %s missing – copying from %s", dockerfilePath, srcPath)
 
-				if !taskDetail.HarnessesIncluded || !fileExists(dockerfileFullPath){
-					if !fileExists(dockerfileFullPath) {
-						 cloneOssFuzzAndMainRepoOnce(taskDir,taskDetail.ProjectName, fuzzerDir)
-						 dockerfilePath_x := path.Join(taskDir, "oss-fuzz/projects",taskDetail.ProjectName)
-						 if dirExists(dockerfilePath_x) {
-							 dockerfilePath = dockerfilePath_x
-							 dockerfileFullPath = path.Join(dockerfilePath_x, "Dockerfile")
-						 } else {
-							 log.Printf("Failed to clone oss-fuzz and main repo for unharnessed task %s %s", taskDetail.ProjectName, taskDetail.TaskID)
-							 
-							 if  taskDetail.ProjectName == "integration-test" {
-								 srcPath := "/app/strategyx/jeff/integration-test"
-								 log.Printf("[INTEGRATION_TEST] dockerfilePath %s missing – copying from %s", dockerfilePath, srcPath)
-	 
-								 if err := robustCopyDir(srcPath, dockerfilePath); err != nil {
-									 log.Printf("[INTEGRATION_TEST] failed to copy integration-test files: %v", err)
-								 } else {
-									 log.Printf("[INTEGRATION_TEST] integration-test files copied to %s", dockerfilePath)
-								 }
-	 
-								 if err := robustCopyDir(srcPath, dockerfilePath_x); err != nil {
-									 log.Printf("[INTEGRATION_TEST] failed to copy integration-test files: %v", err)
-								 } else {
-									 log.Printf("[INTEGRATION_TEST] integration-test files copied to %s", dockerfilePath_x)
-								 }
-							 }
-						 }
-					 } else {
-						 log.Printf("[HarnessesIncluded: %t] dockerfileFullPath NOT exists %s", taskDetail.HarnessesIncluded, dockerfileFullPath)
-					 }
-				 } else {
-					 log.Printf("[HarnessesIncluded: %t] dockerfileFullPath %s", taskDetail.HarnessesIncluded, dockerfileFullPath)
-				 }
-
-				buildOutput, err := BuildDockerImage(dockerfilePath, dockerfileFullPath, taskDetail.ProjectName)
-				if err != nil {
-					log.Printf("Docker build failed. buildOutput: %s", buildOutput)
-					log.Printf("Try building with PullAFCDockerImage")
-					buildOutputAFC, err := PullAFCDockerImage(taskDir, taskDetail.ProjectName) 
-					if err != nil {
-						return results, fmt.Errorf("Failed to build Docker image: %w\nbuildOutputAFC: %s", err, buildOutputAFC)
-					}
-				}
-			}
-
-			if true {
-
-				var wg sync.WaitGroup
-				// For each sanitizer in the YAML, run build_fuzzers
-				for _, sanitizer := range cfg.Sanitizers {
-					sanitizerDir := fuzzerDir + "-" + sanitizer
-						// Capture loop variables
-						san := sanitizer
-						wg.Add(1)
-						go func() {
-							defer wg.Done()
-							log.Printf("Building fuzzers with --sanitizer=%s", san)
-							if err := buildFuzzersDocker(taskDir, projectDir, sanitizerDir, sanitizer, cfg.Language, taskDetail.ProjectName); err != nil {
-								log.Printf("Error building fuzzers for sanitizer %s: %v", san, err)
-								// We're ignoring errors here, which is not ideal
+							if err := robustCopyDir(srcPath, dockerfilePath); err != nil {
+								log.Printf("[INTEGRATION_TEST] failed to copy integration-test files: %v", err)
+							} else {
+								log.Printf("[INTEGRATION_TEST] integration-test files copied to %s", dockerfilePath)
 							}
-						}()  
-				}
-				// Wait for all builds to complete
-				wg.Wait()
-			}
-		} else {
 
-            projectYAMLPath := filepath.Join(dockerfilePath, "project.yaml")
-			var err error
-            cfg, err = loadProjectConfig(projectYAMLPath)
-            if err != nil {
-                log.Printf("Warning: Could not parse project.yaml (%v). Defaulting to address sanitizer.", err)
-                cfg = &ProjectConfig{Sanitizers: []string{"address"}}
-            }
-			if cfg.Language == "java" || cfg.Language == "jvm" {
-				language = "java"
-			} else {
-				language = "c"
-			}
-			// if len(cfg.Sanitizers) == 0 {
-			// 	log.Printf("No sanitizers listed in project.yaml; defaulting to address sanitizer.")
-			// 	cfg.Sanitizers = []string{"address"}
-			// }
-			//only do address
-			cfg.Sanitizers = []string{"address"}
-			var fuzzers []string
-            for _, sanitizer := range cfg.Sanitizers {
-                sanitizerDir := fuzzerDir + "-" + sanitizer
-                // Keep track of each sanitizer's output path
-                sanitizerDirs = append(sanitizerDirs, sanitizerDir)
-
-				fuzzers, _ = findFuzzers(sanitizerDir)
-            }
-
-			//if compile_commands.json does not exist, still run buildFuzzersDocker
-			compileCommandsPath := filepath.Join(fuzzerDir+"-address", "compile_commands.json")
-			if len(fuzzers) == 0 || (language == "c" && !fileExists(compileCommandsPath)) {
-
-				buildOutput, err := BuildDockerImage(dockerfilePath, dockerfileFullPath, taskDetail.ProjectName)
-				if err != nil {
-					log.Printf("Docker build failed. buildOutput: %s", buildOutput)
-					log.Printf("Try building with PullAFCDockerImage")
-					buildOutputAFC, err := PullAFCDockerImage(taskDir, taskDetail.ProjectName) 
-					if err != nil {
-						return results, fmt.Errorf("Failed to build Docker image: %w\nbuildOutputAFC: %s", err, buildOutputAFC)
-					}
-				}
-
-				var wg sync.WaitGroup
-				// For each sanitizer in the YAML, run build_fuzzers
-				for _, sanitizer := range cfg.Sanitizers {
-					sanitizerDir := fuzzerDir + "-" + sanitizer
-						// Capture loop variables
-						san := sanitizer
-						wg.Add(1)
-						go func() {
-							defer wg.Done()
-							log.Printf("Building fuzzers with --sanitizer=%s", san)
-							if err := buildFuzzersDocker(taskDir, projectDir, sanitizerDir, sanitizer, cfg.Language, taskDetail.ProjectName); err != nil {
-								log.Printf("Error building fuzzers for sanitizer %s: %v", san, err)
-								// We're ignoring errors here, which is not ideal
+							if err := robustCopyDir(srcPath, dockerfilePath_x); err != nil {
+								log.Printf("[INTEGRATION_TEST] failed to copy integration-test files: %v", err)
+							} else {
+								log.Printf("[INTEGRATION_TEST] integration-test files copied to %s", dockerfilePath_x)
 							}
-						}()  
+						}
+					}
+				} else {
+					log.Printf("[HarnessesIncluded: %t] dockerfileFullPath NOT exists %s", taskDetail.HarnessesIncluded, dockerfileFullPath)
 				}
-				// Wait for all builds to complete
-				wg.Wait()
+			} else {
+				log.Printf("[HarnessesIncluded: %t] dockerfileFullPath %s", taskDetail.HarnessesIncluded, dockerfileFullPath)
 			}
-        }
-		var codeqlWg sync.WaitGroup
 
-		var allFuzzers []string
-
-		for _, sdir := range sanitizerDirs {
-			fuzzers, err := findFuzzers(sdir)
+			buildOutput, err := BuildDockerImage(dockerfilePath, dockerfileFullPath, taskDetail.ProjectName)
 			if err != nil {
-				log.Printf("Warning: failed to find fuzzers in %s: %v", sdir, err)
-				continue // Skip this directory but continue with others
-			}
-	
-			// Mark these fuzzers with the sanitizer directory so we know where they live
-			for _, fz := range fuzzers {
-				// We'll store the absolute path so we can directly call run_fuzzer
-				fuzzerPath := filepath.Join(sdir, fz)
-				allFuzzers = append(allFuzzers, fuzzerPath)
-			}
-		}
-	
-		if len(allFuzzers) == 0 {
-			log.Printf("No fuzzers found after building all sanitizers")
-			return results, nil
-		}
-	
-		// log.Printf("Found %d fuzzers: %v", len(allFuzzers), allFuzzers)
-
-		if language == "java" {
-			// for Java
-			var javaFilesToAnalyze []string
-			//find all fuzzer source files
-			var javaFuzzerSourceFiles []string
-			{//find all Java source files
-				err := filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
-					if err != nil {
-						return err
-					}
-					
-					// Skip directories
-					if info.IsDir() {
-						return nil
-					}
-					
-					if strings.HasSuffix(path, "Fuzzer.java") {
-						javaFuzzerSourceFiles = append(javaFuzzerSourceFiles, path)
-					} else if strings.HasSuffix(path, ".java")  && !shouldSkipFile(path) {
-						javaFilesToAnalyze = append(javaFilesToAnalyze, path)
-					}
-					
-					return nil
-				})
-				
+				log.Printf("Docker build failed. buildOutput: %s", buildOutput)
+				log.Printf("Try building with PullAFCDockerImage")
+				buildOutputAFC, err := PullAFCDockerImage(taskDir, taskDetail.ProjectName)
 				if err != nil {
-					fmt.Printf("Error finding files: %v\n", err)
-					return results, err
+					return results, fmt.Errorf("Failed to build Docker image: %w\nbuildOutputAFC: %s", err, buildOutputAFC)
 				}
 			}
-
-			{
-				// Find all Java fuzzer source files under dockerfilePath
-				err := filepath.Walk(dockerfilePath, func(path string, info os.FileInfo, err error) error {
-					if err != nil {
-						fmt.Printf("Error accessing path %s: %v\n", path, err)
-						return nil // Continue walking despite the error
-					}
-					
-					// Skip directories and non-Java files
-					if info.IsDir() || !strings.HasSuffix(strings.ToLower(info.Name()), "fuzzer.java") {
-						return nil
-					}
-					
-					// Check if this fuzzer is already in our list (comparing base names)
-					baseName := filepath.Base(path)
-					isDuplicate := false
-					for _, existingPath := range javaFuzzerSourceFiles {
-						if filepath.Base(existingPath) == baseName {
-							isDuplicate = true
-							fmt.Printf("Skipping duplicate fuzzer: %s (already have %s)\n", 
-									path, existingPath)
-							break
-						}
-					}
-					
-					// Add to list if not a duplicate
-					if !isDuplicate {
-						javaFuzzerSourceFiles = append(javaFuzzerSourceFiles, path)
-						fmt.Printf("Found Java fuzzer source: %s\n", path)
-					}
-					
-					return nil
-				})
-
-				if err != nil {
-					fmt.Printf("Error walking directory %s: %v\n", dockerfilePath, err)
-				}
-			}
-
-			for _, fuzzerSourcePath := range javaFuzzerSourceFiles {
-				javaFilesToAnalyze = append(javaFilesToAnalyze, fuzzerSourcePath)
-			}
-
-			// fmt.Printf("javaFilesToAnalyze: %v\n", javaFilesToAnalyze)
-			fmt.Printf("javaFuzzerSourceFiles: %v\n", javaFuzzerSourceFiles)
-			
-			// for testing only 
-			if os.Getenv("QX_TEST") == "1" {
-				EngineMainAnalysisCodeql(taskDetail,taskDir,projectDir,dockerfilePath,javaFuzzerSourceFiles)		
-				return results, nil
-			}
-
-			// FORK A NEW THREAD TO BUILD CODEQL FULL CODE PATHS
-			// When done, save data to a *_qx.json
-			codeqlWg.Add(1)
-			go func(){
-				defer codeqlWg.Done()
-				EngineMainAnalysisCodeql(taskDetail,taskDir,projectDir,dockerfilePath,javaFuzzerSourceFiles)
-			}()
-
-			// call graph analysis
-			numWorkers := runtime.NumCPU()
-			maxDepth := 4
-			buildJavaCallGraph(&results, javaFilesToAnalyze, numWorkers)
-			// finding reachable paths for all fuzzers up to max depth or timeout
-			if true {
-				// Create a wait group to synchronize goroutines
-				var wg sync.WaitGroup
-
-				// Create a mutex to protect access to results.Paths
-				var pathsMutex sync.Mutex
-
-				// Process each fuzzer source path in parallel
-				for _, fuzzerSourcePath := range javaFuzzerSourceFiles {
-					// Increment the wait group counter
-					wg.Add(1)
-					
-					// Launch a goroutine for each fuzzer source path
-					go func(sourcePath string) {
-						// Ensure the wait group counter is decremented when the goroutine finishes
-						defer wg.Done()
-						
-						entryPoint := sourcePath + "." + "fuzzerTestOneInput"
-						
-						// Find reachable functions from this entry point
-						reachable := findReachableFunctions(&results, entryPoint, maxDepth)
-						fmt.Printf("Found %d reachable functions from entry point %s\n", len(reachable), entryPoint)
-
-						pathsMutex.Lock()
-						/* ───── Java: save the reachable list ───── */
-						if results.ReachableFunctions == nil {
-							results.ReachableFunctions = make(map[string][]string)
-						}
-						results.ReachableFunctions[entryPoint] = reachable
-						pathsMutex.Unlock()
-						/* ──────────────────────────────────────── */
-						if true {
-							//TODO this is too expensive, change to on-demand
-							// Create a local map to collect paths before adding to the shared map
-							localPaths := make(map[string][][]string)
-							
-							// Use a separate WaitGroup for path finding
-							var pathWg sync.WaitGroup
-							// Use a semaphore to limit concurrent path finding operations
-							semaphore := make(chan struct{}, runtime.NumCPU())
-							
-							// Process each reachable function
-							for _, func_ := range reachable {
-								pathWg.Add(1)
-								
-								// Launch a goroutine for each target function, but limit concurrency
-								go func(targetFunc string) {
-									defer pathWg.Done()
-									
-									// Acquire semaphore slot
-									semaphore <- struct{}{}
-									// Release semaphore slot when done
-									defer func() { <-semaphore }()
-									
-									// Find paths from entry point to this function
-									paths := findAllPaths(&results, entryPoint, targetFunc, maxDepth)
-									
-									// If we found paths, add them to the local map with a composite key
-									if len(paths) > 0 {
-										// Create a composite key that includes both entry point and target function
-										compositeKey := fmt.Sprintf("%s-%s", entryPoint, targetFunc)
-										
-										pathsMutex.Lock()
-										localPaths[compositeKey] = paths
-										pathsMutex.Unlock()
-									}
-								}(func_)
-							}
-							
-							// Wait for all path finding operations to complete
-							pathWg.Wait()
-							
-							// Now add all collected paths to the shared results map
-							if len(localPaths) > 0 {
-								pathsMutex.Lock()
-								for compositeKey, paths := range localPaths {
-									results.Paths[compositeKey] = paths
-								}
-								pathsMutex.Unlock()
-							}
-						}
-						
-					}(fuzzerSourcePath)
-				}
-
-				// Wait for all fuzzer source paths to be processed
-				wg.Wait()
-				fmt.Printf("Completed parallel processing of %d fuzzer source paths\n", len(javaFuzzerSourceFiles))
-			} else {
-				// Call our parallel path finding function with a 10-minute timeout
-				findAllPathsParallel(&results, javaFuzzerSourceFiles, maxDepth, 10*time.Minute)
-			}
-
-		} else {
-			// language = "c"
-			// for C
-			fuzzerDir:= fuzzerDir+"-address"
-			projectDir := projectDir+"-address"
-			err := GenerateLLVMBitcodeForAllFuzzers(allFuzzers, projectDir,taskDetail.ProjectName,fuzzerDir,dockerfilePath)
-			if err != nil {
-				//TODO handle bitcode generation failures
-			}
-
-			ProcessAllFuzzersParallel(allFuzzers, projectDir, taskDetail.ProjectName, language, &results)
 		}
-		
-		codeqlWg.Wait()
 
 		if true {
-			fmt.Printf("Saving results to %s\n", outputJson)
 
-		// save to json and keep in memory
-			jsonData, err := json.MarshalIndent(results, "", "  ")
+			var wg sync.WaitGroup
+			// For each sanitizer in the YAML, run build_fuzzers
+			for _, sanitizer := range cfg.Sanitizers {
+				sanitizerDir := fuzzerDir + "-" + sanitizer
+				// Capture loop variables
+				san := sanitizer
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					log.Printf("Building fuzzers with --sanitizer=%s", san)
+					if err := buildFuzzersDocker(taskDir, projectDir, sanitizerDir, sanitizer, cfg.Language, taskDetail.ProjectName); err != nil {
+						log.Printf("Error building fuzzers for sanitizer %s: %v", san, err)
+						// We're ignoring errors here, which is not ideal
+					}
+				}()
+			}
+			// Wait for all builds to complete
+			wg.Wait()
+		}
+	} else {
+
+		projectYAMLPath := filepath.Join(dockerfilePath, "project.yaml")
+		var err error
+		cfg, err = loadProjectConfig(projectYAMLPath)
+		if err != nil {
+			log.Printf("Warning: Could not parse project.yaml (%v). Defaulting to address sanitizer.", err)
+			cfg = &ProjectConfig{Sanitizers: []string{"address"}}
+		}
+		if cfg.Language == "java" || cfg.Language == "jvm" {
+			language = "java"
+		} else {
+			language = "c"
+		}
+		// if len(cfg.Sanitizers) == 0 {
+		// 	log.Printf("No sanitizers listed in project.yaml; defaulting to address sanitizer.")
+		// 	cfg.Sanitizers = []string{"address"}
+		// }
+		//only do address
+		cfg.Sanitizers = []string{"address"}
+		var fuzzers []string
+		for _, sanitizer := range cfg.Sanitizers {
+			sanitizerDir := fuzzerDir + "-" + sanitizer
+			// Keep track of each sanitizer's output path
+			sanitizerDirs = append(sanitizerDirs, sanitizerDir)
+
+			fuzzers, _ = findFuzzers(sanitizerDir)
+		}
+
+		//if compile_commands.json does not exist, still run buildFuzzersDocker
+		compileCommandsPath := filepath.Join(fuzzerDir+"-address", "compile_commands.json")
+		if len(fuzzers) == 0 || (language == "c" && !fileExists(compileCommandsPath)) {
+
+			buildOutput, err := BuildDockerImage(dockerfilePath, dockerfileFullPath, taskDetail.ProjectName)
 			if err != nil {
-				fmt.Printf("Error marshaling JSON: %v\n", err)
-			} else {
-				// Write results to JSON file
-				err = os.WriteFile(outputJson, jsonData, 0644)
+				log.Printf("Docker build failed. buildOutput: %s", buildOutput)
+				log.Printf("Try building with PullAFCDockerImage")
+				buildOutputAFC, err := PullAFCDockerImage(taskDir, taskDetail.ProjectName)
 				if err != nil {
-					fmt.Printf("Error writing JSON file: %v\n", err)
+					return results, fmt.Errorf("Failed to build Docker image: %w\nbuildOutputAFC: %s", err, buildOutputAFC)
 				}
 			}
-			log.Printf("[Baseline] Reachable Functions Analysis completed in %v. Results written to %s\n", 
-				time.Since(startTime), outputJson)
 
-			fmt.Printf("language: %s\n", language)
+			var wg sync.WaitGroup
+			// For each sanitizer in the YAML, run build_fuzzers
+			for _, sanitizer := range cfg.Sanitizers {
+				sanitizerDir := fuzzerDir + "-" + sanitizer
+				// Capture loop variables
+				san := sanitizer
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					log.Printf("Building fuzzers with --sanitizer=%s", san)
+					if err := buildFuzzersDocker(taskDir, projectDir, sanitizerDir, sanitizer, cfg.Language, taskDetail.ProjectName); err != nil {
+						log.Printf("Error building fuzzers for sanitizer %s: %v", san, err)
+						// We're ignoring errors here, which is not ideal
+					}
+				}()
+			}
+			// Wait for all builds to complete
+			wg.Wait()
 		}
+	}
+	var codeqlWg sync.WaitGroup
+
+	var allFuzzers []string
+
+	for _, sdir := range sanitizerDirs {
+		fuzzers, err := findFuzzers(sdir)
+		if err != nil {
+			log.Printf("Warning: failed to find fuzzers in %s: %v", sdir, err)
+			continue // Skip this directory but continue with others
+		}
+
+		// Mark these fuzzers with the sanitizer directory so we know where they live
+		for _, fz := range fuzzers {
+			// We'll store the absolute path so we can directly call run_fuzzer
+			fuzzerPath := filepath.Join(sdir, fz)
+			allFuzzers = append(allFuzzers, fuzzerPath)
+		}
+	}
+
+	if len(allFuzzers) == 0 {
+		log.Printf("No fuzzers found after building all sanitizers")
+		return results, nil
+	}
+
+	// log.Printf("Found %d fuzzers: %v", len(allFuzzers), allFuzzers)
+
+	if language == "java" {
+		// for Java
+		var javaFilesToAnalyze []string
+		//find all fuzzer source files
+		var javaFuzzerSourceFiles []string
+		{ //find all Java source files
+			err := filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					return err
+				}
+
+				// Skip directories
+				if info.IsDir() {
+					return nil
+				}
+
+				if strings.HasSuffix(path, "Fuzzer.java") {
+					javaFuzzerSourceFiles = append(javaFuzzerSourceFiles, path)
+				} else if strings.HasSuffix(path, ".java") && !shouldSkipFile(path) {
+					javaFilesToAnalyze = append(javaFilesToAnalyze, path)
+				}
+
+				return nil
+			})
+
+			if err != nil {
+				fmt.Printf("Error finding files: %v\n", err)
+				return results, err
+			}
+		}
+
+		{
+			// Find all Java fuzzer source files under dockerfilePath
+			err := filepath.Walk(dockerfilePath, func(path string, info os.FileInfo, err error) error {
+				if err != nil {
+					fmt.Printf("Error accessing path %s: %v\n", path, err)
+					return nil // Continue walking despite the error
+				}
+
+				// Skip directories and non-Java files
+				if info.IsDir() || !strings.HasSuffix(strings.ToLower(info.Name()), "fuzzer.java") {
+					return nil
+				}
+
+				// Check if this fuzzer is already in our list (comparing base names)
+				baseName := filepath.Base(path)
+				isDuplicate := false
+				for _, existingPath := range javaFuzzerSourceFiles {
+					if filepath.Base(existingPath) == baseName {
+						isDuplicate = true
+						fmt.Printf("Skipping duplicate fuzzer: %s (already have %s)\n",
+							path, existingPath)
+						break
+					}
+				}
+
+				// Add to list if not a duplicate
+				if !isDuplicate {
+					javaFuzzerSourceFiles = append(javaFuzzerSourceFiles, path)
+					fmt.Printf("Found Java fuzzer source: %s\n", path)
+				}
+
+				return nil
+			})
+
+			if err != nil {
+				fmt.Printf("Error walking directory %s: %v\n", dockerfilePath, err)
+			}
+		}
+
+		for _, fuzzerSourcePath := range javaFuzzerSourceFiles {
+			javaFilesToAnalyze = append(javaFilesToAnalyze, fuzzerSourcePath)
+		}
+
+		// fmt.Printf("javaFilesToAnalyze: %v\n", javaFilesToAnalyze)
+		fmt.Printf("javaFuzzerSourceFiles: %v\n", javaFuzzerSourceFiles)
+
+		// for testing only
+		if os.Getenv("QX_TEST") == "1" {
+			EngineMainAnalysisCodeql(taskDetail, taskDir, projectDir, dockerfilePath, javaFuzzerSourceFiles)
+			return results, nil
+		}
+
+		// FORK A NEW THREAD TO BUILD CODEQL FULL CODE PATHS
+		// When done, save data to a *_qx.json
+		codeqlWg.Add(1)
+		go func() {
+			defer codeqlWg.Done()
+			EngineMainAnalysisCodeql(taskDetail, taskDir, projectDir, dockerfilePath, javaFuzzerSourceFiles)
+		}()
+
+		// call graph analysis
+		numWorkers := runtime.NumCPU()
+		maxDepth := 4
+		buildJavaCallGraph(&results, javaFilesToAnalyze, numWorkers)
+		// finding reachable paths for all fuzzers up to max depth or timeout
+		if true {
+			// Create a wait group to synchronize goroutines
+			var wg sync.WaitGroup
+
+			// Create a mutex to protect access to results.Paths
+			var pathsMutex sync.Mutex
+
+			// Process each fuzzer source path in parallel
+			for _, fuzzerSourcePath := range javaFuzzerSourceFiles {
+				// Increment the wait group counter
+				wg.Add(1)
+
+				// Launch a goroutine for each fuzzer source path
+				go func(sourcePath string) {
+					// Ensure the wait group counter is decremented when the goroutine finishes
+					defer wg.Done()
+
+					entryPoint := sourcePath + "." + "fuzzerTestOneInput"
+
+					// Find reachable functions from this entry point
+					reachable := findReachableFunctions(&results, entryPoint, maxDepth)
+					fmt.Printf("Found %d reachable functions from entry point %s\n", len(reachable), entryPoint)
+
+					pathsMutex.Lock()
+					/* ───── Java: save the reachable list ───── */
+					if results.ReachableFunctions == nil {
+						results.ReachableFunctions = make(map[string][]string)
+					}
+					results.ReachableFunctions[entryPoint] = reachable
+					pathsMutex.Unlock()
+					/* ──────────────────────────────────────── */
+					if true {
+						//TODO this is too expensive, change to on-demand
+						// Create a local map to collect paths before adding to the shared map
+						localPaths := make(map[string][][]string)
+
+						// Use a separate WaitGroup for path finding
+						var pathWg sync.WaitGroup
+						// Use a semaphore to limit concurrent path finding operations
+						semaphore := make(chan struct{}, runtime.NumCPU())
+
+						// Process each reachable function
+						for _, func_ := range reachable {
+							pathWg.Add(1)
+
+							// Launch a goroutine for each target function, but limit concurrency
+							go func(targetFunc string) {
+								defer pathWg.Done()
+
+								// Acquire semaphore slot
+								semaphore <- struct{}{}
+								// Release semaphore slot when done
+								defer func() { <-semaphore }()
+
+								// Find paths from entry point to this function
+								paths := findAllPaths(&results, entryPoint, targetFunc, maxDepth)
+
+								// If we found paths, add them to the local map with a composite key
+								if len(paths) > 0 {
+									// Create a composite key that includes both entry point and target function
+									compositeKey := fmt.Sprintf("%s-%s", entryPoint, targetFunc)
+
+									pathsMutex.Lock()
+									localPaths[compositeKey] = paths
+									pathsMutex.Unlock()
+								}
+							}(func_)
+						}
+
+						// Wait for all path finding operations to complete
+						pathWg.Wait()
+
+						// Now add all collected paths to the shared results map
+						if len(localPaths) > 0 {
+							pathsMutex.Lock()
+							for compositeKey, paths := range localPaths {
+								results.Paths[compositeKey] = paths
+							}
+							pathsMutex.Unlock()
+						}
+					}
+
+				}(fuzzerSourcePath)
+			}
+
+			// Wait for all fuzzer source paths to be processed
+			wg.Wait()
+			fmt.Printf("Completed parallel processing of %d fuzzer source paths\n", len(javaFuzzerSourceFiles))
+		} else {
+			// Call our parallel path finding function with a 10-minute timeout
+			findAllPathsParallel(&results, javaFuzzerSourceFiles, maxDepth, 10*time.Minute)
+		}
+
+	} else {
+		// language = "c"
+		// for C
+		fuzzerDir := fuzzerDir + "-address"
+		projectDir := projectDir + "-address"
+		err := GenerateLLVMBitcodeForAllFuzzers(allFuzzers, projectDir, taskDetail.ProjectName, fuzzerDir, dockerfilePath)
+		if err != nil {
+			//TODO handle bitcode generation failures
+		}
+
+		ProcessAllFuzzersParallel(allFuzzers, projectDir, taskDetail.ProjectName, language, &results)
+	}
+
+	codeqlWg.Wait()
+
+	if true {
+		fmt.Printf("Saving results to %s\n", outputJson)
+
+		// save to json and keep in memory
+		jsonData, err := json.MarshalIndent(results, "", "  ")
+		if err != nil {
+			fmt.Printf("Error marshaling JSON: %v\n", err)
+		} else {
+			// Write results to JSON file
+			err = os.WriteFile(outputJson, jsonData, 0644)
+			if err != nil {
+				fmt.Printf("Error writing JSON file: %v\n", err)
+			}
+		}
+		log.Printf("[Baseline] Reachable Functions Analysis completed in %v. Results written to %s\n",
+			time.Since(startTime), outputJson)
+
+		fmt.Printf("language: %s\n", language)
+	}
 
 	return results, nil
 }
@@ -3605,42 +3603,42 @@ func ProcessAllFuzzersParallel(
 }
 
 func filterSanitizerFunctions(funcs []string) []string {
-	    filtered := make([]string, 0, len(funcs))
-	    for _, fn := range funcs {
-	        if strings.HasPrefix(fn, "__asan_") ||
-	            strings.HasPrefix(fn, "__sanitizer_") ||
-	            strings.HasPrefix(fn, "llvm.")  || 
-				strings.HasPrefix(fn, "__assert_") {
-	            continue // skip helper/runtime functions
-	        }
-	        filtered = append(filtered, fn)
-	    }
-	    return filtered
+	filtered := make([]string, 0, len(funcs))
+	for _, fn := range funcs {
+		if strings.HasPrefix(fn, "__asan_") ||
+			strings.HasPrefix(fn, "__sanitizer_") ||
+			strings.HasPrefix(fn, "llvm.") ||
+			strings.HasPrefix(fn, "__assert_") {
+			continue // skip helper/runtime functions
+		}
+		filtered = append(filtered, fn)
+	}
+	return filtered
 }
 
 // -----------------------------------------------------------------------------
 // NEW HELPER
 // -----------------------------------------------------------------------------
 func ProcessFuzzerCallPaths(
-    fuzzer string,
-    projectDir string,
-    projectName string,
-    language string,
-    results *models.AnalysisResults,
+	fuzzer string,
+	projectDir string,
+	projectName string,
+	language string,
+	results *models.AnalysisResults,
 	resultsMu *sync.Mutex,
 ) {
-    // 1) Locate the fuzzer source file
-    fuzzerSourcePath, _, err := findFuzzerSource(fuzzer, projectDir, projectName, language)
-    if err != nil {
-        log.Printf("Failed to locate fuzzer source for %s: %v", fuzzer, err)
-        return
-    }
+	// 1) Locate the fuzzer source file
+	fuzzerSourcePath, _, err := findFuzzerSource(fuzzer, projectDir, projectName, language)
+	if err != nil {
+		log.Printf("Failed to locate fuzzer source for %s: %v", fuzzer, err)
+		return
+	}
 	entryPoint := fuzzerSourcePath + ".LLVMFuzzerTestOneInput"
 
-    // 2) Locate reachable C functions in the call‑graph
-    callGraphDot := fmt.Sprintf("%s.dot", fuzzer)
+	// 2) Locate reachable C functions in the call‑graph
+	callGraphDot := fmt.Sprintf("%s.dot", fuzzer)
 
-	// check if callGraphDot exists, if not, try 
+	// check if callGraphDot exists, if not, try
 	if !fileExists(callGraphDot) {
 		log.Printf("[ProcessFuzzerCallPaths failed] callGraphDot does not exist: %s", callGraphDot)
 		return
@@ -3653,7 +3651,7 @@ func ProcessFuzzerCallPaths(
 		// callGraphDot = fmt.Sprintf("%s.dot", fuzzer)
 	}
 
-    targetFunctionNames := findAllReachableCFunctions(callGraphDot)
+	targetFunctionNames := findAllReachableCFunctions(callGraphDot)
 	targetFunctionNames = filterSanitizerFunctions(targetFunctionNames)
 	resultsMu.Lock()
 	if results.ReachableFunctions == nil {
@@ -3662,14 +3660,14 @@ func ProcessFuzzerCallPaths(
 	results.ReachableFunctions[entryPoint] = targetFunctionNames
 	resultsMu.Unlock()
 
-    // 3) For each reachable function, collect the call paths
+	// 3) For each reachable function, collect the call paths
 	if true {
 		//TODO: this is too expensive, change to on-demand
 		err := GetCCallPathsParallel(projectDir, fuzzer, callGraphDot, entryPoint, targetFunctionNames, results, resultsMu)
 		if err != nil {
 			log.Printf("[ERROR GetCCallPathsParallel failed] fuzzer %s: %v", fuzzer, err)
-		} 
-		
+		}
+
 	}
 }
 
@@ -3722,66 +3720,65 @@ func extractPaths(results *models.AnalysisResults, mu *sync.Mutex, cps []models.
 	return all
 }
 func findAllReachableCFunctions(dotFile string) []string {
-    cmd := exec.Command("python3", "/app/strategyx/jeff/parse_callgraph_full.py", dotFile)
-    cmd.Dir = filepath.Dir(dotFile) // json will be written here
-    if err := cmd.Run(); err != nil {
-        log.Printf("[findAllReachableCFunctions failed] parse_callgraph_full.py %s %v", dotFile, err)
-        return nil
-    }
+	cmd := exec.Command("python3", "/app/strategyx/jeff/parse_callgraph_full.py", dotFile)
+	cmd.Dir = filepath.Dir(dotFile) // json will be written here
+	if err := cmd.Run(); err != nil {
+		log.Printf("[findAllReachableCFunctions failed] parse_callgraph_full.py %s %v", dotFile, err)
+		return nil
+	}
 
 	dotBase := filepath.Base(dotFile)
 
-    outJSON := filepath.Join(filepath.Dir(dotFile), dotBase+"_reachable.json")
-    data, err := os.ReadFile(outJSON)
-    if err != nil {
-        log.Printf("cannot read %s: %v", outJSON, err)
-        return nil
-    }
+	outJSON := filepath.Join(filepath.Dir(dotFile), dotBase+"_reachable.json")
+	data, err := os.ReadFile(outJSON)
+	if err != nil {
+		log.Printf("cannot read %s: %v", outJSON, err)
+		return nil
+	}
 
-    var parsed struct {
-        ReachableFunctions []string `json:"reachable_functions"`
-        NumReachable       int      `json:"num_reachable"`
-    }
-    if err := json.Unmarshal(data, &parsed); err != nil {
-        log.Printf("bad json: %v", err)
-        return nil
-    }
-    return parsed.ReachableFunctions
+	var parsed struct {
+		ReachableFunctions []string `json:"reachable_functions"`
+		NumReachable       int      `json:"num_reachable"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		log.Printf("bad json: %v", err)
+		return nil
+	}
+	return parsed.ReachableFunctions
 }
-
 
 func CopyExtAPIFileIfNotExists() error {
 
 	dst := "/usr/local/lib/extapi.bc"
 	src := "/app/strategyx/jeff/extapi.bc"
 
-    if _, err := os.Stat(dst); os.IsNotExist(err) {
-        // Open the source file
-        srcFile, err := os.Open(src)
-        if err != nil {
-            return err
-        }
-        defer srcFile.Close()
+	if _, err := os.Stat(dst); os.IsNotExist(err) {
+		// Open the source file
+		srcFile, err := os.Open(src)
+		if err != nil {
+			return err
+		}
+		defer srcFile.Close()
 
-        // Create the destination file
-        dstFile, err := os.Create(dst)
-        if err != nil {
-            return err
-        }
-        defer dstFile.Close()
+		// Create the destination file
+		dstFile, err := os.Create(dst)
+		if err != nil {
+			return err
+		}
+		defer dstFile.Close()
 
-        // Copy the contents
-        if _, err := io.Copy(dstFile, srcFile); err != nil {
-            return err
-        }
+		// Copy the contents
+		if _, err := io.Copy(dstFile, srcFile); err != nil {
+			return err
+		}
 
-        log.Printf("Copied %s to %s", src, dst)
-    } else if err != nil {
-        return err
-    } else {
-        // log.Printf("%s already exists, skipping copy", dst)
-    }
-    return nil
+		log.Printf("Copied %s to %s", src, dst)
+	} else if err != nil {
+		return err
+	} else {
+		// log.Printf("%s already exists, skipping copy", dst)
+	}
+	return nil
 }
 
 // BuildCallGraphFromBC builds/fixes metadata and then generates a call-graph
@@ -3789,8 +3786,8 @@ func CopyExtAPIFileIfNotExists() error {
 // smaller x1.bc, x2.bc … that were produced by limitBCFileSize().
 func BuildCallGraphFromBC(fuzzer string, workDir string) error {
 	fuzzerBase := filepath.Base(fuzzer)
-	fuzzerDir  := filepath.Dir(fuzzer)
-	fuzzerBc   := fuzzer + ".bc"
+	fuzzerDir := filepath.Dir(fuzzer)
+	fuzzerBc := fuzzer + ".bc"
 
 	//----------------------------------------------------------------------
 	// 0. ensure extapi.bc is available (same as before)
@@ -3814,7 +3811,7 @@ func BuildCallGraphFromBC(fuzzer string, workDir string) error {
 	fundefCmd.Stdout = &stdout
 	fundefCmd.Stderr = &stderr
 
- 	runWithTimeout(fundefCmd, 15*time.Minute)
+	runWithTimeout(fundefCmd, 15*time.Minute)
 
 	// fmt.Printf("[DEBUG] fundef-bc stdout:\n%s\n", stdout.String())
 
@@ -3832,7 +3829,7 @@ func BuildCallGraphFromBC(fuzzer string, workDir string) error {
 
 	metaSrc := filepath.Join(workDir, "function_metadata.json")
 	if fi, err := os.Stat(metaSrc); err != nil {
-			return fmt.Errorf("no metadata produced; %v", err)
+		return fmt.Errorf("no metadata produced; %v", err)
 	} else if fi.Size() == 0 {
 		return fmt.Errorf("no metadata produced; fundef-bc returned empty file")
 	}
@@ -3842,7 +3839,6 @@ func BuildCallGraphFromBC(fuzzer string, workDir string) error {
 		log.Printf("Warning copying metadata: %v", err)
 	}
 	_ = os.Remove(metaSrc) // best-effort
-
 
 	wpaSuccess := false
 	log.Printf("Running type-based pointer analysis for %s", fuzzerBc)
@@ -3921,32 +3917,32 @@ func BuildCallGraphFromBC(fuzzer string, workDir string) error {
 
 // Helper function to run a command with timeout
 func runWithTimeout(cmd *exec.Cmd, timeout time.Duration) error {
-    if err := cmd.Start(); err != nil {
-        return err
-    }
-    
-    done := make(chan error, 1)
-    go func() {
-        done <- cmd.Wait()
-    }()
-    
-    select {
-    case err := <-done:
-        return err
-    case <-time.After(timeout):
-        if err := cmd.Process.Kill(); err != nil {
-            log.Printf("Failed to kill process: %v", err)
-        }
-        return fmt.Errorf("command timed out")
-    }
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+		if err := cmd.Process.Kill(); err != nil {
+			log.Printf("Failed to kill process: %v", err)
+		}
+		return fmt.Errorf("command timed out")
+	}
 }
-func GenerateLLVMBitcodeForAllFuzzers(allFuzzers []string, projectDir,projectName,fuzzerDir,dockerfilePath string) error {
+func GenerateLLVMBitcodeForAllFuzzers(allFuzzers []string, projectDir, projectName, fuzzerDir, dockerfilePath string) error {
 
 	fmt.Printf("GenerateLLVMBitcodeForAllFuzzers projectDir: %s\n", projectDir)
 
 	var cFilesToAnalyze []string
 	var cFuzzerSourceFiles []string
-	
+
 	// Find all C files and fuzzers in project directory
 	projectCFiles, projectFuzzers, err := FindCFilesToAnalyze(projectDir)
 	if err != nil {
@@ -3955,7 +3951,7 @@ func GenerateLLVMBitcodeForAllFuzzers(allFuzzers []string, projectDir,projectNam
 	}
 	cFilesToAnalyze = append(cFilesToAnalyze, projectCFiles...)
 	cFuzzerSourceFiles = append(cFuzzerSourceFiles, projectFuzzers...)
-	
+
 	// Find additional fuzzers in dockerfile path
 	dockerfileFuzzers, err := findFuzzerFiles(dockerfilePath, cFuzzerSourceFiles)
 	if err != nil {
@@ -3963,7 +3959,6 @@ func GenerateLLVMBitcodeForAllFuzzers(allFuzzers []string, projectDir,projectNam
 	}
 	cFuzzerSourceFiles = append(cFuzzerSourceFiles, dockerfileFuzzers...)
 
-	
 	// Create a filtered version of cFuzzerSourceFiles
 	var filteredFuzzerSourceFiles []string
 	var skippedFuzzerSourceFiles []string
@@ -3974,7 +3969,7 @@ func GenerateLLVMBitcodeForAllFuzzers(allFuzzers []string, projectDir,projectNam
 			fmt.Printf("Error reading file %s: %v\n", fuzzerSourcePath, err)
 			continue
 		}
-		
+
 		if strings.Contains(string(data), "LLVMFuzzerTestOneInput") {
 			//make sure it is in allFuzzers, name match
 			baseName := filepath.Base(fuzzerSourcePath)
@@ -4057,17 +4052,16 @@ func GenerateLLVMBitcodeForAllFuzzers(allFuzzers []string, projectDir,projectNam
 				return nil
 			})
 		}
- 	}
+	}
 
 	fmt.Printf("#cFilesToAnalyze: %d \n", len(cFilesToAnalyze))
 	fmt.Printf("#cFuzzerSourceFiles: %d %v\n", len(cFuzzerSourceFiles), cFuzzerSourceFiles)
 
-
-	// generate BC 
+	// generate BC
 
 	bitcodeDir := filepath.Join(fuzzerDir, "bitcode")
 	bitcodeFuzzerDir := filepath.Join(fuzzerDir, "bitcode-fuzzer")
-	
+
 	// Ensure fuzzer directory exists with permissive permissions
 	if err := os.MkdirAll(fuzzerDir, 0777); err != nil {
 		fmt.Printf("Failed to create fuzzer directory: %v\n", err)
@@ -4077,43 +4071,42 @@ func GenerateLLVMBitcodeForAllFuzzers(allFuzzers []string, projectDir,projectNam
 	// Create bitcodeDir with sudo if regular creation fails
 	if err := os.MkdirAll(bitcodeDir, 0777); err != nil {
 		fmt.Printf("Failed to create bitcode directory normally, trying with sudo: %v\n", err)
-		
+
 		// Try creating the directory with sudo
 		sudoCmd := exec.Command("sudo", "mkdir", "-p", bitcodeDir)
 		if sudoErr := sudoCmd.Run(); sudoErr != nil {
 			fmt.Printf("Failed to create bitcode directory even with sudo: %v\n", sudoErr)
 			return err
 		}
-		
+
 		// Set permissions with sudo
 		chmodCmd := exec.Command("sudo", "chmod", "777", bitcodeDir)
 		if chmodErr := chmodCmd.Run(); chmodErr != nil {
 			fmt.Printf("Warning: Failed to set permissions on directory: %v\n", chmodErr)
 		}
-		
+
 		fmt.Printf("Successfully created directory with sudo: %s\n", bitcodeDir)
 	}
 
 	// Create bitcodeFuzzerDir with permissive permissions
 	if err := os.MkdirAll(bitcodeFuzzerDir, 0777); err != nil {
 		fmt.Printf("Failed to create bitcode-fuzzer directory: %v\n", err)
-		
+
 		// Try creating the directory with sudo
 		sudoCmd := exec.Command("sudo", "mkdir", "-p", bitcodeFuzzerDir)
 		if sudoErr := sudoCmd.Run(); sudoErr != nil {
 			fmt.Printf("Failed to create bitcode directory even with sudo: %v\n", sudoErr)
 			return err
 		}
-		
+
 		// Set permissions with sudo
 		chmodCmd := exec.Command("sudo", "chmod", "777", bitcodeFuzzerDir)
 		if chmodErr := chmodCmd.Run(); chmodErr != nil {
 			fmt.Printf("Warning: Failed to set permissions on directory: %v\n", chmodErr)
 		}
-		
+
 		fmt.Printf("Successfully created directory with sudo: %s\n", bitcodeFuzzerDir)
 	}
-
 
 	compileCommandsPath := filepath.Join(fuzzerDir, "compile_commands.json")
 	fmt.Printf("Trying to read compile_commands.json at %s\n", compileCommandsPath)
@@ -4124,25 +4117,25 @@ func GenerateLLVMBitcodeForAllFuzzers(allFuzzers []string, projectDir,projectNam
 	if fileExists(compileCommandsPath) {
 		fmt.Printf("Found compile_commands.json: %s\n", compileCommandsPath)
 
-		err:= GenerateBitcodeFilesWithBearParallel(compileCommandsPath,projectDir,projectName,cFuzzerSourceFiles,skippedFuzzerSourceFiles,&cFilesToAnalyzeBearFail, bitcodeDir, bitcodeFuzzerDir)
+		err := GenerateBitcodeFilesWithBearParallel(compileCommandsPath, projectDir, projectName, cFuzzerSourceFiles, skippedFuzzerSourceFiles, &cFilesToAnalyzeBearFail, bitcodeDir, bitcodeFuzzerDir)
 		if err == nil {
 			success_with_bear = true
 		} else {
-			log.Println("[GenerateBitcodeFilesWithBearParallel error] %v",err)
+			log.Println("[GenerateBitcodeFilesWithBearParallel error] %v", err)
 		}
-	} 
+	}
 
 	if !success_with_bear {
 		// Generate bitcode for regular C files
 		fmt.Println("Generating bitcode for regular C files...")
-		if err := GenerateBitcodeFilesParallel(projectDir,cFilesToAnalyze, bitcodeDir); err != nil {
+		if err := GenerateBitcodeFilesParallel(projectDir, cFilesToAnalyze, bitcodeDir); err != nil {
 			fmt.Printf("Error generating bitcode for C files: %v\n", err)
 		}
 
 		// After bitcode generation
 		fmt.Printf("Generated %d regular bitcode files in %s\n", len(cFilesToAnalyze), bitcodeDir)
 	} else {
-	
+
 		if len(cFilesToAnalyzeBearFail) > 0 {
 			fmt.Printf("Found %d files where bitcode generation failed with bear\n", len(cFilesToAnalyzeBearFail))
 
@@ -4151,7 +4144,7 @@ func GenerateLLVMBitcodeForAllFuzzers(allFuzzers []string, projectDir,projectNam
 				baseName := filepath.Base(failedFile)
 
 				for _, srcFile := range cFilesToAnalyze {
-					
+
 					if strings.HasSuffix(srcFile, "/"+baseName) {
 
 						cFilesToAnalyzeBearFailFullPath = append(cFilesToAnalyzeBearFailFullPath, srcFile)
@@ -4162,7 +4155,7 @@ func GenerateLLVMBitcodeForAllFuzzers(allFuzzers []string, projectDir,projectNam
 			if len(cFilesToAnalyzeBearFailFullPath) > 0 {
 				// Generate bitcode for regular C files
 				fmt.Println("Generating bitcode for bear fail regular C files...")
-				if err := GenerateBitcodeFiles(projectDir,cFilesToAnalyzeBearFailFullPath, bitcodeDir); err != nil {
+				if err := GenerateBitcodeFiles(projectDir, cFilesToAnalyzeBearFailFullPath, bitcodeDir); err != nil {
 					fmt.Printf("Still Error generating bitcode for bear fail C files: %v\n", err)
 				}
 			} else {
@@ -4175,104 +4168,105 @@ func GenerateLLVMBitcodeForAllFuzzers(allFuzzers []string, projectDir,projectNam
 
 	// Generate bitcode for fuzzer C files
 	log.Println("Generating bitcode for fuzzer C files...")
-	if err := GenerateFuzzerBitcodeFilesAndLinkParallel(projectDir,projectName,bitcodeDir,cFuzzerSourceFiles, bitcodeFuzzerDir, fuzzerDir); err != nil {
+	if err := GenerateFuzzerBitcodeFilesAndLinkParallel(projectDir, projectName, bitcodeDir, cFuzzerSourceFiles, bitcodeFuzzerDir, fuzzerDir); err != nil {
 		fmt.Printf("Error generating bitcode for fuzzer C files: %v\n", err)
 	}
 
 	log.Printf("Generated %d fuzzer bitcode files in %s\n", len(cFuzzerSourceFiles), fuzzerDir)
-	
+
 	return nil
 }
 
 type CompileCommand struct {
-    Arguments []string `json:"arguments"`
-    Directory string   `json:"directory"`
-    File      string   `json:"file"`
+	Arguments []string `json:"arguments"`
+	Directory string   `json:"directory"`
+	File      string   `json:"file"`
 }
 
 var (
 	CompileCommandDirectory = ""
-	IncludeDirectories sync.Map
+	IncludeDirectories      sync.Map
 )
+
 // GenerateBitcodeFilesWithBearParallel processes compile_commands.json and generates bitcode files in parallel
 func GenerateBitcodeFilesWithBearParallel(compileCommandsPath, projectDir, projectName string, cFuzzerSourceFiles, skippedFuzzerSourceFiles []string, cFilesToAnalyzeBearFail *[]string, bitcodeDir, bitcodeFuzzerDir string) error {
-    // Parse the compile_commands.json
-    data, err := os.ReadFile(compileCommandsPath)
-    if err != nil {
-        fmt.Printf("Error reading compile_commands.json: %v\n", err)
-        return err
-    }
-    
+	// Parse the compile_commands.json
+	data, err := os.ReadFile(compileCommandsPath)
+	if err != nil {
+		fmt.Printf("Error reading compile_commands.json: %v\n", err)
+		return err
+	}
+
 	var compileCommands []CompileCommand
 
-    if err := json.Unmarshal(data, &compileCommands); err != nil {
-        fmt.Printf("Error parsing compile_commands.json: %v\n", err)
-        return err
-    }
-    
-    docker_image_bear := projectName + "-with-bear"
-    fmt.Printf("Generating bitcode with %s in parallel...\n", docker_image_bear)
+	if err := json.Unmarshal(data, &compileCommands); err != nil {
+		fmt.Printf("Error parsing compile_commands.json: %v\n", err)
+		return err
+	}
 
-    // Define warning flag replacements
-    warningReplacements := map[string]string{
-        "-Wno-error=vla-cxx-extension": "-Wno-error=vla-extension",
-        "-Werror=vla-cxx-extension": "-Werror=vla-extension",
-    }
+	docker_image_bear := projectName + "-with-bear"
+	fmt.Printf("Generating bitcode with %s in parallel...\n", docker_image_bear)
 
-    // Use a semaphore to limit concurrent Docker processes
-    maxConcurrent := runtime.NumCPU() * 2 / 3  // Adjust based on your system capabilities
-    if maxConcurrent < 2 {
-        maxConcurrent = 1  
-    }
+	// Define warning flag replacements
+	warningReplacements := map[string]string{
+		"-Wno-error=vla-cxx-extension": "-Wno-error=vla-extension",
+		"-Werror=vla-cxx-extension":    "-Werror=vla-extension",
+	}
 
-    semaphore := make(chan struct{}, maxConcurrent)
-    
-    // Use wait group to wait for all goroutines to complete
-    var wg sync.WaitGroup
-    
-    // Mutex for thread-safe updates to shared variables
-    var mu sync.Mutex
-    regularCount := 0
-    
+	// Use a semaphore to limit concurrent Docker processes
+	maxConcurrent := runtime.NumCPU() * 2 / 3 // Adjust based on your system capabilities
+	if maxConcurrent < 2 {
+		maxConcurrent = 1
+	}
+
+	semaphore := make(chan struct{}, maxConcurrent)
+
+	// Use wait group to wait for all goroutines to complete
+	var wg sync.WaitGroup
+
+	// Mutex for thread-safe updates to shared variables
+	var mu sync.Mutex
+	regularCount := 0
+
 	var filesToProcess []CompileCommand
 
 	cFuzzerSourceFilesx := append(cFuzzerSourceFiles, skippedFuzzerSourceFiles...)
-    
-    for _, cmd := range compileCommands {
-        srcFile := cmd.File
-        
-        // Skip non-C/C++ files
-        if !strings.HasSuffix(srcFile, ".c") && !strings.HasSuffix(srcFile, ".cpp") && 
-           !strings.HasSuffix(srcFile, ".cc") && !strings.HasSuffix(srcFile, ".cxx") {
-            continue
-        }
 
-		if strings.Contains(srcFile, "test.c") || strings.Contains(srcFile, "test/")  {
+	for _, cmd := range compileCommands {
+		srcFile := cmd.File
+
+		// Skip non-C/C++ files
+		if !strings.HasSuffix(srcFile, ".c") && !strings.HasSuffix(srcFile, ".cpp") &&
+			!strings.HasSuffix(srcFile, ".cc") && !strings.HasSuffix(srcFile, ".cxx") {
 			continue
 		}
-        
-        filesToProcess = append(filesToProcess, cmd)
-    }
+
+		if strings.Contains(srcFile, "test.c") || strings.Contains(srcFile, "test/") {
+			continue
+		}
+
+		filesToProcess = append(filesToProcess, cmd)
+	}
 
 	if len(filesToProcess) == 0 {
 		return fmt.Errorf("[likely bear error] found ZERO filesToProcess!")
 	}
-    
-    fmt.Printf("Processing %d files in parallel using %d workers\n", len(filesToProcess), maxConcurrent)
 
-    // Process each compile command in parallel
+	fmt.Printf("Processing %d files in parallel using %d workers\n", len(filesToProcess), maxConcurrent)
+
+	// Process each compile command in parallel
 	alreadyProcessedFiles := make(map[string]bool)
 
-    for _, cmd := range filesToProcess {
-        wg.Add(1)
-        go func(cmd CompileCommand) {
-            defer wg.Done()
-            
-            // Acquire semaphore (blocks if maxConcurrent processes are already running)
-            semaphore <- struct{}{}
-            defer func() { <-semaphore }() // Release semaphore when done
-            
-            srcFile := cmd.File
+	for _, cmd := range filesToProcess {
+		wg.Add(1)
+		go func(cmd CompileCommand) {
+			defer wg.Done()
+
+			// Acquire semaphore (blocks if maxConcurrent processes are already running)
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }() // Release semaphore when done
+
+			srcFile := cmd.File
 
 			mu.Lock()
 			if _, exists := alreadyProcessedFiles[srcFile]; exists {
@@ -4284,300 +4278,302 @@ func GenerateBitcodeFilesWithBearParallel(compileCommandsPath, projectDir, proje
 			alreadyProcessedFiles[srcFile] = true
 			mu.Unlock()
 
-            // Create bitcode filename
-            baseName := filepath.Base(srcFile)
-            bcFileName := strings.TrimSuffix(baseName, filepath.Ext(baseName)) + ".bc"
-            bcFilePath := filepath.Join(bitcodeDir, bcFileName)
-            
-            // Create modified compile command for bitcode generation
-            modifiedArgs := make([]string, 0, len(cmd.Arguments))
-            
-            // Replace compiler with clang-17
-            modifiedArgs = append(modifiedArgs, "clang-17")
-            
-            // Add -emit-llvm flag after the compiler
-            modifiedArgs = append(modifiedArgs, "-emit-llvm")
-        
-            // Add all other arguments except the original compiler, output flag and file
-            skipNext := false
-            for i := 1; i < len(cmd.Arguments); i++ {
-                if skipNext {
-                    skipNext = false
-                    continue
-                }
-                
-                if cmd.Arguments[i] == "-o" {
-                    // Skip the original output file
-                    skipNext = true
-                    continue
-                }
-                
-                arg := cmd.Arguments[i]
-                
-				//add include 
-				if strings.HasPrefix(arg,"-I") {
+			// Create bitcode filename
+			baseName := filepath.Base(srcFile)
+			bcFileName := strings.TrimSuffix(baseName, filepath.Ext(baseName)) + ".bc"
+			bcFilePath := filepath.Join(bitcodeDir, bcFileName)
+
+			// Create modified compile command for bitcode generation
+			modifiedArgs := make([]string, 0, len(cmd.Arguments))
+
+			// Replace compiler with clang-17
+			modifiedArgs = append(modifiedArgs, "clang-17")
+
+			// Add -emit-llvm flag after the compiler
+			modifiedArgs = append(modifiedArgs, "-emit-llvm")
+
+			// Add all other arguments except the original compiler, output flag and file
+			skipNext := false
+			for i := 1; i < len(cmd.Arguments); i++ {
+				if skipNext {
+					skipNext = false
+					continue
+				}
+
+				if cmd.Arguments[i] == "-o" {
+					// Skip the original output file
+					skipNext = true
+					continue
+				}
+
+				arg := cmd.Arguments[i]
+
+				//add include
+				if strings.HasPrefix(arg, "-I") {
 					IncludeDirectories.Store(arg, true)
 				}
-                // Handle problematic warning flags
-                if replacement, exists := warningReplacements[arg]; exists {
-                    if replacement != "" {
-                        modifiedArgs = append(modifiedArgs, replacement)
-                    }
-                    continue
-                }
-                
-                modifiedArgs = append(modifiedArgs, cmd.Arguments[i])
-            }
-            
-            // Remove the original source file (it will be added at the end)
-            modifiedArgs = modifiedArgs[:len(modifiedArgs)-1]
-            
-            // Set output to bitcode file
-            modifiedArgs = append(modifiedArgs, "-o", "/out/"+bcFileName)
-            
-            // Add the source file
-            modifiedArgs = append(modifiedArgs, srcFile)
-            
+				// Handle problematic warning flags
+				if replacement, exists := warningReplacements[arg]; exists {
+					if replacement != "" {
+						modifiedArgs = append(modifiedArgs, replacement)
+					}
+					continue
+				}
+
+				modifiedArgs = append(modifiedArgs, cmd.Arguments[i])
+			}
+
+			// Remove the original source file (it will be added at the end)
+			modifiedArgs = modifiedArgs[:len(modifiedArgs)-1]
+
+			// Set output to bitcode file
+			modifiedArgs = append(modifiedArgs, "-o", "/out/"+bcFileName)
+
+			// Add the source file
+			modifiedArgs = append(modifiedArgs, srcFile)
+
 			bitcodeDirx := bitcodeDir
 			// Determine if this is a fuzzer file
 			isFuzzer := false
 			for _, fuzzerFile := range cFuzzerSourceFilesx {
-			    if strings.Contains(fuzzerFile, baseName) {
-			        isFuzzer = true
-			        break
-			    }
+				if strings.Contains(fuzzerFile, baseName) {
+					isFuzzer = true
+					break
+				}
 			}
-			
+
 			// Skip fuzzer files
 			if isFuzzer {
-			    CompileCommandDirectory = cmd.Directory
+				CompileCommandDirectory = cmd.Directory
 				//store -I
 				bitcodeDirx = bitcodeFuzzerDir
 			}
-            // Build the docker command
-            dockerArgs := []string{
-                "run",
-                "--rm",
-                "--privileged",
-                "--shm-size=8g",
-                "--platform", "linux/amd64",
-                "-e", "FUZZING_ENGINE=libfuzzer",
-                "-e", "ARCHITECTURE=x86_64",
-                "-e", fmt.Sprintf("PROJECT_NAME=%s", projectName),
-                "-e", "HELPER=True",
-                "-v", fmt.Sprintf("%s:/src/%s", projectDir, projectName), 
-                "-v", fmt.Sprintf("%s:/out", bitcodeDirx),
-                // "-v", "/usr/include:/usr/include",
-                "-w", cmd.Directory,
-                "-t", docker_image_bear,
-                "bash", "-c", strings.Join(modifiedArgs, " "),
-            }
-            
-            // Execute the docker command with reduced output
-            dockerCmd := exec.Command("docker", dockerArgs...)
-            
-            // Redirect output to a buffer and a log file to reduce console spam
-            var outputBuffer bytes.Buffer
-            logFile := filepath.Join(os.TempDir(), fmt.Sprintf("docker_build_%s.log", bcFileName))
-            logFileHandle, err := os.Create(logFile)
-            
-            if err == nil {
-                dockerCmd.Stdout = io.MultiWriter(&outputBuffer, logFileHandle)
-                dockerCmd.Stderr = io.MultiWriter(&outputBuffer, logFileHandle)
-                defer logFileHandle.Close()
-            } else {
-                // If log file creation fails, just use buffer
-                dockerCmd.Stdout = &outputBuffer
-                dockerCmd.Stderr = &outputBuffer
-            }
-            
-            // Use a mutex to avoid interleaved console output
-            log.Printf("Generating bitcode for %s -> %s\n", srcFile, bcFilePath)
-            
-            if err := dockerCmd.Run(); err != nil {
-                mu.Lock()
-                // log.Printf("Error generating bitcode for %s: %v\ndockerArgs: %v\n", srcFile, err,dockerArgs)				
-                // Add to failed list
+			// Build the docker command
+			dockerArgs := []string{
+				"run",
+				"--rm",
+				"--privileged",
+				"--shm-size=8g",
+				"--platform", "linux/amd64",
+				"-e", "FUZZING_ENGINE=libfuzzer",
+				"-e", "ARCHITECTURE=x86_64",
+				"-e", fmt.Sprintf("PROJECT_NAME=%s", projectName),
+				"-e", "HELPER=True",
+				"-v", fmt.Sprintf("%s:/src/%s", projectDir, projectName),
+				"-v", fmt.Sprintf("%s:/out", bitcodeDirx),
+				// "-v", "/usr/include:/usr/include",
+				"-w", cmd.Directory,
+				"-t", docker_image_bear,
+				"bash", "-c", strings.Join(modifiedArgs, " "),
+			}
+
+			// Execute the docker command with reduced output
+			dockerCmd := exec.Command("docker", dockerArgs...)
+
+			// Redirect output to a buffer and a log file to reduce console spam
+			var outputBuffer bytes.Buffer
+			logFile := filepath.Join(os.TempDir(), fmt.Sprintf("docker_build_%s.log", bcFileName))
+			logFileHandle, err := os.Create(logFile)
+
+			if err == nil {
+				dockerCmd.Stdout = io.MultiWriter(&outputBuffer, logFileHandle)
+				dockerCmd.Stderr = io.MultiWriter(&outputBuffer, logFileHandle)
+				defer logFileHandle.Close()
+			} else {
+				// If log file creation fails, just use buffer
+				dockerCmd.Stdout = &outputBuffer
+				dockerCmd.Stderr = &outputBuffer
+			}
+
+			// Use a mutex to avoid interleaved console output
+			log.Printf("Generating bitcode for %s -> %s\n", srcFile, bcFilePath)
+
+			if err := dockerCmd.Run(); err != nil {
+				mu.Lock()
+				// log.Printf("Error generating bitcode for %s: %v\ndockerArgs: %v\n", srcFile, err,dockerArgs)
+				// Add to failed list
 				if !isFuzzer {
 					*cFilesToAnalyzeBearFail = append(*cFilesToAnalyzeBearFail, srcFile)
 				}
-                mu.Unlock()
-            } else {
-                mu.Lock()
-                regularCount++
-                mu.Unlock()
-            }
-        }(cmd)
-    }
-    
-    // Wait for all goroutines to complete
-    wg.Wait()
-    
-    fmt.Printf("Generated %d regular bitcode files in %s\n", regularCount, bitcodeDir)
-	if len(*cFilesToAnalyzeBearFail) > 0{
+				mu.Unlock()
+			} else {
+				mu.Lock()
+				regularCount++
+				mu.Unlock()
+			}
+		}(cmd)
+	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+
+	fmt.Printf("Generated %d regular bitcode files in %s\n", regularCount, bitcodeDir)
+	if len(*cFilesToAnalyzeBearFail) > 0 {
 		fmt.Printf("Failed to generate %d files (added to fallback list)\n", len(*cFilesToAnalyzeBearFail))
 	}
-    
-    return nil
+
+	return nil
 }
 func GenerateBitcodeFileInDocker(projectDir, projectName, srcFile, bitcodeDir string, includeDirSlice *[]string) error {
 
 	docker_image_bear := projectName + "-with-bear"
 
-	            // Create bitcode filename
-				baseName := filepath.Base(srcFile)
-				bcFileName := strings.TrimSuffix(baseName, filepath.Ext(baseName)) + ".bc"
-				bcFilePath := filepath.Join(bitcodeDir, bcFileName)
-				
-				modifiedArgs := []string{}
-				// Replace compiler with clang-17
-				modifiedArgs = append(modifiedArgs, "clang-17")				
-				modifiedArgs = append(modifiedArgs, "-emit-llvm")
-				modifiedArgs = append(modifiedArgs, "-g")
-				modifiedArgs = append(modifiedArgs, "-c")
-				
-				if len(CompileCommandDirectory) >0 {
-					modifiedArgs = append(modifiedArgs, "-I"+CompileCommandDirectory) //e.g.,/src/sqlite3/bld
-				}
-				if len(*includeDirSlice) > 0 {
-					modifiedArgs = append(modifiedArgs, (*includeDirSlice)...)
-				}
-				// Set output to bitcode file
-				modifiedArgs = append(modifiedArgs, "-o", "/out/"+bcFileName)
-				
-				// Add the source file
-				relPath, err := filepath.Rel(projectDir, srcFile)
-				if err != nil {
-				       // fallback to absolute host path if something goes wrong
-				      relPath = srcFile
-				}
-				// container paths always use forward-slashes
-				containerSrc := filepath.ToSlash(filepath.Join("/src", projectName, relPath))
-				modifiedArgs = append(modifiedArgs, containerSrc)
-				
-				// Build the docker command
-				dockerArgs := []string{
-					"run",
-					"--rm",
-					"--privileged",
-					"--shm-size=8g",
-					"--platform", "linux/amd64",
-					"-e", "FUZZING_ENGINE=libfuzzer",
-					"-e", "ARCHITECTURE=x86_64",
-					"-e", fmt.Sprintf("PROJECT_NAME=%s", projectName),
-					"-e", "HELPER=True",
-					"-v", fmt.Sprintf("%s:/src/%s", projectDir, projectName), 
-					"-v", fmt.Sprintf("%s:/out", bitcodeDir),
-					// "-v", "/usr/include:/usr/include",
-					"-t", docker_image_bear,
-					"bash", "-c", strings.Join(modifiedArgs, " "),
-				}
-				
-				// Execute the docker command with reduced output
-				dockerCmd := exec.Command("docker", dockerArgs...)
-				
-				// Redirect output to a buffer and a log file to reduce console spam
-				var outputBuffer bytes.Buffer
-				logFile := filepath.Join(os.TempDir(), fmt.Sprintf("docker_build_%s.log", bcFileName))
-				logFileHandle, err := os.Create(logFile)
-				
-				if err == nil {
-					dockerCmd.Stdout = io.MultiWriter(&outputBuffer, logFileHandle)
-					dockerCmd.Stderr = io.MultiWriter(&outputBuffer, logFileHandle)
-					defer logFileHandle.Close()
-				} else {
-					// If log file creation fails, just use buffer
-					dockerCmd.Stdout = &outputBuffer
-					dockerCmd.Stderr = &outputBuffer
-				}
-				
-				fmt.Printf("Generating bitcode in docker for %s -> %s\n", srcFile, bcFilePath)
-				
-				if err := dockerCmd.Run(); err != nil {
-					fmt.Printf("GenerateBitcodeFileInDocker Error generating bitcode for %s: %v\n", srcFile, err)
-					fmt.Printf("Execute Docker command: docker %s\n", strings.Join(dockerArgs, " "))
-					return err
-				}
+	// Create bitcode filename
+	baseName := filepath.Base(srcFile)
+	bcFileName := strings.TrimSuffix(baseName, filepath.Ext(baseName)) + ".bc"
+	bcFilePath := filepath.Join(bitcodeDir, bcFileName)
 
-				return nil
+	modifiedArgs := []string{}
+	// Replace compiler with clang-17
+	modifiedArgs = append(modifiedArgs, "clang-17")
+	modifiedArgs = append(modifiedArgs, "-emit-llvm")
+	modifiedArgs = append(modifiedArgs, "-g")
+	modifiedArgs = append(modifiedArgs, "-c")
+
+	if len(CompileCommandDirectory) > 0 {
+		modifiedArgs = append(modifiedArgs, "-I"+CompileCommandDirectory) //e.g.,/src/sqlite3/bld
+	}
+	if len(*includeDirSlice) > 0 {
+		modifiedArgs = append(modifiedArgs, (*includeDirSlice)...)
+	}
+	// Set output to bitcode file
+	modifiedArgs = append(modifiedArgs, "-o", "/out/"+bcFileName)
+
+	// Add the source file
+	relPath, err := filepath.Rel(projectDir, srcFile)
+	if err != nil {
+		// fallback to absolute host path if something goes wrong
+		relPath = srcFile
+	}
+	// container paths always use forward-slashes
+	containerSrc := filepath.ToSlash(filepath.Join("/src", projectName, relPath))
+	modifiedArgs = append(modifiedArgs, containerSrc)
+
+	// Build the docker command
+	dockerArgs := []string{
+		"run",
+		"--rm",
+		"--privileged",
+		"--shm-size=8g",
+		"--platform", "linux/amd64",
+		"-e", "FUZZING_ENGINE=libfuzzer",
+		"-e", "ARCHITECTURE=x86_64",
+		"-e", fmt.Sprintf("PROJECT_NAME=%s", projectName),
+		"-e", "HELPER=True",
+		"-v", fmt.Sprintf("%s:/src/%s", projectDir, projectName),
+		"-v", fmt.Sprintf("%s:/out", bitcodeDir),
+		// "-v", "/usr/include:/usr/include",
+		"-t", docker_image_bear,
+		"bash", "-c", strings.Join(modifiedArgs, " "),
+	}
+
+	// Execute the docker command with reduced output
+	dockerCmd := exec.Command("docker", dockerArgs...)
+
+	// Redirect output to a buffer and a log file to reduce console spam
+	var outputBuffer bytes.Buffer
+	logFile := filepath.Join(os.TempDir(), fmt.Sprintf("docker_build_%s.log", bcFileName))
+	logFileHandle, err := os.Create(logFile)
+
+	if err == nil {
+		dockerCmd.Stdout = io.MultiWriter(&outputBuffer, logFileHandle)
+		dockerCmd.Stderr = io.MultiWriter(&outputBuffer, logFileHandle)
+		defer logFileHandle.Close()
+	} else {
+		// If log file creation fails, just use buffer
+		dockerCmd.Stdout = &outputBuffer
+		dockerCmd.Stderr = &outputBuffer
+	}
+
+	fmt.Printf("Generating bitcode in docker for %s -> %s\n", srcFile, bcFilePath)
+
+	if err := dockerCmd.Run(); err != nil {
+		fmt.Printf("GenerateBitcodeFileInDocker Error generating bitcode for %s: %v\n", srcFile, err)
+		fmt.Printf("Execute Docker command: docker %s\n", strings.Join(dockerArgs, " "))
+		return err
+	}
+
+	return nil
 }
 
 var (
-LLVM_LINK_PATH = "llvm-link-17"
-LLVM_LINK_PATH1 = "llvm17-link"
-CLANG_PATH = "clang-17"
+	LLVM_LINK_PATH  = "llvm-link-17"
+	LLVM_LINK_PATH1 = "llvm17-link"
+	CLANG_PATH      = "clang-17"
 )
+
 func commandExists(cmd string) bool {
-    _, err := exec.LookPath(cmd)
-    return err == nil
+	_, err := exec.LookPath(cmd)
+	return err == nil
 }
+
 // When you need to use the command
 func getValidLlvmLinkPath() string {
-    if commandExists(LLVM_LINK_PATH) {
-        return LLVM_LINK_PATH
-    }
-    if commandExists(LLVM_LINK_PATH1) {
-        fmt.Printf("Warning: %s not found, using %s instead\n", LLVM_LINK_PATH, LLVM_LINK_PATH1)
-        return LLVM_LINK_PATH1
-    }
-    fmt.Printf("Error: Neither %s nor %s found in PATH\n", LLVM_LINK_PATH, LLVM_LINK_PATH1)
-    return LLVM_LINK_PATH // Return the primary path anyway, the command will fail but with a clear error
+	if commandExists(LLVM_LINK_PATH) {
+		return LLVM_LINK_PATH
+	}
+	if commandExists(LLVM_LINK_PATH1) {
+		fmt.Printf("Warning: %s not found, using %s instead\n", LLVM_LINK_PATH, LLVM_LINK_PATH1)
+		return LLVM_LINK_PATH1
+	}
+	fmt.Printf("Error: Neither %s nor %s found in PATH\n", LLVM_LINK_PATH, LLVM_LINK_PATH1)
+	return LLVM_LINK_PATH // Return the primary path anyway, the command will fail but with a clear error
 }
 
 func linkSubset(llvmLinkPath string, files []string, out string) error {
-    args := []string{files[0]}
-    for _, f := range files[1:] {
-        args = append(args, "--override", f)
-    }
-    args = append(args, "-o", out)
-    cmd := exec.Command(llvmLinkPath, args...)
-    return cmd.Run()
+	args := []string{files[0]}
+	for _, f := range files[1:] {
+		args = append(args, "--override", f)
+	}
+	args = append(args, "-o", out)
+	cmd := exec.Command(llvmLinkPath, args...)
+	return cmd.Run()
 }
 
 func generateSubsetBCFiles(files []string, outDir, llvmLinkPath string) {
-    subset := files
-    idx := 1
-    for len(subset) > 1 {
-        subset = subset[:len(subset)/2]                    // halve
-        out := filepath.Join(outDir, fmt.Sprintf("x%d.bc", idx))
-        if err := linkSubset(llvmLinkPath, subset, out); err != nil {
-            log.Printf("subset link failed (%s): %v", out, err)
-            return
-        }
-        if fi, err := os.Stat(out); err == nil && fi.Size() < 25*1024*1024 {
-            return // small enough, stop
-        }
-        idx++
-    }
+	subset := files
+	idx := 1
+	for len(subset) > 1 {
+		subset = subset[:len(subset)/2] // halve
+		out := filepath.Join(outDir, fmt.Sprintf("x%d.bc", idx))
+		if err := linkSubset(llvmLinkPath, subset, out); err != nil {
+			log.Printf("subset link failed (%s): %v", out, err)
+			return
+		}
+		if fi, err := os.Stat(out); err == nil && fi.Size() < 25*1024*1024 {
+			return // small enough, stop
+		}
+		idx++
+	}
 }
 func limitBCFileSize(regularBcFiles []string, outputXBCFile, llvmLinkPath string) error {
-    const maxFileMB = 50
-    maxBytes := int64(maxFileMB * 1024 * 1024)
+	const maxFileMB = 50
+	maxBytes := int64(maxFileMB * 1024 * 1024)
 
-    fi, err := os.Stat(outputXBCFile)
-    if err != nil {
-        return err
-    }
-    if fi.Size() <= maxBytes {
-        // still produce the smaller variants for later fallback
-        generateSubsetBCFiles(regularBcFiles, filepath.Dir(outputXBCFile), llvmLinkPath)
-        return nil
-    }
+	fi, err := os.Stat(outputXBCFile)
+	if err != nil {
+		return err
+	}
+	if fi.Size() <= maxBytes {
+		// still produce the smaller variants for later fallback
+		generateSubsetBCFiles(regularBcFiles, filepath.Dir(outputXBCFile), llvmLinkPath)
+		return nil
+	}
 
-    // -------- shrink x.bc to <= 100 MB --------
-    factor := int(math.Ceil(float64(fi.Size()) / float64(maxBytes)))
-    rand.Seed(time.Now().UnixNano())
-    shuffled := append([]string(nil), regularBcFiles...)
-    rand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
-    subset := shuffled[:len(shuffled)/factor]
+	// -------- shrink x.bc to <= 100 MB --------
+	factor := int(math.Ceil(float64(fi.Size()) / float64(maxBytes)))
+	rand.Seed(time.Now().UnixNano())
+	shuffled := append([]string(nil), regularBcFiles...)
+	rand.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+	subset := shuffled[:len(shuffled)/factor]
 
-    if err := linkSubset(llvmLinkPath, subset, outputXBCFile); err != nil {
-        return err
-    }
+	if err := linkSubset(llvmLinkPath, subset, outputXBCFile); err != nil {
+		return err
+	}
 
-    // emit the additional x1.bc, x2.bc, … for fallback
-    generateSubsetBCFiles(subset, filepath.Dir(outputXBCFile), llvmLinkPath)
-    return nil
+	// emit the additional x1.bc, x2.bc, … for fallback
+	generateSubsetBCFiles(subset, filepath.Dir(outputXBCFile), llvmLinkPath)
+	return nil
 }
 
 func LinkOneFuzzerBitcodeFiles(fuzzerBc string, outputDir string) error {
@@ -4590,27 +4586,27 @@ func LinkOneFuzzerBitcodeFiles(fuzzerBc string, outputDir string) error {
 	if fileExists(outputXBCFile) {
 		// Add all regular bitcode files first
 		args = append(args, outputXBCFile)
-		args = append(args,"--override")
+		args = append(args, "--override")
 	}
 	// Add the fuzzer bitcode file last
 	args = append(args, fuzzerBc)
-	
+
 	// Add output file
 	args = append(args, "-o", outputFile)
-	
+
 	// cmdStr := LLVM_LINK_PATH + " " + strings.Join(args, " ")
 	// fmt.Printf("Executing command:\n%s\n", cmdStr)
-	
+
 	// Create and run the command
 	cmd := exec.Command(LLVM_LINK_PATH, args...)
-	
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
-	
-	fmt.Printf("Linking fuzzer bitcode for %s -> %s\n", 
+
+	fmt.Printf("Linking fuzzer bitcode for %s -> %s\n",
 		fuzzerBaseName, outputFile)
-	
+
 	err := cmd.Run()
 	if err != nil {
 		fmt.Printf("Error linking fuzzer bitcode for %s: %v\n", fuzzerBaseName, err)
@@ -4623,9 +4619,9 @@ func LinkOneFuzzerBitcodeFiles(fuzzerBc string, outputDir string) error {
 // LinkRegularBCFiles links all “regular” *.bc files into a single x.bc,
 // but does it in two stages so large projects don’t stall llvm-link:
 //
-//   1. Split the input list into small batches (default 10 files).
-//      Each batch is linked in parallel, producing tmp_link/batch_<n>.bc.
-//   2. Link the batch artefacts serially to obtain x.bc.
+//  1. Split the input list into small batches (default 10 files).
+//     Each batch is linked in parallel, producing tmp_link/batch_<n>.bc.
+//  2. Link the batch artefacts serially to obtain x.bc.
 //
 // The intermediate step keeps every individual llvm-link invocation fast and
 // allows parallel CPU utilisation.  After x.bc is produced we still call
@@ -4644,7 +4640,7 @@ func LinkRegularBCFiles(bitcodeDir string, outputDir string) error {
 	//   • name contains "scanner.bc"
 	//   • file size ≥ 30 MB
 	// ----------------------------------------------------------------
-	if len(regularBcFiles) > 1 {	
+	if len(regularBcFiles) > 1 {
 		const skipThreshold = int64(32 * 1024 * 1024) // 30 MB
 		var filtered []string
 		for _, f := range regularBcFiles {
@@ -4661,16 +4657,16 @@ func LinkRegularBCFiles(bitcodeDir string, outputDir string) error {
 		regularBcFiles = filtered
 		fmt.Printf("After filtering: %d bitcode files\n", len(regularBcFiles))
 	}
-	
+
 	if len(regularBcFiles) == 0 {
 		fmt.Println("No regular bitcode files to link.")
 		return nil
 	}
 
-	const batchSize = 10                             // tweak for your hardware
-	llvmLinkPath   := getValidLlvmLinkPath()
-	tmpDir         := filepath.Join(outputDir, "tmp_link")
-	_               = os.MkdirAll(tmpDir, 0755)
+	const batchSize = 10 // tweak for your hardware
+	llvmLinkPath := getValidLlvmLinkPath()
+	tmpDir := filepath.Join(outputDir, "tmp_link")
+	_ = os.MkdirAll(tmpDir, 0755)
 
 	// --------------------------------------------------------------------
 	// 1.  Link batches in parallel
@@ -4686,7 +4682,7 @@ func LinkRegularBCFiles(bitcodeDir string, outputDir string) error {
 			end = len(regularBcFiles)
 		}
 		batch := regularBcFiles[i:end]
-		out   := filepath.Join(tmpDir, fmt.Sprintf("batch_%d.bc", i/batchSize))
+		out := filepath.Join(tmpDir, fmt.Sprintf("batch_%d.bc", i/batchSize))
 		interFiles = append(interFiles, out)
 
 		wg.Add(1)
@@ -4777,45 +4773,45 @@ func LinkRegularBCFiles0(bitcodeDir string, outputDir string) error {
 }
 
 func collectMapKeys(m *sync.Map) []string {
-    var keys []string
-    m.Range(func(key, value interface{}) bool {
-        keys = append(keys, key.(string))
-        return true
-    })
-    return keys
+	var keys []string
+	m.Range(func(key, value interface{}) bool {
+		keys = append(keys, key.(string))
+		return true
+	})
+	return keys
 }
 func GenerateFuzzerBitcodeFilesAndLinkParallel(projectDir, projectName string, bitcodeDir string, cFuzzerSourceFiles []string, bitcodeFuzzerDir, fuzzerDir string) error {
-		
+
 	err := LinkRegularBCFiles(bitcodeDir, fuzzerDir)
 	if err != nil {
 		fmt.Printf("Error LinkRegularBCFiles %v\n", err)
 	}
-	
+
 	outputDir := bitcodeFuzzerDir
 	// Create output directory if it doesn't exist
-    if err := os.MkdirAll(outputDir, 0755); err != nil {
-        // Check if it's a permission error
-        if os.IsPermission(err) {
-            log.Printf("Permission denied when creating directory, trying with sudo: %s", outputDir)
-            // Try using sudo to create the directory
-            sudoCmd := exec.Command("sudo", "mkdir", "-p", outputDir)
-            if sudoErr := sudoCmd.Run(); sudoErr != nil {
-                return fmt.Errorf("failed to create output directory even with sudo %s: %v", outputDir, sudoErr)
-            }
-            // Also set permissions with sudo
-            chmodCmd := exec.Command("sudo", "chmod", "755", outputDir)
-            if chmodErr := chmodCmd.Run(); chmodErr != nil {
-                log.Printf("Warning: Failed to set permissions on directory: %v", chmodErr)
-            }
-            log.Printf("Successfully created directory with sudo: %s", outputDir)
-        } else {
-            // It's not a permission error, so return the original error
-            return fmt.Errorf("failed to create output directory %s: %v", outputDir, err)
-        }
-    }
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		// Check if it's a permission error
+		if os.IsPermission(err) {
+			log.Printf("Permission denied when creating directory, trying with sudo: %s", outputDir)
+			// Try using sudo to create the directory
+			sudoCmd := exec.Command("sudo", "mkdir", "-p", outputDir)
+			if sudoErr := sudoCmd.Run(); sudoErr != nil {
+				return fmt.Errorf("failed to create output directory even with sudo %s: %v", outputDir, sudoErr)
+			}
+			// Also set permissions with sudo
+			chmodCmd := exec.Command("sudo", "chmod", "755", outputDir)
+			if chmodErr := chmodCmd.Run(); chmodErr != nil {
+				log.Printf("Warning: Failed to set permissions on directory: %v", chmodErr)
+			}
+			log.Printf("Successfully created directory with sudo: %s", outputDir)
+		} else {
+			// It's not a permission error, so return the original error
+			return fmt.Errorf("failed to create output directory %s: %v", outputDir, err)
+		}
+	}
 
-    // Try to find the include directories
-    includeDirs := findIncludeDirs(projectDir)
+	// Try to find the include directories
+	includeDirs := findIncludeDirs(projectDir)
 
 	//TODO cp src/libpostal.h /usr/local/include/libpostal/
 	includeLibFileSrc := filepath.Join(projectDir, "src", projectName+".h")
@@ -4848,26 +4844,26 @@ func GenerateFuzzerBitcodeFilesAndLinkParallel(projectDir, projectName string, b
 	for _, includeDir := range collectMapKeys(&IncludeDirectories) {
 		includeDirSlice = append(includeDirSlice, includeDir)
 	}
-			
-    // Set up parallelism
-    maxConcurrent := runtime.NumCPU() * 2 / 3  // Adjust based on your system capabilities
-    if maxConcurrent < 2 {
-        maxConcurrent = 1  
-    }
-    semaphore := make(chan struct{}, maxConcurrent)
-    var wg sync.WaitGroup
 
-    for _, sourceFile := range cFuzzerSourceFiles {
-        wg.Add(1)
-        go func(sourceFile string) {
-            defer wg.Done()
-            semaphore <- struct{}{} // acquire
+	// Set up parallelism
+	maxConcurrent := runtime.NumCPU() * 2 / 3 // Adjust based on your system capabilities
+	if maxConcurrent < 2 {
+		maxConcurrent = 1
+	}
+	semaphore := make(chan struct{}, maxConcurrent)
+	var wg sync.WaitGroup
 
-            // Determine output filename
-            baseName := filepath.Base(sourceFile)
-            ext := filepath.Ext(baseName)
-            baseNameWithoutExt := baseName[:len(baseName)-len(ext)]
-            outputFile := filepath.Join(outputDir, baseNameWithoutExt+".bc")
+	for _, sourceFile := range cFuzzerSourceFiles {
+		wg.Add(1)
+		go func(sourceFile string) {
+			defer wg.Done()
+			semaphore <- struct{}{} // acquire
+
+			// Determine output filename
+			baseName := filepath.Base(sourceFile)
+			ext := filepath.Ext(baseName)
+			baseNameWithoutExt := baseName[:len(baseName)-len(ext)]
+			outputFile := filepath.Join(outputDir, baseNameWithoutExt+".bc")
 			successFuzzerBC := true
 			if fileExists(outputFile) {
 				fmt.Printf("Fuzzer BC file already generated: %s\n", outputFile)
@@ -4891,9 +4887,9 @@ func GenerateFuzzerBitcodeFilesAndLinkParallel(projectDir, projectName string, b
 
 				fmt.Printf("Generating bitcode for fuzzer %s -> %s\n", sourceFile, outputFile)
 				err := cmd.Run()
-				
+
 				if err != nil {
-					fmt.Printf("GenerateFuzzerBitcodeFilesAndLinkParallel Error generating bitcode for %s: %v\ncmd: %v", sourceFile, err,cmd)
+					fmt.Printf("GenerateFuzzerBitcodeFilesAndLinkParallel Error generating bitcode for %s: %v\ncmd: %v", sourceFile, err, cmd)
 					fmt.Printf("Stderr: %s\n", stderr.String())
 					// Continue with next file despite error
 					//trying in docker
@@ -4903,141 +4899,139 @@ func GenerateFuzzerBitcodeFilesAndLinkParallel(projectDir, projectName string, b
 					} else {
 						fmt.Printf("GenerateBitcodeFileInDocker successful for %s\n", outputFile)
 					}
-				} 
-								
+				}
+
 			}
 			if successFuzzerBC {
-				LinkOneFuzzerBitcodeFiles(outputFile, fuzzerDir) 
-			} 
+				LinkOneFuzzerBitcodeFiles(outputFile, fuzzerDir)
+			}
 
-            <-semaphore // release
-        }(sourceFile)
-    }
+			<-semaphore // release
+		}(sourceFile)
+	}
 
-    wg.Wait()
-    return nil
+	wg.Wait()
+	return nil
 }
-
 
 // GenerateBitcodeFilesParallel generates LLVM bitcode files from C/C++ source files in parallel
 func GenerateBitcodeFilesParallel(projectDir string, sourceFiles []string, outputDir string) error {
 	// Create output directory if it doesn't exist
-    if err := os.MkdirAll(outputDir, 0755); err != nil {
-        // Check if it's a permission error
-        if os.IsPermission(err) {
-            log.Printf("Permission denied when creating directory, trying with sudo: %s", outputDir)
-            // Try using sudo to create the directory
-            sudoCmd := exec.Command("sudo", "mkdir", "-p", outputDir)
-            if sudoErr := sudoCmd.Run(); sudoErr != nil {
-                return fmt.Errorf("failed to create output directory even with sudo %s: %v", outputDir, sudoErr)
-            }
-            // Also set permissions with sudo
-            chmodCmd := exec.Command("sudo", "chmod", "755", outputDir)
-            if chmodErr := chmodCmd.Run(); chmodErr != nil {
-                log.Printf("Warning: Failed to set permissions on directory: %v", chmodErr)
-            }
-            log.Printf("Successfully created directory with sudo: %s", outputDir)
-        } else {
-            // It's not a permission error, so return the original error
-            return fmt.Errorf("failed to create output directory %s: %v", outputDir, err)
-        }
-    }
-
-    // Try to find the include directories
-    includeDirs := findIncludeDirs(projectDir)
-    // Set up parallelism
-    maxConcurrent := runtime.NumCPU() * 2 / 3  // Adjust based on your system capabilities
-    if maxConcurrent < 2 {
-        maxConcurrent = 1  
-    }
-    semaphore := make(chan struct{}, maxConcurrent)
-    var wg sync.WaitGroup
-
-    for _, sourceFile := range sourceFiles {
-        wg.Add(1)
-        go func(sourceFile string) {
-            defer wg.Done()
-            semaphore <- struct{}{} // acquire
-
-            // Determine output filename
-            baseName := filepath.Base(sourceFile)
-            ext := filepath.Ext(baseName)
-            baseNameWithoutExt := baseName[:len(baseName)-len(ext)]
-            outputFile := filepath.Join(outputDir, baseNameWithoutExt+".bc")
-
-            includeFlags := []string{"-emit-llvm", "-c", "-g", "-fms-extensions", "-Wno-error", "-I" + projectDir, "-I/usr/include", "-I/usr/local/include", "-I/app/include"}
-            for _, dir := range includeDirs {
-                includeFlags = append(includeFlags, "-I"+dir)
-            }
-            includeFlags = append(includeFlags, sourceFile, "-o", outputFile)
-
-            // cmdStr := CLANG_PATH + " " + strings.Join(includeFlags, " ")
-            // fmt.Printf("Executing command:\n%s\n", cmdStr)
-
-            // Build clang command
-            cmd := exec.Command(CLANG_PATH, includeFlags...)
-
-            // Run command
-            var stdout, stderr bytes.Buffer
-            cmd.Stdout = &stdout
-            cmd.Stderr = &stderr
-
-            fmt.Printf("Generating bitcode for %s -> %s\n", sourceFile, outputFile)
-            err := cmd.Run()
-            if err != nil {
-                fmt.Printf("GenerateBitcodeFilesParallel Error generating bitcode for %s: %v\n", sourceFile, err)
-                fmt.Printf("Stderr: %s\n", stderr.String())
-                // Continue with next file despite error
-            }
-
-            <-semaphore // release
-        }(sourceFile)
-    }
-
-    wg.Wait()
-
-    return nil
-}
-
-// GenerateBitcodeFiles generates LLVM bitcode files from C/C++ source files
-func GenerateBitcodeFiles(projectDir string,sourceFiles []string, outputDir string) error {
-    // Create output directory if it doesn't exist
-    if err := os.MkdirAll(outputDir, 0755); err != nil {
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
 		// Check if it's a permission error
 		if os.IsPermission(err) {
 			log.Printf("Permission denied when creating directory, trying with sudo: %s", outputDir)
-			
 			// Try using sudo to create the directory
 			sudoCmd := exec.Command("sudo", "mkdir", "-p", outputDir)
 			if sudoErr := sudoCmd.Run(); sudoErr != nil {
 				return fmt.Errorf("failed to create output directory even with sudo %s: %v", outputDir, sudoErr)
 			}
-			
 			// Also set permissions with sudo
 			chmodCmd := exec.Command("sudo", "chmod", "755", outputDir)
 			if chmodErr := chmodCmd.Run(); chmodErr != nil {
 				log.Printf("Warning: Failed to set permissions on directory: %v", chmodErr)
 			}
-			
 			log.Printf("Successfully created directory with sudo: %s", outputDir)
 		} else {
 			// It's not a permission error, so return the original error
 			return fmt.Errorf("failed to create output directory %s: %v", outputDir, err)
 		}
-    }
+	}
 
 	// Try to find the include directories
 	includeDirs := findIncludeDirs(projectDir)
-    
+	// Set up parallelism
+	maxConcurrent := runtime.NumCPU() * 2 / 3 // Adjust based on your system capabilities
+	if maxConcurrent < 2 {
+		maxConcurrent = 1
+	}
+	semaphore := make(chan struct{}, maxConcurrent)
+	var wg sync.WaitGroup
 
-    for _, sourceFile := range sourceFiles {
-        // Determine output filename
-        baseName := filepath.Base(sourceFile)
-        ext := filepath.Ext(baseName)
-        baseNameWithoutExt := baseName[:len(baseName)-len(ext)]
-        outputFile := filepath.Join(outputDir, baseNameWithoutExt + ".bc")
-        
-		includeFlags := []string{"-emit-llvm", "-c", "-g", "-fms-extensions", "-Wno-error", "-I"+projectDir, "-I/usr/include", "-I/usr/local/include", "-I/app/include"}
+	for _, sourceFile := range sourceFiles {
+		wg.Add(1)
+		go func(sourceFile string) {
+			defer wg.Done()
+			semaphore <- struct{}{} // acquire
+
+			// Determine output filename
+			baseName := filepath.Base(sourceFile)
+			ext := filepath.Ext(baseName)
+			baseNameWithoutExt := baseName[:len(baseName)-len(ext)]
+			outputFile := filepath.Join(outputDir, baseNameWithoutExt+".bc")
+
+			includeFlags := []string{"-emit-llvm", "-c", "-g", "-fms-extensions", "-Wno-error", "-I" + projectDir, "-I/usr/include", "-I/usr/local/include", "-I/app/include"}
+			for _, dir := range includeDirs {
+				includeFlags = append(includeFlags, "-I"+dir)
+			}
+			includeFlags = append(includeFlags, sourceFile, "-o", outputFile)
+
+			// cmdStr := CLANG_PATH + " " + strings.Join(includeFlags, " ")
+			// fmt.Printf("Executing command:\n%s\n", cmdStr)
+
+			// Build clang command
+			cmd := exec.Command(CLANG_PATH, includeFlags...)
+
+			// Run command
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			fmt.Printf("Generating bitcode for %s -> %s\n", sourceFile, outputFile)
+			err := cmd.Run()
+			if err != nil {
+				fmt.Printf("GenerateBitcodeFilesParallel Error generating bitcode for %s: %v\n", sourceFile, err)
+				fmt.Printf("Stderr: %s\n", stderr.String())
+				// Continue with next file despite error
+			}
+
+			<-semaphore // release
+		}(sourceFile)
+	}
+
+	wg.Wait()
+
+	return nil
+}
+
+// GenerateBitcodeFiles generates LLVM bitcode files from C/C++ source files
+func GenerateBitcodeFiles(projectDir string, sourceFiles []string, outputDir string) error {
+	// Create output directory if it doesn't exist
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		// Check if it's a permission error
+		if os.IsPermission(err) {
+			log.Printf("Permission denied when creating directory, trying with sudo: %s", outputDir)
+
+			// Try using sudo to create the directory
+			sudoCmd := exec.Command("sudo", "mkdir", "-p", outputDir)
+			if sudoErr := sudoCmd.Run(); sudoErr != nil {
+				return fmt.Errorf("failed to create output directory even with sudo %s: %v", outputDir, sudoErr)
+			}
+
+			// Also set permissions with sudo
+			chmodCmd := exec.Command("sudo", "chmod", "755", outputDir)
+			if chmodErr := chmodCmd.Run(); chmodErr != nil {
+				log.Printf("Warning: Failed to set permissions on directory: %v", chmodErr)
+			}
+
+			log.Printf("Successfully created directory with sudo: %s", outputDir)
+		} else {
+			// It's not a permission error, so return the original error
+			return fmt.Errorf("failed to create output directory %s: %v", outputDir, err)
+		}
+	}
+
+	// Try to find the include directories
+	includeDirs := findIncludeDirs(projectDir)
+
+	for _, sourceFile := range sourceFiles {
+		// Determine output filename
+		baseName := filepath.Base(sourceFile)
+		ext := filepath.Ext(baseName)
+		baseNameWithoutExt := baseName[:len(baseName)-len(ext)]
+		outputFile := filepath.Join(outputDir, baseNameWithoutExt+".bc")
+
+		includeFlags := []string{"-emit-llvm", "-c", "-g", "-fms-extensions", "-Wno-error", "-I" + projectDir, "-I/usr/include", "-I/usr/local/include", "-I/app/include"}
 		for _, dir := range includeDirs {
 			includeFlags = append(includeFlags, "-I"+dir)
 		}
@@ -5046,162 +5040,162 @@ func GenerateBitcodeFiles(projectDir string,sourceFiles []string, outputDir stri
 		// cmdStr := CLANG_PATH + " " + strings.Join(includeFlags, " ")
 		// fmt.Printf("Executing command:\n%s\n", cmdStr)
 
-        // Build clang command
-        cmd := exec.Command(CLANG_PATH, includeFlags...)
-        
-        // Run command
-        var stdout, stderr bytes.Buffer
-        cmd.Stdout = &stdout
-        cmd.Stderr = &stderr
-        
-        fmt.Printf("Generating bitcode for %s -> %s\n", sourceFile, outputFile)
-        err := cmd.Run()
-        if err != nil {
+		// Build clang command
+		cmd := exec.Command(CLANG_PATH, includeFlags...)
+
+		// Run command
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		fmt.Printf("Generating bitcode for %s -> %s\n", sourceFile, outputFile)
+		err := cmd.Run()
+		if err != nil {
 
 			fmt.Printf("GenerateBitcodeFiles Error generating bitcode for %s: %v\n", sourceFile, err)
 			fmt.Printf("Stderr: %s\n", stderr.String())
-            // Continue with next file despite error
-            continue
-        }
-    }
-    
-    return nil
+			// Continue with next file despite error
+			continue
+		}
+	}
+
+	return nil
 }
 
 // findIncludeDirs searches for any directories named "include" under the projectDir
 func findIncludeDirs(projectDir string) []string {
-    var includeDirs []string
-    
-    // Walk through the project directory
-    err := filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
-        if err != nil {
-            fmt.Printf("Error accessing path %s: %v\n", path, err)
-            return nil // Continue despite errors
-        }
-        
-        // Check if this is a directory named "include"
-        if info.IsDir() && (info.Name() == "include" || info.Name() == "includes" || info.Name() == "lib" || info.Name() == "libs") {
-            includeDirs = append(includeDirs, path)
-            // fmt.Printf("Found include directory: %s\n", path)
-        }
-        
-        return nil
-    })
-    
-    if err != nil {
-        fmt.Printf("Error walking directory tree: %v\n", err)
-    }
-    
-    return includeDirs
+	var includeDirs []string
+
+	// Walk through the project directory
+	err := filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			fmt.Printf("Error accessing path %s: %v\n", path, err)
+			return nil // Continue despite errors
+		}
+
+		// Check if this is a directory named "include"
+		if info.IsDir() && (info.Name() == "include" || info.Name() == "includes" || info.Name() == "lib" || info.Name() == "libs") {
+			includeDirs = append(includeDirs, path)
+			// fmt.Printf("Found include directory: %s\n", path)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		fmt.Printf("Error walking directory tree: %v\n", err)
+	}
+
+	return includeDirs
 }
 
 // Function to find C files that are not fuzzers
 func FindCFilesToAnalyze(rootDir string) ([]string, []string, error) {
-    var cFilesToAnalyze []string
-    var cFuzzerSourceFiles []string
-    
-    err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
-        if err != nil {
-            return err
-        }
-        
-        // Skip directories
-        if info.IsDir() {
-            return nil
-        }
-        
-        if isCCppFile(path) {
-            isFuzzer, _, _ := isFuzzerFile(path, info)
-            
-            if isFuzzer {
-                cFuzzerSourceFiles = append(cFuzzerSourceFiles, path)
-            } else if strings.HasSuffix(path, ".c") && !shouldSkipFile(path) {
-                cFilesToAnalyze = append(cFilesToAnalyze, path)
-            }
-        }
-        
-        return nil
-    })
-    
-    return cFilesToAnalyze, cFuzzerSourceFiles, err
+	var cFilesToAnalyze []string
+	var cFuzzerSourceFiles []string
+
+	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+
+		if isCCppFile(path) {
+			isFuzzer, _, _ := isFuzzerFile(path, info)
+
+			if isFuzzer {
+				cFuzzerSourceFiles = append(cFuzzerSourceFiles, path)
+			} else if strings.HasSuffix(path, ".c") && !shouldSkipFile(path) {
+				cFilesToAnalyze = append(cFilesToAnalyze, path)
+			}
+		}
+
+		return nil
+	})
+
+	return cFilesToAnalyze, cFuzzerSourceFiles, err
 }
 
 // Helper function to check if a file is a fuzzer based on content or name
 func isFuzzerFile(path string, info os.FileInfo) (bool, bool, error) {
-    // Check if file contains LLVMFuzzerTestOneInput
-    hasLLVMFuzzer := false
-    data, err := os.ReadFile(path)
-    if err == nil && strings.Contains(string(data), "LLVMFuzzerTestOneInput") {
-        hasLLVMFuzzer = true
-    }
-    
-    // Check if file name indicates it's a fuzzer
-    hasFuzzerName := strings.Contains(path, "_fuzzer") || 
-                     strings.Contains(path, "fuzz_") || 
-                     strings.Contains(path, "fuzz/") ||
-                     strings.Contains(strings.ToLower(info.Name()), "fuzz")
-    
-    return hasLLVMFuzzer || hasFuzzerName, hasLLVMFuzzer, err
+	// Check if file contains LLVMFuzzerTestOneInput
+	hasLLVMFuzzer := false
+	data, err := os.ReadFile(path)
+	if err == nil && strings.Contains(string(data), "LLVMFuzzerTestOneInput") {
+		hasLLVMFuzzer = true
+	}
+
+	// Check if file name indicates it's a fuzzer
+	hasFuzzerName := strings.Contains(path, "_fuzzer") ||
+		strings.Contains(path, "fuzz_") ||
+		strings.Contains(path, "fuzz/") ||
+		strings.Contains(strings.ToLower(info.Name()), "fuzz")
+
+	return hasLLVMFuzzer || hasFuzzerName, hasLLVMFuzzer, err
 }
 
 // Helper function to check if file is a C/C++ file
 func isCCppFile(path string) bool {
-    ext := strings.ToLower(filepath.Ext(path))
-    return ext == ".c" || ext == ".cc" || ext == ".cpp"
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".c" || ext == ".cc" || ext == ".cpp"
 }
 
 // Function to find fuzzer files in a directory
 func findFuzzerFiles(rootDir string, existingFuzzers []string) ([]string, error) {
-    var fuzzerFiles []string
-    
-    err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
-        if err != nil {
-            fmt.Printf("Error accessing path %s: %v\n", path, err)
-            return nil // Continue walking despite the error
-        }
-        
-        // Skip directories
-        if info.IsDir() {
-            return nil
-        }
-        
-        // Check if it's a C/C++ file
-        if !isCCppFile(path) {
-            return nil
-        }
-        
-        // Check if it's a fuzzer
-        isFuzzer, hasLLVMFuzzer, err := isFuzzerFile(path, info)
-        if err != nil {
-            fmt.Printf("Error reading file %s: %v\n", path, err)
-        }
-        
-        if !isFuzzer {
-            return nil
-        }
-        
-        // Check for duplicates
-        baseName := filepath.Base(path)
-        for _, existingPath := range existingFuzzers {
-            if filepath.Base(existingPath) == baseName {
-                fmt.Printf("Skipping duplicate fuzzer: %s (already have %s)\n", 
-                        path, existingPath)
-                return nil
-            }
-        }
-        // Add to list
-        fuzzerFiles = append(fuzzerFiles, path)
-        fmt.Printf("Found C fuzzer source: %s\n", path)
-        if hasLLVMFuzzer {
-            fmt.Printf("  ↳ Contains LLVMFuzzerTestOneInput\n")
-        }
-        
-        return nil
-    })
-    
-    return fuzzerFiles, err
+	var fuzzerFiles []string
+
+	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			fmt.Printf("Error accessing path %s: %v\n", path, err)
+			return nil // Continue walking despite the error
+		}
+
+		// Skip directories
+		if info.IsDir() {
+			return nil
+		}
+
+		// Check if it's a C/C++ file
+		if !isCCppFile(path) {
+			return nil
+		}
+
+		// Check if it's a fuzzer
+		isFuzzer, hasLLVMFuzzer, err := isFuzzerFile(path, info)
+		if err != nil {
+			fmt.Printf("Error reading file %s: %v\n", path, err)
+		}
+
+		if !isFuzzer {
+			return nil
+		}
+
+		// Check for duplicates
+		baseName := filepath.Base(path)
+		for _, existingPath := range existingFuzzers {
+			if filepath.Base(existingPath) == baseName {
+				fmt.Printf("Skipping duplicate fuzzer: %s (already have %s)\n",
+					path, existingPath)
+				return nil
+			}
+		}
+		// Add to list
+		fuzzerFiles = append(fuzzerFiles, path)
+		fmt.Printf("Found C fuzzer source: %s\n", path)
+		if hasLLVMFuzzer {
+			fmt.Printf("  ↳ Contains LLVMFuzzerTestOneInput\n")
+		}
+
+		return nil
+	})
+
+	return fuzzerFiles, err
 }
- 
+
 func EngineMainCodeql(request models.AnalysisRequest) ([]models.CallPath, error) {
 
 	// Check if project directory exists
@@ -5219,7 +5213,7 @@ func EngineMainCodeql(request models.AnalysisRequest) ([]models.CallPath, error)
 	projectName := filepath.Base(projectDir)
 	fuzzerName := filepath.Base(fuzzerSourcePath)
 	fuzzerName = strings.TrimSuffix(fuzzerName, filepath.Ext(fuzzerName))
-	
+
 	fuzzerDir := filepath.Dir(request.FuzzerSourcePath)
 	taskDir := filepath.Dir(projectDir)
 	taskID := request.TaskID
@@ -5227,17 +5221,17 @@ func EngineMainCodeql(request models.AnalysisRequest) ([]models.CallPath, error)
 	// Determine if this is a Java project
 	isJavaProject := false
 	javaFileCount := 0
-	
+
 	err := filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		
+
 		// Skip directories and hidden files
 		if info.IsDir() || strings.HasPrefix(filepath.Base(path), ".") {
 			return nil
 		}
-		
+
 		// Count Java files
 		if strings.HasSuffix(strings.ToLower(path), ".java") {
 			javaFileCount++
@@ -5246,18 +5240,18 @@ func EngineMainCodeql(request models.AnalysisRequest) ([]models.CallPath, error)
 				return filepath.SkipDir // Stop walking early
 			}
 		}
-		
+
 		return nil
 	})
-	
+
 	if err != nil {
 		return nil, fmt.Errorf("error scanning project directory: %v", err)
 	}
-	
+
 	if !isJavaProject {
 		return nil, fmt.Errorf("not a Java project or insufficient Java files found. CodeQL analysis requires Java projects")
 	}
-	
+
 	// Extract target function information from the request
 	var targetFunctions []models.TargetFunction
 	for filePath, functions := range request.TargetFunctions {
@@ -5269,7 +5263,7 @@ func EngineMainCodeql(request models.AnalysisRequest) ([]models.CallPath, error)
 			})
 		}
 	}
-	
+
 	// DEBUG only
 	// if fuzzerName != "CompressSevenZFuzzer" {
 	// 	return nil, fmt.Errorf("for debug skipping fuzzerName %s (only check CompressSevenZFuzzer)", fuzzerName)
@@ -5280,7 +5274,7 @@ func EngineMainCodeql(request models.AnalysisRequest) ([]models.CallPath, error)
 	log.Printf("Analyzing %d target functions: %v", len(targetFunctions), targetFunctions)
 
 	{
-		tempProjectDir := filepath.Join(taskDir, projectName + "-temp")
+		tempProjectDir := filepath.Join(taskDir, projectName+"-temp")
 		dirMu := getTempDirLock(tempProjectDir)
 		dirMu.Lock()
 		defer dirMu.Unlock()
@@ -5290,7 +5284,7 @@ func EngineMainCodeql(request models.AnalysisRequest) ([]models.CallPath, error)
 		if _, err := os.Stat(tempProjectDir); err == nil {
 			tempDirExists = true
 			log.Printf("Found existing temporary directory at: %s", tempProjectDir)
-			
+
 			// Check if fuzzer file exists in temp directory
 			targetFuzzerPath := filepath.Join(tempProjectDir, filepath.Base(fuzzerSourcePath))
 			if _, err := os.Stat(targetFuzzerPath); err == nil {
@@ -5302,19 +5296,19 @@ func EngineMainCodeql(request models.AnalysisRequest) ([]models.CallPath, error)
 				tempDirExists = false
 			}
 		}
-		
+
 		// If temp directory doesn't exist or fuzzer is missing, create it
 		if !tempDirExists {
 			log.Printf("Creating a directory with project files and fuzzer files...")
-			
+
 			// Clean up any existing directory
 			os.RemoveAll(tempProjectDir)
-			
+
 			// Create temporary directory
 			if err := os.MkdirAll(tempProjectDir, 0755); err != nil {
 				return nil, fmt.Errorf("failed to create temporary project directory: %v", err)
 			}
-			
+
 			// Copy project files to temporary directory (using direct copy instead of symlinks)
 			copyCmd := exec.Command("cp", "-r", projectDir+"/.", tempProjectDir)
 			var copyOutput bytes.Buffer
@@ -5339,25 +5333,25 @@ func EngineMainCodeql(request models.AnalysisRequest) ([]models.CallPath, error)
 					}
 				}
 			}
-			
+
 			// Check if fuzzer file exists
 			_, fuzzerErr := os.Stat(fuzzerSourcePath)
 			if fuzzerErr != nil {
 				return nil, fmt.Errorf("fuzzer source file not found at: %s", fuzzerSourcePath)
 			}
-			
+
 			// Copy fuzzer file to temp directory
 			fuzzerFileName := filepath.Base(fuzzerSourcePath)
 			targetFuzzerPath := filepath.Join(tempProjectDir, fuzzerFileName)
-			
+
 			// copyFuzzerCmd := exec.Command("cp", fuzzerSourcePath, targetFuzzerPath)
 			copyFuzzerCmd := exec.Command("cp", "-r", fuzzerDir+"/.", tempProjectDir)
 			if err := copyFuzzerCmd.Run(); err != nil {
 				return nil, fmt.Errorf("failed to copy fuzzer file: %v", err)
 			}
-			
+
 			log.Printf("Copied fuzzer file to: %s", targetFuzzerPath)
-			
+
 			// Use the new temporary directory as the source code root
 			projectDir = tempProjectDir
 			log.Printf("Using temporary project directory with fuzzer: %s", projectDir)
@@ -5366,20 +5360,20 @@ func EngineMainCodeql(request models.AnalysisRequest) ([]models.CallPath, error)
 	SKIP_COPY:
 		// Continue with the rest of the code
 	}
-	
+
 	// Create database directory in current working directory
-	dbDir := taskDir+"/codeql_databases" // Create directly in current directory
+	dbDir := taskDir + "/codeql_databases" // Create directly in current directory
 	dbPath := filepath.Join(dbDir, projectName+"-temp-db-"+fuzzerName)
-	
+
 	log.Printf("DBPath: %s", dbPath)
-	
+
 	// Check if database already exists
 	dbExists := false
 	if _, err := os.Stat(dbPath); err == nil {
 		dbExists = true
 		log.Printf("Found existing CodeQL database at: %s", dbPath)
 	}
-	
+
 	// If database doesn't exist or needs to be recreated
 	if !dbExists {
 
@@ -5388,7 +5382,7 @@ func EngineMainCodeql(request models.AnalysisRequest) ([]models.CallPath, error)
 		}
 
 		log.Printf("Creating new CodeQL database for %s...", projectName)
-		
+
 		// Build CodeQL database creation command
 		cmdArgs := []string{
 			"database", "create",
@@ -5398,29 +5392,29 @@ func EngineMainCodeql(request models.AnalysisRequest) ([]models.CallPath, error)
 			"--source-root=" + projectDir,
 			"--build-mode=none",
 		}
-		
+
 		cmd := exec.Command("codeql", cmdArgs...)
 		var output bytes.Buffer
 		cmd.Stdout = &output
 		cmd.Stderr = &output
-		
+
 		// Execute command
 		if err := cmd.Run(); err != nil {
 			log.Printf("CodeQL database creation output:\n%s", output.String())
 			return nil, fmt.Errorf("failed to create CodeQL database: %v\nOutput: %s", err, output.String())
 		}
-		
+
 		log.Printf("Successfully created CodeQL database at: %s", dbPath)
 	} else {
 		// Database already exists, use it directly
 	}
-	
+
 	// Create temporary query directory under myqueries
 	queriesDir := filepath.Join("/app/strategyx/jeff/my-queries", "temp-call-"+taskID+"-"+fuzzerName)
 	if err := os.MkdirAll(queriesDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create temp queries directory: %v", err)
 	}
-	
+
 	// Read query template
 	templatePath := filepath.Join("/app/strategyx/jeff/my-queries", "callpath-template.ql")
 	templateContent, err := os.ReadFile(templatePath)
@@ -5434,258 +5428,254 @@ func EngineMainCodeql(request models.AnalysisRequest) ([]models.CallPath, error)
 	var callPaths []models.CallPath
 
 	// Create batch size
-    batchSize := 1000 
-    
-    // Process target functions in batches
-    for i := 0; i < len(targetFunctions); i += batchSize {
-        end := min(i+batchSize, len(targetFunctions))
-        batch := targetFunctions[i:end]
-        
-        // Create combined query
-        combinedQuery := createCombinedCodeQLQuery(templateContent, fuzzerFileName, batch)
-        
-        // Save the combined query
-        queryFilePath := filepath.Join(queriesDir, fmt.Sprintf("combined_query_%d.ql", i/batchSize))
-        if err := os.WriteFile(queryFilePath, []byte(combinedQuery), 0644); err != nil {
-            log.Printf("Warning: Failed to write combined query file: %v", err)
-            continue
-        }
-        
-        // Execute combined query
+	batchSize := 1000
+
+	// Process target functions in batches
+	for i := 0; i < len(targetFunctions); i += batchSize {
+		end := min(i+batchSize, len(targetFunctions))
+		batch := targetFunctions[i:end]
+
+		// Create combined query
+		combinedQuery := createCombinedCodeQLQuery(templateContent, fuzzerFileName, batch)
+
+		// Save the combined query
+		queryFilePath := filepath.Join(queriesDir, fmt.Sprintf("combined_query_%d.ql", i/batchSize))
+		if err := os.WriteFile(queryFilePath, []byte(combinedQuery), 0644); err != nil {
+			log.Printf("Warning: Failed to write combined query file: %v", err)
+			continue
+		}
+
+		// Execute combined query
 		bqrsFilePath := filepath.Join(queriesDir, fmt.Sprintf("combined_result_%d.bqrs", i/batchSize))
-        jsonFilePath := filepath.Join(queriesDir, fmt.Sprintf("combined_result_%d.json", i/batchSize))
-        	
+		jsonFilePath := filepath.Join(queriesDir, fmt.Sprintf("combined_result_%d.json", i/batchSize))
 
 		if false {
 
-		// Execute query and get results
-        queryCmd := exec.Command(
-            "codeql", "query", "run",
-            queryFilePath,
-            "--database="+dbPath,
-            "--output="+bqrsFilePath,
-        )
-        
-        var queryOutput bytes.Buffer
-        queryCmd.Stdout = &queryOutput
-        queryCmd.Stderr = &queryOutput
-        
-        if err := queryCmd.Run(); err != nil {
-            log.Printf("Combined query failed: %v\nOutput: %s", err, queryOutput.String())
-            continue
-        }
-	} else {
+			// Execute query and get results
+			queryCmd := exec.Command(
+				"codeql", "query", "run",
+				queryFilePath,
+				"--database="+dbPath,
+				"--output="+bqrsFilePath,
+			)
 
-        queryCmd := exec.Command(
-            "codeql", "query", "run",
-			"--timeout=120",
-			"--threads=48",
-            "--database="+dbPath,
-            "--output="+bqrsFilePath,
-			queryFilePath,
-        )
+			var queryOutput bytes.Buffer
+			queryCmd.Stdout = &queryOutput
+			queryCmd.Stderr = &queryOutput
 
-        var queryOutput bytes.Buffer
-        queryCmd.Stdout = &queryOutput
-        queryCmd.Stderr = &queryOutput
+			if err := queryCmd.Run(); err != nil {
+				log.Printf("Combined query failed: %v\nOutput: %s", err, queryOutput.String())
+				continue
+			}
+		} else {
 
-        if err := queryCmd.Start(); err != nil {
-            log.Printf("Failed to start combined query: %v", err)
-            continue
-        }
+			queryCmd := exec.Command(
+				"codeql", "query", "run",
+				"--timeout=120",
+				"--threads=48",
+				"--database="+dbPath,
+				"--output="+bqrsFilePath,
+				queryFilePath,
+			)
 
-        done := make(chan error, 1)
-        go func() { done <- queryCmd.Wait() }()
+			var queryOutput bytes.Buffer
+			queryCmd.Stdout = &queryOutput
+			queryCmd.Stderr = &queryOutput
 
-     timeout := time.After(2 * time.Minute)
-        timedOut := false
+			if err := queryCmd.Start(); err != nil {
+				log.Printf("Failed to start combined query: %v", err)
+				continue
+			}
 
-        select {
-        case err := <-done:
-            // Query finished naturally (success or error)
-            if err != nil {
-                log.Printf("Combined query failed: %v\nOutput: %s", err, queryOutput.String())
-                continue
-            }
+			done := make(chan error, 1)
+			go func() { done <- queryCmd.Wait() }()
 
-        case <-timeout:
-            // Timeout: ask CodeQL to stop gracefully
-            timedOut = true
-            log.Printf("Combined query exceeded 2 minutes, sending SIGINT...")
-            _ = queryCmd.Process.Signal(syscall.SIGINT)
+			timeout := time.After(2 * time.Minute)
+			timedOut := false
 
-            // Give CodeQL 30 s to flush .bqrs before killing it
-            select {
-            case err := <-done:
-                if err != nil {
-                    log.Printf("Combined query (after SIGINT) returned error: %v", err)
-                }
-            case <-time.After(30 * time.Second):
-                log.Printf("CodeQL still running; sending SIGKILL...")
-                _ = queryCmd.Process.Kill()
-                <-done
-            }
-        }
+			select {
+			case err := <-done:
+				// Query finished naturally (success or error)
+				if err != nil {
+					log.Printf("Combined query failed: %v\nOutput: %s", err, queryOutput.String())
+					continue
+				}
 
-        if timedOut {
-            log.Printf("Combined query timed out; partial results (if any) in %s", bqrsFilePath)
-        }
+			case <-timeout:
+				// Timeout: ask CodeQL to stop gracefully
+				timedOut = true
+				log.Printf("Combined query exceeded 2 minutes, sending SIGINT...")
+				_ = queryCmd.Process.Signal(syscall.SIGINT)
+
+				// Give CodeQL 30 s to flush .bqrs before killing it
+				select {
+				case err := <-done:
+					if err != nil {
+						log.Printf("Combined query (after SIGINT) returned error: %v", err)
+					}
+				case <-time.After(30 * time.Second):
+					log.Printf("CodeQL still running; sending SIGKILL...")
+					_ = queryCmd.Process.Kill()
+					<-done
+				}
+			}
+
+			if timedOut {
+				log.Printf("Combined query timed out; partial results (if any) in %s", bqrsFilePath)
+			}
+		}
+
+		if false {
+			decodeCmd := exec.Command(
+				"codeql", "bqrs", "decode",
+				"--format=json",
+				"--output="+jsonFilePath,
+				bqrsFilePath,
+			)
+
+			if err := decodeCmd.Run(); err != nil {
+				log.Printf("BQRS decode failed: %v", err)
+				continue
+			}
+		} else {
+
+			log.Printf("Codeql Decode: %s\n", bqrsFilePath)
+
+			decodeCmd := exec.Command(
+				"codeql", "bqrs", "decode",
+				"--format=json",
+				"--output="+jsonFilePath,
+				bqrsFilePath,
+			)
+
+			var decodeOutput bytes.Buffer
+			decodeCmd.Stdout = &decodeOutput
+			decodeCmd.Stderr = &decodeOutput
+
+			if err := decodeCmd.Start(); err != nil {
+				log.Printf("Failed to start BQRS decode: %v", err)
+				continue
+			}
+
+			decodeDone := make(chan error, 1)
+			go func() { decodeDone <- decodeCmd.Wait() }()
+
+			decodeTimeout := time.After(1 * time.Minute) // adjust if needed
+			decodeTimedOut := false
+
+			select {
+			case err := <-decodeDone:
+				if err != nil {
+					log.Printf("BQRS decode failed: %v\nOutput: %s", err, decodeOutput.String())
+					continue
+				}
+
+			case <-decodeTimeout:
+				decodeTimedOut = true
+				log.Printf("BQRS decode exceeded 1 minute, sending SIGINT...")
+				_ = decodeCmd.Process.Signal(syscall.SIGINT)
+
+				// give CodeQL a short grace period to finish flushing JSON
+				select {
+				case err := <-decodeDone:
+					if err != nil {
+						log.Printf("BQRS decode (after SIGINT) returned error: %v", err)
+					}
+				case <-time.After(15 * time.Second):
+					log.Printf("BQRS decode still running; sending SIGKILL...")
+					_ = decodeCmd.Process.Kill()
+					<-decodeDone
+				}
+			}
+
+			if decodeTimedOut {
+				log.Printf("BQRS decode timed out; partial JSON (if any) left in %s", jsonFilePath)
+			}
+
+		}
+
+		resultData, err := os.ReadFile(jsonFilePath)
+		if err != nil {
+			log.Printf("Failed to read query results: %v", err)
+			continue
+		}
+
+		paths, err := parseCodeQLResults(resultData, projectDir, batch)
+		if err != nil {
+			log.Printf("Failed to parse results: %v", err)
+			continue
+		}
+
+		callPaths = append(callPaths, paths...)
 	}
-        
-	if false{
-        decodeCmd := exec.Command(
-            "codeql", "bqrs", "decode",
-            "--format=json",
-            "--output="+jsonFilePath,
-            bqrsFilePath,
-        )
-        
-        if err := decodeCmd.Run(); err != nil {
-            log.Printf("BQRS decode failed: %v", err)
-            continue
-        }
-	} else {
 
-		log.Printf("Codeql Decode: %s\n", bqrsFilePath)
-
-		decodeCmd := exec.Command(
-            "codeql", "bqrs", "decode",
-            "--format=json",
-            "--output="+jsonFilePath,
-            bqrsFilePath,
-        )
-
-        var decodeOutput bytes.Buffer
-        decodeCmd.Stdout = &decodeOutput
-        decodeCmd.Stderr = &decodeOutput
-
-        if err := decodeCmd.Start(); err != nil {
-            log.Printf("Failed to start BQRS decode: %v", err)
-            continue
-        }
-
-        decodeDone    := make(chan error, 1)
-        go func() { decodeDone <- decodeCmd.Wait() }()
-
-		decodeTimeout := time.After(1 * time.Minute) // adjust if needed
-        decodeTimedOut := false
-
-        select {
-        case err := <-decodeDone:
-            if err != nil {
-                log.Printf("BQRS decode failed: %v\nOutput: %s", err, decodeOutput.String())
-                continue
-            }
-
-        case <-decodeTimeout:
-            decodeTimedOut = true
-            log.Printf("BQRS decode exceeded 1 minute, sending SIGINT...")
-            _ = decodeCmd.Process.Signal(syscall.SIGINT)
-
-            // give CodeQL a short grace period to finish flushing JSON
-            select {
-            case err := <-decodeDone:
-                if err != nil {
-                    log.Printf("BQRS decode (after SIGINT) returned error: %v", err)
-                }
-            case <-time.After(15 * time.Second):
-                log.Printf("BQRS decode still running; sending SIGKILL...")
-                _ = decodeCmd.Process.Kill()
-                <-decodeDone
-            }
-        }
-
-        if decodeTimedOut {
-            log.Printf("BQRS decode timed out; partial JSON (if any) left in %s", jsonFilePath)
-        }
-
-	}
-
-
-        resultData, err := os.ReadFile(jsonFilePath)
-        if err != nil {
-            log.Printf("Failed to read query results: %v", err)
-            continue
-        }
-        
-        paths, err := parseCodeQLResults(resultData, projectDir, batch)
-        if err != nil {
-            log.Printf("Failed to parse results: %v", err)
-            continue
-        }
-        
-        callPaths = append(callPaths, paths...)
-    }
-		
-	
 	return callPaths, nil
 }
 
-
 func createCombinedCodeQLQuery(templateContent []byte, fuzzerFileName string, targetFunctions []models.TargetFunction) string {
-    // Base query template
-    baseQuery := string(templateContent)
-    
-    // Build target method conditions
-    var targetConditions []string
-    for _, tf := range targetFunctions {
-        targetFileName := filepath.Base(tf.FilePath)
-        if !strings.HasSuffix(targetFileName, ".java") {
-            targetFileName += ".java"
-        }
-        
-        condition := fmt.Sprintf(
-            `(targetMethod.getName() = "%s" and targetMethod.getLocation().getFile().getBaseName() = "%s")`,
-            tf.FunctionName,
-            targetFileName,
-        )
-        targetConditions = append(targetConditions, condition)
+	// Base query template
+	baseQuery := string(templateContent)
+
+	// Build target method conditions
+	var targetConditions []string
+	for _, tf := range targetFunctions {
+		targetFileName := filepath.Base(tf.FilePath)
+		if !strings.HasSuffix(targetFileName, ".java") {
+			targetFileName += ".java"
+		}
+
+		condition := fmt.Sprintf(
+			`(targetMethod.getName() = "%s" and targetMethod.getLocation().getFile().getBaseName() = "%s")`,
+			tf.FunctionName,
+			targetFileName,
+		)
+		targetConditions = append(targetConditions, condition)
 
 		// if len(targetConditions) > 5 {
 		// 	break
 		// }
-    }
-    
-    // Combine all target conditions with OR
-    combinedTargetCondition := strings.Join(targetConditions, " or\n    ")
-    
-    // Replace placeholders in template
-    modifiedQuery := strings.Replace(baseQuery,
-        `targetMethod.getName() = "{{TARGET_METHOD}}" and`,
-        "(" + combinedTargetCondition + ") and",
-        -1)
-    
-    // Replace source file and method placeholders
-    modifiedQuery = strings.Replace(modifiedQuery, "{{SOURCE_FILE}}", fuzzerFileName, -1)
-    modifiedQuery = strings.Replace(modifiedQuery, "{{SOURCE_METHOD}}", "fuzzerTestOneInput", -1)
-    
-    return modifiedQuery
+	}
+
+	// Combine all target conditions with OR
+	combinedTargetCondition := strings.Join(targetConditions, " or\n    ")
+
+	// Replace placeholders in template
+	modifiedQuery := strings.Replace(baseQuery,
+		`targetMethod.getName() = "{{TARGET_METHOD}}" and`,
+		"("+combinedTargetCondition+") and",
+		-1)
+
+	// Replace source file and method placeholders
+	modifiedQuery = strings.Replace(modifiedQuery, "{{SOURCE_FILE}}", fuzzerFileName, -1)
+	modifiedQuery = strings.Replace(modifiedQuery, "{{SOURCE_METHOD}}", "fuzzerTestOneInput", -1)
+
+	return modifiedQuery
 }
 
 func parseCodeQLResults(resultData []byte, projectDir string, targetFunctions []models.TargetFunction) ([]models.CallPath, error) {
-    var codeqlResult struct {
-        Select struct {
-            Columns []struct {
-                Name string `json:"name"`
-                Kind string `json:"kind"`
-            } `json:"columns"`
-            Tuples [][]interface{} `json:"tuples"`
-        } `json:"#select"`
-    }
-    
-    if err := json.Unmarshal(resultData, &codeqlResult); err != nil {
-        return nil, fmt.Errorf("failed to parse query results: %v", err)
-    }
-    
-    var callPaths []models.CallPath
-    
-    // Check if there are results
-    if len(codeqlResult.Select.Tuples) == 0 {
-        log.Printf("No call paths found for target functions")
-        return nil, nil
-    }
-    
-    log.Printf("Found %d call paths for target functions", len(codeqlResult.Select.Tuples))
+	var codeqlResult struct {
+		Select struct {
+			Columns []struct {
+				Name string `json:"name"`
+				Kind string `json:"kind"`
+			} `json:"columns"`
+			Tuples [][]interface{} `json:"tuples"`
+		} `json:"#select"`
+	}
+
+	if err := json.Unmarshal(resultData, &codeqlResult); err != nil {
+		return nil, fmt.Errorf("failed to parse query results: %v", err)
+	}
+
+	var callPaths []models.CallPath
+
+	// Check if there are results
+	if len(codeqlResult.Select.Tuples) == 0 {
+		log.Printf("No call paths found for target functions")
+		return nil, nil
+	}
+
+	log.Printf("Found %d call paths for target functions", len(codeqlResult.Select.Tuples))
 
 	// Convert to CallPath format
 	for _, tuple := range codeqlResult.Select.Tuples {
@@ -5693,7 +5683,7 @@ func parseCodeQLResults(resultData []byte, projectDir string, targetFunctions []
 			log.Printf("Warning: Unexpected tuple format, expected at least 6 elements, got %d", len(tuple))
 			continue
 		}
-		
+
 		// Extract values from the tuple, note type conversions
 		callPathStr, ok1 := tuple[0].(string)
 		_, ok2 := tuple[1].(float64)
@@ -5726,8 +5716,8 @@ func parseCodeQLResults(resultData []byte, projectDir string, targetFunctions []
 
 		// Ensure location info and method names count match
 		if len(locationParts) != len(methodNames) {
-			log.Printf("Warning: Location parts count (%d) doesn't match method names count (%d)", 
-					len(locationParts), len(methodNames))
+			log.Printf("Warning: Location parts count (%d) doesn't match method names count (%d)",
+				len(locationParts), len(methodNames))
 			// Use default line numbers
 			for i := range methodNames {
 				if i == 0 {
@@ -5754,13 +5744,13 @@ func parseCodeQLResults(resultData []byte, projectDir string, targetFunctions []
 				if len(parts) != 2 {
 					continue
 				}
-				
+
 				filePath := parts[0]
 				line, err := strconv.Atoi(parts[1])
 				if err != nil {
 					line = 0
 				}
-				
+
 				methodLocations[i] = struct {
 					FilePath string
 					Line     int
@@ -5777,7 +5767,7 @@ func parseCodeQLResults(resultData []byte, projectDir string, targetFunctions []
 		// Create nodes for each method
 		for i, methodName := range methodNames {
 			location := methodLocations[i]
-			
+
 			// Extract complete method source code
 			var body string
 			if location.FilePath != "Unknown" && location.Line > 0 {
@@ -5794,7 +5784,7 @@ func parseCodeQLResults(resultData []byte, projectDir string, targetFunctions []
 						// Use more robust method to extract the complete method body
 						// Using the same logic as JavaFunctionVisitor.EnterMethodDeclaration
 						sourceLines := strings.Split(string(fileContent), "\n")
-						methodStartLine := max(0, location.Line-1) // Position may have slight offset
+						methodStartLine := max(0, location.Line-1)                  // Position may have slight offset
 						methodEndLine := min(len(sourceLines), methodStartLine+100) // Initial assumption: method under 100 lines
 
 						// Find method start and end positions
@@ -5808,15 +5798,15 @@ func parseCodeQLResults(resultData []byte, projectDir string, targetFunctions []
 						if strings.Contains(methodName, ".") {
 							parts := strings.Split(methodName, ".")
 							simpleMethodName = parts[len(parts)-1]
-							// log.Printf("Using simple method name '%s' from fully qualified name '%s'", 
+							// log.Printf("Using simple method name '%s' from fully qualified name '%s'",
 							// 		simpleMethodName, methodName)
 						}
 
 						// Search downward from the potential start line to find the method body
 						for i := methodStartLine; i < min(len(sourceLines), methodStartLine+20); i++ {
-							if strings.Contains(sourceLines[i], simpleMethodName) && 
-							(strings.Contains(sourceLines[i], "(") || 
-								(i+1 < len(sourceLines) && strings.Contains(sourceLines[i+1], "("))) {
+							if strings.Contains(sourceLines[i], simpleMethodName) &&
+								(strings.Contains(sourceLines[i], "(") ||
+									(i+1 < len(sourceLines) && strings.Contains(sourceLines[i+1], "("))) {
 								actualStartLine = i
 								foundStart = true
 								// log.Printf("  Found method definition at line %d: %s", i+1, sourceLines[i])
@@ -5829,27 +5819,27 @@ func parseCodeQLResults(resultData []byte, projectDir string, targetFunctions []
 							for i := actualStartLine; i < len(sourceLines); i++ {
 								line := sourceLines[i]
 								bracketCount += strings.Count(line, "{") - strings.Count(line, "}")
-								
+
 								if bracketCount <= 0 && strings.Contains(line, "}") {
 									actualEndLine = i
 									break
 								}
-								
+
 								// Prevent excessively long methods
 								if i > actualStartLine+500 {
 									actualEndLine = i
 									break
 								}
 							}
-							
+
 							// Extract the method body
 							if actualEndLine >= actualStartLine {
-								methodBody := sourceLines[actualStartLine:actualEndLine+1]
+								methodBody := sourceLines[actualStartLine : actualEndLine+1]
 								body = strings.Join(methodBody, "\n")
 
 								// Print the full method body (limit to first 1000 chars if too long)
 								// if len(body) > 1000 {
-								// 	log.Printf("DEBUG: Extracted method body for %s (truncated):\n%s...\n[Total: %d chars]", 
+								// 	log.Printf("DEBUG: Extracted method body for %s (truncated):\n%s...\n[Total: %d chars]",
 								// 	simpleMethodName, body[:1000], len(body))
 								// } else {
 								// 	log.Printf("DEBUG: Extracted method body for %s:\n%s", simpleMethodName, body)
@@ -5859,7 +5849,7 @@ func parseCodeQLResults(resultData []byte, projectDir string, targetFunctions []
 					}
 				}
 			}
-			
+
 			// Create node
 			node := models.CallPathNode{
 				Function:   methodName,
@@ -5868,14 +5858,14 @@ func parseCodeQLResults(resultData []byte, projectDir string, targetFunctions []
 				Body:       body,
 				IsModified: i == len(methodNames)-1, // Mark target method as modified
 			}
-			
+
 			callPath.Nodes = append(callPath.Nodes, node)
 		}
-		
+
 		// Add to result list
 		callPaths = append(callPaths, callPath)
 	}
-	
+
 	// // If we have enough paths, stop analyzing other target functions
 	// if len(callPaths) >= 20 {
 	// 	break
@@ -5886,30 +5876,30 @@ func parseCodeQLResults(resultData []byte, projectDir string, targetFunctions []
 	} else {
 		log.Printf("Analysis complete. Found %d call paths across all target functions", len(callPaths))
 	}
-    
-    return callPaths, nil
+
+	return callPaths, nil
 }
 
 // Generate all possible paths
 func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir, fuzzerDir0 string, fuzzerFiles []string) (models.CodeqlAnalysisResults, error) {
 	// Initialize the result structure
 	results := models.CodeqlAnalysisResults{
-		Functions: make(map[string]*models.FunctionDefinition),
+		Functions:          make(map[string]*models.FunctionDefinition),
 		ReachableFunctions: make(map[string][]string),
-		Paths:     make(map[string]map[string][][]string),
+		Paths:              make(map[string]map[string][][]string),
 	}
 
 	log.Printf("Project directory: %s", projectDir)
-	// fuzzerDir contains all the Fuzzer Java source files 
+	// fuzzerDir contains all the Fuzzer Java source files
 	// log.Printf("Fuzzer source directory: %s", fuzzerDir)
 	log.Printf("Taskdir directory: %s", taskDir)
-	
+
 	taskID := taskDetail.TaskID.String()
-	
+
 	// Extract the base name from the project directory path to use as the output file name
 	projectBase := filepath.Base(projectDir)
-	outputJson0 := filepath.Join(taskDir, fmt.Sprintf("%s.json", projectBase))	
-	outputJson := filepath.Join(taskDir, fmt.Sprintf("%s_qx.json", projectBase))	
+	outputJson0 := filepath.Join(taskDir, fmt.Sprintf("%s.json", projectBase))
+	outputJson := filepath.Join(taskDir, fmt.Sprintf("%s_qx.json", projectBase))
 	// Check if existing analysis results exist
 	if fileExists(outputJson) {
 		// Attempt to load existing results
@@ -5920,14 +5910,14 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 			if err == nil {
 				log.Printf("Successfully loaded existing Codeql analysis results with %d functions and %d target paths",
 					len(results.Functions), len(results.Paths))
-				
+
 				if results.Functions == nil {
 					results.Functions = make(map[string]*models.FunctionDefinition)
 				}
 				if results.Paths == nil {
 					results.Paths = make(map[string]map[string][][]string)
 				}
-				
+
 				return results, nil
 			}
 			log.Printf("Warning: Failed to parse existing results file: %v", err)
@@ -5947,11 +5937,11 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 	// =============================================
 	// Add custom analysis logic here
 	// =============================================
-	
+
 	if projectDir == "" {
 		return results, fmt.Errorf("project source directory is empty")
 	}
-	
+
 	if !dirExists(projectDir) {
 		log.Printf("WARNING: Project directory does not exist: %s", projectDir)
 		return results, fmt.Errorf("project directory does not exist: %s", projectDir)
@@ -5961,13 +5951,13 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 
 	tempProjectDir := filepath.Join(taskDir, projectBase+"-temp")
 	log.Printf("Creating temporary project directory: %s", tempProjectDir)
-	
+
 	tempDirExists := dirExists(tempProjectDir)
 	if !tempDirExists {
 		if err := os.MkdirAll(tempProjectDir, 0755); err != nil {
 			return results, fmt.Errorf("failed to create temporary project directory: %v", err)
 		}
-		
+
 		log.Printf("Copying project files from %s to %s", projectDir, tempProjectDir)
 		copyCmd := exec.Command("cp", "-r", projectDir+"/.", tempProjectDir)
 		var copyOutput bytes.Buffer
@@ -5994,17 +5984,17 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 					if errCopy := copyFile(srcPath, dstPath); errCopy != nil {
 						log.Printf("WARNING: Failed to copy from %s to %s: %v", srcPath, dstPath, err)
 					} else {
-						log.Printf("Copied %s to %s", srcPath, dstPath)	
+						log.Printf("Copied %s to %s", srcPath, dstPath)
 					}
 				}
 			}
 		}
-	}else {
+	} else {
 		log.Printf("Using existing temporary project directory: %s", tempProjectDir)
 	}
-		
+
 	projectName := filepath.Base(tempProjectDir)
-	dbDir := taskDir+"/codeql_databases" 
+	dbDir := taskDir + "/codeql_databases"
 	masterDbPath := filepath.Join(dbDir, projectName+"-db")
 
 	log.Printf("MasterDBPath: %s", masterDbPath)
@@ -6024,7 +6014,7 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 
 	if !dbExists {
 		log.Printf("Creating new CodeQL database for %s...", projectName)
-		
+
 		// 构建CodeQL数据库创建命令
 		cmdArgs := []string{
 			"database", "create",
@@ -6034,7 +6024,7 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 			"--source-root=" + tempProjectDir,
 			"--build-mode=none",
 		}
-		
+
 		cmd := exec.Command("codeql", cmdArgs...)
 		cmd.Env = append(os.Environ(), fmt.Sprintf("CODEQL_JAVA_OPTS=%s", jvmOpts))
 
@@ -6046,7 +6036,7 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 			log.Printf("CodeQL database creation output:\n%s", output.String())
 			return results, fmt.Errorf("failed to create CodeQL database: %v\nOutput: %s", err, output.String())
 		}
-		
+
 		log.Printf("Successfully created CodeQL database at: %s", masterDbPath)
 	}
 
@@ -6104,12 +6094,11 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 		return results, fmt.Errorf("failed to read template file: %v", err)
 	}
 
-
 	var wg sync.WaitGroup // Use WaitGroup to wait for all goroutines
 	var resultsMutex sync.Mutex
 	// Generate and execute a query for each fuzzer file
 	for i, fuzzerPath := range fuzzerFiles {
-		
+
 		currentDbPath := dbCopyPaths[i]
 		if currentDbPath == "" {
 			log.Printf("Skipping fuzzer '%s' due to previous DB copy naming/creation issue.", fuzzerPath)
@@ -6121,94 +6110,94 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 		go func(fuzzerIdx int, currentFuzzerPath string, currentDbPath string) {
 			defer wg.Done() // Decrement counter when goroutine finishes
 
-		fuzzerName := filepath.Base(fuzzerPath)
-		fuzzerName = strings.TrimSuffix(fuzzerName, ".java")
-		
-		log.Printf("Processing fuzzer: %s", fuzzerName)
-		
-		// Create the query directory
-		queriesDir := filepath.Join("/app/strategyx/jeff/my-queries", "temp-call-"+taskID+"-"+fuzzerName)
-		if err := os.MkdirAll(queriesDir, 0755); err != nil {
-			log.Printf("failed to create queries directory: %v", err)
-			return 
-		}
+			fuzzerName := filepath.Base(fuzzerPath)
+			fuzzerName = strings.TrimSuffix(fuzzerName, ".java")
 
-		query := string(templateContent)
-		query = strings.ReplaceAll(query, "FUZZER_CLASS_NAME", fuzzerName)
-		
-		queryFilePath := filepath.Join(queriesDir, fmt.Sprintf("query_%s.ql", fuzzerName))
-		if err := os.WriteFile(queryFilePath, []byte(query), 0644); err != nil {
-			log.Printf("Warning: Failed to write query file for %s: %v", fuzzerName, err)
-			return
-		}
-		
-		bqrsFilePath := filepath.Join(queriesDir, fmt.Sprintf("result_%s.bqrs", fuzzerName))
-		jsonFilePath := filepath.Join(queriesDir, fmt.Sprintf("result_%s.json", fuzzerName))
-		
-		log.Printf("Executing CodeQL query for %s...", fuzzerName)
-		queryCmd := exec.Command(
-			"codeql", "query", "run",
-			queryFilePath,
-			"--database="+currentDbPath,
-			"--output="+bqrsFilePath,
-		)
-		queryCmd.Env = append(os.Environ(), fmt.Sprintf("CODEQL_JAVA_OPTS=%s", jvmOpts))
+			log.Printf("Processing fuzzer: %s", fuzzerName)
 
-		var queryOutput bytes.Buffer
-		queryCmd.Stdout = &queryOutput
-		queryCmd.Stderr = &queryOutput
-		
-		if err := queryCmd.Run(); err != nil {
-			log.Printf("Query failed for %s: %v\nOutput: %s", fuzzerName, err, queryOutput.String())
-			return
-		}
-		
-		if _, err := os.Stat(bqrsFilePath); os.IsNotExist(err) {
-			log.Printf("Query did not produce BQRS results for %s", fuzzerName)
-			return
-		}
-		
-		decodeCmd := exec.Command(
-			"codeql", "bqrs", "decode",
-			"--format=json",
-			"--output="+jsonFilePath,
-			bqrsFilePath,
-		)
-		decodeCmd.Env = append(os.Environ(), fmt.Sprintf("CODEQL_JAVA_OPTS=%s", jvmOpts))
+			// Create the query directory
+			queriesDir := filepath.Join("/app/strategyx/jeff/my-queries", "temp-call-"+taskID+"-"+fuzzerName)
+			if err := os.MkdirAll(queriesDir, 0755); err != nil {
+				log.Printf("failed to create queries directory: %v", err)
+				return
+			}
 
-		var decodeOutput bytes.Buffer
-		decodeCmd.Stdout = &decodeOutput
-		decodeCmd.Stderr = &decodeOutput
-		
-		if err := decodeCmd.Run(); err != nil {
-			log.Printf("BQRS decode failed for %s: %v\nOutput: %s", fuzzerName, err, decodeOutput.String())
-			return
-		}
-		
-		if _, err := os.Stat(jsonFilePath); os.IsNotExist(err) {
-			log.Printf("BQRS decode did not produce JSON file for %s", fuzzerName)
-			return
-		}
-		
-		log.Printf("Successfully processed results for fuzzer: %s", fuzzerName)
+			query := string(templateContent)
+			query = strings.ReplaceAll(query, "FUZZER_CLASS_NAME", fuzzerName)
 
-		log.Printf("Now finding code paths for fuzzer %s...", fuzzerName)
+			queryFilePath := filepath.Join(queriesDir, fmt.Sprintf("query_%s.ql", fuzzerName))
+			if err := os.WriteFile(queryFilePath, []byte(query), 0644); err != nil {
+				log.Printf("Warning: Failed to write query file for %s: %v", fuzzerName, err)
+				return
+			}
 
-		processFuzzerFile(fuzzerIdx, fuzzerPath, fuzzerFiles, queriesDir, &results, &resultsMutex, taskDetail, projectDir)
+			bqrsFilePath := filepath.Join(queriesDir, fmt.Sprintf("result_%s.bqrs", fuzzerName))
+			jsonFilePath := filepath.Join(queriesDir, fmt.Sprintf("result_%s.json", fuzzerName))
+
+			log.Printf("Executing CodeQL query for %s...", fuzzerName)
+			queryCmd := exec.Command(
+				"codeql", "query", "run",
+				queryFilePath,
+				"--database="+currentDbPath,
+				"--output="+bqrsFilePath,
+			)
+			queryCmd.Env = append(os.Environ(), fmt.Sprintf("CODEQL_JAVA_OPTS=%s", jvmOpts))
+
+			var queryOutput bytes.Buffer
+			queryCmd.Stdout = &queryOutput
+			queryCmd.Stderr = &queryOutput
+
+			if err := queryCmd.Run(); err != nil {
+				log.Printf("Query failed for %s: %v\nOutput: %s", fuzzerName, err, queryOutput.String())
+				return
+			}
+
+			if _, err := os.Stat(bqrsFilePath); os.IsNotExist(err) {
+				log.Printf("Query did not produce BQRS results for %s", fuzzerName)
+				return
+			}
+
+			decodeCmd := exec.Command(
+				"codeql", "bqrs", "decode",
+				"--format=json",
+				"--output="+jsonFilePath,
+				bqrsFilePath,
+			)
+			decodeCmd.Env = append(os.Environ(), fmt.Sprintf("CODEQL_JAVA_OPTS=%s", jvmOpts))
+
+			var decodeOutput bytes.Buffer
+			decodeCmd.Stdout = &decodeOutput
+			decodeCmd.Stderr = &decodeOutput
+
+			if err := decodeCmd.Run(); err != nil {
+				log.Printf("BQRS decode failed for %s: %v\nOutput: %s", fuzzerName, err, decodeOutput.String())
+				return
+			}
+
+			if _, err := os.Stat(jsonFilePath); os.IsNotExist(err) {
+				log.Printf("BQRS decode did not produce JSON file for %s", fuzzerName)
+				return
+			}
+
+			log.Printf("Successfully processed results for fuzzer: %s", fuzzerName)
+
+			log.Printf("Now finding code paths for fuzzer %s...", fuzzerName)
+
+			processFuzzerFile(fuzzerIdx, fuzzerPath, fuzzerFiles, queriesDir, &results, &resultsMutex, taskDetail, projectDir)
 
 		}(i, fuzzerPath, currentDbPath) // Pass index and specific DB path
 
 	}
-	
+
 	wg.Wait()
 	// log.Printf("Finished processing all %d fuzzer files.", len(fuzzerFiles))
 
 	// log.Printf("Now finding code paths for %d fuzzers in parallel...", len(fuzzerFiles))
-		
+
 	// for fuzzerIndex, fuzzerPath := range fuzzerFiles {
 	// 	processFuzzerFile(fuzzerIndex, fuzzerPath, fuzzerFiles, queriesDir, &results, taskDetail, projectDir)
 	// }
-	
+
 	log.Printf("Completed analysis of all %d fuzzer files", len(fuzzerFiles))
 
 	// =============================================
@@ -6243,8 +6232,8 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 					if src == nil {
 						for _, pf := range lookup {
 							if pf.Name == fn.Name &&
-							   (strings.HasSuffix(pf.FilePath, fn.FilePath) ||
-							    strings.HasSuffix(fn.FilePath, pf.FilePath)) {
+								(strings.HasSuffix(pf.FilePath, fn.FilePath) ||
+									strings.HasSuffix(fn.FilePath, pf.FilePath)) {
 								src = pf
 								break
 							}
@@ -6253,8 +6242,8 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 
 					if src != nil {
 						fn.SourceCode = src.SourceCode
-						fn.StartLine  = src.StartLine
-						fn.EndLine    = src.EndLine
+						fn.StartLine = src.StartLine
+						fn.EndLine = src.EndLine
 						if fn.FilePath == "" {
 							fn.FilePath = src.FilePath
 						}
@@ -6280,7 +6269,7 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 	// Save the result statistics
 	// log.Printf("Analysis results: %d functions, %d paths",
 	// len(results.Functions), len(results.Paths))
-	
+
 	// log.Printf("Saving results to %s", outputJson)
 	// log.Printf("POST-PROCESS map address: %p", results.Functions)
 	jsonData, err := json.MarshalIndent(results, "", "  ")
@@ -6291,7 +6280,7 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 		if err != nil {
 			log.Printf("Error writing JSON file: %v", err)
 		} else {
-			log.Printf("[CodeQL] Analysis completed in %v. Results written to %s", 
+			log.Printf("[CodeQL] Analysis completed in %v. Results written to %s",
 				elapsedTime, outputJson)
 		}
 	}
@@ -6299,264 +6288,263 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 	return results, nil
 }
 
-
 func processFuzzerFile(
-    fuzzerIndex int,
-    fuzzerPath string,
-    fuzzerFiles []string,
-    queriesDir string,
-    results *models.CodeqlAnalysisResults,
-	resultsMutex *sync.Mutex, 
-    taskDetail models.TaskDetail, 
-    projectDir string,
+	fuzzerIndex int,
+	fuzzerPath string,
+	fuzzerFiles []string,
+	queriesDir string,
+	results *models.CodeqlAnalysisResults,
+	resultsMutex *sync.Mutex,
+	taskDetail models.TaskDetail,
+	projectDir string,
 ) {
-    fuzzerName := filepath.Base(fuzzerPath)
-    fuzzerName = strings.TrimSuffix(fuzzerName, ".java")
+	fuzzerName := filepath.Base(fuzzerPath)
+	fuzzerName = strings.TrimSuffix(fuzzerName, ".java")
 
-    log.Printf("Processing fuzzer %d/%d: %s", fuzzerIndex+1, len(fuzzerFiles), fuzzerName)
+	log.Printf("Processing fuzzer %d/%d: %s", fuzzerIndex+1, len(fuzzerFiles), fuzzerName)
 
-    var fuzzerTargetFunctions []models.TargetFunction
-    fuzzerCollectedFuncMap := make(map[string]bool)
+	var fuzzerTargetFunctions []models.TargetFunction
+	fuzzerCollectedFuncMap := make(map[string]bool)
 
-    jsonFilePath := filepath.Join(queriesDir, fmt.Sprintf("result_%s.json", fuzzerName))
+	jsonFilePath := filepath.Join(queriesDir, fmt.Sprintf("result_%s.json", fuzzerName))
 
-    if !fileExists(jsonFilePath) {
-        log.Printf("No JSON results file found for %s, skipping path analysis", fuzzerName)
-        return
-    }
+	if !fileExists(jsonFilePath) {
+		log.Printf("No JSON results file found for %s, skipping path analysis", fuzzerName)
+		return
+	}
 
-    data, err := os.ReadFile(jsonFilePath)
-    if err != nil {
-        log.Printf("Failed to read JSON results for %s: %v", fuzzerName, err)
-        return
-    }
+	data, err := os.ReadFile(jsonFilePath)
+	if err != nil {
+		log.Printf("Failed to read JSON results for %s: %v", fuzzerName, err)
+		return
+	}
 
-    var codeqlResult struct {
-        Select struct {
-            Columns []struct {
-                Name string `json:"name"`
-                Kind string `json:"kind"`
-            } `json:"columns"`
-            Tuples [][]interface{} `json:"tuples"`
-        } `json:"#select"`
-    }
+	var codeqlResult struct {
+		Select struct {
+			Columns []struct {
+				Name string `json:"name"`
+				Kind string `json:"kind"`
+			} `json:"columns"`
+			Tuples [][]interface{} `json:"tuples"`
+		} `json:"#select"`
+	}
 
-    if err := json.Unmarshal(data, &codeqlResult); err != nil {
-        log.Printf("Failed to parse JSON results for %s: %v", fuzzerName, err)
-        return
-    }
+	if err := json.Unmarshal(data, &codeqlResult); err != nil {
+		log.Printf("Failed to parse JSON results for %s: %v", fuzzerName, err)
+		return
+	}
 
-    if len(codeqlResult.Select.Tuples) == 0 {
-        log.Printf("No function call results found for %s", fuzzerName)
-        return
-    }
+	if len(codeqlResult.Select.Tuples) == 0 {
+		log.Printf("No function call results found for %s", fuzzerName)
+		return
+	}
 
-    log.Printf("Found %d function call results for %s", len(codeqlResult.Select.Tuples), fuzzerName)
+	log.Printf("Found %d function call results for %s", len(codeqlResult.Select.Tuples), fuzzerName)
 
-    for _, tuple := range codeqlResult.Select.Tuples {
-        if len(tuple) < 2 {
-            continue
-        }
+	for _, tuple := range codeqlResult.Select.Tuples {
+		if len(tuple) < 2 {
+			continue
+		}
 
-        functionName, ok := tuple[0].(string)
-        if !ok {
-            continue
-        }
+		functionName, ok := tuple[0].(string)
+		if !ok {
+			continue
+		}
 
-        var filePath string
-        if msg, ok := tuple[1].(string); ok {
-            if strings.Contains(msg, "in file:") {
-                parts := strings.Split(msg, "in file:")
-                if len(parts) > 1 {
-                    filePath = strings.TrimSpace(parts[1])
-                }
-            }
-        }
+		var filePath string
+		if msg, ok := tuple[1].(string); ok {
+			if strings.Contains(msg, "in file:") {
+				parts := strings.Split(msg, "in file:")
+				if len(parts) > 1 {
+					filePath = strings.TrimSpace(parts[1])
+				}
+			}
+		}
 
-        functionName = strings.ReplaceAll(functionName, "<", "_of_")
-        functionName = strings.ReplaceAll(functionName, ">", "")
+		functionName = strings.ReplaceAll(functionName, "<", "_of_")
+		functionName = strings.ReplaceAll(functionName, ">", "")
 
-        // add Reachable
+		// add Reachable
 		resultsMutex.Lock()
-        if results.ReachableFunctions == nil {
-            results.ReachableFunctions = make(map[string][]string)
-        }
-		
-        if _, exists := results.ReachableFunctions[fuzzerName]; !exists {
-            results.ReachableFunctions[fuzzerName] = make([]string, 0)
-        }
-        results.ReachableFunctions[fuzzerName] = append(results.ReachableFunctions[fuzzerName], functionName)
+		if results.ReachableFunctions == nil {
+			results.ReachableFunctions = make(map[string][]string)
+		}
+
+		if _, exists := results.ReachableFunctions[fuzzerName]; !exists {
+			results.ReachableFunctions[fuzzerName] = make([]string, 0)
+		}
+		results.ReachableFunctions[fuzzerName] = append(results.ReachableFunctions[fuzzerName], functionName)
 		resultsMutex.Unlock()
 
-        if strings.HasSuffix(filePath, ".class") {
-            log.Printf("Skipping class file: %s for function: %s", filePath, functionName)
-            continue
-        }
+		if strings.HasSuffix(filePath, ".class") {
+			log.Printf("Skipping class file: %s for function: %s", filePath, functionName)
+			continue
+		}
 
-        simpleFuncName := functionName
-        if lastDotIndex := strings.LastIndex(functionName, "."); lastDotIndex != -1 {
-            simpleFuncName = functionName[lastDotIndex+1:]
-        }
+		simpleFuncName := functionName
+		if lastDotIndex := strings.LastIndex(functionName, "."); lastDotIndex != -1 {
+			simpleFuncName = functionName[lastDotIndex+1:]
+		}
 
-        funcKey := filePath + ":" + simpleFuncName
-        if !fuzzerCollectedFuncMap[funcKey] {
-            fuzzerCollectedFuncMap[funcKey] = true
+		funcKey := filePath + ":" + simpleFuncName
+		if !fuzzerCollectedFuncMap[funcKey] {
+			fuzzerCollectedFuncMap[funcKey] = true
 
-            fuzzerTargetFunctions = append(fuzzerTargetFunctions, models.TargetFunction{
-                FilePath:     filePath,
-                FunctionName: simpleFuncName,
-                StartLine:    1,
-            })
+			fuzzerTargetFunctions = append(fuzzerTargetFunctions, models.TargetFunction{
+				FilePath:     filePath,
+				FunctionName: simpleFuncName,
+				StartLine:    1,
+			})
 
-            qualifiedFuncName := functionName
+			qualifiedFuncName := functionName
 			resultsMutex.Lock()
-            if _, exists := results.Functions[qualifiedFuncName]; !exists {
-                results.Functions[qualifiedFuncName] = &models.FunctionDefinition{
-                    Name:       simpleFuncName,
-                    FilePath:   filePath,
-                    StartLine:  1,
-                    EndLine:    1,
-                    SourceCode: "",
-                }
-            }
+			if _, exists := results.Functions[qualifiedFuncName]; !exists {
+				results.Functions[qualifiedFuncName] = &models.FunctionDefinition{
+					Name:       simpleFuncName,
+					FilePath:   filePath,
+					StartLine:  1,
+					EndLine:    1,
+					SourceCode: "",
+				}
+			}
 			resultsMutex.Unlock()
-        }
-    }
+		}
+	}
 
-    log.Printf("Collected %d unique target functions for fuzzer %s", len(fuzzerTargetFunctions), fuzzerName)
+	log.Printf("Collected %d unique target functions for fuzzer %s", len(fuzzerTargetFunctions), fuzzerName)
 
-    if results.Paths[fuzzerName] == nil {
-        results.Paths[fuzzerName] = make(map[string][][]string)
-    }
+	if results.Paths[fuzzerName] == nil {
+		results.Paths[fuzzerName] = make(map[string][][]string)
+	}
 
-    fuzzerTargetFunctionsMap := make(map[string][]models.FunctionInfo)
-    for _, tf := range fuzzerTargetFunctions {
-        fuzzerTargetFunctionsMap[tf.FilePath] = append(fuzzerTargetFunctionsMap[tf.FilePath], models.FunctionInfo{
-            Name:      tf.FunctionName,
-            StartLine: tf.StartLine,
-        })
-    }
+	fuzzerTargetFunctionsMap := make(map[string][]models.FunctionInfo)
+	for _, tf := range fuzzerTargetFunctions {
+		fuzzerTargetFunctionsMap[tf.FilePath] = append(fuzzerTargetFunctionsMap[tf.FilePath], models.FunctionInfo{
+			Name:      tf.FunctionName,
+			StartLine: tf.StartLine,
+		})
+	}
 
-    if len(fuzzerTargetFunctionsMap) == 0 {
-        log.Printf("No target functions for fuzzer %s, skipping path analysis", fuzzerName)
-        return
-    }
+	if len(fuzzerTargetFunctionsMap) == 0 {
+		log.Printf("No target functions for fuzzer %s, skipping path analysis", fuzzerName)
+		return
+	}
 
-    codeqlRequest := models.AnalysisRequest{
-        TaskID:           taskDetail.TaskID.String(),
-        Focus:            taskDetail.Focus,
-        ProjectSourceDir: projectDir,
-        FuzzerSourcePath: fuzzerPath,
-        TargetFunctions:  fuzzerTargetFunctionsMap,
-    }
+	codeqlRequest := models.AnalysisRequest{
+		TaskID:           taskDetail.TaskID.String(),
+		Focus:            taskDetail.Focus,
+		ProjectSourceDir: projectDir,
+		FuzzerSourcePath: fuzzerPath,
+		TargetFunctions:  fuzzerTargetFunctionsMap,
+	}
 
-    log.Printf("Calling EngineMainCodeql for fuzzer %s with %d target files",
-        fuzzerName, len(fuzzerTargetFunctionsMap))
+	log.Printf("Calling EngineMainCodeql for fuzzer %s with %d target files",
+		fuzzerName, len(fuzzerTargetFunctionsMap))
 
-    // Call EngineMainCodeql to perform path analysis
-    callPaths, err := EngineMainCodeql(codeqlRequest)
-    if err != nil {
-        log.Printf("Error from EngineMainCodeql for fuzzer %s: %v", fuzzerName, err)
-        return
-    }
+	// Call EngineMainCodeql to perform path analysis
+	callPaths, err := EngineMainCodeql(codeqlRequest)
+	if err != nil {
+		log.Printf("Error from EngineMainCodeql for fuzzer %s: %v", fuzzerName, err)
+		return
+	}
 
-    log.Printf("Found %d call paths for fuzzer %s", len(callPaths), fuzzerName)
+	log.Printf("Found %d call paths for fuzzer %s", len(callPaths), fuzzerName)
 
-    // Process the returned call paths
-    for _, path := range callPaths {
-        targetPath := path.Target
+	// Process the returned call paths
+	for _, path := range callPaths {
+		targetPath := path.Target
 
-        if len(path.Nodes) == 0 {
-            continue
-        }
+		if len(path.Nodes) == 0 {
+			continue
+		}
 
-        var pathNodes []string
-        lastNode := path.Nodes[len(path.Nodes)-1]
-        targetFunc := lastNode.Function
+		var pathNodes []string
+		lastNode := path.Nodes[len(path.Nodes)-1]
+		targetFunc := lastNode.Function
 
-        for _, node := range path.Nodes {
-            pathNodes = append(pathNodes, node.Function)
-        }
+		for _, node := range path.Nodes {
+			pathNodes = append(pathNodes, node.Function)
+		}
 
-        pathComponents := strings.Split(targetPath, "/")
-        fileName := pathComponents[len(pathComponents)-1]
-        fileName = strings.TrimSuffix(fileName, ".java")
+		pathComponents := strings.Split(targetPath, "/")
+		fileName := pathComponents[len(pathComponents)-1]
+		fileName = strings.TrimSuffix(fileName, ".java")
 
-        var qualifiedName string
-        if strings.Contains(targetFunc, ".") {
-            qualifiedName = targetFunc
-        } else {
-            packageName := ""
-            for i := 0; i < len(pathComponents)-1; i++ {
-                if packageName != "" {
-                    packageName += "."
-                }
-                packageName += pathComponents[i]
-            }
-            if packageName != "" {
-                qualifiedName = packageName + "." + fileName + "." + targetFunc
-            } else {
-                qualifiedName = fileName + "." + targetFunc
-            }
-        }
+		var qualifiedName string
+		if strings.Contains(targetFunc, ".") {
+			qualifiedName = targetFunc
+		} else {
+			packageName := ""
+			for i := 0; i < len(pathComponents)-1; i++ {
+				if packageName != "" {
+					packageName += "."
+				}
+				packageName += pathComponents[i]
+			}
+			if packageName != "" {
+				qualifiedName = packageName + "." + fileName + "." + targetFunc
+			} else {
+				qualifiedName = fileName + "." + targetFunc
+			}
+		}
 
-        qualifiedName = strings.ReplaceAll(qualifiedName, "<", "_of_")
-        qualifiedName = strings.ReplaceAll(qualifiedName, ">", "")
+		qualifiedName = strings.ReplaceAll(qualifiedName, "<", "_of_")
+		qualifiedName = strings.ReplaceAll(qualifiedName, ">", "")
 
 		resultsMutex.Lock()
-        if _, exists := results.Functions[qualifiedName]; exists {
-            if lastNode.Body != "" && results.Functions[qualifiedName].SourceCode == "" {
-                results.Functions[qualifiedName].SourceCode = lastNode.Body
-            }
+		if _, exists := results.Functions[qualifiedName]; exists {
+			if lastNode.Body != "" && results.Functions[qualifiedName].SourceCode == "" {
+				results.Functions[qualifiedName].SourceCode = lastNode.Body
+			}
 
-            if lineStr := lastNode.Line; lineStr != "" && results.Functions[qualifiedName].StartLine <= 1 {
-                if lineNum, err := strconv.Atoi(lineStr); err == nil {
-                    results.Functions[qualifiedName].StartLine = lineNum
-                    lineCount := strings.Count(lastNode.Body, "\n") + 1
-                    results.Functions[qualifiedName].EndLine = lineNum + lineCount
-                }
-            }
-        } else {
-            lineNum := 1
-            if lineStr := lastNode.Line; lineStr != "" {
-                if n, err := strconv.Atoi(lineStr); err == nil {
-                    lineNum = n
-                }
-            }
+			if lineStr := lastNode.Line; lineStr != "" && results.Functions[qualifiedName].StartLine <= 1 {
+				if lineNum, err := strconv.Atoi(lineStr); err == nil {
+					results.Functions[qualifiedName].StartLine = lineNum
+					lineCount := strings.Count(lastNode.Body, "\n") + 1
+					results.Functions[qualifiedName].EndLine = lineNum + lineCount
+				}
+			}
+		} else {
+			lineNum := 1
+			if lineStr := lastNode.Line; lineStr != "" {
+				if n, err := strconv.Atoi(lineStr); err == nil {
+					lineNum = n
+				}
+			}
 
-            results.Functions[qualifiedName] = &models.FunctionDefinition{
-                Name:       targetFunc,
-                FilePath:   lastNode.File,
-                StartLine:  lineNum,
-                EndLine:    lineNum + strings.Count(lastNode.Body, "\n") + 1,
-                SourceCode: lastNode.Body,
-            }
-        }
+			results.Functions[qualifiedName] = &models.FunctionDefinition{
+				Name:       targetFunc,
+				FilePath:   lastNode.File,
+				StartLine:  lineNum,
+				EndLine:    lineNum + strings.Count(lastNode.Body, "\n") + 1,
+				SourceCode: lastNode.Body,
+			}
+		}
 		resultsMutex.Unlock()
-		
-        if len(pathNodes) > 0 {
-            if results.Paths[fuzzerName][qualifiedName] == nil {
-                results.Paths[fuzzerName][qualifiedName] = make([][]string, 0)
-            }
 
-            pathStr := strings.Join(pathNodes, "|")
-            isDuplicate := false
-            for _, existingPath := range results.Paths[fuzzerName][qualifiedName] {
-                if strings.Join(existingPath, "|") == pathStr {
-                    isDuplicate = true
-                    break
-                }
-            }
+		if len(pathNodes) > 0 {
+			if results.Paths[fuzzerName][qualifiedName] == nil {
+				results.Paths[fuzzerName][qualifiedName] = make([][]string, 0)
+			}
 
-            if !isDuplicate {
-                results.Paths[fuzzerName][qualifiedName] = append(
-                    results.Paths[fuzzerName][qualifiedName], pathNodes)
-            }
-        }
-    }
+			pathStr := strings.Join(pathNodes, "|")
+			isDuplicate := false
+			for _, existingPath := range results.Paths[fuzzerName][qualifiedName] {
+				if strings.Join(existingPath, "|") == pathStr {
+					isDuplicate = true
+					break
+				}
+			}
 
-    log.Printf("Completed analysis for fuzzer %d/%d: %s",
-        fuzzerIndex+1, len(fuzzerFiles), fuzzerName)
+			if !isDuplicate {
+				results.Paths[fuzzerName][qualifiedName] = append(
+					results.Paths[fuzzerName][qualifiedName], pathNodes)
+			}
+		}
+	}
+
+	log.Printf("Completed analysis for fuzzer %d/%d: %s",
+		fuzzerIndex+1, len(fuzzerFiles), fuzzerName)
 }
 
 func normaliseAnalysisPath(fp string) string {
@@ -6587,15 +6575,15 @@ func normaliseAnalysisPath(fp string) string {
 	corrected := filepath.Join(WORK_DIR, uuidPart, rest)
 
 	if !fileExists(corrected) {
-        var tryPath string
-        if strings.Contains(corrected, "-memory") {
-            tryPath = strings.Replace(corrected, "-memory/", "-address/", 1)
-        } else if strings.Contains(corrected, "-undefined") {
-            tryPath = strings.Replace(corrected, "-undefined/", "-address/", 1)
-        }
-        if tryPath != "" && fileExists(tryPath) {
-            corrected = tryPath
-        }
+		var tryPath string
+		if strings.Contains(corrected, "-memory") {
+			tryPath = strings.Replace(corrected, "-memory/", "-address/", 1)
+		} else if strings.Contains(corrected, "-undefined") {
+			tryPath = strings.Replace(corrected, "-undefined/", "-address/", 1)
+		}
+		if tryPath != "" && fileExists(tryPath) {
+			corrected = tryPath
+		}
 	}
 
 	// fmt.Println("Corrected AnalysisPath:", corrected)
@@ -6626,8 +6614,8 @@ func EngineMainFunMeta(request models.FunMetaRequest, results *models.AnalysisRe
 			}
 			// Match function name and file path (allowing for relative path match)
 			if candidate.Name == functionName {
-				//if filePath is empty, we may get a wrong function 
-				if filePath == "MISSING" ||filePath == "unknown.c" || filePath == "Unknown.java" || strings.HasSuffix(candidate.FilePath, fileName) {
+				//if filePath is empty, we may get a wrong function
+				if filePath == "MISSING" || filePath == "unknown.c" || filePath == "Unknown.java" || strings.HasSuffix(candidate.FilePath, fileName) {
 					def = candidate
 					break
 				} else {
@@ -6643,23 +6631,22 @@ func EngineMainFunMeta(request models.FunMetaRequest, results *models.AnalysisRe
 		}
 
 		filePath_x := def.FilePath
-		//fix filePath 
+		//fix filePath
 		{
 			focus := request.Focus
-			focusAddress := request.Focus+"-address"
+			focusAddress := request.Focus + "-address"
 			idx := strings.Index(filePath_x, focusAddress)
-			if idx >=0 {
+			if idx >= 0 {
 				filePath_x = filePath_x[idx+len(focusAddress)+1:]
 			} else {
 				idx = strings.Index(filePath_x, focus)
-				if idx >=0 {
+				if idx >= 0 {
 					filePath_x = filePath_x[idx+len(focus)+1:]
-				} 
-			}			//TODO extract anything after 
+				}
+			} //TODO extract anything after
 			fmt.Printf("[DEBUG] def.FilePath: %s\n", def.FilePath)
 			fmt.Printf("[DEBUG] filePath_x: %s\n", filePath_x)
 		}
-
 
 		meta := models.FunctionMetaInfo{
 			Name:       def.Name,
@@ -6674,10 +6661,10 @@ func EngineMainFunMeta(request models.FunMetaRequest, results *models.AnalysisRe
 	// Debug summary before returning
 	fmt.Printf("[DEBUG] Successfully processed %d functions in EngineMainFunMeta:\n", len(funMeta))
 	for funcName, meta := range funMeta {
-		fmt.Printf("[DEBUG]   - %s in %s (lines %d-%d)\n", 
-			funcName, 
-			meta.FilePath, 
-			meta.StartLine, 
+		fmt.Printf("[DEBUG]   - %s in %s (lines %d-%d)\n",
+			funcName,
+			meta.FilePath,
+			meta.StartLine,
 			meta.EndLine)
 	}
 
@@ -6689,16 +6676,16 @@ func EngineMainReachableQX(request models.AnalysisRequest, results *models.Codeq
 
 	var entryPoint string
 	if strings.HasSuffix(fuzzerSourcePath, ".java") {
-		entryPoint = fuzzerSourcePath+"."+"fuzzerTestOneInput"
+		entryPoint = fuzzerSourcePath + "." + "fuzzerTestOneInput"
 	} else {
-		entryPoint = fuzzerSourcePath+"."+"LLVMFuzzerTestOneInput"
+		entryPoint = fuzzerSourcePath + "." + "LLVMFuzzerTestOneInput"
 	}
 	maxDepth := 6
 	targetFuncs, err := findPotentiallyVulnerableReachableFunctionsQX(results, entryPoint, maxDepth)
 
 	/* ---------- DEBUG: print counts ---------- */
 	if err == nil {
-		numFuncs   := len(targetFuncs)
+		numFuncs := len(targetFuncs)
 		totalWords := 0
 		for _, fd := range targetFuncs {
 			totalWords += len(strings.Fields(fd.SourceCode))
@@ -6710,21 +6697,21 @@ func EngineMainReachableQX(request models.AnalysisRequest, results *models.Codeq
 	return targetFuncs, err
 }
 func EngineMainReachable(request models.AnalysisRequest, results *models.AnalysisResults) ([]models.FunctionDefinition, error) {
-
+	fmt.Printf("[DEBUG] EngineMainReachable request.FuzzerSourcePath: %s\n", request.FuzzerSourcePath)
 	fuzzerSourcePath := normaliseAnalysisPath(request.FuzzerSourcePath)
 
 	var entryPoint string
 	if strings.HasSuffix(fuzzerSourcePath, ".java") {
-		entryPoint = fuzzerSourcePath+"."+"fuzzerTestOneInput"
+		entryPoint = fuzzerSourcePath + "." + "fuzzerTestOneInput"
 	} else {
-		entryPoint = fuzzerSourcePath+"."+"LLVMFuzzerTestOneInput"
+		entryPoint = fuzzerSourcePath + "." + "LLVMFuzzerTestOneInput"
 	}
 	maxDepth := 6
 	targetFuncs, err := findPotentiallyVulnerableReachableFunctions(results, entryPoint, maxDepth)
 
 	/* ---------- DEBUG: print counts ---------- */
 	if err == nil {
-		numFuncs   := len(targetFuncs)
+		numFuncs := len(targetFuncs)
 		totalWords := 0
 		for _, fd := range targetFuncs {
 			totalWords += len(strings.Fields(fd.SourceCode))
@@ -6735,15 +6722,15 @@ func EngineMainReachable(request models.AnalysisRequest, results *models.Analysi
 
 	return targetFuncs, err
 }
-func findPotentiallyVulnerableReachableFunctionsQX(results *models.CodeqlAnalysisResults, entryPoint string, maxDepth int) ([]models.FunctionDefinition, error){
-	
+func findPotentiallyVulnerableReachableFunctionsQX(results *models.CodeqlAnalysisResults, entryPoint string, maxDepth int) ([]models.FunctionDefinition, error) {
+
 	fmt.Printf("[DEBUG] findPotentiallyVulnerableReachableFunctionsQX entryPoint: %s\n", entryPoint)
 
 	if results.ReachableFunctions == nil {
 		results.ReachableFunctions = make(map[string][]string)
 	}
 
-	if len(results.ReachableFunctions) == 0 && len(results.Paths)>0 {
+	if len(results.ReachableFunctions) == 0 && len(results.Paths) > 0 {
 		for fuzzerName, pathsListMap := range results.Paths {
 			// fmt.Println("tf.FunctionName:", tf.FunctionName)
 			var reachable []string
@@ -6751,7 +6738,7 @@ func findPotentiallyVulnerableReachableFunctionsQX(results *models.CodeqlAnalysi
 				// fmt.Println("fullTargetFunction:", fullTargetFunction)
 				reachable = append(reachable, fullTargetFunction)
 			}
-			//save to reachable functions 
+			//save to reachable functions
 			results.ReachableFunctions[fuzzerName] = reachable
 		}
 	}
@@ -6768,7 +6755,7 @@ func findPotentiallyVulnerableReachableFunctionsQX(results *models.CodeqlAnalysi
 	reachableNames := results.ReachableFunctions[fuzzerName]
 	// 2. Build the output slice, making sure we don’t duplicate entries.
 	seen := make(map[string]struct{}, len(reachableNames))
-	
+
 	for _, name := range reachableNames {
 		if _, ok := seen[name]; ok {
 			continue // already added
@@ -6805,10 +6792,10 @@ func findPotentiallyVulnerableReachableFunctionsQX(results *models.CodeqlAnalysi
 		// it's possible the reachable function not in results.Functions duo to BC errors
 		if !found {
 			def := &models.FunctionDefinition{
-				Name:      name,
-				FilePath: "",
+				Name:       name,
+				FilePath:   "",
 				StartLine:  0,
-				EndLine:   0,
+				EndLine:    0,
 				SourceCode: "",
 			}
 			out = append(out, *def)
@@ -6817,8 +6804,8 @@ func findPotentiallyVulnerableReachableFunctionsQX(results *models.CodeqlAnalysi
 
 	return out, nil
 }
-func findPotentiallyVulnerableReachableFunctions(results *models.AnalysisResults, entryPoint string, maxDepth int) ([]models.FunctionDefinition, error){
-	
+func findPotentiallyVulnerableReachableFunctions(results *models.AnalysisResults, entryPoint string, maxDepth int) ([]models.FunctionDefinition, error) {
+
 	fmt.Printf("[DEBUG] findPotentiallyVulnerableReachableFunctions entryPoint: %s\n", entryPoint)
 
 	if results.ReachableFunctions == nil {
@@ -6829,7 +6816,7 @@ func findPotentiallyVulnerableReachableFunctions(results *models.AnalysisResults
 	// 2. Build the output slice, making sure we don’t duplicate entries.
 	seen := make(map[string]struct{}, len(reachableNames))
 	var out []models.FunctionDefinition
-	
+
 	for _, name := range reachableNames {
 		if _, ok := seen[name]; ok {
 			continue // already added
@@ -6849,7 +6836,7 @@ func findPotentiallyVulnerableReachableFunctions(results *models.AnalysisResults
 		if idx := strings.LastIndex(simple, "."); idx != -1 {
 			simple = simple[idx+1:]
 		}
-		found:= false
+		found := false
 		for fn, def := range results.Functions {
 			if def != nil && strings.HasSuffix(fn, "."+simple) {
 				out = append(out, *def)
@@ -6878,10 +6865,10 @@ func findPotentiallyVulnerableReachableFunctions(results *models.AnalysisResults
 		// it's possible the reachable function not in results.Functions duo to BC errors
 		if !found {
 			def := &models.FunctionDefinition{
-				Name:      name,
-				FilePath: "",
+				Name:       name,
+				FilePath:   "",
 				StartLine:  0,
-				EndLine:   0,
+				EndLine:    0,
 				SourceCode: "",
 			}
 			out = append(out, *def)
@@ -6891,12 +6878,12 @@ func findPotentiallyVulnerableReachableFunctions(results *models.AnalysisResults
 	return out, nil
 }
 func extractFuzzerName(entryPoint string) (string, error) {
-    base := filepath.Base(entryPoint) // e.g., "DataTreeFuzzer.java.fuzzerTestOneInput"
-    parts := strings.SplitN(base, ".", 2)
-    if len(parts) < 1 || parts[0] == "" {
-        return "", fmt.Errorf("could not extract fuzzer name from entryPoint: %s", entryPoint)
-    }
-    return parts[0], nil
+	base := filepath.Base(entryPoint) // e.g., "DataTreeFuzzer.java.fuzzerTestOneInput"
+	parts := strings.SplitN(base, ".", 2)
+	if len(parts) < 1 || parts[0] == "" {
+		return "", fmt.Errorf("could not extract fuzzer name from entryPoint: %s", entryPoint)
+	}
+	return parts[0], nil
 }
 func getPathsForTargetFunctionsQX(entryPoint, projectDir string, results *models.CodeqlAnalysisResults, targetFunctions *[]models.TargetFunction) []models.CallPath {
 
@@ -6911,7 +6898,6 @@ func getPathsForTargetFunctionsQX(entryPoint, projectDir string, results *models
 	}
 
 	// fmt.Println("Available fuzzer names:", reflect.ValueOf(results.Paths).MapKeys())
-
 
 	// fmt.Printf("entryPoint: '%s'\n", entryPoint)
 	for _, tf := range *targetFunctions {
@@ -6953,14 +6939,14 @@ func getPathsForTargetFunctionsQX(entryPoint, projectDir string, results *models
 								body = extractFunctionBodyFromFile(filePath, funcDef.StartLine, funcDef.EndLine)
 							}
 						}
-						
+
 						// Create the node with all available information
 						node := models.CallPathNode{
-							Function:     funcDef.Name,
-							File:         funcDef.FilePath,
-							Line:         fmt.Sprintf("%d", funcDef.StartLine),
-							Body:         body,
-							IsModified:   isModified,
+							Function:   funcDef.Name,
+							File:       funcDef.FilePath,
+							Line:       fmt.Sprintf("%d", funcDef.StartLine),
+							Body:       body,
+							IsModified: isModified,
 						}
 						callPath.Nodes = append(callPath.Nodes, node)
 					}
@@ -6977,7 +6963,7 @@ func getPathsForTargetFunctionsQX(entryPoint, projectDir string, results *models
 			}
 		}
 
-		//save to reachable functions 
+		//save to reachable functions
 		results.ReachableFunctions[fuzzerName] = reachable
 
 	}
@@ -6989,34 +6975,33 @@ func getPathsForTargetFunctionsQX(entryPoint, projectDir string, results *models
 
 func EngineMainQueryQX(request models.AnalysisRequest, results *models.CodeqlAnalysisResults) ([]models.CallPath, error) {
 	var targetFunctions []models.TargetFunction
-		// Extract all target functions with their start lines
-		for filePath, functions := range request.TargetFunctions {
-			for _, funcInfo := range functions {
-				targetFunctions = append(targetFunctions, models.TargetFunction{
-					FilePath:     filePath,
-					FunctionName: funcInfo.Name,
-					StartLine:    funcInfo.StartLine,
-				})
-			}
+	// Extract all target functions with their start lines
+	for filePath, functions := range request.TargetFunctions {
+		for _, funcInfo := range functions {
+			targetFunctions = append(targetFunctions, models.TargetFunction{
+				FilePath:     filePath,
+				FunctionName: funcInfo.Name,
+				StartLine:    funcInfo.StartLine,
+			})
 		}
-		projectDir := path.Join(WORK_DIR, request.TaskID, request.Focus)
-		projectDir = request.ProjectSourceDir
-		fuzzerSourcePath := normaliseAnalysisPath(request.FuzzerSourcePath)
-		
+	}
+	projectDir := path.Join(WORK_DIR, request.TaskID, request.Focus)
+	projectDir = request.ProjectSourceDir
+	fuzzerSourcePath := normaliseAnalysisPath(request.FuzzerSourcePath)
 
-		var entryPoint string
-		if strings.HasSuffix(fuzzerSourcePath, ".java") {
-			entryPoint = fuzzerSourcePath+"."+"fuzzerTestOneInput"
-		} else {
-			entryPoint = fuzzerSourcePath+"."+"LLVMFuzzerTestOneInput"
-		}
-		finalPaths := getPathsForTargetFunctionsQX(entryPoint, projectDir, results, &targetFunctions)
-		return finalPaths, nil
+	var entryPoint string
+	if strings.HasSuffix(fuzzerSourcePath, ".java") {
+		entryPoint = fuzzerSourcePath + "." + "fuzzerTestOneInput"
+	} else {
+		entryPoint = fuzzerSourcePath + "." + "LLVMFuzzerTestOneInput"
+	}
+	finalPaths := getPathsForTargetFunctionsQX(entryPoint, projectDir, results, &targetFunctions)
+	return finalPaths, nil
 }
 
 func EngineMainQuery(request models.AnalysisRequest, results *models.AnalysisResults) ([]models.CallPath, error) {
 
-    if results == nil || len(results.Paths) == 0 {
+	if results == nil || len(results.Paths) == 0 {
 		return EngineMain(request)
 	} else {
 		var targetFunctions []models.TargetFunction
@@ -7034,13 +7019,12 @@ func EngineMainQuery(request models.AnalysisRequest, results *models.AnalysisRes
 		projectDir = request.ProjectSourceDir
 
 		fuzzerSourcePath := normaliseAnalysisPath(request.FuzzerSourcePath)
-		
 
 		var entryPoint string
 		if strings.HasSuffix(fuzzerSourcePath, ".java") {
-			entryPoint = fuzzerSourcePath+"."+"fuzzerTestOneInput"
+			entryPoint = fuzzerSourcePath + "." + "fuzzerTestOneInput"
 		} else {
-			entryPoint = fuzzerSourcePath+"."+"LLVMFuzzerTestOneInput"
+			entryPoint = fuzzerSourcePath + "." + "LLVMFuzzerTestOneInput"
 		}
 		finalPaths := getPathsForTargetFunctions(entryPoint, projectDir, results, &targetFunctions)
 		return finalPaths, nil
@@ -7050,17 +7034,17 @@ func EngineMainQuery(request models.AnalysisRequest, results *models.AnalysisRes
 func EngineMain(request models.AnalysisRequest) ([]models.CallPath, error) {
 	var targetFunctions []models.TargetFunction
 	var targetFunctionNames []string
-    // Extract all target functions with their start lines
-    for filePath, functions := range request.TargetFunctions {
-        for _, funcInfo := range functions {
-            targetFunctions = append(targetFunctions, models.TargetFunction{
-                FilePath:     filePath,
-                FunctionName: funcInfo.Name,
-                StartLine:    funcInfo.StartLine,
-            })
+	// Extract all target functions with their start lines
+	for filePath, functions := range request.TargetFunctions {
+		for _, funcInfo := range functions {
+			targetFunctions = append(targetFunctions, models.TargetFunction{
+				FilePath:     filePath,
+				FunctionName: funcInfo.Name,
+				StartLine:    funcInfo.StartLine,
+			})
 			targetFunctionNames = append(targetFunctionNames, funcInfo.Name)
-        }
-    }
+		}
+	}
 	// normalize request.ProjectSourceDir
 	if strings.HasSuffix(request.ProjectSourceDir, "-undefined") || strings.HasSuffix(request.ProjectSourceDir, "-memory") {
 		request.ProjectSourceDir = request.ProjectSourceDir[:strings.LastIndex(request.ProjectSourceDir, "-")] + "-address"
@@ -7079,18 +7063,17 @@ func EngineMain(request models.AnalysisRequest) ([]models.CallPath, error) {
 		// on the real crs-analysis node
 		taskDir = path.Join(WORK_DIR, taskID)
 		projectDir = path.Join(WORK_DIR, taskID, projectFocusName)
-		
+
 		fuzzerSourcePath = normaliseAnalysisPath(request.FuzzerSourcePath)
-		
 
 		if !fileExists(request.Fuzzer) {
 			request.Fuzzer = normaliseAnalysisPath(request.Fuzzer)
 		}
 	}
 
-	outputJson :=  path.Join(taskDir, fmt.Sprintf("%s.json", projectFocusName))
+	outputJson := path.Join(taskDir, fmt.Sprintf("%s.json", projectFocusName))
 	fmt.Println("Analysis outputJson:", outputJson) // For debugging
-	
+
 	var language string
 	var entryPoint string
 
@@ -7103,9 +7086,9 @@ func EngineMain(request models.AnalysisRequest) ([]models.CallPath, error) {
 	} else {
 		language = "c"
 		//if request.Fuzzer.dot exist
-		callGraph_dot := fmt.Sprintf("%s.dot",request.Fuzzer)
-		if fileExists(callGraph_dot){
-			return GetCCallPaths(projectDir,request.Fuzzer,callGraph_dot,targetFunctionNames)
+		callGraph_dot := fmt.Sprintf("%s.dot", request.Fuzzer)
+		if fileExists(callGraph_dot) {
+			return GetCCallPaths(projectDir, request.Fuzzer, callGraph_dot, targetFunctionNames)
 		} else {
 			fmt.Println("request.Fuzzer callgraph does not exist:", callGraph_dot) // For debugging
 		}
@@ -7116,12 +7099,12 @@ func EngineMain(request models.AnalysisRequest) ([]models.CallPath, error) {
 	var javaFilesToAnalyze []string
 
 	if language == "java" {
-		entryPoint = fuzzerSourcePath+ "."+"fuzzerTestOneInput"
+		entryPoint = fuzzerSourcePath + "." + "fuzzerTestOneInput"
 		javaFilesToAnalyze = append(javaFilesToAnalyze, fuzzerSourcePath)
 
 	} else {
 		cFilesToAnalyze = append(cFilesToAnalyze, fuzzerSourcePath)
-		entryPoint = fuzzerSourcePath+"."+"LLVMFuzzerTestOneInput"
+		entryPoint = fuzzerSourcePath + "." + "LLVMFuzzerTestOneInput"
 	}
 
 	if true {
@@ -7129,12 +7112,12 @@ func EngineMain(request models.AnalysisRequest) ([]models.CallPath, error) {
 			if err != nil {
 				return err
 			}
-			
+
 			// Skip directories
 			if info.IsDir() {
 				return nil
 			}
-			
+
 			// Skip files in certain directories
 			if !shouldSkipFile(path) {
 				// Check file extension
@@ -7151,32 +7134,31 @@ func EngineMain(request models.AnalysisRequest) ([]models.CallPath, error) {
 					}
 				}
 			}
-			
+
 			return nil
 		})
-		
+
 		if err != nil {
 			fmt.Printf("Error finding files: %v\n", err)
 			var finalCCallPaths []models.CallPath
 			return finalCCallPaths, err
 		}
 	}
-	
-	fmt.Printf("Found %d C/C++ files and %d Java files to analyze\n", 
+
+	fmt.Printf("Found %d C/C++ files and %d Java files to analyze\n",
 		len(cFilesToAnalyze), len(javaFilesToAnalyze))
 
 	// Initialize results
 	results := models.AnalysisResults{
-		Functions: make(map[string]*models.FunctionDefinition),
-		CallGraph: &models.CallGraph{Calls: []models.MethodCall{}},
+		Functions:          make(map[string]*models.FunctionDefinition),
+		CallGraph:          &models.CallGraph{Calls: []models.MethodCall{}},
 		ReachableFunctions: make(map[string][]string),
-		Paths:     make(map[string][][]string),
+		Paths:              make(map[string][][]string),
 	}
-	
 
 	numWorkers := runtime.NumCPU()
 	startTime := time.Now()
-	fmt.Printf("Starting analysis with %d workers...\n", numWorkers) 
+	fmt.Printf("Starting analysis with %d workers...\n", numWorkers)
 
 	// Process files based on language
 	if language == "c" {
@@ -7189,7 +7171,7 @@ func EngineMain(request models.AnalysisRequest) ([]models.CallPath, error) {
 
 	// Find all paths from entry point
 	if len(targetFunctions) > 0 {
-		fmt.Printf("Finding paths from %s (max depth: %d)...\n", 
+		fmt.Printf("Finding paths from %s (max depth: %d)...\n",
 			entryPoint, maxDepth)
 
 		for _, targetFunc := range targetFunctions {
@@ -7198,9 +7180,9 @@ func EngineMain(request models.AnalysisRequest) ([]models.CallPath, error) {
 
 			// The findAllPaths function should handle resolving simple names to qualified names
 			// fmt.Printf("Finding paths to target: %s", targetFunc)
-	
+
 			paths := findAllPaths(&results, entryPoint, targetFunc, maxDepth)
-			
+
 			// Store paths keyed by the simple function name for now
 			// You might want a more robust key later (e.g., combining file and function)
 			if len(paths) > 0 {
@@ -7208,20 +7190,20 @@ func EngineMain(request models.AnalysisRequest) ([]models.CallPath, error) {
 				compositeKey := fmt.Sprintf("%s-%s", entryPoint, targetFuncName)
 				results.Paths[compositeKey] = paths
 				// fmt.Printf("Found %d paths to target function %s", len(paths), targetFunc)
-				
+
 				// Print a few example paths for this target
 				fmt.Println("  Example paths:")
 				for i := 0; i < min(3, len(paths)); i++ {
 					fmt.Printf("    Path %d: %s", i+1, strings.Join(paths[i], " -> "))
 				}
-			} 
+			}
 		}
 
 	} else {
 		// If no target specified, find reachable functions from entry point
 		reachable := findReachableFunctions(&results, entryPoint, maxDepth)
 		fmt.Printf("Found %d reachable functions from entry point %s\n", len(reachable), entryPoint)
-		
+
 		/* ───── C: save the reachable list ───── */
 		if results.ReachableFunctions == nil {
 			results.ReachableFunctions = make(map[string][]string)
@@ -7230,7 +7212,7 @@ func EngineMain(request models.AnalysisRequest) ([]models.CallPath, error) {
 
 		if false {
 			fmt.Println("\n=== REACHABLE FUNCTIONS FROM ENTRY POINT ===")
-			
+
 			// Group by file path for better readability
 			filePathToFuncs := make(map[string][]string)
 			for _, funcName := range reachable {
@@ -7243,14 +7225,14 @@ func EngineMain(request models.AnalysisRequest) ([]models.CallPath, error) {
 					filePathToFuncs[entryPoint] = append(filePathToFuncs[entryPoint], funcName)
 				}
 			}
-			
+
 			// Sort file paths for consistent output
 			filePaths := make([]string, 0, len(filePathToFuncs))
 			for filePath := range filePathToFuncs {
 				filePaths = append(filePaths, filePath)
 			}
 			sort.Strings(filePaths)
-			
+
 			// Print functions grouped by file
 			for _, filePath := range filePaths {
 				funcs := filePathToFuncs[filePath]
@@ -7266,7 +7248,7 @@ func EngineMain(request models.AnalysisRequest) ([]models.CallPath, error) {
 					fmt.Printf("  - %s%s\n", funcName, pathInfo)
 				}
 			}
-			
+
 			fmt.Println("\n=== END REACHABLE FUNCTIONS ===")
 
 		}
@@ -7279,44 +7261,44 @@ func EngineMain(request models.AnalysisRequest) ([]models.CallPath, error) {
 			}
 		}
 	}
-	
+
 	// Write results to JSON file
 	jsonData, err := json.MarshalIndent(results, "", "  ")
 	if err != nil {
 		fmt.Printf("Error marshaling JSON: %v\n", err)
 		os.Exit(1)
 	}
-	
+
 	err = os.WriteFile(outputJson, jsonData, 0644)
 	if err != nil {
 		fmt.Printf("Error writing JSON file: %v\n", err)
 		os.Exit(1)
 	}
-	
-	fmt.Printf("Analysis completed in %v. Results written to %s\n", 
+
+	fmt.Printf("Analysis completed in %v. Results written to %s\n",
 		time.Since(startTime), outputJson)
-	
+
 	finalPaths := getPathsForTargetFunctions(entryPoint, projectDir, &results, &targetFunctions)
 	return finalPaths, nil
 }
 
 type FunctionInfo struct {
-	Name        string `json:"name"`
-	MangledName string `json:"mangledName"`
-	File        string `json:"file"`
-	Line        json.Number `json:"line"`        // Use json.Number for all numeric fields
-	StartLine   json.Number `json:"startLine"`   // This allows parsing both strings and numbers
+	Name        string      `json:"name"`
+	MangledName string      `json:"mangledName"`
+	File        string      `json:"file"`
+	Line        json.Number `json:"line"`      // Use json.Number for all numeric fields
+	StartLine   json.Number `json:"startLine"` // This allows parsing both strings and numbers
 	ScopeLine   json.Number `json:"scopeLine"`
 	EndLine     json.Number `json:"endLine"`
 }
 type FunctionMetadata struct {
-	Functions     []FunctionInfo `json:"functions"`
-	TotalFunctions int           `json:"totalFunctions"`
-	InputFiles    []string       `json:"inputFiles"`
+	Functions      []FunctionInfo `json:"functions"`
+	TotalFunctions int            `json:"totalFunctions"`
+	InputFiles     []string       `json:"inputFiles"`
 }
 
 // GetCCallPathsParallel processes call paths for multiple target functions in parallel.
-func GetCCallPathsParallel(projectDir, fuzzerPath, callGraph_dot string, entryPoint string, targetFunctionNames []string,  results *models.AnalysisResults, resultsMu *sync.Mutex) error {
+func GetCCallPathsParallel(projectDir, fuzzerPath, callGraph_dot string, entryPoint string, targetFunctionNames []string, results *models.AnalysisResults, resultsMu *sync.Mutex) error {
 
 	fuzzerDir := filepath.Dir(fuzzerPath)
 	fuzzerBase := filepath.Base(fuzzerPath)
@@ -7349,7 +7331,7 @@ func GetCCallPathsParallel(projectDir, fuzzerPath, callGraph_dot string, entryPo
 			if fileExists(fullPath) {
 				funcInfo.File = fullPath
 			} else {
-				baseName := filepath.Base(originalFile) 
+				baseName := filepath.Base(originalFile)
 				cachedPath, foundInCache := filePathCache[baseName]
 				if foundInCache {
 					if cachedPath != "" { // Found a valid path previously
@@ -7389,20 +7371,20 @@ func GetCCallPathsParallel(projectDir, fuzzerPath, callGraph_dot string, entryPo
 	}
 
 	if origN := len(targetFunctionNames); origN > 1000 {
-        rand.Seed(time.Now().UnixNano())
-        rand.Shuffle(origN, func(i, j int) {
-            targetFunctionNames[i], targetFunctionNames[j] =
-                targetFunctionNames[j], targetFunctionNames[i]
-        })
-        targetFunctionNames = targetFunctionNames[:1000]
-        log.Printf("[GetCCallPathsParallel] Down-sampled functions from %d to %d",
-                   origN, len(targetFunctionNames))
-    }
-	
-    maxConcurrent := runtime.NumCPU() * 2 / 3  // Adjust based on your system capabilities
-    if maxConcurrent < 2 {
-        maxConcurrent = 1  
-    }
+		rand.Seed(time.Now().UnixNano())
+		rand.Shuffle(origN, func(i, j int) {
+			targetFunctionNames[i], targetFunctionNames[j] =
+				targetFunctionNames[j], targetFunctionNames[i]
+		})
+		targetFunctionNames = targetFunctionNames[:1000]
+		log.Printf("[GetCCallPathsParallel] Down-sampled functions from %d to %d",
+			origN, len(targetFunctionNames))
+	}
+
+	maxConcurrent := runtime.NumCPU() * 2 / 3 // Adjust based on your system capabilities
+	if maxConcurrent < 2 {
+		maxConcurrent = 1
+	}
 
 	log.Printf("[GetCCallPathsParallel] maxConcurrent: %d #targetFunctions %d", maxConcurrent, len(targetFunctionNames))
 
@@ -7495,7 +7477,6 @@ func GetCCallPathsParallel(projectDir, fuzzerPath, callGraph_dot string, entryPo
 					}
 				}
 
-
 				// Convert to [][]string and merge FunctionDefinitions into results
 				paths := extractPaths(results, resultsMu, targetCCallPaths)
 
@@ -7509,7 +7490,6 @@ func GetCCallPathsParallel(projectDir, fuzzerPath, callGraph_dot string, entryPo
 
 	wg.Wait()
 
-
 	return nil
 }
 
@@ -7519,7 +7499,7 @@ func GetCCallPaths(projectDir, fuzzerPath string, callGraph_dot string, targetFu
 	fuzzerDir := filepath.Dir(fuzzerPath)
 	fuzzerBase := filepath.Base(fuzzerPath)
 	// Load the function metadata
-	functionMetadataFile := filepath.Join(fuzzerDir, fuzzerBase + "_function_metadata.json")
+	functionMetadataFile := filepath.Join(fuzzerDir, fuzzerBase+"_function_metadata.json")
 	functionMetadataData, err := os.ReadFile(functionMetadataFile)
 	if err != nil {
 		return finalCCallPaths, fmt.Errorf("Failed to read function metadata file %s: %v", functionMetadataFile, err)
@@ -7531,7 +7511,7 @@ func GetCCallPaths(projectDir, fuzzerPath string, callGraph_dot string, targetFu
 	if err := decoder.Decode(&functionMetadata); err != nil {
 		return finalCCallPaths, fmt.Errorf("Failed to parse function metadata JSON %s: %v", functionMetadataFile, err)
 	}
-	
+
 	// Then use functionMetadataWrapper.Functions instead of functionMetadata
 	functionMap := make(map[string]FunctionInfo)
 	for _, funcInfo := range functionMetadata.Functions {
@@ -7584,7 +7564,7 @@ func GetCCallPaths(projectDir, fuzzerPath string, callGraph_dot string, targetFu
 		testCmd := exec.Command("python3", "/app/strategyx/jeff/parse_callgraph.py", callGraph_dot, targetFuncName)
 		testCmd.Stdout = &stdout
 		testCmd.Stderr = &stderr
-		
+
 		// Run the command
 		if err := runWithTimeout(testCmd, 5*time.Minute); err != nil {
 			log.Printf("Python script error: %v", err)
@@ -7595,7 +7575,7 @@ func GetCCallPaths(projectDir, fuzzerPath string, callGraph_dot string, targetFu
 			log.Printf("Successfully ran call path analysis for fuzzer: %s targetFuncName: %s", fuzzerPath, targetFuncName)
 			// log.Printf("Python script stdout: %s", stdout.String())
 			//load json from fuzzerDir/targetFuncName_callpaths.json
-			callPathsFile := filepath.Join(fuzzerDir, targetFuncName + "_callpaths.json")
+			callPathsFile := filepath.Join(fuzzerDir, targetFuncName+"_callpaths.json")
 			callPathsData, err := os.ReadFile(callPathsFile)
 			if err != nil {
 				// fmt.Printf("Failed to read call paths file %s: %v", callPathsFile, err)
@@ -7631,9 +7611,9 @@ func GetCCallPaths(projectDir, fuzzerPath string, callGraph_dot string, targetFu
 						fmt.Printf("Skip functions we don't have info for funcName %s targetFuncName: %s\n", funcName, targetFuncName)
 						continue
 					}
-					
+
 					isModified := (funcName == targetFuncName)
-					
+
 					// Extract the source code for this function
 					body := ""
 					if funcInfo.File != "" && fileExists(funcInfo.File) {
@@ -7643,14 +7623,14 @@ func GetCCallPaths(projectDir, fuzzerPath string, callGraph_dot string, targetFu
 					} else {
 						fmt.Printf("[DEBUG] GetCCallPaths File missing or does not exist for function %s: %s\n", funcName, funcInfo.File)
 					}
-					
+
 					// Create the node with all available information
 					node := models.CallPathNode{
 						Function:   funcName,
 						File:       funcInfo.File,
 						Line:       funcInfo.Line.String(),
-						StartLine:     funcInfo.StartLine.String(),
-						EndLine:       funcInfo.EndLine.String(),
+						StartLine:  funcInfo.StartLine.String(),
+						EndLine:    funcInfo.EndLine.String(),
 						Body:       body,
 						IsModified: isModified,
 					}
@@ -7679,12 +7659,12 @@ func getPathsForTargetFunctions(entryPoint, projectDir string, results *models.A
 	// fmt.Printf("entryPoint: '%s'\n", entryPoint)
 	for _, tf := range *targetFunctions {
 
-        // Use only the simple method name (last token after '.')
-        simpleName := tf.FunctionName
-        if idx := strings.LastIndex(simpleName, "."); idx != -1 {
-            simpleName = simpleName[idx+1:]
-        }
-		
+		// Use only the simple method name (last token after '.')
+		simpleName := tf.FunctionName
+		if idx := strings.LastIndex(simpleName, "."); idx != -1 {
+			simpleName = simpleName[idx+1:]
+		}
+
 		targetFullPath := fmt.Sprintf("%s/%s.%s", projectDir, tf.FilePath, simpleName)
 		// fmt.Printf("tf.FunctionName: '%s'\n", tf.FunctionName)
 		// fmt.Printf("targetFullPath: '%s'\n", targetFullPath)
@@ -7720,14 +7700,14 @@ func getPathsForTargetFunctions(entryPoint, projectDir string, results *models.A
 						body = extractFunctionBodyFromFile(filePath, funcDef.StartLine, funcDef.EndLine)
 					}
 				}
-				
+
 				// Create the node with all available information
 				node := models.CallPathNode{
-					Function:     funcDef.Name,
-					File:         funcDef.FilePath,
-					Line:         fmt.Sprintf("%d", funcDef.StartLine),
-					Body:         body,
-					IsModified:   isModified,
+					Function:   funcDef.Name,
+					File:       funcDef.FilePath,
+					Line:       fmt.Sprintf("%d", funcDef.StartLine),
+					Body:       body,
+					IsModified: isModified,
 				}
 				callPath.Nodes = append(callPath.Nodes, node)
 			}
@@ -7748,34 +7728,34 @@ func getPathsForTargetFunctions(entryPoint, projectDir string, results *models.A
 	return finalPaths
 }
 func getSimpleFunctionName(fullName string) string {
-    if strings.Contains(fullName, ".") {
-        parts := strings.Split(fullName, ".")
-        return parts[len(parts)-1]
-    }
-    return fullName
+	if strings.Contains(fullName, ".") {
+		parts := strings.Split(fullName, ".")
+		return parts[len(parts)-1]
+	}
+	return fullName
 }
 
 func extractFunctionBodyFromFile(filePath string, startLine, endLine int) string {
 
-    if startLine <= 0 || endLine <= 0 || endLine < startLine {
-        return ""
-    }
-    
-    content, err := os.ReadFile(filePath)
-    if err != nil {
-        return ""
-    }
-    
-    lines := strings.Split(string(content), "\n")
-    if startLine > len(lines) {
-        return ""
-    }
-    
-    // Adjust for 0-based indexing
-    startLine = max(0, startLine-1)
-    endLine = min(len(lines), endLine)
-    
-    return strings.Join(lines[startLine:endLine], "\n")
+	if startLine <= 0 || endLine <= 0 || endLine < startLine {
+		return ""
+	}
+
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return ""
+	}
+
+	lines := strings.Split(string(content), "\n")
+	if startLine > len(lines) {
+		return ""
+	}
+
+	// Adjust for 0-based indexing
+	startLine = max(0, startLine-1)
+	endLine = min(len(lines), endLine)
+
+	return strings.Join(lines[startLine:endLine], "\n")
 }
 
 // processCFiles processes C/C++ files in parallel
@@ -7783,13 +7763,13 @@ func processCFiles(results *models.AnalysisResults, files []string, numWorkers i
 	var wg sync.WaitGroup
 	fileChan := make(chan string, len(files))
 	resultChan := make(chan map[string]*models.FunctionDefinition, len(files))
-	
+
 	// Start worker goroutines
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for filePath := range fileChan {				
+			for filePath := range fileChan {
 				functions, err := processCFile(filePath)
 				if err != nil {
 					fmt.Printf("Error processing %s: %v\n", filePath, err)
@@ -7799,19 +7779,19 @@ func processCFiles(results *models.AnalysisResults, files []string, numWorkers i
 			}
 		}()
 	}
-	
+
 	// Send files to workers
 	for _, file := range files {
 		fileChan <- file
 	}
 	close(fileChan)
-	
+
 	// Wait for all workers to finish
 	go func() {
 		wg.Wait()
 		close(resultChan)
 	}()
-	
+
 	// Collect results
 	for functions := range resultChan {
 		for name, def := range functions {
@@ -7819,7 +7799,7 @@ func processCFiles(results *models.AnalysisResults, files []string, numWorkers i
 			results.Functions[name] = def
 		}
 	}
-	
+
 	// Build call graph for C functions
 	buildCCallGraph(results)
 	// printCallGraph(results.CallGraph)
@@ -7832,34 +7812,34 @@ func processJavaFile(filePath string) (map[string]*models.FunctionDefinition, []
 	if err != nil {
 		return nil, nil, fmt.Errorf("error reading file: %v", err)
 	}
-	
+
 	sourceContent := string(content)
 	sourceLines := strings.Split(sourceContent, "\n")
-	
+
 	// Create input stream for ANTLR
 	input := antlr.NewInputStream(sourceContent)
-	
+
 	// Create lexer
 	lexer := java_parser.NewJavaLexer(input)
 	tokens := antlr.NewCommonTokenStream(lexer, 0)
-	
+
 	// Create parser
 	parser := java_parser.NewJavaParser(tokens)
-	
+
 	// Create error listener
 	errorListener := &ErrorListener{FilePath: filePath}
 	parser.RemoveErrorListeners()
 	parser.AddErrorListener(errorListener)
-	
+
 	// Parse the input
 	tree := parser.CompilationUnit()
-	
+
 	// Create visitor
 	visitor := NewJavaFunctionVisitor(filePath, sourceLines)
-	
+
 	// Walk the tree with our visitor
 	antlr.ParseTreeWalkerDefault.Walk(visitor, tree)
-	
+
 	return visitor.Functions, visitor.CallGraph.Calls, nil
 }
 
@@ -7869,11 +7849,11 @@ func stripComments(source string) string {
 	// Remove block comments (/* ... */)
 	blockCommentPattern := regexp.MustCompile(`/\*[\s\S]*?\*/`)
 	result := blockCommentPattern.ReplaceAllString(source, "")
-	
+
 	// Remove line comments (// ...)
 	lineCommentPattern := regexp.MustCompile(`//.*`)
 	result = lineCommentPattern.ReplaceAllString(result, "")
-	
+
 	return result
 }
 
@@ -7885,16 +7865,16 @@ func buildCCallGraph(results *models.AnalysisResults) {
 	// Simple regex-based approach to find function calls
 	// This is a simplified approach and might miss some calls or have false positives
 	callPattern := regexp.MustCompile(`\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(`)
-	
+
 	// Use a map to track unique calls
 	uniqueCalls := make(map[string]bool)
-	
+
 	// First, collect all function names that appear in the code
 	allFunctionNames := make(map[string]bool)
 	for funcName := range results.Functions {
 		allFunctionNames[funcName] = true
 	}
-	
+
 	// Scan all function bodies to find potential function calls
 	for callerName, callerDef := range results.Functions {
 		cleanedContent := stripComments(callerDef.SourceCode)
@@ -7910,13 +7890,13 @@ func buildCCallGraph(results *models.AnalysisResults) {
 				if calleeName == callerName || strings.HasSuffix(callerName, "."+calleeName) {
 					continue
 				}
-				
+
 				// Add to the set of all function names
 				allFunctionNames[calleeName] = true
 			}
 		}
 	}
-	
+
 	// Now build the call graph, including calls to functions not in our original set
 	for callerName, callerDef := range results.Functions {
 
@@ -7926,7 +7906,7 @@ func buildCCallGraph(results *models.AnalysisResults) {
 		matches := callPattern.FindAllStringSubmatch(cleanedContent, -1)
 		// Track unique callees for this caller
 		callerCallees := make(map[string]bool)
-		
+
 		for _, match := range matches {
 			if len(match) > 1 {
 				calleeName := match[1]
@@ -7935,21 +7915,21 @@ func buildCCallGraph(results *models.AnalysisResults) {
 				if calleeName == callerName || strings.HasSuffix(callerName, "."+calleeName) {
 					continue
 				}
-				
+
 				// Skip common C keywords and constructs that might be mistaken for function calls
 				if isCommonCKeyword(calleeName) {
 					continue
 				}
 
-						// Create a unique key for this caller-callee pair
-		callKey := callerName + " -> " + calleeName
+				// Create a unique key for this caller-callee pair
+				callKey := callerName + " -> " + calleeName
 
-		// fmt.Printf("callKey '%s'\n", callKey)
+				// fmt.Printf("callKey '%s'\n", callKey)
 
 				// Only add if we haven't seen this call before
 				if !callerCallees[calleeName] {
 					callerCallees[calleeName] = true
-					
+
 					// Also check if we've seen this exact call before (for duplicate file paths)
 					if !uniqueCalls[callKey] {
 						uniqueCalls[callKey] = true
@@ -7958,13 +7938,13 @@ func buildCCallGraph(results *models.AnalysisResults) {
 							Caller: callerName,
 							Callee: calleeName,
 						})
-						
+
 					}
 				}
 			}
 		}
 	}
-	
+
 	fmt.Printf("Built call graph with %d calls\n", len(results.CallGraph.Calls))
 }
 
@@ -7980,7 +7960,7 @@ func isCommonCKeyword(s string) bool {
 		"sizeof":  true,
 		"typedef": true,
 	}
-	
+
 	return keywords[s]
 }
 
@@ -7992,14 +7972,14 @@ func buildJavaCallGraph(results *models.AnalysisResults, javaFiles []string, num
 		functions map[string]*models.FunctionDefinition
 		calls     []models.MethodCall
 	}, len(javaFiles))
-	
+
 	// Start worker goroutines to process files in parallel
 	for i := 0; i < numWorkers; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for filePath := range fileChan {
-				
+
 				// fmt.Printf("processJavaFile: %s", filePath)
 
 				functions, calls, err := processJavaFile(filePath)
@@ -8014,19 +7994,19 @@ func buildJavaCallGraph(results *models.AnalysisResults, javaFiles []string, num
 			}
 		}()
 	}
-	
+
 	// Send files to workers
 	for _, file := range javaFiles {
 		fileChan <- file
 	}
 	close(fileChan)
-	
+
 	// Wait for all workers to finish
 	go func() {
 		wg.Wait()
 		close(resultChan)
 	}()
-	
+
 	// Collect initial function definitions and calls
 	for result := range resultChan {
 		for name, def := range result.functions {
@@ -8035,14 +8015,14 @@ func buildJavaCallGraph(results *models.AnalysisResults, javaFiles []string, num
 		}
 		results.CallGraph.Calls = append(results.CallGraph.Calls, result.calls...)
 	}
-	
+
 	// Deduplicate Caller→Callee pairs
 	callSeen := make(map[string]struct{}, len(results.CallGraph.Calls))
-	unique   := make([]models.MethodCall, 0, len(results.CallGraph.Calls))
+	unique := make([]models.MethodCall, 0, len(results.CallGraph.Calls))
 
 	for _, c := range results.CallGraph.Calls {
 		// Skip set/get for Java
-		if strings.HasPrefix(c.Callee,"set") || strings.HasPrefix(c.Callee,"get") {
+		if strings.HasPrefix(c.Callee, "set") || strings.HasPrefix(c.Callee, "get") {
 			continue
 		}
 		key := c.Caller + "->" + c.Callee
@@ -8055,185 +8035,185 @@ func buildJavaCallGraph(results *models.AnalysisResults, javaFiles []string, num
 
 	// After collecting all functions, enhance the call graph with more detailed analysis
 	enhanceJavaCallGraph(results)
-	
+
 	fmt.Printf("Built Java call graph with %d calls\n", len(results.CallGraph.Calls))
 }
 
 func enhanceJavaCallGraph(results *models.AnalysisResults) {
-    // Use a map to track unique calls to avoid duplicates
-    uniqueCalls := make(map[string]bool)
-    
-    // Add all existing calls to the unique calls map
-    for _, call := range results.CallGraph.Calls {
-        callKey := call.Caller + " -> " + call.Callee
-        uniqueCalls[callKey] = true
-    }
-    
-    // Regular expressions to find method calls
-    directMethodCallPattern := regexp.MustCompile(`\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(`)
-    objectMethodCallPattern := regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\(`)
-    
-    // Scan all function bodies to find potential method calls
-    for callerName, callerDef := range results.Functions {
-        // Skip non-Java functions or functions without source code
-        if !strings.HasSuffix(callerDef.FilePath, ".java") || callerDef.SourceCode == "" {
-            continue
-        }
-        
-        // Clean up the source code by removing comments
-        cleanedContent := stripComments(callerDef.SourceCode)
-        
-        // Track unique callees for this caller
-        callerCallees := make(map[string]bool)
-        
-        // Process direct method calls (no object prefix)
-        directMatches := directMethodCallPattern.FindAllStringSubmatch(cleanedContent, -1)
-        for _, match := range directMatches {
-            if len(match) > 1 {
-                methodName := match[1]
-                
-                // Skip if it's a common keyword or the caller itself
-                if isCommonJavaKeyword(methodName) || methodName == callerName {
-                    continue
-                }
-				// Skip set/get for Java
-				if strings.HasPrefix(methodName,"set") || strings.HasPrefix(methodName,"get") {
+	// Use a map to track unique calls to avoid duplicates
+	uniqueCalls := make(map[string]bool)
+
+	// Add all existing calls to the unique calls map
+	for _, call := range results.CallGraph.Calls {
+		callKey := call.Caller + " -> " + call.Callee
+		uniqueCalls[callKey] = true
+	}
+
+	// Regular expressions to find method calls
+	directMethodCallPattern := regexp.MustCompile(`\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(`)
+	objectMethodCallPattern := regexp.MustCompile(`([a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)*)\s*\.\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\(`)
+
+	// Scan all function bodies to find potential method calls
+	for callerName, callerDef := range results.Functions {
+		// Skip non-Java functions or functions without source code
+		if !strings.HasSuffix(callerDef.FilePath, ".java") || callerDef.SourceCode == "" {
+			continue
+		}
+
+		// Clean up the source code by removing comments
+		cleanedContent := stripComments(callerDef.SourceCode)
+
+		// Track unique callees for this caller
+		callerCallees := make(map[string]bool)
+
+		// Process direct method calls (no object prefix)
+		directMatches := directMethodCallPattern.FindAllStringSubmatch(cleanedContent, -1)
+		for _, match := range directMatches {
+			if len(match) > 1 {
+				methodName := match[1]
+
+				// Skip if it's a common keyword or the caller itself
+				if isCommonJavaKeyword(methodName) || methodName == callerName {
 					continue
 				}
-                
-                // Add as a potential callee
-                calleeName := methodName
-				if strings.HasSuffix(calleeName, "LLVMFuzzerTestOneInput") || strings.HasSuffix(calleeName,"fuzzerTestOneInput") {
-					continue 
+				// Skip set/get for Java
+				if strings.HasPrefix(methodName, "set") || strings.HasPrefix(methodName, "get") {
+					continue
 				}
 
-                callKey := callerName + " -> " + calleeName
-                
-                if !callerCallees[calleeName] && !uniqueCalls[callKey] {
-                    callerCallees[calleeName] = true
-                    uniqueCalls[callKey] = true
-                    results.CallGraph.Calls = append(results.CallGraph.Calls, models.MethodCall{
-                        Caller: callerName,
-                        Callee: calleeName,
-                    })
-                }
-            }
-        }
-        
-        // Process object method calls (object.method)
-        objectMatches := objectMethodCallPattern.FindAllStringSubmatch(cleanedContent, -1)
-        for _, match := range objectMatches {
-            if len(match) > 2 {
-                objectPath := match[1] // Can be simple or complex: "x" or "a.b.c"
-                methodName := match[2]
-                
-                // Skip common Java keywords and constructs
-                if isCommonJavaKeyword(methodName) {
-                    continue
-                }
-                
-                // Handle enum constants: Direction.RECEIVED should not be seen as a method call
-                isEnumAccess := false
-                enumPattern := regexp.MustCompile(`[A-Z][A-Z_0-9]*\.[A-Z][A-Z_0-9]*`)
-                if enumPattern.MatchString(objectPath + "." + methodName) {
-                    isEnumAccess = true
-                }
-                
-                if !isEnumAccess {
-                    // Try to resolve qualified method name
-                    for funcName := range results.Functions {
-                        if strings.HasSuffix(funcName, "."+methodName) {
-                            calleeName := funcName
-                            
-                            // Skip if calling itself
-                            if calleeName == callerName {
-                                continue
-                            }
-                            
-							if strings.HasSuffix(calleeName, "LLVMFuzzerTestOneInput") || strings.HasSuffix(calleeName,"fuzzerTestOneInput") {
-								continue 
+				// Add as a potential callee
+				calleeName := methodName
+				if strings.HasSuffix(calleeName, "LLVMFuzzerTestOneInput") || strings.HasSuffix(calleeName, "fuzzerTestOneInput") {
+					continue
+				}
+
+				callKey := callerName + " -> " + calleeName
+
+				if !callerCallees[calleeName] && !uniqueCalls[callKey] {
+					callerCallees[calleeName] = true
+					uniqueCalls[callKey] = true
+					results.CallGraph.Calls = append(results.CallGraph.Calls, models.MethodCall{
+						Caller: callerName,
+						Callee: calleeName,
+					})
+				}
+			}
+		}
+
+		// Process object method calls (object.method)
+		objectMatches := objectMethodCallPattern.FindAllStringSubmatch(cleanedContent, -1)
+		for _, match := range objectMatches {
+			if len(match) > 2 {
+				objectPath := match[1] // Can be simple or complex: "x" or "a.b.c"
+				methodName := match[2]
+
+				// Skip common Java keywords and constructs
+				if isCommonJavaKeyword(methodName) {
+					continue
+				}
+
+				// Handle enum constants: Direction.RECEIVED should not be seen as a method call
+				isEnumAccess := false
+				enumPattern := regexp.MustCompile(`[A-Z][A-Z_0-9]*\.[A-Z][A-Z_0-9]*`)
+				if enumPattern.MatchString(objectPath + "." + methodName) {
+					isEnumAccess = true
+				}
+
+				if !isEnumAccess {
+					// Try to resolve qualified method name
+					for funcName := range results.Functions {
+						if strings.HasSuffix(funcName, "."+methodName) {
+							calleeName := funcName
+
+							// Skip if calling itself
+							if calleeName == callerName {
+								continue
 							}
 
-                            callKey := callerName + " -> " + calleeName
-                            if !callerCallees[calleeName] && !uniqueCalls[callKey] {
-                                callerCallees[calleeName] = true
-                                uniqueCalls[callKey] = true
-                                results.CallGraph.Calls = append(results.CallGraph.Calls, models.MethodCall{
-                                    Caller: callerName,
-                                    Callee: calleeName,
-                                })
-                            }
-                        }
-                    }
-                    
-                    // Also add the simple method name as a fallback
-                    calleeName := methodName
-                    callKey := callerName + " -> " + calleeName
-                    
-                    if !callerCallees[calleeName] && !uniqueCalls[callKey] {
-                        callerCallees[calleeName] = true
-                        uniqueCalls[callKey] = true
-                        results.CallGraph.Calls = append(results.CallGraph.Calls, models.MethodCall{
-                            Caller: callerName,
-                            Callee: calleeName,
-                        })
-                    }
-                }
-            }
-        }
-    }
+							if strings.HasSuffix(calleeName, "LLVMFuzzerTestOneInput") || strings.HasSuffix(calleeName, "fuzzerTestOneInput") {
+								continue
+							}
+
+							callKey := callerName + " -> " + calleeName
+							if !callerCallees[calleeName] && !uniqueCalls[callKey] {
+								callerCallees[calleeName] = true
+								uniqueCalls[callKey] = true
+								results.CallGraph.Calls = append(results.CallGraph.Calls, models.MethodCall{
+									Caller: callerName,
+									Callee: calleeName,
+								})
+							}
+						}
+					}
+
+					// Also add the simple method name as a fallback
+					calleeName := methodName
+					callKey := callerName + " -> " + calleeName
+
+					if !callerCallees[calleeName] && !uniqueCalls[callKey] {
+						callerCallees[calleeName] = true
+						uniqueCalls[callKey] = true
+						results.CallGraph.Calls = append(results.CallGraph.Calls, models.MethodCall{
+							Caller: callerName,
+							Callee: calleeName,
+						})
+					}
+				}
+			}
+		}
+	}
 }
 
 // isCommonJavaKeyword checks if a string is a common Java keyword or construct
 func isCommonJavaKeyword(word string) bool {
 	keywords := map[string]bool{
-		"if":       true,
-		"else":     true,
-		"for":      true,
-		"while":    true,
-		"do":       true,
-		"switch":   true,
-		"case":     true,
-		"break":    true,
-		"continue": true,
-		"return":   true,
-		"new":      true,
-		"this":     true,
-		"super":    true,
-		"class":    true,
-		"interface":true,
-		"enum":     true,
-		"import":   true,
-		"package":  true,
-		"public":   true,
-		"private":  true,
-		"protected":true,
-		"static":   true,
-		"final":    true,
-		"abstract": true,
-		"try":      true,
-		"catch":    true,
-		"finally":  true,
-		"throw":    true,
-		"throws":   true,
-		"true":     true,
-		"false":    true,
-		"null":     true,
-		"void":     true,
-		"int":      true,
-		"long":     true,
-		"float":    true,
-		"double":   true,
-		"boolean":  true,
-		"char":     true,
-		"byte":     true,
-		"short":    true,
-		"String":   true,
-		"System":   true, // Common class
-		"out":      true, // System.out is common
-		"err":      true, // System.err is common
-		"in":       true, // System.in is common
-		"equals":       true, // System.in is common
+		"if":        true,
+		"else":      true,
+		"for":       true,
+		"while":     true,
+		"do":        true,
+		"switch":    true,
+		"case":      true,
+		"break":     true,
+		"continue":  true,
+		"return":    true,
+		"new":       true,
+		"this":      true,
+		"super":     true,
+		"class":     true,
+		"interface": true,
+		"enum":      true,
+		"import":    true,
+		"package":   true,
+		"public":    true,
+		"private":   true,
+		"protected": true,
+		"static":    true,
+		"final":     true,
+		"abstract":  true,
+		"try":       true,
+		"catch":     true,
+		"finally":   true,
+		"throw":     true,
+		"throws":    true,
+		"true":      true,
+		"false":     true,
+		"null":      true,
+		"void":      true,
+		"int":       true,
+		"long":      true,
+		"float":     true,
+		"double":    true,
+		"boolean":   true,
+		"char":      true,
+		"byte":      true,
+		"short":     true,
+		"String":    true,
+		"System":    true, // Common class
+		"out":       true, // System.out is common
+		"err":       true, // System.err is common
+		"in":        true, // System.in is common
+		"equals":    true, // System.in is common
 	}
 	return keywords[word]
 }
@@ -8241,13 +8221,13 @@ func isCommonJavaKeyword(word string) bool {
 // findAllPaths finds all paths from source to target in the call graph
 func findAllPaths0(results *models.AnalysisResults, fullyQualifiedSource, target string, maxDepth int) [][]string {
 	graph := results.CallGraph
-	
+
 	fmt.Printf("\nDEBUG: Finding paths from '%s' to '%s' (max depth: %d)\n", fullyQualifiedSource, target, maxDepth)
-	
+
 	// Build a mapping from simple function names to their fully qualified versions
 	simpleToQualified := make(map[string][]string)
 	qualifiedToSimple := make(map[string]string)
-	
+
 	// First populate from Functions map
 	for funcName := range results.Functions {
 		if strings.Contains(funcName, ".") {
@@ -8255,7 +8235,7 @@ func findAllPaths0(results *models.AnalysisResults, fullyQualifiedSource, target
 			simpleName := parts[len(parts)-1]
 			simpleToQualified[simpleName] = append(simpleToQualified[simpleName], funcName)
 			qualifiedToSimple[funcName] = simpleName
-			
+
 			// fmt.Printf("funcName: '%s' simpleName: '%s'\n", funcName, simpleName)
 		} else {
 			// This is already a simple name
@@ -8265,7 +8245,7 @@ func findAllPaths0(results *models.AnalysisResults, fullyQualifiedSource, target
 			}
 		}
 	}
-	
+
 	// Check if source exists in the call graph
 	sourceFound := false
 	for _, call := range graph.Calls {
@@ -8277,7 +8257,7 @@ func findAllPaths0(results *models.AnalysisResults, fullyQualifiedSource, target
 	}
 	if !sourceFound {
 		fmt.Printf("DEBUG: Warning - Source '%s' not found as caller in call graph\n", fullyQualifiedSource)
-		
+
 		// Check if simple name of source exists
 		if strings.Contains(fullyQualifiedSource, ".") {
 			simpleName := qualifiedToSimple[fullyQualifiedSource]
@@ -8305,7 +8285,7 @@ func findAllPaths0(results *models.AnalysisResults, fullyQualifiedSource, target
 			adjList[call.Caller] = append(adjList[call.Caller], call.Callee)
 		}
 	}
-		
+
 	// Determine target nodes (could be simple or qualified)
 	targetNodes := []string{}
 	if !strings.Contains(target, ".") {
@@ -8316,33 +8296,33 @@ func findAllPaths0(results *models.AnalysisResults, fullyQualifiedSource, target
 			}
 		}
 	} else {
-		targetNodes = append(targetNodes, target) 
+		targetNodes = append(targetNodes, target)
 	}
-	
+
 	// Map to track unique paths (as strings) to eliminate duplicates
 	uniquePaths := make(map[string]bool)
-	
+
 	var paths [][]string
 	var dfs func(current string, path []string, depth int)
-	
+
 	visited := make(map[string]bool)
-	
+
 	dfs = func(current string, path []string, depth int) {
 		// Base case: reached maximum depth
 		if depth > maxDepth {
 			return
 		}
-		
+
 		// Base case: found target
 		for _, targetNode := range targetNodes {
 			if current == targetNode {
 				// Create a copy of the path
 				pathCopy := make([]string, len(path))
 				copy(pathCopy, path)
-				
+
 				// Convert path to a string representation for uniqueness check
 				pathStr := strings.Join(pathCopy, "|")
-				
+
 				// Only add the path if it's not a duplicate
 				if !uniquePaths[pathStr] {
 					uniquePaths[pathStr] = true
@@ -8351,10 +8331,10 @@ func findAllPaths0(results *models.AnalysisResults, fullyQualifiedSource, target
 				return
 			}
 		}
-		
+
 		// Mark as visited to avoid cycles
 		visited[current] = true
-		
+
 		// Explore neighbors
 		for _, neighbor := range adjList[current] {
 			if !visited[neighbor] {
@@ -8363,14 +8343,14 @@ func findAllPaths0(results *models.AnalysisResults, fullyQualifiedSource, target
 				path = path[:len(path)-1] // Backtrack
 			}
 		}
-		
+
 		// Unmark as visited when backtracking
 		visited[current] = false
 	}
-	
+
 	// Start DFS from fully qualified source
 	dfs(fullyQualifiedSource, []string{fullyQualifiedSource}, 0)
-	
+
 	// Add a secondary DFS from potential alternative source names if no paths found
 	// if len(paths) == 0 && strings.Contains(fullyQualifiedSource, ".") {
 	// 	// Try with other qualified sources that have the same simple name
@@ -8382,11 +8362,11 @@ func findAllPaths0(results *models.AnalysisResults, fullyQualifiedSource, target
 	// 		}
 	// 	}
 	// }
-	
+
 	// Apply additional deduplication based on function sequence
 	// This handles cases where equivalent paths may have slight differences in naming
 	dedupedPaths := deduplicateFunctionallyIdenticalPaths(paths, qualifiedToSimple)
-	
+
 	// Print the paths for debugging
 	// if len(dedupedPaths) > 0 {
 	// 	fmt.Printf("DEBUG: Found %d unique paths\n", len(dedupedPaths))
@@ -8401,7 +8381,7 @@ func findAllPaths0(results *models.AnalysisResults, fullyQualifiedSource, target
 	// } else {
 	// 	fmt.Println("DEBUG: No paths found")
 	// }
-		
+
 	return dedupedPaths
 }
 
@@ -8460,39 +8440,39 @@ func findAllPaths(results *models.AnalysisResults, fullyQualifiedSource, target 
 			return [][]string{cp}
 		}
 
-        key := memoKey{node, depth}
-        if cached, ok := memo[key]; ok {
-            // prepend current partial path to cached suffixes
-            out := make([][]string, 0, len(cached))
-            for _, suf := range cached {
-                // suf[0] is 'node', so skip it to avoid duplication
-                combined := append(append([]string(nil), path...), suf[1:]...)
-                out = append(out, combined)
-            }
-            return out
-        }
+		key := memoKey{node, depth}
+		if cached, ok := memo[key]; ok {
+			// prepend current partial path to cached suffixes
+			out := make([][]string, 0, len(cached))
+			for _, suf := range cached {
+				// suf[0] is 'node', so skip it to avoid duplication
+				combined := append(append([]string(nil), path...), suf[1:]...)
+				out = append(out, combined)
+			}
+			return out
+		}
 
-        var all [][]string
-        seen[node] = struct{}{}
+		var all [][]string
+		seen[node] = struct{}{}
 
-        for _, neigh := range adjList[node] {
-            if _, dup := seen[neigh]; dup {
-                continue // avoid cycles
-            }
-            path = append(path, neigh)
-            all = append(all, dfs(neigh, depth-1, path, seen)...)
-            path = path[:len(path)-1]
-        }
-        delete(seen, node)
+		for _, neigh := range adjList[node] {
+			if _, dup := seen[neigh]; dup {
+				continue // avoid cycles
+			}
+			path = append(path, neigh)
+			all = append(all, dfs(neigh, depth-1, path, seen)...)
+			path = path[:len(path)-1]
+		}
+		delete(seen, node)
 
-        // cache full suffix paths (each starts with ‘node’)
-        memoSuffixes := make([][]string, len(all))
-        prefixIdx := len(path) - 1 // index of current node within each full path
-        for i, full := range all {
-            memoSuffixes[i] = append([]string(nil), full[prefixIdx:]...)
-        }
-        memo[key] = memoSuffixes
-        return all
+		// cache full suffix paths (each starts with ‘node’)
+		memoSuffixes := make([][]string, len(all))
+		prefixIdx := len(path) - 1 // index of current node within each full path
+		for i, full := range all {
+			memoSuffixes[i] = append([]string(nil), full[prefixIdx:]...)
+		}
+		memo[key] = memoSuffixes
+		return all
 	}
 
 	paths := dfs(fullyQualifiedSource, maxDepth, []string{fullyQualifiedSource}, map[string]struct{}{})
@@ -8505,11 +8485,11 @@ func deduplicateFunctionallyIdenticalPaths(paths [][]string, qualifiedToSimple m
 	if len(paths) <= 1 {
 		return paths
 	}
-	
+
 	// Create a map to track functionally unique paths
 	uniqueSimplePaths := make(map[string]int) // Maps simple path string to index in original paths
 	var result [][]string
-	
+
 	for i, path := range paths {
 		// Convert path to simple names
 		simplePath := make([]string, len(path))
@@ -8521,27 +8501,27 @@ func deduplicateFunctionallyIdenticalPaths(paths [][]string, qualifiedToSimple m
 				simplePath[j] = node
 			}
 		}
-		
+
 		// Convert to string for uniqueness check
 		simplePathStr := strings.Join(simplePath, "|")
-		
+
 		// Check if we've seen this simple path before
 		if existingIndex, exists := uniqueSimplePaths[simplePathStr]; exists {
 			// We've seen this path before, check if we should prefer this one
 			// Preference criteria: shorter fully qualified names are better
 			// (they're usually more direct and readable)
-			
+
 			// Sum the length of all node names in both paths
 			existingPathLength := 0
 			for _, node := range paths[existingIndex] {
 				existingPathLength += len(node)
 			}
-			
+
 			currentPathLength := 0
 			for _, node := range path {
 				currentPathLength += len(node)
 			}
-			
+
 			// If current path has shorter names overall, replace the existing one
 			if currentPathLength < existingPathLength {
 				// Remove the existing path from results (will be replaced)
@@ -8553,7 +8533,7 @@ func deduplicateFunctionallyIdenticalPaths(paths [][]string, qualifiedToSimple m
 						break
 					}
 				}
-				
+
 				// Update the index for this simple path
 				uniqueSimplePaths[simplePathStr] = i
 				result = append(result, path)
@@ -8565,62 +8545,62 @@ func deduplicateFunctionallyIdenticalPaths(paths [][]string, qualifiedToSimple m
 			result = append(result, path)
 		}
 	}
-	
+
 	// fmt.Printf("DEBUG: Deduplicated from %d to %d paths\n", len(paths), len(result))
 	return result
 }
 
 // printCallGraph prints all the calls in the call graph for debugging
 func printCallGraph(graph *models.CallGraph) {
-    fmt.Println("\n=== CALL GRAPH ===")
-    
-    // Count calls per caller for better formatting
-    callerCounts := make(map[string]int)
-    for _, call := range graph.Calls {
-        callerCounts[call.Caller]++
-    }
-    
-    // Group calls by caller for more readable output
-    callerToCallees := make(map[string][]string)
-    for _, call := range graph.Calls {
-        callerToCallees[call.Caller] = append(callerToCallees[call.Caller], call.Callee)
-    }
-    
-    // Print in sorted order
-    callers := make([]string, 0, len(callerToCallees))
-    for caller := range callerToCallees {
-        callers = append(callers, caller)
-    }
-    sort.Strings(callers)
-    
-    for _, caller := range callers {
-        callees := callerToCallees[caller]
-        fmt.Printf("%s (%d calls):\n", caller, len(callees))
-        
-        // Sort callees for consistent output
-        sort.Strings(callees)
-        for _, callee := range callees {
-            fmt.Printf("  → %s\n", callee)
-        }
-        fmt.Println()
-    }
-    
-    fmt.Printf("Total: %d calls between %d functions\n", len(graph.Calls), len(callerToCallees))
-    fmt.Println("===================")
+	fmt.Println("\n=== CALL GRAPH ===")
+
+	// Count calls per caller for better formatting
+	callerCounts := make(map[string]int)
+	for _, call := range graph.Calls {
+		callerCounts[call.Caller]++
+	}
+
+	// Group calls by caller for more readable output
+	callerToCallees := make(map[string][]string)
+	for _, call := range graph.Calls {
+		callerToCallees[call.Caller] = append(callerToCallees[call.Caller], call.Callee)
+	}
+
+	// Print in sorted order
+	callers := make([]string, 0, len(callerToCallees))
+	for caller := range callerToCallees {
+		callers = append(callers, caller)
+	}
+	sort.Strings(callers)
+
+	for _, caller := range callers {
+		callees := callerToCallees[caller]
+		fmt.Printf("%s (%d calls):\n", caller, len(callees))
+
+		// Sort callees for consistent output
+		sort.Strings(callees)
+		for _, callee := range callees {
+			fmt.Printf("  → %s\n", callee)
+		}
+		fmt.Println()
+	}
+
+	fmt.Printf("Total: %d calls between %d functions\n", len(graph.Calls), len(callerToCallees))
+	fmt.Println("===================")
 }
 
 func findReachableFunctions(results *models.AnalysisResults, fullyQualifiedSource string, maxDepth int) []string {
-	graph := results.CallGraph	
-	
+	graph := results.CallGraph
+
 	// fmt.Printf("\nDEBUG: Finding reachable functions from '%s' (max depth: %d)\n", fullyQualifiedSource, maxDepth)
-	
+
 	// Check if the entry point exists in the call graph
 	entryPointExists := false
 	for _, call := range graph.Calls {
 		// fmt.Printf("call.Caller: %s\n", call.Caller)
 
 		if call.Caller == fullyQualifiedSource {
-			
+
 			entryPointExists = true
 			// fmt.Printf("DEBUG: Entry point '%s' found as caller in call graph\n", fullyQualifiedSource)
 			break
@@ -8629,8 +8609,7 @@ func findReachableFunctions(results *models.AnalysisResults, fullyQualifiedSourc
 	if !entryPointExists {
 		fmt.Printf("DEBUG: Warning - Entry point '%s' not found as caller in call graph\n", fullyQualifiedSource)
 	}
-	
-	
+
 	// Build a mapping from simple function names to their fully qualified versions
 	simpleToQualified := make(map[string][]string)
 	for funcName := range results.Functions {
@@ -8646,11 +8625,11 @@ func findReachableFunctions(results *models.AnalysisResults, fullyQualifiedSourc
 			}
 		}
 	}
-	
+
 	// Build adjacency list
 	adjList := make(map[string][]string)
 	for _, call := range graph.Calls {
-		
+
 		// Add the direct connection as it exists in the call graph
 		adjList[call.Caller] = append(adjList[call.Caller], call.Callee)
 
@@ -8662,27 +8641,27 @@ func findReachableFunctions(results *models.AnalysisResults, fullyQualifiedSourc
 		}
 
 	}
-	
+
 	// BFS to find reachable functions
 	visited := make(map[string]bool)
 	queue := []struct {
 		node  string
 		depth int
 	}{{fullyQualifiedSource, 0}}
-		
+
 	// Mark all starting points as visited
 	for _, item := range queue {
 		visited[item.node] = true
 	}
-	
+
 	for len(queue) > 0 {
 		current := queue[0]
 		queue = queue[1:]
-		
+
 		if current.depth >= maxDepth {
 			continue
 		}
-		
+
 		for _, neighbor := range adjList[current.node] {
 			if !visited[neighbor] {
 				visited[neighbor] = true
@@ -8693,43 +8672,44 @@ func findReachableFunctions(results *models.AnalysisResults, fullyQualifiedSourc
 			}
 		}
 	}
-	
+
 	// Convert visited map to slice
 	var reachable []string
 	for node := range visited {
-		if node != fullyQualifiedSource { 
+		if node != fullyQualifiedSource {
 			reachable = append(reachable, node)
 		}
 	}
-	
+
 	return reachable
 }
+
 // shouldSkipFile returns true if the file should be skipped
 func shouldSkipFile(filePath string) bool {
 	// List of directories to exclude
 	excludeDirs := []string{
-		"contrib",       // All contrib code (often has platform dependencies)
-		"libpng_build",  // Build artifacts
-		"/version/",          // Test code
-		"test/",          // Test code
-		"tests/",          // Test code
-		"/Test", 		// Test code
-		"/test", 		// Test code
-		"scripts",       // Build scripts
-		"arm",           // ARM-specific code
-		"intel",         // Intel-specific code
-		"mips",          // MIPS-specific code
-		"powerpc",       // PowerPC-specific code
-		"loongarch",     // LoongArch-specific code
+		"contrib",      // All contrib code (often has platform dependencies)
+		"libpng_build", // Build artifacts
+		"/version/",    // Test code
+		"test/",        // Test code
+		"tests/",       // Test code
+		"/Test",        // Test code
+		"/test",        // Test code
+		"scripts",      // Build scripts
+		"arm",          // ARM-specific code
+		"intel",        // Intel-specific code
+		"mips",         // MIPS-specific code
+		"powerpc",      // PowerPC-specific code
+		"loongarch",    // LoongArch-specific code
 	}
-	
+
 	// Check if the file is in an excluded directory
 	for _, dir := range excludeDirs {
 		if strings.Contains(filePath, dir) {
 			return true
 		}
 	}
-	
+
 	// Also skip files that are likely to cause issues
 	problematicFiles := []string{
 		"rpng2-win.c",
@@ -8738,13 +8718,13 @@ func shouldSkipFile(filePath string) bool {
 		"android-ndk.c",
 		"linux-auxv.c",
 	}
-	
+
 	for _, file := range problematicFiles {
 		if strings.HasSuffix(filePath, file) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
