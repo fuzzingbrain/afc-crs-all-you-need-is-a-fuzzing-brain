@@ -132,12 +132,21 @@ func handleReachable(c *gin.Context, service *AnalysisService) {
 	log.Printf("Received reachable functions analysis request for fuzzer: %s", request.FuzzerSourcePath)
 
 	task, ok := service.tasks[request.TaskID]
+	log.Printf("[/v1/reachable] task_id=%q focus=%q project_src_dir=%q fuzzer_path=%q fuzzer_source_path=%q target_functions=%d",
+		request.TaskID,
+		request.Focus,
+		request.ProjectSourceDir,
+		request.Fuzzer,
+		request.FuzzerSourcePath,
+		len(request.TargetFunctions),
+	)
 
 	var taskResult *models.AnalysisResults
 
 	if !ok || task == nil {
 		// for testing only: if json already exist
 		var err error
+		log.Printf("Calling TryLoadJsonResults")
 		taskResult, err = engine.TryLoadJsonResults(request.TaskID, request.Focus)
 		if err != nil {
 			// handle the error, e.g.:
