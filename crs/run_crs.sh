@@ -6,10 +6,10 @@ DATE=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="logs/${DATE}.log"
 
 # original dataset path
-ORIGINAL_DATASET="/crs-workdir/local-test-integration-delta-01"
+ORIGINAL_DATASET="../static-analysis/tmp_repo/local-test-sqlite3-full-01/"
 
 # create new workspace directory
-NEW_WORKSPACE="/crs-workdir/workspace_${DATE}"
+NEW_WORKSPACE="/crs-workdir/workspace_sqlite3_${DATE}"
 
 echo "Starting CRS local run at $(date)" | tee "$LOG_FILE"
 echo "Log file: $LOG_FILE" | tee -a "$LOG_FILE"
