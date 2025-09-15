@@ -35,3 +35,8 @@ cd crs
 cd crs
 go run ./cmd/local/main.go /crs-workdir/local-test-integration-delta-01/
 ```
+
+```
+cd crs
+go run ./cmd/local/main.go /crs-workdir/local-test-integration-delta-01/
+```

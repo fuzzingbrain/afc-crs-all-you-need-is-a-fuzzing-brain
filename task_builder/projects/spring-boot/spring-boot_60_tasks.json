@@ -1,0 +1,602 @@
+[
+  {
+    "id": 1,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "fd4f2b8af5337c3c7c6275be7e8ce538fc395ea1",
+    "challenge_repo_head_ref": "6207e41473d52ffa2075c9b7af1c267c2ea013e5",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 2,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "b1a072f423f905cc459d98406e5166e55dcb7a3f",
+    "challenge_repo_head_ref": "fd4f2b8af5337c3c7c6275be7e8ce538fc395ea1",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 3,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "e3d886e29c859072c54146dd944befc5ca43cde3",
+    "challenge_repo_head_ref": "b1a072f423f905cc459d98406e5166e55dcb7a3f",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 4,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "56e700211671f90589954a5b4e46505205f87e47",
+    "challenge_repo_head_ref": "e3d886e29c859072c54146dd944befc5ca43cde3",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 5,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "f4fce7caa75ae42f55f61d5f564136bb732a74d9",
+    "challenge_repo_head_ref": "56e700211671f90589954a5b4e46505205f87e47",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 6,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "4f2e2d16718aaca45a001825c4fbfe87a5836379",
+    "challenge_repo_head_ref": "f4fce7caa75ae42f55f61d5f564136bb732a74d9",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 7,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "aabc33476e852ac99ce13eaef4f65c81db7ee9c2",
+    "challenge_repo_head_ref": "4f2e2d16718aaca45a001825c4fbfe87a5836379",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 8,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "d8ff59c36e0742ffc23463c1c9f4b8fa0d0f7b13",
+    "challenge_repo_head_ref": "aabc33476e852ac99ce13eaef4f65c81db7ee9c2",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 9,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "67613c3ac05b6c82fb33e2b97362f4ba6501b216",
+    "challenge_repo_head_ref": "d8ff59c36e0742ffc23463c1c9f4b8fa0d0f7b13",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 10,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "6f86a16caa87ffd4337f3d06c533459ec7d6c69c",
+    "challenge_repo_head_ref": "67613c3ac05b6c82fb33e2b97362f4ba6501b216",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 11,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "8a10ec4b6faa6fcaf1629b63c325b6131d012792",
+    "challenge_repo_head_ref": "6f86a16caa87ffd4337f3d06c533459ec7d6c69c",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 12,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "144ddd6517ba66f9806af2a0b32340f30a99d7d6",
+    "challenge_repo_head_ref": "8a10ec4b6faa6fcaf1629b63c325b6131d012792",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 13,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "556d970435139ca0cbb2a3e48720b05a43f377da",
+    "challenge_repo_head_ref": "144ddd6517ba66f9806af2a0b32340f30a99d7d6",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 14,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "0b32cde654b5a52aab2c8cd34023e60df721f59c",
+    "challenge_repo_head_ref": "556d970435139ca0cbb2a3e48720b05a43f377da",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 15,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "ed507004afc24be7cb1244933383fc8eca28c486",
+    "challenge_repo_head_ref": "0b32cde654b5a52aab2c8cd34023e60df721f59c",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 16,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "6be4edbcc0e6281deefb39abcf3785966ef110f1",
+    "challenge_repo_head_ref": "ed507004afc24be7cb1244933383fc8eca28c486",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 17,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "0368edd30635a7cbef1db67229783424ee834661",
+    "challenge_repo_head_ref": "6be4edbcc0e6281deefb39abcf3785966ef110f1",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 18,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "593b977fddba7657370e17d9be072be41bcbabbb",
+    "challenge_repo_head_ref": "0368edd30635a7cbef1db67229783424ee834661",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 19,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "c76b1c30687b7f7c5c48e8a53ef39ec9ae1fd285",
+    "challenge_repo_head_ref": "593b977fddba7657370e17d9be072be41bcbabbb",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 20,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "7031c94ba9f2d2e4e29015f531fd03a0b3c30c47",
+    "challenge_repo_head_ref": "c76b1c30687b7f7c5c48e8a53ef39ec9ae1fd285",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 21,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "98cdb3aab9eb8dfc80d233ff0d53d096ca9db44b",
+    "challenge_repo_head_ref": "7031c94ba9f2d2e4e29015f531fd03a0b3c30c47",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 22,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "dddebef4b11beb2244c35c88959a613e980a0201",
+    "challenge_repo_head_ref": "98cdb3aab9eb8dfc80d233ff0d53d096ca9db44b",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 23,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "4104d08daeda34e2019c01707806ee8967819bbe",
+    "challenge_repo_head_ref": "dddebef4b11beb2244c35c88959a613e980a0201",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 24,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "54572d227b3096d934a0acc9ef651bd2f774cad5",
+    "challenge_repo_head_ref": "4104d08daeda34e2019c01707806ee8967819bbe",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 25,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "d9c06d3d5a5df2688801e3d2d613282a1da87aca",
+    "challenge_repo_head_ref": "54572d227b3096d934a0acc9ef651bd2f774cad5",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 26,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "9780b912633876c914c292c91d8cecb1072a51bc",
+    "challenge_repo_head_ref": "d9c06d3d5a5df2688801e3d2d613282a1da87aca",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 27,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "b5edbd80e957462adc6e550e3e9c8f6de237e86c",
+    "challenge_repo_head_ref": "9780b912633876c914c292c91d8cecb1072a51bc",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 28,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "447b83ef36044b6b83a1bc336d4ae40d851297ef",
+    "challenge_repo_head_ref": "b5edbd80e957462adc6e550e3e9c8f6de237e86c",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 29,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "e64839dc8b24f731f2d68756524e6956711148d5",
+    "challenge_repo_head_ref": "447b83ef36044b6b83a1bc336d4ae40d851297ef",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 30,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "303f15943fbfe4867afa5ddeadecbea8da4438a2",
+    "challenge_repo_head_ref": "e64839dc8b24f731f2d68756524e6956711148d5",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 31,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "4810c485193943582d3d517b5743b8ffb49e438f",
+    "challenge_repo_head_ref": "303f15943fbfe4867afa5ddeadecbea8da4438a2",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 32,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "984a3cd5b108efc1b5f8f907183483180f3fe722",
+    "challenge_repo_head_ref": "4810c485193943582d3d517b5743b8ffb49e438f",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 33,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "dc6fec6ed4a1e38807dd286cd0e31dc3282d12a1",
+    "challenge_repo_head_ref": "984a3cd5b108efc1b5f8f907183483180f3fe722",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 34,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "bcacae7e0cbbfaf2d536345aad141fb6c0b60fe9",
+    "challenge_repo_head_ref": "dc6fec6ed4a1e38807dd286cd0e31dc3282d12a1",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 35,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "426e5630bd961952b33f032ec0e812f0a853fab0",
+    "challenge_repo_head_ref": "bcacae7e0cbbfaf2d536345aad141fb6c0b60fe9",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 36,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "6911c1362d1821b0df0816b8dc1b70eca785067d",
+    "challenge_repo_head_ref": "426e5630bd961952b33f032ec0e812f0a853fab0",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 37,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "3bb34894c83dff80ee09e4e36cd93f4e8912efdc",
+    "challenge_repo_head_ref": "6911c1362d1821b0df0816b8dc1b70eca785067d",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 38,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "5417f7ac341e01119a7f50c878066a2ddd027f31",
+    "challenge_repo_head_ref": "3bb34894c83dff80ee09e4e36cd93f4e8912efdc",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 39,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "e9a7ec7da8f72616460f470c7dec12cf6bf0eea7",
+    "challenge_repo_head_ref": "5417f7ac341e01119a7f50c878066a2ddd027f31",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 40,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "4d8270084f9d6dcafffffdaaacc44f07db6b494e",
+    "challenge_repo_head_ref": "e9a7ec7da8f72616460f470c7dec12cf6bf0eea7",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 41,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "83b7d6e34be79ed8d521637609b37882823dbb95",
+    "challenge_repo_head_ref": "4d8270084f9d6dcafffffdaaacc44f07db6b494e",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 42,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "fa3d12e421f8145510b50aef8f6e316d2dc143ba",
+    "challenge_repo_head_ref": "83b7d6e34be79ed8d521637609b37882823dbb95",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 43,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "fd90e18cf99dec11c3b06bdc13d92c64400b64b6",
+    "challenge_repo_head_ref": "fa3d12e421f8145510b50aef8f6e316d2dc143ba",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 44,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "d2eca0176325dbe1d3a33f024a9aa55add413a3f",
+    "challenge_repo_head_ref": "fd90e18cf99dec11c3b06bdc13d92c64400b64b6",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 45,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "309940527893daec03c4ac5a6d12183ec29d51d1",
+    "challenge_repo_head_ref": "d2eca0176325dbe1d3a33f024a9aa55add413a3f",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 46,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "fef00c9f7fff11f87eb0e640c16baa11ef12ea32",
+    "challenge_repo_head_ref": "309940527893daec03c4ac5a6d12183ec29d51d1",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 47,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "d0629d65947d3e3435da24290b4efd61f65784f9",
+    "challenge_repo_head_ref": "fef00c9f7fff11f87eb0e640c16baa11ef12ea32",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 48,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "bd90d1266e36ad96c0f15a592278cac4b0ab8da2",
+    "challenge_repo_head_ref": "d0629d65947d3e3435da24290b4efd61f65784f9",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 49,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "e4ec422b3dd525796ecb1518b28f0e34fc80c669",
+    "challenge_repo_head_ref": "bd90d1266e36ad96c0f15a592278cac4b0ab8da2",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 50,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "5afbe5645001e1dc3b1c597312150567bc61cc2d",
+    "challenge_repo_head_ref": "e4ec422b3dd525796ecb1518b28f0e34fc80c669",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 51,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "d4795b8e5e1358107738340836061d05d62334a0",
+    "challenge_repo_head_ref": "5afbe5645001e1dc3b1c597312150567bc61cc2d",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 52,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "a396130c7b5203a8245540ede0177fbed2aed3d9",
+    "challenge_repo_head_ref": "d4795b8e5e1358107738340836061d05d62334a0",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 53,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "2bc0e4fbd84ffea9cbee28de42c3bbf713c9e936",
+    "challenge_repo_head_ref": "a396130c7b5203a8245540ede0177fbed2aed3d9",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 54,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "7b33888ad4258776f6593c9975afbc7d1679e1fe",
+    "challenge_repo_head_ref": "2bc0e4fbd84ffea9cbee28de42c3bbf713c9e936",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 55,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "a9314b4dcd9deb9f5f0379f633424f9fb8ae2598",
+    "challenge_repo_head_ref": "7b33888ad4258776f6593c9975afbc7d1679e1fe",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 56,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "0aac151e6319460db4a0eb2241246a179e5f1b96",
+    "challenge_repo_head_ref": "a9314b4dcd9deb9f5f0379f633424f9fb8ae2598",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 57,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "1e2ad8fa04343797b35aa313118c02e38bff5685",
+    "challenge_repo_head_ref": "0aac151e6319460db4a0eb2241246a179e5f1b96",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 58,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "15af6a737188fd96f94baa687152519a8139ae58",
+    "challenge_repo_head_ref": "1e2ad8fa04343797b35aa313118c02e38bff5685",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 59,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "06232756419462f7207174b110794f765e29541f",
+    "challenge_repo_head_ref": "15af6a737188fd96f94baa687152519a8139ae58",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  },
+  {
+    "id": 60,
+    "challenge_repo_url": "https://github.com/spring-projects/spring-boot.git",
+    "challenge_repo_base_ref": "239f384ac0893d151b89f204886874c6adb00001",
+    "challenge_repo_head_ref": "06232756419462f7207174b110794f765e29541f",
+    "fuzz_tooling_url": "git@github.com:OwenSanzas/fuzzing-brain-oss-fuzz.git",
+    "fuzz_tooling_ref": "34a63267342dbaebe65b41e2172f43273dceb0ff",
+    "fuzz_tooling_project_name": "spring-boot",
+    "duration": 720
+  }
+]
