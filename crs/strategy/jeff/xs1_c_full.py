@@ -87,13 +87,13 @@ def get_fallback_model(current_model, tried_models):
     """Get a fallback model that hasn't been tried yet"""
     # Define model fallback chains
     fallback_chains = {
-        GEMINI_MODEL_PRO_25: [CLAUDE_MODEL, CLAUDE_MODEL_35, OPENAI_MODEL_41, OPENAI_MODEL_O3],   
-        OPENAI_MODEL_41: [OPENAI_MODEL_O4_MINI, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25],   
+        GEMINI_MODEL_PRO_25: [CLAUDE_MODEL, CLAUDE_MODEL_35],   
+        OPENAI_MODEL_41: [GEMINI_MODEL_PRO_25],   
         OPENAI_MODEL: [GEMINI_MODEL_PRO_25, GEMINI_MODEL_FLASH, GEMINI_MODEL_FLASH_LITE],             
-        CLAUDE_MODEL: [CLAUDE_MODEL_SONNET_4,OPENAI_MODEL, CLAUDE_MODEL_35, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25],        
-        CLAUDE_MODEL_OPUS_4: [OPENAI_MODEL, CLAUDE_MODEL_35, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25],        
+        CLAUDE_MODEL: [CLAUDE_MODEL_SONNET_4, CLAUDE_MODEL_35, GEMINI_MODEL_PRO_25],        
+        CLAUDE_MODEL_OPUS_4: [CLAUDE_MODEL_35, GEMINI_MODEL_PRO_25],        
         # Default fallbacks
-        "default": [CLAUDE_MODEL, OPENAI_MODEL, OPENAI_MODEL_41,OPENAI_MODEL_O3,GEMINI_MODEL_PRO_25]
+        "default": [CLAUDE_MODEL, GEMINI_MODEL_PRO_25]
     }
     # Get the fallback chain for the current model
     fallback_options = fallback_chains.get(current_model, fallback_chains["default"])
@@ -237,7 +237,9 @@ def call_gemini_api(log_file, messages, model_name="gemini-1.0-pro") -> (str, bo
 
 
 def call_litellm(log_file, messages, model_name) -> (str, bool):
-    """Call LiteLLM API with the given messages and model with comprehensive retry logic"""    
+    """Call LiteLLM API with the given messages and model with comprehensive retry logic"""
+    if model_name == "o3":
+        model_name = CLAUDE_MODEL_OPUS_4
     log_message(log_file, f"Calling {model_name}...")
     start_time = time.time()
     
@@ -451,8 +453,8 @@ def call_llm(log_file, messages, model_name):
     try:
         if model_name.startswith("gemini"):
             response = call_gemini_api(log_file, messages, model_name)
-        elif model_name == OPENAI_MODEL_O1_PRO:
-            response = call_o1_pro_api(log_file, messages, model_name)
+        # elif model_name == OPENAI_MODEL_O1_PRO:
+        #     response = call_o1_pro_api(log_file, messages, model_name)
         else:
             response = call_litellm(log_file, messages, model_name)
         
@@ -5151,8 +5153,8 @@ def main():
     PATCH_WORKSPACE_DIR = args.patch_workspace_dir
     if args.model:
         CLAUDE_MODEL = args.model
-        OPENAI_MODEL = args.model
-        MODELS = [args.model]
+        # OPENAI_MODEL = args.model
+        MODELS = ["claude-opus-4-1-20250805"]
     print(f"DEBUG: Global MODELS = {MODELS}")
     if TEST_NGINX== True:
         MODELS = [args.model]

@@ -6,23 +6,23 @@ DATE=$(date +"%Y%m%d_%H%M%S")
 LOG_FILE="logs/${DATE}.log"
 
 # original dataset path
-ORIGINAL_DATASET="../static-analysis/tmp_repo/local-test-sqlite3-full-01/"
+ORIGINAL_DATASET="~/afc-crs-all-you-need-is-a-fuzzing-brain/crs/test_aixcc_repos/local-test-sqlite3-full-01/"
 
 # create new workspace directory
-NEW_WORKSPACE="/crs-workdir/workspace_sqlite3_${DATE}"
+NEW_WORKSPACE="~/afc-crs-all-you-need-is-a-fuzzing-brain/crs/test_workspace/workspace_sqlite3_${DATE}"
 
 echo "Starting CRS local run at $(date)" | tee "$LOG_FILE"
 echo "Log file: $LOG_FILE" | tee -a "$LOG_FILE"
 echo "Original dataset: $ORIGINAL_DATASET" | tee -a "$LOG_FILE"
 echo "New workspace: $NEW_WORKSPACE" | tee -a "$LOG_FILE"
 
-# create new workspace directory
-echo "Creating new workspace directory..." | tee -a "$LOG_FILE"
-mkdir -p "$NEW_WORKSPACE"
+# # create new workspace directory
+# echo "Creating new workspace directory..." | tee -a "$LOG_FILE"
+# mkdir -p "$NEW_WORKSPACE"
 
-# copy original dataset to new workspace
-echo "Copying original dataset to new workspace..." | tee -a "$LOG_FILE"
-cp -r "$ORIGINAL_DATASET"/* "$NEW_WORKSPACE/"
+# # copy original dataset to new workspace
+# echo "Copying original dataset to new workspace..." | tee -a "$LOG_FILE"
+# cp -r "$ORIGINAL_DATASET"/* "$NEW_WORKSPACE/"
 
 # use the entire copied project directory
 echo "Command: go run ./cmd/local/main.go $NEW_WORKSPACE" | tee -a "$LOG_FILE"

@@ -448,7 +448,8 @@ def call_o1_pro_api(log_file, messages, model_name):
     return f"Unexpected error: all retries failed without exception", False
 
 def call_llm(log_file, messages, model_name):
-    """Call LLM with telemetry tracking."""    
+    """Call LLM with telemetry tracking."""
+    
     with tracer.start_as_current_span("genai") as span:
         span.set_attribute("crs.action.category", "fuzzing")
         span.set_attribute("crs.action.name", "call_llm")
@@ -456,11 +457,13 @@ def call_llm(log_file, messages, model_name):
 
         try:
             if model_name.startswith("gemini"):
+                log_message(log_file, f"Calling LLM with model: {model_name}")
                 response = call_gemini_api(log_file, messages, model_name)
-            elif model_name == OPENAI_MODEL_O1_PRO:
-                response = call_o1_pro_api(log_file, messages, model_name)
+            # elif model_name == OPENAI_MODEL_O1_PRO:
+            #     response = call_o1_pro_api(log_file, messages, model_name)
             else:
-                response = call_litellm(log_file, messages, model_name)
+                log_message(log_file, "Calling LLM with model: claude-opus-4-1-20250805")
+                response = call_litellm(log_file, messages, "claude-opus-4-1-20250805")
             
             return response
 

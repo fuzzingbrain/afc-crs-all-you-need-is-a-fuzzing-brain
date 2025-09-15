@@ -6707,8 +6707,8 @@ func EngineMainReachableQX(request models.AnalysisRequest, results *models.Codeq
 }
 func EngineMainReachable(request models.AnalysisRequest, results *models.AnalysisResults) ([]models.FunctionDefinition, error) {
 	fmt.Printf("[DEBUG] EngineMainReachable request.FuzzerSourcePath: %s\n", request.FuzzerSourcePath)
-	fuzzerSourcePath := normaliseAnalysisPath(request.FuzzerSourcePath)
-
+	// fuzzerSourcePath := normaliseAnalysisPath(request.FuzzerSourcePath)
+	fuzzerSourcePath := request.FuzzerSourcePath
 	var entryPoint string
 	if strings.HasSuffix(fuzzerSourcePath, ".java") {
 		entryPoint = fuzzerSourcePath + "." + "fuzzerTestOneInput"

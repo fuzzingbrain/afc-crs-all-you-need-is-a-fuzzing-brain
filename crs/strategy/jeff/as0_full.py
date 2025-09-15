@@ -75,9 +75,8 @@ GROK_MODEL = "xai/grok-3-beta"
 CLAUDE_MODEL_SONNET_4 = "claude-sonnet-4-20250514"
 CLAUDE_MODEL_OPUS_4 = "claude-opus-4-20250514"
 
-MODELS = [CLAUDE_MODEL, OPENAI_MODEL, CLAUDE_MODEL_OPUS_4, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25]
+MODELS = [CLAUDE_MODEL, CLAUDE_MODEL_OPUS_4, GEMINI_MODEL_PRO_25]
 CLAUDE_MODEL = CLAUDE_MODEL_SONNET_4
-OPENAI_MODEL = CLAUDE_MODEL_SONNET_4
 MODELS = [CLAUDE_MODEL_SONNET_4, CLAUDE_MODEL_OPUS_4]
 
 
@@ -85,12 +84,13 @@ def get_fallback_model(current_model, tried_models):
     """Get a fallback model that hasn't been tried yet"""
     # Define model fallback chains
     fallback_chains = {
-        GEMINI_MODEL_PRO_25: [CLAUDE_MODEL, CLAUDE_MODEL_35, OPENAI_MODEL_41, OPENAI_MODEL_O3],   
-        OPENAI_MODEL_41: [OPENAI_MODEL_O4_MINI, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25],   
+        GEMINI_MODEL_PRO_25: [CLAUDE_MODEL, CLAUDE_MODEL_35],   
+        OPENAI_MODEL_41: [GEMINI_MODEL_PRO_25],   
         OPENAI_MODEL: [GEMINI_MODEL_PRO_25, GEMINI_MODEL_FLASH, GEMINI_MODEL_FLASH_LITE],             
-        CLAUDE_MODEL: [CLAUDE_MODEL_SONNET_4,OPENAI_MODEL, CLAUDE_MODEL_35, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25],        
+        CLAUDE_MODEL: [CLAUDE_MODEL_SONNET_4, CLAUDE_MODEL_35, GEMINI_MODEL_PRO_25],        
+        CLAUDE_MODEL_OPUS_4: [CLAUDE_MODEL_35, GEMINI_MODEL_PRO_25],        
         # Default fallbacks
-        "default": [CLAUDE_MODEL, OPENAI_MODEL, OPENAI_MODEL_41,OPENAI_MODEL_O3,GEMINI_MODEL_PRO_25]
+        "default": [CLAUDE_MODEL, GEMINI_MODEL_PRO_25]
     }
     # Get the fallback chain for the current model
     fallback_options = fallback_chains.get(current_model, fallback_chains["default"])
@@ -223,7 +223,9 @@ def call_gemini_api(log_file, messages, model_name="gemini-2.5-pro-preview-03-25
 
 
 def call_litellm(log_file, messages, model_name) -> (str, bool):
-    """Call LiteLLM API with the given messages and model with comprehensive retry logic"""    
+    """Call LiteLLM API with the given messages and model with comprehensive retry logic"""
+    if model_name == "o3":
+        model_name = CLAUDE_MODEL_OPUS_4  
     log_message(log_file, f"Calling {model_name}...")
     start_time = time.time()
     
@@ -4789,8 +4791,8 @@ def main():
     global CLAUDE_MODEL, OPENAI_MODEL, MODELS
     if args.model:
         CLAUDE_MODEL = args.model
-        OPENAI_MODEL = args.model
-        MODELS = [args.model]
+        # OPENAI_MODEL = args.model
+        MODELS = ["claude-opus-4-1-20250805"]
     print(f"DEBUG: Global MODELS = {MODELS}")
     
     print(f"DEBUG: Global DO_PATCH_ONLY = {DO_PATCH_ONLY}")

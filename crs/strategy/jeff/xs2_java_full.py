@@ -449,11 +449,13 @@ def call_o1_pro_api(log_file, messages, model_name):
 def call_llm(log_file, messages, model_name):
     try:
         if model_name.startswith("gemini"):
+            log_message(log_file, f"Calling LLM with model: {model_name}")
             response = call_gemini_api(log_file, messages, model_name)
-        elif model_name == OPENAI_MODEL_O1_PRO:
-            response = call_o1_pro_api(log_file, messages, model_name)
+        # elif model_name == OPENAI_MODEL_O1_PRO:
+        #     response = call_o1_pro_api(log_file, messages, model_name)
         else:
-            response = call_litellm(log_file, messages, model_name)
+            log_message(log_file, f"Calling LLM with model: claude-opus-4-1-20250805")
+            response = call_litellm(log_file, messages, "claude-opus-4-1-20250805")
         
         return response
 
