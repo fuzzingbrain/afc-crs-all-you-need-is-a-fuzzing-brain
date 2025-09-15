@@ -3,17 +3,34 @@
 mkdir -p logs
 
 DATE=$(date +"%Y%m%d_%H%M%S")
-LOG_FILE="logs/${DATE}.log"
 
-# original dataset path -> as an input of user, set default value as /crs-workdir/FuzzingBrain-AIXCC-Challenges/c-challenges/local-test-libxml2-delta-02
-if [ -z "$ORIGINAL_DATASET" ]; then
-    ORIGINAL_DATASET="/crs-workdir/local-test-integration-delta-01"
+# Check if path argument is provided
+if [ $# -eq 0 ]; then
+    echo "Usage: $0 <dataset_path> [log_name]"
+    echo "Example: $0 /home/ze/crs-workdir/local-test-libxml2-delta-01"
+    echo "Example: $0 /home/ze/crs-workdir/local-test-libxml2-delta-01 my_test_run"
+    exit 1
 fi
 
-# last part of the original dataset path -> as an input of user, set default value as libxml2
-if [ -z "$PROJECT_NAME" ]; then
-    PROJECT_NAME=$(basename "$ORIGINAL_DATASET")
+# Use the first argument as the original dataset path
+ORIGINAL_DATASET="$1"
+
+# Check if custom log name is provided
+if [ $# -eq 2 ]; then
+    LOG_NAME="$2"
+    LOG_FILE="logs/${LOG_NAME}.log"
+else
+    LOG_FILE="logs/${DATE}.log"
 fi
+
+# Check if the dataset path exists
+if [ ! -d "$ORIGINAL_DATASET" ]; then
+    echo "Error: Dataset directory '$ORIGINAL_DATASET' does not exist!"
+    exit 1
+fi
+
+# Extract project name from the dataset path
+PROJECT_NAME=$(basename "$ORIGINAL_DATASET")
 
 # create new workspace directory
 NEW_WORKSPACE="/crs-workdir/workspace_${PROJECT_NAME}_${DATE}"
