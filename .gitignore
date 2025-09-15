@@ -3,3 +3,6 @@
 
 */logs
 *.log
+
+**/tmp_*
+**/test_*
