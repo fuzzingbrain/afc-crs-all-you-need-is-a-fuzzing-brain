@@ -4435,6 +4435,9 @@ func (s *defaultCRSService) buildFuzzersDocker(myFuzzer *string, taskDir, projec
     // Copy the project files to the sanitizer-specific directory
     // Using cp command for simplicity and to handle hidden files
     cpCmd := exec.Command("cp", "-r", fmt.Sprintf("%s/.", projectDir), sanitizerProjectDir)
+
+    // print the command
+    log.Printf("Copying project files to sanitizer-specific directory: %s", cpCmd.String())
     if err := cpCmd.Run(); err != nil {
         return fmt.Errorf("failed to copy project files to sanitizer-specific directory: %v", err)
     }
@@ -7474,7 +7477,7 @@ func (s *defaultCRSService) runFuzzing(myFuzzer,taskDir string, taskDetail model
         s.submissionEndpoint = "http://localhost:7081"
         myFuzzer = allFuzzers[0]
         for _, f := range allFuzzers {
-            if strings.HasSuffix(f, "libxml2-address/html") ||  strings.HasSuffix(f, "tika-address/HtmlParserFuzzer")  ||  strings.HasSuffix(f, "zookeeper-address/MessageTrackerPeekReceivedFuzzer") ||  strings.HasSuffix(f, "apache-commons-compress-address/CompressZipFuzzer")  ||  strings.HasSuffix(f, "sqlite3-address/customfuzz3")  {
+            if strings.HasSuffix(f, "libxml2-address/xml") ||  strings.HasSuffix(f, "tika-address/HtmlParserFuzzer")  ||  strings.HasSuffix(f, "zookeeper-address/MessageTrackerPeekReceivedFuzzer") ||  strings.HasSuffix(f, "apache-commons-compress-address/CompressZipFuzzer")  ||  strings.HasSuffix(f, "sqlite3-address/customfuzz3")  {
                 myFuzzer = f
                 break
             }
