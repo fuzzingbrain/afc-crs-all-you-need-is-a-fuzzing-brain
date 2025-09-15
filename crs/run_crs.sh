@@ -3,21 +3,48 @@
 mkdir -p logs
 
 DATE=$(date +"%Y%m%d_%H%M%S")
+NO_WORKSPACE=false
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --no-workspace)
+            NO_WORKSPACE=true
+            shift
+            ;;
+        -*)
+            echo "Unknown option $1"
+            exit 1
+            ;;
+        *)
+            if [ -z "$ORIGINAL_DATASET" ]; then
+                ORIGINAL_DATASET="$1"
+            elif [ -z "$LOG_NAME" ]; then
+                LOG_NAME="$1"
+            else
+                echo "Too many arguments"
+                exit 1
+            fi
+            shift
+            ;;
+    esac
+done
 
 # Check if path argument is provided
-if [ $# -eq 0 ]; then
-    echo "Usage: $0 <dataset_path> [log_name]"
-    echo "Example: $0 /home/ze/crs-workdir/local-test-libxml2-delta-01"
-    echo "Example: $0 /home/ze/crs-workdir/local-test-libxml2-delta-01 my_test_run"
+if [ -z "$ORIGINAL_DATASET" ]; then
+    echo "Usage: $0 [--no-workspace] <dataset_path> [log_name]"
+    echo "Options:"
+    echo "  --no-workspace    Run directly in the provided path without creating a new workspace"
+    echo ""
+    echo "Examples:"
+    echo "  $0 /home/ze/crs-workdir/local-test-libxml2-delta-01"
+    echo "  $0 /home/ze/crs-workdir/local-test-libxml2-delta-01 my_test_run"
+    echo "  $0 --no-workspace /home/ze/crs-workdir/local-test-libxml2-delta-01"
     exit 1
 fi
 
-# Use the first argument as the original dataset path
-ORIGINAL_DATASET="$1"
-
-# Check if custom log name is provided
-if [ $# -eq 2 ]; then
-    LOG_NAME="$2"
+# Set log file name
+if [ -n "$LOG_NAME" ]; then
     LOG_FILE="logs/${LOG_NAME}.log"
 else
     LOG_FILE="logs/${DATE}.log"
@@ -29,30 +56,38 @@ if [ ! -d "$ORIGINAL_DATASET" ]; then
     exit 1
 fi
 
-# Extract project name from the dataset path
-PROJECT_NAME=$(basename "$ORIGINAL_DATASET")
+# Determine workspace to use
+if [ "$NO_WORKSPACE" = true ]; then
+    WORKSPACE="$ORIGINAL_DATASET"
+    echo "Starting CRS local run at $(date)" | tee "$LOG_FILE"
+    echo "Log file: $LOG_FILE" | tee -a "$LOG_FILE"
+    echo "Using existing dataset directly: $WORKSPACE" | tee -a "$LOG_FILE"
+else
+    # Extract project name from the dataset path
+    PROJECT_NAME=$(basename "$ORIGINAL_DATASET")
 
-# create new workspace directory
-NEW_WORKSPACE="/crs-workdir/workspace_${PROJECT_NAME}_${DATE}"
+    # create new workspace directory
+    WORKSPACE="/crs-workdir/workspace_${PROJECT_NAME}_${DATE}"
 
-echo "Starting CRS local run at $(date)" | tee "$LOG_FILE"
-echo "Log file: $LOG_FILE" | tee -a "$LOG_FILE"
-echo "Original dataset: $ORIGINAL_DATASET" | tee -a "$LOG_FILE"
-echo "New workspace: $NEW_WORKSPACE" | tee -a "$LOG_FILE"
+    echo "Starting CRS local run at $(date)" | tee "$LOG_FILE"
+    echo "Log file: $LOG_FILE" | tee -a "$LOG_FILE"
+    echo "Original dataset: $ORIGINAL_DATASET" | tee -a "$LOG_FILE"
+    echo "New workspace: $WORKSPACE" | tee -a "$LOG_FILE"
 
-# create new workspace directory
-echo "Creating new workspace directory..." | tee -a "$LOG_FILE"
-mkdir -p "$NEW_WORKSPACE"
+    # create new workspace directory
+    echo "Creating new workspace directory..." | tee -a "$LOG_FILE"
+    mkdir -p "$WORKSPACE"
 
-# copy original dataset to new workspace
-echo "Copying original dataset to new workspace..." | tee -a "$LOG_FILE"
-cp -r "$ORIGINAL_DATASET"/* "$NEW_WORKSPACE/"
+    # copy original dataset to new workspace
+    echo "Copying original dataset to new workspace..." | tee -a "$LOG_FILE"
+    cp -r "$ORIGINAL_DATASET"/* "$WORKSPACE/"
+fi
 
-# use the entire copied project directory
-echo "Command: go run ./cmd/local/main.go $NEW_WORKSPACE" | tee -a "$LOG_FILE"
+# use the workspace directory
+echo "Command: go run ./cmd/local/main.go $WORKSPACE" | tee -a "$LOG_FILE"
 echo "===========================================" | tee -a "$LOG_FILE"
 
-go run ./cmd/local/main.go "$NEW_WORKSPACE" 2>&1 | tee -a "$LOG_FILE"
+go run ./cmd/local/main.go "$WORKSPACE" 2>&1 | tee -a "$LOG_FILE"
 
 EXIT_CODE=${PIPESTATUS[0]}
 echo "===========================================" | tee -a "$LOG_FILE"
@@ -65,5 +100,9 @@ else
 fi
 
 echo "===========================================" | tee -a "$LOG_FILE"
-echo "Workspace created at: $NEW_WORKSPACE" | tee -a "$LOG_FILE"
+if [ "$NO_WORKSPACE" = true ]; then
+    echo "Ran directly in: $WORKSPACE" | tee -a "$LOG_FILE"
+else
+    echo "Workspace created at: $WORKSPACE" | tee -a "$LOG_FILE"
+fi
 echo "Full log saved to: $LOG_FILE" | tee -a "$LOG_FILE"
