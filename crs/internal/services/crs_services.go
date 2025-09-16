@@ -7477,7 +7477,8 @@ func (s *defaultCRSService) runFuzzing(myFuzzer,taskDir string, taskDetail model
         s.submissionEndpoint = "http://localhost:7081"
         myFuzzer = allFuzzers[0]
         for _, f := range allFuzzers {
-            if strings.HasSuffix(f, "libxml2-address/xml") ||  strings.HasSuffix(f, "tika-address/HtmlParserFuzzer")  ||  strings.HasSuffix(f, "zookeeper-address/MessageTrackerPeekReceivedFuzzer") ||  strings.HasSuffix(f, "apache-commons-compress-address/CompressZipFuzzer")  ||  strings.HasSuffix(f, "sqlite3-address/customfuzz3")  {
+            if strings.HasSuffix(f, "libxml2-address/xml") ||  strings.HasSuffix(f, "tika-address/HtmlParserFuzzer")  ||  strings.HasSuffix(f, "zookeeper-address/MessageTrackerPeekReceivedFuzzer") ||  
+            strings.HasSuffix(f, "apache-commons-compress-address/CompressZipFuzzer")  ||  strings.HasSuffix(f, "sqlite3-address/customfuzz3") || strings.HasSuffix(f, "igraph-address/read_gml") {
                 myFuzzer = f
                 break
             }
