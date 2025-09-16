@@ -1575,6 +1575,33 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path, 
 
             # If we haven't defined docker_cmd yet (because we successfully copied to out_dir)
             if not 'docker_cmd' in locals():
+
+                # find aixcc-afc/{project_name} first in docker images, if not found, then use the  gcr.io/oss-fuzz/ {project_name}
+                docker_image = None
+
+                # Check aixcc-afc/{project_name}
+                try:
+                    result = subprocess.run(["docker", "images", f"aixcc-afc/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                    if result.returncode == 0 and result.stdout.strip():
+                        docker_image = result.stdout.strip().split('\n')[0]  # Get first line
+                except Exception as e:
+                    log_message(log_file, f"Failed to find docker image for aixcc-afc/{project_name}: {str(e)}")
+
+                # If not found, check gcr.io/oss-fuzz/{project_name}
+                if not docker_image:
+                    try:
+                        result = subprocess.run(["docker", "images", f"gcr.io/oss-fuzz/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                        if result.returncode == 0 and result.stdout.strip():
+                            docker_image = result.stdout.strip().split('\n')[0]  # Get first line
+                    except Exception as e:
+                        log_message(log_file, f"Failed to find docker image for gcr.io/oss-fuzz/{project_name}: {str(e)}")
+
+                if not docker_image:
+                    log_message(log_file, f"Failed to find docker image for {project_name}")
+                    return False, f"Failed to find docker image for {project_name}"
+                
+                log_message(log_file, f"Found docker image for {project_name}: {docker_image}")
+
                 docker_cmd = [
                     "docker", "run", "--rm",
                     "--platform", "linux/amd64",
@@ -1586,7 +1613,7 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path, 
                     "-v", f"{sanitizer_project_dir}:/src/{project_name}",
                     "-v", f"{out_dir_x}:/out",
                     "-v", f"{work_dir}:/work",
-                    f"aixcc-afc/{project_name}",
+                    docker_image,
                     f"/out/{fuzzer_name}",
                     # f"--instrumentation_includes=org.apache.zookeeper.**",
                     # f"--coverage_dump=coverage.exec",
