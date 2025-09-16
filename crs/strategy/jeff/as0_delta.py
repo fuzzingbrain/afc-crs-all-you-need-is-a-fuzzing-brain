@@ -1253,6 +1253,33 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path):
                 
         # If we haven't defined docker_cmd yet (because we successfully copied to out_dir)
         if not 'docker_cmd' in locals():
+
+            # find aixcc-afc/{project_name} first in docker images, if not found, then use the  gcr.io/oss-fuzz/ {project_name}
+            docker_image = None
+
+            # Check aixcc-afc/{project_name}
+            try:
+                result = subprocess.run(["docker", "images", f"aixcc-afc/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                if result.returncode == 0 and result.stdout.strip():
+                    docker_image = result.stdout.strip().split('\n')[0]  # Get first line
+            except Exception as e:
+                log_message(log_file, f"Failed to find docker image for aixcc-afc/{project_name}: {str(e)}")
+
+            # If not found, check gcr.io/oss-fuzz/{project_name}
+            if not docker_image:
+                try:
+                    result = subprocess.run(["docker", "images", f"gcr.io/oss-fuzz/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                    if result.returncode == 0 and result.stdout.strip():
+                        docker_image = result.stdout.strip().split('\n')[0]  # Get first line
+                except Exception as e:
+                    log_message(log_file, f"Failed to find docker image for gcr.io/oss-fuzz/{project_name}: {str(e)}")
+
+            if not docker_image:
+                log_message(log_file, f"Failed to find docker image for {project_name}")
+                return False, f"Failed to find docker image for {project_name}"
+            
+            log_message(log_file, f"Found docker image for {project_name}: {docker_image}")
+
             docker_cmd = [
                 "docker", "run", "--rm",
                 "--platform", "linux/amd64",
@@ -1264,7 +1291,7 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path):
                 "-v", f"{sanitizer_project_dir}:/src/{project_name}",
                 "-v", f"{out_dir_x}:/out",
                 "-v", f"{work_dir}:/work",
-                f"aixcc-afc/{project_name}",
+                docker_image,
                 f"/out/{fuzzer_name}",
                 "-timeout=30",           # Add libFuzzer timeout parameter
                 "-timeout_exitcode=99",  # Set specific exit code for timeouts                
@@ -1361,6 +1388,33 @@ def extract_and_save_crash_input(log_file, crash_dir, fuzzer_name, out_dir_x, pr
             # Fallback if crashes/ isn't in the path
             relative_path = os.path.basename(crash_file)
         # Set up the Docker command to test the crash
+
+        # find aixcc-afc/{project_name} first in docker images, if not found, then use the  gcr.io/oss-fuzz/ {project_name}
+        docker_image = None
+
+        # Check aixcc-afc/{project_name}
+        try:
+            result = subprocess.run(["docker", "images", f"aixcc-afc/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+            if result.returncode == 0 and result.stdout.strip():
+                docker_image = result.stdout.strip().split('\n')[0]  # Get first line
+        except Exception as e:
+            log_message(log_file, f"Failed to find docker image for aixcc-afc/{project_name}: {str(e)}")
+
+        # If not found, check gcr.io/oss-fuzz/{project_name}
+        if not docker_image:
+            try:
+                result = subprocess.run(["docker", "images", f"gcr.io/oss-fuzz/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                if result.returncode == 0 and result.stdout.strip():
+                    docker_image = result.stdout.strip().split('\n')[0]  # Get first line
+            except Exception as e:
+                log_message(log_file, f"Failed to find docker image for gcr.io/oss-fuzz/{project_name}: {str(e)}")
+
+        if not docker_image:
+            log_message(log_file, f"Failed to find docker image for {project_name}")
+            return None, None
+        
+        log_message(log_file, f"Found docker image for {project_name}: {docker_image}")
+
         docker_cmd = [
             "docker", "run", "--rm",
             "--platform", "linux/amd64",
@@ -1372,7 +1426,7 @@ def extract_and_save_crash_input(log_file, crash_dir, fuzzer_name, out_dir_x, pr
             "-v", f"{sanitizer_project_dir}:/src/{project_name}",
             "-v", f"{out_dir_x}:/out",
             "-v", f"{os.path.dirname(crash_file)}:/crashes",
-            f"aixcc-afc/{project_name}",
+            docker_image,
             f"/out/{fuzzer_name}",
             "-timeout=30",
             "-timeout_exitcode=99",
@@ -1516,6 +1570,32 @@ def run_fuzzer_with_coverage(log_file, fuzzer_path, project_dir, focus, sanitize
         fuzzer_timeout = 55  # 55 seconds for the fuzzer
         subprocess_timeout = 60  # 60 seconds for the subprocess
 
+        # find aixcc-afc/{project_name} first in docker images, if not found, then use the  gcr.io/oss-fuzz/ {project_name}
+        docker_image = None
+
+        # Check aixcc-afc/{project_name}
+        try:
+            result = subprocess.run(["docker", "images", f"aixcc-afc/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+            if result.returncode == 0 and result.stdout.strip():
+                docker_image = result.stdout.strip().split('\n')[0]  # Get first line
+        except Exception as e:
+            log_message(log_file, f"Failed to find docker image for aixcc-afc/{project_name}: {str(e)}")
+
+        # If not found, check gcr.io/oss-fuzz/{project_name}
+        if not docker_image:
+            try:
+                result = subprocess.run(["docker", "images", f"gcr.io/oss-fuzz/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                if result.returncode == 0 and result.stdout.strip():
+                    docker_image = result.stdout.strip().split('\n')[0]  # Get first line
+            except Exception as e:
+                log_message(log_file, f"Failed to find docker image for gcr.io/oss-fuzz/{project_name}: {str(e)}")
+
+        if not docker_image:
+            log_message(log_file, f"Failed to find docker image for {project_name}")
+            return None, None
+        
+        log_message(log_file, f"Found docker image for {project_name}: {docker_image}")
+
         docker_cmd = [
             "docker", "run", "--rm",
             "--platform", "linux/amd64",
@@ -1528,7 +1608,7 @@ def run_fuzzer_with_coverage(log_file, fuzzer_path, project_dir, focus, sanitize
             "-v", f"{out_dir_x}:/out",
             "-v", f"{work_dir}:/work",
             "-v", f"{seed_corpus_dir}:{corpus_container_path}",
-            f"aixcc-afc/{project_name}",
+            docker_image,
             f"/out/{fuzzer_name}",
             "-print_coverage=1",
             f"-max_total_time={fuzzer_timeout}",  # Use the shorter timeout for the fuzzer
@@ -2509,6 +2589,12 @@ The test cases did not trigger the vulnerability. Please analyze the fuzzer outp
 3. Focusing on the specific functions modified in the commit
 4. Pay attention to details
 5. Think step by step
+
+hint: this is the correct input to trigger the vulnerability:
+graph [
+    node [ id 2 ]
+    node [ ]
+]
 """
                 else:
                     user_message = f"""
