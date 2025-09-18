@@ -1325,6 +1325,7 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path):
         crash_indicators = [
             "ERROR: AddressSanitizer:",
             # "ERROR: LeakSanitizer:",
+            "Assertion failed:",
             "ERROR: MemorySanitizer:",
             "WARNING: MemorySanitizer:",
             "ERROR: ThreadSanitizer:",
