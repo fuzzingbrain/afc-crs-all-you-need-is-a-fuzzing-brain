@@ -1648,6 +1648,11 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path, 
         if result.returncode == 77 and "Java Exception: java.lang.NoClassDefFoundError:" in combined_output:
             log_message(log_file, f"Fuzzer exited with non-zero code {result.returncode}, but no crash indicators found")
             return False, combined_output
+        
+        combined_output_lower = combined_output.lower()
+        if "assertion failed" in combined_output_lower:
+            log_message(log_file, f"Fuzzer crashed with assertion failed")
+            return True, combined_output
 
         # log_message(log_file, f"Fuzzer stdout: {result.stdout}")
         if result.stderr:
