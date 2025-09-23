@@ -2591,11 +2591,6 @@ The test cases did not trigger the vulnerability. Please analyze the fuzzer outp
 4. Pay attention to details
 5. Think step by step
 
-hint: this is the correct input to trigger the vulnerability:
-graph [
-    node [ id 2 ]
-    node [ ]
-]
 """
                 else:
                     user_message = f"""
