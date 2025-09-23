@@ -1,21 +1,25 @@
 package main
 
 import (
-	"path/filepath"
-	"regexp"
+	"encoding/json"
 	"flag"
 	"fmt"
-	"encoding/json"
 	"os"
-	"strings"
-	"github.com/antlr4-go/antlr/v4"
+	"path/filepath"
+	"regexp"
 	"static-analysis/internal/parser/c"
 	c_parser "static-analysis/internal/parser/c/grammar"
 	"static-analysis/internal/parser/java"
 	java_parser "static-analysis/internal/parser/java/grammar"
+	"strings"
+
+	"github.com/antlr4-go/antlr/v4"
 )
+
 // FunctionDefinition represents a function definition with its source code
 type FunctionDefinition struct {
+	Name       string
+	FilePath   string
 	StartLine  int
 	EndLine    int
 	SourceCode string
@@ -113,6 +117,8 @@ func (v *CFunctionVisitor) EnterFunctionDefinition(ctx *c_parser.FunctionDefinit
     
     // Store the function definition immediately
     funcDef := &FunctionDefinition{
+        Name:       v.CurrentFunc,
+        FilePath:   v.CurrentFile,
         StartLine:  startLine,
         EndLine:    endLine,
         SourceCode: sourceCode,
@@ -215,6 +221,8 @@ func processCFile(filePath string) (map[string][]*FunctionDefinition, error) {
        code      := sourceContent[startByte:endByte]
 
        fd := &FunctionDefinition{
+           Name:       name,
+           FilePath:   filePath,
            StartLine:  startLine,
            EndLine:    endLine,
            SourceCode: code,
@@ -272,6 +280,8 @@ func (v *JavaFunctionVisitor) EnterConstructorDeclaration(ctx *java_parser.Const
     }
 
     funcDef := &FunctionDefinition{
+        Name:       constructorName,
+        FilePath:   v.CurrentFile,
         StartLine:  startLine,
         EndLine:    endLine,
         SourceCode: sourceCode,
@@ -315,6 +325,8 @@ func (v *JavaFunctionVisitor) EnterMethodDeclaration(ctx *java_parser.MethodDecl
     
     // Create function definition
     funcDef := &FunctionDefinition{
+        Name:       methodName,
+        FilePath:   v.CurrentFile,
         StartLine:  startLine,
         EndLine:    endLine,
         SourceCode: sourceCode,
@@ -409,7 +421,7 @@ func main() {
 				matchingFunctions = append(matchingFunctions, funcDef...)
 			}
 		}
-	} else if strings.HasSuffix(filePath, ".c") || strings.HasSuffix(filePath, ".cpp") || strings.HasSuffix(filePath, ".in") || strings.HasSuffix(filePath, ".h") || strings.HasSuffix(filePath, ".hpp") {
+	} else if strings.HasSuffix(filePath, ".c") || strings.HasSuffix(filePath, ".cpp") || strings.HasSuffix(filePath, ".cc") || strings.HasSuffix(filePath, ".in") || strings.HasSuffix(filePath, ".h") || strings.HasSuffix(filePath, ".hpp") {
 		fmt.Printf("Analyzing C/C++ file: %s...\n", filePath)
 
 		functions, err := processCFile(filePath)
@@ -443,19 +455,36 @@ func main() {
 
 	// Create the JSON output
 	type FunctionOutput struct {
+		Name      string `json:"name"`
+		FilePath  string `json:"file_path"`
 		StartLine int    `json:"start_line"`
 		EndLine   int    `json:"end_line"`
 		Content   string `json:"content"`
 	}
 
-	var result []FunctionOutput
+	type MetadataOutput struct {
+		Functions      []FunctionOutput `json:"functions"`
+		TotalFunctions int              `json:"totalFunctions"`
+		InputFiles     []string         `json:"inputFiles"`
+	}
+
+	var functions []FunctionOutput
 	for _, funcDef := range matchingFunctions {
-		result = append(result, FunctionOutput{
+		functions = append(functions, FunctionOutput{
+			Name:      funcDef.Name,
+			FilePath:  funcDef.FilePath,
 			StartLine: funcDef.StartLine,
 			EndLine:   funcDef.EndLine,
 			Content:   funcDef.SourceCode,
 		})
 	}
+
+	result := MetadataOutput{
+		Functions:      functions,
+		TotalFunctions: len(functions),
+		InputFiles:     []string{filePath},
+	}
+
 	// Output the result as JSON
 	jsonOutput, err := json.MarshalIndent(result, "", "    ")
 	if err != nil {

@@ -1290,6 +1290,7 @@ func buildFuzzersDocker(taskDir, projectDir, sanitizerDir string, sanitizer stri
 
 		log.Printf("Try build fuzzers in the standard way with infra/helper.py ...\n")
 		buildCmd0 := exec.Command("python3", "fuzz-tooling/infra/helper.py", "build_fuzzers", "--sanitizer", sanitizer, "--engine", "libfuzzer", projectName, sanitizerProjectDir)
+		log.Printf("Running python command: %v", buildCmd0.Args)
 		var buildOutput0 bytes.Buffer
 		buildCmd0.Dir = taskDir
 
@@ -3048,6 +3049,10 @@ func EngineMainAnalysis(taskDetail models.TaskDetail) (models.AnalysisResults, e
 }
 
 func EngineMainAnalysisCore(taskDetail models.TaskDetail, taskDir string) (models.AnalysisResults, error) {
+	// Initialize tool paths
+	if err := initToolPaths(); err != nil {
+		log.Printf("Warning: Failed to initialize tool paths: %v", err)
+	}
 
 	outputJson := path.Join(taskDir, fmt.Sprintf("%s.json", taskDetail.Focus))
 
@@ -3598,7 +3603,14 @@ func ProcessAllFuzzersParallel(
 			}
 			defer os.RemoveAll(workDir) // Clean up after
 
-			err = BuildCallGraphFromBC(fuzzer, workDir)
+			// Find the fuzzer source file first
+			fuzzerSourcePath, _, err := findFuzzerSource(fuzzer, projectDir, projectName, language)
+			if err != nil {
+				log.Printf("Failed to locate fuzzer source for %s: %v", fuzzer, err)
+				return
+			}
+
+			err = BuildCallGraphFromBC(fuzzer, workDir, fuzzerSourcePath)
 			if err != nil {
 				log.Printf("Error BuildCallGraphFromBC: %v", err)
 			} else {
@@ -3729,7 +3741,7 @@ func extractPaths(results *models.AnalysisResults, mu *sync.Mutex, cps []models.
 	return all
 }
 func findAllReachableCFunctions(dotFile string) []string {
-	cmd := exec.Command("python3", "/app/strategyx/jeff/parse_callgraph_full.py", dotFile)
+	cmd := exec.Command("python3", getToolPath("parse_callgraph_full.py"), dotFile)
 	cmd.Dir = filepath.Dir(dotFile) // json will be written here
 	if err := cmd.Run(); err != nil {
 		log.Printf("[findAllReachableCFunctions failed] parse_callgraph_full.py %s %v", dotFile, err)
@@ -3759,7 +3771,7 @@ func findAllReachableCFunctions(dotFile string) []string {
 func CopyExtAPIFileIfNotExists() error {
 
 	dst := "/usr/local/lib/extapi.bc"
-	src := "/app/strategyx/jeff/extapi.bc"
+	src := getToolPath("extapi.bc")
 
 	if _, err := os.Stat(dst); os.IsNotExist(err) {
 		// Open the source file
@@ -3793,7 +3805,7 @@ func CopyExtAPIFileIfNotExists() error {
 // BuildCallGraphFromBC builds/fixes metadata and then generates a call-graph
 // with WPA.  It first tries the full x.bc; on timeout it retries with the
 // smaller x1.bc, x2.bc … that were produced by limitBCFileSize().
-func BuildCallGraphFromBC(fuzzer string, workDir string) error {
+func BuildCallGraphFromBC(fuzzer string, workDir string, fuzzerSourcePath string) error {
 	fuzzerBase := filepath.Base(fuzzer)
 	fuzzerDir := filepath.Dir(fuzzer)
 	fuzzerBc := fuzzer + ".bc"
@@ -3806,34 +3818,32 @@ func BuildCallGraphFromBC(fuzzer string, workDir string) error {
 	}
 
 	//----------------------------------------------------------------------
-	// 1. run fundef-bc to generate <fuzzer>_function_metadata.json
+	// 1. Use funcdef to extract function metadata from source code
 	//----------------------------------------------------------------------
-	fundefCmd := exec.Command("/app/strategyx/jeff/fundef-bc", fuzzerBc)
-	fundefCmd.Dir = workDir
 
-	// fmt.Printf("[DEBUG] fundef-bc cwd: %s\n", fundefCmd.Dir)
-	// fmt.Printf("[DEBUG] fundef-bc cmd:  %s %s\n",
-	// 	fundefCmd.Path, strings.Join(fundefCmd.Args[1:], " "))
+	log.Printf("Using funcdef to extract functions from %s", fuzzerSourcePath)
+
+	// Run funcdef to extract functions
+	metaFile := filepath.Join(workDir, "function_metadata.json")
+	fundefCmd := exec.Command(getToolPath("funcdef"), "-file", fuzzerSourcePath, "-output", metaFile)
+	fundefCmd.Dir = workDir
 
 	// capture output for troubleshooting
 	var stdout, stderr bytes.Buffer
 	fundefCmd.Stdout = &stdout
 	fundefCmd.Stderr = &stderr
 
-	runWithTimeout(fundefCmd, 15*time.Minute)
-
-	// fmt.Printf("[DEBUG] fundef-bc stdout:\n%s\n", stdout.String())
+	if err := runWithTimeout(fundefCmd, 5*time.Minute); err != nil {
+		log.Printf("funcdef failed: %v", err)
+		log.Printf("funcdef stderr: %s", stderr.String())
+		return fmt.Errorf("funcdef failed: %v", err)
+	}
 
 	// verify that the metadata file is present
-	metaFile := filepath.Join(workDir, "function_metadata.json")
 	if !fileExists(metaFile) {
-		fmt.Printf("[DEBUG] fundef-bc did not create %s\n", metaFile)
+		fmt.Printf("[DEBUG] funcdef did not create %s\n", metaFile)
 		fmt.Printf("[DEBUG fundefCmd] %v\n", fundefCmd)
-		fmt.Printf("[DEBUG] fundef-bc stderr:\n%s\n", stderr.String())
-		// entries, _ := os.ReadDir(workDir)
-		// for _, e := range entries {
-		// 	fmt.Printf("  found: %s\n", e.Name())
-		// }
+		fmt.Printf("[DEBUG] funcdef stderr:\n%s\n", stderr.String())
 	}
 
 	metaSrc := filepath.Join(workDir, "function_metadata.json")
@@ -3851,7 +3861,7 @@ func BuildCallGraphFromBC(fuzzer string, workDir string) error {
 
 	wpaSuccess := false
 	log.Printf("Running type-based pointer analysis for %s", fuzzerBc)
-	wpaTypeCmd := exec.Command("/app/strategyx/jeff/wpa", "-type", "-dump-callgraph", fuzzerBc)
+	wpaTypeCmd := exec.Command(getToolPath("wpa"), "-type", "-dump-callgraph", "-extapi="+getToolPath("extapi.bc"), fuzzerBc)
 	wpaTypeCmd.Dir = workDir
 	if err := runWithTimeout(wpaTypeCmd, 10*time.Minute); err != nil {
 		log.Printf("Warning: wpa analysis failed for %s: %v", fuzzerBc, err)
@@ -3892,7 +3902,7 @@ func BuildCallGraphFromBC(fuzzer string, workDir string) error {
 				continue
 			}
 
-			wpa := exec.Command("/app/strategyx/jeff/wpa", "-type", "-dump-callgraph", tmpBc)
+			wpa := exec.Command(getToolPath("wpa"), "-type", "-dump-callgraph", "-extapi="+getToolPath("extapi.bc"), tmpBc)
 			wpa.Dir = workDir
 			if err := runWithTimeout(wpa, 5*time.Minute); err != nil {
 				log.Printf("WPA timed-out/failed on %s: %v", bundle, err)
@@ -4505,8 +4515,60 @@ func GenerateBitcodeFileInDocker(projectDir, projectName, srcFile, bitcodeDir st
 	return nil
 }
 
+// Tool paths configuration
 var (
-	LLVM_LINK_PATH  = "llvm-link-17"
+	toolsDir string
+)
+
+// findProjectRoot locates the static-analysis directory
+func findProjectRoot() (string, error) {
+	wd, _ := os.Getwd()
+	current := wd
+
+	for {
+		staticAnalysisDir := filepath.Join(current, "static-analysis")
+		if _, err := os.Stat(staticAnalysisDir); err == nil {
+			return staticAnalysisDir, nil
+		}
+
+		parent := filepath.Dir(current)
+		if parent == current { // reached root directory
+			break
+		}
+		current = parent
+	}
+	return "", fmt.Errorf("static-analysis directory not found")
+}
+
+// initToolPaths initializes paths to all required tools
+func initToolPaths() error {
+	var err error
+	toolsDir, err = findProjectRoot()
+	if err != nil {
+		return fmt.Errorf("failed to find tools directory: %v", err)
+	}
+	log.Printf("Using tools directory: %s", toolsDir)
+	return nil
+}
+
+// getToolPath returns the full path to a tool
+func getToolPath(toolName string) string {
+	return filepath.Join(toolsDir, toolName)
+}
+
+// findLLVMLink finds the available LLVM link command
+func findLLVMLink() string {
+	candidates := []string{"llvm-link-18", "llvm-link-17", "llvm-link"}
+	for _, cmd := range candidates {
+		if commandExists(cmd) {
+			return cmd
+		}
+	}
+	return "llvm-link" // fallback
+}
+
+var (
+	LLVM_LINK_PATH  = findLLVMLink()
 	LLVM_LINK_PATH1 = "llvm17-link"
 	CLANG_PATH      = "clang-17"
 )
@@ -7379,6 +7441,31 @@ func GetCCallPathsParallel(projectDir, fuzzerPath, callGraph_dot string, entryPo
 		}
 	}
 
+	// Populate results.Functions with metadata from functionMap
+	resultsMu.Lock()
+	for funcName, funcInfo := range functionMap {
+		// Only populate if not already exists or if existing entry is empty
+		if existing, exists := results.Functions[funcName]; !exists || existing.FilePath == "" {
+			startLineInt, _ := funcInfo.StartLine.Int64()
+			endLineInt, _ := funcInfo.EndLine.Int64()
+
+			// Extract source code if file exists and line numbers are valid
+			sourceCode := ""
+			if funcInfo.File != "" && fileExists(funcInfo.File) && startLineInt > 0 && endLineInt >= startLineInt {
+				sourceCode = extractFunctionBodyFromFile(funcInfo.File, int(startLineInt), int(endLineInt))
+			}
+
+			results.Functions[funcName] = &models.FunctionDefinition{
+				Name:       funcName,
+				FilePath:   funcInfo.File,
+				StartLine:  int(startLineInt),
+				EndLine:    int(endLineInt),
+				SourceCode: sourceCode,
+			}
+		}
+	}
+	resultsMu.Unlock()
+
 	if origN := len(targetFunctionNames); origN > 1000 {
 		rand.Seed(time.Now().UnixNano())
 		rand.Shuffle(origN, func(i, j int) {
@@ -7408,7 +7495,7 @@ func GetCCallPathsParallel(projectDir, fuzzerPath, callGraph_dot string, entryPo
 			defer func() { <-semaphore }()
 
 			var stdout, stderr bytes.Buffer
-			testCmd := exec.Command("python3", "/app/strategyx/jeff/parse_callgraph.py", callGraph_dot, targetFuncName)
+			testCmd := exec.Command("python3", getToolPath("parse_callgraph.py"), callGraph_dot, targetFuncName)
 			testCmd.Stdout = &stdout
 			testCmd.Stderr = &stderr
 
@@ -7570,7 +7657,7 @@ func GetCCallPaths(projectDir, fuzzerPath string, callGraph_dot string, targetFu
 	for _, targetFuncName := range targetFunctionNames {
 		var stdout, stderr bytes.Buffer
 
-		testCmd := exec.Command("python3", "/app/strategyx/jeff/parse_callgraph.py", callGraph_dot, targetFuncName)
+		testCmd := exec.Command("python3", getToolPath("parse_callgraph.py"), callGraph_dot, targetFuncName)
 		testCmd.Stdout = &stdout
 		testCmd.Stderr = &stderr
 
