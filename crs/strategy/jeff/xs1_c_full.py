@@ -65,15 +65,27 @@ OPENAI_MODEL_41 = "gpt-4.1"
 # CLAUDE_MODEL = "gpt-4o-mini"
 CLAUDE_MODEL = "claude-3-7-sonnet-latest"
 CLAUDE_MODEL_35 = "claude-3-5-sonnet-20241022"
-GEMINI_MODEL_PRO_25_0325 = "gemini-2.5-pro-preview-03-25"
-GEMINI_MODEL_PRO_25_0506 = "gemini-2.5-pro-preview-05-06"
-GEMINI_MODEL_PRO_25_0605 ="gemini-2.5-pro-preview-06-05"
+# GEMINI_MODEL_PRO_25_0325 = "gemini-2.5-pro-preview-03-25"
+# GEMINI_MODEL_PRO_25_0506 = "gemini-2.5-pro-preview-05-06"
+# GEMINI_MODEL_PRO_25_0605 ="gemini-2.5-pro-preview-06-05"
 
-GEMINI_MODEL_PRO_25 = "gemini-2.5-pro"
-GEMINI_MODEL = "gemini-2.5-flash"
-GEMINI_MODEL_PRO = "gemini-2.0-pro-exp-02-05"
-GEMINI_MODEL_FLASH = "gemini-2.5-flash"
-GEMINI_MODEL_FLASH_LITE = "gemini-2.5-flash-lite-preview-06-17"
+# GEMINI_MODEL_PRO_25 = "gemini-2.5-pro"
+# GEMINI_MODEL = "gemini-2.5-flash"
+# GEMINI_MODEL_PRO = "gemini-2.0-pro-exp-02-05"
+# GEMINI_MODEL_FLASH = "gemini-2.5-flash"
+# GEMINI_MODEL_FLASH_LITE = "gemini-2.5-flash-lite-preview-06-17"
+
+
+# all claude models
+GEMINI_MODEL_PRO_25_0325 = "claude-opus-4-20250514"
+GEMINI_MODEL_PRO_25_0506 = "claude-opus-4-20250514"
+GEMINI_MODEL_PRO_25 = "claude-opus-4-20250514"
+GEMINI_MODEL = "claude-opus-4-20250514"
+GEMINI_MODEL_PRO = "claude-opus-4-20250514"
+GEMINI_MODEL_FLASH = "claude-opus-4-20250514"
+GEMINI_MODEL_FLASH_LITE = "claude-opus-4-20250514"
+
+
 GROK_MODEL = "xai/grok-3-beta"
 CLAUDE_MODEL_SONNET_4 = "claude-sonnet-4-20250514"
 CLAUDE_MODEL_OPUS_4 = "claude-opus-4-20250514"
@@ -972,6 +984,53 @@ def strip_license_text(source_code):
 
 def find_fuzzer_source(log_file, fuzzer_path, project_name, project_src_dir, language='c'):
     """Find the source code of the fuzzer by using the model to analyze build scripts and source files"""
+
+    # HARD-CODED for f
+    fuzzer_code = """
+    /*
+ * Copyright 2024 Richard Hughes <richard@hughsie.com>
+ *
+ * SPDX-License-Identifier: LGPL-2.1-or-later
+ */
+
+#include <glib.h>
+
+#include "libfwupdplugin/fu-elf-firmware.h"
+
+int
+main(int argc, char **argv)
+{
+	g_autoptr(FuFirmware) firmware = FU_FIRMWARE(g_object_new(FU_TYPE_ELF_FIRMWARE, NULL));
+	g_autoptr(GBytes) blob_dst = NULL;
+	g_autoptr(GError) error = NULL;
+
+	/* do not use g_option_context_parse() here for speed */
+	if (argc != 3 || !g_str_has_suffix(argv[1], ".builder.xml") ||
+	    !g_str_has_suffix(argv[2], ".bin")) {
+		g_printerr("Invalid arguments, expected %s XML BIN\n", argv[0]);
+		return EXIT_FAILURE;
+	}
+	if (!fu_firmware_build_from_filename(firmware, argv[1], &error)) {
+		g_printerr("Failed to build: %s\n", error->message);
+		return EXIT_FAILURE;
+	}
+	blob_dst = fu_firmware_write(firmware, &error);
+	if (blob_dst == NULL) {
+		g_printerr("Failed to write: %s\n", error->message);
+		return EXIT_FAILURE;
+	}
+	if (!g_file_set_contents(argv[2],
+				 g_bytes_get_data(blob_dst, NULL),
+				 g_bytes_get_size(blob_dst),
+				 &error)) {
+		g_printerr("Failed to save: %s\n", error->message);
+		return EXIT_FAILURE;
+	}
+	return EXIT_SUCCESS;
+}
+
+    """
+    return fuzzer_code, ""
 
     fuzzer_name = os.path.basename(fuzzer_path)
     project_dir = fuzzer_path.split("/fuzz-tooling/build/out")[0] + "/"
