@@ -37,8 +37,8 @@ source set_custom_workdir.sh /path/to/your/data/folder
 
 ```bash
 # 设置环境变量
-export CRS_WORKDIR="/home/ze/my-project-folder"
-export CRS_WORK_DIR="/home/ze/my-project-folder"
+export CRS_WORKDIR="/home/zc/afc-crs-all-you-need-is-a-fuzzing-brain/crs_workspace/fwupd_delta"
+export CRS_WORK_DIR="/home/zc/afc-crs-all-you-need-is-a-fuzzing-brain/crs_workspace/fwupd_delta"
 
 # 验证设置
 echo "CRS_WORKDIR=$CRS_WORKDIR"

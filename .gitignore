@@ -6,3 +6,8 @@
 
 **/tmp_*
 **/test_*
+
+**/fwupd*
+crs_workspace
+task_builder/projects
+task_builder/output

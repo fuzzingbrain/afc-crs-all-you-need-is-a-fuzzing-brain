@@ -4885,7 +4885,7 @@ func (s *defaultCRSService) runAdvancedPOVStrategiesWithTimeout(
 	phase int,
 	roundNum int,
 ) bool {
-	strategyDir := "/app/strategy"
+	strategyDir := "/home/zc/afc-crs-all-you-need-is-a-fuzzing-brain/crs/strategy"
 	strategyFilePattern := "as*_delta.py"
 	if taskDetail.Type == "full" {
 		strategyFilePattern = "as*_full.py"
@@ -4948,7 +4948,7 @@ func (s *defaultCRSService) runAdvancedPOVStrategiesWithTimeout(
 				taskDetail.ProjectName,
 				taskDetail.Focus,
 				language,
-				"--model", s.model,
+				// "--model", s.model,
 				"--do-patch=false",
 				"--pov-metadata-dir", s.povAdvcancedMetadataDir,
 				"--check-patch-success",
@@ -6138,7 +6138,7 @@ func (s *defaultCRSService) runPatchingStrategies(myFuzzer, taskDir string, proj
 
 func (s *defaultCRSService) runStrategies(myFuzzer, taskDir, projectDir, fuzzDir, language string, taskDetail models.TaskDetail, fullTask models.Task) bool {
 	// Find all strategy files under /app/strategy/
-	strategyDir := "/app/strategy"
+	strategyDir := "/home/zc/afc-crs-all-you-need-is-a-fuzzing-brain/crs/strategy"
 
 	strategyFilePattern := "xs*_delta.py"
 	if taskDetail.Type == "full" {

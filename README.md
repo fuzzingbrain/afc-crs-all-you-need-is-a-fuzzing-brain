@@ -1,42 +1,17 @@
 ## Test LOCAL CRS:
+```
+export CRS_WORKDIR="/home/zc/afc-crs-all-you-need-is-a-fuzzing-brain/crs_workdir/fwupd_full"
+export CRS_WORK_DIR="/home/zc/afc-crs-all-you-need-is-a-fuzzing-brain/crs_workdir/fwupd_full"
 
-```
-docker pull ghcr.io/o2lab/crs-local:latest
-docker tag ghcr.io/o2lab/crs-local:latest crs-local
-docker run -it --rm --privileged crs-local
-```
-```
-export ANTHROPIC_API_KEY=...
-```
-```
-./crs-local /crs-workdir/local-test-integration-delta-01/
-```
-```
-./crs-local /crs-workdir/local-test-libxml2-delta-01/
-```
-```
-./crs-local /crs-workdir/local-test-sqlite3-full-01/
-```
-```
-./crs-local /crs-workdir/local-test-tika-delta-01/
-```
-```
-./crs-local /crs-workdir/local-test-zookeeper-delta-01/
-```
+echo "CRS_WORKDIR=$CRS_WORKDIR"
+echo "CRS_WORK_DIR=$CRS_WORK_DIR"
 
-## Deploy LOCAL CRS:
-```
-cd crs
-./build-local-crs-image.sh
-```
+python3 /home/zc/afc-crs-all-you-need-is-a-fuzzing-brain/crs_workdir/fwupd_full/fuzz-tooling/infra/helper.py build_fuzzers --clean --sanitizer address --engine libfuzzer fwupd /home/zc/afc-crs-all-you-need-is-a-fuzzing-brain/crs_workdir/fwupd_full/afc-fwupd-coverage
 
-## CRS Development:
-```
-cd crs
-go run ./cmd/local/main.go /crs-workdir/local-test-integration-delta-01/
-```
+cd static-analysis
+sudo go run ./cmd/local/main.go /home/zc/afc-crs-all-you-need-is-a-fuzzing-brain/crs_workdir/fwupd_full
+sudo CRS_WORK_DIR="/home/zc/afc-crs-all-you-need-is-a-fuzzing-brain/crs_workdir/fwupd_full" go run ./cmd/server
 
-```
-cd crs
-go run ./cmd/local/main.go /crs-workdir/local-test-integration-delta-01/
+cd ../crs
+sudo go run cmd/local/main.go  /home/zc/afc-crs-all-you-need-is-a-fuzzing-brain/crs_workdir/fwupd_delta > tmp 2>&1
 ```
