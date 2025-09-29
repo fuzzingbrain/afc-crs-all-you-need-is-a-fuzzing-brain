@@ -6,6 +6,7 @@
 
 **/tmp_*
 **/test_*
+**/tmp
 
 **/fwupd*
 crs_workspace
