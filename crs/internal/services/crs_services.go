@@ -6155,6 +6155,38 @@ func (s *defaultCRSService) runStrategies(myFuzzer, taskDir, projectDir, fuzzDir
 		}
 	}
 
+	// We need to detect whether the vulnerable function is reachable from harness.
+	if taskDetail.Type != "full" {
+		parent := filepath.Dir(projectDir)
+		reachableResultPath := filepath.Join(parent, taskDetail.Focus+".json")
+		log.Printf("Checking reachability result file: %s", reachableResultPath)
+
+		script := "/home/zc/afc-crs-all-you-need-is-a-fuzzing-brain/crs/strategy/zchen/check_reachable.py"
+		cmd := exec.Command(
+			"/tmp/crs_venv/bin/python3",
+			script,
+			"--static_result", reachableResultPath,
+		)
+
+		var outBuf, errBuf bytes.Buffer
+		cmd.Stdout = &outBuf
+		cmd.Stderr = &errBuf
+
+		if err := cmd.Run(); err != nil {
+			log.Printf("script failed: %v\nstderr: %s\n", err, errBuf.String())
+			return false
+		}
+
+		output := outBuf.String()
+		log.Printf("script output:\n", output)
+
+		if strings.Contains(output, "Reachable!") {
+			log.Printf("✅ Found target string in output")
+		} else {
+			log.Printf("❌ Target string not found")
+		}
+	}
+
 	strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, "**", strategyFilePattern))
 	if err != nil {
 		log.Printf("Failed to find strategy files: %v", err)
