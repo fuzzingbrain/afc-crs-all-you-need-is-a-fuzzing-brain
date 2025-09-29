@@ -6158,14 +6158,13 @@ func (s *defaultCRSService) runStrategies(myFuzzer, taskDir, projectDir, fuzzDir
 	// We need to detect whether the vulnerable function is reachable from harness.
 	if taskDetail.Type != "full" {
 		parent := filepath.Dir(projectDir)
-		reachableResultPath := filepath.Join(parent, taskDetail.Focus+".json")
-		log.Printf("Checking reachability result file: %s", reachableResultPath)
 
 		script := "/home/zc/afc-crs-all-you-need-is-a-fuzzing-brain/crs/strategy/zchen/check_reachable.py"
 		cmd := exec.Command(
 			"/tmp/crs_venv/bin/python3",
 			script,
-			"--static_result", reachableResultPath,
+			"--project_parent_dir", parent,
+			"--focus", taskDetail.Focus,
 		)
 
 		var outBuf, errBuf bytes.Buffer
