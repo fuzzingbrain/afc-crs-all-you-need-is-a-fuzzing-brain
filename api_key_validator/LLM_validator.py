@@ -166,22 +166,14 @@ class LLMValidator:
                     error_detail = response.text[:200] if response.text else "No error details"
                     return False, f"❌ Anthropic API request failed: {response.status_code}\nError: {error_detail}"
             else:
-                # Basic validation - use simple test message
-                data = {
-                    'model': 'claude-sonnet-4-20250514',
-                    'max_tokens': 10,
-                    'messages': [{'role': 'user', 'content': 'Hello'}]
-                }
-                
-                response = requests.post(
-                    self.endpoints['anthropic'], 
-                    headers=headers, 
-                    json=data, 
-                    timeout=10
-                )
-                
+                # Basic validation - check models endpoint
+                models_url = 'https://api.anthropic.com/v1/models'
+                response = requests.get(models_url, headers=headers, timeout=10)
+
                 if response.status_code == 200:
-                    return True, "✅ Anthropic API key is valid"
+                    models = response.json().get('data', [])
+                    model_names = [model.get('id', '') for model in models[:5]]
+                    return True, f"✅ Anthropic API key is valid\nAvailable models: {', '.join(model_names)}"
                 else:
                     return False, f"❌ Anthropic API request failed: {response.status_code} - {response.text}"
                 
