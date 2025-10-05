@@ -6,3 +6,7 @@
 
 **/tmp_*
 **/test_*
+
+**/__pycache__/
+*.pyc
+*.pyo
