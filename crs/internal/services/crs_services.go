@@ -6245,6 +6245,9 @@ func (s *defaultCRSService) runStrategies(myFuzzer, taskDir, projectDir, fuzzDir
                 args = append(args, "--full-scan", "true")
             }
             var runCmd *exec.Cmd
+
+            // print args
+            log.Printf("Args: %v", args)
             
             // Create the appropriate command based on our privileges
             if isRoot {
