@@ -1081,8 +1081,9 @@ func buildFuzzersDocker(taskDir, projectDir, sanitizerDir string, sanitizer stri
 	// Copy the project files to the sanitizer-specific directory
 	// Using cp command for simplicity and to handle hidden files
 	cpCmd := exec.Command("cp", "-r", fmt.Sprintf("%s/.", projectDir), sanitizerProjectDir)
-	if err := cpCmd.Run(); err != nil {
-		return fmt.Errorf("failed to copy project files to sanitizer-specific directory: %v", err)
+	log.Printf("Copying project files from %s to %s, language=%s", projectDir, sanitizerProjectDir, language)
+	if output, err := cpCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to copy project files to sanitizer-specific directory: %v\nOutput: %s", err, string(output))
 	}
 
 	log.Printf("Created sanitizer-specific project directory: %s", sanitizerProjectDir)
@@ -1154,12 +1155,13 @@ func buildFuzzersDocker(taskDir, projectDir, sanitizerDir string, sanitizer stri
 	if strings.HasPrefix(language, "c") || strings.HasPrefix(language, "C") {
 		isBearUsed = true
 
-		//0. Create a temporary directory for the Dockerfile
-		tmpDir, err := os.MkdirTemp("", "docker-build-")
-		if err != nil {
+		//0. Create a temporary directory for the Dockerfile in the task directory to avoid permission issues
+		tmpDir := filepath.Join(taskDir, ".docker-build-tmp")
+		if err := os.MkdirAll(tmpDir, 0755); err != nil {
 			return fmt.Errorf("failed to create temporary directory: %v", err)
 		}
 		defer os.RemoveAll(tmpDir) // Clean up when done
+		log.Printf("Created temporary directory for Docker build: %s", tmpDir)
 
 		//1. write a new Dockerfile with the following content
 		dockerfileContent := fmt.Sprintf(`FROM %s
@@ -1180,12 +1182,30 @@ func buildFuzzersDocker(taskDir, projectDir, sanitizerDir string, sanitizer stri
 		if err := os.WriteFile(dockerfilePath, []byte(dockerfileContent), 0644); err != nil {
 			return fmt.Errorf("failed to write Dockerfile: %v", err)
 		}
+		log.Printf("Wrote Dockerfile to: %s", dockerfilePath)
 
 		//2. build a new docker image {docker_image_bear}
+		// Verify files exist before Docker build
+		if files, err := os.ReadDir(tmpDir); err == nil {
+			log.Printf("Files in %s:", tmpDir)
+			for _, f := range files {
+				log.Printf("  - %s", f.Name())
+			}
+		}
+
 		buildCmd := exec.Command("docker", "build", "-t", docker_image_bear, ".")
 		buildCmd.Dir = tmpDir
+		log.Printf("Running docker build in directory: %s, command: %v", tmpDir, buildCmd.Args)
 		if output, err := buildCmd.CombinedOutput(); err != nil {
-			return fmt.Errorf("failed to build Docker image: %v\nOutput: %s", err, output)
+			log.Printf("Docker build failed. Trying with explicit Dockerfile path...")
+			// Try with explicit Dockerfile path
+			buildCmd2 := exec.Command("docker", "build", "-f", dockerfilePath, "-t", docker_image_bear, tmpDir)
+			if output2, err2 := buildCmd2.CombinedOutput(); err2 != nil {
+				return fmt.Errorf("failed to build Docker image (both attempts): %v\nOutput1: %s\nOutput2: %s", err2, output, output2)
+			}
+			log.Printf("Successfully built Docker image with explicit path: %s", docker_image_bear)
+		} else {
+			log.Printf("Successfully built Docker image: %s", docker_image_bear)
 		}
 
 		//3. set cmdArgs

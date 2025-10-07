@@ -4974,6 +4974,10 @@ func (s *defaultCRSService) runAdvancedPOVStrategiesWithTimeout(
                 fmt.Sprintf("--pov-phase=%d", phase),
                 fmt.Sprintf("--max-iterations=%d", maxIterations),
             }
+
+            // print args
+            log.Printf("[POV Round-%d Phase-%d] Args: %v", roundNum, phase, args)
+
             if taskDetail.Type == "full" {
                 args = append(args, "--full-scan", "true")
             }
@@ -6245,6 +6249,9 @@ func (s *defaultCRSService) runStrategies(myFuzzer, taskDir, projectDir, fuzzDir
                 args = append(args, "--full-scan", "true")
             }
             var runCmd *exec.Cmd
+
+            // print args
+            log.Printf("Args: %v", args)
             
             // Create the appropriate command based on our privileges
             if isRoot {

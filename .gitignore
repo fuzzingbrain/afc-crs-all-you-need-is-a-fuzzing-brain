@@ -1,8 +1,12 @@
 **/.env
 */.env
 
-*/logs
+**/logs
 *.log
 
 **/tmp_*
 **/test_*
+
+**/__pycache__/
+*.pyc
+*.pyo
