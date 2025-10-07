@@ -10,3 +10,7 @@
 **/__pycache__/
 *.pyc
 *.pyo
+
+**/coverage.xml
+**/coverage.json
+**/.coverage
