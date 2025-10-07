@@ -1,0 +1,68 @@
+# ============================================================================
+# CRS Strategy Testing Dependencies - Enterprise Grade
+# ============================================================================
+# Install with: pip install -r requirements-test.txt
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Core Testing Framework
+# ----------------------------------------------------------------------------
+pytest>=7.4.0,<8.0.0                # Modern pytest with latest features
+pytest-cov>=4.1.0                   # Coverage reporting
+pytest-xdist>=3.3.0                 # Parallel test execution
+pytest-timeout>=2.1.0               # Prevent hanging tests
+pytest-mock>=3.11.1                 # Enhanced mocking capabilities
+
+# ----------------------------------------------------------------------------
+# Code Quality Tools
+# ----------------------------------------------------------------------------
+pytest-flake8>=1.1.1                # PEP8 style checking
+pytest-pylint>=0.19.0               # Code linting
+pytest-mypy>=0.10.3                 # Type checking
+
+# ----------------------------------------------------------------------------
+# Test Enhancement Tools
+# ----------------------------------------------------------------------------
+pytest-randomly>=3.13.0             # Randomize test order (catch hidden dependencies)
+pytest-repeat>=0.9.1                # Repeat tests to catch flakiness
+pytest-benchmark>=4.0.0             # Performance benchmarking
+
+# ----------------------------------------------------------------------------
+# Reporting & Documentation
+# ----------------------------------------------------------------------------
+pytest-html>=3.2.0                  # HTML test reports
+pytest-json-report>=1.5.0           # JSON test reports
+pytest-metadata>=3.0.0              # Test metadata tracking
+
+# ----------------------------------------------------------------------------
+# Property-Based Testing (Optional but Recommended)
+# ----------------------------------------------------------------------------
+hypothesis>=6.82.0                  # Property-based testing
+
+# ----------------------------------------------------------------------------
+# Mocking & Fixtures
+# ----------------------------------------------------------------------------
+faker>=19.0.0                       # Generate fake data
+freezegun>=1.2.2                    # Mock datetime
+responses>=0.23.0                   # Mock HTTP requests
+
+# ----------------------------------------------------------------------------
+# Coverage Enhancement
+# ----------------------------------------------------------------------------
+coverage[toml]>=7.3.0               # Coverage with TOML config support
+diff-cover>=7.7.0                   # Coverage diff for PRs
+
+# ----------------------------------------------------------------------------
+# Development Tools (Optional)
+# ----------------------------------------------------------------------------
+ipdb>=0.13.13                       # Debugging
+pytest-watch>=4.2.0                 # Auto-run tests on file changes
+pytest-testmon>=2.0.0               # Run only tests affected by changes
+
+# ----------------------------------------------------------------------------
+# Version Compatibility Notes
+# ----------------------------------------------------------------------------
+# - pytest 7.4+ required for modern features
+# - pytest-cov 4.1+ required for branch coverage
+# - All versions pinned for reproducible builds
+# - Compatible with Python 3.10+
