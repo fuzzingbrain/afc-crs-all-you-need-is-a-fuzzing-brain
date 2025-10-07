@@ -100,3 +100,35 @@ class StrategyLogger:
     def get_log_file(self) -> str:
         """Get the log file path"""
         return self.log_file
+
+    def log_user_input(self, content: str, round_number: int = None):
+        """
+        Log user input message in a formatted way
+
+        Args:
+            content: User input content
+            round_number: Optional round number for tracking conversation
+        """
+        self.logger.info("=" * 80)
+        if round_number is not None:
+            self.logger.info(f"[USER INPUT - Round {round_number}]")
+        else:
+            self.logger.info("[USER INPUT]")
+        self.logger.info(content)
+        self.logger.info("=" * 80)
+
+    def log_llm_response(self, content: str, model_name: str = None):
+        """
+        Log LLM response message in a formatted way
+
+        Args:
+            content: LLM response content
+            model_name: Optional model name
+        """
+        self.logger.info("=" * 80)
+        if model_name:
+            self.logger.info(f"[LLM RESPONSE - Model: {model_name}]")
+        else:
+            self.logger.info("[LLM RESPONSE]")
+        self.logger.info(content)
+        self.logger.info("=" * 80)

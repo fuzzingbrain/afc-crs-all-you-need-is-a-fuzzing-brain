@@ -3,8 +3,9 @@ Git and diff processing utilities
 """
 import os
 import re
+import json
 import subprocess
-from typing import Optional, Tuple, TYPE_CHECKING
+from typing import Optional, Tuple, List, Dict, Any, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from common.logging.logger import StrategyLogger
@@ -274,3 +275,244 @@ def get_commit_info(
         return "", ""
 
 
+def extract_diff_functions_using_funtarget(
+    project_src_dir: str,
+    out_dir: str,
+    logger: Optional['StrategyLogger'] = None
+) -> Optional[List[Dict[str, Any]]]:
+    """
+    Extract functions modified in diff using funtarget tool
+
+    Args:
+        project_src_dir: Project source directory
+        out_dir: Output directory for funtarget results
+        logger: Optional StrategyLogger for logging
+
+    Returns:
+        List of function metadata dictionaries or None on failure
+    """
+    funtarget_output_file = os.path.join(out_dir, "funtarget_output.json")
+
+    if os.path.exists(funtarget_output_file):
+        if logger:
+            logger.log(f"Found existing funtarget output: {funtarget_output_file}")
+        try:
+            with open(funtarget_output_file, "r") as f:
+                data = json.load(f)
+            return data
+        except Exception as e:
+            if logger:
+                logger.warning(f"Failed to read funtarget output: {e}")
+
+    if logger:
+        logger.log(f"Running funtarget on {project_src_dir}")
+
+    funtarget_path = os.path.expanduser("~/funtarget/funtarget")
+    if not os.path.exists(funtarget_path):
+        if logger:
+            logger.warning(f"funtarget not found at {funtarget_path}, skipping diff function extraction")
+        return None
+
+    diff_path = os.path.join(project_src_dir, "..", "diff", "ref.diff")
+    if not os.path.exists(diff_path):
+        if logger:
+            logger.warning(f"diff file not found at {diff_path}")
+        return None
+
+    try:
+        cmd = [funtarget_path, diff_path, project_src_dir]
+        if logger:
+            logger.log(f"Running: {' '.join(cmd)}")
+
+        result = subprocess.run(
+            cmd,
+            cwd=out_dir,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+
+        if result.returncode != 0:
+            if logger:
+                logger.warning(f"funtarget failed with return code {result.returncode}")
+                if result.stderr:
+                    logger.log(f"stderr: {result.stderr}")
+            return None
+
+        if result.stdout:
+            try:
+                data = json.loads(result.stdout)
+                with open(funtarget_output_file, "w") as f:
+                    json.dump(data, f, indent=2)
+                if logger:
+                    logger.log(f"Saved funtarget output to {funtarget_output_file}")
+                return data
+            except json.JSONDecodeError as e:
+                if logger:
+                    logger.warning(f"Failed to parse funtarget output as JSON: {e}")
+                return None
+
+        return None
+
+    except subprocess.TimeoutExpired:
+        if logger:
+            logger.warning("funtarget timed out")
+        return None
+    except Exception as e:
+        if logger:
+            logger.error(f"Error running funtarget: {e}")
+        return None
+
+
+def parse_commit_diff(project_src_dir: str, commit_diff: str) -> Dict[str, Any]:
+    """
+    Parse a commit diff in unified diff format and extract modified functions
+
+    Analyzes the diff to identify which functions were changed in each file,
+    extracting both the function metadata and full function bodies.
+
+    Args:
+        project_src_dir: Path to the project source directory
+        commit_diff: Commit diff in unified diff format
+
+    Returns:
+        Dictionary mapping file paths to modified function information:
+        {
+            "path/to/file.c": {
+                "file_path": "path/to/file.c",
+                "modified_functions": [
+                    {
+                        "name": "function_name",
+                        "start_line": 123,
+                        "body": "full function code..."
+                    },
+                    ...
+                ]
+            },
+            ...
+        }
+    """
+    from common.utils.code_extract import extract_function_body
+
+    # Initialize result dictionary
+    modified_functions = {}
+
+    # Split the diff by file
+    file_diffs = re.split(r'diff --git ', commit_diff)
+    if file_diffs[0] == '':
+        file_diffs = file_diffs[1:]
+    else:
+        file_diffs[0] = file_diffs[0].lstrip()
+
+    for file_diff in file_diffs:
+        # Skip empty diffs
+        if not file_diff:
+            continue
+
+        # Extract file path
+        file_path_match = re.search(r'a/(.*) b/', file_diff)
+        if not file_path_match:
+            continue
+
+        file_path = file_path_match.group(1)
+
+        # Skip test files or non-source files
+        if '/test/' in file_path or not any(file_path.endswith(ext) for ext in ['.java', '.c', '.h']):
+            continue
+
+        # Check if the file exists in the project
+        full_file_path = os.path.join(project_src_dir, file_path)
+        if not os.path.exists(full_file_path):
+            continue
+
+        # Initialize entry for this file
+        if file_path not in modified_functions:
+            modified_functions[file_path] = {
+                "file_path": file_path,
+                "modified_functions": []
+            }
+
+        # Extract hunk headers and changed lines
+        hunks = re.finditer(
+            r'@@ -(\d+),(\d+) \+(\d+),(\d+) @@(.*?)(?=\n@@|\Z)',
+            file_diff,
+            re.DOTALL
+        )
+
+        for hunk in hunks:
+            start_line = int(hunk.group(3))  # New file start line
+            hunk_text = hunk.group(0)
+
+            # Find function definitions in the hunk context
+            if file_path.endswith('.java'):
+                # For Java files
+                function_matches = re.finditer(
+                    r'(?:public|private|protected|static|\s) +(?:[a-zA-Z0-9_<>]+) +([a-zA-Z0-9_]+) *\([^)]*\) *(?:\{|throws|$)',
+                    hunk_text
+                )
+
+                for match in function_matches:
+                    function_name = match.group(1)
+
+                    # Skip constructor definitions
+                    if '.' in file_path:
+                        class_name = file_path.split('/')[-1].split('.')[0]
+                        if function_name == class_name:
+                            continue
+
+                    # Find the function's position in the hunk
+                    function_pos = match.start()
+
+                    # Count lines to get the function's start line
+                    lines_before = hunk_text[:function_pos].count('\n')
+                    function_start_line = start_line + lines_before
+
+                    # Extract the function body
+                    function_body = extract_function_body(full_file_path, function_name)
+
+                    # Add to the list of modified functions (avoid duplicates)
+                    existing_names = [f["name"] for f in modified_functions[file_path]["modified_functions"]]
+                    if function_name not in existing_names:
+                        modified_functions[file_path]["modified_functions"].append({
+                            "name": function_name,
+                            "start_line": function_start_line,
+                            "body": function_body
+                        })
+
+            elif file_path.endswith(('.c', '.h')):
+                # For C/C++ files
+                # Match both standard C function definitions and function definitions with return type on separate line
+                function_matches = re.finditer(
+                    r'(?:(?:static|inline|extern)?\s+(?:[a-zA-Z0-9_]+\s+)*([a-zA-Z0-9_]+)\s*\([^)]*\)\s*(?:\{|$))|(?:^([a-zA-Z0-9_]+)\s*\([^)]*\)\s*(?:\{|$))',
+                    hunk_text,
+                    re.MULTILINE
+                )
+
+                for match in function_matches:
+                    # Either group 1 or group 2 will have the function name
+                    function_name = match.group(1) if match.group(1) else match.group(2)
+
+                    # Skip if function name is None or a C keyword
+                    if not function_name or function_name in ['if', 'while', 'for', 'switch', 'return']:
+                        continue
+
+                    # Find the function's position in the hunk
+                    function_pos = match.start()
+
+                    # Count lines to get the function's start line
+                    lines_before = hunk_text[:function_pos].count('\n')
+                    function_start_line = start_line + lines_before
+
+                    # Extract the function body
+                    function_body = extract_function_body(full_file_path, function_name)
+
+                    # Add to the list of modified functions (avoid duplicates)
+                    existing_names = [f["name"] for f in modified_functions[file_path]["modified_functions"]]
+                    if function_name not in existing_names:
+                        modified_functions[file_path]["modified_functions"].append({
+                            "name": function_name,
+                            "start_line": function_start_line,
+                            "body": function_body
+                        })
+
+    return modified_functions

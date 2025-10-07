@@ -32,11 +32,6 @@ class BaseStrategy(ABC):
         pass
 
     @abstractmethod
-    def get_span_name(self) -> str:
-        """Return telemetry span name"""
-        pass
-
-    @abstractmethod
     def execute_core_logic(self) -> bool:
         """Execute the core strategy logic"""
         pass
@@ -48,7 +43,8 @@ class BaseStrategy(ABC):
         Returns:
             bool: True if strategy succeeded, False otherwise
         """
-        with self.tracer.start_as_current_span(self.get_span_name()) as span:
+        span_name = f"strategy.{self.config.strategy_name}"
+        with self.tracer.start_as_current_span(span_name) as span:
             self._set_span_attributes(span)
 
             self.logger.log(f"Starting strategy: {self.get_strategy_name()}")
