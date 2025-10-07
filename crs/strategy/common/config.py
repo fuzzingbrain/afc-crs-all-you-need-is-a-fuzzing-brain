@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Optional, List
 from dataclasses import dataclass, field
 
+from common.llm.models import DEFAULT_MODELS
+
 
 @dataclass
 class StrategyConfig:
@@ -46,8 +48,10 @@ class StrategyConfig:
     use_control_flow: bool = True
     unharnessed: bool = False
 
+    # Logging configuration
+    log_dir: str = "./logs"
+
     # Environment variables (read once at init)
-    log_dir: str = field(init=False)
     api_key_id: Optional[str] = field(init=False)
 
     # Computed fields
@@ -62,8 +66,14 @@ class StrategyConfig:
     def __post_init__(self):
         """Initialize computed fields and read environment variables"""
         # Read environment variables
-        self.log_dir = os.environ.get("LOG_DIR", "/tmp/strategy_logs")
         self.api_key_id = os.environ.get("COMPETITION_API_KEY_ID")
+
+        # Set default models if not specified
+        if not self.models:
+            self.models = DEFAULT_MODELS.copy()
+
+        # Ensure log directory exists
+        os.makedirs(self.log_dir, exist_ok=True)
 
         # Normalize language
         if not self.language.startswith('c'):

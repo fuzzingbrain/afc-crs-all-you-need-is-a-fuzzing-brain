@@ -1,7 +1,7 @@
 **/.env
 */.env
 
-*/logs
+**/logs
 *.log
 
 **/tmp_*

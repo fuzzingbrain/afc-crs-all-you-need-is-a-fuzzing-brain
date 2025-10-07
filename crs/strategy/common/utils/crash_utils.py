@@ -210,3 +210,73 @@ def extract_crash_trace(fuzzer_output: str) -> str:
             return fuzzer_output[marker_index:].strip()
 
     return fuzzer_output
+
+
+def extract_crash_output(output: str, max_size: int = 4096) -> str:
+    """
+    Extract the relevant crash output from fuzzer output.
+    Handles various sanitizer errors, libFuzzer crashes, and Java exceptions.
+
+    Args:
+        output: Full fuzzer output
+        max_size: Maximum size to return in bytes
+
+    Returns:
+        Most relevant part of the crash output (up to max_size bytes)
+    """
+    # Define patterns to look for, in order of priority
+    patterns = [
+        # AddressSanitizer errors
+        {"marker": "ERROR: AddressSanitizer", "backtrack": False},
+        # UndefinedBehaviorSanitizer errors
+        {"marker": "ERROR: UndefinedBehaviorSanitizer", "backtrack": False},
+        # MemorySanitizer errors
+        {"marker": "ERROR: MemorySanitizer", "backtrack": False},
+        {"marker": "WARNING: MemorySanitizer", "backtrack": False},
+        # ThreadSanitizer errors
+        {"marker": "ERROR: ThreadSanitizer", "backtrack": False},
+        # LeakSanitizer errors
+        {"marker": "ERROR: LeakSanitizer", "backtrack": False},
+        # libFuzzer crash indicator
+        {"marker": "==ERROR: libFuzzer", "backtrack": False},
+        # SEGV indicator (with backtracking to find the start of the report)
+        {"marker": "SUMMARY: AddressSanitizer: SEGV", "backtrack": True},
+        # Generic sanitizer summary (with backtracking)
+        {"marker": "SUMMARY: ", "backtrack": True},
+        # Java exceptions - Jazzer format
+        {"marker": "Uncaught exception:", "backtrack": False},
+        # Alternative Java exception format
+        {"marker": "Java Exception:", "backtrack": False},
+        # Generic Java exception format
+        {"marker": "Exception in thread", "backtrack": False}
+    ]
+
+    # Try each pattern
+    for pattern in patterns:
+        marker_index = output.find(pattern["marker"])
+        if marker_index != -1:
+            # Found a match
+            start_idx = marker_index
+
+            # If backtracking is enabled, try to find the start of the error report
+            if pattern["backtrack"]:
+                # Look for the nearest "==" before the marker
+                error_start = output[:marker_index].rfind("==")
+                if error_start != -1:
+                    start_idx = error_start
+                else:
+                    error_start = output[:marker_index].rfind("runtime error:")
+                    if error_start != -1:
+                        start_idx = error_start
+
+            # Extract up to max_size bytes
+            if len(output) - start_idx > max_size:
+                return output[start_idx:start_idx + max_size]
+            else:
+                return output[start_idx:]
+
+    # If no specific error marker found, return the last max_size bytes of output
+    if len(output) > max_size:
+        return output[-max_size:]
+
+    return output
