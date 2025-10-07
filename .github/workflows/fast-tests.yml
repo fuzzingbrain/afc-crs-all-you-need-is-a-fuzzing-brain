@@ -36,7 +36,9 @@ jobs:
     - name: Install Python dependencies
       run: |
         cd crs/strategy
-        pip install -r requirements.txt
+        if [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        fi
         pip install -r requirements-test.txt
 
     - name: Run Python unit tests (fast)
