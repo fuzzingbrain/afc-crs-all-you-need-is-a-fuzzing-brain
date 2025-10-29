@@ -354,7 +354,7 @@ defer resp.Body.Close()
             span.SetAttributes(attribute.String(key, value))
         }
         span.SetAttributes(
-            attribute.String("task", string(i)),
+            attribute.String("task", fmt.Sprint(i)),
             attribute.String("task_id", t.TaskID.String()),
             attribute.String("task_type", string(t.Type)),
             attribute.Int64("deadline", t.Deadline),
