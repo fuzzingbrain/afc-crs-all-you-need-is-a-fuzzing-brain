@@ -45,10 +45,8 @@ jobs:
       run: |
         cd crs/strategy
         pytest -m "unit and not slow" -v --tb=short
-      continue-on-error: true
 
     - name: Run Go tests (short mode)
       run: |
         cd crs
         go test ./... -short -v
-      continue-on-error: true

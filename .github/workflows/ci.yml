@@ -43,7 +43,6 @@ jobs:
       run: |
         cd crs/strategy
         pytest tests/unit/ -v --cov --cov-report=xml --cov-report=term
-      continue-on-error: true
 
     - name: Upload coverage reports
       uses: codecov/codecov-action@v4
@@ -77,13 +76,11 @@ jobs:
       run: |
         cd crs
         go test ./... -v -race -coverprofile=coverage.out
-      continue-on-error: true
 
     - name: Run Go tests (static-analysis)
       run: |
         cd static-analysis
         go test ./... -v
-      continue-on-error: true
 
     - name: Upload coverage reports
       uses: codecov/codecov-action@v4
@@ -123,13 +120,11 @@ jobs:
       run: |
         cd crs/strategy
         flake8 common core strategies --max-line-length=120 --extend-ignore=E203,W503
-      continue-on-error: true
 
     - name: Run Go linters
       run: |
         cd crs && go vet ./...
         cd ../static-analysis && go vet ./...
-      continue-on-error: true
 
   # ============================================================================
   # Summary Job (required for branch protection)
@@ -145,5 +140,15 @@ jobs:
       run: |
         echo "Python Tests: ${{ needs.python-tests.result }}"
         echo "Go Tests: ${{ needs.go-tests.result }}"
-        echo "CI pipeline completed (tests allowed to fail for now)"
-        exit 0
+
+        if [[ "${{ needs.python-tests.result }}" != "success" ]]; then
+          echo "ERROR: Python tests failed!"
+          exit 1
+        fi
+
+        if [[ "${{ needs.go-tests.result }}" != "success" ]]; then
+          echo "ERROR: Go tests failed!"
+          exit 1
+        fi
+
+        echo "All tests passed successfully!"
