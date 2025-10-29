@@ -14,3 +14,7 @@
 **/coverage.xml
 **/coverage.json
 **/.coverage
+
+**/.benchmarks
+**/.benchmark_results
+**/.pytest_cache
