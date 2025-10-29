@@ -3,29 +3,18 @@ package main
 import (
 	"flag"
 	"log"
-	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 
+	"crs/internal/config"
 	"crs/internal/handlers"
 	"crs/internal/services"
-	"github.com/joho/godotenv"
 )
 
 func main() {
-
-	// default model is claude-sonnet-4-20250514
-    modelFlag := flag.String("model", "", "Specify the model to use (e.g., claude-sonnet-4-20250514, gpt-4o, gemini-2.5-pro)")
+	// Parse command line flags
+	modelFlag := flag.String("model", "", "Specify the model to use (e.g., claude-sonnet-4-20250514, gpt-4o, gemini-2.5-pro)")
 	mFlag := flag.String("m", "", "Specify the model to use (shorthand for --model)")
 	flag.Parse()
-
-	model := "claude-sonnet-4-20250514" // Default model
-	if *modelFlag != "" {
-		model = *modelFlag
-	} else if *mFlag != "" {
-		model = *mFlag
-	}
 
 	// Check if task path is provided
 	if len(flag.Args()) < 1 {
@@ -39,75 +28,34 @@ func main() {
 		log.Fatalf("Failed to get absolute task dir path: %v", err)
 	}
 
-	// Load .env file
-	if err := godotenv.Load(); err != nil {
-		log.Printf("Warning: .env file not found, using default values")
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
 
-	// API Key check based on model
-	if strings.Contains(model, "claude") {
-		if os.Getenv("ANTHROPIC_API_KEY") == "" {
-			log.Fatal("Model requires ANTHROPIC_API_KEY. Please set it in your environment.")
-		}
-	} else if strings.Contains(model, "gemini") {
-		if os.Getenv("GEMINI_API_KEY") == "" {
-			log.Fatal("Model requires GEMINI_API_KEY. Please set it in your environment.")
-		}
-	} else if strings.Contains(model, "gpt") || strings.HasPrefix(model, "o") {
-		if os.Getenv("OPENAI_API_KEY") == "" {
-			log.Fatal("Model requires OPENAI_API_KEY. Please set it in your environment.")
-		}
-	} else {
-		log.Printf("Warning: Unknown model type for '%s'. Assuming API key is not required or handled elsewhere.", model)
+	// Set mode to local
+	cfg.Mode = "local"
+
+	// Override model from command line if provided
+	if *modelFlag != "" {
+		cfg.AI.Model = *modelFlag
+	} else if *mFlag != "" {
+		cfg.AI.Model = *mFlag
 	}
 
-	// Get credentials from environment variables with fallback values
-	apiKeyID := os.Getenv("CRS_KEY_ID")
-	if apiKeyID == "" {
-		apiKeyID = "api_key_id"
-	}
-	apiToken := os.Getenv("CRS_KEY_TOKEN")
-	if apiToken == "" {
-		apiToken = "api_key_token"
-	}
-
-	// Get worker configuration
-	workerNodesStr := os.Getenv("WORKER_NODES")
-	workerNodes, err := strconv.Atoi(workerNodesStr)
-	if err != nil || workerNodes <= 0 {
-		workerNodes = 24 // Default to 24 worker nodes
-	}
-
-	workerBasePortStr := os.Getenv("WORKER_BASE_PORT")
-	workerBasePort, err := strconv.Atoi(workerBasePortStr)
-	if err != nil || workerBasePort <= 0 {
-		workerBasePort = 9081 // Default base port
-	}
-
-	submissionService := os.Getenv("SUBMISSION_SERVICE")
-	if submissionService == "" {
-		submissionService = "http://crs-sub"
-	}
-
-	analysisService := os.Getenv("ANALYSIS_SERVICE")
-	if analysisService == "" {
-		analysisService = "http://localhost:7082"
-	}
-
-	if os.Getenv("ANALYSIS_SERVICE_TEST") != "" || os.Getenv("LOCAL_TEST") != "" {
-		analysisService = "http://localhost:7082"
-	}
-	if os.Getenv("SUBMISSION_SERVICE_TEST") != "" || os.Getenv("LOCAL_TEST") != "" {
-		submissionService = "http://localhost:7081"
+	// Validate configuration (will check API keys)
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Invalid configuration: %v", err)
 	}
 
 	// Initialize services
-	crsService := services.NewCRSService(workerNodes, workerBasePort, model)
-	crsService.SetAnalysisServiceUrl(analysisService)
-	crsService.SetSubmissionEndpoint(submissionService)
+	crsService := services.NewCRSService(cfg.Worker.Nodes, cfg.Server.WorkerBasePort, cfg.AI.Model)
+	crsService.SetAnalysisServiceUrl(cfg.Services.AnalysisURL)
+	crsService.SetSubmissionEndpoint(cfg.Services.SubmissionURL)
 
 	// Initialize handlers with task distribution capability
-	h := handlers.NewHandler(crsService, analysisService, submissionService)
+	h := handlers.NewHandler(crsService, cfg.Services.AnalysisURL, cfg.Services.SubmissionURL)
 
 	h.SubmitLocalTask(absTaskDir)
 }
