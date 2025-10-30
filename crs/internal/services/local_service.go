@@ -1,16 +1,20 @@
 package services
 
 import (
+	"bytes"
 	"crs/internal/models"
 	"crs/internal/executor"
+	"crs/internal/competition"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,18 +22,74 @@ import (
 
 // LocalCRSService implements CRSService for local CLI mode
 type LocalCRSService struct {
-	// Embed defaultCRSService temporarily to reuse helper methods
-	// TODO: Remove this once all methods are migrated
-	*defaultCRSService
+	workDir                 string
+	povMetadataDir          string
+	povMetadataDir0         string
+	povAdvcancedMetadataDir string
+	submissionEndpoint      string
+	workerIndex             string
+	analysisServiceUrl      string
+	model                   string
+	competitionClient       *competition.Client
+	unharnessedFuzzerSrc    sync.Map
 }
 
 // NewLocalService creates a new local service instance
 func NewLocalService(model string) CRSService {
-	// Create the embedded defaultCRSService for helper methods
-	embedded := NewCRSService(0, 0, model).(*defaultCRSService)
+	// Get API configuration
+	apiEndpoint := os.Getenv("COMPETITION_API_ENDPOINT")
+	if apiEndpoint == "" {
+		apiEndpoint = "http://localhost:7081"
+	}
+
+	apiKeyID := os.Getenv("CRS_KEY_ID")
+	apiToken := os.Getenv("CRS_KEY_TOKEN")
+	if apiKeyID == "" || apiToken == "" {
+		log.Printf("Warning: CRS_KEY_ID or CRS_KEY_TOKEN not set")
+	}
+
+	// Define default work directory
+	workDir := "/crs-workdir"
+	if envWorkDir := os.Getenv("CRS_WORKDIR"); envWorkDir != "" {
+		workDir = envWorkDir
+	}
+
+	// Create the work directory if it doesn't exist
+	if err := ensureWorkDir(workDir); err != nil {
+		log.Printf("Warning: Could not create work directory at %s: %v", workDir, err)
+
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			workDir = filepath.Join(homeDir, "crs-workdir")
+			log.Printf("Trying fallback work directory: %s", workDir)
+
+			if err := ensureWorkDir(workDir); err != nil {
+				log.Printf("Warning: Could not create fallback work directory: %v", err)
+				tempDir, err := os.MkdirTemp("", "crs-workdir-")
+				if err == nil {
+					workDir = tempDir
+					log.Printf("Using temporary directory as work directory: %s", workDir)
+				} else {
+					workDir = "."
+					log.Printf("Warning: Using current directory as work directory")
+				}
+			}
+		} else {
+			workDir = "."
+			log.Printf("Warning: Using current directory as work directory")
+		}
+	}
 
 	return &LocalCRSService{
-		defaultCRSService: embedded,
+		workDir:                 workDir,
+		competitionClient:       competition.NewClient(apiEndpoint, apiKeyID, apiToken),
+		povMetadataDir:          "successful_povs",
+		povMetadataDir0:         "successful_povs_0",
+		povAdvcancedMetadataDir: "successful_povs_advanced",
+		model:                   model,
+		submissionEndpoint:      "",
+		workerIndex:             "",
+		analysisServiceUrl:      "",
 	}
 }
 
@@ -273,5 +333,135 @@ func (s *LocalCRSService) HandleSarifBroadcastWorker(broadcastWorker models.SARI
 
 // SetWorkerIndex is not used in local mode (no-op)
 func (s *LocalCRSService) SetWorkerIndex(index string) {
-	// No-op for local mode
+	s.workerIndex = index
+}
+
+// SetSubmissionEndpoint sets the submission endpoint
+func (s *LocalCRSService) SetSubmissionEndpoint(endpoint string) {
+	s.submissionEndpoint = endpoint
+}
+
+// SetAnalysisServiceUrl sets the analysis service URL
+func (s *LocalCRSService) SetAnalysisServiceUrl(url string) {
+	s.analysisServiceUrl = url
+}
+
+// GetWorkDir returns the work directory
+func (s *LocalCRSService) GetWorkDir() string {
+	return s.workDir
+}
+
+// buildFuzzersDocker builds fuzzers using Docker for the specified sanitizer
+func (s *LocalCRSService) buildFuzzersDocker(myFuzzer *string, taskDir, projectDir, sanitizerDir string, sanitizer string, language string, taskDetail models.TaskDetail) error {
+	// Create a sanitizer-specific copy of the project directory
+	sanitizerProjectDir := fmt.Sprintf("%s-%s", projectDir, sanitizer)
+
+	// Create the directory if it doesn't exist
+	if err := os.MkdirAll(sanitizerProjectDir, 0755); err != nil {
+		return fmt.Errorf("failed to create sanitizer-specific project directory: %v", err)
+	}
+
+	// Copy the project files to the sanitizer-specific directory
+	cpCmd := exec.Command("cp", "-r", fmt.Sprintf("%s/.", projectDir), sanitizerProjectDir)
+	log.Printf("Copying project files to sanitizer-specific directory: %s", cpCmd.String())
+	if err := cpCmd.Run(); err != nil {
+		return fmt.Errorf("failed to copy project files to sanitizer-specific directory: %v", err)
+	}
+
+	log.Printf("Created sanitizer-specific project directory: %s", sanitizerProjectDir)
+
+	// Check for build.patch in the project's directory
+	projectToolingDir := filepath.Join(taskDir, "fuzz-tooling", "projects", taskDetail.ProjectName)
+	buildPatchPath := filepath.Join(projectToolingDir, "build.patch")
+
+	// If build.patch exists, copy it to both the root and project subdirectory in the sanitizer directory
+	if _, err := os.Stat(buildPatchPath); err == nil {
+		log.Printf("Found build.patch at %s", buildPatchPath)
+
+		// Copy to the root of the sanitizer directory
+		rootPatchPath := filepath.Join(sanitizerProjectDir, "build.patch")
+		cpRootPatchCmd := exec.Command("cp", buildPatchPath, rootPatchPath)
+		if err := cpRootPatchCmd.Run(); err != nil {
+			log.Printf("Warning: Failed to copy build.patch to root of sanitizer directory: %v", err)
+		} else {
+			log.Printf("Copied build.patch to %s", rootPatchPath)
+		}
+
+		// Also copy to the project subdirectory within the sanitizer directory
+		projectSubdir := filepath.Join(sanitizerProjectDir, taskDetail.ProjectName)
+		if err := os.MkdirAll(projectSubdir, 0755); err != nil {
+			log.Printf("Warning: Failed to create project subdirectory in sanitizer directory: %v", err)
+		} else {
+			projectPatchPath := filepath.Join(projectSubdir, "build.patch")
+			cpProjectPatchCmd := exec.Command("cp", buildPatchPath, projectPatchPath)
+			if err := cpProjectPatchCmd.Run(); err != nil {
+				log.Printf("Warning: Failed to copy build.patch to project subdirectory: %v", err)
+			} else {
+				log.Printf("Copied build.patch to %s", projectPatchPath)
+			}
+		}
+	}
+
+	if *myFuzzer == UNHARNESSED && sanitizer != "coverage" {
+		log.Printf("Handling unharnessed task: %s", *myFuzzer)
+		cloneOssFuzzAndMainRepoOnce(taskDir, taskDetail.ProjectName, sanitizerDir)
+
+		newFuzzerSrcPath, newFuzzerPath, err := generateFuzzerForUnharnessedTask(
+			taskDir,
+			taskDetail.Focus,
+			sanitizerDir,
+			taskDetail.ProjectName,
+			sanitizer,
+		)
+		if err != nil {
+			log.Printf("Failed to generate fuzzer: %v", err)
+		} else {
+			s.unharnessedFuzzerSrc.Store(taskDetail.TaskID.String(), newFuzzerSrcPath)
+			log.Printf("New fuzzer source: %s", newFuzzerSrcPath)
+
+			*myFuzzer = newFuzzerPath
+			log.Printf("New fuzzer generated: %s", *myFuzzer)
+		}
+	} else {
+		// For both Java and C tasks on worker
+		if true {
+			BuildAFCFuzzers(taskDir, sanitizer, taskDetail.ProjectName, sanitizerProjectDir, sanitizerDir)
+		} else {
+			workDir := filepath.Join(taskDir, "fuzz-tooling", "build", "work", fmt.Sprintf("%s-%s", taskDetail.ProjectName, sanitizer))
+
+			cmdArgs := []string{
+				"run",
+				"--privileged",
+				"--shm-size=8g",
+				"--platform", "linux/amd64",
+				"--rm",
+				"-e", "FUZZING_ENGINE=libfuzzer",
+				"-e", fmt.Sprintf("SANITIZER=%s", sanitizer),
+				"-e", "ARCHITECTURE=x86_64",
+				"-e", fmt.Sprintf("PROJECT_NAME=%s", taskDetail.ProjectName),
+				"-e", "HELPER=True",
+				"-e", fmt.Sprintf("FUZZING_LANGUAGE=%s", language),
+				"-v", fmt.Sprintf("%s:/src/%s", sanitizerProjectDir, taskDetail.ProjectName),
+				"-v", fmt.Sprintf("%s:/out", sanitizerDir),
+				"-v", fmt.Sprintf("%s:/work", workDir),
+				"-t", fmt.Sprintf("aixcc-afc/%s", taskDetail.ProjectName),
+			}
+
+			buildCmd := exec.Command("docker", cmdArgs...)
+
+			var buildOutput bytes.Buffer
+			buildCmd.Stdout = &buildOutput
+			buildCmd.Stderr = &buildOutput
+
+			log.Printf("Running Docker build for sanitizer=%s, project=%s\nCommand: %v",
+				sanitizer, taskDetail.ProjectName, buildCmd.Args)
+
+			if err := buildCmd.Run(); err != nil {
+				log.Printf("Build fuzzer output:\n%s", buildOutput.String())
+				return fmt.Errorf("failed to build fuzzers with sanitizer=%s: %v\nOutput: %s",
+					sanitizer, err, buildOutput.String())
+			}
+		}
+	}
+	return nil
 }
