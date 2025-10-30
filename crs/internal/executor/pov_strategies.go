@@ -16,6 +16,7 @@ import (
 
 	"crs/internal/models"
 	"crs/internal/telemetry"
+	"crs/internal/utils/helpers"
 
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -371,8 +372,8 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 			pythonInterpreter := "/tmp/crs_venv/bin/python3"
 
 			// Check if we're running as root or if sudo is available
-			isRoot := GetEffectiveUserID() == 0
-			hasSudo := CheckSudoAvailable()
+			isRoot := helpers.GetEffectiveUserID() == 0
+			hasSudo := helpers.CheckSudoAvailable()
 
 			// Prepare the arguments for the Python command
 			args := []string{
@@ -700,8 +701,8 @@ func runAdvancedPOVStrategiesWithTimeout(
 			log.Printf("[POV Round-%d Phase-%d] Running advanced strategy: %s (timeout: %v)", roundNum, phase, strategyName, strategyTimeout)
 
 			pythonInterpreter := "/tmp/crs_venv/bin/python3"
-			isRoot := GetEffectiveUserID() == 0
-			hasSudo := CheckSudoAvailable()
+			isRoot := helpers.GetEffectiveUserID() == 0
+			hasSudo := helpers.CheckSudoAvailable()
 
 			// --- Calculate Max Iterations ---
 			maxIterations := 3

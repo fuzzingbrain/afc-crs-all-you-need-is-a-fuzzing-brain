@@ -1,9 +1,11 @@
-package executor
+package fuzzer
 
 import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"crs/internal/executor"
 )
 
 // FindFuzzers scans a fuzzer directory and returns a list of executable fuzzer binaries.
@@ -78,7 +80,7 @@ func FindFuzzers(fuzzerDir string) ([]string, error) {
 	}
 
 	if len(fuzzers) == 0 {
-		return nil, fmt.Errorf("%w in %s", ErrNoFuzzers, fuzzerDir)
+		return nil, fmt.Errorf("%w in %s", executor.ErrNoFuzzers, fuzzerDir)
 	}
 
 	return fuzzers, nil

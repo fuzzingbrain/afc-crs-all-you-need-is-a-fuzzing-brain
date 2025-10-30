@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"crs/internal/models"
+	"crs/internal/utils/helpers"
 )
 
 // runPatchingStrategies executes patching strategies in multiple rounds with parallel execution
@@ -51,7 +52,7 @@ func runPatchingStrategies(
 			log.Printf("Source diff directory does not exist: %s", sourceDiffDir)
 		} else {
 			// Copy the diff directory
-			if err := robustCopyDir(sourceDiffDir, diffDir); err != nil {
+			if err := helpers.RobustCopyDir(sourceDiffDir, diffDir); err != nil {
 				log.Printf("Failed to copy diff to patch workspace: %v", err)
 				return false
 			}
@@ -70,7 +71,7 @@ func runPatchingStrategies(
 	}
 
 	// Use a more robust copy function that handles directories properly
-	if err := robustCopyDir(projectDir, patchProjectDir); err != nil {
+	if err := helpers.RobustCopyDir(projectDir, patchProjectDir); err != nil {
 		log.Printf("Failed to copy project to patch workspace: %v", err)
 		return false
 	}
@@ -84,7 +85,7 @@ func runPatchingStrategies(
 		log.Printf("Failed to create patch project directory: %v", err)
 		return false
 	}
-	if err := robustCopyDir(projectSanitizerDir, patchSanitizerProjectDir); err != nil {
+	if err := helpers.RobustCopyDir(projectSanitizerDir, patchSanitizerProjectDir); err != nil {
 		log.Printf("Failed to copy project to patch workspace: %v", err)
 		return false
 	}
@@ -127,7 +128,7 @@ func runPatchingStrategies(
 	fuzzToolingDir := filepath.Join(taskDir, "fuzz-tooling")
 	if _, err := os.Stat(fuzzToolingDir); err == nil {
 		patchFuzzToolingDir := filepath.Join(patchWorkDir, "fuzz-tooling")
-		if err := robustCopyDir(fuzzToolingDir, patchFuzzToolingDir); err != nil {
+		if err := helpers.RobustCopyDir(fuzzToolingDir, patchFuzzToolingDir); err != nil {
 			log.Printf("Failed to copy fuzz-tooling to patch workspace: %v", err)
 			return false
 		}
@@ -227,9 +228,9 @@ func runPatchingStrategies(
 		signal.Notify(sigc, os.Interrupt, syscall.SIGTERM)
 		go func() {
 			<-sigc
-			killAllChildren(syscall.SIGTERM)
+			helpers.KillAllChildren(syscall.SIGTERM)
 			time.Sleep(2 * time.Second)
-			killAllChildren(syscall.SIGKILL)
+			helpers.KillAllChildren(syscall.SIGKILL)
 			cancel() // cancel roundCtx
 			fmt.Fprintln(log.Writer()) // newline so shell prompt is clean
 			os.Exit(1)                 // exit the Go program itself
@@ -291,8 +292,8 @@ func runPatchingStrategies(
 
 				// Use the Python interpreter from the virtual environment
 				pythonInterpreter := "/tmp/crs_venv/bin/python3"
-				isRoot := GetEffectiveUserID() == 0
-				hasSudo := CheckSudoAvailable()
+				isRoot := helpers.GetEffectiveUserID() == 0
+				hasSudo := helpers.CheckSudoAvailable()
 
 				// Calculate patching timeout based on deadline
 				remainingMinutes := int(time.Until(deadlineTime).Minutes())
@@ -381,7 +382,7 @@ func runPatchingStrategies(
 				// ─── Forward Ctrl-C (SIGINT) / SIGTERM to the child process-group ───
 				if runCmd.Process != nil {
 					pgid, _ := syscall.Getpgid(runCmd.Process.Pid) // child's pgid == pid (Setpgid:true)
-					registerChildPG(pgid)
+					helpers.RegisterChildPG(pgid)
 				}
 
 				// Buffer for output
@@ -401,7 +402,7 @@ func runPatchingStrategies(
 
 						// Handle in-line carriage returns from progress bars, etc.
 						for _, part := range strings.Split(raw, "\r") {
-							part = sanitizeTerminalString(part)
+							part = helpers.SanitizeTerminalString(part)
 							if part == "" {
 								continue
 							}
@@ -433,7 +434,7 @@ func runPatchingStrategies(
 						raw := scanner.Text()
 
 						for _, part := range strings.Split(raw, "\r") {
-							part = sanitizeTerminalString(part)
+							part = helpers.SanitizeTerminalString(part)
 							if part == "" {
 								continue
 							}
@@ -558,7 +559,7 @@ func runXPatchingStrategiesWithoutPOV(
 			log.Printf("Source diff directory does not exist: %s", sourceDiffDir)
 		} else {
 			// Copy the diff directory
-			if err := robustCopyDir(sourceDiffDir, diffDir); err != nil {
+			if err := helpers.RobustCopyDir(sourceDiffDir, diffDir); err != nil {
 				log.Printf("Failed to copy diff to patch workspace: %v", err)
 				return false
 			}
@@ -577,7 +578,7 @@ func runXPatchingStrategiesWithoutPOV(
 	}
 
 	// Use a more robust copy function that handles directories properly
-	if err := robustCopyDir(projectDir, patchProjectDir); err != nil {
+	if err := helpers.RobustCopyDir(projectDir, patchProjectDir); err != nil {
 		log.Printf("Failed to copy project to patch workspace: %v", err)
 		return false
 	}
@@ -591,7 +592,7 @@ func runXPatchingStrategiesWithoutPOV(
 		log.Printf("Failed to create patch project directory: %v", err)
 		return false
 	}
-	if err := robustCopyDir(projectSanitizerDir, patchSanitizerProjectDir); err != nil {
+	if err := helpers.RobustCopyDir(projectSanitizerDir, patchSanitizerProjectDir); err != nil {
 		log.Printf("Failed to copy project to patch workspace: %v", err)
 		return false
 	}
@@ -601,7 +602,7 @@ func runXPatchingStrategiesWithoutPOV(
 	fuzzToolingDir := filepath.Join(taskDir, "fuzz-tooling")
 	if _, err := os.Stat(fuzzToolingDir); err == nil {
 		patchFuzzToolingDir := filepath.Join(patchWorkDir, "fuzz-tooling")
-		if err := robustCopyDir(fuzzToolingDir, patchFuzzToolingDir); err != nil {
+		if err := helpers.RobustCopyDir(fuzzToolingDir, patchFuzzToolingDir); err != nil {
 			log.Printf("Failed to copy fuzz-tooling to patch workspace: %v", err)
 			return false
 		}
@@ -680,8 +681,8 @@ func runXPatchingStrategiesWithoutPOV(
 
 			// Use the Python interpreter from the virtual environment
 			pythonInterpreter := "/tmp/crs_venv/bin/python3"
-			isRoot := GetEffectiveUserID() == 0
-			hasSudo := CheckSudoAvailable()
+			isRoot := helpers.GetEffectiveUserID() == 0
+			hasSudo := helpers.CheckSudoAvailable()
 
 			// Prepare the arguments for the Python command
 			args := []string{
@@ -914,8 +915,8 @@ func runXPatchSarifStrategies(
 			log.Printf("Running XPATCH Sarif strategy: %s", strategyPath)
 
 			pythonInterpreter := "/tmp/crs_venv/bin/python3"
-			isRoot := GetEffectiveUserID() == 0
-			hasSudo := CheckSudoAvailable()
+			isRoot := helpers.GetEffectiveUserID() == 0
+			hasSudo := helpers.CheckSudoAvailable()
 			maxIterations := 5
 
 			log.Printf("Setting max iterations to %d", maxIterations)

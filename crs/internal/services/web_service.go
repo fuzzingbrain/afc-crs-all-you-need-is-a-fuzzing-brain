@@ -15,10 +15,12 @@ import (
 	"sync"
 	"time"
 
-	"crs/internal/models"
 	"crs/internal/competition"
 	"crs/internal/config"
-	"crs/internal/executor"
+	"crs/internal/models"
+	"crs/internal/utils/environment"
+	"crs/internal/utils/fuzzer"
+	"crs/internal/utils/helpers"
 )
 
 // WebCRSService implements CRSService for web service mode (task scheduling and distribution)
@@ -67,7 +69,7 @@ func NewWebService(cfg *config.Config) CRSService {
 	}
 
 	// Create the work directory if it doesn't exist
-	if err := executor.EnsureWorkDir(workDir); err != nil {
+	if err := helpers.EnsureWorkDir(workDir); err != nil {
 		log.Printf("Warning: Could not create work directory at %s: %v", workDir, err)
 
 		homeDir, err := os.UserHomeDir()
@@ -75,7 +77,7 @@ func NewWebService(cfg *config.Config) CRSService {
 			workDir = filepath.Join(homeDir, "crs-workdir")
 			log.Printf("Trying fallback work directory: %s", workDir)
 
-			if err := executor.EnsureWorkDir(workDir); err != nil {
+			if err := helpers.EnsureWorkDir(workDir); err != nil {
 				log.Printf("Warning: Could not create fallback work directory: %v", err)
 				tempDir, err := os.MkdirTemp("", "crs-workdir-")
 				if err == nil {
@@ -380,7 +382,7 @@ func (s *WebCRSService) processTask(myFuzzer string, taskDetail models.TaskDetai
 	log.Printf("Dockerfile: %s", dockerfileFullPath)
 
 	// Use executor package to prepare environment
-	params := executor.PrepareEnvironmentParams{
+	params := environment.PrepareEnvironmentParams{
 		MyFuzzer:          &myFuzzer,
 		TaskDir:           taskDir,
 		TaskDetail:        taskDetail,
@@ -389,10 +391,10 @@ func (s *WebCRSService) processTask(myFuzzer string, taskDetail models.TaskDetai
 		FuzzerDir:         fuzzerDir,
 		ProjectDir:        projectDir,
 		FuzzerBuilder:     nil, // Web service doesn't build locally
-		FindFuzzers:       executor.FindFuzzers,
+		FindFuzzers:       fuzzer.FindFuzzers,
 	}
 
-	_, sanitizerDirs, err := executor.PrepareEnvironment(params)
+	_, sanitizerDirs, err := environment.PrepareEnvironment(params)
 	if err != nil {
 		return err
 	}
@@ -404,7 +406,7 @@ func (s *WebCRSService) processTask(myFuzzer string, taskDetail models.TaskDetai
 
 	// Now use the copy to find fuzzers
 	for _, sdir := range sanitizerDirsCopy {
-		fuzzers, err := executor.FindFuzzers(sdir)
+		fuzzers, err := fuzzer.FindFuzzers(sdir)
 		if err != nil {
 			log.Printf("Warning: failed to find fuzzers in %s: %v", sdir, err)
 			continue
@@ -430,7 +432,7 @@ func (s *WebCRSService) processTask(myFuzzer string, taskDetail models.TaskDetai
 				allFilteredFuzzers = append(allFilteredFuzzers, fuzzerPath)
 			}
 		}
-		allFuzzers = executor.SortFuzzersByGroup(allFilteredFuzzers)
+		allFuzzers = helpers.SortFuzzersByGroup(allFilteredFuzzers)
 	}
 
 	log.Printf("Found %d fuzzers: %v", len(allFuzzers), allFuzzers)

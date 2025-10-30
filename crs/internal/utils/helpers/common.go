@@ -1,4 +1,4 @@
-package executor
+package helpers
 
 import (
 	"bytes"
@@ -26,8 +26,8 @@ import (
 	"crs/internal/models"
 )
 
-// saveTaskDetailToJson saves task detail to a JSON file in the fuzzer directory
-func saveTaskDetailToJson(taskDetail models.TaskDetail, fuzzer, fuzzDir string) {
+// SaveTaskDetailToJson saves task detail to a JSON file in the fuzzer directory
+func SaveTaskDetailToJson(taskDetail models.TaskDetail, fuzzer, fuzzDir string) {
 	// Create a hash from the fuzzer name
 	fuzzerHash := HashString(fuzzer)
 
@@ -77,8 +77,8 @@ func saveTaskDetailToJson(taskDetail models.TaskDetail, fuzzer, fuzzDir string) 
 	log.Printf("Successfully saved task detail to %s", filePath)
 }
 
-// copyFuzzDirForParallelStrategies creates copies of fuzzDir for parallel strategy execution
-func copyFuzzDirForParallelStrategies(fuzzer, fuzzDir string) error {
+// CopyFuzzDirForParallelStrategies creates copies of fuzzDir for parallel strategy execution
+func CopyFuzzDirForParallelStrategies(fuzzer, fuzzDir string) error {
 	// Define target directories for parallel strategies
 	targetDirs := []string{"ap0", "ap1", "ap2", "ap3", "xp0", "sarif0"}
 	fuzzerName := filepath.Base(fuzzer) // e.g. html
@@ -260,7 +260,7 @@ func CheckSudoAvailable() bool {
 
 // robustCopyDir copies a directory from src to dst with fault tolerance
 // Handles symlinks, preserves permissions, and continues on errors
-func robustCopyDir(src, dst string) error {
+func RobustCopyDir(src, dst string) error {
 	var copyErrors []string
 
 	// Get properties of source directory
@@ -331,7 +331,7 @@ func robustCopyDir(src, dst string) error {
 			}
 		} else if entryInfo.IsDir() {
 			// Recursively copy the subdirectory
-			if err = robustCopyDir(srcPath, dstPath); err != nil {
+			if err = RobustCopyDir(srcPath, dstPath); err != nil {
 				log.Printf("Warning: error copying directory %s: %v", srcPath, err)
 				copyErrors = append(copyErrors, fmt.Sprintf("error copying directory %s: %v", srcPath, err))
 				// Continue despite the error
@@ -366,14 +366,14 @@ var (
 )
 
 // registerChildPG registers a process group ID for tracking
-func registerChildPG(pgid int) {
+func RegisterChildPG(pgid int) {
 	childGroupsMu.Lock()
 	childGroups[pgid] = struct{}{}
 	childGroupsMu.Unlock()
 }
 
 // killAllChildren sends a signal to all registered child process groups
-func killAllChildren(sig syscall.Signal) {
+func KillAllChildren(sig syscall.Signal) {
 	childGroupsMu.Lock()
 	for pgid := range childGroups {
 		syscall.Kill(-pgid, sig)
@@ -386,7 +386,7 @@ func killAllChildren(sig syscall.Signal) {
 var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 
 // sanitizeTerminalString removes ANSI codes and control characters from strings
-func sanitizeTerminalString(s string) string {
+func SanitizeTerminalString(s string) string {
 	// Remove ANSI colour / cursor-movement codes.
 	s = ansiRegexp.ReplaceAllString(s, "")
 
