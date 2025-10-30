@@ -30,6 +30,7 @@ import (
     "encoding/hex"
     "crs/internal/models"
     "crs/internal/competition"
+    "crs/internal/executor"
     "github.com/google/uuid"
     "regexp"
     "sync"
@@ -83,11 +84,8 @@ func killAllChildren(sig syscall.Signal) {
     childGroupsMu.Unlock()
 }
 
-type ProjectConfig struct {
-    Sanitizers []string `yaml:"sanitizers"`
-    Language string  `yaml:"language"`
-    MainRepo string `yaml:"main_repo"`
-}
+// ProjectConfig is an alias to executor.ProjectConfig for backward compatibility
+type ProjectConfig = executor.ProjectConfig
 
 type CRSService interface {
     GetStatus() models.Status
@@ -1413,73 +1411,19 @@ func (s *defaultCRSService) prepareTaskEnvironment(
 	dockerfileFullPath string,
 	fuzzerDir string,
 	projectDir string,
-) (*ProjectConfig, []string, error) {
-	var cfg *ProjectConfig
-	var sanitizerDirs []string
-
-	projectYAMLPath := filepath.Join(dockerfilePath, "project.yaml")
-	cfg, err := loadProjectConfig(projectYAMLPath)
-	if err != nil {
-		log.Printf("Warning: Could not parse project.yaml (%v). Defaulting to address sanitizer.", err)
-		cfg = &ProjectConfig{Sanitizers: []string{"address"}}
+) (*executor.ProjectConfig, []string, error) {
+	params := executor.PrepareEnvironmentParams{
+		MyFuzzer:          myFuzzer,
+		TaskDir:           taskDir,
+		TaskDetail:        taskDetail,
+		DockerfilePath:    dockerfilePath,
+		DockerfileFullPath: dockerfileFullPath,
+		FuzzerDir:         fuzzerDir,
+		ProjectDir:        projectDir,
+		FuzzerBuilder:     s.buildFuzzersDocker,
+		FindFuzzers:       s.findFuzzers,
 	}
-	if len(cfg.Sanitizers) == 0 {
-		log.Printf("No sanitizers listed in project.yaml; defaulting to address sanitizer.")
-		cfg.Sanitizers = []string{"address"}
-	}
-
-	// Build fuzzers for each sanitizer if they don't exist
-	for _, sanitizer := range cfg.Sanitizers {
-		if sanitizer == "undefined" {
-			continue
-		}
-		if *myFuzzer != "" && *myFuzzer != UNHARNESSED && !strings.Contains(*myFuzzer, sanitizer) {
-			continue
-		}
-		sanitizerDir := fuzzerDir + "-" + sanitizer
-		sanitizerDirs = append(sanitizerDirs, sanitizerDir)
-
-        log.Printf("fuzzerDir: %s", fuzzerDir)
-        log.Printf("sanitizerDir: %s", sanitizerDir)
-
-		fuzzers, _ := s.findFuzzers(sanitizerDir)
-		// if err != nil {
-		// 	log.Printf("Warning: problem trying to find fuzzers in %s: %v", sanitizerDir, err)
-		// }
-		if len(fuzzers) == 0 {
-            log.Printf("-------------------- Building fuzzers ----------------------")
-			log.Printf("No fuzzers found in %s for sanitizer %s. Building...", sanitizerDir, sanitizer)
-			if err := s.buildFuzzersDocker(myFuzzer, taskDir, projectDir, sanitizerDir, sanitizer, cfg.Language, taskDetail); err != nil {
-				log.Printf("Error building fuzzers for sanitizer %s: %v", sanitizer, err)
-			}
-		} else {
-			log.Printf("Found %d fuzzers in %s. Skipping build.", len(fuzzers), sanitizerDir)
-		}
-	}
-
-	// Coverage for C/C++ worker fuzzers
-	if os.Getenv("LOCAL_TEST") != "" || *myFuzzer != "" {
-		lang := strings.ToLower(cfg.Language)
-		if lang == "c" || lang == "c++" {
-			san := "coverage"
-			sanDir := fuzzerDir
-			fuzzers, err := s.findFuzzers(sanDir)
-			if err != nil {
-				log.Printf("Warning: problem trying to find coverage fuzzers in %s: %v", sanDir, err)
-			}
-
-			if len(fuzzers) == 0 {
-				log.Printf("Building fuzzers with --sanitizer=%s", san)
-				if err := s.buildFuzzersDocker(myFuzzer, taskDir, projectDir, sanDir, san, cfg.Language, taskDetail); err != nil {
-					log.Printf("Error building fuzzers for sanitizer %s: %v", san, err)
-				}
-			} else {
-				log.Printf("Found %d coverage fuzzers in %s. Skipping build.", len(fuzzers), sanDir)
-			}
-		}
-	}
-
-	return cfg, sanitizerDirs, nil
+	return executor.PrepareEnvironment(params)
 }    
 func (s *defaultCRSService) processTask(myFuzzer string, taskDetail models.TaskDetail, fullTask models.Task) error {
     taskID := taskDetail.TaskID.String()
@@ -3270,80 +3214,7 @@ func analyzeDiff(t models.TaskDetail, diffPath string) error {
 }
 
 func (s *defaultCRSService) findFuzzers(fuzzerDir string) ([]string, error) {
-    entries, err := os.ReadDir(fuzzerDir)
-    if err != nil {
-        return nil, fmt.Errorf("failed to read fuzzer directory: %v", err)
-    }
-
-    // List of known non-fuzzer executables to skip
-    skipBinaries := map[string]bool{
-        "jazzer_agent_deploy.jar": true,
-        "jazzer_driver": true,
-        "jazzer_driver_with_sanitizer": true,
-        "jazzer_junit.jar": true,
-        "llvm-symbolizer": true,
-        "sancov":         true,  // coverage tool
-        "clang":          true,
-        "clang++":        true,
-    }
-
-    // File extensions to skip
-    skipExtensions := map[string]bool{
-		".bin": true,  // Skip .bin files
-		".log": true,  // Skip log files
-        ".class": true,  // Skip Java class files
-        ".jar":   true,  // Skip Java JAR files (except specific fuzzer JARs)
-		".zip": true,
-		".dict": true,
-		".options": true,
-		".bc": true,
-		".json": true,
-        ".o":     true,  // Skip object files
-        ".a":     true,  // Skip static libraries
-        ".so":    true,  // Skip shared libraries (unless they're specifically fuzzers)
-        ".h":     true,  // Skip header files
-        ".c":     true,  // Skip source files
-        ".cpp":   true,  // Skip source files
-        ".java":  true,  // Skip Java source files
-    }
-
-    var fuzzers []string
-    for _, entry := range entries {
-        // Skip directories and non-executable files
-        if entry.IsDir() {
-            continue
-        }
-        
-        name := entry.Name()
-        
-        // Skip files with extensions we want to ignore
-        ext := filepath.Ext(name)
-        if skipExtensions[ext] {
-            continue
-        }
-        
-        // Skip known non-fuzzer binaries
-        if skipBinaries[name] {
-            continue
-        }
-        
-        info, err := entry.Info()
-        if err != nil {
-            continue
-        }
-        
-        // Check if file is executable
-        if info.Mode()&0111 != 0 {
-            fuzzers = append(fuzzers, name)
-        }
-    }
-
-    if len(fuzzers) == 0 {
-        return nil, fmt.Errorf("no fuzzers found in %s", fuzzerDir)
-    }
-    
-    // log.Printf("Found %d fuzzers in %s: %v", len(fuzzers), fuzzerDir, fuzzers)
-    return fuzzers, nil
+    return executor.FindFuzzers(fuzzerDir)
 }
 
 func extractCrashTrace(output string) string {
@@ -4114,15 +3985,7 @@ func hashString(s string) string {
 }
 
 func loadProjectConfig(projectYAMLPath string) (*ProjectConfig, error) {
-    data, err := os.ReadFile(projectYAMLPath)
-    if err != nil {
-        return nil, err
-    }
-    var cfg ProjectConfig
-    if err := yaml.Unmarshal(data, &cfg); err != nil {
-        return nil, err
-    }
-    return &cfg, nil
+    return executor.LoadProjectConfig(projectYAMLPath)
 }
 
 
