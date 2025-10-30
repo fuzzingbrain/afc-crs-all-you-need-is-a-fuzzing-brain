@@ -1,19 +1,26 @@
 package executor
 
 import (
+	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unicode"
 
 	"crs/internal/models"
@@ -392,4 +399,398 @@ func sanitizeTerminalString(s string) string {
 	}, s)
 
 	return strings.TrimSpace(s)
+}
+
+// ─── POV/Crash File Operations ─────────────────────────────────────────────
+
+// ReadCrashFile reads the newest crash blob file from the POV metadata directory
+func ReadCrashFile(fuzzDir, povMetadataDir string) []byte {
+	// Define the povMetadataDir path
+	povMetadataDirPath := filepath.Join(fuzzDir, povMetadataDir)
+
+	// Search specifically for test_blob_*.bin files
+	blobPattern := filepath.Join(povMetadataDirPath, "test_blob_*.bin")
+	// log.Printf("Looking for crash files with pattern: %s", blobPattern)
+
+	files, err := filepath.Glob(blobPattern)
+	if err != nil {
+		log.Printf("Error finding crash files with pattern %s: %v", blobPattern, err)
+		return nil
+	}
+
+	if len(files) == 0 {
+		log.Printf("No crash files found matching pattern %s", blobPattern)
+		return nil
+	}
+
+	// Sort files by modification time (newest first)
+	sort.Slice(files, func(i, j int) bool {
+		iInfo, err := os.Stat(files[i])
+		if err != nil {
+			return false
+		}
+		jInfo, err := os.Stat(files[j])
+		if err != nil {
+			return true
+		}
+		return iInfo.ModTime().After(jInfo.ModTime())
+	})
+
+	// Get the newest file
+	newestFile := files[0]
+	log.Printf("Found crash file: %s", newestFile)
+
+	// Read the file
+	data, err := os.ReadFile(newestFile)
+	if err != nil {
+		log.Printf("Error reading crash file %s: %v", newestFile, err)
+		return nil
+	}
+
+	log.Printf("Successfully read crash file, size: %d bytes", len(data))
+	return data
+}
+
+// ─── Directory/File Utilities ───────────────────────────────────────────────
+
+// LogDirectoryContents logs all files in a directory recursively (for debugging)
+func LogDirectoryContents(dir string) {
+	log.Printf("Contents of %s:", dir)
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(dir, path)
+		if err != nil {
+			rel = path
+		}
+		log.Printf("  %s (%d bytes)", rel, info.Size())
+		return nil
+	})
+	if err != nil {
+		log.Printf("Error walking directory: %v", err)
+	}
+}
+
+// SortFuzzersByGroup sorts fuzzers by sanitizer type (address, undefined, memory)
+// Currently disabled (returns input as-is) but kept for potential future use
+func SortFuzzersByGroup(allFuzzers []string) []string {
+	if true {
+		//skip random
+		return allFuzzers
+	}
+
+	var address, undefined, memory []string
+
+	for _, f := range allFuzzers {
+		switch {
+		case strings.Contains(f, "-address/"):
+			address = append(address, f)
+		case strings.Contains(f, "-undefined/"):
+			undefined = append(undefined, f)
+		case strings.Contains(f, "-memory/"):
+			memory = append(memory, f)
+		}
+	}
+
+	// Note: rand.Seed/Shuffle would need math/rand and time imports
+	// Keeping the structure for reference but currently returns unsorted
+
+	// Concatenate in the desired order
+	return append(append(address, undefined...), memory...)
+}
+
+// VerifyDirectoryAccess verifies that a directory exists and is accessible
+func VerifyDirectoryAccess(dir string) error {
+	log.Printf("Verifying access to directory: %s", dir)
+
+	// Check if directory exists
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("failed to stat directory: %v", err)
+	}
+
+	// Check if it's a directory
+	if !info.IsDir() {
+		return fmt.Errorf("path is not a directory: %s", dir)
+	}
+
+	// Check permissions
+	log.Printf("Directory permissions: %v", info.Mode())
+
+	// Try to read directory contents
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("failed to read directory: %v", err)
+	}
+
+	log.Printf("Directory contents:")
+	for _, file := range files {
+		info, err := file.Info()
+		if err != nil {
+			log.Printf("  %s (error getting info: %v)", file.Name(), err)
+			continue
+		}
+		log.Printf("  %s (mode: %v, size: %d)", file.Name(), info.Mode(), info.Size())
+	}
+
+	return nil
+}
+
+// ─── Source Extraction and Project Detection ────────────────────────────────
+
+// ExtractSources extracts repo and fuzz-tooling archives from a task directory
+func ExtractSources(taskDir string, isDelta bool) error {
+	// Extract repo archive
+	repoCmd := exec.Command("tar", "-xzf", path.Join(taskDir, "repo.tar.gz"))
+	repoCmd.Dir = taskDir
+	var repoOutput bytes.Buffer
+	repoCmd.Stdout = &repoOutput
+	repoCmd.Stderr = &repoOutput
+	if err := repoCmd.Run(); err != nil {
+		log.Printf("Repo extraction output:\n%s", repoOutput.String())
+		return fmt.Errorf("failed to extract repo: %v", err)
+	}
+
+	// Extract fuzz-tooling archive
+	toolingCmd := exec.Command("tar", "-xzf", path.Join(taskDir, "fuzz-tooling.tar.gz"))
+	toolingCmd.Dir = taskDir
+	var toolingOutput bytes.Buffer
+	toolingCmd.Stdout = &toolingOutput
+	toolingCmd.Stderr = &toolingOutput
+	if err := toolingCmd.Run(); err != nil {
+		log.Printf("Tooling extraction output:\n%s", toolingOutput.String())
+		return fmt.Errorf("failed to extract fuzz-tooling: %v", err)
+	}
+
+	if isDelta {
+		diffCmd := exec.Command("tar", "-xzf", path.Join(taskDir, "diff.tar.gz"))
+		diffCmd.Dir = taskDir
+		var diffOutput bytes.Buffer
+		diffCmd.Stdout = &diffOutput
+		diffCmd.Stderr = &diffOutput
+		if err := diffCmd.Run(); err != nil {
+			log.Printf("Diff extraction output:\n%s", diffOutput.String())
+			return fmt.Errorf("failed to extract diff: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// DetectProjectName searches for project.yaml and returns the project name
+func DetectProjectName(taskDir string) (string, error) {
+	// Log initial directory contents
+	log.Printf("Searching for project.yaml in: %s", taskDir)
+	LogDirectoryContents(taskDir)
+
+	// Try different patterns
+	patterns := []string{
+		"*/project.yaml",         // Direct subdirectory
+		"*/*/project.yaml",       // Two levels deep
+		"*/*/*/project.yaml",     // Three levels deep
+		"example*/project.yaml",  // Example projects
+		"*example*/project.yaml", // Example projects in subdirs
+	}
+
+	for _, pattern := range patterns {
+		fullPattern := path.Join(taskDir, pattern)
+		log.Printf("Trying pattern: %s", fullPattern)
+
+		files, err := filepath.Glob(fullPattern)
+		if err != nil {
+			log.Printf("Error with pattern %s: %v", pattern, err)
+			continue
+		}
+
+		if len(files) > 0 {
+			projectName := filepath.Base(filepath.Dir(files[0]))
+			log.Printf("Found project.yaml at %s, project name: %s", files[0], projectName)
+			return projectName, nil
+		}
+	}
+
+	// Try to find any yaml files as a fallback
+	yamlFiles, err := filepath.Glob(path.Join(taskDir, "**/*.yaml"))
+	if err == nil && len(yamlFiles) > 0 {
+		log.Printf("Found yaml files but no project.yaml:")
+		for _, f := range yamlFiles {
+			log.Printf("  %s", f)
+		}
+	}
+
+	// If we still can't find it, let's check what files we actually have
+	log.Printf("Could not find project.yaml, showing all directory contents:")
+	err = filepath.Walk(taskDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(taskDir, path)
+		if err != nil {
+			rel = path
+		}
+		if info.IsDir() {
+			log.Printf("  [DIR] %s", rel)
+		} else {
+			log.Printf("  [FILE] %s (%d bytes)", rel, info.Size())
+		}
+		return nil
+	})
+	if err != nil {
+		log.Printf("Error walking directory: %v", err)
+	}
+
+	return "", fmt.Errorf("could not find project.yaml in extracted sources")
+}
+
+// IsSASTokenExpired checks if the SAS token in the URL is expired or will expire soon
+func IsSASTokenExpired(urlStr string) bool {
+	u, err := url.Parse(urlStr)
+	if err != nil {
+		return true
+	}
+
+	// Get expiry time from SAS token
+	se := u.Query().Get("se")
+	if se == "" {
+		return false // No expiry time found
+	}
+
+	// Parse the expiry time
+	expiry, err := time.Parse(time.RFC3339, se)
+	if err != nil {
+		log.Printf("Failed to parse SAS token expiry time: %v", err)
+		return true
+	}
+
+	// Add some buffer time (e.g., 5 minutes)
+	bufferTime := 5 * time.Minute
+	if time.Until(expiry) < bufferTime {
+		log.Printf("SAS token will expire soon or has expired. Expiry: %v", expiry)
+		return true
+	}
+
+	return false
+}
+
+// DownloadAndVerifySource downloads a source archive from the given URL and verifies its SHA256
+func DownloadAndVerifySource(taskDir string, source models.SourceDetail) error {
+	// Check SAS token expiration first
+	if IsSASTokenExpired(source.URL) {
+		return fmt.Errorf("SAS token for %s has expired or will expire soon", source.Type)
+	}
+
+	outPath := path.Join(taskDir, fmt.Sprintf("%s.tar.gz", source.Type))
+
+	maxRetries := 3
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		log.Printf("Downloading %s (attempt %d/%d): %s", source.Type, attempt, maxRetries, source.URL)
+
+		// Create HTTP client with timeout
+		client := &http.Client{
+			Timeout: 5 * time.Minute,
+		}
+
+		// Make request
+		resp, err := client.Get(source.URL)
+		if err != nil {
+			log.Printf("Download error: %v", err)
+			if attempt == maxRetries {
+				return fmt.Errorf("failed to download source after %d attempts: %v", maxRetries, err)
+			}
+			continue
+		}
+		defer resp.Body.Close()
+
+		// Check response status
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("Download failed with status %d", resp.StatusCode)
+			if attempt == maxRetries {
+				return fmt.Errorf("download failed with status %d after %d attempts", resp.StatusCode, maxRetries)
+			}
+			continue
+		}
+
+		// Check Content-Length
+		expectedSize := resp.ContentLength
+		// if expectedSize > 0 {
+		//     log.Printf("Expected file size: %d bytes", expectedSize)
+		//     // For repo.tar.gz, expect around 1.6MB
+		//     if source.Type == models.SourceTypeRepo && expectedSize < 1_000_000 {
+		//         log.Printf("Warning: repo.tar.gz seems too small (%d bytes)", expectedSize)
+		//         if attempt == maxRetries {
+		//             return fmt.Errorf("repo.tar.gz too small: %d bytes", expectedSize)
+		//         }
+		//         continue
+		//     }
+		// }
+
+		// Create output file
+		out, err := os.Create(outPath)
+		if err != nil {
+			return fmt.Errorf("failed to create output file: %v", err)
+		}
+		defer out.Close()
+
+		// Calculate SHA256 while copying
+		h := sha256.New()
+		written, err := io.Copy(io.MultiWriter(out, h), resp.Body)
+		if err != nil {
+			log.Printf("Download incomplete: %v", err)
+			os.Remove(outPath) // Clean up partial file
+			if attempt == maxRetries {
+				return fmt.Errorf("failed to save file after %d attempts: %v", maxRetries, err)
+			}
+			continue
+		}
+
+		// Verify downloaded size matches Content-Length
+		if expectedSize > 0 && written != expectedSize {
+			log.Printf("Size mismatch. Expected: %d, Got: %d", expectedSize, written)
+			os.Remove(outPath) // Clean up incomplete file
+			if attempt == maxRetries {
+				return fmt.Errorf("incomplete download after %d attempts. Expected: %d, Got: %d",
+					maxRetries, expectedSize, written)
+			}
+			continue
+		}
+
+		// Verify minimum size for repo.tar.gz
+		// if source.Type == models.SourceTypeRepo && written < 1_000_000 {
+		//     log.Printf("repo.tar.gz too small: %d bytes", written)
+		//     os.Remove(outPath) // Clean up suspicious file
+		//     if attempt == maxRetries {
+		//         return fmt.Errorf("repo.tar.gz too small after %d attempts: %d bytes", maxRetries, written)
+		//     }
+		//     continue
+		// }
+
+		// Verify SHA256
+		downloadedHash := hex.EncodeToString(h.Sum(nil))
+		if downloadedHash != source.SHA256 {
+			log.Printf("SHA256 mismatch for %s\nExpected: %s\nGot:      %s",
+				source.Type, source.SHA256, downloadedHash)
+			os.Remove(outPath) // Clean up invalid file
+			if attempt == maxRetries {
+				return fmt.Errorf("SHA256 mismatch for %s after %d attempts", source.Type, maxRetries)
+			}
+			continue
+		}
+
+		// Verify the file on disk
+		if stat, err := os.Stat(outPath); err != nil {
+			log.Printf("Failed to stat downloaded file: %v", err)
+			if attempt == maxRetries {
+				return fmt.Errorf("failed to verify file after download: %v", err)
+			}
+			continue
+		} else {
+			log.Printf("Successfully downloaded %s: %s (%d bytes)",
+				source.Type, outPath, stat.Size())
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("failed to download and verify %s after %d attempts", source.Type, maxRetries)
 }

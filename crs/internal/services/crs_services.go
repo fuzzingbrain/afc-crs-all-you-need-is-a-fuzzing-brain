@@ -804,7 +804,7 @@ func (s *defaultCRSService) SubmitLocalTask(taskDir string) error {
                 allFilteredFuzzers = append(allFilteredFuzzers, fuzzerPath)
             }
         }
-        allFuzzers = sortFuzzersByGroup(allFilteredFuzzers)
+        allFuzzers = executor.SortFuzzersByGroup(allFilteredFuzzers)
     }
 
     // log.Printf("Sorted fuzzers: %v", allFuzzers)
@@ -1143,7 +1143,7 @@ func (s *defaultCRSService) prepareTaskEnvironment0(
         // Download and process sources
         for _, source := range taskDetail.Source {
             if len(source.URL) > 0 {
-                if err := s.downloadAndVerifySource(taskDir, source); err != nil {
+                if err := executor.DownloadAndVerifySource(taskDir, source); err != nil {
                     mutex.Unlock() // Unlock before returning error
                     return nil, nil, fmt.Errorf("failed to download source %s: %v", source.Type, err)
                 }
@@ -1152,7 +1152,7 @@ func (s *defaultCRSService) prepareTaskEnvironment0(
         
         is_delta := (taskDetail.Type == "delta")
         // 1. Extract archives first
-        if err := s.extractSources(taskDir, is_delta); err != nil {
+        if err := executor.ExtractSources(taskDir, is_delta); err != nil {
             mutex.Unlock() // Unlock before returning error
             return nil, nil, fmt.Errorf("failed to extract sources: %v", err)
         }
@@ -1524,14 +1524,31 @@ func (s *defaultCRSService) processTask(myFuzzer string, taskDetail models.TaskD
                 allFilteredFuzzers = append(allFilteredFuzzers, fuzzerPath)
             }
         }
-        allFuzzers = sortFuzzersByGroup(allFilteredFuzzers)
+        allFuzzers = executor.SortFuzzersByGroup(allFilteredFuzzers)
     }
 
     // log.Printf("Sorted fuzzers: %v", allFuzzers)
     log.Printf("Found %d fuzzers: %v", len(allFuzzers), allFuzzers)
 
-    // Process the task based on its type
-    if err := s.runFuzzing(myFuzzer,taskDir, taskDetail, fullTask, cfg, allFuzzers); err != nil {
+    // Process the task using executor package
+    params := executor.TaskExecutionParams{
+        Fuzzer:                   myFuzzer,
+        TaskDir:                  taskDir,
+        TaskDetail:               taskDetail,
+        Task:                     fullTask,
+        ProjectConfig:            cfg,
+        AllFuzzers:               allFuzzers,
+        SubmissionEndpoint:       s.submissionEndpoint,
+        POVMetadataDir:           s.povMetadataDir,
+        POVMetadataDir0:          s.povMetadataDir0,
+        POVAdvancedMetadataDir:   s.povAdvcancedMetadataDir,
+        Model:                    s.model,
+        WorkerIndex:              s.workerIndex,
+        AnalysisServiceUrl:       s.analysisServiceUrl,
+        UnharnessedFuzzerSrcPath: "",
+    }
+
+    if err := executor.ExecuteFuzzingTask(params); err != nil {
         log.Printf("Processing task %s: %v fuzzer: %s", taskDetail.TaskID, err, myFuzzer)
     }
 
@@ -3573,7 +3590,7 @@ func (s *defaultCRSService) generateCrashSignatureAndSubmit(
 ) error {
 
     // Read crash data
-    crashData := s.readCrashFile(fuzzDir)
+    crashData := executor.ReadCrashFile(fuzzDir, s.povMetadataDir)
     // Skip submission if crash file is empty
     if len(crashData) == 0 {
         log.Printf("Libfuzzer skipping submission for empty crash input data")
