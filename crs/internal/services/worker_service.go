@@ -14,23 +14,14 @@ type WorkerCRSService struct {
 }
 
 // NewWorkerService creates a new worker service instance
+// TODO: This currently delegates to the original NewCRSService
+// In future commits, we will migrate the implementation to WorkerCRSService
 func NewWorkerService(workerIndex string, workerPort int, model string) CRSService {
-	workDir := initializeWorkDir()
-	apiEndpoint, apiKeyID, apiToken := initializeCompetitionAPI()
-
-	return &WorkerCRSService{
-		baseService: baseService{
-			workDir:                 workDir,
-			competitionClient:       initializeCompetitionClient(apiEndpoint, apiKeyID, apiToken),
-			model:                   model,
-			povMetadataDir:          "successful_povs",
-			povMetadataDir0:         "successful_povs_0",
-			povAdvcancedMetadataDir: "successful_povs_advanced",
-			patchWorkDir:            "patch_workspace",
-		},
-		workerIndex: workerIndex,
-		workerPort:  workerPort,
-	}
+	// Temporarily use the original implementation
+	service := NewCRSService(0, workerPort, model)
+	// Set worker-specific configuration
+	service.SetWorkerIndex(workerIndex)
+	return service
 }
 
 // GetStatus returns worker status
