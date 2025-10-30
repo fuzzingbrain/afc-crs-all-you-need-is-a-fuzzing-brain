@@ -17,11 +17,13 @@ import (
 
 	"crs/internal/models"
 	"crs/internal/competition"
+	"crs/internal/config"
 	"crs/internal/executor"
 )
 
 // WebCRSService implements CRSService for web service mode (task scheduling and distribution)
 type WebCRSService struct {
+	cfg                    *config.Config
 	tasks                  map[string]*models.TaskDetail
 	tasksMutex             sync.RWMutex
 	workDir                string
@@ -51,17 +53,11 @@ type WebCRSService struct {
 }
 
 // NewWebService creates a new web service instance
-func NewWebService(workerNodes int, workerBasePort int, model string) CRSService {
-	// Get API configuration
+func NewWebService(cfg *config.Config) CRSService {
+	// Get API configuration from config
 	apiEndpoint := os.Getenv("COMPETITION_API_ENDPOINT")
 	if apiEndpoint == "" {
 		apiEndpoint = "http://localhost:7081"
-	}
-
-	apiKeyID := os.Getenv("CRS_KEY_ID")
-	apiToken := os.Getenv("CRS_KEY_TOKEN")
-	if apiKeyID == "" || apiToken == "" {
-		log.Printf("Warning: CRS_KEY_ID or CRS_KEY_TOKEN not set")
 	}
 
 	// Define default work directory
@@ -97,17 +93,20 @@ func NewWebService(workerNodes int, workerBasePort int, model string) CRSService
 	}
 
 	service := &WebCRSService{
+		cfg:                     cfg,
 		tasks:                   make(map[string]*models.TaskDetail),
 		workDir:                 workDir,
-		competitionClient:       competition.NewClient(apiEndpoint, apiKeyID, apiToken),
+		competitionClient:       competition.NewClient(apiEndpoint, cfg.Auth.KeyID, cfg.Auth.Token),
 		status:                  models.StatusTasksState{},
 		povMetadataDir:          "successful_povs",
 		povMetadataDir0:         "successful_povs_0",
 		povAdvcancedMetadataDir: "successful_povs_advanced",
 		patchWorkDir:            "patch_workspace",
-		workerNodes:             workerNodes,
-		workerBasePort:          workerBasePort,
-		model:                   model,
+		workerNodes:             cfg.Worker.Nodes,
+		workerBasePort:          cfg.Server.WorkerBasePort,
+		model:                   cfg.AI.Model,
+		submissionEndpoint:      cfg.Services.SubmissionURL,
+		analysisServiceUrl:      cfg.Services.AnalysisURL,
 		totalTasksDistributed:   0,
 		workerStatus:            make(map[int]*WorkerStatus),
 		fuzzerToWorkerMap:       make(map[string]int),
@@ -572,9 +571,9 @@ func (s *WebCRSService) sendFuzzerToWorker(fuzzer string, taskDetail models.Task
 		return fmt.Errorf("error marshaling task: %v", err)
 	}
 
-	// Get API credentials from environment
-	apiKeyID := os.Getenv("CRS_KEY_ID")
-	apiToken := os.Getenv("CRS_KEY_TOKEN")
+	// Get API credentials from config
+	apiKeyID := s.cfg.Auth.KeyID
+	apiToken := s.cfg.Auth.Token
 
 	// Lock to safely access and update worker status
 	s.workerStatusMux.Lock()
@@ -665,7 +664,7 @@ func (s *WebCRSService) tryWorker(workerIndex int, taskJSON []byte, apiKeyID, ap
 	workerURL := fmt.Sprintf("http://crs-worker-%d.crs-worker.crs-webservice.svc.cluster.local:%d/v1/task/",
 		workerIndex, s.workerBasePort)
 
-	if os.Getenv("LOCAL_TEST") != "" {
+	if os.Getenv("LOCAL_TEST") != "" || s.cfg.Mode == "local" {
 		workerURL = "http://localhost:9081/v1/task/"
 	}
 
@@ -758,9 +757,9 @@ func (s *WebCRSService) findPOVsAndNotifyWorkers(taskID string, broadcast models
 
 	log.Printf("Found %d worker-fuzzer pairs assigned to task %s", len(workerFuzzerPairs), taskID)
 
-	// 4. Get API credentials
-	apiKeyID := os.Getenv("CRS_KEY_ID")
-	apiToken := os.Getenv("CRS_KEY_TOKEN")
+	// 4. Get API credentials from config
+	apiKeyID := s.cfg.Auth.KeyID
+	apiToken := s.cfg.Auth.Token
 
 	// 5. Send the broadcast to each worker with retry logic
 	var wg sync.WaitGroup

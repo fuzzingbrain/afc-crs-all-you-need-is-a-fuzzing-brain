@@ -21,11 +21,13 @@ import (
 
 	"crs/internal/models"
 	"crs/internal/competition"
+	"crs/internal/config"
 	"crs/internal/executor"
 )
 
 // WorkerCRSService implements CRSService for worker mode (task execution)
 type WorkerCRSService struct {
+	cfg                     *config.Config
 	workDir                 string
 	povMetadataDir          string
 	povMetadataDir0         string
@@ -41,17 +43,11 @@ type WorkerCRSService struct {
 }
 
 // NewWorkerService creates a new worker service instance
-func NewWorkerService(workerIndex string, workerPort int, model string) CRSService {
-	// Get API configuration
+func NewWorkerService(cfg *config.Config) CRSService {
+	// Get API configuration from config
 	apiEndpoint := os.Getenv("COMPETITION_API_ENDPOINT")
 	if apiEndpoint == "" {
 		apiEndpoint = "http://localhost:7081"
-	}
-
-	apiKeyID := os.Getenv("CRS_KEY_ID")
-	apiToken := os.Getenv("CRS_KEY_TOKEN")
-	if apiKeyID == "" || apiToken == "" {
-		log.Printf("Warning: CRS_KEY_ID or CRS_KEY_TOKEN not set")
 	}
 
 	// Define default work directory
@@ -87,17 +83,18 @@ func NewWorkerService(workerIndex string, workerPort int, model string) CRSServi
 	}
 
 	return &WorkerCRSService{
+		cfg:                     cfg,
 		workDir:                 workDir,
-		competitionClient:       competition.NewClient(apiEndpoint, apiKeyID, apiToken),
+		competitionClient:       competition.NewClient(apiEndpoint, cfg.Auth.KeyID, cfg.Auth.Token),
 		povMetadataDir:          "successful_povs",
 		povMetadataDir0:         "successful_povs_0",
 		povAdvcancedMetadataDir: "successful_povs_advanced",
 		patchWorkDir:            "patch_workspace",
-		model:                   model,
-		workerIndex:             workerIndex,
-		submissionEndpoint:      "",
-		analysisServiceUrl:      "",
-		workerPort:              workerPort,
+		model:                   cfg.AI.Model,
+		workerIndex:             cfg.Worker.Index,
+		submissionEndpoint:      cfg.Services.SubmissionURL,
+		analysisServiceUrl:      cfg.Services.AnalysisURL,
+		workerPort:              cfg.Worker.Port,
 	}
 }
 
@@ -802,8 +799,8 @@ func (s *WorkerCRSService) runSarifPOVStrategies(myFuzzer, taskDir, sarifFilePat
                 "PATH=/tmp/crs_venv/bin:"+os.Getenv("PATH"),
                 fmt.Sprintf("SUBMISSION_ENDPOINT=%s", s.submissionEndpoint),
                 fmt.Sprintf("TASK_ID=%s", taskDetail.TaskID.String()),
-                fmt.Sprintf("CRS_KEY_ID=%s", os.Getenv("CRS_KEY_ID")),
-                fmt.Sprintf("CRS_KEY_TOKEN=%s", os.Getenv("CRS_KEY_TOKEN")),
+                fmt.Sprintf("CRS_KEY_ID=%s", s.cfg.Auth.KeyID),
+                fmt.Sprintf("CRS_KEY_TOKEN=%s", s.cfg.Auth.Token),
                 fmt.Sprintf("COMPETITION_API_KEY_ID=%s", os.Getenv("COMPETITION_API_KEY_ID")),
                 fmt.Sprintf("COMPETITION_API_KEY_TOKEN=%s", os.Getenv("COMPETITION_API_KEY_TOKEN")),
                 fmt.Sprintf("WORKER_INDEX=%s", s.workerIndex),
@@ -969,8 +966,8 @@ func (s *WorkerCRSService) runXPatchSarifStrategies(myFuzzer, taskDir, sarifFile
                 "PATH=/tmp/crs_venv/bin:"+os.Getenv("PATH"),
                 fmt.Sprintf("SUBMISSION_ENDPOINT=%s", s.submissionEndpoint),
                 fmt.Sprintf("TASK_ID=%s", taskDetail.TaskID.String()),
-                fmt.Sprintf("CRS_KEY_ID=%s", os.Getenv("CRS_KEY_ID")),
-                fmt.Sprintf("CRS_KEY_TOKEN=%s", os.Getenv("CRS_KEY_TOKEN")),
+                fmt.Sprintf("CRS_KEY_ID=%s", s.cfg.Auth.KeyID),
+                fmt.Sprintf("CRS_KEY_TOKEN=%s", s.cfg.Auth.Token),
                 fmt.Sprintf("COMPETITION_API_KEY_ID=%s", os.Getenv("COMPETITION_API_KEY_ID")),
                 fmt.Sprintf("COMPETITION_API_KEY_TOKEN=%s", os.Getenv("COMPETITION_API_KEY_TOKEN")),
                 fmt.Sprintf("WORKER_INDEX=%s", s.workerIndex),
