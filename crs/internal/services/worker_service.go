@@ -1,9 +1,15 @@
 package services
 
 import (
+	"bufio"
 	"bytes"
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path"
@@ -24,6 +30,7 @@ type WorkerCRSService struct {
 	povMetadataDir          string
 	povMetadataDir0         string
 	povAdvcancedMetadataDir string
+	patchWorkDir            string
 	submissionEndpoint      string
 	workerIndex             string
 	analysisServiceUrl      string
@@ -85,6 +92,7 @@ func NewWorkerService(workerIndex string, workerPort int, model string) CRSServi
 		povMetadataDir:          "successful_povs",
 		povMetadataDir0:         "successful_povs_0",
 		povAdvcancedMetadataDir: "successful_povs_advanced",
+		patchWorkDir:            "patch_workspace",
 		model:                   model,
 		workerIndex:             workerIndex,
 		submissionEndpoint:      "",
@@ -224,10 +232,14 @@ func (s *WorkerCRSService) SubmitSarif(sarifBroadcast models.SARIFBroadcast) err
 }
 
 // HandleSarifBroadcastWorker handles SARIF broadcasts received by worker
-// TODO: SARIF workflow to be implemented later
 func (s *WorkerCRSService) HandleSarifBroadcastWorker(broadcastWorker models.SARIFBroadcastDetailWorker) error {
-	log.Printf("SARIF workflow not yet implemented in WorkerCRSService")
-	return nil
+	taskID := broadcastWorker.Broadcast.TaskID.String()
+	broadcast := broadcastWorker.Broadcast
+
+	log.Printf("Worker received SARIF broadcast for task %s, SARIF ID %s", taskID, broadcast.SarifID)
+
+	// Process the SARIF report for this worker's assigned fuzzer
+	return s.processSarif(taskID, broadcast)
 }
 
 // SetWorkerIndex sets the worker index
@@ -440,7 +452,7 @@ func (s *WorkerCRSService) buildFuzzersDocker(myFuzzer *string, taskDir, project
 	} else {
 		// For both Java and C tasks on worker
 		if true {
-			BuildAFCFuzzers(taskDir, sanitizer, taskDetail.ProjectName, sanitizerProjectDir, sanitizerDir)
+			executor.BuildAFCFuzzers(taskDir, sanitizer, taskDetail.ProjectName, sanitizerProjectDir, sanitizerDir)
 		} else {
 			workDir := filepath.Join(taskDir, "fuzz-tooling", "build", "work", fmt.Sprintf("%s-%s", taskDetail.ProjectName, sanitizer))
 
@@ -479,4 +491,558 @@ func (s *WorkerCRSService) buildFuzzersDocker(myFuzzer *string, taskDir, project
 		}
 	}
 	return nil
+}
+
+// ============================================================================
+// SARIF Processing Methods
+// ============================================================================
+
+func (s *WorkerCRSService) processSarif(taskID string, broadcast models.SARIFBroadcastDetail) error {
+    log.Printf("Worker processing SARIF report for task %s, SARIF ID %s", taskID, broadcast.SarifID)
+
+    // 0. save Sarif Broadcast
+    saveSarifBroadcast(s.workDir,taskID,broadcast)
+
+    // 1. Extract and validate the SARIF report
+    sarifData, err := extractSarifData(broadcast.SARIF)
+    if err != nil {
+        return fmt.Errorf("failed to extract SARIF data: %w", err)
+    }
+
+    // 2. Analyze the SARIF report to identify vulnerabilities
+    vulnerabilities, err := analyzeSarifVulnerabilities(sarifData)
+    if err != nil {
+        return fmt.Errorf("failed to analyze vulnerabilities: %w", err)
+    }
+
+    if len(vulnerabilities) == 0 {
+        log.Printf("No vulnerabilities found in SARIF report for task %s", taskID)
+        return nil
+    }
+
+    log.Printf("Found %d vulnerabilities in SARIF report for task %s", len(vulnerabilities), taskID)
+
+    showVulnerabilityDetail(taskID, vulnerabilities)
+
+    // Worker directly runs POV strategies for the SARIF report
+    // TODO: Implement actual POV strategy execution
+    log.Printf("TODO: Worker needs to run POV strategies for task %s", taskID)
+
+    return nil
+}
+
+func (s *WorkerCRSService) checkIfSarifValid(taskID string, broadcast models.SARIFBroadcastDetail) (bool, error) {
+
+    broadcastJSON, err := json.Marshal(broadcast)
+    if err != nil {
+        log.Printf("Error json.Marshal for broadcast SarifID %s: %v", broadcast.SarifID, err)
+        return false, err
+    }
+
+    url := fmt.Sprintf("%s/v1/sarifx/%s/%s/", s.submissionEndpoint, taskID, broadcast.SarifID)
+    // Create the HTTP request
+    req, err := http.NewRequest("POST", url, bytes.NewBuffer(broadcastJSON))
+    if err != nil {
+        log.Printf("Error creating request for broadcast.SarifID %s: %v", broadcast.SarifID, err)
+        return false, err
+    }
+
+
+    {
+        // Set headers
+        req.Header.Set("Content-Type", "application/json")
+
+        // Get API credentials from environment
+        apiKeyID := os.Getenv("COMPETITION_API_KEY_ID")
+        apiToken := os.Getenv("COMPETITION_API_KEY_TOKEN")
+        if apiKeyID != "" && apiToken != "" {
+            req.SetBasicAuth(apiKeyID, apiToken)
+        }
+
+
+// Increase the timeout for the HTTP request
+ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second) // Increase to 3 minutes
+defer cancel()
+req = req.WithContext(ctx)
+
+// Create a client with custom timeout settings
+client := &http.Client{
+    Timeout: 180 * time.Second, // Set client timeout to match context timeout
+    Transport: &http.Transport{
+        DialContext: (&net.Dialer{
+            Timeout:   30 * time.Second, // Connection timeout
+            KeepAlive: 30 * time.Second,
+        }).DialContext,
+        TLSHandshakeTimeout:   15 * time.Second,
+        ResponseHeaderTimeout: 30 * time.Second,
+        ExpectContinueTimeout: 1 * time.Second,
+        MaxIdleConns:          100,
+        IdleConnTimeout:       90 * time.Second,
+    },
+}
+
+// Send the request
+resp, err := client.Do(req)
+if err != nil {
+    log.Printf("Error checking broadcast validity at submission service: %v", err)
+    // Consider implementing a retry mechanism here
+    if ctx.Err() == context.DeadlineExceeded {
+        log.Printf("Request timed out, may need to increase timeout or check server load")
+    }
+    return false, err
+}
+defer resp.Body.Close()
+
+        // Check response
+        if resp.StatusCode != http.StatusOK {
+            body, _ := io.ReadAll(resp.Body)
+            log.Printf("Submission service returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
+            return false, fmt.Errorf("Submission service returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
+        } else {
+
+            var response models.SarifValidResponse
+            if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+                return false, err
+            }
+
+            return response.IsValid, nil
+        }
+
+    }
+}
+
+func (s *WorkerCRSService) checkIfSarifInValid(taskID string, ctxs []models.CodeContext, broadcast models.SARIFBroadcastDetail) (int, error) {
+
+    payload := struct {
+        Broadcast models.SARIFBroadcastDetail `json:"broadcast"`
+        Contexts  []models.CodeContext        `json:"contexts"`
+    }{
+        Broadcast: broadcast,
+        Contexts:  ctxs,
+    }
+
+    payloadJSON, err := json.Marshal(payload)
+    if err != nil {
+        log.Printf("Error json.Marshal for payload with SarifID %s: %v", broadcast.SarifID, err)
+        return 0, err
+    }
+
+    url := fmt.Sprintf("%s/v1/sarifx/check_invalid/%s/%s/", s.submissionEndpoint, taskID, broadcast.SarifID)
+    // Create the HTTP request
+    req, err := http.NewRequest("POST", url, bytes.NewBuffer(payloadJSON))
+    if err != nil {
+        log.Printf("Error creating request for broadcast.SarifID %s: %v", broadcast.SarifID, err)
+        return 0, err
+    }
+
+    {
+        // Set headers
+        req.Header.Set("Content-Type", "application/json")
+
+        // Get API credentials from environment
+        apiKeyID := os.Getenv("COMPETITION_API_KEY_ID")
+        apiToken := os.Getenv("COMPETITION_API_KEY_TOKEN")
+        if apiKeyID != "" && apiToken != "" {
+            req.SetBasicAuth(apiKeyID, apiToken)
+        }
+
+
+        ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+        defer cancel()
+        req = req.WithContext(ctx)
+
+        // Send the request
+        client := &http.Client{}
+        resp, err := client.Do(req)
+        if err != nil {
+            log.Printf("Error checking sarif broadcast invalidity at submission service: %v", err)
+            return 0, err
+        }
+        defer resp.Body.Close()
+
+        // Check response
+        if resp.StatusCode != http.StatusOK {
+            body, _ := io.ReadAll(resp.Body)
+            log.Printf("Submission service returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
+            return 0, fmt.Errorf("Submission service returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
+        } else {
+
+            var response models.SarifInValidResponse
+            if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+                return 0, err
+            }
+
+            return response.IsInvalid, nil
+        }
+
+    }
+}
+
+func (s *WorkerCRSService) submitSarifInvalid(taskID string, broadcast models.SARIFBroadcastDetail) error {
+
+    url := fmt.Sprintf("%s/v1/sarifx/invalid/%s/%s/", s.submissionEndpoint,taskID, broadcast.SarifID)
+
+    broadcastJSON, err := json.Marshal(broadcast)
+    if err != nil {
+        log.Printf("Error json.Marshal for broadcast SarifID %s: %v", broadcast.SarifID, err)
+        return err
+    }
+
+    // Create the HTTP request
+    req, err := http.NewRequest("POST", url, bytes.NewBuffer(broadcastJSON))
+    if err != nil {
+        log.Printf("Error creating request for broadcast.SarifID %s: %v", broadcast.SarifID, err)
+        return err
+    }
+
+    {
+        // Set headers
+        req.Header.Set("Content-Type", "application/json")
+
+        // Get API credentials from environment
+        apiKeyID := os.Getenv("COMPETITION_API_KEY_ID")
+        apiToken := os.Getenv("COMPETITION_API_KEY_TOKEN")
+        if apiKeyID != "" && apiToken != "" {
+            req.SetBasicAuth(apiKeyID, apiToken)
+        }
+
+
+        ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+        defer cancel()
+        req = req.WithContext(ctx)
+
+        // Send the request
+        client := &http.Client{}
+        resp, err := client.Do(req)
+        if err != nil {
+            log.Printf("Error sending broadcast to submission service: %v", err)
+            return err
+        }
+        defer resp.Body.Close()
+
+        // Check response
+        if resp.StatusCode != http.StatusOK {
+            body, _ := io.ReadAll(resp.Body)
+            log.Printf("Submission service returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
+            return fmt.Errorf("Submission service returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
+        }
+    }
+
+    return nil
+}
+
+func (s *WorkerCRSService) runSarifPOVStrategies(myFuzzer, taskDir, sarifFilePath string, language string, taskDetail *models.TaskDetail,    timeout int,
+    phase int) bool {
+    // Find all strategy files under /app/strategy/
+    strategyDir := "/app/strategy"
+    strategyFilePattern := "sarif_pov*.py"
+    strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, "**", strategyFilePattern))
+    if err != nil {
+        log.Printf("Failed to find strategy files: %v", err)
+        return false
+    }
+
+    if len(strategyFiles) == 0 {
+        log.Printf("No Sarif POV strategy files found in %s", strategyDir)
+        return false
+    }
+
+    log.Printf("Found %d Sarif POV strategy files: %v", len(strategyFiles), strategyFiles)
+
+    povSuccess := false
+    var successMutex sync.Mutex
+    var wg sync.WaitGroup
+
+    for _, strategyFile := range strategyFiles {
+        wg.Add(1)
+        go func(strategyPath string) {
+            defer wg.Done()
+            strategyName := filepath.Base(strategyPath)
+            log.Printf("Running Sarif POV strategy: %s", strategyPath)
+
+            pythonInterpreter := "/tmp/crs_venv/bin/python3"
+            isRoot := getEffectiveUserID() == 0
+            hasSudo := checkSudoAvailable()
+            maxIterations := 5
+
+            log.Printf("Setting max iterations to %d", maxIterations)
+
+            args := []string{
+                strategyPath,
+                myFuzzer,
+                sarifFilePath,
+                taskDetail.ProjectName,
+                taskDetail.Focus,
+                language,
+                "--model", s.model,
+                "--do-patch=false",
+                "--pov-metadata-dir", s.povAdvcancedMetadataDir,
+                "--check-patch-success",
+                fmt.Sprintf("--fuzzing-timeout=%d", timeout),
+                fmt.Sprintf("--pov-phase=%d", phase),
+                fmt.Sprintf("--max-iterations=%d", maxIterations),
+            }
+
+            var runCmd *exec.Cmd
+            if isRoot {
+                runCmd = exec.Command(pythonInterpreter, args...)
+            } else if hasSudo {
+                sudoArgs := append([]string{"-E", pythonInterpreter}, args...)
+                runCmd = exec.Command("sudo", sudoArgs...)
+            } else {
+                log.Printf("Warning: Not running as root and sudo not available. Trying direct execution.")
+                runCmd = exec.Command(pythonInterpreter, args...)
+            }
+
+            log.Printf("[SARIF-POV] Executing: %s", runCmd.String())
+
+            runCmd.Dir = taskDir
+            runCmd.Env = append(os.Environ(),
+                "VIRTUAL_ENV=/tmp/crs_venv",
+                "PATH=/tmp/crs_venv/bin:"+os.Getenv("PATH"),
+                fmt.Sprintf("SUBMISSION_ENDPOINT=%s", s.submissionEndpoint),
+                fmt.Sprintf("TASK_ID=%s", taskDetail.TaskID.String()),
+                fmt.Sprintf("CRS_KEY_ID=%s", os.Getenv("CRS_KEY_ID")),
+                fmt.Sprintf("CRS_KEY_TOKEN=%s", os.Getenv("CRS_KEY_TOKEN")),
+                fmt.Sprintf("COMPETITION_API_KEY_ID=%s", os.Getenv("COMPETITION_API_KEY_ID")),
+                fmt.Sprintf("COMPETITION_API_KEY_TOKEN=%s", os.Getenv("COMPETITION_API_KEY_TOKEN")),
+                fmt.Sprintf("WORKER_INDEX=%s", s.workerIndex),
+                fmt.Sprintf("ANALYSIS_SERVICE_URL=%s", s.analysisServiceUrl),
+                "PYTHONUNBUFFERED=1",
+            )
+
+            // If we generated an unharnessed fuzzer for this task, pass its source path.
+            if srcAny, ok := s.unharnessedFuzzerSrc.Load(taskDetail.TaskID.String()); ok {
+                runCmd.Env = append(runCmd.Env,
+                    fmt.Sprintf("NEW_FUZZER_SRC_PATH=%s", srcAny.(string)))
+            }
+
+            // --- Streaming logs setup ---
+            stdoutPipe, err := runCmd.StdoutPipe()
+            if err != nil {
+                log.Printf("Failed to create stdout pipe: %v", err)
+                return
+            }
+            stderrPipe, err := runCmd.StderrPipe()
+            if err != nil {
+                log.Printf("Failed to create stderr pipe: %v", err)
+                return
+            }
+
+            if err := runCmd.Start(); err != nil {
+                log.Printf("Failed to start strategy %s: %v", strategyName, err)
+                return
+            }
+
+            var outputLines []string
+            var outputMutex sync.Mutex
+
+            // Stream stdout
+            go func() {
+                scanner := bufio.NewScanner(stdoutPipe)
+                for scanner.Scan() {
+                    line := scanner.Text()
+                    log.Printf("[SARIF][%s Phase-%d] %s", strategyName, phase, line)
+                    outputMutex.Lock()
+                    outputLines = append(outputLines, line)
+                    outputMutex.Unlock()
+                }
+            }()
+            // Stream stderr
+            go func() {
+                scanner := bufio.NewScanner(stderrPipe)
+                for scanner.Scan() {
+                    line := scanner.Text()
+                    log.Printf("[SARIF ERR][%s Phase-%d] %s", strategyName, phase, line)
+                    outputMutex.Lock()
+                    outputLines = append(outputLines, line)
+                    outputMutex.Unlock()
+                }
+            }()
+
+            startTime := time.Now()
+            err = runCmd.Wait()
+            duration := time.Since(startTime)
+
+            // Combine all output for POV SUCCESS detection
+            outputMutex.Lock()
+            combinedOutput := strings.Join(outputLines, "\n")
+            outputMutex.Unlock()
+
+            if err != nil {
+                log.Printf("Sarif POV Strategy %s failed after %v: %v", strategyName, duration, err)
+            } else {
+                log.Printf("Sarif POV Strategy %s completed successfully in %v", strategyName, duration)
+                successMutex.Lock()
+                if strings.Contains(combinedOutput, "POV SUCCESS!") {
+                    log.Printf("Sarif POV Strategy %s POV successful!", strategyName)
+                    povSuccess = true
+                }
+                successMutex.Unlock()
+            }
+        }(strategyFile)
+    }
+
+    wg.Wait()
+    return povSuccess
+}
+
+func (s *WorkerCRSService) runXPatchSarifStrategies(myFuzzer, taskDir, sarifFilePath string, language string, taskDetail models.TaskDetail,
+	deadlineTime time.Time) bool {
+
+    log.Printf("runXPatchSarifStrategies: starting patch attempt with sarif "+
+    "(task type: %s)", taskDetail.Type)
+
+    strategyDir := "/app/strategy"
+    strategyFilePattern := "xpatch_sarif.py"
+    strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, "**", strategyFilePattern))
+    if err != nil {
+        log.Printf("Failed to find strategy files: %v", err)
+        return false
+    }
+
+    if len(strategyFiles) == 0 {
+        log.Printf("No XPATCH Sarif strategy files found in %s", strategyDir)
+        return false
+    }
+
+    log.Printf("Found %d XPATCH Sarif strategy files: %v", len(strategyFiles), strategyFiles)
+
+    patchSuccess := false
+    // Calculate patching timeout based on deadline
+    remainingMinutes := int(time.Until(deadlineTime).Minutes())
+    // Reserve 5 minutes as safety buffer
+    patchingTimeout := remainingMinutes - 5
+    if patchingTimeout < 5 {
+        patchingTimeout = 5
+    }
+
+    patchWorkDir := filepath.Join(taskDir, s.patchWorkDir)
+
+
+    var successMutex sync.Mutex
+    var wg sync.WaitGroup
+
+    for _, strategyFile := range strategyFiles {
+        wg.Add(1)
+        go func(strategyPath string) {
+            defer wg.Done()
+            strategyName := filepath.Base(strategyPath)
+            log.Printf("Running XPATCH Sarif strategy: %s", strategyPath)
+
+            pythonInterpreter := "/tmp/crs_venv/bin/python3"
+            isRoot := getEffectiveUserID() == 0
+            hasSudo := checkSudoAvailable()
+            maxIterations := 5
+
+            log.Printf("Setting max iterations to %d", maxIterations)
+
+            args := []string{
+                strategyPath,
+                myFuzzer,
+                sarifFilePath,
+                taskDetail.ProjectName,
+                taskDetail.Focus,
+                language,
+                "--model", s.model,
+                fmt.Sprintf("--patching-timeout=%d", patchingTimeout),
+                "--patch-workspace-dir", patchWorkDir,
+            }
+
+            var runCmd *exec.Cmd
+            if isRoot {
+                runCmd = exec.Command(pythonInterpreter, args...)
+            } else if hasSudo {
+                sudoArgs := append([]string{"-E", pythonInterpreter}, args...)
+                runCmd = exec.Command("sudo", sudoArgs...)
+            } else {
+                log.Printf("Warning: Not running as root and sudo not available. Trying direct execution.")
+                runCmd = exec.Command(pythonInterpreter, args...)
+            }
+
+            log.Printf("[XPATCH-SARIF] Executing: %s", runCmd.String())
+
+
+            runCmd.Dir = taskDir
+            runCmd.Env = append(os.Environ(),
+                "VIRTUAL_ENV=/tmp/crs_venv",
+                "PATH=/tmp/crs_venv/bin:"+os.Getenv("PATH"),
+                fmt.Sprintf("SUBMISSION_ENDPOINT=%s", s.submissionEndpoint),
+                fmt.Sprintf("TASK_ID=%s", taskDetail.TaskID.String()),
+                fmt.Sprintf("CRS_KEY_ID=%s", os.Getenv("CRS_KEY_ID")),
+                fmt.Sprintf("CRS_KEY_TOKEN=%s", os.Getenv("CRS_KEY_TOKEN")),
+                fmt.Sprintf("COMPETITION_API_KEY_ID=%s", os.Getenv("COMPETITION_API_KEY_ID")),
+                fmt.Sprintf("COMPETITION_API_KEY_TOKEN=%s", os.Getenv("COMPETITION_API_KEY_TOKEN")),
+                fmt.Sprintf("WORKER_INDEX=%s", s.workerIndex),
+                fmt.Sprintf("ANALYSIS_SERVICE_URL=%s", s.analysisServiceUrl),
+                "PYTHONUNBUFFERED=1",
+            )
+
+            // --- Streaming logs setup ---
+            stdoutPipe, err := runCmd.StdoutPipe()
+            if err != nil {
+                log.Printf("Failed to create stdout pipe: %v", err)
+                return
+            }
+            stderrPipe, err := runCmd.StderrPipe()
+            if err != nil {
+                log.Printf("Failed to create stderr pipe: %v", err)
+                return
+            }
+
+            if err := runCmd.Start(); err != nil {
+                log.Printf("Failed to start strategy %s: %v", strategyName, err)
+                return
+            }
+
+            var outputLines []string
+            var outputMutex sync.Mutex
+
+            // Stream stdout
+            go func() {
+                scanner := bufio.NewScanner(stdoutPipe)
+                for scanner.Scan() {
+                    line := scanner.Text()
+                    log.Printf("[XPATCH-SARIF][%s] %s", strategyName, line)
+                    outputMutex.Lock()
+                    outputLines = append(outputLines, line)
+                    outputMutex.Unlock()
+                }
+            }()
+            // Stream stderr
+            go func() {
+                scanner := bufio.NewScanner(stderrPipe)
+                for scanner.Scan() {
+                    line := scanner.Text()
+                    log.Printf("[XPATCH-SARIF ERR][%s] %s", strategyName, line)
+                    outputMutex.Lock()
+                    outputLines = append(outputLines, line)
+                    outputMutex.Unlock()
+                }
+            }()
+
+            startTime := time.Now()
+            err = runCmd.Wait()
+            duration := time.Since(startTime)
+
+            outputMutex.Lock()
+            combinedOutput := strings.Join(outputLines, "\n")
+            outputMutex.Unlock()
+
+            if err != nil {
+                log.Printf("XPATCH-Sarif Strategy %s failed after %v: %v", strategyName, duration, err)
+            } else {
+                log.Printf("XPATCH-Sarif Strategy %s completed successfully in %v", strategyName, duration)
+                successMutex.Lock()
+                if strings.Contains(combinedOutput, "PATCH SUCCESS!") {
+                    log.Printf("XPATCH-Sarif Strategy %s successful!", strategyName)
+                    patchSuccess = true
+                }
+                successMutex.Unlock()
+            }
+        }(strategyFile)
+    }
+
+    wg.Wait()
+    return patchSuccess
 }
