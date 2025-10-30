@@ -12,7 +12,7 @@ import (
 // Common errors
 var (
 	errNotSupportedInLocalMode  = errors.New("operation not supported in local mode")
-	errNotSupportedInServerMode = errors.New("operation not supported in server mode")
+	errNotSupportedInWebMode    = errors.New("operation not supported in web mode")
 	errNotSupportedInWorkerMode = errors.New("operation not supported in worker mode")
 )
 

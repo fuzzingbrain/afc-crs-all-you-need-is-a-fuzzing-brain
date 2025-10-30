@@ -243,13 +243,14 @@ func (s *LocalCRSService) CancelAllTasks() error {
 	return errNotSupportedInLocalMode
 }
 
-// SubmitSarif handles SARIF broadcast submission
+// SubmitSarif handles SARIF broadcast submission in local mode
+// TODO: SARIF workflow to be implemented later
 func (s *LocalCRSService) SubmitSarif(sarifBroadcast models.SARIFBroadcast) error {
-	// This will use the shared SARIF handling logic
-	panic("SubmitSarif: to be implemented")
+	log.Printf("SARIF workflow not yet implemented in LocalCRSService")
+	return nil
 }
 
-// HandleSarifBroadcastWorker is not typically used in local mode
+// HandleSarifBroadcastWorker is not used in local mode
 func (s *LocalCRSService) HandleSarifBroadcastWorker(broadcastWorker models.SARIFBroadcastDetailWorker) error {
 	return errNotSupportedInLocalMode
 }
