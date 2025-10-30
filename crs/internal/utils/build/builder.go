@@ -1,4 +1,4 @@
-package executor
+package build
 
 import (
 	"bytes"
@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"crs/internal/utils/helpers"
 )
 
 // BuildAFCFuzzers builds fuzzers for a given project with proper isolation per sanitizer.
@@ -136,7 +138,7 @@ func BuildAFCFuzzers0(taskDir string, sanitizer, projectName, projectDir, saniti
 
 	//TODO: copy outDir to sanitizerDir
 	outDir := filepath.Join(taskDir, "fuzz-tooling", "build", "out", projectName)
-	if err := robustCopyDir(outDir, sanitizerDir); err != nil {
+	if err := helpers.RobustCopyDir(outDir, sanitizerDir); err != nil {
 		log.Printf("[BuildAFCFuzzers] failed to copy fuzzer files: outDir %s %v", outDir, err)
 	} else {
 		log.Printf("[BuildAFCFuzzers] fuzzer files copied to %s", sanitizerDir)
@@ -209,3 +211,4 @@ func PullAFCDockerImage(taskDir string, projectName string) (string, error) {
 
 	return cmdOutput.String(), nil
 }
+

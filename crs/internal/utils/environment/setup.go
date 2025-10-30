@@ -1,4 +1,4 @@
-package executor
+package environment
 
 import (
 	"log"
@@ -9,6 +9,9 @@ import (
 	"crs/internal/models"
 	"gopkg.in/yaml.v3"
 )
+
+// setup.go - Project environment setup and configuration loading
+// This file contains functions for loading project.yaml and preparing the fuzzing environment
 
 // ProjectConfig represents the configuration loaded from project.yaml
 type ProjectConfig struct {

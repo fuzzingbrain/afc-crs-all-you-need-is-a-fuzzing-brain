@@ -14,6 +14,8 @@ import (
 
 	"crs/internal/models"
 	"crs/internal/telemetry"
+	"crs/internal/utils/environment"
+	"crs/internal/utils/helpers"
 
 	"go.opentelemetry.io/otel/attribute"
 )
@@ -29,7 +31,7 @@ type TaskExecutionParams struct {
 	TaskDir                  string
 	TaskDetail               models.TaskDetail
 	Task                     models.Task
-	ProjectConfig            *ProjectConfig
+	ProjectConfig            *environment.ProjectConfig
 	AllFuzzers               []string
 	SubmissionEndpoint       string
 	POVMetadataDir           string
@@ -85,10 +87,10 @@ func ExecuteFuzzingTask(params TaskExecutionParams) error {
 	fuzzDir := filepath.Dir(fuzzer)
 
 	// Save task detail to JSON for strategy scripts
-	saveTaskDetailToJson(params.TaskDetail, fuzzer, fuzzDir)
+	helpers.SaveTaskDetailToJson(params.TaskDetail, fuzzer, fuzzDir)
 
 	// Create a copy of fuzzDir for parallel strategies
-	err = copyFuzzDirForParallelStrategies(fuzzer, fuzzDir)
+	err = helpers.CopyFuzzDirForParallelStrategies(fuzzer, fuzzDir)
 	if err != nil {
 		log.Printf("Failed to copy fuzzDir %s for parallel strategies. Error: %v", fuzzDir, err)
 	} else {
@@ -290,7 +292,7 @@ func executeXPatchPhase(fuzzer string, params TaskExecutionParams, projectDir, s
 	// If XPatch failed and harnesses are included, try SARIF-based XPatch
 	if !patchSuccess && params.TaskDetail.HarnessesIncluded {
 		sarifDir := path.Join(params.TaskDir, "sarif_broadcasts")
-		if DirExists(sarifDir) {
+		if helpers.DirExists(sarifDir) {
 			log.Printf("Attempting SARIF-based XPatch...")
 			sarifFiles, err := filepath.Glob(filepath.Join(sarifDir, "*.json"))
 			if err != nil {
