@@ -2,6 +2,7 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -254,7 +255,43 @@ func (s *WebCRSService) CancelAllTasks() error {
 // SubmitSarif handles SARIF broadcast submission
 // TODO: SARIF workflow to be implemented later
 func (s *WebCRSService) SubmitSarif(sarifBroadcast models.SARIFBroadcast) error {
-	log.Printf("SARIF workflow not yet implemented in WebCRSService")
+	// Forward SARIF broadcast to submission server
+	taskJSON, err := json.Marshal(sarifBroadcast)
+	if err != nil {
+		log.Printf("Error marshaling SARIF broadcast: %v", err)
+		return err
+	}
+
+	// Send the broadcast to submission endpoint
+	url := fmt.Sprintf("%s/sarifx/", s.submissionEndpoint)
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(taskJSON))
+	if err != nil {
+		log.Printf("Error sending SARIF request: %v", err)
+		return err
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Error reading response: %v", err)
+		return err
+	}
+
+	// Print response
+	fmt.Printf("\nResponse from server (status %d):\n", resp.StatusCode)
+
+	// Format JSON response if possible
+	var prettyJSON bytes.Buffer
+	err = json.Indent(&prettyJSON, respBody, "", "  ")
+	if err != nil {
+		// Not valid JSON, print as-is
+		fmt.Println(string(respBody))
+	} else {
+		fmt.Println(prettyJSON.String())
+	}
+
+	log.Printf("Successfully forwarded SARIF broadcast to submission server: message id %s", sarifBroadcast.MessageID)
 	return nil
 }
 
@@ -700,4 +737,121 @@ func (s *WebCRSService) recordWorkerFailure(workerIndex int) {
 		log.Printf("Worker %d has failed %d times, blacklisted until %v",
 			workerIndex, status.FailureCount, status.BlacklistedUntil)
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SARIF Processing Methods
+// ─────────────────────────────────────────────────────────────────────────────
+
+// findPOVsAndNotifyWorkers finds all workers assigned to a task and notifies them of SARIF results
+func (s *WebCRSService) findPOVsAndNotifyWorkers(taskID string, broadcast models.SARIFBroadcastDetail) error {
+	// 1. Lock to safely access worker mapping
+	s.workerStatusMux.Lock()
+	defer s.workerStatusMux.Unlock()
+
+	// 2. Find all workers that have been assigned to a fuzzer of the same taskID
+	workerFuzzerPairs, exists := s.taskToWorkersMap[taskID]
+	if !exists || len(workerFuzzerPairs) == 0 {
+		log.Printf("No workers assigned to task %s", taskID)
+		return fmt.Errorf("no workers assigned to task %s", taskID)
+	}
+
+	log.Printf("Found %d worker-fuzzer pairs assigned to task %s", len(workerFuzzerPairs), taskID)
+
+	// 4. Get API credentials
+	apiKeyID := os.Getenv("CRS_KEY_ID")
+	apiToken := os.Getenv("CRS_KEY_TOKEN")
+
+	// 5. Send the broadcast to each worker with retry logic
+	var wg sync.WaitGroup
+	successCount := 0
+	var successMutex sync.Mutex
+
+	for _, pair := range workerFuzzerPairs {
+		workerIndex := pair.Worker
+
+		payload := models.SARIFBroadcastDetailWorker{
+			Broadcast: broadcast,
+			Fuzzer:    pair.Fuzzer,
+		}
+		// 3. Marshal the broadcast message
+		broadcastJSON, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("error marshaling broadcast message: %v", err)
+		}
+
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+
+			// Send broadcast with retry
+			maxRetries := 3
+			for attempt := 0; attempt < maxRetries; attempt++ {
+				success := s.sendBroadcastToWorker(idx, broadcastJSON, apiKeyID, apiToken, taskID)
+				if success {
+					log.Printf("Successfully sent broadcast to worker %d for task %s", idx, taskID)
+					successMutex.Lock()
+					successCount++
+					successMutex.Unlock()
+					return
+				}
+
+				if attempt < maxRetries-1 {
+					log.Printf("Retrying broadcast to worker %d (attempt %d/%d)", idx, attempt+1, maxRetries)
+					time.Sleep(30 * time.Second) // Wait before retry
+				}
+			}
+
+			log.Printf("Failed to send broadcast to worker %d after %d attempts", idx, maxRetries)
+		}(workerIndex)
+	}
+
+	// Wait for all goroutines to complete
+	wg.Wait()
+
+	if successCount == 0 {
+		return fmt.Errorf("Failed to send broadcast to any worker for task %s", taskID)
+	}
+
+	log.Printf("Successfully sent broadcast to %d/%d fuzzer-worker pairs for task %s", successCount, len(workerFuzzerPairs), taskID)
+	return nil
+}
+
+// sendBroadcastToWorker sends a SARIF broadcast to a specific worker
+func (s *WebCRSService) sendBroadcastToWorker(workerIndex int, broadcastJSON []byte, apiKeyID, apiToken, taskID string) bool {
+	// Construct the worker URL
+	workerURL := fmt.Sprintf("http://crs-worker-%d.crs-worker.crs-webservice.svc.cluster.local:%d/sarif_worker/",
+		workerIndex, s.workerBasePort)
+
+	// Create the HTTP request
+	req, err := http.NewRequest("POST", workerURL, bytes.NewBuffer(broadcastJSON))
+	if err != nil {
+		log.Printf("Error creating request for worker %d: %v", workerIndex, err)
+		return false
+	}
+
+	// Set headers
+	req.Header.Set("Content-Type", "application/json")
+	// Set timeout context
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	req = req.WithContext(ctx)
+
+	// Send the request
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("Error sending broadcast to worker %d: %v", workerIndex, err)
+		return false
+	}
+	defer resp.Body.Close()
+
+	// Check response
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Printf("Worker %d returned non-200 status: %d, body: %s", workerIndex, resp.StatusCode, string(body))
+		return false
+	}
+
+	return true
 }

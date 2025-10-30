@@ -425,7 +425,7 @@ func (s *LocalCRSService) buildFuzzersDocker(myFuzzer *string, taskDir, projectD
 	} else {
 		// For both Java and C tasks on worker
 		if true {
-			BuildAFCFuzzers(taskDir, sanitizer, taskDetail.ProjectName, sanitizerProjectDir, sanitizerDir)
+			executor.BuildAFCFuzzers(taskDir, sanitizer, taskDetail.ProjectName, sanitizerProjectDir, sanitizerDir)
 		} else {
 			workDir := filepath.Join(taskDir, "fuzz-tooling", "build", "work", fmt.Sprintf("%s-%s", taskDetail.ProjectName, sanitizer))
 
