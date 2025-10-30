@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"crs/internal/competition"
-	"crs/internal/executor"
 	"crs/internal/models"
+	"crs/internal/utils/helpers"
 	"github.com/shirou/gopsutil/v3/cpu"
 )
 
@@ -59,7 +59,7 @@ func initializeWorkDir() string {
 		workDir = envWorkDir
 	}
 
-	if err := executor.EnsureWorkDir(workDir); err != nil {
+	if err := helpers.EnsureWorkDir(workDir); err != nil {
 		log.Printf("Warning: Could not create work directory at %s: %v", workDir, err)
 
 		homeDir, err := os.UserHomeDir()
@@ -67,7 +67,7 @@ func initializeWorkDir() string {
 			workDir = filepath.Join(homeDir, "crs-workdir")
 			log.Printf("Trying fallback work directory: %s", workDir)
 
-			if err := executor.EnsureWorkDir(workDir); err != nil {
+			if err := helpers.EnsureWorkDir(workDir); err != nil {
 				log.Printf("Warning: Could not create fallback work directory: %v", err)
 				tempDir, err := os.MkdirTemp("", "crs-workdir-")
 				if err == nil {

@@ -19,13 +19,19 @@ import (
 	"sync"
 	"time"
 
-	"crs/internal/models"
 	"crs/internal/competition"
+	"crs/internal/config"
 	"crs/internal/executor"
+	"crs/internal/models"
+	"crs/internal/utils/build"
+	"crs/internal/utils/environment"
+	"crs/internal/utils/fuzzer"
+	"crs/internal/utils/helpers"
 )
 
 // WorkerCRSService implements CRSService for worker mode (task execution)
 type WorkerCRSService struct {
+	cfg                     *config.Config
 	workDir                 string
 	povMetadataDir          string
 	povMetadataDir0         string
@@ -41,17 +47,11 @@ type WorkerCRSService struct {
 }
 
 // NewWorkerService creates a new worker service instance
-func NewWorkerService(workerIndex string, workerPort int, model string) CRSService {
-	// Get API configuration
+func NewWorkerService(cfg *config.Config) CRSService {
+	// Get API configuration from config
 	apiEndpoint := os.Getenv("COMPETITION_API_ENDPOINT")
 	if apiEndpoint == "" {
 		apiEndpoint = "http://localhost:7081"
-	}
-
-	apiKeyID := os.Getenv("CRS_KEY_ID")
-	apiToken := os.Getenv("CRS_KEY_TOKEN")
-	if apiKeyID == "" || apiToken == "" {
-		log.Printf("Warning: CRS_KEY_ID or CRS_KEY_TOKEN not set")
 	}
 
 	// Define default work directory
@@ -61,7 +61,7 @@ func NewWorkerService(workerIndex string, workerPort int, model string) CRSServi
 	}
 
 	// Create the work directory if it doesn't exist
-	if err := executor.EnsureWorkDir(workDir); err != nil {
+	if err := helpers.EnsureWorkDir(workDir); err != nil {
 		log.Printf("Warning: Could not create work directory at %s: %v", workDir, err)
 
 		homeDir, err := os.UserHomeDir()
@@ -69,7 +69,7 @@ func NewWorkerService(workerIndex string, workerPort int, model string) CRSServi
 			workDir = filepath.Join(homeDir, "crs-workdir")
 			log.Printf("Trying fallback work directory: %s", workDir)
 
-			if err := executor.EnsureWorkDir(workDir); err != nil {
+			if err := helpers.EnsureWorkDir(workDir); err != nil {
 				log.Printf("Warning: Could not create fallback work directory: %v", err)
 				tempDir, err := os.MkdirTemp("", "crs-workdir-")
 				if err == nil {
@@ -87,17 +87,18 @@ func NewWorkerService(workerIndex string, workerPort int, model string) CRSServi
 	}
 
 	return &WorkerCRSService{
+		cfg:                     cfg,
 		workDir:                 workDir,
-		competitionClient:       competition.NewClient(apiEndpoint, apiKeyID, apiToken),
+		competitionClient:       competition.NewClient(apiEndpoint, cfg.Auth.KeyID, cfg.Auth.Token),
 		povMetadataDir:          "successful_povs",
 		povMetadataDir0:         "successful_povs_0",
 		povAdvcancedMetadataDir: "successful_povs_advanced",
 		patchWorkDir:            "patch_workspace",
-		model:                   model,
-		workerIndex:             workerIndex,
-		submissionEndpoint:      "",
-		analysisServiceUrl:      "",
-		workerPort:              workerPort,
+		model:                   cfg.AI.Model,
+		workerIndex:             cfg.Worker.Index,
+		submissionEndpoint:      cfg.Services.SubmissionURL,
+		analysisServiceUrl:      cfg.Services.AnalysisURL,
+		workerPort:              cfg.Worker.Port,
 	}
 }
 
@@ -298,7 +299,7 @@ func (s *WorkerCRSService) processTask(myFuzzer string, taskDetail models.TaskDe
 	log.Printf("Dockerfile: %s", dockerfileFullPath)
 
 	// Use executor package to prepare environment
-	params := executor.PrepareEnvironmentParams{
+	params := environment.PrepareEnvironmentParams{
 		MyFuzzer:           &myFuzzer,
 		TaskDir:            taskDir,
 		TaskDetail:         taskDetail,
@@ -307,10 +308,10 @@ func (s *WorkerCRSService) processTask(myFuzzer string, taskDetail models.TaskDe
 		FuzzerDir:          fuzzerDir,
 		ProjectDir:         projectDir,
 		FuzzerBuilder:      s.buildFuzzersDocker,
-		FindFuzzers:        executor.FindFuzzers,
+		FindFuzzers:        fuzzer.FindFuzzers,
 	}
 
-	cfg, sanitizerDirs, err := executor.PrepareEnvironment(params)
+	cfg, sanitizerDirs, err := environment.PrepareEnvironment(params)
 	if err != nil {
 		return err
 	}
@@ -322,7 +323,7 @@ func (s *WorkerCRSService) processTask(myFuzzer string, taskDetail models.TaskDe
 
 	// Now use the copy to find fuzzers
 	for _, sdir := range sanitizerDirsCopy {
-		fuzzers, err := executor.FindFuzzers(sdir)
+		fuzzers, err := fuzzer.FindFuzzers(sdir)
 		if err != nil {
 			log.Printf("Warning: failed to find fuzzers in %s: %v", sdir, err)
 			continue
@@ -348,7 +349,7 @@ func (s *WorkerCRSService) processTask(myFuzzer string, taskDetail models.TaskDe
 				allFilteredFuzzers = append(allFilteredFuzzers, fuzzerPath)
 			}
 		}
-		allFuzzers = executor.SortFuzzersByGroup(allFilteredFuzzers)
+		allFuzzers = helpers.SortFuzzersByGroup(allFilteredFuzzers)
 	}
 
 	log.Printf("Found %d fuzzers: %v", len(allFuzzers), allFuzzers)
@@ -452,7 +453,7 @@ func (s *WorkerCRSService) buildFuzzersDocker(myFuzzer *string, taskDir, project
 	} else {
 		// For both Java and C tasks on worker
 		if true {
-			executor.BuildAFCFuzzers(taskDir, sanitizer, taskDetail.ProjectName, sanitizerProjectDir, sanitizerDir)
+			build.BuildAFCFuzzers(taskDir, sanitizer, taskDetail.ProjectName, sanitizerProjectDir, sanitizerDir)
 		} else {
 			workDir := filepath.Join(taskDir, "fuzz-tooling", "build", "work", fmt.Sprintf("%s-%s", taskDetail.ProjectName, sanitizer))
 
@@ -501,16 +502,16 @@ func (s *WorkerCRSService) processSarif(taskID string, broadcast models.SARIFBro
     log.Printf("Worker processing SARIF report for task %s, SARIF ID %s", taskID, broadcast.SarifID)
 
     // 0. save Sarif Broadcast
-    executor.SaveSarifBroadcast(s.workDir,taskID,broadcast)
+    helpers.SaveSarifBroadcast(s.workDir,taskID,broadcast)
 
     // 1. Extract and validate the SARIF report
-    sarifData, err := executor.ExtractSarifData(broadcast.SARIF)
+    sarifData, err := helpers.ExtractSarifData(broadcast.SARIF)
     if err != nil {
         return fmt.Errorf("failed to extract SARIF data: %w", err)
     }
 
     // 2. Analyze the SARIF report to identify vulnerabilities
-    vulnerabilities, err := executor.AnalyzeSarifVulnerabilities(sarifData)
+    vulnerabilities, err := helpers.AnalyzeSarifVulnerabilities(sarifData)
     if err != nil {
         return fmt.Errorf("failed to analyze vulnerabilities: %w", err)
     }
@@ -522,7 +523,7 @@ func (s *WorkerCRSService) processSarif(taskID string, broadcast models.SARIFBro
 
     log.Printf("Found %d vulnerabilities in SARIF report for task %s", len(vulnerabilities), taskID)
 
-    executor.ShowVulnerabilityDetail(taskID, vulnerabilities)
+    helpers.ShowVulnerabilityDetail(taskID, vulnerabilities)
 
     // Worker directly runs POV strategies for the SARIF report
     // TODO: Implement actual POV strategy execution
@@ -761,8 +762,8 @@ func (s *WorkerCRSService) runSarifPOVStrategies(myFuzzer, taskDir, sarifFilePat
             log.Printf("Running Sarif POV strategy: %s", strategyPath)
 
             pythonInterpreter := "/tmp/crs_venv/bin/python3"
-            isRoot := executor.GetEffectiveUserID() == 0
-            hasSudo := executor.CheckSudoAvailable()
+            isRoot := helpers.GetEffectiveUserID() == 0
+            hasSudo := helpers.CheckSudoAvailable()
             maxIterations := 5
 
             log.Printf("Setting max iterations to %d", maxIterations)
@@ -802,8 +803,8 @@ func (s *WorkerCRSService) runSarifPOVStrategies(myFuzzer, taskDir, sarifFilePat
                 "PATH=/tmp/crs_venv/bin:"+os.Getenv("PATH"),
                 fmt.Sprintf("SUBMISSION_ENDPOINT=%s", s.submissionEndpoint),
                 fmt.Sprintf("TASK_ID=%s", taskDetail.TaskID.String()),
-                fmt.Sprintf("CRS_KEY_ID=%s", os.Getenv("CRS_KEY_ID")),
-                fmt.Sprintf("CRS_KEY_TOKEN=%s", os.Getenv("CRS_KEY_TOKEN")),
+                fmt.Sprintf("CRS_KEY_ID=%s", s.cfg.Auth.KeyID),
+                fmt.Sprintf("CRS_KEY_TOKEN=%s", s.cfg.Auth.Token),
                 fmt.Sprintf("COMPETITION_API_KEY_ID=%s", os.Getenv("COMPETITION_API_KEY_ID")),
                 fmt.Sprintf("COMPETITION_API_KEY_TOKEN=%s", os.Getenv("COMPETITION_API_KEY_TOKEN")),
                 fmt.Sprintf("WORKER_INDEX=%s", s.workerIndex),
@@ -931,8 +932,8 @@ func (s *WorkerCRSService) runXPatchSarifStrategies(myFuzzer, taskDir, sarifFile
             log.Printf("Running XPATCH Sarif strategy: %s", strategyPath)
 
             pythonInterpreter := "/tmp/crs_venv/bin/python3"
-            isRoot := executor.GetEffectiveUserID() == 0
-            hasSudo := executor.CheckSudoAvailable()
+            isRoot := helpers.GetEffectiveUserID() == 0
+            hasSudo := helpers.CheckSudoAvailable()
             maxIterations := 5
 
             log.Printf("Setting max iterations to %d", maxIterations)
@@ -969,8 +970,8 @@ func (s *WorkerCRSService) runXPatchSarifStrategies(myFuzzer, taskDir, sarifFile
                 "PATH=/tmp/crs_venv/bin:"+os.Getenv("PATH"),
                 fmt.Sprintf("SUBMISSION_ENDPOINT=%s", s.submissionEndpoint),
                 fmt.Sprintf("TASK_ID=%s", taskDetail.TaskID.String()),
-                fmt.Sprintf("CRS_KEY_ID=%s", os.Getenv("CRS_KEY_ID")),
-                fmt.Sprintf("CRS_KEY_TOKEN=%s", os.Getenv("CRS_KEY_TOKEN")),
+                fmt.Sprintf("CRS_KEY_ID=%s", s.cfg.Auth.KeyID),
+                fmt.Sprintf("CRS_KEY_TOKEN=%s", s.cfg.Auth.Token),
                 fmt.Sprintf("COMPETITION_API_KEY_ID=%s", os.Getenv("COMPETITION_API_KEY_ID")),
                 fmt.Sprintf("COMPETITION_API_KEY_TOKEN=%s", os.Getenv("COMPETITION_API_KEY_TOKEN")),
                 fmt.Sprintf("WORKER_INDEX=%s", s.workerIndex),

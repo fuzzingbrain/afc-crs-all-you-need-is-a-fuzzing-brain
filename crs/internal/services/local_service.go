@@ -2,9 +2,6 @@ package services
 
 import (
 	"bytes"
-	"crs/internal/models"
-	"crs/internal/executor"
-	"crs/internal/competition"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -17,11 +14,21 @@ import (
 	"sync"
 	"time"
 
+	"crs/internal/competition"
+	"crs/internal/config"
+	"crs/internal/executor"
+	"crs/internal/models"
+	"crs/internal/utils/build"
+	"crs/internal/utils/environment"
+	"crs/internal/utils/fuzzer"
+	"crs/internal/utils/helpers"
+
 	"github.com/google/uuid"
 )
 
 // LocalCRSService implements CRSService for local CLI mode
 type LocalCRSService struct {
+	cfg                     *config.Config
 	workDir                 string
 	povMetadataDir          string
 	povMetadataDir0         string
@@ -35,17 +42,11 @@ type LocalCRSService struct {
 }
 
 // NewLocalService creates a new local service instance
-func NewLocalService(model string) CRSService {
-	// Get API configuration
+func NewLocalService(cfg *config.Config) CRSService {
+	// Get API configuration from config
 	apiEndpoint := os.Getenv("COMPETITION_API_ENDPOINT")
 	if apiEndpoint == "" {
 		apiEndpoint = "http://localhost:7081"
-	}
-
-	apiKeyID := os.Getenv("CRS_KEY_ID")
-	apiToken := os.Getenv("CRS_KEY_TOKEN")
-	if apiKeyID == "" || apiToken == "" {
-		log.Printf("Warning: CRS_KEY_ID or CRS_KEY_TOKEN not set")
 	}
 
 	// Define default work directory
@@ -55,7 +56,7 @@ func NewLocalService(model string) CRSService {
 	}
 
 	// Create the work directory if it doesn't exist
-	if err := executor.EnsureWorkDir(workDir); err != nil {
+	if err := helpers.EnsureWorkDir(workDir); err != nil {
 		log.Printf("Warning: Could not create work directory at %s: %v", workDir, err)
 
 		homeDir, err := os.UserHomeDir()
@@ -63,7 +64,7 @@ func NewLocalService(model string) CRSService {
 			workDir = filepath.Join(homeDir, "crs-workdir")
 			log.Printf("Trying fallback work directory: %s", workDir)
 
-			if err := executor.EnsureWorkDir(workDir); err != nil {
+			if err := helpers.EnsureWorkDir(workDir); err != nil {
 				log.Printf("Warning: Could not create fallback work directory: %v", err)
 				tempDir, err := os.MkdirTemp("", "crs-workdir-")
 				if err == nil {
@@ -81,15 +82,16 @@ func NewLocalService(model string) CRSService {
 	}
 
 	return &LocalCRSService{
+		cfg:                     cfg,
 		workDir:                 workDir,
-		competitionClient:       competition.NewClient(apiEndpoint, apiKeyID, apiToken),
+		competitionClient:       competition.NewClient(apiEndpoint, cfg.Auth.KeyID, cfg.Auth.Token),
 		povMetadataDir:          "successful_povs",
 		povMetadataDir0:         "successful_povs_0",
 		povAdvcancedMetadataDir: "successful_povs_advanced",
-		model:                   model,
-		submissionEndpoint:      "",
+		model:                   cfg.AI.Model,
+		submissionEndpoint:      cfg.Services.SubmissionURL,
 		workerIndex:             "",
-		analysisServiceUrl:      "",
+		analysisServiceUrl:      cfg.Services.AnalysisURL,
 	}
 }
 
@@ -210,7 +212,7 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 	log.Printf("Dockerfile: %s", dockerfileFullPath)
 
 	// Use executor package to prepare environment
-	params := executor.PrepareEnvironmentParams{
+	params := environment.PrepareEnvironmentParams{
 		MyFuzzer:          &myFuzzer,
 		TaskDir:           taskDir,
 		TaskDetail:        taskDetail,
@@ -219,9 +221,9 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 		FuzzerDir:         fuzzerDir,
 		ProjectDir:        projectDir,
 		FuzzerBuilder:     s.buildFuzzersDocker,
-		FindFuzzers:       executor.FindFuzzers,
+		FindFuzzers:       fuzzer.FindFuzzers,
 	}
-	cfg, sanitizerDirs, err := executor.PrepareEnvironment(params)
+	cfg, sanitizerDirs, err := environment.PrepareEnvironment(params)
 	if err != nil {
 		return err
 	}
@@ -234,7 +236,7 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 
 	// Now use the copy to find fuzzers
 	for _, sdir := range sanitizerDirsCopy {
-		fuzzers, err := executor.FindFuzzers(sdir)
+		fuzzers, err := fuzzer.FindFuzzers(sdir)
 		if err != nil {
 			log.Printf("Warning: failed to find fuzzers in %s: %v", sdir, err)
 			continue // Skip this directory but continue with others
@@ -263,7 +265,7 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 				allFilteredFuzzers = append(allFilteredFuzzers, fuzzerPath)
 			}
 		}
-		allFuzzers = executor.SortFuzzersByGroup(allFilteredFuzzers)
+		allFuzzers = helpers.SortFuzzersByGroup(allFilteredFuzzers)
 	}
 
 	log.Printf("Found %d fuzzers: %v", len(allFuzzers), allFuzzers)
@@ -425,7 +427,7 @@ func (s *LocalCRSService) buildFuzzersDocker(myFuzzer *string, taskDir, projectD
 	} else {
 		// For both Java and C tasks on worker
 		if true {
-			executor.BuildAFCFuzzers(taskDir, sanitizer, taskDetail.ProjectName, sanitizerProjectDir, sanitizerDir)
+			build.BuildAFCFuzzers(taskDir, sanitizer, taskDetail.ProjectName, sanitizerProjectDir, sanitizerDir)
 		} else {
 			workDir := filepath.Join(taskDir, "fuzz-tooling", "build", "work", fmt.Sprintf("%s-%s", taskDetail.ProjectName, sanitizer))
 
