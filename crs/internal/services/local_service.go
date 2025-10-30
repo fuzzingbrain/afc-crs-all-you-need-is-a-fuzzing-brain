@@ -203,7 +203,7 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 				allFilteredFuzzers = append(allFilteredFuzzers, fuzzerPath)
 			}
 		}
-		allFuzzers = sortFuzzersByGroup(allFilteredFuzzers)
+		allFuzzers = executor.SortFuzzersByGroup(allFilteredFuzzers)
 	}
 
 	log.Printf("Found %d fuzzers: %v", len(allFuzzers), allFuzzers)
@@ -214,9 +214,25 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 		Tasks:       []models.TaskDetail{taskDetail},
 	}
 
-	// Process the task based on its type
-	// Use the embedded defaultCRSService's runFuzzing method for now
-	if err := s.runFuzzing(myFuzzer, taskDir, taskDetail, fullTask, cfg, allFuzzers); err != nil {
+	// Use executor package for fuzzing execution
+	execParams := executor.TaskExecutionParams{
+		Fuzzer:                   myFuzzer,
+		TaskDir:                  taskDir,
+		TaskDetail:               taskDetail,
+		Task:                     fullTask,
+		ProjectConfig:            cfg,
+		AllFuzzers:               allFuzzers,
+		SubmissionEndpoint:       s.submissionEndpoint,
+		POVMetadataDir:           s.povMetadataDir,
+		POVMetadataDir0:          s.povMetadataDir0,
+		POVAdvancedMetadataDir:   s.povAdvcancedMetadataDir,
+		Model:                    s.model,
+		WorkerIndex:              s.workerIndex,
+		AnalysisServiceUrl:       s.analysisServiceUrl,
+		UnharnessedFuzzerSrcPath: "",
+	}
+
+	if err := executor.ExecuteFuzzingTask(execParams); err != nil {
 		log.Printf("Processing task %s: %v fuzzer: %s", taskDetail.TaskID, err, myFuzzer)
 	}
 
