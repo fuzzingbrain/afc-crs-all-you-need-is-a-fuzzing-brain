@@ -78,7 +78,7 @@ func FindFuzzers(fuzzerDir string) ([]string, error) {
 	}
 
 	if len(fuzzers) == 0 {
-		return nil, fmt.Errorf("no fuzzers found in %s", fuzzerDir)
+		return nil, fmt.Errorf("%w in %s", ErrNoFuzzers, fuzzerDir)
 	}
 
 	return fuzzers, nil
