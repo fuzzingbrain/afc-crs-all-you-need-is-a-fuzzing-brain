@@ -29,7 +29,7 @@ import (
 // saveTaskDetailToJson saves task detail to a JSON file in the fuzzer directory
 func saveTaskDetailToJson(taskDetail models.TaskDetail, fuzzer, fuzzDir string) {
 	// Create a hash from the fuzzer name
-	fuzzerHash := hashString(fuzzer)
+	fuzzerHash := HashString(fuzzer)
 
 	filePath := filepath.Join(fuzzDir, "task_detail.json")
 
@@ -108,7 +108,7 @@ func copyFuzzDirForParallelStrategies(fuzzer, fuzzDir string) error {
 		return fmt.Errorf("%s is not a directory", fuzzDir)
 	}
 
-	isRoot := getEffectiveUserID() == 0
+	isRoot := GetEffectiveUserID() == 0
 	if !isRoot {
 		// Fix permissions using sudo
 		chownCmd := exec.Command("sudo", "chown", "-R", fmt.Sprintf("%d:%d", os.Getuid(), os.Getgid()), fuzzDir)
@@ -188,8 +188,8 @@ func copyFuzzDirForParallelStrategies(fuzzer, fuzzDir string) error {
 	return nil
 }
 
-// hashString generates a SHA256 hash of a string and returns the first 16 characters
-func hashString(s string) string {
+// HashString generates a SHA256 hash of a string and returns the first 16 characters
+func HashString(s string) string {
 	h := sha256.New()
 	h.Write([]byte(s))
 	return fmt.Sprintf("%x", h.Sum(nil))[:16] // Use first 16 chars of hash for brevity
@@ -231,8 +231,8 @@ func copyFile(src, dst string) error {
 	return nil
 }
 
-// getEffectiveUserID returns the effective user ID, handling cross-platform compatibility
-func getEffectiveUserID() int {
+// GetEffectiveUserID returns the effective user ID, handling cross-platform compatibility
+func GetEffectiveUserID() int {
 	// This is a Unix-specific function
 	if runtime.GOOS == "windows" {
 		// On Windows, we can't easily check if we're admin
@@ -245,7 +245,7 @@ func getEffectiveUserID() int {
 }
 
 // checkSudoAvailable checks if sudo is available and can be used
-func checkSudoAvailable() bool {
+func CheckSudoAvailable() bool {
 	// Try to find sudo in PATH
 	_, err := exec.LookPath("sudo")
 	if err != nil {
@@ -793,4 +793,335 @@ func DownloadAndVerifySource(taskDir string, source models.SourceDetail) error {
 	}
 
 	return fmt.Errorf("failed to download and verify %s after %d attempts", source.Type, maxRetries)
+}
+// ============================================================================
+// Directory and File Utilities (migrated from services/crs_services.go)
+// ============================================================================
+
+// EnsureWorkDir creates the work directory if it doesn't exist
+func EnsureWorkDir(dir string) error {
+	// Check if directory exists
+	info, err := os.Stat(dir)
+	if err == nil {
+		// Directory exists, check if it's a directory
+		if !info.IsDir() {
+			return fmt.Errorf("%s exists but is not a directory", dir)
+		}
+
+		// Check if we have write permission
+		testFile := filepath.Join(dir, ".crs-write-test")
+		f, err := os.Create(testFile)
+		if err != nil {
+			return fmt.Errorf("directory exists but is not writable: %v", err)
+		}
+		f.Close()
+		os.Remove(testFile)
+
+		return nil
+	}
+
+	// Directory doesn't exist, try to create it
+	err = os.MkdirAll(dir, 0755)
+	if err != nil {
+		return fmt.Errorf("failed to create directory: %v", err)
+	}
+
+	return nil
+}
+
+// DirExists reports whether path exists and is a directory
+func DirExists(p string) bool {
+	info, err := os.Stat(p)
+	if err != nil {
+		return false
+	}
+	return info.IsDir()
+}
+
+// ============================================================================
+// SARIF Helper Functions (migrated from services/crs_services.go)
+// ============================================================================
+
+// ExtractSarifData extracts SARIF data from an interface
+func ExtractSarifData(sarifInterface interface{}) (map[string]interface{}, error) {
+	sarifData, ok := sarifInterface.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("invalid SARIF data format")
+	}
+
+	return sarifData, nil
+}
+
+// SaveSarifBroadcast saves a SARIF broadcast to disk
+func SaveSarifBroadcast(workDir string, taskID string, broadcast models.SARIFBroadcastDetail) (string, error) {
+
+	var sarifFilePath string
+
+	// Step 0: Save the broadcast to a JSON file
+	// First, find the task directory
+	entries, err := os.ReadDir(workDir)
+	if err != nil {
+		return sarifFilePath, fmt.Errorf("failed to read work directory: %w", err)
+	}
+
+	var taskDir string
+	for _, entry := range entries {
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), taskID+"-") {
+			taskDir = path.Join(workDir, entry.Name())
+			break
+		}
+	}
+
+	if taskDir == "" {
+		return sarifFilePath, fmt.Errorf("task directory for task %s not found", taskID)
+	}
+
+	// Create sarif_broadcasts directory if it doesn't exist
+	sarifDir := path.Join(taskDir, "sarif_broadcasts")
+	if err := os.MkdirAll(sarifDir, 0755); err != nil {
+		return sarifFilePath, fmt.Errorf("failed to create sarif_broadcasts directory: %w", err)
+	}
+
+	// Marshal the broadcast to JSON
+	sarifJSON, err := json.MarshalIndent(broadcast, "", "  ")
+	if err != nil {
+		return sarifFilePath, fmt.Errorf("failed to marshal SARIF broadcast: %w", err)
+	}
+
+	// Save to file with SARIF ID as name
+	sarifFilePath = path.Join(sarifDir, fmt.Sprintf("%s.json", broadcast.SarifID))
+	if err := os.WriteFile(sarifFilePath, sarifJSON, 0644); err != nil {
+		return sarifFilePath, fmt.Errorf("failed to save SARIF broadcast to file: %w", err)
+	}
+
+	log.Printf("Saved SARIF broadcast to %s", sarifFilePath)
+	return sarifFilePath, nil
+}
+
+// ShowVulnerabilityDetail prints vulnerability details
+func ShowVulnerabilityDetail(taskID string, vulnerabilities []models.Vulnerability) {
+	for _, vuln := range vulnerabilities {
+		// 3. Print details of each vulnerability
+		log.Printf("Vulnerability details for task %s:", taskID)
+		log.Printf("  - Rule ID: %s", vuln.RuleID)
+		log.Printf("  - Description: %s", vuln.Description)
+		log.Printf("  - Severity: %s", vuln.Severity)
+
+		// Print location information
+		log.Printf("  - Location: %s (lines %d-%d, columns %d-%d)",
+			vuln.Location.FilePath,
+			vuln.Location.StartLine,
+			vuln.Location.EndLine,
+			vuln.Location.StartCol,
+			vuln.Location.EndCol)
+
+		// Print code flows if available
+		if len(vuln.CodeFlows) > 0 {
+			log.Printf("  - Code Flows:")
+			for i, flow := range vuln.CodeFlows {
+				log.Printf("    - Flow #%d:", i+1)
+				for j, threadFlow := range flow.ThreadFlows {
+					log.Printf("      - Thread Flow #%d:", j+1)
+					for k, loc := range threadFlow.Locations {
+						log.Printf("        - Step %d: %s (lines %d-%d) - %s",
+							k+1,
+							loc.FilePath,
+							loc.StartLine,
+							loc.EndLine,
+							loc.Message)
+					}
+				}
+			}
+		}
+
+		log.Printf("  -----------------------------")
+	}
+}
+
+// AnalyzeSarifVulnerabilities analyzes SARIF data and returns vulnerabilities
+func AnalyzeSarifVulnerabilities(sarifData map[string]interface{}) ([]models.Vulnerability, error) {
+	var vulnerabilities []models.Vulnerability
+
+	// Extract the runs from the SARIF data
+	runs, ok := sarifData["runs"].([]interface{})
+	if !ok || len(runs) == 0 {
+		return nil, fmt.Errorf("no runs found in SARIF data")
+	}
+
+	// Process each run
+	for _, runInterface := range runs {
+		run, ok := runInterface.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// Extract results from the run
+		resultsInterface, ok := run["results"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		// Process each result
+		for _, resultInterface := range resultsInterface {
+			result, ok := resultInterface.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// Create a vulnerability from the result
+			vuln, err := createVulnerabilityFromSarifResult(result, run)
+			if err != nil {
+				log.Printf("Error creating vulnerability from result: %v", err)
+				continue
+			}
+
+			vulnerabilities = append(vulnerabilities, vuln)
+		}
+	}
+
+	return vulnerabilities, nil
+}
+
+// createVulnerabilityFromSarifResult creates a Vulnerability object from a SARIF result
+func createVulnerabilityFromSarifResult(result map[string]interface{}, run map[string]interface{}) (models.Vulnerability, error) {
+	var vuln models.Vulnerability
+
+	// Extract rule ID
+	ruleID, ok := result["ruleId"].(string)
+	if !ok {
+		return vuln, fmt.Errorf("missing ruleId in result")
+	}
+	vuln.RuleID = ruleID
+
+	// Extract message
+	messageObj, ok := result["message"].(map[string]interface{})
+	if ok {
+		if text, ok := messageObj["text"].(string); ok {
+			vuln.Description = text
+		}
+	}
+
+	// Extract severity level
+	if level, ok := result["level"].(string); ok {
+		vuln.Severity = level
+	} else {
+		vuln.Severity = "warning" // Default
+	}
+
+	// Extract locations
+	locationsInterface, ok := result["locations"].([]interface{})
+	if ok && len(locationsInterface) > 0 {
+		firstLocation, ok := locationsInterface[0].(map[string]interface{})
+		if ok {
+			physicalLocation, ok := firstLocation["physicalLocation"].(map[string]interface{})
+			if ok {
+				// Extract artifact location (file path)
+				if artifactLocation, ok := physicalLocation["artifactLocation"].(map[string]interface{}); ok {
+					if uri, ok := artifactLocation["uri"].(string); ok {
+						vuln.Location.FilePath = uri
+					}
+				}
+
+				// Extract region (line/column information)
+				if region, ok := physicalLocation["region"].(map[string]interface{}); ok {
+					if startLine, ok := region["startLine"].(float64); ok {
+						vuln.Location.StartLine = int(startLine)
+					}
+					if endLine, ok := region["endLine"].(float64); ok {
+						vuln.Location.EndLine = int(endLine)
+					}
+					if startColumn, ok := region["startColumn"].(float64); ok {
+						vuln.Location.StartCol = int(startColumn)
+					}
+					if endColumn, ok := region["endColumn"].(float64); ok {
+						vuln.Location.EndCol = int(endColumn)
+					}
+				}
+			}
+		}
+	}
+
+	// Extract code flows if available
+	if codeFlowsInterface, ok := result["codeFlows"].([]interface{}); ok {
+		for _, cfInterface := range codeFlowsInterface {
+			cf, ok := cfInterface.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			var codeFlow models.CodeFlow
+
+			// Extract thread flows
+			if threadFlowsInterface, ok := cf["threadFlows"].([]interface{}); ok {
+				for _, tfInterface := range threadFlowsInterface {
+					tf, ok := tfInterface.(map[string]interface{})
+					if !ok {
+						continue
+					}
+
+					var threadFlow models.ThreadFlow
+
+					// Extract locations in thread flow
+					if locationsInterface, ok := tf["locations"].([]interface{}); ok {
+						for _, locInterface := range locationsInterface {
+							loc, ok := locInterface.(map[string]interface{})
+							if !ok {
+								continue
+							}
+
+							var flowLocation models.ThreadFlowLocation
+
+							// Extract message
+							if msgObj, ok := loc["message"].(map[string]interface{}); ok {
+								if text, ok := msgObj["text"].(string); ok {
+									flowLocation.Message = text
+								}
+							}
+
+							// Extract physical location
+							if physicalLocation, ok := loc["location"].(map[string]interface{}); ok {
+								if physicalLocation, ok := physicalLocation["physicalLocation"].(map[string]interface{}); ok {
+									// Extract file path
+									if artifactLocation, ok := physicalLocation["artifactLocation"].(map[string]interface{}); ok {
+										if uri, ok := artifactLocation["uri"].(string); ok {
+											flowLocation.FilePath = uri
+										}
+									}
+
+									// Extract line numbers
+									if region, ok := physicalLocation["region"].(map[string]interface{}); ok {
+										if startLine, ok := region["startLine"].(float64); ok {
+											flowLocation.StartLine = int(startLine)
+										}
+										if endLine, ok := region["endLine"].(float64); ok {
+											flowLocation.EndLine = int(endLine)
+										}
+									}
+								}
+							}
+
+							threadFlow.Locations = append(threadFlow.Locations, flowLocation)
+						}
+					}
+
+					codeFlow.ThreadFlows = append(codeFlow.ThreadFlows, threadFlow)
+				}
+			}
+
+			vuln.CodeFlows = append(vuln.CodeFlows, codeFlow)
+		}
+	}
+
+	return vuln, nil
+}
+
+// ============================================================================
+// System Utilities (migrated from services/crs_services.go)
+// ============================================================================
+
+// GetAverageCPUUsage returns the average CPU usage percentage
+func GetAverageCPUUsage() (float64, error) {
+	// Import github.com/shirou/gopsutil/v3/cpu at the top
+	// This requires the import to be added
+	return 0, fmt.Errorf("GetAverageCPUUsage needs gopsutil import")
 }

@@ -291,8 +291,8 @@ func runPatchingStrategies(
 
 				// Use the Python interpreter from the virtual environment
 				pythonInterpreter := "/tmp/crs_venv/bin/python3"
-				isRoot := getEffectiveUserID() == 0
-				hasSudo := checkSudoAvailable()
+				isRoot := GetEffectiveUserID() == 0
+				hasSudo := CheckSudoAvailable()
 
 				// Calculate patching timeout based on deadline
 				remainingMinutes := int(time.Until(deadlineTime).Minutes())
@@ -680,8 +680,8 @@ func runXPatchingStrategiesWithoutPOV(
 
 			// Use the Python interpreter from the virtual environment
 			pythonInterpreter := "/tmp/crs_venv/bin/python3"
-			isRoot := getEffectiveUserID() == 0
-			hasSudo := checkSudoAvailable()
+			isRoot := GetEffectiveUserID() == 0
+			hasSudo := CheckSudoAvailable()
 
 			// Prepare the arguments for the Python command
 			args := []string{
@@ -914,8 +914,8 @@ func runXPatchSarifStrategies(
 			log.Printf("Running XPATCH Sarif strategy: %s", strategyPath)
 
 			pythonInterpreter := "/tmp/crs_venv/bin/python3"
-			isRoot := getEffectiveUserID() == 0
-			hasSudo := checkSudoAvailable()
+			isRoot := GetEffectiveUserID() == 0
+			hasSudo := CheckSudoAvailable()
 			maxIterations := 5
 
 			log.Printf("Setting max iterations to %d", maxIterations)

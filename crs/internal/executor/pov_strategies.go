@@ -371,8 +371,8 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 			pythonInterpreter := "/tmp/crs_venv/bin/python3"
 
 			// Check if we're running as root or if sudo is available
-			isRoot := getEffectiveUserID() == 0
-			hasSudo := checkSudoAvailable()
+			isRoot := GetEffectiveUserID() == 0
+			hasSudo := CheckSudoAvailable()
 
 			// Prepare the arguments for the Python command
 			args := []string{
@@ -700,8 +700,8 @@ func runAdvancedPOVStrategiesWithTimeout(
 			log.Printf("[POV Round-%d Phase-%d] Running advanced strategy: %s (timeout: %v)", roundNum, phase, strategyName, strategyTimeout)
 
 			pythonInterpreter := "/tmp/crs_venv/bin/python3"
-			isRoot := getEffectiveUserID() == 0
-			hasSudo := checkSudoAvailable()
+			isRoot := GetEffectiveUserID() == 0
+			hasSudo := CheckSudoAvailable()
 
 			// --- Calculate Max Iterations ---
 			maxIterations := 3

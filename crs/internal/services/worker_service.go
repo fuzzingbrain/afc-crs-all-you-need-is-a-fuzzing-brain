@@ -61,7 +61,7 @@ func NewWorkerService(workerIndex string, workerPort int, model string) CRSServi
 	}
 
 	// Create the work directory if it doesn't exist
-	if err := ensureWorkDir(workDir); err != nil {
+	if err := executor.EnsureWorkDir(workDir); err != nil {
 		log.Printf("Warning: Could not create work directory at %s: %v", workDir, err)
 
 		homeDir, err := os.UserHomeDir()
@@ -69,7 +69,7 @@ func NewWorkerService(workerIndex string, workerPort int, model string) CRSServi
 			workDir = filepath.Join(homeDir, "crs-workdir")
 			log.Printf("Trying fallback work directory: %s", workDir)
 
-			if err := ensureWorkDir(workDir); err != nil {
+			if err := executor.EnsureWorkDir(workDir); err != nil {
 				log.Printf("Warning: Could not create fallback work directory: %v", err)
 				tempDir, err := os.MkdirTemp("", "crs-workdir-")
 				if err == nil {
@@ -501,16 +501,16 @@ func (s *WorkerCRSService) processSarif(taskID string, broadcast models.SARIFBro
     log.Printf("Worker processing SARIF report for task %s, SARIF ID %s", taskID, broadcast.SarifID)
 
     // 0. save Sarif Broadcast
-    saveSarifBroadcast(s.workDir,taskID,broadcast)
+    executor.SaveSarifBroadcast(s.workDir,taskID,broadcast)
 
     // 1. Extract and validate the SARIF report
-    sarifData, err := extractSarifData(broadcast.SARIF)
+    sarifData, err := executor.ExtractSarifData(broadcast.SARIF)
     if err != nil {
         return fmt.Errorf("failed to extract SARIF data: %w", err)
     }
 
     // 2. Analyze the SARIF report to identify vulnerabilities
-    vulnerabilities, err := analyzeSarifVulnerabilities(sarifData)
+    vulnerabilities, err := executor.AnalyzeSarifVulnerabilities(sarifData)
     if err != nil {
         return fmt.Errorf("failed to analyze vulnerabilities: %w", err)
     }
@@ -522,7 +522,7 @@ func (s *WorkerCRSService) processSarif(taskID string, broadcast models.SARIFBro
 
     log.Printf("Found %d vulnerabilities in SARIF report for task %s", len(vulnerabilities), taskID)
 
-    showVulnerabilityDetail(taskID, vulnerabilities)
+    executor.ShowVulnerabilityDetail(taskID, vulnerabilities)
 
     // Worker directly runs POV strategies for the SARIF report
     // TODO: Implement actual POV strategy execution
@@ -761,8 +761,8 @@ func (s *WorkerCRSService) runSarifPOVStrategies(myFuzzer, taskDir, sarifFilePat
             log.Printf("Running Sarif POV strategy: %s", strategyPath)
 
             pythonInterpreter := "/tmp/crs_venv/bin/python3"
-            isRoot := getEffectiveUserID() == 0
-            hasSudo := checkSudoAvailable()
+            isRoot := executor.GetEffectiveUserID() == 0
+            hasSudo := executor.CheckSudoAvailable()
             maxIterations := 5
 
             log.Printf("Setting max iterations to %d", maxIterations)
@@ -931,8 +931,8 @@ func (s *WorkerCRSService) runXPatchSarifStrategies(myFuzzer, taskDir, sarifFile
             log.Printf("Running XPATCH Sarif strategy: %s", strategyPath)
 
             pythonInterpreter := "/tmp/crs_venv/bin/python3"
-            isRoot := getEffectiveUserID() == 0
-            hasSudo := checkSudoAvailable()
+            isRoot := executor.GetEffectiveUserID() == 0
+            hasSudo := executor.CheckSudoAvailable()
             maxIterations := 5
 
             log.Printf("Setting max iterations to %d", maxIterations)
