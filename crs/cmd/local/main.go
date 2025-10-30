@@ -49,8 +49,8 @@ func main() {
 		log.Fatalf("Invalid configuration: %v", err)
 	}
 
-	// Initialize services
-	crsService := services.NewCRSService(cfg.Worker.Nodes, cfg.Server.WorkerBasePort, cfg.AI.Model)
+	// Initialize services - use LocalService for local mode
+	crsService := services.NewLocalService(cfg.AI.Model)
 	crsService.SetAnalysisServiceUrl(cfg.Services.AnalysisURL)
 	crsService.SetSubmissionEndpoint(cfg.Services.SubmissionURL)
 

@@ -33,33 +33,11 @@ type ServerCRSService struct {
 }
 
 // NewServerService creates a new server service instance
+// TODO: This currently delegates to the original NewCRSService
+// In future commits, we will migrate the implementation to ServerCRSService
 func NewServerService(workerNodes int, workerBasePort int, model string) CRSService {
-	workDir := initializeWorkDir()
-	apiEndpoint, apiKeyID, apiToken := initializeCompetitionAPI()
-
-	return &ServerCRSService{
-		baseService: baseService{
-			workDir:           workDir,
-			competitionClient: initializeCompetitionClient(apiEndpoint, apiKeyID, apiToken),
-			model:             model,
-		},
-		tasks: make(map[string]*models.TaskDetail),
-		status: models.StatusTasksState{
-			Pending:    0,
-			Processing: 0,
-			Waiting:    0,
-			Succeeded:  0,
-			Failed:     0,
-			Errored:    0,
-			Canceled:   0,
-		},
-		workerNodes:           workerNodes,
-		workerBasePort:        workerBasePort,
-		totalTasksDistributed: 0,
-		fuzzerToWorkerMap:     make(map[string]int),
-		taskToWorkersMap:      make(map[string][]WorkerFuzzerPair),
-		workerStatus:          make(map[int]*WorkerStatus),
-	}
+	// Temporarily use the original implementation
+	return NewCRSService(workerNodes, workerBasePort, model)
 }
 
 // GetStatus returns current server status
