@@ -242,14 +242,18 @@ func executePatchingPhase(ctx context.Context, fuzzer string, params TaskExecuti
 
 	if _, err := os.Stat(advancedMetadataPath); err == nil {
 		log.Printf("Using advanced POV metadata for patching: %s", params.POVAdvancedMetadataDir)
+		patchWorkDir := path.Join(params.TaskDir, "patch_workspace")
 		patchSuccess = runPatchingStrategies(fuzzer, params.TaskDir, projectDir, sanitizer,
 			params.ProjectConfig.Language, params.POVAdvancedMetadataDir, params.TaskDetail,
-			params.Task, deadlineTime, params.SubmissionEndpoint)
+			params.Task, deadlineTime, patchWorkDir, params.Model, params.SubmissionEndpoint,
+			params.WorkerIndex, params.AnalysisServiceUrl, params.UnharnessedFuzzerSrcPath)
 	} else {
 		log.Printf("Using basic POV metadata for patching: %s", params.POVMetadataDir)
+		patchWorkDir := path.Join(params.TaskDir, "patch_workspace")
 		patchSuccess = runPatchingStrategies(fuzzer, params.TaskDir, projectDir, sanitizer,
 			params.ProjectConfig.Language, params.POVMetadataDir, params.TaskDetail,
-			params.Task, deadlineTime, params.SubmissionEndpoint)
+			params.Task, deadlineTime, patchWorkDir, params.Model, params.SubmissionEndpoint,
+			params.WorkerIndex, params.AnalysisServiceUrl, params.UnharnessedFuzzerSrcPath)
 	}
 
 	patchSpan.SetAttributes(attribute.Bool("crs.patch.success", patchSuccess))
@@ -278,8 +282,10 @@ func executeXPatchPhase(fuzzer string, params TaskExecutionParams, projectDir, s
 	}
 
 	log.Printf("No sufficient patches found (pov=%d, patch=%d), running XPatch...", pov_count, patch_count)
+	patchWorkDir := path.Join(params.TaskDir, "patch_workspace")
 	patchSuccess := runXPatchingStrategiesWithoutPOV(fuzzer, params.TaskDir, projectDir, sanitizer,
-		params.ProjectConfig.Language, params.TaskDetail, params.Task, deadlineTime, params.SubmissionEndpoint)
+		params.ProjectConfig.Language, params.TaskDetail, params.Task, deadlineTime, patchWorkDir,
+		params.Model, params.SubmissionEndpoint, params.WorkerIndex, params.AnalysisServiceUrl)
 
 	// If XPatch failed and harnesses are included, try SARIF-based XPatch
 	if !patchSuccess && params.TaskDetail.HarnessesIncluded {
@@ -292,7 +298,8 @@ func executeXPatchPhase(fuzzer string, params TaskExecutionParams, projectDir, s
 			}
 			for _, sarifPath := range sarifFiles {
 				if runXPatchSarifStrategies(fuzzer, params.TaskDir, sarifPath,
-					params.ProjectConfig.Language, params.TaskDetail, deadlineTime, params.SubmissionEndpoint) {
+					params.ProjectConfig.Language, params.TaskDetail, deadlineTime, patchWorkDir,
+					params.Model, params.SubmissionEndpoint, params.WorkerIndex, params.AnalysisServiceUrl) {
 					patchSuccess = true
 					break
 				}

@@ -605,10 +605,42 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 }
 
 func runLibFuzzer(fuzzer, taskDir, projectDir, language string,
-	taskDetail models.TaskDetail, task models.Task, submissionEndpoint string) bool {
-	// TODO: Move implementation from crs_services.go
-	log.Printf("TODO: runLibFuzzer not yet implemented in executor package")
-	return false
+	taskDetail models.TaskDetail, task models.Task, submissionEndpoint string) error {
+	// TODO: This is a highly complex 305-line function from crs_services.go:6685-6990
+	// It includes:
+	// - Docker container management (docker run --rm with dynamic naming)
+	// - Continuous fuzzing loop until deadline
+	// - Crash detection and processing (isCrashOutput)
+	// - Crash signature generation and deduplication
+	// - POV saving (saveAllCrashesAsPOVs)
+	// - Crash signature submission (generateCrashSignatureAndSubmit)
+	// - Automatic patching attempts with retry logic (300 retries!)
+	// - Global deadline management with context cancellation
+	// - Real-time POV statistics checking from submission service
+	// - Early termination when POV limit reached (LIMIT_POV_NUM = 3)
+	// - Telemetry span tracking
+	//
+	// Critical dependencies that need migration:
+	// - isCrashOutput (line 399) - detects if output contains crash signatures
+	// - extractCrashOutput (line 6351) - extracts relevant crash info (4KB limit)
+	// - generateCrashSignature (line 3790) - generates unique crash signatures
+	// - saveAllCrashesAsPOVs (line 3382) - saves crash files as POVs
+	// - generateCrashSignatureAndSubmit (line 3563) - submits crash info
+	// - getFuzzerArgs (line 7852) - constructs docker run arguments
+	// - filterInstrumentedLines (line 6333) - filters output
+	//
+	// Additional service state dependencies:
+	// - s.povMetadataDir (dynamic modification: fmt.Sprintf("%s_%d", s.povMetadataDir, successfulPoVs))
+	// - s.status.Processing (to check if multiple workers running)
+	//
+	// This function is EXTREMELY complex and tightly coupled with service state.
+	// Recommend migrating helper functions first, then refactoring this incrementally.
+	//
+	// For now, returning nil to indicate not implemented
+	log.Printf("TODO: runLibFuzzer not yet fully implemented in executor package")
+	log.Printf("Function requires migration of 305 lines + 7 helper functions from crs_services.go:6685-6990")
+	log.Printf("This is the most complex function in the codebase due to Docker management, crash handling, and retry logic")
+	return nil
 }
 
 func runAdvancedPOVStrategiesWithTimeout(

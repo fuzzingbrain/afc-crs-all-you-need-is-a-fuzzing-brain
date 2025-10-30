@@ -9,9 +9,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
+	"unicode"
 
 	"crs/internal/models"
 )
@@ -246,4 +249,147 @@ func checkSudoAvailable() bool {
 	cmd := exec.Command("sudo", "-n", "true")
 	err = cmd.Run()
 	return err == nil
+}
+
+// robustCopyDir copies a directory from src to dst with fault tolerance
+// Handles symlinks, preserves permissions, and continues on errors
+func robustCopyDir(src, dst string) error {
+	var copyErrors []string
+
+	// Get properties of source directory
+	srcInfo, err := os.Lstat(src)
+	if err != nil {
+		log.Printf("Warning: error getting stats for source directory %s: %v", src, err)
+		return fmt.Errorf("error getting stats for source directory: %w", err)
+	}
+
+	// Check if source is a symlink
+	if srcInfo.Mode()&os.ModeSymlink != 0 {
+		// It's a symlink, read the link target
+		linkTarget, err := os.Readlink(src)
+		if err != nil {
+			log.Printf("Warning: error reading symlink %s: %v", src, err)
+			return fmt.Errorf("error reading symlink %s: %w", src, err)
+		}
+
+		// Create a symlink at the destination with the same target
+		if err := os.Symlink(linkTarget, dst); err != nil {
+			log.Printf("Warning: error creating symlink %s -> %s: %v", dst, linkTarget, err)
+			return fmt.Errorf("error creating symlink: %w", err)
+		}
+		return nil
+	}
+
+	// Create the destination directory with the same permissions
+	if err = os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		log.Printf("Warning: error creating destination directory %s: %v", dst, err)
+		return fmt.Errorf("error creating destination directory: %w", err)
+	}
+
+	// Read the source directory
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		log.Printf("Warning: error reading source directory %s: %v", src, err)
+		return fmt.Errorf("error reading source directory: %w", err)
+	}
+
+	// Copy each entry
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		// Use Lstat instead of Stat to detect symlinks
+		entryInfo, err := os.Lstat(srcPath)
+		if err != nil {
+			log.Printf("Warning: skipping %s due to error: %v", srcPath, err)
+			copyErrors = append(copyErrors, fmt.Sprintf("error getting stats for %s: %v", srcPath, err))
+			continue // Skip this file but continue with others
+		}
+
+		// Handle different file types
+		if entryInfo.Mode()&os.ModeSymlink != 0 {
+			// It's a symlink, read the link target
+			linkTarget, err := os.Readlink(srcPath)
+			if err != nil {
+				log.Printf("Warning: skipping symlink %s due to error: %v", srcPath, err)
+				copyErrors = append(copyErrors, fmt.Sprintf("error reading symlink %s: %v", srcPath, err))
+				continue // Skip this symlink but continue with others
+			}
+
+			// Create a symlink at the destination with the same target
+			if err := os.Symlink(linkTarget, dstPath); err != nil {
+				// log.Printf("Warning: failed to create symlink %s -> %s: %v", dstPath, linkTarget, err)
+				copyErrors = append(copyErrors, fmt.Sprintf("error creating symlink %s: %v", dstPath, err))
+				// Continue despite the error
+			}
+		} else if entryInfo.IsDir() {
+			// Recursively copy the subdirectory
+			if err = robustCopyDir(srcPath, dstPath); err != nil {
+				log.Printf("Warning: error copying directory %s: %v", srcPath, err)
+				copyErrors = append(copyErrors, fmt.Sprintf("error copying directory %s: %v", srcPath, err))
+				// Continue despite the error
+			}
+		} else {
+			// Copy the regular file
+			if err = copyFile(srcPath, dstPath); err != nil {
+				log.Printf("Warning: error copying file %s: %v", srcPath, err)
+				copyErrors = append(copyErrors, fmt.Sprintf("error copying file %s: %v", srcPath, err))
+				// Continue despite the error
+			}
+		}
+	}
+
+	// If we had any errors, return a summary but only after completing as much as possible
+	if len(copyErrors) > 0 {
+		maxErrors := 5
+		if len(copyErrors) < maxErrors {
+			maxErrors = len(copyErrors)
+		}
+		return fmt.Errorf("completed with %d errors: %s", len(copyErrors), strings.Join(copyErrors[:maxErrors], "; "))
+	}
+
+	return nil
+}
+
+// ─── Process Group Management ───────────────────────────────────────────────
+
+var (
+	childGroups   = make(map[int]struct{})
+	childGroupsMu sync.Mutex
+)
+
+// registerChildPG registers a process group ID for tracking
+func registerChildPG(pgid int) {
+	childGroupsMu.Lock()
+	childGroups[pgid] = struct{}{}
+	childGroupsMu.Unlock()
+}
+
+// killAllChildren sends a signal to all registered child process groups
+func killAllChildren(sig syscall.Signal) {
+	childGroupsMu.Lock()
+	for pgid := range childGroups {
+		syscall.Kill(-pgid, sig)
+	}
+	childGroupsMu.Unlock()
+}
+
+// ─── Terminal Output Sanitization ───────────────────────────────────────────
+
+var ansiRegexp = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
+
+// sanitizeTerminalString removes ANSI codes and control characters from strings
+func sanitizeTerminalString(s string) string {
+	// Remove ANSI colour / cursor-movement codes.
+	s = ansiRegexp.ReplaceAllString(s, "")
+
+	// Drop any remaining control characters.
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) && r != '\n' && r != '\t' {
+			return -1
+		}
+		return r
+	}, s)
+
+	return strings.TrimSpace(s)
 }
