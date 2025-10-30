@@ -32,8 +32,8 @@ func main() {
 
     r := gin.Default()
 
-    // Initialize services
-    crsService := services.NewCRSService(cfg.Worker.Nodes, cfg.Server.WorkerBasePort, cfg.AI.Model)
+    // Initialize services - Use WebService for web mode
+    crsService := services.NewWebService(cfg.Worker.Nodes, cfg.Server.WorkerBasePort, cfg.AI.Model)
     crsService.SetAnalysisServiceUrl(cfg.Services.AnalysisURL)
     crsService.SetSubmissionEndpoint(cfg.Services.SubmissionURL)
 

@@ -1,6 +1,8 @@
 package services
 
 import (
+	"log"
+
 	"crs/internal/models"
 )
 
@@ -62,14 +64,16 @@ func (s *WorkerCRSService) CancelAllTasks() error {
 }
 
 // SubmitSarif handles SARIF broadcast submission from worker
+// TODO: SARIF workflow to be implemented later
 func (s *WorkerCRSService) SubmitSarif(sarifBroadcast models.SARIFBroadcast) error {
-	// This will use the shared SARIF handling logic
-	panic("SubmitSarif: to be implemented")
+	return errNotSupportedInWorkerMode
 }
 
-// HandleSarifBroadcastWorker is not used in worker mode
+// HandleSarifBroadcastWorker handles SARIF broadcasts received by worker
+// TODO: SARIF workflow to be implemented later
 func (s *WorkerCRSService) HandleSarifBroadcastWorker(broadcastWorker models.SARIFBroadcastDetailWorker) error {
-	return errNotSupportedInWorkerMode
+	log.Printf("SARIF workflow not yet implemented in WorkerCRSService")
+	return nil
 }
 
 // SetWorkerIndex sets the worker index
