@@ -15,13 +15,17 @@ import (
 	"sync"
 	"time"
 
-	"crs/internal/models"
 	"crs/internal/competition"
-	"crs/internal/executor"
+	"crs/internal/config"
+	"crs/internal/models"
+	"crs/internal/utils/environment"
+	"crs/internal/utils/fuzzer"
+	"crs/internal/utils/helpers"
 )
 
 // WebCRSService implements CRSService for web service mode (task scheduling and distribution)
 type WebCRSService struct {
+	cfg                    *config.Config
 	tasks                  map[string]*models.TaskDetail
 	tasksMutex             sync.RWMutex
 	workDir                string
@@ -51,17 +55,11 @@ type WebCRSService struct {
 }
 
 // NewWebService creates a new web service instance
-func NewWebService(workerNodes int, workerBasePort int, model string) CRSService {
-	// Get API configuration
+func NewWebService(cfg *config.Config) CRSService {
+	// Get API configuration from config
 	apiEndpoint := os.Getenv("COMPETITION_API_ENDPOINT")
 	if apiEndpoint == "" {
 		apiEndpoint = "http://localhost:7081"
-	}
-
-	apiKeyID := os.Getenv("CRS_KEY_ID")
-	apiToken := os.Getenv("CRS_KEY_TOKEN")
-	if apiKeyID == "" || apiToken == "" {
-		log.Printf("Warning: CRS_KEY_ID or CRS_KEY_TOKEN not set")
 	}
 
 	// Define default work directory
@@ -71,7 +69,7 @@ func NewWebService(workerNodes int, workerBasePort int, model string) CRSService
 	}
 
 	// Create the work directory if it doesn't exist
-	if err := executor.EnsureWorkDir(workDir); err != nil {
+	if err := helpers.EnsureWorkDir(workDir); err != nil {
 		log.Printf("Warning: Could not create work directory at %s: %v", workDir, err)
 
 		homeDir, err := os.UserHomeDir()
@@ -79,7 +77,7 @@ func NewWebService(workerNodes int, workerBasePort int, model string) CRSService
 			workDir = filepath.Join(homeDir, "crs-workdir")
 			log.Printf("Trying fallback work directory: %s", workDir)
 
-			if err := executor.EnsureWorkDir(workDir); err != nil {
+			if err := helpers.EnsureWorkDir(workDir); err != nil {
 				log.Printf("Warning: Could not create fallback work directory: %v", err)
 				tempDir, err := os.MkdirTemp("", "crs-workdir-")
 				if err == nil {
@@ -97,17 +95,20 @@ func NewWebService(workerNodes int, workerBasePort int, model string) CRSService
 	}
 
 	service := &WebCRSService{
+		cfg:                     cfg,
 		tasks:                   make(map[string]*models.TaskDetail),
 		workDir:                 workDir,
-		competitionClient:       competition.NewClient(apiEndpoint, apiKeyID, apiToken),
+		competitionClient:       competition.NewClient(apiEndpoint, cfg.Auth.KeyID, cfg.Auth.Token),
 		status:                  models.StatusTasksState{},
 		povMetadataDir:          "successful_povs",
 		povMetadataDir0:         "successful_povs_0",
 		povAdvcancedMetadataDir: "successful_povs_advanced",
 		patchWorkDir:            "patch_workspace",
-		workerNodes:             workerNodes,
-		workerBasePort:          workerBasePort,
-		model:                   model,
+		workerNodes:             cfg.Worker.Nodes,
+		workerBasePort:          cfg.Server.WorkerBasePort,
+		model:                   cfg.AI.Model,
+		submissionEndpoint:      cfg.Services.SubmissionURL,
+		analysisServiceUrl:      cfg.Services.AnalysisURL,
 		totalTasksDistributed:   0,
 		workerStatus:            make(map[int]*WorkerStatus),
 		fuzzerToWorkerMap:       make(map[string]int),
@@ -381,7 +382,7 @@ func (s *WebCRSService) processTask(myFuzzer string, taskDetail models.TaskDetai
 	log.Printf("Dockerfile: %s", dockerfileFullPath)
 
 	// Use executor package to prepare environment
-	params := executor.PrepareEnvironmentParams{
+	params := environment.PrepareEnvironmentParams{
 		MyFuzzer:          &myFuzzer,
 		TaskDir:           taskDir,
 		TaskDetail:        taskDetail,
@@ -390,10 +391,10 @@ func (s *WebCRSService) processTask(myFuzzer string, taskDetail models.TaskDetai
 		FuzzerDir:         fuzzerDir,
 		ProjectDir:        projectDir,
 		FuzzerBuilder:     nil, // Web service doesn't build locally
-		FindFuzzers:       executor.FindFuzzers,
+		FindFuzzers:       fuzzer.FindFuzzers,
 	}
 
-	_, sanitizerDirs, err := executor.PrepareEnvironment(params)
+	_, sanitizerDirs, err := environment.PrepareEnvironment(params)
 	if err != nil {
 		return err
 	}
@@ -405,7 +406,7 @@ func (s *WebCRSService) processTask(myFuzzer string, taskDetail models.TaskDetai
 
 	// Now use the copy to find fuzzers
 	for _, sdir := range sanitizerDirsCopy {
-		fuzzers, err := executor.FindFuzzers(sdir)
+		fuzzers, err := fuzzer.FindFuzzers(sdir)
 		if err != nil {
 			log.Printf("Warning: failed to find fuzzers in %s: %v", sdir, err)
 			continue
@@ -431,7 +432,7 @@ func (s *WebCRSService) processTask(myFuzzer string, taskDetail models.TaskDetai
 				allFilteredFuzzers = append(allFilteredFuzzers, fuzzerPath)
 			}
 		}
-		allFuzzers = executor.SortFuzzersByGroup(allFilteredFuzzers)
+		allFuzzers = helpers.SortFuzzersByGroup(allFilteredFuzzers)
 	}
 
 	log.Printf("Found %d fuzzers: %v", len(allFuzzers), allFuzzers)
@@ -572,9 +573,9 @@ func (s *WebCRSService) sendFuzzerToWorker(fuzzer string, taskDetail models.Task
 		return fmt.Errorf("error marshaling task: %v", err)
 	}
 
-	// Get API credentials from environment
-	apiKeyID := os.Getenv("CRS_KEY_ID")
-	apiToken := os.Getenv("CRS_KEY_TOKEN")
+	// Get API credentials from config
+	apiKeyID := s.cfg.Auth.KeyID
+	apiToken := s.cfg.Auth.Token
 
 	// Lock to safely access and update worker status
 	s.workerStatusMux.Lock()
@@ -665,7 +666,7 @@ func (s *WebCRSService) tryWorker(workerIndex int, taskJSON []byte, apiKeyID, ap
 	workerURL := fmt.Sprintf("http://crs-worker-%d.crs-worker.crs-webservice.svc.cluster.local:%d/v1/task/",
 		workerIndex, s.workerBasePort)
 
-	if os.Getenv("LOCAL_TEST") != "" {
+	if os.Getenv("LOCAL_TEST") != "" || s.cfg.Mode == "local" {
 		workerURL = "http://localhost:9081/v1/task/"
 	}
 
@@ -758,9 +759,9 @@ func (s *WebCRSService) findPOVsAndNotifyWorkers(taskID string, broadcast models
 
 	log.Printf("Found %d worker-fuzzer pairs assigned to task %s", len(workerFuzzerPairs), taskID)
 
-	// 4. Get API credentials
-	apiKeyID := os.Getenv("CRS_KEY_ID")
-	apiToken := os.Getenv("CRS_KEY_TOKEN")
+	// 4. Get API credentials from config
+	apiKeyID := s.cfg.Auth.KeyID
+	apiToken := s.cfg.Auth.Token
 
 	// 5. Send the broadcast to each worker with retry logic
 	var wg sync.WaitGroup

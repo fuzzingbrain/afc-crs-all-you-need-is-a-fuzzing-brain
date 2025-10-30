@@ -20,6 +20,8 @@ import (
 
 	"crs/internal/competition"
 	"crs/internal/models"
+	"crs/internal/utils/helpers"
+	"crs/internal/utils/libfuzzer"
 	"github.com/google/uuid"
 )
 
@@ -183,7 +185,7 @@ func RunCrashTest(crashFile string, taskDetail models.TaskDetail, taskDir, proje
 	output := outBuf.String()
 
 	// Check for crash regardless of command error (libfuzzer exits with non-zero on crash)
-	if err != nil && isCrashOutput(output) {
+	if err != nil && libfuzzer.IsCrashOutput(output) {
 		log.Printf("CrashFile %s works!", crashFile)
 		return true, output, nil
 	}
@@ -349,7 +351,7 @@ type POVSubmissionParams struct {
 func GenerateCrashSignatureAndSubmit(params POVSubmissionParams) error {
 
 	// Read crash data
-	crashData := ReadCrashFile(params.FuzzDir, params.POVMetadataDir)
+	crashData := helpers.ReadCrashFile(params.FuzzDir, params.POVMetadataDir)
 	// Skip submission if crash file is empty
 	if len(crashData) == 0 {
 		log.Printf("Libfuzzer skipping submission for empty crash input data")
