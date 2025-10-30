@@ -18,3 +18,12 @@
 **/.benchmarks
 **/.benchmark_results
 **/.pytest_cache
+
+# Go test coverage
+**/*.out
+**/*.test
+
+# Go compiled binaries
+crs/local
+crs/server
+crs/worker

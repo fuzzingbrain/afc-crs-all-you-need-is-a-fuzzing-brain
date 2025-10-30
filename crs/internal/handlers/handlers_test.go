@@ -75,13 +75,17 @@ func (m *MockCRSService) GetWorkDir() string {
 
 
 func TestSubmitSarif_BufferOverflow_RealService(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
 	gin.SetMode(gin.TestMode)
 
 	// 1. Instantiate the *real* CRSService.
-	crsService := services.NewCRSService(2, 9000)
+	crsService := services.NewCRSService(2, 9000, "claude-sonnet-4-20250514")
 
 	// 2. Create a Handler that uses the real service.
-	handler := NewHandler(crsService)
+	handler := NewHandler(crsService, "http://localhost:7082", "http://localhost:7081")
 
 	// 3. Build a test router.
 	router := gin.New()
@@ -91,7 +95,8 @@ func TestSubmitSarif_BufferOverflow_RealService(t *testing.T) {
 	sarifFilePath := "/crs-workdir/sarif_reports/sarif_raw_sample.json"
 	jsonData, err := os.ReadFile(sarifFilePath)
 	if err != nil {
-		t.Fatalf("Failed to read SARIF file %s: %v", sarifFilePath, err)
+		t.Skipf("Test data file not found: %s", sarifFilePath)
+		return
 	}
 
 	// 5. Optionally verify the JSON can be unmarshaled into your model

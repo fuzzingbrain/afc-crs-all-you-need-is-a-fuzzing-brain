@@ -2,96 +2,47 @@ package main
 
 import (
     "log"
-    "os"
-    "strings"
-    "strconv"
     "fmt"
     "github.com/gin-gonic/gin"
-    "github.com/joho/godotenv"
+    "crs/internal/config"
     "crs/internal/handlers"
     "crs/internal/services"
     "crs/internal/telemetry"
 )
 
 func main() {
-    // Load .env file
-    if err := godotenv.Load(); err != nil {
-        log.Printf("Warning: .env file not found, using default values")
+    // Load configuration
+    cfg, err := config.Load()
+    if err != nil {
+        log.Fatalf("Failed to load configuration: %v", err)
+    }
+
+    // Set mode to worker
+    cfg.Mode = "worker"
+
+    // Validate configuration
+    if err := cfg.Validate(); err != nil {
+        log.Fatalf("Invalid configuration: %v", err)
     }
 
     // Initialize telemetry
-    _, err := telemetry.InitTelemetry("afc-crs-all-you-need-is-a-fuzzing-brain-worker-node")
+    _, err = telemetry.InitTelemetry("afc-crs-all-you-need-is-a-fuzzing-brain-worker-node")
     if err != nil {
         log.Printf("Warning: Failed to initialize telemetry: %v", err)
-    }
-        
-    // Get credentials from environment variables with fallback values
-    apiKeyID := os.Getenv("CRS_KEY_ID")
-    if apiKeyID == "" {
-        apiKeyID = "api_key_id"
-    }
-    apiToken := os.Getenv("CRS_KEY_TOKEN")
-    if apiToken == "" {
-        apiToken = "api_key_token"
-    }
-
-
-    // log.Printf("CRS_KEY_ID: %s", os.Getenv("CRS_KEY_ID"))
-    // log.Printf("CRS_KEY_TOKEN: %s", os.Getenv("CRS_KEY_TOKEN"))
-    // log.Printf("COMPETITION_API_KEY_ID: %s", os.Getenv("COMPETITION_API_KEY_ID"))
-    // log.Printf("COMPETITION_API_KEY_TOKEN: %s", os.Getenv("COMPETITION_API_KEY_TOKEN"))
-
-    // Get worker configuration
-    podName := os.Getenv("POD_NAME")
-    workerIndex := os.Getenv("WORKER_INDEX")
-    if workerIndex == "" {
-        // Extract index from pod name if not explicitly set
-        if podName != "" {
-            parts := strings.Split(podName, "-")
-            if len(parts) > 0 {
-                workerIndex = parts[len(parts)-1]
-            }
-        }
-        if workerIndex == "" {
-            workerIndex = "0"
-        }
-    }
-
-    // Get worker configuration
-    workerNodesStr := os.Getenv("WORKER_NODES")
-    workerNodes, err := strconv.Atoi(workerNodesStr)
-    if err != nil || workerNodes <= 0 {
-        workerNodes = 24 // Default to 24 worker nodes
-    }
-    workerPortStr := os.Getenv("WORKER_PORT")
-    workerPort, err := strconv.Atoi(workerPortStr)
-    if err != nil || workerPort <= 0 {
-        workerPort = 9081
-    }
-    
-    submissionService := os.Getenv("SUBMISSION_SERVICE")
-    if submissionService == "" {
-        submissionService = "http://crs-sub"
-    }
-
-    analysisService := os.Getenv("ANALYSIS_SERVICE")
-    if analysisService == "" {
-        analysisService = "http://crs-analysis"
     }
 
     r := gin.Default()
 
-    // Initialize services
-    crsService := services.NewCRSService(workerNodes,workerPort)
-    crsService.SetAnalysisServiceUrl(analysisService)
+    // Initialize services - Use WorkerService for worker mode
+    crsService := services.NewWorkerService(cfg.Worker.Index, cfg.Worker.Port, cfg.AI.Model)
+    crsService.SetAnalysisServiceUrl(cfg.Services.AnalysisURL)
     // Configure the service to forward submissions to the submission service
-    crsService.SetSubmissionEndpoint(submissionService)
-    crsService.SetWorkerIndex(workerIndex)
+    crsService.SetSubmissionEndpoint(cfg.Services.SubmissionURL)
 
-    log.Printf("Initialized worker %s (index: %s) services", podName, workerIndex)
+    log.Printf("Initialized worker %s (index: %s) services", cfg.Worker.PodName, cfg.Worker.Index)
 
     // Initialize handlers
-    h := handlers.NewHandler(crsService,analysisService,submissionService)
+    h := handlers.NewHandler(crsService, cfg.Services.AnalysisURL, cfg.Services.SubmissionURL)
 
     // Unauthenticated routes
     r.GET("/status/", h.GetStatus)
@@ -99,23 +50,23 @@ func main() {
 
     // Authenticated routes
     v1 := r.Group("/v1", gin.BasicAuth(gin.Accounts{
-       apiKeyID: apiToken,
+       cfg.Auth.KeyID: cfg.Auth.Token,
     }))
     {
         // SARIF endpoints
         v1.POST("/sarif/", h.SubmitSarif)
-        
+
         // Task endpoints
         v1.POST("/task/", h.SubmitWorkerTask)
         v1.DELETE("/task/", h.CancelAllTasks)
         v1.DELETE("/task/:task_id/", h.CancelTask)
-        
+
         // Status reset endpoint
         v1.POST("/status/reset/", h.ResetStatus)
     }
-    
+
     // Start the worker on the configured port
-    listenAddr := fmt.Sprintf(":%d", workerPort)
-    log.Printf("Worker node %s listening at %s", podName, listenAddr)
+    listenAddr := fmt.Sprintf(":%d", cfg.Worker.Port)
+    log.Printf("Worker node %s listening at %s", cfg.Worker.PodName, listenAddr)
     log.Fatal(r.Run(listenAddr))
 }
