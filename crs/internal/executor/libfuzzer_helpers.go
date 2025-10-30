@@ -313,7 +313,7 @@ func generateVulnerabilitySignature0(output string, sanitizer string) string {
 			signature = "ASAN:" + loc
 		} else {
 			// Fallback to a hash of the entire output
-			signature = "ASAN:generic:" + hashString(output)
+			signature = "ASAN:generic:" + HashString(output)
 		}
 
 	case "undefined":
@@ -321,7 +321,7 @@ func generateVulnerabilitySignature0(output string, sanitizer string) string {
 		if loc := extractUBSANCrashLocation(output); loc != "" {
 			signature = "UBSAN:" + loc
 		} else {
-			signature = "UBSAN:generic:" + hashString(output)
+			signature = "UBSAN:generic:" + HashString(output)
 		}
 
 	case "memory":
@@ -329,12 +329,12 @@ func generateVulnerabilitySignature0(output string, sanitizer string) string {
 		if loc := extractMSANCrashLocation(output); loc != "" {
 			signature = "MSAN:" + loc
 		} else {
-			signature = "MSAN:generic:" + hashString(output)
+			signature = "MSAN:generic:" + HashString(output)
 		}
 
 	default:
 		// For other sanitizers or unknown types
-		signature = sanitizer + ":generic:" + hashString(output)
+		signature = sanitizer + ":generic:" + HashString(output)
 	}
 	log.Printf("Extracted signature: %s", signature)
 

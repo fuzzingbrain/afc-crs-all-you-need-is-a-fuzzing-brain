@@ -290,7 +290,7 @@ func executeXPatchPhase(fuzzer string, params TaskExecutionParams, projectDir, s
 	// If XPatch failed and harnesses are included, try SARIF-based XPatch
 	if !patchSuccess && params.TaskDetail.HarnessesIncluded {
 		sarifDir := path.Join(params.TaskDir, "sarif_broadcasts")
-		if dirExists(sarifDir) {
+		if DirExists(sarifDir) {
 			log.Printf("Attempting SARIF-based XPatch...")
 			sarifFiles, err := filepath.Glob(filepath.Join(sarifDir, "*.json"))
 			if err != nil {
@@ -319,11 +319,3 @@ func executeXPatchPhase(fuzzer string, params TaskExecutionParams, projectDir, s
 	return patchSuccess
 }
 
-// Helper function to check if directory exists
-func dirExists(path string) bool {
-	info, err := os.Stat(path)
-	if os.IsNotExist(err) {
-		return false
-	}
-	return info.IsDir()
-}

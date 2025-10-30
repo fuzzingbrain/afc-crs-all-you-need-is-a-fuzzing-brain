@@ -55,7 +55,7 @@ func NewLocalService(model string) CRSService {
 	}
 
 	// Create the work directory if it doesn't exist
-	if err := ensureWorkDir(workDir); err != nil {
+	if err := executor.EnsureWorkDir(workDir); err != nil {
 		log.Printf("Warning: Could not create work directory at %s: %v", workDir, err)
 
 		homeDir, err := os.UserHomeDir()
@@ -63,7 +63,7 @@ func NewLocalService(model string) CRSService {
 			workDir = filepath.Join(homeDir, "crs-workdir")
 			log.Printf("Trying fallback work directory: %s", workDir)
 
-			if err := ensureWorkDir(workDir); err != nil {
+			if err := executor.EnsureWorkDir(workDir); err != nil {
 				log.Printf("Warning: Could not create fallback work directory: %v", err)
 				tempDir, err := os.MkdirTemp("", "crs-workdir-")
 				if err == nil {
