@@ -233,3 +233,17 @@ func getEffectiveUserID() int {
 	// For Unix systems, use the syscall package
 	return syscall.Geteuid()
 }
+
+// checkSudoAvailable checks if sudo is available and can be used
+func checkSudoAvailable() bool {
+	// Try to find sudo in PATH
+	_, err := exec.LookPath("sudo")
+	if err != nil {
+		return false
+	}
+
+	// Optionally, check if we can actually use sudo
+	cmd := exec.Command("sudo", "-n", "true")
+	err = cmd.Run()
+	return err == nil
+}

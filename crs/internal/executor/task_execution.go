@@ -25,15 +25,20 @@ const (
 
 // TaskExecutionParams contains all parameters needed for executing a fuzzing task on a worker
 type TaskExecutionParams struct {
-	Fuzzer             string
-	TaskDir            string
-	TaskDetail         models.TaskDetail
-	Task               models.Task
-	ProjectConfig      *ProjectConfig
-	AllFuzzers         []string
-	SubmissionEndpoint string
-	POVMetadataDir     string
-	POVAdvancedMetadataDir string
+	Fuzzer                   string
+	TaskDir                  string
+	TaskDetail               models.TaskDetail
+	Task                     models.Task
+	ProjectConfig            *ProjectConfig
+	AllFuzzers               []string
+	SubmissionEndpoint       string
+	POVMetadataDir           string
+	POVMetadataDir0          string
+	POVAdvancedMetadataDir   string
+	Model                    string
+	WorkerIndex              string
+	AnalysisServiceUrl       string
+	UnharnessedFuzzerSrcPath string
 }
 
 // ExecuteFuzzingTask executes a complete fuzzing workflow on a worker node
@@ -134,8 +139,17 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 	}
 
 	if os.Getenv("FUZZER_TEST") == "" {
+		basicConfig := BasicStrategiesConfig{
+			Model:                    params.Model,
+			POVMetadataDir:           params.POVMetadataDir,
+			POVMetadataDir0:          params.POVMetadataDir0,
+			SubmissionEndpoint:       params.SubmissionEndpoint,
+			WorkerIndex:              params.WorkerIndex,
+			AnalysisServiceUrl:       params.AnalysisServiceUrl,
+			UnharnessedFuzzerSrcPath: params.UnharnessedFuzzerSrcPath,
+		}
 		povSuccess = runBasicStrategies(fuzzer, params.TaskDir, projectDir, fuzzDir,
-			params.ProjectConfig.Language, params.TaskDetail, params.Task, params.SubmissionEndpoint)
+			params.ProjectConfig.Language, params.TaskDetail, params.Task, basicConfig)
 	} else {
 		// Testing mode: only run libFuzzer and exit
 		runLibFuzzer(fuzzer, params.TaskDir, projectDir, params.ProjectConfig.Language,
