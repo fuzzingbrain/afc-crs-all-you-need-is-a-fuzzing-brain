@@ -34,10 +34,7 @@ func main() {
     r := gin.Default()
 
     // Initialize services - Use WorkerService for worker mode
-    crsService := services.NewWorkerService(cfg.Worker.Index, cfg.Worker.Port, cfg.AI.Model)
-    crsService.SetAnalysisServiceUrl(cfg.Services.AnalysisURL)
-    // Configure the service to forward submissions to the submission service
-    crsService.SetSubmissionEndpoint(cfg.Services.SubmissionURL)
+    crsService := services.NewWorkerService(cfg)
 
     log.Printf("Initialized worker %s (index: %s) services", cfg.Worker.PodName, cfg.Worker.Index)
 

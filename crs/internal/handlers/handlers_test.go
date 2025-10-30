@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"crs/internal/services"
 	"crs/internal/models"
+	"crs/internal/config"
 )
 
 // MockCRSService implements all methods from services.CRSService.
@@ -73,6 +74,20 @@ func (m *MockCRSService) GetWorkDir() string {
 	return ""
 }
 
+func (m *MockCRSService) SetAnalysisServiceUrl(url string) {
+	m.Called(url)
+}
+
+func (m *MockCRSService) SubmitLocalTask(taskPath string) error {
+	args := m.Called(taskPath)
+	return args.Error(0)
+}
+
+func (m *MockCRSService) HandleSarifBroadcastWorker(broadcastWorker models.SARIFBroadcastDetailWorker) error {
+	args := m.Called(broadcastWorker)
+	return args.Error(0)
+}
+
 
 func TestSubmitSarif_BufferOverflow_RealService(t *testing.T) {
 	if testing.Short() {
@@ -81,10 +96,34 @@ func TestSubmitSarif_BufferOverflow_RealService(t *testing.T) {
 
 	gin.SetMode(gin.TestMode)
 
-	// 1. Instantiate the *real* CRSService.
-	crsService := services.NewCRSService(2, 9000, "claude-sonnet-4-20250514")
+	// 1. Create test config
+	cfg := &config.Config{
+		Mode: "server",
+		Auth: config.AuthConfig{
+			KeyID: "test_key",
+			Token: "test_token",
+		},
+		Server: config.ServerConfig{
+			Port:           "7080",
+			WorkerBasePort: 9000,
+		},
+		Worker: config.WorkerConfig{
+			Nodes: 2,
+			Port:  9081,
+		},
+		Services: config.ServicesConfig{
+			SubmissionURL: "http://localhost:7081",
+			AnalysisURL:   "http://localhost:7082",
+		},
+		AI: config.AIConfig{
+			Model: "claude-sonnet-4-20250514",
+		},
+	}
 
-	// 2. Create a Handler that uses the real service.
+	// 2. Instantiate the *real* CRSService.
+	crsService := services.NewWebService(cfg)
+
+	// 3. Create a Handler that uses the real service.
 	handler := NewHandler(crsService, "http://localhost:7082", "http://localhost:7081")
 
 	// 3. Build a test router.

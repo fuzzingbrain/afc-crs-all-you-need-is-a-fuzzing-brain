@@ -50,9 +50,7 @@ func main() {
 	}
 
 	// Initialize services - use LocalService for local mode
-	crsService := services.NewLocalService(cfg.AI.Model)
-	crsService.SetAnalysisServiceUrl(cfg.Services.AnalysisURL)
-	crsService.SetSubmissionEndpoint(cfg.Services.SubmissionURL)
+	crsService := services.NewLocalService(cfg)
 
 	// Initialize handlers with task distribution capability
 	h := handlers.NewHandler(crsService, cfg.Services.AnalysisURL, cfg.Services.SubmissionURL)

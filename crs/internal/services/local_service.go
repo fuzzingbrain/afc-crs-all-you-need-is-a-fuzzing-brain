@@ -5,6 +5,7 @@ import (
 	"crs/internal/models"
 	"crs/internal/executor"
 	"crs/internal/competition"
+	"crs/internal/config"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -22,6 +23,7 @@ import (
 
 // LocalCRSService implements CRSService for local CLI mode
 type LocalCRSService struct {
+	cfg                     *config.Config
 	workDir                 string
 	povMetadataDir          string
 	povMetadataDir0         string
@@ -35,17 +37,11 @@ type LocalCRSService struct {
 }
 
 // NewLocalService creates a new local service instance
-func NewLocalService(model string) CRSService {
-	// Get API configuration
+func NewLocalService(cfg *config.Config) CRSService {
+	// Get API configuration from config
 	apiEndpoint := os.Getenv("COMPETITION_API_ENDPOINT")
 	if apiEndpoint == "" {
 		apiEndpoint = "http://localhost:7081"
-	}
-
-	apiKeyID := os.Getenv("CRS_KEY_ID")
-	apiToken := os.Getenv("CRS_KEY_TOKEN")
-	if apiKeyID == "" || apiToken == "" {
-		log.Printf("Warning: CRS_KEY_ID or CRS_KEY_TOKEN not set")
 	}
 
 	// Define default work directory
@@ -81,15 +77,16 @@ func NewLocalService(model string) CRSService {
 	}
 
 	return &LocalCRSService{
+		cfg:                     cfg,
 		workDir:                 workDir,
-		competitionClient:       competition.NewClient(apiEndpoint, apiKeyID, apiToken),
+		competitionClient:       competition.NewClient(apiEndpoint, cfg.Auth.KeyID, cfg.Auth.Token),
 		povMetadataDir:          "successful_povs",
 		povMetadataDir0:         "successful_povs_0",
 		povAdvcancedMetadataDir: "successful_povs_advanced",
-		model:                   model,
-		submissionEndpoint:      "",
+		model:                   cfg.AI.Model,
+		submissionEndpoint:      cfg.Services.SubmissionURL,
 		workerIndex:             "",
-		analysisServiceUrl:      "",
+		analysisServiceUrl:      cfg.Services.AnalysisURL,
 	}
 }
 
