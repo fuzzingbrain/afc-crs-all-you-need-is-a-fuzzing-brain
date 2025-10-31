@@ -292,6 +292,7 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 		WorkerIndex:              s.workerIndex,
 		AnalysisServiceUrl:       s.analysisServiceUrl,
 		UnharnessedFuzzerSrcPath: "",
+		StrategyConfig:           &s.cfg.Strategy,
 	}
 
 	if err := executor.ExecuteFuzzingTask(execParams); err != nil {
