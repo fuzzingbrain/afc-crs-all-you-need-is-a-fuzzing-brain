@@ -331,7 +331,25 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 		return false
 	}
 
-	log.Printf("Found %d strategy files: %v", len(strategyFiles), strategyFiles)
+	log.Printf("Found %d strategy files before filtering: %v", len(strategyFiles), strategyFiles)
+
+	// Filter strategies based on configuration
+	var filteredStrategies []string
+	for _, strategyFile := range strategyFiles {
+		strategyName := filepath.Base(strategyFile)
+		if strategyConfig.ShouldRunBasicStrategy(strategyName) {
+			filteredStrategies = append(filteredStrategies, strategyFile)
+		} else {
+			log.Printf("Skipping strategy %s (not selected)", strategyName)
+		}
+	}
+
+	if len(filteredStrategies) == 0 {
+		log.Printf("No strategies to run after filtering (selected: %s)", strategyConfig.SelectedBasicStrategy)
+		return false
+	}
+
+	log.Printf("Running %d filtered strategy files: %v", len(filteredStrategies), filteredStrategies)
 
 	// Create a channel to signal when a POV is found
 	povFoundChan := make(chan bool, 1)
@@ -344,7 +362,7 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 	defer cancel() // Ensure we cancel the context when this function returns
 
 	// Run each strategy in parallel
-	for _, strategyFile := range strategyFiles {
+	for _, strategyFile := range filteredStrategies {
 		wg.Add(1)
 
 		// Use a goroutine to run each strategy in parallel
@@ -693,7 +711,25 @@ func runAdvancedPOVStrategiesWithTimeout(
 		return false
 	}
 
-	log.Printf("Found %d strategy files: %v", len(strategyFiles), strategyFiles)
+	log.Printf("Found %d advanced strategy files before filtering: %v", len(strategyFiles), strategyFiles)
+
+	// Filter strategies based on configuration
+	var filteredStrategies []string
+	for _, strategyFile := range strategyFiles {
+		strategyName := filepath.Base(strategyFile)
+		if strategyConfig.ShouldRunAdvancedStrategy(strategyName) {
+			filteredStrategies = append(filteredStrategies, strategyFile)
+		} else {
+			log.Printf("Skipping advanced strategy %s (not selected)", strategyName)
+		}
+	}
+
+	if len(filteredStrategies) == 0 {
+		log.Printf("No advanced strategies to run after filtering (selected: %s)", strategyConfig.SelectedAdvancedStrategy)
+		return false
+	}
+
+	log.Printf("Running %d filtered advanced strategy files: %v", len(filteredStrategies), filteredStrategies)
 
 	povSuccess := false
 	var successMutex sync.Mutex
@@ -701,7 +737,7 @@ func runAdvancedPOVStrategiesWithTimeout(
 
 	parentCtx := context.Background()
 
-	for _, strategyFile := range strategyFiles {
+	for _, strategyFile := range filteredStrategies {
 		wg.Add(1)
 		go func(strategyPath string) {
 			defer wg.Done()

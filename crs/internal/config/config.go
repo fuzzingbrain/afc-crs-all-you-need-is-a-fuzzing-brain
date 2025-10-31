@@ -75,6 +75,12 @@ type StrategyConfig struct {
 
 	// Legacy strategy directory (for fallback)
 	LegacyDir string `envconfig:"STRATEGY_LEGACY_DIR" default:"jeff"`
+
+	// Strategy selection (empty, "all", or specific strategy name like "xs0_delta_new.py")
+	// If empty or "all", runs all strategies matching the pattern
+	// If specific name provided, runs only that strategy
+	SelectedBasicStrategy    string `envconfig:"STRATEGY_SELECTED_BASIC" default:""`
+	SelectedAdvancedStrategy string `envconfig:"STRATEGY_SELECTED_ADVANCED" default:""`
 }
 
 // GetBasicStrategyPattern returns the appropriate pattern for basic POV strategies
@@ -103,6 +109,40 @@ func (s *StrategyConfig) GetAdvancedStrategyPattern(taskType string) string {
 // GetStrategyDir returns the full path to the strategy directory
 func (s *StrategyConfig) GetStrategyDir() string {
 	return fmt.Sprintf("%s/%s", s.BaseDir, s.NewStrategyDir)
+}
+
+// ShouldRunBasicStrategy checks if a specific basic strategy should be run
+// Returns true if:
+// - SelectedBasicStrategy is empty (run all)
+// - SelectedBasicStrategy is "all" (run all)
+// - strategyName matches SelectedBasicStrategy
+// Returns false if:
+// - SelectedBasicStrategy is "none" (skip all)
+func (s *StrategyConfig) ShouldRunBasicStrategy(strategyName string) bool {
+	if strings.ToLower(s.SelectedBasicStrategy) == "none" {
+		return false
+	}
+	if s.SelectedBasicStrategy == "" || strings.ToLower(s.SelectedBasicStrategy) == "all" {
+		return true
+	}
+	return strategyName == s.SelectedBasicStrategy
+}
+
+// ShouldRunAdvancedStrategy checks if a specific advanced strategy should be run
+// Returns true if:
+// - SelectedAdvancedStrategy is empty (run all)
+// - SelectedAdvancedStrategy is "all" (run all)
+// - strategyName matches SelectedAdvancedStrategy
+// Returns false if:
+// - SelectedAdvancedStrategy is "none" (skip all)
+func (s *StrategyConfig) ShouldRunAdvancedStrategy(strategyName string) bool {
+	if strings.ToLower(s.SelectedAdvancedStrategy) == "none" {
+		return false
+	}
+	if s.SelectedAdvancedStrategy == "" || strings.ToLower(s.SelectedAdvancedStrategy) == "all" {
+		return true
+	}
+	return strategyName == s.SelectedAdvancedStrategy
 }
 
 // Load reads configuration from environment variables
