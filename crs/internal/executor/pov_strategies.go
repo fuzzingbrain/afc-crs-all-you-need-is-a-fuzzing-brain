@@ -305,12 +305,14 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 	if strategyConfig == nil {
 		log.Printf("StrategyConfig is nil, using defaults")
 		strategyConfig = &config.StrategyConfig{
-			BaseDir:              "/app/strategy",
-			NewStrategyDir:       "strategies",
-			BasicDeltaPattern:    "xs*_delta_new.py",
-			BasicCFullPattern:    "xs*_c_full.py",
-			BasicJavaFullPattern: "xs*_java_full.py",
-			BasicFullPattern:     "xs*_full.py",
+			BaseDir:        "/app/strategy",
+			NewStrategyDir: "strategies",
+			POV: config.POVStrategyConfig{
+				BasicDeltaPattern:    "xs*_delta_new.py",
+				BasicCFullPattern:    "xs*_c_full.py",
+				BasicJavaFullPattern: "xs*_java_full.py",
+				BasicFullPattern:     "xs*_full.py",
+			},
 		}
 	}
 
@@ -345,7 +347,7 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 	}
 
 	if len(filteredStrategies) == 0 {
-		log.Printf("No strategies to run after filtering (selected: %s)", strategyConfig.SelectedBasicStrategy)
+		log.Printf("No strategies to run after filtering (selected: %s)", strategyConfig.POV.SelectedBasicStrategy)
 		return false
 	}
 
@@ -687,10 +689,12 @@ func runAdvancedPOVStrategiesWithTimeout(
 	if strategyConfig == nil {
 		log.Printf("StrategyConfig is nil, using defaults")
 		strategyConfig = &config.StrategyConfig{
-			BaseDir:              "/app/strategy",
-			NewStrategyDir:       "strategies",
-			AdvancedDeltaPattern: "as*_delta_new.py",
-			AdvancedFullPattern:  "as*_full.py",
+			BaseDir:        "/app/strategy",
+			NewStrategyDir: "strategies",
+			POV: config.POVStrategyConfig{
+				AdvancedDeltaPattern: "as*_delta_new.py",
+				AdvancedFullPattern:  "as*_full.py",
+			},
 		}
 	}
 
@@ -725,7 +729,7 @@ func runAdvancedPOVStrategiesWithTimeout(
 	}
 
 	if len(filteredStrategies) == 0 {
-		log.Printf("No advanced strategies to run after filtering (selected: %s)", strategyConfig.SelectedAdvancedStrategy)
+		log.Printf("No advanced strategies to run after filtering (selected: %s)", strategyConfig.POV.SelectedAdvancedStrategy)
 		return false
 	}
 
