@@ -17,6 +17,7 @@ type Config struct {
 	Worker   WorkerConfig
 	Services ServicesConfig
 	AI       AIConfig
+	Strategy StrategyConfig
 }
 
 // AuthConfig holds authentication configuration
@@ -52,6 +53,56 @@ type AIConfig struct {
 	AnthropicAPIKey string `envconfig:"ANTHROPIC_API_KEY"`
 	GeminiAPIKey    string `envconfig:"GEMINI_API_KEY"`
 	OpenAIAPIKey    string `envconfig:"OPENAI_API_KEY"`
+}
+
+// StrategyConfig holds POV strategy configuration
+type StrategyConfig struct {
+	// Base directory for all strategies
+	BaseDir string `envconfig:"STRATEGY_BASE_DIR" default:"/app/strategy"`
+
+	// Subdirectory for new OOP-based strategies
+	NewStrategyDir string `envconfig:"STRATEGY_NEW_DIR" default:"strategies"`
+
+	// Basic POV strategy patterns (xs* strategies)
+	BasicDeltaPattern    string `envconfig:"STRATEGY_BASIC_DELTA_PATTERN" default:"xs*_delta_new.py"`
+	BasicCFullPattern    string `envconfig:"STRATEGY_BASIC_C_FULL_PATTERN" default:"xs*_c_full.py"`
+	BasicJavaFullPattern string `envconfig:"STRATEGY_BASIC_JAVA_FULL_PATTERN" default:"xs*_java_full.py"`
+	BasicFullPattern     string `envconfig:"STRATEGY_BASIC_FULL_PATTERN" default:"xs*_full.py"`
+
+	// Advanced POV strategy patterns (as* strategies)
+	AdvancedDeltaPattern string `envconfig:"STRATEGY_ADVANCED_DELTA_PATTERN" default:"as*_delta_new.py"`
+	AdvancedFullPattern  string `envconfig:"STRATEGY_ADVANCED_FULL_PATTERN" default:"as*_full.py"`
+
+	// Legacy strategy directory (for fallback)
+	LegacyDir string `envconfig:"STRATEGY_LEGACY_DIR" default:"jeff"`
+}
+
+// GetBasicStrategyPattern returns the appropriate pattern for basic POV strategies
+func (s *StrategyConfig) GetBasicStrategyPattern(taskType, language string) string {
+	if taskType == "full" {
+		switch strings.ToLower(language) {
+		case "c", "cpp", "c++":
+			return s.BasicCFullPattern
+		case "java", "jvm":
+			return s.BasicJavaFullPattern
+		default:
+			return s.BasicFullPattern
+		}
+	}
+	return s.BasicDeltaPattern
+}
+
+// GetAdvancedStrategyPattern returns the appropriate pattern for advanced POV strategies
+func (s *StrategyConfig) GetAdvancedStrategyPattern(taskType string) string {
+	if taskType == "full" {
+		return s.AdvancedFullPattern
+	}
+	return s.AdvancedDeltaPattern
+}
+
+// GetStrategyDir returns the full path to the strategy directory
+func (s *StrategyConfig) GetStrategyDir() string {
+	return fmt.Sprintf("%s/%s", s.BaseDir, s.NewStrategyDir)
 }
 
 // Load reads configuration from environment variables
