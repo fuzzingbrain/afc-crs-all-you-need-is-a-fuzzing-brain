@@ -4,7 +4,9 @@ import (
 	"testing"
 
 	"crs/internal/config"
+	"crs/internal/models"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -103,8 +105,8 @@ func TestNewWebService(t *testing.T) {
 
 func TestWebService_GetStatus(t *testing.T) {
 	cfg := &config.Config{
-		Mode: "server",
-		Auth: config.AuthConfig{KeyID: "key", Token: "token"},
+		Mode:   "server",
+		Auth:   config.AuthConfig{KeyID: "key", Token: "token"},
 		Server: config.ServerConfig{Port: "7080", WorkerBasePort: 9081},
 		Worker: config.WorkerConfig{Nodes: 2, Port: 9081},
 		Services: config.ServicesConfig{
@@ -127,8 +129,8 @@ func TestWebService_GetStatus(t *testing.T) {
 
 func TestWebService_GetWorkDir(t *testing.T) {
 	cfg := &config.Config{
-		Mode: "server",
-		Auth: config.AuthConfig{KeyID: "key", Token: "token"},
+		Mode:   "server",
+		Auth:   config.AuthConfig{KeyID: "key", Token: "token"},
 		Server: config.ServerConfig{Port: "7080", WorkerBasePort: 9081},
 		Worker: config.WorkerConfig{Nodes: 2, Port: 9081},
 		Services: config.ServicesConfig{
@@ -191,4 +193,80 @@ func TestWebService_ConfigIntegration(t *testing.T) {
 		assert.Equal(t, 0, webService.workerStatus[i].FailureCount)
 		assert.Equal(t, 0, webService.workerStatus[i].AssignedTasks)
 	}
+}
+
+func TestWebServiceCancelTask(t *testing.T) {
+	t.Setenv("CRS_WORKDIR", t.TempDir())
+	service := NewWebService(&config.Config{
+		Mode: "server",
+		Auth: config.AuthConfig{KeyID: "key", Token: "token"},
+		Server: config.ServerConfig{
+			Port:           "7080",
+			WorkerBasePort: 9000,
+		},
+		Worker:   config.WorkerConfig{Nodes: 1, Port: 9001},
+		Services: config.ServicesConfig{SubmissionURL: "http://submit", AnalysisURL: "http://analysis"},
+		AI:       config.AIConfig{Model: "test"},
+	})
+
+	webService := service.(*WebCRSService)
+	taskID := uuid.New()
+	webService.tasks[taskID.String()] = &models.TaskDetail{TaskID: taskID}
+
+	err := webService.CancelTask(taskID.String())
+	require.NoError(t, err)
+
+	_, exists := webService.tasks[taskID.String()]
+	assert.False(t, exists)
+	assert.Equal(t, 1, webService.status.Canceled)
+}
+
+func TestWebServiceCancelAllTasks(t *testing.T) {
+	t.Setenv("CRS_WORKDIR", t.TempDir())
+	service := NewWebService(&config.Config{
+		Mode: "server",
+		Auth: config.AuthConfig{KeyID: "key", Token: "token"},
+		Server: config.ServerConfig{
+			Port:           "7080",
+			WorkerBasePort: 9000,
+		},
+		Worker:   config.WorkerConfig{Nodes: 1, Port: 9001},
+		Services: config.ServicesConfig{SubmissionURL: "http://submit", AnalysisURL: "http://analysis"},
+		AI:       config.AIConfig{Model: "test"},
+	})
+
+	webService := service.(*WebCRSService)
+	webService.tasks["a"] = &models.TaskDetail{TaskID: uuid.New()}
+	webService.tasks["b"] = &models.TaskDetail{TaskID: uuid.New()}
+	webService.status.Pending = 2
+
+	err := webService.CancelAllTasks()
+	require.NoError(t, err)
+	assert.Empty(t, webService.tasks)
+	assert.Equal(t, 2, webService.status.Canceled)
+}
+
+func TestWebServiceSetters(t *testing.T) {
+	t.Setenv("CRS_WORKDIR", t.TempDir())
+	service := NewWebService(&config.Config{
+		Mode: "server",
+		Auth: config.AuthConfig{KeyID: "key", Token: "token"},
+		Server: config.ServerConfig{
+			Port:           "7080",
+			WorkerBasePort: 9000,
+		},
+		Worker:   config.WorkerConfig{Nodes: 1, Port: 9001},
+		Services: config.ServicesConfig{SubmissionURL: "http://submit", AnalysisURL: "http://analysis"},
+		AI:       config.AIConfig{Model: "test"},
+	})
+
+	webService := service.(*WebCRSService)
+
+	webService.SetSubmissionEndpoint("http://new-submit")
+	webService.SetAnalysisServiceUrl("http://new-analysis")
+	webService.SetWorkerIndex("42")
+
+	assert.Equal(t, "http://new-submit", webService.submissionEndpoint)
+	assert.Equal(t, "http://new-analysis", webService.analysisServiceUrl)
+	assert.Equal(t, "42", webService.workerIndex)
 }
