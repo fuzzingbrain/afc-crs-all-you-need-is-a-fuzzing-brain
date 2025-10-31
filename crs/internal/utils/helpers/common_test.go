@@ -1,6 +1,8 @@
 package helpers
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -307,4 +309,115 @@ func TestLogDirectoryContents(t *testing.T) {
 	tmpDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte("x"), 0o644))
 	LogDirectoryContents(tmpDir)
+}
+
+func TestSaveTaskDetailToJson(t *testing.T) {
+	tmpDir := t.TempDir()
+	fuzzDir := filepath.Join(tmpDir, "fuzz")
+	require.NoError(t, os.MkdirAll(fuzzDir, 0o755))
+
+	taskDetail := models.TaskDetail{TaskID: uuid.New()}
+	fuzzerPath := filepath.Join(fuzzDir, "example-fuzzer")
+
+	SaveTaskDetailToJson(taskDetail, fuzzerPath, fuzzDir)
+
+	hash := HashString(fuzzerPath)
+	outputPath := filepath.Join(fuzzDir, fmt.Sprintf("task_detail_%s.json", hash))
+
+	data, err := os.ReadFile(outputPath)
+	require.NoError(t, err)
+
+	var restored models.TaskDetail
+	require.NoError(t, json.Unmarshal(data, &restored))
+	assert.Equal(t, taskDetail.TaskID, restored.TaskID)
+}
+
+func TestCopyFuzzDirForParallelStrategies(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("PATH", "/nonexistent")
+
+	sanitizerDir := filepath.Join(tmpDir, "project-address")
+	require.NoError(t, os.MkdirAll(sanitizerDir, 0o755))
+
+	fuzzerName := "example"
+	fuzzerPath := filepath.Join(sanitizerDir, fuzzerName)
+	require.NoError(t, os.WriteFile(fuzzerPath, []byte("binary"), 0o755))
+
+	coverageDir := filepath.Join(tmpDir, "project")
+	require.NoError(t, os.MkdirAll(coverageDir, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(coverageDir, fuzzerName), []byte("coverage"), 0o755))
+
+	require.NoError(t, CopyFuzzDirForParallelStrategies(fuzzerPath, sanitizerDir))
+
+	targetDirs := []string{"ap0", "ap1", "ap2", "ap3", "xp0", "sarif0"}
+	for _, td := range targetDirs {
+		destBin := filepath.Join(sanitizerDir, td, fuzzerName)
+		data, err := os.ReadFile(destBin)
+		require.NoError(t, err, "expected binary in %s", destBin)
+		assert.Equal(t, []byte("binary"), data)
+
+		coverageBin := filepath.Join(sanitizerDir, td, fuzzerName+"-coverage")
+		coverageData, err := os.ReadFile(coverageBin)
+		require.NoError(t, err, "expected coverage binary in %s", coverageBin)
+		assert.Equal(t, []byte("coverage"), coverageData)
+	}
+}
+
+func createTarGz(t *testing.T, path string, files map[string]string) {
+	t.Helper()
+	f, err := os.Create(path)
+	require.NoError(t, err)
+	defer f.Close()
+
+	gz := gzip.NewWriter(f)
+	defer gz.Close()
+
+	tw := tar.NewWriter(gz)
+	defer tw.Close()
+
+	for name, content := range files {
+		hdr := &tar.Header{
+			Name: name,
+			Mode: 0o644,
+			Size: int64(len(content)),
+		}
+		require.NoError(t, tw.WriteHeader(hdr))
+		_, err = tw.Write([]byte(content))
+		require.NoError(t, err)
+	}
+}
+
+func TestExtractSources(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	createTarGz(t, filepath.Join(tmpDir, "repo.tar.gz"), map[string]string{
+		"repo/file.txt": "data",
+	})
+	createTarGz(t, filepath.Join(tmpDir, "fuzz-tooling.tar.gz"), map[string]string{
+		"fuzz-tooling/info.txt": "tooling",
+	})
+	createTarGz(t, filepath.Join(tmpDir, "diff.tar.gz"), map[string]string{
+		"diff/patch.diff": "diff",
+	})
+
+	err := ExtractSources(tmpDir, true)
+	require.NoError(t, err)
+
+	_, err = os.Stat(filepath.Join(tmpDir, "repo/file.txt"))
+	assert.NoError(t, err)
+	_, err = os.Stat(filepath.Join(tmpDir, "fuzz-tooling/info.txt"))
+	assert.NoError(t, err)
+	_, err = os.Stat(filepath.Join(tmpDir, "diff/patch.diff"))
+	assert.NoError(t, err)
+}
+
+func TestShowVulnerabilityDetail(t *testing.T) {
+	vulns := []models.Vulnerability{
+		{
+			RuleID:      "RULE",
+			Description: "desc",
+			Severity:    "high",
+		},
+	}
+	ShowVulnerabilityDetail("task", vulns)
 }

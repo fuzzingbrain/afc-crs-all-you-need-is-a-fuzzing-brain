@@ -1,10 +1,14 @@
 package services
 
 import (
+	"sync"
 	"testing"
+	"time"
 
 	"crs/internal/config"
+	"crs/internal/models"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -89,6 +93,7 @@ func TestNewWorkerService(t *testing.T) {
 }
 
 func TestWorkerService_GetStatus(t *testing.T) {
+	t.Setenv("CRS_WORKDIR", t.TempDir())
 	cfg := &config.Config{
 		Mode: "worker",
 		Auth: config.AuthConfig{KeyID: "key", Token: "token"},
@@ -115,6 +120,7 @@ func TestWorkerService_GetStatus(t *testing.T) {
 }
 
 func TestWorkerService_GetWorkDir(t *testing.T) {
+	t.Setenv("CRS_WORKDIR", t.TempDir())
 	cfg := &config.Config{
 		Mode: "worker",
 		Auth: config.AuthConfig{KeyID: "key", Token: "token"},
@@ -140,6 +146,7 @@ func TestWorkerService_GetWorkDir(t *testing.T) {
 
 func TestWorkerService_ConfigIntegration(t *testing.T) {
 	// Test that config values are properly used throughout the service
+	t.Setenv("CRS_WORKDIR", t.TempDir())
 	cfg := &config.Config{
 		Mode: "worker",
 		Auth: config.AuthConfig{
@@ -184,6 +191,7 @@ func TestWorkerService_ConfigIntegration(t *testing.T) {
 }
 
 func TestWorkerService_IsWorkerBusy(t *testing.T) {
+	t.Setenv("CRS_WORKDIR", t.TempDir())
 	cfg := &config.Config{
 		Mode: "worker",
 		Auth: config.AuthConfig{KeyID: "key", Token: "token"},
@@ -209,4 +217,149 @@ func TestWorkerService_IsWorkerBusy(t *testing.T) {
 	busy, taskIDs := workerService.IsWorkerBusy()
 	assert.False(t, busy)
 	assert.Empty(t, taskIDs)
+}
+
+func TestWorkerServiceUnsupportedOperations(t *testing.T) {
+	t.Setenv("CRS_WORKDIR", t.TempDir())
+	service := NewWorkerService(&config.Config{
+		Mode: "worker",
+		Auth: config.AuthConfig{KeyID: "key", Token: "token"},
+		Worker: config.WorkerConfig{
+			Nodes: 1,
+			Port:  9000,
+		},
+		Services: config.ServicesConfig{
+			SubmissionURL: "http://submit",
+			AnalysisURL:   "http://analysis",
+		},
+		AI: config.AIConfig{Model: "test"},
+	}).(*WorkerCRSService)
+
+	assert.Equal(t, errNotSupportedInWorkerMode, service.SubmitLocalTask("/tmp/path"))
+	assert.Equal(t, errNotSupportedInWorkerMode, service.SubmitTask(models.Task{}))
+
+	service.SetWorkerIndex("5")
+	service.SetSubmissionEndpoint("http://new-submit")
+	service.SetAnalysisServiceUrl("http://new-analysis")
+
+	assert.Equal(t, "5", service.workerIndex)
+	assert.Equal(t, "http://new-submit", service.submissionEndpoint)
+	assert.Equal(t, "http://new-analysis", service.analysisServiceUrl)
+}
+
+func TestWorkerServiceSubmitWorkerTaskRequiresTasks(t *testing.T) {
+	t.Setenv("CRS_WORKDIR", t.TempDir())
+	service := NewWorkerService(&config.Config{
+		Mode: "worker",
+		Auth: config.AuthConfig{KeyID: "key", Token: "token"},
+		Worker: config.WorkerConfig{
+			Nodes: 1,
+			Port:  9000,
+		},
+		Services: config.ServicesConfig{
+			SubmissionURL: "http://submit",
+			AnalysisURL:   "http://analysis",
+		},
+		AI: config.AIConfig{Model: "test"},
+	}).(*WorkerCRSService)
+
+	err := service.SubmitWorkerTask(models.WorkerTask{})
+	assert.Error(t, err)
+}
+
+func TestWorkerServiceHasActiveTasks(t *testing.T) {
+	t.Setenv("CRS_WORKDIR", t.TempDir())
+	service := NewWorkerService(&config.Config{
+		Mode: "worker",
+		Auth: config.AuthConfig{KeyID: "key", Token: "token"},
+		Worker: config.WorkerConfig{
+			Nodes: 1,
+			Port:  9000,
+		},
+		Services: config.ServicesConfig{
+			SubmissionURL: "http://submit",
+			AnalysisURL:   "http://analysis"},
+		AI: config.AIConfig{Model: "test"},
+	}).(*WorkerCRSService)
+
+	workerTaskMutex.Lock()
+	activeWorkerTasks = map[string]bool{"task1": true}
+	workerTaskMutex.Unlock()
+	defer func() {
+		workerTaskMutex.Lock()
+		activeWorkerTasks = make(map[string]bool)
+		workerTaskMutex.Unlock()
+	}()
+
+	assert.True(t, service.hasActiveWorkTasks())
+}
+
+func TestWorkerServiceSubmitWorkerTaskLowCPU(t *testing.T) {
+	service := NewWorkerService(&config.Config{
+		Mode:     "worker",
+		Auth:     config.AuthConfig{KeyID: "key", Token: "token"},
+		Worker:   config.WorkerConfig{Nodes: 1, Port: 9000},
+		Services: config.ServicesConfig{SubmissionURL: "http://submit", AnalysisURL: "http://analysis"},
+		AI:       config.AIConfig{Model: "test"},
+	}).(*WorkerCRSService)
+
+	service.cpuUsageFn = func() (float64, error) { return 10.0, nil }
+	var wg sync.WaitGroup
+	wg.Add(1)
+	service.processTaskFunc = func(fuzzer string, td models.TaskDetail, task models.Task) error {
+		defer wg.Done()
+		assert.Equal(t, "fuzzer", fuzzer)
+		return nil
+	}
+
+	workerTaskMutex.Lock()
+	activeWorkerTasks = make(map[string]bool)
+	workerTaskMutex.Unlock()
+
+	workerTask := models.WorkerTask{
+		MessageID:   uuid.New(),
+		MessageTime: time.Now().Unix(),
+		Fuzzer:      "fuzzer",
+		Tasks:       []models.TaskDetail{{TaskID: uuid.New()}},
+	}
+
+	assert.NoError(t, service.SubmitWorkerTask(workerTask))
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("processTaskFunc was not invoked")
+	}
+}
+
+func TestWorkerServiceSubmitWorkerTaskHighCPURejects(t *testing.T) {
+	service := NewWorkerService(&config.Config{
+		Mode:     "worker",
+		Auth:     config.AuthConfig{KeyID: "key", Token: "token"},
+		Worker:   config.WorkerConfig{Nodes: 1, Port: 9000},
+		Services: config.ServicesConfig{SubmissionURL: "http://submit", AnalysisURL: "http://analysis"},
+		AI:       config.AIConfig{Model: "test"},
+	}).(*WorkerCRSService)
+
+	service.cpuUsageFn = func() (float64, error) { return 90.0, nil }
+	service.processTaskFunc = func(string, models.TaskDetail, models.Task) error {
+		t.Fatal("processTaskFunc should not be called")
+		return nil
+	}
+
+	workerTaskMutex.Lock()
+	activeWorkerTasks = map[string]bool{"task": true}
+	workerTaskMutex.Unlock()
+
+	err := service.SubmitWorkerTask(models.WorkerTask{
+		MessageID: uuid.New(),
+		Tasks:     []models.TaskDetail{{TaskID: uuid.New()}},
+	})
+	assert.Error(t, err)
 }
