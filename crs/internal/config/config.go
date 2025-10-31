@@ -55,7 +55,7 @@ type AIConfig struct {
 	OpenAIAPIKey    string `envconfig:"OPENAI_API_KEY"`
 }
 
-// StrategyConfig holds POV strategy configuration
+// StrategyConfig holds POV and Patch strategy configuration
 type StrategyConfig struct {
 	// Base directory for all strategies
 	BaseDir string `envconfig:"STRATEGY_BASE_DIR" default:"/app/strategy"`
@@ -63,24 +63,52 @@ type StrategyConfig struct {
 	// Subdirectory for new OOP-based strategies
 	NewStrategyDir string `envconfig:"STRATEGY_NEW_DIR" default:"strategies"`
 
-	// Basic POV strategy patterns (xs* strategies)
-	BasicDeltaPattern    string `envconfig:"STRATEGY_BASIC_DELTA_PATTERN" default:"xs*_delta_new.py"`
-	BasicCFullPattern    string `envconfig:"STRATEGY_BASIC_C_FULL_PATTERN" default:"xs*_c_full.py"`
-	BasicJavaFullPattern string `envconfig:"STRATEGY_BASIC_JAVA_FULL_PATTERN" default:"xs*_java_full.py"`
-	BasicFullPattern     string `envconfig:"STRATEGY_BASIC_FULL_PATTERN" default:"xs*_full.py"`
-
-	// Advanced POV strategy patterns (as* strategies)
-	AdvancedDeltaPattern string `envconfig:"STRATEGY_ADVANCED_DELTA_PATTERN" default:"as*_delta_new.py"`
-	AdvancedFullPattern  string `envconfig:"STRATEGY_ADVANCED_FULL_PATTERN" default:"as*_full.py"`
-
 	// Legacy strategy directory (for fallback)
 	LegacyDir string `envconfig:"STRATEGY_LEGACY_DIR" default:"jeff"`
 
-	// Strategy selection (empty, "all", or specific strategy name like "xs0_delta_new.py")
-	// If empty or "all", runs all strategies matching the pattern
-	// If specific name provided, runs only that strategy
-	SelectedBasicStrategy    string `envconfig:"STRATEGY_SELECTED_BASIC" default:""`
-	SelectedAdvancedStrategy string `envconfig:"STRATEGY_SELECTED_ADVANCED" default:""`
+	// POV Strategy Configuration
+	POV POVStrategyConfig
+
+	// Patch Strategy Configuration
+	Patch PatchStrategyConfig
+
+	// Enable or disable patching phase
+	EnablePatching bool `envconfig:"STRATEGY_ENABLE_PATCHING" default:"true"`
+}
+
+// POVStrategyConfig holds POV strategy patterns and selection
+type POVStrategyConfig struct {
+	// Basic POV strategy patterns (xs* strategies)
+	BasicDeltaPattern    string `envconfig:"STRATEGY_POV_BASIC_DELTA_PATTERN" default:"xs*_delta_new.py"`
+	BasicCFullPattern    string `envconfig:"STRATEGY_POV_BASIC_C_FULL_PATTERN" default:"xs*_c_full.py"`
+	BasicJavaFullPattern string `envconfig:"STRATEGY_POV_BASIC_JAVA_FULL_PATTERN" default:"xs*_java_full.py"`
+	BasicFullPattern     string `envconfig:"STRATEGY_POV_BASIC_FULL_PATTERN" default:"xs*_full.py"`
+
+	// Advanced POV strategy patterns (as* strategies)
+	AdvancedDeltaPattern string `envconfig:"STRATEGY_POV_ADVANCED_DELTA_PATTERN" default:"as*_delta_new.py"`
+	AdvancedFullPattern  string `envconfig:"STRATEGY_POV_ADVANCED_FULL_PATTERN" default:"as*_full.py"`
+
+	// Strategy selection (empty, "all", "none", or specific strategy name)
+	SelectedBasicStrategy    string `envconfig:"STRATEGY_POV_SELECTED_BASIC" default:""`
+	SelectedAdvancedStrategy string `envconfig:"STRATEGY_POV_SELECTED_ADVANCED" default:""`
+}
+
+// PatchStrategyConfig holds Patch strategy patterns and selection
+type PatchStrategyConfig struct {
+	// Patch strategy patterns (patch* strategies)
+	DeltaPattern        string `envconfig:"STRATEGY_PATCH_DELTA_PATTERN" default:"patch*_delta.py"`
+	FullPattern         string `envconfig:"STRATEGY_PATCH_FULL_PATTERN" default:"patch*_full.py"`
+	SpecificDeltaName   string `envconfig:"STRATEGY_PATCH_SPECIFIC_DELTA" default:"patch_delta.py"`
+	SpecificFullName    string `envconfig:"STRATEGY_PATCH_SPECIFIC_FULL" default:"patch_full.py"`
+
+	// XPatch strategy patterns (xpatch* strategies)
+	XPatchDeltaPattern string `envconfig:"STRATEGY_XPATCH_DELTA_PATTERN" default:"xpatch*_delta.py"`
+	XPatchFullPattern  string `envconfig:"STRATEGY_XPATCH_FULL_PATTERN" default:"xpatch*_full.py"`
+	XPatchSarifName    string `envconfig:"STRATEGY_XPATCH_SARIF_NAME" default:"xpatch_sarif.py"`
+
+	// Strategy selection (empty, "all", "none", or specific strategy name)
+	SelectedPatchStrategy  string `envconfig:"STRATEGY_PATCH_SELECTED" default:""`
+	SelectedXPatchStrategy string `envconfig:"STRATEGY_XPATCH_SELECTED" default:""`
 }
 
 // GetBasicStrategyPattern returns the appropriate pattern for basic POV strategies
@@ -88,22 +116,44 @@ func (s *StrategyConfig) GetBasicStrategyPattern(taskType, language string) stri
 	if taskType == "full" {
 		switch strings.ToLower(language) {
 		case "c", "cpp", "c++":
-			return s.BasicCFullPattern
+			return s.POV.BasicCFullPattern
 		case "java", "jvm":
-			return s.BasicJavaFullPattern
+			return s.POV.BasicJavaFullPattern
 		default:
-			return s.BasicFullPattern
+			return s.POV.BasicFullPattern
 		}
 	}
-	return s.BasicDeltaPattern
+	return s.POV.BasicDeltaPattern
 }
 
 // GetAdvancedStrategyPattern returns the appropriate pattern for advanced POV strategies
 func (s *StrategyConfig) GetAdvancedStrategyPattern(taskType string) string {
 	if taskType == "full" {
-		return s.AdvancedFullPattern
+		return s.POV.AdvancedFullPattern
 	}
-	return s.AdvancedDeltaPattern
+	return s.POV.AdvancedDeltaPattern
+}
+
+// GetPatchStrategyPattern returns the appropriate pattern for patch strategies
+func (s *StrategyConfig) GetPatchStrategyPattern(taskType string, useSpecific bool) string {
+	if useSpecific {
+		if taskType == "full" {
+			return s.Patch.SpecificFullName
+		}
+		return s.Patch.SpecificDeltaName
+	}
+	if taskType == "full" {
+		return s.Patch.FullPattern
+	}
+	return s.Patch.DeltaPattern
+}
+
+// GetXPatchStrategyPattern returns the appropriate pattern for xpatch strategies
+func (s *StrategyConfig) GetXPatchStrategyPattern(taskType string) string {
+	if taskType == "full" {
+		return s.Patch.XPatchFullPattern
+	}
+	return s.Patch.XPatchDeltaPattern
 }
 
 // GetStrategyDir returns the full path to the strategy directory
@@ -111,38 +161,52 @@ func (s *StrategyConfig) GetStrategyDir() string {
 	return fmt.Sprintf("%s/%s", s.BaseDir, s.NewStrategyDir)
 }
 
-// ShouldRunBasicStrategy checks if a specific basic strategy should be run
-// Returns true if:
-// - SelectedBasicStrategy is empty (run all)
-// - SelectedBasicStrategy is "all" (run all)
-// - strategyName matches SelectedBasicStrategy
-// Returns false if:
-// - SelectedBasicStrategy is "none" (skip all)
+// ShouldRunBasicStrategy checks if a specific basic POV strategy should be run
 func (s *StrategyConfig) ShouldRunBasicStrategy(strategyName string) bool {
-	if strings.ToLower(s.SelectedBasicStrategy) == "none" {
+	selected := s.POV.SelectedBasicStrategy
+	if strings.ToLower(selected) == "none" {
 		return false
 	}
-	if s.SelectedBasicStrategy == "" || strings.ToLower(s.SelectedBasicStrategy) == "all" {
+	if selected == "" || strings.ToLower(selected) == "all" {
 		return true
 	}
-	return strategyName == s.SelectedBasicStrategy
+	return strategyName == selected
 }
 
-// ShouldRunAdvancedStrategy checks if a specific advanced strategy should be run
-// Returns true if:
-// - SelectedAdvancedStrategy is empty (run all)
-// - SelectedAdvancedStrategy is "all" (run all)
-// - strategyName matches SelectedAdvancedStrategy
-// Returns false if:
-// - SelectedAdvancedStrategy is "none" (skip all)
+// ShouldRunAdvancedStrategy checks if a specific advanced POV strategy should be run
 func (s *StrategyConfig) ShouldRunAdvancedStrategy(strategyName string) bool {
-	if strings.ToLower(s.SelectedAdvancedStrategy) == "none" {
+	selected := s.POV.SelectedAdvancedStrategy
+	if strings.ToLower(selected) == "none" {
 		return false
 	}
-	if s.SelectedAdvancedStrategy == "" || strings.ToLower(s.SelectedAdvancedStrategy) == "all" {
+	if selected == "" || strings.ToLower(selected) == "all" {
 		return true
 	}
-	return strategyName == s.SelectedAdvancedStrategy
+	return strategyName == selected
+}
+
+// ShouldRunPatchStrategy checks if a specific patch strategy should be run
+func (s *StrategyConfig) ShouldRunPatchStrategy(strategyName string) bool {
+	selected := s.Patch.SelectedPatchStrategy
+	if strings.ToLower(selected) == "none" {
+		return false
+	}
+	if selected == "" || strings.ToLower(selected) == "all" {
+		return true
+	}
+	return strategyName == selected
+}
+
+// ShouldRunXPatchStrategy checks if a specific xpatch strategy should be run
+func (s *StrategyConfig) ShouldRunXPatchStrategy(strategyName string) bool {
+	selected := s.Patch.SelectedXPatchStrategy
+	if strings.ToLower(selected) == "none" {
+		return false
+	}
+	if selected == "" || strings.ToLower(selected) == "all" {
+		return true
+	}
+	return strategyName == selected
 }
 
 // Load reads configuration from environment variables

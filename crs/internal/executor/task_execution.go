@@ -204,7 +204,19 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 	go runAdvancedPOVPhases(ctx, fuzzer, params, fuzzDir, workflowStartTime,
 		deadlineTime, totalLibfuzzingTime, workingBudgetMinutes, &povFound, genericPovChan, &povSuccess)
 
-	// Phase 4: Wait for POV or deadline, then proceed to patching
+	// Phase 4: Wait for POV or deadline, then proceed to patching (if enabled)
+	if !params.StrategyConfig.EnablePatching {
+		log.Println("========== PATCHING DISABLED: Waiting for POV or deadline ==========")
+		select {
+		case <-povChan:
+			log.Println("========== POV FOUND: Patching disabled, task completed ==========")
+			return nil
+		case <-time.After(time.Until(deadlineTime)):
+			log.Println("========== DEADLINE REACHED: No POV found ==========")
+			return ErrPOVNotFound
+		}
+	}
+
 	select {
 	case <-povChan:
 		log.Println("========== POV FOUND: Proceeding to patching ==========")
