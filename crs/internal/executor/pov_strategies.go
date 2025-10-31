@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"crs/internal/config"
 	"crs/internal/models"
 	"crs/internal/telemetry"
 	"crs/internal/utils/helpers"
@@ -200,7 +201,8 @@ func runPOVPhasesSequential(ctx context.Context, fuzzer string, params TaskExecu
 		success := runAdvancedPOVStrategiesWithTimeout(fuzzer, params.TaskDir, projectDir,
 			params.ProjectConfig.Language, params.TaskDetail, params.Task, timeout, phase, roundNum,
 			params.Model, params.POVAdvancedMetadataDir, params.SubmissionEndpoint,
-			params.WorkerIndex, params.AnalysisServiceUrl, params.UnharnessedFuzzerSrcPath)
+			params.WorkerIndex, params.AnalysisServiceUrl, params.UnharnessedFuzzerSrcPath,
+			params.StrategyConfig)
 
 		phaseSpan.SetAttributes(attribute.Bool("crs.phase.pov_success", success))
 		phaseSpan.End()
@@ -251,7 +253,8 @@ func runPOVPhasesParallel(ctx context.Context, fuzzer string, params TaskExecuti
 			success := runAdvancedPOVStrategiesWithTimeout(fuzzer, params.TaskDir, projectDir,
 				params.ProjectConfig.Language, params.TaskDetail, params.Task, roundTimeoutMinutes,
 				phase, roundNum, params.Model, params.POVAdvancedMetadataDir, params.SubmissionEndpoint,
-				params.WorkerIndex, params.AnalysisServiceUrl, params.UnharnessedFuzzerSrcPath)
+				params.WorkerIndex, params.AnalysisServiceUrl, params.UnharnessedFuzzerSrcPath,
+				params.StrategyConfig)
 
 			phaseSpan.SetAttributes(attribute.Bool("crs.phase.pov_success", success))
 			phaseSpan.End()
@@ -288,33 +291,36 @@ type BasicStrategiesConfig struct {
 	WorkerIndex              string
 	AnalysisServiceUrl       string
 	UnharnessedFuzzerSrcPath string
+	StrategyConfig           *config.StrategyConfig
 }
 
 // runBasicStrategies runs basic POV generation strategies in parallel
 // This function runs multiple Python strategy files (xs*_delta.py or xs*_full.py) concurrently
 // and returns true if any strategy successfully generates a POV
 func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
-	taskDetail models.TaskDetail, task models.Task, config BasicStrategiesConfig) bool {
+	taskDetail models.TaskDetail, task models.Task, basicConfig BasicStrategiesConfig) bool {
 
-	// Find all strategy files under /app/strategy/
-	strategyDir := "/app/strategy"
-
-	strategyFilePattern := "xs*_delta.py"
-	if taskDetail.Type == "full" {
-		switch strings.ToLower(language) {
-		case "c", "cpp", "c++":
-			// Use C/C++-specific full-run strategies
-			strategyFilePattern = "xs*_c_full.py"
-		case "java", "jvm":
-			// Use Java-specific full-run strategies
-			strategyFilePattern = "xs*_java_full.py"
-		default:
-			// Fallback to any generic full-run strategy
-			strategyFilePattern = "xs*_full.py"
+	// Get strategy configuration
+	strategyConfig := basicConfig.StrategyConfig
+	if strategyConfig == nil {
+		log.Printf("StrategyConfig is nil, using defaults")
+		strategyConfig = &config.StrategyConfig{
+			BaseDir:              "/app/strategy",
+			NewStrategyDir:       "strategies",
+			BasicDeltaPattern:    "xs*_delta_new.py",
+			BasicCFullPattern:    "xs*_c_full.py",
+			BasicJavaFullPattern: "xs*_java_full.py",
+			BasicFullPattern:     "xs*_full.py",
 		}
 	}
 
-	strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, "**", strategyFilePattern))
+	// Determine strategy directory and pattern
+	strategyDir := strategyConfig.GetStrategyDir()
+	strategyFilePattern := strategyConfig.GetBasicStrategyPattern(string(taskDetail.Type), language)
+
+	log.Printf("Using strategy directory: %s, pattern: %s", strategyDir, strategyFilePattern)
+
+	strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, strategyFilePattern))
 	if err != nil {
 		log.Printf("Failed to find strategy files: %v", err)
 		return false
@@ -382,8 +388,8 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 				taskDetail.ProjectName,
 				taskDetail.Focus,
 				language,
-				"--model", config.Model,
-				"--pov-metadata-dir", config.POVMetadataDir0,
+				"--model", basicConfig.Model,
+				"--pov-metadata-dir", basicConfig.POVMetadataDir0,
 				"--check-patch-success",
 			}
 
@@ -414,7 +420,7 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 			runCmd.Env = append(os.Environ(),
 				"VIRTUAL_ENV=/tmp/crs_venv",
 				"PATH=/tmp/crs_venv/bin:"+os.Getenv("PATH"),
-				fmt.Sprintf("SUBMISSION_ENDPOINT=%s", config.SubmissionEndpoint),
+				fmt.Sprintf("SUBMISSION_ENDPOINT=%s", basicConfig.SubmissionEndpoint),
 				fmt.Sprintf("TASK_ID=%s", taskDetail.TaskID.String()),
 				// Pass through API credentials if they exist
 				fmt.Sprintf("CRS_KEY_ID=%s", os.Getenv("CRS_KEY_ID")),
@@ -422,15 +428,15 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 				fmt.Sprintf("COMPETITION_API_KEY_ID=%s", os.Getenv("COMPETITION_API_KEY_ID")),
 				fmt.Sprintf("COMPETITION_API_KEY_TOKEN=%s", os.Getenv("COMPETITION_API_KEY_TOKEN")),
 				// Add any other environment variables needed by the Python script
-				fmt.Sprintf("WORKER_INDEX=%s", config.WorkerIndex),
-				fmt.Sprintf("ANALYSIS_SERVICE_URL=%s", config.AnalysisServiceUrl),
+				fmt.Sprintf("WORKER_INDEX=%s", basicConfig.WorkerIndex),
+				fmt.Sprintf("ANALYSIS_SERVICE_URL=%s", basicConfig.AnalysisServiceUrl),
 				"PYTHONUNBUFFERED=1",
 			)
 
 			// If we have an unharnessed fuzzer source path, pass it
-			if config.UnharnessedFuzzerSrcPath != "" {
+			if basicConfig.UnharnessedFuzzerSrcPath != "" {
 				runCmd.Env = append(runCmd.Env,
-					fmt.Sprintf("NEW_FUZZER_SRC_PATH=%s", config.UnharnessedFuzzerSrcPath))
+					fmt.Sprintf("NEW_FUZZER_SRC_PATH=%s", basicConfig.UnharnessedFuzzerSrcPath))
 			}
 
 			// Create pipes for stdout and stderr
@@ -501,7 +507,7 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 				case <-ticker.C:
 					// Check for successful POVs if we haven't already signaled
 					if !povFound {
-						povDir := filepath.Join(fuzzDir, config.POVMetadataDir)
+						povDir := filepath.Join(fuzzDir, basicConfig.POVMetadataDir)
 						if _, err := os.Stat(povDir); err == nil {
 							// Directory exists, check for files
 							files, err := os.ReadDir(povDir)
@@ -657,13 +663,26 @@ func runAdvancedPOVStrategiesWithTimeout(
 	workerIndex string,
 	analysisServiceUrl string,
 	unharnessedFuzzerSrcPath string,
+	strategyConfig *config.StrategyConfig,
 ) bool {
-	strategyDir := "/app/strategy"
-	strategyFilePattern := "as*_delta.py"
-	if taskDetail.Type == "full" {
-		strategyFilePattern = "as*_full.py"
+	// Use default config if not provided
+	if strategyConfig == nil {
+		log.Printf("StrategyConfig is nil, using defaults")
+		strategyConfig = &config.StrategyConfig{
+			BaseDir:              "/app/strategy",
+			NewStrategyDir:       "strategies",
+			AdvancedDeltaPattern: "as*_delta_new.py",
+			AdvancedFullPattern:  "as*_full.py",
+		}
 	}
-	strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, "**", strategyFilePattern))
+
+	// Determine strategy directory and pattern
+	strategyDir := strategyConfig.GetStrategyDir()
+	strategyFilePattern := strategyConfig.GetAdvancedStrategyPattern(string(taskDetail.Type))
+
+	log.Printf("Using advanced strategy directory: %s, pattern: %s", strategyDir, strategyFilePattern)
+
+	strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, strategyFilePattern))
 	if err != nil {
 		log.Printf("Failed to find strategy files: %v", err)
 		return false

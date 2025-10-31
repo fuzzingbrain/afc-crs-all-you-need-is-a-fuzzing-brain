@@ -378,6 +378,7 @@ func (s *WorkerCRSService) processTask(myFuzzer string, taskDetail models.TaskDe
 		WorkerIndex:              s.workerIndex,
 		AnalysisServiceUrl:       s.analysisServiceUrl,
 		UnharnessedFuzzerSrcPath: "",
+		StrategyConfig:           &s.cfg.Strategy,
 	}
 
 	if err := executor.ExecuteFuzzingTask(execParams); err != nil {

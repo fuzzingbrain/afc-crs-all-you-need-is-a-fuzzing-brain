@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"crs/internal/config"
 	"crs/internal/models"
 	"crs/internal/telemetry"
 	"crs/internal/utils/environment"
@@ -41,6 +42,7 @@ type TaskExecutionParams struct {
 	WorkerIndex              string
 	AnalysisServiceUrl       string
 	UnharnessedFuzzerSrcPath string
+	StrategyConfig           *config.StrategyConfig
 }
 
 // ExecuteFuzzingTask executes a complete fuzzing workflow on a worker node
@@ -149,6 +151,7 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 			WorkerIndex:              params.WorkerIndex,
 			AnalysisServiceUrl:       params.AnalysisServiceUrl,
 			UnharnessedFuzzerSrcPath: params.UnharnessedFuzzerSrcPath,
+			StrategyConfig:           params.StrategyConfig,
 		}
 		povSuccess = runBasicStrategies(fuzzer, params.TaskDir, projectDir, fuzzDir,
 			params.ProjectConfig.Language, params.TaskDetail, params.Task, basicConfig)
