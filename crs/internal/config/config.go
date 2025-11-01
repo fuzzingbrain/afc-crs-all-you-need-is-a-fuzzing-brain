@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -299,6 +300,7 @@ func (c *Config) GetListenAddress() string {
 
 // GetSanitizerList returns the list of sanitizers to build
 // If FUZZER_SANITIZERS is set, it overrides project.yaml
+// Note: Coverage is handled separately and should not be included here
 func (f *FuzzerConfig) GetSanitizerList() []string {
 	if f.Sanitizers == "" {
 		return nil // Use project.yaml defaults
@@ -309,7 +311,8 @@ func (f *FuzzerConfig) GetSanitizerList() []string {
 	result := make([]string, 0, len(sanitizers))
 	for _, s := range sanitizers {
 		s = strings.TrimSpace(s)
-		if s != "" && s != "undefined" {
+		// Filter out empty strings and 'coverage' (handled separately)
+		if s != "" && s != "coverage" {
 			result = append(result, s)
 		}
 	}
@@ -355,4 +358,54 @@ func (f *FuzzerConfig) GetSelectedFuzzers() []string {
 // IsAutoDiscovery returns true if fuzzer discovery mode is auto
 func (f *FuzzerConfig) IsAutoDiscovery() bool {
 	return strings.ToLower(f.DiscoveryMode) == "auto" || f.DiscoveryMode == ""
+}
+
+// MatchesFuzzerSelection checks if a fuzzer path matches the configured selection criteria
+// Returns true if:
+// - IsAutoDiscovery() is true (auto mode), OR
+// - The fuzzer name matches one of the selected fuzzer patterns
+func (f *FuzzerConfig) MatchesFuzzerSelection(fuzzerPath string) bool {
+	// Auto-discovery mode: accept all fuzzers
+	if f.IsAutoDiscovery() {
+		return true
+	}
+
+	// Config mode: check if fuzzer matches selected patterns
+	selectedFuzzers := f.GetSelectedFuzzers()
+	if len(selectedFuzzers) == 0 {
+		// No selection specified in config mode = accept all
+		return true
+	}
+
+	fuzzerName := filepath.Base(fuzzerPath)
+	for _, pattern := range selectedFuzzers {
+		// Exact match
+		if fuzzerName == pattern {
+			return true
+		}
+		// Pattern match (simple glob-style: contains or prefix)
+		if strings.Contains(fuzzerName, pattern) {
+			return true
+		}
+		// Wildcard pattern matching
+		matched, _ := filepath.Match(pattern, fuzzerName)
+		if matched {
+			return true
+		}
+	}
+
+	return false
+}
+
+// ShouldUseSanitizer checks if a fuzzer with a specific sanitizer should be used
+// based on the PreferredSanitizer setting
+func (f *FuzzerConfig) ShouldUseSanitizer(fuzzerPath string) bool {
+	// If no preferred sanitizer is set, accept all
+	if f.PreferredSanitizer == "" {
+		return true
+	}
+
+	// Check if fuzzer path contains the preferred sanitizer
+	sanitizerDir := fmt.Sprintf("-%s/", f.PreferredSanitizer)
+	return strings.Contains(fuzzerPath, sanitizerDir)
 }

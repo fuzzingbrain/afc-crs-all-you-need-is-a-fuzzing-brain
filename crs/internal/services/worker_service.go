@@ -317,6 +317,7 @@ func (s *WorkerCRSService) processTask(myFuzzer string, taskDetail models.TaskDe
 		ProjectDir:         projectDir,
 		FuzzerBuilder:      s.buildFuzzersDocker,
 		FindFuzzers:        fuzzer.FindFuzzers,
+		SanitizerOverride:  s.cfg.Fuzzer.GetSanitizerList(), // Use config sanitizers if set
 	}
 
 	cfg, sanitizerDirs, err := environment.PrepareEnvironment(params)
@@ -379,6 +380,8 @@ func (s *WorkerCRSService) processTask(myFuzzer string, taskDetail models.TaskDe
 		AnalysisServiceUrl:       s.analysisServiceUrl,
 		UnharnessedFuzzerSrcPath: "",
 		StrategyConfig:           &s.cfg.Strategy,
+		FuzzerConfig:             &s.cfg.Fuzzer,
+		Sanitizer:                s.cfg.Fuzzer.PreferredSanitizer,
 	}
 
 	if err := executor.ExecuteFuzzingTask(execParams); err != nil {
