@@ -18,6 +18,7 @@ type Config struct {
 	Services ServicesConfig
 	AI       AIConfig
 	Strategy StrategyConfig
+	Fuzzer   FuzzerConfig
 }
 
 // AuthConfig holds authentication configuration
@@ -53,6 +54,21 @@ type AIConfig struct {
 	AnthropicAPIKey string `envconfig:"ANTHROPIC_API_KEY"`
 	GeminiAPIKey    string `envconfig:"GEMINI_API_KEY"`
 	OpenAIAPIKey    string `envconfig:"OPENAI_API_KEY"`
+}
+
+// FuzzerConfig holds fuzzer build and selection configuration
+type FuzzerConfig struct {
+	// Sanitizers to build (comma-separated). Empty = use project.yaml
+	Sanitizers string `envconfig:"FUZZER_SANITIZERS" default:""`
+
+	// Preferred sanitizer when multiple are built
+	PreferredSanitizer string `envconfig:"FUZZER_PREFERRED_SANITIZER" default:"address"`
+
+	// Selected fuzzer(s) - name, pattern, or comma-separated list
+	Selected string `envconfig:"FUZZER_SELECTED" default:""`
+
+	// Discovery mode: "auto" or "config"
+	DiscoveryMode string `envconfig:"FUZZER_DISCOVERY_MODE" default:"auto"`
 }
 
 // StrategyConfig holds POV and Patch strategy configuration
@@ -279,4 +295,64 @@ func (c *Config) GetListenAddress() string {
 	default:
 		return ":8080"
 	}
+}
+
+// GetSanitizerList returns the list of sanitizers to build
+// If FUZZER_SANITIZERS is set, it overrides project.yaml
+func (f *FuzzerConfig) GetSanitizerList() []string {
+	if f.Sanitizers == "" {
+		return nil // Use project.yaml defaults
+	}
+
+	// Split comma-separated list and trim spaces
+	sanitizers := strings.Split(f.Sanitizers, ",")
+	result := make([]string, 0, len(sanitizers))
+	for _, s := range sanitizers {
+		s = strings.TrimSpace(s)
+		if s != "" && s != "undefined" {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+// ShouldBuildSanitizer checks if a specific sanitizer should be built
+// Returns true if:
+// - FUZZER_SANITIZERS is empty (use all from project.yaml), OR
+// - The sanitizer is in the FUZZER_SANITIZERS list
+func (f *FuzzerConfig) ShouldBuildSanitizer(sanitizer string) bool {
+	if f.Sanitizers == "" {
+		return true // Build all sanitizers from project.yaml
+	}
+
+	sanitizerList := f.GetSanitizerList()
+	for _, s := range sanitizerList {
+		if s == sanitizer {
+			return true
+		}
+	}
+	return false
+}
+
+// GetSelectedFuzzers returns the list of fuzzer names/patterns to use
+func (f *FuzzerConfig) GetSelectedFuzzers() []string {
+	if f.Selected == "" {
+		return nil // Auto-discover
+	}
+
+	// Split comma-separated list and trim spaces
+	fuzzers := strings.Split(f.Selected, ",")
+	result := make([]string, 0, len(fuzzers))
+	for _, name := range fuzzers {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			result = append(result, name)
+		}
+	}
+	return result
+}
+
+// IsAutoDiscovery returns true if fuzzer discovery mode is auto
+func (f *FuzzerConfig) IsAutoDiscovery() bool {
+	return strings.ToLower(f.DiscoveryMode) == "auto" || f.DiscoveryMode == ""
 }

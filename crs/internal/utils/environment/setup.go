@@ -48,6 +48,7 @@ type PrepareEnvironmentParams struct {
 	ProjectDir        string
 	FuzzerBuilder     FuzzerBuilder
 	FindFuzzers       func(string) ([]string, error)
+	SanitizerOverride []string // Optional: override sanitizers from config
 }
 
 // PrepareEnvironment prepares the task environment by loading config and building fuzzers
@@ -66,8 +67,15 @@ func PrepareEnvironment(params PrepareEnvironmentParams) (*ProjectConfig, []stri
 		cfg.Sanitizers = []string{"address"}
 	}
 
+	// Use sanitizer override from config if provided
+	sanitizersToUse := cfg.Sanitizers
+	if len(params.SanitizerOverride) > 0 {
+		log.Printf("Using sanitizer override from config: %v (original: %v)", params.SanitizerOverride, cfg.Sanitizers)
+		sanitizersToUse = params.SanitizerOverride
+	}
+
 	// Build fuzzers for each sanitizer if they don't exist
-	for _, sanitizer := range cfg.Sanitizers {
+	for _, sanitizer := range sanitizersToUse {
 		if sanitizer == "undefined" {
 			continue
 		}

@@ -43,6 +43,8 @@ type TaskExecutionParams struct {
 	AnalysisServiceUrl       string
 	UnharnessedFuzzerSrcPath string
 	StrategyConfig           *config.StrategyConfig
+	FuzzerConfig             *config.FuzzerConfig
+	Sanitizer                string // Extracted or configured sanitizer
 }
 
 // ExecuteFuzzingTask executes a complete fuzzing workflow on a worker node
@@ -99,10 +101,25 @@ func ExecuteFuzzingTask(params TaskExecutionParams) error {
 		log.Printf("Prepared fuzzer directory for execution: %v", fuzzer)
 	}
 
-	// Extract sanitizer info (e.g., "address" from "bind9-address")
-	baseName := filepath.Base(fuzzDir)
-	parts := strings.Split(baseName, "-")
-	sanitizer := parts[len(parts)-1]
+	// Determine sanitizer from params or extract from fuzzer directory name
+	sanitizer := params.Sanitizer
+	if sanitizer == "" {
+		// Fallback: Extract sanitizer from directory name (e.g., "bind9-address" -> "address")
+		baseName := filepath.Base(fuzzDir)
+		parts := strings.Split(baseName, "-")
+		if len(parts) > 1 {
+			sanitizer = parts[len(parts)-1]
+			log.Printf("Extracted sanitizer from directory name: %s", sanitizer)
+		} else {
+			// Use configured preferred sanitizer as last resort
+			if params.FuzzerConfig != nil {
+				sanitizer = params.FuzzerConfig.PreferredSanitizer
+			} else {
+				sanitizer = "address"
+			}
+			log.Printf("Using default sanitizer: %s", sanitizer)
+		}
+	}
 
 	// Execute the fuzzing workflow
 	return executeFuzzingWorkflow(fuzzer, params, projectDir, fuzzDir, sanitizer)
