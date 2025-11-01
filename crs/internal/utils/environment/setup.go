@@ -69,12 +69,29 @@ func PrepareEnvironment(params PrepareEnvironmentParams) (*ProjectConfig, []stri
 
 	// Use sanitizer override from config if provided
 	sanitizersToUse := cfg.Sanitizers
+	configSource := "project.yaml"
 	if len(params.SanitizerOverride) > 0 {
-		log.Printf("Using sanitizer override from .env config: %v (project.yaml has: %v)", params.SanitizerOverride, cfg.Sanitizers)
 		sanitizersToUse = params.SanitizerOverride
-	} else {
-		log.Printf("Using sanitizers from project.yaml: %v", cfg.Sanitizers)
+		configSource = ".env"
 	}
+
+	// Print configuration summary
+	log.Println("")
+	log.Println("╔════════════════════════════════════════════════════════════════╗")
+	log.Println("║              FUZZER BUILD CONFIGURATION                        ║")
+	log.Println("╠════════════════════════════════════════════════════════════════╣")
+	log.Printf("║ Configuration Source: %-41s║\n", configSource)
+	log.Printf("║ Language: %-52s║\n", cfg.Language)
+	log.Println("╠════════════════════════════════════════════════════════════════╣")
+	log.Println("║ Sanitizers to Build:                                           ║")
+	for _, san := range sanitizersToUse {
+		log.Printf("║   - %-58s║\n", san)
+	}
+	if strings.ToLower(cfg.Language) == "c" || strings.ToLower(cfg.Language) == "c++" {
+		log.Printf("║   - %-58s║\n", "coverage (mandatory for C/C++)")
+	}
+	log.Println("╚════════════════════════════════════════════════════════════════╝")
+	log.Println("")
 
 	// Build fuzzers for each configurable sanitizer (address, memory, undefined, thread)
 	for _, sanitizer := range sanitizersToUse {
