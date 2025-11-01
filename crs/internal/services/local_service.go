@@ -291,7 +291,28 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 
 	allFuzzers = helpers.SortFuzzersByGroup(filteredFuzzers)
 
-	log.Printf("Found %d fuzzers after filtering: %v", len(allFuzzers), allFuzzers)
+	// Print execution summary
+	log.Println("")
+	log.Println("╔════════════════════════════════════════════════════════════════╗")
+	log.Println("║              FUZZER EXECUTION CONFIGURATION                    ║")
+	log.Println("╠════════════════════════════════════════════════════════════════╣")
+	log.Printf("║ Discovery Mode: %-47s║\n", s.cfg.Fuzzer.DiscoveryMode)
+	log.Printf("║ Preferred Sanitizer: %-43s║\n", s.cfg.Fuzzer.PreferredSanitizer)
+	if s.cfg.Fuzzer.Selected != "" {
+		log.Printf("║ Selected Fuzzer: %-47s║\n", s.cfg.Fuzzer.Selected)
+	}
+	log.Println("╠════════════════════════════════════════════════════════════════╣")
+	log.Printf("║ Total Discovered: %-47d║\n", len(allFuzzers))
+	log.Println("║ Fuzzers to Execute:                                            ║")
+	for i, fz := range allFuzzers {
+		fuzzerName := filepath.Base(fz)
+		if len(fuzzerName) > 55 {
+			fuzzerName = fuzzerName[:52] + "..."
+		}
+		log.Printf("║   %2d. %-57s║\n", i+1, fuzzerName)
+	}
+	log.Println("╚════════════════════════════════════════════════════════════════╝")
+	log.Println("")
 
 	fullTask := models.Task{
 		MessageID:   uuid.New(),
