@@ -213,15 +213,16 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 
 	// Use executor package to prepare environment
 	params := environment.PrepareEnvironmentParams{
-		MyFuzzer:          &myFuzzer,
-		TaskDir:           taskDir,
-		TaskDetail:        taskDetail,
-		DockerfilePath:    dockerfilePath,
+		MyFuzzer:           &myFuzzer,
+		TaskDir:            taskDir,
+		TaskDetail:         taskDetail,
+		DockerfilePath:     dockerfilePath,
 		DockerfileFullPath: dockerfileFullPath,
-		FuzzerDir:         fuzzerDir,
-		ProjectDir:        projectDir,
-		FuzzerBuilder:     s.buildFuzzersDocker,
-		FindFuzzers:       fuzzer.FindFuzzers,
+		FuzzerDir:          fuzzerDir,
+		ProjectDir:         projectDir,
+		FuzzerBuilder:      s.buildFuzzersDocker,
+		FindFuzzers:        fuzzer.FindFuzzers,
+		SanitizerOverride:  s.cfg.Fuzzer.GetSanitizerList(), // Use config sanitizers if set
 	}
 	cfg, sanitizerDirs, err := environment.PrepareEnvironment(params)
 	if err != nil {
@@ -255,20 +256,42 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 		return nil
 	}
 
-	//TODO: skip memory and undefined sanitizers if too many fuzzers
-	// keep only address sanitizer
-	const MAX_FUZZERS = 10
-	if true {
-		var allFilteredFuzzers []string
-		for _, fuzzerPath := range allFuzzers {
-			if strings.Contains(fuzzerPath, "-address/") || (strings.Contains(fuzzerPath, "-memory/") && len(allFuzzers) < MAX_FUZZERS) {
-				allFilteredFuzzers = append(allFilteredFuzzers, fuzzerPath)
-			}
+	log.Printf("Discovered %d fuzzers before filtering", len(allFuzzers))
+
+	// Apply fuzzer filtering based on configuration
+	var filteredFuzzers []string
+	for _, fuzzerPath := range allFuzzers {
+		// Filter by fuzzer selection (FUZZER_SELECTED + FUZZER_DISCOVERY_MODE)
+		if !s.cfg.Fuzzer.MatchesFuzzerSelection(fuzzerPath) {
+			log.Printf("Skipping fuzzer (not selected): %s", filepath.Base(fuzzerPath))
+			continue
 		}
-		allFuzzers = helpers.SortFuzzersByGroup(allFilteredFuzzers)
+
+		// Filter by preferred sanitizer (FUZZER_PREFERRED_SANITIZER)
+		if !s.cfg.Fuzzer.ShouldUseSanitizer(fuzzerPath) {
+			log.Printf("Skipping fuzzer (wrong sanitizer): %s", fuzzerPath)
+			continue
+		}
+
+		filteredFuzzers = append(filteredFuzzers, fuzzerPath)
 	}
 
-	log.Printf("Found %d fuzzers: %v", len(allFuzzers), allFuzzers)
+	// Legacy filtering: skip memory/undefined if too many fuzzers
+	const MAX_FUZZERS = 10
+	if len(filteredFuzzers) > MAX_FUZZERS {
+		var finalFuzzers []string
+		for _, fuzzerPath := range filteredFuzzers {
+			if strings.Contains(fuzzerPath, "-address/") {
+				finalFuzzers = append(finalFuzzers, fuzzerPath)
+			}
+		}
+		log.Printf("Too many fuzzers (%d), keeping only address sanitizer (%d fuzzers)", len(filteredFuzzers), len(finalFuzzers))
+		filteredFuzzers = finalFuzzers
+	}
+
+	allFuzzers = helpers.SortFuzzersByGroup(filteredFuzzers)
+
+	log.Printf("Found %d fuzzers after filtering: %v", len(allFuzzers), allFuzzers)
 
 	fullTask := models.Task{
 		MessageID:   uuid.New(),
@@ -293,6 +316,8 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 		AnalysisServiceUrl:       s.analysisServiceUrl,
 		UnharnessedFuzzerSrcPath: "",
 		StrategyConfig:           &s.cfg.Strategy,
+		FuzzerConfig:             &s.cfg.Fuzzer,
+		Sanitizer:                s.cfg.Fuzzer.PreferredSanitizer,
 	}
 
 	if err := executor.ExecuteFuzzingTask(execParams); err != nil {

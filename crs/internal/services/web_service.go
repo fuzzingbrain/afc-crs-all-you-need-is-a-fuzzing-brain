@@ -383,15 +383,16 @@ func (s *WebCRSService) processTask(myFuzzer string, taskDetail models.TaskDetai
 
 	// Use executor package to prepare environment
 	params := environment.PrepareEnvironmentParams{
-		MyFuzzer:          &myFuzzer,
-		TaskDir:           taskDir,
-		TaskDetail:        taskDetail,
-		DockerfilePath:    dockerfilePath,
+		MyFuzzer:           &myFuzzer,
+		TaskDir:            taskDir,
+		TaskDetail:         taskDetail,
+		DockerfilePath:     dockerfilePath,
 		DockerfileFullPath: dockerfileFullPath,
-		FuzzerDir:         fuzzerDir,
-		ProjectDir:        projectDir,
-		FuzzerBuilder:     nil, // Web service doesn't build locally
-		FindFuzzers:       fuzzer.FindFuzzers,
+		FuzzerDir:          fuzzerDir,
+		ProjectDir:         projectDir,
+		FuzzerBuilder:      nil, // Web service doesn't build locally
+		FindFuzzers:        fuzzer.FindFuzzers,
+		SanitizerOverride:  s.cfg.Fuzzer.GetSanitizerList(), // Use config sanitizers if set
 	}
 
 	_, sanitizerDirs, err := environment.PrepareEnvironment(params)

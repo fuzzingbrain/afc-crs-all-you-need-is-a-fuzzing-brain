@@ -412,9 +412,14 @@ func TestFuzzerConfig_GetSanitizerList(t *testing.T) {
 			expected: []string{"address", "memory", "thread"},
 		},
 		{
-			name:     "filters undefined",
-			input:    "address,undefined,memory",
+			name:     "filters coverage only",
+			input:    "address,coverage,memory",
 			expected: []string{"address", "memory"},
+		},
+		{
+			name:     "keeps undefined",
+			input:    "address,undefined,memory",
+			expected: []string{"address", "undefined", "memory"},
 		},
 	}
 

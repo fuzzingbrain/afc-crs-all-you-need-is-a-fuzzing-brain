@@ -70,18 +70,24 @@ func PrepareEnvironment(params PrepareEnvironmentParams) (*ProjectConfig, []stri
 	// Use sanitizer override from config if provided
 	sanitizersToUse := cfg.Sanitizers
 	if len(params.SanitizerOverride) > 0 {
-		log.Printf("Using sanitizer override from config: %v (original: %v)", params.SanitizerOverride, cfg.Sanitizers)
+		log.Printf("Using sanitizer override from .env config: %v (project.yaml has: %v)", params.SanitizerOverride, cfg.Sanitizers)
 		sanitizersToUse = params.SanitizerOverride
+	} else {
+		log.Printf("Using sanitizers from project.yaml: %v", cfg.Sanitizers)
 	}
 
-	// Build fuzzers for each sanitizer if they don't exist
+	// Build fuzzers for each configurable sanitizer (address, memory, undefined, thread)
 	for _, sanitizer := range sanitizersToUse {
-		if sanitizer == "undefined" {
+		// Skip coverage here - it's handled separately below as mandatory
+		if sanitizer == "coverage" {
+			log.Printf("Skipping 'coverage' in config (built separately as mandatory)")
 			continue
 		}
+
 		if *params.MyFuzzer != "" && *params.MyFuzzer != "UNHARNESSED" && !strings.Contains(*params.MyFuzzer, sanitizer) {
 			continue
 		}
+
 		sanitizerDir := params.FuzzerDir + "-" + sanitizer
 		sanitizerDirs = append(sanitizerDirs, sanitizerDir)
 
@@ -100,25 +106,26 @@ func PrepareEnvironment(params PrepareEnvironmentParams) (*ProjectConfig, []stri
 		}
 	}
 
-	// Coverage for C/C++ worker fuzzers
-	if os.Getenv("LOCAL_TEST") != "" || *params.MyFuzzer != "" {
-		lang := strings.ToLower(cfg.Language)
-		if lang == "c" || lang == "c++" {
-			san := "coverage"
-			sanDir := params.FuzzerDir
-			fuzzers, err := params.FindFuzzers(sanDir)
-			if err != nil {
-				log.Printf("Warning: problem trying to find coverage fuzzers in %s: %v", sanDir, err)
-			}
+	// ALWAYS build coverage for C/C++ projects (mandatory for control flow analysis)
+	// Coverage is built in the base directory without sanitizer suffix
+	lang := strings.ToLower(cfg.Language)
+	if lang == "c" || lang == "c++" {
+		log.Printf("Building mandatory coverage instrumentation for C/C++ project")
+		san := "coverage"
+		sanDir := params.FuzzerDir
+		fuzzers, err := params.FindFuzzers(sanDir)
+		if err != nil {
+			log.Printf("Warning: problem trying to find coverage fuzzers in %s: %v", sanDir, err)
+		}
 
-			if len(fuzzers) == 0 {
-				log.Printf("Building fuzzers with --sanitizer=%s", san)
-				if err := params.FuzzerBuilder(params.MyFuzzer, params.TaskDir, params.ProjectDir, sanDir, san, cfg.Language, params.TaskDetail); err != nil {
-					log.Printf("Error building fuzzers for sanitizer %s: %v", san, err)
-				}
-			} else {
-				log.Printf("Found %d coverage fuzzers in %s. Skipping build.", len(fuzzers), sanDir)
+		if len(fuzzers) == 0 {
+			log.Printf("-------------------- Building coverage fuzzers ----------------------")
+			log.Printf("No coverage fuzzers found in %s. Building with --sanitizer=%s", sanDir, san)
+			if err := params.FuzzerBuilder(params.MyFuzzer, params.TaskDir, params.ProjectDir, sanDir, san, cfg.Language, params.TaskDetail); err != nil {
+				log.Printf("Error building coverage fuzzers: %v", err)
 			}
+		} else {
+			log.Printf("Found %d coverage fuzzers in %s. Skipping build.", len(fuzzers), sanDir)
 		}
 	}
 
