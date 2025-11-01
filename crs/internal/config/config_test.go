@@ -380,3 +380,229 @@ func TestGetListenAddress_DefaultMode(t *testing.T) {
 		t.Errorf("Expected default listen address ':8080', got '%s'", addr)
 	}
 }
+
+// ============================================================================
+// FuzzerConfig Tests
+// ============================================================================
+
+func TestFuzzerConfig_GetSanitizerList(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "empty string returns nil",
+			input:    "",
+			expected: nil,
+		},
+		{
+			name:     "single sanitizer",
+			input:    "address",
+			expected: []string{"address"},
+		},
+		{
+			name:     "multiple sanitizers",
+			input:    "address,memory,thread",
+			expected: []string{"address", "memory", "thread"},
+		},
+		{
+			name:     "with spaces",
+			input:    " address , memory , thread ",
+			expected: []string{"address", "memory", "thread"},
+		},
+		{
+			name:     "filters undefined",
+			input:    "address,undefined,memory",
+			expected: []string{"address", "memory"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fc := &FuzzerConfig{Sanitizers: tt.input}
+			result := fc.GetSanitizerList()
+
+			if len(result) != len(tt.expected) {
+				t.Errorf("expected %d sanitizers, got %d", len(tt.expected), len(result))
+				return
+			}
+
+			for i, expected := range tt.expected {
+				if result[i] != expected {
+					t.Errorf("at index %d: expected %s, got %s", i, expected, result[i])
+				}
+			}
+		})
+	}
+}
+
+func TestFuzzerConfig_ShouldBuildSanitizer(t *testing.T) {
+	tests := []struct {
+		name      string
+		config    string
+		sanitizer string
+		expected  bool
+	}{
+		{
+			name:      "empty config allows all",
+			config:    "",
+			sanitizer: "address",
+			expected:  true,
+		},
+		{
+			name:      "single match",
+			config:    "address",
+			sanitizer: "address",
+			expected:  true,
+		},
+		{
+			name:      "single no match",
+			config:    "address",
+			sanitizer: "memory",
+			expected:  false,
+		},
+		{
+			name:      "multiple with match",
+			config:    "address,memory,undefined",
+			sanitizer: "memory",
+			expected:  true,
+		},
+		{
+			name:      "multiple no match",
+			config:    "address,memory",
+			sanitizer: "thread",
+			expected:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fc := &FuzzerConfig{Sanitizers: tt.config}
+			result := fc.ShouldBuildSanitizer(tt.sanitizer)
+
+			if result != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestFuzzerConfig_GetSelectedFuzzers(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "empty returns nil",
+			input:    "",
+			expected: nil,
+		},
+		{
+			name:     "single fuzzer",
+			input:    "avif_decode_fuzzer",
+			expected: []string{"avif_decode_fuzzer"},
+		},
+		{
+			name:     "multiple fuzzers",
+			input:    "fuzzer1,fuzzer2,fuzzer3",
+			expected: []string{"fuzzer1", "fuzzer2", "fuzzer3"},
+		},
+		{
+			name:     "with spaces",
+			input:    " fuzzer1 , fuzzer2 ",
+			expected: []string{"fuzzer1", "fuzzer2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fc := &FuzzerConfig{Selected: tt.input}
+			result := fc.GetSelectedFuzzers()
+
+			if len(result) != len(tt.expected) {
+				t.Errorf("expected %d fuzzers, got %d", len(tt.expected), len(result))
+				return
+			}
+
+			for i, expected := range tt.expected {
+				if result[i] != expected {
+					t.Errorf("at index %d: expected %s, got %s", i, expected, result[i])
+				}
+			}
+		})
+	}
+}
+
+func TestFuzzerConfig_IsAutoDiscovery(t *testing.T) {
+	tests := []struct {
+		name     string
+		mode     string
+		expected bool
+	}{
+		{
+			name:     "auto mode",
+			mode:     "auto",
+			expected: true,
+		},
+		{
+			name:     "Auto with capital",
+			mode:     "Auto",
+			expected: true,
+		},
+		{
+			name:     "empty is auto",
+			mode:     "",
+			expected: true,
+		},
+		{
+			name:     "config mode",
+			mode:     "config",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fc := &FuzzerConfig{DiscoveryMode: tt.mode}
+			result := fc.IsAutoDiscovery()
+
+			if result != tt.expected {
+				t.Errorf("expected %v, got %v", tt.expected, result)
+			}
+		})
+	}
+}
+
+func TestConfig_LoadWithFuzzerConfig(t *testing.T) {
+	clearEnv()
+	defer clearEnv()
+
+	// Set environment variables for testing
+	os.Setenv("FUZZER_SANITIZERS", "address,memory")
+	os.Setenv("FUZZER_PREFERRED_SANITIZER", "memory")
+	os.Setenv("FUZZER_SELECTED", "test_fuzzer")
+	os.Setenv("FUZZER_DISCOVERY_MODE", "config")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("failed to load config: %v", err)
+	}
+
+	if cfg.Fuzzer.Sanitizers != "address,memory" {
+		t.Errorf("expected sanitizers 'address,memory', got '%s'", cfg.Fuzzer.Sanitizers)
+	}
+
+	if cfg.Fuzzer.PreferredSanitizer != "memory" {
+		t.Errorf("expected preferred sanitizer 'memory', got '%s'", cfg.Fuzzer.PreferredSanitizer)
+	}
+
+	if cfg.Fuzzer.Selected != "test_fuzzer" {
+		t.Errorf("expected selected fuzzer 'test_fuzzer', got '%s'", cfg.Fuzzer.Selected)
+	}
+
+	if cfg.Fuzzer.DiscoveryMode != "config" {
+		t.Errorf("expected discovery mode 'config', got '%s'", cfg.Fuzzer.DiscoveryMode)
+	}
+}

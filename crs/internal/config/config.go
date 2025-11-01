@@ -18,6 +18,7 @@ type Config struct {
 	Services ServicesConfig
 	AI       AIConfig
 	Strategy StrategyConfig
+	Fuzzer   FuzzerConfig
 }
 
 // AuthConfig holds authentication configuration
@@ -55,7 +56,22 @@ type AIConfig struct {
 	OpenAIAPIKey    string `envconfig:"OPENAI_API_KEY"`
 }
 
-// StrategyConfig holds POV strategy configuration
+// FuzzerConfig holds fuzzer build and selection configuration
+type FuzzerConfig struct {
+	// Sanitizers to build (comma-separated). Empty = use project.yaml
+	Sanitizers string `envconfig:"FUZZER_SANITIZERS" default:""`
+
+	// Preferred sanitizer when multiple are built
+	PreferredSanitizer string `envconfig:"FUZZER_PREFERRED_SANITIZER" default:"address"`
+
+	// Selected fuzzer(s) - name, pattern, or comma-separated list
+	Selected string `envconfig:"FUZZER_SELECTED" default:""`
+
+	// Discovery mode: "auto" or "config"
+	DiscoveryMode string `envconfig:"FUZZER_DISCOVERY_MODE" default:"auto"`
+}
+
+// StrategyConfig holds POV and Patch strategy configuration
 type StrategyConfig struct {
 	// Base directory for all strategies
 	BaseDir string `envconfig:"STRATEGY_BASE_DIR" default:"/app/strategy"`
@@ -63,18 +79,52 @@ type StrategyConfig struct {
 	// Subdirectory for new OOP-based strategies
 	NewStrategyDir string `envconfig:"STRATEGY_NEW_DIR" default:"strategies"`
 
-	// Basic POV strategy patterns (xs* strategies)
-	BasicDeltaPattern    string `envconfig:"STRATEGY_BASIC_DELTA_PATTERN" default:"xs*_delta_new.py"`
-	BasicCFullPattern    string `envconfig:"STRATEGY_BASIC_C_FULL_PATTERN" default:"xs*_c_full.py"`
-	BasicJavaFullPattern string `envconfig:"STRATEGY_BASIC_JAVA_FULL_PATTERN" default:"xs*_java_full.py"`
-	BasicFullPattern     string `envconfig:"STRATEGY_BASIC_FULL_PATTERN" default:"xs*_full.py"`
-
-	// Advanced POV strategy patterns (as* strategies)
-	AdvancedDeltaPattern string `envconfig:"STRATEGY_ADVANCED_DELTA_PATTERN" default:"as*_delta_new.py"`
-	AdvancedFullPattern  string `envconfig:"STRATEGY_ADVANCED_FULL_PATTERN" default:"as*_full.py"`
-
 	// Legacy strategy directory (for fallback)
 	LegacyDir string `envconfig:"STRATEGY_LEGACY_DIR" default:"jeff"`
+
+	// POV Strategy Configuration
+	POV POVStrategyConfig
+
+	// Patch Strategy Configuration
+	Patch PatchStrategyConfig
+
+	// Enable or disable patching phase
+	EnablePatching bool `envconfig:"STRATEGY_ENABLE_PATCHING" default:"true"`
+}
+
+// POVStrategyConfig holds POV strategy patterns and selection
+type POVStrategyConfig struct {
+	// Basic POV strategy patterns (xs* strategies)
+	BasicDeltaPattern    string `envconfig:"STRATEGY_POV_BASIC_DELTA_PATTERN" default:"xs*_delta_new.py"`
+	BasicCFullPattern    string `envconfig:"STRATEGY_POV_BASIC_C_FULL_PATTERN" default:"xs*_c_full.py"`
+	BasicJavaFullPattern string `envconfig:"STRATEGY_POV_BASIC_JAVA_FULL_PATTERN" default:"xs*_java_full.py"`
+	BasicFullPattern     string `envconfig:"STRATEGY_POV_BASIC_FULL_PATTERN" default:"xs*_full.py"`
+
+	// Advanced POV strategy patterns (as* strategies)
+	AdvancedDeltaPattern string `envconfig:"STRATEGY_POV_ADVANCED_DELTA_PATTERN" default:"as*_delta_new.py"`
+	AdvancedFullPattern  string `envconfig:"STRATEGY_POV_ADVANCED_FULL_PATTERN" default:"as*_full.py"`
+
+	// Strategy selection (empty, "all", "none", or specific strategy name)
+	SelectedBasicStrategy    string `envconfig:"STRATEGY_POV_SELECTED_BASIC" default:""`
+	SelectedAdvancedStrategy string `envconfig:"STRATEGY_POV_SELECTED_ADVANCED" default:""`
+}
+
+// PatchStrategyConfig holds Patch strategy patterns and selection
+type PatchStrategyConfig struct {
+	// Patch strategy patterns (patch* strategies)
+	DeltaPattern        string `envconfig:"STRATEGY_PATCH_DELTA_PATTERN" default:"patch*_delta.py"`
+	FullPattern         string `envconfig:"STRATEGY_PATCH_FULL_PATTERN" default:"patch*_full.py"`
+	SpecificDeltaName   string `envconfig:"STRATEGY_PATCH_SPECIFIC_DELTA" default:"patch_delta.py"`
+	SpecificFullName    string `envconfig:"STRATEGY_PATCH_SPECIFIC_FULL" default:"patch_full.py"`
+
+	// XPatch strategy patterns (xpatch* strategies)
+	XPatchDeltaPattern string `envconfig:"STRATEGY_XPATCH_DELTA_PATTERN" default:"xpatch*_delta.py"`
+	XPatchFullPattern  string `envconfig:"STRATEGY_XPATCH_FULL_PATTERN" default:"xpatch*_full.py"`
+	XPatchSarifName    string `envconfig:"STRATEGY_XPATCH_SARIF_NAME" default:"xpatch_sarif.py"`
+
+	// Strategy selection (empty, "all", "none", or specific strategy name)
+	SelectedPatchStrategy  string `envconfig:"STRATEGY_PATCH_SELECTED" default:""`
+	SelectedXPatchStrategy string `envconfig:"STRATEGY_XPATCH_SELECTED" default:""`
 }
 
 // GetBasicStrategyPattern returns the appropriate pattern for basic POV strategies
@@ -82,27 +132,97 @@ func (s *StrategyConfig) GetBasicStrategyPattern(taskType, language string) stri
 	if taskType == "full" {
 		switch strings.ToLower(language) {
 		case "c", "cpp", "c++":
-			return s.BasicCFullPattern
+			return s.POV.BasicCFullPattern
 		case "java", "jvm":
-			return s.BasicJavaFullPattern
+			return s.POV.BasicJavaFullPattern
 		default:
-			return s.BasicFullPattern
+			return s.POV.BasicFullPattern
 		}
 	}
-	return s.BasicDeltaPattern
+	return s.POV.BasicDeltaPattern
 }
 
 // GetAdvancedStrategyPattern returns the appropriate pattern for advanced POV strategies
 func (s *StrategyConfig) GetAdvancedStrategyPattern(taskType string) string {
 	if taskType == "full" {
-		return s.AdvancedFullPattern
+		return s.POV.AdvancedFullPattern
 	}
-	return s.AdvancedDeltaPattern
+	return s.POV.AdvancedDeltaPattern
+}
+
+// GetPatchStrategyPattern returns the appropriate pattern for patch strategies
+func (s *StrategyConfig) GetPatchStrategyPattern(taskType string, useSpecific bool) string {
+	if useSpecific {
+		if taskType == "full" {
+			return s.Patch.SpecificFullName
+		}
+		return s.Patch.SpecificDeltaName
+	}
+	if taskType == "full" {
+		return s.Patch.FullPattern
+	}
+	return s.Patch.DeltaPattern
+}
+
+// GetXPatchStrategyPattern returns the appropriate pattern for xpatch strategies
+func (s *StrategyConfig) GetXPatchStrategyPattern(taskType string) string {
+	if taskType == "full" {
+		return s.Patch.XPatchFullPattern
+	}
+	return s.Patch.XPatchDeltaPattern
 }
 
 // GetStrategyDir returns the full path to the strategy directory
 func (s *StrategyConfig) GetStrategyDir() string {
 	return fmt.Sprintf("%s/%s", s.BaseDir, s.NewStrategyDir)
+}
+
+// ShouldRunBasicStrategy checks if a specific basic POV strategy should be run
+func (s *StrategyConfig) ShouldRunBasicStrategy(strategyName string) bool {
+	selected := s.POV.SelectedBasicStrategy
+	if strings.ToLower(selected) == "none" {
+		return false
+	}
+	if selected == "" || strings.ToLower(selected) == "all" {
+		return true
+	}
+	return strategyName == selected
+}
+
+// ShouldRunAdvancedStrategy checks if a specific advanced POV strategy should be run
+func (s *StrategyConfig) ShouldRunAdvancedStrategy(strategyName string) bool {
+	selected := s.POV.SelectedAdvancedStrategy
+	if strings.ToLower(selected) == "none" {
+		return false
+	}
+	if selected == "" || strings.ToLower(selected) == "all" {
+		return true
+	}
+	return strategyName == selected
+}
+
+// ShouldRunPatchStrategy checks if a specific patch strategy should be run
+func (s *StrategyConfig) ShouldRunPatchStrategy(strategyName string) bool {
+	selected := s.Patch.SelectedPatchStrategy
+	if strings.ToLower(selected) == "none" {
+		return false
+	}
+	if selected == "" || strings.ToLower(selected) == "all" {
+		return true
+	}
+	return strategyName == selected
+}
+
+// ShouldRunXPatchStrategy checks if a specific xpatch strategy should be run
+func (s *StrategyConfig) ShouldRunXPatchStrategy(strategyName string) bool {
+	selected := s.Patch.SelectedXPatchStrategy
+	if strings.ToLower(selected) == "none" {
+		return false
+	}
+	if selected == "" || strings.ToLower(selected) == "all" {
+		return true
+	}
+	return strategyName == selected
 }
 
 // Load reads configuration from environment variables
@@ -175,4 +295,64 @@ func (c *Config) GetListenAddress() string {
 	default:
 		return ":8080"
 	}
+}
+
+// GetSanitizerList returns the list of sanitizers to build
+// If FUZZER_SANITIZERS is set, it overrides project.yaml
+func (f *FuzzerConfig) GetSanitizerList() []string {
+	if f.Sanitizers == "" {
+		return nil // Use project.yaml defaults
+	}
+
+	// Split comma-separated list and trim spaces
+	sanitizers := strings.Split(f.Sanitizers, ",")
+	result := make([]string, 0, len(sanitizers))
+	for _, s := range sanitizers {
+		s = strings.TrimSpace(s)
+		if s != "" && s != "undefined" {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+// ShouldBuildSanitizer checks if a specific sanitizer should be built
+// Returns true if:
+// - FUZZER_SANITIZERS is empty (use all from project.yaml), OR
+// - The sanitizer is in the FUZZER_SANITIZERS list
+func (f *FuzzerConfig) ShouldBuildSanitizer(sanitizer string) bool {
+	if f.Sanitizers == "" {
+		return true // Build all sanitizers from project.yaml
+	}
+
+	sanitizerList := f.GetSanitizerList()
+	for _, s := range sanitizerList {
+		if s == sanitizer {
+			return true
+		}
+	}
+	return false
+}
+
+// GetSelectedFuzzers returns the list of fuzzer names/patterns to use
+func (f *FuzzerConfig) GetSelectedFuzzers() []string {
+	if f.Selected == "" {
+		return nil // Auto-discover
+	}
+
+	// Split comma-separated list and trim spaces
+	fuzzers := strings.Split(f.Selected, ",")
+	result := make([]string, 0, len(fuzzers))
+	for _, name := range fuzzers {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			result = append(result, name)
+		}
+	}
+	return result
+}
+
+// IsAutoDiscovery returns true if fuzzer discovery mode is auto
+func (f *FuzzerConfig) IsAutoDiscovery() bool {
+	return strings.ToLower(f.DiscoveryMode) == "auto" || f.DiscoveryMode == ""
 }
