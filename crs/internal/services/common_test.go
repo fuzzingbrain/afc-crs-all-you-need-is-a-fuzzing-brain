@@ -74,6 +74,9 @@ func TestInitializeCompetitionClient(t *testing.T) {
 }
 
 func TestGetAverageCPUUsage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping CPU usage test in short mode (takes 2s)")
+	}
 	value, err := getAverageCPUUsage()
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, value, 0.0)
