@@ -27,3 +27,5 @@
 crs/local
 crs/server
 crs/worker
+
+**/WORKFLOW_*
