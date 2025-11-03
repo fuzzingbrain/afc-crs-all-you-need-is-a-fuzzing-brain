@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 )
 
@@ -18,6 +19,7 @@ type FullScanStrategyConfig struct {
 	WorkerIndex        string
 	AnalysisServiceUrl string
 	StrategyConfig     *config.StrategyConfig
+	Sanitizer          string
 }
 
 // runFullScanStrategy executes the full scan workflow
@@ -35,11 +37,16 @@ func runFullScanStrategy(fuzzer, taskDir, projectDir, fuzzDir, language string,
 
 	log.Printf("========== FULL SCAN STRATEGY ==========")
 	log.Printf("TaskID: %s", taskDetail.TaskID)
+	log.Printf("TaskType: %s", taskDetail.Type)
 	log.Printf("Project: %s", taskDetail.ProjectName)
 	log.Printf("Focus: %s", taskDetail.Focus)
 	log.Printf("Language: %s", language)
+	log.Printf("Sanitizer: %s", fullScanConfig.Sanitizer)
 	log.Printf("Fuzzer: %s", fuzzer)
+	log.Printf("FuzzerName: %s", filepath.Base(fuzzer))
+	log.Printf("Deadline: %d (timestamp: %s)", taskDetail.Deadline, time.Unix(taskDetail.Deadline/1000, 0).Format(time.RFC3339))
 	log.Printf("Analysis Service URL: %s", fullScanConfig.AnalysisServiceUrl)
+	log.Printf("Metadata: %v", taskDetail.Metadata)
 	log.Printf("=========================================")
 
 	// TODO: Implement full scan workflow
