@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -116,36 +115,22 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 	}
 
 	//----------------------------------------------------------
-	// Locate and load task_detail*.json (if present)
+	// Locate and load task_detail.json from task root directory (if present)
 	//----------------------------------------------------------
 	var (
 		taskDetail models.TaskDetail
 		jsonFound  bool
 	)
 
-	walkErr := filepath.WalkDir(taskDir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil // Skip errors & directories
-		}
-
-		name := d.Name()
-		if strings.HasPrefix(name, "task_detail") && strings.HasSuffix(name, ".json") {
-			data, rdErr := os.ReadFile(p)
-			if rdErr != nil {
-				log.Printf("Failed to read %s: %v (continuing search)", p, rdErr)
-				return nil
-			}
-			if umErr := json.Unmarshal(data, &taskDetail); umErr != nil {
-				log.Printf("Failed to unmarshal %s: %v (continuing search)", p, umErr)
-				return nil
-			}
+	// Only check for task_detail.json in the task root directory, not subdirectories
+	taskDetailPath := filepath.Join(taskDir, "task_detail.json")
+	if data, err := os.ReadFile(taskDetailPath); err == nil {
+		if umErr := json.Unmarshal(data, &taskDetail); umErr == nil {
 			jsonFound = true
-			return filepath.SkipDir // Stop walking once we succeed
+			log.Printf("Loaded task detail from %s", taskDetailPath)
+		} else {
+			log.Printf("Failed to unmarshal %s: %v", taskDetailPath, umErr)
 		}
-		return nil
-	})
-	if walkErr != nil {
-		log.Printf("Directory walk error: %v", walkErr)
 	}
 
 	// Fallback to stub when JSON isn't found / can't be parsed
@@ -193,6 +178,16 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 		}
 
 		log.Printf("Completed Task Detail, setting task detail to %v", taskDetail)
+
+		// Save task detail to task directory for future runs
+		jsonData, marshalErr := json.MarshalIndent(taskDetail, "", "  ")
+		if marshalErr == nil {
+			if writeErr := os.WriteFile(taskDetailPath, jsonData, 0644); writeErr == nil {
+				log.Printf("Saved task detail to %s", taskDetailPath)
+			} else {
+				log.Printf("Warning: Failed to save task detail: %v", writeErr)
+			}
+		}
 	}
 	//----------------------------------------------------------
 
