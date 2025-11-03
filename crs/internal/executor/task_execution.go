@@ -170,6 +170,7 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 				WorkerIndex:              params.WorkerIndex,
 				AnalysisServiceUrl:       params.AnalysisServiceUrl,
 				StrategyConfig:           params.StrategyConfig,
+				Sanitizer:                sanitizer,
 			}
 			povSuccess = runFullScanStrategy(fuzzer, params.TaskDir, projectDir, fuzzDir,
 				params.ProjectConfig.Language, params.TaskDetail, params.Task, fullScanConfig)
