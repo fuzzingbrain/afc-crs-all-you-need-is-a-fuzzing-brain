@@ -150,36 +150,77 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 		log.Printf("Started LibFuzzer for C/C++ project")
 	}
 
-	// Phase 2: Run Basic Strategies
-	log.Printf("========== BASIC PHASE: Running initial strategies ==========")
-	_, basicPhasesSpan := telemetry.StartSpan(ctx, "basic_strategies_phase")
-	basicPhasesSpan.SetAttributes(attribute.String("crs.action.category", "fuzzing"))
-	basicPhasesSpan.SetAttributes(attribute.String("crs.action.name", "runBasicStrategies"))
-	for key, value := range params.TaskDetail.Metadata {
-		basicPhasesSpan.SetAttributes(attribute.String(key, value))
-	}
-
-	if os.Getenv("FUZZER_TEST") == "" {
-		basicConfig := BasicStrategiesConfig{
-			Model:                    params.Model,
-			POVMetadataDir:           params.POVMetadataDir,
-			POVMetadataDir0:          params.POVMetadataDir0,
-			SubmissionEndpoint:       params.SubmissionEndpoint,
-			WorkerIndex:              params.WorkerIndex,
-			AnalysisServiceUrl:       params.AnalysisServiceUrl,
-			UnharnessedFuzzerSrcPath: params.UnharnessedFuzzerSrcPath,
-			StrategyConfig:           params.StrategyConfig,
+	// Phase 2: Run Strategies (Branch based on task type)
+	// Check if this is a full scan task or delta scan task
+	if params.TaskDetail.Type == models.TaskTypeFull {
+		// ========== FULL SCAN WORKFLOW ==========
+		log.Printf("========== FULL SCAN: Running full codebase analysis ==========")
+		_, fullScanSpan := telemetry.StartSpan(ctx, "full_scan_phase")
+		fullScanSpan.SetAttributes(attribute.String("crs.action.category", "fuzzing"))
+		fullScanSpan.SetAttributes(attribute.String("crs.action.name", "runFullScanStrategy"))
+		for key, value := range params.TaskDetail.Metadata {
+			fullScanSpan.SetAttributes(attribute.String(key, value))
 		}
-		povSuccess = runBasicStrategies(fuzzer, params.TaskDir, projectDir, fuzzDir,
-			params.ProjectConfig.Language, params.TaskDetail, params.Task, basicConfig)
-	} else {
-		// Testing mode: only run libFuzzer and exit
-		runLibFuzzer(fuzzer, params.TaskDir, projectDir, params.ProjectConfig.Language,
-			params.TaskDetail, params.Task, params.SubmissionEndpoint)
-		os.Exit(0)
-	}
-	basicPhasesSpan.End()
 
+		if os.Getenv("FUZZER_TEST") == "" {
+			fullScanConfig := FullScanStrategyConfig{
+				Model:                    params.Model,
+				POVMetadataDir:           params.POVMetadataDir,
+				SubmissionEndpoint:       params.SubmissionEndpoint,
+				WorkerIndex:              params.WorkerIndex,
+				AnalysisServiceUrl:       params.AnalysisServiceUrl,
+				StrategyConfig:           params.StrategyConfig,
+				Sanitizer:                sanitizer,
+			}
+			povSuccess = runFullScanStrategy(fuzzer, params.TaskDir, projectDir, fuzzDir,
+				params.ProjectConfig.Language, params.TaskDetail, params.Task, fullScanConfig)
+		}
+		fullScanSpan.End()
+
+	} else {
+		// ========== DELTA SCAN WORKFLOW (default) ==========
+		log.Printf("========== BASIC PHASE: Running initial strategies ==========")
+		_, basicPhasesSpan := telemetry.StartSpan(ctx, "basic_strategies_phase")
+		basicPhasesSpan.SetAttributes(attribute.String("crs.action.category", "fuzzing"))
+		basicPhasesSpan.SetAttributes(attribute.String("crs.action.name", "runBasicStrategies"))
+		for key, value := range params.TaskDetail.Metadata {
+			basicPhasesSpan.SetAttributes(attribute.String(key, value))
+		}
+
+		if os.Getenv("FUZZER_TEST") == "" {
+			basicConfig := BasicStrategiesConfig{
+				Model:                    params.Model,
+				POVMetadataDir:           params.POVMetadataDir,
+				POVMetadataDir0:          params.POVMetadataDir0,
+				SubmissionEndpoint:       params.SubmissionEndpoint,
+				WorkerIndex:              params.WorkerIndex,
+				AnalysisServiceUrl:       params.AnalysisServiceUrl,
+				UnharnessedFuzzerSrcPath: params.UnharnessedFuzzerSrcPath,
+				StrategyConfig:           params.StrategyConfig,
+			}
+			povSuccess = runBasicStrategies(fuzzer, params.TaskDir, projectDir, fuzzDir,
+				params.ProjectConfig.Language, params.TaskDetail, params.Task, basicConfig)
+		} else {
+			// Testing mode: only run libFuzzer and exit
+			runLibFuzzer(fuzzer, params.TaskDir, projectDir, params.ProjectConfig.Language,
+				params.TaskDetail, params.Task, params.SubmissionEndpoint)
+			os.Exit(0)
+		}
+		basicPhasesSpan.End()
+	}
+
+	// For full scan tasks, return early after basic phase completes
+	if params.TaskDetail.Type == models.TaskTypeFull {
+		if povSuccess {
+			log.Printf("✓ Full scan completed: POV found!")
+			return nil
+		} else {
+			log.Printf("✗ Full scan completed: No POV found")
+			return ErrPOVNotFound
+		}
+	}
+
+	// For delta scan tasks, continue with advanced phases
 	if povSuccess {
 		log.Printf("POV found in basic phase!")
 		povFound.Do(func() { close(povChan) })
