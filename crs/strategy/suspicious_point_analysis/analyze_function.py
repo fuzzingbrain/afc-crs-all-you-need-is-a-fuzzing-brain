@@ -13,7 +13,7 @@ def analyze_function(
     target_function: Dict[str, Any],
     call_chain_functions: List[Dict[str, Any]],
     window_size: int = 3,
-    model: str = "claude-sonnet-4-20250514"
+    model: str = "claude-sonnet-4"
 ) -> List[Dict[str, Any]]:
     """
     Analyze a function and identify suspicious points.
