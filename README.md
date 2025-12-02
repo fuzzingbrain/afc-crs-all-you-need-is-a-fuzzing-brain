@@ -93,6 +93,16 @@ We have released our challenge datasets on Hugging Face:
 ## Citation
 
 ```bibtex
+@misc{sheng2025needfuzzingbrainllmpowered,
+  title={All You Need Is A Fuzzing Brain: An LLM-Powered System for Automated Vulnerability Detection and Patching},
+  author={Ze Sheng and Qingxiao Xu and Jianwei Huang and Matthew Woodcock and Heqing Huang and Alastair F. Donaldson and Guofei Gu and Jeff Huang},
+  year={2025},
+  eprint={2509.07225},
+  archivePrefix={arXiv},
+  primaryClass={cs.CR},
+  url={https://arxiv.org/abs/2509.07225},
+}
+
 @article{10.1145/3769082,
   author = {Sheng, Ze and Chen, Zhicheng and Gu, Shuning and Huang, Heqing and Gu, Guofei and Huang, Jeff},
   title = {LLMs in Software Security: A Survey of Vulnerability Detection Techniques and Insights},
