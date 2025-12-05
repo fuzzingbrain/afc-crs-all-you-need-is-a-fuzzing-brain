@@ -18,7 +18,9 @@
 ## Quick Start
 
 ```bash
-./run_crs.sh --no-workspace <path_to_workspace>
+cd crs
+./run_crs.sh <dataset_path>              # Creates a new workspace copy
+./run_crs.sh --in-place <dataset_path>   # Run directly without copying
 ```
 
 ## Project Structure

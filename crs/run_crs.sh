@@ -3,13 +3,13 @@
 mkdir -p logs
 
 DATE=$(date +"%Y%m%d_%H%M%S")
-NO_WORKSPACE=false
+IN_PLACE=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --no-workspace)
-            NO_WORKSPACE=true
+        --in-place)
+            IN_PLACE=true
             shift
             ;;
         -*)
@@ -32,14 +32,14 @@ done
 
 # Check if path argument is provided
 if [ -z "$ORIGINAL_DATASET" ]; then
-    echo "Usage: $0 [--no-workspace] <dataset_path> [log_name]"
+    echo "Usage: $0 [--in-place] <dataset_path> [log_name]"
     echo "Options:"
-    echo "  --no-workspace    Run directly in the provided path without creating a new workspace"
+    echo "  --in-place    Run directly in the provided path without copying to a new workspace"
     echo ""
     echo "Examples:"
-    echo "  $0 /home/ze/crs-workdir/local-test-libxml2-delta-01"
-    echo "  $0 /home/ze/crs-workdir/local-test-libxml2-delta-01 my_test_run"
-    echo "  $0 --no-workspace /home/ze/crs-workdir/local-test-libxml2-delta-01"
+    echo "  $0 /path/to/dataset                      # Creates a new workspace copy"
+    echo "  $0 /path/to/dataset my_test_run          # With custom log name"
+    echo "  $0 --in-place /path/to/dataset           # Run directly without copying"
     exit 1
 fi
 
@@ -57,7 +57,7 @@ if [ ! -d "$ORIGINAL_DATASET" ]; then
 fi
 
 # Determine workspace to use
-if [ "$NO_WORKSPACE" = true ]; then
+if [ "$IN_PLACE" = true ]; then
     WORKSPACE="$ORIGINAL_DATASET"
     echo "Starting CRS local run at $(date)" | tee "$LOG_FILE"
     echo "Log file: $LOG_FILE" | tee -a "$LOG_FILE"
@@ -100,7 +100,7 @@ else
 fi
 
 echo "===========================================" | tee -a "$LOG_FILE"
-if [ "$NO_WORKSPACE" = true ]; then
+if [ "$IN_PLACE" = true ]; then
     echo "Ran directly in: $WORKSPACE" | tee -a "$LOG_FILE"
 else
     echo "Workspace created at: $WORKSPACE" | tee -a "$LOG_FILE"
