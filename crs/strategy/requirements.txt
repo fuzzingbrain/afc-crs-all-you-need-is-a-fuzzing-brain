@@ -7,3 +7,6 @@ loguru>=0.7.0
 
 # Type checking (runtime)
 typing-extensions>=4.8.0
+
+# LLM API
+litellm>=1.0.0
