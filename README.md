@@ -7,6 +7,10 @@
 <img src="https://img.shields.io/badge/Docker-Required-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
 <img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
 
+<img src="https://img.shields.io/badge/Linux-✓-success?style=flat-square&logo=linux&logoColor=white" alt="Linux">
+<img src="https://img.shields.io/badge/macOS-✓-success?style=flat-square&logo=apple&logoColor=white" alt="macOS">
+<img src="https://img.shields.io/badge/Windows-✗-critical?style=flat-square&logo=windows&logoColor=white" alt="Windows">
+
 **Autonomous Cyber Reasoning System for Vulnerability Discovery**
 
 [Paper](https://dl.acm.org/doi/full/10.1145/3769082) | [C Dataset](https://huggingface.co/datasets/Kitxuuu/AIXCC-C-Challenge) | [Java Dataset](https://huggingface.co/datasets/Kitxuuu/AIXCC-Java-Challenge)
@@ -18,9 +22,8 @@
 ## Quick Start
 
 ```bash
-cd crs
-./run_crs.sh <dataset_path>              # Creates a new workspace copy
-./run_crs.sh --in-place <dataset_path>   # Run directly without copying
+./FuzzingBrain.sh <dataset_path>              # Creates a new workspace copy
+./FuzzingBrain.sh --in-place <dataset_path>   # Run directly without copying
 ```
 
 ## Project Structure

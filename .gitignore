@@ -29,3 +29,7 @@ crs/server
 crs/worker
 
 document/
+
+**/WORKFLOW/*
+
+**/workspace/*
