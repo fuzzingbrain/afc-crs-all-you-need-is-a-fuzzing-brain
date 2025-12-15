@@ -10,3 +10,12 @@ typing-extensions>=4.8.0
 
 # LLM API
 litellm>=1.0.0
+
+# LLM Observability
+openlit>=1.0.0
+
+# Code Analysis
+clang>=14.0
+
+# Environment
+python-dotenv>=1.0.0
