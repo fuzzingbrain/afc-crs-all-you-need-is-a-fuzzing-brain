@@ -2,6 +2,20 @@
 
 mkdir -p logs
 
+# Setup Python virtual environment
+VENV_DIR="/tmp/crs_venv"
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Creating Python virtual environment at $VENV_DIR..."
+    python3 -m venv "$VENV_DIR"
+fi
+
+# Activate venv and install dependencies
+source "$VENV_DIR/bin/activate"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/strategy/requirements.txt" ]; then
+    pip install -q -r "$SCRIPT_DIR/strategy/requirements.txt" 2>/dev/null
+fi
+
 DATE=$(date +"%Y%m%d_%H%M%S")
 IN_PLACE=false
 

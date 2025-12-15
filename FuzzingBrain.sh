@@ -336,7 +336,7 @@ if is_git_url "$TARGET"; then
     check_environment
 
     # Run CRS with the new workspace (always in-place since we just created it)
-    cd "$CRS_DIR" && ./run_crs.sh --in-place "$WORKSPACE"
+    cd "$CRS_DIR" && sudo ./run_crs.sh --in-place "$WORKSPACE"
 
 # ============================================
 # CASE 2: Local path - Use existing workspace
@@ -352,8 +352,8 @@ else
 
     # Pass through to original run_crs.sh
     if [ "$IN_PLACE" = true ]; then
-        cd "$CRS_DIR" && ./run_crs.sh --in-place "$TARGET"
+        cd "$CRS_DIR" && sudo ./run_crs.sh --in-place "$TARGET"
     else
-        cd "$CRS_DIR" && ./run_crs.sh "$TARGET"
+        cd "$CRS_DIR" && sudo ./run_crs.sh "$TARGET"
     fi
 fi
