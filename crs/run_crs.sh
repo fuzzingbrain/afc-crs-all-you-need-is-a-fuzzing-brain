@@ -16,6 +16,13 @@ if [ -f "$SCRIPT_DIR/strategy/requirements.txt" ]; then
     pip install -q -r "$SCRIPT_DIR/strategy/requirements.txt" 2>/dev/null
 fi
 
+# Load and export .env variables for Python strategies
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+
 DATE=$(date +"%Y%m%d_%H%M%S")
 IN_PLACE=false
 
