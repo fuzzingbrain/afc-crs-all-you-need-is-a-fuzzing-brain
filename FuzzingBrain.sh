@@ -58,6 +58,71 @@ find_ossfuzz_project() {
     echo ""
 }
 
+# Prompt user for API key
+prompt_api_key() {
+    local env_file="$CRS_DIR/.env"
+    local env_example="$CRS_DIR/.env.example"
+
+    echo ""
+    print_info "No API key configured. Let's set one up!"
+    echo ""
+    echo "Which API key would you like to use?"
+    echo "  1) Anthropic (Claude)"
+    echo "  2) OpenAI (GPT)"
+    echo "  3) Google (Gemini)"
+    echo ""
+    read -p "Enter choice [1-3]: " choice
+
+    local key_name=""
+    local key_value=""
+
+    case $choice in
+        1)
+            key_name="ANTHROPIC_API_KEY"
+            read -p "Enter your Anthropic API key: " key_value
+            ;;
+        2)
+            key_name="OPENAI_API_KEY"
+            read -p "Enter your OpenAI API key: " key_value
+            ;;
+        3)
+            key_name="GEMINI_API_KEY"
+            read -p "Enter your Google/Gemini API key: " key_value
+            ;;
+        *)
+            print_error "Invalid choice"
+            exit 1
+            ;;
+    esac
+
+    if [ -z "$key_value" ]; then
+        print_error "API key cannot be empty"
+        exit 1
+    fi
+
+    # Create .env from example if it doesn't exist
+    if [ ! -f "$env_file" ]; then
+        if [ -f "$env_example" ]; then
+            cp "$env_example" "$env_file"
+            print_info "Created $env_file from example"
+        else
+            touch "$env_file"
+        fi
+    fi
+
+    # Update or append the API key
+    if grep -q "^${key_name}=" "$env_file" 2>/dev/null; then
+        # Update existing key
+        sed -i "s|^${key_name}=.*|${key_name}=${key_value}|" "$env_file"
+    else
+        # Append new key
+        echo "${key_name}=${key_value}" >> "$env_file"
+    fi
+
+    print_info "API key saved to $env_file"
+    export "$key_name=$key_value"
+}
+
 # Check environment configuration
 check_environment() {
     local env_file="$CRS_DIR/.env"
@@ -65,13 +130,9 @@ check_environment() {
 
     # Check if .env exists
     if [ ! -f "$env_file" ]; then
-        print_error ".env file not found!"
-        print_error "Please create it by copying the example file:"
-        echo ""
-        echo "    cp $env_example $env_file"
-        echo ""
-        print_error "Then edit $env_file and set your API keys."
-        exit 1
+        print_warn ".env file not found at $env_file"
+        prompt_api_key
+        return
     fi
 
     # Load .env file
@@ -81,35 +142,23 @@ check_environment() {
 
     # Check if at least one API key is set
     local has_api_key=false
-    local missing_keys=()
 
     if [ -n "$ANTHROPIC_API_KEY" ] && [ "$ANTHROPIC_API_KEY" != "your-anthropic-api-key" ]; then
         has_api_key=true
-    else
-        missing_keys+=("ANTHROPIC_API_KEY")
     fi
 
     if [ -n "$OPENAI_API_KEY" ] && [ "$OPENAI_API_KEY" != "your-openai-api-key" ]; then
         has_api_key=true
-    else
-        missing_keys+=("OPENAI_API_KEY")
     fi
 
     if [ -n "$GEMINI_API_KEY" ] && [ "$GEMINI_API_KEY" != "your-gemini-api-key" ]; then
         has_api_key=true
-    else
-        missing_keys+=("GEMINI_API_KEY")
     fi
 
     if [ "$has_api_key" = false ]; then
-        print_error "No API key configured!"
-        print_error "At least one of the following must be set in $env_file:"
-        for key in "${missing_keys[@]}"; do
-            echo "    - $key"
-        done
-        echo ""
-        print_error "Please edit $env_file and add your API key."
-        exit 1
+        print_warn "No valid API key found in $env_file"
+        prompt_api_key
+        return
     fi
 
     print_info "Environment check passed"
@@ -171,9 +220,6 @@ set -- "${POSITIONAL_ARGS[@]}"
 if [ $# -lt 1 ]; then
     show_usage
 fi
-
-# Check environment before proceeding
-check_environment
 
 TARGET="$1"
 COMMIT_ID="${2:-}"
@@ -266,6 +312,9 @@ if is_git_url "$TARGET"; then
     print_info "Workspace created successfully: $WORKSPACE"
     echo ""
 
+    # Check environment before running
+    check_environment
+
     # Run CRS with the new workspace (always in-place since we just created it)
     cd "$CRS_DIR" && ./run_crs.sh --in-place "$WORKSPACE"
 
@@ -277,6 +326,9 @@ else
         print_error "Directory does not exist: $TARGET"
         exit 1
     fi
+
+    # Check environment before running
+    check_environment
 
     # Pass through to original run_crs.sh
     if [ "$IN_PLACE" = true ]; then
