@@ -1,0 +1,11 @@
+homepage: "https://github.com/ianlancetaylor/demangle"
+language: go
+main_repo: "https://github.com/ianlancetaylor/demangle"
+auto_ccs:
+  - "adam@adalogics.com"
+fuzzing_engines:
+  - libfuzzer
+sanitizers:
+  - address
+
+base_os_version: ubuntu-24-04
