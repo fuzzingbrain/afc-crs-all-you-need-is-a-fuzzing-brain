@@ -137,8 +137,8 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 	if !jsonFound {
 		log.Printf("No valid task_detail.json found – falling back to default task detail")
 
-		projectName := "test"
-		focusName := "test"
+		projectName := "unknown"
+		focusName := "repo"
 
 		projectsDir := filepath.Join(taskDir, "fuzz-tooling/projects/")
 		files, err := os.ReadDir(projectsDir)
@@ -146,8 +146,8 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 			for _, file := range files {
 				if file.IsDir() {
 					projectName = file.Name()
-					focusName = "afc-" + projectName
-					log.Printf("Found project '%s' in fuzz-tooling/projects, setting focus to '%s'", projectName, focusName)
+					focusName = "repo"
+					log.Printf("Found project '%s' in fuzz-tooling/projects, source code in '%s'", projectName, focusName)
 					break // Use the first one
 				}
 			}
