@@ -162,8 +162,7 @@ func (h *Handler) SubmitWorkerTask(c *gin.Context) {
     c.Status(http.StatusAccepted)
 }
 
-func (h *Handler) SubmitLocalTask(taskPath string) {
-    log.Printf("SubmitLocalTask taskPath: %v", taskPath)
+func (h *Handler) SubmitLocalTask(taskPath string, projectName, focusName string) {
 
     if os.Getenv("ANALYSIS_SERVICE_TEST") != "" || os.Getenv("LOCAL_TEST") != "" {
         h.analysisService = "http://localhost:7082"
@@ -172,7 +171,7 @@ func (h *Handler) SubmitLocalTask(taskPath string) {
         h.submissionService = "http://localhost:7081"
     }
 
-    h.crs.SubmitLocalTask(taskPath)
+    h.crs.SubmitLocalTask(taskPath, projectName, focusName)
 
 }
 

@@ -91,7 +91,7 @@ type ProjectConfig struct {
 
 type CRSService interface {
     GetStatus() models.Status
-    SubmitLocalTask(taskPath string) error
+    SubmitLocalTask(taskPath string, projectName, focusName string) error
     SubmitTask(task models.Task) error
     SubmitWorkerTask(task models.WorkerTask) error
     CancelTask(taskID string) error
@@ -103,6 +103,7 @@ type CRSService interface {
     SetSubmissionEndpoint(endpoint string)
     SetWorkerIndex(index string)
     SetAnalysisServiceUrl(url string)
+    SetStrategyDirectory(dir string)
     GetWorkDir() string
 }
 
@@ -124,6 +125,7 @@ type defaultCRSService struct {
     submissionEndpoint string
     workerIndex        string
     analysisServiceUrl string
+    strategyDir string
     //for worker only
     workerNodes int
     workerBasePort int
@@ -151,7 +153,9 @@ func (s *defaultCRSService) SetWorkerIndex(index string) {
 func (s *defaultCRSService) SetAnalysisServiceUrl(url string) {
     s.analysisServiceUrl = url
 }
-
+func (s *defaultCRSService) SetStrategyDirectory(dir string) {
+    s.strategyDir = dir
+}
 func (s *defaultCRSService) GetWorkDir() string {
     return s.workDir
 }
@@ -651,7 +655,7 @@ func (s *defaultCRSService) IsWorkerBusy() (bool, []string) {
     return len(activeWorkerTasks) > 0, activeIDs
 }
 
-func (s *defaultCRSService) SubmitLocalTask(taskDir string) error {
+func (s *defaultCRSService) SubmitLocalTask(taskDir string, projectName, focusName string) error {
     myFuzzer := ""
     // --- ensure LOCAL_TEST mode is enabled ---
     if os.Getenv("LOCAL_TEST") == "" {
@@ -661,58 +665,42 @@ func (s *defaultCRSService) SubmitLocalTask(taskDir string) error {
     //----------------------------------------------------------
     // Locate and load task_detail*.json (if present)
     //----------------------------------------------------------
-    var (
-        taskDetail models.TaskDetail
-        jsonFound  bool
-    )
-
-    walkErr := filepath.WalkDir(taskDir, func(p string, d fs.DirEntry, err error) error {
-        if err != nil || d.IsDir() {
-            return nil // Skip errors & directories
-        }
-
-        name := d.Name()
-        if strings.HasPrefix(name, "task_detail") && strings.HasSuffix(name, ".json") {
-            data, rdErr := os.ReadFile(p)
-            if rdErr != nil {
-                log.Printf("Failed to read %s: %v (continuing search)", p, rdErr)
-                return nil
-            }
-            if umErr := json.Unmarshal(data, &taskDetail); umErr != nil {
-                log.Printf("Failed to unmarshal %s: %v (continuing search)", p, umErr)
-                return nil
-            }
-            // log.Printf("Loaded task detail from %s", p)
-            jsonFound = true
-            return filepath.SkipDir // Stop walking once we succeed
-        }
-        return nil
-    })
-    if walkErr != nil {
-        log.Printf("Directory walk error: %v", walkErr)
-    }
-
-	// Fallback to stub when JSON isn’t found / can’t be parsed
-	if !jsonFound {
-		log.Printf("No valid task_detail.json found – falling back to default task detail")
-
-		projectName := "test"
-		focusName := "test"
-
-		projectsDir := filepath.Join(taskDir, "fuzz-tooling/projects/")
-		files, err := os.ReadDir(projectsDir)
-		if err == nil {
-			for _, file := range files {
-				if file.IsDir() {
-					projectName = file.Name()
-					focusName = "afc-" + projectName
-					log.Printf("Found project '%s' in fuzz-tooling/projects, setting focus to '%s'", projectName, focusName)
-					break // Use the first one
+    var taskDetail models.TaskDetail
+    {
+		// Use provided values if available, otherwise try to detect
+		if projectName == "" || focusName == "" {
+			// Try to detect from oss-fuzz/projects directory
+			projectsDir := filepath.Join(taskDir, "oss-fuzz/projects/")
+			files, err := os.ReadDir(projectsDir)
+			if err == nil {
+				for _, file := range files {
+					if file.IsDir() {
+						if projectName == "" {
+							projectName = file.Name()
+						}
+						if focusName == "" {
+							// Default: focusName is same as projectName
+							focusName = projectName
+						}
+						log.Printf("Found project '%s' in oss-fuzz/projects", projectName)
+						break // Use the first one
+					}
 				}
+			} else {
+				log.Printf("Could not read oss-fuzz/projects/ directory: %v", err)
 			}
-		} else {
-			log.Printf("Could not read fuzz-tooling/projects/ directory: %v", err)
 		}
+
+		// Fallback defaults if still not set
+		if projectName == "" {
+			projectName = "test"
+		}
+		if focusName == "" {
+			focusName = projectName
+		}
+
+		log.Printf("Using projectName='%s', focusName='%s'", projectName, focusName)
+
 
 		// Determine task type based on presence of "diff" directory
 		taskType := models.TaskTypeFull
@@ -743,14 +731,14 @@ func (s *defaultCRSService) SubmitLocalTask(taskDir string) error {
     }
     
     projectDir := path.Join(absTaskDir, taskDetail.Focus)
-    dockerfilePath := path.Join(absTaskDir, "fuzz-tooling/projects",taskDetail.ProjectName)
+    dockerfilePath := path.Join(absTaskDir, "oss-fuzz/projects",taskDetail.ProjectName)
     dockerfileFullPath := path.Join(dockerfilePath, "Dockerfile")
-    fuzzerDir := path.Join(taskDir, "fuzz-tooling/build/out", taskDetail.ProjectName)
+    fuzzerDir := path.Join(taskDir, "oss-fuzz/build/out", taskDetail.ProjectName)
 
     log.Printf("Project dir: %s", projectDir)
     log.Printf("Dockerfile: %s", dockerfileFullPath)
 
-    cfg, sanitizerDirs, err := s.prepareTaskEnvironment(
+    cfg, err := s.prepareTaskEnvironment(
         &myFuzzer,
         taskDir,
         taskDetail,
@@ -764,42 +752,25 @@ func (s *defaultCRSService) SubmitLocalTask(taskDir string) error {
     }
 
     // Collect all fuzzers from all sanitizer builds and run them in parallel
-    var allFuzzers []string
-    sanitizerDirsCopy := make([]string, len(sanitizerDirs))
-    copy(sanitizerDirsCopy, sanitizerDirs)
-    
+    var allFuzzers []string    
     // Now use the copy to find fuzzers
-    for _, sdir := range sanitizerDirsCopy {
-        fuzzers, err := s.findFuzzers(sdir)
-        if err != nil {
-            log.Printf("Warning: failed to find fuzzers in %s: %v", sdir, err)
-            continue // Skip this directory but continue with others
-        }
-
-        // Mark these fuzzers with the sanitizer directory so we know where they live
-        for _, fz := range fuzzers {
-            // We'll store the absolute path so we can directly call run_fuzzer
-            fuzzerPath := filepath.Join(sdir, fz)
-            allFuzzers = append(allFuzzers, fuzzerPath)
-        }
+    fuzzers, err := s.findFuzzers(fuzzerDir)
+    if err != nil {
+        log.Printf("Warning: failed to find fuzzers in %s: %v", fuzzerDir, err)
+        return nil
     }
+
+    // Mark these fuzzers with the sanitizer directory so we know where they live
+    for _, fz := range fuzzers {
+        // We'll store the absolute path so we can directly call run_fuzzer
+        fuzzerPath := filepath.Join(fuzzerDir, fz)
+        allFuzzers = append(allFuzzers, fuzzerPath)
+    }
+    
 
     if len(allFuzzers) == 0 {
         log.Printf("No fuzzers found after building all sanitizers")
         return nil
-    }
-
-    //TODO: skip memory and undefined sanitizers if too many fuzzers
-    // keep only address sanitizer
-    const MAX_FUZZERS = 10
-    if true {
-        var allFilteredFuzzers []string
-        for _, fuzzerPath := range allFuzzers {
-            if strings.Contains(fuzzerPath, "-address/") || (strings.Contains(fuzzerPath, "-memory/") && len(allFuzzers) < MAX_FUZZERS) {
-                allFilteredFuzzers = append(allFilteredFuzzers, fuzzerPath)
-            }
-        }
-        allFuzzers = sortFuzzersByGroup(allFilteredFuzzers)
     }
 
     // log.Printf("Sorted fuzzers: %v", allFuzzers)
@@ -812,10 +783,11 @@ func (s *defaultCRSService) SubmitLocalTask(taskDir string) error {
     }
 
     // Process the task based on its type
-    if err := s.runFuzzing(myFuzzer,taskDir, taskDetail, fullTask, cfg, allFuzzers); err != nil {
-        log.Printf("Processing task %s: %v fuzzer: %s", taskDetail.TaskID, err, myFuzzer)
+    for _, myFuzzer := range allFuzzers {
+        if err := s.runFuzzing(myFuzzer,taskDir, taskDetail, fullTask, cfg, allFuzzers); err != nil {
+            log.Printf("Error in processing task %s: %v fuzzer: %s", taskDetail.TaskID, err, myFuzzer)
+        }
     }
-
     return nil
 }
 
@@ -880,7 +852,7 @@ func getDirMutex(dir string) *sync.Mutex {
 
 func BuildAFCFuzzers(taskDir string, sanitizer, projectName, projectDir, sanitizerDir string) (string, error) {
     // ***** NEW: give every build its own out/work dirs *****
-    buildRoot   := filepath.Join(taskDir, "fuzz-tooling", "build")
+    buildRoot   := filepath.Join(taskDir, "oss-fuzz", "build")
     uniqOutDir  := filepath.Join(buildRoot, "out",  fmt.Sprintf("%s-%s", projectName, sanitizer))
     uniqWorkDir := filepath.Join(buildRoot, "work", fmt.Sprintf("%s-%s", projectName, sanitizer))
 
@@ -921,7 +893,7 @@ func BuildAFCFuzzers(taskDir string, sanitizer, projectName, projectDir, sanitiz
     // -------------------------------------------------------
 
     helperCmd := exec.Command("python3",
-        filepath.Join(taskDir, "fuzz-tooling/infra/helper.py"),
+        filepath.Join(taskDir, "oss-fuzz/infra/helper.py"),
         "build_fuzzers",
         "--clean",
         "--sanitizer", sanitizer,
@@ -953,120 +925,6 @@ func BuildAFCFuzzers(taskDir string, sanitizer, projectName, projectDir, sanitiz
         }
         
         return output, err
-    }
-
-    return cmdOutput.String(), nil
-}
-
-func BuildAFCFuzzers0(taskDir string, sanitizer, projectName, projectDir, sanitizerDir string) (string, error) {
-    // Build the command to run helper.py
-    // python3 infra/helper.py build_fuzzers --clean --sanitizer sanitizer --engine "libfuzzer" taskDetail.ProjectName sanitizerProjectDir
-
-    helperCmd := exec.Command("python3",
-        filepath.Join(taskDir, "fuzz-tooling/infra/helper.py"),
-        "build_fuzzers",
-        "--clean",
-        "--sanitizer", sanitizer,
-        "--engine", "libfuzzer",
-        projectName,
-        projectDir,
-    )
-    
-    var cmdOutput bytes.Buffer
-    helperCmd.Stdout = &cmdOutput
-    helperCmd.Stderr = &cmdOutput
-    
-    log.Printf("[BuildAFCFuzzers] Building fuzzers for %s %s sanitizer\nCommand: %v", projectName,sanitizer, helperCmd.Args)
-    
-    if err := helperCmd.Run(); err != nil {
-        output := cmdOutput.String()
-        lines := strings.Split(output, "\n")
-        
-        // Truncate output if it's very long
-        if len(lines) > 30 {
-            firstLines := lines[:10]
-            lastLines := lines[len(lines)-20:]
-            
-            truncatedOutput := strings.Join(firstLines, "\n") + 
-                "\n\n[...TRUNCATED " + fmt.Sprintf("%d", len(lines)-30) + " LINES...]\n\n" + 
-                strings.Join(lastLines, "\n")
-            
-            output = truncatedOutput
-        }
-        
-        return output, err
-    }
-
-    //TODO: copy outDir to sanitizerDir
-    outDir := filepath.Join(taskDir, "fuzz-tooling", "build", "out", projectName)
-    if err := robustCopyDir(outDir, sanitizerDir); err != nil {
-        log.Printf("[BuildAFCFuzzers] failed to copy fuzzer files: outDir %s %v", outDir, err)
-    } else {
-        log.Printf("[BuildAFCFuzzers] fuzzer files copied to %s", sanitizerDir)
-    }
-
-    return cmdOutput.String(), nil
-}
-
-// PullAFCDockerImage runs the helper.py script to build and pull Docker images for the project
-func PullAFCDockerImage(taskDir string, projectName string) (string, error) {
-    // Build the command to run helper.py
-    helperCmd := exec.Command("python3",
-        filepath.Join(taskDir, "fuzz-tooling/infra/helper.py"),
-        "build_image",
-        "--pull",
-        projectName,
-    )
-    
-    var cmdOutput bytes.Buffer
-    helperCmd.Stdout = &cmdOutput
-    helperCmd.Stderr = &cmdOutput
-    
-    log.Printf("Building and pulling Docker images for %s\nCommand: %v", projectName, helperCmd.Args)
-    
-    if err := helperCmd.Run(); err != nil {
-        output := cmdOutput.String()
-        lines := strings.Split(output, "\n")
-        
-        // Truncate output if it's very long
-        if len(lines) > 30 {
-            firstLines := lines[:10]
-            lastLines := lines[len(lines)-20:]
-            
-            truncatedOutput := strings.Join(firstLines, "\n") + 
-                "\n\n[...TRUNCATED " + fmt.Sprintf("%d", len(lines)-30) + " LINES...]\n\n" + 
-                strings.Join(lastLines, "\n")
-            
-            output = truncatedOutput
-        }
-        
-        return output, err
-    }
-    
-    dstImage := fmt.Sprintf("aixcc-afc/%s", projectName)
-    // Check if dstImage already exists
-    checkDstCmd := exec.Command("docker", "image", "inspect", dstImage)
-    if err := checkDstCmd.Run(); err != nil {
-
-        // Tag the image as aixcc-afc/<projectName>
-        srcImage := fmt.Sprintf("gcr.io/oss-fuzz/%s", projectName)
-
-        // Check if srcImage exists
-        checkSrcCmd := exec.Command("docker", "image", "inspect", srcImage)
-        if err := checkSrcCmd.Run(); err != nil {
-            log.Printf("Source image %s does not exist, cannot tag.", srcImage)
-            return cmdOutput.String() + "\nSource image does not exist.", fmt.Errorf("source image %s does not exist", srcImage)
-        }
-
-        tagCmd := exec.Command("docker", "tag", srcImage, dstImage)
-        var tagOutput bytes.Buffer
-        tagCmd.Stdout = &tagOutput
-        tagCmd.Stderr = &tagOutput
-        if err := tagCmd.Run(); err != nil {
-            log.Printf("Failed to tag image: %s -> %s\nOutput: %s", srcImage, dstImage, tagOutput.String())
-            return cmdOutput.String() + "\n" + tagOutput.String(), err
-        }
-        log.Printf("Tagged image as %s", dstImage)
     }
 
     return cmdOutput.String(), nil
@@ -1090,313 +948,6 @@ func fileExists(p string) bool {
     return !info.IsDir()
 }
 
-// prepareTaskEnvironment handles all task directory setup, source extraction, and fuzzer builds.
-// It returns the sanitizer directories and project configuration.
-func (s *defaultCRSService) prepareTaskEnvironment0(
-    myFuzzer *string,
-    taskDir string,
-    taskDetail models.TaskDetail,
-    dockerfilePath string,
-    dockerfileFullPath string,
-    fuzzerDir string,
-    projectDir string,
-) (*ProjectConfig, []string, error) {
-    var cfg *ProjectConfig
-    var sanitizerDirs []string
-    
-    // Get a mutex specific to this task directory
-    mutex := getDirMutex(taskDir)
-    
-    // Lock the mutex to prevent race conditions
-    mutex.Lock()
-    
-    // We'll handle unlocking explicitly, not with defer
-    
-    // Check if directory exists
-    _, err := os.Stat(taskDir)
-    taskDirExists := !os.IsNotExist(err)
-    
-    if !taskDirExists {
-        defer func() {
-            // Clean up the mutex if we're done with it and created a new directory
-            dirMutexes.Delete(filepath.Clean(taskDir))
-        }()
-        
-        // Now create the directory with the unique name
-        if err := os.MkdirAll(taskDir, 0755); err != nil {
-            mutex.Unlock() // Unlock before returning error
-            return nil, nil, fmt.Errorf("failed to create task directory: %v", err)
-        }
-
-        log.Printf("Created task directory: %s", taskDir)
-
-        //for workers, save a copy under taskDir
-        if *myFuzzer != "" {
-            saveTaskDetailToJson(taskDetail,*myFuzzer,taskDir)
-        }
-
-        // Download and process sources
-        for _, source := range taskDetail.Source {
-            if len(source.URL) > 0 {
-                if err := s.downloadAndVerifySource(taskDir, source); err != nil {
-                    mutex.Unlock() // Unlock before returning error
-                    return nil, nil, fmt.Errorf("failed to download source %s: %v", source.Type, err)
-                }
-            }
-        }
-        
-        is_delta := (taskDetail.Type == "delta")
-        // 1. Extract archives first
-        if err := s.extractSources(taskDir, is_delta); err != nil {
-            mutex.Unlock() // Unlock before returning error
-            return nil, nil, fmt.Errorf("failed to extract sources: %v", err)
-        }
-        
-        if is_delta {
-            // 1. Extract and analyze diff
-            diffPath := filepath.Join(taskDir, "diff", "ref.diff")
-            analyzeDiff(taskDetail, diffPath)
-            // Find the correct directory to apply the diff
-            applyCmd := exec.Command("git", "apply", diffPath)
-            applyCmd.Dir = projectDir  // Use projectDir instead of taskDir
-            
-            var applyOutput bytes.Buffer
-            applyCmd.Stdout = &applyOutput
-            applyCmd.Stderr = &applyOutput
-            
-            log.Printf("Applying diff in directory: %s", applyCmd.Dir)
-            
-            if err := applyCmd.Run(); err != nil {
-                log.Printf("Git apply failed, trying standard patch command instead...")
-                
-                // Reset the output buffer
-                applyOutput.Reset()
-                
-                // Try using the standard patch command instead
-                patchCmd := exec.Command("patch", "-p1", "-i", diffPath)
-                patchCmd.Dir = projectDir
-                patchCmd.Stdout = &applyOutput
-                patchCmd.Stderr = &applyOutput
-                
-                if patchErr := patchCmd.Run(); patchErr != nil {
-                    // Try to list files in the directory to debug
-                    log.Printf("Directory contents of %s:", applyCmd.Dir)
-                    files, _ := os.ReadDir(applyCmd.Dir)
-                    for _, file := range files {
-                        log.Printf("  %s", file.Name())
-                    }
-                    
-                    log.Printf("Git apply and patch command both failed.\nGit apply output:\n%s\nPatch output:\n%s", 
-                            err.Error(), applyOutput.String())
-                    mutex.Unlock() // Unlock before returning error
-                    return nil, nil, fmt.Errorf("failed to apply diff with both git apply and patch: %v\nOutput: %s", 
-                                    patchErr, applyOutput.String())
-                }
-                
-                log.Printf("Successfully applied diff using standard patch command to %s", patchCmd.Dir)
-            } else {
-                log.Printf("Successfully applied diff using git apply to %s", applyCmd.Dir)
-            }
-        }
-            
-        if false {
-            buildOutput, err := PullAFCDockerImage(taskDir, taskDetail.ProjectName) 
-            if err != nil {
-                log.Printf("Docker image pull build failed: %s", buildOutput)
-                log.Printf("Trying Docker build instead: %s", dockerfileFullPath)
-
-                // build docker image for the project
-                buildCmd := exec.Command("docker", 
-                    "build",
-                    "--no-cache",
-                    "-t", "aixcc-afc/"+taskDetail.ProjectName,
-                    "--file", dockerfileFullPath,  
-                    dockerfilePath,
-                )
-                var buildOutput bytes.Buffer
-                buildCmd.Stdout = &buildOutput
-                buildCmd.Stderr = &buildOutput
-
-                log.Printf("Building docker image aixcc-afc/%s\nbuildCmd: %v\n", taskDetail.ProjectName,buildCmd)
-                
-                if err := buildCmd.Run(); err != nil {
-                    log.Printf("Docker build output:\n%s", buildOutput.String())
-                    mutex.Unlock() // Unlock before returning error
-                    return nil, nil, fmt.Errorf("failed to build Docker image: %v\nOutput: %s", err, buildOutput.String())
-                }
-            }
-        } else {
-
-                // Make sure dockerfilePath exists
-                if os.Getenv("LOCAL_TEST") != "" {
-                    //TODO if dockerfilePath does not exist, if taskDetail.ProjectName == integration-test
-                    //copy /datadrive/FUZZ/oss-fuzz-aixcc/projects/integration-test to dockerfilePath
-                    if _, err := os.Stat(dockerfilePath); os.IsNotExist(err) &&
-                        taskDetail.ProjectName == "integration-test" {
-
-                        srcPath := "/datadrive/FUZZ/oss-fuzz-aixcc/projects/integration-test"
-                        log.Printf("[LOCAL_TEST] dockerfilePath %s missing – copying from %s", dockerfilePath, srcPath)
-
-                        if err := robustCopyDir(srcPath, dockerfilePath); err != nil {
-                            log.Printf("[LOCAL_TEST] failed to copy integration-test files: %v", err)
-                        } else {
-                            log.Printf("[LOCAL_TEST] integration-test files copied to %s", dockerfilePath)
-                        }
-                    }
-                }
-            
-            //IMPORTANT - we must build it successfully
-            //for unharnessed tasks, projects folder is not present, let's try oss-fuzz/projects
-            if !taskDetail.HarnessesIncluded || !fileExists(dockerfileFullPath){
-               if !fileExists(dockerfileFullPath) {
-                    cloneOssFuzzAndMainRepoOnce(taskDir,taskDetail.ProjectName, fuzzerDir)
-                    dockerfilePath_x := path.Join(taskDir, "oss-fuzz/projects",taskDetail.ProjectName)
-                    if dirExists(dockerfilePath_x) {
-                        dockerfilePath = dockerfilePath_x
-                        dockerfileFullPath = path.Join(dockerfilePath_x, "Dockerfile")
-                    } else {
-                        log.Printf("Failed to clone oss-fuzz and main repo for unharnessed task %s %s", taskDetail.ProjectName, taskDetail.TaskID)
-                        
-                        if  taskDetail.ProjectName == "integration-test" {
-                            srcPath := "/app/strategy/jeff/integration-test"
-                            log.Printf("[INTEGRATION_TEST] dockerfilePath %s missing – copying from %s", dockerfilePath, srcPath)
-
-                            if err := robustCopyDir(srcPath, dockerfilePath); err != nil {
-                                log.Printf("[INTEGRATION_TEST] failed to copy integration-test files: %v", err)
-                            } else {
-                                log.Printf("[INTEGRATION_TEST] integration-test files copied to %s", dockerfilePath)
-                            }
-
-                            if err := robustCopyDir(srcPath, dockerfilePath_x); err != nil {
-                                log.Printf("[INTEGRATION_TEST] failed to copy integration-test files: %v", err)
-                            } else {
-                                log.Printf("[INTEGRATION_TEST] integration-test files copied to %s", dockerfilePath_x)
-                            }
-                        }
-                    }
-                } else {
-                    log.Printf("[HarnessesIncluded: %t] dockerfileFullPath NOT exists %s", taskDetail.HarnessesIncluded, dockerfileFullPath)
-                }
-            } else {
-                log.Printf("[HarnessesIncluded: %t] dockerfileFullPath %s", taskDetail.HarnessesIncluded, dockerfileFullPath)
-            }
-
-            if !fileExists(dockerfileFullPath) {
-                log.Printf("[HarnessesIncluded: %t] dockerfileFullPath does not exist: %s", taskDetail.HarnessesIncluded, dockerfileFullPath)
-                return nil, nil, fmt.Errorf("DockerfileFullPath does not exist: %s", dockerfileFullPath)
-            }
-
-            maxAttempts := 5
-            for attempt := 1; attempt <= maxAttempts; attempt++ {
-                // build docker image for the project
-                buildCmd := exec.Command("docker", 
-                    "build",
-                    "--no-cache",
-                    "-t", "aixcc-afc/"+taskDetail.ProjectName,
-                    "--file", dockerfileFullPath,  
-                    dockerfilePath,
-                    )
-                var buildOutput bytes.Buffer
-                buildCmd.Stdout = &buildOutput
-                buildCmd.Stderr = &buildOutput
-
-                log.Printf("Building docker image aixcc-afc/%s (attempt=%d)\nbuildCmd: %v\n", taskDetail.ProjectName,attempt,buildCmd)
-                
-                if err := buildCmd.Run(); err != nil {
-                    log.Printf("Docker build failed. Output:\n%s", buildOutput.String())
-                    log.Printf("Try building with PullAFCDockerImage")
-                    buildOutputAFC, err := PullAFCDockerImage(taskDir, taskDetail.ProjectName) 
-                    if err != nil {
-                        log.Printf("Building with PullAFCDockerImage failed too (attempt=%d). buildOutputAFC:\n%s",attempt,buildOutputAFC)
-                        if attempt == maxAttempts {
-                            mutex.Unlock() // Unlock before returning error
-                            return nil, nil, fmt.Errorf("Failed to build Docker image: %v\nOutput: %s", err, buildOutputAFC)
-                        }
-                        // Wait before retrying
-                        time.Sleep(2 * time.Second)
-                        continue
-                    }
-                    break
-                }
-                break
-            }
-        }
-    }
-
-    // These operations don't need the lock anymore
-    projectYAMLPath := filepath.Join(dockerfilePath, "project.yaml")
-    cfg, err = loadProjectConfig(projectYAMLPath)
-    if err != nil {
-        log.Printf("Warning: Could not parse project.yaml (%v). Defaulting to address sanitizer.", err)
-        cfg = &ProjectConfig{Sanitizers: []string{"address"}}
-    }
-    if len(cfg.Sanitizers) == 0 {
-        log.Printf("No sanitizers listed in project.yaml; defaulting to address sanitizer.")
-        cfg.Sanitizers = []string{"address"}
-    }
-
-    if !taskDirExists {
-        // 3. Build fuzzers
-        var wg sync.WaitGroup
-        // For each sanitizer in the YAML, run build_fuzzers
-        for _, sanitizer := range cfg.Sanitizers {
-            //skip undefined
-            if sanitizer == "undefined" {
-                continue
-            }
-            if *myFuzzer != "" && *myFuzzer !=UNHARNESSED && !strings.Contains(*myFuzzer, sanitizer) {
-                continue
-            }
-
-            sanitizerDir := fuzzerDir + "-" + sanitizer
-            // Keep track of each sanitizer's output path
-            sanitizerDirs = append(sanitizerDirs, sanitizerDir)
-            // Capture loop variables
-            san := sanitizer
-            sanDir := sanitizerDir
-            wg.Add(1)
-            go func() {
-                defer wg.Done()
-                log.Printf("Building fuzzers with --sanitizer=%s", san)
-                if err := s.buildFuzzersDocker(myFuzzer, taskDir, projectDir, sanDir, san, cfg.Language, taskDetail); err != nil {
-                    log.Printf("Error building fuzzers for sanitizer %s: %v", san, err)
-                    // We're ignoring errors here, which is not ideal
-                }
-            }()  
-        }
-
-        //coverage for C worker fuzzers
-        if os.Getenv("LOCAL_TEST") != "" || *myFuzzer != "" {
-            lang := strings.ToLower(cfg.Language)
-            if lang == "c" || lang == "c++" {
-                wg.Add(1)
-                go func() {
-                    defer wg.Done()
-                    san := "coverage"
-                    sanDir := fuzzerDir
-                    log.Printf("Building fuzzers with --sanitizer=%s", san)
-                    if err := s.buildFuzzersDocker(myFuzzer, taskDir, projectDir, sanDir, san, cfg.Language, taskDetail); err != nil {
-                        log.Printf("Error building fuzzers for sanitizer %s: %v", san, err)
-                        // We're ignoring errors here, which is not ideal
-                    }
-                }()  
-            }
-        }
-        // Wait for all builds to complete
-        wg.Wait()
-    } else {
-        // Directory already exists, just populate sanitizerDirs
-        for _, sanitizer := range cfg.Sanitizers {
-            sanitizerDir := fuzzerDir + "-" + sanitizer
-            // Keep track of each sanitizer's output path
-            sanitizerDirs = append(sanitizerDirs, sanitizerDir)
-        }
-    }
-    
-    mutex.Unlock()
-
-    return cfg, sanitizerDirs, nil
-}
 
 func (s *defaultCRSService) prepareTaskEnvironment(
 	myFuzzer *string,
@@ -1406,9 +957,8 @@ func (s *defaultCRSService) prepareTaskEnvironment(
 	dockerfileFullPath string,
 	fuzzerDir string,
 	projectDir string,
-) (*ProjectConfig, []string, error) {
+) (*ProjectConfig, error) {
 	var cfg *ProjectConfig
-	var sanitizerDirs []string
 
 	projectYAMLPath := filepath.Join(dockerfilePath, "project.yaml")
 	cfg, err := loadProjectConfig(projectYAMLPath)
@@ -1423,27 +973,22 @@ func (s *defaultCRSService) prepareTaskEnvironment(
 
 	// Build fuzzers for each sanitizer if they don't exist
 	for _, sanitizer := range cfg.Sanitizers {
-		if sanitizer == "undefined" {
+		if sanitizer != "address" {
 			continue
 		}
 		if *myFuzzer != "" && *myFuzzer != UNHARNESSED && !strings.Contains(*myFuzzer, sanitizer) {
 			continue
 		}
-		sanitizerDir := fuzzerDir + "-" + sanitizer
-		sanitizerDirs = append(sanitizerDirs, sanitizerDir)
 
-		fuzzers, _ := s.findFuzzers(sanitizerDir)
-		// if err != nil {
-		// 	log.Printf("Warning: problem trying to find fuzzers in %s: %v", sanitizerDir, err)
-		// }
+		fuzzers, _ := s.findFuzzers(fuzzerDir)
 
 		if len(fuzzers) == 0 {
-			log.Printf("No fuzzers found in %s for sanitizer %s. Building...", sanitizerDir, sanitizer)
-			if err := s.buildFuzzersDocker(myFuzzer, taskDir, projectDir, sanitizerDir, sanitizer, cfg.Language, taskDetail); err != nil {
+			log.Printf("No fuzzers found in %s for sanitizer %s. Building...", fuzzerDir, sanitizer)
+			if err := s.buildFuzzersDocker(myFuzzer, taskDir, projectDir, fuzzerDir, sanitizer, cfg.Language, taskDetail); err != nil {
 				log.Printf("Error building fuzzers for sanitizer %s: %v", sanitizer, err)
 			}
 		} else {
-			log.Printf("Found %d fuzzers in %s. Skipping build.", len(fuzzers), sanitizerDir)
+			log.Printf("Found %d fuzzers in %s. Skipping build.", len(fuzzers), fuzzerDir)
 		}
 	}
 
@@ -1469,7 +1014,7 @@ func (s *defaultCRSService) prepareTaskEnvironment(
 		}
 	}
 
-	return cfg, sanitizerDirs, nil
+	return cfg, nil
 }    
 func (s *defaultCRSService) processTask(myFuzzer string, taskDetail models.TaskDetail, fullTask models.Task) error {
     taskID := taskDetail.TaskID.String()
@@ -1492,12 +1037,12 @@ func (s *defaultCRSService) processTask(myFuzzer string, taskDetail models.TaskD
     timestamp := time.Now().Format("20060102-150405")
     taskDir := path.Join(s.workDir, fmt.Sprintf("%s-%s", taskID, timestamp))
 
-    // If fuzzer path is provided, use its parent directory up to fuzz-tooling/build/out
+    // If fuzzer path is provided, use its parent directory up to oss-fuzz/build/out
     if myFuzzer != "" {
-        // Find the index of "fuzz-tooling/build/out" in the fuzzer path
-        fuzzToolingIndex := strings.Index(myFuzzer, "fuzz-tooling/")
+        // Find the index of "oss-fuzz/build/out" in the fuzzer path
+        fuzzToolingIndex := strings.Index(myFuzzer, "oss-fuzz/")
         if fuzzToolingIndex != -1 {
-            // Extract the base directory (everything before fuzz-tooling/build/out)
+            // Extract the base directory (everything before oss-fuzz/build/out)
             taskDir = myFuzzer[:fuzzToolingIndex]
             // Remove trailing slash if present
             taskDir = strings.TrimRight(taskDir, "/")
@@ -1511,14 +1056,14 @@ func (s *defaultCRSService) processTask(myFuzzer string, taskDetail models.TaskD
     }
     
     projectDir := path.Join(absTaskDir, taskDetail.Focus)
-    dockerfilePath := path.Join(absTaskDir, "fuzz-tooling/projects",taskDetail.ProjectName)
+    dockerfilePath := path.Join(absTaskDir, "oss-fuzz/projects",taskDetail.ProjectName)
     dockerfileFullPath := path.Join(dockerfilePath, "Dockerfile")
-    fuzzerDir := path.Join(taskDir, "fuzz-tooling/build/out", taskDetail.ProjectName)
+    fuzzerDir := path.Join(taskDir, "oss-fuzz/build/out", taskDetail.ProjectName)
 
     log.Printf("Project dir: %s", projectDir)
     log.Printf("Dockerfile: %s", dockerfileFullPath)
 
-    cfg, sanitizerDirs, err := s.prepareTaskEnvironment(
+    cfg, err := s.prepareTaskEnvironment(
         &myFuzzer,
         taskDir,
         taskDetail,
@@ -1533,46 +1078,23 @@ func (s *defaultCRSService) processTask(myFuzzer string, taskDetail models.TaskD
 
     // Collect all fuzzers from all sanitizer builds and run them in parallel
     var allFuzzers []string
-    // Make a thread-safe copy of the sanitizer directories
-    sanitizerDirsMutex.Lock()
-    sanitizerDirsCopy := make([]string, len(sanitizerDirs))
-    copy(sanitizerDirsCopy, sanitizerDirs)
-    sanitizerDirsMutex.Unlock()
-    
-    // Now use the copy to find fuzzers
-    for _, sdir := range sanitizerDirsCopy {
-        fuzzers, err := s.findFuzzers(sdir)
-        if err != nil {
-            log.Printf("Warning: failed to find fuzzers in %s: %v", sdir, err)
-            continue // Skip this directory but continue with others
-        }
+    fuzzers, err := s.findFuzzers(fuzzerDir)
+    if err != nil {
+        log.Printf("Warning: failed to find fuzzers in %s: %v", fuzzerDir, err)
+        return nil
+    }
 
-        // Mark these fuzzers with the sanitizer directory so we know where they live
-        for _, fz := range fuzzers {
-            // We'll store the absolute path so we can directly call run_fuzzer
-            fuzzerPath := filepath.Join(sdir, fz)
-            allFuzzers = append(allFuzzers, fuzzerPath)
-        }
+    // Mark these fuzzers with the sanitizer directory so we know where they live
+    for _, fz := range fuzzers {
+        // We'll store the absolute path so we can directly call run_fuzzer
+        fuzzerPath := filepath.Join(fuzzerDir, fz)
+        allFuzzers = append(allFuzzers, fuzzerPath)
     }
 
     if len(allFuzzers) == 0 {
         log.Printf("No fuzzers found after building all sanitizers")
         return nil
     }
-
-    //TODO: skip memory and undefined sanitizers if too many fuzzers
-    // keep only address sanitizer
-    const MAX_FUZZERS = 10
-    if true {
-        var allFilteredFuzzers []string
-        for _, fuzzerPath := range allFuzzers {
-            if strings.Contains(fuzzerPath, "-address/") || (strings.Contains(fuzzerPath, "-memory/") && len(allFuzzers) < MAX_FUZZERS) {
-                allFilteredFuzzers = append(allFilteredFuzzers, fuzzerPath)
-            }
-        }
-        allFuzzers = sortFuzzersByGroup(allFilteredFuzzers)
-    }
-
     // log.Printf("Sorted fuzzers: %v", allFuzzers)
     log.Printf("Found %d fuzzers: %v", len(allFuzzers), allFuzzers)
 
@@ -3104,15 +2626,15 @@ func (s *defaultCRSService) extractSources(taskDir string, is_delta bool) error 
         return fmt.Errorf("failed to extract repo: %v", err)
     }
 
-    // Extract fuzz-tooling archive
-    toolingCmd := exec.Command("tar", "-xzf", path.Join(taskDir, "fuzz-tooling.tar.gz"))
+    // Extract oss-fuzz archive
+    toolingCmd := exec.Command("tar", "-xzf", path.Join(taskDir, "oss-fuzz.tar.gz"))
     toolingCmd.Dir = taskDir
     var toolingOutput bytes.Buffer
     toolingCmd.Stdout = &toolingOutput
     toolingCmd.Stderr = &toolingOutput
     if err := toolingCmd.Run(); err != nil {
         log.Printf("Tooling extraction output:\n%s", toolingOutput.String())
-        return fmt.Errorf("failed to extract fuzz-tooling: %v", err)
+        return fmt.Errorf("failed to extract oss-fuzz: %v", err)
     }
 
     if is_delta {
@@ -3267,6 +2789,7 @@ func (s *defaultCRSService) findFuzzers(fuzzerDir string) ([]string, error) {
 
     // List of known non-fuzzer executables to skip
     skipBinaries := map[string]bool{
+        "task_detail.json": true,
         "jazzer_agent_deploy.jar": true,
         "jazzer_driver": true,
         "jazzer_driver_with_sanitizer": true,
@@ -3279,6 +2802,7 @@ func (s *defaultCRSService) findFuzzers(fuzzerDir string) ([]string, error) {
 
     // File extensions to skip
     skipExtensions := map[string]bool{
+        ".swp": true,  // Skip .swp files
 		".bin": true,  // Skip .bin files
 		".log": true,  // Skip log files
         ".class": true,  // Skip Java class files
@@ -3628,8 +3152,8 @@ func (s *defaultCRSService) saveAllCrashesAsPOVs(crashesDir, taskDir, fuzzerPath
 
 func (s *defaultCRSService) runCrashTest(crashFile string, taskDetail models.TaskDetail, taskDir, projectDir string, fuzzerName string, sanitizer string) (bool, string, error) {
     uniqueBlobName := filepath.Base(crashFile)    
-    outDir := filepath.Join(taskDir, "fuzz-tooling", "build", "out", fmt.Sprintf("%s-%s", taskDetail.ProjectName, sanitizer))
-    workDir := filepath.Join(taskDir, "fuzz-tooling", "build", "work", fmt.Sprintf("%s-%s", taskDetail.ProjectName, sanitizer))
+    outDir := filepath.Join(taskDir, "oss-fuzz", "build", "out", fmt.Sprintf("%s-%s", taskDetail.ProjectName, sanitizer))
+    workDir := filepath.Join(taskDir, "oss-fuzz", "build", "work", fmt.Sprintf("%s-%s", taskDetail.ProjectName, sanitizer))
 
     // Prepare docker command
     dockerArgs := []string{
@@ -4414,34 +3938,23 @@ func cloneOssFuzzAndMainRepoOnce(taskDir, projectName, sanitizerDir string) erro
 
 // Inside the loop: for _, sanitizer := range cfg.Sanitizers { ... }
 func (s *defaultCRSService) buildFuzzersDocker(myFuzzer *string, taskDir, projectDir, sanitizerDir string, sanitizer string, language string, taskDetail models.TaskDetail) error {
-    // Create a sanitizer-specific copy of the project directory
-    sanitizerProjectDir := fmt.Sprintf("%s-%s", projectDir, sanitizer)
 
     // Create the directory if it doesn't exist
-    if err := os.MkdirAll(sanitizerProjectDir, 0755); err != nil {
+    if err := os.MkdirAll(projectDir, 0755); err != nil {
         return fmt.Errorf("failed to create sanitizer-specific project directory: %v", err)
     }
     
-    // Copy the project files to the sanitizer-specific directory
-    // Using cp command for simplicity and to handle hidden files
-    cpCmd := exec.Command("cp", "-r", fmt.Sprintf("%s/.", projectDir), sanitizerProjectDir)
-    if err := cpCmd.Run(); err != nil {
-        return fmt.Errorf("failed to copy project files to sanitizer-specific directory: %v", err)
-    }
-    
-    log.Printf("Created sanitizer-specific project directory: %s", sanitizerProjectDir)
+    // Check for build.patch in the project's directory
+    projectToolingDir := filepath.Join(taskDir, "oss-fuzz", "projects", taskDetail.ProjectName)
+    buildPatchPath := filepath.Join(projectToolingDir, "build.patch")
 
-        // Check for build.patch in the project's directory
-        projectToolingDir := filepath.Join(taskDir, "fuzz-tooling", "projects", taskDetail.ProjectName)
-        buildPatchPath := filepath.Join(projectToolingDir, "build.patch")
-    
         
       // If build.patch exists, copy it to both the root and project subdirectory in the sanitizer directory
       if _, err := os.Stat(buildPatchPath); err == nil {
         log.Printf("Found build.patch at %s", buildPatchPath)
         
         // Copy to the root of the sanitizer directory
-        rootPatchPath := filepath.Join(sanitizerProjectDir, "build.patch")
+        rootPatchPath := filepath.Join(projectDir, "build.patch")
         cpRootPatchCmd := exec.Command("cp", buildPatchPath, rootPatchPath)
         if err := cpRootPatchCmd.Run(); err != nil {
             log.Printf("Warning: Failed to copy build.patch to root of sanitizer directory: %v", err)
@@ -4451,7 +3964,7 @@ func (s *defaultCRSService) buildFuzzersDocker(myFuzzer *string, taskDir, projec
         
         // Also copy to the project subdirectory within the sanitizer directory
         // This handles cases where the patch needs to be in the project directory
-        projectSubdir := filepath.Join(sanitizerProjectDir, taskDetail.ProjectName)
+        projectSubdir := filepath.Join(projectDir, taskDetail.ProjectName)
         if err := os.MkdirAll(projectSubdir, 0755); err != nil {
             log.Printf("Warning: Failed to create project subdirectory in sanitizer directory: %v", err)
         } else {
@@ -4489,9 +4002,9 @@ func (s *defaultCRSService) buildFuzzersDocker(myFuzzer *string, taskDir, projec
     } else {
         //for both Java and C tasks on worker
         if true {
-            BuildAFCFuzzers(taskDir, sanitizer, taskDetail.ProjectName, sanitizerProjectDir, sanitizerDir)
+            BuildAFCFuzzers(taskDir, sanitizer, taskDetail.ProjectName, projectDir, sanitizerDir)
         } else {
-            workDir := filepath.Join(taskDir, "fuzz-tooling", "build", "work", fmt.Sprintf("%s-%s", taskDetail.ProjectName, sanitizer))
+            workDir := filepath.Join(taskDir, "oss-fuzz", "build", "work", fmt.Sprintf("%s-%s", taskDetail.ProjectName, sanitizer))
             
             cmdArgs := []string{
                 "run",
@@ -4506,7 +4019,7 @@ func (s *defaultCRSService) buildFuzzersDocker(myFuzzer *string, taskDir, projec
                 "-e", "HELPER=True",
                 "-e", fmt.Sprintf("FUZZING_LANGUAGE=%s", language),
                 // Mount the original source directory
-                "-v", fmt.Sprintf("%s:/src/%s", sanitizerProjectDir, taskDetail.ProjectName),
+                "-v", fmt.Sprintf("%s:/src/%s", projectDir, taskDetail.ProjectName),
                 // Mount your output directory (e.g., /out)
                 "-v", fmt.Sprintf("%s:/out", sanitizerDir),
                 // Mount a work directory
@@ -4569,16 +4082,15 @@ func getEffectiveUserID() int {
 func (s *defaultCRSService) runSarifPOVStrategies(myFuzzer, taskDir, sarifFilePath string, language string, taskDetail *models.TaskDetail,    timeout int,
     phase int) bool {
     // Find all strategy files under /app/strategy/
-    strategyDir := "/app/strategy"
     strategyFilePattern := "sarif_pov*.py"
-    strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, "**", strategyFilePattern))
+    strategyFiles, err := filepath.Glob(filepath.Join(s.strategyDir, "**", strategyFilePattern))
     if err != nil {
         log.Printf("Failed to find strategy files: %v", err)
         return false
     }
 
     if len(strategyFiles) == 0 {
-        log.Printf("No Sarif POV strategy files found in %s", strategyDir)
+        log.Printf("No Sarif POV strategy files found in %s", s.strategyDir)
         return false
     }
 
@@ -4610,9 +4122,7 @@ func (s *defaultCRSService) runSarifPOVStrategies(myFuzzer, taskDir, sarifFilePa
                 taskDetail.Focus,
                 language,
                 "--model", s.model,
-                "--do-patch=false",
                 "--pov-metadata-dir", s.povAdvcancedMetadataDir,
-                "--check-patch-success",
                 fmt.Sprintf("--fuzzing-timeout=%d", timeout),
                 fmt.Sprintf("--pov-phase=%d", phase),
                 fmt.Sprintf("--max-iterations=%d", maxIterations),
@@ -4727,16 +4237,15 @@ func (s *defaultCRSService) runXPatchSarifStrategies(myFuzzer, taskDir, sarifFil
     log.Printf("runXPatchSarifStrategies: starting patch attempt with sarif "+
     "(task type: %s)", taskDetail.Type)
 
-    strategyDir := "/app/strategy"
     strategyFilePattern := "xpatch_sarif.py"
-    strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, "**", strategyFilePattern))
+    strategyFiles, err := filepath.Glob(filepath.Join(s.strategyDir, "**", strategyFilePattern))
     if err != nil {
         log.Printf("Failed to find strategy files: %v", err)
         return false
     }
 
     if len(strategyFiles) == 0 {
-        log.Printf("No XPATCH Sarif strategy files found in %s", strategyDir)
+        log.Printf("No XPATCH Sarif strategy files found in %s", s.strategyDir)
         return false
     }
 
@@ -4890,19 +4399,18 @@ func (s *defaultCRSService) runAdvancedPOVStrategiesWithTimeout(
     phase int,
     roundNum int,
 ) bool {
-    strategyDir := "/app/strategyx"
     strategyFilePattern := "as*_delta.py"
     if taskDetail.Type == "full" {
         strategyFilePattern = "as*_full.py"
     }
-    strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, "**", strategyFilePattern))
+    strategyFiles, err := filepath.Glob(filepath.Join(s.strategyDir, "**", strategyFilePattern))
     if err != nil {
         log.Printf("Failed to find strategy files: %v", err)
         return false
     }
 
     if len(strategyFiles) == 0 {
-        log.Printf("No strategy files found in %s", strategyDir)
+        log.Printf("No strategy files found in %s", s.strategyDir)
         return false
     }
 
@@ -4954,9 +4462,7 @@ func (s *defaultCRSService) runAdvancedPOVStrategiesWithTimeout(
                 taskDetail.Focus,
                 language,
                 "--model", s.model,
-                "--do-patch=false",
                 "--pov-metadata-dir", s.povAdvcancedMetadataDir,
-                "--check-patch-success",
                 fmt.Sprintf("--fuzzing-timeout=%d", timeoutMinutes),
                 fmt.Sprintf("--pov-phase=%d", phase),
                 fmt.Sprintf("--max-iterations=%d", maxIterations),
@@ -5346,17 +4852,17 @@ func (s *defaultCRSService) runXPatchingStrategiesWithoutPOV(
         }
         log.Printf("Copied project-sanitizer directory %s to patch workspace", projectSanitizerBaseName)
         
-        // 2. Copy the fuzz-tooling directory if it exists
-        fuzzToolingDir := filepath.Join(taskDir, "fuzz-tooling")
+        // 2. Copy the oss-fuzz directory if it exists
+        fuzzToolingDir := filepath.Join(taskDir, "oss-fuzz")
         if _, err := os.Stat(fuzzToolingDir); err == nil {
-            patchFuzzToolingDir := filepath.Join(patchWorkDir, "fuzz-tooling")
+            patchFuzzToolingDir := filepath.Join(patchWorkDir, "oss-fuzz")
             if err := robustCopyDir(fuzzToolingDir, patchFuzzToolingDir); err != nil {
-                log.Printf("Failed to copy fuzz-tooling to patch workspace: %v", err)
+                log.Printf("Failed to copy oss-fuzz to patch workspace: %v", err)
                 return false
             }
-            log.Printf("Copied fuzz-tooling directory to patch workspace")
+            log.Printf("Copied oss-fuzz directory to patch workspace")
         } else {
-            log.Printf("fuzz-tooling directory not found, skipping")
+            log.Printf("oss-fuzz directory not found, skipping")
         }
             
         // Determine the fuzzer path in the patch workspace
@@ -5381,20 +4887,19 @@ func (s *defaultCRSService) runXPatchingStrategiesWithoutPOV(
         log.Printf("Patch workspace fuzzer path: %s", patchFuzzerPath)
         
         // Find all strategy files under /app/strategy/
-        strategyDir := "/app/strategyx"
         strategyFilePattern := "xpatch*_delta.py"
         if taskDetail.Type == "full" {
             strategyFilePattern = "xpatch*_full.py"
         }
     
-        strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, "**", strategyFilePattern))
+        strategyFiles, err := filepath.Glob(filepath.Join(s.strategyDir, "**", strategyFilePattern))
         if err != nil {
             log.Printf("Failed to find strategy files: %v", err)
             return false
         }
         
         if len(strategyFiles) == 0 {
-            log.Printf("No strategy files found in %s", strategyDir)
+            log.Printf("No strategy files found in %s", s.strategyDir)
             return false
         }
         
@@ -5422,7 +4927,7 @@ func (s *defaultCRSService) runXPatchingStrategiesWithoutPOV(
                 
                 {
                     // Create a symbolic link to the .env file in the task directory
-                    envFilePath := filepath.Join("/app/strategyx", ".env")
+                    envFilePath := filepath.Join(s.strategyDir, ".env")
                     targetEnvPath := filepath.Join(taskDir, ".env")
                     os.Symlink(envFilePath, targetEnvPath)
                 }
@@ -5705,17 +5210,17 @@ func (s *defaultCRSService) runPatchingStrategies(myFuzzer,taskDir string, proje
             }
         }
     }
-    // 2. Copy the fuzz-tooling directory if it exists
-    fuzzToolingDir := filepath.Join(taskDir, "fuzz-tooling")
+    // 2. Copy the oss-fuzz directory if it exists
+    fuzzToolingDir := filepath.Join(taskDir, "oss-fuzz")
     if _, err := os.Stat(fuzzToolingDir); err == nil {
-        patchFuzzToolingDir := filepath.Join(patchWorkDir, "fuzz-tooling")
+        patchFuzzToolingDir := filepath.Join(patchWorkDir, "oss-fuzz")
         if err := robustCopyDir(fuzzToolingDir, patchFuzzToolingDir); err != nil {
-            log.Printf("Failed to copy fuzz-tooling to patch workspace: %v", err)
+            log.Printf("Failed to copy oss-fuzz to patch workspace: %v", err)
             return false
         }
-        log.Printf("Copied fuzz-tooling directory to patch workspace")
+        log.Printf("Copied oss-fuzz directory to patch workspace")
     } else {
-        log.Printf("fuzz-tooling directory not found, skipping")
+        log.Printf("oss-fuzz directory not found, skipping")
     }
         
     // Determine the fuzzer path in the patch workspace
@@ -5740,7 +5245,6 @@ func (s *defaultCRSService) runPatchingStrategies(myFuzzer,taskDir string, proje
     log.Printf("Patch workspace fuzzer path: %s", patchFuzzerPath)
     
     // Find all strategy files under /app/strategy/
-    strategyDir := "/app/strategyx"
     strategyFilePattern := "patch*_delta.py"
     if taskDetail.Type == "full" {
         strategyFilePattern = "patch*_full.py"
@@ -5755,14 +5259,14 @@ func (s *defaultCRSService) runPatchingStrategies(myFuzzer,taskDir string, proje
         }
     }
 
-    strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, "**", strategyFilePattern))
+    strategyFiles, err := filepath.Glob(filepath.Join(s.strategyDir, "**", strategyFilePattern))
     if err != nil {
         log.Printf("Failed to find strategy files: %v", err)
         return false
     }
     
     if len(strategyFiles) == 0 {
-        log.Printf("No strategy files found in %s", strategyDir)
+        log.Printf("No strategy files found in %s", s.strategyDir)
         return false
     }
     
@@ -5860,7 +5364,7 @@ func (s *defaultCRSService) runPatchingStrategies(myFuzzer,taskDir string, proje
                 {
                     // Create a symbolic link to the .env file in the task directory
                     var symlinkCreationErr error
-                    envFilePath := filepath.Join("/app/strategyx", ".env")
+                    envFilePath := filepath.Join(s.strategyDir, ".env")
                     targetEnvPath := filepath.Join(taskDir, ".env")
                     linkFi, errLstat := os.Lstat(targetEnvPath)
                     if errLstat == nil { // Path exists
@@ -6137,31 +5641,37 @@ func (s *defaultCRSService) runPatchingStrategies(myFuzzer,taskDir string, proje
 
 func (s *defaultCRSService) runStrategies(myFuzzer, taskDir, projectDir, fuzzDir, language string, taskDetail models.TaskDetail, fullTask models.Task) bool {
     // Find all strategy files under /app/strategy/
-    strategyDir := "/app/strategyx"
 
-    strategyFilePattern := "xs*_delta.py"
-    if taskDetail.Type == "full" {
-        switch strings.ToLower(language) {
+    var strategyFilePattern string
+    
+    switch strings.ToLower(language) {
         case "c", "cpp", "c++":
             // Use C/C++-specific full-run strategies
-            strategyFilePattern = "xs*_c_full.py"
+            if taskDetail.Type == "full" {
+                strategyFilePattern = "c_full.py"
+            } else {
+                strategyFilePattern = "c_delta.py"
+            }
         case "java", "jvm":
             // Use Java-specific full-run strategies
-            strategyFilePattern = "xs*_java_full.py"
+            if taskDetail.Type == "full" {
+                strategyFilePattern = "java_full.py"
+            } else {
+                strategyFilePattern = "java_delta.py"
+            }
         default:
             // Fallback to any generic full-run strategy
-        strategyFilePattern = "xs*_full.py"
-        }
+            strategyFilePattern = "xs*.py"
     }
 
-    strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, "**", strategyFilePattern))
+    strategyFiles, err := filepath.Glob(filepath.Join(s.strategyDir, strategyFilePattern))
     if err != nil {
         log.Printf("Failed to find strategy files: %v", err)
         return false
     }
     
     if len(strategyFiles) == 0 {
-        log.Printf("No strategy files found in %s", strategyDir)
+        log.Printf("No strategy files found in %s", s.strategyDir)
         return false
     }
     
@@ -6190,7 +5700,7 @@ func (s *defaultCRSService) runStrategies(myFuzzer, taskDir, projectDir, fuzzDir
             
             {
                 // Create a symbolic link to the .env file in the task directory
-                envFilePath := filepath.Join("/app/strategyx", ".env")
+                envFilePath := filepath.Join(s.strategyDir, ".env")
                 targetEnvPath := filepath.Join(taskDir, ".env")
                 
                 // Remove existing symlink if it exists
@@ -6225,7 +5735,6 @@ func (s *defaultCRSService) runStrategies(myFuzzer, taskDir, projectDir, fuzzDir
                 language,
                 "--model", s.model,
                 "--pov-metadata-dir", s.povMetadataDir0,
-                "--check-patch-success",
             }
             
             if taskDetail.Type == "full" {
@@ -6619,10 +6128,10 @@ func (s *defaultCRSService) HandleSarifBroadcastWorker(broadcastWorker models.SA
             //let's try to get taskDetail by loading fuzzerDir
             {
 
-                // Find the index of "fuzz-tooling/build/out" in the fuzzer path
-                fuzzToolingIndex := strings.Index(myFuzzer, "fuzz-tooling/")
+                // Find the index of "oss-fuzz/build/out" in the fuzzer path
+                fuzzToolingIndex := strings.Index(myFuzzer, "oss-fuzz/")
                 if fuzzToolingIndex != -1 {
-                    // Extract the base directory (everything before fuzz-tooling/build/out)
+                    // Extract the base directory (everything before oss-fuzz/build/out)
                     taskDir := myFuzzer[:fuzzToolingIndex]
                     // Remove trailing slash if present
                     taskDir = strings.TrimRight(taskDir, "/")
@@ -6638,7 +6147,7 @@ func (s *defaultCRSService) HandleSarifBroadcastWorker(broadcastWorker models.SA
                     taskDetail := loadTaskDetailFromJson(myFuzzer, fuzzDir,taskDir)
 
                     
-                    dockerfilePath := path.Join(taskDir, "fuzz-tooling/projects",taskDetail.ProjectName)
+                    dockerfilePath := path.Join(taskDir, "oss-fuzz/projects",taskDetail.ProjectName)
                     projectYAMLPath := filepath.Join(dockerfilePath, "project.yaml")
                     cfg, cfgErr := loadProjectConfig(projectYAMLPath)
 
@@ -7185,7 +6694,7 @@ func saveTaskDetailToJson(taskDetail models.TaskDetail, myFuzzer string, fuzzDir
 
     filePath := filepath.Join(fuzzDir, "task_detail.json")
 
-    if !strings.Contains(fuzzDir, "fuzz-tooling/build/out") {
+    if !strings.Contains(fuzzDir, "oss-fuzz/build/out") {
         // Create the file path with hash
         filePath = filepath.Join(fuzzDir, fmt.Sprintf("task_detail_%s.json", fuzzerHash))
     }
@@ -7462,11 +6971,13 @@ func (s *defaultCRSService) runFuzzing(myFuzzer,taskDir string, taskDetail model
     if os.Getenv("LOCAL_TEST") != "" {
         s.workerIndex = "0"
         s.submissionEndpoint = "http://localhost:7081"
-        myFuzzer = allFuzzers[0]
-        for _, f := range allFuzzers {
-            if strings.HasSuffix(f, "libxml2-address/html") ||  strings.HasSuffix(f, "tika-address/HtmlParserFuzzer")  ||  strings.HasSuffix(f, "zookeeper-address/MessageTrackerPeekReceivedFuzzer") ||  strings.HasSuffix(f, "apache-commons-compress-address/CompressZipFuzzer")  ||  strings.HasSuffix(f, "sqlite3-address/customfuzz3")  {
-                myFuzzer = f
-                break
+        if myFuzzer == "" {
+            myFuzzer = allFuzzers[0]
+            for _, f := range allFuzzers {
+                if strings.HasSuffix(f, "libxml2-address/html") ||  strings.HasSuffix(f, "tika-address/HtmlParserFuzzer")  ||  strings.HasSuffix(f, "zookeeper-address/MessageTrackerPeekReceivedFuzzer") ||  strings.HasSuffix(f, "apache-commons-compress-address/CompressZipFuzzer")  ||  strings.HasSuffix(f, "sqlite3-address/customfuzz3")  {
+                    myFuzzer = f
+                    break
+                }
             }
         }
     }
@@ -7591,6 +7102,12 @@ func (s *defaultCRSService) runFuzzing(myFuzzer,taskDir string, taskDetail model
                      s.runLibFuzzer(myFuzzer,taskDir, projectDir, cfg.Language, taskDetail, fullTask)
                      os.Exit(0)
                 }
+
+
+                //for local test, we will skip advance phases
+                if os.Getenv("LOCAL_TEST") != "" {
+                     return nil
+                }
                 
                 if pov_success {
                     povFound.Do(func() { close(povChan) })
@@ -7604,6 +7121,8 @@ func (s *defaultCRSService) runFuzzing(myFuzzer,taskDir string, taskDetail model
                 }
             // }()
 
+
+        
              // Calculate time budget based on deadline
              deadlineTime := time.Unix(taskDetail.Deadline/1000, 0)
              totalBudgetMinutes := int(time.Until(deadlineTime).Minutes())
@@ -7618,255 +7137,255 @@ func (s *defaultCRSService) runFuzzing(myFuzzer,taskDir string, taskDetail model
              halfTimeToDeadline := time.Now().Add(totalLibfuzzingTime)
              log.Printf("halfTimeToDeadline: %v", halfTimeToDeadline)
 
-             // if taskDetail.Type == "delta" {
-             //     //should be ~6h for final
-             // } else {
-             //     //should be ~12h for final
-             // }           
-            workingBudgetMinutes := totalBudgetMinutes - safetyBufferMinutes
-            sequentialTestRun := false          
-            go func()  {
-                // if pov failed, run continous fuzzing w/ load seeds every 10mins
-                log.Printf("ADVANCED PHASES started...")
+                // if taskDetail.Type == "delta" {
+                //     //should be ~6h for final
+                // } else {
+                //     //should be ~12h for final
+                // }           
+                workingBudgetMinutes := totalBudgetMinutes - safetyBufferMinutes
+                sequentialTestRun := false          
+                go func()  {
+                    // if pov failed, run continous fuzzing w/ load seeds every 10mins
+                    log.Printf("ADVANCED PHASES started...")
 
-                //do libfuzzer after basic phase - seeds generated by LLM
-                // go func() {
-                //     s.runLibFuzzer(myFuzzer, taskDir, projectDir, cfg.Language, taskDetail, fullTask)
-                // }()
+                    //do libfuzzer after basic phase - seeds generated by LLM
+                    // go func() {
+                    //     s.runLibFuzzer(myFuzzer, taskDir, projectDir, cfg.Language, taskDetail, fullTask)
+                    // }()
 
-                ctx, advancedPhasesSpan := telemetry.StartSpan(ctx, "llm_advanced_phases")
-                advancedPhasesSpan.SetAttributes(attribute.String("crs.action.category", "fuzzing"))
-                advancedPhasesSpan.SetAttributes(attribute.String("crs.action.name", "RunAdvancedLLMPhases"))
-                for key, value := range taskDetail.Metadata {
-                    advancedPhasesSpan.SetAttributes(attribute.String(key, value))
-                }
-                defer advancedPhasesSpan.End()
-                
-                log.Printf("Time budget: %.2f hours total, %.2f hours for work", 
-                    float64(totalBudgetMinutes)/60.0, 
-                    float64(workingBudgetMinutes)/60.0)
-
-
-                advancedPhasesSpan.SetAttributes(attribute.Float64("crs.budget.total_hours", float64(totalBudgetMinutes)/60.0))
-                advancedPhasesSpan.SetAttributes(attribute.Float64("crs.budget.working_hours", float64(workingBudgetMinutes)/60.0))
-
-                // Initial POV budget calculated (e.g., 80% of working time)
-                initialPovBudgetMinutes := int(float64(workingBudgetMinutes) * 0.8)
-                if initialPovBudgetMinutes < 1 {
-                    initialPovBudgetMinutes = 1 
-                }
-                log.Printf("Initial calculated POV budget: %d minutes", initialPovBudgetMinutes)
-                initialPovBudgetDuration := time.Duration(initialPovBudgetMinutes) * time.Minute
-
-
-                // Using 4 phases as an example based on the original phaseRatios len
-                numPhases := 4 
-
-                roundNum := 0 // Counter for logging/telemetry
-
-                var totalPovTimeSpent time.Duration // Accumulator for time spent in POV rounds
-                // Loop until POV is found or deadline approaches
-                for {
-                    roundNum++
-                    log.Printf("Starting Advanced Phases Round %d", roundNum)
-
-                    // --- Check for exit conditions before starting a new round ---
-                    // 1. Check if POV was found in a previous round or by the basic phase
-                    select {
-                    case <-povChan:
-                        log.Printf("POV signal received before starting round %d, exiting advanced loop.", roundNum)
-                        return // Exit the advanced phases goroutine
-                    default:
-                        // No POV signal yet, continue
+                    ctx, advancedPhasesSpan := telemetry.StartSpan(ctx, "llm_advanced_phases")
+                    advancedPhasesSpan.SetAttributes(attribute.String("crs.action.category", "fuzzing"))
+                    advancedPhasesSpan.SetAttributes(attribute.String("crs.action.name", "RunAdvancedLLMPhases"))
+                    for key, value := range taskDetail.Metadata {
+                        advancedPhasesSpan.SetAttributes(attribute.String(key, value))
                     }
-
-                    // 2. Check deadline - leave buffer time
-                    currentTime := time.Now()
-                    if currentTime.After(deadlineTime.Add(-time.Duration(safetyBufferMinutes) * time.Minute)) {
-                         log.Printf("Absolute deadline approaching before starting round %d, exiting advanced loop.", roundNum)
-                         return // Exit the advanced phases goroutine
-                    }
-
-                    // 3. Check remaining POV budget based on time spent in previous rounds
-                    remainingPovBudgetDuration := initialPovBudgetDuration - totalPovTimeSpent
-                    if remainingPovBudgetDuration <= 0 {
-                         log.Printf("Calculated POV budget exhausted before starting round %d (spent: %v), exiting advanced loop.", roundNum, totalPovTimeSpent)
-                         return // Exit the advanced phases goroutine
-                    }
-
-                    // Determine the actual timeout for this round: minimum of remaining overall deadline and remaining calculated POV budget
-                    absoluteRemainingTime := deadlineTime.Sub(currentTime)
-                    effectiveRemainingTime := absoluteRemainingTime - time.Duration(safetyBufferMinutes)*time.Minute
+                    defer advancedPhasesSpan.End()
                     
-                    roundTimeoutDuration := remainingPovBudgetDuration // Start with remaining calculated budget
-                    if effectiveRemainingTime < roundTimeoutDuration {
-                        log.Printf("Round %d timeout capped by absolute deadline proximity. Using %v instead of %v.", roundNum, effectiveRemainingTime, roundTimeoutDuration)
-                        roundTimeoutDuration = effectiveRemainingTime // Cap by actual time left
+                    log.Printf("Time budget: %.2f hours total, %.2f hours for work", 
+                        float64(totalBudgetMinutes)/60.0, 
+                        float64(workingBudgetMinutes)/60.0)
+
+
+                    advancedPhasesSpan.SetAttributes(attribute.Float64("crs.budget.total_hours", float64(totalBudgetMinutes)/60.0))
+                    advancedPhasesSpan.SetAttributes(attribute.Float64("crs.budget.working_hours", float64(workingBudgetMinutes)/60.0))
+
+                    // Initial POV budget calculated (e.g., 80% of working time)
+                    initialPovBudgetMinutes := int(float64(workingBudgetMinutes) * 0.8)
+                    if initialPovBudgetMinutes < 1 {
+                        initialPovBudgetMinutes = 1 
                     }
+                    log.Printf("Initial calculated POV budget: %d minutes", initialPovBudgetMinutes)
+                    initialPovBudgetDuration := time.Duration(initialPovBudgetMinutes) * time.Minute
 
-                    if roundTimeoutDuration <= 0 {
-                        log.Printf("Insufficient time budget calculated for round %d (%v). Exiting advanced loop.", roundNum, roundTimeoutDuration)
-                        return // No time left for this round
-                    }
-                    
-                    roundTimeoutMinutes := int(roundTimeoutDuration.Minutes())
-                    if roundTimeoutMinutes < 1 { roundTimeoutMinutes = 1} // Ensure at least 1 minute timeout value
-                    if roundTimeoutMinutes > 60 { roundTimeoutMinutes = 60} // Ensure at most 60 minutes per round
+                    // Using 4 phases as an example based on the original phaseRatios len
+                    numPhases := 4 
 
-                    log.Printf("Starting Advanced Phases Round %d with timeout budget: %d minutes", roundNum, roundTimeoutMinutes)
-                    // --- End Exit Condition Checks ---
+                    roundNum := 0 // Counter for logging/telemetry
 
-                    roundStartTime := time.Now() // Record start time for this round
+                    var totalPovTimeSpent time.Duration // Accumulator for time spent in POV rounds
+                    // Loop until POV is found or deadline approaches
+                    for {
+                        roundNum++
+                        log.Printf("Starting Advanced Phases Round %d", roundNum)
 
-
-                    var roundWG sync.WaitGroup // WaitGroup for the current round
-                    povFoundInRound := false   // Track if POV found specifically in this round
-
-                    if sequentialTestRun {
-
-                        log.Printf("Running sequential phases for round %d...", roundNum)
-                        // Calculate timeouts based on *remaining* budget? Or fixed per round?
-                        // Example: Fixed timeouts per round based on original ratios
-                        phaseRatios := []float64{0.1, 0.2, 0.2, 0.5}
-                        phaseTimeouts := make([]int, len(phaseRatios))
-                        for i, ratio := range phaseRatios {
-                            phaseTimeouts[i] = int(float64(roundTimeoutMinutes) * ratio)
-                            if phaseTimeouts[i] < 1 { phaseTimeouts[i] = 1 } // Min 1 min per phase
+                        // --- Check for exit conditions before starting a new round ---
+                        // 1. Check if POV was found in a previous round or by the basic phase
+                        select {
+                        case <-povChan:
+                            log.Printf("POV signal received before starting round %d, exiting advanced loop.", roundNum)
+                            return // Exit the advanced phases goroutine
+                        default:
+                            // No POV signal yet, continue
                         }
 
-                        // Run in multiple phases with increasing timeouts
-                        for phase, timeout := range phaseTimeouts {
-                            // Check deadline before starting phase
-                            if time.Now().After(deadlineTime.Add(-time.Duration(safetyBufferMinutes) * time.Minute)) {
-                                log.Printf("Deadline approaching during sequential phase %d of round %d.", phase+1, roundNum)
-                                povFoundInRound = false // Ensure we exit outer loop if deadline hit here
-                                break // Break inner phase loop
-                            }
-                            log.Printf("Starting phase %d (timeout %d min) for round %d", phase+1, timeout, roundNum)
-                        // Create a span for each phase
-                            _, phaseSpan := telemetry.StartSpan(ctx, fmt.Sprintf("pov_round%d_phase%d", roundNum, phase+1))
-                            phaseSpan.SetAttributes(attribute.String("crs.action.category", "input_generation"))
-                            phaseSpan.SetAttributes(attribute.String("crs.action.name", fmt.Sprintf("runPOVPhase%d", phase)))
-                            phaseSpan.SetAttributes(attribute.Int("crs.phase.number", phase))
-                            phaseSpan.SetAttributes(attribute.Int("crs.round.number", roundNum))
-                            phaseSpan.SetAttributes(attribute.Int("crs.phase.timeout_minutes", timeout))
-                            for key, value := range taskDetail.Metadata {
-                                phaseSpan.SetAttributes(attribute.String(key, value))
-                            }
-                            // FOR PHASE 1: five each call + coverage
-                            // FOR PHASE 2: + category
-                            // FOR PHASE 3: + full source code
-                            pov_success = s.runAdvancedPOVStrategiesWithTimeout(myFuzzer,taskDir, projectDir,cfg.Language, taskDetail, fullTask, timeout,phase,roundNum)
+                        // 2. Check deadline - leave buffer time
+                        currentTime := time.Now()
+                        if currentTime.After(deadlineTime.Add(-time.Duration(safetyBufferMinutes) * time.Minute)) {
+                            log.Printf("Absolute deadline approaching before starting round %d, exiting advanced loop.", roundNum)
+                            return // Exit the advanced phases goroutine
+                        }
+
+                        // 3. Check remaining POV budget based on time spent in previous rounds
+                        remainingPovBudgetDuration := initialPovBudgetDuration - totalPovTimeSpent
+                        if remainingPovBudgetDuration <= 0 {
+                            log.Printf("Calculated POV budget exhausted before starting round %d (spent: %v), exiting advanced loop.", roundNum, totalPovTimeSpent)
+                            return // Exit the advanced phases goroutine
+                        }
+
+                        // Determine the actual timeout for this round: minimum of remaining overall deadline and remaining calculated POV budget
+                        absoluteRemainingTime := deadlineTime.Sub(currentTime)
+                        effectiveRemainingTime := absoluteRemainingTime - time.Duration(safetyBufferMinutes)*time.Minute
                         
-                            phaseSpan.SetAttributes(attribute.Bool("crs.phase.pov_success", pov_success))
-                            phaseSpan.End()
+                        roundTimeoutDuration := remainingPovBudgetDuration // Start with remaining calculated budget
+                        if effectiveRemainingTime < roundTimeoutDuration {
+                            log.Printf("Round %d timeout capped by absolute deadline proximity. Using %v instead of %v.", roundNum, effectiveRemainingTime, roundTimeoutDuration)
+                            roundTimeoutDuration = effectiveRemainingTime // Cap by actual time left
+                        }
 
-                            if pov_success {
-                                log.Printf("POV found in sequential phase %d of round %d.", phase+1, roundNum)
-                                povFoundInRound = true
-                                povFound.Do(func() { close(povChan) })
-                                break
+                        if roundTimeoutDuration <= 0 {
+                            log.Printf("Insufficient time budget calculated for round %d (%v). Exiting advanced loop.", roundNum, roundTimeoutDuration)
+                            return // No time left for this round
+                        }
+                        
+                        roundTimeoutMinutes := int(roundTimeoutDuration.Minutes())
+                        if roundTimeoutMinutes < 1 { roundTimeoutMinutes = 1} // Ensure at least 1 minute timeout value
+                        if roundTimeoutMinutes > 60 { roundTimeoutMinutes = 60} // Ensure at most 60 minutes per round
+
+                        log.Printf("Starting Advanced Phases Round %d with timeout budget: %d minutes", roundNum, roundTimeoutMinutes)
+                        // --- End Exit Condition Checks ---
+
+                        roundStartTime := time.Now() // Record start time for this round
+
+
+                        var roundWG sync.WaitGroup // WaitGroup for the current round
+                        povFoundInRound := false   // Track if POV found specifically in this round
+
+                        if sequentialTestRun {
+
+                            log.Printf("Running sequential phases for round %d...", roundNum)
+                            // Calculate timeouts based on *remaining* budget? Or fixed per round?
+                            // Example: Fixed timeouts per round based on original ratios
+                            phaseRatios := []float64{0.1, 0.2, 0.2, 0.5}
+                            phaseTimeouts := make([]int, len(phaseRatios))
+                            for i, ratio := range phaseRatios {
+                                phaseTimeouts[i] = int(float64(roundTimeoutMinutes) * ratio)
+                                if phaseTimeouts[i] < 1 { phaseTimeouts[i] = 1 } // Min 1 min per phase
                             }
-                            log.Printf("No POV found in sequential phase %d of round %d.", phase+1, roundNum)
-                        }
-                        if povFoundInRound {
-                            break // Exit the outer round loop
-                        }
 
-                    } else {
-
-                        log.Printf("Running parallel phases for round %d (timeout per phase: %d min)...", roundNum, roundTimeoutMinutes) // Log the calculated round timeout
-
-                        for phase := 0; phase < numPhases; phase++ {
-                            roundWG.Add(1) // Increment counter before launching goroutine
-                            go func(phase int) {
-                                defer roundWG.Done() // Decrement counter when goroutine finishes
-                                // Check deadline *inside* goroutine before starting work? Optional but good practice.
+                            // Run in multiple phases with increasing timeouts
+                            for phase, timeout := range phaseTimeouts {
+                                // Check deadline before starting phase
                                 if time.Now().After(deadlineTime.Add(-time.Duration(safetyBufferMinutes) * time.Minute)) {
-                                    log.Printf("Deadline approaching, skipping parallel phase %d of round %d.", phase+1, roundNum)
-                                    return 
+                                    log.Printf("Deadline approaching during sequential phase %d of round %d.", phase+1, roundNum)
+                                    povFoundInRound = false // Ensure we exit outer loop if deadline hit here
+                                    break // Break inner phase loop
                                 }
-                                log.Printf("Starting parallel phase %d (using round timeout %d min) for round %d", phase+1, roundTimeoutMinutes, roundNum) 
-                                // Create a span for each phase
+                                log.Printf("Starting phase %d (timeout %d min) for round %d", phase+1, timeout, roundNum)
+                            // Create a span for each phase
                                 _, phaseSpan := telemetry.StartSpan(ctx, fmt.Sprintf("pov_round%d_phase%d", roundNum, phase+1))
                                 phaseSpan.SetAttributes(attribute.String("crs.action.category", "input_generation"))
                                 phaseSpan.SetAttributes(attribute.String("crs.action.name", fmt.Sprintf("runPOVPhase%d", phase)))
                                 phaseSpan.SetAttributes(attribute.Int("crs.phase.number", phase))
                                 phaseSpan.SetAttributes(attribute.Int("crs.round.number", roundNum))
-                                phaseSpan.SetAttributes(attribute.Int("crs.phase.timeout_minutes", roundTimeoutMinutes)) 
+                                phaseSpan.SetAttributes(attribute.Int("crs.phase.timeout_minutes", timeout))
                                 for key, value := range taskDetail.Metadata {
                                     phaseSpan.SetAttributes(attribute.String(key, value))
                                 }
-                                pov_success = s.runAdvancedPOVStrategiesWithTimeout(myFuzzer,taskDir, projectDir,cfg.Language, taskDetail, fullTask, roundTimeoutMinutes,phase,roundNum)
+                                // FOR PHASE 1: five each call + coverage
+                                // FOR PHASE 2: + category
+                                // FOR PHASE 3: + full source code
+                                pov_success = s.runAdvancedPOVStrategiesWithTimeout(myFuzzer,taskDir, projectDir,cfg.Language, taskDetail, fullTask, timeout,phase,roundNum)
                             
                                 phaseSpan.SetAttributes(attribute.Bool("crs.phase.pov_success", pov_success))
                                 phaseSpan.End()
+
                                 if pov_success {
-                                    log.Printf("POV found in parallel phase %d of round %d.", phase+1, roundNum)
+                                    log.Printf("POV found in sequential phase %d of round %d.", phase+1, roundNum)
+                                    povFoundInRound = true
                                     povFound.Do(func() { close(povChan) })
-                                } else {
-                                    log.Printf("No POV found in parallel phase %d of round %d.", phase+1, roundNum)
+                                    break
                                 }
-                            }(phase)
+                                log.Printf("No POV found in sequential phase %d of round %d.", phase+1, roundNum)
+                            }
+                            if povFoundInRound {
+                                break // Exit the outer round loop
+                            }
 
-                        }
-                        // Wait for all goroutines *in this round* to complete
-                        roundWG.Wait()
-                         // Calculate time spent *in this round*
-                         roundDuration := time.Since(roundStartTime)
-                         log.Printf("All parallel phases for round %d completed in %v.", roundNum, roundDuration)
-                         // Add this round's duration to the total spent time
-                         totalPovTimeSpent += roundDuration 
-                         log.Printf("Total POV time spent across rounds: %v", totalPovTimeSpent)
-
-                        // After waiting, check if the POV signal was sent during this round
-                        select {
-                        case <-povChan:
-                            log.Printf("POV signal received after round %d completed.", roundNum)
-                            povFoundInRound = true // Set flag to break outer loop
-                        default:
-                            // No POV signal from this round, loop will continue after checking deadline
-                        }
-
-                    } // End parallel execution logic
-                    // If POV was found in this round (either sequential or parallel), break the outer loop
-                    if povFoundInRound {
-                        break
-                    }
-
-                    // Optional: Add a small delay between rounds?
-                    // time.Sleep(10 * time.Second) 
-                    //check if other fuzzers have found POVs, if yes and runnnig long enough, break
-                    {
-                        llmFuzzingDuration := time.Since(llmFuzzingStartTime)
-                        pov_count, patch_count, err := s.getPOVStatsFromSubmissionService(taskDetail.TaskID.String())
-                        if err != nil {
-                            log.Printf("Error getPOVStatsFromSubmissionService: %v", err)
-                        } else if pov_count > 0 && llmFuzzingDuration > 45 * time.Minute {
-                            // Enough POVs already exist and this fuzzer has been running >1 h – stop to save resources
-                            log.Printf("POV already found in other fuzzers. llmFuzzingDuration %v (>45min). Stop LLM Fuzzer %s. pov_count: %d patch_count: %d",
-                            llmFuzzingDuration, myFuzzer, pov_count, patch_count)
-                            break
-                        } else if llmFuzzingDuration > totalLibfuzzingTime || llmFuzzingDuration > 60 * time.Minute {
-                            // half time of challenge time 
-                            log.Printf("Halftime or 1h passed. llmFuzzingDuration %v. Stop LLM Fuzzer %s. pov_count: %d patch_count: %d",
-                            llmFuzzingDuration, myFuzzer, pov_count, patch_count)
-                            break
-                        } else if pov_count > 0 {
-                            // POVs exist but we haven’t hit the 1 h mark yet – keep fuzzing a bit longer
-                            log.Printf("POVs found by other fuzzers but llmFuzzingDuration only %v (<1h). Continuing. pov_count: %d patch_count: %d",
-                            llmFuzzingDuration, pov_count, patch_count)
                         } else {
-                            log.Printf("No POVs found so far, llmFuzzingDuration: %v, continue to next round", llmFuzzingDuration)
-                        }
-                    }
-                } // End of the main advanced phases loop
 
-                log.Printf("Exiting advanced phases goroutine.")
-                // Advanced phases finished (either by finding POV or hitting deadline in loop check)
-                // The outer select statement will handle the next steps (patching or deadline error)
-                
-            }()
+                            log.Printf("Running parallel phases for round %d (timeout per phase: %d min)...", roundNum, roundTimeoutMinutes) // Log the calculated round timeout
+
+                            for phase := 0; phase < numPhases; phase++ {
+                                roundWG.Add(1) // Increment counter before launching goroutine
+                                go func(phase int) {
+                                    defer roundWG.Done() // Decrement counter when goroutine finishes
+                                    // Check deadline *inside* goroutine before starting work? Optional but good practice.
+                                    if time.Now().After(deadlineTime.Add(-time.Duration(safetyBufferMinutes) * time.Minute)) {
+                                        log.Printf("Deadline approaching, skipping parallel phase %d of round %d.", phase+1, roundNum)
+                                        return 
+                                    }
+                                    log.Printf("Starting parallel phase %d (using round timeout %d min) for round %d", phase+1, roundTimeoutMinutes, roundNum) 
+                                    // Create a span for each phase
+                                    _, phaseSpan := telemetry.StartSpan(ctx, fmt.Sprintf("pov_round%d_phase%d", roundNum, phase+1))
+                                    phaseSpan.SetAttributes(attribute.String("crs.action.category", "input_generation"))
+                                    phaseSpan.SetAttributes(attribute.String("crs.action.name", fmt.Sprintf("runPOVPhase%d", phase)))
+                                    phaseSpan.SetAttributes(attribute.Int("crs.phase.number", phase))
+                                    phaseSpan.SetAttributes(attribute.Int("crs.round.number", roundNum))
+                                    phaseSpan.SetAttributes(attribute.Int("crs.phase.timeout_minutes", roundTimeoutMinutes)) 
+                                    for key, value := range taskDetail.Metadata {
+                                        phaseSpan.SetAttributes(attribute.String(key, value))
+                                    }
+                                    pov_success = s.runAdvancedPOVStrategiesWithTimeout(myFuzzer,taskDir, projectDir,cfg.Language, taskDetail, fullTask, roundTimeoutMinutes,phase,roundNum)
+                                
+                                    phaseSpan.SetAttributes(attribute.Bool("crs.phase.pov_success", pov_success))
+                                    phaseSpan.End()
+                                    if pov_success {
+                                        log.Printf("POV found in parallel phase %d of round %d.", phase+1, roundNum)
+                                        povFound.Do(func() { close(povChan) })
+                                    } else {
+                                        log.Printf("No POV found in parallel phase %d of round %d.", phase+1, roundNum)
+                                    }
+                                }(phase)
+
+                            }
+                            // Wait for all goroutines *in this round* to complete
+                            roundWG.Wait()
+                            // Calculate time spent *in this round*
+                            roundDuration := time.Since(roundStartTime)
+                            log.Printf("All parallel phases for round %d completed in %v.", roundNum, roundDuration)
+                            // Add this round's duration to the total spent time
+                            totalPovTimeSpent += roundDuration 
+                            log.Printf("Total POV time spent across rounds: %v", totalPovTimeSpent)
+
+                            // After waiting, check if the POV signal was sent during this round
+                            select {
+                            case <-povChan:
+                                log.Printf("POV signal received after round %d completed.", roundNum)
+                                povFoundInRound = true // Set flag to break outer loop
+                            default:
+                                // No POV signal from this round, loop will continue after checking deadline
+                            }
+
+                        } // End parallel execution logic
+                        // If POV was found in this round (either sequential or parallel), break the outer loop
+                        if povFoundInRound {
+                            break
+                        }
+
+                        // Optional: Add a small delay between rounds?
+                        // time.Sleep(10 * time.Second) 
+                        //check if other fuzzers have found POVs, if yes and runnnig long enough, break
+                        {
+                            llmFuzzingDuration := time.Since(llmFuzzingStartTime)
+                            pov_count, patch_count, err := s.getPOVStatsFromSubmissionService(taskDetail.TaskID.String())
+                            if err != nil {
+                                log.Printf("Error getPOVStatsFromSubmissionService: %v", err)
+                            } else if pov_count > 0 && llmFuzzingDuration > 45 * time.Minute {
+                                // Enough POVs already exist and this fuzzer has been running >1 h – stop to save resources
+                                log.Printf("POV already found in other fuzzers. llmFuzzingDuration %v (>45min). Stop LLM Fuzzer %s. pov_count: %d patch_count: %d",
+                                llmFuzzingDuration, myFuzzer, pov_count, patch_count)
+                                break
+                            } else if llmFuzzingDuration > totalLibfuzzingTime || llmFuzzingDuration > 60 * time.Minute {
+                                // half time of challenge time 
+                                log.Printf("Halftime or 1h passed. llmFuzzingDuration %v. Stop LLM Fuzzer %s. pov_count: %d patch_count: %d",
+                                llmFuzzingDuration, myFuzzer, pov_count, patch_count)
+                                break
+                            } else if pov_count > 0 {
+                                // POVs exist but we haven’t hit the 1 h mark yet – keep fuzzing a bit longer
+                                log.Printf("POVs found by other fuzzers but llmFuzzingDuration only %v (<1h). Continuing. pov_count: %d patch_count: %d",
+                                llmFuzzingDuration, pov_count, patch_count)
+                            } else {
+                                log.Printf("No POVs found so far, llmFuzzingDuration: %v, continue to next round", llmFuzzingDuration)
+                            }
+                        }
+                    } // End of the main advanced phases loop
+
+                    log.Printf("Exiting advanced phases goroutine.")
+                    // Advanced phases finished (either by finding POV or hitting deadline in loop check)
+                    // The outer select statement will handle the next steps (patching or deadline error)
+                    
+                }()
+            
 
             // Wait for POV found or deadline
             select {

@@ -1,13 +1,22 @@
-## Test LOCAL CRS:
+## Quick Start:
+
+```
+export ANTHROPIC_API_KEY=...
+```
+
+```
+cd crs
+go run ./cmd/local/ https://github.com/libexpat/libexpat
+```
+
+## CRS docker image:
 
 ```
 docker pull ghcr.io/o2lab/crs-local:latest
 docker tag ghcr.io/o2lab/crs-local:latest crs-local
 docker run -it --rm --privileged crs-local
 ```
-```
-export ANTHROPIC_API_KEY=...
-```
+
 ```
 ./crs-local /crs-workdir/local-test-integration-delta-01/
 ```
@@ -28,10 +37,4 @@ export ANTHROPIC_API_KEY=...
 ```
 cd crs
 ./build-local-crs-image.sh
-```
-
-## CRS Development:
-```
-cd crs
-go run ./cmd/local/main.go /crs-workdir/local-test-integration-delta-01/
 ```
