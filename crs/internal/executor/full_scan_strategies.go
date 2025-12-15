@@ -72,7 +72,7 @@ func runFullScanPlaceholderStrategy(fuzzer, taskDir, projectDir, fuzzDir, langua
 		log.Printf("StrategyConfig is nil, using defaults")
 		strategyConfig = &config.StrategyConfig{
 			BaseDir:        "/app/strategy",
-			NewStrategyDir: "strategies",
+			NewStrategyDir: "jeff",
 		}
 	}
 

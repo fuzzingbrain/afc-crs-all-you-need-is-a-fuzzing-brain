@@ -469,7 +469,15 @@ func (s *LocalCRSService) buildFuzzersDocker(myFuzzer *string, taskDir, projectD
 	} else {
 		// For both Java and C tasks on worker
 		if true {
-			build.BuildAFCFuzzers(taskDir, sanitizer, taskDetail.ProjectName, sanitizerProjectDir, sanitizerDir)
+			output, err := build.BuildAFCFuzzers(taskDir, sanitizer, taskDetail.ProjectName, sanitizerProjectDir, sanitizerDir)
+			if err != nil {
+				log.Printf("[BuildAFCFuzzers] Build failed for %s-%s: %v", taskDetail.ProjectName, sanitizer, err)
+				if output != "" {
+					log.Printf("[BuildAFCFuzzers] Output:\n%s", output)
+				}
+			} else if output != "" {
+				log.Printf("[BuildAFCFuzzers] Build completed for %s-%s", taskDetail.ProjectName, sanitizer)
+			}
 		} else {
 			workDir := filepath.Join(taskDir, "fuzz-tooling", "build", "work", fmt.Sprintf("%s-%s", taskDetail.ProjectName, sanitizer))
 

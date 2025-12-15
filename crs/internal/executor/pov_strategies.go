@@ -306,7 +306,7 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 		log.Printf("StrategyConfig is nil, using defaults")
 		strategyConfig = &config.StrategyConfig{
 			BaseDir:        "/app/strategy",
-			NewStrategyDir: "strategies",
+			NewStrategyDir: "jeff",
 			POV: config.POVStrategyConfig{
 				BasicDeltaPattern:    "xs*_delta_new.py",
 				BasicCFullPattern:    "xs*_c_full.py",
@@ -690,7 +690,7 @@ func runAdvancedPOVStrategiesWithTimeout(
 		log.Printf("StrategyConfig is nil, using defaults")
 		strategyConfig = &config.StrategyConfig{
 			BaseDir:        "/app/strategy",
-			NewStrategyDir: "strategies",
+			NewStrategyDir: "jeff",
 			POV: config.POVStrategyConfig{
 				AdvancedDeltaPattern: "as*_delta_new.py",
 				AdvancedFullPattern:  "as*_full.py",
