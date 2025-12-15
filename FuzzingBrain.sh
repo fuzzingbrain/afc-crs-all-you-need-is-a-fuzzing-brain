@@ -123,10 +123,30 @@ prompt_api_key() {
     export "$key_name=$key_value"
 }
 
+# Check if Docker is running
+check_docker() {
+    if ! command -v docker &> /dev/null; then
+        print_error "Docker is not installed!"
+        print_error "Please install Docker: https://docs.docker.com/get-docker/"
+        exit 1
+    fi
+
+    if ! docker info &> /dev/null; then
+        print_error "Docker is not running!"
+        print_error "Please start Docker daemon and try again."
+        exit 1
+    fi
+
+    print_info "Docker is running"
+}
+
 # Check environment configuration
 check_environment() {
     local env_file="$CRS_DIR/.env"
     local env_example="$CRS_DIR/.env.example"
+
+    # Check Docker first
+    check_docker
 
     # Check if .env exists
     if [ ! -f "$env_file" ]; then
