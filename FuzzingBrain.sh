@@ -58,6 +58,63 @@ find_ossfuzz_project() {
     echo ""
 }
 
+# Check environment configuration
+check_environment() {
+    local env_file="$CRS_DIR/.env"
+    local env_example="$CRS_DIR/.env.example"
+
+    # Check if .env exists
+    if [ ! -f "$env_file" ]; then
+        print_error ".env file not found!"
+        print_error "Please create it by copying the example file:"
+        echo ""
+        echo "    cp $env_example $env_file"
+        echo ""
+        print_error "Then edit $env_file and set your API keys."
+        exit 1
+    fi
+
+    # Load .env file
+    set -a
+    source "$env_file"
+    set +a
+
+    # Check if at least one API key is set
+    local has_api_key=false
+    local missing_keys=()
+
+    if [ -n "$ANTHROPIC_API_KEY" ] && [ "$ANTHROPIC_API_KEY" != "your-anthropic-api-key" ]; then
+        has_api_key=true
+    else
+        missing_keys+=("ANTHROPIC_API_KEY")
+    fi
+
+    if [ -n "$OPENAI_API_KEY" ] && [ "$OPENAI_API_KEY" != "your-openai-api-key" ]; then
+        has_api_key=true
+    else
+        missing_keys+=("OPENAI_API_KEY")
+    fi
+
+    if [ -n "$GEMINI_API_KEY" ] && [ "$GEMINI_API_KEY" != "your-gemini-api-key" ]; then
+        has_api_key=true
+    else
+        missing_keys+=("GEMINI_API_KEY")
+    fi
+
+    if [ "$has_api_key" = false ]; then
+        print_error "No API key configured!"
+        print_error "At least one of the following must be set in $env_file:"
+        for key in "${missing_keys[@]}"; do
+            echo "    - $key"
+        done
+        echo ""
+        print_error "Please edit $env_file and add your API key."
+        exit 1
+    fi
+
+    print_info "Environment check passed"
+}
+
 show_usage() {
     echo "Usage: $0 [OPTIONS] <git_url|workspace_path> [commit_id]"
     echo ""
@@ -114,6 +171,9 @@ set -- "${POSITIONAL_ARGS[@]}"
 if [ $# -lt 1 ]; then
     show_usage
 fi
+
+# Check environment before proceeding
+check_environment
 
 TARGET="$1"
 COMMIT_ID="${2:-}"
