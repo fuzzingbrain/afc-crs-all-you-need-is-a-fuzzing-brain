@@ -83,8 +83,12 @@ else
     cp -r "$ORIGINAL_DATASET"/* "$WORKSPACE/"
 fi
 
+# Set strategy base directory for local runs
+export STRATEGY_BASE_DIR="$(pwd)/strategy"
+
 # use the workspace directory
 echo "Command: go run ./cmd/local/main.go $WORKSPACE" | tee -a "$LOG_FILE"
+echo "Strategy directory: $STRATEGY_BASE_DIR" | tee -a "$LOG_FILE"
 echo "===========================================" | tee -a "$LOG_FILE"
 
 go run ./cmd/local/main.go "$WORKSPACE" 2>&1 | tee -a "$LOG_FILE"
