@@ -140,13 +140,42 @@ check_docker() {
     print_info "Docker is running"
 }
 
+# Function to compare version numbers
+version_ge() {
+    printf '%s\n%s\n' "$2" "$1" | sort -V -C
+}
+
+# Check and install Go
+check_go() {
+    local REQUIRED_GO_VERSION="1.21"
+
+    if command -v go &> /dev/null; then
+        local CURRENT_GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
+        print_info "Go $CURRENT_GO_VERSION is installed"
+
+        if version_ge "$CURRENT_GO_VERSION" "$REQUIRED_GO_VERSION"; then
+            print_info "Go version is sufficient (>= $REQUIRED_GO_VERSION)"
+            return 0
+        else
+            print_warn "Go version $CURRENT_GO_VERSION is too old (required >= $REQUIRED_GO_VERSION)"
+            print_warn "Please upgrade Go: https://go.dev/doc/install"
+            exit 1
+        fi
+    else
+        print_error "Go is not installed!"
+        print_error "Please install Go (>= $REQUIRED_GO_VERSION): https://go.dev/doc/install"
+        exit 1
+    fi
+}
+
 # Check environment configuration
 check_environment() {
     local env_file="$CRS_DIR/.env"
     local env_example="$CRS_DIR/.env.example"
 
-    # Check Docker first
+    # Check Docker and Go first
     check_docker
+    check_go
 
     # Check if .env exists
     if [ ! -f "$env_file" ]; then
