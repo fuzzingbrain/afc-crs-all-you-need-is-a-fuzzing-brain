@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -858,11 +859,20 @@ func runAdvancedPOVStrategiesWithTimeout(
 
 				scanner := bufio.NewScanner(stdoutPipe)
 				for scanner.Scan() {
-					line := scanner.Text()
-					log.Printf("[POV Round-%d][%s Phase-%d] %s", roundNum, strategyName, phase, line)
-					outputMutex.Lock()
-					outputLines = append(outputLines, line)
-					outputMutex.Unlock()
+					raw := scanner.Text()
+
+					// Handle in-line carriage returns from progress bars, etc.
+					for _, part := range strings.Split(raw, "\r") {
+						part = helpers.SanitizeTerminalString(part)
+						if part == "" {
+							continue
+						}
+						io.WriteString(log.Writer(), "\r\033[K")
+						log.Printf("[POV Round-%d][%s Phase-%d] %s", roundNum, strategyName, phase, part)
+						outputMutex.Lock()
+						outputLines = append(outputLines, part)
+						outputMutex.Unlock()
+					}
 				}
 				if err := scanner.Err(); err != nil {
 					// Log scanner errors, especially if caused by pipe closing on kill
@@ -877,11 +887,20 @@ func runAdvancedPOVStrategiesWithTimeout(
 
 				scanner := bufio.NewScanner(stderrPipe)
 				for scanner.Scan() {
-					line := scanner.Text()
-					log.Printf("[POV Round-%d ERR][%s Phase-%d] %s", roundNum, strategyName, phase, line)
-					outputMutex.Lock()
-					outputLines = append(outputLines, line)
-					outputMutex.Unlock()
+					raw := scanner.Text()
+
+					// Handle in-line carriage returns from progress bars, etc.
+					for _, part := range strings.Split(raw, "\r") {
+						part = helpers.SanitizeTerminalString(part)
+						if part == "" {
+							continue
+						}
+						io.WriteString(log.Writer(), "\r\033[K")
+						log.Printf("[POV Round-%d ERR][%s Phase-%d] %s", roundNum, strategyName, phase, part)
+						outputMutex.Lock()
+						outputLines = append(outputLines, part)
+						outputMutex.Unlock()
+					}
 				}
 				if err := scanner.Err(); err != nil {
 					if strategyCtx.Err() == nil {
