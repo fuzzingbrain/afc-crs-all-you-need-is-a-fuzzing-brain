@@ -33,3 +33,7 @@ document/
 **/WORKFLOW/*
 
 **/workspace/*
+
+# POV and Patch outputs
+pov/
+patch/
