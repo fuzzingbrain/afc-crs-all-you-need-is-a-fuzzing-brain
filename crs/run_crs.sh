@@ -2,6 +2,27 @@
 
 mkdir -p logs
 
+# Setup Python virtual environment
+VENV_DIR="/tmp/crs_venv"
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Creating Python virtual environment at $VENV_DIR..."
+    python3 -m venv "$VENV_DIR"
+fi
+
+# Activate venv and install dependencies
+source "$VENV_DIR/bin/activate"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/strategy/requirements.txt" ]; then
+    pip install -q -r "$SCRIPT_DIR/strategy/requirements.txt" 2>/dev/null
+fi
+
+# Load and export .env variables for Python strategies
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    source "$SCRIPT_DIR/.env"
+    set +a
+fi
+
 DATE=$(date +"%Y%m%d_%H%M%S")
 IN_PLACE=false
 
@@ -83,8 +104,12 @@ else
     cp -r "$ORIGINAL_DATASET"/* "$WORKSPACE/"
 fi
 
+# Set strategy base directory for local runs
+export STRATEGY_BASE_DIR="$(pwd)/strategy"
+
 # use the workspace directory
 echo "Command: go run ./cmd/local/main.go $WORKSPACE" | tee -a "$LOG_FILE"
+echo "Strategy directory: $STRATEGY_BASE_DIR" | tee -a "$LOG_FILE"
 echo "===========================================" | tee -a "$LOG_FILE"
 
 go run ./cmd/local/main.go "$WORKSPACE" 2>&1 | tee -a "$LOG_FILE"

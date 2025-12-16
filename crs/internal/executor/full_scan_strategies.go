@@ -28,7 +28,7 @@ type FullScanStrategyConfig struct {
 // 1. Call Analysis Service to get reachable functions
 // 2. For each function, identify suspicious points using LLM
 // 3. Store suspicious points in PostgreSQL database
-// 4. Run Python strategy (xs0_full_new.py) which reads from database
+// 4. Run Python strategy (as0_full.py) which reads from database
 //
 // This is different from delta scan which analyzes git diffs.
 // Full scan analyzes the entire codebase to find vulnerabilities.
@@ -72,13 +72,13 @@ func runFullScanPlaceholderStrategy(fuzzer, taskDir, projectDir, fuzzDir, langua
 		log.Printf("StrategyConfig is nil, using defaults")
 		strategyConfig = &config.StrategyConfig{
 			BaseDir:        "/app/strategy",
-			NewStrategyDir: "strategies",
+			NewStrategyDir: "jeff",
 		}
 	}
 
 	// Use the full scan strategy file
 	strategyDir := strategyConfig.GetStrategyDir()
-	strategyFile := "xs0_full_new.py"
+	strategyFile := "as0_full.py"
 	strategyPath := strategyDir + "/" + strategyFile
 
 	// Check if strategy file exists

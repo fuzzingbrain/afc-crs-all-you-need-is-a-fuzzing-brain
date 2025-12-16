@@ -77,11 +77,8 @@ type StrategyConfig struct {
 	// Base directory for all strategies
 	BaseDir string `envconfig:"STRATEGY_BASE_DIR" default:"/app/strategy"`
 
-	// Subdirectory for new OOP-based strategies
-	NewStrategyDir string `envconfig:"STRATEGY_NEW_DIR" default:"strategies"`
-
-	// Legacy strategy directory (for fallback)
-	LegacyDir string `envconfig:"STRATEGY_LEGACY_DIR" default:"jeff"`
+	// Strategy subdirectory
+	NewStrategyDir string `envconfig:"STRATEGY_NEW_DIR" default:"jeff"`
 
 	// POV Strategy Configuration
 	POV POVStrategyConfig

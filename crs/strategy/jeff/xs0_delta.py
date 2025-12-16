@@ -478,6 +478,25 @@ if False:
     print(call_llm(log_file, messages, OPENAI_MODEL))
     exit(0)
 
+def clean_non_python_code(code):
+    """
+    Remove non-Python code elements like C/C++ comments and code blocks
+    """
+    lines = code.split('\n')
+    cleaned_lines = []
+
+    for line in lines:
+        stripped = line.strip()
+        # Skip C/C++ style comments
+        if stripped.startswith('//'):
+            continue
+        # Skip obvious C/C++ code patterns
+        if any(pattern in stripped for pattern in ['Before (vulnerable):', 'After (patched):']):
+            continue
+        cleaned_lines.append(line)
+
+    return '\n'.join(cleaned_lines)
+
 def extract_python_code_from_response(log_file, text, max_retries=2, timeout=30):
     """    
     Args:
@@ -493,6 +512,8 @@ def extract_python_code_from_response(log_file, text, max_retries=2, timeout=30)
     if m:
         candidate = m.group(1).strip()
         if candidate:                     # non-empty code
+            # Clean up non-Python code (C/C++ comments, code blocks)
+            candidate = clean_non_python_code(candidate)
             log_message(log_file,
                         f"Quick-path extracted {len(candidate)} chars of code")
             return candidate  
@@ -522,6 +543,8 @@ def extract_python_code_from_response(log_file, text, max_retries=2, timeout=30)
             if matches:
                 extracted_code = matches[0].strip()
                 if extracted_code:
+                    # Clean up non-Python code
+                    extracted_code = clean_non_python_code(extracted_code)
                     # print(f"Successfully extracted {len(extracted_code)} characters of code")
                     return extracted_code
                 print("Extracted code block was empty")
@@ -555,6 +578,8 @@ def extract_python_code_from_response(log_file, text, max_retries=2, timeout=30)
             if matches:
                 extracted_code = matches[0].strip()
                 if extracted_code:
+                    # Clean up non-Python code
+                    extracted_code = clean_non_python_code(extracted_code)
                     # print(f"Successfully extracted {len(extracted_code)} characters of code with fallback model")
                     return extracted_code
         else:
@@ -2532,7 +2557,40 @@ def doPoV(log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer, project_di
                     json.dump(messages, f, indent=2)
                 
                 log_message(log_file, f"Saved successful PoV artifacts to {save_dir}")
-                vuln_signature = fuzzer_name+"-"+generate_vulnerability_signature(crash_output, sanitizer)    
+
+                # Also save to main pov folder (same level as workspace)
+                # Extract workspace name from project_dir (e.g., libpng_20251215_164844)
+                workspace_name = os.path.basename(project_dir.rstrip('/'))
+                # Get parent directory of workspace
+                workspace_parent = os.path.dirname(project_dir.rstrip('/'))
+                # Create pov directory at same level as workspace
+                pov_parent = os.path.join(os.path.dirname(workspace_parent), "pov")
+                workspace_pov_base = os.path.join(pov_parent, workspace_name)
+
+                # Create a separate folder for each POV
+                pov_folder_name = f"pov_{pov_id}_{model_name}_{iteration}"
+                main_pov_dir = os.path.join(workspace_pov_base, pov_folder_name)
+
+                try:
+                    os.makedirs(main_pov_dir, exist_ok=True)
+
+                    # Copy all POV artifacts to dedicated pov folder
+                    main_pov_file = os.path.join(main_pov_dir, f"pov.py")
+                    main_blob_file = os.path.join(main_pov_dir, "test_blob.bin")
+                    main_output_file = os.path.join(main_pov_dir, "fuzzer_output.txt")
+                    main_conv_file = os.path.join(main_pov_dir, "conversation.json")
+
+                    shutil.copy(pov_file_path, main_pov_file)
+                    if os.path.exists(os.path.join(save_dir, blob_file)):
+                        shutil.copy(os.path.join(save_dir, blob_file), main_blob_file)
+                    shutil.copy(os.path.join(save_dir, fuzzer_output_file), main_output_file)
+                    shutil.copy(os.path.join(save_dir, conversation_file), main_conv_file)
+
+                    log_message(log_file, f"Copied POV artifacts to: {main_pov_dir}")
+                except Exception as e:
+                    log_message(log_file, f"Warning: Failed to copy POV to main folder: {str(e)}")
+
+                vuln_signature = fuzzer_name+"-"+generate_vulnerability_signature(crash_output, sanitizer)
                 # Create POV metadata
                 pov_metadata = {
                     "conversation": conversation_file,
@@ -2543,14 +2601,23 @@ def doPoV(log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer, project_di
                     "project_name": project_name,
                     "pov_signature": vuln_signature,
                 }
-                
+
                 # Save pov_metadata to disk
                 metadata_file = f"pov_metadata_{pov_id}_{model_name}_{iteration}.json"
                 metadata_path = os.path.join(save_dir, metadata_file)
                 with open(metadata_path, "w") as f:
                     json.dump(pov_metadata, f, indent=2)
-                
+
                 log_message(log_file, f"Saved PoV metadata to {metadata_path}")
+
+                # Also save metadata to main pov folder
+                try:
+                    main_metadata_path = os.path.join(main_pov_dir, "pov_metadata.json")
+                    with open(main_metadata_path, "w") as f:
+                        json.dump(pov_metadata, f, indent=2)
+                    log_message(log_file, f"Saved PoV metadata to: {main_metadata_path}")
+                except Exception as e:
+                    log_message(log_file, f"Warning: Failed to save metadata to main folder: {str(e)}")
                 log_message(log_file, f"POV SUCCESS! Vulnerability triggered with {model_name} on iteration {iteration}")
                 
                 # Submit POV to endpoint
@@ -2575,7 +2642,7 @@ Focus on:
 3. Edge cases that weren't covered by your previous solution
 4. Other potential vulnerabilities in the code
 
-Please provide a new Python script that creates a different x.bin file.
+Please provide a new Python script that creates a different x.bin file. Only output the Python script, no other text.
 """
                 messages.append({"role": "user", "content": user_message})
                 
@@ -2906,7 +2973,9 @@ def main():
 
     parser.add_argument("--cpv", type=str, default="cpv12",
                         help="CPV number to test (e.g., cpv3, cpv5, cpv9)")
-                        
+
+    parser.add_argument("--pov-phase", type=int, default=0, help=argparse.SUPPRESS)
+
     args = parser.parse_args()
     # Set global variables
     global TEST_NGINX, DO_PATCH, DO_PATCH_ONLY, MAX_ITERATIONS, FUZZING_TIMEOUT_MINUTES

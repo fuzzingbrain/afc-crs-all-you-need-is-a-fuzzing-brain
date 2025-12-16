@@ -158,11 +158,15 @@ func runPatchingStrategies(
 	log.Printf("Original fuzzer path: %s", myFuzzer)
 	log.Printf("Patch workspace fuzzer path: %s", patchFuzzerPath)
 
-	// Find all strategy files under /app/strategy/
-	strategyDir := "/app/strategy"
-	strategyFilePattern := "patch*_delta.py"
+	// Find all strategy files under strategy/jeff/
+	strategyBaseDir := os.Getenv("STRATEGY_BASE_DIR")
+	if strategyBaseDir == "" {
+		strategyBaseDir = "/app/strategy"
+	}
+	strategyDir := filepath.Join(strategyBaseDir, "jeff")
+	strategyFilePattern := "patch0_delta.py"
 	if taskDetail.Type == "full" {
-		strategyFilePattern = "patch*_full.py"
+		strategyFilePattern = "patch0_full.py"
 	}
 
 	if !taskDetail.HarnessesIncluded {
@@ -174,7 +178,7 @@ func runPatchingStrategies(
 		}
 	}
 
-	strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, "**", strategyFilePattern))
+	strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, strategyFilePattern))
 	if err != nil {
 		log.Printf("Failed to find strategy files: %v", err)
 		return false
@@ -632,14 +636,18 @@ func runXPatchingStrategiesWithoutPOV(
 	log.Printf("Original fuzzer path: %s", myFuzzer)
 	log.Printf("Patch workspace fuzzer path: %s", patchFuzzerPath)
 
-	// Find all strategy files under /app/strategy/
-	strategyDir := "/app/strategy"
-	strategyFilePattern := "xpatch*_delta.py"
+	// Find all strategy files under strategy/jeff/
+	strategyBaseDir := os.Getenv("STRATEGY_BASE_DIR")
+	if strategyBaseDir == "" {
+		strategyBaseDir = "/app/strategy"
+	}
+	strategyDir := filepath.Join(strategyBaseDir, "jeff")
+	strategyFilePattern := "xpatch_delta.py"
 	if taskDetail.Type == "full" {
-		strategyFilePattern = "xpatch*_full.py"
+		strategyFilePattern = "xpatch_full.py"
 	}
 
-	strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, "**", strategyFilePattern))
+	strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, strategyFilePattern))
 	if err != nil {
 		log.Printf("Failed to find strategy files: %v", err)
 		return false
@@ -880,9 +888,13 @@ func runXPatchSarifStrategies(
 	log.Printf("runXPatchSarifStrategies: starting patch attempt with sarif "+
 		"(task type: %s)", taskDetail.Type)
 
-	strategyDir := "/app/strategy"
+	strategyBaseDir := os.Getenv("STRATEGY_BASE_DIR")
+	if strategyBaseDir == "" {
+		strategyBaseDir = "/app/strategy"
+	}
+	strategyDir := filepath.Join(strategyBaseDir, "jeff")
 	strategyFilePattern := "xpatch_sarif.py"
-	strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, "**", strategyFilePattern))
+	strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, strategyFilePattern))
 	if err != nil {
 		log.Printf("Failed to find strategy files: %v", err)
 		return false
