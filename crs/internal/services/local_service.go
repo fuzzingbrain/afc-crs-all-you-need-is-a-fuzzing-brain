@@ -137,8 +137,8 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 	if !jsonFound {
 		log.Printf("No valid task_detail.json found – falling back to default task detail")
 
-		projectName := "test"
-		focusName := "test"
+		projectName := "unknown"
+		focusName := "repo"
 
 		projectsDir := filepath.Join(taskDir, "fuzz-tooling/projects/")
 		files, err := os.ReadDir(projectsDir)
@@ -146,8 +146,8 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 			for _, file := range files {
 				if file.IsDir() {
 					projectName = file.Name()
-					focusName = "afc-" + projectName
-					log.Printf("Found project '%s' in fuzz-tooling/projects, setting focus to '%s'", projectName, focusName)
+					focusName = "repo"
+					log.Printf("Found project '%s' in fuzz-tooling/projects, source code in '%s'", projectName, focusName)
 					break // Use the first one
 				}
 			}
@@ -469,7 +469,15 @@ func (s *LocalCRSService) buildFuzzersDocker(myFuzzer *string, taskDir, projectD
 	} else {
 		// For both Java and C tasks on worker
 		if true {
-			build.BuildAFCFuzzers(taskDir, sanitizer, taskDetail.ProjectName, sanitizerProjectDir, sanitizerDir)
+			output, err := build.BuildAFCFuzzers(taskDir, sanitizer, taskDetail.ProjectName, sanitizerProjectDir, sanitizerDir)
+			if err != nil {
+				log.Printf("[BuildAFCFuzzers] Build failed for %s-%s: %v", taskDetail.ProjectName, sanitizer, err)
+				if output != "" {
+					log.Printf("[BuildAFCFuzzers] Output:\n%s", output)
+				}
+			} else if output != "" {
+				log.Printf("[BuildAFCFuzzers] Build completed for %s-%s", taskDetail.ProjectName, sanitizer)
+			}
 		} else {
 			workDir := filepath.Join(taskDir, "fuzz-tooling", "build", "work", fmt.Sprintf("%s-%s", taskDetail.ProjectName, sanitizer))
 

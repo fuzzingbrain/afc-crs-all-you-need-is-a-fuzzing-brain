@@ -594,6 +594,32 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path, 
             except Exception as e:
                 log_message(log_file, f"Direct copy failed: {str(e)}")
 
+            # Find Docker image: try aixcc-afc first, then gcr.io/oss-fuzz
+            docker_image = None
+
+            # Check aixcc-afc/{project_name}
+            try:
+                result_check = subprocess.run(["docker", "images", f"aixcc-afc/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                if result_check.returncode == 0 and result_check.stdout.strip():
+                    docker_image = result_check.stdout.strip().split('\n')[0]
+            except Exception as e:
+                log_message(log_file, f"Failed to find docker image for aixcc-afc/{project_name}: {str(e)}")
+
+            # If not found, check gcr.io/oss-fuzz/{project_name}
+            if not docker_image:
+                try:
+                    result_check = subprocess.run(["docker", "images", f"gcr.io/oss-fuzz/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                    if result_check.returncode == 0 and result_check.stdout.strip():
+                        docker_image = result_check.stdout.strip().split('\n')[0]
+                except Exception as e:
+                    log_message(log_file, f"Failed to find docker image for gcr.io/oss-fuzz/{project_name}: {str(e)}")
+
+            if not docker_image:
+                log_message(log_file, f"Failed to find docker image for {project_name}")
+                return False, f"Failed to find docker image for {project_name}"
+
+            log_message(log_file, f"Found docker image for {project_name}: {docker_image}")
+
             # If we haven't defined docker_cmd yet (because we successfully copied to out_dir)
             if not 'docker_cmd' in locals():
                 docker_cmd = [
@@ -606,7 +632,7 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path, 
                     "-e", f"PROJECT_NAME={project_name}",
                     "-v", f"{out_dir}:/out",
                     "-v", f"{work_dir}:/work",
-                    f"aixcc-afc/{project_name}",
+                    docker_image,
                     f"/out/{fuzzer_name}",
                     # f"--instrumentation_includes=org.apache.zookeeper.**",
                     # f"--coverage_dump=coverage.exec",
@@ -1637,6 +1663,33 @@ def apply_patch(log_file, patch_code_dict, project_dir, project_src_dir, languag
         fuzz_language = "jvm"
         if language.startswith('c'):
            fuzz_language = "c++"
+
+        # Find Docker image: try aixcc-afc first, then gcr.io/oss-fuzz
+        docker_image = None
+
+        # Check aixcc-afc/{project_name}
+        try:
+            result_check = subprocess.run(["docker", "images", f"aixcc-afc/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+            if result_check.returncode == 0 and result_check.stdout.strip():
+                docker_image = result_check.stdout.strip().split('\n')[0]
+        except Exception as e:
+            log_message(log_file, f"Failed to find docker image for aixcc-afc/{project_name}: {str(e)}")
+
+        # If not found, check gcr.io/oss-fuzz/{project_name}
+        if not docker_image:
+            try:
+                result_check = subprocess.run(["docker", "images", f"gcr.io/oss-fuzz/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                if result_check.returncode == 0 and result_check.stdout.strip():
+                    docker_image = result_check.stdout.strip().split('\n')[0]
+            except Exception as e:
+                log_message(log_file, f"Failed to find docker image for gcr.io/oss-fuzz/{project_name}: {str(e)}")
+
+        if not docker_image:
+            log_message(log_file, f"Failed to find docker image for {project_name}")
+            return False, f"Failed to find docker image for {project_name}"
+
+        log_message(log_file, f"Found docker image for {project_name}: {docker_image}")
+
         # Build Docker command
         cmd_args = [
             "docker", "run",
@@ -1653,7 +1706,7 @@ def apply_patch(log_file, patch_code_dict, project_dir, project_src_dir, languag
             "-v", f"{project_src_dir}:/src/{project_name}",
             "-v", f"{out_dir}:/out",
             "-v", f"{work_dir}:/work",
-            f"aixcc-afc/{project_name}"
+            docker_image
         ]
         # Convert array to string with proper escaping
         cmd_string = " ".join([arg if " " not in arg else f'"{arg}"' for arg in cmd_args])
@@ -2447,10 +2500,43 @@ Please generate a valid patch that can be applied to the code.
                 success_metadata_path = os.path.join(attempt_dir, "success_metadata.json")
                 with open(success_metadata_path, "w") as f:
                     json.dump(success_metadata, f, indent=2)
-                
+
                 # Also copy to the main success directory
                 shutil.copy(success_metadata_path, os.path.join(PATCH_SUCCESS_DIR, f"success_metadata_{model_name}_{time.strftime('%Y%m%d_%H%M%S')}.json"))
-            
+
+                # Save to main patch folder (same as patch0_delta.py)
+                # project_dir is typically the workspace directory
+                # e.g., /root/.../workspace/libpng_20251215_175412
+                original_workspace = project_dir.rstrip('/')
+                workspace_name = os.path.basename(original_workspace)
+                # Get the main directory (e.g., /root/afc-crs-all-you-need-is-a-fuzzing-brain)
+                workspace_parent = os.path.dirname(original_workspace)
+                main_dir = os.path.dirname(workspace_parent)
+                patch_parent = os.path.join(main_dir, "patch")
+                workspace_patch_base = os.path.join(patch_parent, workspace_name)
+
+                # Create a separate folder for each patch
+                patch_folder_name = f"patch_{model_name}_{iteration}_{time.strftime('%Y%m%d_%H%M%S')}"
+                main_patch_dir = os.path.join(workspace_patch_base, patch_folder_name)
+
+                try:
+                    os.makedirs(main_patch_dir, exist_ok=True)
+
+                    # Copy all patch artifacts to dedicated patch folder
+                    main_diff_file = os.path.join(main_patch_dir, "patch.diff")
+                    main_patch_file = os.path.join(main_patch_dir, "patched_file.c")
+                    main_conv_file = os.path.join(main_patch_dir, "conversation.json")
+                    main_metadata_file = os.path.join(main_patch_dir, "patch_metadata.json")
+
+                    shutil.copy(diff_file, main_diff_file)
+                    shutil.copy(patch_file, main_patch_file)
+                    shutil.copy(conversation_path, main_conv_file)
+                    shutil.copy(success_metadata_path, main_metadata_file)
+
+                    log_message(log_file, f"Copied patch artifacts to: {main_patch_dir}")
+                except Exception as e:
+                    log_message(log_file, f"Warning: Failed to copy patch to main folder: {str(e)}")
+
                 log_message(log_file, f"PATCH SUCCESS! Vulnerability patched on iteration {iteration}")
                 log_message(log_file, "Successfully patched the vulnerability, exiting the process")
                 return True, patch_id  # Return success status to the caller

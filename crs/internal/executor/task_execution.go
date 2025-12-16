@@ -209,10 +209,10 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 		basicPhasesSpan.End()
 	}
 
-	// For full scan tasks, return early after basic phase completes
-	if params.TaskDetail.Type == models.TaskTypeFull {
+	// For full scan tasks without patching enabled, return early after basic phase completes
+	if params.TaskDetail.Type == models.TaskTypeFull && !params.StrategyConfig.EnablePatching {
 		if povSuccess {
-			log.Printf("✓ Full scan completed: POV found!")
+			log.Printf("✓ Full scan completed: POV found! (Patching disabled)")
 			return nil
 		} else {
 			log.Printf("✗ Full scan completed: No POV found")
@@ -220,7 +220,7 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 		}
 	}
 
-	// For delta scan tasks, continue with advanced phases
+	// Continue with advanced phases (for delta scan or full scan with patching enabled)
 	if povSuccess {
 		log.Printf("POV found in basic phase!")
 		povFound.Do(func() { close(povChan) })
@@ -266,17 +266,19 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 	if !params.StrategyConfig.EnablePatching {
 		log.Println("========== PATCHING DISABLED: Waiting for POV or deadline ==========")
 		select {
-		case <-povChan:
+		case <-genericPovChan:
 			log.Println("========== POV FOUND: Patching disabled, task completed ==========")
+			printCompletionSummary(projectDir, params.TaskDir, povSuccess)
 			return nil
 		case <-time.After(time.Until(deadlineTime)):
 			log.Println("========== DEADLINE REACHED: No POV found ==========")
+			printCompletionSummary(projectDir, params.TaskDir, false)
 			return ErrPOVNotFound
 		}
 	}
 
 	select {
-	case <-povChan:
+	case <-genericPovChan:
 		log.Println("========== POV FOUND: Proceeding to patching ==========")
 		patchSuccess = executePatchingPhase(ctx, fuzzer, params, projectDir, fuzzDir, sanitizer, deadlineTime)
 
@@ -293,9 +295,11 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 	io.WriteString(log.Writer(), "\r\033[K")
 	if patchSuccess {
 		log.Printf("✓ TASK COMPLETED SUCCESSFULLY: %s", fuzzer)
+		printCompletionSummary(projectDir, params.TaskDir, povSuccess)
 		return nil
 	} else {
 		log.Printf("✗ TASK FAILED: Could not generate valid patch for %s", fuzzer)
+		printCompletionSummary(projectDir, params.TaskDir, povSuccess)
 		return ErrPatchNotFound
 	}
 }
@@ -392,5 +396,73 @@ func executeXPatchPhase(fuzzer string, params TaskExecutionParams, projectDir, s
 	}
 
 	return patchSuccess
+}
+
+// printCompletionSummary prints a formatted summary box with paths and results
+func printCompletionSummary(projectDir, taskDir string, povFound bool) {
+	// Extract workspace name
+	workspaceName := filepath.Base(strings.TrimRight(projectDir, "/"))
+
+	// Determine paths
+	workspaceParent := filepath.Dir(strings.TrimRight(projectDir, "/"))
+	mainDir := filepath.Dir(workspaceParent)
+	povDir := filepath.Join(mainDir, "pov", workspaceName)
+	patchDir := filepath.Join(mainDir, "patch", workspaceName)
+	logPath := filepath.Join(taskDir, "task.log")
+
+	// Check if POV directory exists and count POVs
+	povCount := 0
+	if entries, err := os.ReadDir(povDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() && strings.HasPrefix(entry.Name(), "pov_") {
+				povCount++
+			}
+		}
+	}
+
+	// Check if Patch directory exists and count patches
+	patchCount := 0
+	if entries, err := os.ReadDir(patchDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() && strings.HasPrefix(entry.Name(), "patch_") {
+				patchCount++
+			}
+		}
+	}
+
+	log.Println("")
+	log.Println("╔════════════════════════════════════════════════════════════════╗")
+	log.Println("║                    TASK COMPLETION SUMMARY                     ║")
+	log.Println("╠════════════════════════════════════════════════════════════════╣")
+
+	status := "SUCCESS ✓"
+	if !povFound {
+		status = "NO POV FOUND ✗"
+	}
+	log.Printf("║ Status: %s", status)
+
+	if povFound && povCount > 0 {
+		log.Printf("║ POVs Found: %d", povCount)
+	}
+
+	if patchCount > 0 {
+		log.Printf("║ Patches Found: %d", patchCount)
+	}
+
+	log.Println("╠════════════════════════════════════════════════════════════════╣")
+	log.Println("║ Paths:")
+	log.Printf("║   Workspace:  %s", projectDir)
+	log.Printf("║   Log:        %s", logPath)
+
+	if povFound && povCount > 0 {
+		log.Printf("║   POVs:       %s", povDir)
+	}
+
+	if patchCount > 0 {
+		log.Printf("║   Patches:    %s", patchDir)
+	}
+
+	log.Println("╚════════════════════════════════════════════════════════════════╝")
+	log.Println("")
 }
 
