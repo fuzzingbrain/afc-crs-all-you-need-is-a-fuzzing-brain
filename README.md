@@ -41,9 +41,16 @@
 
 ## Quick Start
 
-### 1. Setup Configuration
+### 1. Clone Repository
 
-First, create your `.env` configuration file:
+```bash
+git clone https://github.com/your-org/afc-crs-all-you-need-is-a-fuzzing-brain.git
+cd afc-crs-all-you-need-is-a-fuzzing-brain
+```
+
+### 2. Setup Configuration
+
+Create your `.env` configuration file:
 
 ```bash
 cd crs
@@ -62,7 +69,7 @@ XAI_API_KEY=xai-your-actual-xai-key-here
 
 **Note**: If you skip this step, FuzzingBrain will prompt you interactively for API keys on first run.
 
-### 2. Run Delta Scan
+### 3. Run Delta Scan
 
 Analyze changes between two specific commits:
 
@@ -70,7 +77,7 @@ Analyze changes between two specific commits:
 ./FuzzingBrain.sh -b bc841a89aea42b2a2de752171588ce94402b3949 -d 2c894c66108f0724331a9e5b4826e351bf2d094b git@github.com:OwenSanzas/libpng.git
 ```
 
-### 3. Run Full Scan
+### 4. Run Full Scan
 
 Complete vulnerability analysis on entire repository:
 
@@ -78,7 +85,7 @@ Complete vulnerability analysis on entire repository:
 ./FuzzingBrain.sh git@github.com:OwenSanzas/libpng.git
 ```
 
-### Output
+### 5. Output
 
 After running, you'll find:
 - **Logs**: `workspace/<project>_<timestamp>/task.log`
