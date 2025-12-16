@@ -1247,14 +1247,40 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path):
         unique_id = str(uuid.uuid4())[:8]  # Use first 8 chars of UUID for brevity
         unique_blob_name = f"x_{unique_id}.bin"
         # Try multiple approaches to make the blob accessible to Docker
-        docker_blob_path = os.path.join(out_dir_x, unique_blob_name)            
+        docker_blob_path = os.path.join(out_dir_x, unique_blob_name)
         # Approach 1: Try direct copy
         try:
             shutil.copy(blob_path, docker_blob_path)
             log_message(log_file, f"Copied blob to {docker_blob_path}")
         except Exception as e:
             log_message(log_file, f"Direct copy failed: {str(e)}")
-        
+
+        # Find Docker image: try aixcc-afc first, then gcr.io/oss-fuzz
+        docker_image = None
+
+        # Check aixcc-afc/{project_name}
+        try:
+            result_check = subprocess.run(["docker", "images", f"aixcc-afc/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+            if result_check.returncode == 0 and result_check.stdout.strip():
+                docker_image = result_check.stdout.strip().split('\n')[0]
+        except Exception as e:
+            log_message(log_file, f"Failed to find docker image for aixcc-afc/{project_name}: {str(e)}")
+
+        # If not found, check gcr.io/oss-fuzz/{project_name}
+        if not docker_image:
+            try:
+                result_check = subprocess.run(["docker", "images", f"gcr.io/oss-fuzz/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                if result_check.returncode == 0 and result_check.stdout.strip():
+                    docker_image = result_check.stdout.strip().split('\n')[0]
+            except Exception as e:
+                log_message(log_file, f"Failed to find docker image for gcr.io/oss-fuzz/{project_name}: {str(e)}")
+
+        if not docker_image:
+            log_message(log_file, f"Failed to find docker image for {project_name}")
+            return False, f"Failed to find docker image for {project_name}"
+
+        log_message(log_file, f"Found docker image for {project_name}: {docker_image}")
+
         # If we haven't defined docker_cmd yet (because we successfully copied to out_dir)
         if not 'docker_cmd' in locals():
             docker_cmd = [
@@ -1268,10 +1294,10 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path):
                 "-v", f"{sanitizer_project_dir}:/src/{project_name}",
                 "-v", f"{out_dir_x}:/out",
                 "-v", f"{work_dir}:/work",
-                f"aixcc-afc/{project_name}",
+                docker_image,
                 f"/out/{fuzzer_name}",
                 "-timeout=30",           # Add libFuzzer timeout parameter
-                "-timeout_exitcode=99",  # Set specific exit code for timeouts                
+                "-timeout_exitcode=99",  # Set specific exit code for timeouts
                 f'/out/{unique_blob_name}'
             ]
 
@@ -1356,7 +1382,7 @@ def extract_and_save_crash_input(log_file, crash_dir, fuzzer_name, out_dir_x, pr
     def test_crash_file(crash_file, project_name, sanitizer):
         """Test if a crash file actually triggers a crash when run with the fuzzer"""
         log_message(log_file, f"Testing crash file: {crash_file}")
-        
+
         # Get just the "crashes/crash-xxx" part correctly
         if "crashes/" in crash_file:
             # Extract just the "crashes/crash-xxx" part
@@ -1364,7 +1390,31 @@ def extract_and_save_crash_input(log_file, crash_dir, fuzzer_name, out_dir_x, pr
         else:
             # Fallback if crashes/ isn't in the path
             relative_path = os.path.basename(crash_file)
-        
+
+        # Find Docker image: try aixcc-afc first, then gcr.io/oss-fuzz
+        docker_image = None
+
+        # Check aixcc-afc/{project_name}
+        try:
+            result_check = subprocess.run(["docker", "images", f"aixcc-afc/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+            if result_check.returncode == 0 and result_check.stdout.strip():
+                docker_image = result_check.stdout.strip().split('\n')[0]
+        except Exception as e:
+            log_message(log_file, f"Failed to find docker image for aixcc-afc/{project_name}: {str(e)}")
+
+        # If not found, check gcr.io/oss-fuzz/{project_name}
+        if not docker_image:
+            try:
+                result_check = subprocess.run(["docker", "images", f"gcr.io/oss-fuzz/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                if result_check.returncode == 0 and result_check.stdout.strip():
+                    docker_image = result_check.stdout.strip().split('\n')[0]
+            except Exception as e:
+                log_message(log_file, f"Failed to find docker image for gcr.io/oss-fuzz/{project_name}: {str(e)}")
+
+        if not docker_image:
+            log_message(log_file, f"Failed to find docker image for {project_name}")
+            return False
+
         # Set up the Docker command to test the crash
         docker_cmd = [
             "docker", "run", "--rm",
@@ -1377,7 +1427,7 @@ def extract_and_save_crash_input(log_file, crash_dir, fuzzer_name, out_dir_x, pr
             "-v", f"{sanitizer_project_dir}:/src/{project_name}",
             "-v", f"{out_dir_x}:/out",
             "-v", f"{os.path.dirname(crash_file)}:/crashes",
-            f"aixcc-afc/{project_name}",
+            docker_image,
             f"/out/{fuzzer_name}",
             "-timeout=30",
             "-timeout_exitcode=99",
@@ -1496,27 +1546,50 @@ def log_fuzzer_output(log_file, combined_output, max_line_length=200):
         log_message(log_file, f"Fuzzer output END (last 200 lines):\n{end_output}")
 
 def run_fuzzer_with_coverage(log_file, fuzzer_path, project_dir, focus, sanitizer, project_name, seed_corpus_dir):
-    """Run the fuzzer with seed corpus dir containing generated blob file"""    
+    """Run the fuzzer with seed corpus dir containing generated blob file"""
     try:
         log_message(log_file, f"Running fuzzer {fuzzer_path} with {seed_corpus_dir}")
         # Get the directory containing the fuzzer
-        fuzzer_name = os.path.basename(fuzzer_path) 
+        fuzzer_name = os.path.basename(fuzzer_path)
         sanitizer_project_dir = os.path.join(project_dir, focus)
         out_dir = os.path.dirname(fuzzer_path)
         out_dir_x = os.path.join(out_dir, f"ap{POV_PHASE}")
 
         work_dir = os.path.join(project_dir, "fuzz-tooling", "build", "work", f"{project_name}-{sanitizer}")
-        
+
         # Create a directory for crash inputs if it doesn't exist
         crash_dir = os.path.join(out_dir_x, "crashes")
         os.makedirs(crash_dir, exist_ok=True)
-        
+
         corpus_container_path = "/corpus"
-        
+
         # Set a shorter timeout for the fuzzer itself to ensure we get coverage output
         # Make this less than the subprocess timeout
         fuzzer_timeout = 55  # 55 seconds for the fuzzer
         subprocess_timeout = 60  # 60 seconds for the subprocess
+
+        # Find Docker image: try aixcc-afc first, then gcr.io/oss-fuzz
+        docker_image = None
+        try:
+            result_check = subprocess.run(["docker", "images", f"aixcc-afc/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+            if result_check.returncode == 0 and result_check.stdout.strip():
+                docker_image = result_check.stdout.strip().split('\n')[0]
+                log_message(log_file, f"Using Docker image: {docker_image}")
+        except Exception as e:
+            log_message(log_file, f"Failed to find docker image for aixcc-afc/{project_name}: {str(e)}")
+
+        if not docker_image:
+            try:
+                result_check = subprocess.run(["docker", "images", f"gcr.io/oss-fuzz/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                if result_check.returncode == 0 and result_check.stdout.strip():
+                    docker_image = result_check.stdout.strip().split('\n')[0]
+                    log_message(log_file, f"Using Docker image: {docker_image}")
+            except Exception as e:
+                log_message(log_file, f"Failed to find docker image for gcr.io/oss-fuzz/{project_name}: {str(e)}")
+
+        if not docker_image:
+            log_message(log_file, f"Failed to find docker image for {project_name}")
+            return False, "", "", None
 
         docker_cmd = [
             "docker", "run", "--rm",
@@ -1530,7 +1603,7 @@ def run_fuzzer_with_coverage(log_file, fuzzer_path, project_dir, focus, sanitize
             "-v", f"{out_dir_x}:/out",
             "-v", f"{work_dir}:/work",
             "-v", f"{seed_corpus_dir}:{corpus_container_path}",
-            f"aixcc-afc/{project_name}",
+            docker_image,
             f"/out/{fuzzer_name}",
             "-print_coverage=1",
             f"-max_total_time={fuzzer_timeout}",  # Use the shorter timeout for the fuzzer
@@ -2262,7 +2335,7 @@ def extract_crash_output(output):
     
     return output
     
-def after_pov_crash_detected(log_file,model_name,iteration,fuzzer_name,sanitizer,project_name,crash_output,vuln_signature,code,blob_path,messages):
+def after_pov_crash_detected(log_file,model_name,iteration,fuzzer_name,sanitizer,project_name,crash_output,vuln_signature,code,blob_path,messages,project_dir=None):
     pov_id = str(uuid.uuid4())[:8]
     # Define a more accessible directory for saving POVs
     pov_base_dir = os.environ.get('POV_OUTPUT_DIR', '/tmp/povs')
@@ -2276,7 +2349,7 @@ def after_pov_crash_detected(log_file,model_name,iteration,fuzzer_name,sanitizer
         log_message(log_file, f"Warning: Cannot write to {POV_SUCCESS_DIR}, using {pov_success_dir} instead")
         os.makedirs(pov_success_dir, exist_ok=True)
         save_dir = pov_success_dir
-    
+
     # Save the successful test case
     pov_file_path = os.path.join(save_dir, f"pov_{pov_id}_{model_name}_{iteration}.py")
     try:
@@ -2286,23 +2359,57 @@ def after_pov_crash_detected(log_file,model_name,iteration,fuzzer_name,sanitizer
         log_message(log_file, f"Saved POV to {pov_file_path}")
     except Exception as e:
         log_message(log_file, f"Error saving POV: {str(e)}")
-        
+
     blob_file = f"test_blob_{pov_id}_{model_name}_{iteration}.bin"
     if os.path.exists(blob_path):
         shutil.copy(blob_path, os.path.join(save_dir, blob_file))
-    
+
     # Save the crash output
     fuzzer_output_file = f"fuzzer_output_{pov_id}_{model_name}_{iteration}.txt"
     with open(os.path.join(save_dir, fuzzer_output_file), "w") as f:
         f.write(crash_output)
-    
+
     # Save the conversation history as JSON
     conversation_file = f"conversation_{pov_id}_{model_name}_{iteration}.json"
     with open(os.path.join(save_dir, conversation_file), "w") as f:
         json.dump(messages, f, indent=2)
-    
+
     log_message(log_file, f"Saved successful PoV artifacts to {save_dir}")
-    
+
+    # Also save to main pov folder (same as xs0_delta.py)
+    if project_dir:
+        # Extract workspace name from project_dir (e.g., libpng_20251215_164844)
+        workspace_name = os.path.basename(project_dir.rstrip('/'))
+        # Get parent directory of workspace
+        workspace_parent = os.path.dirname(project_dir.rstrip('/'))
+        # Create pov directory at same level as workspace
+        pov_parent = os.path.join(os.path.dirname(workspace_parent), "pov")
+        workspace_pov_base = os.path.join(pov_parent, workspace_name)
+
+        # Create a separate folder for each POV
+        pov_folder_name = f"pov_{pov_id}_{model_name}_{iteration}"
+        main_pov_dir = os.path.join(workspace_pov_base, pov_folder_name)
+
+        try:
+            os.makedirs(main_pov_dir, exist_ok=True)
+
+            # Copy all POV artifacts to dedicated pov folder
+            main_pov_file = os.path.join(main_pov_dir, f"pov.py")
+            main_blob_file = os.path.join(main_pov_dir, "test_blob.bin")
+            main_output_file = os.path.join(main_pov_dir, "fuzzer_output.txt")
+            main_conv_file = os.path.join(main_pov_dir, "conversation.json")
+            main_metadata_file = os.path.join(main_pov_dir, "pov_metadata.json")
+
+            shutil.copy(pov_file_path, main_pov_file)
+            if os.path.exists(os.path.join(save_dir, blob_file)):
+                shutil.copy(os.path.join(save_dir, blob_file), main_blob_file)
+            shutil.copy(os.path.join(save_dir, fuzzer_output_file), main_output_file)
+            shutil.copy(os.path.join(save_dir, conversation_file), main_conv_file)
+
+            log_message(log_file, f"Copied POV artifacts to: {main_pov_dir}")
+        except Exception as e:
+            log_message(log_file, f"Warning: Failed to copy POV to main folder: {str(e)}")
+
     # Create POV metadata
     pov_metadata = {
         "conversation": conversation_file,
@@ -2313,15 +2420,24 @@ def after_pov_crash_detected(log_file,model_name,iteration,fuzzer_name,sanitizer
         "project_name": project_name,
         "pov_signature": vuln_signature,
     }
-    
+
     # Save pov_metadata to disk
     metadata_file = f"pov_metadata_{pov_id}_{model_name}_{iteration}.json"
     metadata_path = os.path.join(save_dir, metadata_file)
     with open(metadata_path, "w") as f:
         json.dump(pov_metadata, f, indent=2)
-    
+
+    # Also save metadata to main pov folder
+    if project_dir:
+        try:
+            main_metadata_path = os.path.join(main_pov_dir, "pov_metadata.json")
+            with open(main_metadata_path, "w") as f:
+                json.dump(pov_metadata, f, indent=2)
+        except Exception as e:
+            log_message(log_file, f"Warning: Failed to save metadata to main folder: {str(e)}")
+
     log_message(log_file, f"Saved PoV metadata to {metadata_path}")
-    
+
     return pov_metadata
 
 def has_successful_pov0(fuzzer_path):
@@ -2484,7 +2600,7 @@ def doAdvancedPoV0(log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer, p
                 # Submit POV to endpoint
                 submission_result = submit_pov_to_endpoint(log_file, project_dir,blob_path,fuzzer_output,sanitizer, vuln_signature, fuzzer_name)
                 if submission_result or True: # for local test w/o submission endpoint
-                    pov_metadata = after_pov_crash_detected(log_file,model_name,iteration,fuzzer_name,sanitizer,project_name,crash_output,vuln_signature,code,blob_path,messages)
+                    pov_metadata = after_pov_crash_detected(log_file,model_name,iteration,fuzzer_name,sanitizer,project_name,crash_output,vuln_signature,code,blob_path,messages,project_dir)
                     successful_pov_metadata = pov_metadata
                     log_message(log_file, f"POV SUCCESS! Vulnerability triggered with {model_name} on iteration {iteration}")
                     break

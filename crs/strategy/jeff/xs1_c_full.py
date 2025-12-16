@@ -1385,6 +1385,29 @@ def run_fuzzer_with_input_for_c_coverage(
         shutil.copy(blob_path, host_blob)
         log_message(log_file, f"[coverage] blob copied to {host_blob}")
 
+        # Find Docker image: try aixcc-afc first, then gcr.io/oss-fuzz
+        docker_image = None
+        try:
+            result_check = subprocess.run(["docker", "images", f"aixcc-afc/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+            if result_check.returncode == 0 and result_check.stdout.strip():
+                docker_image = result_check.stdout.strip().split('\n')[0]
+                log_message(log_file, f"Using Docker image: {docker_image}")
+        except Exception as e:
+            log_message(log_file, f"Failed to find docker image for aixcc-afc/{project_name}: {str(e)}")
+
+        if not docker_image:
+            try:
+                result_check = subprocess.run(["docker", "images", f"gcr.io/oss-fuzz/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                if result_check.returncode == 0 and result_check.stdout.strip():
+                    docker_image = result_check.stdout.strip().split('\n')[0]
+                    log_message(log_file, f"Using Docker image: {docker_image}")
+            except Exception as e:
+                log_message(log_file, f"Failed to find docker image for gcr.io/oss-fuzz/{project_name}: {str(e)}")
+
+        if not docker_image:
+            log_message(log_file, f"Failed to find docker image for {project_name}")
+            return False, lcov_host, f"Failed to find docker image for {project_name}"
+
         # ------------------------------------------------------------
         # 2.  Run the coverage fuzzer once (records to /out/coverage.profraw)
         # ------------------------------------------------------------
@@ -1395,7 +1418,7 @@ def run_fuzzer_with_input_for_c_coverage(
             # LLVM_PROFILE_FILE tells the binary where to dump coverage
             "-e", "LLVM_PROFILE_FILE=/out/coverage.profraw",
             "-v", f"{out_dir}:/out",
-            f"aixcc-afc/{project_name}",
+            docker_image,
             f"/out/{fuzzer_name}",
             "-runs=1",
             f"/out/{unique_blob}",
@@ -1427,7 +1450,7 @@ def run_fuzzer_with_input_for_c_coverage(
         docker_cov = [
             "docker", "run", "--rm", "--platform", "linux/amd64",
             "-v", f"{out_dir}:/out",
-            f"aixcc-afc/{project_name}",
+            docker_image,
             "bash", "-c", merge_and_export,
         ]
         log_message(log_file, "[coverage] " + " ".join(docker_cov))
@@ -1503,13 +1526,36 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path, 
             unique_id = str(uuid.uuid4())[:8]  # Use first 8 chars of UUID for brevity
             unique_blob_name = f"x_{unique_id}.bin"
             # Try multiple approaches to make the blob accessible to Docker
-            docker_blob_path = os.path.join(out_dir_x, unique_blob_name)            
+            docker_blob_path = os.path.join(out_dir_x, unique_blob_name)
             # Approach 1: Try direct copy
             try:
                 shutil.copy(blob_path, docker_blob_path)
                 log_message(log_file, f"Copied blob to {docker_blob_path}")
             except Exception as e:
                 log_message(log_file, f"Direct copy failed: {str(e)}")
+
+            # Find Docker image: try aixcc-afc first, then gcr.io/oss-fuzz
+            docker_image = None
+            try:
+                result_check = subprocess.run(["docker", "images", f"aixcc-afc/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                if result_check.returncode == 0 and result_check.stdout.strip():
+                    docker_image = result_check.stdout.strip().split('\n')[0]
+                    log_message(log_file, f"Using Docker image: {docker_image}")
+            except Exception as e:
+                log_message(log_file, f"Failed to find docker image for aixcc-afc/{project_name}: {str(e)}")
+
+            if not docker_image:
+                try:
+                    result_check = subprocess.run(["docker", "images", f"gcr.io/oss-fuzz/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                    if result_check.returncode == 0 and result_check.stdout.strip():
+                        docker_image = result_check.stdout.strip().split('\n')[0]
+                        log_message(log_file, f"Using Docker image: {docker_image}")
+                except Exception as e:
+                    log_message(log_file, f"Failed to find docker image for gcr.io/oss-fuzz/{project_name}: {str(e)}")
+
+            if not docker_image:
+                log_message(log_file, f"Failed to find docker image for {project_name}")
+                return False, f"Failed to find docker image for {project_name}"
 
             # If we haven't defined docker_cmd yet (because we successfully copied to out_dir)
             if not 'docker_cmd' in locals():
@@ -1524,7 +1570,7 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path, 
                     "-v", f"{sanitizer_project_dir}:/src/{project_name}",
                     "-v", f"{out_dir_x}:/out",
                     "-v", f"{work_dir}:/work",
-                    f"aixcc-afc/{project_name}",
+                    docker_image,
                     f"/out/{fuzzer_name}",
                     # f"--instrumentation_includes=org.apache.zookeeper.**",
                     # f"--coverage_dump=coverage.exec",
@@ -3681,6 +3727,30 @@ def apply_patch(log_file, patch_code_dict, project_dir, project_src_dir, languag
         fuzz_language = "jvm"
         if language.startswith('c'):
            fuzz_language = "c++"
+
+        # Find Docker image: try aixcc-afc first, then gcr.io/oss-fuzz
+        docker_image = None
+        try:
+            result_check = subprocess.run(["docker", "images", f"aixcc-afc/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+            if result_check.returncode == 0 and result_check.stdout.strip():
+                docker_image = result_check.stdout.strip().split('\n')[0]
+                log_message(log_file, f"Using Docker image: {docker_image}")
+        except Exception as e:
+            log_message(log_file, f"Failed to find docker image for aixcc-afc/{project_name}: {str(e)}")
+
+        if not docker_image:
+            try:
+                result_check = subprocess.run(["docker", "images", f"gcr.io/oss-fuzz/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"], capture_output=True, text=True, timeout=60)
+                if result_check.returncode == 0 and result_check.stdout.strip():
+                    docker_image = result_check.stdout.strip().split('\n')[0]
+                    log_message(log_file, f"Using Docker image: {docker_image}")
+            except Exception as e:
+                log_message(log_file, f"Failed to find docker image for gcr.io/oss-fuzz/{project_name}: {str(e)}")
+
+        if not docker_image:
+            log_message(log_file, f"Failed to find docker image for {project_name}")
+            return False, "", f"Failed to find docker image for {project_name}"
+
         # Build Docker command
         cmd_args = [
             "docker", "run",
@@ -3697,7 +3767,7 @@ def apply_patch(log_file, patch_code_dict, project_dir, project_src_dir, languag
             "-v", f"{project_src_dir}:/src/{project_name}",
             "-v", f"{out_dir}:/out",
             "-v", f"{work_dir}:/work",
-            f"aixcc-afc/{project_name}"
+            docker_image
         ]
         
         try:

@@ -209,10 +209,10 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 		basicPhasesSpan.End()
 	}
 
-	// For full scan tasks, return early after basic phase completes
-	if params.TaskDetail.Type == models.TaskTypeFull {
+	// For full scan tasks without patching enabled, return early after basic phase completes
+	if params.TaskDetail.Type == models.TaskTypeFull && !params.StrategyConfig.EnablePatching {
 		if povSuccess {
-			log.Printf("✓ Full scan completed: POV found!")
+			log.Printf("✓ Full scan completed: POV found! (Patching disabled)")
 			return nil
 		} else {
 			log.Printf("✗ Full scan completed: No POV found")
@@ -220,7 +220,7 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 		}
 	}
 
-	// For delta scan tasks, continue with advanced phases
+	// Continue with advanced phases (for delta scan or full scan with patching enabled)
 	if povSuccess {
 		log.Printf("POV found in basic phase!")
 		povFound.Do(func() { close(povChan) })
