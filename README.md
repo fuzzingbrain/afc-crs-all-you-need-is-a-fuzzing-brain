@@ -43,9 +43,9 @@
 
 **Prerequisites**:
 - **Docker** must be installed and running. [Install Docker](https://docs.docker.com/get-docker/)
-- **Go** (>= 1.21) must be installed. [Install Go](https://go.dev/doc/install)
+- **Go** (>= 1.21) - FuzzingBrain will offer to install it automatically if missing
 
-FuzzingBrain will automatically check these requirements and prompt you if something is missing.
+FuzzingBrain will automatically check these requirements. If Go is not installed or the version is too old, you'll be prompted to install it automatically.
 
 ### 1. Clone Repository
 
