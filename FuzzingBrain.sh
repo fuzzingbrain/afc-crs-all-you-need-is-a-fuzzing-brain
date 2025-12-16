@@ -58,47 +58,16 @@ find_ossfuzz_project() {
     echo ""
 }
 
-# Prompt user for API key
+# Prompt user for API keys
 prompt_api_key() {
     local env_file="$CRS_DIR/.env"
     local env_example="$CRS_DIR/.env.example"
 
     echo ""
-    print_info "No API key configured. Let's set one up!"
+    print_info "No API key configured. Let's set them up!"
     echo ""
-    echo "Which API key would you like to use?"
-    echo "  1) Anthropic (Claude)"
-    echo "  2) OpenAI (GPT)"
-    echo "  3) Google (Gemini)"
+    print_info "Press SPACE or ENTER to skip any key you don't have"
     echo ""
-    read -p "Enter choice [1-3]: " choice
-
-    local key_name=""
-    local key_value=""
-
-    case $choice in
-        1)
-            key_name="ANTHROPIC_API_KEY"
-            read -p "Enter your Anthropic API key: " key_value
-            ;;
-        2)
-            key_name="OPENAI_API_KEY"
-            read -p "Enter your OpenAI API key: " key_value
-            ;;
-        3)
-            key_name="GEMINI_API_KEY"
-            read -p "Enter your Google/Gemini API key: " key_value
-            ;;
-        *)
-            print_error "Invalid choice"
-            exit 1
-            ;;
-    esac
-
-    if [ -z "$key_value" ]; then
-        print_error "API key cannot be empty"
-        exit 1
-    fi
 
     # Create .env from example if it doesn't exist
     if [ ! -f "$env_file" ]; then
@@ -110,17 +79,48 @@ prompt_api_key() {
         fi
     fi
 
-    # Update or append the API key
-    if grep -q "^${key_name}=" "$env_file" 2>/dev/null; then
-        # Update existing key
-        sed -i "s|^${key_name}=.*|${key_name}=${key_value}|" "$env_file"
-    else
-        # Append new key
-        echo "${key_name}=${key_value}" >> "$env_file"
+    local keys_added=0
+
+    # Prompt for each API key
+    declare -A api_keys=(
+        ["ANTHROPIC_API_KEY"]="Anthropic (Claude)"
+        ["OPENAI_API_KEY"]="OpenAI (GPT)"
+        ["GEMINI_API_KEY"]="Google (Gemini)"
+        ["XAI_API_KEY"]="xAI (Grok)"
+    )
+
+    for key_name in "ANTHROPIC_API_KEY" "OPENAI_API_KEY" "GEMINI_API_KEY" "XAI_API_KEY"; do
+        local key_display="${api_keys[$key_name]}"
+        echo ""
+        read -p "Enter your $key_display API key (or press ENTER to skip): " key_value
+
+        # Skip if empty or just whitespace
+        if [ -z "$key_value" ] || [ "$key_value" = " " ]; then
+            print_warn "Skipped $key_display"
+            continue
+        fi
+
+        # Update or append the API key
+        if grep -q "^${key_name}=" "$env_file" 2>/dev/null; then
+            # Update existing key
+            sed -i "s|^${key_name}=.*|${key_name}=${key_value}|" "$env_file"
+        else
+            # Append new key
+            echo "${key_name}=${key_value}" >> "$env_file"
+        fi
+
+        print_info "$key_display API key saved"
+        export "$key_name=$key_value"
+        keys_added=$((keys_added + 1))
+    done
+
+    echo ""
+    if [ $keys_added -eq 0 ]; then
+        print_error "No API keys were added. At least one API key is required."
+        exit 1
     fi
 
-    print_info "API key saved to $env_file"
-    export "$key_name=$key_value"
+    print_info "Successfully configured $keys_added API key(s)"
 }
 
 # Check if Docker is running
