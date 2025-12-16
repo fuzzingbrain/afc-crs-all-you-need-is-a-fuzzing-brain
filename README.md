@@ -41,6 +41,12 @@
 
 ## Quick Start
 
+**Prerequisites**:
+- **Docker** must be installed and running. [Install Docker](https://docs.docker.com/get-docker/)
+- **Go** (>= 1.21) must be installed. [Install Go](https://go.dev/doc/install)
+
+FuzzingBrain will automatically check these requirements and prompt you if something is missing.
+
 ### 1. Clone Repository
 
 ```bash
@@ -74,7 +80,7 @@ XAI_API_KEY=xai-your-actual-xai-key-here
 Analyze changes between two specific commits:
 
 ```bash
-./FuzzingBrain.sh -b bc841a89aea42b2a2de752171588ce94402b3949 -d 2c894c66108f0724331a9e5b4826e351bf2d094b git@github.com:OwenSanzas/libpng.git
+./FuzzingBrain.sh -b bc841a89aea42b2a2de752171588ce94402b3949 -d 2c894c66108f0724331a9e5b4826e351bf2d094b https://github.com/OwenSanzas/libpng.git
 ```
 
 - `-b`: Base commit (the earlier commit)
@@ -85,7 +91,7 @@ Analyze changes between two specific commits:
 Complete vulnerability analysis on entire repository:
 
 ```bash
-./FuzzingBrain.sh git@github.com:OwenSanzas/libpng.git
+./FuzzingBrain.sh https://github.com/OwenSanzas/libpng.git
 ```
 
 ### 5. Output
@@ -105,6 +111,8 @@ A completion summary will show all paths and counts at the end of execution.
 
 - **Docker**: Ensure Docker is installed and running
   - [Install Docker](https://docs.docker.com/get-docker/)
+- **Go**: Version 1.21 or higher
+  - [Install Go](https://go.dev/doc/install)
 - **Git**: For cloning repositories
 - **At least one LLM API key**:
   - OpenAI (GPT-4, etc.)
@@ -155,7 +163,7 @@ GEMINI_API_KEY_R1=your-gemini-backup-key
 Run a complete vulnerability analysis on a Git repository:
 
 ```bash
-./FuzzingBrain.sh git@github.com:OwenSanzas/libpng.git
+./FuzzingBrain.sh https://github.com/OwenSanzas/libpng.git
 ```
 
 FuzzingBrain will:
@@ -168,7 +176,7 @@ FuzzingBrain will:
 You can also specify the OSS-Fuzz project name if auto-detection fails:
 
 ```bash
-./FuzzingBrain.sh --project libpng git@github.com:OwenSanzas/libpng.git
+./FuzzingBrain.sh --project libpng https://github.com/OwenSanzas/libpng.git
 ```
 
 ### Delta Scan
@@ -176,13 +184,13 @@ You can also specify the OSS-Fuzz project name if auto-detection fails:
 Analyze only the changes between two commits:
 
 ```bash
-./FuzzingBrain.sh -b <base_commit> -d <delta_commit> git@github.com:user/repo.git
+./FuzzingBrain.sh -b <base_commit> -d <delta_commit> https://github.com/user/repo.git
 ```
 
 Example with libpng:
 
 ```bash
-./FuzzingBrain.sh -b bc841a89aea42b2a2de752171588ce94402b3949 -d 2c894c66108f0724331a9e5b4826e351bf2d094b git@github.com:OwenSanzas/libpng.git
+./FuzzingBrain.sh -b bc841a89aea42b2a2de752171588ce94402b3949 -d 2c894c66108f0724331a9e5b4826e351bf2d094b https://github.com/OwenSanzas/libpng.git
 ```
 
 This will:
