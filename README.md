@@ -77,6 +77,9 @@ Analyze changes between two specific commits:
 ./FuzzingBrain.sh -b bc841a89aea42b2a2de752171588ce94402b3949 -d 2c894c66108f0724331a9e5b4826e351bf2d094b git@github.com:OwenSanzas/libpng.git
 ```
 
+- `-b`: Base commit (the earlier commit)
+- `-d`: Delta commit (the later commit to compare against)
+
 ### 4. Run Full Scan
 
 Complete vulnerability analysis on entire repository:
