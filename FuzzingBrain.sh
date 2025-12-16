@@ -185,29 +185,32 @@ check_environment() {
 }
 
 show_usage() {
-    echo "Usage: $0 [OPTIONS] <git_url|workspace_path> [commit_id]"
+    echo "Usage: $0 [OPTIONS] <git_url|workspace_path>"
     echo ""
     echo "Arguments:"
     echo "  git_url         Git repository URL (e.g., git@github.com:libexpat/libexpat.git)"
     echo "  workspace_path  Local workspace directory path"
-    echo "  commit_id       (Optional) Commit ID for delta scan (generates ref.diff)"
     echo ""
     echo "Options:"
     echo "  --in-place      Run directly without copying workspace"
     echo "  --project NAME  Specify OSS-Fuzz project name (if different from repo name)"
+    echo "  -b COMMIT       Base commit ID (for delta scan)"
+    echo "  -d COMMIT       Delta commit ID (for delta scan, requires -b)"
     echo ""
     echo "Examples:"
-    echo "  $0 git@github.com:libexpat/libexpat.git                    # Full scan from git"
-    echo "  $0 git@github.com:libexpat/libexpat.git abc123             # Delta scan with commit"
-    echo "  $0 --project expat git@github.com:libexpat/libexpat.git   # Specify oss-fuzz project"
-    echo "  $0 /path/to/workspace                                      # Use existing workspace"
-    echo "  $0 --in-place /path/to/workspace                           # Run in-place"
+    echo "  $0 git@github.com:libexpat/libexpat.git                                # Full scan from git"
+    echo "  $0 -b abc123 -d def456 git@github.com:libexpat/libexpat.git           # Delta scan with base and delta commits"
+    echo "  $0 --project expat git@github.com:libexpat/libexpat.git               # Specify oss-fuzz project"
+    echo "  $0 /path/to/workspace                                                  # Use existing workspace"
+    echo "  $0 --in-place /path/to/workspace                                       # Run in-place"
     exit 1
 }
 
 # Parse arguments
 IN_PLACE=false
 OSS_FUZZ_PROJECT=""
+BASE_COMMIT=""
+DELTA_COMMIT=""
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -218,6 +221,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --project)
             OSS_FUZZ_PROJECT="$2"
+            shift 2
+            ;;
+        -b)
+            BASE_COMMIT="$2"
+            shift 2
+            ;;
+        -d)
+            DELTA_COMMIT="$2"
             shift 2
             ;;
         -h|--help)
@@ -242,7 +253,12 @@ if [ $# -lt 1 ]; then
 fi
 
 TARGET="$1"
-COMMIT_ID="${2:-}"
+
+# Validate delta scan arguments
+if [ -n "$DELTA_COMMIT" ] && [ -z "$BASE_COMMIT" ]; then
+    print_error "Delta commit (-d) requires base commit (-b)"
+    show_usage
+fi
 
 # ============================================
 # CASE 1: Git URL - Create workspace from scratch
@@ -304,29 +320,36 @@ if is_git_url "$TARGET"; then
         print_info "OSS-Fuzz project copied to workspace"
     fi
 
-    # Handle delta scan (generate ref.diff from commit)
-    if [ -n "$COMMIT_ID" ]; then
-        print_info "Delta scan mode: generating diff from commit $COMMIT_ID"
+    # Handle delta scan (generate ref.diff from base and delta commits)
+    if [ -n "$BASE_COMMIT" ]; then
+        print_info "Delta scan mode: generating diff between base ($BASE_COMMIT) and delta ($DELTA_COMMIT)"
         mkdir -p "$WORKSPACE/diff"
 
         cd "$WORKSPACE/repo"
-        if git cat-file -t "$COMMIT_ID" >/dev/null 2>&1; then
-            # Generate diff: changes introduced by this commit
-            git diff "${COMMIT_ID}^..${COMMIT_ID}" > "$WORKSPACE/diff/ref.diff" 2>/dev/null || \
-            git diff "${COMMIT_ID}~1..${COMMIT_ID}" > "$WORKSPACE/diff/ref.diff" 2>/dev/null || \
-            git show "$COMMIT_ID" --format="" > "$WORKSPACE/diff/ref.diff"
 
-            if [ -s "$WORKSPACE/diff/ref.diff" ]; then
-                print_info "Generated ref.diff from commit $COMMIT_ID"
-            else
-                print_warn "Commit $COMMIT_ID produced empty diff"
-            fi
-        else
-            print_error "Commit $COMMIT_ID not found in repository"
+        # Verify both commits exist
+        if ! git cat-file -t "$BASE_COMMIT" >/dev/null 2>&1; then
+            print_error "Base commit $BASE_COMMIT not found in repository"
             print_warn "Continuing without diff (full scan mode)"
             rm -rf "$WORKSPACE/diff"
+            cd "$SCRIPT_DIR"
+        elif [ -n "$DELTA_COMMIT" ] && ! git cat-file -t "$DELTA_COMMIT" >/dev/null 2>&1; then
+            print_error "Delta commit $DELTA_COMMIT not found in repository"
+            print_warn "Continuing without diff (full scan mode)"
+            rm -rf "$WORKSPACE/diff"
+            cd "$SCRIPT_DIR"
+        else
+            # Generate diff between base and delta (or HEAD if delta not specified)
+            local target_commit="${DELTA_COMMIT:-HEAD}"
+            git diff "$BASE_COMMIT..$target_commit" > "$WORKSPACE/diff/ref.diff"
+
+            if [ -s "$WORKSPACE/diff/ref.diff" ]; then
+                print_info "Generated ref.diff from $BASE_COMMIT to $target_commit"
+            else
+                print_warn "Diff between $BASE_COMMIT and $target_commit is empty"
+            fi
+            cd "$SCRIPT_DIR"
         fi
-        cd "$SCRIPT_DIR"
     fi
 
     print_info "Workspace created successfully: $WORKSPACE"
