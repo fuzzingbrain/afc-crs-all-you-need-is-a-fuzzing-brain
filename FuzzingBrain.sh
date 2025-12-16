@@ -145,6 +145,94 @@ version_ge() {
     printf '%s\n%s\n' "$2" "$1" | sort -V -C
 }
 
+# Install Go
+install_go() {
+    local GO_VERSION="1.21.5"
+    local OS="$(uname -s)"
+    local ARCH="$(uname -m)"
+    local GO_ARCH=""
+
+    print_info "Installing Go ${GO_VERSION}..."
+
+    # Determine architecture
+    case "$ARCH" in
+        x86_64)
+            GO_ARCH="amd64"
+            ;;
+        aarch64|arm64)
+            GO_ARCH="arm64"
+            ;;
+        *)
+            print_error "Unsupported architecture: $ARCH"
+            return 1
+            ;;
+    esac
+
+    case "$OS" in
+        Linux)
+            local GO_TARBALL="go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
+            local DOWNLOAD_URL="https://go.dev/dl/${GO_TARBALL}"
+
+            print_info "Downloading Go for Linux ${GO_ARCH}..."
+            if ! wget -q "$DOWNLOAD_URL" -O "/tmp/${GO_TARBALL}"; then
+                print_error "Failed to download Go"
+                return 1
+            fi
+
+            print_info "Installing Go to /usr/local/go (requires sudo)..."
+            sudo rm -rf /usr/local/go
+            sudo tar -C /usr/local -xzf "/tmp/${GO_TARBALL}"
+            rm "/tmp/${GO_TARBALL}"
+
+            # Add to PATH
+            if ! grep -q '/usr/local/go/bin' ~/.bashrc 2>/dev/null; then
+                echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+            fi
+            if ! grep -q '/usr/local/go/bin' ~/.profile 2>/dev/null; then
+                echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
+            fi
+
+            export PATH=$PATH:/usr/local/go/bin
+            print_info "Go ${GO_VERSION} installed successfully"
+            print_info "Please run: source ~/.bashrc"
+            ;;
+
+        Darwin)
+            local GO_PKG="go${GO_VERSION}.darwin-${GO_ARCH}.pkg"
+            local DOWNLOAD_URL="https://go.dev/dl/${GO_PKG}"
+
+            print_info "Downloading Go for macOS ${GO_ARCH}..."
+            if ! curl -L "$DOWNLOAD_URL" -o "/tmp/${GO_PKG}"; then
+                print_error "Failed to download Go"
+                return 1
+            fi
+
+            print_info "Installing Go (requires sudo)..."
+            sudo installer -pkg "/tmp/${GO_PKG}" -target /
+            rm "/tmp/${GO_PKG}"
+
+            # Add to PATH
+            if ! grep -q '/usr/local/go/bin' ~/.zshrc 2>/dev/null; then
+                echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.zshrc
+            fi
+            if ! grep -q '/usr/local/go/bin' ~/.bash_profile 2>/dev/null; then
+                echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bash_profile
+            fi
+
+            export PATH=$PATH:/usr/local/go/bin
+            print_info "Go ${GO_VERSION} installed successfully"
+            print_info "Please restart your terminal or run: source ~/.zshrc"
+            ;;
+
+        *)
+            print_error "Unsupported OS: $OS"
+            return 1
+            ;;
+    esac
+
+    return 0
+}
+
 # Check and install Go
 check_go() {
     local REQUIRED_GO_VERSION="1.21"
@@ -158,13 +246,40 @@ check_go() {
             return 0
         else
             print_warn "Go version $CURRENT_GO_VERSION is too old (required >= $REQUIRED_GO_VERSION)"
-            print_warn "Please upgrade Go: https://go.dev/doc/install"
-            exit 1
+            echo ""
+            read -p "Would you like to install Go 1.21.5? (yes/no): " install_choice
+
+            if [ "$install_choice" = "yes" ]; then
+                if install_go; then
+                    print_info "Go installation completed"
+                    return 0
+                else
+                    print_error "Go installation failed"
+                    exit 1
+                fi
+            else
+                print_error "Go upgrade required. Exiting."
+                exit 1
+            fi
         fi
     else
-        print_error "Go is not installed!"
-        print_error "Please install Go (>= $REQUIRED_GO_VERSION): https://go.dev/doc/install"
-        exit 1
+        print_error "Go is not installed (required >= $REQUIRED_GO_VERSION)"
+        echo ""
+        read -p "Would you like to install Go 1.21.5? (yes/no): " install_choice
+
+        if [ "$install_choice" = "yes" ]; then
+            if install_go; then
+                print_info "Go installation completed"
+                return 0
+            else
+                print_error "Go installation failed"
+                exit 1
+            fi
+        else
+            print_error "Go is required. Exiting."
+            print_error "Manual installation: https://go.dev/doc/install"
+            exit 1
+        fi
     fi
 }
 
