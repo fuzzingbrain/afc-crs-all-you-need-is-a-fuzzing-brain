@@ -147,7 +147,7 @@ version_ge() {
 
 # Install Go
 install_go() {
-    local GO_VERSION="1.21.5"
+    local GO_VERSION="1.22.2"
     local OS="$(uname -s)"
     local ARCH="$(uname -m)"
     local GO_ARCH=""
@@ -194,7 +194,6 @@ install_go() {
 
             export PATH=$PATH:/usr/local/go/bin
             print_info "Go ${GO_VERSION} installed successfully"
-            print_info "Please run: source ~/.bashrc"
             ;;
 
         Darwin)
@@ -221,7 +220,6 @@ install_go() {
 
             export PATH=$PATH:/usr/local/go/bin
             print_info "Go ${GO_VERSION} installed successfully"
-            print_info "Please restart your terminal or run: source ~/.zshrc"
             ;;
 
         *)
@@ -236,6 +234,7 @@ install_go() {
 # Check and install Go
 check_go() {
     local REQUIRED_GO_VERSION="1.21"
+    local need_install=false
 
     if command -v go &> /dev/null; then
         local CURRENT_GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
@@ -246,26 +245,16 @@ check_go() {
             return 0
         else
             print_warn "Go version $CURRENT_GO_VERSION is too old (required >= $REQUIRED_GO_VERSION)"
-            echo ""
-            read -p "Would you like to install Go 1.21.5? (yes/no): " install_choice
-
-            if [ "$install_choice" = "yes" ]; then
-                if install_go; then
-                    print_info "Go installation completed"
-                    return 0
-                else
-                    print_error "Go installation failed"
-                    exit 1
-                fi
-            else
-                print_error "Go upgrade required. Exiting."
-                exit 1
-            fi
+            need_install=true
         fi
     else
         print_error "Go is not installed (required >= $REQUIRED_GO_VERSION)"
+        need_install=true
+    fi
+
+    if [ "$need_install" = true ]; then
         echo ""
-        read -p "Would you like to install Go 1.21.5? (yes/no): " install_choice
+        read -p "Would you like to install Go 1.22.2? (yes/no): " install_choice
 
         if [ "$install_choice" = "yes" ]; then
             if install_go; then
@@ -276,7 +265,7 @@ check_go() {
                 exit 1
             fi
         else
-            print_error "Go is required. Exiting."
+            print_error "Go >= $REQUIRED_GO_VERSION is required. Exiting."
             print_error "Manual installation: https://go.dev/doc/install"
             exit 1
         fi
