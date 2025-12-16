@@ -34,6 +34,7 @@
   - [Common Configuration Examples](#common-configuration-examples)
 - [Workspace Structure](#workspace-structure)
 - [Output](#output)
+- [Troubleshooting](#troubleshooting)
 - [Datasets](#datasets)
 - [Citation](#citation)
 
@@ -41,11 +42,21 @@
 
 ## Quick Start
 
+**Platform Support**:
+- ✅ **Linux** (Fully supported, recommended)
+- ⚠️ **macOS** (Partially supported - OSS-Fuzz Docker builds may have permission issues. Use Linux VM or cloud instance recommended)
+- ❌ **Windows** (Not supported - use WSL2 with Linux distribution)
+
 **Prerequisites**:
 - **Docker** must be installed and running. [Install Docker](https://docs.docker.com/get-docker/)
 - **Go** (>= 1.21) - FuzzingBrain will offer to install it automatically if missing
 
 FuzzingBrain will automatically check these requirements. If Go is not installed or the version is too old, you'll be prompted to install it automatically.
+
+**Note for macOS users**: Due to Docker virtualization layer limitations on macOS, OSS-Fuzz builds may fail with permission errors. We recommend using:
+- Linux VM (UTM, VirtualBox, Parallels)
+- Cloud Linux instance (AWS, GCP, Azure)
+- GitHub Codespaces
 
 ### 1. Clone Repository
 
@@ -418,6 +429,36 @@ At the end of execution, you'll see a summary like:
 ║   Patches:    /root/.../patch/libpng_20251215_175412
 ╚════════════════════════════════════════════════════════════════╝
 ```
+
+---
+
+## Troubleshooting
+
+### macOS: Docker Permission Issues
+
+If you see errors like `mkdir: cannot create directory '/work/libfuzzer': Permission denied` on macOS:
+
+1. **Enable File Sharing in Docker Desktop**:
+   - Open Docker Desktop
+   - Go to Settings → Resources → File Sharing
+   - Add your workspace directory (e.g., `/Users/yourname/Desktop/afc-crs-all-you-need-is-a-fuzzing-brain`)
+   - Click "Apply & Restart"
+
+2. **Check Docker Desktop Settings**:
+   - Ensure "Use gRPC FUSE for file sharing" is disabled in Settings → General
+   - This setting can cause permission issues on macOS
+
+3. **Alternative**: Use a workspace location in your home directory:
+   ```bash
+   cd ~
+   git clone https://github.com/your-org/afc-crs-all-you-need-is-a-fuzzing-brain.git
+   ```
+
+### Go Installation Issues
+
+If automatic Go installation fails, install manually:
+- **Linux/macOS**: Download from [go.dev/dl](https://go.dev/dl/)
+- Add to PATH: `export PATH=$PATH:/usr/local/go/bin`
 
 ---
 
