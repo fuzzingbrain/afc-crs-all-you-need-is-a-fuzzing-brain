@@ -399,58 +399,76 @@ fi
 if is_git_url "$TARGET"; then
     GIT_URL="$TARGET"
     REPO_NAME=$(get_repo_name "$GIT_URL")
-    DATE=$(date +"%Y%m%d_%H%M%S")
 
     print_info "Detected git URL: $GIT_URL"
     print_info "Repository name: $REPO_NAME"
 
-    # Create workspace directory
-    WORKSPACE="$SCRIPT_DIR/workspace/${REPO_NAME}_${DATE}"
-    print_info "Creating workspace: $WORKSPACE"
+    # Set workspace directory (without timestamp to allow reuse)
+    WORKSPACE="$SCRIPT_DIR/workspace/${REPO_NAME}"
 
-    mkdir -p "$WORKSPACE/repo"
-    mkdir -p "$WORKSPACE/fuzz-tooling"
+    # Check if workspace already exists
+    if [ -d "$WORKSPACE/repo" ] && [ -d "$WORKSPACE/repo/.git" ]; then
+        print_info "Found existing workspace: $WORKSPACE"
+        print_info "Reusing existing repository (pulling latest changes)..."
 
-    # Clone target repository
-    print_info "Cloning target repository..."
-    if ! git clone "$GIT_URL" "$WORKSPACE/repo"; then
-        print_error "Failed to clone repository: $GIT_URL"
-        exit 1
-    fi
-
-    # Clone oss-fuzz to temp directory
-    OSSFUZZ_TMP="/tmp/oss-fuzz-$$"
-    print_info "Cloning oss-fuzz (this may take a moment)..."
-    if ! git clone --depth 1 https://github.com/google/oss-fuzz.git "$OSSFUZZ_TMP" 2>/dev/null; then
-        print_error "Failed to clone oss-fuzz"
-        rm -rf "$OSSFUZZ_TMP"
-        exit 1
-    fi
-
-    # Find matching oss-fuzz project
-    if [ -z "$OSS_FUZZ_PROJECT" ]; then
-        OSS_FUZZ_PROJECT=$(find_ossfuzz_project "$REPO_NAME" "$OSSFUZZ_TMP")
-    fi
-
-    if [ -z "$OSS_FUZZ_PROJECT" ]; then
-        print_warn "No matching OSS-Fuzz project found for '$REPO_NAME'"
-        print_warn "Available projects can be found at: https://github.com/google/oss-fuzz/tree/master/projects"
-        print_warn "Use --project NAME to specify the correct project name"
-        print_warn "Continuing without fuzz-tooling (you'll need to set it up manually)"
-        rm -rf "$OSSFUZZ_TMP"
+        cd "$WORKSPACE/repo"
+        if git pull; then
+            print_info "Repository updated successfully"
+        else
+            print_warn "Failed to pull updates, continuing with existing repository"
+        fi
+        cd "$SCRIPT_DIR"
     else
-        print_info "Found OSS-Fuzz project: $OSS_FUZZ_PROJECT"
+        print_info "Creating new workspace: $WORKSPACE"
+        mkdir -p "$WORKSPACE/repo"
+        mkdir -p "$WORKSPACE/fuzz-tooling"
 
-        # Copy only the matching project
-        mkdir -p "$WORKSPACE/fuzz-tooling/projects"
-        cp -r "$OSSFUZZ_TMP/projects/$OSS_FUZZ_PROJECT" "$WORKSPACE/fuzz-tooling/projects/"
+        # Clone target repository
+        print_info "Cloning target repository..."
+        if ! git clone "$GIT_URL" "$WORKSPACE/repo"; then
+            print_error "Failed to clone repository: $GIT_URL"
+            exit 1
+        fi
+    fi
 
-        # Copy necessary oss-fuzz infrastructure
-        cp -r "$OSSFUZZ_TMP/infra" "$WORKSPACE/fuzz-tooling/" 2>/dev/null || true
+    # Check if fuzz-tooling already exists
+    if [ -d "$WORKSPACE/fuzz-tooling/projects" ] && [ -n "$(ls -A "$WORKSPACE/fuzz-tooling/projects" 2>/dev/null)" ]; then
+        print_info "Reusing existing fuzz-tooling from workspace"
+    else
+        # Clone oss-fuzz to temp directory
+        OSSFUZZ_TMP="/tmp/oss-fuzz-$$"
+        print_info "Cloning oss-fuzz (this may take a moment)..."
+        if ! git clone --depth 1 https://github.com/google/oss-fuzz.git "$OSSFUZZ_TMP" 2>/dev/null; then
+            print_error "Failed to clone oss-fuzz"
+            rm -rf "$OSSFUZZ_TMP"
+            exit 1
+        fi
 
-        # Cleanup
-        rm -rf "$OSSFUZZ_TMP"
-        print_info "OSS-Fuzz project copied to workspace"
+        # Find matching oss-fuzz project
+        if [ -z "$OSS_FUZZ_PROJECT" ]; then
+            OSS_FUZZ_PROJECT=$(find_ossfuzz_project "$REPO_NAME" "$OSSFUZZ_TMP")
+        fi
+
+        if [ -z "$OSS_FUZZ_PROJECT" ]; then
+            print_warn "No matching OSS-Fuzz project found for '$REPO_NAME'"
+            print_warn "Available projects can be found at: https://github.com/google/oss-fuzz/tree/master/projects"
+            print_warn "Use --project NAME to specify the correct project name"
+            print_warn "Continuing without fuzz-tooling (you'll need to set it up manually)"
+            rm -rf "$OSSFUZZ_TMP"
+        else
+            print_info "Found OSS-Fuzz project: $OSS_FUZZ_PROJECT"
+
+            # Copy only the matching project
+            mkdir -p "$WORKSPACE/fuzz-tooling/projects"
+            cp -r "$OSSFUZZ_TMP/projects/$OSS_FUZZ_PROJECT" "$WORKSPACE/fuzz-tooling/projects/"
+
+            # Copy necessary oss-fuzz infrastructure
+            cp -r "$OSSFUZZ_TMP/infra" "$WORKSPACE/fuzz-tooling/" 2>/dev/null || true
+
+            # Cleanup
+            rm -rf "$OSSFUZZ_TMP"
+            print_info "OSS-Fuzz project copied to workspace"
+        fi
     fi
 
     # Handle delta scan (generate ref.diff from base and delta commits)
