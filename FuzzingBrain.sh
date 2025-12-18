@@ -18,6 +18,16 @@ is_git_url() {
     [[ "$1" =~ ^git@ ]] || [[ "$1" =~ ^https?://.*\.git$ ]] || [[ "$1" =~ ^https?://github\.com/ ]] || [[ "$1" =~ ^https?://gitlab\.com/ ]]
 }
 
+# Check if argument is a simple project name (no slashes, not a URL)
+is_project_name() {
+    local input="$1"
+    # Not a URL and doesn't contain slashes
+    if ! is_git_url "$input" && [[ ! "$input" =~ / ]]; then
+        return 0
+    fi
+    return 1
+}
+
 # Extract repo name from git URL
 # git@github.com:libexpat/libexpat.git -> libexpat
 # https://github.com/libexpat/libexpat.git -> libexpat
@@ -318,11 +328,12 @@ check_environment() {
 }
 
 show_usage() {
-    echo "Usage: $0 [OPTIONS] <git_url|workspace_path>"
+    echo "Usage: $0 [OPTIONS] <git_url|workspace_path|project_name>"
     echo ""
     echo "Arguments:"
     echo "  git_url         Git repository URL (e.g., git@github.com:libexpat/libexpat.git)"
     echo "  workspace_path  Local workspace directory path"
+    echo "  project_name    Existing project name under workspace/ directory"
     echo ""
     echo "Options:"
     echo "  --in-place      Run directly without copying workspace"
@@ -336,6 +347,7 @@ show_usage() {
     echo "  $0 --project expat git@github.com:libexpat/libexpat.git               # Specify oss-fuzz project"
     echo "  $0 /path/to/workspace                                                  # Use existing workspace"
     echo "  $0 --in-place /path/to/workspace                                       # Run in-place"
+    echo "  $0 libexpat                                                            # Continue fuzzing existing project"
     exit 1
 }
 
@@ -394,9 +406,50 @@ if [ -n "$DELTA_COMMIT" ] && [ -z "$BASE_COMMIT" ]; then
 fi
 
 # ============================================
-# CASE 1: Git URL - Create workspace from scratch
+# CASE 1: Project Name - Continue fuzzing existing project
 # ============================================
-if is_git_url "$TARGET"; then
+if is_project_name "$TARGET"; then
+    PROJECT_NAME="$TARGET"
+    WORKSPACE="$SCRIPT_DIR/workspace/${PROJECT_NAME}"
+
+    # Check if project exists under workspace
+    if [ ! -d "$WORKSPACE" ]; then
+        print_error "Project '$PROJECT_NAME' not found under workspace/"
+        print_error "Expected workspace at: $WORKSPACE"
+        echo ""
+        print_info "Available projects:"
+        if [ -d "$SCRIPT_DIR/workspace" ] && [ -n "$(ls -A "$SCRIPT_DIR/workspace" 2>/dev/null)" ]; then
+            ls -1 "$SCRIPT_DIR/workspace"
+        else
+            echo "  (none)"
+        fi
+        echo ""
+        print_info "To create a new project, use a git URL instead:"
+        print_info "  $0 git@github.com:user/repo.git"
+        exit 1
+    fi
+
+    # Verify workspace structure
+    if [ ! -d "$WORKSPACE/repo" ]; then
+        print_error "Invalid workspace structure: missing 'repo' directory"
+        print_error "Workspace at $WORKSPACE does not appear to be a valid fuzzing workspace"
+        exit 1
+    fi
+
+    print_info "Found existing project: $PROJECT_NAME"
+    print_info "Workspace: $WORKSPACE"
+    echo ""
+
+    # Check environment before running
+    check_environment
+
+    # Continue fuzzing with existing workspace (always in-place)
+    cd "$CRS_DIR" && sudo ./run_crs.sh --in-place "$WORKSPACE"
+
+# ============================================
+# CASE 2: Git URL - Create workspace from scratch
+# ============================================
+elif is_git_url "$TARGET"; then
     GIT_URL="$TARGET"
     REPO_NAME=$(get_repo_name "$GIT_URL")
 
@@ -513,7 +566,7 @@ if is_git_url "$TARGET"; then
     cd "$CRS_DIR" && sudo ./run_crs.sh --in-place "$WORKSPACE"
 
 # ============================================
-# CASE 2: Local path - Use existing workspace
+# CASE 3: Local path - Use existing workspace
 # ============================================
 else
     if [ ! -d "$TARGET" ]; then
