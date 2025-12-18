@@ -17,12 +17,10 @@ func IsCrashOutput(output string) bool {
 	// Check for common crash indicators that always represent errors
 	errorIndicators := []string{
 		"ERROR: AddressSanitizer:",
-		// "ERROR: LeakSanitizer:",
 		"ERROR: MemorySanitizer:",
 		"WARNING: MemorySanitizer:",
 		"ERROR: ThreadSanitizer:",
 		"ERROR: UndefinedBehaviorSanitizer:",
-		// "ERROR: libFuzzer: timeout", // <-- remove from here
 		"SEGV on unknown address",
 		"Segmentation fault",
 		"AddressSanitizer: heap-buffer-overflow",
@@ -33,12 +31,20 @@ func IsCrashOutput(output string) bool {
 		"runtime error:", // UBSan generic line
 		"AddressSanitizer:DEADLYSIGNAL",
 		"libfuzzer exit=1",
-		// "libfuzzer exit=99",
 		"Java Exception: com.code_intelligence.jazzer",
 	}
+
+	// Optional: Enable timeout detection as crash
 	if os.Getenv("DETECT_TIMEOUT_CRASH") == "1" {
 		errorIndicators = append(errorIndicators, "ERROR: libFuzzer: timeout")
 		errorIndicators = append(errorIndicators, "libfuzzer exit=99")
+	}
+
+	// Optional: Enable leak detection as crash (disabled by default)
+	// LeakSanitizer detects memory leaks which are usually not security issues
+	// Enable this for comprehensive testing or resource leak detection
+	if os.Getenv("DETECT_LEAK_AS_CRASH") == "1" {
+		errorIndicators = append(errorIndicators, "ERROR: LeakSanitizer:")
 	}
 
 	for _, indicator := range errorIndicators {
@@ -98,13 +104,14 @@ func IsCrashOutput(output string) bool {
 		return true
 	}
 
-	// For LeakSanitizer, only count ERROR reports
-	// if strings.Contains(output, "LeakSanitizer:") {
-	//     if !strings.Contains(output, "ERROR: LeakSanitizer:") {
-	//         return false // It's a warning or summary, not an error
-	//     }
-	//     return true
-	// }
+	// For LeakSanitizer (when enabled via DETECT_LEAK_AS_CRASH=1)
+	// Only count as crash if it's an ERROR, not a warning or summary
+	if os.Getenv("DETECT_LEAK_AS_CRASH") == "1" && strings.Contains(output, "LeakSanitizer:") {
+		if strings.Contains(output, "ERROR: LeakSanitizer:") {
+			return true
+		}
+		return false // It's a warning or summary, not an error
+	}
 
 	return false
 }
