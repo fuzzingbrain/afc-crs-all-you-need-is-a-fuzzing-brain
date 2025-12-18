@@ -75,12 +75,12 @@ GEMINI_MODEL_PRO = "gemini-2.0-pro-exp-02-05"
 GEMINI_MODEL_FLASH = "gemini-2.5-flash"
 GEMINI_MODEL_FLASH_LITE = "gemini-2.5-flash-lite-preview-06-17"
 GROK_MODEL = "xai/grok-3-beta"
-CLAUDE_MODEL_SONNET_4 = "claude-sonnet-4-20250514"
+CLAUDE_MODEL_SONNET_45 = "claude-sonnet-4-5-20250929"
 CLAUDE_MODEL_OPUS_4 = "claude-opus-4-20250514"
 MODELS = [CLAUDE_MODEL_OPUS_4, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25]
-CLAUDE_MODEL = CLAUDE_MODEL_SONNET_4
-OPENAI_MODEL = CLAUDE_MODEL_SONNET_4
-MODELS = [CLAUDE_MODEL_SONNET_4, CLAUDE_MODEL_OPUS_4]
+CLAUDE_MODEL = CLAUDE_MODEL_SONNET_45
+OPENAI_MODEL = CLAUDE_MODEL_SONNET_45
+MODELS = [CLAUDE_MODEL_SONNET_45, CLAUDE_MODEL_OPUS_4]
 
 def get_fallback_model(current_model, tried_models):
     """Get a fallback model that hasn't been tried yet"""
@@ -89,7 +89,7 @@ def get_fallback_model(current_model, tried_models):
         GEMINI_MODEL_PRO_25: [CLAUDE_MODEL, CLAUDE_MODEL_35, OPENAI_MODEL_41, OPENAI_MODEL_O3],   
         OPENAI_MODEL_41: [OPENAI_MODEL_O4_MINI, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25],   
         OPENAI_MODEL: [GEMINI_MODEL_PRO_25, GEMINI_MODEL_FLASH, GEMINI_MODEL_FLASH_LITE],             
-        CLAUDE_MODEL: [CLAUDE_MODEL_SONNET_4,OPENAI_MODEL, CLAUDE_MODEL_35, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25],        
+        CLAUDE_MODEL: [CLAUDE_MODEL_SONNET_45,OPENAI_MODEL, CLAUDE_MODEL_35, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25],        
         CLAUDE_MODEL_OPUS_4: [OPENAI_MODEL, CLAUDE_MODEL_35, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25],        
         # Default fallbacks
         "default": [CLAUDE_MODEL, OPENAI_MODEL, OPENAI_MODEL_41,OPENAI_MODEL_O3,GEMINI_MODEL_PRO_25]
@@ -529,7 +529,7 @@ def extract_python_code_from_response(log_file, text, max_retries=2, timeout=30)
                 print(f"Waiting {wait_time} seconds before retry")
                 time.sleep(wait_time)
     
-    use_another_model = GEMINI_MODEL
+    use_another_model = CLAUDE_MODEL_SONNET_45
     try:
         print(f"Falling back to {use_another_model}")
 
@@ -1473,6 +1473,24 @@ def run_fuzzer_with_input_for_c_coverage(
         return False, "", str(exc)
 
 
+def get_same_project_fuzzers(fuzzer_path):
+    """Find all fuzzers from the same project and sanitizer as the given fuzzer"""
+    fuzzer_dir = os.path.dirname(fuzzer_path)
+
+    # Get all files in the same directory that are executable
+    same_project_fuzzers = []
+    if os.path.isdir(fuzzer_dir):
+        for item in os.listdir(fuzzer_dir):
+            item_path = os.path.join(fuzzer_dir, item)
+            # Check if it's a file and executable
+            if os.path.isfile(item_path) and os.access(item_path, os.X_OK):
+                # Skip coverage builds and other non-fuzzer executables
+                if not item.endswith('-coverage') and not item in ['llvm-symbolizer', 'clang']:
+                    same_project_fuzzers.append(item_path)
+
+    return same_project_fuzzers
+
+
 def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path, is_c_project=True):
     try:
         log_message(log_file, f"Running fuzzer {fuzzer_path} with blob {blob_path}")
@@ -2375,15 +2393,38 @@ def doPoV_full(log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer, proje
                     log_message(log_file, f"[INFO] {blob_name} not found; nothing to run.")
                     continue
 
-                log_message(log_file, f"[INFO] Running fuzzer with {blob_name} (attempt {idx})")
+                log_message(log_file, f"[INFO] Testing {blob_name} against multiple fuzzer(s)")
                 is_c_project = language.startswith('c')
-                crash_detected, fuzzer_output = run_fuzzer_with_input(
-                    log_file, fuzzer_path, project_dir, focus, blob_path, is_c_project
+                
+                # Get all fuzzers from the same project (same directory)
+                same_project_fuzzers = get_same_project_fuzzers(fuzzer_path)
+                if idx == 0:  # Log once
+                    log_message(log_file, f"[INFO] Found {len(same_project_fuzzers)} fuzzer(s) in same project:")
+                    for spf in same_project_fuzzers:
+                        log_message(log_file, f"  - {os.path.basename(spf)}")
+                
+                # Test this blob against ALL fuzzers in the same project
+                crash_detected = False
+                fuzzer_output = ""
+                successful_fuzzer = None
+                for test_fuzzer_path in same_project_fuzzers:
+                    test_fuzzer_name = os.path.basename(test_fuzzer_path)
+                    log_message(log_file, f"  Testing with fuzzer: {test_fuzzer_name}")
+                    crash, output = run_fuzzer_with_input(
+                    log_file, test_fuzzer_path, project_dir, focus, blob_path, is_c_project
                 )
+                    if crash:
+                        log_message(log_file, f"  [+] CRASH detected with fuzzer: {test_fuzzer_name}")
+                        crash_detected = True
+                        fuzzer_output = output
+                        successful_fuzzer = test_fuzzer_name
+                        break
+                    else:
+                        log_message(log_file, f"  [-] No crash with fuzzer: {test_fuzzer_name}")
                 fuzzer_output = filter_instrumented_lines(fuzzer_output)
                 if crash_detected:
-                    log_message(log_file, f"[+] Crash detected with {blob_name}")
-                    break  # success - stop looping
+                    log_message(log_file, f"[+] Crash detected with {blob_name} using fuzzer {successful_fuzzer}")
+                    break  # success - stop testing remaining blobs
 
                 log_message(log_file, "Fuzzer did not crash, adding output to context and continuing")
                 # Save x.bin to the fuzzer's seed corpus for future fuzzing
@@ -5386,7 +5427,7 @@ def main():
             OPENAI_MODEL_O3,
             CLAUDE_MODEL_OPUS_4,
             CLAUDE_MODEL,
-            CLAUDE_MODEL_SONNET_4,
+            CLAUDE_MODEL_SONNET_45,
         ]
 
         def _find_vulns(candidates: list[dict]) -> list[dict]:
