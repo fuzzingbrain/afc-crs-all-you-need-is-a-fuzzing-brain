@@ -72,13 +72,13 @@ GEMINI_MODEL_PRO = "gemini-2.0-pro-exp-02-05"
 GEMINI_MODEL_FLASH = "gemini-2.5-flash"
 GEMINI_MODEL_FLASH_LITE = "gemini-2.5-flash-lite-preview-06-17"
 GROK_MODEL = "xai/grok-3-beta"
-CLAUDE_MODEL_SONNET_4 = "claude-sonnet-4-20250514"
+CLAUDE_MODEL_SONNET_45 = "claude-sonnet-4-5-20250929"
 CLAUDE_MODEL_OPUS_4 = "claude-opus-4-20250514"
 
 MODELS = [CLAUDE_MODEL, OPENAI_MODEL, CLAUDE_MODEL_OPUS_4, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25]
-CLAUDE_MODEL = CLAUDE_MODEL_SONNET_4
-OPENAI_MODEL = CLAUDE_MODEL_SONNET_4
-MODELS = [CLAUDE_MODEL_SONNET_4, CLAUDE_MODEL_OPUS_4]
+CLAUDE_MODEL = CLAUDE_MODEL_SONNET_45
+OPENAI_MODEL = CLAUDE_MODEL_SONNET_45
+MODELS = [CLAUDE_MODEL_SONNET_45, CLAUDE_MODEL_OPUS_4]
 
 
 def get_fallback_model(current_model, tried_models):
@@ -88,7 +88,7 @@ def get_fallback_model(current_model, tried_models):
         GEMINI_MODEL_PRO_25: [CLAUDE_MODEL, CLAUDE_MODEL_35, OPENAI_MODEL_41, OPENAI_MODEL_O3],   
         OPENAI_MODEL_41: [OPENAI_MODEL_O4_MINI, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25],   
         OPENAI_MODEL: [GEMINI_MODEL_PRO_25, GEMINI_MODEL_FLASH, GEMINI_MODEL_FLASH_LITE],             
-        CLAUDE_MODEL: [CLAUDE_MODEL_SONNET_4,OPENAI_MODEL, CLAUDE_MODEL_35, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25],        
+        CLAUDE_MODEL: [CLAUDE_MODEL_SONNET_45,OPENAI_MODEL, CLAUDE_MODEL_35, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25],        
         # Default fallbacks
         "default": [CLAUDE_MODEL, OPENAI_MODEL, OPENAI_MODEL_41,OPENAI_MODEL_O3,GEMINI_MODEL_PRO_25]
     }
@@ -418,7 +418,7 @@ def extract_python_code_from_response(log_file, text, max_retries=2, timeout=30)
                 print(f"Waiting {wait_time} seconds before retry")
                 time.sleep(wait_time)
     
-    use_another_model = GEMINI_MODEL
+    use_another_model = CLAUDE_MODEL_SONNET_45
     try:
         print(f"Falling back to {use_another_model}")
 
