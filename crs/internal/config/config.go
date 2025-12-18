@@ -70,6 +70,9 @@ type FuzzerConfig struct {
 
 	// Discovery mode: "auto" or "config"
 	DiscoveryMode string `envconfig:"FUZZER_DISCOVERY_MODE" default:"auto"`
+
+	// Per-fuzzer timeout in minutes (each fuzzer gets this much time)
+	PerFuzzerTimeoutMinutes int `envconfig:"FUZZER_PER_FUZZER_TIMEOUT_MINUTES" default:"60"`
 }
 
 // StrategyConfig holds POV and Patch strategy configuration
