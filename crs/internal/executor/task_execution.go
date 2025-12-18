@@ -50,79 +50,121 @@ type TaskExecutionParams struct {
 // ExecuteFuzzingTask executes a complete fuzzing workflow on a worker node
 // This includes: running strategies, POV generation, and patching
 func ExecuteFuzzingTask(params TaskExecutionParams) error {
-	fuzzer := params.Fuzzer
+	// Determine which fuzzers to execute
+	var fuzzersToExecute []string
 
 	// Handle LOCAL_TEST mode
 	if os.Getenv("LOCAL_TEST") != "" {
 		params.SubmissionEndpoint = "http://localhost:7081"
-		fuzzer = params.AllFuzzers[0]
-		// Select specific fuzzers for testing
-		for _, f := range params.AllFuzzers {
-			if strings.HasSuffix(f, "libxml2-address/xml") ||
-			   strings.HasSuffix(f, "tika-address/HtmlParserFuzzer") ||
-			   strings.HasSuffix(f, "zookeeper-address/MessageTrackerPeekReceivedFuzzer") ||
-			   strings.HasSuffix(f, "apache-commons-compress-address/CompressZipFuzzer") ||
-			   strings.HasSuffix(f, "sqlite3-address/customfuzz3") ||
-			   strings.HasSuffix(f, "igraph-address/read_gml") {
-				fuzzer = f
-				break
-			}
+		// In LOCAL_TEST mode, use all fuzzers from params.AllFuzzers
+		fuzzersToExecute = params.AllFuzzers
+	} else {
+		// In normal mode, if a specific fuzzer is provided, use it; otherwise use all
+		if params.Fuzzer != "" {
+			fuzzersToExecute = []string{params.Fuzzer}
+		} else {
+			fuzzersToExecute = params.AllFuzzers
 		}
 	}
 
-	if fuzzer == "" {
-		log.Printf("No fuzzer specified for worker execution, skipping...")
+	if len(fuzzersToExecute) == 0 {
+		log.Printf("No fuzzers specified for execution, skipping...")
 		return nil
 	}
 
-	log.Printf("=========================================== Executing Fuzzer Task ===========================================")
-	log.Printf("Fuzzer: %s", fuzzer)
-	log.Printf("TaskID: %s", params.TaskDetail.TaskID)
-	log.Printf("ProjectName: %s", params.TaskDetail.ProjectName)
-	log.Printf("=========================================================================================================")
-
-	// Get absolute paths
+	// Get absolute paths (used for all fuzzers)
 	absTaskDir, err := filepath.Abs(params.TaskDir)
 	if err != nil {
 		return fmt.Errorf("failed to get absolute task dir path: %v", err)
 	}
-
 	projectDir := path.Join(absTaskDir, params.TaskDetail.Focus)
-	fuzzDir := filepath.Dir(fuzzer)
 
-	// Save task detail to JSON for strategy scripts
-	helpers.SaveTaskDetailToJson(params.TaskDetail, fuzzer, fuzzDir)
+	// Execute each fuzzer sequentially
+	log.Printf("===========================================")
+	log.Printf("Executing %d fuzzer(s) sequentially", len(fuzzersToExecute))
+	log.Printf("TaskID: %s", params.TaskDetail.TaskID)
+	log.Printf("ProjectName: %s", params.TaskDetail.ProjectName)
+	log.Printf("===========================================")
 
-	// Create a copy of fuzzDir for parallel strategies
-	err = helpers.CopyFuzzDirForParallelStrategies(fuzzer, fuzzDir)
-	if err != nil {
-		log.Printf("Failed to copy fuzzDir %s for parallel strategies. Error: %v", fuzzDir, err)
-	} else {
-		log.Printf("Prepared fuzzer directory for execution: %v", fuzzer)
-	}
+	var lastErr error
+	successCount := 0
 
-	// Determine sanitizer from params or extract from fuzzer directory name
-	sanitizer := params.Sanitizer
-	if sanitizer == "" {
-		// Fallback: Extract sanitizer from directory name (e.g., "bind9-address" -> "address")
-		baseName := filepath.Base(fuzzDir)
-		parts := strings.Split(baseName, "-")
-		if len(parts) > 1 {
-			sanitizer = parts[len(parts)-1]
-			log.Printf("Extracted sanitizer from directory name: %s", sanitizer)
+	for idx, fuzzer := range fuzzersToExecute {
+		log.Printf("")
+		log.Printf("╔════════════════════════════════════════════════════════════════╗")
+		log.Printf("║  Fuzzer %d/%d: %s", idx+1, len(fuzzersToExecute), filepath.Base(fuzzer))
+		log.Printf("╚════════════════════════════════════════════════════════════════╝")
+
+		// Set a fresh deadline for this fuzzer based on per-fuzzer timeout
+		timeoutMinutes := 60 // Default 1 hour
+		if params.FuzzerConfig != nil && params.FuzzerConfig.PerFuzzerTimeoutMinutes > 0 {
+			timeoutMinutes = params.FuzzerConfig.PerFuzzerTimeoutMinutes
+		}
+
+		// Create a new deadline for this specific fuzzer
+		newDeadline := time.Now().Add(time.Duration(timeoutMinutes) * time.Minute)
+		params.TaskDetail.Deadline = newDeadline.Unix() * 1000
+
+		log.Printf("Fuzzer timeout: %d minutes (deadline: %s)",
+			timeoutMinutes, newDeadline.Format("15:04:05"))
+
+		fuzzDir := filepath.Dir(fuzzer)
+
+		// Save task detail to JSON for strategy scripts
+		helpers.SaveTaskDetailToJson(params.TaskDetail, fuzzer, fuzzDir)
+
+		// Create a copy of fuzzDir for parallel strategies
+		err = helpers.CopyFuzzDirForParallelStrategies(fuzzer, fuzzDir)
+		if err != nil {
+			log.Printf("Failed to copy fuzzDir %s for parallel strategies. Error: %v", fuzzDir, err)
 		} else {
-			// Use configured preferred sanitizer as last resort
-			if params.FuzzerConfig != nil {
-				sanitizer = params.FuzzerConfig.PreferredSanitizer
+			log.Printf("Prepared fuzzer directory for execution: %v", fuzzer)
+		}
+
+		// Determine sanitizer from params or extract from fuzzer directory name
+		sanitizer := params.Sanitizer
+		if sanitizer == "" {
+			// Fallback: Extract sanitizer from directory name (e.g., "bind9-address" -> "address")
+			baseName := filepath.Base(fuzzDir)
+			parts := strings.Split(baseName, "-")
+			if len(parts) > 1 {
+				sanitizer = parts[len(parts)-1]
+				log.Printf("Extracted sanitizer from directory name: %s", sanitizer)
 			} else {
-				sanitizer = "address"
+				// Use configured preferred sanitizer as last resort
+				if params.FuzzerConfig != nil {
+					sanitizer = params.FuzzerConfig.PreferredSanitizer
+				} else {
+					sanitizer = "address"
+				}
+				log.Printf("Using default sanitizer: %s", sanitizer)
 			}
-			log.Printf("Using default sanitizer: %s", sanitizer)
+		}
+
+		// Execute the fuzzing workflow for this fuzzer
+		err = executeFuzzingWorkflow(fuzzer, params, projectDir, fuzzDir, sanitizer)
+		if err != nil {
+			log.Printf("✗ Fuzzer %d/%d failed: %v", idx+1, len(fuzzersToExecute), err)
+			lastErr = err
+		} else {
+			log.Printf("✓ Fuzzer %d/%d completed successfully", idx+1, len(fuzzersToExecute))
+			successCount++
 		}
 	}
 
-	// Execute the fuzzing workflow
-	return executeFuzzingWorkflow(fuzzer, params, projectDir, fuzzDir, sanitizer)
+	// Print final summary
+	log.Printf("")
+	log.Printf("╔════════════════════════════════════════════════════════════════╗")
+	log.Printf("║              ALL FUZZERS EXECUTION SUMMARY                     ║")
+	log.Printf("╠════════════════════════════════════════════════════════════════╣")
+	log.Printf("║ Total Fuzzers:    %d", len(fuzzersToExecute))
+	log.Printf("║ Successful:       %d", successCount)
+	log.Printf("║ Failed:           %d", len(fuzzersToExecute)-successCount)
+	log.Printf("╚════════════════════════════════════════════════════════════════╝")
+	log.Printf("")
+
+	// Return last error if any fuzzer failed, or nil if all succeeded
+	return lastErr
 }
 
 // executeFuzzingWorkflow runs the complete fuzzing workflow: strategies -> POV generation -> patching

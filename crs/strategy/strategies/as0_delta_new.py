@@ -28,7 +28,7 @@ from core.pov_strategy import PoVStrategy
 from common.config import StrategyConfig
 from common.logging.logger import StrategyLogger
 from common.llm.client import LLMClient
-from common.llm.models import CLAUDE_MODEL_SONNET_4, OPENAI_MODEL_O3
+from common.llm.models import CLAUDE_MODEL_SONNET_45, OPENAI_MODEL_O3
 from common.prompts import create_commit_based_prompt
 from common.utils import (
     filter_instrumented_lines,
@@ -458,11 +458,11 @@ The test cases did not trigger the vulnerability. Please analyze the fuzzer outp
 
             # Run Phase 0 logic with this category-specific prompt (with 3 iterations instead of 5)
             # Use specific models: [CLAUDE_MODEL, OPENAI_MODEL, OPENAI_MODEL_O3] from original
-            # Both CLAUDE_MODEL and OPENAI_MODEL are set to CLAUDE_MODEL_SONNET_4 in original
+            # Both CLAUDE_MODEL and OPENAI_MODEL are set to CLAUDE_MODEL_SONNET_45 in original
             pov_success, pov_metadata = self._do_pov_phase_0(
                 category_prompt,
                 max_iterations=3,
-                models=[CLAUDE_MODEL_SONNET_4, CLAUDE_MODEL_SONNET_4, OPENAI_MODEL_O3]
+                models=[CLAUDE_MODEL_SONNET_45, CLAUDE_MODEL_SONNET_45, OPENAI_MODEL_O3]
             )
 
             if pov_success:
