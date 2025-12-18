@@ -15,7 +15,17 @@ print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 # Check if argument looks like a git URL
 is_git_url() {
-    [[ "$1" =~ ^git@ ]] || [[ "$1" =~ ^https?://.*\.git$ ]] || [[ "$1" =~ ^https?://github\.com/ ]] || [[ "$1" =~ ^https?://gitlab\.com/ ]]
+    local input="$1"
+    # Match git@, ssh://, or http(s):// URLs
+    # Also match any URL with common git hosting patterns or ending in .git
+    if [[ "$input" =~ ^git@ ]] || \
+       [[ "$input" =~ ^ssh:// ]] || \
+       [[ "$input" =~ ^https?://.*\.git$ ]] || \
+       [[ "$input" =~ ^https?://.+/.+/.+ ]] || \
+       [[ "$input" =~ ^https?://(github|gitlab|bitbucket|gitea|gitee|sourceforge|git\.)\..*/ ]]; then
+        return 0
+    fi
+    return 1
 }
 
 # Check if argument is a simple project name (no slashes, not a URL)
@@ -503,11 +513,16 @@ elif is_git_url "$TARGET"; then
         fi
 
         if [ -z "$OSS_FUZZ_PROJECT" ]; then
-            print_warn "No matching OSS-Fuzz project found for '$REPO_NAME'"
-            print_warn "Available projects can be found at: https://github.com/google/oss-fuzz/tree/master/projects"
-            print_warn "Use --project NAME to specify the correct project name"
-            print_warn "Continuing without fuzz-tooling (you'll need to set it up manually)"
+            print_error "No matching OSS-Fuzz project found for '$REPO_NAME'"
+            print_error "Available projects can be found at: https://github.com/google/oss-fuzz/tree/master/projects"
+            echo ""
+            print_info "Please use --project NAME to specify the correct OSS-Fuzz project name:"
+            print_info "  $0 --project PROJECT_NAME $GIT_URL"
+            echo ""
+            print_info "Example:"
+            print_info "  $0 --project openldap https://git.openldap.org/openldap/openldap"
             rm -rf "$OSSFUZZ_TMP"
+            exit 1
         else
             print_info "Found OSS-Fuzz project: $OSS_FUZZ_PROJECT"
 
