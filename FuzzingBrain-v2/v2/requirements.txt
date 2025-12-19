@@ -1,0 +1,53 @@
+# ============================================================================
+# FuzzingBrain v2 - Dependencies
+# ============================================================================
+
+# -----------------------------------------------------------------------------
+# Core (from legacy)
+# -----------------------------------------------------------------------------
+
+# Logging
+loguru>=0.7.0
+
+# Type checking (runtime)
+typing-extensions>=4.8.0
+
+# LLM API
+litellm>=1.0.0
+google-generativeai
+anthropic>=0.18.0
+
+# LLM Observability
+openlit>=1.0.0
+
+# Code Analysis
+clang>=14.0
+
+# Environment
+python-dotenv>=1.0.0
+
+# -----------------------------------------------------------------------------
+# FuzzingBrain v2 - New Dependencies
+# -----------------------------------------------------------------------------
+
+# MCP Server
+fastmcp>=0.1.0
+
+# Task Queue
+celery>=5.3.0
+redis>=5.0.0
+
+# Database
+pymongo>=4.6.0
+
+# HTTP Client
+httpx>=0.27.0
+
+# Data Validation
+pydantic>=2.0.0
+
+# Async Support
+aiofiles>=23.0.0
+
+# CLI
+rich>=13.0.0

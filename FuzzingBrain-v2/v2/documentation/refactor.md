@@ -1,0 +1,685 @@
+# 重构指南：
+
+目的：为了更好的和llm结合，我们决定使用python对整个库进行重写
+
+所有代码应在FuzzingBrain（当前文件夹下），禁止污染任何legacy代码
+
+1. go的部分将完全由python代替
+2. static analysis的部分暂时不变
+3. competition-api的一部分改写成python，并融入进crs中
+
+
+## 运行命令
+./FuzzingBrain.sh <github_repo_url>
+
+
+## 重构后的架构：
+
+以下全部内容docker化。
+
+### 双层MCP架构
+
+我们的系统设计为 **MCP中的MCP**：
+
+1. **外层MCP**：FuzzingBrain本身作为一个MCP工具，供其他MCP Client调用（如Claude Desktop、其他AI系统）
+2. **内层MCP**：FuzzingBrain内部的CRS Worker是一个基于MCP的AI Agent，通过调用各种工具来完成漏洞查找和修补
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    外部 MCP Client                              │
+│         (Claude Desktop, 其他AI系统, 用户的Agent)               │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ 调用 FuzzingBrain 工具
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│              FuzzingBrain MCP Server (外层MCP)                  │
+│                       用fastmcp搭建                             │
+│                                                                 │
+│   对外暴露的工具：                                               │
+│   - fuzzingbrain_find_pov(repo_url, commit_id?, fuzz_tooling?) │
+│   - fuzzingbrain_generate_patch(pov_id)                        │
+│   - fuzzingbrain_pov_patch(repo_url)                           │
+│   - fuzzingbrain_get_status(task_id)                           │
+│                                                                 │
+│   别人可以将以下信息发至我们的服务器：                            │
+│   - github repo link                                           │
+│   - commit id（可选）                                           │
+│   - fuzz-tooling的链接（可选）                                   │
+│                                                                 │
+│   也可以用户直接在本地运行，传入文件夹路径等参数                   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ 内部分发任务
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                CRS Worker (内层MCP - AI Agent)                  │
+│                                                                 │
+│   每个Worker内部是一个AI Agent，通过MCP调用工具完成任务：          │
+│                                                                 │
+│   代码分析工具：                                                 │
+│   - read_code(file, start_line, end_line)                      │
+│   - read_function(function_name)                               │
+│   - get_static_analysis_result()                               │
+│   - analyze_suspicious_point(description)                      │
+│                                                                 │
+│   执行验证工具：                                                 │
+│   - run_fuzzer(blob, fuzzer_name)                              │
+│   - run_test()                                                 │
+│   - apply_patch(patch_content)                                 │
+│                                                                 │
+│   生成工具：                                                     │
+│   - generate_pov_blob(vulnerability_info)                      │
+│   - generate_patch(bug_info)                                   │
+│   - pack_pov(pov_id)                                           │
+│                                                                 │
+│   其他工具：                                                     │
+│   - pov_dedup(pov_list)                                        │
+│   - submit_pov(pov)                                            │
+│   - submit_patch(patch)                                        │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 两层MCP的区别
+
+| | 外层 MCP | 内层 MCP |
+|--|----------|----------|
+| **角色** | FuzzingBrain是工具 | CRS Worker是Agent |
+| **调用者** | 外部AI/用户 | 内部LLM |
+| **工具粒度** | 粗粒度（整个任务） | 细粒度（单个操作） |
+| **实现** | FastMCP Server | AI Agent + MCP Tools |
+
+
+除此之外，为了Evaluate我们的crs，我们还需要一个evaluator
+
+它会记录：
+1. LLM调用的api用量，详细记录类别
+2. 每个工具/步骤需要的时间
+3. 每个task有多少个策略在跑，有多少个pov，patch找到了？
+4. 当前的pov/patch的记录
+等等所有的信息
+
+这一部分我们先不用管
+
+总而言之，我们的主要架构由
+
+MainCRS （综合mcp服务）
+
+- Controller（中心CRS， 负责解析任务，分配fuzzer给不同的worker）
+- CRS Worker（AI-Agent，负责pov/patch的生成）
+- vuln-management server (负责pov去重，验证pov， 验证补丁， 生成结果， 打包结果)
+- static-analysis模块（负责在项目开始时提供必要信息）
+- fuzzing 模块（无LLM，纯fuzzing， 可接受由LLM指导的种子）
+
+
+Evaluation Service：
+- Evaluator：监控crs的健康，运行情况
+
+## 运行逻辑
+假设一个repo，是oss-fuzz based的，它有20个fuzzer。
+
+Controller会将 每一个fuzzer单独由{address， memory， UB}构建。并且分配至一个worker。
+
+
+因此一个worker会拿到一个{address，sanitizer}对
+
+也就是说对于这一个任务，我们动态开60个worker节点
+
+每一个节点都是一个crs，会根据任务类型，跑相应的策略。
+
+具体来说：
+
+1. 收到请求/或者本地运行
+2. 创建task
+3. 下载task, 将task的repo复制一份，叫repo-static-analysis，并将task发送给static analysis server
+4. static analysis server是一个异步的server，它会对一个repo进行静态分析，把结果存入redis
+5. 构建task
+6. 将所有的fuzzer信息收集起来，发送给Vuln_management server，这里会对所有进来的pov和patch做评估，打包，去重等工作
+7. 分配{fuzzer， sanitizer}对给子crs，并且持续监控其运行
+
+
+
+## 进度0：技术选型 （参考）
+
+1. 整个软件架构是一个可以被MCP调用的mcp tool，因此我们用fastmcp实现再适合不过了
+2. 数据库的话，用mongodb
+3.
+
+
+## 进度1：搭建fastmcp server (未完成)：
+
+### 目标0：数据模型的搭建 （未完成）
+在开始之前，必须明确每个数据模型的参数，意义，这样便于我们监控/统一编程接口
+
+粒度：
+1. Task: 一个task就是一次对fuzzingbrain的使用，它可以是：
+    - 找pov
+    - 找patch
+    - 生成harness
+    - 根据sarif-report找bug
+
+它应该拥有如下属性
+    - task_id: 我们分配，可用于查询当前任务进度
+    - task_type: pov, patch, pov-patch, harness, 代表不同的类别
+    - task_status: cancelled (用户自己cancel), pending （等待中）, running, completed, error
+    - is_sarif_check: 如果输入有sarif，说明可能是根据sarif report进行bug验证（其实就是生成pov）或者修补
+    - is_fuzz_tooling_provided: 检测fuzz-tooling是否提供，比如有的项目采用oss-fuzz标准fuzzing框架，可以更好的利用
+    - create_time: 创建时间
+    - running_time: 当前task运行时间
+    - pov (这是个pov的集合，里面放所有找到的pov)
+    - patch（patch的集合，里面放所有找到的patch）
+    - sarif（sarif的集合，里面放用户输入的，需要验证的sarif）
+    - task_path: task的workspace路径
+    - src_path: task中，被测试代码的路径
+    - fuzz_tooling_path: task中，测试suite的路径
+    - diff_path: 对于delta-scan任务，需要提供一个commit_id，然后crs下载下来commit文件后，放入文件夹中，分配给task
+
+
+2. pov (或者叫pov_detail)
+    重要：pov在我们这里叫proof-of-Vulnerability，和广义的poc很像，对于当前版本，我们只支持oss-fuzz的项目，因此pov可以简单的理解为一次fuzzing input的生成
+
+    一次fuzzing input的生成，就代表着或许成功触发bug，或许失败，因此我们有一个is_successful的参数
+
+    - _id: 自生成
+    - task_id (只有这个是必须的): 隶属于哪个task？
+    - description：对于当前pov的描述
+    - sanitizer_output: fuzzer在当前sanitizer的基础上的report
+    - harness_name: 被什么harness检测到的？
+    - gen_blob: Python代码，用于生成该漏洞的输入
+    - blob: base64编码过后的blob内容
+    - msg_history: LLM在生成这个pov时的聊天记录
+    - create_time: 这个pov发现的时间
+    - is_successful: 该pov是否是一个成功的
+    - is_active: true/false (实际运行中，有可能很多个pov实际上重复，为了减小我们去重系统的开销，我们将所有失败/重复的pov deactive掉)
+    - architecture：x86_64 (固定)
+    - engine: libfuzzer （固定）
+    - sanitizer: address/ubsan/memory, 目前数据集全是address，可以在当前版本固定
+
+
+3. patch (或者叫patch_detail)
+    重要：patch的成功与否，取决于两个要素 - 1.是否通过pov检查，2.是否跑通所有测试（如果提供测试）
+    - _id: 自生成
+    - pov_id (opt): 注意，这个是可选项，如果用户直接patch，可能没有这个pov_id
+    - task_id: 隶属于哪个task？
+    - description：对于当前patch的描述
+    - pov_detail: 用户传入的pov_detail
+    - apply_check: true/false 是否能够正确被打入程序
+    - compilation_check: t/f 在打补丁后，程序是否正常编译？
+    - pov_check: true/false 是否通过了pov测试？不再触发漏洞为true
+    - test_check: t/f 是否通过了所有的回归测试
+    - is_active: 用于补丁去重（功能暂时未实现）
+    - create_time: 创建时间
+    - msg_history: 聊天记录
+
+4. Sarif
+（暂不处理）
+
+
+5. Harness:
+    很多开源程序的harness数量很少，导致覆盖率很少，因此对于生成harness的task来说，可能会有多个harness最后被生产，Harness就代表着一个harness
+    - _id: 同
+    - task_id: 同
+    - target_function: 可以是一个函数，也可以是一个模块
+    - fuzzing_entry: harness的测试入口
+    - coverage_report: 记录{函数：覆盖率}对
+    - build_check: 是否能被构建？
+    - source_code: 源代码
+    - description: 设计思路&如何构建
+Harness的生成逻辑仍需讨论
+
+
+6. Fuzzer:
+    用于追踪每个fuzzer的构建状态，由Controller在任务初始化阶段管理。
+    一个Task可能有多个fuzzer，每个fuzzer需要单独构建。
+
+    - _id: 自生成
+    - fuzzer_name: 构建后的可执行文件名，如 "fuzz_png"
+    - source_path: fuzzer源码文件的路径，如 "fuzz/fuzz_png.c"
+    - task_id: 隶属于哪个task
+    - repo_name: 属于哪个软件（task中的软件名），如 "libpng"
+    - status: 构建状态
+        - pending: 等待构建
+        - building: 正在构建
+        - success: 构建成功
+        - failed: 构建失败
+    - error_msg: 构建失败时的错误信息（可选）
+    - created_at: 创建时间
+    - updated_at: 更新时间
+
+    状态流转：pending → building → success / failed
+
+    Controller流程：
+    1. 解析Task，发现fuzzer源文件
+    2. 为每个fuzzer创建记录，status="pending"
+    3. 开始构建，status="building"
+    4. 构建完成，status="success" 或 "failed"
+    5. 把成功的fuzzer分配给Worker
+
+
+7. function
+    作为可疑点分析的基本，函数分析是原crs的重要的一环，我们可以继续采用老crs的办法，不过这里我们要将函数单独提取出来，作为一个基础单位
+    我们将所有fuzzer可达的函数全部列出来，因为我们是基于fuzzer找漏洞，因此可以分析的函数也只是fuzzer可达的。
+
+    但是将函数放入数据库有风险，因为几千个函数同时被建模输入进数据库，会有极大的开销和内存占用。因此这部分需要探讨。
+
+    - _id: 自己产生，但是好像用不到
+    - task_id:
+    - function_name: 函数名称
+    - class_name: java专用，用于记录类
+    - file_name: 文件名
+    - start_line: 起始行
+    - end_line: 终止行
+    - suspecious_points: 这个函数里面的可疑点, 可以用id做个list
+    - score：分数，有可能产生真实bug的可能性
+    - is_important: t/f 如果此flag为true，该函数将会直接放置到队列头部等待进行可疑点分析
+
+
+
+8. suspicious point：
+    可疑点分析是重构后的crs的精髓，以前的crs采用的是函数级分析，因此可能会忽略重合在一个函数里的不同bug，或者是检测不到一些细节性的bug。
+    一个可疑点，就是一次行级分析
+    - _id: 自生成id
+    - task_id: 属于哪个task
+    - function_id: 属于哪个function
+    - description: 可疑点的细致描述，我们不用具体的行，因为llm不擅长生成行数
+    - is_check: 所有可疑点均需二次验证，该验证由LLM完成，LLM通过description获得控制流，然后进行验证
+    - is_real: 如果agent认为这是一个真实的bug，则判为real
+    - score：分数，用于队列
+    - is_important: LLM分析为真实后，如果被认定为可能性非常大的bug，将直接设置为true并进入队首进行pov分析
+
+
+9. Worker:
+    Worker是CRS的执行单元，每个Worker负责一个{fuzzer, sanitizer}组合的任务。
+    由Controller动态创建和管理，使用Celery进行任务分发。
+
+    - _id: 组合键，格式为 {task_id}__{fuzzer}__{sanitizer}，如 "task_A__fuzz_png__address"
+    - celery_job_id: Celery任务ID，用于和Celery系统关联查询任务状态（可选，重试时可能变化）
+    - task_id: 属于哪个Task
+    - job_type: 任务类型 pov | patch | harness
+    - fuzzer: 被分配到的fuzzer名称
+    - sanitizer: 被分配到的sanitizer (address | memory | undefined)
+    - current_strategy: 当前正在运行的策略ID（可选）
+    - strategy_history: 历史运行过的策略ID列表
+    - workspace_path: 该Worker的工作目录路径
+    - status: Worker状态
+        - pending: 等待执行
+        - running: 正在运行
+        - completed: 执行完成
+        - failed: 执行失败
+    - error_msg: 失败时的错误信息（可选）
+    - povs_found: 找到的POV数量
+    - patches_found: 找到的Patch数量
+    - created_at: 创建时间
+    - updated_at: 更新时间
+
+    _id生成规则：
+    ```python
+    def generate_worker_id(task_id: str, fuzzer: str, sanitizer: str) -> str:
+        return f"{task_id}__{fuzzer}__{sanitizer}"
+    ```
+
+    好处：
+    1. 一眼就知道Worker的任务内容
+    2. 天然防重复（同一Task不会有相同的fuzzer+sanitizer组合）
+    3. 查询方便
+
+
+### 目标1 API搭建：
+    所有api命名逻辑应遵循:
+    localhost:xxxx/v1/api/pov
+    localhost:xxxx/v1/api/patch
+
+    此处的工具，是对外的工具，不是对内（不是我们crs mcp的）
+
+    工具1：POV查找
+        工具名称：FuzzingBrain-pov
+        对外暴露接口：/api/v1/pov
+        描述：对指定github repo进行扫描/输出pov
+        参数：repo link, commit id(optional), fuzz-tooling link(optional), fuzz-tooling commit (opt)， sarif-report（opt）
+        返回：task_id, 密钥供查询，这是因为任务不可能这么快完成
+
+        最终输出：pov_detail (储存在数据库中)
+
+    工具2：patch生成
+        工具名称：FuzzingBrain-patch
+        对外暴露接口：/api/v1/patch
+        描述：对指定repo，pov进行修复，生成patch
+        参数：pov_detail
+        返回：task_id, 密钥供查询
+
+        最终输出：patch_detail (储存在数据库中)
+
+    工具3: POV + Patch一条龙
+        工具名称：FuzzingBrain-pov-patch
+        对外暴露接口：/api/v1/pov-patch
+        描述：对指定repo进行漏洞检测+修补
+        参数：repo link, commit id(optional), fuzz-tooling link(optional), fuzz-tooling commit (opt)， sarif-report（opt）
+        返回：task_id, 密钥供查询
+
+        最终输出：上述两个都有
+
+    工具4: harness生成
+        工具名称：FuzzingBrain-harness
+        对外接口：/api/v1/harness-generation
+        描述：对指定repo生成更多的harness从而提高覆盖率
+        参数：repo link，commit id（这是用于指定版本，opt）， fuzz-tooling link(optional), fuzz-tooling commit (opt)，个数（默认1），指定函数/module（也就是fuzzing的对象功能）
+        返回：task_id, 密钥供查询
+
+        最终输出：harness_report
+
+
+
+## 进度2：业务相关逻辑 （未完成）
+
+### 目标2 基本任务处理：
+这一部分包括，解析任务，构建task，如何跑fuzzer，如何跑test，提交pov，提交patch,等
+
+解析任务，构建Task交给TaskBuilder对象
+
+1. 解析任务
+    - 直接照抄原来go的代码即可
+    - 注意，现在我们的crs分为本地模式和请求模式
+        - 请求模式：用户发送http请求至fuzzingbrain服务器，由我们的服务器处理，比如说克隆，下载代码
+        - 本地模式：用户在自己电脑上使用，通过传入文件夹等参数来运行
+
+2. 构建任务：
+    - 直接照抄原来的代码即可
+
+
+运行Fuzzer，跑test，pov，patch的提交交给另一个单独的模块，我们讨论一下称呼
+
+3. 跑fuzzer，test：
+    注意，此处的跑fuzzer是指将找出来的pov放入fuzzer跑，也就是说fuzzer只运行一个testcase。
+    跑fuzzer的应用场景：
+     - 测试生成的blob是不是能触发bug
+     - 在完成补丁后，如果相同的blob不能触发bug，说明补丁可以通过pov测试
+
+    跑test的应用场景：
+     - 完成补丁后，程序须通过回归测试，这个test.sh一般是开发者自己写的，用于跑单元测试
+
+    - 具体命令可以抄jeff文件夹下面的策略文件中的实现, 这一部分不难
+
+
+4. 所有提交
+提交逻辑也可以参照jeff文件夹下面的策略文件夹中的实现
+
+每次提交pov或者patch
+都必须附上所有详细信息：
+pov (或者叫pov_detail)
+    重要：pov在我们这里叫proof-of-Vulnerability，和广义的poc很像，对于当前版本，我们只支持oss-fuzz的项目，因此pov可以简单的理解为一次fuzzing input的生成
+
+    一次fuzzing input的生成，就代表着或许成功触发bug，或许失败，因此我们有一个is_successful的参数
+
+    - _id: 自生成
+    - task_id (只有这个是必须的): 隶属于哪个task？
+    - description：对于当前pov的描述
+    - sanitizer_output: fuzzer在当前sanitizer的基础上的report
+    - harness_name: 被什么harness检测到的？
+    - gen_blob: Python代码，用于生成该漏洞的输入
+    - blob: base64编码过后的blob内容
+    - msg_history: LLM在生成这个pov时的聊天记录
+    - create_time: 这个pov发现的时间
+    - is_successful: 该pov是否是一个成功的
+    - is_active: true/false (实际运行中，有可能很多个pov实际上重复，为了减小我们去重系统的开销，我们将所有失败/重复的pov deactive掉)
+    - architecture：x86_64 (固定)
+    - engine: libfuzzer （固定）
+    - sanitizer: address/ubsan/memory, 目前数据集全是address，可以在当前版本固定
+
+patch同理
+
+
+
+
+
+
+
+
+
+## 进度3：并发业务相关逻辑 （未完成）
+
+Controller，也就是中心crs 在构建完Task后，可能会生成多个{fuzzer，sanitizer}对，对于每一个这样的对，我们都应该有一个单独的子CRS去跑
+
+### 技术选型：Celery + Redis
+
+我们选择 **Celery** 作为分布式任务队列，配合 **Redis** 作为消息代理（Broker）和结果后端（Result Backend）。
+
+选择理由：
+1. **稳定性**：Celery是Python生态最成熟的分布式任务队列
+2. **简单性**：我们的功能需求不复杂，Celery完全够用
+3. **Redis复用**：我们已经用Redis存储函数缓存，直接复用
+
+### 架构设计
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        Controller                                │
+│                                                                  │
+│   1. 解析Task，构建所有fuzzer                                     │
+│   2. 生成 {fuzzer, sanitizer} 组合                                │
+│   3. 通过Celery分发任务给Worker                                   │
+│   4. 监控Worker状态                                              │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ Celery任务分发
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     Redis (Broker)                               │
+│                                                                  │
+│   - 任务队列：fuzzingbrain:celery                                │
+│   - 结果存储：fuzzingbrain:celery:results                        │
+│   - 函数缓存：fuzzingbrain:{task_id}:{fuzzer}:functions          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+          ┌───────────────────┼───────────────────┐
+          │                   │                   │
+          ▼                   ▼                   ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
+│    Worker 1     │ │    Worker 2     │ │    Worker N     │
+│                 │ │                 │ │                 │
+│ fuzzer: fuzz_a  │ │ fuzzer: fuzz_a  │ │ fuzzer: fuzz_b  │
+│ sanitizer: addr │ │ sanitizer: mem  │ │ sanitizer: addr │
+│                 │ │                 │ │                 │
+│   AI Agent      │ │   AI Agent      │ │   AI Agent      │
+│   Executor      │ │   Executor      │ │   Executor      │
+└─────────────────┘ └─────────────────┘ └─────────────────┘
+```
+
+### Celery任务定义
+
+```python
+# tasks.py
+from celery import Celery
+
+app = Celery('fuzzingbrain',
+             broker='redis://localhost:6379/0',
+             backend='redis://localhost:6379/0')
+
+@app.task(bind=True)
+def run_worker(self, assignment: dict):
+    """
+    执行一个Worker任务
+
+    assignment包含:
+    - task_id: str
+    - fuzzer: str
+    - sanitizer: str
+    - job_type: str (pov | patch | harness)
+    - workspace_path: str
+    - all_fuzzers: List[str]  # 所有可用的fuzzer，用于cross-fuzzer验证
+    """
+    worker_id = f"{assignment['task_id']}__{assignment['fuzzer']}__{assignment['sanitizer']}"
+
+    # 创建Worker记录
+    worker = Worker(
+        _id=worker_id,
+        celery_job_id=self.request.id,
+        task_id=assignment['task_id'],
+        job_type=assignment['job_type'],
+        fuzzer=assignment['fuzzer'],
+        sanitizer=assignment['sanitizer'],
+        workspace_path=assignment['workspace_path'],
+        status='running'
+    )
+    worker.save()
+
+    # 执行策略
+    try:
+        executor = Executor(assignment)
+        result = executor.run_strategies()
+
+        worker.status = 'completed'
+        worker.povs_found = result.pov_count
+        worker.patches_found = result.patch_count
+    except Exception as e:
+        worker.status = 'failed'
+        worker.error_msg = str(e)
+
+    worker.save()
+    return worker.to_dict()
+```
+
+### Controller分发逻辑
+
+```python
+# controller.py
+from tasks import run_worker
+
+class Controller:
+    def dispatch_workers(self, task: Task, fuzzers: List[Fuzzer]):
+        """
+        为每个 {fuzzer, sanitizer} 组合创建Worker任务
+        """
+        sanitizers = ['address', 'memory', 'undefined']
+        all_fuzzer_names = [f.fuzzer_name for f in fuzzers if f.status == 'success']
+
+        jobs = []
+        for fuzzer in fuzzers:
+            if fuzzer.status != 'success':
+                continue
+
+            for sanitizer in sanitizers:
+                assignment = {
+                    'task_id': task.task_id,
+                    'fuzzer': fuzzer.fuzzer_name,
+                    'sanitizer': sanitizer,
+                    'job_type': task.task_type,
+                    'workspace_path': f"{task.task_path}/workers/{fuzzer.fuzzer_name}_{sanitizer}",
+                    'all_fuzzers': all_fuzzer_names  # 传入所有fuzzer供cross验证
+                }
+
+                # 异步分发任务
+                result = run_worker.delay(assignment)
+                jobs.append({
+                    'worker_id': f"{task.task_id}__{fuzzer.fuzzer_name}__{sanitizer}",
+                    'celery_id': result.id
+                })
+
+        return jobs
+
+    def monitor_workers(self, task_id: str):
+        """
+        监控所有Worker的状态
+        """
+        workers = Worker.find_by_task(task_id)
+        return {
+            'total': len(workers),
+            'pending': len([w for w in workers if w.status == 'pending']),
+            'running': len([w for w in workers if w.status == 'running']),
+            'completed': len([w for w in workers if w.status == 'completed']),
+            'failed': len([w for w in workers if w.status == 'failed']),
+        }
+```
+
+### Docker运行策略：Docker-out-of-Docker (DooD)
+
+我们采用DooD模式运行fuzzer容器：
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                     Host Machine                            │
+│                                                             │
+│   docker.sock ◄──────────────────────────────────────┐     │
+│                                                       │     │
+│   ┌─────────────────────────────────────────────────┐ │     │
+│   │         FuzzingBrain Container                  │ │     │
+│   │                                                 │ │     │
+│   │   - Controller                                  │ │     │
+│   │   - Celery Workers                              │ │     │
+│   │   - Redis                                       │ │     │
+│   │   - MongoDB                                     │ │     │
+│   │                                                 │ │     │
+│   │   docker.sock (mounted) ────────────────────────┘ │     │
+│   │         │                                         │     │
+│   │         │ 启动fuzzer容器                          │     │
+│   │         ▼                                         │     │
+│   └─────────────────────────────────────────────────┘       │
+│                                                             │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐     │
+│   │ Fuzzer容器1  │  │ Fuzzer容器2  │  │ Fuzzer容器N  │     │
+│   │ (oss-fuzz)   │  │ (oss-fuzz)   │  │ (oss-fuzz)   │     │
+│   └──────────────┘  └──────────────┘  └──────────────┘     │
+│                                                             │
+└────────────────────────────────────────────────────────────┘
+```
+
+**DooD的优点**：
+1. 无需嵌套虚拟化
+2. 复用宿主机的Docker缓存
+3. 性能好，无额外开销
+
+**Docker运行命令**：
+
+```bash
+# 启动FuzzingBrain容器（挂载docker.sock）
+docker run -d \
+    --name fuzzingbrain \
+    -v /var/run/docker.sock:/var/run/docker.sock \
+    -v $(pwd)/workspace:/workspace \
+    -p 8000:8000 \
+    fuzzingbrain:latest
+```
+
+### Celery配置
+
+```python
+# celeryconfig.py
+broker_url = 'redis://localhost:6379/0'
+result_backend = 'redis://localhost:6379/0'
+
+task_serializer = 'json'
+result_serializer = 'json'
+accept_content = ['json']
+
+# 任务超时设置
+task_time_limit = 3600  # 1小时硬超时
+task_soft_time_limit = 3000  # 50分钟软超时
+
+# Worker并发设置
+worker_concurrency = 4  # 每个Worker进程的并发数
+
+# 任务路由
+task_routes = {
+    'tasks.run_worker': {'queue': 'workers'},
+}
+
+# 结果过期时间
+result_expires = 86400  # 24小时
+```
+
+### 启动命令
+
+```bash
+# 启动Celery Worker
+celery -A tasks worker --loglevel=info --queues=workers --concurrency=4
+
+# 启动Celery Beat（如果需要定时任务）
+celery -A tasks beat --loglevel=info
+
+# 监控（可选）
+celery -A tasks flower --port=5555
+```
+
+
+## 进度4：静态分析服务器接口

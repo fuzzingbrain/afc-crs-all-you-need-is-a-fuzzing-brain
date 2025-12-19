@@ -1,0 +1,506 @@
+#!/bin/bash
+#
+# FuzzingBrain v2 - Autonomous Cyber Reasoning System
+# Entry point for both local and Docker execution
+#
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKSPACE_DIR="$SCRIPT_DIR/workspace"
+VENV_DIR="$SCRIPT_DIR/venv"
+PYTHON="$VENV_DIR/bin/python3"
+
+# =============================================================================
+# Colors
+# =============================================================================
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+NC='\033[0m' # No Color
+
+# Claude 土黄色/橙棕色
+CLAUDE_ORANGE='\033[38;5;208m'
+CLAUDE_BROWN='\033[38;5;172m'
+CLAUDE_SAND='\033[38;5;180m'
+
+# =============================================================================
+# Banner
+# =============================================================================
+show_banner() {
+    echo -e "${CLAUDE_ORANGE}"
+    cat << 'EOF'
+    ███████╗██╗   ██╗███████╗███████╗██╗███╗   ██╗ ██████╗
+    ██╔════╝██║   ██║╚══███╔╝╚══███╔╝██║████╗  ██║██╔════╝
+    █████╗  ██║   ██║  ███╔╝   ███╔╝ ██║██╔██╗ ██║██║  ███╗
+    ██╔══╝  ██║   ██║ ███╔╝   ███╔╝  ██║██║╚██╗██║██║   ██║
+    ██║     ╚██████╔╝███████╗███████╗██║██║ ╚████║╚██████╔╝
+    ╚═╝      ╚═════╝ ╚══════╝╚══════╝╚═╝╚═╝  ╚═══╝ ╚═════╝
+EOF
+    echo -e "${CLAUDE_BROWN}"
+    cat << 'EOF'
+    ██████╗ ██████╗  █████╗ ██╗███╗   ██╗
+    ██╔══██╗██╔══██╗██╔══██╗██║████╗  ██║
+    ██████╔╝██████╔╝███████║██║██╔██╗ ██║
+    ██╔══██╗██╔══██╗██╔══██║██║██║╚██╗██║
+    ██████╔╝██║  ██║██║  ██║██║██║ ╚████║
+    ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝
+EOF
+    echo -e "${NC}"
+    echo -e "${CLAUDE_SAND}    ══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${CLAUDE_ORANGE}              🧠 Autonomous Cyber Reasoning System v2.0${NC}"
+    echo -e "${CLAUDE_SAND}    ══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${WHITE}    Developed by O2 Lab @ Texas A&M University,${NC}"
+    echo -e "${WHITE}                   City University of Hong Kong,${NC}"
+    echo -e "${WHITE}                   Imperial College London${NC}"
+    echo ""
+    echo -e "${CYAN}    Contact: zesheng@tamu.edu${NC}"
+    echo ""
+}
+
+# =============================================================================
+# Logging
+# =============================================================================
+print_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
+print_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
+print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+print_step()  { echo -e "${CYAN}[STEP]${NC} $1"; }
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
+
+# Check if argument looks like a git URL
+is_git_url() {
+    [[ "$1" =~ ^git@ ]] || [[ "$1" =~ ^https?://.*\.git$ ]] || [[ "$1" =~ ^https?://github\.com/ ]] || [[ "$1" =~ ^https?://gitlab\.com/ ]]
+}
+
+# Check if argument is a JSON file
+is_json_file() {
+    [[ "$1" =~ \.json$ ]] && [ -f "$1" ]
+}
+
+# Check if argument is a simple project name (no slashes, not a URL)
+is_project_name() {
+    local input="$1"
+    if ! is_git_url "$input" && [[ ! "$input" =~ / ]] && [[ ! "$input" =~ \.json$ ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# Extract repo name from git URL
+get_repo_name() {
+    local url="$1"
+    basename "$url" .git
+}
+
+# Generate task ID (short UUID)
+generate_task_id() {
+    python3 -c "import uuid; print(str(uuid.uuid4())[:8])"
+}
+
+# Try to find matching oss-fuzz project
+find_ossfuzz_project() {
+    local repo_name="$1"
+    local ossfuzz_dir="$2"
+
+    # Direct match
+    if [ -d "$ossfuzz_dir/projects/$repo_name" ]; then
+        echo "$repo_name"
+        return
+    fi
+
+    # Try lowercase
+    local lower_name=$(echo "$repo_name" | tr '[:upper:]' '[:lower:]')
+    if [ -d "$ossfuzz_dir/projects/$lower_name" ]; then
+        echo "$lower_name"
+        return
+    fi
+
+    # Try removing common prefixes/suffixes
+    local stripped_name=$(echo "$repo_name" | sed -E 's/^(lib|py|go|rust)-?//i' | sed -E 's/-?(lib|py|go|rust)$//i')
+    if [ -d "$ossfuzz_dir/projects/$stripped_name" ]; then
+        echo "$stripped_name"
+        return
+    fi
+
+    echo ""
+}
+
+# =============================================================================
+# Environment Checks
+# =============================================================================
+
+check_python() {
+    if command -v python3 &> /dev/null; then
+        local py_version=$(python3 --version 2>&1 | awk '{print $2}')
+        print_info "Python $py_version found"
+        return 0
+    elif command -v python &> /dev/null; then
+        local py_version=$(python --version 2>&1 | awk '{print $2}')
+        print_info "Python $py_version found"
+        return 0
+    else
+        print_error "Python is not installed!"
+        print_error "Please install Python 3.10+: https://www.python.org/downloads/"
+        return 1
+    fi
+}
+
+check_docker() {
+    if ! command -v docker &> /dev/null; then
+        print_error "Docker is not installed!"
+        print_error "Please install Docker: https://docs.docker.com/get-docker/"
+        return 1
+    fi
+
+    if ! docker info &> /dev/null 2>&1; then
+        print_error "Docker is not running!"
+        print_error "Please start Docker daemon and try again."
+        return 1
+    fi
+
+    print_info "Docker is running"
+    return 0
+}
+
+setup_venv() {
+    local REQUIREMENTS="$SCRIPT_DIR/requirements.txt"
+    local PIP="$VENV_DIR/bin/pip"
+
+    # Check if venv exists
+    if [ ! -d "$VENV_DIR" ]; then
+        print_info "Creating virtual environment..."
+        python3 -m venv "$VENV_DIR"
+        if [ $? -ne 0 ]; then
+            print_error "Failed to create virtual environment"
+            return 1
+        fi
+    fi
+
+    # Check if requirements need to be installed
+    # Use a marker file to track if dependencies are installed
+    local MARKER="$VENV_DIR/.deps_installed"
+    local REQUIREMENTS_HASH=$(md5sum "$REQUIREMENTS" 2>/dev/null | awk '{print $1}')
+
+    if [ ! -f "$MARKER" ] || [ "$(cat "$MARKER" 2>/dev/null)" != "$REQUIREMENTS_HASH" ]; then
+        print_info "Installing dependencies..."
+        $PIP install --upgrade pip -q
+        $PIP install -r "$REQUIREMENTS" -q
+        if [ $? -ne 0 ]; then
+            print_error "Failed to install dependencies"
+            return 1
+        fi
+        echo "$REQUIREMENTS_HASH" > "$MARKER"
+        print_info "Dependencies installed"
+    else
+        print_info "Dependencies up to date"
+    fi
+
+    return 0
+}
+
+check_environment() {
+    print_step "Checking environment..."
+
+    local checks_passed=true
+
+    check_python || checks_passed=false
+    check_docker || checks_passed=false
+
+    if [ "$checks_passed" = false ]; then
+        print_error "Environment check failed"
+        exit 1
+    fi
+
+    # Setup virtual environment and dependencies
+    setup_venv || exit 1
+
+    print_info "Environment check passed"
+    echo ""
+}
+
+# =============================================================================
+# Usage
+# =============================================================================
+
+show_usage() {
+    echo "Usage: $0 [OPTIONS] [TARGET]"
+    echo ""
+    echo "TARGET:"
+    echo "  (none)              Start MCP server mode"
+    echo "  <git_url>           Clone repository and process"
+    echo "  <json_file>         Load configuration from JSON file"
+    echo "  <workspace_path>    Use existing workspace directory"
+    echo "  <project_name>      Continue processing workspace/<project_name>"
+    echo ""
+    echo "OPTIONS:"
+    echo "  -b <commit>         Base commit (for delta scan)"
+    echo "  -d <commit>         Delta commit (for delta scan, requires -b)"
+    echo "  --project <name>    Specify OSS-Fuzz project name"
+    echo "  --job-type <type>   Task type: pov-patch (default), pov, patch, harness"
+    echo "  --sanitizers <list> Comma-separated sanitizers (default: address)"
+    echo "  --timeout <min>     Timeout in minutes (default: 60)"
+    echo "  --in-place          Run directly without copying workspace"
+    echo "  -h, -help, --help   Show this help message"
+    echo ""
+    echo "Examples:"
+    echo "  $0                                                    # Server mode"
+    echo "  $0 https://github.com/OwenSanzas/libpng.git           # Full scan"
+    echo "  $0 -b abc123 -d def456 https://github.com/user/repo   # Delta scan"
+    echo "  $0 ./task_config.json                                 # From JSON"
+    echo "  $0 libpng                                             # Continue project"
+    exit 0
+}
+
+# =============================================================================
+# Parse Arguments
+# =============================================================================
+
+IN_PLACE=false
+OSS_FUZZ_PROJECT=""
+BASE_COMMIT=""
+DELTA_COMMIT=""
+JOB_TYPE="pov-patch"
+SANITIZERS="address"
+TIMEOUT_MINUTES=60
+POSITIONAL_ARGS=()
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --in-place)
+            IN_PLACE=true
+            shift
+            ;;
+        --project)
+            OSS_FUZZ_PROJECT="$2"
+            shift 2
+            ;;
+        --job-type)
+            JOB_TYPE="$2"
+            shift 2
+            ;;
+        --sanitizers)
+            SANITIZERS="$2"
+            shift 2
+            ;;
+        --timeout)
+            TIMEOUT_MINUTES="$2"
+            shift 2
+            ;;
+        -b)
+            BASE_COMMIT="$2"
+            shift 2
+            ;;
+        -d)
+            DELTA_COMMIT="$2"
+            shift 2
+            ;;
+        -h|-help|--help)
+            show_banner
+            show_usage
+            ;;
+        -*)
+            print_error "Unknown option: $1"
+            show_usage
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Restore positional arguments
+set -- "${POSITIONAL_ARGS[@]}"
+
+# Validate delta scan arguments
+if [ -n "$DELTA_COMMIT" ] && [ -z "$BASE_COMMIT" ]; then
+    print_error "Delta commit (-d) requires base commit (-b)"
+    exit 1
+fi
+
+# =============================================================================
+# Main Logic
+# =============================================================================
+
+show_banner
+
+# =============================================================================
+# CASE 0: No arguments - Server Mode
+# =============================================================================
+if [ $# -eq 0 ]; then
+    print_info "No arguments provided, entering Server mode..."
+    echo ""
+    print_step "Starting FuzzingBrain MCP Server..."
+    check_environment
+
+    cd "$SCRIPT_DIR"
+    exec $PYTHON -m fuzzingbrain.main --server
+fi
+
+TARGET="$1"
+
+# =============================================================================
+# CASE 1: JSON File
+# =============================================================================
+if is_json_file "$TARGET"; then
+    print_step "Loading configuration from JSON: $TARGET"
+    check_environment
+
+    cd "$SCRIPT_DIR"
+    exec $PYTHON -m fuzzingbrain.main --config "$TARGET"
+fi
+
+# =============================================================================
+# CASE 2: Project Name - Continue existing project
+# =============================================================================
+if is_project_name "$TARGET"; then
+    PROJECT_NAME="$TARGET"
+    WORKSPACE="$WORKSPACE_DIR/${PROJECT_NAME}"
+
+    if [ ! -d "$WORKSPACE" ]; then
+        print_error "Project '$PROJECT_NAME' not found under workspace/"
+        echo ""
+        print_info "Available projects:"
+        if [ -d "$WORKSPACE_DIR" ] && [ -n "$(ls -A "$WORKSPACE_DIR" 2>/dev/null)" ]; then
+            ls -1 "$WORKSPACE_DIR" | sed 's/^/  /'
+        else
+            echo "  (none)"
+        fi
+        exit 1
+    fi
+
+    print_step "Continuing project: $PROJECT_NAME"
+    print_info "Workspace: $WORKSPACE"
+    check_environment
+
+    cd "$SCRIPT_DIR"
+    exec $PYTHON -m fuzzingbrain.main \
+        --workspace "$WORKSPACE" \
+        --job-type "$JOB_TYPE" \
+        --sanitizers "$SANITIZERS" \
+        --timeout "$TIMEOUT_MINUTES"
+fi
+
+# =============================================================================
+# CASE 3: Git URL - Create workspace from scratch
+# =============================================================================
+if is_git_url "$TARGET"; then
+    GIT_URL="$TARGET"
+    REPO_NAME=$(get_repo_name "$GIT_URL")
+    TASK_ID=$(generate_task_id)
+    WORKSPACE_NAME="${REPO_NAME}_${TASK_ID}"
+
+    print_step "Processing Git repository"
+    print_info "Task ID: $TASK_ID"
+    print_info "URL: $GIT_URL"
+    print_info "Repository: $REPO_NAME"
+
+    WORKSPACE="$WORKSPACE_DIR/${WORKSPACE_NAME}"
+    mkdir -p "$WORKSPACE"
+
+    # Clone repository
+    print_info "Cloning repository..."
+    if ! git clone "$GIT_URL" "$WORKSPACE/repo"; then
+        print_error "Failed to clone repository"
+        exit 1
+    fi
+
+    # Setup OSS-Fuzz tooling
+    if [ ! -d "$WORKSPACE/fuzz-tooling/projects" ] || [ -z "$(ls -A "$WORKSPACE/fuzz-tooling/projects" 2>/dev/null)" ]; then
+        print_info "Setting up OSS-Fuzz tooling..."
+        OSSFUZZ_TMP="/tmp/oss-fuzz-$$"
+
+        if git clone --depth 1 https://github.com/google/oss-fuzz.git "$OSSFUZZ_TMP" 2>/dev/null; then
+            if [ -z "$OSS_FUZZ_PROJECT" ]; then
+                OSS_FUZZ_PROJECT=$(find_ossfuzz_project "$REPO_NAME" "$OSSFUZZ_TMP")
+            fi
+
+            if [ -n "$OSS_FUZZ_PROJECT" ]; then
+                print_info "Found OSS-Fuzz project: $OSS_FUZZ_PROJECT"
+                mkdir -p "$WORKSPACE/fuzz-tooling/projects"
+                cp -r "$OSSFUZZ_TMP/projects/$OSS_FUZZ_PROJECT" "$WORKSPACE/fuzz-tooling/projects/"
+                cp -r "$OSSFUZZ_TMP/infra" "$WORKSPACE/fuzz-tooling/" 2>/dev/null || true
+            else
+                print_warn "No matching OSS-Fuzz project found"
+                print_warn "Use --project NAME to specify manually"
+            fi
+            rm -rf "$OSSFUZZ_TMP"
+        else
+            print_warn "Failed to clone oss-fuzz"
+        fi
+    else
+        print_info "Using existing fuzz-tooling"
+    fi
+
+    # Handle delta scan
+    if [ -n "$BASE_COMMIT" ]; then
+        print_info "Delta scan: $BASE_COMMIT → ${DELTA_COMMIT:-HEAD}"
+        mkdir -p "$WORKSPACE/diff"
+
+        cd "$WORKSPACE/repo"
+        TARGET_COMMIT="${DELTA_COMMIT:-HEAD}"
+
+        if git cat-file -t "$BASE_COMMIT" >/dev/null 2>&1; then
+            git diff "$BASE_COMMIT..$TARGET_COMMIT" > "$WORKSPACE/diff/ref.diff"
+            print_info "Generated diff file"
+        else
+            print_warn "Base commit not found, running full scan"
+            rm -rf "$WORKSPACE/diff"
+        fi
+        cd "$SCRIPT_DIR"
+    fi
+
+    print_info "Workspace ready: $WORKSPACE"
+    echo ""
+    check_environment
+
+    cd "$SCRIPT_DIR"
+    exec $PYTHON -m fuzzingbrain.main \
+        --task-id "$TASK_ID" \
+        --workspace "$WORKSPACE" \
+        --job-type "$JOB_TYPE" \
+        --sanitizers "$SANITIZERS" \
+        --timeout "$TIMEOUT_MINUTES" \
+        ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
+        ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"}
+fi
+
+# =============================================================================
+# CASE 4: Local Path - Use existing workspace
+# =============================================================================
+if [ -d "$TARGET" ]; then
+    print_step "Using existing workspace: $TARGET"
+    check_environment
+
+    cd "$SCRIPT_DIR"
+
+    if [ "$IN_PLACE" = true ]; then
+        exec $PYTHON -m fuzzingbrain.main \
+            --workspace "$TARGET" \
+            --in-place \
+            --job-type "$JOB_TYPE" \
+            --sanitizers "$SANITIZERS" \
+            --timeout "$TIMEOUT_MINUTES"
+    else
+        exec $PYTHON -m fuzzingbrain.main \
+            --workspace "$TARGET" \
+            --job-type "$JOB_TYPE" \
+            --sanitizers "$SANITIZERS" \
+            --timeout "$TIMEOUT_MINUTES"
+    fi
+fi
+
+# =============================================================================
+# Unknown input
+# =============================================================================
+print_error "Unknown input: $TARGET"
+print_error "Expected: git URL, JSON file, workspace path, or project name"
+exit 1
