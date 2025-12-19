@@ -47,6 +47,22 @@ type WorkerCRSService struct {
 
 	cpuUsageFn      func() (float64, error)
 	processTaskFunc func(string, models.TaskDetail, models.Task) error
+
+	// Track running child processes for cleanup
+	runningProcesses sync.Map // map[int]*exec.Cmd
+}
+
+// KillAllChildProcesses kills all tracked child processes
+func (s *WorkerCRSService) KillAllChildProcesses() {
+	log.Println("Killing all child processes...")
+	s.runningProcesses.Range(func(key, value interface{}) bool {
+		cmd := value.(*exec.Cmd)
+		if cmd.Process != nil {
+			log.Printf("Killing process PID %d", cmd.Process.Pid)
+			cmd.Process.Kill()
+		}
+		return true
+	})
 }
 
 // NewWorkerService creates a new worker service instance
@@ -843,6 +859,11 @@ func (s *WorkerCRSService) runSarifPOVStrategies(myFuzzer, taskDir, sarifFilePat
 				return
 			}
 
+			// Track this process for cleanup on interrupt
+			pid := runCmd.Process.Pid
+			s.runningProcesses.Store(pid, runCmd)
+			defer s.runningProcesses.Delete(pid)
+
 			var outputLines []string
 			var outputMutex sync.Mutex
 
@@ -1001,6 +1022,11 @@ func (s *WorkerCRSService) runXPatchSarifStrategies(myFuzzer, taskDir, sarifFile
 				log.Printf("Failed to start strategy %s: %v", strategyName, err)
 				return
 			}
+
+			// Track this process for cleanup on interrupt
+			pid := runCmd.Process.Pid
+			s.runningProcesses.Store(pid, runCmd)
+			defer s.runningProcesses.Delete(pid)
 
 			var outputLines []string
 			var outputMutex sync.Mutex

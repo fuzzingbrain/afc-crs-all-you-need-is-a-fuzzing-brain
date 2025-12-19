@@ -17,6 +17,9 @@ import requests
 import base64
 import random
 from pathlib import Path
+
+# Add repository root to path for imports
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 import tempfile
 import shutil
 import glob
@@ -24,6 +27,13 @@ import tarfile
 from litellm import completion
 from dotenv import load_dotenv
 from typing import Optional, Dict, List, Any, Union, Tuple
+
+from crs.strategy.common.utils.code_analysis import (
+    run_static_analysis_local,
+    load_qx_analysis_results,
+    get_reachable_functions_qx,
+    find_task_directory
+)
 import concurrent.futures
 import uuid
 
@@ -77,6 +87,7 @@ CLAUDE_MODEL_OPUS_4 = "claude-opus-4-20250514"
 MODELS = [CLAUDE_MODEL, OPENAI_MODEL, CLAUDE_MODEL_OPUS_4, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25]
 CLAUDE_MODEL = CLAUDE_MODEL_SONNET_45
 OPENAI_MODEL = CLAUDE_MODEL_SONNET_45
+OPENAI_MODEL_O3 = CLAUDE_MODEL_SONNET_45
 MODELS = [CLAUDE_MODEL_SONNET_45, CLAUDE_MODEL_OPUS_4]
 
 def get_fallback_model(current_model, tried_models):
@@ -2770,96 +2781,24 @@ def extract_function_body(file_path, function_name):
 
 def extract_call_paths_from_analysis_service(project_name,fuzzer_path,fuzzer_src_path, focus, project_src_dir, target_functions, use_qx):
     """
-    Extract call paths leading to vulnerable functions by querying an analysis service.
-    
+    Extract call paths leading to vulnerable functions using local static analysis.
+
+    Wrapper function that delegates to the imported local analysis function.
+
     Args:
-        fuzzer_src_path (str): Path to the fuzzer file that triggered the crash
-        modified_functions (dict): Dictionary of modified functions from the commit
-        project_src_dir (str, optional): Project source directory for resolving paths
-        
+        project_name (str): Project name (not used, kept for compatibility)
+        fuzzer_path (str): Path to the compiled fuzzer binary
+        fuzzer_src_path (str): Path to the fuzzer source file
+        focus (str): Focus area identifier
+        project_src_dir (str): Project source directory
+        target_functions (dict): Dictionary of target functions
+        use_qx (bool): Whether to use CodeQL analysis
+
     Returns:
-        list: List of call paths, where each call path is a list of function info dictionaries
-    """    
-    # Define the analysis service endpoint
-    ANALYSIS_SERVICE_URL = os.environ.get("ANALYSIS_SERVICE_URL", "http://localhost:7082")
-
-    if use_qx == True:
-        if not "/v1/analysis_qx" in ANALYSIS_SERVICE_URL:
-            ANALYSIS_SERVICE_URL = f"{ANALYSIS_SERVICE_URL}/v1/analysis_qx"
-    else:
-        if not "/v1/analysis" in ANALYSIS_SERVICE_URL:
-            ANALYSIS_SERVICE_URL = f"{ANALYSIS_SERVICE_URL}/v1/analysis"
-   
-    payload = {
-        "task_id": os.environ.get("TASK_ID"),
-        "focus": focus,
-        "project_src_dir": project_src_dir,
-        "fuzzer_path": fuzzer_path,
-        "fuzzer_source_path": fuzzer_src_path,
-        "target_functions": target_functions,
-    }
-    # List to hold the extracted call paths
-    call_paths = []
-    
-    try:
-        print(f"ANALYSIS_SERVICE_URL: {ANALYSIS_SERVICE_URL} payload: {payload}")
-
-        with tracer.start_as_current_span("analysis_service.request") as span:
-            span.set_attribute("crs.action.category", "static_analysis")
-            span.set_attribute("crs.action.name", f"extract_call_paths")
-            span.set_attribute("payload", f"{payload}")
-
-            # Make request to analysis service
-            response = requests.post(ANALYSIS_SERVICE_URL, json=payload, timeout=60)
-            
-            if response.status_code == 200:
-                result = response.json()
-                
-                if "call_paths" in result and isinstance(result["call_paths"], list):
-                    raw_call_paths = result["call_paths"]
-            
-                    # Process each call path
-                    for call_path_obj in raw_call_paths:
-                        processed_path = []
-                        
-                        # Extract the nodes array from the call path object
-                        if "nodes" not in call_path_obj or not isinstance(call_path_obj["nodes"], list):
-                            continue  # Skip if no nodes array
-                            
-                        for func_info in call_path_obj["nodes"]:
-                            file_path = func_info.get("file", "")
-                            function_name = func_info.get("function", "")
-                            func_body = func_info.get("body", "")
-                            line = func_info.get("line", "")
-                            
-                            # Construct processed function info
-                            processed_func = {
-                                "file": file_path,
-                                "function": function_name,
-                                "body": func_body,
-                                "line": line,
-                                "is_modified": func_info.get("is_modified", False),
-                                "is_vulnerable": func_info.get("is_vulnerable", False),  # Include if present
-                            }
-                            
-                            processed_path.append(processed_func)
-                        
-                        # Only add non-empty paths
-                        if processed_path:
-                            call_paths.append(processed_path)
-            else:
-                print(f"Analysis service returned non-200 status: {response.status_code}")
-                try:
-                    error_details = response.json()
-                    print("Error details (JSON):", error_details)
-                except Exception:
-                    print("Response body (not JSON):", response.text)
-    
-    except Exception as e:
-        print(f"Error querying analysis service: {str(e)}")
-    
-    print(f"Received {len(call_paths)} call_paths\n")
-    return call_paths
+        list: List of call paths
+    """
+    # Delegate to the imported local analysis function
+    return extract_call_paths_local(fuzzer_path, fuzzer_src_path, focus, project_src_dir, target_functions, use_qx)
 
 
 # Sample call path
@@ -2904,82 +2843,75 @@ TEST_CALL_PATHS = [
 ]
 
 
-def extract_reachable_functions_from_analysis_service(fuzzer_path,fuzzer_src_path, focus, project_src_dir, is_java):
-    # Define the analysis service endpoint
-    ANALYSIS_SERVICE_URL = os.environ.get("ANALYSIS_SERVICE_URL", "http://localhost:7082")
-    if not "/v1/reachable" in ANALYSIS_SERVICE_URL:
-        ANALYSIS_SERVICE_URL = f"{ANALYSIS_SERVICE_URL}/v1/reachable"
-    
-    ANALYSIS_SERVICE_URL_QX = f"{ANALYSIS_SERVICE_URL}_qx"
+def extract_reachable_functions_from_analysis_service(fuzzer_path, fuzzer_src_path, focus, project_src_dir, use_qx=True):
+    """Extract reachable functions using local static analysis"""
+    task_id = os.environ.get("TASK_ID")
+    if not task_id:
+        print("Warning: TASK_ID environment variable not set")
+        return []
 
-    payload = {
-        "task_id": os.environ.get("TASK_ID"),
-        "focus": focus,
-        "project_src_dir": project_src_dir,
-        "fuzzer_path": fuzzer_path,
-        "fuzzer_source_path": fuzzer_src_path,
-    }
-    max_tries   = 5          # total attempts
-    backoff_sec = 30          # initial back-off
+    # Find the actual task directory
+    task_dir = find_task_directory(task_id)
+    if not task_dir:
+        print(f"Could not find task directory for task_id {task_id}")
+        return []
 
-    reachable_functions = []
-    for attempt in range(1, max_tries + 1):
-        try:
-            if is_java == True:
-                print(f"[try {attempt}/{max_tries}] ANALYSIS_SERVICE_URL_QX: {ANALYSIS_SERVICE_URL_QX} payload: {payload}")
-                resp = requests.post(ANALYSIS_SERVICE_URL_QX, json=payload, timeout=60)
+    # Run analysis if results don't exist
+    if use_qx:
+        results_file = os.path.join(task_dir, f"{focus}_qx.json")
+    else:
+        results_file = os.path.join(task_dir, f"{focus}.json")
 
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if isinstance(data.get("reachable"), list):
-                        reachable_functions = data["reachable"]
-                        # for sarif, if empty, just return empty
-                        return reachable_functions
-                else:
-                    print(f"Analysis service returned {resp.status_code} for {ANALYSIS_SERVICE_URL_QX}")
-                    try:
-                        error_details = resp.json()
-                        print("Error details (JSON):", error_details)
-                    except Exception:
-                        print("Response body (not JSON):", resp.text)
-                    
-                    print(f"[second try {attempt}/{max_tries}] ANALYSIS_SERVICE_URL: {ANALYSIS_SERVICE_URL} payload: {payload}")
-                    resp = requests.post(ANALYSIS_SERVICE_URL, json=payload, timeout=60)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if isinstance(data.get("reachable"), list):
-                            reachable_functions = data["reachable"]
-                            return reachable_functions
-                    else:
-                        print(f"Analysis service returned {resp.status_code} for {ANALYSIS_SERVICE_URL}")
-                        try:
-                            error_details = resp.json()
-                            print("Error details (JSON):", error_details)
-                        except Exception:
-                            print("Response body (not JSON):", resp.text)
-            else:
-                print(f"[try {attempt}/{max_tries}] ANALYSIS_SERVICE_URL: {ANALYSIS_SERVICE_URL} payload: {payload}")
-                resp = requests.post(ANALYSIS_SERVICE_URL, json=payload, timeout=60)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if isinstance(data.get("reachable"), list):
-                        reachable_functions = data["reachable"]
-                        return reachable_functions
-                else:
-                    print(f"Analysis service returned {resp.status_code} for {ANALYSIS_SERVICE_URL}")
-                    try:
-                        error_details = resp.json()
-                        print("Error details (JSON):", error_details)
-                    except Exception:
-                        print("Response body (not JSON):", resp.text)
-        except Exception as e:
-            print(f"Error querying analysis service on attempt {attempt}: {e}")
+    if not os.path.exists(results_file):
+        print(f"[try 1/1] Running local static analysis for {focus}")
+        print(f"  task_id: {task_id}")
+        print(f"  task_dir: {task_dir}")
+        print(f"  fuzzer_source_path: {fuzzer_src_path}")
 
-        # only sleep if we will retry again
-        if attempt < max_tries:
-            time.sleep(backoff_sec)  
-    
-    return reachable_functions
+        success = run_static_analysis_local(task_id, task_dir, focus)
+        if not success:
+            print("Failed to run static analysis")
+            return []
+
+        # Wait for results
+        import time
+        time.sleep(2)
+
+    # Load results
+    if use_qx:
+        results = load_qx_analysis_results(task_id, focus, task_dir)
+        if results:
+            reachable_funcs = get_reachable_functions_qx(fuzzer_src_path, results)
+            return reachable_funcs
+    else:
+        # For non-QX, load regular results
+        if os.path.exists(results_file):
+            import json
+            with open(results_file, 'r') as f:
+                results = json.load(f)
+
+            # Normalize fuzzer path
+            fuzzer_key = fuzzer_src_path.replace(os.sep, '/')
+            entry_point = f"{fuzzer_key}.fuzzerTestOneInput" if fuzzer_src_path.endswith('.java') else f"{fuzzer_key}.LLVMFuzzerTestOneInput"
+
+            reachable_names = results.get('reachable', {}).get(entry_point, [])
+            functions_map = results.get('functions', {})
+
+            reachable_funcs = []
+            for func_name in reachable_names:
+                func_def = functions_map.get(func_name, {})
+                reachable_funcs.append({
+                    'name': func_def.get('Name', func_name),
+                    'file_path': func_def.get('FilePath', ''),
+                    'start_line': func_def.get('StartLine', 0),
+                    'end_line': func_def.get('EndLine', 0),
+                    'body': func_def.get('SourceCode', '')  # Use 'body' for consistency
+                })
+            return reachable_funcs
+
+    return []
+
+
 
 def extract_vulnerable_functions(reachable_funcs, vulnerable_functions, limit=10):
     """

@@ -17,6 +17,9 @@ import requests
 import base64
 import random
 from pathlib import Path
+
+# Add repository root to path for imports
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 import tempfile
 import shutil
 import glob
@@ -24,6 +27,12 @@ import tarfile
 from litellm import completion
 from dotenv import load_dotenv
 from typing import Optional, Dict, List, Any, Union, Tuple
+
+from crs.strategy.common.utils.code_analysis import (
+    run_static_analysis_local,
+    load_qx_analysis_results,
+    get_reachable_functions_qx
+)
 import concurrent.futures
 import uuid
 import pprint
@@ -78,6 +87,7 @@ CLAUDE_MODEL_OPUS_4 = "claude-opus-4-20250514"
 MODELS = [CLAUDE_MODEL_OPUS_4, CLAUDE_MODEL, OPENAI_MODEL, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25]
 CLAUDE_MODEL = CLAUDE_MODEL_SONNET_45
 OPENAI_MODEL = CLAUDE_MODEL_SONNET_45
+OPENAI_MODEL_O3 = CLAUDE_MODEL_SONNET_45
 MODELS = [CLAUDE_MODEL_SONNET_45, CLAUDE_MODEL_OPUS_4]
 
 def get_fallback_model(current_model, tried_models):
@@ -3207,6 +3217,10 @@ def main():
             patch_success = doPatchUntilSuccess(log_file,fuzzer_path,project_dir,project_name,focus, language)
         except Exception as e:
             span.record_exception(e)
+            # Print the full traceback so errors are visible
+            import traceback
+            print(f"ERROR: {str(e)}")
+            traceback.print_exc()
 
         span.set_attribute("crs.patch.success", patch_success)
     
