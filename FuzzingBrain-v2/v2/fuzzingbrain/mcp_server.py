@@ -8,8 +8,7 @@ from fastmcp import FastMCP
 from typing import Optional, List
 import asyncio
 
-from .config import Config
-from .models import Task, JobType, TaskStatus
+from .core import Config, Task, JobType, TaskStatus
 
 
 # Create MCP server instance

@@ -10,7 +10,29 @@
 
 
 ## 运行命令
+
+```bash
+# 基本用法
 ./FuzzingBrain.sh <github_repo_url>
+
+# 使用已存在的workspace
+./FuzzingBrain.sh <workspace_path>
+
+# 使用JSON配置文件
+./FuzzingBrain.sh config.json
+
+# 启动MCP服务器模式
+./FuzzingBrain.sh
+
+# 常用参数
+# --job-type <type>     任务类型: pov, patch, pov-patch (默认), harness
+# --scan-mode <mode>    扫描模式: full (默认), delta
+# -b <commit>           基准commit (自动设置scan-mode为delta)
+# -d <commit>           目标commit (可选，默认HEAD)
+# --sanitizers <list>   sanitizer列表 (默认: address)
+# --timeout <minutes>   超时时间 (默认: 60)
+# --in-place            原地运行，不复制workspace
+```
 
 
 ## 重构后的架构：
@@ -148,9 +170,97 @@ Controller会将 每一个fuzzer单独由{address， memory， UB}构建。并�
 3.
 
 
-## 进度1：搭建fastmcp server (未完成)：
+## 进度1：入口与服务器 (已完成) ✅
 
-### 目标0：数据模型的搭建 （未完成）
+### 已完成的代码结构
+
+```
+fuzzingbrain/
+├── __init__.py           # 包初始化
+├── config.py             # 配置管理 (环境变量、JSON、CLI参数)
+├── main.py               # Python入口点，四种模式路由
+├── mcp_server.py         # FastMCP服务器实现 (MCP协议)
+├── api.py                # FastAPI服务器实现 (REST API)
+├── processor.py          # 任务处理器 (工作空间设置、Fuzzer发现)
+├── models/
+│   ├── __init__.py       # 模型导出
+│   ├── task.py           # Task, TaskStatus, JobType, ScanMode
+│   ├── pov.py            # POV模型
+│   ├── patch.py          # Patch模型
+│   ├── worker.py         # Worker, WorkerStatus
+│   └── fuzzer.py         # Fuzzer, FuzzerStatus
+└── db/
+    ├── __init__.py       # 数据库模块导出
+    ├── connection.py     # MongoDB连接管理 (单例模式)
+    └── repository.py     # Repository模式CRUD操作
+
+FuzzingBrain.sh           # Shell入口脚本
+requirements.txt          # Python依赖
+```
+
+### 四种入口模式
+
+1. **REST API模式** (默认): `./FuzzingBrain.sh` 或 `./FuzzingBrain.sh --api`
+   - 启动FastAPI服务器 (默认端口: 8080)
+   - 提供标准HTTP REST API
+   - 支持Swagger文档 (`/docs`)
+
+2. **MCP Server模式**: `./FuzzingBrain.sh --mcp`
+   - 启动FastMCP服务器
+   - 对外暴露MCP工具供AI Agent调用
+   - 使用MCP协议 (stdio/SSE)
+
+3. **JSON模式**: `./FuzzingBrain.sh config.json`
+   - 从JSON文件加载完整配置
+   - 适合批量任务或CI/CD集成
+
+4. **本地模式**: `./FuzzingBrain.sh <url_or_path>`
+   - 直接处理GitHub URL或本地workspace
+   - 支持命令行参数覆盖配置
+
+### REST API 端点
+
+| 方法 | 端点 | 描述 |
+|------|------|------|
+| GET | `/` | 服务状态 |
+| GET | `/health` | 健康检查 |
+| GET | `/docs` | Swagger 文档 |
+| POST | `/api/v1/pov` | 查找漏洞 (POV) |
+| POST | `/api/v1/patch` | 生成补丁 |
+| POST | `/api/v1/pov-patch` | POV + Patch 一条龙 |
+| POST | `/api/v1/harness` | 生成 harness |
+| GET | `/api/v1/status/{task_id}` | 查询任务状态 |
+| GET | `/api/v1/tasks` | 列出所有任务 |
+| GET | `/api/v1/pov/{task_id}` | 获取 POV 结果 |
+| GET | `/api/v1/patch/{task_id}` | 获取 Patch 结果 |
+
+#### 示例调用
+
+```bash
+# 启动 REST API 服务器
+./FuzzingBrain.sh --api
+
+# 发起 POV 扫描
+curl -X POST http://localhost:8080/api/v1/pov \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repo_url": "https://github.com/pnggroup/libpng.git",
+    "sanitizers": ["address"],
+    "timeout_minutes": 60
+  }'
+
+# 响应
+{
+  "task_id": "abc123",
+  "status": "pending",
+  "message": "POV scan started for https://github.com/pnggroup/libpng.git"
+}
+
+# 查询任务状态
+curl http://localhost:8080/api/v1/status/abc123
+```
+
+### 目标0：数据模型的搭建 (已完成) ✅
 在开始之前，必须明确每个数据模型的参数，意义，这样便于我们监控/统一编程接口
 
 粒度：
@@ -163,6 +273,7 @@ Controller会将 每一个fuzzer单独由{address， memory， UB}构建。并�
 它应该拥有如下属性
     - task_id: 我们分配，可用于查询当前任务进度
     - task_type: pov, patch, pov-patch, harness, 代表不同的类别
+    - scan_mode: full（全量扫描）或 delta（增量扫描，基于commit差异）
     - task_status: cancelled (用户自己cancel), pending （等待中）, running, completed, error
     - is_sarif_check: 如果输入有sarif，说明可能是根据sarif report进行bug验证（其实就是生成pov）或者修补
     - is_fuzz_tooling_provided: 检测fuzz-tooling是否提供，比如有的项目采用oss-fuzz标准fuzzing框架，可以更好的利用
@@ -326,7 +437,100 @@ Harness的生成逻辑仍需讨论
     3. 查询方便
 
 
-### 目标1 API搭建：
+### 目标1 数据库层 (已完成) ✅
+
+使用 Repository 模式封装 MongoDB 操作，提供类型安全的 CRUD 接口。
+
+#### MongoDB 连接管理 (`db/connection.py`)
+
+```python
+from fuzzingbrain.db import MongoDB, get_database
+
+# 连接 MongoDB
+db = MongoDB.connect("mongodb://localhost:27017", "fuzzingbrain")
+
+# 检查连接状态
+if MongoDB.is_connected():
+    print("已连接")
+
+# 关闭连接
+MongoDB.close()
+```
+
+#### Repository 模式 (`db/repository.py`)
+
+每个模型都有对应的 Repository 类：
+
+| Repository | 模型 | 集合名 |
+|------------|------|--------|
+| `TaskRepository` | Task | tasks |
+| `POVRepository` | POV | povs |
+| `PatchRepository` | Patch | patches |
+| `WorkerRepository` | Worker | workers |
+| `FuzzerRepository` | Fuzzer | fuzzers |
+
+#### 基本 CRUD 操作
+
+```python
+from fuzzingbrain.db import MongoDB, init_repos
+
+# 初始化
+db = MongoDB.connect()
+repos = init_repos(db)
+
+# 创建任务
+task = Task(repo_url="https://github.com/pnggroup/libpng.git")
+repos.tasks.save(task)
+
+# 查询
+task = repos.tasks.find_by_id("task_123")
+pending_tasks = repos.tasks.find_pending()
+
+# 更新
+repos.tasks.update_status("task_123", "running")
+
+# 删除
+repos.tasks.delete("task_123")
+```
+
+#### 专用查询方法
+
+```python
+# Task
+repos.tasks.find_pending()
+repos.tasks.find_running()
+repos.tasks.find_by_project("libpng")
+repos.tasks.add_pov(task_id, pov_id)
+repos.tasks.add_patch(task_id, patch_id)
+
+# POV
+repos.povs.find_by_task(task_id)
+repos.povs.find_active_by_task(task_id)
+repos.povs.find_successful_by_task(task_id)
+repos.povs.deactivate(pov_id)
+repos.povs.mark_successful(pov_id)
+
+# Patch
+repos.patches.find_by_task(task_id)
+repos.patches.find_by_pov(pov_id)
+repos.patches.find_valid_by_task(task_id)
+repos.patches.update_checks(patch_id, apply=True, compile=True)
+
+# Worker
+repos.workers.find_by_task(task_id)
+repos.workers.find_running_by_task(task_id)
+repos.workers.find_by_fuzzer(task_id, fuzzer, sanitizer)
+repos.workers.update_strategy(worker_id, "strategy_a")
+
+# Fuzzer
+repos.fuzzers.find_by_task(task_id)
+repos.fuzzers.find_successful_by_task(task_id)
+repos.fuzzers.find_by_name(task_id, "fuzz_png")
+repos.fuzzers.update_status(fuzzer_id, "success", binary_path="/path/to/binary")
+```
+
+
+### 目标2 API搭建 (已完成) ✅
     所有api命名逻辑应遵循:
     localhost:xxxx/v1/api/pov
     localhost:xxxx/v1/api/patch
@@ -371,9 +575,85 @@ Harness的生成逻辑仍需讨论
 
 
 
-## 进度2：业务相关逻辑 （未完成）
+## 进度2：业务相关逻辑 （部分完成）
 
-### 目标2 基本任务处理：
+### 目标3 任务处理器 (已完成) ✅
+
+任务处理器 (`processor.py`) 实现了任务处理管道的核心逻辑：
+
+#### 代码结构
+
+```
+fuzzingbrain/processor.py
+├── WorkspaceSetup       # 工作空间设置
+│   ├── setup()           # 创建目录结构
+│   ├── clone_repository()  # 克隆仓库
+│   └── setup_fuzz_tooling()  # 设置fuzz-tooling
+├── FuzzerDiscovery      # Fuzzer发现
+│   ├── discover_fuzzers()  # 扫描fuzzer源文件
+│   └── save_fuzzers()      # 保存到数据库
+└── TaskProcessor        # 主处理器
+    ├── _init_database()    # 初始化数据库连接
+    └── process()           # 执行处理管道
+```
+
+#### 处理管道
+
+```python
+from fuzzingbrain.processor import process_task
+from fuzzingbrain.models import Task
+from fuzzingbrain.config import Config
+
+task = Task(
+    repo_url="https://github.com/pnggroup/libpng.git",
+    project_name="libpng",
+    job_type=JobType.POV_PATCH
+)
+config = Config(workspace="workspace")
+
+result = process_task(task, config)
+# {
+#   "task_id": "abc123",
+#   "status": "pending",
+#   "message": "Task initialized. Found 3 fuzzers.",
+#   "workspace": "workspace/libpng_abc123",
+#   "fuzzers": ["fuzz_png", "fuzz_decode", "fuzz_read"]
+# }
+```
+
+#### 工作空间结构
+
+执行后创建的目录结构：
+
+```
+workspace/
+└── libpng_abc123/
+    ├── repo/              # 克隆的源代码
+    ├── fuzz-tooling/      # fuzzing工具 (如果提供)
+    ├── results/
+    │   ├── povs/          # POV结果
+    │   └── patches/       # Patch结果
+    └── logs/              # 日志文件
+```
+
+#### Fuzzer发现
+
+支持的fuzzer文件模式：
+- `fuzz_*.c`, `fuzz_*.cc`, `fuzz_*.cpp`
+- `*_fuzzer.c`, `*_fuzzer.cc`, `*_fuzzer.cpp`
+- `fuzzer_*.c`, `fuzzer_*.cc`, `fuzzer_*.cpp`
+
+搜索路径：
+1. `fuzz-tooling/` (如果提供)
+2. `repo/` (源代码目录)
+
+#### 待实现
+
+- [ ] Fuzzer构建 (需要Docker环境)
+- [ ] Worker分发 (需要Celery)
+- [ ] 静态分析集成
+
+### 目标4 基本任务处理：
 这一部分包括，解析任务，构建task，如何跑fuzzer，如何跑test，提交pov，提交patch,等
 
 解析任务，构建Task交给TaskBuilder对象

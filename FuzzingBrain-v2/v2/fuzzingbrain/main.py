@@ -4,18 +4,59 @@ FuzzingBrain v2 - Main Entry Point
 This module is the Python entry point for FuzzingBrain.
 It is called by FuzzingBrain.sh as: python3 -m fuzzingbrain.main <args>
 
-Three entry modes:
-1. Server Mode (--server): Start MCP server for external AI systems
-2. JSON Mode (--config): Load task configuration from JSON file
-3. Local Mode (--workspace): Run task on local workspace
+Four entry modes:
+1. REST API Mode (default): Start REST API server
+2. MCP Server Mode (--mcp): Start MCP server for AI systems
+3. JSON Mode (--config): Load task configuration from JSON file
+4. Local Mode (--workspace): Run task on local workspace
 """
 
 import argparse
 import sys
 from pathlib import Path
+from typing import Optional
 
-from .config import Config
-from .models import Task, JobType, ScanMode
+from .core import Config, Task, JobType, ScanMode, setup_logging, setup_console_only
+from .db import MongoDB, RepositoryManager, init_repos
+
+
+# =============================================================================
+# Global State
+# =============================================================================
+
+# Global Repository Manager - initialized in init_database()
+_repos: Optional[RepositoryManager] = None
+
+
+def get_repos() -> RepositoryManager:
+    """Get global RepositoryManager instance"""
+    global _repos
+    if _repos is None:
+        raise RuntimeError("Database not initialized. Call init_database() first.")
+    return _repos
+
+
+def init_database(config: Config) -> RepositoryManager:
+    """
+    Initialize database connection (global singleton)
+
+    Called once at application startup, then shared by all components.
+    """
+    global _repos
+
+    if _repos is not None:
+        return _repos
+
+    print_info("Connecting to MongoDB...")
+    try:
+        db = MongoDB.connect(config.mongodb_url, config.mongodb_db)
+        _repos = init_repos(db)
+        print_info(f"Connected to database: {config.mongodb_db}")
+        return _repos
+    except Exception as e:
+        print_error(f"Failed to connect to MongoDB: {e}")
+        print_error("Make sure MongoDB is running (check: docker ps)")
+        sys.exit(1)
 
 
 # =============================================================================
@@ -60,7 +101,8 @@ def parse_args() -> argparse.Namespace:
     )
 
     # Mode selection
-    parser.add_argument("--server", action="store_true", help="Start MCP server mode")
+    parser.add_argument("--mcp", action="store_true", help="Start MCP server mode")
+    parser.add_argument("--api", action="store_true", help="Start REST API server mode")
     parser.add_argument("--config", type=str, help="JSON configuration file path")
 
     # Task identification
@@ -80,6 +122,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-commit", type=str, help="Base commit for delta scan")
     parser.add_argument("--delta-commit", type=str, help="Delta commit for delta scan")
 
+    # Project info
+    parser.add_argument("--project", type=str, help="Project name (e.g., libpng)")
+    parser.add_argument("--ossfuzz-project", type=str, help="OSS-Fuzz project name (if different from --project)")
+
     return parser.parse_args()
 
 
@@ -88,9 +134,9 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
     # Start with environment config
     config = Config.from_env()
 
-    # Server mode
-    if args.server:
-        config.server_mode = True
+    # MCP server mode
+    if args.mcp:
+        config.mcp_mode = True
         return config
 
     # JSON mode - load from file
@@ -117,50 +163,70 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
         config.base_commit = args.base_commit
     if args.delta_commit:
         config.delta_commit = args.delta_commit
+    if args.project:
+        config.project_name = args.project
+    if args.ossfuzz_project:
+        config.ossfuzz_project = args.ossfuzz_project
 
     return config
 
 
 # =============================================================================
-# Shared Business Logic (placeholder)
+# Shared Business Logic
 # =============================================================================
 
-def process_task(task: Task, config: Config):  # noqa: ARG001
+def process_task(task: Task, config: Config) -> dict:
     """
     Process a task - shared logic for all entry modes.
 
     This is the core business logic that:
     1. Parses and validates the workspace
-    2. Starts static analysis
-    3. Builds fuzzers
-    4. Dispatches workers via Celery
-    5. Monitors and collects results
+    2. Sets up repository and fuzz-tooling
+    3. Discovers fuzzers
+    4. Builds fuzzers
+    5. Dispatches workers via Celery
+    6. Monitors and collects results
     """
+    # Setup logging for this task
+    project_name = config.project_name or "unknown"
+    log_dir = setup_logging(
+        project_name,
+        task.task_id,
+        metadata={
+            "Task Type": task.task_type.value,
+            "Scan Mode": task.scan_mode.value,
+            "Workspace": config.workspace,
+            "Sanitizers": ", ".join(config.sanitizers),
+            "Timeout": f"{config.timeout_minutes} minutes",
+            "Base Commit": config.base_commit,
+            "Delta Commit": config.delta_commit,
+        }
+    )
+    print_info(f"Logs: {log_dir}")
+
     print_info(f"Task ID: {task.task_id}")
     print_info(f"Task Type: {task.task_type.value}")
+    print_info(f"Scan Mode: {task.scan_mode.value}")
     print("")
 
-    # TODO: Implement actual task processing
-    # from .controller import Controller
-    # controller = Controller(config)
-    # result = controller.run(task)
-    # return result
+    print_step("Starting task processing pipeline...")
 
-    print_step("Task execution pipeline:")
-    print_info("1. Parse and validate workspace")
-    print_info("2. Start static analysis server")
-    print_info("3. Build fuzzers")
-    print_info("4. Dispatch workers via Celery")
-    print_info("5. Monitor and collect results")
+    from .core import process_task as run_processor
+    result = run_processor(task, config, get_repos())
+
+    # Display result
     print("")
+    if result["status"] == "error":
+        print_error(f"Task failed: {result['message']}")
+    else:
+        print_info(f"Status: {result['status']}")
+        print_info(f"Message: {result['message']}")
+        if "workspace" in result:
+            print_info(f"Workspace: {result['workspace']}")
+        if "fuzzers" in result and result["fuzzers"]:
+            print_info(f"Fuzzers: {', '.join(result['fuzzers'])}")
 
-    print_warn("Task execution not yet implemented")
-
-    return {
-        "task_id": task.task_id,
-        "status": "pending",
-        "message": "Task created but execution not implemented",
-    }
+    return result
 
 
 def create_task_from_config(config: Config) -> Task:
@@ -187,15 +253,16 @@ def create_task_from_config(config: Config) -> Task:
 
 
 # =============================================================================
-# Entry Mode: Server
+# Entry Mode: MCP Server
 # =============================================================================
 
-def run_server(config: Config):
+def run_mcp_server(config: Config):
     """
     Start MCP server mode.
 
     Exposes FuzzingBrain as MCP tools for external AI systems.
     """
+    setup_console_only("INFO")
     print_step("Starting FuzzingBrain MCP Server...")
     print_info(f"Host: {config.mcp_host}")
     print_info(f"Port: {config.mcp_port}")
@@ -208,8 +275,36 @@ def run_server(config: Config):
     print_info("  - fuzzingbrain_generate_harness")
     print("")
 
-    from .server import run_server as start_mcp_server
+    from .mcp_server import run_server as start_mcp_server
     start_mcp_server(config)
+
+
+# =============================================================================
+# Entry Mode: REST API
+# =============================================================================
+
+def run_api(config: Config):
+    """
+    Start REST API server mode.
+
+    Exposes FuzzingBrain as REST API endpoints.
+    """
+    setup_console_only("INFO")
+    print_step("Starting FuzzingBrain REST API Server...")
+    print_info(f"Host: {config.api_host}")
+    print_info(f"Port: {config.api_port}")
+    print("")
+    print_info("Available API Endpoints:")
+    print_info("  POST /api/v1/pov         - Find vulnerabilities")
+    print_info("  POST /api/v1/patch       - Generate patches")
+    print_info("  POST /api/v1/pov-patch   - POV + Patch combo")
+    print_info("  POST /api/v1/harness     - Generate harnesses")
+    print_info("  GET  /api/v1/status/{id} - Get task status")
+    print_info("  GET  /docs               - API documentation")
+    print("")
+
+    from .api_server import run_api_server
+    run_api_server(host=config.api_host, port=config.api_port)
 
 
 # =============================================================================
@@ -330,14 +425,29 @@ def main():
     args = parse_args()
     config = create_config_from_args(args)
 
-    if config.server_mode:
+    # Check for API mode from args
+    if hasattr(args, 'api') and args.api:
+        config.api_mode = True
+
+    # =========================================================================
+    # Initialize database connection (shared by all modes)
+    # =========================================================================
+    repos = init_database(config)
+
+    # =========================================================================
+    # Route to corresponding mode
+    # =========================================================================
+    if config.mcp_mode:
         # Mode 1: MCP Server
-        run_server(config)
+        run_mcp_server(config)
+    elif config.api_mode:
+        # Mode 2: REST API Server
+        run_api(config)
     elif args.config:
-        # Mode 2: JSON Config
+        # Mode 3: JSON Config
         run_json_mode(config)
     else:
-        # Mode 3: Local Workspace
+        # Mode 4: Local Workspace
         run_local_mode(config)
 
 

@@ -16,7 +16,7 @@ class Config:
     """FuzzingBrain configuration"""
 
     # Mode
-    server_mode: bool = False
+    mcp_mode: bool = False
 
     # Task identification
     task_id: Optional[str] = None
@@ -35,6 +35,7 @@ class Config:
     repo_url: Optional[str] = None
     repo_path: Optional[str] = None
     project_name: Optional[str] = None
+    ossfuzz_project: Optional[str] = None  # OSS-Fuzz project name (may differ from project_name)
 
     # Delta scan commits (used when scan_mode is delta)
     base_commit: Optional[str] = None
@@ -61,6 +62,11 @@ class Config:
     # MCP server
     mcp_host: str = "0.0.0.0"
     mcp_port: int = 8000
+
+    # REST API server
+    api_mode: bool = False
+    api_host: str = "0.0.0.0"
+    api_port: int = 8080
 
     @classmethod
     def from_json(cls, json_path: str) -> "Config":
@@ -97,7 +103,7 @@ class Config:
         sanitizers = os.environ.get("FUZZINGBRAIN_SANITIZERS", "address")
 
         return cls(
-            server_mode=os.environ.get("FUZZINGBRAIN_SERVER", "").lower() == "true",
+            mcp_mode=os.environ.get("FUZZINGBRAIN_MCP", "").lower() == "true",
             workspace=os.environ.get("FUZZINGBRAIN_WORKSPACE"),
             job_type=os.environ.get("FUZZINGBRAIN_JOB_TYPE", "pov-patch"),
             scan_mode=os.environ.get("FUZZINGBRAIN_SCAN_MODE", "full"),
@@ -108,6 +114,9 @@ class Config:
             mongodb_db=os.environ.get("MONGODB_DB", "fuzzingbrain"),
             mcp_host=os.environ.get("MCP_HOST", "0.0.0.0"),
             mcp_port=int(os.environ.get("MCP_PORT", "8000")),
+            api_mode=os.environ.get("FUZZINGBRAIN_API", "").lower() == "true",
+            api_host=os.environ.get("API_HOST", "0.0.0.0"),
+            api_port=int(os.environ.get("API_PORT", "8080")),
         )
 
     def merge(self, other: "Config") -> "Config":
@@ -122,7 +131,7 @@ class Config:
         """Validate configuration, return list of errors"""
         errors = []
 
-        if self.server_mode:
+        if self.mcp_mode or self.api_mode:
             # Server mode doesn't need workspace
             return errors
 
@@ -161,7 +170,8 @@ class Config:
     def to_dict(self) -> dict:
         """Convert to dictionary"""
         return {
-            "server_mode": self.server_mode,
+            "mcp_mode": self.mcp_mode,
+            "api_mode": self.api_mode,
             "workspace": self.workspace,
             "in_place": self.in_place,
             "job_type": self.job_type,

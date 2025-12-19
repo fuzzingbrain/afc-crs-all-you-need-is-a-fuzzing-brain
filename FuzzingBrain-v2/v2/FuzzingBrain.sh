@@ -170,6 +170,134 @@ check_docker() {
     return 0
 }
 
+# MongoDB container name
+MONGODB_CONTAINER="fuzzingbrain-mongodb"
+MONGODB_PORT=27017
+MONGODB_HOST="${MONGODB_HOST:-localhost}"
+
+# =============================================================================
+# Docker Environment Detection
+# =============================================================================
+
+is_in_docker() {
+    # 检测是否在 Docker 容器内运行
+    # 方法1: 检查 /.dockerenv 文件
+    [ -f /.dockerenv ] && return 0
+
+    # 方法2: 检查 cgroup
+    grep -q docker /proc/1/cgroup 2>/dev/null && return 0
+
+    # 方法3: 检查环境变量 (docker-compose 设置)
+    [ -n "$RUNNING_IN_DOCKER" ] && return 0
+
+    return 1
+}
+
+check_mongodb() {
+    # Check if MongoDB is accessible
+    # Try multiple methods for compatibility
+
+    # Method 1: netcat
+    if command -v nc &> /dev/null; then
+        if nc -z "$MONGODB_HOST" $MONGODB_PORT 2>/dev/null; then
+            print_info "MongoDB is running on $MONGODB_HOST:$MONGODB_PORT"
+            return 0
+        fi
+    fi
+
+    # Method 2: /dev/tcp (bash built-in)
+    if (echo > /dev/tcp/$MONGODB_HOST/$MONGODB_PORT) 2>/dev/null; then
+        print_info "MongoDB is running on $MONGODB_HOST:$MONGODB_PORT"
+        return 0
+    fi
+
+    # Method 3: Check if container is running (only for local mode)
+    if [ "$MONGODB_HOST" = "localhost" ] || [ "$MONGODB_HOST" = "127.0.0.1" ]; then
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${MONGODB_CONTAINER}$"; then
+            print_info "MongoDB container is running"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+start_mongodb() {
+    # Check if MongoDB container already exists
+    if docker ps -a --format '{{.Names}}' | grep -q "^${MONGODB_CONTAINER}$"; then
+        # Container exists, check if running
+        if docker ps --format '{{.Names}}' | grep -q "^${MONGODB_CONTAINER}$"; then
+            print_info "MongoDB container already running"
+            return 0
+        else
+            # Start existing container
+            print_info "Starting existing MongoDB container..."
+            docker start "$MONGODB_CONTAINER" > /dev/null
+            sleep 2
+            if check_mongodb; then
+                return 0
+            fi
+        fi
+    else
+        # Create new container
+        print_info "Starting MongoDB container..."
+        docker run -d \
+            --name "$MONGODB_CONTAINER" \
+            -p 0.0.0.0:${MONGODB_PORT}:27017 \
+            -v fuzzingbrain-mongodb-data:/data/db \
+            mongo:7.0 > /dev/null
+
+        # Wait for MongoDB to start
+        print_info "Waiting for MongoDB to start..."
+        for i in {1..10}; do
+            sleep 1
+            if check_mongodb; then
+                print_info "MongoDB started successfully"
+                return 0
+            fi
+        done
+    fi
+
+    print_error "Failed to start MongoDB"
+    return 1
+}
+
+ensure_mongodb() {
+    # 如果在 Docker 容器内运行，假设 MongoDB 由外部管理（如 docker-compose）
+    if is_in_docker; then
+        print_info "Running in Docker container"
+        print_info "Assuming MongoDB is managed by docker-compose"
+
+        if check_mongodb; then
+            return 0
+        else
+            print_error "MongoDB not reachable at $MONGODB_HOST:$MONGODB_PORT"
+            print_error "Check docker-compose configuration"
+            return 1
+        fi
+    fi
+
+    # 本地模式：检查并启动 MongoDB
+    if check_mongodb; then
+        return 0
+    fi
+
+    print_info "MongoDB not running, starting via Docker..."
+
+    if ! command -v docker &> /dev/null; then
+        print_error "Docker required to start MongoDB"
+        print_error "Either install Docker or start MongoDB manually"
+        return 1
+    fi
+
+    if ! docker info &> /dev/null 2>&1; then
+        print_error "Docker daemon not running"
+        return 1
+    fi
+
+    start_mongodb
+}
+
 setup_venv() {
     local REQUIREMENTS="$SCRIPT_DIR/requirements.txt"
     local PIP="$VENV_DIR/bin/pip"
@@ -222,6 +350,9 @@ check_environment() {
     # Setup virtual environment and dependencies
     setup_venv || exit 1
 
+    # Ensure MongoDB is running
+    ensure_mongodb || exit 1
+
     print_info "Environment check passed"
     echo ""
 }
@@ -241,6 +372,8 @@ show_usage() {
     echo "  <project_name>      Continue processing workspace/<project_name>"
     echo ""
     echo "OPTIONS:"
+    echo "  --api               Start REST API server (default, port: 8080)"
+    echo "  --mcp               Start MCP server (for AI agents)"
     echo "  --scan-mode <mode>  Scan mode: full (default), delta"
     echo "  -b <commit>         Base commit (auto-sets scan-mode to delta)"
     echo "  -d <commit>         Delta commit (requires -b, default: HEAD)"
@@ -252,7 +385,8 @@ show_usage() {
     echo "  -h, -help, --help   Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0                                                    # Server mode"
+    echo "  $0                                                    # REST API mode (default)"
+    echo "  $0 --mcp                                              # MCP Server mode"
     echo "  $0 https://github.com/OwenSanzas/libpng.git           # Full scan"
     echo "  $0 -b abc123 -d def456 https://github.com/user/repo   # Delta scan"
     echo "  $0 ./task_config.json                                 # From JSON"
@@ -272,6 +406,8 @@ JOB_TYPE="pov-patch"
 SCAN_MODE="full"
 SANITIZERS="address"
 TIMEOUT_MINUTES=60
+API_MODE=false
+MCP_MODE=false
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -309,6 +445,14 @@ while [[ $# -gt 0 ]]; do
             SCAN_MODE="$2"
             shift 2
             ;;
+        --api)
+            API_MODE=true
+            shift
+            ;;
+        --mcp)
+            MCP_MODE=true
+            shift
+            ;;
         -h|-help|--help)
             show_banner
             show_usage
@@ -340,16 +484,29 @@ fi
 show_banner
 
 # =============================================================================
-# CASE 0: No arguments - Server Mode
+# CASE 0a: MCP Mode (explicit --mcp flag)
 # =============================================================================
-if [ $# -eq 0 ]; then
-    print_info "No arguments provided, entering Server mode..."
+if [ "$MCP_MODE" = true ]; then
+    print_info "Starting MCP Server mode..."
     echo ""
     print_step "Starting FuzzingBrain MCP Server..."
     check_environment
 
     cd "$SCRIPT_DIR"
-    exec $PYTHON -m fuzzingbrain.main --server
+    exec $PYTHON -m fuzzingbrain.main --mcp
+fi
+
+# =============================================================================
+# CASE 0b: No arguments or --api - REST API Server Mode (default)
+# =============================================================================
+if [ $# -eq 0 ] || [ "$API_MODE" = true ]; then
+    print_info "Starting REST API Server mode (default)..."
+    echo ""
+    print_step "Starting FuzzingBrain REST API Server..."
+    check_environment
+
+    cd "$SCRIPT_DIR"
+    exec $PYTHON -m fuzzingbrain.main --api
 fi
 
 TARGET="$1"
@@ -476,6 +633,8 @@ if is_git_url "$TARGET"; then
     exec $PYTHON -m fuzzingbrain.main \
         --task-id "$TASK_ID" \
         --workspace "$WORKSPACE" \
+        --project "$REPO_NAME" \
+        ${OSS_FUZZ_PROJECT:+--ossfuzz-project "$OSS_FUZZ_PROJECT"} \
         --job-type "$JOB_TYPE" \
         --scan-mode "$SCAN_MODE" \
         --sanitizers "$SANITIZERS" \

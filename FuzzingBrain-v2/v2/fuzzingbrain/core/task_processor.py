@@ -1,0 +1,385 @@
+"""
+Task Processor
+
+Core business logic for processing FuzzingBrain tasks.
+This module handles:
+1. Workspace setup and validation
+2. Repository cloning/setup
+3. Fuzzer discovery and building
+4. Task dispatch to workers
+"""
+
+import os
+import shutil
+import subprocess
+from datetime import datetime
+from pathlib import Path
+from typing import Optional, List, Tuple
+from .logging import logger
+from .config import Config
+from .models import Task, TaskStatus, Fuzzer, FuzzerStatus
+from ..db import RepositoryManager
+
+
+class WorkspaceSetup:
+    """Handles workspace creation and validation"""
+
+    def __init__(self, config: Config, task: Task):
+        self.config = config
+        self.task = task
+
+    def setup(self) -> Tuple[bool, str]:
+        """
+        Setup workspace for the task.
+
+        When --workspace is provided (from FuzzingBrain.sh), use it directly.
+        Otherwise, create a new workspace under ./workspace/
+
+        Returns:
+            (success, message)
+        """
+        try:
+            if self.config.workspace:
+                # Workspace already created by shell script, use it directly
+                task_workspace = Path(self.config.workspace)
+                logger.info(f"Using existing workspace: {task_workspace}")
+            else:
+                # Create new workspace (API/MCP mode)
+                workspace_root = Path("workspace")
+                project_name = self.task.project_name or "unknown"
+                task_workspace = workspace_root / f"{project_name}_{self.task.task_id[:8]}"
+                task_workspace.mkdir(parents=True, exist_ok=True)
+                logger.info(f"Created workspace: {task_workspace}")
+
+            # Ensure subdirectories exist
+            (task_workspace / "repo").mkdir(exist_ok=True)
+            (task_workspace / "results").mkdir(exist_ok=True)
+            (task_workspace / "results" / "povs").mkdir(exist_ok=True)
+            (task_workspace / "results" / "patches").mkdir(exist_ok=True)
+            (task_workspace / "logs").mkdir(exist_ok=True)
+
+            # Update task paths
+            self.task.task_path = str(task_workspace)
+            self.task.src_path = str(task_workspace / "repo")
+
+            logger.info(f"Workspace setup complete: {task_workspace}")
+            return True, str(task_workspace)
+
+        except Exception as e:
+            logger.error(f"Failed to setup workspace: {e}")
+            return False, str(e)
+
+    def clone_repository(self) -> Tuple[bool, str]:
+        """
+        Clone the repository if repo_url is provided.
+
+        Returns:
+            (success, message)
+        """
+        if not self.config.repo_url:
+            # Repo already cloned by FuzzingBrain.sh or using existing workspace
+            logger.info("Repository already available, skipping clone")
+            return True, "Skipped"
+
+        repo_path = Path(self.task.src_path)
+
+        # Check if already cloned
+        if (repo_path / ".git").exists():
+            logger.info(f"Repository already exists at {repo_path}")
+            return True, "Already exists"
+
+        try:
+            logger.info(f"Cloning {self.config.repo_url} to {repo_path}")
+            result = subprocess.run(
+                ["git", "clone", "--depth", "1", self.config.repo_url, str(repo_path)],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+
+            if result.returncode != 0:
+                logger.error(f"Git clone failed: {result.stderr}")
+                return False, result.stderr
+
+            logger.info("Repository cloned successfully")
+            return True, "Cloned"
+
+        except subprocess.TimeoutExpired:
+            logger.error("Git clone timed out")
+            return False, "Clone timed out"
+        except Exception as e:
+            logger.error(f"Failed to clone repository: {e}")
+            return False, str(e)
+
+    def setup_fuzz_tooling(self) -> Tuple[bool, str]:
+        """
+        Setup fuzz-tooling directory.
+
+        Returns:
+            (success, message)
+        """
+        task_workspace = Path(self.task.task_path)
+        fuzz_tooling_path = task_workspace / "fuzz-tooling"
+
+        if self.config.fuzz_tooling_url:
+            # Clone fuzz-tooling from URL
+            try:
+                logger.info(f"Cloning fuzz-tooling from {self.config.fuzz_tooling_url}")
+                result = subprocess.run(
+                    ["git", "clone", "--depth", "1", self.config.fuzz_tooling_url, str(fuzz_tooling_path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+
+                if result.returncode != 0:
+                    logger.error(f"Fuzz-tooling clone failed: {result.stderr}")
+                    return False, result.stderr
+
+                self.task.fuzz_tooling_path = str(fuzz_tooling_path)
+                self.task.is_fuzz_tooling_provided = True
+                return True, "Cloned"
+
+            except Exception as e:
+                logger.error(f"Failed to clone fuzz-tooling: {e}")
+                return False, str(e)
+
+        elif self.config.fuzz_tooling_path:
+            # Copy from local path
+            try:
+                source = Path(self.config.fuzz_tooling_path)
+                if source.exists():
+                    shutil.copytree(source, fuzz_tooling_path, dirs_exist_ok=True)
+                    self.task.fuzz_tooling_path = str(fuzz_tooling_path)
+                    self.task.is_fuzz_tooling_provided = True
+                    return True, "Copied"
+                else:
+                    return False, f"Fuzz-tooling path not found: {source}"
+
+            except Exception as e:
+                logger.error(f"Failed to copy fuzz-tooling: {e}")
+                return False, str(e)
+
+        else:
+            # Check if fuzz-tooling exists in workspace (set up by FuzzingBrain.sh)
+            if fuzz_tooling_path.exists() and (fuzz_tooling_path / "projects").exists():
+                self.task.fuzz_tooling_path = str(fuzz_tooling_path)
+                self.task.is_fuzz_tooling_provided = True
+                return True, "Found existing"
+
+            # No fuzz-tooling provided
+            logger.warning("No fuzz-tooling found. Current version only supports OSS-Fuzz based projects.")
+            logger.warning("Please ensure the project exists in OSS-Fuzz or provide --fuzz-tooling-url")
+            return True, "Not provided"
+
+
+class FuzzerDiscovery:
+    """Discovers and builds fuzzers in the workspace"""
+
+    # Common fuzzer file patterns (search in direct children, not recursively in infra/)
+    FUZZER_PATTERNS = [
+        "fuzz_*.c",
+        "fuzz_*.cc",
+        "fuzz_*.cpp",
+        "*_fuzzer.c",
+        "*_fuzzer.cc",
+        "*_fuzzer.cpp",
+        "fuzzer_*.c",
+        "fuzzer_*.cc",
+        "fuzzer_*.cpp",
+    ]
+
+    def __init__(self, task: Task, config: Config, repos: RepositoryManager):
+        self.task = task
+        self.config = config
+        self.repos = repos
+
+    def discover_fuzzers(self) -> List[Fuzzer]:
+        """
+        Discover fuzzer source files in the workspace.
+
+        Search paths:
+        1. fuzz-tooling/projects/{ossfuzz_project}/ - OSS-Fuzz project fuzzers (shallow search)
+        2. repo/ - fuzzers in the source repository (recursive search)
+
+        Returns:
+            List of Fuzzer objects
+        """
+        fuzzers = []
+        seen_names = set()
+
+        # Search in OSS-Fuzz project directory (shallow - only top level)
+        if self.task.fuzz_tooling_path:
+            fuzz_tooling = Path(self.task.fuzz_tooling_path)
+            ossfuzz_project = self.config.ossfuzz_project or self.task.project_name
+            if ossfuzz_project:
+                project_dir = fuzz_tooling / "projects" / ossfuzz_project
+                if project_dir.exists():
+                    logger.info(f"Searching for fuzzers in: {project_dir}")
+                    for pattern in self.FUZZER_PATTERNS:
+                        for fuzzer_file in project_dir.glob(pattern):
+                            self._add_fuzzer(fuzzers, seen_names, fuzzer_file, project_dir)
+                else:
+                    logger.warning(f"OSS-Fuzz project directory not found: {project_dir}")
+
+        # Search in source repo (recursive - fuzzers can be anywhere)
+        if self.task.src_path:
+            repo_path = Path(self.task.src_path)
+            if repo_path.exists():
+                logger.info(f"Searching for fuzzers in repo: {repo_path}")
+                for pattern in self.FUZZER_PATTERNS:
+                    for fuzzer_file in repo_path.glob(f"**/{pattern}"):
+                        self._add_fuzzer(fuzzers, seen_names, fuzzer_file, repo_path)
+
+        return fuzzers
+
+    def _add_fuzzer(self, fuzzers: List[Fuzzer], seen_names: set, fuzzer_file: Path, search_path: Path):
+        """Add a fuzzer to the list if not already seen"""
+        fuzzer_name = fuzzer_file.stem
+        if fuzzer_name in seen_names:
+            return
+        seen_names.add(fuzzer_name)
+
+        fuzzer = Fuzzer(
+            task_id=self.task.task_id,
+            fuzzer_name=fuzzer_name,
+            source_path=str(fuzzer_file.relative_to(search_path)),
+            repo_name=self.task.project_name,
+            status=FuzzerStatus.PENDING,
+        )
+        fuzzers.append(fuzzer)
+        logger.info(f"Discovered fuzzer: {fuzzer_name} ({fuzzer_file})")
+
+    def save_fuzzers(self, fuzzers: List[Fuzzer]):
+        """Save discovered fuzzers to database"""
+        for fuzzer in fuzzers:
+            self.repos.fuzzers.save(fuzzer)
+            logger.debug(f"Saved fuzzer: {fuzzer.fuzzer_name}")
+
+
+class TaskProcessor:
+    """
+    Main task processor.
+
+    Orchestrates the task processing pipeline:
+    1. Setup workspace
+    2. Clone repository
+    3. Discover fuzzers
+    4. Build fuzzers (TODO)
+    5. Dispatch workers (TODO)
+    """
+
+    def __init__(self, config: Config, repos: RepositoryManager):
+        """
+        Initialize task processor
+
+        Args:
+            config: Configuration object
+            repos: RepositoryManager instance (passed from main.py)
+        """
+        self.config = config
+        self.repos = repos
+
+    def process(self, task: Task) -> dict:
+        """
+        Process a task.
+
+        Args:
+            task: Task to process
+
+        Returns:
+            Result dictionary with task_id, status, message
+        """
+        logger.info(f"Processing task: {task.task_id}")
+
+        # Save task to database
+        task.mark_running()
+        self.repos.tasks.save(task)
+
+        try:
+            # Step 1: Setup workspace
+            logger.info("Step 1: Setting up workspace")
+            workspace_setup = WorkspaceSetup(self.config, task)
+
+            success, msg = workspace_setup.setup()
+            if not success:
+                raise Exception(f"Workspace setup failed: {msg}")
+
+            # Step 2: Clone repository
+            logger.info("Step 2: Cloning repository")
+            success, msg = workspace_setup.clone_repository()
+            if not success:
+                raise Exception(f"Repository clone failed: {msg}")
+
+            # Step 3: Setup fuzz-tooling
+            logger.info("Step 3: Setting up fuzz-tooling")
+            success, msg = workspace_setup.setup_fuzz_tooling()
+            if not success:
+                raise Exception(f"Fuzz-tooling setup failed: {msg}")
+
+            # Update task in database with new paths
+            self.repos.tasks.save(task)
+
+            # Step 4: Discover fuzzers
+            logger.info("Step 4: Discovering fuzzers")
+            fuzzer_discovery = FuzzerDiscovery(task, self.config, self.repos)
+            fuzzers = fuzzer_discovery.discover_fuzzers()
+
+            if not fuzzers:
+                logger.warning("No fuzzers found in workspace")
+            else:
+                logger.info(f"Found {len(fuzzers)} fuzzers")
+                fuzzer_discovery.save_fuzzers(fuzzers)
+
+            # Step 5: Build fuzzers (TODO)
+            # This will be implemented with Celery workers
+            logger.info("Step 5: Building fuzzers (not implemented)")
+
+            # Step 6: Dispatch workers (TODO)
+            # This will be implemented with Celery
+            logger.info("Step 6: Dispatching workers (not implemented)")
+
+            # For now, mark as pending (waiting for worker implementation)
+            task.status = TaskStatus.PENDING
+            task.updated_at = datetime.now()
+            self.repos.tasks.save(task)
+
+            return {
+                "task_id": task.task_id,
+                "status": "pending",
+                "message": f"Task initialized. Found {len(fuzzers)} fuzzers. Waiting for worker implementation.",
+                "workspace": task.task_path,
+                "fuzzers": [f.fuzzer_name for f in fuzzers],
+            }
+
+        except Exception as e:
+            logger.exception(f"Task processing failed: {e}")
+            task.mark_error(str(e))
+            self.repos.tasks.save(task)
+
+            return {
+                "task_id": task.task_id,
+                "status": "error",
+                "message": str(e),
+            }
+
+
+def process_task(task: Task, config: Config, repos: RepositoryManager = None) -> dict:
+    """
+    Process a task - main entry point.
+
+    Args:
+        task: Task to process
+        config: Configuration
+        repos: RepositoryManager instance (optional, gets global instance from main.py if not provided)
+
+    Returns:
+        Result dictionary
+    """
+    # Get from global if repos not provided
+    if repos is None:
+        from ..main import get_repos
+        repos = get_repos()
+
+    processor = TaskProcessor(config, repos)
+    return processor.process(task)
