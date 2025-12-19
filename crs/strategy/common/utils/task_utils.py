@@ -8,6 +8,8 @@ import time
 import glob
 import select
 import subprocess
+import signal
+import atexit
 from pathlib import Path
 from typing import Optional, Tuple, List, TYPE_CHECKING
 
@@ -16,6 +18,49 @@ if TYPE_CHECKING:
 
 # Constants
 DETECT_TIMEOUT_CRASH_SENTINEL = "detect_timeout_crash"
+
+# Global cleanup flag to prevent recursive cleanup
+_cleanup_in_progress = False
+
+def _cleanup_docker_containers():
+    """Stop all running Docker containers on exit"""
+    global _cleanup_in_progress
+    if _cleanup_in_progress:
+        return
+    _cleanup_in_progress = True
+
+    try:
+        # Get all running containers
+        result = subprocess.run(
+            ["docker", "ps", "-q"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        container_ids = result.stdout.strip().split('\n')
+        container_ids = [cid for cid in container_ids if cid]
+
+        if container_ids:
+            print(f"\n⚠️  Stopping {len(container_ids)} Docker container(s)...")
+            # Stop all containers
+            subprocess.run(
+                ["docker", "stop"] + container_ids,
+                timeout=10,
+                capture_output=True
+            )
+    except Exception as e:
+        print(f"Warning: Could not clean up Docker containers: {e}")
+
+def _signal_handler(signum, frame):
+    """Handle interrupt signals"""
+    print(f"\n⚠️  Received signal {signum}, cleaning up...")
+    _cleanup_docker_containers()
+    os._exit(130)
+
+# Register cleanup handlers
+atexit.register(_cleanup_docker_containers)
+signal.signal(signal.SIGINT, _signal_handler)
+signal.signal(signal.SIGTERM, _signal_handler)
 
 
 def load_task_detail(fuzz_dir: str, logger: Optional['StrategyLogger'] = None) -> Optional[dict]:

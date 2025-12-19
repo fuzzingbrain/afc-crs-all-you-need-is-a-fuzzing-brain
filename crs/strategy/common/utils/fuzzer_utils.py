@@ -6,7 +6,7 @@ import re
 import tarfile
 from typing import Optional, List, TYPE_CHECKING
 
-from common.utils.text_utils import is_likely_source_for_fuzzer, strip_license_text
+from .text_utils import is_likely_source_for_fuzzer, strip_license_text
 
 if TYPE_CHECKING:
     from common.logging.logger import StrategyLogger

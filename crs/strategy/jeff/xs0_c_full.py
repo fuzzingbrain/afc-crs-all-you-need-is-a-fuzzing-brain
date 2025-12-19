@@ -17,6 +17,9 @@ import requests
 import base64
 import random
 from pathlib import Path
+
+# Add repository root to path for imports
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent.parent))
 import tempfile
 import shutil
 import glob
@@ -24,6 +27,14 @@ import tarfile
 from litellm import completion
 from dotenv import load_dotenv
 from typing import Optional, Dict, List, Any, Union, Tuple
+import textwrap
+
+from crs.strategy.common.utils.code_analysis import (
+    run_static_analysis_local,
+    load_qx_analysis_results,
+    get_reachable_functions_qx,
+    find_task_directory
+)
 import concurrent.futures
 import uuid
 
@@ -84,6 +95,7 @@ CLAUDE_MODEL_OPUS_4 = "claude-opus-4-20250514"
 MODELS = [CLAUDE_MODEL, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25]
 CLAUDE_MODEL = CLAUDE_MODEL_SONNET_45
 OPENAI_MODEL = CLAUDE_MODEL_SONNET_45
+OPENAI_MODEL_O3 = CLAUDE_MODEL_SONNET_45
 MODELS = [CLAUDE_MODEL_SONNET_45, CLAUDE_MODEL_OPUS_4]
 
 def get_fallback_model(current_model, tried_models):
@@ -4461,117 +4473,81 @@ def load_task_detail(fuzz_dir):
         return None
 
 
-def extract_reachable_functions_from_analysis_service_for_c(fuzzer_path,fuzzer_src_path, focus, project_src_dir):
-    # Define the analysis service endpoint
-    ANALYSIS_SERVICE_URL = os.environ.get("ANALYSIS_SERVICE_URL", "http://localhost:7082")
-    if not "/v1/reachable" in ANALYSIS_SERVICE_URL:
-        ANALYSIS_SERVICE_URL = f"{ANALYSIS_SERVICE_URL}/v1/reachable"
-
-    payload = {
-        "task_id": os.environ.get("TASK_ID"),
-        "focus": focus,
-        "project_src_dir": project_src_dir,
-        "fuzzer_path": fuzzer_path,
-        "fuzzer_source_path": fuzzer_src_path,
-    }
-    max_tries   = 60          # total attempts
-    backoff_sec = 30          # initial back-off
-
-    reachable_functions = []
-    for attempt in range(1, max_tries + 1):
-        try:
-            print(f"[try {attempt}/{max_tries}] ANALYSIS_SERVICE_URL: {ANALYSIS_SERVICE_URL} payload: {payload}")
-            resp = requests.post(ANALYSIS_SERVICE_URL, json=payload, timeout=60)
-
-            if resp.status_code == 200:
-                data = resp.json()
-                if isinstance(data.get("reachable"), list):
-                    reachable_functions = data["reachable"]
-                break  # success - exit retry loop
-            else:
-                print(f"Analysis service returned {resp.status_code} for {ANALYSIS_SERVICE_URL}")
-                try:
-                    error_details = resp.json()
-                    print("Error details (JSON):", error_details)
-                except Exception:
-                    print("Response body (not JSON):", resp.text)
-
-        except Exception as e:
-            print(f"Error querying analysis service on attempt {attempt}: {e}")
-
-        # only sleep if we will retry again
-        if attempt < max_tries:
-            time.sleep(backoff_sec)  
-    
-    return reachable_functions
+def extract_reachable_functions_from_analysis_service_for_c(fuzzer_path, fuzzer_src_path, focus, project_src_dir):
+    """Extract reachable functions for C projects using local static analysis"""
+    return extract_reachable_functions_from_analysis_service(fuzzer_path, fuzzer_src_path, focus, project_src_dir, use_qx=False)
 
 
-def extract_reachable_functions_from_analysis_service(fuzzer_path,fuzzer_src_path, focus, project_src_dir, use_qx=True):
-    # Define the analysis service endpoint
-    ANALYSIS_SERVICE_URL = os.environ.get("ANALYSIS_SERVICE_URL", "http://localhost:7082")
-    if not "/v1/reachable" in ANALYSIS_SERVICE_URL:
-        ANALYSIS_SERVICE_URL = f"{ANALYSIS_SERVICE_URL}/v1/reachable"
-    ANALYSIS_SERVICE_URL_QX = f"{ANALYSIS_SERVICE_URL}_qx"
 
-    if not use_qx:
-        ANALYSIS_SERVICE_URL_QX = ANALYSIS_SERVICE_URL
+def extract_reachable_functions_from_analysis_service(fuzzer_path, fuzzer_src_path, focus, project_src_dir, use_qx=True):
+    """Extract reachable functions using local static analysis"""
+    task_id = os.environ.get("TASK_ID")
+    if not task_id:
+        print("Warning: TASK_ID environment variable not set")
+        return []
 
-    payload = {
-        "task_id": os.environ.get("TASK_ID"),
-        "focus": focus,
-        "project_src_dir": project_src_dir,
-        "fuzzer_path": fuzzer_path,
-        "fuzzer_source_path": fuzzer_src_path,
-    }
-    max_tries   = 60          # total attempts
-    backoff_sec = 30          # initial back-off
+    # Find the actual task directory
+    task_dir = find_task_directory(task_id)
+    if not task_dir:
+        print(f"Could not find task directory for task_id {task_id}")
+        return []
 
-    reachable_functions = []
-    for attempt in range(1, max_tries + 1):
-        try:
-            print(f"[try {attempt}/{max_tries}] ANALYSIS_SERVICE_URL_QX: {ANALYSIS_SERVICE_URL_QX} payload: {payload}")
-            resp = requests.post(ANALYSIS_SERVICE_URL_QX, json=payload, timeout=60)
+    # Run analysis if results don't exist
+    if use_qx:
+        results_file = os.path.join(task_dir, f"{focus}_qx.json")
+    else:
+        results_file = os.path.join(task_dir, f"{focus}.json")
 
-            if resp.status_code == 200:
-                data = resp.json()
-                if isinstance(data.get("reachable"), list):
-                    reachable_functions = data["reachable"]
-                    if len(reachable_functions) >0:
-                        return reachable_functions
-            else:
-                print(f"Analysis service returned {resp.status_code} for {ANALYSIS_SERVICE_URL_QX}")
-                try:
-                    error_details = resp.json()
-                    print("Error details (JSON):", error_details)
-                except Exception:
-                    print("Response body (not JSON):", resp.text)
-                
-                print(f"[try {attempt}/{max_tries}] ANALYSIS_SERVICE_URL: {ANALYSIS_SERVICE_URL} payload: {payload}")
-                resp = requests.post(ANALYSIS_SERVICE_URL, json=payload, timeout=60)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    if isinstance(data.get("reachable"), list):
-                        reachable_functions = data["reachable"]
-                        if len(reachable_functions) >0:
-                            return reachable_functions
-                else:
-                    print(f"Analysis service returned {resp.status_code} for {ANALYSIS_SERVICE_URL}")
-                    try:
-                        error_details = resp.json()
-                        print("Error details (JSON):", error_details)
-                    except Exception:
-                        print("Response body (not JSON):", resp.text)
+    if not os.path.exists(results_file):
+        print(f"[try 1/1] Running local static analysis for {focus}")
+        print(f"  task_id: {task_id}")
+        print(f"  task_dir: {task_dir}")
+        print(f"  fuzzer_source_path: {fuzzer_src_path}")
 
-        except Exception as e:
-            print(f"Error querying analysis service on attempt {attempt}: {e}")
+        success = run_static_analysis_local(task_id, task_dir, focus)
+        if not success:
+            print("Failed to run static analysis")
+            return []
 
-        # only sleep if we will retry again
-        if attempt < max_tries:
-            time.sleep(backoff_sec)  
-    
-    return reachable_functions
+        # Wait for results
+        import time
+        time.sleep(2)
 
-import json, re, time, textwrap
+    # Load results
+    if use_qx:
+        results = load_qx_analysis_results(task_id, focus, task_dir)
+        if results:
+            reachable_funcs = get_reachable_functions_qx(fuzzer_src_path, results)
+            return reachable_funcs
+    else:
+        # For non-QX, load regular results
+        if os.path.exists(results_file):
+            import json
+            with open(results_file, 'r') as f:
+                results = json.load(f)
+
+            # Normalize fuzzer path
+            fuzzer_key = fuzzer_src_path.replace(os.sep, '/')
+            entry_point = f"{fuzzer_key}.fuzzerTestOneInput" if fuzzer_src_path.endswith('.java') else f"{fuzzer_key}.LLVMFuzzerTestOneInput"
+
+            reachable_names = results.get('reachable', {}).get(entry_point, [])
+            functions_map = results.get('functions', {})
+
+            reachable_funcs = []
+            for func_name in reachable_names:
+                func_def = functions_map.get(func_name, {})
+                reachable_funcs.append({
+                    'name': func_def.get('Name', func_name),
+                    'file_path': func_def.get('FilePath', ''),
+                    'start_line': func_def.get('StartLine', 0),
+                    'end_line': func_def.get('EndLine', 0),
+                    'body': func_def.get('SourceCode', '')  # Use 'body' for consistency
+                })
+            return reachable_funcs
+
+    return []
+
+
 
 def find_most_likely_vulnerable_functions(log_file,reachable_funcs,language,model_name,
                                           top_k=10,
@@ -4922,6 +4898,10 @@ def main():
             
         except Exception as e:
             span.record_exception(e)
+            # Print the full traceback so errors are visible
+            import traceback
+            print(f"ERROR: {str(e)}")
+            traceback.print_exc()
 
         span.set_attribute("crs.pov.success", pov_success)
         

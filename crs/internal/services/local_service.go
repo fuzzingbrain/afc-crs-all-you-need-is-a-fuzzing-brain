@@ -38,6 +38,22 @@ type LocalCRSService struct {
 	model                   string
 	competitionClient       *competition.Client
 	unharnessedFuzzerSrc    sync.Map
+
+	// Track running child processes for cleanup
+	runningProcesses sync.Map // map[int]*exec.Cmd
+}
+
+// KillAllChildProcesses kills all tracked child processes
+func (s *LocalCRSService) KillAllChildProcesses() {
+	log.Println("Killing all child processes...")
+	s.runningProcesses.Range(func(key, value interface{}) bool {
+		cmd := value.(*exec.Cmd)
+		if cmd.Process != nil {
+			log.Printf("Killing process PID %d", cmd.Process.Pid)
+			cmd.Process.Kill()
+		}
+		return true
+	})
 }
 
 // NewLocalService creates a new local service instance

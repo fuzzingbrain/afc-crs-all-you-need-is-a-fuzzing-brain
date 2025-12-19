@@ -84,6 +84,7 @@ CLAUDE_MODEL_OPUS_4 = "claude-opus-4-20250514"
 MODELS = [CLAUDE_MODEL, OPENAI_MODEL, CLAUDE_MODEL_OPUS_4, OPENAI_MODEL_O3, GEMINI_MODEL_PRO_25]
 CLAUDE_MODEL = CLAUDE_MODEL_SONNET_45
 OPENAI_MODEL = CLAUDE_MODEL_SONNET_45
+OPENAI_MODEL_O3 = CLAUDE_MODEL_SONNET_45
 MODELS = [CLAUDE_MODEL_SONNET_45, CLAUDE_MODEL_OPUS_4]
 
 def get_fallback_model(current_model, tried_models):
@@ -1542,6 +1543,17 @@ def get_same_project_fuzzers(fuzzer_path):
     """Find all fuzzers from the same project and sanitizer as the given fuzzer"""
     fuzzer_dir = os.path.dirname(fuzzer_path)
 
+    # List of known non-fuzzer executables and libraries to skip
+    skip_binaries = {
+        'llvm-symbolizer',
+        'clang',
+        'sancov',
+        'jazzer_agent_deploy.jar',
+        'jazzer_driver',
+        'jazzer_driver_with_sanitizer',
+        'jazzer_junit.jar',
+    }
+
     # Get all files in the same directory that are executable
     same_project_fuzzers = []
     if os.path.isdir(fuzzer_dir):
@@ -1550,7 +1562,7 @@ def get_same_project_fuzzers(fuzzer_path):
             # Check if it's a file and executable
             if os.path.isfile(item_path) and os.access(item_path, os.X_OK):
                 # Skip coverage builds and other non-fuzzer executables
-                if not item.endswith('-coverage') and not item in ['llvm-symbolizer', 'clang']:
+                if not item.endswith('-coverage') and item not in skip_binaries:
                     same_project_fuzzers.append(item_path)
 
     return same_project_fuzzers
@@ -3162,6 +3174,10 @@ def main():
         
         except Exception as e:
             span.record_exception(e)
+            # Print the full traceback so errors are visible
+            import traceback
+            print(f"ERROR: {str(e)}")
+            traceback.print_exc()
 
         span.set_attribute("crs.pov.success", pov_success)
         

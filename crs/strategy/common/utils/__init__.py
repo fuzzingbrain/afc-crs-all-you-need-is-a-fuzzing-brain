@@ -1,7 +1,7 @@
 """Utility functions for strategies"""
 
 # Text utilities
-from common.utils.text_utils import (
+from .text_utils import (
     truncate_output,
     is_likely_source_for_fuzzer,
     strip_license_text,
@@ -9,7 +9,7 @@ from common.utils.text_utils import (
 )
 
 # Code extraction utilities
-from common.utils.code_extract import (
+from .code_extract import (
     extract_code,
     is_python_code,
     extract_python_code_from_response,
@@ -18,7 +18,7 @@ from common.utils.code_extract import (
 )
 
 # Git and diff utilities
-from common.utils.git_utils import (
+from .git_utils import (
     process_large_diff,
     get_commit_info,
     extract_diff_functions_using_funtarget,
@@ -26,12 +26,15 @@ from common.utils.git_utils import (
 )
 
 # Code analysis utilities
-from common.utils.code_analysis import (
+from .code_analysis import (
     extract_call_paths_from_analysis_service,
+    run_static_analysis_local,
+    load_qx_analysis_results,
+    get_reachable_functions_qx,
 )
 
 # Crash parsing utilities
-from common.utils.crash_utils import (
+from .crash_utils import (
     extract_java_fallback_location,
     extract_asan_fallback_location,
     extract_ubsan_fallback_location,
@@ -43,7 +46,7 @@ from common.utils.crash_utils import (
 )
 
 # Task and file utilities
-from common.utils.task_utils import (
+from .task_utils import (
     load_task_detail,
     cleanup_seed_corpus,
     extract_and_save_crash_input,
@@ -51,7 +54,7 @@ from common.utils.task_utils import (
 )
 
 # Fuzzer utilities
-from common.utils.fuzzer_utils import (
+from .fuzzer_utils import (
     find_fuzzer_source,
 )
 
@@ -74,6 +77,9 @@ __all__ = [
     'parse_commit_diff',
     # Code analysis
     'extract_call_paths_from_analysis_service',
+    'run_static_analysis_local',
+    'load_qx_analysis_results',
+    'get_reachable_functions_qx',
     # Crash parsing
     'extract_java_fallback_location',
     'extract_asan_fallback_location',

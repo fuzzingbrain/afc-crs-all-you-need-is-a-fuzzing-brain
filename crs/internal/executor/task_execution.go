@@ -319,14 +319,33 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 		}
 	}
 
+	// Check if XPatch is disabled
+	xpatchDisabled := strings.ToLower(params.StrategyConfig.Patch.SelectedXPatchStrategy) == "none"
+	if xpatchDisabled {
+		log.Println("========== XPatch disabled, waiting for POV until deadline ==========")
+	}
+
 	select {
 	case <-genericPovChan:
 		log.Println("========== POV FOUND: Proceeding to patching ==========")
 		patchSuccess = executePatchingPhase(ctx, fuzzer, params, projectDir, fuzzDir, sanitizer, deadlineTime)
 
 	case <-time.After(time.Until(halfTimeToDeadline)):
-		log.Println("========== HALFTIME REACHED: Attempting XPatch without POV ==========")
-		patchSuccess = executeXPatchPhase(fuzzer, params, projectDir, sanitizer, deadlineTime)
+		if xpatchDisabled {
+			// XPatch is disabled, continue waiting for POV until deadline
+			log.Println("========== HALFTIME REACHED: XPatch disabled, continuing to wait for POV ==========")
+			select {
+			case <-genericPovChan:
+				log.Println("========== POV FOUND: Proceeding to patching ==========")
+				patchSuccess = executePatchingPhase(ctx, fuzzer, params, projectDir, fuzzDir, sanitizer, deadlineTime)
+			case <-time.After(time.Until(deadlineTime)):
+				log.Println("========== DEADLINE REACHED: No POV found ==========")
+				return ErrPOVNotFound
+			}
+		} else {
+			log.Println("========== HALFTIME REACHED: Attempting XPatch without POV ==========")
+			patchSuccess = executeXPatchPhase(fuzzer, params, projectDir, sanitizer, deadlineTime)
+		}
 
 	case <-time.After(time.Until(deadlineTime)):
 		log.Println("========== DEADLINE REACHED: No POV found ==========")
@@ -387,6 +406,12 @@ func executeXPatchPhase(fuzzer string, params TaskExecutionParams, projectDir, s
 
 	if fuzzer == UNHARNESSED {
 		log.Printf("Skipping XPatch for unharnessed fuzzer")
+		return false
+	}
+
+	// Check if XPatch is disabled via configuration
+	if strings.ToLower(params.StrategyConfig.Patch.SelectedXPatchStrategy) == "none" {
+		log.Printf("XPatch disabled via STRATEGY_XPATCH_SELECTED=none, skipping XPatch phase")
 		return false
 	}
 
