@@ -184,7 +184,7 @@ def find_fuzzer_source(
 
             # Add any directory with "fuzz" in its name
             for dir_name in dirs:
-                if "fuzz" in dir_name.lower():
+                if "fuzz" in dir_name.lower() and "CMakeFiles" not in root:
                     fuzz_dir = os.path.join(root, dir_name)
                     if fuzz_dir not in fuzz_dirs:
                         fuzz_dirs.append(fuzz_dir)

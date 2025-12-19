@@ -962,7 +962,7 @@ def find_fuzzer_source(log_file, fuzzer_path, project_name, project_src_dir, lan
         for root, dirs, files in os.walk(project_src_dir):                
             # Add any directory with "fuzz" in its name
             for dir_name in dirs:
-                if "fuzz" in dir_name.lower():
+                if "fuzz" in dir_name.lower() and "CMakeFiles" not in root:
                     fuzz_dir = os.path.join(root, dir_name)
                     if fuzz_dir not in fuzz_dirs:
                         fuzz_dirs.append(fuzz_dir)
@@ -1085,7 +1085,7 @@ Please respond with just the full path to the file you believe is the fuzzer sou
     
     # Call the model to identify the fuzzer source
     messages = [{"role": "user", "content": prompt}]
-    response, success = call_llm(log_file, messages, GEMINI_MODEL)
+    response, success = call_llm(log_file, messages, CLAUDE_MODEL)
     
     if not success:
         log_message(log_file, "Failed to get model response for fuzzer source identification")
