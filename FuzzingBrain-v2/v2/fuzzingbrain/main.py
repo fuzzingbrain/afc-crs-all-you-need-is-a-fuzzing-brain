@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 from .config import Config
-from .models import Task, JobType
+from .models import Task, JobType, ScanMode
 
 
 # =============================================================================
@@ -72,6 +72,7 @@ def parse_args() -> argparse.Namespace:
 
     # Task configuration
     parser.add_argument("--job-type", type=str, choices=["pov", "patch", "pov-patch", "harness"], default="pov-patch")
+    parser.add_argument("--scan-mode", type=str, choices=["full", "delta"], default="full", help="Scan mode: full or delta")
     parser.add_argument("--sanitizers", type=str, default="address", help="Comma-separated sanitizers")
     parser.add_argument("--timeout", type=int, default=60, help="Timeout in minutes")
 
@@ -106,6 +107,8 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
         config.in_place = args.in_place
     if args.job_type:
         config.job_type = args.job_type
+    if args.scan_mode:
+        config.scan_mode = args.scan_mode
     if args.sanitizers:
         config.sanitizers = args.sanitizers.split(",")
     if args.timeout:
@@ -168,10 +171,11 @@ def create_task_from_config(config: Config) -> Task:
     return Task(
         task_id=task_id,
         task_type=JobType(config.job_type),
+        scan_mode=ScanMode(config.scan_mode),
         task_path=config.workspace,
         src_path=f"{config.workspace}/repo" if config.workspace else None,
         fuzz_tooling_path=f"{config.workspace}/fuzz-tooling" if config.workspace else None,
-        diff_path=f"{config.workspace}/diff" if config.workspace and config.is_delta_scan else None,
+        diff_path=f"{config.workspace}/diff" if config.workspace and config.scan_mode == "delta" else None,
         repo_url=config.repo_url,
         project_name=config.project_name,
         sanitizers=config.sanitizers,
@@ -228,6 +232,7 @@ def run_json_mode(config: Config):
         sys.exit(1)
 
     # Print configuration summary
+    print_info(f"Scan Mode: {config.scan_mode}")
     print_info(f"Job Type: {config.job_type}")
     print_info(f"Sanitizers: {', '.join(config.sanitizers)}")
     print_info(f"Timeout: {config.timeout_minutes} minutes")
@@ -236,8 +241,8 @@ def run_json_mode(config: Config):
         print_info(f"Repository: {config.repo_url}")
     if config.workspace:
         print_info(f"Workspace: {config.workspace}")
-    if config.is_delta_scan:
-        print_info(f"Delta Scan: {config.base_commit} -> {config.delta_commit or 'HEAD'}")
+    if config.scan_mode == "delta":
+        print_info(f"Delta: {config.base_commit[:8]}..{(config.delta_commit or 'HEAD')[:8] if config.delta_commit else 'HEAD'}")
 
     print("")
 
@@ -269,12 +274,13 @@ def run_local_mode(config: Config):
 
     # Print configuration summary
     print_info(f"Workspace: {config.workspace}")
+    print_info(f"Scan Mode: {config.scan_mode}")
     print_info(f"Job Type: {config.job_type}")
     print_info(f"Sanitizers: {', '.join(config.sanitizers)}")
     print_info(f"Timeout: {config.timeout_minutes} minutes")
 
-    if config.is_delta_scan:
-        print_info(f"Delta Scan: {config.base_commit} -> {config.delta_commit or 'HEAD'}")
+    if config.scan_mode == "delta":
+        print_info(f"Delta: {config.base_commit[:8]}..{(config.delta_commit or 'HEAD')[:8] if config.delta_commit else 'HEAD'}")
 
     print("")
 

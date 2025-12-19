@@ -27,6 +27,7 @@ class Config:
 
     # Task configuration
     job_type: str = "pov-patch"  # pov | patch | pov-patch | harness
+    scan_mode: str = "full"  # full | delta
     sanitizers: List[str] = field(default_factory=lambda: ["address"])
     timeout_minutes: int = 60
 
@@ -35,7 +36,7 @@ class Config:
     repo_path: Optional[str] = None
     project_name: Optional[str] = None
 
-    # Delta scan
+    # Delta scan commits (used when scan_mode is delta)
     base_commit: Optional[str] = None
     delta_commit: Optional[str] = None
 
@@ -69,7 +70,8 @@ class Config:
 
         return cls(
             workspace=data.get("workspace"),
-            job_type=data.get("job_type", "pov"),
+            job_type=data.get("job_type", "pov-patch"),
+            scan_mode=data.get("scan_mode", "full"),
             sanitizers=data.get("sanitizers", ["address"]),
             timeout_minutes=data.get("timeout_minutes", 60),
             repo_url=data.get("repo_url"),
@@ -97,7 +99,8 @@ class Config:
         return cls(
             server_mode=os.environ.get("FUZZINGBRAIN_SERVER", "").lower() == "true",
             workspace=os.environ.get("FUZZINGBRAIN_WORKSPACE"),
-            job_type=os.environ.get("FUZZINGBRAIN_JOB_TYPE", "pov"),
+            job_type=os.environ.get("FUZZINGBRAIN_JOB_TYPE", "pov-patch"),
+            scan_mode=os.environ.get("FUZZINGBRAIN_SCAN_MODE", "full"),
             sanitizers=sanitizers.split(","),
             timeout_minutes=int(os.environ.get("FUZZINGBRAIN_TIMEOUT", "60")),
             redis_url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
@@ -155,11 +158,6 @@ class Config:
 
         return errors
 
-    @property
-    def is_delta_scan(self) -> bool:
-        """Check if this is a delta scan configuration"""
-        return self.base_commit is not None
-
     def to_dict(self) -> dict:
         """Convert to dictionary"""
         return {
@@ -167,6 +165,7 @@ class Config:
             "workspace": self.workspace,
             "in_place": self.in_place,
             "job_type": self.job_type,
+            "scan_mode": self.scan_mode,
             "sanitizers": self.sanitizers,
             "timeout_minutes": self.timeout_minutes,
             "repo_url": self.repo_url,

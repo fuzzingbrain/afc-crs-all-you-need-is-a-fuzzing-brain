@@ -241,10 +241,11 @@ show_usage() {
     echo "  <project_name>      Continue processing workspace/<project_name>"
     echo ""
     echo "OPTIONS:"
-    echo "  -b <commit>         Base commit (for delta scan)"
-    echo "  -d <commit>         Delta commit (for delta scan, requires -b)"
-    echo "  --project <name>    Specify OSS-Fuzz project name"
+    echo "  --scan-mode <mode>  Scan mode: full (default), delta"
+    echo "  -b <commit>         Base commit (auto-sets scan-mode to delta)"
+    echo "  -d <commit>         Delta commit (requires -b, default: HEAD)"
     echo "  --job-type <type>   Task type: pov-patch (default), pov, patch, harness"
+    echo "  --project <name>    Specify OSS-Fuzz project name"
     echo "  --sanitizers <list> Comma-separated sanitizers (default: address)"
     echo "  --timeout <min>     Timeout in minutes (default: 60)"
     echo "  --in-place          Run directly without copying workspace"
@@ -268,6 +269,7 @@ OSS_FUZZ_PROJECT=""
 BASE_COMMIT=""
 DELTA_COMMIT=""
 JOB_TYPE="pov-patch"
+SCAN_MODE="full"
 SANITIZERS="address"
 TIMEOUT_MINUTES=60
 POSITIONAL_ARGS=()
@@ -296,10 +298,15 @@ while [[ $# -gt 0 ]]; do
             ;;
         -b)
             BASE_COMMIT="$2"
+            SCAN_MODE="delta"
             shift 2
             ;;
         -d)
             DELTA_COMMIT="$2"
+            shift 2
+            ;;
+        --scan-mode)
+            SCAN_MODE="$2"
             shift 2
             ;;
         -h|-help|--help)
@@ -385,6 +392,7 @@ if is_project_name "$TARGET"; then
     exec $PYTHON -m fuzzingbrain.main \
         --workspace "$WORKSPACE" \
         --job-type "$JOB_TYPE" \
+        --scan-mode "$SCAN_MODE" \
         --sanitizers "$SANITIZERS" \
         --timeout "$TIMEOUT_MINUTES"
 fi
@@ -400,6 +408,8 @@ if is_git_url "$TARGET"; then
 
     print_step "Processing Git repository"
     print_info "Task ID: $TASK_ID"
+    print_info "Scan Mode: $SCAN_MODE"
+    print_info "Job Type: $JOB_TYPE"
     print_info "URL: $GIT_URL"
     print_info "Repository: $REPO_NAME"
 
@@ -467,6 +477,7 @@ if is_git_url "$TARGET"; then
         --task-id "$TASK_ID" \
         --workspace "$WORKSPACE" \
         --job-type "$JOB_TYPE" \
+        --scan-mode "$SCAN_MODE" \
         --sanitizers "$SANITIZERS" \
         --timeout "$TIMEOUT_MINUTES" \
         ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
@@ -487,12 +498,14 @@ if [ -d "$TARGET" ]; then
             --workspace "$TARGET" \
             --in-place \
             --job-type "$JOB_TYPE" \
+            --scan-mode "$SCAN_MODE" \
             --sanitizers "$SANITIZERS" \
             --timeout "$TIMEOUT_MINUTES"
     else
         exec $PYTHON -m fuzzingbrain.main \
             --workspace "$TARGET" \
             --job-type "$JOB_TYPE" \
+            --scan-mode "$SCAN_MODE" \
             --sanitizers "$SANITIZERS" \
             --timeout "$TIMEOUT_MINUTES"
     fi

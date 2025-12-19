@@ -26,6 +26,12 @@ class JobType(str, Enum):
     HARNESS = "harness"
 
 
+class ScanMode(str, Enum):
+    """Scan mode enum"""
+    FULL = "full"
+    DELTA = "delta"
+
+
 @dataclass
 class Task:
     """
@@ -40,7 +46,8 @@ class Task:
 
     # Core identifiers
     task_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    task_type: JobType = JobType.POV
+    task_type: JobType = JobType.POV_PATCH
+    scan_mode: ScanMode = ScanMode.FULL
     status: TaskStatus = TaskStatus.PENDING
 
     # Paths
@@ -55,7 +62,7 @@ class Task:
     sanitizers: List[str] = field(default_factory=lambda: ["address"])
     timeout_minutes: int = 60
 
-    # Delta scan
+    # Delta scan commits
     base_commit: Optional[str] = None
     delta_commit: Optional[str] = None
 
@@ -80,6 +87,7 @@ class Task:
             "_id": self.task_id,
             "task_id": self.task_id,
             "task_type": self.task_type.value,
+            "scan_mode": self.scan_mode.value,
             "status": self.status.value,
             "task_path": self.task_path,
             "src_path": self.src_path,
@@ -105,7 +113,8 @@ class Task:
         """Create Task from dictionary"""
         return cls(
             task_id=data.get("task_id", data.get("_id")),
-            task_type=JobType(data.get("task_type", "pov")),
+            task_type=JobType(data.get("task_type", "pov-patch")),
+            scan_mode=ScanMode(data.get("scan_mode", "full")),
             status=TaskStatus(data.get("status", "pending")),
             task_path=data.get("task_path"),
             src_path=data.get("src_path"),
@@ -125,11 +134,6 @@ class Task:
             patch_ids=data.get("patch_ids", []),
             error_msg=data.get("error_msg"),
         )
-
-    @property
-    def is_delta_scan(self) -> bool:
-        """Check if this is a delta scan task"""
-        return self.base_commit is not None
 
     def mark_running(self):
         """Mark task as running"""
