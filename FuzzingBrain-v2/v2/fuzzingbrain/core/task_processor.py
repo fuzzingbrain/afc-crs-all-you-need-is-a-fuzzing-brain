@@ -325,6 +325,30 @@ class TaskProcessor:
         for line in box_lines:
             logger.info(line)
 
+    def _log_dispatch_summary(self, jobs: List[dict], project_name: str):
+        """Log a formatted summary of dispatched workers"""
+        width = 80
+
+        box_lines = []
+        box_lines.append("")
+        box_lines.append("┌" + "─" * width + "┐")
+
+        header = f" {project_name} - Dispatched {len(jobs)} Workers "
+        box_lines.append("│" + header.center(width) + "│")
+        box_lines.append("├" + "─" * width + "┤")
+
+        for job in jobs:
+            worker_line = f" {job['fuzzer']} | {job['sanitizer']} "
+            box_lines.append("│" + worker_line.ljust(width) + "│")
+            celery_line = f"   Celery ID: {job['celery_id']}"
+            box_lines.append("│" + celery_line.ljust(width) + "│")
+
+        box_lines.append("└" + "─" * width + "┘")
+        box_lines.append("")
+
+        for line in box_lines:
+            logger.info(line)
+
     def process(self, task: Task) -> dict:
         """
         Process a task.
@@ -404,22 +428,79 @@ class TaskProcessor:
             # Log fuzzer build summary
             self._log_fuzzer_summary(fuzzers, project_name)
 
-            # Step 6: Dispatch workers (TODO)
-            # This will be implemented with Celery
-            logger.info("Step 6: Dispatching workers (not implemented)")
+            # Step 6: Start infrastructure (CLI mode only)
+            logger.info("Step 6: Starting infrastructure")
+            from .infrastructure import InfrastructureManager
 
-            # For now, mark as pending (waiting for worker implementation)
-            task.status = TaskStatus.PENDING
-            task.updated_at = datetime.now()
-            self.repos.tasks.save(task)
+            infra = None
+            if not self.config.api_mode:
+                infra = InfrastructureManager(
+                    redis_url=self.config.redis_url,
+                    concurrency=8,
+                )
+                if not infra.start():
+                    raise Exception("Failed to start infrastructure (Redis/Celery)")
 
-            return {
-                "task_id": task.task_id,
-                "status": "pending",
-                "message": f"Task initialized. Built {len(successful_fuzzers)} fuzzers. Waiting for worker dispatch.",
-                "workspace": task.task_path,
-                "fuzzers": [f.fuzzer_name for f in successful_fuzzers],
-            }
+            try:
+                # Step 7: Dispatch workers
+                logger.info("Step 7: Dispatching workers")
+                from .dispatcher import WorkerDispatcher
+
+                dispatcher = WorkerDispatcher(task, self.config, self.repos)
+                jobs = dispatcher.dispatch(fuzzers)
+
+                if not jobs:
+                    raise Exception("No workers were dispatched")
+
+                # Log dispatch summary
+                self._log_dispatch_summary(jobs, project_name)
+
+                # Mark task as running
+                task.status = TaskStatus.RUNNING
+                task.updated_at = datetime.now()
+                self.repos.tasks.save(task)
+
+                # Step 8: Wait for completion (CLI mode) or return (API mode)
+                if not self.config.api_mode:
+                    logger.info("Step 8: Waiting for workers to complete")
+                    timeout = self.config.timeout_minutes or 60
+                    result = dispatcher.wait_for_completion(timeout_minutes=timeout)
+
+                    # Mark task as complete
+                    if result["status"] == "completed":
+                        if result["failed"] == 0:
+                            task.mark_success()
+                        else:
+                            task.mark_error(f"{result['failed']} workers failed")
+                    else:
+                        task.mark_error(f"Timeout after {timeout} minutes")
+
+                    self.repos.tasks.save(task)
+
+                    return {
+                        "task_id": task.task_id,
+                        "status": result["status"],
+                        "message": f"Completed {result['completed']}/{result['total']} workers",
+                        "workspace": task.task_path,
+                        "fuzzers": [f.fuzzer_name for f in successful_fuzzers],
+                        "workers": dispatcher.get_results(),
+                        "elapsed_minutes": result.get("elapsed_minutes", 0),
+                    }
+                else:
+                    # API mode: return immediately
+                    return {
+                        "task_id": task.task_id,
+                        "status": "running",
+                        "message": f"Dispatched {len(jobs)} workers.",
+                        "workspace": task.task_path,
+                        "fuzzers": [f.fuzzer_name for f in successful_fuzzers],
+                        "workers": [j["worker_id"] for j in jobs],
+                    }
+
+            finally:
+                # Stop infrastructure (CLI mode only)
+                if infra:
+                    infra.stop()
 
         except Exception as e:
             logger.exception(f"Task processing failed: {e}")

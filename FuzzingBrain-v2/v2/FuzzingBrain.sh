@@ -175,6 +175,11 @@ MONGODB_CONTAINER="fuzzingbrain-mongodb"
 MONGODB_PORT=27017
 MONGODB_HOST="${MONGODB_HOST:-localhost}"
 
+# Redis container name
+REDIS_CONTAINER="fuzzingbrain-redis"
+REDIS_PORT=6379
+REDIS_HOST="${REDIS_HOST:-localhost}"
+
 # =============================================================================
 # Docker Environment Detection
 # =============================================================================
@@ -298,6 +303,128 @@ ensure_mongodb() {
     start_mongodb
 }
 
+# =============================================================================
+# Redis Management
+# =============================================================================
+
+check_redis() {
+    # Check if Redis is accessible
+
+    # Method 1: netcat
+    if command -v nc &> /dev/null; then
+        if nc -z "$REDIS_HOST" $REDIS_PORT 2>/dev/null; then
+            print_info "Redis is running on $REDIS_HOST:$REDIS_PORT"
+            return 0
+        fi
+    fi
+
+    # Method 2: /dev/tcp (bash built-in)
+    if (echo > /dev/tcp/$REDIS_HOST/$REDIS_PORT) 2>/dev/null; then
+        print_info "Redis is running on $REDIS_HOST:$REDIS_PORT"
+        return 0
+    fi
+
+    # Method 3: Check if container is running (only for local mode)
+    if [ "$REDIS_HOST" = "localhost" ] || [ "$REDIS_HOST" = "127.0.0.1" ]; then
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${REDIS_CONTAINER}$"; then
+            print_info "Redis container is running"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+start_redis() {
+    # Check if Redis container already exists
+    if docker ps -a --format '{{.Names}}' | grep -q "^${REDIS_CONTAINER}$"; then
+        # Container exists, check if running
+        if docker ps --format '{{.Names}}' | grep -q "^${REDIS_CONTAINER}$"; then
+            print_info "Redis container already running"
+            return 0
+        else
+            # Start existing container
+            print_info "Starting existing Redis container..."
+            docker start "$REDIS_CONTAINER" > /dev/null
+            sleep 2
+            if check_redis; then
+                return 0
+            fi
+        fi
+    else
+        # Create new container
+        print_info "Starting Redis container..."
+        docker run -d \
+            --name "$REDIS_CONTAINER" \
+            -p 0.0.0.0:${REDIS_PORT}:6379 \
+            -v fuzzingbrain-redis-data:/data \
+            redis:7-alpine > /dev/null
+
+        # Wait for Redis to start
+        print_info "Waiting for Redis to start..."
+        for i in {1..10}; do
+            sleep 1
+            if check_redis; then
+                print_info "Redis started successfully"
+                return 0
+            fi
+        done
+    fi
+
+    print_error "Failed to start Redis"
+    return 1
+}
+
+ensure_redis() {
+    # In Docker container, assume Redis is managed by docker-compose
+    if is_in_docker; then
+        print_info "Running in Docker container"
+        print_info "Assuming Redis is managed by docker-compose"
+
+        if check_redis; then
+            return 0
+        else
+            print_error "Redis not reachable at $REDIS_HOST:$REDIS_PORT"
+            print_error "Check docker-compose configuration"
+            return 1
+        fi
+    fi
+
+    # Local mode: check and start Redis
+    if check_redis; then
+        return 0
+    fi
+
+    print_info "Redis not running, starting via Docker..."
+
+    if ! command -v docker &> /dev/null; then
+        print_error "Docker required to start Redis"
+        print_error "Either install Docker or start Redis manually"
+        return 1
+    fi
+
+    if ! docker info &> /dev/null 2>&1; then
+        print_error "Docker daemon not running"
+        return 1
+    fi
+
+    start_redis
+}
+
+# =============================================================================
+# Python Dependencies Check
+# =============================================================================
+
+check_celery() {
+    if $PYTHON -c "import celery" 2>/dev/null; then
+        print_info "Celery is installed"
+        return 0
+    else
+        print_warn "Celery not installed, will be installed with dependencies"
+        return 0
+    fi
+}
+
 setup_venv() {
     local REQUIREMENTS="$SCRIPT_DIR/requirements.txt"
     local PIP="$VENV_DIR/bin/pip"
@@ -352,6 +479,9 @@ check_environment() {
 
     # Ensure MongoDB is running
     ensure_mongodb || exit 1
+
+    # Ensure Redis is running (for Celery task queue)
+    ensure_redis || exit 1
 
     print_info "Environment check passed"
     echo ""

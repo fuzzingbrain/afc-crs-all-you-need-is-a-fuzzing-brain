@@ -7,6 +7,8 @@ Contains core business logic, configuration, and models.
 from .config import Config
 from .task_processor import TaskProcessor, process_task
 from .fuzzer_builder import FuzzerBuilder
+from .dispatcher import WorkerDispatcher
+from .infrastructure import InfrastructureManager, RedisManager, CeleryWorkerManager
 from .logging import (
     logger,
     setup_logging,
@@ -33,6 +35,12 @@ __all__ = [
     "process_task",
     # Builder
     "FuzzerBuilder",
+    # Dispatcher
+    "WorkerDispatcher",
+    # Infrastructure
+    "InfrastructureManager",
+    "RedisManager",
+    "CeleryWorkerManager",
     # Logging
     "logger",
     "setup_logging",
