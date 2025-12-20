@@ -280,6 +280,51 @@ class TaskProcessor:
         self.config = config
         self.repos = repos
 
+    def _log_fuzzer_summary(self, fuzzers: List[Fuzzer], project_name: str):
+        """Log a formatted summary of fuzzer build results"""
+        success_count = sum(1 for f in fuzzers if f.status == FuzzerStatus.SUCCESS)
+        total_count = len(fuzzers)
+
+        # Calculate box width
+        lines = []
+        for f in fuzzers:
+            lines.append(f"  Binary Path:  {f.binary_path or 'N/A'}")
+            lines.append(f"  Source Path:  {f.source_path or 'N/A'}")
+            lines.append(f"  Status:       {f.status.value}")
+
+        width = max(len(line) for line in lines) + 4 if lines else 60
+        width = max(width, 60)
+
+        # Build the box
+        box_lines = []
+        box_lines.append("")
+        box_lines.append("┌" + "─" * width + "┐")
+
+        # Header
+        header = f" {project_name} - Built {success_count}/{total_count} fuzzers "
+        box_lines.append("│" + header.center(width) + "│")
+        box_lines.append("├" + "─" * width + "┤")
+
+        # Each fuzzer
+        for i, f in enumerate(fuzzers):
+            status_icon = "✓" if f.status == FuzzerStatus.SUCCESS else "✗"
+            fuzzer_header = f" {status_icon} {f.fuzzer_name} "
+            box_lines.append("│" + fuzzer_header.ljust(width) + "│")
+            box_lines.append("│" + f"  Binary Path:  {f.binary_path or 'N/A'}".ljust(width) + "│")
+            box_lines.append("│" + f"  Source Path:  {f.source_path or 'N/A'}".ljust(width) + "│")
+            box_lines.append("│" + f"  Status:       {f.status.value}".ljust(width) + "│")
+
+            # Separator between fuzzers (except last)
+            if i < len(fuzzers) - 1:
+                box_lines.append("│" + "─" * width + "│")
+
+        box_lines.append("└" + "─" * width + "┘")
+        box_lines.append("")
+
+        # Log the box
+        for line in box_lines:
+            logger.info(line)
+
     def process(self, task: Task) -> dict:
         """
         Process a task.
@@ -331,9 +376,33 @@ class TaskProcessor:
                 logger.info(f"Found {len(fuzzers)} fuzzers")
                 fuzzer_discovery.save_fuzzers(fuzzers)
 
-            # Step 5: Build fuzzers (TODO)
-            # This will be implemented with Celery workers
-            logger.info("Step 5: Building fuzzers (not implemented)")
+            # Step 5: Build fuzzers
+            logger.info("Step 5: Building fuzzers")
+            from .fuzzer_builder import FuzzerBuilder
+
+            builder = FuzzerBuilder(task, self.config)
+            build_success, built_fuzzers, build_msg = builder.build()
+
+            if not build_success:
+                raise Exception(f"Fuzzer build failed: {build_msg}")
+
+            logger.info(f"Successfully built {len(built_fuzzers)} fuzzers: {built_fuzzers}")
+
+            # Update fuzzer status in database
+            project_name = self.config.ossfuzz_project or task.project_name
+            for fuzzer in fuzzers:
+                if fuzzer.fuzzer_name in built_fuzzers:
+                    fuzzer.status = FuzzerStatus.SUCCESS
+                    fuzzer.binary_path = builder.get_fuzzer_binary_path(fuzzer.fuzzer_name)
+                else:
+                    fuzzer.status = FuzzerStatus.FAILED
+                    fuzzer.error_msg = "Not found in build output"
+                self.repos.fuzzers.save(fuzzer)
+
+            successful_fuzzers = [f for f in fuzzers if f.status == FuzzerStatus.SUCCESS]
+
+            # Log fuzzer build summary
+            self._log_fuzzer_summary(fuzzers, project_name)
 
             # Step 6: Dispatch workers (TODO)
             # This will be implemented with Celery
@@ -347,9 +416,9 @@ class TaskProcessor:
             return {
                 "task_id": task.task_id,
                 "status": "pending",
-                "message": f"Task initialized. Found {len(fuzzers)} fuzzers. Waiting for worker implementation.",
+                "message": f"Task initialized. Built {len(successful_fuzzers)} fuzzers. Waiting for worker dispatch.",
                 "workspace": task.task_path,
-                "fuzzers": [f.fuzzer_name for f in fuzzers],
+                "fuzzers": [f.fuzzer_name for f in successful_fuzzers],
             }
 
         except Exception as e:

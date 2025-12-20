@@ -16,8 +16,14 @@ from .db import RepositoryManager
 
 def get_repos() -> RepositoryManager:
     """Get global RepositoryManager instance"""
-    from .main import get_repos as main_get_repos
-    return main_get_repos()
+    from .main import get_repos as main_get_repos, init_database
+    from .core import Config
+    try:
+        return main_get_repos()
+    except RuntimeError:
+        # Database not initialized yet, initialize it now
+        config = Config.from_env()
+        return init_database(config)
 
 
 # =============================================================================
@@ -384,7 +390,53 @@ async def get_patches(task_id: str, valid_only: bool = False):
 # Server Runner
 # =============================================================================
 
+def check_port_in_use(port: int) -> tuple[bool, int]:
+    """
+    Check if a port is in use.
+
+    Returns:
+        (is_in_use, pid) - pid is 0 if not in use or can't determine
+    """
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["lsof", "-i", f":{port}", "-t"],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            pid = int(result.stdout.strip().split('\n')[0])
+            return True, pid
+    except Exception:
+        pass
+    return False, 0
+
+
 def run_api_server(host: str = "0.0.0.0", port: int = 8080):
     """Run the FastAPI server"""
     import uvicorn
+    import os
+    import signal
+
+    # Check if port is in use
+    in_use, pid = check_port_in_use(port)
+    if in_use:
+        print(f"\n[WARN] Port {port} is already in use by process {pid}")
+        response = input("Kill the process and continue? [y/N]: ").strip().lower()
+
+        if response == 'y':
+            try:
+                os.kill(pid, signal.SIGTERM)
+                print(f"[INFO] Killed process {pid}")
+                import time
+                time.sleep(1)  # Wait for port to be released
+            except ProcessLookupError:
+                print(f"[INFO] Process {pid} already terminated")
+            except PermissionError:
+                print(f"[ERROR] No permission to kill process {pid}")
+                return
+        else:
+            print("[INFO] Exiting...")
+            return
+
     uvicorn.run(app, host=host, port=port)

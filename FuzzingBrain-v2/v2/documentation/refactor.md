@@ -962,4 +962,202 @@ celery -A tasks flower --port=5555
 ```
 
 
-## 进度4：静态分析服务器接口
+## 进度4：Fuzzer构建模块 (进行中)
+
+### 目标：构建fuzzer，获知成功构建的fuzzer数量
+
+Controller构建fuzzer的**唯一目的**：知道最终有多少个fuzzer能成功构建。
+
+per-sanitizer目录、Worker分发等是后续步骤的事情。
+
+### 实现方案
+
+#### 1. 核心流程
+
+```
+输入: workspace (含repo/ 和 fuzz-tooling/)
+输出: 成功构建的fuzzer列表
+```
+
+**步骤:**
+1. 调用 `helper.py build_fuzzers` 构建 (使用address sanitizer)
+2. 扫描 `build/out/{project}/` 目录
+3. 过滤出可执行的fuzzer文件
+4. 更新数据库中Fuzzer记录状态
+
+**目录结构:**
+```
+workspace/
+├── repo/                    # 源代码
+└── fuzz-tooling/
+    ├── infra/helper.py      # OSS-Fuzz构建脚本
+    ├── projects/{project}/  # 项目配置
+    └── build/
+        └── out/{project}/   # 构建输出 ← 扫描这里
+```
+
+#### 2. 代码结构
+
+```
+fuzzingbrain/core/
+├── task_processor.py      # 添加Step 5调用
+└── fuzzer_builder.py      # 新增
+    └── FuzzerBuilder
+        ├── build()              # 执行构建
+        ├── _run_helper()        # 调用helper.py
+        └── _collect_fuzzers()   # 收集构建结果
+```
+
+#### 3. 实现
+
+**fuzzer_builder.py:**
+
+```python
+class FuzzerBuilder:
+    """构建fuzzer并收集结果"""
+
+    # 需要过滤的非fuzzer文件
+    SKIP_FILES = {"llvm-symbolizer", "sancov", "clang", "clang++"}
+    SKIP_EXTENSIONS = {".bin", ".log", ".dict", ".options", ".bc", ".json",
+                       ".o", ".a", ".so", ".h", ".c", ".cpp", ".py"}
+
+    def __init__(self, task: Task, config: Config):
+        self.task = task
+        self.config = config
+        self.project_name = config.ossfuzz_project or task.project_name
+
+    def build(self) -> Tuple[bool, List[str], str]:
+        """
+        构建fuzzer
+
+        Returns:
+            (success, fuzzer_list, message)
+        """
+        # 1. 调用helper.py构建
+        success, msg = self._run_helper()
+        if not success:
+            return False, [], msg
+
+        # 2. 收集构建结果
+        fuzzers = self._collect_fuzzers()
+        if not fuzzers:
+            return False, [], "Build succeeded but no fuzzers found"
+
+        return True, fuzzers, f"Built {len(fuzzers)} fuzzers"
+
+    def _run_helper(self) -> Tuple[bool, str]:
+        """调用OSS-Fuzz helper.py构建"""
+        helper_path = Path(self.task.fuzz_tooling_path) / "infra" / "helper.py"
+
+        if not helper_path.exists():
+            return False, f"helper.py not found: {helper_path}"
+
+        cmd = [
+            "python3", str(helper_path),
+            "build_fuzzers",
+            "--sanitizer", "address",
+            "--engine", "libfuzzer",
+            self.project_name,
+            str(Path(self.task.src_path))
+        ]
+
+        logger.info(f"Building fuzzers: {' '.join(cmd)}")
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=1800,  # 30分钟
+                cwd=str(Path(self.task.fuzz_tooling_path))
+            )
+
+            if result.returncode != 0:
+                error = self._truncate_output(result.stderr, max_lines=30)
+                logger.error(f"Build failed: {error}")
+                return False, error
+
+            return True, "Build successful"
+
+        except subprocess.TimeoutExpired:
+            return False, "Build timed out (30 minutes)"
+        except Exception as e:
+            return False, str(e)
+
+    def _collect_fuzzers(self) -> List[str]:
+        """扫描build/out目录，收集成功构建的fuzzer"""
+        out_dir = Path(self.task.fuzz_tooling_path) / "build" / "out" / self.project_name
+
+        if not out_dir.exists():
+            logger.warning(f"Output directory not found: {out_dir}")
+            return []
+
+        fuzzers = []
+        for f in out_dir.iterdir():
+            if f.name in self.SKIP_FILES:
+                continue
+            if f.suffix in self.SKIP_EXTENSIONS:
+                continue
+            if f.is_file() and os.access(f, os.X_OK):
+                fuzzers.append(f.name)
+                logger.debug(f"Found fuzzer: {f.name}")
+
+        logger.info(f"Collected {len(fuzzers)} fuzzers from {out_dir}")
+        return fuzzers
+
+    def _truncate_output(self, text: str, max_lines: int = 30) -> str:
+        """截断过长的输出"""
+        lines = text.strip().split('\n')
+        if len(lines) <= max_lines:
+            return text
+
+        first = lines[:10]
+        last = lines[-20:]
+        return '\n'.join(first + [f"... [{len(lines) - 30} lines truncated] ..."] + last)
+```
+
+#### 4. 整合到TaskProcessor
+
+```python
+# Step 5: Build fuzzers
+logger.info("Step 5: Building fuzzers")
+from .fuzzer_builder import FuzzerBuilder
+
+builder = FuzzerBuilder(task, self.config)
+success, built_fuzzers, msg = builder.build()
+
+if not success:
+    raise Exception(f"Fuzzer build failed: {msg}")
+
+logger.info(f"Successfully built {len(built_fuzzers)} fuzzers: {built_fuzzers}")
+
+# 更新数据库中的fuzzer状态
+for fuzzer in fuzzers:
+    if fuzzer.fuzzer_name in built_fuzzers:
+        fuzzer.status = FuzzerStatus.SUCCESS
+        fuzzer.binary_path = f"{task.fuzz_tooling_path}/build/out/{project_name}/{fuzzer.fuzzer_name}"
+    else:
+        fuzzer.status = FuzzerStatus.FAILED
+        fuzzer.error_msg = "Not found in build output"
+    self.repos.fuzzers.save(fuzzer)
+```
+
+#### 5. 注意事项
+
+1. **Docker环境**: helper.py需要Docker
+2. **超时**: 30分钟
+3. **只构建一次**: 使用address sanitizer，目的只是知道有多少fuzzer
+4. **per-sanitizer构建**: 那是Worker分发时的事情
+
+### 执行计划
+
+1. [ ] 创建 `fuzzingbrain/core/fuzzer_builder.py`
+2. [ ] 实现 `FuzzerBuilder.build()`
+3. [ ] 实现 `FuzzerBuilder._run_helper()`
+4. [ ] 实现 `FuzzerBuilder._collect_fuzzers()`
+5. [ ] 整合到 `TaskProcessor.process()`
+6. [ ] 测试验证
+
+---
+
+## 进度5：静态分析服务器接口

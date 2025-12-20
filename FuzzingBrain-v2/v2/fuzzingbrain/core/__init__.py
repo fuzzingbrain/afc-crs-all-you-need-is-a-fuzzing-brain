@@ -6,6 +6,7 @@ Contains core business logic, configuration, and models.
 
 from .config import Config
 from .task_processor import TaskProcessor, process_task
+from .fuzzer_builder import FuzzerBuilder
 from .logging import (
     logger,
     setup_logging,
@@ -30,6 +31,8 @@ __all__ = [
     # Processor
     "TaskProcessor",
     "process_task",
+    # Builder
+    "FuzzerBuilder",
     # Logging
     "logger",
     "setup_logging",
