@@ -730,6 +730,24 @@ Controller，也就是中心crs 在构建完Task后，可能会生成多个{fuzz
 2. **简单性**：我们的功能需求不复杂，Celery完全够用
 3. **Redis复用**：我们已经用Redis存储函数缓存，直接复用
 
+
+### 运行逻辑：
+1. 首先，我们需要生成一个list，记录所有的{fuzzer， sanitizer}对。 这个list可以做两件事情：
+    - 知道我们需要动态生成多少个worker
+    - 知道我们要动态生成多少个独立的workspace
+
+
+2. 根据list，动态生成worker，记录worker状态，并挂载对应的workspace
+
+worker 生成逻辑：
+
+1. 轮询当前资源利用（cpu利用率， 磁盘），正在运行的worker所消耗的资源等等
+2. 如果超过了某个阈值，可能会导致worker创建失败，则直接进入等待状态，等待controller清理
+3. 检查通过，开始创建worker实例：
+    - 创建一个worker_workspace/{projectname}_{fuzzername}_{sanitizer}文件夹，里面放入和主repo完全一样的内容，repo，fuzz-tooling, diff(如果有)，这个是当前worker的workspace
+    - 然后挂载workspace
+
+
 ### 架构设计
 
 ```
