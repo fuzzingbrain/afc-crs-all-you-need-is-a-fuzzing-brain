@@ -186,6 +186,10 @@ class WorkerDispatcher:
         )
         self.repos.workers.save(worker)
 
+        # Get log directory from current logging config
+        from .logging import get_log_dir
+        log_dir = get_log_dir()
+
         # Prepare assignment
         assignment = {
             "task_id": self.task.task_id,
@@ -194,6 +198,7 @@ class WorkerDispatcher:
             "job_type": self.task.task_type.value,
             "workspace_path": workspace_path,
             "project_name": self.project_name,
+            "log_dir": str(log_dir) if log_dir else None,
         }
 
         # Dispatch Celery task

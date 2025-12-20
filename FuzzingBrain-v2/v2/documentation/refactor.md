@@ -416,6 +416,7 @@ Harness的生成逻辑仍需讨论
     - workspace_path: 该Worker的工作目录路径
     - status: Worker状态
         - pending: 等待执行
+        - building: 正在构建fuzzer
         - running: 正在运行
         - completed: 执行完成
         - failed: 执行失败
@@ -717,7 +718,7 @@ patch同理
 
 
 
-## 进度3：并发业务相关逻辑 （未完成）
+## 进度3：并发业务相关逻辑 (已完成) ✅
 
 Controller，也就是中心crs 在构建完Task后，可能会生成多个{fuzzer，sanitizer}对，对于每一个这样的对，我们都应该有一个单独的子CRS去跑
 
@@ -980,7 +981,7 @@ celery -A tasks flower --port=5555
 ```
 
 
-## 进度4：Fuzzer构建模块 (进行中)
+## 进度4：Fuzzer构建模块 (已完成) ✅
 
 ### 目标：构建fuzzer，获知成功构建的fuzzer数量
 
@@ -1169,13 +1170,152 @@ for fuzzer in fuzzers:
 
 ### 执行计划
 
-1. [ ] 创建 `fuzzingbrain/core/fuzzer_builder.py`
-2. [ ] 实现 `FuzzerBuilder.build()`
-3. [ ] 实现 `FuzzerBuilder._run_helper()`
-4. [ ] 实现 `FuzzerBuilder._collect_fuzzers()`
-5. [ ] 整合到 `TaskProcessor.process()`
-6. [ ] 测试验证
+1. [x] 创建 `fuzzingbrain/core/fuzzer_builder.py`
+2. [x] 实现 `FuzzerBuilder.build()`
+3. [x] 实现 `FuzzerBuilder._run_helper()`
+4. [x] 实现 `FuzzerBuilder._collect_fuzzers()`
+5. [x] 整合到 `TaskProcessor.process()`
+6. [x] 测试验证
 
 ---
 
-## 进度5：静态分析服务器接口
+## 进度5：Worker分发与基础设施管理 (已完成) ✅
+
+### 已完成的代码结构
+
+```
+fuzzingbrain/
+├── celery_app.py              # Celery应用配置
+├── tasks.py                   # Celery任务定义 (run_worker)
+└── core/
+    ├── dispatcher.py          # WorkerDispatcher - Worker分发逻辑
+    ├── infrastructure.py      # 基础设施管理 (Redis, Celery Worker)
+    └── models/
+        └── worker.py          # Worker模型 (含BUILDING状态)
+```
+
+### WorkerDispatcher 实现
+
+```python
+class WorkerDispatcher:
+    """
+    Dispatches worker tasks for fuzzing.
+
+    For each {fuzzer, sanitizer} pair:
+    1. Create isolated worker workspace
+    2. Dispatch Celery task
+    3. Track worker status
+    """
+
+    def dispatch(self, fuzzers: List[Fuzzer]) -> List[Dict[str, Any]]:
+        """Dispatch worker tasks for all {fuzzer, sanitizer} pairs."""
+
+    def _create_worker_workspace(self, pair: Dict[str, str]) -> str:
+        """Create isolated workspace for a worker."""
+
+    def _dispatch_celery_task(self, pair: Dict[str, str], workspace_path: str) -> Dict[str, Any]:
+        """Dispatch a Celery task for the worker."""
+
+    def wait_for_completion(self, timeout_minutes: int = 60) -> Dict[str, Any]:
+        """Wait for all workers to complete (CLI mode)."""
+
+    def get_results(self) -> List[Dict[str, Any]]:
+        """Get results from all completed workers."""
+```
+
+### 基础设施管理 (CLI模式)
+
+```python
+class InfrastructureManager:
+    """Manages Redis and Celery infrastructure for CLI mode."""
+
+    def start(self) -> bool:
+        """Start Redis (ensure running) and Celery worker (embedded)."""
+
+    def stop(self):
+        """Stop Celery worker. Redis keeps running for reuse."""
+
+class RedisManager:
+    """Manages Redis connection."""
+
+    def ensure_running(self) -> bool:
+        """Ensure Redis is running."""
+
+class CeleryWorkerManager:
+    """Manages embedded Celery worker for CLI mode."""
+
+    def start(self):
+        """Start embedded Celery worker in background thread."""
+
+    def stop(self):
+        """Stop the embedded Celery worker."""
+```
+
+### Docker容器配置
+
+**重要**：在某些环境下（如K3s + Snap Docker共存的Azure VM），需要使用 `--restart=always` 参数启动容器，否则容器会被系统杀死。
+
+**FuzzingBrain.sh 中的容器启动命令**：
+
+```bash
+# MongoDB
+docker run -d \
+    --name fuzzingbrain-mongodb \
+    --restart=always \
+    -p 0.0.0.0:27017:27017 \
+    -v fuzzingbrain-mongodb-data:/data/db \
+    mongo:8.0
+
+# Redis
+docker run -d \
+    --name fuzzingbrain-redis \
+    --restart=always \
+    -p 0.0.0.0:6379:6379 \
+    -v fuzzingbrain-redis-data:/data \
+    redis:7-alpine
+```
+
+### Worker分配表格输出
+
+分配Worker后，会输出清晰的表格：
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                      libpng - Dispatched 3 Workers                                          │
+├────────────┬────────────────────────────┬────────────┬──────────┬─────────────────────────────────────────────┤
+│   Worker   │ Fuzzer                     │ Sanitizer  │ Status   │ Worker ID                                   │
+├────────────┼────────────────────────────┼────────────┼──────────┼─────────────────────────────────────────────┤
+│ Worker 1   │ libpng_read_fuzzer         │ address    │ PENDING  │ abc123__libpng_read_fuzzer__address         │
+│ Worker 2   │ libpng_read_fuzzer         │ memory     │ PENDING  │ abc123__libpng_read_fuzzer__memory          │
+│ Worker 3   │ libpng_write_fuzzer        │ address    │ PENDING  │ abc123__libpng_write_fuzzer__address        │
+└────────────┴────────────────────────────┴────────────┴──────────┴─────────────────────────────────────────────┘
+```
+
+### Worker ID格式
+
+使用双下划线 `__` 作为分隔符：
+
+```
+{task_id}__{fuzzer}__{sanitizer}
+```
+
+示例：`ef963ac5__libpng_read_fuzzer__address`
+
+原因：fuzzer名称本身包含单下划线（如 `libpng_read_fuzzer`），双下划线确保可以正确解析。
+
+### CLI模式完整流程
+
+```
+1. 启动基础设施 (Redis检查, Celery Worker启动)
+2. 构建Fuzzer
+3. 生成 {fuzzer, sanitizer} 对
+4. 创建Worker工作空间
+5. 通过Celery分发任务
+6. 等待所有Worker完成
+7. 收集结果
+8. 停止基础设施
+```
+
+---
+
+## 进度6：静态分析服务器接口
