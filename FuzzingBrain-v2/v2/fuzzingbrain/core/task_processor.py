@@ -326,24 +326,56 @@ class TaskProcessor:
             logger.info(line)
 
     def _log_dispatch_summary(self, jobs: List[dict], project_name: str):
-        """Log a formatted summary of dispatched workers"""
-        width = 80
+        """Log a formatted summary of dispatched workers as a table"""
+        if not jobs:
+            logger.info("No workers dispatched")
+            return
+
+        # Column widths
+        col_worker = 12
+        col_fuzzer = 28
+        col_sanitizer = 12
+        col_status = 10
+        col_worker_id = 45
+
+        total_width = col_worker + col_fuzzer + col_sanitizer + col_status + col_worker_id + 6  # 6 for separators
 
         box_lines = []
         box_lines.append("")
-        box_lines.append("┌" + "─" * width + "┐")
 
+        # Title
+        box_lines.append("┌" + "─" * total_width + "┐")
         header = f" {project_name} - Dispatched {len(jobs)} Workers "
-        box_lines.append("│" + header.center(width) + "│")
-        box_lines.append("├" + "─" * width + "┤")
+        box_lines.append("│" + header.center(total_width) + "│")
 
-        for job in jobs:
-            worker_line = f" {job['fuzzer']} | {job['sanitizer']} "
-            box_lines.append("│" + worker_line.ljust(width) + "│")
-            celery_line = f"   Celery ID: {job['celery_id']}"
-            box_lines.append("│" + celery_line.ljust(width) + "│")
+        # Table header
+        box_lines.append("├" + "─" * col_worker + "┬" + "─" * col_fuzzer + "┬" + "─" * col_sanitizer + "┬" + "─" * col_status + "┬" + "─" * col_worker_id + "┤")
+        header_row = (
+            "│" + " Worker".center(col_worker) +
+            "│" + " Fuzzer".ljust(col_fuzzer) +
+            "│" + " Sanitizer".ljust(col_sanitizer) +
+            "│" + " Status".ljust(col_status) +
+            "│" + " Worker ID".ljust(col_worker_id) + "│"
+        )
+        box_lines.append(header_row)
+        box_lines.append("├" + "─" * col_worker + "┼" + "─" * col_fuzzer + "┼" + "─" * col_sanitizer + "┼" + "─" * col_status + "┼" + "─" * col_worker_id + "┤")
 
-        box_lines.append("└" + "─" * width + "┘")
+        # Data rows
+        for i, job in enumerate(jobs, 1):
+            fuzzer_name = job['fuzzer'][:col_fuzzer-2] if len(job['fuzzer']) > col_fuzzer-2 else job['fuzzer']
+            worker_id = job['worker_id'][:col_worker_id-2] if len(job['worker_id']) > col_worker_id-2 else job['worker_id']
+
+            row = (
+                "│" + f" Worker {i}".ljust(col_worker) +
+                "│ " + fuzzer_name.ljust(col_fuzzer-1) +
+                "│ " + job['sanitizer'].ljust(col_sanitizer-1) +
+                "│ " + "PENDING".ljust(col_status-1) +
+                "│ " + worker_id.ljust(col_worker_id-1) + "│"
+            )
+            box_lines.append(row)
+
+        # Footer
+        box_lines.append("└" + "─" * col_worker + "┴" + "─" * col_fuzzer + "┴" + "─" * col_sanitizer + "┴" + "─" * col_status + "┴" + "─" * col_worker_id + "┘")
         box_lines.append("")
 
         for line in box_lines:
@@ -469,7 +501,7 @@ class TaskProcessor:
                     # Mark task as complete
                     if result["status"] == "completed":
                         if result["failed"] == 0:
-                            task.mark_success()
+                            task.mark_completed()
                         else:
                             task.mark_error(f"{result['failed']} workers failed")
                     else:

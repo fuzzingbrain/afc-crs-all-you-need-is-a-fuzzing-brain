@@ -548,7 +548,7 @@ FuzzingBrain automatically checks and starts these services:
 
 | Container | Image | Port | Purpose |
 |-----------|-------|------|---------|
-| fuzzingbrain-mongodb | mongo:7.0 | 27017 | State storage |
+| fuzzingbrain-mongodb | mongo:8.0 | 27017 | State storage |
 | fuzzingbrain-redis | redis:7-alpine | 6379 | Celery task queue |
 
 ### Python Dependencies (requirements.txt)

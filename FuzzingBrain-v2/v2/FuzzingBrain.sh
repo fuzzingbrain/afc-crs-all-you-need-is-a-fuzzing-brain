@@ -248,9 +248,10 @@ start_mongodb() {
         print_info "Starting MongoDB container..."
         docker run -d \
             --name "$MONGODB_CONTAINER" \
+            --restart=always \
             -p 0.0.0.0:${MONGODB_PORT}:27017 \
             -v fuzzingbrain-mongodb-data:/data/db \
-            mongo:7.0 > /dev/null
+            mongo:8.0 > /dev/null
 
         # Wait for MongoDB to start
         print_info "Waiting for MongoDB to start..."
@@ -356,6 +357,7 @@ start_redis() {
         print_info "Starting Redis container..."
         docker run -d \
             --name "$REDIS_CONTAINER" \
+            --restart=always \
             -p 0.0.0.0:${REDIS_PORT}:6379 \
             -v fuzzingbrain-redis-data:/data \
             redis:7-alpine > /dev/null

@@ -11,6 +11,7 @@ from typing import Optional, List
 class WorkerStatus(str, Enum):
     """Worker status enum"""
     PENDING = "pending"
+    BUILDING = "building"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
