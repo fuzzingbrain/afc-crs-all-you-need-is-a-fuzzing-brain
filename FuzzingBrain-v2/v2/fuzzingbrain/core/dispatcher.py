@@ -168,7 +168,7 @@ class WorkerDispatcher:
         Returns:
             Job info dictionary
         """
-        from ..tasks import run_worker
+        from ..worker.tasks import run_worker
 
         fuzzer = pair["fuzzer"]
         sanitizer = pair["sanitizer"]

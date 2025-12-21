@@ -11,10 +11,10 @@ from typing import Dict, Any
 
 from loguru import logger
 
-from .celery_app import app
-from .core.models import Worker, WorkerStatus
-from .core.logging import get_worker_banner_and_header
-from .db import MongoDB, init_repos
+from ..celery_app import app
+from ..core.models import Worker, WorkerStatus
+from ..core.logging import get_worker_banner_and_header
+from ..db import MongoDB, init_repos
 
 
 def setup_worker_logging(log_dir: str, worker_id: str, metadata: Dict[str, Any]):
@@ -71,7 +71,7 @@ def setup_worker_logging(log_dir: str, worker_id: str, metadata: Dict[str, Any])
     return logger
 
 
-@app.task(bind=True, name="fuzzingbrain.tasks.run_worker")
+@app.task(bind=True, name="fuzzingbrain.worker.tasks.run_worker")
 def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     """
     Execute a worker task for a {fuzzer, sanitizer} pair.
@@ -119,7 +119,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"Worker starting")
 
     # Initialize database connection for this worker process
-    from .core import Config
+    from ..core import Config
     config = Config.from_env()
     db = MongoDB.connect(config.mongodb_url, config.mongodb_db)
     repos = init_repos(db)
@@ -143,7 +143,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         worker.status = WorkerStatus.BUILDING
         repos.workers.save(worker)
 
-        from .worker.builder import WorkerBuilder
+        from .builder import WorkerBuilder
         builder = WorkerBuilder(workspace_path, project_name, sanitizer)
         build_success, build_msg = builder.build()
 
@@ -155,7 +155,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         worker.status = WorkerStatus.RUNNING
         repos.workers.save(worker)
 
-        from .worker.executor import WorkerExecutor
+        from .executor import WorkerExecutor
         executor = WorkerExecutor(
             workspace_path=workspace_path,
             project_name=project_name,
@@ -177,7 +177,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(f"Completed: POVs={result.get('povs_found', 0)}, Patches={result.get('patches_found', 0)}")
 
         # Step 4: Cleanup workspace (keep results)
-        from .worker.cleanup import cleanup_worker_workspace
+        from .cleanup import cleanup_worker_workspace
         cleanup_worker_workspace(workspace_path)
 
         return {

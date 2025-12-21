@@ -16,7 +16,7 @@ app = Celery(
     "fuzzingbrain",
     broker=REDIS_URL,
     backend=REDIS_URL,
-    include=["fuzzingbrain.tasks"],
+    include=["fuzzingbrain.worker.tasks"],
 )
 
 # Celery configuration
@@ -44,7 +44,7 @@ app.conf.update(
 
     # Task routing (optional, for future use)
     task_routes={
-        "fuzzingbrain.tasks.run_worker": {"queue": "workers"},
+        "fuzzingbrain.worker.tasks.run_worker": {"queue": "workers"},
     },
 )
 
