@@ -12,10 +12,11 @@ This module handles:
 import os
 import shutil
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Tuple
-from .logging import logger
+from .logging import logger, create_final_summary, WorkerColors, get_log_dir
 from .config import Config
 from .models import Task, TaskStatus, Fuzzer, FuzzerStatus
 from ..db import RepositoryManager
@@ -338,18 +339,16 @@ class TaskProcessor:
         col_status = 10
         col_worker_id = 45
 
-        total_width = col_worker + col_fuzzer + col_sanitizer + col_status + col_worker_id + 6  # 6 for separators
+        # Total width = sum of columns + 4 internal separators (┬/┼)
+        total_width = col_worker + col_fuzzer + col_sanitizer + col_status + col_worker_id + 4
 
-        box_lines = []
-        box_lines.append("")
-
-        # Title
-        box_lines.append("┌" + "─" * total_width + "┐")
+        # Build header lines (no color)
+        header_lines = []
+        header_lines.append("")
+        header_lines.append("┌" + "─" * total_width + "┐")
         header = f" {project_name} - Dispatched {len(jobs)} Workers "
-        box_lines.append("│" + header.center(total_width) + "│")
-
-        # Table header
-        box_lines.append("├" + "─" * col_worker + "┬" + "─" * col_fuzzer + "┬" + "─" * col_sanitizer + "┬" + "─" * col_status + "┬" + "─" * col_worker_id + "┤")
+        header_lines.append("│" + header.center(total_width) + "│")
+        header_lines.append("├" + "─" * col_worker + "┬" + "─" * col_fuzzer + "┬" + "─" * col_sanitizer + "┬" + "─" * col_status + "┬" + "─" * col_worker_id + "┤")
         header_row = (
             "│" + " Worker".center(col_worker) +
             "│" + " Fuzzer".ljust(col_fuzzer) +
@@ -357,29 +356,60 @@ class TaskProcessor:
             "│" + " Status".ljust(col_status) +
             "│" + " Worker ID".ljust(col_worker_id) + "│"
         )
-        box_lines.append(header_row)
-        box_lines.append("├" + "─" * col_worker + "┼" + "─" * col_fuzzer + "┼" + "─" * col_sanitizer + "┼" + "─" * col_status + "┼" + "─" * col_worker_id + "┤")
+        header_lines.append(header_row)
+        header_lines.append("├" + "─" * col_worker + "┼" + "─" * col_fuzzer + "┼" + "─" * col_sanitizer + "┼" + "─" * col_status + "┼" + "─" * col_worker_id + "┤")
 
-        # Data rows
+        # Build data rows (colored and plain versions)
+        colored_rows = []
+        plain_rows = []
+
         for i, job in enumerate(jobs, 1):
             fuzzer_name = job['fuzzer'][:col_fuzzer-2] if len(job['fuzzer']) > col_fuzzer-2 else job['fuzzer']
             worker_id = job['worker_id'][:col_worker_id-2] if len(job['worker_id']) > col_worker_id-2 else job['worker_id']
 
-            row = (
-                "│" + f" Worker {i}".ljust(col_worker) +
-                "│ " + fuzzer_name.ljust(col_fuzzer-1) +
-                "│ " + job['sanitizer'].ljust(col_sanitizer-1) +
-                "│ " + "PENDING".ljust(col_status-1) +
-                "│ " + worker_id.ljust(col_worker_id-1) + "│"
+            # Build cell content
+            worker_cell = f" Worker {i}".ljust(col_worker)
+            fuzzer_cell = " " + fuzzer_name.ljust(col_fuzzer-1)
+            sanitizer_cell = " " + job['sanitizer'].ljust(col_sanitizer-1)
+            status_cell = " " + "PENDING".ljust(col_status-1)
+            id_cell = " " + worker_id.ljust(col_worker_id-1)
+
+            # Plain row (for log file)
+            plain_row = (
+                "│" + worker_cell +
+                "│" + fuzzer_cell +
+                "│" + sanitizer_cell +
+                "│" + status_cell +
+                "│" + id_cell + "│"
             )
-            box_lines.append(row)
+            plain_rows.append(plain_row)
+
+            # Colored row (for console)
+            color = WorkerColors.get(i - 1)
+            reset = WorkerColors.RESET
+            colored_row = (
+                "│" + color + worker_cell + reset +
+                "│" + color + fuzzer_cell + reset +
+                "│" + color + sanitizer_cell + reset +
+                "│" + color + status_cell + reset +
+                "│" + color + id_cell + reset + "│"
+            )
+            colored_rows.append(colored_row)
 
         # Footer
-        box_lines.append("└" + "─" * col_worker + "┴" + "─" * col_fuzzer + "┴" + "─" * col_sanitizer + "┴" + "─" * col_status + "┴" + "─" * col_worker_id + "┘")
-        box_lines.append("")
+        footer = "└" + "─" * col_worker + "┴" + "─" * col_fuzzer + "┴" + "─" * col_sanitizer + "┴" + "─" * col_status + "┴" + "─" * col_worker_id + "┘"
 
-        for line in box_lines:
+        # Output table with colors
+        # Header lines go through logger normally
+        for line in header_lines:
             logger.info(line)
+
+        # Worker rows with individual colors
+        for row in colored_rows:
+            logger.opt(colors=True).info(row)
+
+        logger.info(footer)
+        logger.info("")
 
     def process(self, task: Task) -> dict:
         """
@@ -444,6 +474,13 @@ class TaskProcessor:
 
             logger.info(f"Successfully built {len(built_fuzzers)} fuzzers: {built_fuzzers}")
 
+            # Set shared coverage fuzzer path for tools
+            coverage_dir = builder.get_coverage_fuzzer_dir()
+            if coverage_dir:
+                from ..tools.coverage import set_coverage_fuzzer_path
+                set_coverage_fuzzer_path(coverage_dir)
+                logger.info(f"Coverage fuzzer path set: {coverage_dir}")
+
             # Update fuzzer status in database
             project_name = self.config.ossfuzz_project or task.project_name
             for fuzzer in fuzzers:
@@ -466,11 +503,13 @@ class TaskProcessor:
 
             infra = None
             if not self.config.api_mode:
+                log_dir = get_log_dir()
+
                 infra = InfrastructureManager(
                     redis_url=self.config.redis_url,
                     concurrency=8,
                 )
-                if not infra.start():
+                if not infra.start(log_dir=str(log_dir) if log_dir else None):
                     raise Exception("Failed to start infrastructure (Redis/Celery)")
 
             try:
@@ -509,13 +548,41 @@ class TaskProcessor:
 
                     self.repos.tasks.save(task)
 
+                    # Get worker results for summary
+                    worker_results = dispatcher.get_results()
+
+                    # Create and output final summary with worker colors via loguru
+                    summary = create_final_summary(
+                        project_name=project_name,
+                        task_id=task.task_id,
+                        workers=worker_results,
+                        total_elapsed_minutes=result.get("elapsed_minutes", 0),
+                        use_color=True,
+                    )
+                    # Reset terminal settings before output (subprocess may have changed them)
+                    os.system('stty sane 2>/dev/null')
+
+                    # Print clean summary to console without log prefixes to avoid wrapping
+                    # Add ANSI reset at the end to ensure terminal state is restored
+                    sys.stdout.write("\n" + summary + "\n\033[0m")
+                    sys.stdout.flush()
+
+                    # Append plain summary (no ANSI codes) to log file for record
+                    log_dir = get_log_dir()
+                    if log_dir:
+                        plain_summary = WorkerColors.strip(summary)
+                        with open(Path(log_dir) / "fuzzingbrain.log", "a", encoding="utf-8") as f:
+                            f.write("\n" + plain_summary + "\n")
+
+                    logger.info("Final summary written to console and log file")
+
                     return {
                         "task_id": task.task_id,
                         "status": result["status"],
                         "message": f"Completed {result['completed']}/{result['total']} workers",
                         "workspace": task.task_path,
                         "fuzzers": [f.fuzzer_name for f in successful_fuzzers],
-                        "workers": dispatcher.get_results(),
+                        "workers": worker_results,
                         "elapsed_minutes": result.get("elapsed_minutes", 0),
                     }
                 else:

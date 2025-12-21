@@ -5,8 +5,8 @@ Builds fuzzer with a specific sanitizer in the worker's workspace.
 This is different from the Controller's build - each worker builds
 its own copy with its assigned sanitizer.
 
-Additionally builds a coverage-instrumented fuzzer for dynamic analysis
-(e.g., verifying if POV reaches target functions).
+Note: Coverage fuzzer is built once by Controller and shared by all Workers.
+Workers access the shared coverage fuzzer via the coverage tool.
 """
 
 import os
@@ -24,7 +24,7 @@ class WorkerBuilder:
     Builds fuzzer with a specific sanitizer.
 
     Each worker has its own workspace copy and builds with its assigned sanitizer.
-    Also builds a coverage-instrumented version for dynamic analysis.
+    Coverage fuzzer is shared (built by Controller, not here).
     """
 
     def __init__(self, workspace_path: str, project_name: str, sanitizer: str):
@@ -46,20 +46,16 @@ class WorkerBuilder:
         # Output directories
         self.results_path = self.workspace_path / "results"
         self.fuzzers_path = self.results_path / "fuzzers" / self.project_name
-        self.coverage_fuzzers_path = self.results_path / "coverage_fuzzer" / self.project_name
 
         # OSS-Fuzz build output directory
         self.build_out_path = self.fuzz_tooling_path / "build" / "out" / self.project_name
 
     def build(self) -> Tuple[bool, str]:
         """
-        Build fuzzer with the specified sanitizer AND coverage instrumentation.
+        Build fuzzer with the specified sanitizer.
 
-        Build order:
-        1. Build with specified sanitizer (address/memory/undefined)
-        2. Copy to results/fuzzers/{project}/
-        3. Build with coverage sanitizer
-        4. Copy to results/coverage_fuzzer/{project}/
+        Note: Coverage fuzzer is built once by Controller and shared.
+        Workers access the shared coverage fuzzer via the coverage tool.
 
         Returns:
             (success, message)
@@ -69,12 +65,11 @@ class WorkerBuilder:
         if not helper_path.exists():
             return False, f"helper.py not found: {helper_path}"
 
-        # Ensure output directories exist
+        # Ensure output directory exists
         self.fuzzers_path.mkdir(parents=True, exist_ok=True)
-        self.coverage_fuzzers_path.mkdir(parents=True, exist_ok=True)
 
-        # Step 1: Build with specified sanitizer
-        logger.info(f"[1/2] Building fuzzer with {self.sanitizer} sanitizer")
+        # Build with specified sanitizer
+        logger.info(f"Building fuzzer with {self.sanitizer} sanitizer")
         success, msg = self._build_with_sanitizer(
             helper_path,
             self.sanitizer,
@@ -85,31 +80,11 @@ class WorkerBuilder:
         self._fix_build_permissions()
 
         if not success:
-            return False, f"Main build failed: {msg}"
+            return False, f"Build failed: {msg}"
 
-        # Copy main fuzzer to results/fuzzers/
+        # Copy fuzzer to results/fuzzers/
         self._copy_build_output(self.fuzzers_path)
-        logger.info(f"Main fuzzer copied to {self.fuzzers_path}")
-
-        # Step 2: Build with coverage sanitizer
-        logger.info(f"[2/2] Building fuzzer with coverage sanitizer")
-        success, msg = self._build_with_sanitizer(
-            helper_path,
-            "coverage",
-            self.results_path / "build_coverage.log"
-        )
-
-        # Fix permissions after Docker build
-        self._fix_build_permissions()
-
-        if not success:
-            # Coverage build failure is not fatal, just warn
-            logger.warning(f"Coverage build failed: {msg}")
-            logger.warning("Continuing without coverage fuzzer")
-        else:
-            # Copy coverage fuzzer to results/coverage_fuzzer/
-            self._copy_build_output(self.coverage_fuzzers_path)
-            logger.info(f"Coverage fuzzer copied to {self.coverage_fuzzers_path}")
+        logger.info(f"Fuzzer copied to {self.fuzzers_path}")
 
         return True, "Build successful"
 
@@ -157,10 +132,19 @@ class WorkerBuilder:
                     cwd=str(self.fuzz_tooling_path),
                 )
 
-                for line in process.stdout:
+                ended_with_newline = True
+                for raw_line in process.stdout:
+                    # Docker/oss-fuzz often emits carriage-return updates; normalize to newlines to avoid smashed console output
+                    line = raw_line.replace("\r", "\n")
                     sys.stdout.write(line)
                     sys.stdout.flush()
                     log_file.write(line)
+                    ended_with_newline = line.endswith("\n")
+
+                # Ensure the next log line starts cleanly
+                if not ended_with_newline:
+                    sys.stdout.write("\n")
+                    log_file.write("\n")
 
                 process.wait(timeout=1800)  # 30 minutes
 
@@ -281,18 +265,6 @@ class WorkerBuilder:
         """
         return self.fuzzers_path / fuzzer_name
 
-    def get_coverage_fuzzer_path(self, fuzzer_name: str) -> Path:
-        """
-        Get path to coverage-instrumented fuzzer binary.
-
-        Args:
-            fuzzer_name: Name of the fuzzer
-
-        Returns:
-            Path to coverage fuzzer binary
-        """
-        return self.coverage_fuzzers_path / fuzzer_name
-
     def list_fuzzers(self) -> List[str]:
         """
         List all built fuzzer binaries.
@@ -310,7 +282,3 @@ class WorkerBuilder:
                 fuzzers.append(f.name)
 
         return fuzzers
-
-    def has_coverage_fuzzer(self) -> bool:
-        """Check if coverage fuzzer was built successfully."""
-        return self.coverage_fuzzers_path.exists() and any(self.coverage_fuzzers_path.iterdir())

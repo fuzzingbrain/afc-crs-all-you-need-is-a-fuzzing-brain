@@ -5,6 +5,7 @@ Defines the tasks that can be executed by Celery workers.
 """
 
 import sys
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
@@ -13,19 +14,32 @@ from loguru import logger
 
 from ..celery_app import app
 from ..core.models import Worker, WorkerStatus
-from ..core.logging import get_worker_banner_and_header
+from ..core.logging import get_worker_banner_and_header, create_worker_summary
 from ..db import MongoDB, init_repos
+
+
+# Capture any uncaught exceptions at module level
+def _log_uncaught_exception(exc_type, exc_value, exc_tb):
+    """Log uncaught exceptions to both stderr and file."""
+    error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    logger.error(f"Uncaught exception in worker:\n{error_msg}")
+    # Also ensure it goes to stderr
+    sys.stderr.write(f"[WORKER ERROR] {error_msg}\n")
+    sys.stderr.flush()
+
+sys.excepthook = _log_uncaught_exception
 
 
 def setup_worker_logging(log_dir: str, worker_id: str, metadata: Dict[str, Any]):
     """
     Setup logging for a worker process.
 
-    Configures logger to write to both:
+    Configures logger to write to:
     1. Main task log file (fuzzingbrain.log)
     2. Worker-specific log file (worker_{worker_id}.log)
 
-    Also writes the worker banner and metadata header to the log file.
+    Note: Workers do NOT write to console to avoid output interleaving
+    from multiple concurrent worker processes.
     """
     logger.remove()
 
@@ -39,16 +53,8 @@ def setup_worker_logging(log_dir: str, worker_id: str, metadata: Dict[str, Any])
         f.write(banner)
         f.write("\n")
 
-    # Also print banner to console
-    print(banner, file=sys.stderr)
-
-    # Console output
-    logger.add(
-        sys.stderr,
-        level="INFO",
-        format="<green>{time:HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>" + worker_id + "</cyan> - <level>{message}</level>",
-        colorize=True,
-    )
+    # NO console output for workers - avoids interleaving from multiple processes
+    # All output goes to log files only
 
     # Main log file (append)
     logger.add(
@@ -117,12 +123,21 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         setup_worker_logging(log_dir, worker_id, worker_metadata)
 
     logger.info(f"Worker starting")
+    start_time = datetime.now()
 
     # Initialize database connection for this worker process
-    from ..core import Config
-    config = Config.from_env()
-    db = MongoDB.connect(config.mongodb_url, config.mongodb_db)
-    repos = init_repos(db)
+    try:
+        from ..core import Config
+        config = Config.from_env()
+        db = MongoDB.connect(config.mongodb_url, config.mongodb_db)
+        repos = init_repos(db)
+    except Exception as e:
+        logger.exception(f"Failed to initialize worker: {e}")
+        return {
+            "worker_id": worker_id,
+            "status": "failed",
+            "error": f"Initialization failed: {e}",
+        }
 
     # Create worker record
     worker = Worker(
@@ -174,7 +189,21 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         worker.finished_at = datetime.now()
         repos.workers.save(worker)
 
-        logger.info(f"Completed: POVs={result.get('povs_found', 0)}, Patches={result.get('patches_found', 0)}")
+        # Calculate elapsed time
+        elapsed_seconds = (datetime.now() - start_time).total_seconds()
+
+        # Log worker completion summary
+        summary = create_worker_summary(
+            worker_id=worker_id,
+            status="completed",
+            fuzzer=fuzzer,
+            sanitizer=sanitizer,
+            povs_found=result.get("povs_found", 0),
+            patches_found=result.get("patches_found", 0),
+            elapsed_seconds=elapsed_seconds,
+        )
+        for line in summary.split("\n"):
+            logger.info(line)
 
         # Step 4: Cleanup workspace (keep results)
         from .cleanup import cleanup_worker_workspace
@@ -183,6 +212,8 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "worker_id": worker_id,
             "status": "completed",
+            "fuzzer": fuzzer,
+            "sanitizer": sanitizer,
             "povs_found": result.get("povs_found", 0),
             "patches_found": result.get("patches_found", 0),
         }
@@ -195,8 +226,25 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         worker.finished_at = datetime.now()
         repos.workers.save(worker)
 
+        # Calculate elapsed time
+        elapsed_seconds = (datetime.now() - start_time).total_seconds()
+
+        # Log worker failure summary
+        summary = create_worker_summary(
+            worker_id=worker_id,
+            status="failed",
+            fuzzer=fuzzer,
+            sanitizer=sanitizer,
+            elapsed_seconds=elapsed_seconds,
+            error_msg=str(e),
+        )
+        for line in summary.split("\n"):
+            logger.info(line)
+
         return {
             "worker_id": worker_id,
             "status": "failed",
+            "fuzzer": fuzzer,
+            "sanitizer": sanitizer,
             "error": str(e),
         }

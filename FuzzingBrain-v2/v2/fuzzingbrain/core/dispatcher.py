@@ -222,9 +222,15 @@ class WorkerDispatcher:
         """
         Get status of all workers for this task.
 
+        Also checks Celery task status to detect workers that failed
+        before updating the database.
+
         Returns:
             Status summary dictionary
         """
+        from celery.result import AsyncResult
+        from ..celery_app import app
+
         workers = self.repos.workers.find_by_task(self.task.task_id)
 
         status = {
@@ -237,9 +243,24 @@ class WorkerDispatcher:
         }
 
         for worker in workers:
-            status_key = worker.status.value
-            if status_key in status:
-                status[status_key] += 1
+            worker_status = worker.status.value
+
+            # If worker is still pending/building/running, check Celery task status
+            if worker_status in ["pending", "building", "running"] and worker.celery_job_id:
+                try:
+                    result = AsyncResult(worker.celery_job_id, app=app)
+                    if result.failed():
+                        # Celery task failed but DB not updated - mark as failed
+                        worker.status = WorkerStatus.FAILED
+                        worker.error_msg = str(result.result) if result.result else "Task failed"
+                        self.repos.workers.save(worker)
+                        worker_status = "failed"
+                        logger.warning(f"Worker {worker.worker_id} failed (detected via Celery)")
+                except Exception:
+                    pass  # Ignore Celery check errors
+
+            if worker_status in status:
+                status[worker_status] += 1
 
         return status
 
@@ -328,6 +349,8 @@ class WorkerDispatcher:
                 "fuzzer": worker.fuzzer,
                 "sanitizer": worker.sanitizer,
                 "status": worker.status.value,
+                "povs_found": worker.povs_found or 0,
+                "patches_found": worker.patches_found or 0,
                 "error_msg": worker.error_msg,
             }
             results.append(result)

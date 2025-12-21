@@ -3,13 +3,17 @@ Fuzzer Builder
 
 Builds fuzzers using OSS-Fuzz helper.py and collects the results.
 The purpose is to determine how many fuzzers can be successfully built.
+
+Also builds a shared coverage-instrumented fuzzer for dynamic analysis.
+This coverage fuzzer is shared by all Workers (built once by Controller).
 """
 
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 from .logging import logger, get_log_dir
 from .config import Config
@@ -22,6 +26,9 @@ class FuzzerBuilder:
 
     Uses OSS-Fuzz helper.py to build fuzzers with address sanitizer.
     The goal is simply to know how many fuzzers are successfully built.
+
+    Also builds a shared coverage fuzzer that all Workers can use for
+    dynamic analysis (e.g., verifying if POV reaches target functions).
     """
 
     # Files to skip when scanning build output
@@ -49,9 +56,19 @@ class FuzzerBuilder:
         self.config = config
         self.project_name = config.ossfuzz_project or task.project_name
 
+        # Shared coverage fuzzer path (accessible by all Workers)
+        self.task_path = Path(task.task_path) if task.task_path else None
+        self.coverage_fuzzer_path: Optional[Path] = None
+        if self.task_path:
+            self.coverage_fuzzer_path = self.task_path / "results" / "coverage_fuzzer" / self.project_name
+
     def build(self) -> Tuple[bool, List[str], str]:
         """
         Build fuzzers.
+
+        Build order:
+        1. Build with address sanitizer (to verify which fuzzers work)
+        2. Build with coverage sanitizer (shared by all Workers)
 
         Returns:
             (success, fuzzer_list, message)
@@ -65,25 +82,41 @@ class FuzzerBuilder:
         if not self.task.src_path:
             return False, [], "src_path not set"
 
-        # 1. Run helper.py to build fuzzers
-        success, msg = self._run_helper()
+        # Step 1: Run helper.py to build fuzzers with address sanitizer
+        logger.info("[1/2] Building with address sanitizer")
+        success, msg = self._run_helper(sanitizer="address")
         if not success:
             return False, [], msg
 
-        # 2. Collect built fuzzers
+        # Fix permissions after Docker build
+        self._fix_build_permissions()
+
+        # Collect built fuzzers
         fuzzers = self._collect_fuzzers()
         if not fuzzers:
             return False, [], "Build succeeded but no fuzzers found in output"
 
+        # Step 2: Build shared coverage fuzzer
+        logger.info("[2/2] Building shared coverage fuzzer")
+        coverage_success = self._build_coverage_fuzzer()
+        if not coverage_success:
+            logger.warning("Coverage fuzzer build failed, continuing without it")
+        else:
+            logger.info(f"Coverage fuzzer available at: {self.coverage_fuzzer_path}")
+
         return True, fuzzers, f"Built {len(fuzzers)} fuzzers successfully"
 
-    def _run_helper(self) -> Tuple[bool, str]:
+    def _run_helper(self, sanitizer: str = "address", log_suffix: str = "") -> Tuple[bool, str]:
         """
         Call OSS-Fuzz helper.py to build fuzzers.
 
         Output is:
         - Streamed to console in real-time
-        - Written to build_fuzzer.log in the log directory
+        - Written to build_fuzzer{log_suffix}.log in the log directory
+
+        Args:
+            sanitizer: Sanitizer type (address, memory, undefined, coverage)
+            log_suffix: Suffix for log file name (e.g., "_coverage")
 
         Returns:
             (success, message)
@@ -97,7 +130,7 @@ class FuzzerBuilder:
         cmd = [
             "python3", str(helper_path),
             "build_fuzzers",
-            "--sanitizer", "address",
+            "--sanitizer", sanitizer,
             "--engine", "libfuzzer",
             self.project_name,
             str(Path(self.task.src_path).absolute()),
@@ -107,7 +140,8 @@ class FuzzerBuilder:
 
         # Setup build log file
         log_dir = get_log_dir()
-        build_log_path = log_dir / "build_fuzzer.log" if log_dir else None
+        log_name = f"build_fuzzer{log_suffix}.log"
+        build_log_path = log_dir / log_name if log_dir else None
 
         try:
             # Open log file if available
@@ -126,9 +160,13 @@ class FuzzerBuilder:
                 cwd=str(Path(self.task.fuzz_tooling_path)),
             )
 
-            # Stream output to console and log file
+            # Stream output to console and log file, normalizing carriage returns
             output_lines = []
-            for line in process.stdout:
+            ended_with_newline = True
+            for raw_line in process.stdout:
+                # Replace progress-carriage-returns (e.g., docker pull) with newlines
+                line = raw_line.replace("\r", "\n")
+
                 # Write to console
                 sys.stdout.write(line)
                 sys.stdout.flush()
@@ -138,6 +176,13 @@ class FuzzerBuilder:
                     build_log_file.write(line)
 
                 output_lines.append(line)
+                ended_with_newline = line.endswith("\n")
+
+            # Ensure the next log line starts on a fresh line
+            if not ended_with_newline:
+                sys.stdout.write("\n")
+                if build_log_file:
+                    build_log_file.write("\n")
 
             process.wait(timeout=1800)  # 30 minutes
 
@@ -243,3 +288,111 @@ class FuzzerBuilder:
         return str(
             Path(self.task.fuzz_tooling_path) / "build" / "out" / self.project_name / fuzzer_name
         )
+
+    def get_coverage_fuzzer_dir(self) -> Optional[Path]:
+        """
+        Get the path to the shared coverage fuzzer directory.
+
+        Returns:
+            Path to coverage fuzzer directory, or None if not built
+        """
+        if self.coverage_fuzzer_path and self.coverage_fuzzer_path.exists():
+            return self.coverage_fuzzer_path
+        return None
+
+    def _build_coverage_fuzzer(self) -> bool:
+        """
+        Build coverage-instrumented fuzzer and copy to shared location.
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.coverage_fuzzer_path:
+            logger.warning("Coverage fuzzer path not set")
+            return False
+
+        # Build with coverage sanitizer
+        success, msg = self._run_helper(sanitizer="coverage", log_suffix="_coverage")
+
+        # Fix permissions after Docker build
+        self._fix_build_permissions()
+
+        if not success:
+            logger.error(f"Coverage build failed: {msg}")
+            return False
+
+        # Copy to shared location
+        self._copy_build_output(self.coverage_fuzzer_path)
+        return True
+
+    def _copy_build_output(self, dest_path: Path) -> None:
+        """
+        Copy build output to destination directory.
+
+        Args:
+            dest_path: Destination directory
+        """
+        out_dir = Path(self.task.fuzz_tooling_path) / "build" / "out" / self.project_name
+
+        if not out_dir.exists():
+            logger.warning(f"Build output not found: {out_dir}")
+            return
+
+        # Clear destination if exists
+        if dest_path.exists():
+            shutil.rmtree(dest_path)
+
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Copy all files
+        shutil.copytree(out_dir, dest_path)
+
+        # Fix permissions after copy
+        self._fix_permissions(dest_path)
+
+        logger.info(f"Copied build output to {dest_path}")
+
+    def _fix_build_permissions(self) -> None:
+        """
+        Fix permissions for build-related directories.
+
+        Docker creates files as root, which causes permission issues.
+        This method uses a Docker container to chown the files.
+        """
+        # Directories that Docker may have created with root ownership
+        dirs_to_fix = [
+            Path(self.task.fuzz_tooling_path) / "build",
+            Path(self.task.src_path) if self.task.src_path else None,
+        ]
+
+        for dir_path in dirs_to_fix:
+            if dir_path and dir_path.exists():
+                self._fix_permissions(dir_path)
+
+    def _fix_permissions(self, path: Path) -> None:
+        """
+        Fix file permissions to current user using Docker.
+
+        Args:
+            path: Directory to fix permissions for
+        """
+        if not path.exists():
+            return
+
+        uid = os.getuid()
+        gid = os.getgid()
+
+        try:
+            subprocess.run(
+                [
+                    "docker", "run", "--rm",
+                    "-v", f"{path.absolute()}:/fix_perms",
+                    "alpine:latest",
+                    "chown", "-R", f"{uid}:{gid}", "/fix_perms"
+                ],
+                capture_output=True,
+                timeout=120,
+            )
+            logger.debug(f"Fixed permissions for {path}")
+        except Exception as e:
+            logger.warning(f"Could not fix permissions for {path}: {e}")

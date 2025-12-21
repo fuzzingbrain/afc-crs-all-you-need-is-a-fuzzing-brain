@@ -6,11 +6,53 @@ Each task run creates a dedicated log directory.
 """
 
 import sys
+import traceback
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any
 
 from loguru import logger
+
+# Sanitize stdout/stderr to avoid stray carriage-return progress output
+class _CRSanitizer:
+    """Wrap a stream and replace carriage returns with newlines to keep console alignment."""
+
+    def __init__(self, wrapped):
+        self._wrapped = wrapped
+
+    def write(self, data):
+        return self._wrapped.write(data.replace("\r", "\n"))
+
+    def flush(self):
+        return self._wrapped.flush()
+
+    def isatty(self):
+        return self._wrapped.isatty()
+
+    @property
+    def encoding(self):
+        return getattr(self._wrapped, "encoding", None)
+
+
+# Only wrap once to avoid double replacement
+if not isinstance(sys.stdout, _CRSanitizer):
+    sys.stdout = _CRSanitizer(sys.stdout)
+if not isinstance(sys.stderr, _CRSanitizer):
+    sys.stderr = _CRSanitizer(sys.stderr)
+
+
+# Global exception handler to ensure all errors are logged
+def _global_exception_handler(exc_type, exc_value, exc_tb):
+    """Handle uncaught exceptions globally."""
+    if issubclass(exc_type, KeyboardInterrupt):
+        # Don't log keyboard interrupts
+        sys.__excepthook__(exc_type, exc_value, exc_tb)
+        return
+
+    error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    logger.error(f"Uncaught exception:\n{error_msg}")
+
+sys.excepthook = _global_exception_handler
 
 
 # Remove default handler
@@ -18,6 +60,49 @@ logger.remove()
 
 # Global log directory for current task
 _current_log_dir: Optional[Path] = None
+
+
+# =============================================================================
+# Worker Colors
+# =============================================================================
+
+class WorkerColors:
+    """
+    Color palette for workers in console output.
+
+    Each worker gets a unique color for easy visual distinction.
+    Colors are assigned based on worker index (cycling if more workers than colors).
+    """
+
+    # ANSI color codes - bright/bold colors for better visibility
+    PALETTE = [
+        "\033[1;36m",   # Cyan (bright)
+        "\033[1;33m",   # Yellow (bright)
+        "\033[1;35m",   # Magenta (bright)
+        "\033[1;32m",   # Green (bright)
+        "\033[1;34m",   # Blue (bright)
+        "\033[38;5;208m",  # Orange
+        "\033[38;5;141m",  # Purple
+        "\033[38;5;229m",  # Light yellow
+    ]
+
+    RESET = "\033[0m"
+
+    @classmethod
+    def get(cls, index: int) -> str:
+        """Get color for worker at given index (0-based)."""
+        return cls.PALETTE[index % len(cls.PALETTE)]
+
+    @classmethod
+    def colorize(cls, text: str, index: int) -> str:
+        """Colorize text for worker at given index."""
+        return f"{cls.get(index)}{text}{cls.RESET}"
+
+    @classmethod
+    def strip(cls, text: str) -> str:
+        """Remove all ANSI color codes from text (for log files)."""
+        import re
+        return re.sub(r'\033\[[0-9;]*m', '', text)
 
 
 _LOGO_TOP = """╔════════════════════════════════════════════════════════════════════════════════════════════════════╗
@@ -299,6 +384,178 @@ def get_task_logger(name: str):
     return logger.bind(task_log=name)
 
 
+def create_worker_summary(
+    worker_id: str,
+    status: str,
+    fuzzer: str,
+    sanitizer: str,
+    povs_found: int = 0,
+    patches_found: int = 0,
+    elapsed_seconds: float = 0,
+    error_msg: Optional[str] = None,
+) -> str:
+    """
+    Create a formatted worker completion summary box.
+
+    Args:
+        worker_id: Worker ID
+        status: completed/failed
+        fuzzer: Fuzzer name
+        sanitizer: Sanitizer type
+        povs_found: Number of POVs found
+        patches_found: Number of patches found
+        elapsed_seconds: Time elapsed
+        error_msg: Error message if failed
+
+    Returns:
+        Formatted summary string
+    """
+    status_icon = "✓" if status == "completed" else "✗"
+    elapsed_str = f"{elapsed_seconds:.1f}s" if elapsed_seconds else "N/A"
+
+    lines = []
+    width = 70
+
+    lines.append("")
+    lines.append("┌" + "─" * width + "┐")
+    lines.append("│" + f" {status_icon} WORKER COMPLETE ".center(width) + "│")
+    lines.append("├" + "─" * width + "┤")
+    lines.append("│" + f"  Worker ID:    {worker_id}".ljust(width) + "│")
+    lines.append("│" + f"  Fuzzer:       {fuzzer}".ljust(width) + "│")
+    lines.append("│" + f"  Sanitizer:    {sanitizer}".ljust(width) + "│")
+    lines.append("│" + f"  Status:       {status.upper()}".ljust(width) + "│")
+    lines.append("│" + f"  Elapsed:      {elapsed_str}".ljust(width) + "│")
+
+    if status == "completed":
+        lines.append("│" + f"  POVs Found:   {povs_found}".ljust(width) + "│")
+        lines.append("│" + f"  Patches:      {patches_found}".ljust(width) + "│")
+    elif error_msg:
+        # Truncate error message if too long
+        err_display = error_msg[:50] + "..." if len(error_msg) > 50 else error_msg
+        lines.append("│" + f"  Error:        {err_display}".ljust(width) + "│")
+
+    lines.append("└" + "─" * width + "┘")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def create_final_summary(
+    project_name: str,
+    task_id: str,
+    workers: list,
+    total_elapsed_minutes: float = 0,
+    use_color: bool = False,
+) -> str:
+    """
+    Create final task summary with all workers results.
+
+    Args:
+        project_name: Project name
+        task_id: Task ID
+        workers: List of worker result dicts
+        total_elapsed_minutes: Total elapsed time in minutes
+        use_color: Whether to use ANSI colors for console output
+
+    Returns:
+        Formatted summary string
+    """
+    # Count statistics
+    total = len(workers)
+    completed = sum(1 for w in workers if w.get("status") == "completed")
+    failed = sum(1 for w in workers if w.get("status") == "failed")
+    total_povs = sum(w.get("povs_found", 0) for w in workers)
+    total_patches = sum(w.get("patches_found", 0) for w in workers)
+
+    # Column widths for worker table
+    col_num = 4
+    col_fuzzer = 28
+    col_sanitizer = 12
+    col_status = 12
+    col_povs = 8
+    col_patches = 8
+
+    # Total width = sum of columns + 5 internal separators (┼)
+    table_width = col_num + col_fuzzer + col_sanitizer + col_status + col_povs + col_patches + 5
+
+    lines = []
+    lines.append("")
+    lines.append("")
+    lines.append("=" * (table_width + 2))
+    lines.append(" Thank you for using FuzzingBrain! ".center(table_width + 2, "="))
+    lines.append("=" * (table_width + 2))
+    lines.append("")
+    lines.append("┌" + "─" * table_width + "┐")
+    lines.append("│" + " EXECUTION SUMMARY ".center(table_width) + "│")
+    lines.append("├" + "─" * table_width + "┤")
+
+    # Task info
+    lines.append("│" + f"  Project:       {project_name}".ljust(table_width) + "│")
+    lines.append("│" + f"  Task ID:       {task_id[:16]}...".ljust(table_width) + "│")
+    lines.append("│" + f"  Total Time:    {total_elapsed_minutes:.1f} minutes".ljust(table_width) + "│")
+    lines.append("│" + f"  Workers:       {completed}/{total} completed, {failed} failed".ljust(table_width) + "│")
+    lines.append("│" + f"  POVs Found:    {total_povs}".ljust(table_width) + "│")
+    lines.append("│" + f"  Patches:       {total_patches}".ljust(table_width) + "│")
+    lines.append("├" + "─" * table_width + "┤")
+
+    # Worker table header
+    header = (
+        "│" + " # ".center(col_num) +
+        "│" + " Fuzzer".ljust(col_fuzzer) +
+        "│" + " Sanitizer".ljust(col_sanitizer) +
+        "│" + " Status".ljust(col_status) +
+        "│" + " POVs".center(col_povs) +
+        "│" + " Patches".center(col_patches) + "│"
+    )
+    lines.append(header)
+    lines.append("├" + "─" * col_num + "┼" + "─" * col_fuzzer + "┼" + "─" * col_sanitizer + "┼" + "─" * col_status + "┼" + "─" * col_povs + "┼" + "─" * col_patches + "┤")
+
+    # Worker rows
+    for i, w in enumerate(workers, 1):
+        fuzzer = w.get("fuzzer", "N/A")
+        if len(fuzzer) > col_fuzzer - 2:
+            fuzzer = fuzzer[:col_fuzzer - 4] + ".."
+
+        status = w.get("status", "unknown")
+        status_display = "✓ " + status if status == "completed" else "✗ " + status
+
+        # Build row content
+        num_cell = f" {i} ".center(col_num)
+        fuzzer_cell = " " + fuzzer.ljust(col_fuzzer - 1)
+        sanitizer_cell = " " + w.get("sanitizer", "N/A").ljust(col_sanitizer - 1)
+        status_cell = " " + status_display.ljust(col_status - 1)
+        povs_cell = str(w.get("povs_found", 0)).center(col_povs)
+        patches_cell = str(w.get("patches_found", 0)).center(col_patches)
+
+        # Apply color to worker content (not borders)
+        if use_color:
+            color = WorkerColors.get(i - 1)
+            reset = WorkerColors.RESET
+            row = (
+                "│" + color + num_cell + reset +
+                "│" + color + fuzzer_cell + reset +
+                "│" + color + sanitizer_cell + reset +
+                "│" + color + status_cell + reset +
+                "│" + color + povs_cell + reset +
+                "│" + color + patches_cell + reset + "│"
+            )
+        else:
+            row = (
+                "│" + num_cell +
+                "│" + fuzzer_cell +
+                "│" + sanitizer_cell +
+                "│" + status_cell +
+                "│" + povs_cell +
+                "│" + patches_cell + "│"
+            )
+        lines.append(row)
+
+    lines.append("└" + "─" * col_num + "┴" + "─" * col_fuzzer + "┴" + "─" * col_sanitizer + "┴" + "─" * col_status + "┴" + "─" * col_povs + "┴" + "─" * col_patches + "┘")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
 # Re-export logger for convenience
 __all__ = [
     "logger",
@@ -309,4 +566,7 @@ __all__ = [
     "get_worker_banner_and_header",
     "add_task_log",
     "get_task_logger",
+    "create_worker_summary",
+    "create_final_summary",
+    "WorkerColors",
 ]

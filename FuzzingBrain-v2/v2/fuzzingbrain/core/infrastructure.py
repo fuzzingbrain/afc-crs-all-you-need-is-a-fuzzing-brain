@@ -3,13 +3,12 @@ Infrastructure Management
 
 Handles Redis and Celery worker lifecycle for CLI mode:
 - Auto-detect/start Redis
-- Start/stop embedded Celery worker
+- Start/stop Celery worker subprocess
 """
 
 import os
 import subprocess
 import socket
-import threading
 import time
 from typing import Optional
 from urllib.parse import urlparse
@@ -98,7 +97,7 @@ class RedisManager:
 
 
 class CeleryWorkerManager:
-    """Manages embedded Celery worker for CLI mode."""
+    """Manages Celery worker as subprocess for CLI mode."""
 
     def __init__(self, concurrency: int = 8):
         """
@@ -108,65 +107,79 @@ class CeleryWorkerManager:
             concurrency: Number of concurrent worker processes
         """
         self.concurrency = concurrency
-        self._worker_thread: Optional[threading.Thread] = None
-        self._worker = None
-        self._stop_event = threading.Event()
+        self._worker_process: Optional[subprocess.Popen] = None
+        self._celery_log_file = None
 
-    def start(self):
-        """Start embedded Celery worker in a background thread."""
-        if self._worker_thread and self._worker_thread.is_alive():
+    def start(self, log_dir: str = None):
+        """Start Celery worker as a subprocess."""
+        if self._worker_process and self._worker_process.poll() is None:
             logger.warning("Celery worker already running")
             return
 
-        self._stop_event.clear()
-        self._worker_thread = threading.Thread(
-            target=self._run_worker,
-            daemon=True,
-            name="celery-worker"
+        # Setup log file for Celery output
+        if log_dir:
+            from pathlib import Path
+            celery_log = Path(log_dir) / "celery_worker.log"
+            self._celery_log_file = open(celery_log, "w", encoding="utf-8")
+            stderr_target = self._celery_log_file
+            logger.info(f"Celery logs: {celery_log}")
+        else:
+            self._celery_log_file = None
+            stderr_target = subprocess.DEVNULL
+
+        # Start Celery worker as subprocess
+        # Output goes to log file (not console) to prevent terminal interference
+        self._worker_process = subprocess.Popen(
+            [
+                "celery",
+                "-A", "fuzzingbrain.celery_app",
+                "worker",
+                "--loglevel=INFO",
+                f"--concurrency={self.concurrency}",
+                "--pool=prefork",
+                "-Q", "celery,workers",
+                "--without-gossip",
+                "--without-mingle",
+                "--without-heartbeat",
+            ],
+            stdout=stderr_target,  # Capture stdout too
+            stderr=stderr_target,
+            start_new_session=True,  # Detach from terminal
         )
-        self._worker_thread.start()
-        logger.info(f"Started embedded Celery worker (concurrency={self.concurrency})")
+
+        logger.info(f"Started Celery worker subprocess (pid={self._worker_process.pid}, concurrency={self.concurrency})")
 
         # Give worker time to initialize
-        time.sleep(1)
+        time.sleep(2)
 
-    def _run_worker(self):
-        """Run Celery worker (called in background thread)."""
-        try:
-            from ..celery_app import app
-
-            # Create worker instance
-            self._worker = app.Worker(
-                concurrency=self.concurrency,
-                pool="prefork",
-                loglevel="INFO",
-                quiet=True,
-            )
-
-            # Start worker (blocks until stopped)
-            self._worker.start()
-
-        except Exception as e:
-            logger.exception(f"Celery worker error: {e}")
+        # Reset terminal settings (subprocess startup may affect them)
+        os.system('stty sane 2>/dev/null')
 
     def stop(self):
-        """Stop the embedded Celery worker."""
-        if self._worker:
+        """Stop the Celery worker subprocess."""
+        if self._worker_process:
             logger.info("Stopping Celery worker...")
             try:
-                self._worker.stop()
+                # Send SIGTERM for graceful shutdown
+                self._worker_process.terminate()
+                try:
+                    self._worker_process.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    # Force kill if not responding
+                    self._worker_process.kill()
+                    self._worker_process.wait(timeout=5)
             except Exception as e:
                 logger.warning(f"Error stopping worker: {e}")
-            self._worker = None
+            self._worker_process = None
 
-        if self._worker_thread and self._worker_thread.is_alive():
-            self._stop_event.set()
-            self._worker_thread.join(timeout=5)
-            self._worker_thread = None
+        # Close log file
+        if self._celery_log_file:
+            self._celery_log_file.close()
+            self._celery_log_file = None
 
     def is_running(self) -> bool:
         """Check if worker is running."""
-        return self._worker_thread is not None and self._worker_thread.is_alive()
+        return self._worker_process is not None and self._worker_process.poll() is None
 
 
 class InfrastructureManager:
@@ -175,6 +188,9 @@ class InfrastructureManager:
 
     Handles Redis and Celery worker lifecycle.
     """
+
+    # Global instance for signal handler access
+    _instance: Optional["InfrastructureManager"] = None
 
     def __init__(self, redis_url: str = None, concurrency: int = 8):
         """
@@ -188,9 +204,15 @@ class InfrastructureManager:
         self.celery = CeleryWorkerManager(concurrency)
         self._started = False
 
-    def start(self) -> bool:
+        # Store instance for signal handler
+        InfrastructureManager._instance = self
+
+    def start(self, log_dir: str = None) -> bool:
         """
         Start all infrastructure for CLI mode.
+
+        Args:
+            log_dir: Directory to write Celery logs to
 
         Returns:
             True if all infrastructure started successfully
@@ -203,8 +225,8 @@ class InfrastructureManager:
             logger.error("Failed to start Redis")
             return False
 
-        # 2. Start embedded Celery worker
-        self.celery.start()
+        # 2. Start Celery worker subprocess
+        self.celery.start(log_dir=log_dir)
 
         self._started = True
         logger.info("Infrastructure started successfully")

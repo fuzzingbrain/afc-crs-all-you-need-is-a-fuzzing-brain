@@ -12,12 +12,94 @@ Four entry modes:
 """
 
 import argparse
+import atexit
+import os
+import signal
 import sys
 from pathlib import Path
 from typing import Optional
 
 from .core import Config, Task, JobType, ScanMode, setup_logging, setup_console_only
 from .db import MongoDB, RepositoryManager, init_repos
+
+
+# =============================================================================
+# Terminal Cleanup
+# =============================================================================
+
+def reset_terminal():
+    """Reset terminal to sane state on exit"""
+    try:
+        # Reset ANSI attributes
+        sys.stdout.write("\033[0m")
+        sys.stdout.flush()
+        # Reset terminal settings (handles raw mode, echo, etc.)
+        os.system('stty sane 2>/dev/null')
+    except Exception:
+        pass
+
+
+# Register cleanup on exit
+atexit.register(reset_terminal)
+
+
+# =============================================================================
+# Signal Handling
+# =============================================================================
+
+_shutdown_requested = False
+
+
+def signal_handler(signum, frame):
+    """Handle Ctrl+C gracefully"""
+    global _shutdown_requested, _repos
+    if _shutdown_requested:
+        # Second Ctrl+C - force exit
+        print("\n\033[0;31m[FORCE]\033[0m Forcing shutdown...")
+        reset_terminal()
+        sys.exit(1)
+
+    _shutdown_requested = True
+    print("\n\033[1;33m[INTERRUPT]\033[0m Shutting down gracefully... (Press Ctrl+C again to force)")
+
+    # Mark all running workers as cancelled
+    try:
+        if _repos:
+            from .core.models import WorkerStatus
+            # Find all non-finished workers and mark them cancelled
+            all_workers = _repos.workers.collection.find({
+                "status": {"$in": ["pending", "building", "running"]}
+            })
+            cancelled_count = 0
+            for w in all_workers:
+                _repos.workers.collection.update_one(
+                    {"_id": w["_id"]},
+                    {"$set": {
+                        "status": "failed",
+                        "error_msg": "Cancelled by user (Ctrl+C)"
+                    }}
+                )
+                cancelled_count += 1
+            if cancelled_count > 0:
+                print(f"\033[1;33m[INTERRUPT]\033[0m Marked {cancelled_count} worker(s) as cancelled")
+    except Exception as e:
+        print(f"\033[0;31m[ERROR]\033[0m Failed to update worker status: {e}")
+
+    # Stop infrastructure
+    try:
+        from .core.infrastructure import InfrastructureManager
+        if InfrastructureManager._instance:
+            InfrastructureManager._instance.stop()
+    except Exception:
+        pass
+
+    reset_terminal()
+    sys.exit(0)
+
+
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 
 # =============================================================================
