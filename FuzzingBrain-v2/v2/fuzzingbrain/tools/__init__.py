@@ -5,14 +5,15 @@ Internal MCP server that provides tools for the FuzzingBrain AI agent.
 These tools can be called via MCP protocol or directly as functions.
 
 Usage:
-    # Via MCP Client (for AI agent)
-    from fuzzingbrain.tools import tools_mcp
-    async with Client(tools_mcp) as client:
+    # Via MCP Client (external AI agent)
+    from fastmcp import Client
+    client = Client("fuzzingbrain/tools/__init__.py")
+    async with client:
         result = await client.call_tool("run_coverage", {...})
 
-    # Direct function call (for scripts/testing)
+    # Direct function call (internal Python code)
     from fuzzingbrain.tools.coverage import run_coverage
-    result = run_coverage(fuzzer_path, input_data, target_functions)
+    result = run_coverage(fuzzer_name, input_data_base64, target_functions)
 """
 
 from fastmcp import FastMCP
