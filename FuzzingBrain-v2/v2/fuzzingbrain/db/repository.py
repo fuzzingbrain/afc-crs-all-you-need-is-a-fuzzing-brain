@@ -11,7 +11,7 @@ from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError
 from loguru import logger
 
-from ..core.models import Task, POV, Patch, Worker, Fuzzer
+from ..core.models import Task, POV, Patch, Worker, Fuzzer, Function, CallGraphNode
 
 
 T = TypeVar("T")
@@ -343,6 +343,139 @@ class FuzzerRepository(BaseRepository[Fuzzer]):
         return self.update(fuzzer_id, updates)
 
 
+class FunctionRepository(BaseRepository[Function]):
+    """Repository for Function model (static analysis metadata)"""
+
+    def __init__(self, db: Database):
+        super().__init__(db, "functions", Function)
+
+    def find_by_task(self, task_id: str) -> List[Function]:
+        """Find all functions for a task"""
+        return self.find_all({"task_id": task_id})
+
+    def find_by_name(self, task_id: str, name: str) -> Optional[Function]:
+        """Find function by task and name"""
+        function_id = f"{task_id}_{name}"
+        return self.find_by_id(function_id)
+
+    def find_by_file(self, task_id: str, file_path: str) -> List[Function]:
+        """Find all functions in a specific file"""
+        return self.find_all({"task_id": task_id, "file_path": file_path})
+
+    def save_many(self, functions: List[Function]) -> int:
+        """
+        Bulk save functions.
+
+        Returns:
+            Number of functions saved successfully
+        """
+        if not functions:
+            return 0
+        try:
+            docs = [f.to_dict() for f in functions]
+            # Use bulk write with upsert
+            from pymongo import UpdateOne
+            operations = [
+                UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True)
+                for doc in docs
+            ]
+            result = self.collection.bulk_write(operations)
+            return result.upserted_count + result.modified_count
+        except Exception as e:
+            logger.error(f"Failed to bulk save functions: {e}")
+            return 0
+
+    def delete_by_task(self, task_id: str) -> int:
+        """Delete all functions for a task"""
+        try:
+            result = self.collection.delete_many({"task_id": task_id})
+            return result.deleted_count
+        except Exception as e:
+            logger.error(f"Failed to delete functions for task: {e}")
+            return 0
+
+
+class CallGraphNodeRepository(BaseRepository[CallGraphNode]):
+    """Repository for CallGraphNode model (call graph relationships)"""
+
+    def __init__(self, db: Database):
+        super().__init__(db, "callgraph_nodes", CallGraphNode)
+
+    def find_by_task(self, task_id: str) -> List[CallGraphNode]:
+        """Find all call graph nodes for a task"""
+        return self.find_all({"task_id": task_id})
+
+    def find_by_fuzzer(self, task_id: str, fuzzer_id: str) -> List[CallGraphNode]:
+        """Find all nodes for a specific fuzzer"""
+        return self.find_all({"task_id": task_id, "fuzzer_id": fuzzer_id})
+
+    def find_by_function(self, task_id: str, fuzzer_id: str, function_name: str) -> Optional[CallGraphNode]:
+        """Find node by function name for a specific fuzzer"""
+        node_id = f"{task_id}_{fuzzer_id}_{function_name}"
+        return self.find_by_id(node_id)
+
+    def find_callers(self, task_id: str, fuzzer_id: str, function_name: str) -> List[str]:
+        """Get list of callers for a function"""
+        node = self.find_by_function(task_id, fuzzer_id, function_name)
+        return node.callers if node else []
+
+    def find_callees(self, task_id: str, fuzzer_id: str, function_name: str) -> List[str]:
+        """Get list of callees for a function"""
+        node = self.find_by_function(task_id, fuzzer_id, function_name)
+        return node.callees if node else []
+
+    def find_by_depth(self, task_id: str, fuzzer_id: str, depth: int) -> List[CallGraphNode]:
+        """Find all nodes at a specific call depth"""
+        return self.find_all({
+            "task_id": task_id,
+            "fuzzer_id": fuzzer_id,
+            "call_depth": depth
+        })
+
+    def save_many(self, nodes: List[CallGraphNode]) -> int:
+        """
+        Bulk save call graph nodes.
+
+        Returns:
+            Number of nodes saved successfully
+        """
+        if not nodes:
+            return 0
+        try:
+            docs = [n.to_dict() for n in nodes]
+            from pymongo import UpdateOne
+            operations = [
+                UpdateOne({"_id": doc["_id"]}, {"$set": doc}, upsert=True)
+                for doc in docs
+            ]
+            result = self.collection.bulk_write(operations)
+            return result.upserted_count + result.modified_count
+        except Exception as e:
+            logger.error(f"Failed to bulk save call graph nodes: {e}")
+            return 0
+
+    def delete_by_task(self, task_id: str) -> int:
+        """Delete all nodes for a task"""
+        try:
+            result = self.collection.delete_many({"task_id": task_id})
+            return result.deleted_count
+        except Exception as e:
+            logger.error(f"Failed to delete call graph nodes for task: {e}")
+            return 0
+
+    def delete_by_fuzzer(self, task_id: str, fuzzer_id: str) -> int:
+        """Delete all nodes for a specific fuzzer"""
+        try:
+            result = self.collection.delete_many({
+                "task_id": task_id,
+                "fuzzer_id": fuzzer_id
+            })
+            return result.deleted_count
+        except Exception as e:
+            logger.error(f"Failed to delete call graph nodes for fuzzer: {e}")
+            return 0
+
+
 class RepositoryManager:
     """
     Central repository manager.
@@ -357,6 +490,8 @@ class RepositoryManager:
         self._patches: Optional[PatchRepository] = None
         self._workers: Optional[WorkerRepository] = None
         self._fuzzers: Optional[FuzzerRepository] = None
+        self._functions: Optional[FunctionRepository] = None
+        self._callgraph_nodes: Optional[CallGraphNodeRepository] = None
 
     @property
     def tasks(self) -> TaskRepository:
@@ -392,6 +527,20 @@ class RepositoryManager:
         if self._fuzzers is None:
             self._fuzzers = FuzzerRepository(self.db)
         return self._fuzzers
+
+    @property
+    def functions(self) -> FunctionRepository:
+        """Get FunctionRepository"""
+        if self._functions is None:
+            self._functions = FunctionRepository(self.db)
+        return self._functions
+
+    @property
+    def callgraph_nodes(self) -> CallGraphNodeRepository:
+        """Get CallGraphNodeRepository"""
+        if self._callgraph_nodes is None:
+            self._callgraph_nodes = CallGraphNodeRepository(self.db)
+        return self._callgraph_nodes
 
 
 # Global repository manager instance

@@ -376,10 +376,16 @@ Both modes share the same core components:
 │   │   ├── dispatcher.py  # Task dispatch logic                  │
 │   │   ├── task_processor.py  # Main processing pipeline         │
 │   │   └── models.py      # Data models                          │
-│   └── worker/                                                    │
-│       ├── builder.py     # Build fuzzer with sanitizer          │
-│       ├── executor.py    # Run fuzzing, generate POV/Patch      │
-│       └── cleanup.py     # Workspace cleanup                    │
+│   ├── worker/                                                    │
+│   │   ├── builder.py     # Build fuzzer with sanitizer          │
+│   │   ├── executor.py    # Run fuzzing, generate POV/Patch      │
+│   │   └── cleanup.py     # Workspace cleanup                    │
+│   └── tools/             # Internal MCP Tools (for AI Agent)    │
+│       ├── __init__.py    # FastMCP server                       │
+│       ├── coverage.py    # Coverage analysis                    │
+│       └── test/          # Tool health check                    │
+│           ├── health_check.py                                   │
+│           └── test_project/  # Permanent test project           │
 │                                                                  │
 └─────────────────────────────────────────────────────────────────┘
 ```

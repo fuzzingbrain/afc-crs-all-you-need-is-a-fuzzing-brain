@@ -1318,4 +1318,95 @@ docker run -d \
 
 ---
 
+## 进度5.5：Internal MCP Tools (已完成) ✅
+
+### 概述
+
+内部 MCP 工具是供内部 AI Agent 调用的底层工具，用于覆盖率分析、fuzzer操作等。
+
+### 已完成的代码结构
+
+```
+fuzzingbrain/tools/
+├── __init__.py           # FastMCP server (tools_mcp)
+├── coverage.py           # 覆盖率分析工具 ✅
+└── test/
+    ├── __init__.py
+    ├── __main__.py       # python -m fuzzingbrain.tools.test
+    ├── health_check.py   # 工具健康检查框架 ✅
+    └── test_project/     # 永久测试项目 ✅
+        ├── config.json
+        ├── coverage_fuzzer/
+        ├── source/
+        ├── corpus/
+        └── output/
+```
+
+### Coverage Tools
+
+| 工具 | 描述 |
+|------|------|
+| `run_coverage` | 运行覆盖率分析，返回执行的函数和代码行 |
+| `check_pov_reaches_target` | 检查 POV 是否到达目标函数 |
+| `list_available_fuzzers` | 列出可用的 coverage fuzzer |
+| `get_coverage_feedback` | 获取 LLM 格式的覆盖率反馈 |
+
+### 覆盖率工作流
+
+```
+1. 运行 coverage fuzzer (Docker)
+   └── LLVM_PROFILE_FILE=coverage.profraw ./fuzzer corpus/
+
+2. 生成 profdata
+   └── llvm-profdata merge coverage.profraw -o coverage.profdata
+
+3. 导出 LCOV
+   └── llvm-cov export fuzzer -instr-profile=coverage.profdata -format=lcov
+
+4. 解析 LCOV
+   └── 提取 executed functions, lines, branches
+
+5. 生成反馈
+   └── 显示执行的代码 + 上下文 (用于 LLM prompt)
+```
+
+### 工具健康检查
+
+```bash
+# 运行健康检查
+python -m fuzzingbrain.tools.test
+
+# 输出
+============================================================
+FuzzingBrain Tools Health Check
+============================================================
+Prerequisites:
+  [OK] All prerequisites satisfied
+Tool Tests:
+  [OK] list_available_fuzzers: Found 1 fuzzer(s)
+  [OK] run_coverage: Coverage executed, 2 functions reached
+  [OK] get_coverage_feedback: Feedback generated
+Result: 3/3 tests passed
+============================================================
+```
+
+### 关键修复
+
+1. **Docker Snap /tmp 限制**：添加 `work_dir` 参数，使用永久目录
+2. **符号链接处理**：Docker mount 前解析符号链接为真实路径
+3. **libFuzzer 目录参数**：创建 corpus 目录而非单个文件
+4. **MCP wrapper 问题**：创建 `_impl` 函数绕过 FastMCP FunctionTool 包装
+
+### 待实现工具
+
+| 模块 | 工具 | 状态 |
+|------|------|------|
+| `fuzzer.py` | run_fuzzer, analyze_crash, minimize_input | TODO |
+| `analysis.py` | get_function_source, list_functions, get_call_graph | TODO |
+| `harness.py` | write_harness, compile_harness, test_harness | TODO |
+
+详细文档见：`documentation/tools.md`
+
+---
+
 ## 进度6：静态分析服务器接口

@@ -1,7 +1,7 @@
 """
 FuzzingBrain Data Models
 
-Models for Task, POV, Patch, Worker, Fuzzer, etc.
+Models for Task, POV, Patch, Worker, Fuzzer, Function, CallGraphNode, etc.
 """
 
 from .task import Task, TaskStatus, JobType, ScanMode
@@ -9,6 +9,8 @@ from .pov import POV
 from .patch import Patch
 from .worker import Worker, WorkerStatus
 from .fuzzer import Fuzzer, FuzzerStatus
+from .function import Function
+from .callgraph import CallGraphNode
 
 __all__ = [
     "Task", "TaskStatus", "JobType", "ScanMode",
@@ -16,4 +18,6 @@ __all__ = [
     "Patch",
     "Worker", "WorkerStatus",
     "Fuzzer", "FuzzerStatus",
+    "Function",
+    "CallGraphNode",
 ]
