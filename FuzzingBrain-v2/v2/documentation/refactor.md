@@ -1524,4 +1524,6 @@ results = analyzer.analyze(fuzzer_names=["fuzz_png"])
 
 ---
 
-## 进度7：静态分析服务器接口
+## 进度7：静态分析服务器接口以及调用逻辑
+
+需要明确的是，静态分析我们可以把它视作为一个单独的服务，这个服务要做成server？还是直接写成服务模块内嵌在fuzzingbrain里？
