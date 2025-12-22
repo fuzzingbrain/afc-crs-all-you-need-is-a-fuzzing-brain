@@ -111,7 +111,7 @@ def get_function_metadata(
     function_names: List[str],
     project_dir: Path,
     language: str = "c"
-) -> Dict[str, FunctionInfo]:
+) -> Dict[str, List[FunctionInfo]]:
     """
     Get metadata for specific functions.
 
@@ -121,18 +121,18 @@ def get_function_metadata(
         language: Programming language
 
     Returns:
-        Dictionary mapping function name to FunctionInfo
+        Dictionary mapping function name to list of FunctionInfo (支持重名函数)
     """
     # Extract all functions
     all_functions = extract_functions_from_directory(project_dir, language)
 
-    # Build lookup by name
-    result = {}
+    # Build lookup by name (保留所有重名函数)
+    result: Dict[str, List[FunctionInfo]] = {}
     for func in all_functions:
         if func.name in function_names:
-            # If duplicate names, keep the first one (or could keep all)
             if func.name not in result:
-                result[func.name] = func
+                result[func.name] = []
+            result[func.name].append(func)
 
     return result
 
@@ -141,7 +141,7 @@ def find_function_by_name(
     name: str,
     project_dir: Path,
     language: str = "c"
-) -> Optional[FunctionInfo]:
+) -> List[FunctionInfo]:
     """
     Find a specific function by name.
 
@@ -151,7 +151,7 @@ def find_function_by_name(
         language: Programming language
 
     Returns:
-        FunctionInfo if found, None otherwise
+        List of FunctionInfo (可能有多个重名函数)
     """
     result = get_function_metadata([name], project_dir, language)
-    return result.get(name)
+    return result.get(name, [])

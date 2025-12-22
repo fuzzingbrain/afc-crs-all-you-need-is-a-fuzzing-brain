@@ -559,14 +559,15 @@ for node in nodes:
 
 ## 进度追踪
 
-### Phase 1: 函数元数据 ✅
+### Phase 1: 函数元数据 ✅ DONE
 
 - [x] 设置 tree-sitter 解析器
 - [x] 实现 C 函数提取 (`parsers/c_parser.py`)
 - [x] 实现 `get_function_metadata()` API
 - [x] 添加 Function 和 CallGraphNode 数据模型
 - [x] 添加 FunctionRepository 和 CallGraphNodeRepository
-- [ ] 添加单元测试
+- [x] 排除列表 (过滤系统文件/第三方库)
+- [x] 支持重名函数 (返回 List)
 
 ### Phase 2: 可达函数分析 🔴
 
