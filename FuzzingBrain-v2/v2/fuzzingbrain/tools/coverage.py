@@ -87,6 +87,20 @@ def get_coverage_context() -> Tuple[Optional[Path], Optional[str], Optional[Path
     return _coverage_fuzzer_dir, _project_name, _src_dir
 
 
+def set_coverage_fuzzer_path(coverage_fuzzer_dir: Path) -> None:
+    """
+    Set the coverage fuzzer directory path.
+
+    Simplified version of set_coverage_context that only sets the fuzzer directory.
+    Used when only the fuzzer path is known (other context will be set later).
+
+    Args:
+        coverage_fuzzer_dir: Directory containing coverage-instrumented fuzzers
+    """
+    global _coverage_fuzzer_dir
+    _coverage_fuzzer_dir = Path(coverage_fuzzer_dir) if coverage_fuzzer_dir else None
+
+
 # =============================================================================
 # LCOV Parsing
 # =============================================================================
@@ -728,6 +742,7 @@ __all__ = [
     "get_feedback_impl",  # Alias for direct get
     # Setup and utilities
     "set_coverage_context",
+    "set_coverage_fuzzer_path",
     "get_coverage_context",
     "CoverageResult",
     "parse_lcov",

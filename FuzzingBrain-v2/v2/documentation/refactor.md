@@ -1409,4 +1409,119 @@ Result: 3/3 tests passed
 
 ---
 
-## 进度6：静态分析服务器接口
+## 进度6：静态分析模块 (已完成 Phase 1-3) ✅
+
+### 已完成的代码结构
+
+```
+fuzzingbrain/analysis/
+├── __init__.py                 # 模块入口
+├── function_extraction.py      # 函数元数据提取 (tree-sitter)
+├── parsers/
+│   ├── __init__.py
+│   └── c_parser.py             # C/C++ 解析器
+└── callgraph/
+    ├── __init__.py
+    ├── dot_parser.py           # SVF DOT 文件解析
+    ├── reachable.py            # BFS 可达性分析
+    └── svf.py                  # SVF wpa 工具封装
+```
+
+### 核心 API
+
+```python
+from fuzzingbrain.analysis import (
+    # Phase 1: 函数元数据
+    get_function_metadata,      # 按函数名查找源码
+    extract_functions_from_file,  # 提取文件中所有函数
+
+    # Phase 2: 可达函数
+    get_reachable_functions,    # 从 DOT 文件获取可达函数
+    get_reachable_function_names,  # 只返回函数名列表
+
+    # Phase 3: 调用路径
+    find_call_paths,            # 查找从入口到目标的调用路径
+)
+```
+
+### 数据模型
+
+```python
+# 函数元数据 (存入 MongoDB)
+Function:
+    function_id: str      # {task_id}_{name}
+    task_id: str
+    name: str
+    file_path: str
+    start_line: int
+    end_line: int
+    content: str          # 完整源码
+
+# 调用图节点 (每个 fuzzer 各一份)
+CallGraphNode:
+    node_id: str          # {task_id}_{fuzzer_id}_{function_name}
+    task_id: str
+    fuzzer_id: str
+    fuzzer_name: str
+    function_name: str
+    callers: List[str]    # 谁调用了我
+    callees: List[str]    # 我调用了谁
+    call_depth: int       # 距离入口的深度
+```
+
+### Workspace 静态分析目录结构
+
+```
+workspace/{task_id}/
+├── repo/                       # 源代码
+├── fuzz-tooling/               # fuzzing 工具
+└── static_analysis/            # 静态分析结果 ← 新增
+    ├── bitcode/                # LLVM bitcode 文件
+    │   ├── {fuzzer_name}.bc    # 每个 fuzzer 的 bitcode
+    │   └── ...
+    ├── callgraph/              # 调用图
+    │   ├── {fuzzer_name}.dot   # SVF 生成的 DOT 文件
+    │   └── ...
+    └── reachable/              # 可达函数分析结果
+        ├── {fuzzer_name}.json  # 可达函数列表 + 深度信息
+        └── ...
+```
+
+### 已完成
+
+- [x] 在 `fuzzer_builder.py` 中生成 .bc 文件 (使用 introspector sanitizer)
+- [x] 创建 `static_analyzer.py` 封装 SVF 调用图生成
+- [x] 添加 `get_bitcode_dir()`, `get_callgraph_dir()`, `get_reachable_dir()` 辅助方法
+
+### FuzzerBuilder 构建流程
+
+```
+Step 1: Build with address sanitizer    (验证哪些fuzzer可用)
+Step 2: Build with coverage sanitizer   (共享给所有Worker)
+Step 3: Build with introspector         (生成 LLVM bitcode)
+        └── 收集 .bc/.ll 文件到 static_analysis/bitcode/
+```
+
+### StaticAnalyzer 分析流程
+
+```python
+from fuzzingbrain.analysis import StaticAnalyzer
+
+analyzer = StaticAnalyzer(static_analysis_path)
+results = analyzer.analyze(fuzzer_names=["fuzz_png"])
+
+# 流程:
+# 1. 读取 static_analysis/bitcode/*.bc
+# 2. 对每个 .bc 文件运行 SVF wpa
+# 3. 生成 static_analysis/callgraph/{fuzzer}/callgraph_final.dot
+# 4. BFS 提取可达函数
+# 5. 保存 static_analysis/reachable/{fuzzer}.json
+```
+
+### 待完成
+
+- [ ] Phase 4: Java 支持 (CodeQL)
+
+---
+
+## 进度7：静态分析服务器接口

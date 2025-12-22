@@ -59,8 +59,10 @@ class FuzzerBuilder:
         # Shared coverage fuzzer path (accessible by all Workers)
         self.task_path = Path(task.task_path) if task.task_path else None
         self.coverage_fuzzer_path: Optional[Path] = None
+        self.static_analysis_path: Optional[Path] = None
         if self.task_path:
             self.coverage_fuzzer_path = self.task_path / "results" / "coverage_fuzzer" / self.project_name
+            self.static_analysis_path = self.task_path / "static_analysis"
 
     def build(self) -> Tuple[bool, List[str], str]:
         """
@@ -69,6 +71,7 @@ class FuzzerBuilder:
         Build order:
         1. Build with address sanitizer (to verify which fuzzers work)
         2. Build with coverage sanitizer (shared by all Workers)
+        3. Build with emit-llvm (for static analysis - call graph generation)
 
         Returns:
             (success, fuzzer_list, message)
@@ -83,7 +86,7 @@ class FuzzerBuilder:
             return False, [], "src_path not set"
 
         # Step 1: Run helper.py to build fuzzers with address sanitizer
-        logger.info("[1/2] Building with address sanitizer")
+        logger.info("[1/3] Building with address sanitizer")
         success, msg = self._run_helper(sanitizer="address")
         if not success:
             return False, [], msg
@@ -97,12 +100,20 @@ class FuzzerBuilder:
             return False, [], "Build succeeded but no fuzzers found in output"
 
         # Step 2: Build shared coverage fuzzer
-        logger.info("[2/2] Building shared coverage fuzzer")
+        logger.info("[2/3] Building shared coverage fuzzer")
         coverage_success = self._build_coverage_fuzzer()
         if not coverage_success:
             logger.warning("Coverage fuzzer build failed, continuing without it")
         else:
             logger.info(f"Coverage fuzzer available at: {self.coverage_fuzzer_path}")
+
+        # Step 3: Build with introspector for static analysis
+        logger.info("[3/3] Running introspector for static analysis")
+        introspector_success = self._build_bitcode()
+        if not introspector_success:
+            logger.warning("Introspector build failed, static analysis will be limited")
+        else:
+            logger.info(f"Introspector data available at: {self.static_analysis_path / 'introspector'}")
 
         return True, fuzzers, f"Built {len(fuzzers)} fuzzers successfully"
 
@@ -396,3 +407,158 @@ class FuzzerBuilder:
             logger.debug(f"Fixed permissions for {path}")
         except Exception as e:
             logger.warning(f"Could not fix permissions for {path}: {e}")
+
+    def _build_bitcode(self) -> bool:
+        """
+        Build with introspector to get static analysis data.
+
+        Uses OSS-Fuzz introspector sanitizer which generates function
+        reachability data in JSON format. This provides:
+        - All functions reachable from each fuzzer
+        - Call depth information
+        - Source file and line numbers
+        - Call graph edges (callsites)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.static_analysis_path:
+            logger.warning("Static analysis path not set")
+            return False
+
+        # Create static_analysis directory structure
+        introspector_dir = self.static_analysis_path / "introspector"
+        reachable_dir = self.static_analysis_path / "reachable"
+
+        for d in [introspector_dir, reachable_dir]:
+            d.mkdir(parents=True, exist_ok=True)
+
+        # Build with introspector sanitizer
+        success, msg = self._run_helper(
+            sanitizer="introspector",
+            log_suffix="_introspector"
+        )
+
+        # Fix permissions after Docker build
+        self._fix_build_permissions()
+
+        if not success:
+            logger.error(f"Introspector build failed: {msg}")
+            return False
+
+        # Collect introspector output files
+        collected = self._collect_introspector_files(introspector_dir)
+        if not collected:
+            logger.warning("No introspector files generated")
+            return False
+
+        logger.info(f"Collected {len(collected)} introspector files")
+        return True
+
+    def _collect_introspector_files(self, dest_dir: Path) -> List[Path]:
+        """
+        Collect introspector output files from build output.
+
+        Copies the key introspector JSON files that contain function
+        reachability and call graph information.
+
+        Args:
+            dest_dir: Destination directory for introspector files
+
+        Returns:
+            List of collected file paths
+        """
+        out_dir = Path(self.task.fuzz_tooling_path) / "build" / "out" / self.project_name
+        inspector_dir = out_dir / "inspector"
+
+        if not inspector_dir.exists():
+            logger.warning(f"Inspector directory not found: {inspector_dir}")
+            return []
+
+        collected = []
+
+        # Key files to collect
+        key_files = [
+            "all-fuzz-introspector-functions.json",  # All reachable functions
+            "summary.json",                           # Summary statistics
+            "all_debug_info.json",                    # Debug info
+        ]
+
+        for filename in key_files:
+            src_file = inspector_dir / filename
+            if src_file.exists():
+                dest_file = dest_dir / filename
+                try:
+                    shutil.copy2(src_file, dest_file)
+                    collected.append(dest_file)
+                    logger.debug(f"Collected introspector file: {filename}")
+                except Exception as e:
+                    logger.warning(f"Failed to copy {filename}: {e}")
+
+        # Also copy fuzzer-specific YAML files
+        for yaml_file in inspector_dir.glob("fuzzerLogFile-*.data.yaml"):
+            dest_file = dest_dir / yaml_file.name
+            try:
+                shutil.copy2(yaml_file, dest_file)
+                collected.append(dest_file)
+            except Exception as e:
+                logger.warning(f"Failed to copy {yaml_file.name}: {e}")
+
+        return collected
+
+    def get_introspector_dir(self) -> Optional[Path]:
+        """
+        Get the path to the introspector output directory.
+
+        Returns:
+            Path to introspector directory, or None if not available
+        """
+        if self.static_analysis_path:
+            introspector_dir = self.static_analysis_path / "introspector"
+            if introspector_dir.exists():
+                return introspector_dir
+        return None
+
+    def get_bitcode_dir(self) -> Optional[Path]:
+        """
+        Get the path to the bitcode directory.
+
+        Deprecated: Use get_introspector_dir() instead.
+        Returns introspector directory for backwards compatibility.
+        """
+        return self.get_introspector_dir()
+
+    def get_static_analysis_path(self) -> Optional[Path]:
+        """
+        Get the path to the static analysis directory.
+
+        Returns:
+            Path to static_analysis directory, or None if not set
+        """
+        return self.static_analysis_path
+
+    def get_callgraph_dir(self) -> Optional[Path]:
+        """
+        Get the path to the call graph directory.
+
+        Returns:
+            Path to callgraph directory, or None if not available
+        """
+        if self.static_analysis_path:
+            callgraph_dir = self.static_analysis_path / "callgraph"
+            if callgraph_dir.exists():
+                return callgraph_dir
+        return None
+
+    def get_reachable_dir(self) -> Optional[Path]:
+        """
+        Get the path to the reachable functions directory.
+
+        Returns:
+            Path to reachable directory, or None if not available
+        """
+        if self.static_analysis_path:
+            reachable_dir = self.static_analysis_path / "reachable"
+            if reachable_dir.exists():
+                return reachable_dir
+        return None

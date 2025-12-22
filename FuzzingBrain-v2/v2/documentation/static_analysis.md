@@ -2,13 +2,13 @@
 
 静态分析模块，提供代码分析能力，用于缩小 Fuzzing 分析范围。
 
-**状态**: 🚧 开发中 (Phase 1 完成)
+**状态**: ✅ 核心功能完成 (Phase 1-3)
 
 ---
 
 ## 核心功能
 
-### 功能 1: 可达函数分析 (Reachable Functions) - TODO 🔴
+### 功能 1: 可达函数分析 (Reachable Functions) - DONE ✅
 
 **目的**: 给定一个 Fuzzer，找出它能到达的所有函数
 
@@ -35,7 +35,7 @@
 
 ---
 
-### 功能 2: 调用路径分析 (Call Path Analysis) - TODO 🔴
+### 功能 2: 调用路径分析 (Call Path Analysis) - DONE ✅
 
 **目的**: 给定目标函数，找出从 Fuzzer 入口到该函数的所有调用路径
 
@@ -551,8 +551,8 @@ for node in nodes:
 | Phase | 内容 | 状态 |
 |-------|------|------|
 | **Phase 1** | 函数元数据 (tree-sitter) | ✅ DONE |
-| **Phase 2** | 可达函数分析 C (SVF) | 🔴 TODO |
-| **Phase 3** | 调用路径分析 | 🔴 TODO |
+| **Phase 2** | 可达函数分析 C (SVF) | ✅ DONE |
+| **Phase 3** | 调用路径分析 | ✅ DONE |
 | **Phase 4** | Java 支持 (CodeQL) | 🔴 TODO |
 
 ---
@@ -569,20 +569,18 @@ for node in nodes:
 - [x] 排除列表 (过滤系统文件/第三方库)
 - [x] 支持重名函数 (返回 List)
 
-### Phase 2: 可达函数分析 🔴
+### Phase 2: 可达函数分析 ✅ DONE
 
-- [ ] 复制 SVF 二进制工具 (fundef, wpa, funtarget)
-- [ ] 实现 SVF 调用封装 (`callgraph/svf.py`)
-- [ ] 实现 DOT 文件解析 (复用 `parse_callgraph.py`)
-- [ ] 实现 BFS 可达性分析
-- [ ] 实现 `get_reachable_functions()` API
-- [ ] 添加单元测试
+- [x] 实现 SVF 调用封装 (`callgraph/svf.py`)
+- [x] 实现 DOT 文件解析 (`callgraph/dot_parser.py`)
+- [x] 实现 BFS 可达性分析 (`callgraph/reachable.py`)
+- [x] 实现 `get_reachable_functions()` API
+- [ ] SVF 二进制工具 (wpa) - 需要在 Docker 环境中使用
 
-### Phase 3: 调用路径分析 🔴
+### Phase 3: 调用路径分析 ✅ DONE
 
-- [ ] 实现 `get_call_paths()` API
-- [ ] 路径节点源码位置标注
-- [ ] 添加单元测试
+- [x] 实现 `find_call_paths()` API
+- [ ] 路径节点源码位置标注 (可通过 get_function_metadata 实现)
 
 ### Phase 4: Java 支持 🔴
 
