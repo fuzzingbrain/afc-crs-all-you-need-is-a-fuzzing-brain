@@ -2,27 +2,6 @@
 
 mkdir -p logs
 
-# Setup Python virtual environment
-VENV_DIR="/tmp/crs_venv"
-if [ ! -d "$VENV_DIR" ]; then
-    echo "Creating Python virtual environment at $VENV_DIR..."
-    python3 -m venv "$VENV_DIR"
-fi
-
-# Activate venv and install dependencies
-source "$VENV_DIR/bin/activate"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "$SCRIPT_DIR/strategy/requirements.txt" ]; then
-    pip install -q -r "$SCRIPT_DIR/strategy/requirements.txt" 2>/dev/null
-fi
-
-# Load and export .env variables for Python strategies
-if [ -f "$SCRIPT_DIR/.env" ]; then
-    set -a
-    source "$SCRIPT_DIR/.env"
-    set +a
-fi
-
 DATE=$(date +"%Y%m%d_%H%M%S")
 IN_PLACE=false
 
@@ -102,6 +81,28 @@ else
     # copy original dataset to new workspace
     echo "Copying original dataset to new workspace..." | tee -a "$LOG_FILE"
     cp -r "$ORIGINAL_DATASET"/* "$WORKSPACE/"
+fi
+
+# Setup Python virtual environment in workspace
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="$WORKSPACE/crs_venv"
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Creating Python virtual environment at $VENV_DIR..." | tee -a "$LOG_FILE"
+    python3 -m venv "$VENV_DIR"
+fi
+
+# Activate venv and install dependencies
+source "$VENV_DIR/bin/activate"
+if [ -f "$SCRIPT_DIR/strategy/requirements.txt" ]; then
+    echo "Installing Python dependencies..." | tee -a "$LOG_FILE"
+    pip install -q -r "$SCRIPT_DIR/strategy/requirements.txt" 2>/dev/null
+fi
+
+# Load and export .env variables for Python strategies
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    source "$SCRIPT_DIR/.env"
+    set +a
 fi
 
 # Set strategy base directory for local runs

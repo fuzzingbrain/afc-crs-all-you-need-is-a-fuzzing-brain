@@ -1,7 +1,7 @@
-python3 -m venv /tmp/crs_venv
+python3 -m venv ~/crs_venv
 
 # Activate the virtual environment
-source /tmp/crs_venv/bin/activate
+source ~/crs_venv/bin/activate
 
 # Install litellm in the virtual environment
 pip install litellm==1.69.0

@@ -1487,7 +1487,16 @@ def run_fuzzer_with_input_for_c_coverage(
 def get_same_project_fuzzers(fuzzer_path):
     """Find all fuzzers from the same project and sanitizer as the given fuzzer"""
     fuzzer_dir = os.path.dirname(fuzzer_path)
-
+    # List of known non-fuzzer executables and libraries to skip
+    skip_binaries = {
+        'llvm-symbolizer',
+        'clang',
+        'sancov',
+        'jazzer_agent_deploy.jar',
+        'jazzer_driver',
+        'jazzer_driver_with_sanitizer',
+        'jazzer_junit.jar',
+    }
     # Get all files in the same directory that are executable
     same_project_fuzzers = []
     if os.path.isdir(fuzzer_dir):
@@ -1496,7 +1505,7 @@ def get_same_project_fuzzers(fuzzer_path):
             # Check if it's a file and executable
             if os.path.isfile(item_path) and os.access(item_path, os.X_OK):
                 # Skip coverage builds and other non-fuzzer executables
-                if not item.endswith('-coverage') and not item in ['llvm-symbolizer', 'clang']:
+                iif not item.endswith('-coverage') and not item.endswith('.zip') and not item.endswith('.dict') and not item.endswith('.options') and item not in skip_binaries:
                     same_project_fuzzers.append(item_path)
 
     return same_project_fuzzers

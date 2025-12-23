@@ -1234,7 +1234,7 @@ def get_same_project_fuzzers(fuzzer_path):
             # Check if it's a file and executable
             if os.path.isfile(item_path) and os.access(item_path, os.X_OK):
                 # Skip coverage builds and other non-fuzzer executables
-                if not item.endswith('-coverage') and item not in skip_binaries:
+                if not item.endswith('-coverage') and not item.endswith('.zip') and not item.endswith('.dict') and not item.endswith('.options') and item not in skip_binaries:
                     same_project_fuzzers.append(item_path)
 
     return same_project_fuzzers

@@ -1242,7 +1242,7 @@ def get_same_project_fuzzers(fuzzer_path):
             # Check if it's a file and executable
             if os.path.isfile(item_path) and os.access(item_path, os.X_OK):
                 # Skip coverage builds and other non-fuzzer executables
-                if not item.endswith('-coverage') and item not in skip_binaries:
+                if not item.endswith('-coverage') and not item.endswith('.zip') and not item.endswith('.dict') and not item.endswith('.options') and item not in skip_binaries:
                     same_project_fuzzers.append(item_path)
 
     return same_project_fuzzers
@@ -3395,7 +3395,7 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
 
     # TEMPORARY: Skip to Phase 3 only for testing
     # if POV_PHASE != 3:
-    #     print(f"[TESTING] Skipping POV_PHASE {POV_PHASE}, only running Phase 3")
+    #     print(f"[TESTING] Skipping POV_PHASE {POV_PHASE}")
     #     return False, {}
 
     project_src_dir = os.path.join(project_dir, focus+"-"+sanitizer)
@@ -3524,12 +3524,9 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
 
         log_message(log_file, f"target_functions (reachable_funcs): {target_functions}")
 
-        if language.startswith('c'):
-            call_paths = extract_call_paths_from_analysis_service(project_name, fuzzer_path,fuzzer_src_path,focus,project_src_dir,target_functions,False)
-        else:
-            call_paths = extract_call_paths_from_analysis_service(project_name, fuzzer_path,fuzzer_src_path,focus,project_src_dir,target_functions,True)
-        if len(call_paths) == 0:
-            call_paths = extract_call_paths_from_analysis_service(project_name,fuzzer_path,fuzzer_src_path,focus,project_src_dir,target_functions,False) 
+        # Always use simple analysis (use_qx=False) since CodeQL/qx is not configured
+        # The simple Joern-based analysis works for both C and Java
+        call_paths = extract_call_paths_from_analysis_service(project_name, fuzzer_path,fuzzer_src_path,focus,project_src_dir,target_functions,False) 
         # just for testing
         # call_paths = TEST_CALL_PATHS
         # for each call path, doPOV

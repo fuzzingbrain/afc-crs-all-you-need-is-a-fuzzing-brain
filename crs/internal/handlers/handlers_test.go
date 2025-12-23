@@ -116,7 +116,7 @@ func TestSubmitSarif_BufferOverflow_RealService(t *testing.T) {
 			AnalysisURL:   "http://localhost:7082",
 		},
 		AI: config.AIConfig{
-			Model: "claude-sonnet-4-20250514",
+			Model: "claude-sonnet-4-5-20250929",
 		},
 	}
 

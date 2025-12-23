@@ -51,7 +51,7 @@ type ServicesConfig struct {
 
 // AIConfig holds AI model configuration (for local mode)
 type AIConfig struct {
-	Model           string `envconfig:"AI_MODEL" default:"claude-sonnet-4-20250514"`
+	Model           string `envconfig:"AI_MODEL" default:"claude-sonnet-4-5-20250929"`
 	AnthropicAPIKey string `envconfig:"ANTHROPIC_API_KEY"`
 	GeminiAPIKey    string `envconfig:"GEMINI_API_KEY"`
 	OpenAIAPIKey    string `envconfig:"OPENAI_API_KEY"`

@@ -337,6 +337,57 @@ check_environment() {
     print_info "Environment check passed"
 }
 
+# Run static analysis on workspace
+run_static_analysis() {
+    local workspace="$1"
+
+    print_info "Running static analysis on workspace..."
+
+    # Path to static analysis binary
+    local analysis_binary="$SCRIPT_DIR/static-analysis/cmd/local/local"
+
+    # Check if binary exists, if not try to build it
+    if [ ! -f "$analysis_binary" ]; then
+        print_warn "Static analysis binary not found, building..."
+        local build_dir="$SCRIPT_DIR/static-analysis/cmd/local"
+
+        cd "$build_dir"
+        if go build -o local .; then
+            print_info "Successfully built static analysis binary"
+        else
+            print_error "Failed to build static analysis binary"
+            print_warn "Continuing without pre-analysis (strategies will run on-demand analysis)"
+            cd "$SCRIPT_DIR"
+            return 1
+        fi
+        cd "$SCRIPT_DIR"
+    fi
+
+    # Check if analysis results already exist and are recent
+    local static_analysis_dir="$workspace/static_analysis"
+    if [ -d "$static_analysis_dir" ] && [ -f "$static_analysis_dir/index.json" ]; then
+        # Check if results are less than 1 hour old
+        local index_age=$(($(date +%s) - $(stat -c %Y "$static_analysis_dir/index.json" 2>/dev/null || stat -f %m "$static_analysis_dir/index.json" 2>/dev/null || echo 0)))
+        if [ $index_age -lt 3600 ]; then
+            print_info "Recent static analysis results found (age: ${index_age}s), skipping re-analysis"
+            return 0
+        else
+            print_info "Static analysis results are old (age: ${index_age}s), re-running analysis"
+        fi
+    fi
+
+    # Run the analysis
+    print_info "Analyzing workspace: $workspace"
+    if timeout 600 "$analysis_binary" "$workspace"; then
+        print_info "Static analysis completed successfully"
+        return 0
+    else
+        print_error "Static analysis failed or timed out"
+        print_warn "Continuing without pre-analysis (strategies will run on-demand analysis)"
+        return 1
+    fi
+}
+
 show_usage() {
     echo "Usage: $0 [OPTIONS] <git_url|workspace_path|project_name>"
     echo ""
@@ -452,6 +503,10 @@ if is_project_name "$TARGET"; then
 
     # Check environment before running
     check_environment
+
+    # Run static analysis on workspace
+    run_static_analysis "$WORKSPACE"
+    echo ""
 
     # Continue fuzzing with existing workspace (always in-place)
     cd "$CRS_DIR" && sudo ./run_crs.sh --in-place "$WORKSPACE"
@@ -577,6 +632,10 @@ elif is_git_url "$TARGET"; then
     # Check environment before running
     check_environment
 
+    # Run static analysis on workspace
+    run_static_analysis "$WORKSPACE"
+    echo ""
+
     # Run CRS with the new workspace (always in-place since we just created it)
     cd "$CRS_DIR" && sudo ./run_crs.sh --in-place "$WORKSPACE"
 
@@ -591,6 +650,10 @@ else
 
     # Check environment before running
     check_environment
+
+    # Run static analysis on workspace
+    run_static_analysis "$TARGET"
+    echo ""
 
     # Pass through to original run_crs.sh
     if [ "$IN_PLACE" = true ]; then

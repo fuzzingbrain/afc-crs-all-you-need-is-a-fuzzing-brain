@@ -129,8 +129,12 @@ func runSingleFullScanStrategy(
 	workerIndex string,
 ) bool {
 
+	// Get workspace directory (parent of projectDir which is typically workspace/repo)
+	workspaceDir := filepath.Dir(projectDir)
+	venvPath := filepath.Join(workspaceDir, "crs_venv")
+
 	// Get Python interpreter path
-	pythonInterpreter := "/tmp/crs_venv/bin/python3"
+	pythonInterpreter := filepath.Join(venvPath, "bin", "python3")
 	if _, err := os.Stat(pythonInterpreter); os.IsNotExist(err) {
 		pythonInterpreter = "python3"
 	}
@@ -154,7 +158,7 @@ func runSingleFullScanStrategy(
 	env = append(env, "TASK_ID="+taskID)
 	env = append(env, "WORKER_INDEX="+workerIndex)
 	env = append(env, "PYTHONUNBUFFERED=1")
-	env = append(env, "VIRTUAL_ENV=/tmp/crs_venv")
+	env = append(env, "VIRTUAL_ENV="+venvPath)
 
 	// Create context with timeout (1 hour)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
