@@ -18,6 +18,10 @@ func AnalyzeProjectDirs(projectDirs []string, language string, fuzzers []string)
 	if len(projectDirs) == 0 {
 		return nil, fmt.Errorf("no project directories specified")
 	}
+
+	// Normalize language names for Joern
+	language = normalizeLanguage(language)
+
 	log.Printf("Starting Joern analysis for %s project at %v", language, projectDirs)
 
 	projectDir := projectDirs[0] // Use first directory for path resolution
@@ -33,11 +37,11 @@ func AnalyzeProjectDirs(projectDirs []string, language string, fuzzers []string)
 		return nil, fmt.Errorf("failed to create CPG output directory: %w", err)
 	}
 
-	// For C/C++ projects, also look for fuzzer directories that might be conditionally compiled
+	// For C/C++/Java projects, also look for fuzzer directories that might be conditionally compiled
 	// (e.g., behind CMake flags like DNP3_FUZZING=ON) and include them explicitly
-	// Note: We store these separately because joern-parse may not include them due to CMake configs
+	// Note: We store these separately because joern-parse may not include them due to build configs
 	var fuzzerDirs []string
-	if language == "c" || language == "c++" || language == "cpp" {
+	if language == "c" || language == "cpp" || language == "java" {
 		fuzzerDirs = findFuzzerDirectories(projectDir)
 		for _, fuzzerDir := range fuzzerDirs {
 			log.Printf("Found fuzzer directory: %s", fuzzerDir)
@@ -309,6 +313,37 @@ exit
 	log.Printf("Extracted %d functions, %d call edges, %d entry points",
 		len(results.Functions), len(results.CallGraph.Calls), len(results.ReachableFunctions))
 
+	// Java-specific fallback: If we have entry points but no reachable functions,
+	// Joern's Java call graph extraction likely failed. Fall back to marking all functions as reachable.
+	if language == "java" {
+		hasEmptyReachability := false
+		for entryPoint, reachable := range results.ReachableFunctions {
+			if len(reachable) == 0 {
+				hasEmptyReachability = true
+				log.Printf("Warning: Entry point %s has 0 reachable functions (Joern Java limitation)", entryPoint)
+			}
+		}
+
+		if hasEmptyReachability && len(results.Functions) > 0 {
+			log.Printf("Applying Java fallback: marking all %d functions as reachable from entry points", len(results.Functions))
+			allFunctionNames := make([]string, 0, len(results.Functions))
+			for name := range results.Functions {
+				// Skip operators and synthetic methods
+				if !strings.HasPrefix(name, "<operator>") && !strings.HasPrefix(name, "<unresolvedNamespace>") {
+					allFunctionNames = append(allFunctionNames, name)
+				}
+			}
+
+			// Update each entry point to have all functions as reachable
+			for entryPoint := range results.ReachableFunctions {
+				if len(results.ReachableFunctions[entryPoint]) == 0 {
+					results.ReachableFunctions[entryPoint] = allFunctionNames
+					log.Printf("Marked %d functions as reachable from %s", len(allFunctionNames), entryPoint)
+				}
+			}
+		}
+	}
+
 	return results, nil
 }
 
@@ -365,6 +400,27 @@ func createTempCombinedDir(sourceDirs []string) (string, func(), error) {
 	return tempDir, cleanup, nil
 }
 
+// normalizeLanguage converts language names to the format expected by Joern
+func normalizeLanguage(language string) string {
+	language = strings.ToLower(strings.TrimSpace(language))
+
+	// Map of language aliases to canonical Joern language names
+	languageMap := map[string]string{
+		"jvm":  "java",
+		"c++":  "cpp",
+		"c":    "c",
+		"cpp":  "cpp",
+		"java": "java",
+	}
+
+	if normalized, ok := languageMap[language]; ok {
+		return normalized
+	}
+
+	// Return as-is if not in map (Joern will handle the error)
+	return language
+}
+
 // findTaskDirectory finds the task directory from a project directory
 // It walks up the directory tree looking for characteristic files
 func findTaskDirectory(projectDir string) string {
@@ -397,14 +453,19 @@ func findFuzzerDirectories(projectDir string) []string {
 	var fuzzerDirs []string
 
 	// Common fuzzer directory patterns to check
+	// NOTE: More specific patterns (e.g., tests/fuzzer) should come before general ones (e.g., tests)
 	patterns := []string{
 		"cpp/tests/fuzz",
 		"tests/fuzz",
 		"test/fuzz",
+		"tests/fuzzer",      // flatbuffers uses this
+		"test/fuzzer",
 		"fuzz",
 		"fuzzing",
 		"cpp/fuzz",
 		"src/fuzz",
+		"src/test/fuzz",
+		"src/test/java/fuzz",
 		"fuzzer",
 		"fuzzers",
 	}
@@ -421,6 +482,7 @@ func findFuzzerDirectories(projectDir string) []string {
 
 	// Also check if tests/test directories contain fuzzer files directly
 	// (e.g., jq has jq_fuzz_*.c files directly in tests/ directory)
+	// But only if we haven't already found a more specific fuzzer subdirectory
 	testDirPatterns := []string{
 		"tests",
 		"test",
@@ -430,9 +492,22 @@ func findFuzzerDirectories(projectDir string) []string {
 	for _, pattern := range testDirPatterns {
 		candidatePath := filepath.Join(projectDir, pattern)
 		if stat, err := os.Stat(candidatePath); err == nil && stat.IsDir() {
-			// Check if this directory contains files with "fuzz" in the name
-			if hasFuzzerFiles(candidatePath) {
-				fuzzerDirs = append(fuzzerDirs, candidatePath)
+			// Skip if we've already found a fuzzer subdirectory within this test directory
+			hasSubdirFuzzer := false
+			for _, existingDir := range fuzzerDirs {
+				// Check if existingDir is a subdirectory of candidatePath
+				// e.g., if we found "tests/fuzzer", skip adding "tests"
+				if strings.HasPrefix(existingDir, candidatePath + string(filepath.Separator)) {
+					hasSubdirFuzzer = true
+					break
+				}
+			}
+
+			if !hasSubdirFuzzer {
+				// Check if this directory contains files with "fuzz" in the name
+				if hasFuzzerFiles(candidatePath) {
+					fuzzerDirs = append(fuzzerDirs, candidatePath)
+				}
 			}
 		}
 	}
@@ -488,7 +563,7 @@ func hasFuzzerFiles(dir string) bool {
 		ext := strings.ToLower(filepath.Ext(name))
 
 		// Check if it's a source file with "fuzz" in the name
-		if (ext == ".c" || ext == ".cpp" || ext == ".cc" || ext == ".cxx") &&
+		if (ext == ".c" || ext == ".cpp" || ext == ".cc" || ext == ".cxx" || ext == ".java") &&
 			strings.Contains(name, "fuzz") {
 			hasFuzzer = true
 			break
