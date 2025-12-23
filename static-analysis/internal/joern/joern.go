@@ -33,6 +33,17 @@ func AnalyzeProjectDirs(projectDirs []string, language string, fuzzers []string)
 		return nil, fmt.Errorf("failed to create CPG output directory: %w", err)
 	}
 
+	// For C/C++ projects, also look for fuzzer directories that might be conditionally compiled
+	// (e.g., behind CMake flags like DNP3_FUZZING=ON) and include them explicitly
+	// Note: We store these separately because joern-parse may not include them due to CMake configs
+	var fuzzerDirs []string
+	if language == "c" || language == "c++" || language == "cpp" {
+		fuzzerDirs = findFuzzerDirectories(projectDir)
+		for _, fuzzerDir := range fuzzerDirs {
+			log.Printf("Found fuzzer directory: %s", fuzzerDir)
+		}
+	}
+
 	// Step 1: Create CPG (Code Property Graph)
 	log.Println("Creating Code Property Graph...")
 	if err := createCPG(projectDirs, cpgPath, language); err != nil {
@@ -44,6 +55,49 @@ func AnalyzeProjectDirs(projectDirs []string, language string, fuzzers []string)
 	// Step 2: Extract basic analysis results from CPG
 	log.Println("Extracting analysis results from CPG...")
 	results, err := extractBasicResults(cpgPath, projectDir, fuzzers, language)
+
+	// Step 2.5: If no entry points found and we have fuzzer directories, parse fuzzer dirs separately
+	if err == nil && len(results.ReachableFunctions) == 0 && len(fuzzerDirs) > 0 {
+		log.Printf("No entry points found in initial CPG. Parsing fuzzer directories separately to find entry points...")
+
+		// Parse just the fuzzer directories to find entry points
+		fuzzerCpgPath := cpgPath + ".fuzzers"
+		if err := createCPG(fuzzerDirs, fuzzerCpgPath, language); err == nil {
+			// Extract entry points from fuzzer-only CPG
+			fuzzerResults, err := extractBasicResults(fuzzerCpgPath, projectDir, fuzzers, language)
+			if err == nil && len(fuzzerResults.ReachableFunctions) > 0 {
+				log.Printf("Found %d entry points in fuzzer directories!", len(fuzzerResults.ReachableFunctions))
+
+				// Merge: keep main CPG's functions and call graph, but add fuzzer entry points
+				// The main CPG has all the library functions, the fuzzer CPG has the entry points
+				for entryPoint, reachable := range fuzzerResults.ReachableFunctions {
+					results.ReachableFunctions[entryPoint] = reachable
+				}
+
+				// Add fuzzer functions to the main results
+				for name, fn := range fuzzerResults.Functions {
+					if _, exists := results.Functions[name]; !exists {
+						results.Functions[name] = fn
+					}
+				}
+
+				// Add fuzzer call graph edges
+				for _, call := range fuzzerResults.CallGraph.Calls {
+					results.CallGraph.Calls = append(results.CallGraph.Calls, call)
+				}
+				for caller, callees := range fuzzerResults.CallGraphAdj {
+					results.CallGraphAdj[caller] = append(results.CallGraphAdj[caller], callees...)
+				}
+
+				log.Printf("Merged results: %d total functions, %d entry points",
+					len(results.Functions), len(results.ReachableFunctions))
+			}
+			// Keep the fuzzer CPG for reference
+			// Don't delete fuzzerCpgPath - it may be useful for debugging
+		} else {
+			log.Printf("Failed to parse fuzzer directories: %v", err)
+		}
+	}
 	if err != nil {
 		log.Printf("Warning: failed to extract results from CPG: %v", err)
 		// Return empty results but don't fail - CPG is still usable by Python
@@ -335,6 +389,113 @@ func findTaskDirectory(projectDir string) string {
 
 	// If we can't find task directory, use projectDir
 	return projectDir
+}
+
+// findFuzzerDirectories searches for common fuzzer directory locations
+// that might be excluded from the main build due to conditional compilation
+func findFuzzerDirectories(projectDir string) []string {
+	var fuzzerDirs []string
+
+	// Common fuzzer directory patterns to check
+	patterns := []string{
+		"cpp/tests/fuzz",
+		"tests/fuzz",
+		"test/fuzz",
+		"fuzz",
+		"fuzzing",
+		"cpp/fuzz",
+		"src/fuzz",
+		"fuzzer",
+		"fuzzers",
+	}
+
+	for _, pattern := range patterns {
+		candidatePath := filepath.Join(projectDir, pattern)
+		if stat, err := os.Stat(candidatePath); err == nil && stat.IsDir() {
+			// Check if this directory contains actual source files
+			if hasSourceFiles(candidatePath) {
+				fuzzerDirs = append(fuzzerDirs, candidatePath)
+			}
+		}
+	}
+
+	// Also check if tests/test directories contain fuzzer files directly
+	// (e.g., jq has jq_fuzz_*.c files directly in tests/ directory)
+	testDirPatterns := []string{
+		"tests",
+		"test",
+		"cpp/tests",
+	}
+
+	for _, pattern := range testDirPatterns {
+		candidatePath := filepath.Join(projectDir, pattern)
+		if stat, err := os.Stat(candidatePath); err == nil && stat.IsDir() {
+			// Check if this directory contains files with "fuzz" in the name
+			if hasFuzzerFiles(candidatePath) {
+				fuzzerDirs = append(fuzzerDirs, candidatePath)
+			}
+		}
+	}
+
+	return fuzzerDirs
+}
+
+// hasSourceFiles checks if a directory contains C/C++ or Java source files
+func hasSourceFiles(dir string) bool {
+	var hasSource bool
+
+	// Walk the directory to find source files
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Continue walking even if there's an error
+		}
+		if info.IsDir() {
+			return nil
+		}
+
+		// Check for common source file extensions
+		ext := strings.ToLower(filepath.Ext(path))
+		if ext == ".c" || ext == ".cpp" || ext == ".cc" || ext == ".cxx" ||
+		   ext == ".h" || ext == ".hpp" || ext == ".hh" || ext == ".hxx" ||
+		   ext == ".java" {
+			hasSource = true
+			return filepath.SkipAll // Found a source file, stop walking
+		}
+
+		return nil
+	})
+
+	return hasSource
+}
+
+// hasFuzzerFiles checks if a directory contains source files with "fuzz" in their name
+// This helps detect fuzzer files that are in test directories but not in dedicated fuzz subdirs
+func hasFuzzerFiles(dir string) bool {
+	var hasFuzzer bool
+
+	// Only check files directly in this directory (not subdirectories)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		name := strings.ToLower(entry.Name())
+		ext := strings.ToLower(filepath.Ext(name))
+
+		// Check if it's a source file with "fuzz" in the name
+		if (ext == ".c" || ext == ".cpp" || ext == ".cc" || ext == ".cxx") &&
+			strings.Contains(name, "fuzz") {
+			hasFuzzer = true
+			break
+		}
+	}
+
+	return hasFuzzer
 }
 
 // createCPG creates a Code Property Graph using local Joern installation
