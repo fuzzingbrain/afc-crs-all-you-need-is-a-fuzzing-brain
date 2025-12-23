@@ -52,6 +52,35 @@ func getTempDirLock(dir string) *sync.Mutex {
 	return mu.(*sync.Mutex)
 }
 
+// hasSourceFiles checks if a directory contains source code files (not just build scripts)
+func hasSourceFiles(dir string) bool {
+	sourceExtensions := map[string]bool{
+		".c": true, ".cc": true, ".cpp": true, ".cxx": true, ".c++": true, // C/C++
+		".h": true, ".hh": true, ".hpp": true, ".hxx": true, ".h++": true, // C/C++ headers
+		".java": true, // Java
+		".rs": true,   // Rust
+		".go": true,   // Go
+		".py": true,   // Python
+	}
+
+	foundSourceFile := false
+	filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip errors, continue walking
+		}
+		if !d.IsDir() {
+			ext := strings.ToLower(filepath.Ext(path))
+			if sourceExtensions[ext] {
+				foundSourceFile = true
+				return filepath.SkipAll // Found a source file, stop walking
+			}
+		}
+		return nil
+	})
+
+	return foundSourceFile
+}
+
 // ---------------------------------------------------------------------------
 
 // CFunctionVisitor for C/C++ files
@@ -3119,14 +3148,18 @@ func EngineMainAnalysisCore(taskDetail models.TaskDetail, taskDir string) (model
 	projectDir := path.Join(taskDir, taskDetail.Focus)
 
 	// Build list of directories to analyze
-	// For some projects (especially Java), fuzzers live in fuzz-tooling/projects/<project>
+	// Some projects have fuzzer sources in fuzz-tooling/projects/<project>
 	dirsToAnalyze := []string{projectDir}
 
-	// Check for fuzzer sources in fuzz-tooling/projects/<projectName>
+	// Check if fuzzer source directory contains actual source files
 	fuzzerSourceDir := filepath.Join(taskDir, "fuzz-tooling", "projects", taskDetail.ProjectName)
 	if stat, err := os.Stat(fuzzerSourceDir); err == nil && stat.IsDir() {
-		dirsToAnalyze = append(dirsToAnalyze, fuzzerSourceDir)
-		log.Printf("Found fuzzer sources in %s, including in analysis", fuzzerSourceDir)
+		if hasSourceFiles(fuzzerSourceDir) {
+			dirsToAnalyze = append(dirsToAnalyze, fuzzerSourceDir)
+			log.Printf("Found fuzzer sources in %s, including in analysis", fuzzerSourceDir)
+		} else {
+			log.Printf("Skipping %s (no source files found, likely only build scripts)", fuzzerSourceDir)
+		}
 	}
 
 	var allFuzzers []string

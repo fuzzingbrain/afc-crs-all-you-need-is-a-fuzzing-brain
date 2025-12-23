@@ -238,7 +238,7 @@ def call_litellm(log_file, messages, model_name) -> (str, bool):
     start_time = time.time()
     
     # Retry parameters
-    max_retries = 5
+    max_retries = 2
     base_delay = 2  # Start with 2 seconds
     
     # Track models we've tried to implement fallback logic

@@ -241,7 +241,7 @@ def call_litellm(log_file, messages, model_name) -> (str, bool):
     start_time = time.time()
     
     # Retry parameters
-    max_retries = 5
+    max_retries = 2
     base_delay = 2  # Start with 2 seconds
     
     # Track models we've tried to implement fallback logic
@@ -365,7 +365,7 @@ def call_o1_pro_api(log_file, messages, model_name):
         "input": user_message
     }
     # Retry parameters
-    max_retries = 5
+    max_retries = 2
     base_delay = 2  # Start with 2 seconds
     
     for attempt in range(max_retries):

@@ -241,7 +241,7 @@ def call_litellm(log_file, messages, model_name) -> (str, bool):
     start_time = time.time()
     
     # Retry parameters
-    max_retries = 5
+    max_retries = 2
     base_delay = 2  # Start with 2 seconds
     
     # Track models we've tried to implement fallback logic
@@ -1220,30 +1220,78 @@ def filter_instrumented_lines(text, max_line_length=200):
     return '\n'.join(filtered_lines)
 
 def get_same_project_fuzzers(fuzzer_path):
-    """Find all fuzzers from the same project and sanitizer as the given fuzzer"""
+    """
+    Find all fuzzers from the same project and sanitizer as the given fuzzer.
+
+    Uses heuristics to identify fuzzer binaries:
+    - Must be executable
+    - Must not be a known tool/library
+    - Must not have non-fuzzer file extensions
+    - Should have fuzzer-like naming patterns
+    """
     fuzzer_dir = os.path.dirname(fuzzer_path)
 
-    # List of known non-fuzzer executables and libraries to skip
-    skip_binaries = {
-        'llvm-symbolizer',
-        'clang',
-        'sancov',
+    # Extensions that are definitely not fuzzer binaries
+    NON_FUZZER_EXTENSIONS = {
+        '.zip', '.tar', '.gz', '.bz2',  # Archives
+        '.dict', '.options', '.corpus',  # Fuzzing artifacts
+        '.so', '.a', '.dylib', '.dll',   # Libraries
+        '.class', '.jar',                # Java compiled/archives
+        '.py', '.sh', '.txt', '.md',     # Scripts/docs
+        '.json', '.xml', '.yaml',        # Config files
+        '-coverage'                       # Coverage builds (special case)
+    }
+
+    # Known non-fuzzer executables to skip
+    SKIP_EXECUTABLES = {
+        'llvm-symbolizer', 'llvm-cov', 'llvm-profdata',
+        'clang', 'clang++', 'gcc', 'g++',
+        'sancov', 'addr2line', 'objdump',
         'jazzer_agent_deploy.jar',
         'jazzer_driver',
         'jazzer_driver_with_sanitizer',
         'jazzer_junit.jar',
     }
 
-    # Get all files in the same directory that are executable
+    def is_likely_fuzzer(filename):
+        """Check if filename looks like a fuzzer binary"""
+        # Skip known non-fuzzers
+        if filename in SKIP_EXECUTABLES:
+            return False
+
+        # Skip files with non-fuzzer extensions
+        for ext in NON_FUZZER_EXTENSIONS:
+            if filename.endswith(ext):
+                return False
+
+        # Positive signals: common fuzzer name patterns
+        fuzzer_patterns = ['fuzzer', 'fuzz', 'test']
+        name_lower = filename.lower()
+
+        # If it contains fuzzer keywords, it's likely a fuzzer
+        if any(pattern in name_lower for pattern in fuzzer_patterns):
+            return True
+
+        # If no extension and not in skip list, might be a fuzzer
+        # (many C/C++ fuzzers have no extension)
+        if '.' not in filename:
+            return True
+
+        return False
+
+    # Find all fuzzer candidates
     same_project_fuzzers = []
     if os.path.isdir(fuzzer_dir):
         for item in os.listdir(fuzzer_dir):
             item_path = os.path.join(fuzzer_dir, item)
-            # Check if it's a file and executable
-            if os.path.isfile(item_path) and os.access(item_path, os.X_OK):
-                # Skip coverage builds and other non-fuzzer executables
-                if not item.endswith('-coverage') and not item.endswith('.zip') and not item.endswith('.dict') and not item.endswith('.options') and item not in skip_binaries:
-                    same_project_fuzzers.append(item_path)
+
+            # Must be a regular file and executable
+            if not (os.path.isfile(item_path) and os.access(item_path, os.X_OK)):
+                continue
+
+            # Apply fuzzer detection heuristics
+            if is_likely_fuzzer(item):
+                same_project_fuzzers.append(item_path)
 
     return same_project_fuzzers
 
@@ -3394,7 +3442,7 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
     log_message(log_file, f"POV_PHASE: {POV_PHASE} doAdvancedPoV")
 
     # TEMPORARY: Skip to Phase 3 only for testing
-    # if POV_PHASE != 3:
+    # if POV_PHASE != 1:
     #     print(f"[TESTING] Skipping POV_PHASE {POV_PHASE}")
     #     return False, {}
 
@@ -3530,7 +3578,7 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
         # just for testing
         # call_paths = TEST_CALL_PATHS
         # for each call path, doPOV
-        MAX_CALL_PATHS = 10
+        MAX_CALL_PATHS = 5  # Reduced from 10 to save context window
         if len(call_paths) > MAX_CALL_PATHS:
             log_message(log_file, f"Too many call paths ({len(call_paths)}), limiting to first {MAX_CALL_PATHS}")
             call_paths = call_paths[:MAX_CALL_PATHS]
@@ -3977,8 +4025,10 @@ def create_commit_call_paths_based_prompt(project_name,fuzzer_code, commit_diff,
         # Only show code for non-empty function bodies
         if function_body.strip():
             lines = function_body.strip().splitlines()
-            if len(lines) > 100:
-                function_body_text = "\n".join(lines[:100]) + "\n... (truncated for brevity)"
+            # Truncate to 30 lines for non-modified functions, 50 for modified ones
+            max_lines = 50 if is_modified else 30
+            if len(lines) > max_lines:
+                function_body_text = "\n".join(lines[:max_lines]) + "\n... (truncated for brevity)"
             else:
                 function_body_text = "\n".join(lines)
             call_path_info += (
