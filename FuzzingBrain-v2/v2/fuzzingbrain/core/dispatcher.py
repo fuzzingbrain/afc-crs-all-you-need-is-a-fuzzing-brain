@@ -16,6 +16,7 @@ from .logging import logger
 from .config import Config
 from .models import Task, Fuzzer, FuzzerStatus, Worker, WorkerStatus
 from ..db import RepositoryManager
+from ..analyzer import AnalyzeResult
 
 
 class WorkerDispatcher:
@@ -24,11 +25,17 @@ class WorkerDispatcher:
 
     For each {fuzzer, sanitizer} pair:
     1. Create isolated worker workspace
-    2. Dispatch Celery task
+    2. Dispatch Celery task (with pre-built fuzzer path)
     3. Track worker status
     """
 
-    def __init__(self, task: Task, config: Config, repos: RepositoryManager):
+    def __init__(
+        self,
+        task: Task,
+        config: Config,
+        repos: RepositoryManager,
+        analyze_result: AnalyzeResult = None,
+    ):
         """
         Initialize WorkerDispatcher.
 
@@ -36,11 +43,13 @@ class WorkerDispatcher:
             task: Task object
             config: Configuration
             repos: Database repository manager
+            analyze_result: Result from Code Analyzer (contains pre-built fuzzer paths)
         """
         self.task = task
         self.config = config
         self.repos = repos
         self.project_name = config.ossfuzz_project or task.project_name
+        self.analyze_result = analyze_result
 
     def dispatch(self, fuzzers: List[Fuzzer]) -> List[Dict[str, Any]]:
         """
@@ -190,6 +199,13 @@ class WorkerDispatcher:
         from .logging import get_log_dir
         log_dir = get_log_dir()
 
+        # Get pre-built fuzzer path from analyze_result
+        fuzzer_binary_path = None
+        build_dir = None
+        if self.analyze_result:
+            fuzzer_binary_path = self.analyze_result.get_fuzzer_path(fuzzer, sanitizer)
+            build_dir = self.analyze_result.build_paths.get(sanitizer)
+
         # Prepare assignment
         assignment = {
             "task_id": self.task.task_id,
@@ -199,6 +215,10 @@ class WorkerDispatcher:
             "workspace_path": workspace_path,
             "project_name": self.project_name,
             "log_dir": str(log_dir) if log_dir else None,
+            # Pre-built fuzzer info from Analyzer
+            "fuzzer_binary_path": fuzzer_binary_path,
+            "build_dir": build_dir,
+            "coverage_fuzzer_path": self.analyze_result.coverage_fuzzer_path if self.analyze_result else None,
         }
 
         # Dispatch Celery task

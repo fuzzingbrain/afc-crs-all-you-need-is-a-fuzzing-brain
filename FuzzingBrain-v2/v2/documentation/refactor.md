@@ -155,11 +155,37 @@ Controller会将 每一个fuzzer单独由{address， memory， UB}构建。并�
 
 1. 收到请求/或者本地运行
 2. 创建task
-3. 下载task, 将task的repo复制一份，叫repo-static-analysis，并将task发送给static analysis server
-4. static analysis server是一个异步的server，它会对一个repo进行静态分析，把结果存入redis
-5. 构建task
-6. 将所有的fuzzer信息收集起来，发送给Vuln_management server，这里会对所有进来的pov和patch做评估，打包，去重等工作
-7. 分配{fuzzer， sanitizer}对给子crs，并且持续监控其运行
+3. task下载，然后形成以下格式
+    workspace/task_id_{timestamp}/
+     - repo
+     - diff
+     - fuzz-tooling
+
+
+4. 接下来，将task发送给code analyzer，也就是静态分析服务
+
+
+5. static analysis server是一个异步的server，它会对一个repo进行
+   将原来controller干的事情移到这里：
+  - 根据用户提供的/默认的sanitizer，构建fuzzer，并将output从简单的fuzz-tooling/build/out放入out/{projectname}_{sanitizer}中
+  - 在数据库中更新状态
+  - 返回fuzzer，路径，代码等信息给controller
+
+  - Coverage的构建c/c++
+  - 静态分析，把结果存入redis
+
+  返回controller所需要的一切信息
+
+
+主controller此时必须等待构建/分析的执行，在日志里显示等待时间，以及进行到哪一步了
+
+6. controller接收到信息后，将work分配给worker 分配{fuzzer， sanitizer}对给子crs，并且持续监控其运行
+
+worker在创建属于自己的workspace的事时候，会完全复制一份
+- repo
+- fuzz-tooling （带上用户输入的sanitizer构建的fuzzer/不要coverage或者inspector）
+- diff（如果有）
+
 
 
 
@@ -1524,6 +1550,4 @@ results = analyzer.analyze(fuzzer_names=["fuzz_png"])
 
 ---
 
-## 进度7：静态分析服务器接口以及调用逻辑
 
-需要明确的是，静态分析我们可以把它视作为一个单独的服务，这个服务要做成server？还是直接写成服务模块内嵌在fuzzingbrain里？

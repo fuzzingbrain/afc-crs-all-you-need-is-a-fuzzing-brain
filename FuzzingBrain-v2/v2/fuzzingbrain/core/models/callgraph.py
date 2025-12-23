@@ -1,5 +1,7 @@
 """
 CallGraphNode Model - Call graph relationships per fuzzer
+
+Data source: OSS-Fuzz introspector (generated during fuzzer build)
 """
 
 from dataclasses import dataclass, field
@@ -15,8 +17,8 @@ class CallGraphNode:
     Each fuzzer has its own set of reachable functions and call relationships.
     The node_id is {task_id}_{fuzzer_id}_{function_name} to ensure uniqueness.
 
-    This model stores the results from SVF call graph analysis, which requires
-    LLVM bitcode (compiled binary).
+    Data comes from OSS-Fuzz introspector output, which is generated
+    automatically during the fuzzer build process.
     """
 
     # Identifiers

@@ -32,6 +32,7 @@ class WorkerExecutor:
         job_type: str,
         repos: RepositoryManager,
         task_id: str,
+        fuzzer_binary_path: str = None,
     ):
         """
         Initialize WorkerExecutor.
@@ -44,6 +45,7 @@ class WorkerExecutor:
             job_type: Job type (pov, patch, pov-patch, harness)
             repos: Database repository manager
             task_id: Parent task ID
+            fuzzer_binary_path: Path to pre-built fuzzer binary (from Analyzer)
         """
         self.workspace_path = Path(workspace_path)
         self.project_name = project_name
@@ -52,6 +54,9 @@ class WorkerExecutor:
         self.job_type = job_type
         self.repos = repos
         self.task_id = task_id
+
+        # Fuzzer binary path (from Analyzer or built locally)
+        self.fuzzer_binary_path = Path(fuzzer_binary_path) if fuzzer_binary_path else None
 
         # Paths
         self.results_path = self.workspace_path / "results"

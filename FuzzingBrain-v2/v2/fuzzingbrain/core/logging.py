@@ -122,6 +122,7 @@ _LOGO_BOTTOM = """║                                                           
 _SUBTITLES = {
     "controller": "║" + "FuzzingBrain Controller - Autonomous Cyber Reasoning System v2.0".center(100) + "║",
     "worker": "║" + "FuzzingBrain Worker - Autonomous Cyber Reasoning System v2.0".center(100) + "║",
+    "analyzer": "║" + "FuzzingBrain Code Analyzer - Static Analysis & Build System v2.0".center(100) + "║",
 }
 
 

@@ -399,17 +399,29 @@ class TaskProcessor:
         # Footer
         footer = "└" + "─" * col_worker + "┴" + "─" * col_fuzzer + "┴" + "─" * col_sanitizer + "┴" + "─" * col_status + "┴" + "─" * col_worker_id + "┘"
 
-        # Output table with colors
-        # Header lines go through logger normally
+        # Output table - separate handling for console (colored) and file (plain)
+        import sys
+
+        # Print colored version to console
         for line in header_lines:
-            logger.info(line)
-
-        # Worker rows with individual colors
+            sys.stderr.write(line + "\n")
         for row in colored_rows:
-            logger.opt(colors=True).info(row)
+            sys.stderr.write(row + "\n")
+        sys.stderr.write(footer + "\n")
+        sys.stderr.write("\n")
+        sys.stderr.flush()
 
-        logger.info(footer)
-        logger.info("")
+        # Write plain version to log file
+        log_dir = get_log_dir()
+        if log_dir:
+            log_file = log_dir / "fuzzingbrain.log"
+            with open(log_file, "a", encoding="utf-8") as f:
+                for line in header_lines:
+                    f.write(line + "\n")
+                for row in plain_rows:
+                    f.write(row + "\n")
+                f.write(footer + "\n")
+                f.write("\n")
 
     def process(self, task: Task) -> dict:
         """
@@ -462,31 +474,61 @@ class TaskProcessor:
                 logger.info(f"Found {len(fuzzers)} fuzzers")
                 fuzzer_discovery.save_fuzzers(fuzzers)
 
-            # Step 5: Build fuzzers
-            logger.info("Step 5: Building fuzzers")
-            from .fuzzer_builder import FuzzerBuilder
+            # Step 5: Run Code Analyzer (build + static analysis)
+            logger.info("Step 5: Running Code Analyzer")
+            from ..analyzer import AnalyzeRequest, AnalyzeResult
+            from ..analyzer.tasks import run_analyzer
 
-            builder = FuzzerBuilder(task, self.config)
-            build_success, built_fuzzers, build_msg = builder.build()
+            project_name = self.config.ossfuzz_project or task.project_name
 
-            if not build_success:
-                raise Exception(f"Fuzzer build failed: {build_msg}")
+            # Create analyze request
+            analyze_request = AnalyzeRequest(
+                task_id=task.task_id,
+                task_path=task.task_path,
+                project_name=project_name,
+                sanitizers=self.config.sanitizers,
+                language="c",  # TODO: detect language
+                ossfuzz_project=self.config.ossfuzz_project,
+            )
 
-            logger.info(f"Successfully built {len(built_fuzzers)} fuzzers: {built_fuzzers}")
+            logger.info(f"Analyzer request: sanitizers={self.config.sanitizers}")
+            logger.info("Waiting for Analyzer to complete (this may take a while)...")
+
+            # Run analyzer (synchronously for now, can be made async with Celery)
+            # In CLI mode, run directly; in API mode, use Celery task
+            if self.config.api_mode:
+                # Dispatch to Celery and wait
+                celery_result = run_analyzer.delay(analyze_request.to_dict())
+                result_dict = celery_result.get(timeout=3600)  # 1 hour timeout
+            else:
+                # Run directly in same process
+                result_dict = run_analyzer(analyze_request.to_dict())
+
+            analyze_result = AnalyzeResult.from_dict(result_dict)
+
+            if not analyze_result.success:
+                raise Exception(f"Code Analyzer failed: {analyze_result.error_msg}")
+
+            logger.info(f"Analyzer completed: {len(analyze_result.fuzzers)} fuzzers built")
+            logger.info(f"Build duration: {analyze_result.build_duration_seconds:.1f}s")
+            logger.info(f"Static analysis: {analyze_result.reachable_functions_count} functions")
 
             # Set shared coverage fuzzer path for tools
-            coverage_dir = builder.get_coverage_fuzzer_dir()
-            if coverage_dir:
+            if analyze_result.coverage_fuzzer_path:
                 from ..tools.coverage import set_coverage_fuzzer_path
-                set_coverage_fuzzer_path(coverage_dir)
-                logger.info(f"Coverage fuzzer path set: {coverage_dir}")
+                set_coverage_fuzzer_path(analyze_result.coverage_fuzzer_path)
+                logger.info(f"Coverage fuzzer path set: {analyze_result.coverage_fuzzer_path}")
 
-            # Update fuzzer status in database
-            project_name = self.config.ossfuzz_project or task.project_name
+            # Update fuzzer status in database based on Analyzer result
+            built_fuzzer_names = analyze_result.get_fuzzer_names()
             for fuzzer in fuzzers:
-                if fuzzer.fuzzer_name in built_fuzzers:
+                if fuzzer.fuzzer_name in built_fuzzer_names:
                     fuzzer.status = FuzzerStatus.SUCCESS
-                    fuzzer.binary_path = builder.get_fuzzer_binary_path(fuzzer.fuzzer_name)
+                    # Get binary path for first sanitizer (they all have the same fuzzer name)
+                    for fi in analyze_result.fuzzers:
+                        if fi.name == fuzzer.fuzzer_name:
+                            fuzzer.binary_path = fi.binary_path
+                            break
                 else:
                     fuzzer.status = FuzzerStatus.FAILED
                     fuzzer.error_msg = "Not found in build output"
@@ -496,6 +538,9 @@ class TaskProcessor:
 
             # Log fuzzer build summary
             self._log_fuzzer_summary(fuzzers, project_name)
+
+            # Store analyze_result for dispatcher to use
+            self._analyze_result = analyze_result
 
             # Step 6: Start infrastructure (CLI mode only)
             logger.info("Step 6: Starting infrastructure")
@@ -517,7 +562,10 @@ class TaskProcessor:
                 logger.info("Step 7: Dispatching workers")
                 from .dispatcher import WorkerDispatcher
 
-                dispatcher = WorkerDispatcher(task, self.config, self.repos)
+                dispatcher = WorkerDispatcher(
+                    task, self.config, self.repos,
+                    analyze_result=self._analyze_result,
+                )
                 jobs = dispatcher.dispatch(fuzzers)
 
                 if not jobs:

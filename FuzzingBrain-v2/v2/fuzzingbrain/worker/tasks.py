@@ -103,6 +103,11 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     project_name = assignment["project_name"]
     log_dir = assignment.get("log_dir")
 
+    # Pre-built fuzzer info from Analyzer (new architecture)
+    fuzzer_binary_path = assignment.get("fuzzer_binary_path")
+    build_dir = assignment.get("build_dir")
+    coverage_fuzzer_path = assignment.get("coverage_fuzzer_path")
+
     worker_id = f"{task_id}__{fuzzer}__{sanitizer}"
 
     # Build worker metadata for logging
@@ -153,17 +158,33 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     repos.workers.save(worker)
 
     try:
-        # Step 1: Build fuzzer with specific sanitizer
-        logger.info(f"Building fuzzer with {sanitizer} sanitizer")
-        worker.status = WorkerStatus.BUILDING
-        repos.workers.save(worker)
+        # Step 1: Setup fuzzer binary
+        # If pre-built fuzzer path is provided (new architecture), skip building
+        # Otherwise fall back to building (legacy mode)
+        if fuzzer_binary_path:
+            logger.info(f"Using pre-built fuzzer from Analyzer: {fuzzer_binary_path}")
+            worker.status = WorkerStatus.RUNNING
+            repos.workers.save(worker)
 
-        from .builder import WorkerBuilder
-        builder = WorkerBuilder(workspace_path, project_name, sanitizer)
-        build_success, build_msg = builder.build()
+            # Set coverage fuzzer path if provided
+            if coverage_fuzzer_path:
+                from ..tools.coverage import set_coverage_fuzzer_path
+                set_coverage_fuzzer_path(coverage_fuzzer_path)
+        else:
+            # Legacy mode: build fuzzer in worker
+            logger.info(f"Building fuzzer with {sanitizer} sanitizer (legacy mode)")
+            worker.status = WorkerStatus.BUILDING
+            repos.workers.save(worker)
 
-        if not build_success:
-            raise Exception(f"Build failed: {build_msg}")
+            from .builder import WorkerBuilder
+            builder = WorkerBuilder(workspace_path, project_name, sanitizer)
+            build_success, build_msg = builder.build()
+
+            if not build_success:
+                raise Exception(f"Build failed: {build_msg}")
+
+            # Get fuzzer path from builder
+            fuzzer_binary_path = str(builder.get_fuzzer_path(fuzzer))
 
         # Step 2: Run fuzzing strategies
         logger.info(f"Running fuzzing strategies")
@@ -179,6 +200,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             job_type=job_type,
             repos=repos,
             task_id=task_id,
+            fuzzer_binary_path=fuzzer_binary_path,
         )
         result = executor.run()
 

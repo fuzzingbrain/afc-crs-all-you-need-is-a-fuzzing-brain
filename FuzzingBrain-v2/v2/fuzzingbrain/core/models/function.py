@@ -1,10 +1,15 @@
 """
 Function Model - Extracted function metadata from source code
+
+Data sources:
+- Basic info (name, file, lines): OSS-Fuzz introspector
+- Source code content: tree-sitter extraction
+- Complexity metrics: OSS-Fuzz introspector
 """
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Optional
+from typing import List
 
 
 @dataclass
@@ -16,20 +21,29 @@ class Function:
     fuzzers can reach it. The function_id is {task_id}_{name} to
     ensure uniqueness within a task.
 
-    This model stores the static analysis results from tree-sitter
-    parsing, without requiring compilation.
+    Data comes from two sources:
+    - OSS-Fuzz introspector: name, file_path, lines, complexity
+    - tree-sitter: source code content extraction
     """
 
     # Identifiers
     function_id: str = ""  # {task_id}_{name}
     task_id: str = ""
 
-    # Function info
+    # Function info (from introspector)
     name: str = ""  # Function name, e.g., "parse_config"
     file_path: str = ""  # Relative path to source file
     start_line: int = 0
     end_line: int = 0
+
+    # Source code (from tree-sitter)
     content: str = ""  # Full function source code
+
+    # Metrics (from introspector)
+    cyclomatic_complexity: int = 0
+
+    # Reachability (which fuzzers can reach this function)
+    reached_by_fuzzers: List[str] = field(default_factory=list)
 
     # Optional metadata
     language: str = "c"  # Programming language
@@ -53,6 +67,8 @@ class Function:
             "start_line": self.start_line,
             "end_line": self.end_line,
             "content": self.content,
+            "cyclomatic_complexity": self.cyclomatic_complexity,
+            "reached_by_fuzzers": self.reached_by_fuzzers,
             "language": self.language,
             "created_at": self.created_at,
         }
@@ -68,6 +84,8 @@ class Function:
             start_line=data.get("start_line", 0),
             end_line=data.get("end_line", 0),
             content=data.get("content", ""),
+            cyclomatic_complexity=data.get("cyclomatic_complexity", 0),
+            reached_by_fuzzers=data.get("reached_by_fuzzers", []),
             language=data.get("language", "c"),
             created_at=data.get("created_at", datetime.now()),
         )
