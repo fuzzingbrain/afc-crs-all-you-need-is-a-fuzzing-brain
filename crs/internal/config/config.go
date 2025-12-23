@@ -73,6 +73,9 @@ type FuzzerConfig struct {
 
 	// Per-fuzzer timeout in minutes (each fuzzer gets this much time)
 	PerFuzzerTimeoutMinutes int `envconfig:"FUZZER_PER_FUZZER_TIMEOUT_MINUTES" default:"60"`
+
+	// Maximum number of fuzzers to run in parallel (1 = sequential)
+	MaxParallelFuzzers int `envconfig:"FUZZER_MAX_PARALLEL" default:"8"`
 }
 
 // StrategyConfig holds POV and Patch strategy configuration
