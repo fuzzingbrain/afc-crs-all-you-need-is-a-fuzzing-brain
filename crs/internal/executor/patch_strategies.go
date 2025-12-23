@@ -341,7 +341,7 @@ func runPatchingStrategies(
 					runCmd = exec.CommandContext(patchCtx, pythonInterpreter, args...)
 				}
 				runCmd.Dir = patchWorkDir
-				runCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // NEW: own PG
+				runCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: false} // NEW: own PG
 
 				// Set environment variables that would be set by the virtual environment activation
 				runCmd.Env = append(os.Environ(),
@@ -358,6 +358,8 @@ func runPatchingStrategies(
 					fmt.Sprintf("WORKER_INDEX=%s", workerIndex),
 					fmt.Sprintf("ANALYSIS_SERVICE_URL=%s", analysisServiceUrl),
 					"PYTHONUNBUFFERED=1",
+					// Suppress known warnings from dependencies
+					"PYTHONWARNINGS=ignore::FutureWarning:google.api_core._python_version_support,ignore::FutureWarning:wrapt.patches",
 				)
 
 				// If we generated an unharnessed fuzzer for this task, pass its source path.
@@ -735,7 +737,7 @@ func runXPatchingStrategiesWithoutPOV(
 			log.Printf("[XPATCH] Executing: %s", runCmd.String())
 
 			runCmd.Dir = patchWorkDir
-			runCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // NEW: own PG
+			runCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: false} // NEW: own PG
 
 			// Set environment variables that would be set by the virtual environment activation
 			runCmd.Env = append(os.Environ(),

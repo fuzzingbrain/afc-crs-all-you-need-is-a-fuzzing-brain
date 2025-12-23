@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -22,6 +23,84 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 )
+
+// killProcessTree kills a process and all its descendants
+func killProcessTree(pid int) error {
+	// Find all descendant PIDs
+	descendants, err := findDescendantPIDs(pid)
+	if err != nil {
+		// If we can't find descendants, just kill the root process
+		log.Printf("Warning: Could not find descendants for PID %d: %v", pid, err)
+		return syscall.Kill(pid, syscall.SIGKILL)
+	}
+
+	// Kill descendants first (children before parents)
+	for i := len(descendants) - 1; i >= 0; i-- {
+		syscall.Kill(descendants[i], syscall.SIGKILL)
+	}
+
+	// Finally kill the root process
+	return syscall.Kill(pid, syscall.SIGKILL)
+}
+
+// findDescendantPIDs returns all descendant PIDs of the given PID
+func findDescendantPIDs(rootPid int) ([]int, error) {
+	// Read all /proc entries
+	procDirs, err := filepath.Glob("/proc/[0-9]*")
+	if err != nil {
+		return nil, err
+	}
+
+	// Build parent -> children map
+	children := make(map[int][]int)
+	for _, procDir := range procDirs {
+		childPid, err := strconv.Atoi(filepath.Base(procDir))
+		if err != nil {
+			continue
+		}
+
+		// Read /proc/PID/stat to get parent PID
+		statPath := filepath.Join(procDir, "stat")
+		statData, err := os.ReadFile(statPath)
+		if err != nil {
+			continue
+		}
+
+		// Parse stat file: PID (comm) state PPID ...
+		// Find the last ')' to handle comm names with spaces/parens
+		statStr := string(statData)
+		lastParen := strings.LastIndex(statStr, ")")
+		if lastParen == -1 || lastParen+1 >= len(statStr) {
+			continue
+		}
+
+		// Fields after comm are space-separated
+		fields := strings.Fields(statStr[lastParen+1:])
+		if len(fields) < 2 {
+			continue
+		}
+
+		ppid, err := strconv.Atoi(fields[1]) // PPID is 2nd field after comm
+		if err != nil {
+			continue
+		}
+
+		children[ppid] = append(children[ppid], childPid)
+	}
+
+	// Recursively collect all descendants
+	var descendants []int
+	var collect func(int)
+	collect = func(pid int) {
+		for _, child := range children[pid] {
+			descendants = append(descendants, child)
+			collect(child) // Recursively collect grandchildren
+		}
+	}
+
+	collect(rootPid)
+	return descendants, nil
+}
 
 // runAdvancedPOVPhases runs multiple rounds of advanced POV generation strategies
 func runAdvancedPOVPhases(
@@ -53,18 +132,18 @@ func runAdvancedPOVPhases(
 	advancedPhasesSpan.SetAttributes(attribute.Float64("crs.budget.total_hours", float64(workingBudgetMinutes+SafetyBufferMinutes)/60.0))
 	advancedPhasesSpan.SetAttributes(attribute.Float64("crs.budget.working_hours", float64(workingBudgetMinutes)/60.0))
 
-	// Calculate POV budget (80% of working time)
-	initialPovBudgetMinutes := int(float64(workingBudgetMinutes) * 0.8)
+	// Calculate POV budget (95% of working time to maximize strategy execution time)
+	initialPovBudgetMinutes := int(float64(workingBudgetMinutes) * 0.95)
 	if initialPovBudgetMinutes < 1 {
 		initialPovBudgetMinutes = 1
 	}
-	log.Printf("POV generation budget: %d minutes", initialPovBudgetMinutes)
+	log.Printf("POV generation budget: %d minutes (95%% of working time)", initialPovBudgetMinutes)
 	initialPovBudgetDuration := time.Duration(initialPovBudgetMinutes) * time.Minute
 
 	numPhases := 4
 	roundNum := 0
 	var totalPovTimeSpent time.Duration
-	sequentialTestRun := true // Set to true for sequential execution (for debugging)
+	sequentialTestRun := false // Set to true for sequential execution (for debugging)
 
 	// Loop until POV is found or deadline approaches
 	for {
@@ -306,17 +385,8 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 	// Get strategy configuration
 	strategyConfig := basicConfig.StrategyConfig
 	if strategyConfig == nil {
-		log.Printf("StrategyConfig is nil, using defaults")
-		strategyConfig = &config.StrategyConfig{
-			BaseDir:        "/app/strategy",
-			NewStrategyDir: "jeff",
-			POV: config.POVStrategyConfig{
-				BasicDeltaPattern:    "xs*_delta_new.py",
-				BasicCFullPattern:    "xs*_c_full.py",
-				BasicJavaFullPattern: "xs*_java_full.py",
-				BasicFullPattern:     "xs*_full.py",
-			},
-		}
+		log.Printf("StrategyConfig is nil")
+		return false
 	}
 
 	// Determine strategy directory and pattern
@@ -441,7 +511,7 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 				log.Printf("Warning: Not running as root and sudo not available. Trying direct execution.")
 				runCmd = exec.CommandContext(strategyCtx, pythonInterpreter, args...)
 			}
-			runCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			runCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: false}
 			runCmd.Dir = taskDir
 			// Set environment variables that would be set by the virtual environment activation
 			runCmd.Env = append(os.Environ(),
@@ -458,6 +528,8 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 				fmt.Sprintf("WORKER_INDEX=%s", basicConfig.WorkerIndex),
 				fmt.Sprintf("ANALYSIS_SERVICE_URL=%s", basicConfig.AnalysisServiceUrl),
 				"PYTHONUNBUFFERED=1",
+				// Suppress known warnings from dependencies
+				"PYTHONWARNINGS=ignore::FutureWarning:google.api_core._python_version_support,ignore::FutureWarning:wrapt.patches",
 			)
 
 			// If we have an unharnessed fuzzer source path, pass it
@@ -590,9 +662,10 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 						log.Printf("Strategy %s canceled after %v.", strategyName, time.Since(startTime))
 					}
 					if runCmd.Process != nil {
-						// Kill entire group: negative PGID
-						pgid, _ := syscall.Getpgid(runCmd.Process.Pid)
-						syscall.Kill(-pgid, syscall.SIGKILL)
+						// Kill the process tree (process and all descendants)
+						if err := killProcessTree(runCmd.Process.Pid); err != nil {
+							log.Printf("Error killing process tree for %s (PID %d): %v", strategyName, runCmd.Process.Pid, err)
+						}
 					}
 					<-done // ensure Wait() returns
 					return
@@ -779,6 +852,7 @@ func runAdvancedPOVStrategiesWithTimeout(
 				runCmd = exec.CommandContext(strategyCtx, pythonInterpreter, args...)
 			}
 
+			runCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: false}
 			runCmd.Dir = taskDir
 
 			runCmd.Env = append(os.Environ(),
@@ -793,6 +867,8 @@ func runAdvancedPOVStrategiesWithTimeout(
 				fmt.Sprintf("WORKER_INDEX=%s", workerIndex),
 				fmt.Sprintf("ANALYSIS_SERVICE_URL=%s", analysisServiceUrl),
 				"PYTHONUNBUFFERED=1",
+				// Suppress known warnings from dependencies
+				"PYTHONWARNINGS=ignore::FutureWarning:google.api_core._python_version_support,ignore::FutureWarning:wrapt.patches",
 			)
 
 			// If we have an unharnessed fuzzer source path, pass it
@@ -921,21 +997,15 @@ func runAdvancedPOVStrategiesWithTimeout(
 				streamWg.Wait() // Allow scanners to finish after kill signal
 				duration := time.Since(startTime)
 				if strategyCtx.Err() == context.DeadlineExceeded {
-					log.Printf("[POV Round-%d Phase-%d] Strategy %s timed out after %v. Killing process group.", roundNum, phase, strategyName, duration)
+					log.Printf("[POV Round-%d Phase-%d] Strategy %s timed out after %v. Killing process tree.", roundNum, phase, strategyName, duration)
 				} else {
-					log.Printf("[POV Round-%d Phase-%d] Strategy %s canceled after %v. Killing process group.", roundNum, phase, strategyName, duration)
+					log.Printf("[POV Round-%d Phase-%d] Strategy %s canceled after %v. Killing process tree.", roundNum, phase, strategyName, duration)
 				}
 
-				// Kill the entire process group
+				// Kill the process tree (process and all descendants)
 				if runCmd.Process != nil {
-					pgid, err := syscall.Getpgid(runCmd.Process.Pid)
-					if err == nil {
-						errKill := syscall.Kill(-pgid, syscall.SIGKILL) // Kill negative PGID
-						if errKill != nil && !strings.Contains(errKill.Error(), "no such process") { // Ignore "no such process" error
-							log.Printf("[POV Round-%d Phase-%d] Error killing process group %d for %s: %v", roundNum, phase, -pgid, strategyName, errKill)
-						}
-					} else if !strings.Contains(err.Error(), "no such process") {
-						log.Printf("[POV Round-%d Phase-%d] Error getting PGID for %s (PID %d): %v", roundNum, phase, strategyName, runCmd.Process.Pid, err)
+					if err := killProcessTree(runCmd.Process.Pid); err != nil {
+						log.Printf("[POV Round-%d Phase-%d] Error killing process tree for %s (PID %d): %v", roundNum, phase, strategyName, runCmd.Process.Pid, err)
 					}
 				}
 				// Wait for Wait() to return after kill

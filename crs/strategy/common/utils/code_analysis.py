@@ -633,7 +633,7 @@ def _run_local_analysis(
 
                 # Sort by score descending, take top targets
                 scored_funcs.sort(reverse=True, key=lambda x: x[0])
-                top_targets = scored_funcs[:20]  # Top 20 interesting functions
+                top_targets = scored_funcs[:10]  # Top 10 interesting functions (reduced to save context)
 
                 print(f"Selected {len(top_targets)} interesting target functions for path computation")
 
@@ -691,7 +691,8 @@ def _run_local_analysis(
                         print(f"Entry point has {len(adj[entry_point])} direct callees")
 
                     for i, (score, target_name, target_def) in enumerate(top_targets):
-                        paths = _find_paths_bfs(entry_point, target_name, adj, max_depth=8, max_paths=2)
+                        # Increased max_depth to 15 to handle long paths, but only return 1 path per target
+                        paths = _find_paths_bfs(entry_point, target_name, adj, max_depth=15, max_paths=1)
 
                         for path in paths:
                             processed_path = []
@@ -718,46 +719,98 @@ def _run_local_analysis(
             return call_paths
 
         # For each target function, get the paths
-        for file_path, functions in target_functions.items():
-            # Normalize file path
-            normalized_file_path = file_path.replace(os.sep, '/')
+        # First check if paths are pre-computed in paths_data
+        has_precomputed_paths = any(
+            paths_data.get(f"{entry_point}-{file_path.replace(os.sep, '/')}.{func['name']}", [])
+            for file_path, functions in target_functions.items()
+            for func in functions
+        )
 
-            for func_info in functions:
-                func_name = func_info['name']
+        # If no pre-computed paths, compute them on-demand
+        if not has_precomputed_paths:
+            print(f"No pre-computed paths found. Computing paths on-demand for {len(target_functions)} target files...")
 
-                # Construct the full target function signature
-                target_signature = f"{normalized_file_path}.{func_name}"
+            functions_map = analysis_results.get('functions', {})
+            call_graph = analysis_results.get('callGraph', {})
 
-                # Construct the composite key: fuzzer.entryPoint-target.function
-                composite_key = f"{entry_point}-{target_signature}"
+            # Build adjacency list for BFS
+            call_graph_edges = call_graph.get('Calls', []) if call_graph else []
+            adj = {}
+            for edge in call_graph_edges:
+                caller = edge.get('Caller', '')
+                callee = edge.get('Callee', '')
+                if caller and callee:
+                    if caller not in adj:
+                        adj[caller] = []
+                    adj[caller].append(callee)
 
-                # Try to find paths using the composite key
-                target_paths = paths_data.get(composite_key, [])
+            print(f"Built call graph with {len(adj)} nodes, {len(call_graph_edges)} edges")
 
-                if target_paths:
-                    print(f"Found {len(target_paths)} paths for {composite_key}")
-                else:
-                    print(f"No paths found for {composite_key}")
+            # Compute paths for each target function
+            for file_path, functions in target_functions.items():
+                normalized_file_path = file_path.replace(os.sep, '/')
 
-                # Process each path
-                for path in target_paths:
-                    processed_path = []
-                    for node_name in path:
-                        # Get function definition
-                        func_def = analysis_results.get('functions', {}).get(node_name, {})
+                for func_info in functions:
+                    func_name = func_info['name']
+                    target_signature = f"{normalized_file_path}.{func_name}"
 
-                        processed_func = {
-                            "file": func_def.get('FilePath', ''),
-                            "function": func_def.get('Name', node_name),
-                            "body": func_def.get('SourceCode', ''),
-                            "line": str(func_def.get('StartLine', '')),
-                            "is_modified": node_name in [f['name'] for f in sum([funcs for funcs in target_functions.values()], [])],
-                            "is_vulnerable": False,
-                        }
-                        processed_path.append(processed_func)
+                    # Find paths using BFS
+                    paths = _find_paths_bfs(entry_point, target_signature, adj, max_depth=15, max_paths=1)
 
-                    if processed_path:
-                        call_paths.append(processed_path)
+                    if paths:
+                        print(f"Found {len(paths)} path(s) to {target_signature}")
+                        for path in paths:
+                            processed_path = []
+                            for node_name in path:
+                                func_def = functions_map.get(node_name, {})
+                                processed_func = {
+                                    "file": func_def.get('FilePath', ''),
+                                    "function": func_def.get('Name', node_name),
+                                    "body": func_def.get('SourceCode', ''),
+                                    "line": str(func_def.get('StartLine', '')),
+                                    "is_modified": node_name in [f['name'] for f in sum([funcs for funcs in target_functions.values()], [])],
+                                    "is_vulnerable": False,
+                                }
+                                processed_path.append(processed_func)
+
+                            if processed_path:
+                                call_paths.append(processed_path)
+                    else:
+                        print(f"No paths found to {target_signature}")
+        else:
+            # Use pre-computed paths from paths_data
+            for file_path, functions in target_functions.items():
+                normalized_file_path = file_path.replace(os.sep, '/')
+
+                for func_info in functions:
+                    func_name = func_info['name']
+                    target_signature = f"{normalized_file_path}.{func_name}"
+                    composite_key = f"{entry_point}-{target_signature}"
+
+                    target_paths = paths_data.get(composite_key, [])
+
+                    if target_paths:
+                        print(f"Found {len(target_paths)} paths for {composite_key}")
+                    else:
+                        print(f"No paths found for {composite_key}")
+
+                    # Process each path
+                    for path in target_paths:
+                        processed_path = []
+                        for node_name in path:
+                            func_def = analysis_results.get('functions', {}).get(node_name, {})
+                            processed_func = {
+                                "file": func_def.get('FilePath', ''),
+                                "function": func_def.get('Name', node_name),
+                                "body": func_def.get('SourceCode', ''),
+                                "line": str(func_def.get('StartLine', '')),
+                                "is_modified": node_name in [f['name'] for f in sum([funcs for funcs in target_functions.values()], [])],
+                                "is_vulnerable": False,
+                            }
+                            processed_path.append(processed_func)
+
+                        if processed_path:
+                            call_paths.append(processed_path)
 
     return call_paths
 

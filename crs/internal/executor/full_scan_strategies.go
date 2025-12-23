@@ -69,11 +69,8 @@ func runFullScanPlaceholderStrategy(fuzzer, taskDir, projectDir, fuzzDir, langua
 
 	strategyConfig := fullScanConfig.StrategyConfig
 	if strategyConfig == nil {
-		log.Printf("StrategyConfig is nil, using defaults")
-		strategyConfig = &config.StrategyConfig{
-			BaseDir:        "/app/strategy",
-			NewStrategyDir: "jeff",
-		}
+		log.Printf("StrategyConfig is nil")
+		return false
 	}
 
 	// Use the full scan strategy file
@@ -158,6 +155,8 @@ func runSingleFullScanStrategy(
 	env = append(env, "TASK_ID="+taskID)
 	env = append(env, "WORKER_INDEX="+workerIndex)
 	env = append(env, "PYTHONUNBUFFERED=1")
+	// Suppress known warnings from dependencies
+	env = append(env, "PYTHONWARNINGS=ignore::FutureWarning:google.api_core._python_version_support,ignore::FutureWarning:wrapt.patches")
 	env = append(env, "VIRTUAL_ENV="+venvPath)
 
 	// Create context with timeout (1 hour)
