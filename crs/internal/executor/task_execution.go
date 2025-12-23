@@ -79,78 +79,113 @@ func ExecuteFuzzingTask(params TaskExecutionParams) error {
 	}
 	projectDir := path.Join(absTaskDir, params.TaskDetail.Focus)
 
-	// Execute each fuzzer sequentially
+	// Determine parallelism level
+	maxParallel := 1 // Default to sequential
+	if params.FuzzerConfig != nil && params.FuzzerConfig.MaxParallelFuzzers > 0 {
+		maxParallel = params.FuzzerConfig.MaxParallelFuzzers
+	}
+
+	// Log execution mode
 	log.Printf("===========================================")
-	log.Printf("Executing %d fuzzer(s) sequentially", len(fuzzersToExecute))
+	if maxParallel == 1 {
+		log.Printf("Executing %d fuzzer(s) sequentially", len(fuzzersToExecute))
+	} else {
+		log.Printf("Executing %d fuzzer(s) with max %d parallel", len(fuzzersToExecute), maxParallel)
+	}
 	log.Printf("TaskID: %s", params.TaskDetail.TaskID)
 	log.Printf("ProjectName: %s", params.TaskDetail.ProjectName)
 	log.Printf("===========================================")
 
+	// Shared state for tracking results
+	var resultsMu sync.Mutex
 	var lastErr error
 	successCount := 0
 
+	// Semaphore channel to limit parallelism
+	sem := make(chan struct{}, maxParallel)
+	var wg sync.WaitGroup
+
+	// Execute fuzzers with controlled parallelism
 	for idx, fuzzer := range fuzzersToExecute {
-		log.Printf("")
-		log.Printf("╔════════════════════════════════════════════════════════════════╗")
-		log.Printf("║  Fuzzer %d/%d: %s", idx+1, len(fuzzersToExecute), filepath.Base(fuzzer))
-		log.Printf("╚════════════════════════════════════════════════════════════════╝")
+		wg.Add(1)
+		sem <- struct{}{} // Acquire semaphore
 
-		// Set a fresh deadline for this fuzzer based on per-fuzzer timeout
-		timeoutMinutes := 60 // Default 1 hour
-		if params.FuzzerConfig != nil && params.FuzzerConfig.PerFuzzerTimeoutMinutes > 0 {
-			timeoutMinutes = params.FuzzerConfig.PerFuzzerTimeoutMinutes
-		}
+		go func(idx int, fuzzer string) {
+			defer wg.Done()
+			defer func() { <-sem }() // Release semaphore
 
-		// Create a new deadline for this specific fuzzer
-		newDeadline := time.Now().Add(time.Duration(timeoutMinutes) * time.Minute)
-		params.TaskDetail.Deadline = newDeadline.Unix() * 1000
+			log.Printf("")
+			log.Printf("╔════════════════════════════════════════════════════════════════╗")
+			log.Printf("║  Fuzzer %d/%d: %s", idx+1, len(fuzzersToExecute), filepath.Base(fuzzer))
+			log.Printf("╚════════════════════════════════════════════════════════════════╝")
 
-		log.Printf("Fuzzer timeout: %d minutes (deadline: %s)",
-			timeoutMinutes, newDeadline.Format("15:04:05"))
-
-		fuzzDir := filepath.Dir(fuzzer)
-
-		// Save task detail to JSON for strategy scripts
-		helpers.SaveTaskDetailToJson(params.TaskDetail, fuzzer, fuzzDir)
-
-		// Create a copy of fuzzDir for parallel strategies
-		err = helpers.CopyFuzzDirForParallelStrategies(fuzzer, fuzzDir)
-		if err != nil {
-			log.Printf("Failed to copy fuzzDir %s for parallel strategies. Error: %v", fuzzDir, err)
-		} else {
-			log.Printf("Prepared fuzzer directory for execution: %v", fuzzer)
-		}
-
-		// Determine sanitizer from params or extract from fuzzer directory name
-		sanitizer := params.Sanitizer
-		if sanitizer == "" {
-			// Fallback: Extract sanitizer from directory name (e.g., "bind9-address" -> "address")
-			baseName := filepath.Base(fuzzDir)
-			parts := strings.Split(baseName, "-")
-			if len(parts) > 1 {
-				sanitizer = parts[len(parts)-1]
-				log.Printf("Extracted sanitizer from directory name: %s", sanitizer)
-			} else {
-				// Use configured preferred sanitizer as last resort
-				if params.FuzzerConfig != nil {
-					sanitizer = params.FuzzerConfig.PreferredSanitizer
-				} else {
-					sanitizer = "address"
-				}
-				log.Printf("Using default sanitizer: %s", sanitizer)
+			// Set a fresh deadline for this fuzzer based on per-fuzzer timeout
+			timeoutMinutes := 60 // Default 1 hour
+			if params.FuzzerConfig != nil && params.FuzzerConfig.PerFuzzerTimeoutMinutes > 0 {
+				timeoutMinutes = params.FuzzerConfig.PerFuzzerTimeoutMinutes
 			}
-		}
 
-		// Execute the fuzzing workflow for this fuzzer
-		err = executeFuzzingWorkflow(fuzzer, params, projectDir, fuzzDir, sanitizer)
-		if err != nil {
-			log.Printf("✗ Fuzzer %d/%d failed: %v", idx+1, len(fuzzersToExecute), err)
-			lastErr = err
-		} else {
-			log.Printf("✓ Fuzzer %d/%d completed successfully", idx+1, len(fuzzersToExecute))
-			successCount++
-		}
+			// Create a copy of params for this goroutine
+			fuzzerParams := params
+
+			// Create a new deadline for this specific fuzzer
+			newDeadline := time.Now().Add(time.Duration(timeoutMinutes) * time.Minute)
+			fuzzerParams.TaskDetail.Deadline = newDeadline.Unix() * 1000
+
+			log.Printf("Fuzzer timeout: %d minutes (deadline: %s)",
+				timeoutMinutes, newDeadline.Format("15:04:05"))
+
+			fuzzDir := filepath.Dir(fuzzer)
+
+			// Save task detail to JSON for strategy scripts
+			helpers.SaveTaskDetailToJson(fuzzerParams.TaskDetail, fuzzer, fuzzDir)
+
+			// Create a copy of fuzzDir for parallel strategies
+			err := helpers.CopyFuzzDirForParallelStrategies(fuzzer, fuzzDir)
+			if err != nil {
+				log.Printf("Failed to copy fuzzDir %s for parallel strategies. Error: %v", fuzzDir, err)
+			} else {
+				log.Printf("Prepared fuzzer directory for execution: %v", fuzzer)
+			}
+
+			// Determine sanitizer from params or extract from fuzzer directory name
+			sanitizer := fuzzerParams.Sanitizer
+			if sanitizer == "" {
+				// Fallback: Extract sanitizer from directory name (e.g., "bind9-address" -> "address")
+				baseName := filepath.Base(fuzzDir)
+				parts := strings.Split(baseName, "-")
+				if len(parts) > 1 {
+					sanitizer = parts[len(parts)-1]
+					log.Printf("Extracted sanitizer from directory name: %s", sanitizer)
+				} else {
+					// Use configured preferred sanitizer as last resort
+					if fuzzerParams.FuzzerConfig != nil {
+						sanitizer = fuzzerParams.FuzzerConfig.PreferredSanitizer
+					} else {
+						sanitizer = "address"
+					}
+					log.Printf("Using default sanitizer: %s", sanitizer)
+				}
+			}
+
+			// Execute the fuzzing workflow for this fuzzer
+			err = executeFuzzingWorkflow(fuzzer, fuzzerParams, projectDir, fuzzDir, sanitizer)
+
+			// Update shared state with mutex
+			resultsMu.Lock()
+			if err != nil {
+				log.Printf("✗ Fuzzer %d/%d failed: %v", idx+1, len(fuzzersToExecute), err)
+				lastErr = err
+			} else {
+				log.Printf("✓ Fuzzer %d/%d completed successfully", idx+1, len(fuzzersToExecute))
+				successCount++
+			}
+			resultsMu.Unlock()
+		}(idx, fuzzer)
 	}
+
+	// Wait for all fuzzers to complete
+	wg.Wait()
 
 	// Print final summary
 	log.Printf("")
