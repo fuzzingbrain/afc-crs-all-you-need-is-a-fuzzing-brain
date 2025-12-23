@@ -443,7 +443,7 @@ func executeXPatchPhase(fuzzer string, params TaskExecutionParams, projectDir, s
 				log.Printf("Error finding SARIF files: %v", err)
 			}
 			for _, sarifPath := range sarifFiles {
-				if runXPatchSarifStrategies(fuzzer, params.TaskDir, sarifPath,
+				if runXPatchSarifStrategies(fuzzer, params.TaskDir, projectDir, sarifPath,
 					params.ProjectConfig.Language, params.TaskDetail, deadlineTime, patchWorkDir,
 					params.Model, params.SubmissionEndpoint, params.WorkerIndex, params.AnalysisServiceUrl) {
 					patchSuccess = true

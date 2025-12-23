@@ -756,7 +756,7 @@ func (s *WorkerCRSService) submitSarifInvalid(taskID string, broadcast models.SA
 	return nil
 }
 
-func (s *WorkerCRSService) runSarifPOVStrategies(myFuzzer, taskDir, sarifFilePath string, language string, taskDetail *models.TaskDetail, timeout int,
+func (s *WorkerCRSService) runSarifPOVStrategies(myFuzzer, taskDir, projectDir, sarifFilePath string, language string, taskDetail *models.TaskDetail, timeout int,
 	phase int) bool {
 	// Find all strategy files under /app/strategy/
 	strategyDir := "/app/strategy"
@@ -785,7 +785,11 @@ func (s *WorkerCRSService) runSarifPOVStrategies(myFuzzer, taskDir, sarifFilePat
 			strategyName := filepath.Base(strategyPath)
 			log.Printf("Running Sarif POV strategy: %s", strategyPath)
 
-			pythonInterpreter := "/tmp/crs_venv/bin/python3"
+			// Get workspace directory (parent of projectDir which is typically workspace/repo)
+			workspaceDir := filepath.Dir(projectDir)
+			venvPath := filepath.Join(workspaceDir, "crs_venv")
+
+			pythonInterpreter := filepath.Join(venvPath, "bin", "python3")
 			isRoot := helpers.GetEffectiveUserID() == 0
 			hasSudo := helpers.CheckSudoAvailable()
 			maxIterations := 5
@@ -823,8 +827,8 @@ func (s *WorkerCRSService) runSarifPOVStrategies(myFuzzer, taskDir, sarifFilePat
 
 			runCmd.Dir = taskDir
 			runCmd.Env = append(os.Environ(),
-				"VIRTUAL_ENV=/tmp/crs_venv",
-				"PATH=/tmp/crs_venv/bin:"+os.Getenv("PATH"),
+				"VIRTUAL_ENV="+venvPath,
+				"PATH="+filepath.Join(venvPath, "bin")+":"+os.Getenv("PATH"),
 				fmt.Sprintf("SUBMISSION_ENDPOINT=%s", s.submissionEndpoint),
 				fmt.Sprintf("TASK_ID=%s", taskDetail.TaskID.String()),
 				fmt.Sprintf("CRS_KEY_ID=%s", s.cfg.Auth.KeyID),
@@ -917,7 +921,7 @@ func (s *WorkerCRSService) runSarifPOVStrategies(myFuzzer, taskDir, sarifFilePat
 	return povSuccess
 }
 
-func (s *WorkerCRSService) runXPatchSarifStrategies(myFuzzer, taskDir, sarifFilePath string, language string, taskDetail models.TaskDetail,
+func (s *WorkerCRSService) runXPatchSarifStrategies(myFuzzer, taskDir, projectDir, sarifFilePath string, language string, taskDetail models.TaskDetail,
 	deadlineTime time.Time) bool {
 
 	log.Printf("runXPatchSarifStrategies: starting patch attempt with sarif "+
@@ -959,7 +963,11 @@ func (s *WorkerCRSService) runXPatchSarifStrategies(myFuzzer, taskDir, sarifFile
 			strategyName := filepath.Base(strategyPath)
 			log.Printf("Running XPATCH Sarif strategy: %s", strategyPath)
 
-			pythonInterpreter := "/tmp/crs_venv/bin/python3"
+			// Get workspace directory (parent of projectDir which is typically workspace/repo)
+			workspaceDir := filepath.Dir(projectDir)
+			venvPath := filepath.Join(workspaceDir, "crs_venv")
+
+			pythonInterpreter := filepath.Join(venvPath, "bin", "python3")
 			isRoot := helpers.GetEffectiveUserID() == 0
 			hasSudo := helpers.CheckSudoAvailable()
 			maxIterations := 5
@@ -993,8 +1001,8 @@ func (s *WorkerCRSService) runXPatchSarifStrategies(myFuzzer, taskDir, sarifFile
 
 			runCmd.Dir = taskDir
 			runCmd.Env = append(os.Environ(),
-				"VIRTUAL_ENV=/tmp/crs_venv",
-				"PATH=/tmp/crs_venv/bin:"+os.Getenv("PATH"),
+				"VIRTUAL_ENV="+venvPath,
+				"PATH="+filepath.Join(venvPath, "bin")+":"+os.Getenv("PATH"),
 				fmt.Sprintf("SUBMISSION_ENDPOINT=%s", s.submissionEndpoint),
 				fmt.Sprintf("TASK_ID=%s", taskDetail.TaskID.String()),
 				fmt.Sprintf("CRS_KEY_ID=%s", s.cfg.Auth.KeyID),

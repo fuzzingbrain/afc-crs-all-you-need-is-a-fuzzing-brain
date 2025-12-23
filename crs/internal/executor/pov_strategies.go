@@ -64,7 +64,7 @@ func runAdvancedPOVPhases(
 	numPhases := 4
 	roundNum := 0
 	var totalPovTimeSpent time.Duration
-	sequentialTestRun := false // Set to true for sequential execution (for debugging)
+	sequentialTestRun := true // Set to true for sequential execution (for debugging)
 
 	// Loop until POV is found or deadline approaches
 	for {
@@ -142,24 +142,26 @@ func runAdvancedPOVPhases(
 
 		// Check if other fuzzers have found POVs - early exit optimization
 		workflowDuration := time.Since(workflowStartTime)
-		pov_count, patch_count, err := getPOVStatsFromSubmissionService(
-			params.TaskDetail.TaskID.String(), params.SubmissionEndpoint)
-		if err != nil {
-			log.Printf("Error checking POV stats: %v", err)
-		} else if pov_count > 0 && workflowDuration > 45*time.Minute {
-			log.Printf("Other fuzzers found POVs and workflow running >45min. Stopping. (pov=%d, patch=%d, duration=%v)",
-				pov_count, patch_count, workflowDuration)
+		useSubmissionService := false
+		if workflowDuration > totalLibfuzzingTime || workflowDuration > 60*time.Minute {
+			log.Printf("Halftime or 1h passed (duration=%v). Stopping POV generation.",
+				workflowDuration)
 			break
-		} else if workflowDuration > totalLibfuzzingTime || workflowDuration > 60*time.Minute {
-			log.Printf("Halftime or 1h passed (duration=%v). Stopping POV generation. (pov=%d, patch=%d)",
-				workflowDuration, pov_count, patch_count)
-			break
-		} else if pov_count > 0 {
-			log.Printf("POVs exist but workflow only %v (<1h), continuing. (pov=%d, patch=%d)",
-				workflowDuration, pov_count, patch_count)
-		} else {
-			log.Printf("No POVs yet, continuing to next round (duration=%v)", workflowDuration)
-		}
+		} else if useSubmissionService {
+			pov_count, patch_count, err := getPOVStatsFromSubmissionService(
+				params.TaskDetail.TaskID.String(), params.SubmissionEndpoint)
+			if err != nil {
+				log.Printf("Error checking POV stats: %v", err)
+			} else if pov_count > 0 && workflowDuration > 45*time.Minute {
+				log.Printf("Other fuzzers found POVs and workflow running >45min. Stopping. (pov=%d, patch=%d, duration=%v)",
+					pov_count, patch_count, workflowDuration)
+				break
+			} else if pov_count > 0 {
+				log.Printf("POVs exist but workflow only %v (<1h), continuing. (pov=%d, patch=%d)",
+					workflowDuration, pov_count, patch_count)
+			} 
+		}		
+		log.Printf("No POVs yet, continuing to next round (duration=%v)", workflowDuration)
 	}
 
 	log.Printf("========== Advanced POV phases completed ==========")
@@ -395,8 +397,12 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 			strategyCtx, strategyCancel := context.WithTimeout(ctx, strategyTimeout)
 			defer strategyCancel()
 
+			// Get workspace directory (parent of projectDir which is typically workspace/repo)
+			workspaceDir := filepath.Dir(projectDir)
+			venvPath := filepath.Join(workspaceDir, "crs_venv")
+
 			// Use the Python interpreter from the virtual environment
-			pythonInterpreter := "/tmp/crs_venv/bin/python3"
+			pythonInterpreter := filepath.Join(venvPath, "bin", "python3")
 
 			// Check if we're running as root or if sudo is available
 			isRoot := helpers.GetEffectiveUserID() == 0
@@ -439,8 +445,8 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 			runCmd.Dir = taskDir
 			// Set environment variables that would be set by the virtual environment activation
 			runCmd.Env = append(os.Environ(),
-				"VIRTUAL_ENV=/tmp/crs_venv",
-				"PATH=/tmp/crs_venv/bin:"+os.Getenv("PATH"),
+				"VIRTUAL_ENV="+venvPath,
+				"PATH="+filepath.Join(venvPath, "bin")+":"+os.Getenv("PATH"),
 				fmt.Sprintf("SUBMISSION_ENDPOINT=%s", basicConfig.SubmissionEndpoint),
 				fmt.Sprintf("TASK_ID=%s", taskDetail.TaskID.String()),
 				// Pass through API credentials if they exist
@@ -634,40 +640,9 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 
 func runLibFuzzer(fuzzer, taskDir, projectDir, language string,
 	taskDetail models.TaskDetail, task models.Task, submissionEndpoint string) error {
-	// TODO: This is a highly complex 305-line function from crs_services.go:6685-6990
-	// It includes:
-	// - Docker container management (docker run --rm with dynamic naming)
-	// - Continuous fuzzing loop until deadline
-	// - Crash detection and processing (isCrashOutput)
-	// - Crash signature generation and deduplication
-	// - POV saving (saveAllCrashesAsPOVs)
-	// - Crash signature submission (generateCrashSignatureAndSubmit)
-	// - Automatic patching attempts with retry logic (300 retries!)
-	// - Global deadline management with context cancellation
-	// - Real-time POV statistics checking from submission service
-	// - Early termination when POV limit reached (LIMIT_POV_NUM = 3)
-	// - Telemetry span tracking
-	//
-	// Critical dependencies that need migration:
-	// - isCrashOutput (line 399) - detects if output contains crash signatures
-	// - extractCrashOutput (line 6351) - extracts relevant crash info (4KB limit)
-	// - generateCrashSignature (line 3790) - generates unique crash signatures
-	// - saveAllCrashesAsPOVs (line 3382) - saves crash files as POVs
-	// - generateCrashSignatureAndSubmit (line 3563) - submits crash info
-	// - getFuzzerArgs (line 7852) - constructs docker run arguments
-	// - filterInstrumentedLines (line 6333) - filters output
-	//
-	// Additional service state dependencies:
-	// - s.povMetadataDir (dynamic modification: fmt.Sprintf("%s_%d", s.povMetadataDir, successfulPoVs))
-	// - s.status.Processing (to check if multiple workers running)
-	//
-	// This function is EXTREMELY complex and tightly coupled with service state.
-	// Recommend migrating helper functions first, then refactoring this incrementally.
-	//
 	// For now, returning nil to indicate not implemented
-	log.Printf("TODO: runLibFuzzer not yet fully implemented in executor package")
-	log.Printf("Function requires migration of 305 lines + 7 helper functions from crs_services.go:6685-6990")
-	log.Printf("This is the most complex function in the codebase due to Docker management, crash handling, and retry logic")
+	log.Printf("TODO: skipped runLibFuzzer in executor package")
+
 	return nil
 }
 
@@ -688,15 +663,8 @@ func runAdvancedPOVStrategiesWithTimeout(
 ) bool {
 	// Use default config if not provided
 	if strategyConfig == nil {
-		log.Printf("StrategyConfig is nil, using defaults")
-		strategyConfig = &config.StrategyConfig{
-			BaseDir:        "/app/strategy",
-			NewStrategyDir: "jeff",
-			POV: config.POVStrategyConfig{
-				AdvancedDeltaPattern: "as*_delta_new.py",
-				AdvancedFullPattern:  "as*_full.py",
-			},
-		}
+		log.Printf("StrategyConfig is nil")
+		return false
 	}
 
 	// Determine strategy directory and pattern
@@ -760,7 +728,11 @@ func runAdvancedPOVStrategiesWithTimeout(
 
 			log.Printf("[POV Round-%d Phase-%d] Running advanced strategy: %s (timeout: %v)", roundNum, phase, strategyName, strategyTimeout)
 
-			pythonInterpreter := "/tmp/crs_venv/bin/python3"
+			// Get workspace directory (parent of projectDir which is typically workspace/repo)
+			workspaceDir := filepath.Dir(projectDir)
+			venvPath := filepath.Join(workspaceDir, "crs_venv")
+
+			pythonInterpreter := filepath.Join(venvPath, "bin", "python3")
 			isRoot := helpers.GetEffectiveUserID() == 0
 			hasSudo := helpers.CheckSudoAvailable()
 
@@ -810,8 +782,8 @@ func runAdvancedPOVStrategiesWithTimeout(
 			runCmd.Dir = taskDir
 
 			runCmd.Env = append(os.Environ(),
-				"VIRTUAL_ENV=/tmp/crs_venv",
-				"PATH=/tmp/crs_venv/bin:"+os.Getenv("PATH"),
+				"VIRTUAL_ENV="+venvPath,
+				"PATH="+filepath.Join(venvPath, "bin")+":"+os.Getenv("PATH"),
 				fmt.Sprintf("SUBMISSION_ENDPOINT=%s", submissionEndpoint),
 				fmt.Sprintf("TASK_ID=%s", taskDetail.TaskID.String()),
 				fmt.Sprintf("CRS_KEY_ID=%s", os.Getenv("CRS_KEY_ID")),

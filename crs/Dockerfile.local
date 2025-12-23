@@ -44,7 +44,7 @@ RUN apk add --no-cache \
 RUN python3 -m venv /tmp/crs_venv
 
 # Activate the virtual environment and install packages
-RUN /bin/bash -c "source /tmp/crs_venv/bin/activate && \
+RUN /bin/bash -c "source ~/crs_venv/bin/activate && \
     pip install --no-cache-dir litellm==1.69.0 && \
     pip install --no-cache-dir tiktoken python-dotenv pyyaml openai anthropic && \
     pip install --no-cache-dir google-generativeai && \
@@ -52,7 +52,7 @@ RUN /bin/bash -c "source /tmp/crs_venv/bin/activate && \
     pip install --no-cache-dir openlit"
     
 # Make sure the virtual environment is accessible
-ENV PATH="/tmp/crs_venv/bin:${PATH}"
+ENV PATH="~/crs_venv/bin:${PATH}"
 
 # Set working directory
 WORKDIR /app

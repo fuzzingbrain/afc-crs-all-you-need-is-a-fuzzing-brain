@@ -113,6 +113,7 @@ type TaskDetail struct {
     Deadline    int64         `json:"deadline"`
     Focus       string        `json:"focus"`
     ProjectName string        `json:"project_name"`
+    Language    string        `json:"language,omitempty"`
     Source      []SourceDetail `json:"source"`
     Metadata    map[string]string `json:"metadata"`
     State       TaskState     `json:"state"`

@@ -185,7 +185,7 @@ def mock_config() -> Mock:
     config.sanitizer = "address"
     config.max_iterations = 5
     config.fuzzing_timeout_minutes = 45
-    config.models = ["claude-sonnet-4-20250514", "claude-opus-4-20250514"]
+    config.models = ["claude-sonnet-4-5-20250929", "claude-opus-4-20250514"]
     config.pov_phase = 0
     config.project_dir = "/test/project"
     config.fuzz_dir = "/test/fuzz"

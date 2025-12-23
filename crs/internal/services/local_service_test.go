@@ -28,7 +28,7 @@ func TestNewLocalService(t *testing.T) {
 					AnalysisURL:   "http://localhost:7082",
 				},
 				AI: config.AIConfig{
-					Model:           "claude-sonnet-4-20250514",
+					Model:           "claude-sonnet-4-5-20250929",
 					AnthropicAPIKey: "test-api-key",
 				},
 			},
@@ -104,7 +104,7 @@ func TestLocalService_GetStatus(t *testing.T) {
 			AnalysisURL:   "http://localhost:7082",
 		},
 		AI: config.AIConfig{
-			Model:           "claude-sonnet-4-20250514",
+			Model:           "claude-sonnet-4-5-20250929",
 			AnthropicAPIKey: "test-key",
 		},
 	}

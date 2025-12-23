@@ -83,7 +83,7 @@
     RUN python3 -m venv /tmp/crs_venv
     
     # Install Python packages in the virtualenv
-    RUN /bin/bash -c "source /tmp/crs_venv/bin/activate && \
+    RUN /bin/bash -c "source ~/crs_venv/bin/activate && \
         pip install --no-cache-dir litellm && \
         pip install --no-cache-dir tiktoken python-dotenv pyyaml openai anthropic && \
         pip install --no-cache-dir google-generativeai && \
@@ -91,7 +91,7 @@
         pip install --no-cache-dir openlit"
     
     # Ensure the virtual environment is on PATH
-    ENV PATH="/tmp/crs_venv/bin:${PATH}"
+    ENV PATH="~/crs_venv/bin:${PATH}"
     
     # ------------------------------------------------------
     # Copy entrypoint-local, .env, and set up directories

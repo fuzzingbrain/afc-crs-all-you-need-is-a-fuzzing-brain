@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"flag"
-	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -37,58 +36,43 @@ func main() {
 		jsonFound  bool
 	)
 
-	walkErr := filepath.WalkDir(absTaskPath, func(p string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
-			return nil // Skip errors & directories
-		}
-
-		name := d.Name()
-		if strings.HasPrefix(name, "task_detail") && strings.HasSuffix(name, ".json") {
-			data, rdErr := os.ReadFile(p)
-			if rdErr != nil {
-				log.Printf("Failed to read %s: %v (continuing search)", p, rdErr)
-				return nil
-			}
-			if umErr := json.Unmarshal(data, &taskDetail); umErr != nil {
-				log.Printf("Failed to unmarshal %s: %v (continuing search)", p, umErr)
-				return nil
-			}
+	taskDir := absTaskPath
+	// Only check for task_detail.json in the task root directory, not subdirectories
+	taskDetailPath := filepath.Join(taskDir, "task_detail.json")
+	if data, err := os.ReadFile(taskDetailPath); err == nil {
+		if umErr := json.Unmarshal(data, &taskDetail); umErr == nil {
 			jsonFound = true
-			log.Printf("Loaded task detail from %s", p)
-			return filepath.SkipDir // Stop walking once we succeed
+			log.Printf("Loaded task detail from %s", taskDetailPath)
+		} else {
+			log.Printf("Failed to unmarshal %s: %v", taskDetailPath, umErr)
 		}
-		return nil
-	})
-	if walkErr != nil {
-		log.Printf("Directory walk error: %v", walkErr)
 	}
 
-	// Fallback to stub when JSON isn’t found / can’t be parsed
+	// Fallback to stub when JSON isn't found / can't be parsed
 	if !jsonFound {
-		log.Printf("No valid task_detail.json found – falling back to default task detail.")
+		log.Printf("No valid task_detail.json found – falling back to default task detail")
 
-		// Default values
-		projectName := "test"
-		focusName := "test"
+		projectName := "unknown"
+		focusName := "repo"
 
-		// Try to infer project from fuzz-tooling/projects/<project>
-		projectsDir := filepath.Join(absTaskPath, "fuzz-tooling", "projects")
-		if files, err := os.ReadDir(projectsDir); err == nil {
-			for _, f := range files {
-				if f.IsDir() {
-					projectName = f.Name()
-					focusName = "afc-" + projectName
-					log.Printf("Found project '%s' in fuzz-tooling/projects, setting focus to '%s'", projectName, focusName)
-					break // first hit wins
+		projectsDir := filepath.Join(taskDir, "fuzz-tooling/projects/")
+		files, err := os.ReadDir(projectsDir)
+		if err == nil {
+			for _, file := range files {
+				if file.IsDir() {
+					projectName = file.Name()
+					focusName = "repo"
+					log.Printf("Found project '%s' in fuzz-tooling/projects, source code in '%s'", projectName, focusName)
+					break // Use the first one
 				}
 			}
 		} else {
-			log.Printf("Could not read fuzz-tooling/projects directory: %v", err)
+			log.Printf("Could not read fuzz-tooling/projects/ directory: %v", err)
 		}
 
 		// Determine task type based on presence of "diff" directory
 		taskType := models.TaskTypeFull
-		diffPath := filepath.Join(absTaskPath, "diff")
+		diffPath := filepath.Join(taskDir, "diff")
 		if info, err := os.Stat(diffPath); err == nil && info.IsDir() {
 			taskType = models.TaskTypeDelta
 			log.Printf("Found 'diff' directory, setting task type to 'delta'")
@@ -96,15 +80,28 @@ func main() {
 			log.Printf("No 'diff' directory found, setting task type to 'full'")
 		}
 
-		// Build fallback TaskDetail (mirrors your example)
+		log.Printf("Saving Task Detail")
+
 		taskDetail = models.TaskDetail{
 			TaskID:            uuid.New(),
 			ProjectName:       projectName,
 			Focus:             focusName,
 			Type:              taskType,
-			Deadline:          time.Now().Add(time.Hour).Unix(),
+			Deadline:          time.Now().Add(time.Hour).Unix() * 1000,
 			HarnessesIncluded: true,
 			Metadata:          make(map[string]string),
+		}
+
+		log.Printf("Completed Task Detail, setting task detail to %v", taskDetail)
+
+		// Save task detail to task directory for future runs
+		jsonData, marshalErr := json.MarshalIndent(taskDetail, "", "  ")
+		if marshalErr == nil {
+			if writeErr := os.WriteFile(taskDetailPath, jsonData, 0644); writeErr == nil {
+				log.Printf("Saved task detail to %s", taskDetailPath)
+			} else {
+				log.Printf("Warning: Failed to save task detail: %v", writeErr)
+			}
 		}
 	}
 
@@ -113,7 +110,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Analysis failed: %v", err)
 	}
-	log.Printf("Analysis complete: %+v", results)
+	// log.Printf("Analysis complete: %+v", results)
 
 	// helper: write JSON file
 	writeJSON := func(path string, v any) error {

@@ -48,7 +48,7 @@ class LLMValidator:
         # Advanced models for testing
         self.advanced_models = {
             'openai': 'gpt-5-2025-08-07',
-            'anthropic': 'claude-sonnet-4-20250514',
+            'anthropic': 'claude-sonnet-4-5-20250929',
             'gemini': 'gemini-2.5-flash',
             'xai': 'grok-3'
         }
@@ -424,7 +424,7 @@ def main():
         print("🚀 Advanced Mode: Testing with latest models")
         print("Models to test:")
         print("  - OpenAI: GPT-5 (gpt-5-2025-08-07)")
-        print("  - Anthropic: Claude Sonnet 4 (claude-sonnet-4-20250514)")
+        print("  - Anthropic: Claude Sonnet 4.5 (claude-sonnet-4-5-20250929)")
         print("  - Google: Gemini 2.5 Flash (gemini-2.5-flash)")
         print("  - xAI: Grok-3 (grok-3)")
         print("  - Test question: 'What is 2+2? Answer with just the number.'")

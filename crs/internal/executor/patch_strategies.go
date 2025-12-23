@@ -294,8 +294,12 @@ func runPatchingStrategies(
 					}
 				}
 
+				// Get workspace directory (parent of projectDir which is typically workspace/repo)
+				workspaceDir := filepath.Dir(projectDir)
+				venvPath := filepath.Join(workspaceDir, "crs_venv")
+
 				// Use the Python interpreter from the virtual environment
-				pythonInterpreter := "/tmp/crs_venv/bin/python3"
+				pythonInterpreter := filepath.Join(venvPath, "bin", "python3")
 				isRoot := helpers.GetEffectiveUserID() == 0
 				hasSudo := helpers.CheckSudoAvailable()
 
@@ -341,8 +345,8 @@ func runPatchingStrategies(
 
 				// Set environment variables that would be set by the virtual environment activation
 				runCmd.Env = append(os.Environ(),
-					"VIRTUAL_ENV=/tmp/crs_venv",
-					"PATH=/tmp/crs_venv/bin:"+os.Getenv("PATH"),
+					"VIRTUAL_ENV="+venvPath,
+					"PATH="+filepath.Join(venvPath, "bin")+":"+os.Getenv("PATH"),
 					fmt.Sprintf("SUBMISSION_ENDPOINT=%s", submissionEndpoint),
 					fmt.Sprintf("TASK_ID=%s", taskDetail.TaskID.String()),
 					// Pass through API credentials if they exist
@@ -687,8 +691,12 @@ func runXPatchingStrategiesWithoutPOV(
 				os.Symlink(envFilePath, targetEnvPath)
 			}
 
+			// Get workspace directory (parent of projectDir which is typically workspace/repo)
+			workspaceDir := filepath.Dir(projectDir)
+			venvPath := filepath.Join(workspaceDir, "crs_venv")
+
 			// Use the Python interpreter from the virtual environment
-			pythonInterpreter := "/tmp/crs_venv/bin/python3"
+			pythonInterpreter := filepath.Join(venvPath, "bin", "python3")
 			isRoot := helpers.GetEffectiveUserID() == 0
 			hasSudo := helpers.CheckSudoAvailable()
 
@@ -731,8 +739,8 @@ func runXPatchingStrategiesWithoutPOV(
 
 			// Set environment variables that would be set by the virtual environment activation
 			runCmd.Env = append(os.Environ(),
-				"VIRTUAL_ENV=/tmp/crs_venv",
-				"PATH=/tmp/crs_venv/bin:"+os.Getenv("PATH"),
+				"VIRTUAL_ENV="+venvPath,
+				"PATH="+filepath.Join(venvPath, "bin")+":"+os.Getenv("PATH"),
 				fmt.Sprintf("SUBMISSION_ENDPOINT=%s", submissionEndpoint),
 				fmt.Sprintf("TASK_ID=%s", taskDetail.TaskID.String()),
 				// Pass through API credentials if they exist
@@ -875,7 +883,7 @@ func runXPatchingStrategiesWithoutPOV(
 }
 
 func runXPatchSarifStrategies(
-	myFuzzer, taskDir, sarifFilePath, language string,
+	myFuzzer, taskDir, projectDir, sarifFilePath, language string,
 	taskDetail models.TaskDetail,
 	deadlineTime time.Time,
 	patchWorkDir string,
@@ -926,7 +934,11 @@ func runXPatchSarifStrategies(
 			strategyName := filepath.Base(strategyPath)
 			log.Printf("Running XPATCH Sarif strategy: %s", strategyPath)
 
-			pythonInterpreter := "/tmp/crs_venv/bin/python3"
+			// Get workspace directory (parent of projectDir which is typically workspace/repo)
+			workspaceDir := filepath.Dir(projectDir)
+			venvPath := filepath.Join(workspaceDir, "crs_venv")
+
+			pythonInterpreter := filepath.Join(venvPath, "bin", "python3")
 			isRoot := helpers.GetEffectiveUserID() == 0
 			hasSudo := helpers.CheckSudoAvailable()
 			maxIterations := 5
@@ -960,8 +972,8 @@ func runXPatchSarifStrategies(
 
 			runCmd.Dir = taskDir
 			runCmd.Env = append(os.Environ(),
-				"VIRTUAL_ENV=/tmp/crs_venv",
-				"PATH=/tmp/crs_venv/bin:"+os.Getenv("PATH"),
+				"VIRTUAL_ENV="+venvPath,
+				"PATH="+filepath.Join(venvPath, "bin")+":"+os.Getenv("PATH"),
 				fmt.Sprintf("SUBMISSION_ENDPOINT=%s", submissionEndpoint),
 				fmt.Sprintf("TASK_ID=%s", taskDetail.TaskID.String()),
 				fmt.Sprintf("CRS_KEY_ID=%s", os.Getenv("CRS_KEY_ID")),

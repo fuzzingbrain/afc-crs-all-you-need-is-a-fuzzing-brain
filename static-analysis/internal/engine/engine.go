@@ -35,6 +35,8 @@ import (
 
 	// "static-analysis/internal/parser/java"
 	"static-analysis/internal/engine/models"
+	"static-analysis/internal/joern"
+	"static-analysis/internal/simple"
 	java_parser "static-analysis/internal/parser/java/grammar"
 )
 
@@ -3093,484 +3095,93 @@ func EngineMainAnalysisCore(taskDetail models.TaskDetail, taskDir string) (model
 
 	var language string
 
+	// Try to get language from task detail first
+	if taskDetail.Language != "" {
+		language = taskDetail.Language
+	} else {
+		// Fall back to reading from project.yaml
+		projectYamlPath := filepath.Join(taskDir, "fuzz-tooling", "projects", taskDetail.ProjectName, "project.yaml")
+		yamlData, err := os.ReadFile(projectYamlPath)
+		if err == nil {
+			var cfg ProjectConfig
+			if unmarshalErr := yaml.Unmarshal(yamlData, &cfg); unmarshalErr == nil {
+				language = cfg.Language
+			} else {
+				log.Printf("Warning: Could not parse project.yaml (%v). Language will be auto-detected.", unmarshalErr)
+			}
+		} else {
+			log.Printf("Warning: Could not read project.yaml (%v). Language will be auto-detected.", err)
+		}
+	}
+
 	startTime := time.Now()
 
-	dockerfilePath := path.Join(taskDir, "fuzz-tooling/projects", taskDetail.ProjectName)
-	dockerfileFullPath := path.Join(dockerfilePath, "Dockerfile")
-	fuzzerDir := path.Join(taskDir, "fuzz-tooling/build/out", taskDetail.ProjectName)
 	projectDir := path.Join(taskDir, taskDetail.Focus)
 
-	var sanitizerDirs []string
+	// Build list of directories to analyze
+	// For some projects (especially Java), fuzzers live in fuzz-tooling/projects/<project>
+	dirsToAnalyze := []string{projectDir}
 
-	var cfg *ProjectConfig
-	if !dirExists(taskDir) {
-		if err := os.MkdirAll(taskDir, 0755); err != nil {
-			return results, fmt.Errorf("failed to create task directory: %v", err)
-		}
-
-		log.Printf("Created task directory: %s", taskDir)
-
-		// download all code
-		for _, source := range taskDetail.Source {
-			if len(source.URL) > 0 {
-				if err := downloadAndVerifySource(taskDir, source); err != nil {
-					return results, fmt.Errorf("failed to download source %s: %v", source.Type, err)
-				}
-			}
-		}
-
-		is_delta := (taskDetail.Type == "delta")
-		// 1. Extract archives first
-		if err := extractSources(taskDir, is_delta); err != nil {
-			return results, fmt.Errorf("failed to extract sources: %v", err)
-		}
-		projectYAMLPath := filepath.Join(dockerfilePath, "project.yaml")
-		var err error
-		cfg, err = loadProjectConfig(projectYAMLPath)
-		if err != nil {
-			log.Printf("Warning: Could not parse project.yaml (%v). Defaulting to address sanitizer.", err)
-			cfg = &ProjectConfig{Sanitizers: []string{"address"}}
-		}
-		if cfg.Language == "java" || cfg.Language == "jvm" {
-			language = "java"
-		} else {
-			language = "c"
-		}
-
-		// if len(cfg.Sanitizers) == 0 {
-		// 	log.Printf("No sanitizers listed in project.yaml; defaulting to address sanitizer.")
-		// 	cfg.Sanitizers = []string{"address"}
-		// }
-		//only do address
-		cfg.Sanitizers = []string{"address"}
-		for _, sanitizer := range cfg.Sanitizers {
-			sanitizerDir := fuzzerDir + "-" + sanitizer
-			// Keep track of each sanitizer's output path
-			sanitizerDirs = append(sanitizerDirs, sanitizerDir)
-		}
-
-		if is_delta {
-			// apply diff if appliable
-			diffPath := filepath.Join(taskDir, "diff", "ref.diff")
-
-			applyCmd := exec.Command("git", "apply", diffPath)
-			applyCmd.Dir = projectDir // Use projectDir instead of taskDir
-
-			var applyOutput bytes.Buffer
-			applyCmd.Stdout = &applyOutput
-			applyCmd.Stderr = &applyOutput
-
-			log.Printf("Applying diff in directory: %s", applyCmd.Dir)
-
-			if err := applyCmd.Run(); err != nil {
-				log.Printf("Git apply failed, trying standard patch command instead...")
-
-				// Reset the output buffer
-				applyOutput.Reset()
-
-				// Try using the standard patch command instead
-				patchCmd := exec.Command("patch", "-p1", "-i", diffPath)
-				patchCmd.Dir = projectDir
-				patchCmd.Stdout = &applyOutput
-				patchCmd.Stderr = &applyOutput
-
-				if patchErr := patchCmd.Run(); patchErr != nil {
-					// Try to list files in the directory to debug
-					log.Printf("Directory contents of %s:", applyCmd.Dir)
-					files, _ := os.ReadDir(applyCmd.Dir)
-					for _, file := range files {
-						log.Printf("  %s", file.Name())
-					}
-
-					log.Printf("Git apply and patch command both failed.\nGit apply output:\n%s\nPatch output:\n%s",
-						err.Error(), applyOutput.String())
-					return results, fmt.Errorf("failed to apply diff with both git apply and patch: %v\nOutput: %s",
-						patchErr, applyOutput.String())
-				}
-
-				log.Printf("Successfully applied diff using standard patch command to %s", patchCmd.Dir)
-			} else {
-				log.Printf("Successfully applied diff using git apply to %s", applyCmd.Dir)
-			}
-		}
-
-		if false {
-			//TODO: WHENe PULL IMAGE IS FASTER
-			buildOutput, err := PullAFCDockerImage(taskDir, taskDetail.ProjectName)
-			if err != nil {
-				log.Printf("Docker image pull build failed: %s", buildOutput)
-				log.Printf("Trying Docker build instead: %s", dockerfileFullPath)
-				buildOutput, err := BuildDockerImage(dockerfilePath, dockerfileFullPath, taskDetail.ProjectName)
-				if err != nil {
-					log.Printf("Docker build failed: %s", buildOutput)
-					return results, fmt.Errorf("failed to build Docker image: %w\nOutput: %s", err, buildOutput)
-				} else {
-					log.Printf("Docker build successful!")
-				}
-
-			} else {
-				log.Printf("Docker image pull successful: %s", buildOutput)
-			}
-		} else {
-
-			if !taskDetail.HarnessesIncluded || !fileExists(dockerfileFullPath) {
-				if !fileExists(dockerfileFullPath) {
-					cloneOssFuzzAndMainRepoOnce(taskDir, taskDetail.ProjectName, fuzzerDir)
-					dockerfilePath_x := path.Join(taskDir, "oss-fuzz/projects", taskDetail.ProjectName)
-					if dirExists(dockerfilePath_x) {
-						dockerfilePath = dockerfilePath_x
-						dockerfileFullPath = path.Join(dockerfilePath_x, "Dockerfile")
-					} else {
-						log.Printf("Failed to clone oss-fuzz and main repo for unharnessed task %s %s", taskDetail.ProjectName, taskDetail.TaskID)
-
-						if taskDetail.ProjectName == "integration-test" {
-							srcPath := "/app/strategyx/jeff/integration-test"
-							log.Printf("[INTEGRATION_TEST] dockerfilePath %s missing – copying from %s", dockerfilePath, srcPath)
-
-							if err := robustCopyDir(srcPath, dockerfilePath); err != nil {
-								log.Printf("[INTEGRATION_TEST] failed to copy integration-test files: %v", err)
-							} else {
-								log.Printf("[INTEGRATION_TEST] integration-test files copied to %s", dockerfilePath)
-							}
-
-							if err := robustCopyDir(srcPath, dockerfilePath_x); err != nil {
-								log.Printf("[INTEGRATION_TEST] failed to copy integration-test files: %v", err)
-							} else {
-								log.Printf("[INTEGRATION_TEST] integration-test files copied to %s", dockerfilePath_x)
-							}
-						}
-					}
-				} else {
-					log.Printf("[HarnessesIncluded: %t] dockerfileFullPath NOT exists %s", taskDetail.HarnessesIncluded, dockerfileFullPath)
-				}
-			} else {
-				log.Printf("[HarnessesIncluded: %t] dockerfileFullPath %s", taskDetail.HarnessesIncluded, dockerfileFullPath)
-			}
-
-			buildOutput, err := BuildDockerImage(dockerfilePath, dockerfileFullPath, taskDetail.ProjectName)
-			if err != nil {
-				log.Printf("Docker build failed. buildOutput: %s", buildOutput)
-				log.Printf("Try building with PullAFCDockerImage")
-				buildOutputAFC, err := PullAFCDockerImage(taskDir, taskDetail.ProjectName)
-				if err != nil {
-					return results, fmt.Errorf("Failed to build Docker image: %w\nbuildOutputAFC: %s", err, buildOutputAFC)
-				}
-			}
-		}
-
-		if true {
-
-			var wg sync.WaitGroup
-			// For each sanitizer in the YAML, run build_fuzzers
-			for _, sanitizer := range cfg.Sanitizers {
-				sanitizerDir := fuzzerDir + "-" + sanitizer
-				// Capture loop variables
-				san := sanitizer
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					log.Printf("Building fuzzers with --sanitizer=%s", san)
-					if err := buildFuzzersDocker(taskDir, projectDir, sanitizerDir, sanitizer, cfg.Language, taskDetail.ProjectName); err != nil {
-						log.Printf("Error building fuzzers for sanitizer %s: %v", san, err)
-						// We're ignoring errors here, which is not ideal
-					}
-				}()
-			}
-			// Wait for all builds to complete
-			wg.Wait()
-		}
-	} else {
-
-		projectYAMLPath := filepath.Join(dockerfilePath, "project.yaml")
-		var err error
-		cfg, err = loadProjectConfig(projectYAMLPath)
-		if err != nil {
-			log.Printf("Warning: Could not parse project.yaml (%v). Defaulting to address sanitizer.", err)
-			cfg = &ProjectConfig{Sanitizers: []string{"address"}}
-		}
-		if cfg.Language == "java" || cfg.Language == "jvm" {
-			language = "java"
-		} else {
-			language = "c"
-		}
-		// if len(cfg.Sanitizers) == 0 {
-		// 	log.Printf("No sanitizers listed in project.yaml; defaulting to address sanitizer.")
-		// 	cfg.Sanitizers = []string{"address"}
-		// }
-		//only do address
-		cfg.Sanitizers = []string{"address"}
-		var fuzzers []string
-		for _, sanitizer := range cfg.Sanitizers {
-			sanitizerDir := fuzzerDir + "-" + sanitizer
-			// Keep track of each sanitizer's output path
-			sanitizerDirs = append(sanitizerDirs, sanitizerDir)
-
-			fuzzers, _ = findFuzzers(sanitizerDir)
-		}
-
-		//if compile_commands.json does not exist, still run buildFuzzersDocker
-		compileCommandsPath := filepath.Join(fuzzerDir+"-address", "compile_commands.json")
-		if len(fuzzers) == 0 || (language == "c" && !fileExists(compileCommandsPath)) {
-
-			buildOutput, err := BuildDockerImage(dockerfilePath, dockerfileFullPath, taskDetail.ProjectName)
-			if err != nil {
-				log.Printf("Docker build failed. buildOutput: %s", buildOutput)
-				log.Printf("Try building with PullAFCDockerImage")
-				buildOutputAFC, err := PullAFCDockerImage(taskDir, taskDetail.ProjectName)
-				if err != nil {
-					return results, fmt.Errorf("Failed to build Docker image: %w\nbuildOutputAFC: %s", err, buildOutputAFC)
-				}
-			}
-
-			var wg sync.WaitGroup
-			// For each sanitizer in the YAML, run build_fuzzers
-			for _, sanitizer := range cfg.Sanitizers {
-				sanitizerDir := fuzzerDir + "-" + sanitizer
-				// Capture loop variables
-				san := sanitizer
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
-					log.Printf("Building fuzzers with --sanitizer=%s", san)
-					if err := buildFuzzersDocker(taskDir, projectDir, sanitizerDir, sanitizer, cfg.Language, taskDetail.ProjectName); err != nil {
-						log.Printf("Error building fuzzers for sanitizer %s: %v", san, err)
-						// We're ignoring errors here, which is not ideal
-					}
-				}()
-			}
-			// Wait for all builds to complete
-			wg.Wait()
-		}
+	// Check for fuzzer sources in fuzz-tooling/projects/<projectName>
+	fuzzerSourceDir := filepath.Join(taskDir, "fuzz-tooling", "projects", taskDetail.ProjectName)
+	if stat, err := os.Stat(fuzzerSourceDir); err == nil && stat.IsDir() {
+		dirsToAnalyze = append(dirsToAnalyze, fuzzerSourceDir)
+		log.Printf("Found fuzzer sources in %s, including in analysis", fuzzerSourceDir)
 	}
-	var codeqlWg sync.WaitGroup
 
 	var allFuzzers []string
+	// Try Joern first (more powerful), fall back to simple analysis if it fails
+	log.Printf("Attempting Joern-based analysis for language: %s", language)
+	log.Printf("Analyzing directories: %v", dirsToAnalyze)
+	joernResults, err := joern.AnalyzeProjectDirs(dirsToAnalyze, language, allFuzzers)
+	if err != nil {
+		log.Printf("Joern analysis failed: %v", err)
+		log.Printf("Falling back to simple regex-based analysis...")
 
-	for _, sdir := range sanitizerDirs {
-		fuzzers, err := findFuzzers(sdir)
-		if err != nil {
-			log.Printf("Warning: failed to find fuzzers in %s: %v", sdir, err)
-			continue // Skip this directory but continue with others
-		}
-
-		// Mark these fuzzers with the sanitizer directory so we know where they live
-		for _, fz := range fuzzers {
-			// We'll store the absolute path so we can directly call run_fuzzer
-			fuzzerPath := filepath.Join(sdir, fz)
-			allFuzzers = append(allFuzzers, fuzzerPath)
-		}
-	}
-
-	if len(allFuzzers) == 0 {
-		log.Printf("No fuzzers found after building all sanitizers")
-		return results, nil
-	}
-
-	// log.Printf("Found %d fuzzers: %v", len(allFuzzers), allFuzzers)
-
-	if language == "java" {
-		// for Java
-		var javaFilesToAnalyze []string
-		//find all fuzzer source files
-		var javaFuzzerSourceFiles []string
-		{ //find all Java source files
-			err := filepath.Walk(projectDir, func(path string, info os.FileInfo, err error) error {
-				if err != nil {
-					return err
-				}
-
-				// Skip directories
-				if info.IsDir() {
-					return nil
-				}
-
-				if strings.HasSuffix(path, "Fuzzer.java") {
-					javaFuzzerSourceFiles = append(javaFuzzerSourceFiles, path)
-				} else if strings.HasSuffix(path, ".java") && !shouldSkipFile(path) {
-					javaFilesToAnalyze = append(javaFilesToAnalyze, path)
-				}
-
-				return nil
-			})
-
-			if err != nil {
-				fmt.Printf("Error finding files: %v\n", err)
-				return results, err
-			}
-		}
-
-		{
-			// Find all Java fuzzer source files under dockerfilePath
-			err := filepath.Walk(dockerfilePath, func(path string, info os.FileInfo, err error) error {
-				if err != nil {
-					fmt.Printf("Error accessing path %s: %v\n", path, err)
-					return nil // Continue walking despite the error
-				}
-
-				// Skip directories and non-Java files
-				if info.IsDir() || !strings.HasSuffix(strings.ToLower(info.Name()), "fuzzer.java") {
-					return nil
-				}
-
-				// Check if this fuzzer is already in our list (comparing base names)
-				baseName := filepath.Base(path)
-				isDuplicate := false
-				for _, existingPath := range javaFuzzerSourceFiles {
-					if filepath.Base(existingPath) == baseName {
-						isDuplicate = true
-						fmt.Printf("Skipping duplicate fuzzer: %s (already have %s)\n",
-							path, existingPath)
-						break
-					}
-				}
-
-				// Add to list if not a duplicate
-				if !isDuplicate {
-					javaFuzzerSourceFiles = append(javaFuzzerSourceFiles, path)
-					fmt.Printf("Found Java fuzzer source: %s\n", path)
-				}
-
-				return nil
-			})
-
-			if err != nil {
-				fmt.Printf("Error walking directory %s: %v\n", dockerfilePath, err)
-			}
-		}
-
-		for _, fuzzerSourcePath := range javaFuzzerSourceFiles {
-			javaFilesToAnalyze = append(javaFilesToAnalyze, fuzzerSourcePath)
-		}
-
-		// fmt.Printf("javaFilesToAnalyze: %v\n", javaFilesToAnalyze)
-		fmt.Printf("javaFuzzerSourceFiles: %v\n", javaFuzzerSourceFiles)
-
-		// for testing only
-		if os.Getenv("QX_TEST") == "1" {
-			EngineMainAnalysisCodeql(taskDetail, taskDir, projectDir, dockerfilePath, javaFuzzerSourceFiles)
-			return results, nil
-		}
-
-		// FORK A NEW THREAD TO BUILD CODEQL FULL CODE PATHS
-		// When done, save data to a *_qx.json
-		codeqlWg.Add(1)
-		go func() {
-			defer codeqlWg.Done()
-			EngineMainAnalysisCodeql(taskDetail, taskDir, projectDir, dockerfilePath, javaFuzzerSourceFiles)
-		}()
-
-		// call graph analysis
-		numWorkers := runtime.NumCPU()
-		maxDepth := 4
-		buildJavaCallGraph(&results, javaFilesToAnalyze, numWorkers)
-		// finding reachable paths for all fuzzers up to max depth or timeout
-		if true {
-			// Create a wait group to synchronize goroutines
-			var wg sync.WaitGroup
-
-			// Create a mutex to protect access to results.Paths
-			var pathsMutex sync.Mutex
-
-			// Process each fuzzer source path in parallel
-			for _, fuzzerSourcePath := range javaFuzzerSourceFiles {
-				// Increment the wait group counter
-				wg.Add(1)
-
-				// Launch a goroutine for each fuzzer source path
-				go func(sourcePath string) {
-					// Ensure the wait group counter is decremented when the goroutine finishes
-					defer wg.Done()
-
-					entryPoint := sourcePath + "." + "fuzzerTestOneInput"
-
-					// Find reachable functions from this entry point
-					reachable := findReachableFunctions(&results, entryPoint, maxDepth)
-					fmt.Printf("Found %d reachable functions from entry point %s\n", len(reachable), entryPoint)
-
-					pathsMutex.Lock()
-					/* ───── Java: save the reachable list ───── */
-					if results.ReachableFunctions == nil {
-						results.ReachableFunctions = make(map[string][]string)
-					}
-					results.ReachableFunctions[entryPoint] = reachable
-					pathsMutex.Unlock()
-					/* ──────────────────────────────────────── */
-					if true {
-						//TODO this is too expensive, change to on-demand
-						// Create a local map to collect paths before adding to the shared map
-						localPaths := make(map[string][][]string)
-
-						// Use a separate WaitGroup for path finding
-						var pathWg sync.WaitGroup
-						// Use a semaphore to limit concurrent path finding operations
-						semaphore := make(chan struct{}, runtime.NumCPU())
-
-						// Process each reachable function
-						for _, func_ := range reachable {
-							pathWg.Add(1)
-
-							// Launch a goroutine for each target function, but limit concurrency
-							go func(targetFunc string) {
-								defer pathWg.Done()
-
-								// Acquire semaphore slot
-								semaphore <- struct{}{}
-								// Release semaphore slot when done
-								defer func() { <-semaphore }()
-
-								// Find paths from entry point to this function
-								paths := findAllPaths(&results, entryPoint, targetFunc, maxDepth)
-
-								// If we found paths, add them to the local map with a composite key
-								if len(paths) > 0 {
-									// Create a composite key that includes both entry point and target function
-									compositeKey := fmt.Sprintf("%s-%s", entryPoint, targetFunc)
-
-									pathsMutex.Lock()
-									localPaths[compositeKey] = paths
-									pathsMutex.Unlock()
-								}
-							}(func_)
-						}
-
-						// Wait for all path finding operations to complete
-						pathWg.Wait()
-
-						// Now add all collected paths to the shared results map
-						if len(localPaths) > 0 {
-							pathsMutex.Lock()
-							for compositeKey, paths := range localPaths {
-								results.Paths[compositeKey] = paths
-							}
-							pathsMutex.Unlock()
-						}
-					}
-
-				}(fuzzerSourcePath)
-			}
-
-			// Wait for all fuzzer source paths to be processed
-			wg.Wait()
-			fmt.Printf("Completed parallel processing of %d fuzzer source paths\n", len(javaFuzzerSourceFiles))
+		// Fall back to simple analysis
+		simpleResults, simpleErr := simple.AnalyzeProjectDirs(dirsToAnalyze, language, allFuzzers)
+		if simpleErr != nil {
+			log.Printf("Simple analysis also failed: %v", simpleErr)
+			log.Printf("Falling back to legacy analysis method...")
 		} else {
-			// Call our parallel path finding function with a 10-minute timeout
-			findAllPathsParallel(&results, javaFuzzerSourceFiles, maxDepth, 10*time.Minute)
+			// Use simple analysis results
+			results = *simpleResults
+			log.Printf("Simple analysis succeeded: %d functions, %d reachable sets",
+				len(results.Functions), len(results.ReachableFunctions))
 		}
-
 	} else {
-		// language = "c"
-		// for C
-		fuzzerDir := fuzzerDir + "-address"
-		projectDir := projectDir + "-address"
-		err := GenerateLLVMBitcodeForAllFuzzers(allFuzzers, projectDir, taskDetail.ProjectName, fuzzerDir, dockerfilePath)
-		if err != nil {
-			//TODO handle bitcode generation failures
+		// Check if Joern computed reachability properly
+		hasReachability := false
+		for _, reachable := range joernResults.ReachableFunctions {
+			if len(reachable) > 0 {
+				hasReachability = true
+				break
+			}
 		}
 
-		ProcessAllFuzzersParallel(allFuzzers, projectDir, taskDetail.ProjectName, language, &results)
+		// If Joern found entry points but no reachability, use simple analysis
+		if len(joernResults.ReachableFunctions) > 0 && !hasReachability {
+			log.Printf("Joern found entry points but computed 0 reachable functions, trying simple analysis...")
+			simpleResults, simpleErr := simple.AnalyzeProjectDirs(dirsToAnalyze, language, allFuzzers)
+			if simpleErr == nil && len(simpleResults.ReachableFunctions) > 0 {
+				// Use simple analysis results entirely (functions, call graph, and reachability)
+				// because Joern and simple analysis use incompatible key formats
+				results = *simpleResults
+				log.Printf("Using simple analysis results: %d functions, %d entry points (Joern reachability failed)",
+					len(results.Functions), len(results.ReachableFunctions))
+			} else {
+				// Use Joern results as-is
+				results = *joernResults
+				log.Printf("Joern analysis succeeded: %d functions, %d reachable sets (empty)",
+					len(results.Functions), len(results.ReachableFunctions))
+			}
+		} else {
+			// Use Joern results
+			results = *joernResults
+			log.Printf("Joern analysis succeeded: %d functions, %d reachable sets",
+				len(results.Functions), len(results.ReachableFunctions))
+		}
 	}
-
-	codeqlWg.Wait()
 
 	if true {
 		fmt.Printf("Saving results to %s\n", outputJson)
@@ -4004,16 +3615,34 @@ func GenerateLLVMBitcodeForAllFuzzers(allFuzzers []string, projectDir, projectNa
 			baseName := filepath.Base(fuzzerSourcePath)
 			nameWithoutExt := strings.TrimSuffix(baseName, filepath.Ext(baseName))
 			var matched bool
+			var matchedBinary string
 			for _, built := range allFuzzers {
-				if filepath.Base(built) == nameWithoutExt {
+				binaryName := filepath.Base(built)
+				// Try multiple matching strategies:
+				// 1. Exact match
+				if binaryName == nameWithoutExt {
 					matched = true
+					matchedBinary = binaryName
+					break
+				}
+				// 2. Check if binary name is a suffix of source name
+				// e.g., "64bit_fuzzer" matches "flatbuffers_64bit_fuzzer"
+				if strings.HasSuffix(nameWithoutExt, "_"+binaryName) || strings.HasSuffix(nameWithoutExt, "-"+binaryName) {
+					matched = true
+					matchedBinary = binaryName
+					break
+				}
+				// 3. Check if source name is a suffix of binary name (less common)
+				if strings.HasSuffix(binaryName, "_"+nameWithoutExt) || strings.HasSuffix(binaryName, "-"+nameWithoutExt) {
+					matched = true
+					matchedBinary = binaryName
 					break
 				}
 			}
 			if matched {
 				// Keep it in the fuzzer files list
 				filteredFuzzerSourceFiles = append(filteredFuzzerSourceFiles, fuzzerSourcePath)
-				fmt.Printf("Confirmed fuzzer with LLVMFuzzerTestOneInput: %s\n", fuzzerSourcePath)
+				fmt.Printf("Confirmed fuzzer with LLVMFuzzerTestOneInput: %s (matched with binary: %s)\n", fuzzerSourcePath, matchedBinary)
 			} else {
 				skippedFuzzerSourceFiles = append(skippedFuzzerSourceFiles, fuzzerSourcePath)
 				fmt.Printf("Skipping potential fuzzer file because there is no binary built: %s\n", fuzzerSourcePath)
@@ -4072,8 +3701,12 @@ func GenerateLLVMBitcodeForAllFuzzers(allFuzzers []string, projectDir, projectNa
 				// Only accept the file if we actually produced a binary with the same name
 				base := strings.TrimSuffix(filepath.Base(path), ext)
 				for _, bin := range allFuzzers {
-					if filepath.Base(bin) == base {
-						fmt.Printf("Adding fuzzer harness discovered in pkgs/: %s\n", path)
+					binaryName := filepath.Base(bin)
+					// Try multiple matching strategies (same as above)
+					if binaryName == base ||
+						strings.HasSuffix(base, "_"+binaryName) || strings.HasSuffix(base, "-"+binaryName) ||
+						strings.HasSuffix(binaryName, "_"+base) || strings.HasSuffix(binaryName, "-"+base) {
+						fmt.Printf("Adding fuzzer harness discovered in pkgs/: %s (matched with binary: %s)\n", path, binaryName)
 						cFuzzerSourceFiles = append(cFuzzerSourceFiles, path)
 						break
 					}
@@ -4827,8 +4460,16 @@ func GenerateFuzzerBitcodeFilesAndLinkParallel(projectDir, projectName string, b
 			if sudoErr := sudoCmd.Run(); sudoErr != nil {
 				return fmt.Errorf("failed to create output directory even with sudo %s: %v", outputDir, sudoErr)
 			}
+			// Change ownership to current user so we can write to it
+			currentUser := os.Getenv("USER")
+			if currentUser != "" {
+				chownCmd := exec.Command("sudo", "chown", "-R", currentUser+":"+currentUser, outputDir)
+				if chownErr := chownCmd.Run(); chownErr != nil {
+					log.Printf("Warning: Failed to change ownership on directory: %v", chownErr)
+				}
+			}
 			// Also set permissions with sudo
-			chmodCmd := exec.Command("sudo", "chmod", "755", outputDir)
+			chmodCmd := exec.Command("sudo", "chmod", "-R", "755", outputDir)
 			if chmodErr := chmodCmd.Run(); chmodErr != nil {
 				log.Printf("Warning: Failed to set permissions on directory: %v", chmodErr)
 			}
@@ -4955,8 +4596,16 @@ func GenerateBitcodeFilesParallel(projectDir string, sourceFiles []string, outpu
 			if sudoErr := sudoCmd.Run(); sudoErr != nil {
 				return fmt.Errorf("failed to create output directory even with sudo %s: %v", outputDir, sudoErr)
 			}
+			// Change ownership to current user so we can write to it
+			currentUser := os.Getenv("USER")
+			if currentUser != "" {
+				chownCmd := exec.Command("sudo", "chown", "-R", currentUser+":"+currentUser, outputDir)
+				if chownErr := chownCmd.Run(); chownErr != nil {
+					log.Printf("Warning: Failed to change ownership on directory: %v", chownErr)
+				}
+			}
 			// Also set permissions with sudo
-			chmodCmd := exec.Command("sudo", "chmod", "755", outputDir)
+			chmodCmd := exec.Command("sudo", "chmod", "-R", "755", outputDir)
 			if chmodErr := chmodCmd.Run(); chmodErr != nil {
 				log.Printf("Warning: Failed to set permissions on directory: %v", chmodErr)
 			}
