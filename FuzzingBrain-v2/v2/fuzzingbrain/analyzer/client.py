@@ -29,16 +29,18 @@ class AnalysisClient:
         callees = client.get_callees("png_read_info")
     """
 
-    def __init__(self, socket_path: str, timeout: float = 30.0):
+    def __init__(self, socket_path: str, timeout: float = 30.0, client_id: str = None):
         """
         Initialize client.
 
         Args:
             socket_path: Path to Unix socket
             timeout: Request timeout in seconds
+            client_id: Identifier for this client (e.g., "controller", "worker_fuzzer_address")
         """
         self.socket_path = Path(socket_path)
         self.timeout = timeout
+        self.client_id = client_id
         self._sock: Optional[socket.socket] = None
 
     def _connect(self):
@@ -78,7 +80,7 @@ class AnalysisClient:
             TimeoutError: If request times out
             RuntimeError: If request fails
         """
-        request = Request(method=method, params=params or {})
+        request = Request(method=method, params=params or {}, source=self.client_id)
 
         try:
             self._connect()
@@ -317,24 +319,25 @@ class AnalysisClient:
         return self._request(Method.GET_BUILD_PATHS)
 
 
-def connect(socket_path: str, timeout: float = 30.0) -> AnalysisClient:
+def connect(socket_path: str, timeout: float = 30.0, client_id: str = None) -> AnalysisClient:
     """
     Create and connect to Analysis Server.
 
     Args:
         socket_path: Path to Unix socket
         timeout: Request timeout in seconds
+        client_id: Identifier for this client
 
     Returns:
         Connected AnalysisClient
     """
-    client = AnalysisClient(socket_path, timeout)
+    client = AnalysisClient(socket_path, timeout, client_id=client_id)
     if not client.ping():
         raise ConnectionError(f"Cannot connect to Analysis Server at {socket_path}")
     return client
 
 
-def wait_for_server(socket_path: str, timeout: float = 300.0, poll_interval: float = 1.0) -> AnalysisClient:
+def wait_for_server(socket_path: str, timeout: float = 300.0, poll_interval: float = 1.0, client_id: str = None) -> AnalysisClient:
     """
     Wait for Analysis Server to become available.
 
@@ -342,6 +345,7 @@ def wait_for_server(socket_path: str, timeout: float = 300.0, poll_interval: flo
         socket_path: Path to Unix socket
         timeout: Maximum time to wait in seconds
         poll_interval: Time between connection attempts
+        client_id: Identifier for this client
 
     Returns:
         Connected AnalysisClient
@@ -354,7 +358,7 @@ def wait_for_server(socket_path: str, timeout: float = 300.0, poll_interval: flo
 
     while time.time() - start < timeout:
         try:
-            client = AnalysisClient(socket_path)
+            client = AnalysisClient(socket_path, client_id=client_id)
             if client.ping():
                 return client
         except Exception:

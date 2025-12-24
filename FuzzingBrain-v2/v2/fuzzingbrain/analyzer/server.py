@@ -304,9 +304,17 @@ class AnalysisServer:
 
     def _log_query(self, request: Request):
         """Log query for experiment tracking."""
-        self.query_count += 1
+        # Distinguish between management commands and actual queries
+        management_methods = {Method.PING, Method.SHUTDOWN}
+        is_query = request.method not in management_methods
+
+        if is_query:
+            self.query_count += 1
+
         self.query_log.append({
             "timestamp": datetime.now().isoformat(),
+            "type": "query" if is_query else "management",
+            "source": request.source,  # e.g., "controller", "worker_libpng_read_fuzzer_address"
             "method": request.method,
             "params": request.params,
             "request_id": request.request_id,

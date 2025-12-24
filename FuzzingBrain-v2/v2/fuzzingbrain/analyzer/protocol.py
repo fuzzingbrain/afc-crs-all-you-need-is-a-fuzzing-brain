@@ -47,12 +47,14 @@ class Request:
     method: str
     params: Dict[str, Any] = field(default_factory=dict)
     request_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    source: Optional[str] = None  # e.g., "controller", "worker_libpng_read_fuzzer_address"
 
     def to_json(self) -> str:
         return json.dumps({
             "method": self.method,
             "params": self.params,
             "request_id": self.request_id,
+            "source": self.source,
         })
 
     @classmethod
@@ -62,6 +64,7 @@ class Request:
             method=obj["method"],
             params=obj.get("params", {}),
             request_id=obj.get("request_id", str(uuid.uuid4())[:8]),
+            source=obj.get("source"),
         )
 
 

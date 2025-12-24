@@ -77,6 +77,11 @@ class WorkerExecutor:
         self.patches_path.mkdir(parents=True, exist_ok=True)
 
     @property
+    def worker_id(self) -> str:
+        """Get worker identifier for logging."""
+        return f"worker_{self.task_id}_{self.fuzzer}_{self.sanitizer}"
+
+    @property
     def analysis_client(self) -> Optional[AnalysisClient]:
         """
         Get Analysis Server client (lazy initialization).
@@ -86,7 +91,10 @@ class WorkerExecutor:
         """
         if self._analysis_client is None and self.analysis_socket_path:
             try:
-                self._analysis_client = AnalysisClient(self.analysis_socket_path)
+                self._analysis_client = AnalysisClient(
+                    self.analysis_socket_path,
+                    client_id=self.worker_id,
+                )
                 if self._analysis_client.ping():
                     logger.info(f"Connected to Analysis Server: {self.analysis_socket_path}")
                 else:

@@ -210,7 +210,7 @@ def stop_analysis_server(task_path: str) -> bool:
     if socket_path and socket_path.exists():
         try:
             from .client import AnalysisClient
-            client = AnalysisClient(str(socket_path), timeout=5)
+            client = AnalysisClient(str(socket_path), timeout=5, client_id="controller")
             client.shutdown()
             client.close()
             logger.info("[Analyzer] Sent shutdown request via socket")
