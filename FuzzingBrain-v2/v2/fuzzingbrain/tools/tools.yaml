@@ -1,0 +1,326 @@
+# FuzzingBrain MCP Tools Registry
+#
+# This file documents all available MCP tools for AI agents.
+# Tools are registered via FastMCP and can be called via MCP protocol.
+#
+# Usage:
+#   from fastmcp import Client
+#   client = Client("fuzzingbrain/tools/__init__.py")
+#   async with client:
+#       result = await client.call_tool("tool_name", {"param": "value"})
+
+version: "2.0"
+last_updated: "2024-12-24"
+
+# =============================================================================
+# Coverage Tools (coverage.py)
+# =============================================================================
+coverage:
+  description: "Coverage analysis tools for verifying code path execution"
+  context_required: true
+  context_function: "set_coverage_context"
+
+  tools:
+    run_coverage:
+      description: "Run coverage analysis on an input to check code path execution"
+      params:
+        fuzzer_name:
+          type: string
+          required: true
+          description: "Name of the fuzzer binary (e.g., 'libpng_read_fuzzer')"
+        input_data_base64:
+          type: string
+          required: true
+          description: "Base64 encoded input data to analyze"
+        target_functions:
+          type: list[string]
+          required: false
+          description: "Optional list of function names to check for coverage"
+        target_files:
+          type: list[string]
+          required: false
+          description: "Optional list of filenames to filter coverage display"
+      returns:
+        executed_functions: "List of functions that were executed"
+        executed_lines: "Dict mapping files to executed line numbers"
+        target_reached: "Dict mapping target functions to reached status"
+        coverage_summary: "Human-readable coverage summary"
+
+    check_pov_reaches_target:
+      description: "Check if a POV reaches a specific target function"
+      params:
+        fuzzer_name:
+          type: string
+          required: true
+          description: "Name of the fuzzer binary"
+        pov_data_base64:
+          type: string
+          required: true
+          description: "Base64 encoded POV input"
+        target_function:
+          type: string
+          required: true
+          description: "The function name to check"
+      returns:
+        reached: "Boolean indicating if target was reached"
+        distance: "Call depth to target if reached"
+
+    list_available_fuzzers:
+      description: "List all available coverage-instrumented fuzzers"
+      params: {}
+      returns:
+        fuzzers: "List of fuzzer names available for coverage analysis"
+
+    get_coverage_feedback:
+      description: "Get coverage feedback formatted for LLM prompt enhancement"
+      params:
+        fuzzer_name:
+          type: string
+          required: true
+          description: "Name of the fuzzer binary"
+        input_data_base64:
+          type: string
+          required: true
+          description: "Base64 encoded input data"
+        target_files:
+          type: list[string]
+          required: false
+          description: "Optional list of filenames to focus on"
+      returns:
+        feedback: "Formatted coverage feedback for LLM consumption"
+
+# =============================================================================
+# Analyzer Tools (analyzer.py)
+# =============================================================================
+analyzer:
+  description: "Code analysis tools for querying static analysis data"
+  context_required: true
+  context_function: "set_analyzer_context"
+
+  tools:
+    # -------------------------------------------------------------------------
+    # Server Control
+    # -------------------------------------------------------------------------
+    analyzer_status:
+      description: "Get Analysis Server status including query count and uptime"
+      category: "server_control"
+      params: {}
+      returns:
+        status: "Server status dict with query_count, uptime, function_count, etc."
+
+    # -------------------------------------------------------------------------
+    # Function Queries
+    # -------------------------------------------------------------------------
+    get_function:
+      description: "Get detailed information about a function by name"
+      category: "function_query"
+      params:
+        name:
+          type: string
+          required: true
+          description: "Function name to look up"
+      returns:
+        function: "Function metadata (name, file, lines, complexity, args, return_type)"
+
+    get_functions_by_file:
+      description: "Get all functions defined in a specific file"
+      category: "function_query"
+      params:
+        file_path:
+          type: string
+          required: true
+          description: "File path (can be partial, e.g., 'png.c')"
+      returns:
+        functions: "List of functions in the file with metadata"
+        count: "Number of functions found"
+
+    search_functions:
+      description: "Search for functions by name pattern (regex)"
+      category: "function_query"
+      params:
+        pattern:
+          type: string
+          required: true
+          description: "Regex pattern to match function names (e.g., 'png_read.*')"
+        limit:
+          type: int
+          required: false
+          default: 50
+          description: "Maximum number of results"
+      returns:
+        functions: "List of matching functions with metadata"
+        count: "Number of matches"
+
+    get_function_source:
+      description: "Get the source code of a function"
+      category: "function_query"
+      params:
+        name:
+          type: string
+          required: true
+          description: "Function name"
+      returns:
+        source: "Source code of the function"
+
+    # -------------------------------------------------------------------------
+    # Call Graph
+    # -------------------------------------------------------------------------
+    get_callers:
+      description: "Get all functions that call the specified function"
+      category: "call_graph"
+      params:
+        function:
+          type: string
+          required: true
+          description: "Target function name"
+      returns:
+        callers: "List of function names that call the target"
+        count: "Number of callers"
+
+    get_callees:
+      description: "Get all functions called by the specified function"
+      category: "call_graph"
+      params:
+        function:
+          type: string
+          required: true
+          description: "Source function name"
+      returns:
+        callees: "List of function names called by the source"
+        count: "Number of callees"
+
+    get_call_graph:
+      description: "Get the call graph starting from a fuzzer entry point"
+      category: "call_graph"
+      params:
+        fuzzer:
+          type: string
+          required: true
+          description: "Fuzzer name (entry point function)"
+        depth:
+          type: int
+          required: false
+          default: 3
+          description: "Maximum depth to traverse"
+      returns:
+        call_graph: "Dict mapping function names to their callees"
+        node_count: "Number of nodes in the graph"
+
+    # -------------------------------------------------------------------------
+    # Reachability Analysis
+    # -------------------------------------------------------------------------
+    check_reachability:
+      description: "Check if a function is reachable from a fuzzer"
+      category: "reachability"
+      params:
+        fuzzer:
+          type: string
+          required: true
+          description: "Fuzzer name"
+        function:
+          type: string
+          required: true
+          description: "Target function to check"
+      returns:
+        reachable: "Boolean indicating if function is reachable"
+        distance: "Call depth to function if reachable"
+
+    get_reachable_functions:
+      description: "Get all functions reachable from a fuzzer"
+      category: "reachability"
+      params:
+        fuzzer:
+          type: string
+          required: true
+          description: "Fuzzer name"
+      returns:
+        functions: "List of all reachable function names"
+        count: "Number of reachable functions"
+
+    get_unreached_functions:
+      description: "Get functions not yet covered by a fuzzer (coverage gaps)"
+      category: "reachability"
+      params:
+        fuzzer:
+          type: string
+          required: true
+          description: "Fuzzer name"
+      returns:
+        functions: "List of function names not yet reached"
+        count: "Number of unreached functions"
+
+    # -------------------------------------------------------------------------
+    # Build Information
+    # -------------------------------------------------------------------------
+    get_fuzzers:
+      description: "Get list of all built fuzzers"
+      category: "build_info"
+      params: {}
+      returns:
+        fuzzers: "List of fuzzer info (name, sanitizer, binary_path)"
+        count: "Number of fuzzers"
+
+    get_build_paths:
+      description: "Get build output paths for each sanitizer"
+      category: "build_info"
+      params: {}
+      returns:
+        build_paths: "Dict mapping sanitizer names to build directories"
+
+# =============================================================================
+# Tool Categories Summary
+# =============================================================================
+categories:
+  coverage:
+    description: "Tools for dynamic coverage analysis"
+    use_cases:
+      - "Verify if a POV reaches target vulnerable function"
+      - "Analyze code paths executed by an input"
+      - "Guide input generation based on coverage feedback"
+
+  function_query:
+    description: "Tools for querying function metadata"
+    use_cases:
+      - "Look up function details (file, lines, complexity)"
+      - "Find functions in a specific file"
+      - "Search for functions by name pattern"
+      - "Read function source code"
+
+  call_graph:
+    description: "Tools for analyzing function call relationships"
+    use_cases:
+      - "Find who calls a function (callers)"
+      - "Find what a function calls (callees)"
+      - "Visualize call hierarchy from fuzzer entry"
+
+  reachability:
+    description: "Tools for analyzing code reachability from fuzzers"
+    use_cases:
+      - "Check if target function is reachable"
+      - "Find all functions a fuzzer can reach"
+      - "Identify coverage gaps for fuzzing strategy"
+
+  build_info:
+    description: "Tools for querying build configuration"
+    use_cases:
+      - "List available fuzzers and their sanitizers"
+      - "Get paths to built binaries"
+
+# =============================================================================
+# Context Setup
+# =============================================================================
+context:
+  coverage:
+    function: "set_coverage_context"
+    params:
+      coverage_fuzzer_dir: "Path to coverage-instrumented fuzzer directory"
+      project_name: "OSS-Fuzz project name"
+      src_dir: "Source code directory"
+      docker_image: "Optional Docker image override"
+      work_dir: "Optional work directory for coverage output"
+
+  analyzer:
+    function: "set_analyzer_context"
+    params:
+      socket_path: "Path to Analysis Server Unix socket"
+      client_id: "Client identifier for query logging"

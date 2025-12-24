@@ -14,6 +14,9 @@ Usage:
     # Direct function call (internal Python code)
     from fuzzingbrain.tools.coverage import run_coverage
     result = run_coverage(fuzzer_name, input_data_base64, target_functions)
+
+    from fuzzingbrain.tools.analyzer import get_function
+    result = get_function("png_read_info")
 """
 
 from fastmcp import FastMCP
@@ -23,5 +26,6 @@ tools_mcp = FastMCP("FuzzingBrain-Tools")
 
 # Import tools to register them with the server
 from .coverage import *
+from .analyzer import *
 
 __all__ = ["tools_mcp"]

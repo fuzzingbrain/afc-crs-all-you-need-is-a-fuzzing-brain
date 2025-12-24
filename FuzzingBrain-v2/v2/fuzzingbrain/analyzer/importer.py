@@ -161,11 +161,24 @@ class StaticAnalysisImporter:
             if not name:
                 continue
 
+            # Get file path from various possible locations
+            file_path = (
+                func_data.get("Functions filename") or  # Primary field in introspector JSON
+                func_data.get("Source file") or
+                func_data.get("source_file") or
+                ""
+            )
+            # Also check debug_function_info.source.source_file
+            if not file_path:
+                debug_info = func_data.get("debug_function_info", {})
+                source_info = debug_info.get("source", {})
+                file_path = source_info.get("source_file", "")
+
             functions.append({
                 "name": name,
-                "file_path": func_data.get("Source file", func_data.get("source_file", "")),
-                "start_line": func_data.get("Func src line begin", func_data.get("start_line", 0)),
-                "end_line": func_data.get("Func src line end", func_data.get("end_line", 0)),
+                "file_path": file_path,
+                "start_line": func_data.get("source_line_begin", func_data.get("Func src line begin", func_data.get("start_line", 0))),
+                "end_line": func_data.get("source_line_end", func_data.get("Func src line end", func_data.get("end_line", 0))),
                 "cyclomatic_complexity": func_data.get("Cyclomatic complexity", func_data.get("complexity", 0)),
                 "reached_by_fuzzers": func_data.get("Reached by Fuzzers", func_data.get("reached_by_fuzzers", [])),
                 "reached_by_functions": func_data.get("Reached by functions", func_data.get("reached_by_functions", 0)),
@@ -252,7 +265,8 @@ class StaticAnalysisImporter:
             # Extract all functions from file using tree-sitter
             try:
                 extracted = extract_functions_from_file(str(full_path))
-                extracted_by_name = {f["name"]: f for f in extracted}
+                # FunctionInfo is a dataclass, use attribute access
+                extracted_by_name = {f.name: f for f in extracted}
             except Exception as e:
                 self.log(f"Tree-sitter extraction failed for {file_path}: {e}", "WARN")
                 extracted_by_name = {}
@@ -260,8 +274,22 @@ class StaticAnalysisImporter:
             # Match and save functions
             for func in file_functions:
                 content = ""
-                if func["name"] in extracted_by_name:
-                    content = extracted_by_name[func["name"]].get("content", "")
+                func_name = func["name"]
+
+                # Try direct match first
+                if func_name in extracted_by_name:
+                    content = extracted_by_name[func_name].content
+                else:
+                    # Try stripping common prefixes (e.g., OSS_FUZZ_png_read -> png_read)
+                    # These prefixes are added by build scripts like --with-libpng-prefix=OSS_FUZZ_
+                    stripped_name = func_name
+                    for prefix in ["OSS_FUZZ_", "FUZZ_", "ossfuzz_"]:
+                        if func_name.startswith(prefix):
+                            stripped_name = func_name[len(prefix):]
+                            break
+
+                    if stripped_name in extracted_by_name:
+                        content = extracted_by_name[stripped_name].content
 
                 self._save_function(func, distances, content)
 
