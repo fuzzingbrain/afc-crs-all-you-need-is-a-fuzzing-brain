@@ -482,6 +482,7 @@ class TaskProcessor:
             project_name = self.config.ossfuzz_project or task.project_name
 
             # Create analyze request
+            log_dir = get_log_dir()
             analyze_request = AnalyzeRequest(
                 task_id=task.task_id,
                 task_path=task.task_path,
@@ -489,6 +490,7 @@ class TaskProcessor:
                 sanitizers=self.config.sanitizers,
                 language="c",  # TODO: detect language
                 ossfuzz_project=self.config.ossfuzz_project,
+                log_dir=str(log_dir) if log_dir else None,
             )
 
             logger.info(f"Analyzer request: sanitizers={self.config.sanitizers}")
@@ -645,6 +647,12 @@ class TaskProcessor:
                     }
 
             finally:
+                # Stop Analysis Server
+                if task and task.task_path:
+                    from ..analyzer.tasks import stop_analysis_server
+                    logger.info("Stopping Analysis Server...")
+                    stop_analysis_server(task.task_path)
+
                 # Stop infrastructure (CLI mode only)
                 if infra:
                     infra.stop()

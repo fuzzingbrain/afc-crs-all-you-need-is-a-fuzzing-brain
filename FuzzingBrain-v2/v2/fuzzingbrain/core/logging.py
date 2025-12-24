@@ -229,6 +229,55 @@ def get_worker_banner_and_header(metadata: Dict[str, Any]) -> str:
     return get_logo("worker") + "\n" + _create_worker_header(metadata)
 
 
+def _create_analyzer_header(metadata: Dict[str, Any]) -> str:
+    """Create a formatted analyzer metadata header"""
+    # Calculate max key length for alignment
+    max_key_len = max(len(str(k)) for k in metadata.keys() if metadata[k] is not None)
+
+    # Calculate the width needed to fit all content in one line
+    content_lines = []
+    for key, value in metadata.items():
+        if value is not None:
+            val_str = str(value)
+            key_padded = f"{key}:".ljust(max_key_len + 2)
+            content = f"  {key_padded} {val_str}"
+            content_lines.append(content)
+
+    # Width = max content length + padding
+    width = max(len(line) for line in content_lines) + 2
+    width = max(width, 80)  # Minimum width of 80
+
+    lines = []
+    lines.append("┌" + "─" * width + "┐")
+    lines.append("│" + " CODE ANALYZER ".center(width) + "│")
+    lines.append("├" + "─" * width + "┤")
+
+    for content in content_lines:
+        lines.append("│" + content.ljust(width) + "│")
+
+    lines.append("└" + "─" * width + "┘")
+    lines.append("")
+    lines.append("=" * (width + 2))
+    lines.append(" ANALYZER LOG START ".center(width + 2, "="))
+    lines.append("=" * (width + 2))
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def get_analyzer_banner_and_header(metadata: Dict[str, Any]) -> str:
+    """
+    Get complete analyzer banner with logo and metadata header.
+
+    Args:
+        metadata: Analyzer metadata dictionary
+
+    Returns:
+        Formatted banner string ready to write to log
+    """
+    return get_logo("analyzer") + "\n" + _create_analyzer_header(metadata)
+
+
 def get_log_dir() -> Optional[Path]:
     """Get current task's log directory"""
     return _current_log_dir
@@ -565,6 +614,7 @@ __all__ = [
     "get_log_dir",
     "get_logo",
     "get_worker_banner_and_header",
+    "get_analyzer_banner_and_header",
     "add_task_log",
     "get_task_logger",
     "create_worker_summary",

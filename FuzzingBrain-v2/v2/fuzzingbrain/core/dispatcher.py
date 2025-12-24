@@ -219,6 +219,8 @@ class WorkerDispatcher:
             "fuzzer_binary_path": fuzzer_binary_path,
             "build_dir": build_dir,
             "coverage_fuzzer_path": self.analyze_result.coverage_fuzzer_path if self.analyze_result else None,
+            # Analysis Server socket for code queries
+            "analysis_socket_path": self.analyze_result.socket_path if self.analyze_result else None,
         }
 
         # Dispatch Celery task

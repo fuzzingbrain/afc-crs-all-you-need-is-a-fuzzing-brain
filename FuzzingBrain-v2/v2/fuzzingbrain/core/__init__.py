@@ -16,6 +16,7 @@ from .logging import (
     get_log_dir,
     add_task_log,
     get_task_logger,
+    get_analyzer_banner_and_header,
 )
 
 # Re-export models
@@ -48,6 +49,7 @@ __all__ = [
     "get_log_dir",
     "add_task_log",
     "get_task_logger",
+    "get_analyzer_banner_and_header",
     # Models
     "Task", "TaskStatus", "JobType", "ScanMode",
     "POV",

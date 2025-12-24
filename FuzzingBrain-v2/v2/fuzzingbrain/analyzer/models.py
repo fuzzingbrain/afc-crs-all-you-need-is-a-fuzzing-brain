@@ -22,6 +22,7 @@ class AnalyzeRequest:
     sanitizers: List[str]             # ["address", "memory", "undefined"]
     language: str = "c"               # "c" / "cpp" / "java"
     ossfuzz_project: Optional[str] = None  # OSS-Fuzz project name if different
+    log_dir: Optional[str] = None     # Log directory path
 
     def to_dict(self) -> dict:
         return {
@@ -31,6 +32,7 @@ class AnalyzeRequest:
             "sanitizers": self.sanitizers,
             "language": self.language,
             "ossfuzz_project": self.ossfuzz_project,
+            "log_dir": self.log_dir,
         }
 
     @classmethod
@@ -42,6 +44,7 @@ class AnalyzeRequest:
             sanitizers=data.get("sanitizers", ["address"]),
             language=data.get("language", "c"),
             ossfuzz_project=data.get("ossfuzz_project"),
+            log_dir=data.get("log_dir"),
         )
 
 
@@ -104,6 +107,10 @@ class AnalyzeResult:
     # Error information
     error_msg: Optional[str] = None
 
+    # Analysis Server info
+    socket_path: Optional[str] = None  # Unix socket path for queries
+    server_pid: Optional[int] = None   # Server process ID
+
     # Timestamps
     completed_at: datetime = field(default_factory=datetime.now)
 
@@ -119,6 +126,8 @@ class AnalyzeResult:
             "build_duration_seconds": self.build_duration_seconds,
             "analysis_duration_seconds": self.analysis_duration_seconds,
             "error_msg": self.error_msg,
+            "socket_path": self.socket_path,
+            "server_pid": self.server_pid,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
         }
 
@@ -135,6 +144,8 @@ class AnalyzeResult:
             build_duration_seconds=data.get("build_duration_seconds", 0.0),
             analysis_duration_seconds=data.get("analysis_duration_seconds", 0.0),
             error_msg=data.get("error_msg"),
+            socket_path=data.get("socket_path"),
+            server_pid=data.get("server_pid"),
             completed_at=datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else datetime.now(),
         )
 

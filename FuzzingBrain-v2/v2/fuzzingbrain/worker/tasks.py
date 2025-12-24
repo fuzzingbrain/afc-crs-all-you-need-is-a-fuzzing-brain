@@ -107,6 +107,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     fuzzer_binary_path = assignment.get("fuzzer_binary_path")
     build_dir = assignment.get("build_dir")
     coverage_fuzzer_path = assignment.get("coverage_fuzzer_path")
+    analysis_socket_path = assignment.get("analysis_socket_path")
 
     worker_id = f"{task_id}__{fuzzer}__{sanitizer}"
 
@@ -201,8 +202,12 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             repos=repos,
             task_id=task_id,
             fuzzer_binary_path=fuzzer_binary_path,
+            analysis_socket_path=analysis_socket_path,
         )
         result = executor.run()
+
+        # Clean up analysis client
+        executor.close()
 
         # Step 3: Mark completed
         worker.status = WorkerStatus.COMPLETED
