@@ -3160,7 +3160,25 @@ func EngineMainAnalysisCore(taskDetail models.TaskDetail, taskDir string) (model
 		}
 	}
 
+	// Find fuzzer binaries
 	var allFuzzers []string
+	// Try to determine sanitizer from metadata, default to "address"
+	sanitizer := "address"
+	if taskDetail.Metadata != nil {
+		if san, ok := taskDetail.Metadata["sanitizer"]; ok && san != "" {
+			sanitizer = san
+		}
+	}
+
+	fuzzerDir := filepath.Join(taskDir, "fuzz-tooling", "build", "out", fmt.Sprintf("%s-%s", taskDetail.ProjectName, sanitizer))
+	if fuzzers, err := findFuzzers(fuzzerDir); err == nil {
+		allFuzzers = fuzzers
+		log.Printf("Found %d fuzzer binaries in %s", len(allFuzzers), fuzzerDir)
+	} else {
+		log.Printf("Warning: Could not find fuzzer binaries in %s: %v", fuzzerDir, err)
+		log.Printf("Will attempt to find entry points by searching for LLVMFuzzerTestOneInput in source code")
+	}
+
 	// Try Joern first (more powerful), fall back to simple analysis if it fails
 	log.Printf("Attempting Joern-based analysis for language: %s", language)
 	log.Printf("Analyzing directories: %v", dirsToAnalyze)

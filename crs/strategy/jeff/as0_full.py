@@ -847,13 +847,43 @@ def find_fuzzer_source(log_file, fuzzer_path, project_name, project_src_dir, lan
     project_dir = fuzzer_path.split("/fuzz-tooling/build/out")[0] + "/"
     
     log_message(log_file, f"Looking for source of {fuzzer_name} in {project_src_dir}")
-    
+
+    # FIRST: Search all source files for LLVMFuzzerTestOneInput (most reliable method)
+    log_message(log_file, "Searching for files containing LLVMFuzzerTestOneInput...")
+    extensions = ['.c', '.cc', '.cpp'] if language.startswith('c') else ['.java']
+
+    for root, dirs, files in os.walk(project_src_dir):
+        for file in files:
+            if any(file.endswith(ext) for ext in extensions):
+                file_path = os.path.join(root, file)
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                        if 'LLVMFuzzerTestOneInput' in content:
+                            log_message(log_file, f"Found LLVMFuzzerTestOneInput in: {file_path}")
+                            # Remove license headers
+                            content_lines = content.split('\n')
+                            filtered_lines = []
+                            skip_license = False
+                            for line in content_lines:
+                                if 'Copyright' in line or 'License' in line or skip_license:
+                                    skip_license = True
+                                    if line.strip().endswith('*/') or line.strip() == '':
+                                        skip_license = False
+                                    continue
+                                filtered_lines.append(line)
+                            return '\n'.join(filtered_lines), file_path
+                except Exception as e:
+                    log_message(log_file, f"Error reading {file_path}: {str(e)}")
+
+    log_message(log_file, "LLVMFuzzerTestOneInput not found, trying other methods...")
+
     # Extract the base name without _fuzzer suffix if present
     base_name = fuzzer_name
     if "_fuzzer" in base_name:
         base_name = base_name.replace("_fuzzer", "")
-    
-    # First, collect all build scripts
+
+    # Collect all build scripts
     build_script_paths = []
     build_script_contents = {}
 
