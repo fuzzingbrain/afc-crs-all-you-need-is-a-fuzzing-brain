@@ -13,6 +13,131 @@ if TYPE_CHECKING:
     from common.llm.client import LLMClient
 
 
+def _parse_build_scripts_for_fuzzer_source(
+    build_script_contents: dict,
+    fuzzer_name: str,
+    project_src_dir: str,
+    logger: Optional['StrategyLogger'] = None
+) -> Optional[str]:
+    """
+    Parse build scripts (Makefile, build.sh, CMakeLists.txt) to identify the source file
+    that is compiled into the fuzzer binary.
+
+    Args:
+        build_script_contents: Dict mapping script path to content
+        fuzzer_name: Name of the fuzzer binary
+        project_src_dir: Project source directory
+        logger: Optional logger
+
+    Returns:
+        Path to the source file, or None if not found
+    """
+    for script_path, content in build_script_contents.items():
+        script_name = os.path.basename(script_path)
+
+        # Parse Makefile
+        if script_name in ['Makefile', 'makefile', 'GNUmakefile'] or 'make' in script_path.lower():
+            # Look for fuzzer target definition
+            # Pattern: $(BUILD_DIR)/fuzzer_name: source_file.c
+            # or: fuzzer_name.o: source_file.c
+            # Handle multi-line targets with backslash continuations
+            pattern1 = rf'{re.escape(fuzzer_name)}[^:]*:\s*\\?\s*([^\s]+\.(?:c|cc|cpp))'
+            matches = re.finditer(pattern1, content, re.MULTILINE | re.DOTALL)
+            for match in matches:
+                source_file = match.group(1)
+                if logger:
+                    logger.log(f"Found source from Makefile pattern 1: {source_file}")
+                return source_file
+
+            # Also look for fuzzer_name on a line, followed by a source file on the next line
+            lines = content.split('\n')
+            for i, line in enumerate(lines):
+                if fuzzer_name in line and ':' in line:
+                    # Check next few lines for source files
+                    for j in range(i+1, min(i+5, len(lines))):
+                        next_line = lines[j].strip()
+                        if next_line and not next_line.startswith('#'):
+                            # Check if line contains a source file
+                            source_match = re.search(r'([^\s]+\.(?:c|cc|cpp))\s*$', next_line)
+                            if source_match:
+                                source_file = source_match.group(1)
+                                if logger:
+                                    logger.log(f"Found source from Makefile multi-line: {source_file}")
+                                return source_file
+                        # Stop at next target definition
+                        if ':' in next_line and not next_line.startswith('\t'):
+                            break
+
+            # Look for compilation commands with fuzzer-specific flags
+            # Pattern: -DFUZZER_TARGET ... -o fuzzer_name.o source_file.c
+            pattern2 = rf'-D[A-Z_]*FUZZ[A-Z_]*.*?-o.*?{re.escape(fuzzer_name)}[^\s]*\s+([^\s]+\.(?:c|cc|cpp))'
+            matches = re.finditer(pattern2, content, re.DOTALL)
+            for match in matches:
+                source_file = match.group(1)
+                # Remove any leading paths from build variables
+                if '$' in source_file:
+                    continue
+                if logger:
+                    logger.log(f"Found source from Makefile pattern 2: {source_file}")
+                return source_file
+
+            # Look for lines with fuzzer name and a .c/.cc/.cpp file
+            lines = content.split('\n')
+            for i, line in enumerate(lines):
+                if fuzzer_name in line and ('.c' in line or '.cc' in line or '.cpp' in line):
+                    # Extract potential source file
+                    parts = re.findall(r'([^\s]+\.(?:c|cc|cpp))', line)
+                    for part in parts:
+                        if '$' not in part and part not in ['$NJS_CC', '$CC', '$CXX']:
+                            if logger:
+                                logger.log(f"Found source from Makefile line scan: {part}")
+                            return part
+
+        # Parse build.sh
+        elif script_name == 'build.sh' or script_name.endswith('.sh'):
+            # Look for compile commands
+            # Pattern: $CXX ... -o $OUT/fuzzer_name source_file.cc
+            pattern1 = rf'\$(?:CXX|CC).*?-o.*?{re.escape(fuzzer_name)}[^\s]*\s+([^\s]+\.(?:c|cc|cpp))'
+            matches = re.finditer(pattern1, content)
+            for match in matches:
+                source_file = match.group(1)
+                if '$' not in source_file:
+                    if logger:
+                        logger.log(f"Found source from build.sh pattern 1: {source_file}")
+                    return source_file
+
+            # Pattern: compile_fuzzer source_file.cc fuzzer_name
+            pattern2 = rf'compile_(?:fuzzer|libfuzzer)[^\n]+([^\s]+\.(?:c|cc|cpp))[^\n]+{re.escape(fuzzer_name)}'
+            matches = re.finditer(pattern2, content)
+            for match in matches:
+                source_file = match.group(1)
+                if logger:
+                    logger.log(f"Found source from build.sh pattern 2: {source_file}")
+                return source_file
+
+            # Reverse pattern: compile_fuzzer fuzzer_name source_file.cc
+            pattern3 = rf'compile_(?:fuzzer|libfuzzer)[^\n]+{re.escape(fuzzer_name)}[^\n]+([^\s]+\.(?:c|cc|cpp))'
+            matches = re.finditer(pattern3, content)
+            for match in matches:
+                source_file = match.group(1)
+                if logger:
+                    logger.log(f"Found source from build.sh pattern 3: {source_file}")
+                return source_file
+
+        # Parse CMakeLists.txt
+        elif script_name == 'CMakeLists.txt':
+            # Pattern: add_executable(fuzzer_name source_file.c)
+            pattern1 = rf'add_executable\s*\(\s*{re.escape(fuzzer_name)}\s+([^\s)]+\.(?:c|cc|cpp))'
+            matches = re.finditer(pattern1, content)
+            for match in matches:
+                source_file = match.group(1)
+                if logger:
+                    logger.log(f"Found source from CMakeLists pattern 1: {source_file}")
+                return source_file
+
+    return None
+
+
 def find_fuzzer_source(
     fuzzer_path: str,
     project_name: str,
@@ -57,6 +182,34 @@ def find_fuzzer_source(
     if logger:
         logger.log(f"Looking for source of {fuzzer_name} in {project_src_dir}")
 
+    # FIRST: Search all source files for LLVMFuzzerTestOneInput
+    # This is the most reliable method
+    if logger:
+        logger.log("Searching for files containing LLVMFuzzerTestOneInput...")
+
+    extensions = ['.c', '.cc', '.cpp']
+    if not language.startswith('c'):
+        extensions = ['.java']
+
+    for root, dirs, files in os.walk(project_src_dir):
+        for file in files:
+            if any(file.endswith(ext) for ext in extensions):
+                file_path = os.path.join(root, file)
+                try:
+                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+                        if 'LLVMFuzzerTestOneInput' in content:
+                            if logger:
+                                logger.log(f"Found LLVMFuzzerTestOneInput in: {file_path}")
+                            return strip_license_text(content)
+                except Exception as e:
+                    if logger:
+                        logger.error(f"Error reading {file_path}: {str(e)}")
+
+    # If not found, log and continue with other methods
+    if logger:
+        logger.log("LLVMFuzzerTestOneInput not found in any source file, trying other methods...")
+
     # Extract base name without _fuzzer suffix
     base_name = fuzzer_name
     if "_fuzzer" in base_name:
@@ -80,6 +233,30 @@ def find_fuzzer_source(
                     if logger:
                         logger.error(f"Error reading build script {script_path}: {str(e)}")
 
+    # Also search project source directory for Makefiles
+    if os.path.exists(project_src_dir):
+        for root, dirs, files in os.walk(project_src_dir):
+            # Limit depth to avoid searching too deep
+            depth = root[len(project_src_dir):].count(os.sep)
+            if depth > 3:
+                continue
+
+            for filename in files:
+                if filename in ['Makefile', 'makefile', 'GNUmakefile', 'CMakeLists.txt']:
+                    script_path = os.path.join(root, filename)
+                    build_script_paths.append(script_path)
+                    try:
+                        with open(script_path, 'r') as f:
+                            content = f.read()
+                            # Only include Makefiles that mention the fuzzer name
+                            if fuzzer_name in content or 'fuzzer' in content.lower():
+                                build_script_contents[script_path] = content
+                                if logger:
+                                    logger.log(f"Found relevant build script: {script_path}")
+                    except Exception as e:
+                        if logger:
+                            logger.error(f"Error reading build script {script_path}: {str(e)}")
+
     # Also search in {focus} if not found
     if len(build_script_paths) == 0:
         focus_path = os.path.join(project_dir, focus)
@@ -94,6 +271,19 @@ def find_fuzzer_source(
                     except Exception as e:
                         if logger:
                             logger.error(f"Error reading build script {script_path}: {str(e)}")
+
+    # Extract directories referenced in build scripts
+    dirs_from_build_scripts = set()
+    for script_path, content in build_script_contents.items():
+        # Look for common directory patterns in build scripts
+        dir_patterns = re.findall(r'(?:^|\s)([\w_]+/[\w_/]+\.(?:c|cc|cpp))', content, re.MULTILINE)
+        for pattern in dir_patterns:
+            dir_path = os.path.dirname(pattern)
+            if dir_path:
+                dirs_from_build_scripts.add(dir_path)
+
+    if logger and dirs_from_build_scripts:
+        logger.log(f"Found {len(dirs_from_build_scripts)} directories referenced in build scripts")
 
     # Collect potential source files
     source_files = {}
@@ -132,6 +322,27 @@ def find_fuzzer_source(
                     except Exception as e:
                         if logger:
                             logger.error(f"Error reading source file {file_path}: {str(e)}")
+
+    # Also look in directories referenced in build scripts
+    for dir_from_build in dirs_from_build_scripts:
+        # Try both absolute and relative to project_src_dir
+        for base_dir in [project_src_dir, os.path.dirname(project_src_dir)]:
+            search_dir = os.path.join(base_dir, dir_from_build)
+            if os.path.exists(search_dir) and os.path.isdir(search_dir):
+                for file in os.listdir(search_dir):
+                    if any(file.endswith(ext) for ext in extensions):
+                        file_path = os.path.join(search_dir, file)
+                        if file_path not in source_files:
+                            try:
+                                with open(file_path, 'r') as f:
+                                    content = f.read()
+                                    if len(content) < 50000:
+                                        source_files[file_path] = content
+                                        if logger:
+                                            logger.log(f"Added source file from build-referenced dir: {file_path}")
+                            except Exception as e:
+                                if logger:
+                                    logger.error(f"Error reading source file {file_path}: {str(e)}")
 
     # Look in pkgs/ directories and archives
     fuzz_dirs: List[str] = []
@@ -258,6 +469,54 @@ def find_fuzzer_source(
     if logger:
         logger.log(f"Collected {len(source_files)} potential source files")
 
+    # First, try to find files containing LLVMFuzzerTestOneInput
+    llvm_fuzzer_files = {}
+    for file_path, content in source_files.items():
+        if 'LLVMFuzzerTestOneInput' in content:
+            llvm_fuzzer_files[file_path] = content
+            if logger:
+                logger.log(f"Found LLVMFuzzerTestOneInput in: {file_path}")
+
+    # If we found exactly one file with LLVMFuzzerTestOneInput, return it
+    if len(llvm_fuzzer_files) == 1:
+        only_file_path = list(llvm_fuzzer_files.keys())[0]
+        if logger:
+            logger.log(f"Found single file with LLVMFuzzerTestOneInput: {only_file_path}")
+        return strip_license_text(llvm_fuzzer_files[only_file_path])
+
+    # Try to parse build scripts to find which source file is compiled as the fuzzer
+    fuzzer_source_from_build = _parse_build_scripts_for_fuzzer_source(
+        build_script_contents, fuzzer_name, project_src_dir, logger
+    )
+    if fuzzer_source_from_build:
+        # Try multiple path resolutions
+        possible_paths = [
+            fuzzer_source_from_build,  # As-is
+            os.path.join(project_src_dir, fuzzer_source_from_build),  # Relative to project_src_dir
+        ]
+
+        # Also try to find it in the repo if it's a simple filename
+        if '/' not in fuzzer_source_from_build:
+            # Search in common directories
+            for common_dir in ['src', 'external', 'lib', 'fuzz', 'test']:
+                possible_paths.append(os.path.join(project_src_dir, common_dir, fuzzer_source_from_build))
+
+        for path in possible_paths:
+            if os.path.exists(path):
+                try:
+                    with open(path, 'r') as f:
+                        content = f.read()
+                        # Verify it contains fuzzer code
+                        if 'LLVMFuzzerTestOneInput' in content:
+                            if logger:
+                                logger.log(f"Found fuzzer source from build script: {path}")
+                            return strip_license_text(content)
+                        elif logger:
+                            logger.warning(f"Build-identified file {path} doesn't contain LLVMFuzzerTestOneInput")
+                except Exception as e:
+                    if logger:
+                        logger.error(f"Error reading build-identified source {path}: {str(e)}")
+
     # If only one source file found, return it directly
     if len(source_files) == 1:
         only_file_path = list(source_files.keys())[0]
@@ -289,6 +548,9 @@ def find_fuzzer_source(
 
     # Use LLM to identify the fuzzer source if available
     if llm_client and len(source_files) > 1:
+        # If we have multiple files with LLVMFuzzerTestOneInput, use LLM to pick the right one
+        files_to_analyze = llvm_fuzzer_files if len(llvm_fuzzer_files) > 1 else source_files
+
         prompt = f"""I need to identify the source code file for a fuzzer named '{fuzzer_name}' (base name: '{base_name}').
 Please analyze the following build scripts and source files to determine which file is most likely the fuzzer source.
 
@@ -297,21 +559,54 @@ The fuzzer binary is located at: {fuzzer_path}
 BUILD SCRIPTS:
 """
 
-        # Add build scripts to prompt
+        # Add build scripts to prompt (truncate if too long)
         for script_path, content in build_script_contents.items():
-            prompt += f"\n--- {script_path} ---\n{content}\n"
+            truncated_content = content[:5000] + ('\n... (truncated)' if len(content) > 5000 else '')
+            prompt += f"\n--- {script_path} ---\n{truncated_content}\n"
 
         prompt += "\nSOURCE FILES:\n"
 
-        # Add source files to prompt
-        for file_path, content in source_files.items():
+        # Add source files to prompt with more context
+        for file_path, content in files_to_analyze.items():
             lines = content.split('\n')
-            preview = '\n'.join(lines[:20]) + ('\n... (file continues)' if len(lines) > 20 else '')
-            prompt += f"\n--- {file_path} ---\n{preview}\n"
+            # For files with LLVMFuzzerTestOneInput, show more context around it
+            if 'LLVMFuzzerTestOneInput' in content:
+                # Find the line with LLVMFuzzerTestOneInput
+                fuzzer_line_idx = None
+                for i, line in enumerate(lines):
+                    if 'LLVMFuzzerTestOneInput' in line:
+                        fuzzer_line_idx = i
+                        break
 
-        prompt += """
-Based on the build scripts and source files, which file is most likely the source code for the fuzzer?
-Please respond with just the full path to the file you believe is the fuzzer source code.
+                if fuzzer_line_idx is not None:
+                    # Show 10 lines before and 30 lines after
+                    start_idx = max(0, fuzzer_line_idx - 10)
+                    end_idx = min(len(lines), fuzzer_line_idx + 30)
+                    preview = '\n'.join(lines[start_idx:end_idx])
+                    prompt += f"\n--- {file_path} ---\n{preview}\n"
+                else:
+                    preview = '\n'.join(lines[:50]) + ('\n... (file continues)' if len(lines) > 50 else '')
+                    prompt += f"\n--- {file_path} ---\n{preview}\n"
+            else:
+                # For other files, show first 50 lines
+                preview = '\n'.join(lines[:50]) + ('\n... (file continues)' if len(lines) > 50 else '')
+                prompt += f"\n--- {file_path} ---\n{preview}\n"
+
+        prompt += f"""
+Based on the build scripts and source files above, which file is the source code for the fuzzer?
+Look for:
+1. Files containing LLVMFuzzerTestOneInput function
+2. Files referenced in build scripts for compiling the fuzzer
+3. Files with fuzzer-related compilation flags (like -DFUZZER_TARGET)
+
+IMPORTANT: Return the SOURCE FILE path, NOT the build artifact path.
+- Good: external/njs_shell.c, src/fuzzer.cc, fuzz/test_fuzzer.c
+- Bad: /build/{fuzzer_name}, /out/{fuzzer_name}, build/{fuzzer_name}
+
+The fuzzer BINARY is at: {fuzzer_path}
+You need to find the SOURCE FILE that was compiled to create this binary.
+
+Please respond with ONLY the source file path (e.g., external/shell.c or src/fuzzer.cc), nothing else.
 """
 
         # Call LLM to identify the fuzzer source
@@ -321,24 +616,64 @@ Please respond with just the full path to the file you believe is the fuzzer sou
         if success:
             response = response.strip()
 
-            # Extract file path from response
-            file_path_match = re.search(r'(/[^\s]+)', response)
+            # Extract file path from response - try multiple patterns
+            # Pattern 1: Full absolute path
+            file_path_match = re.search(r'(/[^\s]+\.(?:c|cc|cpp|java))', response)
             if file_path_match:
                 identified_path = file_path_match.group(1)
+            else:
+                # Pattern 2: Relative path or just filename
+                file_path_match = re.search(r'([^\s]+\.(?:c|cc|cpp|java))', response)
+                if file_path_match:
+                    identified_path = file_path_match.group(1)
+                else:
+                    identified_path = None
+
+            if identified_path:
                 if logger:
                     logger.log(f"Model identified fuzzer source as: {identified_path}")
+
+                # Validate: reject build artifact paths
+                build_artifact_patterns = ['/build/', '/out/', 'build/' + fuzzer_name, 'out/' + fuzzer_name]
+                is_build_artifact = any(pattern in identified_path for pattern in build_artifact_patterns)
+                if is_build_artifact:
+                    if logger:
+                        logger.warning(f"Model returned build artifact path (not source): {identified_path}")
+                    identified_path = None
+
+            if identified_path:
+                # Try to find this path in our source files (check basename match)
+                identified_basename = os.path.basename(identified_path)
+                for file_path, content in source_files.items():
+                    if os.path.basename(file_path) == identified_basename:
+                        if logger:
+                            logger.log(f"Matched identified source to collected file: {file_path}")
+                        return strip_license_text(content)
 
                 # Check if identified path is in collected source files
                 if identified_path in source_files:
                     return strip_license_text(source_files[identified_path])
 
-                # Try to read file directly
+                # Try to read file directly (absolute path)
                 if os.path.exists(identified_path):
                     try:
                         with open(identified_path, 'r') as f:
                             content = f.read()
                             if logger:
                                 logger.log("Successfully read identified fuzzer source")
+                            return strip_license_text(content)
+                    except Exception as e:
+                        if logger:
+                            logger.error(f"Error reading identified source: {str(e)}")
+
+                # Try relative to project_src_dir
+                relative_path = os.path.join(project_src_dir, identified_path)
+                if os.path.exists(relative_path):
+                    try:
+                        with open(relative_path, 'r') as f:
+                            content = f.read()
+                            if logger:
+                                logger.log(f"Successfully read identified fuzzer source (relative): {relative_path}")
                             return strip_license_text(content)
                     except Exception as e:
                         if logger:

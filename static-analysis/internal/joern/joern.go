@@ -42,9 +42,20 @@ func AnalyzeProjectDirs(projectDirs []string, language string, fuzzers []string)
 	// Note: We store these separately because joern-parse may not include them due to build configs
 	var fuzzerDirs []string
 	if language == "c" || language == "cpp" || language == "java" {
-		fuzzerDirs = findFuzzerDirectories(projectDir)
-		for _, fuzzerDir := range fuzzerDirs {
-			log.Printf("Found fuzzer directory: %s", fuzzerDir)
+		// First, check if any of the additional project directories are fuzzer directories
+		for i := 1; i < len(projectDirs); i++ {
+			dir := projectDirs[i]
+			if hasSourceFiles(dir) && (hasFuzzerFiles(dir) || strings.Contains(strings.ToLower(dir), "fuzz")) {
+				fuzzerDirs = append(fuzzerDirs, dir)
+				log.Printf("Found fuzzer directory from projectDirs: %s", dir)
+			}
+		}
+
+		// Then search within the primary project directory for fuzzer subdirectories
+		additionalDirs := findFuzzerDirectories(projectDir)
+		for _, fuzzerDir := range additionalDirs {
+			fuzzerDirs = append(fuzzerDirs, fuzzerDir)
+			log.Printf("Found fuzzer subdirectory: %s", fuzzerDir)
 		}
 	}
 
@@ -60,9 +71,10 @@ func AnalyzeProjectDirs(projectDirs []string, language string, fuzzers []string)
 	log.Println("Extracting analysis results from CPG...")
 	results, err := extractBasicResults(cpgPath, projectDir, fuzzers, language)
 
-	// Step 2.5: If no entry points found and we have fuzzer directories, parse fuzzer dirs separately
-	if err == nil && len(results.ReachableFunctions) == 0 && len(fuzzerDirs) > 0 {
-		log.Printf("No entry points found in initial CPG. Parsing fuzzer directories separately to find entry points...")
+	// Step 2.5: If we have fuzzer directories, parse them separately to find fuzzer entry points
+	// This is needed because joern-parse only analyzes the primary directory
+	if err == nil && len(fuzzerDirs) > 0 {
+		log.Printf("Parsing fuzzer directories separately to find fuzzer entry points...")
 
 		// Parse just the fuzzer directories to find entry points
 		fuzzerCpgPath := cpgPath + ".fuzzers"
@@ -70,7 +82,10 @@ func AnalyzeProjectDirs(projectDirs []string, language string, fuzzers []string)
 			// Extract entry points from fuzzer-only CPG
 			fuzzerResults, err := extractBasicResults(fuzzerCpgPath, projectDir, fuzzers, language)
 			if err == nil && len(fuzzerResults.ReachableFunctions) > 0 {
-				log.Printf("Found %d entry points in fuzzer directories!", len(fuzzerResults.ReachableFunctions))
+				log.Printf("Found %d fuzzer entry points in fuzzer directories!", len(fuzzerResults.ReachableFunctions))
+				for entryPoint := range fuzzerResults.ReachableFunctions {
+					log.Printf("  - %s", entryPoint)
+				}
 
 				// Merge: keep main CPG's functions and call graph, but add fuzzer entry points
 				// The main CPG has all the library functions, the fuzzer CPG has the entry points
@@ -137,27 +152,20 @@ func extractBasicResults(cpgPath, projectDir string, fuzzers []string, language 
 	}
 
 	// Determine entry point patterns based on language
-	var entryPointPatterns []string
+	// We'll construct Joern queries that properly handle pattern matching
+	var entryPointQueries string
+
 	switch language {
 	case "c", "c++", "cpp":
-		entryPointPatterns = []string{".*LLVMFuzzerTestOneInput.*"}
+		// For C/C++, look for LLVMFuzzerTestOneInput (exact match) and main as fallback
+		// Use filter with regex for flexible matching, plus exact name matches
+		entryPointQueries = `cpg.method.name("LLVMFuzzerTestOneInput").l ++ cpg.method.filter(_.name.matches(".*LLVMFuzzerTestOneInput.*")).l ++ cpg.method.name("main").l`
 	case "java":
-		entryPointPatterns = []string{
-			".*fuzzerTestOneInput.*",
-			".*fuzzerInitialize.*",
-			".*testOneInput.*",
-		}
+		// For Java, look for common fuzzer method patterns
+		entryPointQueries = `cpg.method.filter(_.name.matches(".*fuzzerTestOneInput.*")).l ++ cpg.method.filter(_.name.matches(".*fuzzerInitialize.*")).l ++ cpg.method.filter(_.name.matches(".*testOneInput.*")).l`
 	default:
-		entryPointPatterns = []string{".*LLVMFuzzerTestOneInput.*", ".*fuzzerTestOneInput.*"}
-	}
-
-	// Build the entry point search queries
-	entryPointQueries := ""
-	for i, pattern := range entryPointPatterns {
-		if i > 0 {
-			entryPointQueries += " ++ "
-		}
-		entryPointQueries += fmt.Sprintf(`cpg.method.fullName("%s").l`, pattern)
+		// Default: try both C and Java patterns
+		entryPointQueries = `cpg.method.name("LLVMFuzzerTestOneInput").l ++ cpg.method.filter(_.name.matches(".*fuzzerTestOneInput.*")).l ++ cpg.method.name("main").l`
 	}
 
 	// Create a Joern script to extract data
@@ -594,9 +602,17 @@ func createCPG(projectDirs []string, cpgPath, language string) error {
 
 	switch language {
 	case "c", "c++", "cpp":
-		// Use joern-parse for C/C++ - supports multiple directories
-		args := append([]string{}, projectDirs...)
-		args = append(args, "--output", cpgPath)
+		// Use joern-parse for C/C++ - only supports single directory
+		// IMPORTANT: Explicitly specify --language to avoid auto-detection issues
+		// (e.g., njs has both .c and .js files, and joern would pick JavaScript)
+		// If multiple directories are provided, use the first one (main repo)
+		// and let simple analysis handle the others (e.g., fuzzer harnesses)
+		primaryDir := projectDirs[0]
+		if len(projectDirs) > 1 {
+			log.Printf("Warning: joern-parse only supports single directory. Using primary directory: %s", primaryDir)
+			log.Printf("Other directories will be analyzed with simple regex-based analysis: %v", projectDirs[1:])
+		}
+		args := []string{primaryDir, "--output", cpgPath, "--language", "newc"}
 		cmd = exec.Command("joern-parse", args...)
 	case "java":
 		// Use javasrc2cpg for Java - only supports single directory

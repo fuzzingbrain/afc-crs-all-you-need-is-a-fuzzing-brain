@@ -161,6 +161,22 @@ func AnalyzeProjectDirs(projectDirs []string, language string, fuzzers []string)
 
 	log.Printf("Found %d entry points", len(entryPoints))
 
+	// If no entry points found, log debug info
+	if len(entryPoints) == 0 {
+		log.Printf("DEBUG: No entry points found. Searching for '%s' in %d functions:", entryPointName, len(results.Functions))
+		count := 0
+		for funcName, funcDef := range results.Functions {
+			if count < 10 {
+				log.Printf("  Sample function key: %s, name: %s", funcName, funcDef.Name)
+				count++
+			}
+			// Extra check: log if any function has similar name
+			if strings.Contains(strings.ToLower(funcName), "fuzzer") || strings.Contains(strings.ToLower(funcDef.Name), "fuzzer") {
+				log.Printf("  Found fuzzer-related function: %s (name: %s)", funcName, funcDef.Name)
+			}
+		}
+	}
+
 	// Compute reachability from each entry point
 	for _, entryPoint := range entryPoints {
 		reachable := findReachableFunctions(entryPoint, results.CallGraphAdj, 100)
@@ -275,12 +291,6 @@ func AnalyzeProject(projectDir string, language string, fuzzers []string) (*mode
 
 // parseFunctionsOnly extracts only function definitions from a source file (pass 1)
 func parseFunctionsOnly(filePath, projectDir, language string, results *models.AnalysisResults) error {
-	file, err := os.Open(filePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
 	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
@@ -293,19 +303,50 @@ func parseFunctionsOnly(filePath, projectDir, language string, results *models.A
 	if language == "java" {
 		funcRegex = regexp.MustCompile(`(?m)^\s*(public|private|protected|static|\s)+[\w<>\[\]]+\s+(\w+)\s*\([^)]*\)\s*\{`)
 	} else {
-		funcRegex = regexp.MustCompile(`(?m)^\s*(?:extern\s+"C"\s+)?(?:inline\s+)?(?:static\s+)?[\w:*\s]+\s+(\w+)\s*\([^)]*\)\s*\{`)
+		// Match C/C++ functions with brace on same line OR next line
+		// This will match functions like:
+		// int foo() {
+		// OR
+		// int
+		// foo(args)
+		// {
+		// Note: We need at least one return type token ([\w:*]+) followed by whitespace and then the function name
+		funcRegex = regexp.MustCompile(`(?m)^\s*(?:extern\s+"C"\s+)?(?:inline\s+)?(?:static\s+)?(?:const\s+)?[\w:*]+[\s*]+(\w+)\s*\([^)]*\)(?:\s*\{|$)`)
 	}
 
-	scanner := bufio.NewScanner(file)
-	scanner.Split(bufio.ScanLines)
+	// Split content into lines for processing
+	lines := strings.Split(contentStr, "\n")
 
 	lineNum := 0
-	for scanner.Scan() {
+	for lineNum < len(lines) {
+		line := lines[lineNum]
 		lineNum++
-		line := scanner.Text()
+
+		// For C/C++, check if this looks like a function return type
+		// If so, combine with next line(s) to get full declaration
+		var combinedLine string
+		if language != "java" {
+			// Check if line looks like a return type (ends with a type, no opening brace)
+			trimmed := strings.TrimSpace(line)
+			if len(trimmed) > 0 && !strings.Contains(line, "{") && !strings.Contains(line, ";") {
+				// Might be a return type on its own line, combine with next line
+				combinedLine = line
+				if lineNum < len(lines) {
+					combinedLine += " " + lines[lineNum]
+					// Also check the line after for opening brace
+					if lineNum+1 < len(lines) && strings.Contains(lines[lineNum+1], "{") {
+						combinedLine += " " + lines[lineNum+1]
+					}
+				}
+			} else {
+				combinedLine = line
+			}
+		} else {
+			combinedLine = line
+		}
 
 		// Check for function definition
-		if matches := funcRegex.FindStringSubmatch(line); len(matches) > 0 {
+		if matches := funcRegex.FindStringSubmatch(combinedLine); len(matches) > 0 {
 			funcName := ""
 			if language == "java" && len(matches) > 2 {
 				funcName = matches[2]
@@ -313,44 +354,42 @@ func parseFunctionsOnly(filePath, projectDir, language string, results *models.A
 				funcName = matches[1]
 			}
 
-			if funcName != "" {
+			// Filter out C/C++ keywords
+			if funcName != "" && !isCKeyword(funcName) {
 				fullFuncName := fmt.Sprintf("%s.%s", relPath, funcName)
 
-				// Extract function body (simplified - just a few lines)
+				// Extract function body (up to 50 lines from current position)
 				bodyLines := []string{}
-				tmpScanner := bufio.NewScanner(strings.NewReader(contentStr))
-				tmpLine := 0
-				for tmpScanner.Scan() {
-					tmpLine++
-					if tmpLine >= lineNum && tmpLine < lineNum+50 {
-						bodyLines = append(bodyLines, tmpScanner.Text())
-					}
-					if tmpLine >= lineNum+50 {
-						break
-					}
+				startLine := lineNum - 1 // We already incremented lineNum
+				endLine := startLine + 50
+				if endLine > len(lines) {
+					endLine = len(lines)
+				}
+				for i := startLine; i < endLine; i++ {
+					bodyLines = append(bodyLines, lines[i])
 				}
 
 				results.Functions[fullFuncName] = &models.FunctionDefinition{
 					Name:       funcName,
 					FilePath:   relPath,
-					StartLine:  lineNum,
-					EndLine:    lineNum + len(bodyLines),
+					StartLine:  startLine + 1, // 1-indexed for display
+					EndLine:    endLine,
 					SourceCode: strings.Join(bodyLines, "\n"),
 				}
 			}
 		}
 	}
 
-	return scanner.Err()
+	return nil
 }
 
 // parseCallsOnly extracts function calls and builds the call graph (pass 2)
 func parseCallsOnly(filePath, projectDir, language string, results *models.AnalysisResults) error {
-	file, err := os.Open(filePath)
+	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	contentStr := string(content)
 
 	relPath, _ := filepath.Rel(projectDir, filePath)
 
@@ -365,22 +404,38 @@ func parseCallsOnly(filePath, projectDir, language string, results *models.Analy
 		callRegex = regexp.MustCompile(`\b(\w+)\s*\(`)
 	}
 
-	scanner := bufio.NewScanner(file)
-	scanner.Split(bufio.ScanLines)
-
+	lines := strings.Split(contentStr, "\n")
 	lineNum := 0
 	var currentFunction string
 	braceDepth := 0
 
-	for scanner.Scan() {
+	for lineNum < len(lines) {
+		line := lines[lineNum]
 		lineNum++
-		line := scanner.Text()
+
+		// For C/C++, combine lines for multi-line function declarations
+		var combinedLine string
+		if language != "java" {
+			trimmed := strings.TrimSpace(line)
+			// If line looks like it might be a return type without opening brace
+			if len(trimmed) > 0 && !strings.Contains(line, "{") && !strings.Contains(line, ";") && lineNum < len(lines) {
+				combinedLine = line + " " + lines[lineNum]
+				// Also check if the opening brace is on the line after that
+				if lineNum+1 < len(lines) && strings.Contains(lines[lineNum+1], "{") {
+					combinedLine += " " + lines[lineNum+1]
+				}
+			} else {
+				combinedLine = line
+			}
+		} else {
+			combinedLine = line
+		}
 
 		// Track brace depth to know when we're inside a function
 		braceDepth += strings.Count(line, "{") - strings.Count(line, "}")
 
-		// Check for function definition to track current function
-		if matches := funcRegex.FindStringSubmatch(line); len(matches) > 0 {
+		// Check for function definition to track current function (use combinedLine for multi-line declarations)
+		if matches := funcRegex.FindStringSubmatch(combinedLine); len(matches) > 0 {
 			funcName := ""
 			if language == "java" && len(matches) > 2 {
 				funcName = matches[2]
@@ -388,12 +443,13 @@ func parseCallsOnly(filePath, projectDir, language string, results *models.Analy
 				funcName = matches[1]
 			}
 
-			if funcName != "" {
+			// Filter out C/C++ keywords
+			if funcName != "" && (language == "java" || !isCKeyword(funcName)) {
 				currentFunction = fmt.Sprintf("%s.%s", relPath, funcName)
 			}
 		}
 
-		// Check for function calls
+		// Check for function calls (use original line, not combined, to avoid double-counting)
 		if currentFunction != "" && braceDepth > 0 {
 			callMatches := callRegex.FindAllStringSubmatch(line, -1)
 			for _, match := range callMatches {
@@ -424,7 +480,7 @@ func parseCallsOnly(filePath, projectDir, language string, results *models.Analy
 		}
 	}
 
-	return scanner.Err()
+	return nil
 }
 
 // parseFile extracts functions and calls from a source file
@@ -568,6 +624,11 @@ func isKeyword(name, language string) bool {
 	}
 }
 
+// isCKeyword checks if a name is a C/C++ keyword
+func isCKeyword(name string) bool {
+	return isKeyword(name, "c")
+}
+
 // findFullFunctionName tries to match a simple function name to a full function identifier
 func findFullFunctionName(simpleName string, functions map[string]*models.FunctionDefinition, currentFile string) string {
 	// First try in the same file
@@ -592,31 +653,53 @@ func findFullFunctionName(simpleName string, functions map[string]*models.Functi
 func extractEntryPoints(fuzzers []string, language string, results *models.AnalysisResults) []string {
 	var entryPoints []string
 
+	entryPointName := "LLVMFuzzerTestOneInput"
 	if language == "java" {
-		// For Java, look for fuzzerTestOneInput methods
-		for fullName, funcDef := range results.Functions {
-			if funcDef.Name == "fuzzerTestOneInput" {
-				entryPoints = append(entryPoints, fullName)
-			}
+		entryPointName = "fuzzerTestOneInput"
+	}
+
+	// First, try exact name matching
+	for fullName, funcDef := range results.Functions {
+		if funcDef.Name == entryPointName {
+			entryPoints = append(entryPoints, fullName)
+			log.Printf("Found entry point (exact match): %s", fullName)
 		}
-	} else {
-		// For C/C++, look for LLVMFuzzerTestOneInput
+	}
+
+	// If no exact matches, try substring matching on both full name and function name
+	if len(entryPoints) == 0 {
 		for fullName, funcDef := range results.Functions {
-			if funcDef.Name == "LLVMFuzzerTestOneInput" {
+			if strings.Contains(fullName, entryPointName) || strings.Contains(funcDef.Name, entryPointName) {
 				entryPoints = append(entryPoints, fullName)
+				log.Printf("Found entry point (substring match): %s", fullName)
 			}
 		}
 	}
 
-	// If no entry points found, create synthetic ones based on fuzzer binaries
-	if len(entryPoints) == 0 {
-		log.Println("Warning: No entry points found in source, creating synthetic ones")
+	// If still no entry points found, create synthetic ones based on fuzzer binaries
+	if len(entryPoints) == 0 && len(fuzzers) > 0 {
+		log.Println("Warning: No entry points found in source, creating synthetic ones based on fuzzer binaries")
 		for _, fuzzer := range fuzzers {
 			baseName := filepath.Base(fuzzer)
 			if language == "java" {
 				entryPoints = append(entryPoints, baseName+".fuzzerTestOneInput")
 			} else {
 				entryPoints = append(entryPoints, baseName+".LLVMFuzzerTestOneInput")
+			}
+			log.Printf("Created synthetic entry point: %s", entryPoints[len(entryPoints)-1])
+		}
+	}
+
+	// If still nothing, log a warning
+	if len(entryPoints) == 0 {
+		log.Printf("Warning: No entry points found and no fuzzer binaries provided")
+		log.Printf("Available functions: %d", len(results.Functions))
+		// Debug: print first few function names
+		count := 0
+		for fullName, funcDef := range results.Functions {
+			if count < 5 {
+				log.Printf("  Sample function: %s (name: %s)", fullName, funcDef.Name)
+				count++
 			}
 		}
 	}
