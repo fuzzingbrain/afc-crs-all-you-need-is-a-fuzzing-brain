@@ -190,6 +190,7 @@ class AnalysisServer:
             sanitizers=self.sanitizers,
             ossfuzz_project=self.ossfuzz_project,
             log_callback=self._log,
+            log_dir=self.log_dir,
         )
 
         # Run build in thread pool to not block event loop

@@ -62,6 +62,7 @@ class AnalyzerBuilder:
         sanitizers: List[str],
         ossfuzz_project: Optional[str] = None,
         log_callback=None,
+        log_dir: Optional[str] = None,
     ):
         """
         Initialize AnalyzerBuilder.
@@ -72,11 +73,13 @@ class AnalyzerBuilder:
             sanitizers: List of sanitizers to build (e.g., ["address", "memory"])
             ossfuzz_project: OSS-Fuzz project name if different from project_name
             log_callback: Optional callback for logging (func(msg, level))
+            log_dir: Directory for build logs (build output saved here, not to console)
         """
         self.task_path = Path(task_path)
         self.project_name = ossfuzz_project or project_name
         self.sanitizers = sanitizers
         self.log_callback = log_callback or self._default_log
+        self.log_dir = Path(log_dir) if log_dir else None
 
         self.repo_path = self.task_path / "repo"
         self.fuzz_tooling_path = self.task_path / "fuzz-tooling"
@@ -190,9 +193,9 @@ class AnalyzerBuilder:
             str(self.repo_path.absolute()),
         ]
 
-        self.log(f"Running: {' '.join(cmd)}")
-
         try:
+            start_time = time.time()
+
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -201,28 +204,57 @@ class AnalyzerBuilder:
                 cwd=str(self.fuzz_tooling_path),
             )
 
-            # Stream output
+            # Collect output - write to build log file, not console
+            build_output = []
             for line in process.stdout:
-                # Normalize carriage returns
                 line = line.replace("\r", "\n").rstrip("\n")
                 if line:
-                    sys.stdout.write(line + "\n")
-                    sys.stdout.flush()
+                    build_output.append(line)
 
             process.wait(timeout=1800)  # 30 minutes
+            elapsed = time.time() - start_time
+
+            # Write build output to separate log file
+            if self.log_dir:
+                build_log_file = self.log_dir / f"build_{sanitizer}.log"
+                with open(build_log_file, "w", encoding="utf-8") as f:
+                    f.write(f"# Build log for {sanitizer} sanitizer\n")
+                    f.write(f"# Command: {' '.join(cmd)}\n")
+                    f.write(f"# Duration: {elapsed:.1f}s\n")
+                    f.write(f"# Return code: {process.returncode}\n")
+                    f.write("=" * 80 + "\n\n")
+                    f.write("\n".join(build_output))
 
             # Fix permissions after Docker build
             self._fix_permissions()
 
             if process.returncode != 0:
+                # Write error to error.log
+                if self.log_dir:
+                    error_log = self.log_dir / "error.log"
+                    with open(error_log, "a", encoding="utf-8") as f:
+                        f.write(f"[BUILD ERROR] {sanitizer} build failed (code {process.returncode})\n")
+                        f.write("Last 20 lines of output:\n")
+                        for line in build_output[-20:]:
+                            f.write(f"  {line}\n")
+                        f.write("\n")
                 return False, f"Build failed with code {process.returncode}"
 
+            self.log(f"Built {sanitizer} in {elapsed:.1f}s")
             return True, "Build successful"
 
         except subprocess.TimeoutExpired:
             process.kill()
+            if self.log_dir:
+                error_log = self.log_dir / "error.log"
+                with open(error_log, "a", encoding="utf-8") as f:
+                    f.write(f"[BUILD ERROR] {sanitizer} build timed out (30 minutes)\n")
             return False, "Build timed out (30 minutes)"
         except Exception as e:
+            if self.log_dir:
+                error_log = self.log_dir / "error.log"
+                with open(error_log, "a", encoding="utf-8") as f:
+                    f.write(f"[BUILD ERROR] {sanitizer} build exception: {e}\n")
             return False, str(e)
 
     def _move_build_output(self, sanitizer: str) -> bool:

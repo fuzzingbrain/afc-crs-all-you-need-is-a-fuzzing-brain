@@ -36,4 +36,4 @@ document/
 
 # POV and Patch outputs
 pov/
-patch/
+patch/package-lock.json
