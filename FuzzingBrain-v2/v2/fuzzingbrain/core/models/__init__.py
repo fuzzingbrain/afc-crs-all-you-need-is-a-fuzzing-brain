@@ -11,6 +11,7 @@ from .worker import Worker, WorkerStatus
 from .fuzzer import Fuzzer, FuzzerStatus
 from .function import Function
 from .callgraph import CallGraphNode
+from .suspicious_point import SuspiciousPoint, ControlFlowItem
 
 __all__ = [
     "Task", "TaskStatus", "JobType", "ScanMode",
@@ -20,4 +21,5 @@ __all__ = [
     "Fuzzer", "FuzzerStatus",
     "Function",
     "CallGraphNode",
+    "SuspiciousPoint", "ControlFlowItem",
 ]

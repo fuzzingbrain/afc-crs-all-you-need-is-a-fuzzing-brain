@@ -11,7 +11,7 @@ from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError
 from loguru import logger
 
-from ..core.models import Task, POV, Patch, Worker, Fuzzer, Function, CallGraphNode
+from ..core.models import Task, POV, Patch, Worker, Fuzzer, Function, CallGraphNode, SuspiciousPoint
 
 
 T = TypeVar("T")
@@ -258,6 +258,96 @@ class PatchRepository(BaseRepository[Patch]):
         return False
 
 
+class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
+    """Repository for SuspiciousPoint model"""
+
+    def __init__(self, db: Database):
+        super().__init__(db, "suspicious_points", SuspiciousPoint)
+
+    def find_by_task(self, task_id: str) -> List[SuspiciousPoint]:
+        """Find all suspicious points for a task"""
+        return self.find_all({"task_id": task_id})
+
+    def find_by_function(self, task_id: str, function_name: str) -> List[SuspiciousPoint]:
+        """Find suspicious points for a specific function"""
+        return self.find_all({
+            "task_id": task_id,
+            "function_name": function_name
+        })
+
+    def find_unchecked(self, task_id: str) -> List[SuspiciousPoint]:
+        """Find unchecked suspicious points for a task"""
+        return self.find_all({
+            "task_id": task_id,
+            "is_checked": False
+        })
+
+    def find_real(self, task_id: str) -> List[SuspiciousPoint]:
+        """Find verified real vulnerabilities for a task"""
+        return self.find_all({
+            "task_id": task_id,
+            "is_checked": True,
+            "is_real": True
+        })
+
+    def find_important(self, task_id: str) -> List[SuspiciousPoint]:
+        """Find important (high priority) suspicious points"""
+        return self.find_all({
+            "task_id": task_id,
+            "is_important": True
+        })
+
+    def find_by_score(self, task_id: str, min_score: float = 0.0) -> List[SuspiciousPoint]:
+        """Find suspicious points with score >= min_score, sorted by score descending"""
+        try:
+            cursor = self.collection.find({
+                "task_id": task_id,
+                "score": {"$gte": min_score}
+            }).sort("score", -1)
+            return [self.model_class.from_dict(doc) for doc in cursor]
+        except Exception as e:
+            logger.error(f"Failed to find suspicious points by score: {e}")
+            return []
+
+    def mark_checked(self, sp_id: str, is_real: bool, notes: str = None) -> bool:
+        """Mark a suspicious point as checked"""
+        updates = {
+            "is_checked": True,
+            "is_real": is_real,
+            "checked_at": datetime.now()
+        }
+        if notes:
+            updates["verification_notes"] = notes
+        return self.update(sp_id, updates)
+
+    def mark_important(self, sp_id: str) -> bool:
+        """Mark a suspicious point as important (high priority)"""
+        return self.update(sp_id, {"is_important": True})
+
+    def update_score(self, sp_id: str, score: float) -> bool:
+        """Update the score of a suspicious point"""
+        return self.update(sp_id, {"score": score})
+
+    def count_by_status(self, task_id: str) -> dict:
+        """Get count of suspicious points by status"""
+        try:
+            total = self.collection.count_documents({"task_id": task_id})
+            checked = self.collection.count_documents({"task_id": task_id, "is_checked": True})
+            real = self.collection.count_documents({"task_id": task_id, "is_checked": True, "is_real": True})
+            important = self.collection.count_documents({"task_id": task_id, "is_important": True})
+            return {
+                "total": total,
+                "checked": checked,
+                "unchecked": total - checked,
+                "real": real,
+                "false_positive": checked - real,
+                "important": important
+            }
+        except Exception as e:
+            logger.error(f"Failed to count suspicious points: {e}")
+            return {"total": 0, "checked": 0, "unchecked": 0, "real": 0, "false_positive": 0, "important": 0}
+
+
 class WorkerRepository(BaseRepository[Worker]):
     """Repository for Worker model"""
 
@@ -488,6 +578,7 @@ class RepositoryManager:
         self._tasks: Optional[TaskRepository] = None
         self._povs: Optional[POVRepository] = None
         self._patches: Optional[PatchRepository] = None
+        self._suspicious_points: Optional[SuspiciousPointRepository] = None
         self._workers: Optional[WorkerRepository] = None
         self._fuzzers: Optional[FuzzerRepository] = None
         self._functions: Optional[FunctionRepository] = None
@@ -513,6 +604,13 @@ class RepositoryManager:
         if self._patches is None:
             self._patches = PatchRepository(self.db)
         return self._patches
+
+    @property
+    def suspicious_points(self) -> SuspiciousPointRepository:
+        """Get SuspiciousPointRepository"""
+        if self._suspicious_points is None:
+            self._suspicious_points = SuspiciousPointRepository(self.db)
+        return self._suspicious_points
 
     @property
     def workers(self) -> WorkerRepository:
