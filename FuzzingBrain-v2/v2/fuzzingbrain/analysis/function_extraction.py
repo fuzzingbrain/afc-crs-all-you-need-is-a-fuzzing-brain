@@ -9,12 +9,12 @@ from typing import List, Dict, Any, Optional
 from .parsers.c_parser import parse_c_file, parse_c_files, FunctionInfo
 
 
-# 默认排除的目录（系统头文件、第三方库、构建产物等）
+# Default directories to exclude (system headers, third-party libs, build artifacts)
 DEFAULT_EXCLUDE_DIRS = {
-    # 系统
+    # System
     "usr",
     "include",
-    # 第三方库
+    # Third-party libraries
     "llvm",
     "clang",
     "boost",
@@ -24,7 +24,7 @@ DEFAULT_EXCLUDE_DIRS = {
     "external",
     "deps",
     "node_modules",
-    # 构建产物
+    # Build artifacts
     "build",
     "out",
     "cmake-build",
@@ -57,7 +57,7 @@ def extract_functions_from_file(
 
 
 def _should_exclude(file_path: Path, exclude_dirs: set) -> bool:
-    """检查文件是否应该被排除"""
+    """Check if file should be excluded"""
     parts = file_path.parts
     for part in parts:
         if part in exclude_dirs:
@@ -121,12 +121,12 @@ def get_function_metadata(
         language: Programming language
 
     Returns:
-        Dictionary mapping function name to list of FunctionInfo (支持重名函数)
+        Dictionary mapping function name to list of FunctionInfo (supports duplicate names)
     """
     # Extract all functions
     all_functions = extract_functions_from_directory(project_dir, language)
 
-    # Build lookup by name (保留所有重名函数)
+    # Build lookup by name (keep all duplicates)
     result: Dict[str, List[FunctionInfo]] = {}
     for func in all_functions:
         if func.name in function_names:
@@ -151,7 +151,7 @@ def find_function_by_name(
         language: Programming language
 
     Returns:
-        List of FunctionInfo (可能有多个重名函数)
+        List of FunctionInfo (may contain duplicates)
     """
     result = get_function_metadata([name], project_dir, language)
     return result.get(name, [])

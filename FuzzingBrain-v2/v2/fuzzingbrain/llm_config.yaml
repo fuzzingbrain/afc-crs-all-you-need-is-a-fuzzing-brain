@@ -1,0 +1,96 @@
+# =============================================================================
+# FuzzingBrain LLM Configuration
+# =============================================================================
+#
+# Quick Start:
+#   1. Copy this file to llm_config.local.yaml (won't be tracked by git)
+#   2. Fill in your API key(s)
+#   3. Choose your preferred model
+#   4. Run: python -m fuzzingbrain.llms.test
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# API Keys (required - fill at least one)
+# -----------------------------------------------------------------------------
+# Note: Use llm_config.local.yaml to store API keys to avoid leaking secrets
+#
+api_keys:
+  # Anthropic (Claude) - https://console.anthropic.com/
+  anthropic: ""
+
+  # OpenAI (GPT) - https://platform.openai.com/api-keys
+  openai: ""
+
+  # Google (Gemini) - https://aistudio.google.com/apikey
+  google: ""
+
+  # xAI (Grok) - https://console.x.ai/
+  xai: ""
+
+
+# -----------------------------------------------------------------------------
+# Model Selection
+# -----------------------------------------------------------------------------
+# Available models:
+#
+# Claude (Anthropic) - recommended for code analysis
+#   - claude-opus-4-5      Most intelligent, $5/$25 per 1M tokens
+#   - claude-sonnet-4-5    Balanced, $3/$15 per 1M tokens
+#   - claude-haiku-4-5     Fastest, $1/$5 per 1M tokens
+#
+# GPT (OpenAI)
+#   - gpt-5.2              Structured work, $1.75/$14 per 1M tokens
+#   - gpt-5.2-pro          Most accurate, $5/$40 per 1M tokens
+#   - gpt-5.2-codex        Code specialized, $1.75/$14 per 1M tokens
+#   - o3                   Strong reasoning, $10/$40 per 1M tokens
+#
+# Gemini (Google) - large context window
+#   - gemini-3-flash       Fast, $0.50/$3 per 1M tokens
+#   - gemini-3-pro         Professional, $1.25/$5 per 1M tokens
+#
+# Grok (xAI)
+#   - grok-3               xAI flagship, $5/$15 per 1M tokens
+#
+default_model: claude-sonnet-4-5
+
+
+# -----------------------------------------------------------------------------
+# Task-specific Models (optional)
+# -----------------------------------------------------------------------------
+# If not specified, uses default_model
+#
+task_models:
+  # Code analysis - requires deep understanding
+  code_analysis: claude-opus-4-5
+
+  # Code refactoring - large scale modifications
+  code_refactor: claude-sonnet-4-5
+
+  # Fast coding - simple tasks
+  fast_coding: claude-haiku-4-5
+
+  # Fast judgment - yes/no decisions
+  fast_judgment: gemini-3-flash
+
+  # Complex reasoning - math/logic
+  complex_reasoning: claude-opus-4-5
+
+
+# -----------------------------------------------------------------------------
+# Fallback Settings
+# -----------------------------------------------------------------------------
+# Automatically try other models when primary model fails
+#
+fallback:
+  enabled: true
+  max_attempts: 3
+
+
+# -----------------------------------------------------------------------------
+# Generation Parameters
+# -----------------------------------------------------------------------------
+generation:
+  temperature: 0.7      # 0.0-1.0, higher = more random
+  max_tokens: 8192      # Maximum output tokens
+  timeout: 120          # Request timeout in seconds

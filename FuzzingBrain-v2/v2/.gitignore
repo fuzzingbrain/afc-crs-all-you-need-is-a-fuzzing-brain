@@ -1,4 +1,5 @@
 **/venv/
 **/workspace/
 **/workspace/*
-**/examples/
+**/examples/llm_config.local.yaml
+fuzzingbrain/llm_config.local.yaml

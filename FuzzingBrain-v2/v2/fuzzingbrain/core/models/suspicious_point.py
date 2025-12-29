@@ -1,8 +1,8 @@
 """
-SuspiciousPoint Model - 可疑点
+SuspiciousPoint Model
 
-可疑点是介于行级和函数级之间的漏洞分析粒度。
-每个可疑点代表一个潜在的漏洞位置，需要通过 AI Agent 验证。
+A suspicious point is a vulnerability analysis granularity between line-level and function-level.
+Each suspicious point represents a potential vulnerability location that needs to be verified by AI Agent.
 """
 
 from dataclasses import dataclass, field
@@ -14,55 +14,55 @@ import uuid
 @dataclass
 class ControlFlowItem:
     """
-    控制流相关项，可以是函数或变量
+    Control flow related item, can be function or variable
     """
     type: str  # "function" | "variable"
     name: str
-    location: str  # 位置描述
+    location: str  # Location description
 
 
 @dataclass
 class SuspiciousPoint:
     """
-    可疑点 - 潜在漏洞位置
+    Suspicious Point - Potential vulnerability location
 
-    可疑点分析是重构后 CRS 的精髓。以前的 CRS 采用函数级分析，
-    可能会忽略同一函数中的多个 bug，或检测不到细节性 bug。
-    一个可疑点就是一次行级分析。
+    Suspicious point analysis is the core of the refactored CRS. Previous CRS used function-level
+    analysis, which might miss multiple bugs in the same function or fail to detect subtle bugs.
+    Each suspicious point represents a line-level analysis.
     """
 
-    # 标识符
+    # Identifiers
     suspicious_point_id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    task_id: str = ""  # 属于哪个 task
-    function_name: str = ""  # 属于哪个函数
+    task_id: str = ""  # Which task this belongs to
+    function_name: str = ""  # Which function this belongs to
 
-    # 描述（不用具体行号，用控制流描述，因为 LLM 不擅长生成行号）
+    # Description (uses control flow instead of line numbers, as LLMs are not good at generating line numbers)
     description: str = ""
 
-    # 漏洞类型
+    # Vulnerability type
     vuln_type: str = ""  # buffer-overflow, use-after-free, integer-overflow, null-pointer, etc.
 
-    # 验证状态
-    is_checked: bool = False  # 是否已被 LLM 二次验证
-    is_real: bool = False  # 如果 Agent 认为是真实 bug，则为 True
+    # Verification status
+    is_checked: bool = False  # Whether verified by LLM
+    is_real: bool = False  # True if Agent confirms it's a real bug
 
-    # 优先级
-    score: float = 0.0  # 分数 (0.0-1.0)，用于队列排序
-    is_important: bool = False  # 如果被认定为高可能性 bug，直接进入队首
+    # Priority
+    score: float = 0.0  # Score (0.0-1.0), used for queue ordering
+    is_important: bool = False  # If marked as high-probability bug, goes to front of queue
 
-    # 相关控制流信息
+    # Related control flow information
     important_controlflow: List[Dict] = field(default_factory=list)
-    # 格式: [{"type": "function"|"variable", "name": "xxx", "location": "xxx"}, ...]
+    # Format: [{"type": "function"|"variable", "name": "xxx", "location": "xxx"}, ...]
 
-    # 验证备注
+    # Verification notes
     verification_notes: Optional[str] = None
 
-    # 时间戳
+    # Timestamps
     created_at: datetime = field(default_factory=datetime.now)
     checked_at: Optional[datetime] = None
 
     def to_dict(self) -> dict:
-        """转换为字典，用于 MongoDB 存储"""
+        """Convert to dict for MongoDB storage"""
         return {
             "_id": self.suspicious_point_id,
             "suspicious_point_id": self.suspicious_point_id,
@@ -82,7 +82,7 @@ class SuspiciousPoint:
 
     @classmethod
     def from_dict(cls, data: dict) -> "SuspiciousPoint":
-        """从字典创建 SuspiciousPoint"""
+        """Create SuspiciousPoint from dict"""
         return cls(
             suspicious_point_id=data.get("suspicious_point_id", data.get("_id", str(uuid.uuid4()))),
             task_id=data.get("task_id", ""),
@@ -100,7 +100,7 @@ class SuspiciousPoint:
         )
 
     def mark_checked(self, is_real: bool, notes: str = None):
-        """标记为已验证"""
+        """Mark as verified"""
         self.is_checked = True
         self.is_real = is_real
         self.checked_at = datetime.now()
@@ -108,5 +108,5 @@ class SuspiciousPoint:
             self.verification_notes = notes
 
     def mark_important(self):
-        """标记为重要（高优先级）"""
+        """Mark as important (high priority)"""
         self.is_important = True
