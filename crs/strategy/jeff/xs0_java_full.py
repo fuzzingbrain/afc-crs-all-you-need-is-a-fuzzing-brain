@@ -2621,7 +2621,7 @@ Please provide a new Python script that creates a different x.bin file.
                 
                 # If we've found 2 successful POVs with this model, move to the next model
                 # For full-scan model, there may exist multiple vulnerabilities?
-                if model_success_count >= 1:
+                if model_success_count >= 5:
                     log_message(log_file, f"Found {model_success_count} successful POVs with {model_name}, moving to next model")
                     break
             else:
@@ -2684,7 +2684,7 @@ The test case did not trigger the vulnerability. Please analyze the fuzzer outpu
                     if os.path.exists(blob_path_x):
                         os.remove(blob_path_x)
 
-        if model_success_count >= 1:
+        if model_success_count >= 5:
             log_message(log_file, f"Found {model_success_count} successful POVs! Break model loop.")
             break
 

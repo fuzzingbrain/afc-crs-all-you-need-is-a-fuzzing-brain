@@ -2766,7 +2766,7 @@ Please provide a new Python script that creates a different x.bin file. Only out
                 messages.append({"role": "user", "content": user_message})
                 
                 # If we've found 2 successful POVs with this model, move to the next model
-                if model_success_count >= 1:
+                if model_success_count >= 5:
                     log_message(log_file, f"Found {model_success_count} successful POVs with {model_name}, moving to next model")
                     break
             else:
@@ -2841,7 +2841,7 @@ The test case did not trigger the vulnerability. Please analyze the fuzzer outpu
                     os.remove(blob_path)
 
 
-        if model_success_count >= 1:
+        if model_success_count >= 5:
             log_message(log_file, f"Found {model_success_count} successful POVs! Break model loop.")
             break
 

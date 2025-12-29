@@ -62,6 +62,7 @@ DETECT_TIMEOUT_CRASH_SENTINEL = "detect_timeout_crash"
 
 # Constants
 MAX_ITERATIONS = 5
+MAX_VULNERABILITIES = 5  # Find up to 5 different vulnerabilities before returning
 FUZZING_TIMEOUT_MINUTES = 45
 PATCHING_TIMEOUT_MINUTES = 30
 OPENAI_MODEL = "chatgpt-4o-latest"
@@ -2608,8 +2609,10 @@ def doAdvancedPoV0(log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer, p
     
     print(f"start_time: {start_time} end_time: {end_time} FUZZING_TIMEOUT_MINUTES: {FUZZING_TIMEOUT_MINUTES}")
     
-    # Track if we've found at least one successful POV
+    # Track vulnerabilities found (by signature to detect duplicates)
     found_pov = False
+    found_vuln_signatures = set()  # Track unique vulnerability signatures
+    all_pov_metadata = []  # Store metadata for all found vulnerabilities
     successful_pov_metadata = {}
     
     # Try with different models
@@ -2776,16 +2779,35 @@ def doAdvancedPoV0(log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer, p
 
             if found_pov and blob_path:
                 crash_output = extract_crash_output(fuzzer_output)
-                vuln_signature = fuzzer_name+"-"+generate_vulnerability_signature(crash_output, sanitizer)    
-                # Submit POV to endpoint
-                submission_result = submit_pov_to_endpoint(log_file, project_dir,blob_path,fuzzer_output,sanitizer, vuln_signature, fuzzer_name)
-                if submission_result or True: # for local test w/o submission endpoint
-                    pov_metadata = after_pov_crash_detected(log_file,model_name,iteration,fuzzer_name,sanitizer,project_name,crash_output,vuln_signature,code,blob_path,messages,project_dir)
-                    successful_pov_metadata = pov_metadata
-                    log_message(log_file, f"POV SUCCESS! Vulnerability triggered with {model_name} on iteration {iteration}")
-                    break
+                vuln_signature = fuzzer_name+"-"+generate_vulnerability_signature(crash_output, sanitizer)
+
+                # Check if this is a duplicate vulnerability
+                if vuln_signature in found_vuln_signatures:
+                    log_message(log_file, f"Duplicate vulnerability detected (signature: {vuln_signature}), continuing to find more...")
+                    found_pov = False  # Reset so we continue looking
                 else:
-                    log_message(log_file, "Failed to submit POV to endpoint")
+                    # New unique vulnerability found
+                    found_vuln_signatures.add(vuln_signature)
+                    log_message(log_file, f"NEW UNIQUE VULNERABILITY #{len(found_vuln_signatures)} (signature: {vuln_signature})")
+
+                    # Submit POV to endpoint
+                    submission_result = submit_pov_to_endpoint(log_file, project_dir,blob_path,fuzzer_output,sanitizer, vuln_signature, fuzzer_name)
+                    if submission_result or True: # for local test w/o submission endpoint
+                        pov_metadata = after_pov_crash_detected(log_file,model_name,iteration,fuzzer_name,sanitizer,project_name,crash_output,vuln_signature,code,blob_path,messages,project_dir)
+                        all_pov_metadata.append(pov_metadata)
+                        successful_pov_metadata = pov_metadata
+                        log_message(log_file, f"POV SUCCESS! Vulnerability triggered with {model_name} on iteration {iteration}")
+                        log_message(log_file, f"Found {len(found_vuln_signatures)}/{MAX_VULNERABILITIES} unique vulnerabilities so far")
+
+                        # Check if we've found enough vulnerabilities
+                        if len(found_vuln_signatures) >= MAX_VULNERABILITIES:
+                            log_message(log_file, f"Reached MAX_VULNERABILITIES ({MAX_VULNERABILITIES}), stopping search")
+                            break
+                        else:
+                            log_message(log_file, f"Continuing to search for more vulnerabilities...")
+                            found_pov = False  # Reset to continue searching
+                    else:
+                        log_message(log_file, "Failed to submit POV to endpoint")
             else:
                 fuzzer_output = filter_instrumented_lines(fuzzer_output)
                 if iteration == 1:
@@ -2814,17 +2836,24 @@ The test cases did not trigger the vulnerability. Please analyze the fuzzer outp
                     user_message = user_message + "\nThis is your last attempt. This task is very very important to me. If you generate a successful blob, I will tip you 2000 dollars."
                 messages.append({"role": "user", "content": user_message})
 
-        if found_pov:
+        # Only break out of model loop if we've found enough vulnerabilities
+        if len(found_vuln_signatures) >= MAX_VULNERABILITIES:
             break
+
     # Final summary
     total_time = time.time() - start_time
     log_message(log_file, f"Advanced Strategy as0_full.py completed in {total_time:.2f} seconds")
-    
+    log_message(log_file, f"Found {len(found_vuln_signatures)} unique vulnerabilities")
+
     # Check if any successful PoVs were found
-    if os.path.exists(POV_SUCCESS_DIR) and len(os.listdir(POV_SUCCESS_DIR)) > 0:
+    if len(found_vuln_signatures) > 0:
+        log_message(log_file, f"Vulnerability signatures found: {found_vuln_signatures}")
+        # Return True if we found at least one, along with all metadata
+        return True, {"all_vulnerabilities": all_pov_metadata, "count": len(found_vuln_signatures), "last": successful_pov_metadata}
+    elif os.path.exists(POV_SUCCESS_DIR) and len(os.listdir(POV_SUCCESS_DIR)) > 0:
         pov_count = len([f for f in os.listdir(POV_SUCCESS_DIR) if f.startswith("pov_metadata_")])
-        log_message(log_file, f"Found {pov_count} successful PoVs")
-        return found_pov, successful_pov_metadata
+        log_message(log_file, f"Found {pov_count} successful PoVs in POV_SUCCESS_DIR")
+        return True, successful_pov_metadata
     else:
         log_message(log_file, "No successful PoVs found")
         return False, {}
