@@ -318,6 +318,110 @@ class AnalysisClient:
         """
         return self._request(Method.GET_BUILD_PATHS)
 
+    # =========================================================================
+    # Suspicious point operations
+    # =========================================================================
+
+    def create_suspicious_point(
+        self,
+        function_name: str,
+        description: str,
+        vuln_type: str,
+        score: float = 0.0,
+        important_controlflow: List[dict] = None,
+    ) -> dict:
+        """
+        Create a new suspicious point.
+
+        Args:
+            function_name: Name of the function containing the suspicious code
+            description: Description of the potential vulnerability (use control flow, not line numbers)
+            vuln_type: Type of vulnerability (buffer-overflow, use-after-free, etc.)
+            score: Initial score (0.0-1.0)
+            important_controlflow: List of related functions/variables
+
+        Returns:
+            Dict with 'id' and 'created' status
+        """
+        return self._request(Method.CREATE_SUSPICIOUS_POINT, {
+            "function_name": function_name,
+            "description": description,
+            "vuln_type": vuln_type,
+            "score": score,
+            "important_controlflow": important_controlflow or [],
+        })
+
+    def update_suspicious_point(
+        self,
+        sp_id: str,
+        is_checked: bool = None,
+        is_real: bool = None,
+        is_important: bool = None,
+        score: float = None,
+        verification_notes: str = None,
+    ) -> dict:
+        """
+        Update a suspicious point.
+
+        Args:
+            sp_id: Suspicious point ID
+            is_checked: Whether verification is complete
+            is_real: Whether it's a real vulnerability
+            is_important: Whether it's high priority
+            score: Updated score
+            verification_notes: Notes from verification
+
+        Returns:
+            Dict with 'updated' status
+        """
+        params = {"id": sp_id}
+        if is_checked is not None:
+            params["is_checked"] = is_checked
+        if is_real is not None:
+            params["is_real"] = is_real
+        if is_important is not None:
+            params["is_important"] = is_important
+        if score is not None:
+            params["score"] = score
+        if verification_notes is not None:
+            params["verification_notes"] = verification_notes
+        return self._request(Method.UPDATE_SUSPICIOUS_POINT, params)
+
+    def list_suspicious_points(
+        self,
+        filter_unchecked: bool = False,
+        filter_real: bool = False,
+        filter_important: bool = False,
+    ) -> dict:
+        """
+        List suspicious points with optional filters.
+
+        Args:
+            filter_unchecked: Only return unchecked points
+            filter_real: Only return verified real vulnerabilities
+            filter_important: Only return high priority points
+
+        Returns:
+            Dict with 'suspicious_points', 'count', and 'stats'
+        """
+        return self._request(Method.LIST_SUSPICIOUS_POINTS, {
+            "filter_unchecked": filter_unchecked,
+            "filter_real": filter_real,
+            "filter_important": filter_important,
+        })
+
+    def get_suspicious_point(self, sp_id: str) -> Optional[dict]:
+        """
+        Get a single suspicious point by ID.
+
+        Args:
+            sp_id: Suspicious point ID
+
+        Returns:
+            Suspicious point dict or None
+        """
+        return self._request(Method.GET_SUSPICIOUS_POINT, {"id": sp_id})
+
 
 def connect(socket_path: str, timeout: float = 30.0, client_id: str = None) -> AnalysisClient:
     """

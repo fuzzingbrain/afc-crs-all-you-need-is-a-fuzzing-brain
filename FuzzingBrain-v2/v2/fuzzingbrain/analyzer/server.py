@@ -400,6 +400,23 @@ class AnalysisServer:
             elif method == Method.GET_BUILD_PATHS:
                 return Response.ok(self.build_paths, req_id)
 
+            # Suspicious point operations
+            elif method == Method.CREATE_SUSPICIOUS_POINT:
+                result = await self._create_suspicious_point(params)
+                return Response.ok(result, req_id)
+
+            elif method == Method.UPDATE_SUSPICIOUS_POINT:
+                result = await self._update_suspicious_point(params)
+                return Response.ok(result, req_id)
+
+            elif method == Method.LIST_SUSPICIOUS_POINTS:
+                result = await self._list_suspicious_points(params)
+                return Response.ok(result, req_id)
+
+            elif method == Method.GET_SUSPICIOUS_POINT:
+                result = await self._get_suspicious_point(params.get("id"))
+                return Response.ok(result, req_id)
+
             else:
                 return Response.err(f"Unknown method: {method}", req_id)
 
@@ -590,6 +607,98 @@ class AnalysisServer:
         reached = set(await self._get_reachable_functions(fuzzer))
 
         return list(all_functions - reached)
+
+    # =========================================================================
+    # Suspicious Point Operations
+    # =========================================================================
+
+    async def _create_suspicious_point(self, params: dict) -> dict:
+        """Create a new suspicious point."""
+        from ..core.models import SuspiciousPoint
+
+        if not self.repos:
+            raise RuntimeError("Database not connected")
+
+        sp = SuspiciousPoint(
+            task_id=self.task_id,
+            function_name=params.get("function_name", ""),
+            description=params.get("description", ""),
+            vuln_type=params.get("vuln_type", ""),
+            score=params.get("score", 0.0),
+            important_controlflow=params.get("important_controlflow", []),
+        )
+
+        self.repos.suspicious_points.save(sp)
+        self._log(f"Created suspicious point: {sp.suspicious_point_id} in {sp.function_name}")
+
+        return {
+            "id": sp.suspicious_point_id,
+            "created": True,
+        }
+
+    async def _update_suspicious_point(self, params: dict) -> dict:
+        """Update a suspicious point."""
+        if not self.repos:
+            raise RuntimeError("Database not connected")
+
+        sp_id = params.get("id")
+        if not sp_id:
+            raise ValueError("Missing suspicious point id")
+
+        updates = {}
+        if "is_checked" in params:
+            updates["is_checked"] = params["is_checked"]
+        if "is_real" in params:
+            updates["is_real"] = params["is_real"]
+        if "is_important" in params:
+            updates["is_important"] = params["is_important"]
+        if "score" in params:
+            updates["score"] = params["score"]
+        if "verification_notes" in params:
+            updates["verification_notes"] = params["verification_notes"]
+        if params.get("is_checked"):
+            from datetime import datetime
+            updates["checked_at"] = datetime.now()
+
+        success = self.repos.suspicious_points.update(sp_id, updates)
+        return {"updated": success}
+
+    async def _list_suspicious_points(self, params: dict) -> dict:
+        """List suspicious points with optional filters."""
+        if not self.repos:
+            raise RuntimeError("Database not connected")
+
+        filter_unchecked = params.get("filter_unchecked", False)
+        filter_real = params.get("filter_real", False)
+        filter_important = params.get("filter_important", False)
+
+        if filter_unchecked:
+            points = self.repos.suspicious_points.find_unchecked(self.task_id)
+        elif filter_real:
+            points = self.repos.suspicious_points.find_real(self.task_id)
+        elif filter_important:
+            points = self.repos.suspicious_points.find_important(self.task_id)
+        else:
+            points = self.repos.suspicious_points.find_by_task(self.task_id)
+
+        # Get counts
+        counts = self.repos.suspicious_points.count_by_status(self.task_id)
+
+        return {
+            "suspicious_points": [sp.to_dict() for sp in points],
+            "count": len(points),
+            "stats": counts,
+        }
+
+    async def _get_suspicious_point(self, sp_id: str) -> Optional[dict]:
+        """Get a single suspicious point by ID."""
+        if not self.repos or not sp_id:
+            return None
+
+        sp = self.repos.suspicious_points.find_by_id(sp_id)
+        if sp:
+            return sp.to_dict()
+        return None
 
     # =========================================================================
     # Lifecycle

@@ -40,6 +40,12 @@ class Method(str, Enum):
     GET_FUZZERS = "get_fuzzers"
     GET_BUILD_PATHS = "get_build_paths"
 
+    # Suspicious point operations
+    CREATE_SUSPICIOUS_POINT = "create_suspicious_point"
+    UPDATE_SUSPICIOUS_POINT = "update_suspicious_point"
+    LIST_SUSPICIOUS_POINTS = "list_suspicious_points"
+    GET_SUSPICIOUS_POINT = "get_suspicious_point"
+
 
 @dataclass
 class Request:

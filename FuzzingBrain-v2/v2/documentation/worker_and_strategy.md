@@ -161,49 +161,43 @@ is_real为false
 
 ## 实现记录
 
-### SuspiciousPoint Model
+### 数据模型
+
+#### SuspiciousPoint Model
 
 **文件**: `fuzzingbrain/core/models/suspicious_point.py`
 
-```python
-@dataclass
-class SuspiciousPoint:
-    # 标识符
-    suspicious_point_id: str      # 自生成UUID
-    task_id: str                  # 属于哪个task
-    function_name: str            # 属于哪个函数
+可疑点数据模型，包含以下字段：
 
-    # 描述
-    description: str              # 控制流描述（不用行号）
-    vuln_type: str                # 漏洞类型
+| 字段 | 类型 | 描述 |
+|------|------|------|
+| `suspicious_point_id` | str | 自生成 UUID |
+| `task_id` | str | 所属任务 ID |
+| `function_name` | str | 所属函数名 |
+| `description` | str | 控制流描述（不用行号） |
+| `vuln_type` | str | 漏洞类型 |
+| `is_checked` | bool | 是否已验证 |
+| `is_real` | bool | 是否为真实漏洞 |
+| `score` | float | 置信度分数 (0.0-1.0) |
+| `is_important` | bool | 是否高优先级 |
+| `important_controlflow` | List[Dict] | 相关函数/变量列表 |
+| `verification_notes` | str | 验证备注 |
+| `created_at` | datetime | 创建时间 |
+| `checked_at` | datetime | 验证时间 |
 
-    # 验证状态
-    is_checked: bool = False      # 是否已验证
-    is_real: bool = False         # 是否为真实漏洞
+支持的漏洞类型：`buffer-overflow`, `use-after-free`, `integer-overflow`, `null-pointer-dereference`, `format-string`, `double-free`, `uninitialized-memory`, `out-of-bounds-read`, `out-of-bounds-write`
 
-    # 优先级
-    score: float = 0.0            # 分数 (0.0-1.0)
-    is_important: bool = False    # 是否高优先级
+---
 
-    # 控制流信息
-    important_controlflow: List[Dict]  # [{"type": "function"|"variable", "name": "xxx", "location": "xxx"}]
+### 数据库层
 
-    # 验证备注
-    verification_notes: str       # 验证时的备注
-
-    # 时间戳
-    created_at: datetime
-    checked_at: datetime
-```
-
-### SuspiciousPointRepository
+#### SuspiciousPointRepository
 
 **文件**: `fuzzingbrain/db/repository.py`
 
-提供以下方法：
-
 | 方法 | 描述 |
 |------|------|
+| `save(sp)` | 保存可疑点 |
 | `find_by_task(task_id)` | 查找任务的所有可疑点 |
 | `find_by_function(task_id, function_name)` | 查找某函数的可疑点 |
 | `find_unchecked(task_id)` | 查找未验证的可疑点 |
@@ -215,11 +209,106 @@ class SuspiciousPoint:
 | `update_score(sp_id, score)` | 更新分数 |
 | `count_by_status(task_id)` | 统计各状态数量 |
 
-使用方式：
-```python
-repos.suspicious_points.save(sp)
-repos.suspicious_points.find_unchecked(task_id)
-repos.suspicious_points.mark_checked(sp_id, is_real=True, notes="confirmed buffer overflow")
-```
+通过 `RepositoryManager.suspicious_points` 访问。
 
+---
+
+### Analysis Server 层
+
+#### 可疑点 RPC 接口
+
+**文件**: `fuzzingbrain/analyzer/protocol.py`, `server.py`, `client.py`
+
+| RPC 方法 | 描述 |
+|----------|------|
+| `create_suspicious_point` | 创建可疑点 |
+| `update_suspicious_point` | 更新可疑点状态 |
+| `list_suspicious_points` | 列出可疑点（支持过滤） |
+| `get_suspicious_point` | 获取单个可疑点 |
+
+通过 `AnalysisClient` 调用，支持参数：
+- 创建：`function_name`, `description`, `vuln_type`, `score`, `important_controlflow`
+- 更新：`sp_id`, `is_checked`, `is_real`, `is_important`, `score`, `verification_notes`
+- 列表过滤：`filter_unchecked`, `filter_real`, `filter_important`
+
+---
+
+### AI Agent 工具层
+
+所有工具定义在 `fuzzingbrain/tools/` 目录下，统一注册在 `tools.yaml`。
+
+#### 工具模块总览
+
+| 模块 | 文件 | 描述 |
+|------|------|------|
+| coverage | `coverage.py` | 覆盖率分析工具 |
+| analyzer | `analyzer.py` | 代码静态分析工具 |
+| suspicious_points | `suspicious_points.py` | 可疑点管理工具 |
+| code_viewer | `code_viewer.py` | 代码查看与搜索工具 |
+
+#### 可疑点工具 (suspicious_points.py)
+
+| 工具 | 描述 |
+|------|------|
+| `create_suspicious_point` | 创建可疑点 |
+| `update_suspicious_point` | 验证并更新可疑点 |
+| `list_suspicious_points` | 列出可疑点 |
+
+提供 `SuspiciousPointTools` 类封装和 `SUSPICIOUS_POINT_TOOLS` LLM function calling 定义。
+
+#### 代码查看工具 (code_viewer.py)
+
+| 工具 | 描述 |
+|------|------|
+| `get_diff` | 读取 diff/patch 文件 |
+| `get_file_content` | 读取仓库文件内容，支持行范围 |
+| `search_code` | grep/ripgrep 搜索代码模式 |
+| `list_files` | 列出仓库目录文件 |
+
+需要先调用 `set_code_viewer_context()` 设置 workspace 路径。
+
+提供 `CODE_VIEWER_TOOLS` LLM function calling 定义。
+
+#### 代码分析工具 (analyzer.py)
+
+| 类别 | 工具 | 描述 |
+|------|------|------|
+| 函数查询 | `get_function` | 获取函数元数据 |
+| | `get_functions_by_file` | 获取文件中所有函数 |
+| | `search_functions` | 按名称模式搜索函数 |
+| | `get_function_source` | 获取函数源码 |
+| 调用图 | `get_callers` | 获取调用者 |
+| | `get_callees` | 获取被调用函数 |
+| | `get_call_graph` | 获取调用图 |
+| 可达性 | `check_reachability` | 检查函数可达性 |
+| | `get_reachable_functions` | 获取可达函数列表 |
+| | `get_unreached_functions` | 获取未覆盖函数 |
+| 构建信息 | `get_fuzzers` | 获取 fuzzer 列表 |
+| | `get_build_paths` | 获取构建路径 |
+
+需要先调用 `set_analyzer_context()` 设置 socket 路径。
+
+#### 覆盖率工具 (coverage.py)
+
+| 工具 | 描述 |
+|------|------|
+| `run_coverage` | 运行覆盖率分析 |
+| `check_pov_reaches_target` | 检查 POV 是否到达目标函数 |
+| `list_available_fuzzers` | 列出可用的覆盖率 fuzzer |
+| `get_coverage_feedback` | 获取覆盖率反馈（用于 LLM） |
+
+需要先调用 `set_coverage_context()` 设置覆盖率 fuzzer 目录。
+
+---
+
+### 工具注册表
+
+**文件**: `fuzzingbrain/tools/tools.yaml`
+
+统一管理所有工具的定义，包括：
+- 工具名称和描述
+- 参数定义（类型、是否必需、默认值）
+- 返回值说明
+- 上下文设置函数
+- 工具分类和使用场景
 
