@@ -1,8 +1,8 @@
 """
 Worker Executor
 
-Executes fuzzing strategies and generates POV/Patch.
-This is the main worker logic that runs after the fuzzer is built.
+Dispatches work to the appropriate strategy based on job type.
+This is the main entry point for worker logic.
 """
 
 from pathlib import Path
@@ -17,11 +17,10 @@ class WorkerExecutor:
     """
     Executes fuzzing strategies for a {fuzzer, sanitizer} pair.
 
-    Workflow:
-    1. Run fuzzing (libFuzzer)
-    2. Collect crashes
-    3. Generate POV from crashes
-    4. (If patch job) Generate patches
+    The executor is a thin layer that:
+    1. Initializes common resources (workspace, analysis client)
+    2. Selects the appropriate strategy based on job_type
+    3. Delegates execution to the strategy
     """
 
     def __init__(
@@ -33,8 +32,10 @@ class WorkerExecutor:
         job_type: str,
         repos: RepositoryManager,
         task_id: str,
+        scan_mode: str = "full",
         fuzzer_binary_path: str = None,
         analysis_socket_path: str = None,
+        diff_path: str = None,
     ):
         """
         Initialize WorkerExecutor.
@@ -47,8 +48,10 @@ class WorkerExecutor:
             job_type: Job type (pov, patch, pov-patch, harness)
             repos: Database repository manager
             task_id: Parent task ID
+            scan_mode: Scan mode ("full" or "delta")
             fuzzer_binary_path: Path to pre-built fuzzer binary (from Analyzer)
             analysis_socket_path: Path to Analysis Server socket for code queries
+            diff_path: Path to diff file (required for delta mode)
         """
         self.workspace_path = Path(workspace_path)
         self.project_name = project_name
@@ -57,6 +60,7 @@ class WorkerExecutor:
         self.job_type = job_type
         self.repos = repos
         self.task_id = task_id
+        self.scan_mode = scan_mode
 
         # Fuzzer binary path (from Analyzer or built locally)
         self.fuzzer_binary_path = Path(fuzzer_binary_path) if fuzzer_binary_path else None
@@ -65,6 +69,9 @@ class WorkerExecutor:
         self.analysis_socket_path = analysis_socket_path
         self._analysis_client: Optional[AnalysisClient] = None
 
+        # Diff file path (for delta mode)
+        self.diff_path = Path(diff_path) if diff_path else self.workspace_path / "diff" / "ref.diff"
+
         # Paths
         self.results_path = self.workspace_path / "results"
         self.crashes_path = self.results_path / "crashes"
@@ -72,6 +79,7 @@ class WorkerExecutor:
         self.patches_path = self.results_path / "patches"
 
         # Ensure directories exist
+        self.results_path.mkdir(parents=True, exist_ok=True)
         self.crashes_path.mkdir(parents=True, exist_ok=True)
         self.povs_path.mkdir(parents=True, exist_ok=True)
         self.patches_path.mkdir(parents=True, exist_ok=True)
@@ -106,15 +114,7 @@ class WorkerExecutor:
         return self._analysis_client
 
     def get_function(self, name: str) -> Optional[dict]:
-        """
-        Query function information from Analysis Server.
-
-        Args:
-            name: Function name
-
-        Returns:
-            Function info dict or None
-        """
+        """Query function information from Analysis Server."""
         if self.analysis_client:
             try:
                 return self.analysis_client.get_function(name)
@@ -123,15 +123,7 @@ class WorkerExecutor:
         return None
 
     def get_function_source(self, name: str) -> Optional[str]:
-        """
-        Get function source code from Analysis Server.
-
-        Args:
-            name: Function name
-
-        Returns:
-            Source code string or None
-        """
+        """Get function source code from Analysis Server."""
         if self.analysis_client:
             try:
                 return self.analysis_client.get_function_source(name)
@@ -140,15 +132,7 @@ class WorkerExecutor:
         return None
 
     def get_callees(self, function: str) -> list:
-        """
-        Get functions called by the given function.
-
-        Args:
-            function: Function name
-
-        Returns:
-            List of callee function names
-        """
+        """Get functions called by the given function."""
         if self.analysis_client:
             try:
                 return self.analysis_client.get_callees(function)
@@ -157,15 +141,7 @@ class WorkerExecutor:
         return []
 
     def is_reachable(self, function: str) -> bool:
-        """
-        Check if function is reachable from this fuzzer.
-
-        Args:
-            function: Function name
-
-        Returns:
-            True if reachable
-        """
+        """Check if function is reachable from this fuzzer."""
         if self.analysis_client:
             try:
                 return self.analysis_client.is_reachable(self.fuzzer, function)
@@ -179,111 +155,57 @@ class WorkerExecutor:
             self._analysis_client.close()
             self._analysis_client = None
 
+    def _get_strategy(self):
+        """
+        Get the appropriate strategy for this job type.
+
+        Returns:
+            Strategy instance
+        """
+        from .strategies import POVStrategy, PatchStrategy, HarnessStrategy
+
+        if self.job_type in ["pov", "pov-patch"]:
+            return POVStrategy(self)
+        elif self.job_type == "patch":
+            return PatchStrategy(self)
+        elif self.job_type == "harness":
+            return HarnessStrategy(self)
+        else:
+            raise ValueError(f"Unknown job type: {self.job_type}")
+
     def run(self) -> Dict[str, Any]:
         """
         Run the worker execution pipeline.
 
+        Selects and executes the appropriate strategy based on job_type.
+
         Returns:
             Result dictionary with findings
         """
-        logger.info(f"Starting executor: {self.fuzzer} with {self.sanitizer}")
-
-        result = {
-            "povs_found": 0,
-            "patches_found": 0,
-            "crashes": [],
-        }
+        logger.info(f"Starting executor: {self.fuzzer} with {self.sanitizer} (mode: {self.scan_mode}, job: {self.job_type})")
 
         try:
-            # Step 1: Run fuzzing
-            crashes = self._run_fuzzing()
-            result["crashes"] = crashes
+            # Get strategy for this job type
+            strategy = self._get_strategy()
+            logger.info(f"Using strategy: {strategy.strategy_name}")
 
-            if not crashes:
-                logger.info("No crashes found")
-                return result
+            # Execute strategy
+            result = strategy.execute()
 
-            # Step 2: Generate POVs from crashes
-            if self.job_type in ["pov", "pov-patch"]:
-                povs = self._generate_povs(crashes)
-                result["povs_found"] = len(povs)
+            # Add common fields
+            result["fuzzer"] = self.fuzzer
+            result["sanitizer"] = self.sanitizer
+            result["job_type"] = self.job_type
 
-            # Step 3: Generate patches (if requested)
-            if self.job_type in ["patch", "pov-patch"]:
-                patches = self._generate_patches()
-                result["patches_found"] = len(patches)
+            # Map strategy-specific fields to common result fields
+            # (for backward compatibility with tasks.py)
+            if "povs_generated" in result:
+                result["povs_found"] = result["povs_generated"]
+            if "patches_verified" in result:
+                result["patches_found"] = result["patches_verified"]
 
             return result
 
         except Exception as e:
             logger.exception(f"Executor failed: {e}")
             raise
-
-    def _run_fuzzing(self) -> list:
-        """
-        Run libFuzzer on the target.
-
-        Returns:
-            List of crash file paths
-        """
-        logger.info("Running fuzzing...")
-
-        # TODO: Implement actual fuzzing logic
-        # This will involve:
-        # 1. Finding the fuzzer binary
-        # 2. Running libFuzzer with appropriate flags
-        # 3. Collecting crash files
-        # 4. Optionally running AI-guided fuzzing
-
-        # Placeholder - return empty list for now
-        logger.warning("Fuzzing not yet implemented, returning empty crashes")
-        return []
-
-    def _generate_povs(self, crashes: list) -> list:
-        """
-        Generate POV from crash files.
-
-        Args:
-            crashes: List of crash file paths
-
-        Returns:
-            List of POV IDs
-        """
-        logger.info(f"Generating POVs from {len(crashes)} crashes...")
-
-        # TODO: Implement POV generation
-        # This will involve:
-        # 1. Minimize crash inputs
-        # 2. Verify crash reproducibility
-        # 3. Generate POV blob
-        # 4. Save to database
-
-        povs = []
-
-        for crash in crashes:
-            # TODO: Process each crash
-            pass
-
-        logger.info(f"Generated {len(povs)} POVs")
-        return povs
-
-    def _generate_patches(self) -> list:
-        """
-        Generate patches for found vulnerabilities.
-
-        Returns:
-            List of Patch IDs
-        """
-        logger.info("Generating patches...")
-
-        # TODO: Implement patch generation
-        # This will involve:
-        # 1. Analyze vulnerability
-        # 2. Use AI to generate fix
-        # 3. Verify patch
-        # 4. Save to database
-
-        patches = []
-
-        logger.info(f"Generated {len(patches)} patches")
-        return patches

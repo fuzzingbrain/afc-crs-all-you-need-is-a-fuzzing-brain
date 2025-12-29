@@ -109,6 +109,10 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     coverage_fuzzer_path = assignment.get("coverage_fuzzer_path")
     analysis_socket_path = assignment.get("analysis_socket_path")
 
+    # Scan mode and diff path (for delta mode)
+    scan_mode = assignment.get("scan_mode", "full")
+    diff_path = assignment.get("diff_path")
+
     worker_id = f"{task_id}__{fuzzer}__{sanitizer}"
 
     # Build worker metadata for logging
@@ -119,6 +123,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         "Fuzzer": fuzzer,
         "Sanitizer": sanitizer,
         "Job Type": job_type,
+        "Scan Mode": scan_mode,
         "Start Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "Workspace": workspace_path,
         "Celery ID": self.request.id,
@@ -201,8 +206,10 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             job_type=job_type,
             repos=repos,
             task_id=task_id,
+            scan_mode=scan_mode,
             fuzzer_binary_path=fuzzer_binary_path,
             analysis_socket_path=analysis_socket_path,
+            diff_path=diff_path,
         )
         result = executor.run()
 
