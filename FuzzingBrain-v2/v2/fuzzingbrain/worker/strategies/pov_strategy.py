@@ -1,23 +1,19 @@
 """
 POV Strategy
 
-Finds vulnerabilities and generates Proof-of-Vulnerability (POV).
+Finds vulnerabilities using AI-based suspicious point analysis.
 
-Workflow:
-1. [Delta mode] Check if diff changes are reachable from fuzzer
-2. Analyze code to find suspicious points
+Workflow (Delta-scan mode):
+1. Check if diff changes are reachable from fuzzer
+2. Analyze reachable code to find suspicious points
 3. Verify suspicious points with AI Agent
-4. Run fuzzing to trigger crashes
-5. Generate POV from crashes
+4. Sort and prioritize suspicious points by score
+5. Save results
 """
 
 import json
-import subprocess
 from datetime import datetime
-from pathlib import Path
 from typing import Dict, Any, List, Optional
-
-from loguru import logger
 
 from .base import BaseStrategy
 from ...analysis.diff_parser import get_reachable_changes, DiffReachabilityResult
@@ -28,7 +24,7 @@ class POVStrategy(BaseStrategy):
     """
     POV (Proof-of-Vulnerability) Strategy.
 
-    This is the core strategy for finding vulnerabilities.
+    Uses AI to analyze code and find vulnerabilities.
     """
 
     def __init__(self, executor):
@@ -39,17 +35,6 @@ class POVStrategy(BaseStrategy):
 
         # Reachability result (populated in delta mode)
         self._reachability_result: Optional[DiffReachabilityResult] = None
-
-        # Fuzzer binary path
-        self.fuzzer_binary_path = executor.fuzzer_binary_path
-
-        # Corpus and crash directories for libFuzzer
-        self.corpus_path = self.workspace_path / "corpus"
-        self.crash_output_path = self.workspace_path / "crashes"
-
-        # Ensure directories exist
-        self.corpus_path.mkdir(parents=True, exist_ok=True)
-        self.crash_output_path.mkdir(parents=True, exist_ok=True)
 
     def execute(self) -> Dict[str, Any]:
         """
@@ -67,8 +52,7 @@ class POVStrategy(BaseStrategy):
             "reachable_changes": [],
             "suspicious_points_found": 0,
             "suspicious_points_verified": 0,
-            "crashes_found": 0,
-            "povs_generated": 0,
+            "confirmed_bugs": 0,
         }
 
         try:
@@ -100,19 +84,17 @@ class POVStrategy(BaseStrategy):
             verified_points = self._verify_suspicious_points(suspicious_points)
             result["suspicious_points_verified"] = len(verified_points)
 
-            # Step 4: Run fuzzing
-            crashes = self._run_fuzzing(verified_points)
-            result["crashes_found"] = len(crashes)
+            # Step 4: Sort by score (higher score = more likely to be real bug)
+            sorted_points = self._sort_by_priority(verified_points)
 
-            if not crashes:
-                self.log_info("No crashes found during fuzzing")
-                return result
+            # Count confirmed bugs (is_real == True)
+            confirmed = [p for p in sorted_points if p.is_real]
+            result["confirmed_bugs"] = len(confirmed)
 
-            # Step 5: Generate POVs from crashes
-            povs = self._generate_povs(crashes)
-            result["povs_generated"] = len(povs)
+            # Step 5: Save results
+            self._save_results(sorted_points)
 
-            self.log_info(f"Completed: {len(povs)} POVs generated from {len(crashes)} crashes")
+            self.log_info(f"Completed: {len(confirmed)} confirmed bugs out of {len(verified_points)} verified points")
             return result
 
         except Exception as e:
@@ -303,122 +285,83 @@ class POVStrategy(BaseStrategy):
         return verified
 
     # =========================================================================
-    # Step 4: Run Fuzzing
+    # Step 4: Sort and Prioritize
     # =========================================================================
 
-    def _run_fuzzing(
-        self, suspicious_points: List[SuspiciousPoint] = None
-    ) -> List[Path]:
+    def _sort_by_priority(
+        self, suspicious_points: List[SuspiciousPoint]
+    ) -> List[SuspiciousPoint]:
         """
-        Run libFuzzer to trigger crashes.
+        Sort suspicious points by priority.
+
+        Sorting order:
+        1. is_important (high priority bugs first)
+        2. score (higher score = more likely to be real)
 
         Args:
-            suspicious_points: Optional list of points to guide fuzzing
+            suspicious_points: List of points to sort
 
         Returns:
-            List of crash file paths
+            Sorted list of suspicious points
         """
-        self.log_info("Running fuzzing...")
-
-        if not self.fuzzer_binary_path:
-            self.log_error("No fuzzer binary path provided")
-            return []
-
-        fuzzer_path = Path(self.fuzzer_binary_path)
-        if not fuzzer_path.exists():
-            self.log_error(f"Fuzzer binary not found: {fuzzer_path}")
-            return []
-
-        # libFuzzer arguments
-        args = [
-            str(fuzzer_path),
-            str(self.corpus_path),
-            f"-artifact_prefix={self.crash_output_path}/",
-            "-max_total_time=60",  # 60 seconds for now
-            "-print_final_stats=1",
-        ]
-
-        self.log_info(f"Running: {' '.join(args)}")
-
-        try:
-            result = subprocess.run(
-                args,
-                capture_output=True,
-                text=True,
-                timeout=120,  # 2 minute timeout
-                cwd=str(self.workspace_path),
-            )
-
-            # Log output
-            if result.stdout:
-                self.log_debug(f"Fuzzer stdout:\n{result.stdout[-2000:]}")  # Last 2000 chars
-            if result.stderr:
-                self.log_debug(f"Fuzzer stderr:\n{result.stderr[-2000:]}")
-
-        except subprocess.TimeoutExpired:
-            self.log_warning("Fuzzer timeout")
-        except Exception as e:
-            self.log_error(f"Fuzzer failed: {e}")
-
-        # Collect crash files
-        crashes = list(self.crash_output_path.glob("crash-*"))
-        crashes.extend(self.crash_output_path.glob("oom-*"))
-        crashes.extend(self.crash_output_path.glob("timeout-*"))
-
-        self.log_info(f"Found {len(crashes)} crash files")
-        return crashes
+        return sorted(
+            suspicious_points,
+            key=lambda p: (p.is_important, p.score),
+            reverse=True,
+        )
 
     # =========================================================================
-    # Step 5: Generate POVs
+    # Step 5: Save Results
     # =========================================================================
 
-    def _generate_povs(self, crashes: List[Path]) -> List[str]:
+    def _save_results(self, suspicious_points: List[SuspiciousPoint]) -> None:
         """
-        Generate POV from crash files.
+        Save suspicious points to database and results file.
 
         Args:
-            crashes: List of crash file paths
-
-        Returns:
-            List of POV IDs
+            suspicious_points: List of points to save
         """
-        self.log_info(f"Generating POVs from {len(crashes)} crashes...")
+        self.log_info(f"Saving {len(suspicious_points)} suspicious points...")
 
-        pov_ids = []
-
-        for crash_file in crashes:
+        # Save to database
+        for point in suspicious_points:
+            point.task_id = self.task_id
             try:
-                pov_id = self._process_crash(crash_file)
-                if pov_id:
-                    pov_ids.append(pov_id)
+                self.repos.suspicious_points.save(point)
             except Exception as e:
-                self.log_error(f"Failed to process crash {crash_file}: {e}")
+                self.log_error(f"Failed to save suspicious point to DB: {e}")
 
-        self.log_info(f"Generated {len(pov_ids)} POVs")
-        return pov_ids
+        # Save summary to results file
+        report = {
+            "timestamp": datetime.now().isoformat(),
+            "task_id": self.task_id,
+            "fuzzer": self.fuzzer,
+            "sanitizer": self.sanitizer,
+            "scan_mode": self.scan_mode,
+            "total_points": len(suspicious_points),
+            "confirmed_bugs": len([p for p in suspicious_points if p.is_real]),
+            "suspicious_points": [
+                {
+                    "id": p.suspicious_point_id,
+                    "function": p.function_name,
+                    "vuln_type": p.vuln_type,
+                    "description": p.description,
+                    "score": p.score,
+                    "is_important": p.is_important,
+                    "is_real": p.is_real,
+                    "verification_notes": p.verification_notes,
+                }
+                for p in suspicious_points
+            ],
+        }
 
-    def _process_crash(self, crash_file: Path) -> Optional[str]:
-        """
-        Process a single crash file into a POV.
-
-        Args:
-            crash_file: Path to crash file
-
-        Returns:
-            POV ID or None
-        """
-        # TODO: Implement crash processing
-        # This should:
-        # 1. Read crash input
-        # 2. Verify reproducibility
-        # 3. Minimize crash input
-        # 4. Extract crash info (stack trace, etc.)
-        # 5. Create POV record in database
-
-        self.log_debug(f"Processing crash: {crash_file}")
-
-        # Placeholder
-        return None
+        report_path = self.results_path / "suspicious_points_report.json"
+        try:
+            with open(report_path, 'w', encoding='utf-8') as f:
+                json.dump(report, f, indent=2, ensure_ascii=False)
+            self.log_info(f"Saved results to: {report_path}")
+        except Exception as e:
+            self.log_error(f"Failed to save results: {e}")
 
     # =========================================================================
     # Properties
