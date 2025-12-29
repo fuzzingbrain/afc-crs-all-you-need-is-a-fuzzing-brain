@@ -48,7 +48,7 @@ tracer = trace.get_tracer(__name__)
 
 GLOBAL_FUNCTION_METADATA = {}
 GLOBAL_RELEVANT_SOURCE_FILES = set()
-USE_CONTROL_FLOW = True
+USE_CONTROL_FLOW = False
 POV_METADATA_DIR = "successful_povs"
 POV_SUCCESS_DIR = f"/tmp/{POV_METADATA_DIR}"
 PATCH_METADATA_DIR = "successful_patches"

@@ -3472,7 +3472,7 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
     log_message(log_file, f"POV_PHASE: {POV_PHASE} doAdvancedPoV")
 
     # TEMPORARY: Skip to Phase 3 only for testing
-    # if POV_PHASE != 1:
+    # if POV_PHASE != 3:
     #     print(f"[TESTING] Skipping POV_PHASE {POV_PHASE}")
     #     return False, {}
 
