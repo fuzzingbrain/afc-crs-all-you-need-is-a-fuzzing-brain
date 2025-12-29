@@ -5,9 +5,10 @@ Contains core business logic, configuration, and models.
 """
 
 from .config import Config
-from .task_processor import TaskProcessor, process_task
+# NOTE: task_processor and dispatcher are NOT imported here to avoid circular dependency
+# Import directly: from fuzzingbrain.core.task_processor import TaskProcessor, process_task
+# Import directly: from fuzzingbrain.core.dispatcher import WorkerDispatcher
 from .fuzzer_builder import FuzzerBuilder
-from .dispatcher import WorkerDispatcher
 from .infrastructure import InfrastructureManager, RedisManager, CeleryWorkerManager
 from .logging import (
     logger,
@@ -31,13 +32,11 @@ from .models import (
 __all__ = [
     # Config
     "Config",
-    # Processor
-    "TaskProcessor",
-    "process_task",
+    # NOTE: TaskProcessor, process_task, WorkerDispatcher not exported (circular dependency)
+    # Import directly: from fuzzingbrain.core.task_processor import TaskProcessor, process_task
+    # Import directly: from fuzzingbrain.core.dispatcher import WorkerDispatcher
     # Builder
     "FuzzerBuilder",
-    # Dispatcher
-    "WorkerDispatcher",
     # Infrastructure
     "InfrastructureManager",
     "RedisManager",

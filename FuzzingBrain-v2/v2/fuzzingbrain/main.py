@@ -293,7 +293,7 @@ def process_task(task: Task, config: Config) -> dict:
 
     print_step("Starting task processing pipeline...")
 
-    from .core import process_task as run_processor
+    from .core.task_processor import process_task as run_processor
     result = run_processor(task, config, get_repos())
 
     # Display result
