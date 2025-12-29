@@ -125,26 +125,26 @@ func PrepareEnvironment(params PrepareEnvironmentParams) (*ProjectConfig, []stri
 
 	// ALWAYS build coverage for C/C++ projects (mandatory for control flow analysis)
 	// Coverage is built in the base directory without sanitizer suffix
-	lang := strings.ToLower(cfg.Language)
-	if lang == "c" || lang == "c++" {
-		log.Printf("Building mandatory coverage instrumentation for C/C++ project")
-		san := "coverage"
-		sanDir := params.FuzzerDir
-		fuzzers, err := params.FindFuzzers(sanDir)
-		if err != nil {
-			log.Printf("Warning: problem trying to find coverage fuzzers in %s: %v", sanDir, err)
-		}
+	// lang := strings.ToLower(cfg.Language)
+	// if lang == "c" || lang == "c++" {
+	// 	log.Printf("Building mandatory coverage instrumentation for C/C++ project")
+	// 	san := "coverage"
+	// 	sanDir := params.FuzzerDir
+	// 	fuzzers, err := params.FindFuzzers(sanDir)
+	// 	if err != nil {
+	// 		log.Printf("Warning: problem trying to find coverage fuzzers in %s: %v", sanDir, err)
+	// 	}
 
-		if len(fuzzers) == 0 {
-			log.Printf("-------------------- Building coverage fuzzers ----------------------")
-			log.Printf("No coverage fuzzers found in %s. Building with --sanitizer=%s", sanDir, san)
-			if err := params.FuzzerBuilder(params.MyFuzzer, params.TaskDir, params.ProjectDir, sanDir, san, cfg.Language, params.TaskDetail); err != nil {
-				log.Printf("Error building coverage fuzzers: %v", err)
-			}
-		} else {
-			log.Printf("Found %d coverage fuzzers in %s. Skipping build.", len(fuzzers), sanDir)
-		}
-	}
+	// 	if len(fuzzers) == 0 {
+	// 		log.Printf("-------------------- Building coverage fuzzers ----------------------")
+	// 		log.Printf("No coverage fuzzers found in %s. Building with --sanitizer=%s", sanDir, san)
+	// 		if err := params.FuzzerBuilder(params.MyFuzzer, params.TaskDir, params.ProjectDir, sanDir, san, cfg.Language, params.TaskDetail); err != nil {
+	// 			log.Printf("Error building coverage fuzzers: %v", err)
+	// 		}
+	// 	} else {
+	// 		log.Printf("Found %d coverage fuzzers in %s. Skipping build.", len(fuzzers), sanDir)
+	// 	}
+	// }
 
 	return cfg, sanitizerDirs, nil
 }
