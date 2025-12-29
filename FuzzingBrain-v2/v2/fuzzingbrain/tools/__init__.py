@@ -27,7 +27,12 @@ tools_mcp = FastMCP("FuzzingBrain-Tools")
 # Import tools to register them with the server
 from .coverage import *
 from .analyzer import *
-from .suspicious_points import SuspiciousPointTools, SUSPICIOUS_POINT_TOOLS
+from .suspicious_points import (
+    create_suspicious_point,
+    update_suspicious_point,
+    list_suspicious_points,
+    get_suspicious_point,
+)
 from .code_viewer import (
     set_code_viewer_context,
     get_code_viewer_context,
@@ -44,9 +49,11 @@ from .code_viewer import (
 
 __all__ = [
     "tools_mcp",
-    # Suspicious point tools
-    "SuspiciousPointTools",
-    "SUSPICIOUS_POINT_TOOLS",
+    # Suspicious point tools (MCP)
+    "create_suspicious_point",
+    "update_suspicious_point",
+    "list_suspicious_points",
+    "get_suspicious_point",
     # Code viewer tools
     "set_code_viewer_context",
     "get_code_viewer_context",

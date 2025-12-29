@@ -18,6 +18,9 @@ from typing import Dict, Any, List, Optional
 from .base import BaseStrategy
 from ...analysis.diff_parser import get_reachable_changes, DiffReachabilityResult
 from ...core.models import SuspiciousPoint
+from ...agents import SuspiciousPointAgent
+from ...tools.code_viewer import set_code_viewer_context
+from ...tools.analyzer import set_analyzer_context
 
 
 class POVStrategy(BaseStrategy):
@@ -35,6 +38,32 @@ class POVStrategy(BaseStrategy):
 
         # Reachability result (populated in delta mode)
         self._reachability_result: Optional[DiffReachabilityResult] = None
+
+        # Set up tool contexts for MCP
+        self._setup_tool_contexts()
+
+        # Create the suspicious point agent
+        self._agent = SuspiciousPointAgent(
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+            verbose=True,
+        )
+
+    def _setup_tool_contexts(self) -> None:
+        """Set up contexts for MCP tools."""
+        # Set code viewer context (workspace path, repo subdir, diff filename)
+        set_code_viewer_context(
+            workspace_path=str(self.workspace_path),
+            repo_subdir="repo",
+            diff_filename="diff/ref.diff",
+        )
+
+        # Set analyzer context (socket path)
+        if self.executor.analysis_socket_path:
+            set_analyzer_context(
+                socket_path=self.executor.analysis_socket_path,
+                client_id=f"agent_{self.fuzzer}_{self.sanitizer}",
+            )
 
     def execute(self) -> Dict[str, Any]:
         """
@@ -190,7 +219,7 @@ class POVStrategy(BaseStrategy):
 
     def _find_suspicious_points(self) -> List[SuspiciousPoint]:
         """
-        Find suspicious points in code.
+        Find suspicious points in code using AI Agent.
 
         For delta mode: Focus on reachable changed functions.
         For full mode: Analyze all reachable functions.
@@ -198,55 +227,52 @@ class POVStrategy(BaseStrategy):
         Returns:
             List of SuspiciousPoint objects
         """
-        self.log_info("Finding suspicious points...")
-
-        suspicious_points = []
+        self.log_info("Finding suspicious points with AI Agent...")
 
         if self.scan_mode == "delta" and self._reachability_result:
-            # Delta mode: analyze reachable changes
-            for change in self._reachability_result.reachable_changes:
-                points = self._analyze_function_for_vulnerabilities(
-                    function_name=change.function_name,
-                    file_path=change.function_file,
-                    diff_content=change.diff_content,
-                )
-                suspicious_points.extend(points)
+            # Delta mode: use agent to analyze reachable changes
+            reachable_changes = [
+                {
+                    "function": c.function_name,
+                    "file": c.file_path,
+                    "distance": c.reachability_distance,
+                }
+                for c in self._reachability_result.reachable_changes
+            ]
+
+            # Run the agent to find suspicious points
+            try:
+                response = self._agent.find_suspicious_points_sync(reachable_changes)
+                self.log_debug(f"Agent response: {response[:500]}...")  # Log first 500 chars
+            except Exception as e:
+                self.log_error(f"Agent failed to find suspicious points: {e}")
+                return []
+
+            # Query database for suspicious points created by agent
+            suspicious_points = self._get_suspicious_points_from_db()
+
         else:
             # Full mode: TODO - analyze all functions reachable from fuzzer
             self.log_warning("Full scan suspicious point analysis not yet implemented")
+            suspicious_points = []
 
         self.log_info(f"Found {len(suspicious_points)} suspicious points")
         return suspicious_points
 
-    def _analyze_function_for_vulnerabilities(
-        self,
-        function_name: str,
-        file_path: str,
-        diff_content: str = None,
-    ) -> List[SuspiciousPoint]:
+    def _get_suspicious_points_from_db(self) -> List[SuspiciousPoint]:
         """
-        Analyze a function for potential vulnerabilities.
-
-        Uses AI to identify suspicious code patterns.
-
-        Args:
-            function_name: Function to analyze
-            file_path: File containing the function
-            diff_content: Optional diff content for context
+        Get suspicious points created by agent from database.
 
         Returns:
             List of SuspiciousPoint objects
         """
-        # TODO: Implement AI-based vulnerability analysis
-        # This should:
-        # 1. Get function source code
-        # 2. Send to LLM for analysis
-        # 3. Parse LLM response into SuspiciousPoint objects
-
-        self.log_debug(f"Analyzing function: {function_name} in {file_path}")
-
-        # Placeholder - return empty list for now
-        return []
+        try:
+            # Query for unchecked points for this task
+            points_data = self.repos.suspicious_points.find_unchecked(self.task_id)
+            return [SuspiciousPoint.from_dict(p) for p in points_data]
+        except Exception as e:
+            self.log_error(f"Failed to get suspicious points from DB: {e}")
+            return []
 
     # =========================================================================
     # Step 3: Verify Suspicious Points
@@ -265,24 +291,58 @@ class POVStrategy(BaseStrategy):
             suspicious_points: List of points to verify
 
         Returns:
-            List of verified (likely real) suspicious points
+            List of verified suspicious points (all checked, some may be real)
         """
-        self.log_info(f"Verifying {len(suspicious_points)} suspicious points...")
+        self.log_info(f"Verifying {len(suspicious_points)} suspicious points with AI Agent...")
 
         verified = []
 
-        for point in suspicious_points:
-            # TODO: Implement AI verification
-            # This should:
-            # 1. Get more context (callers, callees, data flow)
-            # 2. Ask AI to verify if the bug is real
-            # 3. Mark point as verified or not
+        for i, point in enumerate(suspicious_points):
+            self.log_info(f"Verifying point {i+1}/{len(suspicious_points)}: {point.function_name}")
 
-            # Placeholder - assume all are verified
-            verified.append(point)
+            # Convert SuspiciousPoint to dict for agent
+            point_dict = point.to_dict()
+
+            try:
+                # Run agent to verify this point
+                response = self._agent.verify_suspicious_point_sync(point_dict)
+                self.log_debug(f"Verification response: {response[:300]}...")
+
+                # Re-fetch the point from database (agent may have updated it)
+                updated_point = self._get_suspicious_point_by_id(point.suspicious_point_id)
+                if updated_point:
+                    verified.append(updated_point)
+                else:
+                    # Point not found, use original
+                    verified.append(point)
+
+            except Exception as e:
+                self.log_error(f"Failed to verify point {point.suspicious_point_id}: {e}")
+                # Mark as checked but not verified due to error
+                point.is_checked = True
+                point.verification_notes = f"Verification failed: {e}"
+                verified.append(point)
 
         self.log_info(f"Verified {len(verified)} suspicious points")
         return verified
+
+    def _get_suspicious_point_by_id(self, sp_id: str) -> Optional[SuspiciousPoint]:
+        """
+        Get a suspicious point by ID from database.
+
+        Args:
+            sp_id: Suspicious point ID
+
+        Returns:
+            SuspiciousPoint or None
+        """
+        try:
+            data = self.repos.suspicious_points.find_by_id(sp_id)
+            if data:
+                return SuspiciousPoint.from_dict(data)
+        except Exception as e:
+            self.log_error(f"Failed to get suspicious point {sp_id}: {e}")
+        return None
 
     # =========================================================================
     # Step 4: Sort and Prioritize
