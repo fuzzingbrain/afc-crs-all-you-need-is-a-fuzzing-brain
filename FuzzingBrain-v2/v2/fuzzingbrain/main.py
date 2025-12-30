@@ -195,7 +195,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--in-place", action="store_true", help="Run without copying workspace")
 
     # Task configuration
-    parser.add_argument("--job-type", type=str, choices=["pov", "patch", "pov-patch", "harness"], default="pov-patch")
+    parser.add_argument("--task-type", type=str, choices=["pov", "patch", "pov-patch", "harness"], default="pov-patch")
     parser.add_argument("--scan-mode", type=str, choices=["full", "delta"], default="full", help="Scan mode: full or delta")
     parser.add_argument("--sanitizers", type=str, default="address", help="Comma-separated sanitizers")
     parser.add_argument("--timeout", type=int, default=60, help="Timeout in minutes")
@@ -410,7 +410,7 @@ def run_json_mode(config: Config):
 
     # Print configuration summary
     print_info(f"Scan Mode: {config.scan_mode}")
-    print_info(f"Job Type: {config.task_type}")
+    print_info(f"Task Type: {config.task_type}")
     print_info(f"Sanitizers: {', '.join(config.sanitizers)}")
     print_info(f"Timeout: {config.timeout_minutes} minutes")
 
@@ -452,7 +452,7 @@ def run_local_mode(config: Config):
     # Print configuration summary
     print_info(f"Workspace: {config.workspace}")
     print_info(f"Scan Mode: {config.scan_mode}")
-    print_info(f"Job Type: {config.task_type}")
+    print_info(f"Task Type: {config.task_type}")
     print_info(f"Sanitizers: {', '.join(config.sanitizers)}")
     print_info(f"Timeout: {config.timeout_minutes} minutes")
 
