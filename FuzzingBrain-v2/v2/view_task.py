@@ -172,7 +172,7 @@ def generate_html(task_id: str, data: dict) -> str:
             </div>
             <div class="worker-details">
                 <div><strong>Worker ID:</strong> {w.get('worker_id', 'N/A')}</div>
-                <div><strong>Job Type:</strong> {w.get('job_type', 'N/A')}</div>
+                <div><strong>Job Type:</strong> {w.get('task_type', 'N/A')}</div>
                 <div><strong>POVs Found:</strong> {w.get('povs_found', 0)}</div>
                 <div><strong>Patches Found:</strong> {w.get('patches_found', 0)}</div>
                 {f'<div class="error-msg"><strong>Error:</strong> {w.get("error_msg", "")}</div>' if w.get('error_msg') else ''}
@@ -670,7 +670,7 @@ def generate_html(task_id: str, data: dict) -> str:
                 </div>
                 <div class="info-item">
                     <div class="info-label">Job Type</div>
-                    <div class="info-value">{task.get('job_type', 'N/A') if task else 'N/A'}</div>
+                    <div class="info-value">{task.get('task_type', 'N/A') if task else 'N/A'}</div>
                 </div>
                 <div class="info-item">
                     <div class="info-label">Created</div>
