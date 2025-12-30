@@ -22,14 +22,24 @@ from ..llms import LLMClient, ModelInfo
 # System prompt for finding suspicious points
 FIND_SUSPICIOUS_POINTS_PROMPT = """You are a security researcher analyzing code for vulnerabilities.
 
-You have been assigned to analyze code changes (diff) for a fuzzer. Your task is to:
-1. Read the diff to understand what code was changed
-2. For each changed function that is reachable from the fuzzer, analyze for potential vulnerabilities
-3. Create suspicious points for any potential bugs you find
+## IMPORTANT: Definition of Vulnerability
 
-You have access to the following tools:
+A vulnerability is ONLY valid if it can be reached and triggered by the fuzzer.
+Code that has bugs but cannot be reached from the fuzzer entry point is NOT a vulnerability.
+You MUST verify reachability before creating any suspicious point.
+
+## Your Task
+
+1. FIRST: Read the fuzzer source code to understand how input flows into the target
+2. Read the diff to understand what code was changed
+3. Check if changed functions are reachable from the fuzzer
+4. For reachable functions, analyze for potential vulnerabilities
+5. Create suspicious points for confirmed vulnerabilities
+
+## Available Tools
+
 - get_diff: Read the diff file to see what changed
-- get_file_content: Read source files
+- get_file_content: Read source files (USE THIS TO READ FUZZER SOURCE FIRST)
 - get_function_source: Get source code of a specific function
 - get_callers: Find functions that call a given function
 - get_callees: Find functions called by a given function
@@ -37,21 +47,48 @@ You have access to the following tools:
 - search_code: Search for patterns in the codebase
 - create_suspicious_point: Create a suspicious point when you find a potential vulnerability
 
-When creating suspicious points:
+## CRITICAL: One Vulnerability = One Suspicious Point
+
+A suspicious point represents ONE unique vulnerability, not a code location.
+
+Rules:
+- If 100 lines of code all contribute to ONE vulnerability → create ONE suspicious point
+- If 2 adjacent lines have TWO different vulnerabilities → create TWO suspicious points
+- The key question: "Is this a different way to exploit the system?" If yes, it's a new vulnerability.
+
+Bad example (DO NOT DO THIS):
+- Point 1: "Function X has type confusion"
+- Point 2: "Function X has buffer overflow due to type confusion"
+- Point 3: "Function X has OOB read due to type confusion"
+These describe the SAME vulnerability from different angles - only create ONE point.
+
+Good example:
+- ONE point: "Function X has type confusion between wpng_byte (2 bytes) and byte array, leading to buffer overflow and OOB access"
+
+Another good example (two different vulnerabilities):
+- Point 1: "Function X has integer overflow in size calculation before malloc"
+- Point 2: "Function X has null pointer dereference when input is empty"
+These are DIFFERENT vulnerabilities with different root causes - create separate points.
+
+## When Creating Suspicious Points
+
 - Use control flow descriptions, NOT line numbers
+- Describe the ROOT CAUSE of the vulnerability
 - Assign a confidence score (0.0-1.0)
 - Specify the vulnerability type (buffer-overflow, use-after-free, integer-overflow, etc.)
 - List related functions/variables that affect the bug
 
-Focus on common vulnerability patterns:
+## Vulnerability Patterns to Look For
+
 - Buffer overflows (memcpy, strcpy without bounds checking)
 - Use-after-free (dangling pointers)
 - Integer overflows (arithmetic on sizes before allocation)
+- Type confusion (sizeof misuse, wrong type casts)
 - Null pointer dereferences
 - Format string vulnerabilities
 - Double-free
 
-Be thorough but precise. Only create suspicious points for code that is likely vulnerable.
+Be thorough but precise. Quality over quantity - fewer accurate points are better than many redundant ones.
 """
 
 # System prompt for verifying suspicious points
@@ -214,24 +251,48 @@ Sanitizer: {self.sanitizer}
                     message += f"  Distance from fuzzer: {change['distance']}\n"
                 message += "\n"
 
-            message += """
-Please:
-1. First, read the diff to understand what changed
-2. For each reachable changed function, analyze the code for vulnerabilities
-3. Create suspicious points for any potential bugs you find
-4. Focus on the most likely vulnerabilities first
+            message += f"""
+IMPORTANT: Follow these steps IN ORDER:
 
-Start by reading the diff.
+Step 1: UNDERSTAND THE FUZZER
+- Call get_function_source for "{self.fuzzer}" to read the fuzzer source code
+- Understand how the fuzzer processes input and calls into the target library
+- This helps you understand what input an attacker can control
+
+Step 2: READ THE DIFF
+- Call get_diff to see what code was changed
+- Focus on the changed functions listed above
+
+Step 3: ANALYZE VULNERABILITIES
+- For each reachable changed function, analyze for vulnerabilities
+- Remember: only fuzzer-reachable code can be exploited
+
+Step 4: CREATE SUSPICIOUS POINTS
+- Create ONE suspicious point per unique vulnerability (not per symptom)
+- Focus on ROOT CAUSE, not multiple manifestations of the same bug
+
+Start by reading the fuzzer source code with get_function_source("{self.fuzzer}").
 """
         else:
-            message += """
-Please:
-1. Read the diff to understand what changed
-2. Check which changed functions are reachable from the fuzzer
-3. Analyze reachable functions for potential vulnerabilities
-4. Create suspicious points for any potential bugs you find
+            message += f"""
+IMPORTANT: Follow these steps IN ORDER:
 
-Start by reading the diff.
+Step 1: UNDERSTAND THE FUZZER
+- Call get_function_source for "{self.fuzzer}" to read the fuzzer source code
+- Understand how the fuzzer processes input and calls into the target library
+
+Step 2: READ THE DIFF
+- Call get_diff to see what code was changed
+
+Step 3: CHECK REACHABILITY
+- Use check_reachability to verify which changed functions can be reached from the fuzzer
+- Only reachable functions can have exploitable vulnerabilities
+
+Step 4: ANALYZE AND CREATE SUSPICIOUS POINTS
+- Analyze reachable functions for vulnerabilities
+- Create ONE suspicious point per unique vulnerability
+
+Start by reading the fuzzer source code with get_function_source("{self.fuzzer}").
 """
 
         return message
