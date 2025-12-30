@@ -139,7 +139,7 @@ def update_suspicious_point(
             verification_notes=verification_notes,
         )
 
-        # Log the update
+        # Log the update with server result
         update_json = json.dumps({
             "id": suspicious_point_id,
             "is_checked": is_checked,
@@ -148,11 +148,18 @@ def update_suspicious_point(
             "score": score,
             "verification_notes": verification_notes,
         }, ensure_ascii=False)
-        logger.info(f"[UPDATE SUSPICIOUS POINT] {update_json}")
+
+        # Check if server actually updated the DB
+        updated = result.get("updated", False) if result else False
+        if updated:
+            logger.info(f"[UPDATE SUSPICIOUS POINT] {update_json}")
+        else:
+            logger.warning(f"[UPDATE SUSPICIOUS POINT FAILED] Server returned: {result}, params: {update_json}")
 
         return {
-            "success": True,
-            "updated": True,
+            "success": updated,
+            "updated": updated,
+            "server_result": result,
         }
     except Exception as e:
         logger.error(f"Failed to update suspicious point: {e}")

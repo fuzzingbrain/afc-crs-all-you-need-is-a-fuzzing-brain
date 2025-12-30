@@ -18,19 +18,80 @@ from pathlib import Path
 from pymongo import MongoClient
 
 
+def find_conversations(task_id: str) -> list:
+    """Find all conversation JSON files for a task."""
+    conversations = []
+    logs_dir = Path('logs')
+
+    # Find task log directory
+    for task_dir in logs_dir.glob(f'*_{task_id}_*'):
+        agent_dir = task_dir / 'agent'
+        if agent_dir.exists():
+            for conv_file in agent_dir.glob('*.conversation.json'):
+                try:
+                    with open(conv_file, 'r', encoding='utf-8') as f:
+                        conv_data = json.load(f)
+                        conversations.append({
+                            'file': str(conv_file.name),
+                            'messages': conv_data if isinstance(conv_data, list) else conv_data.get('messages', []),
+                        })
+                except Exception as e:
+                    print(f'Warning: Failed to read {conv_file}: {e}')
+
+    return conversations
+
+
+def extract_tool_calls(conversations: list) -> list:
+    """Extract all tool calls from conversations."""
+    tool_calls = []
+
+    for conv in conversations:
+        conv_file = conv.get('file', 'Unknown')
+        for msg in conv.get('messages', []):
+            # Check for tool_calls in assistant messages
+            if msg.get('tool_calls'):
+                for tc in msg['tool_calls']:
+                    func = tc.get('function', {})
+                    tool_calls.append({
+                        'conversation': conv_file,
+                        'tool_call_id': tc.get('id', ''),
+                        'name': func.get('name', 'unknown'),
+                        'arguments': func.get('arguments', ''),
+                    })
+
+            # Check for tool role messages (responses)
+            if msg.get('role') == 'tool':
+                tool_call_id = msg.get('tool_call_id', '')
+                content = msg.get('content', '')
+                # Find matching call and add response
+                for tc in tool_calls:
+                    if tc.get('tool_call_id') == tool_call_id and 'response' not in tc:
+                        tc['response'] = content
+                        break
+
+    return tool_calls
+
+
 def get_task_data(task_id: str) -> dict:
     """Fetch all task-related data from MongoDB."""
+    import re
     client = MongoClient('mongodb://localhost:27017')
     db = client['fuzzingbrain']
 
-    # Get task
+    # Try exact match first, then partial match
     task = db.tasks.find_one({'task_id': task_id})
+    if not task:
+        # Try partial match - task_id might be embedded in a longer ID
+        task = db.tasks.find_one({'task_id': re.compile(task_id)})
+
+    # Get the actual task_id from the found task for consistent queries
+    actual_task_id = task['task_id'] if task else task_id
 
     # Get workers for this task
-    workers = list(db.workers.find({'task_id': task_id}))
+    workers = list(db.workers.find({'task_id': actual_task_id}))
 
     # Get suspicious points for this task
-    suspicious_points = list(db.suspicious_points.find({'task_id': task_id}))
+    suspicious_points = list(db.suspicious_points.find({'task_id': actual_task_id}))
 
     # Convert ObjectId to string
     for w in workers:
@@ -40,10 +101,18 @@ def get_task_data(task_id: str) -> dict:
     if task:
         task['_id'] = str(task['_id'])
 
+    # Get conversations - use actual_task_id for consistent matching
+    conversations = find_conversations(actual_task_id)
+
+    # Extract tool calls
+    tool_calls = extract_tool_calls(conversations)
+
     return {
         'task': task,
         'workers': workers,
         'suspicious_points': suspicious_points,
+        'conversations': conversations,
+        'tool_calls': tool_calls,
     }
 
 
@@ -52,6 +121,8 @@ def generate_html(task_id: str, data: dict) -> str:
     task = data['task']
     workers = data['workers']
     suspicious_points = data['suspicious_points']
+    conversations = data.get('conversations', [])
+    tool_calls = data.get('tool_calls', [])
 
     # Sort suspicious points by score (descending)
     suspicious_points.sort(key=lambda x: x.get('score', 0), reverse=True)
@@ -164,6 +235,92 @@ def generate_html(task_id: str, data: dict) -> str:
     confirmed = len([sp for sp in suspicious_points if sp.get('is_real')])
     checked = len([sp for sp in suspicious_points if sp.get('is_checked')])
     high_score = len([sp for sp in suspicious_points if sp.get('score', 0) >= 0.8])
+
+    # Generate conversations HTML
+    import html as html_module
+    conv_html = ""
+    for idx, conv in enumerate(conversations):
+        messages_html = ""
+        for msg in conv.get('messages', []):
+            role = msg.get('role', 'unknown')
+            content = msg.get('content', '')
+            # Escape HTML
+            content_escaped = html_module.escape(str(content) if content else '')
+            # Truncate very long content
+            if len(content_escaped) > 5000:
+                content_escaped = content_escaped[:5000] + '\n\n... (truncated)'
+
+            msg_class = f'msg msg-{role}'
+            tool_calls_html = ""
+
+            if msg.get('tool_calls'):
+                tool_calls_html = '<div class="msg-tool-calls"><strong>Tool Calls:</strong>'
+                for tc in msg['tool_calls']:
+                    func_name = tc.get('function', {}).get('name', 'unknown')
+                    func_args = tc.get('function', {}).get('arguments', '')
+                    # Truncate long args
+                    if len(func_args) > 500:
+                        func_args = func_args[:500] + '...'
+                    tool_calls_html += f'<div class="tool-call">{func_name}({html_module.escape(func_args)})</div>'
+                tool_calls_html += '</div>'
+
+            messages_html += f'''
+            <div class="{msg_class}">
+                <div class="msg-role">{role}</div>
+                <div class="msg-content">{content_escaped}</div>
+                {tool_calls_html}
+            </div>
+            '''
+
+        conv_html += f'''
+        <div class="conv-file">
+            <div class="conv-file-header" onclick="toggleConv({idx})">
+                <span class="conv-file-name">{conv.get('file', 'Unknown')}</span>
+                <span class="conv-toggle" id="toggle-{idx}">▼ Click to collapse</span>
+            </div>
+            <div class="conv-messages" id="conv-{idx}">
+                {messages_html}
+            </div>
+        </div>
+        '''
+
+    # Generate tool calls HTML
+    # Group by tool name
+    tool_stats = {}
+    for tc in tool_calls:
+        name = tc.get('name', 'unknown')
+        tool_stats[name] = tool_stats.get(name, 0) + 1
+
+    tool_stats_html = ""
+    for name, count in sorted(tool_stats.items(), key=lambda x: -x[1]):
+        tool_stats_html += f'<div class="tool-stat"><span class="tool-name">{name}</span><span class="tool-count">{count}</span></div>'
+
+    tool_list_html = ""
+    for idx, tc in enumerate(tool_calls):
+        args_escaped = html_module.escape(tc.get('arguments', ''))
+        response = tc.get('response', '')
+        response_escaped = html_module.escape(str(response)[:2000]) if response else '<em>No response</em>'
+        if len(str(response)) > 2000:
+            response_escaped += '... (truncated)'
+
+        tool_list_html += f'''
+        <div class="tool-item">
+            <div class="tool-header" onclick="toggleTool({idx})">
+                <span class="tool-badge">{tc.get('name', 'unknown')}</span>
+                <span class="tool-expand" id="tool-toggle-{idx}">▶</span>
+            </div>
+            <div class="tool-details" id="tool-{idx}">
+                <div class="tool-section">
+                    <div class="tool-section-title">Arguments:</div>
+                    <pre class="tool-args">{args_escaped}</pre>
+                </div>
+                <div class="tool-section">
+                    <div class="tool-section-title">Response:</div>
+                    <pre class="tool-response">{response_escaped}</pre>
+                </div>
+            </div>
+        </div>
+        '''
 
     html = f'''<!DOCTYPE html>
 <html lang="en">
@@ -322,6 +479,170 @@ def generate_html(task_id: str, data: dict) -> str:
         .refresh-btn:hover {{ background: #00b8e6; }}
         .no-data {{ color: #888; font-style: italic; padding: 20px; text-align: center; }}
         .generated-time {{ color: #666; font-size: 12px; margin-top: 5px; }}
+
+        /* Conversation styles */
+        .conv-container {{ margin-top: 20px; }}
+        .conv-file {{
+            background: #16213e;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }}
+        .conv-file-header {{
+            background: #0f3460;
+            padding: 15px 20px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .conv-file-header:hover {{ background: #1a4a7a; }}
+        .conv-file-name {{ font-weight: bold; color: #00d4ff; }}
+        .conv-toggle {{ color: #888; }}
+        .conv-messages {{
+            display: block;
+            padding: 20px;
+            max-height: 800px;
+            overflow-y: auto;
+        }}
+        .conv-messages.hide {{ display: none; }}
+        .msg {{
+            margin-bottom: 15px;
+            padding: 15px;
+            border-radius: 10px;
+        }}
+        .msg-system {{ background: #2d2d44; border-left: 4px solid #6c757d; }}
+        .msg-user {{ background: #1a3a5c; border-left: 4px solid #00d4ff; }}
+        .msg-assistant {{ background: #1a3a1a; border-left: 4px solid #28a745; }}
+        .msg-tool {{ background: #3a2a1a; border-left: 4px solid #fd7e14; }}
+        .msg-role {{
+            font-size: 12px;
+            text-transform: uppercase;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }}
+        .msg-system .msg-role {{ color: #6c757d; }}
+        .msg-user .msg-role {{ color: #00d4ff; }}
+        .msg-assistant .msg-role {{ color: #28a745; }}
+        .msg-tool .msg-role {{ color: #fd7e14; }}
+        .msg-content {{
+            font-size: 14px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+        }}
+        .msg-tool-calls {{
+            margin-top: 10px;
+            padding: 10px;
+            background: #0f0f23;
+            border-radius: 5px;
+            font-family: monospace;
+            font-size: 12px;
+        }}
+        .tool-call {{ margin: 5px 0; color: #ffd93d; }}
+
+        /* Tab styles */
+        .tabs {{
+            display: flex;
+            gap: 5px;
+            margin: 20px 0;
+            border-bottom: 2px solid #333;
+            padding-bottom: 0;
+        }}
+        .tab-btn {{
+            padding: 12px 24px;
+            background: #16213e;
+            border: none;
+            border-radius: 8px 8px 0 0;
+            color: #888;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }}
+        .tab-btn:hover {{ background: #1a3a5c; color: #fff; }}
+        .tab-btn.active {{
+            background: #0f3460;
+            color: #00d4ff;
+            border-bottom: 2px solid #00d4ff;
+            margin-bottom: -2px;
+        }}
+        .tab-content {{ display: none; }}
+        .tab-content.active {{ display: block; }}
+
+        /* Tool calls styles */
+        .tool-stats {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
+        }}
+        .tool-stat {{
+            background: #16213e;
+            padding: 10px 15px;
+            border-radius: 8px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }}
+        .tool-name {{ color: #ffd93d; font-family: monospace; }}
+        .tool-count {{
+            background: #0f3460;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+            color: #00d4ff;
+        }}
+        .tool-item {{
+            background: #16213e;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            overflow: hidden;
+        }}
+        .tool-header {{
+            padding: 12px 15px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .tool-header:hover {{ background: #1a3a5c; }}
+        .tool-badge {{
+            background: #0f3460;
+            color: #ffd93d;
+            padding: 4px 12px;
+            border-radius: 15px;
+            font-family: monospace;
+            font-size: 13px;
+        }}
+        .tool-expand {{ color: #888; }}
+        .tool-details {{
+            display: none;
+            padding: 15px;
+            border-top: 1px solid #333;
+        }}
+        .tool-details.show {{ display: block; }}
+        .tool-section {{ margin-bottom: 15px; }}
+        .tool-section-title {{
+            font-size: 12px;
+            color: #888;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+        }}
+        .tool-args, .tool-response {{
+            background: #0f0f23;
+            padding: 12px;
+            border-radius: 5px;
+            font-size: 12px;
+            overflow-x: auto;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }}
+        .tool-args {{ color: #17a2b8; }}
+        .tool-response {{ color: #28a745; }}
     </style>
 </head>
 <body>
@@ -378,16 +699,84 @@ def generate_html(task_id: str, data: dict) -> str:
             </div>
         </div>
 
-        <h2>Workers ({len(workers)})</h2>
-        <div class="workers-grid">
-            {workers_html if workers_html else '<div class="no-data">No workers found</div>'}
+        <!-- Tab Navigation -->
+        <div class="tabs">
+            <button class="tab-btn active" onclick="switchTab('workers')">Workers ({len(workers)})</button>
+            <button class="tab-btn" onclick="switchTab('suspicious')">Suspicious Points ({total_sp})</button>
+            <button class="tab-btn" onclick="switchTab('conversations')">Conversations ({len(conversations)})</button>
+            <button class="tab-btn" onclick="switchTab('tools')">Tool Calls ({len(tool_calls)})</button>
         </div>
 
-        <h2>Suspicious Points ({total_sp})</h2>
-        {sp_html if sp_html else '<div class="no-data">No suspicious points found</div>'}
+        <!-- Tab: Workers -->
+        <div id="tab-workers" class="tab-content active">
+            <h2>Workers</h2>
+            <div class="workers-grid">
+                {workers_html if workers_html else '<div class="no-data">No workers found</div>'}
+            </div>
+        </div>
+
+        <!-- Tab: Suspicious Points -->
+        <div id="tab-suspicious" class="tab-content">
+            <h2>Suspicious Points</h2>
+            {sp_html if sp_html else '<div class="no-data">No suspicious points found</div>'}
+        </div>
+
+        <!-- Tab: Conversations -->
+        <div id="tab-conversations" class="tab-content">
+            <h2>Conversations</h2>
+            <div class="conv-container">
+                {conv_html if conv_html else '<div class="no-data">No conversation records found</div>'}
+            </div>
+        </div>
+
+        <!-- Tab: Tool Calls -->
+        <div id="tab-tools" class="tab-content">
+            <h2>Tool Calls Summary</h2>
+            <div class="tool-stats">
+                {tool_stats_html if tool_stats_html else '<div class="no-data">No tool calls</div>'}
+            </div>
+            <h2>All Tool Calls ({len(tool_calls)})</h2>
+            {tool_list_html if tool_list_html else '<div class="no-data">No tool calls found</div>'}
+        </div>
     </div>
 
     <button class="refresh-btn" onclick="location.reload()">Refresh</button>
+
+    <script>
+        function switchTab(tabName) {{
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+
+            // Show selected tab
+            document.getElementById('tab-' + tabName).classList.add('active');
+            event.target.classList.add('active');
+        }}
+
+        function toggleConv(idx) {{
+            const conv = document.getElementById('conv-' + idx);
+            const toggle = document.getElementById('toggle-' + idx);
+            if (conv.classList.contains('hide')) {{
+                conv.classList.remove('hide');
+                toggle.textContent = '▼ Click to collapse';
+            }} else {{
+                conv.classList.add('hide');
+                toggle.textContent = '▶ Click to expand';
+            }}
+        }}
+
+        function toggleTool(idx) {{
+            const details = document.getElementById('tool-' + idx);
+            const toggle = document.getElementById('tool-toggle-' + idx);
+            if (details.classList.contains('show')) {{
+                details.classList.remove('show');
+                toggle.textContent = '▶';
+            }} else {{
+                details.classList.add('show');
+                toggle.textContent = '▼';
+            }}
+        }}
+    </script>
 </body>
 </html>
 '''

@@ -77,7 +77,11 @@ class POVStrategy(BaseStrategy):
         Returns:
             Result dictionary with findings
         """
-        self.log_info(f"Starting POV strategy for {self.fuzzer} (mode: {self.scan_mode})")
+        import time
+        start_time = time.time()
+
+        self.log_info(f"========== POV Strategy Start ==========")
+        self.log_info(f"Fuzzer: {self.fuzzer}, Mode: {self.scan_mode}")
 
         result = {
             "strategy": "pov",
@@ -86,49 +90,60 @@ class POVStrategy(BaseStrategy):
             "reachable_changes": [],
             "suspicious_points_found": 0,
             "suspicious_points_verified": 0,
-            "confirmed_bugs": 0,
+            "high_confidence_bugs": 0,
         }
 
         try:
             # Step 1: Delta mode - check diff reachability
             if self.scan_mode == "delta":
+                self.log_info(f"[Step 1/4] Checking diff reachability...")
+                step_start = time.time()
                 reachability = self._check_diff_reachability()
                 result["reachable"] = reachability.reachable
                 result["reachable_changes"] = [
                     {"function": c.function_name, "file": c.file_path, "distance": c.reachability_distance}
                     for c in reachability.reachable_changes
                 ]
+                self.log_info(f"[Step 1/4] Done in {time.time() - step_start:.1f}s - {len(reachability.reachable_changes)} reachable changes")
 
                 if not reachability.reachable:
                     self.log_info(f"No reachable changes in diff, skipping")
                     result["skip_reason"] = "no_reachable_changes"
                     return result
 
-                self.log_info(f"Found {len(reachability.reachable_changes)} reachable changes")
-
             # Step 2: Find suspicious points
+            self.log_info(f"[Step 2/4] Finding suspicious points with AI Agent...")
+            step_start = time.time()
             suspicious_points = self._find_suspicious_points()
             result["suspicious_points_found"] = len(suspicious_points)
+            self.log_info(f"[Step 2/4] Done in {time.time() - step_start:.1f}s - Found {len(suspicious_points)} suspicious points")
 
             if not suspicious_points:
                 self.log_info("No suspicious points found")
                 return result
 
             # Step 3: Verify suspicious points with AI Agent
+            self.log_info(f"[Step 3/4] Verifying {len(suspicious_points)} suspicious points...")
+            step_start = time.time()
             verified_points = self._verify_suspicious_points(suspicious_points)
             result["suspicious_points_verified"] = len(verified_points)
+            self.log_info(f"[Step 3/4] Done in {time.time() - step_start:.1f}s - Verified {len(verified_points)} points")
 
             # Step 4: Sort by score (higher score = more likely to be real bug)
+            self.log_info(f"[Step 4/4] Sorting and saving results...")
             sorted_points = self._sort_by_priority(verified_points)
 
-            # Count confirmed bugs (is_real == True)
-            confirmed = [p for p in sorted_points if p.is_real]
-            result["confirmed_bugs"] = len(confirmed)
+            # Count high-confidence bugs (is_important == True or score >= 0.9)
+            high_conf = [p for p in sorted_points if p.is_important or p.score >= 0.9]
+            result["high_confidence_bugs"] = len(high_conf)
 
-            # Step 5: Save results
+            # Save results
             self._save_results(sorted_points)
 
-            self.log_info(f"Completed: {len(confirmed)} confirmed bugs out of {len(verified_points)} verified points")
+            total_time = time.time() - start_time
+            self.log_info(f"========== POV Strategy Complete ==========")
+            self.log_info(f"Total time: {total_time:.1f}s")
+            self.log_info(f"Results: {len(suspicious_points)} found, {len(verified_points)} verified, {len(high_conf)} high-confidence")
             return result
 
         except Exception as e:
@@ -273,8 +288,8 @@ class POVStrategy(BaseStrategy):
         """
         try:
             # Query for unchecked points for this task
-            points_data = self.repos.suspicious_points.find_unchecked(self.task_id)
-            return [SuspiciousPoint.from_dict(p) for p in points_data]
+            # find_unchecked already returns List[SuspiciousPoint]
+            return self.repos.suspicious_points.find_unchecked(self.task_id)
         except Exception as e:
             self.log_error(f"Failed to get suspicious points from DB: {e}")
             return []
@@ -298,12 +313,14 @@ class POVStrategy(BaseStrategy):
         Returns:
             List of verified suspicious points (all checked, some may be real)
         """
-        self.log_info(f"Verifying {len(suspicious_points)} suspicious points with AI Agent...")
+        import time
 
         verified = []
+        total = len(suspicious_points)
 
         for i, point in enumerate(suspicious_points):
-            self.log_info(f"Verifying point {i+1}/{len(suspicious_points)}: {point.function_name}")
+            point_start = time.time()
+            self.log_info(f"  [{i+1}/{total}] Verifying: {point.function_name} ({point.vuln_type}, score={point.score:.2f})")
 
             # Convert SuspiciousPoint to dict for agent
             point_dict = point.to_dict()
@@ -311,24 +328,26 @@ class POVStrategy(BaseStrategy):
             try:
                 # Run agent to verify this point
                 response = self._agent.verify_suspicious_point_sync(point_dict)
-                self.log_debug(f"Verification response: {response[:300]}...")
 
                 # Re-fetch the point from database (agent may have updated it)
                 updated_point = self._get_suspicious_point_by_id(point.suspicious_point_id)
                 if updated_point:
                     verified.append(updated_point)
+                    elapsed = time.time() - point_start
+                    status = "HIGH" if updated_point.is_important or updated_point.score >= 0.9 else "verified"
+                    self.log_info(f"  [{i+1}/{total}] Done in {elapsed:.1f}s - {status} (score={updated_point.score:.2f})")
                 else:
                     # Point not found, use original
                     verified.append(point)
+                    self.log_warning(f"  [{i+1}/{total}] Point not found in DB after verification")
 
             except Exception as e:
-                self.log_error(f"Failed to verify point {point.suspicious_point_id}: {e}")
+                self.log_error(f"  [{i+1}/{total}] Failed to verify: {e}")
                 # Mark as checked but not verified due to error
                 point.is_checked = True
                 point.verification_notes = f"Verification failed: {e}"
                 verified.append(point)
 
-        self.log_info(f"Verified {len(verified)} suspicious points")
         return verified
 
     def _get_suspicious_point_by_id(self, sp_id: str) -> Optional[SuspiciousPoint]:
@@ -342,9 +361,8 @@ class POVStrategy(BaseStrategy):
             SuspiciousPoint or None
         """
         try:
-            data = self.repos.suspicious_points.find_by_id(sp_id)
-            if data:
-                return SuspiciousPoint.from_dict(data)
+            # find_by_id already returns SuspiciousPoint, not dict
+            return self.repos.suspicious_points.find_by_id(sp_id)
         except Exception as e:
             self.log_error(f"Failed to get suspicious point {sp_id}: {e}")
         return None
@@ -381,20 +399,24 @@ class POVStrategy(BaseStrategy):
 
     def _save_results(self, suspicious_points: List[SuspiciousPoint]) -> None:
         """
-        Save suspicious points to database and results file.
+        Save suspicious points summary to results file.
+
+        Note: Points are already saved/updated in DB by the agent via
+        create_suspicious_point and update_suspicious_point tools.
+        We only save the JSON report here.
 
         Args:
-            suspicious_points: List of points to save
+            suspicious_points: List of points to include in report
         """
-        self.log_info(f"Saving {len(suspicious_points)} suspicious points...")
+        self.log_info(f"Saving {len(suspicious_points)} suspicious points report...")
 
-        # Save to database
-        for point in suspicious_points:
-            point.task_id = self.task_id
-            try:
-                self.repos.suspicious_points.save(point)
-            except Exception as e:
-                self.log_error(f"Failed to save suspicious point to DB: {e}")
+        # Note: DO NOT call save() here - it would overwrite DB updates made by the agent
+        # The agent already saves points via create_suspicious_point and updates via update_suspicious_point
+
+        # Re-fetch all points from DB to get latest values (agent may have updated them)
+        fresh_points = self.repos.suspicious_points.find_by_task(self.task_id)
+        if not fresh_points:
+            fresh_points = suspicious_points  # Fallback to in-memory if DB query fails
 
         # Save summary to results file
         report = {
@@ -403,8 +425,8 @@ class POVStrategy(BaseStrategy):
             "fuzzer": self.fuzzer,
             "sanitizer": self.sanitizer,
             "scan_mode": self.scan_mode,
-            "total_points": len(suspicious_points),
-            "confirmed_bugs": len([p for p in suspicious_points if p.is_real]),
+            "total_points": len(fresh_points),
+            "confirmed_bugs": len([p for p in fresh_points if p.is_real]),
             "suspicious_points": [
                 {
                     "id": p.suspicious_point_id,
@@ -416,7 +438,7 @@ class POVStrategy(BaseStrategy):
                     "is_real": p.is_real,
                     "verification_notes": p.verification_notes,
                 }
-                for p in suspicious_points
+                for p in fresh_points
             ],
         }
 

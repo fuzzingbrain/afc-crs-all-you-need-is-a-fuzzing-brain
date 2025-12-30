@@ -682,7 +682,12 @@ class AnalysisServer:
             from datetime import datetime
             updates["checked_at"] = datetime.now()
 
+        self._log(f"Updating suspicious point {sp_id[:8]}... with: is_checked={updates.get('is_checked')}, score={updates.get('score')}")
         success = self.repos.suspicious_points.update(sp_id, updates)
+        if success:
+            self._log(f"Updated suspicious point: {sp_id[:8]}...")
+        else:
+            self._log(f"Failed to update suspicious point: {sp_id[:8]}... (not found or no changes)", "WARNING")
         return {"updated": success}
 
     async def _list_suspicious_points(self, params: dict) -> dict:
