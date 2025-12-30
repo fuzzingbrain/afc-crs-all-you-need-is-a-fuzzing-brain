@@ -187,7 +187,7 @@ class WorkerDispatcher:
         worker = Worker(
             worker_id=worker_id,
             task_id=self.task.task_id,
-            job_type=self.task.task_type.value,
+            task_type=self.task.task_type.value,
             fuzzer=fuzzer,
             sanitizer=sanitizer,
             workspace_path=workspace_path,
@@ -211,7 +211,7 @@ class WorkerDispatcher:
             "task_id": self.task.task_id,
             "fuzzer": fuzzer,
             "sanitizer": sanitizer,
-            "job_type": self.task.task_type.value,
+            "task_type": self.task.task_type.value,
             "workspace_path": workspace_path,
             "project_name": self.project_name,
             "log_dir": str(log_dir) if log_dir else None,

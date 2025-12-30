@@ -36,7 +36,7 @@ class Worker:
     task_id: str = ""
 
     # Assignment
-    job_type: str = "pov"  # pov | patch | harness
+    task_type: str = "pov"  # pov | patch | harness
     fuzzer: str = ""
     sanitizer: str = "address"
 
@@ -76,7 +76,7 @@ class Worker:
             "worker_id": self.worker_id,
             "celery_job_id": self.celery_job_id,
             "task_id": self.task_id,
-            "job_type": self.job_type,
+            "task_type": self.task_type,
             "fuzzer": self.fuzzer,
             "sanitizer": self.sanitizer,
             "workspace_path": self.workspace_path,
@@ -97,7 +97,7 @@ class Worker:
             worker_id=data.get("worker_id", data.get("_id", "")),
             celery_job_id=data.get("celery_job_id"),
             task_id=data.get("task_id", ""),
-            job_type=data.get("job_type", "pov"),
+            task_type=data.get("task_type", "pov"),
             fuzzer=data.get("fuzzer", ""),
             sanitizer=data.get("sanitizer", "address"),
             workspace_path=data.get("workspace_path"),

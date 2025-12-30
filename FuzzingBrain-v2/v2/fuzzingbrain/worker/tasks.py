@@ -87,7 +87,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             - task_id: str
             - fuzzer: str
             - sanitizer: str
-            - job_type: str (pov | patch | pov-patch | harness)
+            - task_type: str (pov | patch | pov-patch | harness)
             - workspace_path: str
             - project_name: str
             - log_dir: str (optional)
@@ -99,7 +99,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     fuzzer = assignment["fuzzer"]
     sanitizer = assignment["sanitizer"]
     workspace_path = assignment["workspace_path"]
-    job_type = assignment["job_type"]
+    task_type = assignment["task_type"]
     project_name = assignment["project_name"]
     log_dir = assignment.get("log_dir")
 
@@ -122,7 +122,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         "Project": project_name,
         "Fuzzer": fuzzer,
         "Sanitizer": sanitizer,
-        "Job Type": job_type,
+        "Job Type": task_type,
         "Scan Mode": scan_mode,
         "Start Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "Workspace": workspace_path,
@@ -155,7 +155,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         worker_id=worker_id,
         celery_job_id=self.request.id,
         task_id=task_id,
-        job_type=job_type,
+        task_type=task_type,
         fuzzer=fuzzer,
         sanitizer=sanitizer,
         workspace_path=workspace_path,
@@ -203,7 +203,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             project_name=project_name,
             fuzzer=fuzzer,
             sanitizer=sanitizer,
-            job_type=job_type,
+            task_type=task_type,
             repos=repos,
             task_id=task_id,
             scan_mode=scan_mode,

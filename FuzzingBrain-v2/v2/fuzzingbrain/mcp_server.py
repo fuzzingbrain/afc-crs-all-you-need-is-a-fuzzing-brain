@@ -48,7 +48,7 @@ async def fuzzingbrain_find_pov(
         fuzz_tooling_url=fuzz_tooling_url,
         sanitizers=sanitizers or ["address"],
         timeout_minutes=timeout_minutes,
-        job_type="pov",
+        task_type="pov",
     )
 
     task = Task(
@@ -89,7 +89,7 @@ async def fuzzingbrain_generate_patch(
         dict with task_id for tracking and initial status
     """
     config = Config(
-        job_type="patch",
+        task_type="patch",
         timeout_minutes=timeout_minutes,
     )
 
@@ -143,7 +143,7 @@ async def fuzzingbrain_pov_patch(
         fuzz_tooling_url=fuzz_tooling_url,
         sanitizers=sanitizers or ["address"],
         timeout_minutes=timeout_minutes,
-        job_type="pov-patch",
+        task_type="pov-patch",
     )
 
     task = Task(
@@ -216,7 +216,7 @@ async def fuzzingbrain_generate_harness(
         project_name=project_name,
         targets=targets,
         timeout_minutes=timeout_minutes,
-        job_type="harness",
+        task_type="harness",
     )
 
     task = Task(

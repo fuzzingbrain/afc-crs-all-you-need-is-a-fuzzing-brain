@@ -233,8 +233,8 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
         config.workspace = args.workspace
     if args.in_place:
         config.in_place = args.in_place
-    if args.job_type:
-        config.job_type = args.job_type
+    if args.task_type:
+        config.task_type = args.task_type
     if args.scan_mode:
         config.scan_mode = args.scan_mode
     if args.sanitizers:
@@ -318,7 +318,7 @@ def create_task_from_config(config: Config) -> Task:
 
     return Task(
         task_id=task_id,
-        task_type=JobType(config.job_type),
+        task_type=JobType(config.task_type),
         scan_mode=ScanMode(config.scan_mode),
         task_path=config.workspace,
         src_path=f"{config.workspace}/repo" if config.workspace else None,
@@ -410,7 +410,7 @@ def run_json_mode(config: Config):
 
     # Print configuration summary
     print_info(f"Scan Mode: {config.scan_mode}")
-    print_info(f"Job Type: {config.job_type}")
+    print_info(f"Job Type: {config.task_type}")
     print_info(f"Sanitizers: {', '.join(config.sanitizers)}")
     print_info(f"Timeout: {config.timeout_minutes} minutes")
 
@@ -452,7 +452,7 @@ def run_local_mode(config: Config):
     # Print configuration summary
     print_info(f"Workspace: {config.workspace}")
     print_info(f"Scan Mode: {config.scan_mode}")
-    print_info(f"Job Type: {config.job_type}")
+    print_info(f"Job Type: {config.task_type}")
     print_info(f"Sanitizers: {', '.join(config.sanitizers)}")
     print_info(f"Timeout: {config.timeout_minutes} minutes")
 
@@ -487,11 +487,11 @@ def run_local_mode(config: Config):
     print("")
     print_step("Expected output structure:")
     print_info(f"  {config.workspace}/results/")
-    if "pov" in config.job_type:
+    if "pov" in config.task_type:
         print_info(f"  ├── povs/")
-    if "patch" in config.job_type:
+    if "patch" in config.task_type:
         print_info(f"  ├── patches/")
-    if config.job_type == "harness":
+    if config.task_type == "harness":
         print_info(f"  ├── harnesses/")
     print_info(f"  └── report.json")
 

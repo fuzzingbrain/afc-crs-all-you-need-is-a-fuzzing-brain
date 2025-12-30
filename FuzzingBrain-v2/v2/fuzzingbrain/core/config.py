@@ -26,7 +26,7 @@ class Config:
     in_place: bool = False
 
     # Task configuration
-    job_type: str = "pov-patch"  # pov | patch | pov-patch | harness
+    task_type: str = "pov-patch"  # pov | patch | pov-patch | harness
     scan_mode: str = "full"  # full | delta
     sanitizers: List[str] = field(default_factory=lambda: ["address"])
     timeout_minutes: int = 60
@@ -76,7 +76,7 @@ class Config:
 
         return cls(
             workspace=data.get("workspace"),
-            job_type=data.get("job_type", "pov-patch"),
+            task_type=data.get("task_type", "pov-patch"),
             scan_mode=data.get("scan_mode", "full"),
             sanitizers=data.get("sanitizers", ["address"]),
             timeout_minutes=data.get("timeout_minutes", 60),
@@ -105,7 +105,7 @@ class Config:
         return cls(
             mcp_mode=os.environ.get("FUZZINGBRAIN_MCP", "").lower() == "true",
             workspace=os.environ.get("FUZZINGBRAIN_WORKSPACE"),
-            job_type=os.environ.get("FUZZINGBRAIN_JOB_TYPE", "pov-patch"),
+            task_type=os.environ.get("FUZZINGBRAIN_TASK_TYPE", "pov-patch"),
             scan_mode=os.environ.get("FUZZINGBRAIN_SCAN_MODE", "full"),
             sanitizers=sanitizers.split(","),
             timeout_minutes=int(os.environ.get("FUZZINGBRAIN_TIMEOUT", "60")),
@@ -136,8 +136,8 @@ class Config:
             return errors
 
         # Check job type
-        if self.job_type not in ["pov", "patch", "pov-patch", "harness"]:
-            errors.append(f"Invalid job_type: {self.job_type}")
+        if self.task_type not in ["pov", "patch", "pov-patch", "harness"]:
+            errors.append(f"Invalid task_type: {self.task_type}")
 
         # Check workspace or repo
         if not self.workspace and not self.repo_url and not self.repo_path:
@@ -148,14 +148,14 @@ class Config:
             errors.append("delta_commit requires base_commit")
 
         # Patch mode validation
-        if self.job_type == "patch":
+        if self.task_type == "patch":
             if not self.gen_blob and not self.input_blob:
                 errors.append("patch mode requires gen_blob or input")
             if self.gen_blob and self.input_blob:
                 errors.append("gen_blob and input are mutually exclusive")
 
         # Harness mode validation
-        if self.job_type == "harness":
+        if self.task_type == "harness":
             if not self.targets:
                 errors.append("harness mode requires targets")
 
@@ -174,7 +174,7 @@ class Config:
             "api_mode": self.api_mode,
             "workspace": self.workspace,
             "in_place": self.in_place,
-            "job_type": self.job_type,
+            "task_type": self.task_type,
             "scan_mode": self.scan_mode,
             "sanitizers": self.sanitizers,
             "timeout_minutes": self.timeout_minutes,

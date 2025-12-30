@@ -19,7 +19,7 @@ class WorkerExecutor:
 
     The executor is a thin layer that:
     1. Initializes common resources (workspace, analysis client)
-    2. Selects the appropriate strategy based on job_type
+    2. Selects the appropriate strategy based on task_type
     3. Delegates execution to the strategy
     """
 
@@ -29,7 +29,7 @@ class WorkerExecutor:
         project_name: str,
         fuzzer: str,
         sanitizer: str,
-        job_type: str,
+        task_type: str,
         repos: RepositoryManager,
         task_id: str,
         scan_mode: str = "full",
@@ -46,7 +46,7 @@ class WorkerExecutor:
             project_name: Project name
             fuzzer: Fuzzer name
             sanitizer: Sanitizer (address, memory, undefined)
-            job_type: Job type (pov, patch, pov-patch, harness)
+            task_type: Job type (pov, patch, pov-patch, harness)
             repos: Database repository manager
             task_id: Parent task ID
             scan_mode: Scan mode ("full" or "delta")
@@ -59,7 +59,7 @@ class WorkerExecutor:
         self.project_name = project_name
         self.fuzzer = fuzzer
         self.sanitizer = sanitizer
-        self.job_type = job_type
+        self.task_type = task_type
         self.repos = repos
         self.task_id = task_id
         self.scan_mode = scan_mode
@@ -176,25 +176,25 @@ class WorkerExecutor:
         """
         from .strategies import POVStrategy, PatchStrategy, HarnessStrategy
 
-        if self.job_type in ["pov", "pov-patch"]:
+        if self.task_type in ["pov", "pov-patch"]:
             return POVStrategy(self)
-        elif self.job_type == "patch":
+        elif self.task_type == "patch":
             return PatchStrategy(self)
-        elif self.job_type == "harness":
+        elif self.task_type == "harness":
             return HarnessStrategy(self)
         else:
-            raise ValueError(f"Unknown job type: {self.job_type}")
+            raise ValueError(f"Unknown job type: {self.task_type}")
 
     def run(self) -> Dict[str, Any]:
         """
         Run the worker execution pipeline.
 
-        Selects and executes the appropriate strategy based on job_type.
+        Selects and executes the appropriate strategy based on task_type.
 
         Returns:
             Result dictionary with findings
         """
-        logger.info(f"Starting executor: {self.fuzzer} with {self.sanitizer} (mode: {self.scan_mode}, job: {self.job_type})")
+        logger.info(f"Starting executor: {self.fuzzer} with {self.sanitizer} (mode: {self.scan_mode}, job: {self.task_type})")
 
         try:
             # Get strategy for this job type
@@ -207,7 +207,7 @@ class WorkerExecutor:
             # Add common fields
             result["fuzzer"] = self.fuzzer
             result["sanitizer"] = self.sanitizer
-            result["job_type"] = self.job_type
+            result["task_type"] = self.task_type
 
             # Map strategy-specific fields to common result fields
             # (for backward compatibility with tasks.py)
