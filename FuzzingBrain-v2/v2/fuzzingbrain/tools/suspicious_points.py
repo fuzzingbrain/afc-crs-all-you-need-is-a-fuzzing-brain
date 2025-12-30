@@ -5,6 +5,7 @@ MCP tools for AI Agent to create, update, and query suspicious points.
 These tools use the same AnalysisClient context as analyzer tools.
 """
 
+import json
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -70,6 +71,18 @@ def create_suspicious_point(
             score=score,
             important_controlflow=important_controlflow or [],
         )
+
+        # Log the new suspicious point
+        sp_json = json.dumps({
+            "id": result.get("id"),
+            "function_name": function_name,
+            "vuln_type": vuln_type,
+            "score": score,
+            "description": description,
+            "important_controlflow": important_controlflow or [],
+        }, ensure_ascii=False)
+        logger.info(f"[NEW SUSPICIOUS POINT] {sp_json}")
+
         return {
             "success": True,
             "id": result.get("id"),
@@ -125,6 +138,18 @@ def update_suspicious_point(
             score=score,
             verification_notes=verification_notes,
         )
+
+        # Log the update
+        update_json = json.dumps({
+            "id": suspicious_point_id,
+            "is_checked": is_checked,
+            "is_real": is_real,
+            "is_important": is_important,
+            "score": score,
+            "verification_notes": verification_notes,
+        }, ensure_ascii=False)
+        logger.info(f"[UPDATE SUSPICIOUS POINT] {update_json}")
+
         return {
             "success": True,
             "updated": True,

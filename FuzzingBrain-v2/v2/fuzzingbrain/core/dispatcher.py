@@ -222,8 +222,9 @@ class WorkerDispatcher:
             # Analysis Server socket for code queries
             "analysis_socket_path": self.analyze_result.socket_path if self.analyze_result else None,
             # Scan mode and diff path for delta mode
+            # Use worker's own diff path (copied to worker workspace)
             "scan_mode": self.task.scan_mode.value,
-            "diff_path": self.task.diff_path,
+            "diff_path": str(Path(workspace_path) / "diff" / "ref.diff") if self.task.scan_mode.value == "delta" else None,
         }
 
         # Dispatch Celery task

@@ -210,6 +210,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             fuzzer_binary_path=fuzzer_binary_path,
             analysis_socket_path=analysis_socket_path,
             diff_path=diff_path,
+            log_dir=log_dir,
         )
         result = executor.run()
 

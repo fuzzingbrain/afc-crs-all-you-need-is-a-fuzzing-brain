@@ -39,8 +39,10 @@ class BaseStrategy(ABC):
         self.fuzzer = executor.fuzzer
         self.sanitizer = executor.sanitizer
         self.task_id = executor.task_id
+        self.worker_id = executor.worker_id
         self.repos = executor.repos
         self.scan_mode = executor.scan_mode
+        self.log_dir = executor.log_dir
 
         # Paths
         self.results_path = executor.results_path

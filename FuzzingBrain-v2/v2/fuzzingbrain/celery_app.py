@@ -9,6 +9,10 @@ import logging
 import os
 import sys
 import traceback
+
+from dotenv import load_dotenv
+load_dotenv()  # Load .env file for API keys
+
 from celery import Celery
 from celery.signals import task_failure, worker_process_init, setup_logging
 

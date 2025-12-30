@@ -7,6 +7,8 @@ MCP-based AI agent with tool execution loop.
 import asyncio
 import json
 from abc import ABC, abstractmethod
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from fastmcp import Client
@@ -34,6 +36,10 @@ class BaseAgent(ABC):
         model: Optional[Union[ModelInfo, str]] = None,
         max_iterations: int = 20,
         verbose: bool = True,
+        # Logging context
+        task_id: str = "",
+        worker_id: str = "",
+        log_dir: Optional[Path] = None,
     ):
         """
         Initialize agent.
@@ -43,11 +49,19 @@ class BaseAgent(ABC):
             model: Model to use for LLM calls
             max_iterations: Maximum tool call iterations to prevent infinite loops
             verbose: Whether to log detailed progress
+            task_id: Task ID for logging context
+            worker_id: Worker ID for logging context
+            log_dir: Directory for log files
         """
         self.llm_client = llm_client or LLMClient()
         self.model = model
         self.max_iterations = max_iterations
         self.verbose = verbose
+
+        # Logging context
+        self.task_id = task_id
+        self.worker_id = worker_id
+        self.log_dir = log_dir
 
         # Conversation history
         self.messages: List[Dict[str, str]] = []
@@ -58,6 +72,17 @@ class BaseAgent(ABC):
         # Statistics
         self.total_iterations = 0
         self.total_tool_calls = 0
+        self.start_time: Optional[datetime] = None
+        self.end_time: Optional[datetime] = None
+
+        # Agent-specific logger
+        self._agent_logger = None
+        self._log_file: Optional[Path] = None
+
+    @property
+    def agent_name(self) -> str:
+        """Get agent name for logging."""
+        return self.__class__.__name__
 
     @property
     @abstractmethod
@@ -69,6 +94,77 @@ class BaseAgent(ABC):
     def get_initial_message(self, **kwargs) -> str:
         """Generate the initial user message based on task context."""
         pass
+
+    def _setup_logging(self) -> None:
+        """Set up agent-specific logging."""
+        if not self.log_dir:
+            return
+
+        log_dir = Path(self.log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create log file name: sus_point_analysis_{worker_id}_{timestamp}.log
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        if self.worker_id:
+            log_name = f"sus_point_analysis_{self.worker_id}_{timestamp}.log"
+        else:
+            log_name = f"sus_point_analysis_{timestamp}.log"
+
+        self._log_file = log_dir / log_name
+
+        # Add file handler with agent-specific filter
+        self._agent_logger = logger.bind(
+            agent=self.agent_name,
+            task_id=self.task_id,
+            worker_id=self.worker_id,
+        )
+
+        # Add file sink for this agent
+        logger.add(
+            self._log_file,
+            level="DEBUG",
+            format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[agent]} | {message}",
+            filter=lambda record: record["extra"].get("agent") == self.agent_name,
+            encoding="utf-8",
+        )
+
+        self._log("Logging initialized", level="INFO")
+        self._log(f"Log file: {self._log_file}", level="INFO")
+
+    def _log(self, message: str, level: str = "DEBUG") -> None:
+        """Log a message with agent context."""
+        if self._agent_logger:
+            log_func = getattr(self._agent_logger, level.lower(), self._agent_logger.debug)
+            log_func(message)
+        elif self.verbose:
+            # Fallback to standard logger
+            prefix = f"[{self.agent_name}]"
+            if self.worker_id:
+                prefix = f"[{self.agent_name}:{self.worker_id}]"
+            log_func = getattr(logger, level.lower(), logger.debug)
+            log_func(f"{prefix} {message}")
+
+    def _log_conversation(self) -> None:
+        """Log the full conversation history to file."""
+        if not self._log_file:
+            return
+
+        conv_file = self._log_file.with_suffix(".conversation.json")
+        try:
+            with open(conv_file, "w", encoding="utf-8") as f:
+                json.dump({
+                    "agent": self.agent_name,
+                    "task_id": self.task_id,
+                    "worker_id": self.worker_id,
+                    "start_time": self.start_time.isoformat() if self.start_time else None,
+                    "end_time": self.end_time.isoformat() if self.end_time else None,
+                    "total_iterations": self.total_iterations,
+                    "total_tool_calls": self.total_tool_calls,
+                    "messages": self.messages,
+                }, f, indent=2, ensure_ascii=False)
+            self._log(f"Conversation saved to: {conv_file}", level="INFO")
+        except Exception as e:
+            self._log(f"Failed to save conversation: {e}", level="ERROR")
 
     def _convert_mcp_tools_to_openai(self, mcp_tools: List[Any]) -> List[Dict[str, Any]]:
         """
@@ -129,6 +225,9 @@ class BaseAgent(ABC):
         Returns:
             Tool result as string
         """
+        self._log(f"Executing tool: {tool_name}", level="DEBUG")
+        self._log(f"  Args: {json.dumps(tool_args, ensure_ascii=False)[:500]}", level="DEBUG")
+
         try:
             result = await client.call_tool(tool_name, tool_args)
 
@@ -141,13 +240,16 @@ class BaseAgent(ABC):
                         texts.append(block.text)
                     elif isinstance(block, str):
                         texts.append(block)
-                return '\n'.join(texts) if texts else str(result)
+                result_str = '\n'.join(texts) if texts else str(result)
+            else:
+                result_str = str(result)
 
-            return str(result)
+            self._log(f"  Result: {result_str[:500]}...", level="DEBUG")
+            return result_str
 
         except Exception as e:
             error_msg = f"Tool execution error: {e}"
-            logger.warning(f"[{self.__class__.__name__}] {error_msg}")
+            self._log(error_msg, level="ERROR")
             return json.dumps({"success": False, "error": str(e)})
 
     async def _run_agent_loop(
@@ -173,30 +275,48 @@ class BaseAgent(ABC):
 
         # Get tools
         self._tools = await self._get_tools(client)
+        self._log(f"Loaded {len(self._tools)} MCP tools", level="INFO")
 
-        if self.verbose:
-            logger.info(f"[{self.__class__.__name__}] Loaded {len(self._tools)} tools")
+        # Log tool names
+        tool_names = [t["function"]["name"] for t in self._tools]
+        self._log(f"Available tools: {', '.join(tool_names)}", level="DEBUG")
+
+        # Log model info
+        model_name = self.model.id if hasattr(self.model, 'id') else (self.model or self.llm_client.config.default_model.id)
+        self._log(f"Using model: {model_name}", level="INFO")
 
         iteration = 0
         final_response = ""
+        response = None
 
         while iteration < self.max_iterations:
             iteration += 1
             self.total_iterations += 1
 
-            if self.verbose:
-                logger.debug(f"[{self.__class__.__name__}] Iteration {iteration}")
+            self._log(f"=== Iteration {iteration}/{self.max_iterations} ===", level="INFO")
 
             # Call LLM with tools
             self.llm_client.reset_tried_models()
-            response = self.llm_client.call_with_tools(
-                messages=self.messages,
-                tools=self._tools,
-                model=self.model,
-            )
+            try:
+                response = self.llm_client.call_with_tools(
+                    messages=self.messages,
+                    tools=self._tools,
+                    model=self.model,
+                )
+            except Exception as e:
+                import traceback
+                self._log(f"LLM call failed: {e}", level="ERROR")
+                self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
+                break
+
+            # Log LLM response
+            if response.content:
+                self._log(f"LLM response: {response.content[:300]}...", level="DEBUG")
 
             # Check for tool calls
             if response.tool_calls:
+                self._log(f"LLM requested {len(response.tool_calls)} tool call(s)", level="INFO")
+
                 # Add assistant message with tool calls
                 self.messages.append({
                     "role": "assistant",
@@ -215,9 +335,9 @@ class BaseAgent(ABC):
                         tool_args = json.loads(tool_args_str) if tool_args_str else {}
                     except json.JSONDecodeError:
                         tool_args = {}
+                        self._log(f"Failed to parse tool args: {tool_args_str}", level="WARNING")
 
-                    if self.verbose:
-                        logger.info(f"[{self.__class__.__name__}] Calling tool: {tool_name}")
+                    self._log(f"Calling tool: {tool_name}", level="INFO")
 
                     # Execute tool via MCP
                     tool_result = await self._execute_tool(client, tool_name, tool_args)
@@ -233,12 +353,12 @@ class BaseAgent(ABC):
             else:
                 # No tool calls - agent is done
                 final_response = response.content
-                if self.verbose:
-                    logger.info(f"[{self.__class__.__name__}] Completed after {iteration} iterations")
+                self._log(f"Agent completed after {iteration} iterations", level="INFO")
+                self._log(f"Final response: {final_response[:500]}...", level="DEBUG")
                 break
 
         if iteration >= self.max_iterations:
-            logger.warning(f"[{self.__class__.__name__}] Max iterations reached")
+            self._log(f"Max iterations ({self.max_iterations}) reached", level="WARNING")
             final_response = response.content if response else ""
 
         return final_response
@@ -253,11 +373,36 @@ class BaseAgent(ABC):
         Returns:
             Final agent response
         """
-        initial_message = self.get_initial_message(**kwargs)
+        # Setup logging
+        self._setup_logging()
 
-        # Connect to MCP server and run agent loop
-        async with Client(tools_mcp) as client:
-            return await self._run_agent_loop(client, initial_message)
+        self.start_time = datetime.now()
+        self._log(f"Starting agent run", level="INFO")
+        self._log(f"Task ID: {self.task_id}", level="INFO")
+        self._log(f"Worker ID: {self.worker_id}", level="INFO")
+
+        initial_message = self.get_initial_message(**kwargs)
+        self._log(f"Initial message: {initial_message[:500]}...", level="DEBUG")
+
+        try:
+            # Connect to MCP server and run agent loop
+            async with Client(tools_mcp) as client:
+                result = await self._run_agent_loop(client, initial_message)
+        except Exception as e:
+            self._log(f"Agent run failed: {e}", level="ERROR")
+            result = f"Agent failed: {e}"
+
+        self.end_time = datetime.now()
+        duration = (self.end_time - self.start_time).total_seconds()
+
+        self._log(f"Agent run completed in {duration:.2f}s", level="INFO")
+        self._log(f"Total iterations: {self.total_iterations}", level="INFO")
+        self._log(f"Total tool calls: {self.total_tool_calls}", level="INFO")
+
+        # Save conversation log
+        self._log_conversation()
+
+        return result
 
     def run(self, **kwargs) -> str:
         """
@@ -271,10 +416,21 @@ class BaseAgent(ABC):
         """
         return asyncio.run(self.run_async(**kwargs))
 
-    def get_stats(self) -> Dict[str, int]:
+    def get_stats(self) -> Dict[str, Any]:
         """Get agent statistics."""
-        return {
+        stats = {
+            "agent": self.agent_name,
+            "task_id": self.task_id,
+            "worker_id": self.worker_id,
             "total_iterations": self.total_iterations,
             "total_tool_calls": self.total_tool_calls,
             "message_count": len(self.messages),
         }
+
+        if self.start_time and self.end_time:
+            stats["duration_seconds"] = (self.end_time - self.start_time).total_seconds()
+
+        if self._log_file:
+            stats["log_file"] = str(self._log_file)
+
+        return stats

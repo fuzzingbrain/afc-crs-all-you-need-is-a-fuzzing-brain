@@ -267,8 +267,8 @@ def get_reachable_changes(
         changed_lines = set(file_diff.changed_lines)
 
         for func in functions:
-            func_start = func.get('line_start', 0)
-            func_end = func.get('line_end', 0)
+            func_start = func.get('start_line', 0)
+            func_end = func.get('end_line', 0)
             func_name = func.get('name', '')
 
             if not func_name or not func_start:
@@ -293,9 +293,9 @@ def get_reachable_changes(
     # Check reachability for each changed function
     for func, file_diff in changed_functions:
         func_name = func.get('name', '')
-        func_file = func.get('file', file_diff.path)
-        func_start = func.get('line_start', 0)
-        func_end = func.get('line_end', 0)
+        func_file = func.get('file_path', file_diff.path)
+        func_start = func.get('start_line', 0)
+        func_end = func.get('end_line', 0)
 
         try:
             reachability = analysis_client.get_reachability(fuzzer, func_name)

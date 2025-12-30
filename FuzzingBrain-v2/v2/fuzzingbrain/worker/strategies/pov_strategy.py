@@ -42,11 +42,16 @@ class POVStrategy(BaseStrategy):
         # Set up tool contexts for MCP
         self._setup_tool_contexts()
 
-        # Create the suspicious point agent
+        # Create the suspicious point agent with logging context
+        # Agent logs go to main log directory under agent/ subdirectory
+        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
         self._agent = SuspiciousPointAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             verbose=True,
+            task_id=self.task_id,
+            worker_id=self.worker_id,
+            log_dir=agent_log_dir,
         )
 
     def _setup_tool_contexts(self) -> None:

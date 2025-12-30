@@ -10,6 +10,7 @@ Workflow:
 4. Update points as real bugs or false positives
 """
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from loguru import logger
@@ -109,6 +110,10 @@ class SuspiciousPointAgent(BaseAgent):
         model: Optional[Union[ModelInfo, str]] = None,
         max_iterations: int = 30,
         verbose: bool = True,
+        # Logging context
+        task_id: str = "",
+        worker_id: str = "",
+        log_dir: Optional[Path] = None,
     ):
         """
         Initialize suspicious point agent.
@@ -121,12 +126,18 @@ class SuspiciousPointAgent(BaseAgent):
             model: Model to use
             max_iterations: Maximum iterations
             verbose: Whether to log progress
+            task_id: Task ID for logging
+            worker_id: Worker ID for logging
+            log_dir: Directory for log files
         """
         super().__init__(
             llm_client=llm_client,
             model=model,
             max_iterations=max_iterations,
             verbose=verbose,
+            task_id=task_id,
+            worker_id=worker_id,
+            log_dir=log_dir,
         )
         self.mode = mode
         self.fuzzer = fuzzer

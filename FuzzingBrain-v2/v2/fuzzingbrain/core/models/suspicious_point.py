@@ -62,7 +62,7 @@ class SuspiciousPoint:
     checked_at: Optional[datetime] = None
 
     def to_dict(self) -> dict:
-        """Convert to dict for MongoDB storage"""
+        """Convert to dict for MongoDB storage and JSON serialization"""
         return {
             "_id": self.suspicious_point_id,
             "suspicious_point_id": self.suspicious_point_id,
@@ -76,13 +76,24 @@ class SuspiciousPoint:
             "is_important": self.is_important,
             "important_controlflow": self.important_controlflow,
             "verification_notes": self.verification_notes,
-            "created_at": self.created_at,
-            "checked_at": self.checked_at,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "checked_at": self.checked_at.isoformat() if self.checked_at else None,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "SuspiciousPoint":
         """Create SuspiciousPoint from dict"""
+        # Parse datetime fields (handles both datetime objects and ISO strings)
+        created_at = data.get("created_at")
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at)
+        elif created_at is None:
+            created_at = datetime.now()
+
+        checked_at = data.get("checked_at")
+        if isinstance(checked_at, str):
+            checked_at = datetime.fromisoformat(checked_at)
+
         return cls(
             suspicious_point_id=data.get("suspicious_point_id", data.get("_id", str(uuid.uuid4()))),
             task_id=data.get("task_id", ""),
@@ -95,8 +106,8 @@ class SuspiciousPoint:
             is_important=data.get("is_important", False),
             important_controlflow=data.get("important_controlflow", []),
             verification_notes=data.get("verification_notes"),
-            created_at=data.get("created_at", datetime.now()),
-            checked_at=data.get("checked_at"),
+            created_at=created_at,
+            checked_at=checked_at,
         )
 
     def mark_checked(self, is_real: bool, notes: str = None):

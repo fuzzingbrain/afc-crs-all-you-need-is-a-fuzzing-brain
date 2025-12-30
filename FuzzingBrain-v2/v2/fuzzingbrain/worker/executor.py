@@ -36,6 +36,7 @@ class WorkerExecutor:
         fuzzer_binary_path: str = None,
         analysis_socket_path: str = None,
         diff_path: str = None,
+        log_dir: str = None,
     ):
         """
         Initialize WorkerExecutor.
@@ -52,6 +53,7 @@ class WorkerExecutor:
             fuzzer_binary_path: Path to pre-built fuzzer binary (from Analyzer)
             analysis_socket_path: Path to Analysis Server socket for code queries
             diff_path: Path to diff file (required for delta mode)
+            log_dir: Main task log directory for agent logs
         """
         self.workspace_path = Path(workspace_path)
         self.project_name = project_name
@@ -61,6 +63,7 @@ class WorkerExecutor:
         self.repos = repos
         self.task_id = task_id
         self.scan_mode = scan_mode
+        self.log_dir = Path(log_dir) if log_dir else None
 
         # Fuzzer binary path (from Analyzer or built locally)
         self.fuzzer_binary_path = Path(fuzzer_binary_path) if fuzzer_binary_path else None
@@ -70,7 +73,16 @@ class WorkerExecutor:
         self._analysis_client: Optional[AnalysisClient] = None
 
         # Diff file path (for delta mode)
-        self.diff_path = Path(diff_path) if diff_path else self.workspace_path / "diff" / "ref.diff"
+        # Handle both file path and directory path
+        if diff_path:
+            diff_p = Path(diff_path)
+            if diff_p.is_dir():
+                # If directory, look for ref.diff inside
+                self.diff_path = diff_p / "ref.diff"
+            else:
+                self.diff_path = diff_p
+        else:
+            self.diff_path = self.workspace_path / "diff" / "ref.diff"
 
         # Paths
         self.results_path = self.workspace_path / "results"

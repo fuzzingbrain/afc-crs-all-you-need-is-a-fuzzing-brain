@@ -91,6 +91,6 @@ fallback:
 # Generation Parameters
 # -----------------------------------------------------------------------------
 generation:
-  temperature: 0.7      # 0.0-1.0, higher = more random
+  temperature: 0.1      # 0.0-1.0, higher = more random
   max_tokens: 8192      # Maximum output tokens
   timeout: 120          # Request timeout in seconds

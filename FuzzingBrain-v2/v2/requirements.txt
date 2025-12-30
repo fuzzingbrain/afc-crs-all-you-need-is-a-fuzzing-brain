@@ -22,6 +22,8 @@ openlit>=1.0.0
 
 # Code Analysis
 clang>=14.0
+tree-sitter>=0.21.0
+tree-sitter-c>=0.21.0
 
 # Environment
 python-dotenv>=1.0.0

@@ -28,6 +28,28 @@ from ..core import Config
 from ..core.logging import get_analyzer_banner_and_header
 
 
+def _serialize_doc(doc: dict) -> dict:
+    """
+    Serialize MongoDB document for JSON response.
+
+    Converts datetime objects to ISO strings.
+    """
+    if not doc:
+        return doc
+
+    result = {}
+    for key, value in doc.items():
+        if isinstance(value, datetime):
+            result[key] = value.isoformat()
+        elif isinstance(value, dict):
+            result[key] = _serialize_doc(value)
+        elif isinstance(value, list):
+            result[key] = [_serialize_doc(v) if isinstance(v, dict) else v for v in value]
+        else:
+            result[key] = value
+    return result
+
+
 class AnalysisServer:
     """
     Analysis Server for a single task.
@@ -464,7 +486,7 @@ class AnalysisServer:
 
         if func:
             func.pop("_id", None)
-            return func
+            return _serialize_doc(func)
         return None
 
     async def _get_functions_by_file(self, file_path: str) -> List[dict]:
@@ -480,7 +502,7 @@ class AnalysisServer:
         results = []
         for func in cursor:
             func.pop("_id", None)
-            results.append(func)
+            results.append(_serialize_doc(func))
         return results
 
     async def _search_functions(self, pattern: str, limit: int = 50) -> List[dict]:
@@ -496,7 +518,7 @@ class AnalysisServer:
         results = []
         for func in cursor:
             func.pop("_id", None)
-            results.append(func)
+            results.append(_serialize_doc(func))
         return results
 
     async def _get_function_source(self, name: str) -> Optional[str]:

@@ -57,7 +57,7 @@ class Function:
             self.function_id = f"{self.task_id}_{self.name}"
 
     def to_dict(self) -> dict:
-        """Convert to dictionary for MongoDB storage"""
+        """Convert to dictionary for MongoDB storage and JSON serialization"""
         return {
             "_id": self.function_id,
             "function_id": self.function_id,
@@ -70,12 +70,19 @@ class Function:
             "cyclomatic_complexity": self.cyclomatic_complexity,
             "reached_by_fuzzers": self.reached_by_fuzzers,
             "language": self.language,
-            "created_at": self.created_at,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "Function":
         """Create Function from dictionary"""
+        # Parse datetime field (handles both datetime objects and ISO strings)
+        created_at = data.get("created_at")
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at)
+        elif created_at is None:
+            created_at = datetime.now()
+
         return cls(
             function_id=data.get("function_id", data.get("_id", "")),
             task_id=data.get("task_id", ""),
@@ -87,5 +94,5 @@ class Function:
             cyclomatic_complexity=data.get("cyclomatic_complexity", 0),
             reached_by_fuzzers=data.get("reached_by_fuzzers", []),
             language=data.get("language", "c"),
-            created_at=data.get("created_at", datetime.now()),
+            created_at=created_at,
         )
