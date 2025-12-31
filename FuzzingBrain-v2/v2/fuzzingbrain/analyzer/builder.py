@@ -1,24 +1,139 @@
 """
 Analyzer Builder
 
-Builds fuzzers with all sanitizers in a single pass.
+Builds fuzzers with all sanitizers in parallel (resource-aware).
 Output is organized as: out/{project}_{sanitizer}/
 
 This replaces the old fuzzer_builder.py approach where Controller
 and Workers would each build separately.
 """
 
+import asyncio
 import os
 import shutil
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
+from threading import Lock
 from typing import List, Tuple, Dict, Optional
 
+import psutil
 from loguru import logger as loguru_logger
 
 from .models import FuzzerInfo
+
+
+class ResourceMonitor:
+    """
+    Monitor system resources and control parallel build execution.
+
+    Checks CPU and memory availability before starting new builds.
+    """
+
+    # Resource thresholds
+    MAX_CPU_PERCENT = 85.0  # Don't start new build if CPU > 85%
+    MIN_MEMORY_GB = 4.0     # Need at least 4GB free memory per build
+    MIN_MEMORY_PERCENT = 15.0  # Keep at least 15% memory free
+
+    # Estimated resource usage per Docker build
+    MEMORY_PER_BUILD_GB = 4.0
+
+    def __init__(self, max_parallel: int = None):
+        """
+        Initialize ResourceMonitor.
+
+        Args:
+            max_parallel: Maximum parallel builds (default: CPU cores / 4, min 2)
+        """
+        cpu_count = psutil.cpu_count() or 4
+        self.max_parallel = max_parallel or max(2, cpu_count // 4)
+        self.current_builds = 0
+        self._state_lock = Lock()  # Lock for state changes
+
+    def get_status(self) -> Dict:
+        """Get current resource status."""
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        mem = psutil.virtual_memory()
+        return {
+            "cpu_percent": cpu_percent,
+            "memory_available_gb": mem.available / (1024**3),
+            "memory_percent_used": mem.percent,
+            "current_builds": self.current_builds,
+            "max_parallel": self.max_parallel,
+        }
+
+    def can_start_build(self) -> Tuple[bool, str]:
+        """
+        Check if a new build can be started.
+
+        Returns:
+            (can_start, reason)
+        """
+        # Check parallel limit (use state lock for current_builds)
+        with self._state_lock:
+            if self.current_builds >= self.max_parallel:
+                return False, f"Max parallel builds reached ({self.max_parallel})"
+
+        # Check CPU (no lock needed for read-only system calls)
+        cpu_percent = psutil.cpu_percent(interval=0.1)
+        if cpu_percent > self.MAX_CPU_PERCENT:
+            return False, f"CPU too high ({cpu_percent:.1f}% > {self.MAX_CPU_PERCENT}%)"
+
+        # Check memory
+        mem = psutil.virtual_memory()
+        mem_available_gb = mem.available / (1024**3)
+
+        if mem_available_gb < self.MIN_MEMORY_GB:
+            return False, f"Not enough memory ({mem_available_gb:.1f}GB < {self.MIN_MEMORY_GB}GB)"
+
+        if mem.percent > (100 - self.MIN_MEMORY_PERCENT):
+            return False, f"Memory usage too high ({mem.percent:.1f}%)"
+
+        return True, "OK"
+
+    def acquire_build_slot(self) -> bool:
+        """Try to acquire a build slot. Returns True if successful."""
+        with self._state_lock:
+            # Re-check limit under lock
+            if self.current_builds >= self.max_parallel:
+                return False
+
+            # Check resources (no lock needed)
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+            if cpu_percent > self.MAX_CPU_PERCENT:
+                return False
+
+            mem = psutil.virtual_memory()
+            if mem.available / (1024**3) < self.MIN_MEMORY_GB:
+                return False
+
+            self.current_builds += 1
+            return True
+
+    def release_build_slot(self):
+        """Release a build slot."""
+        with self._state_lock:
+            self.current_builds = max(0, self.current_builds - 1)
+
+    async def wait_for_slot(self, poll_interval: float = 2.0, timeout: float = 300.0) -> bool:
+        """
+        Wait until a build slot is available.
+
+        Args:
+            poll_interval: Seconds between checks
+            timeout: Maximum wait time in seconds
+
+        Returns:
+            True if slot acquired, False if timeout
+        """
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self.acquire_build_slot():
+                return True
+            await asyncio.sleep(poll_interval)
+        return False
 
 
 class AnalyzerBuilder:
@@ -63,6 +178,8 @@ class AnalyzerBuilder:
         ossfuzz_project: Optional[str] = None,
         log_callback=None,
         log_dir: Optional[str] = None,
+        parallel: bool = True,
+        max_parallel: int = None,
     ):
         """
         Initialize AnalyzerBuilder.
@@ -74,16 +191,25 @@ class AnalyzerBuilder:
             ossfuzz_project: OSS-Fuzz project name if different from project_name
             log_callback: Optional callback for logging (func(msg, level))
             log_dir: Directory for build logs (build output saved here, not to console)
+            parallel: Enable parallel builds (default: True)
+            max_parallel: Maximum parallel builds (default: auto based on CPU)
         """
         self.task_path = Path(task_path)
         self.project_name = ossfuzz_project or project_name
         self.sanitizers = sanitizers
         self.log_callback = log_callback or self._default_log
         self.log_dir = Path(log_dir) if log_dir else None
+        self.parallel = parallel
 
         self.repo_path = self.task_path / "repo"
         self.fuzz_tooling_path = self.task_path / "fuzz-tooling"
         self.build_out_base = self.fuzz_tooling_path / "build" / "out"
+
+        # Resource monitor for parallel builds
+        self.resource_monitor = ResourceMonitor(max_parallel=max_parallel)
+
+        # Thread-safe lock for shared state
+        self._lock = Lock()
 
         # Results
         self.fuzzers: List[FuzzerInfo] = []
@@ -109,13 +235,20 @@ class AnalyzerBuilder:
         Build fuzzers with all sanitizers.
 
         Build order:
-        1. Build with each user-specified sanitizer
+        1. Build with each user-specified sanitizer (parallel if enabled)
         2. Build with coverage (for C/C++)
         3. Build with introspector (for static analysis)
 
         Returns:
             (success, message)
         """
+        if self.parallel:
+            return self._build_all_parallel()
+        else:
+            return self._build_all_sequential()
+
+    def _build_all_sequential(self) -> Tuple[bool, str]:
+        """Sequential build (original implementation)."""
         start_time = time.time()
 
         # Validate paths
@@ -172,9 +305,294 @@ class AnalyzerBuilder:
 
         return True, f"Built {len(self.fuzzers)} fuzzers in {elapsed:.1f}s"
 
+    def _build_all_parallel(self) -> Tuple[bool, str]:
+        """
+        Parallel build with resource-aware scheduling.
+
+        Each sanitizer gets its own copy of fuzz-tooling to avoid conflicts:
+        1. Copy fuzz-tooling → fuzz-tooling-{sanitizer}/
+        2. Build in isolated directory
+        3. Move output to fuzz-tooling/build/out/{project}_{sanitizer}/
+        4. Delete temp directory
+        """
+        start_time = time.time()
+
+        # Validate paths
+        if not self.fuzz_tooling_path.exists():
+            return False, f"fuzz-tooling not found: {self.fuzz_tooling_path}"
+
+        helper_path = self.fuzz_tooling_path / "infra" / "helper.py"
+        if not helper_path.exists():
+            return False, f"helper.py not found: {helper_path}"
+
+        # All builds: sanitizers + coverage + introspector
+        all_builds = self.sanitizers + ["coverage", "introspector"]
+        total_builds = len(all_builds)
+
+        self.log(f"Starting parallel build: {total_builds} builds, max {self.resource_monitor.max_parallel} parallel")
+        status = self.resource_monitor.get_status()
+        self.log(f"System resources: CPU {status['cpu_percent']:.1f}%, Memory available {status['memory_available_gb']:.1f}GB")
+
+        # Track build results
+        build_results: Dict[str, Tuple[bool, str]] = {}
+        completed_count = 0
+
+        def build_with_isolated_dir(sanitizer: str) -> Tuple[str, bool, str]:
+            """Build a single sanitizer in isolated directory."""
+            nonlocal completed_count
+
+            # Wait for resource availability
+            wait_start = time.time()
+            while not self.resource_monitor.acquire_build_slot():
+                time.sleep(2.0)
+                if time.time() - wait_start > 600:  # 10 min timeout
+                    return sanitizer, False, "Timeout waiting for resources"
+
+            temp_dir = None
+            try:
+                # Step 1: Copy fuzz-tooling to temp directory
+                temp_dir = self._create_temp_fuzz_tooling(sanitizer)
+                if not temp_dir:
+                    return sanitizer, False, "Failed to create temp directory"
+
+                self.log(f"[Building] {sanitizer} (parallel)")
+
+                # Step 2: Build in isolated directory
+                success, msg = self._build_sanitizer_in_dir(sanitizer, temp_dir)
+
+                if success:
+                    # Step 3: Move output to main fuzz-tooling
+                    self._move_temp_output_to_main(sanitizer, temp_dir)
+
+                with self._lock:
+                    completed_count += 1
+                    self.log(f"[{completed_count}/{total_builds}] {sanitizer}: {'OK' if success else 'FAILED'}")
+
+                return sanitizer, success, msg
+
+            except Exception as e:
+                return sanitizer, False, str(e)
+            finally:
+                self.resource_monitor.release_build_slot()
+                # Step 4: Cleanup temp directory
+                if temp_dir and temp_dir.exists():
+                    try:
+                        shutil.rmtree(temp_dir)
+                    except Exception:
+                        pass
+
+        # Run builds in parallel using ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=self.resource_monitor.max_parallel) as executor:
+            futures = {
+                executor.submit(build_with_isolated_dir, san): san
+                for san in all_builds
+            }
+
+            for future in as_completed(futures):
+                sanitizer = futures[future]
+                try:
+                    san, success, msg = future.result()
+                    build_results[san] = (success, msg)
+                except Exception as e:
+                    build_results[sanitizer] = (False, str(e))
+                    self.log(f"Build exception for {sanitizer}: {e}", "ERROR")
+
+        # Process results: collect fuzzers from successful sanitizer builds
+        for sanitizer in self.sanitizers:
+            success, msg = build_results.get(sanitizer, (False, "Not built"))
+            if success:
+                self._collect_fuzzers(sanitizer)
+            else:
+                self.log(f"Build failed for {sanitizer}: {msg}", "ERROR")
+
+        # Check if at least one sanitizer succeeded
+        if not self.fuzzers:
+            return False, "All sanitizer builds failed, no fuzzers available"
+
+        # Handle coverage result
+        cov_success, _ = build_results.get("coverage", (False, "Not built"))
+        if cov_success:
+            self.coverage_path = str(self.build_out_base / f"{self.project_name}_coverage")
+        else:
+            self.log("Coverage build failed, continuing without it", "WARN")
+
+        # Handle introspector result
+        intro_success, _ = build_results.get("introspector", (False, "Not built"))
+        if intro_success:
+            self.introspector_path = str(self.build_out_base / f"{self.project_name}_introspector")
+        else:
+            self.log("Introspector build failed, static analysis will be limited", "WARN")
+
+        elapsed = time.time() - start_time
+        successful = sum(1 for s, _ in build_results.values() if s)
+        self.log(f"Parallel build completed in {elapsed:.1f}s. {successful}/{total_builds} succeeded, {len(self.fuzzers)} fuzzers available.")
+
+        return True, f"Built {len(self.fuzzers)} fuzzers in {elapsed:.1f}s (parallel)"
+
+    def _create_temp_fuzz_tooling(self, sanitizer: str) -> Optional[Path]:
+        """
+        Create a temporary copy of fuzz-tooling for isolated build.
+
+        Args:
+            sanitizer: Sanitizer name (used in directory name)
+
+        Returns:
+            Path to temp directory, or None if failed
+        """
+        temp_dir = self.task_path / f"fuzz-tooling-{sanitizer}"
+
+        try:
+            # Remove if exists
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+
+            # Copy fuzz-tooling
+            shutil.copytree(self.fuzz_tooling_path, temp_dir)
+            return temp_dir
+
+        except Exception as e:
+            self.log(f"Failed to create temp fuzz-tooling for {sanitizer}: {e}", "ERROR")
+            return None
+
+    def _build_sanitizer_in_dir(self, sanitizer: str, fuzz_tooling_dir: Path) -> Tuple[bool, str]:
+        """
+        Build with a specific sanitizer in the given directory.
+
+        Args:
+            sanitizer: Sanitizer type
+            fuzz_tooling_dir: Path to fuzz-tooling directory to use
+
+        Returns:
+            (success, message)
+        """
+        helper_path = fuzz_tooling_dir / "infra" / "helper.py"
+
+        cmd = [
+            "python3", str(helper_path),
+            "build_fuzzers",
+            "--sanitizer", sanitizer,
+            "--engine", "libfuzzer",
+            self.project_name,
+            str(self.repo_path.absolute()),
+        ]
+
+        try:
+            start_time = time.time()
+
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                cwd=str(fuzz_tooling_dir),
+            )
+
+            # Collect output
+            build_output = []
+            for line in process.stdout:
+                line = line.replace("\r", "\n").rstrip("\n")
+                if line:
+                    build_output.append(line)
+
+            process.wait(timeout=1800)  # 30 minutes
+            elapsed = time.time() - start_time
+
+            # Write build output to log file
+            if self.log_dir:
+                build_log_file = self.log_dir / f"build_{sanitizer}.log"
+                with open(build_log_file, "w", encoding="utf-8") as f:
+                    f.write(f"# Build log for {sanitizer} sanitizer\n")
+                    f.write(f"# Command: {' '.join(cmd)}\n")
+                    f.write(f"# Duration: {elapsed:.1f}s\n")
+                    f.write(f"# Return code: {process.returncode}\n")
+                    f.write("=" * 80 + "\n\n")
+                    f.write("\n".join(build_output))
+
+            # Fix permissions
+            self._fix_permissions_for_dir(fuzz_tooling_dir / "build" / "out")
+
+            if process.returncode != 0:
+                if self.log_dir:
+                    error_log = self.log_dir / "error.log"
+                    with open(error_log, "a", encoding="utf-8") as f:
+                        f.write(f"[BUILD ERROR] {sanitizer} build failed (code {process.returncode})\n")
+                        f.write("Last 20 lines of output:\n")
+                        for line in build_output[-20:]:
+                            f.write(f"  {line}\n")
+                        f.write("\n")
+                return False, f"Build failed with code {process.returncode}"
+
+            self.log(f"Built {sanitizer} in {elapsed:.1f}s")
+            return True, "Build successful"
+
+        except subprocess.TimeoutExpired:
+            process.kill()
+            return False, "Build timed out (30 minutes)"
+        except Exception as e:
+            return False, str(e)
+
+    def _move_temp_output_to_main(self, sanitizer: str, temp_dir: Path) -> bool:
+        """
+        Move build output from temp directory to main fuzz-tooling.
+
+        Args:
+            sanitizer: Sanitizer name
+            temp_dir: Temp fuzz-tooling directory
+
+        Returns:
+            True if successful
+        """
+        src_dir = temp_dir / "build" / "out" / self.project_name
+        dest_dir = self.build_out_base / f"{self.project_name}_{sanitizer}"
+
+        if not src_dir.exists():
+            self.log(f"Source directory not found: {src_dir}", "WARN")
+            return False
+
+        try:
+            # Ensure output base exists
+            self.build_out_base.mkdir(parents=True, exist_ok=True)
+
+            # Remove destination if exists
+            if dest_dir.exists():
+                shutil.rmtree(dest_dir)
+
+            # Move output
+            shutil.move(str(src_dir), str(dest_dir))
+            self.build_paths[sanitizer] = str(dest_dir)
+
+            self.log(f"Moved {sanitizer} output to {dest_dir}")
+            return True
+
+        except Exception as e:
+            self.log(f"Failed to move output for {sanitizer}: {e}", "ERROR")
+            return False
+
+    def _fix_permissions_for_dir(self, dir_path: Path) -> None:
+        """Fix file permissions for a specific directory after Docker build."""
+        if not dir_path or not dir_path.exists():
+            return
+
+        uid = os.getuid()
+        gid = os.getgid()
+
+        try:
+            subprocess.run(
+                [
+                    "docker", "run", "--rm",
+                    "-v", f"{dir_path.absolute()}:/fix_perms",
+                    "alpine:latest",
+                    "chown", "-R", f"{uid}:{gid}", "/fix_perms"
+                ],
+                capture_output=True,
+                timeout=120,
+            )
+        except Exception:
+            pass
+
     def _build_sanitizer(self, sanitizer: str) -> Tuple[bool, str]:
         """
-        Build with a specific sanitizer.
+        Build with a specific sanitizer (used by sequential build).
 
         Args:
             sanitizer: Sanitizer type (address, memory, undefined, coverage, introspector)

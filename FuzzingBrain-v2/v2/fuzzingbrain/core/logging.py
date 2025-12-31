@@ -496,6 +496,7 @@ def create_final_summary(
     workers: list,
     total_elapsed_minutes: float = 0,
     use_color: bool = False,
+    dedup_count: int = 0,
 ) -> str:
     """
     Create final task summary with all workers results.
@@ -506,6 +507,7 @@ def create_final_summary(
         workers: List of worker result dicts
         total_elapsed_minutes: Total elapsed time in minutes
         use_color: Whether to use ANSI colors for console output
+        dedup_count: Number of SPs merged as duplicates
 
     Returns:
         Formatted summary string
@@ -524,7 +526,7 @@ def create_final_summary(
     col_sanitizer = 10
     col_status = 12
     col_duration = 10
-    col_sps = 5
+    col_sps = 8  # Wider to accommodate "1(1)" format
     col_povs = 6
     col_patches = 8
 
@@ -548,6 +550,8 @@ def create_final_summary(
     lines.append("│" + f"  Total Time:    {total_elapsed_minutes:.1f} minutes".ljust(table_width) + "│")
     lines.append("│" + f"  Workers:       {completed}/{total} completed, {failed} failed".ljust(table_width) + "│")
     lines.append("│" + f"  SPs Found:     {total_sps}".ljust(table_width) + "│")
+    if dedup_count > 0:
+        lines.append("│" + f"  SPs Merged:    {dedup_count} (duplicates)".ljust(table_width) + "│")
     lines.append("│" + f"  POVs Found:    {total_povs}".ljust(table_width) + "│")
     lines.append("│" + f"  Patches:       {total_patches}".ljust(table_width) + "│")
     lines.append("├" + "─" * table_width + "┤")
@@ -584,7 +588,16 @@ def create_final_summary(
         sanitizer_cell = " " + w.get("sanitizer", "N/A").ljust(col_sanitizer - 1)
         status_cell = " " + status_display.ljust(col_status - 1)
         duration_cell = duration_str.center(col_duration)
-        sps_cell = str(w.get("sps_found", 0)).center(col_sps)
+
+        # SPs cell: show "N(M)" format where N=found, M=merged
+        sps_found = w.get("sps_found", 0)
+        sps_merged = w.get("sps_merged", 0)
+        if sps_merged > 0:
+            sps_display = f"{sps_found}({sps_merged})"
+        else:
+            sps_display = str(sps_found)
+        sps_cell = sps_display.center(col_sps)
+
         povs_cell = str(w.get("povs_found", 0)).center(col_povs)
         patches_cell = str(w.get("patches_found", 0)).center(col_patches)
 

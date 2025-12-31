@@ -108,24 +108,55 @@ def create_suspicious_point(
             sanitizer=sanitizer or "",
         )
 
-        # Log the new suspicious point
-        sp_json = json.dumps({
-            "id": result.get("id"),
-            "function_name": function_name,
-            "vuln_type": vuln_type,
-            "score": score,
-            "description": description,
-            "important_controlflow": important_controlflow or [],
-            "harness_name": harness_name,
-            "sanitizer": sanitizer,
-        }, ensure_ascii=False)
-        logger.info(f"[NEW SUSPICIOUS POINT] {sp_json}")
+        # Check if this was merged with an existing SP
+        merged = result.get("merged", False)
+        created = result.get("created", not merged)
+        sp_id = result.get("id")
 
-        return {
-            "success": True,
-            "id": result.get("id"),
-            "created": True,
-        }
+        if merged:
+            # Log the merge
+            merge_json = json.dumps({
+                "id": sp_id,
+                "function_name": function_name,
+                "vuln_type": vuln_type,
+                "description": description,
+                "harness_name": harness_name,
+                "sanitizer": sanitizer,
+                "merged_with_existing": True,
+            }, ensure_ascii=False)
+            logger.info(f"[MERGED SUSPICIOUS POINT] {merge_json}")
+
+            return {
+                "success": True,
+                "id": sp_id,
+                "created": False,
+                "merged": True,
+                "message": (
+                    f"This suspicious point was identified as a duplicate of an existing SP "
+                    f"in function '{function_name}'. The source ({harness_name}/{sanitizer}) "
+                    f"has been added to the existing SP. No new SP was created."
+                ),
+            }
+        else:
+            # Log the new suspicious point
+            sp_json = json.dumps({
+                "id": sp_id,
+                "function_name": function_name,
+                "vuln_type": vuln_type,
+                "score": score,
+                "description": description,
+                "important_controlflow": important_controlflow or [],
+                "harness_name": harness_name,
+                "sanitizer": sanitizer,
+            }, ensure_ascii=False)
+            logger.info(f"[NEW SUSPICIOUS POINT] {sp_json}")
+
+            return {
+                "success": True,
+                "id": sp_id,
+                "created": True,
+                "merged": False,
+            }
     except Exception as e:
         logger.error(f"Failed to create suspicious point: {e}")
         return {

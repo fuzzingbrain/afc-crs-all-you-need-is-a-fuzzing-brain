@@ -328,6 +328,86 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         """Update the score of a suspicious point"""
         return self.update(sp_id, {"score": score})
 
+    def add_source(self, sp_id: str, harness_name: str, sanitizer: str) -> bool:
+        """
+        Add a new source to an existing SP.
+
+        Args:
+            sp_id: Suspicious point ID
+            harness_name: Harness name to add
+            sanitizer: Sanitizer to add
+
+        Returns:
+            True if source was added, False if already exists or error
+        """
+        try:
+            new_source = {"harness_name": harness_name, "sanitizer": sanitizer}
+            # Use $addToSet to avoid duplicates
+            result = self.collection.update_one(
+                {"_id": sp_id},
+                {"$addToSet": {"sources": new_source}}
+            )
+            return result.modified_count > 0
+        except Exception as e:
+            logger.error(f"Failed to add source to SP {sp_id}: {e}")
+            return False
+
+    def add_merged_duplicate(
+        self,
+        sp_id: str,
+        description: str,
+        vuln_type: str,
+        harness_name: str,
+        sanitizer: str,
+        score: float = 0.0,
+    ) -> bool:
+        """
+        Record a merged duplicate for human review.
+
+        When an SP is identified as a duplicate and merged, this records
+        the original description and metadata for later review.
+
+        Args:
+            sp_id: Suspicious point ID that the duplicate was merged into
+            description: Description of the duplicate SP
+            vuln_type: Vulnerability type of the duplicate
+            harness_name: Harness that discovered the duplicate
+            sanitizer: Sanitizer used
+            score: Score of the duplicate
+
+        Returns:
+            True if recorded successfully
+        """
+        try:
+            merged_record = {
+                "description": description,
+                "vuln_type": vuln_type,
+                "harness_name": harness_name,
+                "sanitizer": sanitizer,
+                "score": score,
+                "merged_at": datetime.now().isoformat(),
+            }
+            result = self.collection.update_one(
+                {"_id": sp_id},
+                {"$push": {"merged_duplicates": merged_record}}
+            )
+            return result.modified_count > 0
+        except Exception as e:
+            logger.error(f"Failed to add merged duplicate to SP {sp_id}: {e}")
+            return False
+
+    def find_with_merged_duplicates(self, task_id: str) -> List[SuspiciousPoint]:
+        """
+        Find all SPs that have merged duplicates (for human review).
+
+        Returns:
+            List of SPs with at least one merged duplicate
+        """
+        return self.find_all({
+            "task_id": task_id,
+            "merged_duplicates": {"$exists": True, "$ne": []}
+        })
+
     def count_by_status(self, task_id: str) -> dict:
         """Get count of suspicious points by status"""
         try:
@@ -382,11 +462,11 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 "task_id": task_id,
                 "status": SPStatus.PENDING_VERIFY.value,
             }
-            # Filter by harness_name and sanitizer for worker isolation
-            if harness_name:
-                query["harness_name"] = harness_name
-            if sanitizer:
-                query["sanitizer"] = sanitizer
+            # Filter by sources array for worker isolation
+            if harness_name and sanitizer:
+                query["sources"] = {
+                    "$elemMatch": {"harness_name": harness_name, "sanitizer": sanitizer}
+                }
 
             # Atomic claim: find pending_verify and update to verifying
             result = self.collection.find_one_and_update(
@@ -420,9 +500,10 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         sanitizer: str = None,
     ) -> Optional[SuspiciousPoint]:
         """
-        Atomically claim a suspicious point for POV generation.
+        Claim a suspicious point for POV generation (parallel mode).
 
-        Only claims SPs that are verified with high score.
+        Multiple workers can attempt the same SP simultaneously.
+        First to succeed wins and sets pov_success_by.
 
         Args:
             task_id: Task ID to filter
@@ -441,23 +522,31 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             # Build filter query
             query = {
                 "task_id": task_id,
-                "status": SPStatus.PENDING_POV.value,
+                "status": {"$in": [SPStatus.PENDING_POV.value, SPStatus.GENERATING_POV.value]},
                 "score": {"$gte": min_score},
+                "pov_success_by": None,  # Not already succeeded
             }
-            # Filter by harness_name and sanitizer for worker isolation
-            if harness_name:
-                query["harness_name"] = harness_name
-            if sanitizer:
-                query["sanitizer"] = sanitizer
+            # Filter by sources array for worker isolation
+            if harness_name and sanitizer:
+                query["sources"] = {
+                    "$elemMatch": {"harness_name": harness_name, "sanitizer": sanitizer}
+                }
+                # Exclude SPs that this worker has already attempted
+                query["pov_attempted_by"] = {
+                    "$not": {
+                        "$elemMatch": {"harness_name": harness_name, "sanitizer": sanitizer}
+                    }
+                }
 
-            # Atomic claim: find pending_pov and update to generating_pov
+            # Parallel claim: add self to attempted list, set status to generating
+            attempt_record = {"harness_name": harness_name, "sanitizer": sanitizer}
             result = self.collection.find_one_and_update(
                 query,
                 {
                     "$set": {
                         "status": SPStatus.GENERATING_POV.value,
-                        "processor_id": processor_id,
-                    }
+                    },
+                    "$addToSet": {"pov_attempted_by": attempt_record},
                 },
                 # Priority: is_important DESC, score DESC
                 sort=[("is_important", -1), ("score", -1)],
@@ -465,7 +554,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             )
 
             if result:
-                logger.debug(f"Claimed SP {result['_id']} for POV generation by {processor_id}")
+                logger.debug(f"Claimed SP {result['_id']} for POV generation by {harness_name}/{sanitizer}")
                 return self.model_class.from_dict(result)
             return None
 
@@ -523,14 +612,26 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             logger.error(f"Failed to complete verification: {e}")
             return False
 
-    def complete_pov(self, sp_id: str, pov_id: str = None, success: bool = True) -> bool:
+    def complete_pov(
+        self,
+        sp_id: str,
+        pov_id: str = None,
+        success: bool = True,
+        harness_name: str = None,
+        sanitizer: str = None,
+    ) -> bool:
         """
-        Complete POV generation for a suspicious point.
+        Complete POV generation for a suspicious point (parallel mode).
+
+        On success: marks SP as pov_generated, records pov_success_by
+        On failure: worker already in pov_attempted_by, check if others still trying
 
         Args:
             sp_id: Suspicious point ID
             pov_id: Generated POV ID (if successful)
             success: Whether POV generation succeeded
+            harness_name: Worker's harness name
+            sanitizer: Worker's sanitizer
 
         Returns:
             True if successful
@@ -538,16 +639,47 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         try:
             from ..core.models import SPStatus
 
-            updates = {
-                "status": SPStatus.POV_GENERATED.value if success else SPStatus.FAILED.value,
-                "processor_id": None,  # Release the lock
-                "pov_generated_at": datetime.now(),
-            }
-            if pov_id:
-                updates["pov_id"] = pov_id
-                updates["is_real"] = True  # Confirmed real if POV generated
+            if success:
+                # Success - record who succeeded
+                success_record = {"harness_name": harness_name, "sanitizer": sanitizer}
+                result = self.collection.update_one(
+                    {
+                        "_id": sp_id,
+                        "pov_success_by": None,  # Only if not already succeeded
+                    },
+                    {
+                        "$set": {
+                            "status": SPStatus.POV_GENERATED.value,
+                            "processor_id": None,
+                            "pov_id": pov_id,
+                            "pov_success_by": success_record,
+                            "pov_generated_at": datetime.now(),
+                            "is_real": True,
+                        },
+                    }
+                )
+                if result.modified_count > 0:
+                    logger.info(f"SP {sp_id}: POV succeeded by {harness_name}/{sanitizer}")
+                    return True
+                else:
+                    # Someone else already succeeded
+                    logger.info(f"SP {sp_id}: POV succeeded by {harness_name}/{sanitizer} but another worker already won")
+                    return False
+            else:
+                # Failed - check if all contributors have tried
+                # For now, just log the failure (worker already in pov_attempted_by from claim)
+                logger.info(f"SP {sp_id}: POV failed by {harness_name}/{sanitizer}")
 
-            return self.update(sp_id, updates)
+                # Check if we need to mark as failed (all contributors tried)
+                sp = self.find_by_id(sp_id)
+                if sp:
+                    sources_set = {(s["harness_name"], s["sanitizer"]) for s in sp.sources}
+                    attempted_set = {(a["harness_name"], a["sanitizer"]) for a in sp.pov_attempted_by}
+                    if sources_set == attempted_set and sp.pov_success_by is None:
+                        # All contributors tried and failed
+                        self.update(sp_id, {"status": SPStatus.FAILED.value})
+                        logger.info(f"SP {sp_id}: All contributors failed, marking as FAILED")
+                return True
 
         except Exception as e:
             logger.error(f"Failed to complete POV generation: {e}")
@@ -608,7 +740,13 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         sanitizer: str = None,
     ) -> bool:
         """
-        Check if all SPs have finished processing (no pending or in-progress).
+        Check if all SPs have finished processing for this worker.
+
+        For verify stage: checks pending_verify and verifying
+        For POV stage (parallel mode): checks if there are SPs that:
+            - This worker is a contributor (in sources)
+            - Not yet succeeded (pov_success_by is None)
+            - This worker hasn't attempted yet
 
         Args:
             task_id: Task ID to filter
@@ -616,33 +754,49 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             sanitizer: Filter by sanitizer (if provided)
 
         Returns:
-            True if all SPs are in terminal state (verified, pov_generated, failed, skipped)
+            True if no more work for this worker
         """
         try:
             from ..core.models import SPStatus
 
-            # Build filter query
-            query = {
-                "task_id": task_id,
-                "status": {
-                    "$in": [
-                        SPStatus.PENDING_VERIFY.value,
-                        SPStatus.VERIFYING.value,
-                        SPStatus.PENDING_POV.value,
-                        SPStatus.GENERATING_POV.value,
-                    ]
+            if harness_name and sanitizer:
+                # Check verify stage SPs
+                verify_query = {
+                    "task_id": task_id,
+                    "status": {"$in": [SPStatus.PENDING_VERIFY.value, SPStatus.VERIFYING.value]},
+                    "sources": {"$elemMatch": {"harness_name": harness_name, "sanitizer": sanitizer}},
                 }
-            }
-            # Filter by harness_name and sanitizer for worker isolation
-            if harness_name:
-                query["harness_name"] = harness_name
-            if sanitizer:
-                query["sanitizer"] = sanitizer
+                verify_pending = self.collection.count_documents(verify_query)
 
-            # Count SPs that are still pending or in progress
-            in_progress = self.collection.count_documents(query)
+                # Check POV stage SPs (parallel mode)
+                # SP is available if: contributor + not succeeded + not attempted by me
+                pov_query = {
+                    "task_id": task_id,
+                    "status": {"$in": [SPStatus.PENDING_POV.value, SPStatus.GENERATING_POV.value]},
+                    "sources": {"$elemMatch": {"harness_name": harness_name, "sanitizer": sanitizer}},
+                    "pov_success_by": None,  # Not already succeeded
+                    "pov_attempted_by": {
+                        "$not": {"$elemMatch": {"harness_name": harness_name, "sanitizer": sanitizer}}
+                    },
+                }
+                pov_pending = self.collection.count_documents(pov_query)
 
-            return in_progress == 0
+                return verify_pending == 0 and pov_pending == 0
+            else:
+                # No worker filter - check all pending/in-progress
+                query = {
+                    "task_id": task_id,
+                    "status": {
+                        "$in": [
+                            SPStatus.PENDING_VERIFY.value,
+                            SPStatus.VERIFYING.value,
+                            SPStatus.PENDING_POV.value,
+                            SPStatus.GENERATING_POV.value,
+                        ]
+                    }
+                }
+                in_progress = self.collection.count_documents(query)
+                return in_progress == 0
 
         except Exception as e:
             logger.error(f"Failed to check pipeline completion: {e}")

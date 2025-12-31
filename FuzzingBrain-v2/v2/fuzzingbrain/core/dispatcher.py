@@ -370,11 +370,27 @@ class WorkerDispatcher:
         results = []
 
         for worker in workers:
-            # Count SPs for this worker (by harness_name and sanitizer)
+            # Count SPs for this worker (by sources array with $elemMatch)
             sp_count = self.repos.suspicious_points.count({
                 "task_id": self.task.task_id,
-                "harness_name": worker.fuzzer,
-                "sanitizer": worker.sanitizer,
+                "sources": {
+                    "$elemMatch": {
+                        "harness_name": worker.fuzzer,
+                        "sanitizer": worker.sanitizer,
+                    }
+                },
+            })
+
+            # Count merged duplicates for this worker
+            # (SPs where this worker's description was merged into existing SP)
+            merged_count = self.repos.suspicious_points.count({
+                "task_id": self.task.task_id,
+                "merged_duplicates": {
+                    "$elemMatch": {
+                        "harness_name": worker.fuzzer,
+                        "sanitizer": worker.sanitizer,
+                    }
+                },
             })
 
             result = {
@@ -383,6 +399,7 @@ class WorkerDispatcher:
                 "sanitizer": worker.sanitizer,
                 "status": worker.status.value,
                 "sps_found": sp_count,
+                "sps_merged": merged_count,
                 "povs_found": worker.povs_found or 0,
                 "patches_found": worker.patches_found or 0,
                 "error_msg": worker.error_msg,

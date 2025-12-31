@@ -53,8 +53,11 @@ class SuspiciousPoint:
     suspicious_point_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     task_id: str = ""  # Which task this belongs to
     function_name: str = ""  # Which function this belongs to
-    harness_name: str = ""  # Which fuzzer harness created this SP
-    sanitizer: str = ""  # Which sanitizer (address, memory, undefined)
+
+    # Sources - which harness/sanitizer combinations discovered this SP
+    # Multiple sources indicate the same bug was found by multiple workers (higher confidence)
+    # Format: [{"harness_name": "fuzz_png", "sanitizer": "address"}, ...]
+    sources: List[Dict] = field(default_factory=list)
 
     # Description (uses control flow instead of line numbers, as LLMs are not good at generating line numbers)
     description: str = ""
@@ -78,11 +81,22 @@ class SuspiciousPoint:
     important_controlflow: List[Dict] = field(default_factory=list)
     # Format: [{"type": "function"|"variable", "name": "xxx", "location": "xxx"}, ...]
 
+    # Merged duplicates - records of SPs that were identified as duplicates and merged into this one
+    # For human review of dedup decisions
+    # Format: [{"description": "...", "vuln_type": "...", "harness_name": "...",
+    #           "sanitizer": "...", "score": 0.7, "merged_at": "ISO timestamp"}, ...]
+    merged_duplicates: List[Dict] = field(default_factory=list)
+
     # Verification notes
     verification_notes: Optional[str] = None
 
     # POV generation result
     pov_id: Optional[str] = None  # ID of generated POV (if any)
+    pov_success_by: Optional[Dict] = None  # Which worker succeeded: {"harness_name": "...", "sanitizer": "..."}
+
+    # POV attempt tracking - which workers are currently attempting or have failed
+    # Format: [{"harness_name": "fuzz_png", "sanitizer": "address"}, ...]
+    pov_attempted_by: List[Dict] = field(default_factory=list)
 
     # Timestamps
     created_at: datetime = field(default_factory=datetime.now)
@@ -96,8 +110,7 @@ class SuspiciousPoint:
             "suspicious_point_id": self.suspicious_point_id,
             "task_id": self.task_id,
             "function_name": self.function_name,
-            "harness_name": self.harness_name,
-            "sanitizer": self.sanitizer,
+            "sources": self.sources,
             "description": self.description,
             "vuln_type": self.vuln_type,
             "status": self.status,
@@ -107,8 +120,11 @@ class SuspiciousPoint:
             "score": self.score,
             "is_important": self.is_important,
             "important_controlflow": self.important_controlflow,
+            "merged_duplicates": self.merged_duplicates,
             "verification_notes": self.verification_notes,
             "pov_id": self.pov_id,
+            "pov_success_by": self.pov_success_by,
+            "pov_attempted_by": self.pov_attempted_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "checked_at": self.checked_at.isoformat() if self.checked_at else None,
             "pov_generated_at": self.pov_generated_at.isoformat() if self.pov_generated_at else None,
@@ -129,12 +145,16 @@ class SuspiciousPoint:
         if created_at is None:
             created_at = datetime.now()
 
+        # Handle backward compatibility: convert old harness_name/sanitizer to sources
+        sources = data.get("sources", [])
+        if not sources and (data.get("harness_name") or data.get("sanitizer")):
+            sources = [{"harness_name": data.get("harness_name", ""), "sanitizer": data.get("sanitizer", "")}]
+
         return cls(
             suspicious_point_id=data.get("suspicious_point_id", data.get("_id", str(uuid.uuid4()))),
             task_id=data.get("task_id", ""),
             function_name=data.get("function_name", ""),
-            harness_name=data.get("harness_name", ""),
-            sanitizer=data.get("sanitizer", ""),
+            sources=sources,
             description=data.get("description", ""),
             vuln_type=data.get("vuln_type", ""),
             status=data.get("status", SPStatus.PENDING_VERIFY.value),
@@ -144,8 +164,11 @@ class SuspiciousPoint:
             score=data.get("score", 0.0),
             is_important=data.get("is_important", False),
             important_controlflow=data.get("important_controlflow", []),
+            merged_duplicates=data.get("merged_duplicates", []),
             verification_notes=data.get("verification_notes"),
             pov_id=data.get("pov_id"),
+            pov_success_by=data.get("pov_success_by"),
+            pov_attempted_by=data.get("pov_attempted_by", []),
             created_at=created_at,
             checked_at=parse_datetime(data.get("checked_at")),
             pov_generated_at=parse_datetime(data.get("pov_generated_at")),
@@ -162,3 +185,22 @@ class SuspiciousPoint:
     def mark_important(self):
         """Mark as important (high priority)"""
         self.is_important = True
+
+    def has_source(self, harness_name: str, sanitizer: str) -> bool:
+        """Check if this SP has a specific source"""
+        for source in self.sources:
+            if source.get("harness_name") == harness_name and source.get("sanitizer") == sanitizer:
+                return True
+        return False
+
+    def add_source(self, harness_name: str, sanitizer: str) -> bool:
+        """
+        Add a new source to this SP.
+
+        Returns:
+            True if source was added, False if already exists
+        """
+        if self.has_source(harness_name, sanitizer):
+            return False
+        self.sources.append({"harness_name": harness_name, "sanitizer": sanitizer})
+        return True

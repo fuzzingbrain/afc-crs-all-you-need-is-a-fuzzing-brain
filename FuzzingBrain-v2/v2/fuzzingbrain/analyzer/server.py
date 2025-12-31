@@ -635,29 +635,86 @@ class AnalysisServer:
     # =========================================================================
 
     async def _create_suspicious_point(self, params: dict) -> dict:
-        """Create a new suspicious point."""
+        """
+        Create a new suspicious point or merge with existing duplicate.
+
+        Uses LLM to check for duplicates in the same function. If a duplicate
+        is found, merges the source instead of creating a new SP.
+        """
         from ..core.models import SuspiciousPoint
+        from ..core.sp_dedup import check_sp_duplicate_async
 
         if not self.repos:
             raise RuntimeError("Database not connected")
 
+        function_name = params.get("function_name", "")
+        harness_name = params.get("harness_name", "")
+        sanitizer = params.get("sanitizer", "")
+        description = params.get("description", "")
+        vuln_type = params.get("vuln_type", "")
+        score = params.get("score", 0.0)
+        important_controlflow = params.get("important_controlflow", [])
+
+        # Check for duplicates in the same function
+        existing_sps = self.repos.suspicious_points.find_by_function(
+            self.task_id, function_name
+        )
+
+        if existing_sps:
+            # Convert to dict format for dedup check
+            existing_sp_dicts = [sp.to_dict() for sp in existing_sps]
+
+            # Use LLM to check for semantic duplicates
+            duplicate_id = await check_sp_duplicate_async(description, existing_sp_dicts)
+
+            if duplicate_id:
+                # Found a duplicate - merge the source instead of creating new SP
+                source_added = self.repos.suspicious_points.add_source(
+                    duplicate_id, harness_name, sanitizer
+                )
+
+                # Record the merged duplicate for human review
+                self.repos.suspicious_points.add_merged_duplicate(
+                    sp_id=duplicate_id,
+                    description=description,
+                    vuln_type=vuln_type,
+                    harness_name=harness_name,
+                    sanitizer=sanitizer,
+                    score=score,
+                )
+
+                self._log(
+                    f"Merged SP source: {harness_name}/{sanitizer} -> existing SP {duplicate_id[:8]}... "
+                    f"in {function_name} (source_added={source_added})"
+                )
+                return {
+                    "id": duplicate_id,
+                    "merged": True,
+                    "created": False,
+                    "message": f"Merged with existing SP in {function_name}",
+                }
+
+        # No duplicate found - create new SP with sources list
         sp = SuspiciousPoint(
             task_id=self.task_id,
-            function_name=params.get("function_name", ""),
-            harness_name=params.get("harness_name", ""),
-            sanitizer=params.get("sanitizer", ""),
-            description=params.get("description", ""),
-            vuln_type=params.get("vuln_type", ""),
-            score=params.get("score", 0.0),
-            important_controlflow=params.get("important_controlflow", []),
+            function_name=function_name,
+            sources=[{"harness_name": harness_name, "sanitizer": sanitizer}],
+            description=description,
+            vuln_type=vuln_type,
+            score=score,
+            important_controlflow=important_controlflow,
         )
 
         self.repos.suspicious_points.save(sp)
-        self._log(f"Created suspicious point: {sp.suspicious_point_id} in {sp.function_name} (harness={sp.harness_name}, sanitizer={sp.sanitizer})")
+        self._log(
+            f"Created suspicious point: {sp.suspicious_point_id} in {function_name} "
+            f"(harness={harness_name}, sanitizer={sanitizer})"
+        )
 
         return {
             "id": sp.suspicious_point_id,
             "created": True,
+            "merged": False,
         }
 
     async def _update_suspicious_point(self, params: dict) -> dict:

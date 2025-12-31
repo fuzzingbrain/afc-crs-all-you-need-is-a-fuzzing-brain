@@ -373,10 +373,13 @@ class AgentPipeline:
                 result = await pov_agent.generate_pov_async(sp.to_dict())
 
                 # Complete POV generation
+                # On failure, pass harness_name/sanitizer so other contributors can retry
                 self.repos.suspicious_points.complete_pov(
                     sp.suspicious_point_id,
                     pov_id=result.pov_id if result.success else None,
                     success=result.success,
+                    harness_name=self.fuzzer,
+                    sanitizer=self.sanitizer,
                 )
 
                 # Update stats

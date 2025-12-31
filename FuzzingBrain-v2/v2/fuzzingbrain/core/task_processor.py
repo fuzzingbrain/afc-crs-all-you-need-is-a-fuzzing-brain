@@ -601,6 +601,15 @@ class TaskProcessor:
                     # Get worker results for summary
                     worker_results = dispatcher.get_results()
 
+                    # Count merged duplicates for dedup stats
+                    dedup_count = 0
+                    try:
+                        sps_with_merges = self.repos.suspicious_points.find_with_merged_duplicates(task.task_id)
+                        for sp in sps_with_merges:
+                            dedup_count += len(sp.merged_duplicates)
+                    except Exception as e:
+                        logger.warning(f"Failed to count merged duplicates: {e}")
+
                     # Create and output final summary with worker colors via loguru
                     summary = create_final_summary(
                         project_name=project_name,
@@ -608,6 +617,7 @@ class TaskProcessor:
                         workers=worker_results,
                         total_elapsed_minutes=result.get("elapsed_minutes", 0),
                         use_color=True,
+                        dedup_count=dedup_count,
                     )
                     # Reset terminal settings before output (subprocess may have changed them)
                     os.system('stty sane 2>/dev/null')
