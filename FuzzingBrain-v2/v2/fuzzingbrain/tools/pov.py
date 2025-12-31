@@ -2,10 +2,14 @@
 POV Tools
 
 MCP tools for POV Agent to generate and manage POVs (Proof of Vulnerability).
+
+Uses contextvars for coroutine-safe context management, allowing multiple
+POV agents to run concurrently without interfering with each other.
 """
 
 import base64
 import uuid
+from contextvars import ContextVar, copy_context
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -23,22 +27,28 @@ from ..db import RepositoryManager
 
 
 # =============================================================================
-# Global Context for POV Tools
+# Coroutine-Safe Context for POV Tools (using contextvars)
 # =============================================================================
 
-_pov_context: Dict[str, Any] = {
-    "task_id": None,
-    "worker_id": None,
-    "output_dir": None,
-    "repos": None,
-    "fuzzer": None,
-    "sanitizer": None,
-    "suspicious_point_id": None,
-    "iteration": 0,   # Current agent loop iteration
-    "attempt": 0,     # Current POV attempt count
-    "fuzzer_path": None,   # Path to fuzzer binary (for verification)
-    "docker_image": None,  # Docker image for running fuzzer
-}
+# Each coroutine/agent gets its own isolated context
+_pov_context_var: ContextVar[Dict[str, Any]] = ContextVar(
+    'pov_context',
+    default={
+        "task_id": None,
+        "worker_id": None,
+        "output_dir": None,
+        "repos": None,
+        "fuzzer": None,
+        "sanitizer": None,
+        "suspicious_point_id": None,
+        "iteration": 0,
+        "attempt": 0,
+        "fuzzer_path": None,
+        "docker_image": None,
+        "workspace_path": None,
+        "fuzzer_source": None,
+    }
+)
 
 
 def set_pov_context(
@@ -51,9 +61,13 @@ def set_pov_context(
     suspicious_point_id: str = "",
     fuzzer_path: Optional[Path] = None,
     docker_image: Optional[str] = None,
+    workspace_path: Optional[Path] = None,
+    fuzzer_source: Optional[str] = None,
 ) -> None:
     """
-    Set the context for POV tools.
+    Set the context for POV tools (coroutine-safe).
+
+    Each concurrent POV agent gets its own isolated context.
 
     Args:
         task_id: Current task ID
@@ -65,9 +79,10 @@ def set_pov_context(
         suspicious_point_id: Current suspicious point being processed
         fuzzer_path: Path to fuzzer binary (for verification)
         docker_image: Docker image for running fuzzer (e.g., "gcr.io/oss-fuzz/libpng")
+        workspace_path: Path to workspace directory
+        fuzzer_source: Fuzzer harness source code
     """
-    global _pov_context
-    _pov_context = {
+    ctx = {
         "task_id": task_id,
         "worker_id": worker_id,
         "output_dir": Path(output_dir) if output_dir else None,
@@ -79,33 +94,82 @@ def set_pov_context(
         "attempt": 0,
         "fuzzer_path": Path(fuzzer_path) if fuzzer_path else None,
         "docker_image": docker_image,
+        "workspace_path": Path(workspace_path) if workspace_path else None,
+        "fuzzer_source": fuzzer_source,
     }
+    _pov_context_var.set(ctx)
 
 
 def update_pov_iteration(iteration: int) -> None:
-    """Update current agent loop iteration."""
-    global _pov_context
-    _pov_context["iteration"] = iteration
+    """Update current agent loop iteration (coroutine-safe)."""
+    ctx = _pov_context_var.get().copy()
+    ctx["iteration"] = iteration
+    _pov_context_var.set(ctx)
 
 
 def get_pov_context() -> Dict[str, Any]:
-    """Get the current POV context."""
-    return _pov_context.copy()
+    """Get the current POV context (coroutine-safe)."""
+    return _pov_context_var.get().copy()
 
 
 def _ensure_context() -> Optional[Dict[str, Any]]:
     """Ensure POV context is set. Returns error dict if not configured."""
-    if _pov_context.get("task_id") is None:
+    ctx = _pov_context_var.get()
+    if ctx.get("task_id") is None:
         return {
             "success": False,
             "error": "POV context not set. Call set_pov_context first.",
         }
-    if _pov_context.get("repos") is None:
+    if ctx.get("repos") is None:
         return {
             "success": False,
             "error": "Database repos not available in POV context.",
         }
     return None
+
+
+# =============================================================================
+# Fuzzer Info Tool
+# =============================================================================
+
+@tools_mcp.tool
+def get_fuzzer_info() -> Dict[str, Any]:
+    """
+    Get the fuzzer harness source code and current sanitizer type.
+
+    Use this tool to refresh your memory about:
+    - How the fuzzer processes input data
+    - What sanitizer is being used (address, memory, undefined)
+    - The fuzzer name and current attempt count
+
+    Returns:
+        {
+            "success": True,
+            "fuzzer": "fuzzer_name",
+            "sanitizer": "address|memory|undefined",
+            "fuzzer_source": "... source code ...",
+            "current_attempt": N,
+            "current_iteration": M,
+        }
+    """
+    err = _ensure_context()
+    if err:
+        return err
+
+    ctx = _pov_context_var.get()
+
+    fuzzer_source = ctx.get("fuzzer_source")
+    if not fuzzer_source:
+        fuzzer_source = "(Fuzzer source code not available)"
+
+    return {
+        "success": True,
+        "fuzzer": ctx.get("fuzzer", ""),
+        "sanitizer": ctx.get("sanitizer", "address"),
+        "fuzzer_source": fuzzer_source,
+        "current_attempt": ctx.get("attempt", 0),
+        "current_iteration": ctx.get("iteration", 0),
+    }
 
 
 # =============================================================================
@@ -276,13 +340,11 @@ def create_pov(
             return data
         '''
     """
-    global _pov_context
-
     err = _ensure_context()
     if err:
         return err
 
-    ctx = _pov_context
+    ctx = _pov_context_var.get()
     task_id = ctx["task_id"]
     worker_id = ctx["worker_id"]
     output_dir = ctx["output_dir"]
@@ -291,9 +353,11 @@ def create_pov(
     sanitizer = ctx.get("sanitizer", "address")
     current_iteration = ctx.get("iteration", 0)
 
-    # Increment attempt counter
-    _pov_context["attempt"] += 1
-    current_attempt = _pov_context["attempt"]
+    # Increment attempt counter (coroutine-safe)
+    ctx = ctx.copy()
+    ctx["attempt"] += 1
+    _pov_context_var.set(ctx)
+    current_attempt = ctx["attempt"]
 
     # Use context SP if not provided
     if not suspicious_point_id and ctx.get("suspicious_point_id"):
@@ -556,7 +620,7 @@ def verify_pov(
     if err:
         return err
 
-    ctx = _pov_context
+    ctx = _pov_context_var.get()
     repos = ctx["repos"]
     sanitizer = ctx.get("sanitizer", "address")
 
@@ -683,7 +747,7 @@ def trace_pov(
     if err:
         return err
 
-    ctx = _pov_context
+    ctx = _pov_context_var.get()
     repos = ctx["repos"]
 
     # Get POV from database
@@ -761,6 +825,7 @@ __all__ = [
     "set_pov_context",
     "update_pov_iteration",
     "get_pov_context",
+    "get_fuzzer_info",
     "create_pov",
     "verify_pov",
     "trace_pov",

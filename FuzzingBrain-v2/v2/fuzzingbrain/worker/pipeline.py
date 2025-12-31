@@ -46,7 +46,12 @@ class PipelineConfig:
     max_idle_cycles: int = 10   # Max cycles with no work before agent exits
 
     # POV Agent settings
-    pov_sleep_seconds: float = 30.0  # Placeholder POV agent sleep time
+    max_iterations: int = 200      # Max agent loop iterations
+    max_pov_attempts: int = 40     # Max POV generation attempts
+
+    # Fuzzer settings (for POV verification)
+    fuzzer_path: Optional[Path] = None   # Path to fuzzer binary
+    docker_image: Optional[str] = None   # Docker image for running fuzzer
 
 
 @dataclass
@@ -95,6 +100,7 @@ class AgentPipeline:
         config: PipelineConfig = None,
         output_dir: Path = None,
         log_dir: Path = None,
+        workspace_path: Path = None,
     ):
         """
         Initialize the pipeline.
@@ -107,6 +113,7 @@ class AgentPipeline:
             config: Pipeline configuration
             output_dir: Directory for POV output
             log_dir: Directory for agent logs
+            workspace_path: Path to workspace (for reading source code)
         """
         self.task_id = task_id
         self.repos = repos
@@ -115,6 +122,7 @@ class AgentPipeline:
         self.config = config or PipelineConfig()
         self.output_dir = output_dir
         self.log_dir = log_dir
+        self.workspace_path = workspace_path
 
         # Statistics
         self.stats = PipelineStats()
@@ -320,14 +328,20 @@ class AgentPipeline:
             try:
                 logger.info(f"[Pipeline:{agent_id}] Generating POV for SP {sp.suspicious_point_id}")
 
-                # Run POV agent (placeholder)
+                # Run POV agent
                 pov_agent = POVAgent(
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
                     task_id=self.task_id,
                     worker_id=agent_id,
                     output_dir=self.output_dir,
-                    sleep_seconds=self.config.pov_sleep_seconds,
+                    log_dir=self.log_dir,
+                    repos=self.repos,
+                    max_iterations=self.config.max_iterations,
+                    max_pov_attempts=self.config.max_pov_attempts,
+                    fuzzer_path=self.config.fuzzer_path,
+                    docker_image=self.config.docker_image,
+                    workspace_path=self.workspace_path,
                 )
 
                 result = await pov_agent.generate_pov_async(sp.to_dict())
@@ -369,6 +383,11 @@ async def run_pipeline(
     pov_min_score: float = 0.5,
     output_dir: Path = None,
     log_dir: Path = None,
+    fuzzer_path: Path = None,
+    docker_image: str = None,
+    max_iterations: int = 200,
+    max_pov_attempts: int = 40,
+    workspace_path: Path = None,
 ) -> PipelineStats:
     """
     Convenience function to run the pipeline.
@@ -383,6 +402,11 @@ async def run_pipeline(
         pov_min_score: Minimum score for POV generation
         output_dir: Directory for POV output
         log_dir: Directory for agent logs
+        fuzzer_path: Path to fuzzer binary (for POV verification)
+        docker_image: Docker image for running fuzzer
+        max_iterations: Max POV agent iterations
+        max_pov_attempts: Max POV generation attempts
+        workspace_path: Path to workspace (for reading source code)
 
     Returns:
         Pipeline statistics
@@ -391,6 +415,10 @@ async def run_pipeline(
         num_verify_agents=num_verify_agents,
         num_pov_agents=num_pov_agents,
         pov_min_score=pov_min_score,
+        fuzzer_path=fuzzer_path,
+        docker_image=docker_image,
+        max_iterations=max_iterations,
+        max_pov_attempts=max_pov_attempts,
     )
 
     pipeline = AgentPipeline(
@@ -401,6 +429,7 @@ async def run_pipeline(
         config=config,
         output_dir=output_dir,
         log_dir=log_dir,
+        workspace_path=workspace_path,
     )
 
     return await pipeline.run()
