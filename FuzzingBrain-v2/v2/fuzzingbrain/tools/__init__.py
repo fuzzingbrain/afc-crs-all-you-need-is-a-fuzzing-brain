@@ -46,6 +46,14 @@ from .code_viewer import (
     list_files_impl,
     CODE_VIEWER_TOOLS,
 )
+from .pov import (
+    set_pov_context,
+    update_pov_iteration,
+    get_pov_context,
+    create_pov,
+    verify_pov,
+    trace_pov,
+)
 
 __all__ = [
     "tools_mcp",
@@ -66,4 +74,11 @@ __all__ = [
     "search_code_impl",
     "list_files_impl",
     "CODE_VIEWER_TOOLS",
+    # POV tools
+    "set_pov_context",
+    "update_pov_iteration",
+    "get_pov_context",
+    "create_pov",
+    "verify_pov",
+    "trace_pov",
 ]

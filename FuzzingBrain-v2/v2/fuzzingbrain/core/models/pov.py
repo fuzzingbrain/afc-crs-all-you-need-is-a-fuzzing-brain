@@ -21,10 +21,21 @@ class POV:
     # Identifiers
     pov_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     task_id: str = ""  # Required: which task does this POV belong to
+    suspicious_point_id: str = ""  # Which suspicious point this POV is for
+    generation_id: str = ""  # Group POVs from same generation (same code, multiple variants)
+
+    # Iteration tracking (for model evaluation)
+    iteration: int = 0  # Which agent loop iteration when created
+    attempt: int = 1  # Which POV attempt (1-40)
+    variant: int = 1  # Which variant in this attempt (1-3)
 
     # POV content
     blob: Optional[str] = None  # Base64 encoded blob content
+    blob_path: Optional[str] = None  # File path where blob is saved
     gen_blob: Optional[str] = None  # Python code to generate the blob
+
+    # Vulnerability info (parsed from sanitizer output after verification)
+    vuln_type: Optional[str] = None  # heap-buffer-overflow, stack-use-after-free, etc.
 
     # Detection info
     harness_name: Optional[str] = None  # Which fuzzer/harness detected this
@@ -47,6 +58,7 @@ class POV:
 
     # Timestamps
     created_at: datetime = field(default_factory=datetime.now)
+    verified_at: Optional[datetime] = None  # When POV was verified
 
     def to_dict(self) -> dict:
         """Convert to dictionary for MongoDB storage"""
@@ -54,8 +66,15 @@ class POV:
             "_id": self.pov_id,
             "pov_id": self.pov_id,
             "task_id": self.task_id,
+            "suspicious_point_id": self.suspicious_point_id,
+            "generation_id": self.generation_id,
+            "iteration": self.iteration,
+            "attempt": self.attempt,
+            "variant": self.variant,
             "blob": self.blob,
+            "blob_path": self.blob_path,
             "gen_blob": self.gen_blob,
+            "vuln_type": self.vuln_type,
             "harness_name": self.harness_name,
             "sanitizer": self.sanitizer,
             "sanitizer_output": self.sanitizer_output,
@@ -66,6 +85,7 @@ class POV:
             "engine": self.engine,
             "msg_history": self.msg_history,
             "created_at": self.created_at,
+            "verified_at": self.verified_at,
         }
 
     @classmethod
@@ -74,8 +94,15 @@ class POV:
         return cls(
             pov_id=data.get("pov_id", data.get("_id", str(uuid.uuid4()))),
             task_id=data.get("task_id", ""),
+            suspicious_point_id=data.get("suspicious_point_id", ""),
+            generation_id=data.get("generation_id", ""),
+            iteration=data.get("iteration", 0),
+            attempt=data.get("attempt", 1),
+            variant=data.get("variant", 1),
             blob=data.get("blob"),
+            blob_path=data.get("blob_path"),
             gen_blob=data.get("gen_blob"),
+            vuln_type=data.get("vuln_type"),
             harness_name=data.get("harness_name"),
             sanitizer=data.get("sanitizer", "address"),
             sanitizer_output=data.get("sanitizer_output"),
@@ -86,6 +113,7 @@ class POV:
             engine=data.get("engine", "libfuzzer"),
             msg_history=data.get("msg_history", []),
             created_at=data.get("created_at", datetime.now()),
+            verified_at=data.get("verified_at"),
         )
 
     def deactivate(self):

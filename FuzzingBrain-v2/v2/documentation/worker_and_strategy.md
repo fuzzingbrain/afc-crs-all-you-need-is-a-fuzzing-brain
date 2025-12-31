@@ -500,43 +500,460 @@ sp_5: status=pending_pov, score=0.85
 # POV Agent
 
 
-## 背景
+## Overview
 
-一个可疑点终究还是要被验证。因此我们必须设计一个agent，用于生成可以对指定fuzzer使用从而触发漏洞的输入。
-
-
-## 输入输出
-
-**输入：**
-- suspicious point信息（漏洞类型、位置、控制流描述）
-- fuzzer源码
-- diff内容
-- 可调用各种工具查看代码
-
-**输出：**
-- Python代码，可生成一个或多个 `pov_{uuid}.bin` 文件
-- uuid防止并发冲突
-- 生成bin的个数可配置
+POV Agent is responsible for generating Proof-of-Vulnerability inputs that can trigger the vulnerability identified in a suspicious point. This is the final step in the vulnerability discovery pipeline.
 
 
-## 为什么输出是Python代码而不是直接的blob？
+## Architecture
 
-- 可以生成多个变体（尝试不同的触发方式）
-- 可复现（保存生成逻辑）
-- 可调试（看到生成过程）
-- 复杂格式更容易处理（如PNG需要正确的header、CRC等）
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            POV Agent Workflow                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  Input: Suspicious Point (verified, high score)                             │
+│    │                                                                        │
+│    ▼                                                                        │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Step 1: Understand the Vulnerability                                 │   │
+│  │   - Read SP description, vuln_type, controlflow                      │   │
+│  │   - Read vulnerable function source code                             │   │
+│  │   - Understand trigger conditions                                    │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│    │                                                                        │
+│    ▼                                                                        │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Step 2: Understand the Input Format                                  │   │
+│  │   - Read fuzzer source code                                          │   │
+│  │   - Understand how fuzzer processes input                            │   │
+│  │   - Identify input format constraints (PNG, JSON, etc.)              │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│    │                                                                        │
+│    ▼                                                                        │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Step 3: Design Trigger Strategy                                      │   │
+│  │   - Plan how to craft input that reaches vulnerable code             │   │
+│  │   - Determine specific values needed to trigger the bug              │   │
+│  │   - Consider format requirements (headers, checksums, etc.)          │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│    │                                                                        │
+│    ▼                                                                        │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Step 4: Generate POV                                                 │   │
+│  │   - Write Python code to generate the malicious input                │   │
+│  │   - Call create_pov tool with generator_code                         │   │
+│  │   - Tool executes code and saves blob to file                        │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│    │                                                                        │
+│    ▼                                                                        │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Step 5: Verify POV (Optional, can be done by pipeline)               │   │
+│  │   - Run fuzzer with generated input                                  │   │
+│  │   - Check if sanitizer reports the expected crash                    │   │
+│  │   - If failed, analyze coverage and iterate                          │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│    │                                                                        │
+│    ▼                                                                        │
+│  Output: POV record in database + blob file                                 │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
 
-## 实现逻辑
+## Input and Output
 
-POV Agent同样使用领取制，从队列中领取高分sp进行处理。
+### Input
+- Suspicious point info:
+  - `suspicious_point_id`: Unique identifier
+  - `function_name`: Vulnerable function
+  - `vuln_type`: Type of vulnerability (buffer-overflow, use-after-free, etc.)
+  - `description`: Control flow based description
+  - `important_controlflow`: Related functions and variables
+  - `score`: Confidence score
+  - `verification_notes`: Notes from verification phase
+- Fuzzer name and sanitizer type
+- Access to code viewing tools
 
-工作流程：
-1. 领取一个 status="pending_pov" 的sp
-2. 读取sp信息、fuzzer源码、相关代码
-3. 分析如何构造输入触发漏洞
-4. 生成Python代码
-5. 执行代码生成bin文件
-6. 更新sp状态为 "pov_generated"
+### Output
+- POV record in MongoDB with:
+  - `gen_blob`: Python code that generates the POV
+  - `blob`: Base64 encoded binary data
+  - `blob_path`: Path to saved file
+  - `description`: How this POV triggers the vulnerability
+- Binary file saved to `povs/pov_{uuid}.bin`
+
+
+## Why Python Code Instead of Direct Blob?
+
+1. **Reproducibility**: Code documents the generation logic
+2. **Debuggability**: Can trace through generation process
+3. **Flexibility**: Can generate multiple variants
+4. **Complex Formats**: Easier to handle formats with headers, checksums, CRC (e.g., PNG)
+5. **Iteration**: Can modify and re-run without regenerating from scratch
+
+
+## Tools Available to POV Agent
+
+| Tool | Description |
+|------|-------------|
+| `get_function_source` | Read source code of vulnerable function |
+| `get_file_content` | Read any file in repository |
+| `get_diff` | Read the diff file |
+| `get_callers` | Get functions that call a given function |
+| `get_callees` | Get functions called by a given function |
+| `search_code` | Search for patterns in codebase |
+| `create_pov` | Create POV with Python generator code |
+
+### create_pov Tool Design
+
+```python
+create_pov(
+    suspicious_point_id: str,   # Required: which SP this POV is for
+    generator_code: str,        # Required: Python code to generate blob
+    description: str,           # Required: How this triggers the vulnerability
+    num_variants: int = 1,      # Optional: Generate multiple variants
+) -> {
+    "success": bool,
+    "pov_id": str,
+    "blob_path": str,
+    "error": str | None
+}
+```
+
+The tool internally:
+1. Creates POV record in database
+2. Executes generator_code in sandboxed environment
+3. Saves generated blob(s) to file
+4. Updates POV record with blob and path
+
+
+## Generator Code Requirements
+
+The Python code passed to `create_pov` must:
+
+1. Define a `generate()` function that returns `bytes`
+2. Or define a `generate_variants(n)` function that returns `List[bytes]`
+3. Use only standard library (struct, zlib, etc.)
+4. Not perform any I/O operations (file saving is done by tool)
+
+### Example Generator Code
+
+```python
+import struct
+import zlib
+
+def generate():
+    """Generate test PNG that reproduces buffer overflow in iCCP handler."""
+
+    # PNG signature
+    signature = b'\\x89PNG\\r\\n\\x1a\\n'
+
+    # Minimal IHDR chunk
+    ihdr_data = struct.pack('>IIBBBBB', 1, 1, 8, 2, 0, 0, 0)
+    ihdr = make_chunk(b'IHDR', ihdr_data)
+
+    # Test iCCP chunk - keyword length exceeds wpng_byte[41] bounds
+    keyword = b'A' * 82  # Overflow: array is wpng_byte[41] = 82 bytes, but indexed as bytes
+    compression = b'\\x00'  # Compression method
+    # Minimal compressed data
+    compressed = zlib.compress(b'\\x00' * 100)
+
+    iccp_data = keyword + compression + compressed
+    iccp = make_chunk(b'iCCP', iccp_data)
+
+    # IEND chunk
+    iend = make_chunk(b'IEND', b'')
+
+    return signature + ihdr + iccp + iend
+
+def make_chunk(chunk_type, data):
+    """Create PNG chunk with length and CRC."""
+    length = struct.pack('>I', len(data))
+    crc = struct.pack('>I', zlib.crc32(chunk_type + data) & 0xffffffff)
+    return length + chunk_type + data + crc
+```
+
+
+## POV Agent System Prompt
+
+```
+You are a security researcher on a defensive security team. Your job is to generate
+Proof-of-Vulnerability (POV) test inputs to verify that a suspected bug exists.
+
+This is part of an automated vulnerability discovery system that helps developers
+find and fix bugs before they become security issues in production.
+
+## Your Task
+
+Given a verified suspicious point, generate Python code that creates a test input
+to reproduce the vulnerability. This helps confirm the bug exists so it can be fixed.
+
+## Available Tools
+
+- get_function_source: Read source code of the function under test
+- get_file_content: Read files for format understanding
+- get_diff: See what code changed
+- search_code: Find format handling code, magic numbers, etc.
+- create_pov: Submit your POV generator code
+
+## Mandatory Steps
+
+### Step 1: Understand the Bug
+- Read the suspicious point description carefully
+- Call get_function_source for the function under test
+- Identify exactly what condition triggers the bug
+- Note the problematic operation (memcpy size, array index, etc.)
+
+### Step 2: Understand Input Format
+- Call get_function_source for the fuzzer entry point
+- Trace how input flows from fuzzer to the target function
+- Identify file format requirements (headers, chunks, etc.)
+- Look for magic numbers, length fields, checksums
+
+### Step 3: Design Test Case
+- Determine what input values reproduce the vulnerability
+- Plan the structure of your test input
+- Consider format constraints (valid headers, CRC, etc.)
+
+### Step 4: Write Generator Code
+- Write Python code that generates the test input blob
+- Use struct for binary packing
+- Use zlib for compression/CRC if needed
+- Define a generate() function returning bytes
+
+### Step 5: Submit POV
+- Call create_pov with your generator code
+- Provide clear description of how it reproduces the bug
+
+## Generator Code Requirements
+
+Your code MUST:
+- Define generate() function returning bytes
+- Use only standard library (struct, zlib, hashlib, etc.)
+- NOT perform file I/O (tool handles saving)
+- Be self-contained (no external dependencies)
+
+## Example Interaction
+
+User: Generate POV for SP in png_handle_iCCP with type confusion vulnerability.
+
+Agent:
+1. First, let me read the suspicious point details and the function under test.
+   [Calls get_function_source("png_handle_iCCP")]
+
+2. I see the bug: wpng_byte is typedef'd to png_uint_16 (2 bytes), but
+   the code treats keyword[] as a byte array. The loop can access beyond bounds.
+
+3. Now let me understand the fuzzer input format.
+   [Calls get_function_source("libpng_read_fuzzer")]
+
+4. The fuzzer passes raw bytes to png_read_info. Input must be valid PNG format.
+   Let me check PNG structure requirements.
+   [Calls search_code("PNG signature")]
+
+5. I'll generate a test PNG with oversized iCCP keyword to reproduce the bug.
+   [Calls create_pov with generator code]
+```
+
+
+## POV Verification Flow
+
+After POV is generated, it needs to be verified to confirm it actually triggers the vulnerability.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         POV Verification Flow                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  POV Generated (blob file exists)                                           │
+│    │                                                                        │
+│    ▼                                                                        │
+│  ┌─────────────────────────────────────────────────────────────────────┐   │
+│  │ Run Fuzzer with POV                                                  │   │
+│  │   $ ./fuzzer pov_{uuid}.bin                                          │   │
+│  │   Capture stdout/stderr                                              │   │
+│  └─────────────────────────────────────────────────────────────────────┘   │
+│    │                                                                        │
+│    ├─────────────────────┬─────────────────────┬───────────────────────┐   │
+│    │                     │                     │                       │   │
+│    ▼                     ▼                     ▼                       │   │
+│  ┌───────────┐     ┌───────────┐        ┌───────────┐                  │   │
+│  │ Sanitizer │     │ No Crash  │        │ Timeout   │                  │   │
+│  │ Triggered │     │           │        │           │                  │   │
+│  └───────────┘     └───────────┘        └───────────┘                  │   │
+│    │                     │                     │                       │   │
+│    ▼                     ▼                     ▼                       │   │
+│  SUCCESS!           Check Coverage         Mark as                     │   │
+│  - Parse output     - Did it reach         inconclusive                │   │
+│  - Extract type       target func?                                     │   │
+│  - Update POV       - Feedback to                                      │   │
+│                       Agent for                                        │   │
+│                       iteration                                        │   │
+│                                                                        │   │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Verification Results
+
+| Result | Action |
+|--------|--------|
+| Sanitizer crash | SUCCESS - Parse vuln_type from output, mark is_successful=true |
+| No crash, reached target | Iterate - Adjust trigger values |
+| No crash, didn't reach | Iterate - Fix input format/path |
+| Timeout | Mark inconclusive, may need simpler input |
+| Crash but wrong type | Partial success - Document unexpected finding |
+
+
+## Iteration 与 POV Attempt
+
+**关键术语：**
+- **Iteration**：Agent loop 的一次循环。LLM 可以做各种事情（读代码、搜索、分析、或调用 create_pov）
+- **POV Attempt**：一次 `create_pov` 工具调用，生成 Python 代码并产出 N 个 blob 变体
+
+```
+Agent Loop (iteration 1): 读取 SP 信息
+Agent Loop (iteration 2): get_function_source(漏洞函数)
+Agent Loop (iteration 3): get_function_source(fuzzer)
+Agent Loop (iteration 4): search_code(格式相关模式)
+Agent Loop (iteration 5): 调用 create_pov  ← POV Attempt #1 (产生 3 个 blob)
+Agent Loop (iteration 6): 收到验证失败反馈
+Agent Loop (iteration 7): 分析 coverage
+Agent Loop (iteration 8): 调用 create_pov  ← POV Attempt #2 (产生 3 个 blob)
+...
+```
+
+### 停止条件（OR 关系）
+
+```
+满足任一条件即停止：
+  iterations >= 200      →  停止（防止 agent 无限循环）
+  OR
+  pov_attempts >= 40     →  停止（POV 尝试已足够）
+  OR
+  POV 验证成功            →  停止（找到 bug 了！）
+```
+
+| 场景 | iterations | pov_attempts | 应该停止？ |
+|------|------------|--------------|-----------|
+| LLM 卡住，一直读代码 | 200 | 5 | ✅ 是（iterations 触发） |
+| LLM 激进，快速生成 | 60 | 40 | ✅ 是（pov_attempts 触发） |
+| 正常流程，第 3 次成功 | 15 | 3 | ✅ 是（成功触发） |
+
+### 限制参数
+
+| 参数 | 默认值 | 用途 |
+|------|--------|------|
+| `max_iterations` | 200 | 安全阀，防止 agent 卡住 |
+| `max_pov_attempts` | 40 | 业务上限，控制生成成本 |
+| `num_variants` | 3 | 每次 POV attempt 的 blob 变体数 |
+
+每个 SP 最大 blob 数量：40 × 3 = 120
+
+### 反馈信息
+
+当 POV 验证失败时，提供给 agent：
+- Coverage 数据：哪些函数被执行了
+- 距离：离漏洞函数有多近
+- 错误信息：解析错误等
+- 执行轨迹：调用序列
+
+
+## POV Model
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| pov_id | str | 自动生成的 UUID |
+| task_id | str | 所属任务 ID |
+| suspicious_point_id | str | 关联的 SP |
+| **generation_id** | str | 同一次 create_pov 调用产生的 blob 共享此 ID |
+| **iteration** | int | 在第几次 agent loop 时创建，用于分析 |
+| **attempt** | int | 第几次 POV 尝试 (1-40)，用于模型评估 |
+| **variant** | int | 这次尝试的第几个变体 (1-3) |
+| blob | str | Base64 编码的二进制数据 |
+| blob_path | str | 文件路径 |
+| gen_blob | str | Python 生成代码 |
+| vuln_type | str | 崩溃类型（从 sanitizer 输出解析） |
+| harness_name | str | Fuzzer 名称 |
+| sanitizer | str | address/memory/undefined |
+| sanitizer_output | str | 完整的 sanitizer 输出 |
+| description | str | POV 如何触发 bug |
+| is_successful | bool | 是否验证成功触发 crash |
+| is_active | bool | 是否有效（非重复/失败） |
+| created_at | datetime | 创建时间 |
+| verified_at | datetime | 验证时间 |
+
+
+## Blob 文件管理
+
+### 目录结构
+
+```
+povs/
+  {task_id}/
+    {worker_id}/
+      attempt_001/
+        v1.bin
+        v2.bin
+        v3.bin
+      attempt_002/
+        v1.bin
+        v2.bin
+        v3.bin
+      ...
+
+success_povs/
+  {task_id}/
+    {worker_id}/
+      {sp_id_short}_{attempt}_v{variant}.bin
+```
+
+### 流程
+
+1. **生成**：Blob 保存到 `povs/{task_id}/{worker_id}/attempt_{n}/`
+2. **验证成功**：移动到 `success_povs/`
+3. **任务完成**：清理 `povs/{task_id}/`（删除失败的 blob）
+
+### 优点
+
+- 方便调试：可以看到每次 attempt 生成了什么
+- 成功的 POV 单独管理，方便提交/展示
+- 清理简单：直接删除 `povs/{task_id}/` 目录即可
+
+
+## Integration with Pipeline
+
+POV Agent runs as part of the All-in-Agent Pipeline:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          Pipeline                                    │
+│                                                                     │
+│  Find Agent ──> Verify Agent Pool ──> POV Agent Pool                │
+│       │               │                     │                       │
+│       │               │                     │                       │
+│       ▼               ▼                     ▼                       │
+│  SP created      SP verified           POV generated                │
+│  (pending)       (pending_pov)         (pov_generated)              │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+POV Agent claims tasks with:
+- `status = "pending_pov"`
+- `score >= pov_min_score` (default 0.5)
+- Priority: `is_important DESC, score DESC`
+
+
+## Implementation Status
+
+| Component | Status |
+|-----------|--------|
+| POV Model | Done |
+| create_pov tool | TODO |
+| POV Agent (LLM-based) | TODO |
+| Verification runner | TODO |
+| Coverage feedback | TODO |
+| Pipeline integration | Done (placeholder) |
 
 
