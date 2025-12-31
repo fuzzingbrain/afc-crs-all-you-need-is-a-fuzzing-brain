@@ -347,6 +347,256 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             logger.error(f"Failed to count suspicious points: {e}")
             return {"total": 0, "checked": 0, "unchecked": 0, "real": 0, "false_positive": 0, "important": 0}
 
+    # =========================================================================
+    # Pipeline Methods (Claim-based task distribution)
+    # =========================================================================
+
+    def claim_for_verify(self, task_id: str, processor_id: str) -> Optional[SuspiciousPoint]:
+        """
+        Atomically claim a suspicious point for verification.
+
+        Uses find_one_and_update with atomic operation to prevent race conditions.
+        Returns the claimed SP, or None if no SP available.
+
+        Args:
+            task_id: Task ID to filter
+            processor_id: ID of the agent claiming the task
+
+        Returns:
+            Claimed SuspiciousPoint, or None if none available
+        """
+        try:
+            from pymongo import ReturnDocument
+            from ..core.models import SPStatus
+
+            # Atomic claim: find pending_verify and update to verifying
+            result = self.collection.find_one_and_update(
+                {
+                    "task_id": task_id,
+                    "status": SPStatus.PENDING_VERIFY.value,
+                },
+                {
+                    "$set": {
+                        "status": SPStatus.VERIFYING.value,
+                        "processor_id": processor_id,
+                    }
+                },
+                # Priority: is_important DESC, score DESC, created_at ASC
+                sort=[("is_important", -1), ("score", -1), ("created_at", 1)],
+                return_document=ReturnDocument.AFTER,
+            )
+
+            if result:
+                logger.debug(f"Claimed SP {result['_id']} for verification by {processor_id}")
+                return self.model_class.from_dict(result)
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to claim SP for verification: {e}")
+            return None
+
+    def claim_for_pov(self, task_id: str, processor_id: str, min_score: float = 0.5) -> Optional[SuspiciousPoint]:
+        """
+        Atomically claim a suspicious point for POV generation.
+
+        Only claims SPs that are verified with high score.
+
+        Args:
+            task_id: Task ID to filter
+            processor_id: ID of the agent claiming the task
+            min_score: Minimum score threshold for POV generation
+
+        Returns:
+            Claimed SuspiciousPoint, or None if none available
+        """
+        try:
+            from pymongo import ReturnDocument
+            from ..core.models import SPStatus
+
+            # Atomic claim: find pending_pov and update to generating_pov
+            result = self.collection.find_one_and_update(
+                {
+                    "task_id": task_id,
+                    "status": SPStatus.PENDING_POV.value,
+                    "score": {"$gte": min_score},
+                },
+                {
+                    "$set": {
+                        "status": SPStatus.GENERATING_POV.value,
+                        "processor_id": processor_id,
+                    }
+                },
+                # Priority: is_important DESC, score DESC
+                sort=[("is_important", -1), ("score", -1)],
+                return_document=ReturnDocument.AFTER,
+            )
+
+            if result:
+                logger.debug(f"Claimed SP {result['_id']} for POV generation by {processor_id}")
+                return self.model_class.from_dict(result)
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to claim SP for POV generation: {e}")
+            return None
+
+    def complete_verify(
+        self,
+        sp_id: str,
+        is_real: bool,
+        score: float,
+        notes: str = None,
+        is_important: bool = False,
+        proceed_to_pov: bool = False,
+    ) -> bool:
+        """
+        Complete verification of a suspicious point.
+
+        Args:
+            sp_id: Suspicious point ID
+            is_real: Whether it's a real vulnerability
+            score: Updated score
+            notes: Verification notes
+            is_important: Whether to mark as important
+            proceed_to_pov: Whether to proceed to POV generation stage
+
+        Returns:
+            True if successful
+        """
+        try:
+            from ..core.models import SPStatus
+
+            # Determine next status
+            if proceed_to_pov:
+                next_status = SPStatus.PENDING_POV.value
+            else:
+                next_status = SPStatus.VERIFIED.value
+
+            updates = {
+                "status": next_status,
+                "processor_id": None,  # Release the lock
+                "is_checked": True,
+                "is_real": is_real,
+                "score": score,
+                "is_important": is_important,
+                "checked_at": datetime.now(),
+            }
+            if notes:
+                updates["verification_notes"] = notes
+
+            return self.update(sp_id, updates)
+
+        except Exception as e:
+            logger.error(f"Failed to complete verification: {e}")
+            return False
+
+    def complete_pov(self, sp_id: str, pov_id: str = None, success: bool = True) -> bool:
+        """
+        Complete POV generation for a suspicious point.
+
+        Args:
+            sp_id: Suspicious point ID
+            pov_id: Generated POV ID (if successful)
+            success: Whether POV generation succeeded
+
+        Returns:
+            True if successful
+        """
+        try:
+            from ..core.models import SPStatus
+
+            updates = {
+                "status": SPStatus.POV_GENERATED.value if success else SPStatus.FAILED.value,
+                "processor_id": None,  # Release the lock
+                "pov_generated_at": datetime.now(),
+            }
+            if pov_id:
+                updates["pov_id"] = pov_id
+                updates["is_real"] = True  # Confirmed real if POV generated
+
+            return self.update(sp_id, updates)
+
+        except Exception as e:
+            logger.error(f"Failed to complete POV generation: {e}")
+            return False
+
+    def release_claim(self, sp_id: str, revert_status: str = None) -> bool:
+        """
+        Release a claimed SP (e.g., on agent failure).
+
+        Args:
+            sp_id: Suspicious point ID
+            revert_status: Status to revert to (if None, keeps current status)
+
+        Returns:
+            True if successful
+        """
+        try:
+            updates = {"processor_id": None}
+            if revert_status:
+                updates["status"] = revert_status
+            return self.update(sp_id, updates)
+        except Exception as e:
+            logger.error(f"Failed to release claim: {e}")
+            return False
+
+    def count_by_pipeline_status(self, task_id: str) -> dict:
+        """Get count of suspicious points by pipeline status"""
+        try:
+            from ..core.models import SPStatus
+
+            counts = {
+                "pending_verify": 0,
+                "verifying": 0,
+                "verified": 0,
+                "pending_pov": 0,
+                "generating_pov": 0,
+                "pov_generated": 0,
+                "failed": 0,
+            }
+
+            for status in SPStatus:
+                counts[status.value] = self.collection.count_documents({
+                    "task_id": task_id,
+                    "status": status.value,
+                })
+
+            counts["total"] = sum(counts.values())
+            return counts
+
+        except Exception as e:
+            logger.error(f"Failed to count by pipeline status: {e}")
+            return {"total": 0}
+
+    def is_pipeline_complete(self, task_id: str) -> bool:
+        """
+        Check if all SPs have finished processing (no pending or in-progress).
+
+        Returns:
+            True if all SPs are in terminal state (verified, pov_generated, failed, skipped)
+        """
+        try:
+            from ..core.models import SPStatus
+
+            # Count SPs that are still pending or in progress
+            in_progress = self.collection.count_documents({
+                "task_id": task_id,
+                "status": {
+                    "$in": [
+                        SPStatus.PENDING_VERIFY.value,
+                        SPStatus.VERIFYING.value,
+                        SPStatus.PENDING_POV.value,
+                        SPStatus.GENERATING_POV.value,
+                    ]
+                }
+            })
+
+            return in_progress == 0
+
+        except Exception as e:
+            logger.error(f"Failed to check pipeline completion: {e}")
+            return False
+
 
 class WorkerRepository(BaseRepository[Worker]):
     """Repository for Worker model"""

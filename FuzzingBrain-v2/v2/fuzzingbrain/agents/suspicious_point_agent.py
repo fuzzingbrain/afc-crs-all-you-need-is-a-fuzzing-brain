@@ -47,6 +47,18 @@ You MUST verify reachability before creating any suspicious point.
 - search_code: Search for patterns in the codebase
 - create_suspicious_point: Create a suspicious point when you find a potential vulnerability
 
+## CRITICAL: Find Mode = Create Only, No Verification
+
+In FIND mode, you can ONLY create suspicious points. DO NOT call update_suspicious_point.
+Verification will be done separately by the Verify Agent.
+
+Your job is to:
+1. Thoroughly analyze the code to find potential vulnerabilities
+2. Create suspicious points for each unique vulnerability found
+3. Set an initial confidence score based on your analysis
+
+DO NOT mark points as checked or verified - that's the Verify Agent's job.
+
 ## CRITICAL: One Vulnerability = One Suspicious Point
 
 A suspicious point represents ONE unique vulnerability, not a code location.
@@ -78,7 +90,34 @@ These are DIFFERENT vulnerabilities with different root causes - create separate
 - Specify the vulnerability type (buffer-overflow, use-after-free, integer-overflow, etc.)
 - List related functions/variables that affect the bug
 
-## Vulnerability Patterns to Look For
+## Sanitizer-Specific Vulnerability Focus
+
+IMPORTANT: Focus on vulnerabilities that the current sanitizer can detect!
+
+### AddressSanitizer (address/asan)
+Primary focus:
+- Buffer overflows (stack, heap, global)
+- Out-of-bounds read/write
+- Use-after-free
+- Double-free
+- Memory leaks
+
+### MemorySanitizer (memory/msan)
+Primary focus:
+- Uninitialized memory reads
+- Using values derived from uninitialized memory
+- Passing uninitialized memory to functions
+
+### UndefinedBehaviorSanitizer (undefined/ubsan)
+Primary focus:
+- Integer overflow (signed)
+- Shift overflow (shift by negative or too large amount)
+- Null pointer dereference
+- Division by zero
+- Invalid enum values
+- Misaligned pointers
+
+## General Vulnerability Patterns
 
 - Buffer overflows (memcpy, strcpy without bounds checking)
 - Use-after-free (dangling pointers)
@@ -89,6 +128,7 @@ These are DIFFERENT vulnerabilities with different root causes - create separate
 - Double-free
 
 Be thorough but precise. Quality over quantity - fewer accurate points are better than many redundant ones.
+Focus on vulnerabilities that match the current sanitizer type!
 """
 
 # System prompt for verifying suspicious points

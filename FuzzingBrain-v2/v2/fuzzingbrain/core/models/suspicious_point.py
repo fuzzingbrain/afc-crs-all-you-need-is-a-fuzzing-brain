@@ -7,8 +7,26 @@ Each suspicious point represents a potential vulnerability location that needs t
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import Enum
 from typing import Optional, List, Dict
 import uuid
+
+
+class SPStatus(str, Enum):
+    """SuspiciousPoint pipeline status"""
+    # Verification stage
+    PENDING_VERIFY = "pending_verify"  # Waiting for verification
+    VERIFYING = "verifying"            # Being verified by an agent
+    VERIFIED = "verified"              # Verification complete (low score, won't proceed to POV)
+
+    # POV generation stage
+    PENDING_POV = "pending_pov"        # High score, waiting for POV generation
+    GENERATING_POV = "generating_pov"  # Being processed by POV agent
+    POV_GENERATED = "pov_generated"    # POV generation complete
+
+    # Terminal states
+    FAILED = "failed"                  # Processing failed
+    SKIPPED = "skipped"                # Skipped (e.g., unreachable)
 
 
 @dataclass
@@ -42,6 +60,10 @@ class SuspiciousPoint:
     # Vulnerability type
     vuln_type: str = ""  # buffer-overflow, use-after-free, integer-overflow, null-pointer, etc.
 
+    # Pipeline status (for parallel processing)
+    status: str = SPStatus.PENDING_VERIFY.value  # Current pipeline status
+    processor_id: Optional[str] = None  # ID of agent currently processing this SP
+
     # Verification status
     is_checked: bool = False  # Whether verified by LLM
     is_real: bool = False  # True if Agent confirms it's a real bug
@@ -57,9 +79,13 @@ class SuspiciousPoint:
     # Verification notes
     verification_notes: Optional[str] = None
 
+    # POV generation result
+    pov_id: Optional[str] = None  # ID of generated POV (if any)
+
     # Timestamps
     created_at: datetime = field(default_factory=datetime.now)
     checked_at: Optional[datetime] = None
+    pov_generated_at: Optional[datetime] = None
 
     def to_dict(self) -> dict:
         """Convert to dict for MongoDB storage and JSON serialization"""
@@ -70,29 +96,34 @@ class SuspiciousPoint:
             "function_name": self.function_name,
             "description": self.description,
             "vuln_type": self.vuln_type,
+            "status": self.status,
+            "processor_id": self.processor_id,
             "is_checked": self.is_checked,
             "is_real": self.is_real,
             "score": self.score,
             "is_important": self.is_important,
             "important_controlflow": self.important_controlflow,
             "verification_notes": self.verification_notes,
+            "pov_id": self.pov_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "checked_at": self.checked_at.isoformat() if self.checked_at else None,
+            "pov_generated_at": self.pov_generated_at.isoformat() if self.pov_generated_at else None,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "SuspiciousPoint":
         """Create SuspiciousPoint from dict"""
         # Parse datetime fields (handles both datetime objects and ISO strings)
-        created_at = data.get("created_at")
-        if isinstance(created_at, str):
-            created_at = datetime.fromisoformat(created_at)
-        elif created_at is None:
-            created_at = datetime.now()
+        def parse_datetime(val):
+            if isinstance(val, str):
+                return datetime.fromisoformat(val)
+            elif isinstance(val, datetime):
+                return val
+            return None
 
-        checked_at = data.get("checked_at")
-        if isinstance(checked_at, str):
-            checked_at = datetime.fromisoformat(checked_at)
+        created_at = parse_datetime(data.get("created_at"))
+        if created_at is None:
+            created_at = datetime.now()
 
         return cls(
             suspicious_point_id=data.get("suspicious_point_id", data.get("_id", str(uuid.uuid4()))),
@@ -100,14 +131,18 @@ class SuspiciousPoint:
             function_name=data.get("function_name", ""),
             description=data.get("description", ""),
             vuln_type=data.get("vuln_type", ""),
+            status=data.get("status", SPStatus.PENDING_VERIFY.value),
+            processor_id=data.get("processor_id"),
             is_checked=data.get("is_checked", False),
             is_real=data.get("is_real", False),
             score=data.get("score", 0.0),
             is_important=data.get("is_important", False),
             important_controlflow=data.get("important_controlflow", []),
             verification_notes=data.get("verification_notes"),
+            pov_id=data.get("pov_id"),
             created_at=created_at,
-            checked_at=checked_at,
+            checked_at=parse_datetime(data.get("checked_at")),
+            pov_generated_at=parse_datetime(data.get("pov_generated_at")),
         )
 
     def mark_checked(self, is_real: bool, notes: str = None):

@@ -6,18 +6,23 @@ Finds vulnerabilities using AI-based suspicious point analysis.
 Workflow (Delta-scan mode):
 1. Check if diff changes are reachable from fuzzer
 2. Analyze reachable code to find suspicious points
-3. Verify suspicious points with AI Agent
-4. Sort and prioritize suspicious points by score
+3. Verify suspicious points with AI Agent (parallel pipeline)
+4. Generate POV for high-confidence points (parallel pipeline)
 5. Save results
+
+Supports two modes:
+- Sequential: Original step-by-step verification
+- Pipeline: Parallel verification and POV generation using AgentPipeline
 """
 
+import asyncio
 import json
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 from .base import BaseStrategy
 from ...analysis.diff_parser import get_reachable_changes, DiffReachabilityResult
-from ...core.models import SuspiciousPoint
+from ...core.models import SuspiciousPoint, SPStatus
 from ...agents import SuspiciousPointAgent
 from ...tools.code_viewer import set_code_viewer_context
 from ...tools.analyzer import set_analyzer_context
@@ -28,10 +33,19 @@ class POVStrategy(BaseStrategy):
     POV (Proof-of-Vulnerability) Strategy.
 
     Uses AI to analyze code and find vulnerabilities.
+    Supports parallel pipeline for verification and POV generation.
     """
 
-    def __init__(self, executor):
+    def __init__(self, executor, use_pipeline: bool = True):
+        """
+        Initialize POV Strategy.
+
+        Args:
+            executor: WorkerExecutor instance
+            use_pipeline: Whether to use parallel pipeline (default: True)
+        """
         super().__init__(executor)
+        self.use_pipeline = use_pipeline
 
         # Diff path for delta mode
         self.diff_path = executor.diff_path
@@ -112,30 +126,50 @@ class POVStrategy(BaseStrategy):
                     return result
 
             # Step 2: Find suspicious points
-            self.log_info(f"[Step 2/4] Finding suspicious points with AI Agent...")
+            self.log_info(f"[Step 2/5] Finding suspicious points with AI Agent...")
             step_start = time.time()
             suspicious_points = self._find_suspicious_points()
             result["suspicious_points_found"] = len(suspicious_points)
-            self.log_info(f"[Step 2/4] Done in {time.time() - step_start:.1f}s - Found {len(suspicious_points)} suspicious points")
+            self.log_info(f"[Step 2/5] Done in {time.time() - step_start:.1f}s - Found {len(suspicious_points)} suspicious points")
 
             if not suspicious_points:
                 self.log_info("No suspicious points found")
                 return result
 
-            # Step 3: Verify suspicious points with AI Agent
-            self.log_info(f"[Step 3/4] Verifying {len(suspicious_points)} suspicious points...")
-            step_start = time.time()
-            verified_points = self._verify_suspicious_points(suspicious_points)
-            result["suspicious_points_verified"] = len(verified_points)
-            self.log_info(f"[Step 3/4] Done in {time.time() - step_start:.1f}s - Verified {len(verified_points)} points")
+            # Step 3 & 4: Verify and generate POV
+            if self.use_pipeline:
+                # Use parallel pipeline for verification and POV generation
+                self.log_info(f"[Step 3-4/5] Running parallel pipeline for verification and POV generation...")
+                step_start = time.time()
+                pipeline_stats = self._run_pipeline()
+                result["suspicious_points_verified"] = pipeline_stats.sp_verified
+                result["pov_generated"] = pipeline_stats.pov_generated
+                result["pipeline_stats"] = pipeline_stats.to_dict()
+                self.log_info(f"[Step 3-4/5] Done in {time.time() - step_start:.1f}s")
+                self.log_info(f"  Verified: {pipeline_stats.sp_verified} (real: {pipeline_stats.sp_verified_real}, fp: {pipeline_stats.sp_verified_fp})")
+                self.log_info(f"  POV generated: {pipeline_stats.pov_generated}")
+            else:
+                # Sequential verification (original behavior)
+                self.log_info(f"[Step 3/5] Verifying {len(suspicious_points)} suspicious points...")
+                step_start = time.time()
+                verified_points = self._verify_suspicious_points(suspicious_points)
+                result["suspicious_points_verified"] = len(verified_points)
+                self.log_info(f"[Step 3/5] Done in {time.time() - step_start:.1f}s - Verified {len(verified_points)} points")
 
-            # Step 4: Sort by score (higher score = more likely to be real bug)
-            self.log_info(f"[Step 4/4] Sorting and saving results...")
-            sorted_points = self._sort_by_priority(verified_points)
+            # Step 5: Sort and save results
+            self.log_info(f"[Step 5/5] Sorting and saving results...")
+
+            # Get latest points from DB
+            all_points = self.repos.suspicious_points.find_by_task(self.task_id)
+            sorted_points = self._sort_by_priority(all_points)
 
             # Count high-confidence bugs (is_important == True or score >= 0.9)
             high_conf = [p for p in sorted_points if p.is_important or p.score >= 0.9]
             result["high_confidence_bugs"] = len(high_conf)
+
+            # Count POVs generated
+            pov_points = [p for p in sorted_points if p.pov_id]
+            result["pov_generated"] = result.get("pov_generated", len(pov_points))
 
             # Save results
             self._save_results(sorted_points)
@@ -143,7 +177,7 @@ class POVStrategy(BaseStrategy):
             total_time = time.time() - start_time
             self.log_info(f"========== POV Strategy Complete ==========")
             self.log_info(f"Total time: {total_time:.1f}s")
-            self.log_info(f"Results: {len(suspicious_points)} found, {len(verified_points)} verified, {len(high_conf)} high-confidence")
+            self.log_info(f"Results: {result['suspicious_points_found']} found, {result['suspicious_points_verified']} verified, {len(high_conf)} high-confidence")
             return result
 
         except Exception as e:
@@ -287,9 +321,8 @@ class POVStrategy(BaseStrategy):
             List of SuspiciousPoint objects
         """
         try:
-            # Query for unchecked points for this task
-            # find_unchecked already returns List[SuspiciousPoint]
-            return self.repos.suspicious_points.find_unchecked(self.task_id)
+            # Query all points for this task (agent may have already verified some)
+            return self.repos.suspicious_points.find_by_task(self.task_id)
         except Exception as e:
             self.log_error(f"Failed to get suspicious points from DB: {e}")
             return []
@@ -460,3 +493,52 @@ class POVStrategy(BaseStrategy):
         if self._reachability_result:
             return self._reachability_result.reachable_changes
         return []
+
+    # =========================================================================
+    # Pipeline Mode
+    # =========================================================================
+
+    def _run_pipeline(self):
+        """
+        Run parallel pipeline for verification and POV generation.
+
+        Returns:
+            PipelineStats with execution statistics
+        """
+        from ..pipeline import AgentPipeline, PipelineConfig, PipelineStats
+
+        # Configure pipeline
+        config = PipelineConfig(
+            num_verify_agents=2,   # 2 verification agents
+            num_pov_agents=1,      # 1 POV generation agent
+            pov_min_score=0.5,     # Minimum score to proceed to POV
+            poll_interval=1.0,     # Poll every 1 second
+            max_idle_cycles=10,    # Exit after 10 idle cycles
+            pov_sleep_seconds=30.0,  # POV placeholder sleep time
+        )
+
+        # Create pipeline
+        pipeline = AgentPipeline(
+            task_id=self.task_id,
+            repos=self.repos,
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+            config=config,
+            output_dir=self.povs_path,
+            log_dir=self.log_dir / "agent" if self.log_dir else None,
+        )
+
+        # Run pipeline (asyncio)
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        try:
+            stats = loop.run_until_complete(pipeline.run())
+        except Exception as e:
+            self.log_error(f"Pipeline failed: {e}")
+            stats = PipelineStats()
+
+        return stats
