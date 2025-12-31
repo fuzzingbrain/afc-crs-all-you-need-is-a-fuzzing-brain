@@ -53,6 +53,8 @@ class SuspiciousPoint:
     suspicious_point_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     task_id: str = ""  # Which task this belongs to
     function_name: str = ""  # Which function this belongs to
+    harness_name: str = ""  # Which fuzzer harness created this SP
+    sanitizer: str = ""  # Which sanitizer (address, memory, undefined)
 
     # Description (uses control flow instead of line numbers, as LLMs are not good at generating line numbers)
     description: str = ""
@@ -94,6 +96,8 @@ class SuspiciousPoint:
             "suspicious_point_id": self.suspicious_point_id,
             "task_id": self.task_id,
             "function_name": self.function_name,
+            "harness_name": self.harness_name,
+            "sanitizer": self.sanitizer,
             "description": self.description,
             "vuln_type": self.vuln_type,
             "status": self.status,
@@ -129,6 +133,8 @@ class SuspiciousPoint:
             suspicious_point_id=data.get("suspicious_point_id", data.get("_id", str(uuid.uuid4()))),
             task_id=data.get("task_id", ""),
             function_name=data.get("function_name", ""),
+            harness_name=data.get("harness_name", ""),
+            sanitizer=data.get("sanitizer", ""),
             description=data.get("description", ""),
             vuln_type=data.get("vuln_type", ""),
             status=data.get("status", SPStatus.PENDING_VERIFY.value),

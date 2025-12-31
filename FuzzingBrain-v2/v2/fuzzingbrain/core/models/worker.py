@@ -65,7 +65,8 @@ class Worker:
     # Strategy phases
     phase_reachability: float = 0.0      # Step 1: Diff reachability check
     phase_find_sp: float = 0.0           # Step 2: Find suspicious points
-    phase_verify_pov: float = 0.0        # Step 3-4: Verify + POV pipeline
+    phase_verify: float = 0.0            # Step 3: Verify suspicious points
+    phase_pov: float = 0.0               # Step 4: POV generation
     phase_save: float = 0.0              # Step 5: Save results
 
     @staticmethod
@@ -105,7 +106,8 @@ class Worker:
             "phase_build": self.phase_build,
             "phase_reachability": self.phase_reachability,
             "phase_find_sp": self.phase_find_sp,
-            "phase_verify_pov": self.phase_verify_pov,
+            "phase_verify": self.phase_verify,
+            "phase_pov": self.phase_pov,
             "phase_save": self.phase_save,
         }
 
@@ -134,7 +136,8 @@ class Worker:
             phase_build=data.get("phase_build", 0.0),
             phase_reachability=data.get("phase_reachability", 0.0),
             phase_find_sp=data.get("phase_find_sp", 0.0),
-            phase_verify_pov=data.get("phase_verify_pov", 0.0),
+            phase_verify=data.get("phase_verify", 0.0),
+            phase_pov=data.get("phase_pov", 0.0),
             phase_save=data.get("phase_save", 0.0),
         )
 
@@ -192,7 +195,8 @@ class Worker:
             ("Build", self.phase_build, "#4CAF50"),        # Green
             ("Reachability", self.phase_reachability, "#2196F3"),  # Blue
             ("Find SP", self.phase_find_sp, "#FF9800"),    # Orange
-            ("Verify+POV", self.phase_verify_pov, "#9C27B0"),  # Purple
+            ("Verify", self.phase_verify, "#9C27B0"),      # Purple
+            ("POV", self.phase_pov, "#E91E63"),            # Pink
             ("Save", self.phase_save, "#607D8B"),          # Grey
         ]
 

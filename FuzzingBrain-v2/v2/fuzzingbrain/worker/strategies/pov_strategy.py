@@ -26,6 +26,7 @@ from ...core.models import SuspiciousPoint, SPStatus
 from ...agents import SuspiciousPointAgent
 from ...tools.code_viewer import set_code_viewer_context
 from ...tools.analyzer import set_analyzer_context
+from ...tools.suspicious_points import set_sp_context
 
 
 class POVStrategy(BaseStrategy):
@@ -84,6 +85,13 @@ class POVStrategy(BaseStrategy):
                 client_id=f"agent_{self.fuzzer}_{self.sanitizer}",
             )
 
+        # Set SP context (harness_name, sanitizer) for SP isolation
+        # Each worker only processes SPs created with matching harness_name and sanitizer
+        set_sp_context(
+            harness_name=self.fuzzer,
+            sanitizer=self.sanitizer,
+        )
+
     def execute(self) -> Dict[str, Any]:
         """
         Execute POV strategy.
@@ -108,7 +116,8 @@ class POVStrategy(BaseStrategy):
             # Phase timing (seconds)
             "phase_reachability": 0.0,
             "phase_find_sp": 0.0,
-            "phase_verify_pov": 0.0,
+            "phase_verify": 0.0,
+            "phase_pov": 0.0,
             "phase_save": 0.0,
         }
 
@@ -155,8 +164,10 @@ class POVStrategy(BaseStrategy):
                 result["pov_generated"] = pipeline_stats.pov_generated
                 result["pipeline_stats"] = pipeline_stats.to_dict()
                 step_duration = time.time() - step_start
-                result["phase_verify_pov"] = step_duration
-                self.log_info(f"[Step 3-4/5] Done in {step_duration:.1f}s")
+                # Extract individual phase times from pipeline stats
+                result["phase_verify"] = pipeline_stats.verify_time_total
+                result["phase_pov"] = pipeline_stats.pov_time_total
+                self.log_info(f"[Step 3-4/5] Done in {step_duration:.1f}s (verify: {pipeline_stats.verify_time_total:.1f}s, pov: {pipeline_stats.pov_time_total:.1f}s)")
                 self.log_info(f"  Verified: {pipeline_stats.sp_verified} (real: {pipeline_stats.sp_verified_real}, fp: {pipeline_stats.sp_verified_fp})")
                 self.log_info(f"  POV generated: {pipeline_stats.pov_generated}")
             else:
@@ -166,7 +177,8 @@ class POVStrategy(BaseStrategy):
                 verified_points = self._verify_suspicious_points(suspicious_points)
                 result["suspicious_points_verified"] = len(verified_points)
                 step_duration = time.time() - step_start
-                result["phase_verify_pov"] = step_duration
+                result["phase_verify"] = step_duration
+                result["phase_pov"] = 0.0  # No POV in sequential mode
                 self.log_info(f"[Step 3/5] Done in {step_duration:.1f}s - Verified {len(verified_points)} points")
 
             # Step 5: Sort and save results

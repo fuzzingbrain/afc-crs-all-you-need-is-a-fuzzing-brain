@@ -68,6 +68,10 @@ class PipelineStats:
     pov_generated: int = 0
     pov_failed: int = 0
 
+    # Time tracking (cumulative seconds across all agents)
+    verify_time_total: float = 0.0  # Total time spent on verification
+    pov_time_total: float = 0.0     # Total time spent on POV generation
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "start_time": self.start_time.isoformat(),
@@ -78,6 +82,8 @@ class PipelineStats:
             "sp_verified_fp": self.sp_verified_fp,
             "pov_generated": self.pov_generated,
             "pov_failed": self.pov_failed,
+            "verify_time_total": self.verify_time_total,
+            "pov_time_total": self.pov_time_total,
         }
 
 
@@ -193,18 +199,24 @@ class AgentPipeline:
         idle_cycles = 0
 
         while not self._shutdown:
-            # Try to claim a task
+            # Try to claim a task (filter by fuzzer/sanitizer for worker isolation)
             sp = self.repos.suspicious_points.claim_for_verify(
                 self.task_id,
                 agent_id,
+                harness_name=self.fuzzer,
+                sanitizer=self.sanitizer,
             )
 
             if sp is None:
                 # No work available
                 idle_cycles += 1
                 if idle_cycles >= self.config.max_idle_cycles:
-                    # Check if pipeline is complete
-                    if self.repos.suspicious_points.is_pipeline_complete(self.task_id):
+                    # Check if pipeline is complete (for this worker's SPs only)
+                    if self.repos.suspicious_points.is_pipeline_complete(
+                        self.task_id,
+                        harness_name=self.fuzzer,
+                        sanitizer=self.sanitizer,
+                    ):
                         logger.info(f"[Pipeline:{agent_id}] No more work, exiting")
                         break
                     # Otherwise keep waiting (new SPs might be added)
@@ -216,7 +228,9 @@ class AgentPipeline:
             # Reset idle counter
             idle_cycles = 0
 
-            # Process the SP
+            # Process the SP with time tracking
+            import time as time_module
+            sp_start_time = time_module.time()
             try:
                 logger.info(f"[Pipeline:{agent_id}] Verifying SP {sp.suspicious_point_id}")
 
@@ -280,6 +294,10 @@ class AgentPipeline:
                     sp.suspicious_point_id,
                     SPStatus.PENDING_VERIFY.value,  # Revert to pending for retry
                 )
+            finally:
+                # Track verification time
+                sp_duration = time_module.time() - sp_start_time
+                self.stats.verify_time_total += sp_duration
 
         logger.info(f"[Pipeline:{agent_id}] Verification agent stopped")
 
@@ -300,19 +318,25 @@ class AgentPipeline:
         idle_cycles = 0
 
         while not self._shutdown:
-            # Try to claim a task
+            # Try to claim a task (filter by fuzzer/sanitizer for worker isolation)
             sp = self.repos.suspicious_points.claim_for_pov(
                 self.task_id,
                 agent_id,
                 min_score=self.config.pov_min_score,
+                harness_name=self.fuzzer,
+                sanitizer=self.sanitizer,
             )
 
             if sp is None:
                 # No work available
                 idle_cycles += 1
                 if idle_cycles >= self.config.max_idle_cycles:
-                    # Check if pipeline is complete
-                    if self.repos.suspicious_points.is_pipeline_complete(self.task_id):
+                    # Check if pipeline is complete (for this worker's SPs only)
+                    if self.repos.suspicious_points.is_pipeline_complete(
+                        self.task_id,
+                        harness_name=self.fuzzer,
+                        sanitizer=self.sanitizer,
+                    ):
                         logger.info(f"[Pipeline:{agent_id}] No more work, exiting")
                         break
                     # Otherwise keep waiting
@@ -324,7 +348,9 @@ class AgentPipeline:
             # Reset idle counter
             idle_cycles = 0
 
-            # Process the SP
+            # Process the SP with time tracking
+            import time as time_module
+            sp_start_time = time_module.time()
             try:
                 logger.info(f"[Pipeline:{agent_id}] Generating POV for SP {sp.suspicious_point_id}")
 
@@ -369,6 +395,10 @@ class AgentPipeline:
                     SPStatus.PENDING_POV.value,  # Revert to pending for retry
                 )
                 self.stats.pov_failed += 1
+            finally:
+                # Track POV generation time
+                sp_duration = time_module.time() - sp_start_time
+                self.stats.pov_time_total += sp_duration
 
         logger.info(f"[Pipeline:{agent_id}] POV generation agent stopped")
 

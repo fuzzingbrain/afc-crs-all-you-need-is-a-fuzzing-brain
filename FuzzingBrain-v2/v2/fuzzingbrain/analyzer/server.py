@@ -644,6 +644,8 @@ class AnalysisServer:
         sp = SuspiciousPoint(
             task_id=self.task_id,
             function_name=params.get("function_name", ""),
+            harness_name=params.get("harness_name", ""),
+            sanitizer=params.get("sanitizer", ""),
             description=params.get("description", ""),
             vuln_type=params.get("vuln_type", ""),
             score=params.get("score", 0.0),
@@ -651,7 +653,7 @@ class AnalysisServer:
         )
 
         self.repos.suspicious_points.save(sp)
-        self._log(f"Created suspicious point: {sp.suspicious_point_id} in {sp.function_name}")
+        self._log(f"Created suspicious point: {sp.suspicious_point_id} in {sp.function_name} (harness={sp.harness_name}, sanitizer={sp.sanitizer})")
 
         return {
             "id": sp.suspicious_point_id,

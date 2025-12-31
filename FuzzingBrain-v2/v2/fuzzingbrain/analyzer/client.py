@@ -329,6 +329,8 @@ class AnalysisClient:
         vuln_type: str,
         score: float = 0.0,
         important_controlflow: List[dict] = None,
+        harness_name: str = "",
+        sanitizer: str = "",
     ) -> dict:
         """
         Create a new suspicious point.
@@ -339,6 +341,8 @@ class AnalysisClient:
             vuln_type: Type of vulnerability (buffer-overflow, use-after-free, etc.)
             score: Initial score (0.0-1.0)
             important_controlflow: List of related functions/variables
+            harness_name: Fuzzer harness name that created this SP
+            sanitizer: Sanitizer type (address, memory, undefined)
 
         Returns:
             Dict with 'id' and 'created' status
@@ -349,6 +353,8 @@ class AnalysisClient:
             "vuln_type": vuln_type,
             "score": score,
             "important_controlflow": important_controlflow or [],
+            "harness_name": harness_name,
+            "sanitizer": sanitizer,
         })
 
     def update_suspicious_point(

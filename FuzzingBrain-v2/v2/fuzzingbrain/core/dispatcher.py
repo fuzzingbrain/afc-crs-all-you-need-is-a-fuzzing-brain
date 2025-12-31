@@ -364,17 +364,25 @@ class WorkerDispatcher:
         Get results from all completed workers.
 
         Returns:
-            List of worker results with duration info
+            List of worker results with duration info and SP count
         """
         workers = self.repos.workers.find_by_task(self.task.task_id)
         results = []
 
         for worker in workers:
+            # Count SPs for this worker (by harness_name and sanitizer)
+            sp_count = self.repos.suspicious_points.count({
+                "task_id": self.task.task_id,
+                "harness_name": worker.fuzzer,
+                "sanitizer": worker.sanitizer,
+            })
+
             result = {
                 "worker_id": worker.worker_id,
                 "fuzzer": worker.fuzzer,
                 "sanitizer": worker.sanitizer,
                 "status": worker.status.value,
+                "sps_found": sp_count,
                 "povs_found": worker.povs_found or 0,
                 "patches_found": worker.patches_found or 0,
                 "error_msg": worker.error_msg,

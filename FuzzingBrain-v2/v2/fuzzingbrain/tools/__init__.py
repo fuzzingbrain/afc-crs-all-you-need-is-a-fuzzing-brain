@@ -28,6 +28,8 @@ tools_mcp = FastMCP("FuzzingBrain-Tools")
 from .coverage import *
 from .analyzer import *
 from .suspicious_points import (
+    set_sp_context,
+    get_sp_context,
     create_suspicious_point,
     update_suspicious_point,
     list_suspicious_points,
@@ -59,7 +61,9 @@ from .pov import (
 
 __all__ = [
     "tools_mcp",
-    # Suspicious point tools (MCP)
+    # Suspicious point context and tools (MCP)
+    "set_sp_context",
+    "get_sp_context",
     "create_suspicious_point",
     "update_suspicious_point",
     "list_suspicious_points",

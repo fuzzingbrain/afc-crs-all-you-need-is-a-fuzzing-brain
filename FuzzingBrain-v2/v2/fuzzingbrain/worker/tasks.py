@@ -232,7 +232,8 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         # Copy phase timing from strategy result
         worker.phase_reachability = result.get("phase_reachability", 0.0)
         worker.phase_find_sp = result.get("phase_find_sp", 0.0)
-        worker.phase_verify_pov = result.get("phase_verify_pov", 0.0)
+        worker.phase_verify = result.get("phase_verify", 0.0)
+        worker.phase_pov = result.get("phase_pov", 0.0)
         worker.phase_save = result.get("phase_save", 0.0)
         repos.workers.save(worker)
 

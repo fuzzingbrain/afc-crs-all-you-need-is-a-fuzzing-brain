@@ -514,6 +514,7 @@ def create_final_summary(
     total = len(workers)
     completed = sum(1 for w in workers if w.get("status") == "completed")
     failed = sum(1 for w in workers if w.get("status") == "failed")
+    total_sps = sum(w.get("sps_found", 0) for w in workers)
     total_povs = sum(w.get("povs_found", 0) for w in workers)
     total_patches = sum(w.get("patches_found", 0) for w in workers)
 
@@ -523,11 +524,12 @@ def create_final_summary(
     col_sanitizer = 10
     col_status = 12
     col_duration = 10
+    col_sps = 5
     col_povs = 6
     col_patches = 8
 
-    # Total width = sum of columns + 6 internal separators (┼)
-    table_width = col_num + col_fuzzer + col_sanitizer + col_status + col_duration + col_povs + col_patches + 6
+    # Total width = sum of columns + 7 internal separators (┼)
+    table_width = col_num + col_fuzzer + col_sanitizer + col_status + col_duration + col_sps + col_povs + col_patches + 7
 
     lines = []
     lines.append("")
@@ -545,6 +547,7 @@ def create_final_summary(
     lines.append("│" + f"  Task ID:       {task_id[:16]}...".ljust(table_width) + "│")
     lines.append("│" + f"  Total Time:    {total_elapsed_minutes:.1f} minutes".ljust(table_width) + "│")
     lines.append("│" + f"  Workers:       {completed}/{total} completed, {failed} failed".ljust(table_width) + "│")
+    lines.append("│" + f"  SPs Found:     {total_sps}".ljust(table_width) + "│")
     lines.append("│" + f"  POVs Found:    {total_povs}".ljust(table_width) + "│")
     lines.append("│" + f"  Patches:       {total_patches}".ljust(table_width) + "│")
     lines.append("├" + "─" * table_width + "┤")
@@ -556,11 +559,12 @@ def create_final_summary(
         "│" + " Sanitizer".ljust(col_sanitizer) +
         "│" + " Status".ljust(col_status) +
         "│" + " Duration".center(col_duration) +
+        "│" + " SPs".center(col_sps) +
         "│" + " POVs".center(col_povs) +
         "│" + " Patches".center(col_patches) + "│"
     )
     lines.append(header)
-    lines.append("├" + "─" * col_num + "┼" + "─" * col_fuzzer + "┼" + "─" * col_sanitizer + "┼" + "─" * col_status + "┼" + "─" * col_duration + "┼" + "─" * col_povs + "┼" + "─" * col_patches + "┤")
+    lines.append("├" + "─" * col_num + "┼" + "─" * col_fuzzer + "┼" + "─" * col_sanitizer + "┼" + "─" * col_status + "┼" + "─" * col_duration + "┼" + "─" * col_sps + "┼" + "─" * col_povs + "┼" + "─" * col_patches + "┤")
 
     # Worker rows
     for i, w in enumerate(workers, 1):
@@ -580,6 +584,7 @@ def create_final_summary(
         sanitizer_cell = " " + w.get("sanitizer", "N/A").ljust(col_sanitizer - 1)
         status_cell = " " + status_display.ljust(col_status - 1)
         duration_cell = duration_str.center(col_duration)
+        sps_cell = str(w.get("sps_found", 0)).center(col_sps)
         povs_cell = str(w.get("povs_found", 0)).center(col_povs)
         patches_cell = str(w.get("patches_found", 0)).center(col_patches)
 
@@ -593,6 +598,7 @@ def create_final_summary(
                 "│" + color + sanitizer_cell + reset +
                 "│" + color + status_cell + reset +
                 "│" + color + duration_cell + reset +
+                "│" + color + sps_cell + reset +
                 "│" + color + povs_cell + reset +
                 "│" + color + patches_cell + reset + "│"
             )
@@ -603,12 +609,13 @@ def create_final_summary(
                 "│" + sanitizer_cell +
                 "│" + status_cell +
                 "│" + duration_cell +
+                "│" + sps_cell +
                 "│" + povs_cell +
                 "│" + patches_cell + "│"
             )
         lines.append(row)
 
-    lines.append("└" + "─" * col_num + "┴" + "─" * col_fuzzer + "┴" + "─" * col_sanitizer + "┴" + "─" * col_status + "┴" + "─" * col_duration + "┴" + "─" * col_povs + "┴" + "─" * col_patches + "┘")
+    lines.append("└" + "─" * col_num + "┴" + "─" * col_fuzzer + "┴" + "─" * col_sanitizer + "┴" + "─" * col_status + "┴" + "─" * col_duration + "┴" + "─" * col_sps + "┴" + "─" * col_povs + "┴" + "─" * col_patches + "┘")
     lines.append("")
 
     return "\n".join(lines)

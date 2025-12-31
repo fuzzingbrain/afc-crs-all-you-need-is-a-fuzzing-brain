@@ -175,7 +175,8 @@ def generate_html(task_id: str, data: dict) -> str:
             ("Build", "phase_build", "#4CAF50"),        # Green
             ("Reach", "phase_reachability", "#2196F3"), # Blue
             ("Find SP", "phase_find_sp", "#FF9800"),    # Orange
-            ("Verify+POV", "phase_verify_pov", "#9C27B0"),  # Purple
+            ("Verify", "phase_verify", "#9C27B0"),      # Purple
+            ("POV", "phase_pov", "#E91E63"),            # Pink
             ("Save", "phase_save", "#607D8B"),          # Grey
         ]
 

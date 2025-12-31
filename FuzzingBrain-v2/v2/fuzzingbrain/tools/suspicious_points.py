@@ -15,6 +15,38 @@ from .analyzer import _get_client, _ensure_client
 
 
 # =============================================================================
+# SP Context - Track harness_name and sanitizer for SP isolation
+# =============================================================================
+
+# Global context for SP tools (each worker sets its own)
+_sp_harness_name: Optional[str] = None
+_sp_sanitizer: Optional[str] = None
+
+
+def set_sp_context(harness_name: str, sanitizer: str) -> None:
+    """
+    Set the context for SP tools.
+
+    This should be called by each worker before running agents that create SPs.
+    SPs created will be tagged with this harness_name and sanitizer, ensuring
+    each worker only processes its own SPs.
+
+    Args:
+        harness_name: Fuzzer harness name (e.g., "fuzz_png")
+        sanitizer: Sanitizer type (e.g., "address")
+    """
+    global _sp_harness_name, _sp_sanitizer
+    _sp_harness_name = harness_name
+    _sp_sanitizer = sanitizer
+    logger.debug(f"SP context set: harness_name={harness_name}, sanitizer={sanitizer}")
+
+
+def get_sp_context() -> tuple:
+    """Get the current SP context (harness_name, sanitizer)."""
+    return _sp_harness_name, _sp_sanitizer
+
+
+# =============================================================================
 # Suspicious Point Tools
 # =============================================================================
 
@@ -64,12 +96,16 @@ def create_suspicious_point(
 
     try:
         client = _get_client()
+        # Include harness_name and sanitizer from context
+        harness_name, sanitizer = get_sp_context()
         result = client.create_suspicious_point(
             function_name=function_name,
             description=description,
             vuln_type=vuln_type,
             score=score,
             important_controlflow=important_controlflow or [],
+            harness_name=harness_name or "",
+            sanitizer=sanitizer or "",
         )
 
         # Log the new suspicious point
@@ -80,6 +116,8 @@ def create_suspicious_point(
             "score": score,
             "description": description,
             "important_controlflow": important_controlflow or [],
+            "harness_name": harness_name,
+            "sanitizer": sanitizer,
         }, ensure_ascii=False)
         logger.info(f"[NEW SUSPICIOUS POINT] {sp_json}")
 
@@ -252,6 +290,10 @@ def get_suspicious_point(suspicious_point_id: str) -> Dict[str, Any]:
 
 # Export public API
 __all__ = [
+    # Context
+    "set_sp_context",
+    "get_sp_context",
+    # SP tools
     "create_suspicious_point",
     "update_suspicious_point",
     "list_suspicious_points",

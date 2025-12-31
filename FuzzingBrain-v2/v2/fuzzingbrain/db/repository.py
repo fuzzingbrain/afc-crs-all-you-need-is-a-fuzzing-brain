@@ -351,7 +351,13 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
     # Pipeline Methods (Claim-based task distribution)
     # =========================================================================
 
-    def claim_for_verify(self, task_id: str, processor_id: str) -> Optional[SuspiciousPoint]:
+    def claim_for_verify(
+        self,
+        task_id: str,
+        processor_id: str,
+        harness_name: str = None,
+        sanitizer: str = None,
+    ) -> Optional[SuspiciousPoint]:
         """
         Atomically claim a suspicious point for verification.
 
@@ -361,6 +367,8 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         Args:
             task_id: Task ID to filter
             processor_id: ID of the agent claiming the task
+            harness_name: Filter by harness name (if provided)
+            sanitizer: Filter by sanitizer (if provided)
 
         Returns:
             Claimed SuspiciousPoint, or None if none available
@@ -369,12 +377,20 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             from pymongo import ReturnDocument
             from ..core.models import SPStatus
 
+            # Build filter query
+            query = {
+                "task_id": task_id,
+                "status": SPStatus.PENDING_VERIFY.value,
+            }
+            # Filter by harness_name and sanitizer for worker isolation
+            if harness_name:
+                query["harness_name"] = harness_name
+            if sanitizer:
+                query["sanitizer"] = sanitizer
+
             # Atomic claim: find pending_verify and update to verifying
             result = self.collection.find_one_and_update(
-                {
-                    "task_id": task_id,
-                    "status": SPStatus.PENDING_VERIFY.value,
-                },
+                query,
                 {
                     "$set": {
                         "status": SPStatus.VERIFYING.value,
@@ -395,7 +411,14 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             logger.error(f"Failed to claim SP for verification: {e}")
             return None
 
-    def claim_for_pov(self, task_id: str, processor_id: str, min_score: float = 0.5) -> Optional[SuspiciousPoint]:
+    def claim_for_pov(
+        self,
+        task_id: str,
+        processor_id: str,
+        min_score: float = 0.5,
+        harness_name: str = None,
+        sanitizer: str = None,
+    ) -> Optional[SuspiciousPoint]:
         """
         Atomically claim a suspicious point for POV generation.
 
@@ -405,6 +428,8 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             task_id: Task ID to filter
             processor_id: ID of the agent claiming the task
             min_score: Minimum score threshold for POV generation
+            harness_name: Filter by harness name (if provided)
+            sanitizer: Filter by sanitizer (if provided)
 
         Returns:
             Claimed SuspiciousPoint, or None if none available
@@ -413,13 +438,21 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             from pymongo import ReturnDocument
             from ..core.models import SPStatus
 
+            # Build filter query
+            query = {
+                "task_id": task_id,
+                "status": SPStatus.PENDING_POV.value,
+                "score": {"$gte": min_score},
+            }
+            # Filter by harness_name and sanitizer for worker isolation
+            if harness_name:
+                query["harness_name"] = harness_name
+            if sanitizer:
+                query["sanitizer"] = sanitizer
+
             # Atomic claim: find pending_pov and update to generating_pov
             result = self.collection.find_one_and_update(
-                {
-                    "task_id": task_id,
-                    "status": SPStatus.PENDING_POV.value,
-                    "score": {"$gte": min_score},
-                },
+                query,
                 {
                     "$set": {
                         "status": SPStatus.GENERATING_POV.value,
@@ -568,9 +601,19 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             logger.error(f"Failed to count by pipeline status: {e}")
             return {"total": 0}
 
-    def is_pipeline_complete(self, task_id: str) -> bool:
+    def is_pipeline_complete(
+        self,
+        task_id: str,
+        harness_name: str = None,
+        sanitizer: str = None,
+    ) -> bool:
         """
         Check if all SPs have finished processing (no pending or in-progress).
+
+        Args:
+            task_id: Task ID to filter
+            harness_name: Filter by harness name (if provided)
+            sanitizer: Filter by sanitizer (if provided)
 
         Returns:
             True if all SPs are in terminal state (verified, pov_generated, failed, skipped)
@@ -578,8 +621,8 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         try:
             from ..core.models import SPStatus
 
-            # Count SPs that are still pending or in progress
-            in_progress = self.collection.count_documents({
+            # Build filter query
+            query = {
                 "task_id": task_id,
                 "status": {
                     "$in": [
@@ -589,7 +632,15 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                         SPStatus.GENERATING_POV.value,
                     ]
                 }
-            })
+            }
+            # Filter by harness_name and sanitizer for worker isolation
+            if harness_name:
+                query["harness_name"] = harness_name
+            if sanitizer:
+                query["sanitizer"] = sanitizer
+
+            # Count SPs that are still pending or in progress
+            in_progress = self.collection.count_documents(query)
 
             return in_progress == 0
 
