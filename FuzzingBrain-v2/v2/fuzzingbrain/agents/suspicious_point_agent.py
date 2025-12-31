@@ -265,6 +265,29 @@ class SuspiciousPointAgent(BaseAgent):
         else:
             return VERIFY_SUSPICIOUS_POINTS_PROMPT
 
+    def _filter_tools_for_mode(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Filter tools based on current mode.
+
+        Find mode: Cannot use update_suspicious_point (verification is separate)
+        Verify mode: Cannot use create_suspicious_point (only updates existing)
+        """
+        if self.mode == "find":
+            # Find mode: exclude update_suspicious_point
+            excluded = {"update_suspicious_point"}
+        else:
+            # Verify mode: exclude create_suspicious_point
+            excluded = {"create_suspicious_point"}
+
+        return [t for t in tools if t.get("function", {}).get("name") not in excluded]
+
+    async def _get_tools(self, client) -> List[Dict[str, Any]]:
+        """Get tools from MCP server, filtered by mode."""
+        # Get all tools from parent
+        all_tools = await super()._get_tools(client)
+        # Filter based on mode
+        return self._filter_tools_for_mode(all_tools)
+
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message based on mode and context."""
         if self.mode == "find":

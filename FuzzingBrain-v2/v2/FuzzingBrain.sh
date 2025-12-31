@@ -23,7 +23,7 @@ CYAN='\033[0;36m'
 WHITE='\033[1;37m'
 NC='\033[0m' # No Color
 
-# Claude 土黄色/橙棕色
+# Claude orange/brown colors
 CLAUDE_ORANGE='\033[38;5;208m'
 CLAUDE_BROWN='\033[38;5;172m'
 CLAUDE_SAND='\033[38;5;180m'
@@ -185,14 +185,14 @@ REDIS_HOST="${REDIS_HOST:-localhost}"
 # =============================================================================
 
 is_in_docker() {
-    # 检测是否在 Docker 容器内运行
-    # 方法1: 检查 /.dockerenv 文件
+    # Detect if running inside Docker container
+    # Method 1: Check /.dockerenv file
     [ -f /.dockerenv ] && return 0
 
-    # 方法2: 检查 cgroup
+    # Method 2: Check cgroup
     grep -q docker /proc/1/cgroup 2>/dev/null && return 0
 
-    # 方法3: 检查环境变量 (docker-compose 设置)
+    # Method 3: Check environment variable (set by docker-compose)
     [ -n "$RUNNING_IN_DOCKER" ] && return 0
 
     return 1
@@ -269,7 +269,7 @@ start_mongodb() {
 }
 
 ensure_mongodb() {
-    # 如果在 Docker 容器内运行，假设 MongoDB 由外部管理（如 docker-compose）
+    # If running inside Docker container, assume MongoDB is managed externally (e.g., docker-compose)
     if is_in_docker; then
         print_info "Running in Docker container"
         print_info "Assuming MongoDB is managed by docker-compose"
@@ -283,7 +283,7 @@ ensure_mongodb() {
         fi
     fi
 
-    # 本地模式：检查并启动 MongoDB
+    # Local mode: check and start MongoDB
     if check_mongodb; then
         return 0
     fi

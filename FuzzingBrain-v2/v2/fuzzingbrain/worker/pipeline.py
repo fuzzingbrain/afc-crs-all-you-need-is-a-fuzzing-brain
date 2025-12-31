@@ -9,7 +9,7 @@ Architecture:
     │   SP Verify Agent Pool       POV Generate Agent Pool                │
     │   ┌─────────────┐           ┌─────────────┐                        │
     │   │  Agent 1    │           │  Agent 1    │                        │
-    │   │  Agent 2    │──队列───>│  Agent 2    │                        │
+    │   │  Agent 2    │──Queue──>│  Agent 2    │                        │
     │   │  ...        │           │  ...        │                        │
     │   │  Agent y    │           │  Agent z    │                        │
     │   └─────────────┘           └─────────────┘                        │
