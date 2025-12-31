@@ -105,6 +105,11 @@ class POVStrategy(BaseStrategy):
             "suspicious_points_found": 0,
             "suspicious_points_verified": 0,
             "high_confidence_bugs": 0,
+            # Phase timing (seconds)
+            "phase_reachability": 0.0,
+            "phase_find_sp": 0.0,
+            "phase_verify_pov": 0.0,
+            "phase_save": 0.0,
         }
 
         try:
@@ -118,7 +123,9 @@ class POVStrategy(BaseStrategy):
                     {"function": c.function_name, "file": c.file_path, "distance": c.reachability_distance}
                     for c in reachability.reachable_changes
                 ]
-                self.log_info(f"[Step 1/4] Done in {time.time() - step_start:.1f}s - {len(reachability.reachable_changes)} reachable changes")
+                step_duration = time.time() - step_start
+                result["phase_reachability"] = step_duration
+                self.log_info(f"[Step 1/4] Done in {step_duration:.1f}s - {len(reachability.reachable_changes)} reachable changes")
 
                 if not reachability.reachable:
                     self.log_info(f"No reachable changes in diff, skipping")
@@ -130,7 +137,9 @@ class POVStrategy(BaseStrategy):
             step_start = time.time()
             suspicious_points = self._find_suspicious_points()
             result["suspicious_points_found"] = len(suspicious_points)
-            self.log_info(f"[Step 2/5] Done in {time.time() - step_start:.1f}s - Found {len(suspicious_points)} suspicious points")
+            step_duration = time.time() - step_start
+            result["phase_find_sp"] = step_duration
+            self.log_info(f"[Step 2/5] Done in {step_duration:.1f}s - Found {len(suspicious_points)} suspicious points")
 
             if not suspicious_points:
                 self.log_info("No suspicious points found")
@@ -145,7 +154,9 @@ class POVStrategy(BaseStrategy):
                 result["suspicious_points_verified"] = pipeline_stats.sp_verified
                 result["pov_generated"] = pipeline_stats.pov_generated
                 result["pipeline_stats"] = pipeline_stats.to_dict()
-                self.log_info(f"[Step 3-4/5] Done in {time.time() - step_start:.1f}s")
+                step_duration = time.time() - step_start
+                result["phase_verify_pov"] = step_duration
+                self.log_info(f"[Step 3-4/5] Done in {step_duration:.1f}s")
                 self.log_info(f"  Verified: {pipeline_stats.sp_verified} (real: {pipeline_stats.sp_verified_real}, fp: {pipeline_stats.sp_verified_fp})")
                 self.log_info(f"  POV generated: {pipeline_stats.pov_generated}")
             else:
@@ -154,10 +165,13 @@ class POVStrategy(BaseStrategy):
                 step_start = time.time()
                 verified_points = self._verify_suspicious_points(suspicious_points)
                 result["suspicious_points_verified"] = len(verified_points)
-                self.log_info(f"[Step 3/5] Done in {time.time() - step_start:.1f}s - Verified {len(verified_points)} points")
+                step_duration = time.time() - step_start
+                result["phase_verify_pov"] = step_duration
+                self.log_info(f"[Step 3/5] Done in {step_duration:.1f}s - Verified {len(verified_points)} points")
 
             # Step 5: Sort and save results
             self.log_info(f"[Step 5/5] Sorting and saving results...")
+            step_start = time.time()
 
             # Get latest points from DB
             all_points = self.repos.suspicious_points.find_by_task(self.task_id)
@@ -174,10 +188,13 @@ class POVStrategy(BaseStrategy):
             # Save results
             self._save_results(sorted_points)
 
+            step_duration = time.time() - step_start
+            result["phase_save"] = step_duration
+
             total_time = time.time() - start_time
             self.log_info(f"========== POV Strategy Complete ==========")
             self.log_info(f"Total time: {total_time:.1f}s")
-            self.log_info(f"Results: {result['suspicious_points_found']} found, {result['suspicious_points_verified']} verified, {len(high_conf)} high-confidence")
+            self.log_info(f"Results: {result['suspicious_points_found']} found, {result['suspicious_points_verified']} verified, {len(high_conf)} high-confidence, {result.get('pov_generated', 0)} POV generated")
             return result
 
         except Exception as e:
@@ -506,6 +523,18 @@ class POVStrategy(BaseStrategy):
             PipelineStats with execution statistics
         """
         from ..pipeline import AgentPipeline, PipelineConfig, PipelineStats
+        from ...tools.coverage import set_coverage_context, get_coverage_context
+
+        # Ensure coverage context is fully set for trace_pov
+        coverage_fuzzer_dir, _, _ = get_coverage_context()
+        if coverage_fuzzer_dir:
+            set_coverage_context(
+                coverage_fuzzer_dir=coverage_fuzzer_dir,
+                project_name=self.project_name,
+                src_dir=self.workspace_path / "repo",
+                docker_image=f"gcr.io/oss-fuzz/{self.project_name}",
+                work_dir=self.results_path / "coverage_work",
+            )
 
         # Configure pipeline
         config = PipelineConfig(

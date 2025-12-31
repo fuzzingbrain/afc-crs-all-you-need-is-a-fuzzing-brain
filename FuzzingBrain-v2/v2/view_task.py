@@ -93,11 +93,16 @@ def get_task_data(task_id: str) -> dict:
     # Get suspicious points for this task
     suspicious_points = list(db.suspicious_points.find({'task_id': actual_task_id}))
 
+    # Get POVs for this task
+    povs = list(db.povs.find({'task_id': actual_task_id}))
+
     # Convert ObjectId to string
     for w in workers:
         w['_id'] = str(w['_id'])
     for sp in suspicious_points:
         sp['_id'] = str(sp['_id'])
+    for pov in povs:
+        pov['_id'] = str(pov['_id'])
     if task:
         task['_id'] = str(task['_id'])
 
@@ -111,6 +116,7 @@ def get_task_data(task_id: str) -> dict:
         'task': task,
         'workers': workers,
         'suspicious_points': suspicious_points,
+        'povs': povs,
         'conversations': conversations,
         'tool_calls': tool_calls,
     }
@@ -121,6 +127,7 @@ def generate_html(task_id: str, data: dict) -> str:
     task = data['task']
     workers = data['workers']
     suspicious_points = data['suspicious_points']
+    povs = data.get('povs', [])
     conversations = data.get('conversations', [])
     tool_calls = data.get('tool_calls', [])
 
@@ -160,10 +167,92 @@ def generate_html(task_id: str, data: dict) -> str:
         else:
             return '#6c757d'  # Gray - low
 
+    # Helper function to generate time bar HTML
+    def generate_time_bar(w):
+        """Generate time bar HTML for a worker."""
+        # Phase definitions: (name, field, color)
+        phases = [
+            ("Build", "phase_build", "#4CAF50"),        # Green
+            ("Reach", "phase_reachability", "#2196F3"), # Blue
+            ("Find SP", "phase_find_sp", "#FF9800"),    # Orange
+            ("Verify+POV", "phase_verify_pov", "#9C27B0"),  # Purple
+            ("Save", "phase_save", "#607D8B"),          # Grey
+        ]
+
+        # Calculate total and phase durations
+        phase_values = []
+        for name, field, color in phases:
+            duration = w.get(field, 0) or 0
+            phase_values.append((name, duration, color))
+
+        total_tracked = sum(p[1] for p in phase_values)
+
+        # Calculate total worker time from timestamps
+        started_at = w.get('started_at')
+        finished_at = w.get('finished_at')
+        total_time = 0
+        if started_at and finished_at:
+            if isinstance(started_at, str):
+                try:
+                    started_at = datetime.fromisoformat(started_at.replace('Z', '+00:00'))
+                except:
+                    started_at = None
+            if isinstance(finished_at, str):
+                try:
+                    finished_at = datetime.fromisoformat(finished_at.replace('Z', '+00:00'))
+                except:
+                    finished_at = None
+            if started_at and finished_at:
+                total_time = (finished_at - started_at).total_seconds()
+
+        # Use tracked total if no timestamps
+        if total_time <= 0:
+            total_time = total_tracked
+
+        # Add "Other" time if there's untracked time
+        other_time = max(0, total_time - total_tracked)
+        if other_time > 1:
+            phase_values.append(("Other", other_time, "#BDBDBD"))
+
+        # Format total time string
+        if total_time < 60:
+            total_str = f"{total_time:.1f}s"
+        elif total_time < 3600:
+            total_str = f"{total_time/60:.1f}m"
+        else:
+            total_str = f"{total_time/3600:.1f}h"
+
+        # Generate bar segments
+        segments_html = ""
+        legend_html = ""
+        for name, duration, color in phase_values:
+            if duration > 0 and total_time > 0:
+                pct = (duration / total_time) * 100
+                dur_str = f"{duration:.1f}s" if duration < 60 else f"{duration/60:.1f}m"
+                # Only show label if segment is wide enough
+                label = name if pct > 10 else ""
+                segments_html += f'<div class="time-bar-segment" style="width: {pct:.1f}%; background: {color};" title="{name}: {dur_str} ({pct:.1f}%)">{label}</div>'
+                legend_html += f'<div class="legend-item"><div class="legend-color" style="background: {color};"></div><span class="legend-text">{name}: {dur_str}</span></div>'
+
+        if not segments_html:
+            return ""  # No timing data
+
+        return f'''
+            <div class="time-bar-container">
+                <div class="time-bar-header">
+                    <span>Phase Timing</span>
+                    <span>Total: {total_str}</span>
+                </div>
+                <div class="time-bar">{segments_html}</div>
+                <div class="time-bar-legend">{legend_html}</div>
+            </div>
+        '''
+
     # Generate workers HTML
     workers_html = ""
     for w in workers:
         status = w.get('status', 'unknown')
+        time_bar_html = generate_time_bar(w)
         workers_html += f'''
         <div class="worker-card">
             <div class="worker-header">
@@ -177,6 +266,7 @@ def generate_html(task_id: str, data: dict) -> str:
                 <div><strong>Patches Found:</strong> {w.get('patches_found', 0)}</div>
                 {f'<div class="error-msg"><strong>Error:</strong> {w.get("error_msg", "")}</div>' if w.get('error_msg') else ''}
             </div>
+            {time_bar_html}
         </div>
         '''
 
@@ -236,8 +326,83 @@ def generate_html(task_id: str, data: dict) -> str:
     checked = len([sp for sp in suspicious_points if sp.get('is_checked')])
     high_score = len([sp for sp in suspicious_points if sp.get('score', 0) >= 0.8])
 
-    # Generate conversations HTML
+    # POV stats
+    total_povs = len(povs)
+    successful_povs = [p for p in povs if p.get('is_successful')]
+
+    # Generate POVs HTML - separate successful and all POVs
     import html as html_module
+
+    def generate_pov_card_html(pov, idx):
+        """Generate HTML for a single POV card."""
+        pov_id = pov.get('pov_id', 'N/A')
+        vuln_type = pov.get('vuln_type', 'unknown')
+        harness = pov.get('harness_name', 'N/A')
+        sanitizer = pov.get('sanitizer', 'N/A')
+        is_successful = pov.get('is_successful', False)
+        blob_path = pov.get('blob_path', '')
+        sp_id = pov.get('suspicious_point_id', 'N/A')
+        iteration = pov.get('iteration', 0)
+        attempt = pov.get('attempt', 0)
+        description = pov.get('description', '')
+        sanitizer_output = pov.get('sanitizer_output', '')
+
+        # Status badge
+        if is_successful:
+            status_badge = '<span class="badge badge-real">CRASHED</span>'
+            card_border = '#28a745'
+        else:
+            status_badge = '<span class="badge badge-fp">NO CRASH</span>'
+            card_border = '#6c757d'
+
+        # Sanitizer output (truncated)
+        sanitizer_html = ""
+        if sanitizer_output:
+            sanitizer_escaped = html_module.escape(str(sanitizer_output)[:2000])
+            if len(str(sanitizer_output)) > 2000:
+                sanitizer_escaped += '... (truncated)'
+            sanitizer_html = f'<div class="pov-sanitizer"><strong>Sanitizer Output:</strong><pre>{sanitizer_escaped}</pre></div>'
+
+        return f'''
+        <div class="pov-card" style="border-left-color: {card_border}">
+            <div class="pov-header">
+                <div class="pov-title">
+                    <span class="pov-num">#{idx}</span>
+                    <span class="vuln-badge" style="background-color: {vuln_color(vuln_type)}">{vuln_type}</span>
+                    {status_badge}
+                </div>
+                <div class="pov-meta">
+                    <span class="pov-harness">{harness} ({sanitizer})</span>
+                </div>
+            </div>
+            <div class="pov-body">
+                <div class="pov-info-grid">
+                    <div><strong>POV ID:</strong> {pov_id[:16]}...</div>
+                    <div><strong>SP ID:</strong> {sp_id[:16] if sp_id != 'N/A' else 'N/A'}...</div>
+                    <div><strong>Iteration:</strong> {iteration}</div>
+                    <div><strong>Attempt:</strong> {attempt}</div>
+                </div>
+                {f'<div class="pov-desc"><strong>Description:</strong> {html_module.escape(description)}</div>' if description else ''}
+                {f'<div class="pov-blob"><strong>Blob:</strong> {blob_path}</div>' if blob_path else ''}
+                {sanitizer_html}
+            </div>
+            <div class="pov-footer">
+                <span class="pov-time">Created: {pov.get('created_at', 'N/A')}</span>
+            </div>
+        </div>
+        '''
+
+    # Generate HTML for successful POVs
+    success_povs_html = ""
+    for i, pov in enumerate(successful_povs, 1):
+        success_povs_html += generate_pov_card_html(pov, i)
+
+    # Generate HTML for all POVs
+    povs_html = ""
+    for i, pov in enumerate(povs, 1):
+        povs_html += generate_pov_card_html(pov, i)
+
+    # Generate conversations HTML
     conv_html = ""
     for idx, conv in enumerate(conversations):
         messages_html = ""
@@ -480,6 +645,129 @@ def generate_html(task_id: str, data: dict) -> str:
         .no-data {{ color: #888; font-style: italic; padding: 20px; text-align: center; }}
         .generated-time {{ color: #666; font-size: 12px; margin-top: 5px; }}
 
+        /* Time bar styles */
+        .time-bar-container {{
+            margin-top: 10px;
+            background: #0f0f23;
+            border-radius: 8px;
+            padding: 12px;
+        }}
+        .time-bar-header {{
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 12px;
+            color: #888;
+        }}
+        .time-bar {{
+            height: 24px;
+            border-radius: 4px;
+            overflow: hidden;
+            display: flex;
+            background: #1a1a2e;
+        }}
+        .time-bar-segment {{
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: bold;
+            color: white;
+            text-shadow: 0 0 2px rgba(0,0,0,0.5);
+            transition: opacity 0.2s;
+            min-width: 2px;
+        }}
+        .time-bar-segment:hover {{
+            opacity: 0.8;
+        }}
+        .time-bar-legend {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 8px;
+            font-size: 11px;
+        }}
+        .legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }}
+        .legend-color {{
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+        }}
+        .legend-text {{
+            color: #aaa;
+        }}
+
+        /* POV styles */
+        .pov-card {{
+            background: #16213e;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid #28a745;
+        }}
+        .pov-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
+        }}
+        .pov-title {{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }}
+        .pov-num {{ color: #28a745; font-weight: bold; font-size: 18px; }}
+        .pov-meta {{ color: #888; }}
+        .pov-harness {{ font-family: monospace; }}
+        .pov-body {{ margin-bottom: 15px; }}
+        .pov-info-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+            background: #0f0f23;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }}
+        .pov-desc {{
+            background: #0f0f23;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }}
+        .pov-blob {{
+            background: #1a3a1a;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 13px;
+            margin-bottom: 10px;
+        }}
+        .pov-sanitizer {{
+            margin-top: 10px;
+        }}
+        .pov-sanitizer pre {{
+            background: #0f0f23;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 12px;
+            overflow-x: auto;
+            max-height: 300px;
+            overflow-y: auto;
+            color: #ff6b6b;
+        }}
+        .pov-footer {{
+            font-size: 12px;
+            color: #666;
+            border-top: 1px solid #333;
+            padding-top: 10px;
+        }}
+
         /* Conversation styles */
         .conv-container {{ margin-top: 20px; }}
         .conv-file {{
@@ -703,6 +991,8 @@ def generate_html(task_id: str, data: dict) -> str:
         <div class="tabs">
             <button class="tab-btn active" onclick="switchTab('workers')">Workers ({len(workers)})</button>
             <button class="tab-btn" onclick="switchTab('suspicious')">Suspicious Points ({total_sp})</button>
+            <button class="tab-btn" onclick="switchTab('success-povs')">Success POVs ({len(successful_povs)})</button>
+            <button class="tab-btn" onclick="switchTab('all-povs')">All POVs ({total_povs})</button>
             <button class="tab-btn" onclick="switchTab('conversations')">Conversations ({len(conversations)})</button>
             <button class="tab-btn" onclick="switchTab('tools')">Tool Calls ({len(tool_calls)})</button>
         </div>
@@ -719,6 +1009,18 @@ def generate_html(task_id: str, data: dict) -> str:
         <div id="tab-suspicious" class="tab-content">
             <h2>Suspicious Points</h2>
             {sp_html if sp_html else '<div class="no-data">No suspicious points found</div>'}
+        </div>
+
+        <!-- Tab: Success POVs -->
+        <div id="tab-success-povs" class="tab-content">
+            <h2>Successful POVs ({len(successful_povs)})</h2>
+            {success_povs_html if success_povs_html else '<div class="no-data">No successful POVs found</div>'}
+        </div>
+
+        <!-- Tab: All POVs -->
+        <div id="tab-all-povs" class="tab-content">
+            <h2>All POVs ({total_povs})</h2>
+            {povs_html if povs_html else '<div class="no-data">No POVs found</div>'}
         </div>
 
         <!-- Tab: Conversations -->

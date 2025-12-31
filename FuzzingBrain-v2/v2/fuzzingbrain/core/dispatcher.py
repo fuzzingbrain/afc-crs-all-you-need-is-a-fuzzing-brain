@@ -364,7 +364,7 @@ class WorkerDispatcher:
         Get results from all completed workers.
 
         Returns:
-            List of worker results
+            List of worker results with duration info
         """
         workers = self.repos.workers.find_by_task(self.task.task_id)
         results = []
@@ -378,6 +378,8 @@ class WorkerDispatcher:
                 "povs_found": worker.povs_found or 0,
                 "patches_found": worker.patches_found or 0,
                 "error_msg": worker.error_msg,
+                "duration_seconds": worker.get_duration_seconds(),
+                "duration_str": worker.get_duration_str(),
             }
             results.append(result)
 

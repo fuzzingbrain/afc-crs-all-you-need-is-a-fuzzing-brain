@@ -3,13 +3,17 @@ POV Tools
 
 MCP tools for POV Agent to generate and manage POVs (Proof of Vulnerability).
 
-Uses contextvars for coroutine-safe context management, allowing multiple
+Uses a thread-safe global dict for context management, allowing multiple
 POV agents to run concurrently without interfering with each other.
+Each agent is identified by its worker_id.
+
+Note: We use a global dict instead of contextvars because fastmcp may execute
+sync tools in a thread pool, which breaks contextvar propagation.
 """
 
 import base64
+import threading
 import uuid
-from contextvars import ContextVar, copy_context
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -27,28 +31,18 @@ from ..db import RepositoryManager
 
 
 # =============================================================================
-# Coroutine-Safe Context for POV Tools (using contextvars)
+# Thread-Safe Context for POV Tools
 # =============================================================================
 
-# Each coroutine/agent gets its own isolated context
-_pov_context_var: ContextVar[Dict[str, Any]] = ContextVar(
-    'pov_context',
-    default={
-        "task_id": None,
-        "worker_id": None,
-        "output_dir": None,
-        "repos": None,
-        "fuzzer": None,
-        "sanitizer": None,
-        "suspicious_point_id": None,
-        "iteration": 0,
-        "attempt": 0,
-        "fuzzer_path": None,
-        "docker_image": None,
-        "workspace_path": None,
-        "fuzzer_source": None,
-    }
-)
+# Global dict to store context per worker_id
+# Using a dict + lock instead of contextvars because fastmcp may run
+# sync tools in a thread pool, breaking contextvar propagation
+_pov_contexts: Dict[str, Dict[str, Any]] = {}
+_pov_contexts_lock = threading.Lock()
+
+# Current active worker_id (global, since only one worker runs at a time per process)
+# This is set when set_pov_context is called
+_current_worker_id: Optional[str] = None
 
 
 def set_pov_context(
@@ -65,9 +59,9 @@ def set_pov_context(
     fuzzer_source: Optional[str] = None,
 ) -> None:
     """
-    Set the context for POV tools (coroutine-safe).
+    Set the context for POV tools (thread-safe).
 
-    Each concurrent POV agent gets its own isolated context.
+    Each concurrent POV agent gets its own isolated context, identified by worker_id.
 
     Args:
         task_id: Current task ID
@@ -97,25 +91,86 @@ def set_pov_context(
         "workspace_path": Path(workspace_path) if workspace_path else None,
         "fuzzer_source": fuzzer_source,
     }
-    _pov_context_var.set(ctx)
+    global _current_worker_id
+    with _pov_contexts_lock:
+        _pov_contexts[worker_id] = ctx
+    # Set current worker_id globally
+    _current_worker_id = worker_id
 
 
-def update_pov_iteration(iteration: int) -> None:
-    """Update current agent loop iteration (coroutine-safe)."""
-    ctx = _pov_context_var.get().copy()
-    ctx["iteration"] = iteration
-    _pov_context_var.set(ctx)
+def update_pov_iteration(iteration: int, worker_id: Optional[str] = None) -> None:
+    """
+    Update current agent loop iteration (thread-safe).
+
+    Args:
+        iteration: Current iteration number
+        worker_id: Worker ID (uses global if not provided)
+    """
+    wid = worker_id or _current_worker_id
+    if not wid:
+        logger.warning("[POV] update_pov_iteration: no worker_id available")
+        return
+
+    with _pov_contexts_lock:
+        if wid in _pov_contexts:
+            _pov_contexts[wid]["iteration"] = iteration
 
 
-def get_pov_context() -> Dict[str, Any]:
-    """Get the current POV context (coroutine-safe)."""
-    return _pov_context_var.get().copy()
+def get_pov_context(worker_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Get the current POV context (thread-safe).
+
+    Args:
+        worker_id: Worker ID (uses global if not provided)
+
+    Returns:
+        Copy of the context dict
+    """
+    wid = worker_id or _current_worker_id
+    if not wid:
+        return {}
+
+    with _pov_contexts_lock:
+        if wid in _pov_contexts:
+            return _pov_contexts[wid].copy()
+    return {}
+
+
+def clear_pov_context(worker_id: Optional[str] = None) -> None:
+    """
+    Clear the POV context for a worker (thread-safe).
+
+    Args:
+        worker_id: Worker ID (uses global if not provided)
+    """
+    global _current_worker_id
+    wid = worker_id or _current_worker_id
+    if not wid:
+        return
+
+    with _pov_contexts_lock:
+        if wid in _pov_contexts:
+            del _pov_contexts[wid]
+
+    # Clear global if matching
+    if _current_worker_id == wid:
+        _current_worker_id = None
+
+
+def _get_current_context() -> Optional[Dict[str, Any]]:
+    """Get the current context for tools (internal use)."""
+    wid = _current_worker_id
+    if not wid:
+        return None
+
+    with _pov_contexts_lock:
+        return _pov_contexts.get(wid)
 
 
 def _ensure_context() -> Optional[Dict[str, Any]]:
     """Ensure POV context is set. Returns error dict if not configured."""
-    ctx = _pov_context_var.get()
-    if ctx.get("task_id") is None:
+    ctx = _get_current_context()
+    if ctx is None or ctx.get("task_id") is None:
         return {
             "success": False,
             "error": "POV context not set. Call set_pov_context first.",
@@ -156,7 +211,7 @@ def get_fuzzer_info() -> Dict[str, Any]:
     if err:
         return err
 
-    ctx = _pov_context_var.get()
+    ctx = _get_current_context()
 
     fuzzer_source = ctx.get("fuzzer_source")
     if not fuzzer_source:
@@ -344,7 +399,7 @@ def create_pov(
     if err:
         return err
 
-    ctx = _pov_context_var.get()
+    ctx = _get_current_context()
     task_id = ctx["task_id"]
     worker_id = ctx["worker_id"]
     output_dir = ctx["output_dir"]
@@ -353,11 +408,13 @@ def create_pov(
     sanitizer = ctx.get("sanitizer", "address")
     current_iteration = ctx.get("iteration", 0)
 
-    # Increment attempt counter (coroutine-safe)
-    ctx = ctx.copy()
-    ctx["attempt"] += 1
-    _pov_context_var.set(ctx)
-    current_attempt = ctx["attempt"]
+    # Increment attempt counter (thread-safe)
+    with _pov_contexts_lock:
+        if worker_id in _pov_contexts:
+            _pov_contexts[worker_id]["attempt"] += 1
+            current_attempt = _pov_contexts[worker_id]["attempt"]
+        else:
+            current_attempt = 1
 
     # Use context SP if not provided
     if not suspicious_point_id and ctx.get("suspicious_point_id"):
@@ -620,7 +677,7 @@ def verify_pov(
     if err:
         return err
 
-    ctx = _pov_context_var.get()
+    ctx = _get_current_context()
     repos = ctx["repos"]
     sanitizer = ctx.get("sanitizer", "address")
 
@@ -747,7 +804,7 @@ def trace_pov(
     if err:
         return err
 
-    ctx = _pov_context_var.get()
+    ctx = _get_current_context()
     repos = ctx["repos"]
 
     # Get POV from database

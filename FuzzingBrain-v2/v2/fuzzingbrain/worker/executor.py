@@ -211,7 +211,9 @@ class WorkerExecutor:
 
             # Map strategy-specific fields to common result fields
             # (for backward compatibility with tasks.py)
-            if "povs_generated" in result:
+            if "pov_generated" in result:
+                result["povs_found"] = result["pov_generated"]
+            elif "povs_generated" in result:
                 result["povs_found"] = result["povs_generated"]
             if "patches_verified" in result:
                 result["patches_found"] = result["patches_verified"]

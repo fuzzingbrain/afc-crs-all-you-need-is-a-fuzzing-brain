@@ -519,14 +519,15 @@ def create_final_summary(
 
     # Column widths for worker table
     col_num = 4
-    col_fuzzer = 28
-    col_sanitizer = 12
+    col_fuzzer = 24
+    col_sanitizer = 10
     col_status = 12
-    col_povs = 8
+    col_duration = 10
+    col_povs = 6
     col_patches = 8
 
-    # Total width = sum of columns + 5 internal separators (┼)
-    table_width = col_num + col_fuzzer + col_sanitizer + col_status + col_povs + col_patches + 5
+    # Total width = sum of columns + 6 internal separators (┼)
+    table_width = col_num + col_fuzzer + col_sanitizer + col_status + col_duration + col_povs + col_patches + 6
 
     lines = []
     lines.append("")
@@ -554,11 +555,12 @@ def create_final_summary(
         "│" + " Fuzzer".ljust(col_fuzzer) +
         "│" + " Sanitizer".ljust(col_sanitizer) +
         "│" + " Status".ljust(col_status) +
+        "│" + " Duration".center(col_duration) +
         "│" + " POVs".center(col_povs) +
         "│" + " Patches".center(col_patches) + "│"
     )
     lines.append(header)
-    lines.append("├" + "─" * col_num + "┼" + "─" * col_fuzzer + "┼" + "─" * col_sanitizer + "┼" + "─" * col_status + "┼" + "─" * col_povs + "┼" + "─" * col_patches + "┤")
+    lines.append("├" + "─" * col_num + "┼" + "─" * col_fuzzer + "┼" + "─" * col_sanitizer + "┼" + "─" * col_status + "┼" + "─" * col_duration + "┼" + "─" * col_povs + "┼" + "─" * col_patches + "┤")
 
     # Worker rows
     for i, w in enumerate(workers, 1):
@@ -569,11 +571,15 @@ def create_final_summary(
         status = w.get("status", "unknown")
         status_display = "✓ " + status if status == "completed" else "✗ " + status
 
+        # Get duration string
+        duration_str = w.get("duration_str", "N/A")
+
         # Build row content
         num_cell = f" {i} ".center(col_num)
         fuzzer_cell = " " + fuzzer.ljust(col_fuzzer - 1)
         sanitizer_cell = " " + w.get("sanitizer", "N/A").ljust(col_sanitizer - 1)
         status_cell = " " + status_display.ljust(col_status - 1)
+        duration_cell = duration_str.center(col_duration)
         povs_cell = str(w.get("povs_found", 0)).center(col_povs)
         patches_cell = str(w.get("patches_found", 0)).center(col_patches)
 
@@ -586,6 +592,7 @@ def create_final_summary(
                 "│" + color + fuzzer_cell + reset +
                 "│" + color + sanitizer_cell + reset +
                 "│" + color + status_cell + reset +
+                "│" + color + duration_cell + reset +
                 "│" + color + povs_cell + reset +
                 "│" + color + patches_cell + reset + "│"
             )
@@ -595,12 +602,13 @@ def create_final_summary(
                 "│" + fuzzer_cell +
                 "│" + sanitizer_cell +
                 "│" + status_cell +
+                "│" + duration_cell +
                 "│" + povs_cell +
                 "│" + patches_cell + "│"
             )
         lines.append(row)
 
-    lines.append("└" + "─" * col_num + "┴" + "─" * col_fuzzer + "┴" + "─" * col_sanitizer + "┴" + "─" * col_status + "┴" + "─" * col_povs + "┴" + "─" * col_patches + "┘")
+    lines.append("└" + "─" * col_num + "┴" + "─" * col_fuzzer + "┴" + "─" * col_sanitizer + "┴" + "─" * col_status + "┴" + "─" * col_duration + "┴" + "─" * col_povs + "┴" + "─" * col_patches + "┘")
     lines.append("")
 
     return "\n".join(lines)

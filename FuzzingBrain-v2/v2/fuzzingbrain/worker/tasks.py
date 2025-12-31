@@ -150,7 +150,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             "error": f"Initialization failed: {e}",
         }
 
-    # Create worker record
+    # Create worker record with started_at timestamp
     worker = Worker(
         worker_id=worker_id,
         celery_job_id=self.request.id,
@@ -160,6 +160,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         sanitizer=sanitizer,
         workspace_path=workspace_path,
         status=WorkerStatus.BUILDING,
+        started_at=start_time,
     )
     repos.workers.save(worker)
 
@@ -167,9 +168,11 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         # Step 1: Setup fuzzer binary
         # If pre-built fuzzer path is provided (new architecture), skip building
         # Otherwise fall back to building (legacy mode)
+        build_start = datetime.now()
         if fuzzer_binary_path:
             logger.info(f"Using pre-built fuzzer from Analyzer: {fuzzer_binary_path}")
             worker.status = WorkerStatus.RUNNING
+            worker.phase_build = 0.0  # Pre-built, no build time
             repos.workers.save(worker)
 
             # Set coverage fuzzer path if provided
@@ -191,6 +194,10 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
             # Get fuzzer path from builder
             fuzzer_binary_path = str(builder.get_fuzzer_path(fuzzer))
+
+            # Record build time
+            worker.phase_build = (datetime.now() - build_start).total_seconds()
+            repos.workers.save(worker)
 
         # Step 2: Run fuzzing strategies
         logger.info(f"Running fuzzing strategies")
@@ -217,11 +224,16 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         # Clean up analysis client
         executor.close()
 
-        # Step 3: Mark completed
+        # Step 3: Mark completed and save phase timing from strategy result
         worker.status = WorkerStatus.COMPLETED
         worker.povs_found = result.get("povs_found", 0)
         worker.patches_found = result.get("patches_found", 0)
         worker.finished_at = datetime.now()
+        # Copy phase timing from strategy result
+        worker.phase_reachability = result.get("phase_reachability", 0.0)
+        worker.phase_find_sp = result.get("phase_find_sp", 0.0)
+        worker.phase_verify_pov = result.get("phase_verify_pov", 0.0)
+        worker.phase_save = result.get("phase_save", 0.0)
         repos.workers.save(worker)
 
         # Calculate elapsed time

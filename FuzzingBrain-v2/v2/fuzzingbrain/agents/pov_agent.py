@@ -462,8 +462,8 @@ Start by reading the vulnerable function source with get_function_source("{funct
             iteration += 1
             self.total_iterations += 1
 
-            # Update iteration in POV context
-            update_pov_iteration(iteration)
+            # Update iteration in POV context (pass worker_id for thread-safety)
+            update_pov_iteration(iteration, worker_id=self.worker_id)
 
             self._log(f"=== Iteration {iteration}/{self.max_iterations} (POV attempts: {self.pov_attempts}/{self.max_pov_attempts}) ===", level="INFO")
 

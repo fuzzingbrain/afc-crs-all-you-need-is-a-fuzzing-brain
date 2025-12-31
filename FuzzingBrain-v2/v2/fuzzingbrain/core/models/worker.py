@@ -56,6 +56,17 @@ class Worker:
     # Timestamps
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+
+    # Phase timing (seconds) - for performance analysis
+    # Build phase
+    phase_build: float = 0.0
+    # Strategy phases
+    phase_reachability: float = 0.0      # Step 1: Diff reachability check
+    phase_find_sp: float = 0.0           # Step 2: Find suspicious points
+    phase_verify_pov: float = 0.0        # Step 3-4: Verify + POV pipeline
+    phase_save: float = 0.0              # Step 5: Save results
 
     @staticmethod
     def generate_worker_id(task_id: str, fuzzer: str, sanitizer: str) -> str:
@@ -88,6 +99,14 @@ class Worker:
             "patches_found": self.patches_found,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "started_at": self.started_at,
+            "finished_at": self.finished_at,
+            # Phase timing
+            "phase_build": self.phase_build,
+            "phase_reachability": self.phase_reachability,
+            "phase_find_sp": self.phase_find_sp,
+            "phase_verify_pov": self.phase_verify_pov,
+            "phase_save": self.phase_save,
         }
 
     @classmethod
@@ -109,11 +128,20 @@ class Worker:
             patches_found=data.get("patches_found", 0),
             created_at=data.get("created_at", datetime.now()),
             updated_at=data.get("updated_at", datetime.now()),
+            started_at=data.get("started_at"),
+            finished_at=data.get("finished_at"),
+            # Phase timing
+            phase_build=data.get("phase_build", 0.0),
+            phase_reachability=data.get("phase_reachability", 0.0),
+            phase_find_sp=data.get("phase_find_sp", 0.0),
+            phase_verify_pov=data.get("phase_verify_pov", 0.0),
+            phase_save=data.get("phase_save", 0.0),
         )
 
     def mark_running(self):
         """Mark worker as running"""
         self.status = WorkerStatus.RUNNING
+        self.started_at = datetime.now()
         self.updated_at = datetime.now()
 
     def mark_completed(self, povs: int = 0, patches: int = 0):
@@ -121,10 +149,81 @@ class Worker:
         self.status = WorkerStatus.COMPLETED
         self.povs_found = povs
         self.patches_found = patches
+        self.finished_at = datetime.now()
         self.updated_at = datetime.now()
 
     def mark_failed(self, error: str):
         """Mark worker as failed"""
         self.status = WorkerStatus.FAILED
         self.error_msg = error
+        self.finished_at = datetime.now()
         self.updated_at = datetime.now()
+
+    def get_duration_seconds(self) -> float:
+        """Get worker execution duration in seconds"""
+        if self.started_at and self.finished_at:
+            return (self.finished_at - self.started_at).total_seconds()
+        elif self.started_at:
+            # Still running
+            return (datetime.now() - self.started_at).total_seconds()
+        return 0.0
+
+    def get_duration_str(self) -> str:
+        """Get worker execution duration as formatted string"""
+        seconds = self.get_duration_seconds()
+        if seconds < 60:
+            return f"{seconds:.1f}s"
+        elif seconds < 3600:
+            minutes = seconds / 60
+            return f"{minutes:.1f}m"
+        else:
+            hours = seconds / 3600
+            return f"{hours:.1f}h"
+
+    def get_phase_timing(self) -> dict:
+        """
+        Get phase timing breakdown.
+
+        Returns:
+            Dict with phase names, durations, and percentages
+        """
+        total = self.get_duration_seconds()
+        phases = [
+            ("Build", self.phase_build, "#4CAF50"),        # Green
+            ("Reachability", self.phase_reachability, "#2196F3"),  # Blue
+            ("Find SP", self.phase_find_sp, "#FF9800"),    # Orange
+            ("Verify+POV", self.phase_verify_pov, "#9C27B0"),  # Purple
+            ("Save", self.phase_save, "#607D8B"),          # Grey
+        ]
+
+        result = []
+        tracked_total = sum(p[1] for p in phases)
+        other_time = max(0, total - tracked_total)
+
+        for name, duration, color in phases:
+            if duration > 0:
+                pct = (duration / total * 100) if total > 0 else 0
+                result.append({
+                    "name": name,
+                    "duration": duration,
+                    "duration_str": f"{duration:.1f}s" if duration < 60 else f"{duration/60:.1f}m",
+                    "percentage": pct,
+                    "color": color,
+                })
+
+        # Add "Other" if there's untracked time
+        if other_time > 1:  # Only show if > 1 second
+            pct = (other_time / total * 100) if total > 0 else 0
+            result.append({
+                "name": "Other",
+                "duration": other_time,
+                "duration_str": f"{other_time:.1f}s" if other_time < 60 else f"{other_time/60:.1f}m",
+                "percentage": pct,
+                "color": "#BDBDBD",  # Light grey
+            })
+
+        return {
+            "total_seconds": total,
+            "total_str": self.get_duration_str(),
+            "phases": result,
+        }
