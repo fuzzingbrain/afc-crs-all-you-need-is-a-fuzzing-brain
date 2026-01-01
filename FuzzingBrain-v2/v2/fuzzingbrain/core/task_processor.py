@@ -593,6 +593,9 @@ class TaskProcessor:
                             task.mark_completed()
                         else:
                             task.mark_error(f"{result['failed']} workers failed")
+                    elif result["status"] == "pov_target_reached":
+                        task.mark_completed()
+                        logger.info(f"Task completed: POV target reached ({result.get('pov_count', 0)} POVs)")
                     else:
                         task.mark_error(f"Timeout after {timeout} minutes")
 

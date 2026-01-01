@@ -507,19 +507,22 @@ show_usage() {
     echo "  --api               Start REST API server (default, port: 8080)"
     echo "  --mcp               Start MCP server (for AI agents)"
     echo "  --scan-mode <mode>  Scan mode: full (default), delta"
+    echo "  -v <commit>         Target version/commit for full-scan"
     echo "  -b <commit>         Base commit (auto-sets scan-mode to delta)"
     echo "  -d <commit>         Delta commit (requires -b, default: HEAD)"
     echo "  --task-type <type>  Task type: pov-patch (default), pov, patch, harness"
     echo "  --project <name>    Specify OSS-Fuzz project name"
     echo "  --sanitizers <list> Comma-separated sanitizers (default: address)"
     echo "  --timeout <min>     Timeout in minutes (default: 60)"
+    echo "  --pov-count <N>     Stop after N verified POVs (default: 0 = unlimited)"
     echo "  --in-place          Run directly without copying workspace"
     echo "  -h, -help, --help   Show this help message"
     echo ""
     echo "Examples:"
     echo "  $0                                                    # REST API mode (default)"
     echo "  $0 --mcp                                              # MCP Server mode"
-    echo "  $0 https://github.com/OwenSanzas/libpng.git           # Full scan"
+    echo "  $0 https://github.com/OwenSanzas/libpng.git           # Full scan (HEAD)"
+    echo "  $0 -v abc123 https://github.com/user/repo.git        # Full scan at commit"
     echo "  $0 -b abc123 -d def456 https://github.com/user/repo   # Delta scan"
     echo "  $0 ./task_config.json                                 # From JSON"
     echo "  $0 libpng                                             # Continue project"
@@ -532,12 +535,14 @@ show_usage() {
 
 IN_PLACE=false
 OSS_FUZZ_PROJECT=""
+TARGET_VERSION=""
 BASE_COMMIT=""
 DELTA_COMMIT=""
 TASK_TYPE="pov-patch"
 SCAN_MODE="full"
 SANITIZERS="address"
 TIMEOUT_MINUTES=60
+POV_COUNT=0
 API_MODE=false
 MCP_MODE=false
 POSITIONAL_ARGS=()
@@ -562,6 +567,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --timeout)
             TIMEOUT_MINUTES="$2"
+            shift 2
+            ;;
+        --pov-count)
+            POV_COUNT="$2"
+            shift 2
+            ;;
+        -v|--version)
+            TARGET_VERSION="$2"
             shift 2
             ;;
         -b)
@@ -701,6 +714,7 @@ if is_git_url "$TARGET"; then
     print_info "Task Type: $TASK_TYPE"
     print_info "URL: $GIT_URL"
     print_info "Repository: $REPO_NAME"
+    [ -n "$TARGET_VERSION" ] && print_info "Version: $TARGET_VERSION"
 
     WORKSPACE="$WORKSPACE_DIR/${WORKSPACE_NAME}"
     mkdir -p "$WORKSPACE"
@@ -710,6 +724,17 @@ if is_git_url "$TARGET"; then
     if ! git clone "$GIT_URL" "$WORKSPACE/repo"; then
         print_error "Failed to clone repository"
         exit 1
+    fi
+
+    # Checkout target version if specified
+    if [ -n "$TARGET_VERSION" ]; then
+        print_info "Checking out version: $TARGET_VERSION"
+        cd "$WORKSPACE/repo"
+        if ! git checkout "$TARGET_VERSION"; then
+            print_error "Failed to checkout version: $TARGET_VERSION"
+            exit 1
+        fi
+        cd "$SCRIPT_DIR"
     fi
 
     # Setup OSS-Fuzz tooling
@@ -771,6 +796,7 @@ if is_git_url "$TARGET"; then
         --scan-mode "$SCAN_MODE" \
         --sanitizers "$SANITIZERS" \
         --timeout "$TIMEOUT_MINUTES" \
+        --pov-count "$POV_COUNT" \
         ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
         ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"}
 fi
@@ -791,14 +817,16 @@ if [ -d "$TARGET" ]; then
             --task-type "$TASK_TYPE" \
             --scan-mode "$SCAN_MODE" \
             --sanitizers "$SANITIZERS" \
-            --timeout "$TIMEOUT_MINUTES"
+            --timeout "$TIMEOUT_MINUTES" \
+            --pov-count "$POV_COUNT"
     else
         exec $PYTHON -m fuzzingbrain.main \
             --workspace "$TARGET" \
             --task-type "$TASK_TYPE" \
             --scan-mode "$SCAN_MODE" \
             --sanitizers "$SANITIZERS" \
-            --timeout "$TIMEOUT_MINUTES"
+            --timeout "$TIMEOUT_MINUTES" \
+            --pov-count "$POV_COUNT"
     fi
 fi
 

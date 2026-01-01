@@ -58,6 +58,13 @@ from .pov import (
     verify_pov,
     trace_pov,
 )
+from .directions import (
+    set_direction_context,
+    get_direction_context,
+    create_direction,
+    list_directions,
+    get_direction,
+)
 
 __all__ = [
     "tools_mcp",
@@ -89,4 +96,10 @@ __all__ = [
     "create_pov",
     "verify_pov",
     "trace_pov",
+    # Direction tools (Full-scan)
+    "set_direction_context",
+    "get_direction_context",
+    "create_direction",
+    "list_directions",
+    "get_direction",
 ]

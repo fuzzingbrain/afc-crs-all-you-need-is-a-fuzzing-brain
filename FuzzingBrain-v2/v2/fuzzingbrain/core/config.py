@@ -30,6 +30,7 @@ class Config:
     scan_mode: str = "full"  # full | delta
     sanitizers: List[str] = field(default_factory=lambda: ["address"])
     timeout_minutes: int = 60
+    pov_count: int = 0  # Stop after N verified POVs (0 = unlimited)
 
     # Repository
     repo_url: Optional[str] = None
@@ -80,6 +81,7 @@ class Config:
             scan_mode=data.get("scan_mode", "full"),
             sanitizers=data.get("sanitizers", ["address"]),
             timeout_minutes=data.get("timeout_minutes", 60),
+            pov_count=data.get("pov_count", 0),
             repo_url=data.get("repo_url"),
             repo_path=data.get("repo_path"),
             project_name=data.get("project_name"),
@@ -178,6 +180,7 @@ class Config:
             "scan_mode": self.scan_mode,
             "sanitizers": self.sanitizers,
             "timeout_minutes": self.timeout_minutes,
+            "pov_count": self.pov_count,
             "repo_url": self.repo_url,
             "repo_path": self.repo_path,
             "project_name": self.project_name,

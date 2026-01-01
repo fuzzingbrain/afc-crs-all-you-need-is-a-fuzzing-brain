@@ -132,9 +132,15 @@ def create_suspicious_point(
                 "created": False,
                 "merged": True,
                 "message": (
-                    f"This suspicious point was identified as a duplicate of an existing SP "
-                    f"in function '{function_name}'. The source ({harness_name}/{sanitizer}) "
-                    f"has been added to the existing SP. No new SP was created."
+                    f"DUPLICATE DETECTED: This suspicious point was identified as a duplicate "
+                    f"of existing SP '{sp_id}' in function '{function_name}'. "
+                    f"Your source ({harness_name}/{sanitizer}) has been added to the existing SP. "
+                    f"No new SP was created.\n\n"
+                    f"SUGGESTION: You have two options:\n"
+                    f"1. SWITCH: Explore other functions or call paths in your direction to maximize coverage.\n"
+                    f"2. FOCUS: Continue analyzing this area if you believe there are additional "
+                    f"vulnerabilities with different root causes that haven't been identified yet.\n\n"
+                    f"Use your judgment based on how thoroughly this function has been analyzed."
                 ),
             }
         else:

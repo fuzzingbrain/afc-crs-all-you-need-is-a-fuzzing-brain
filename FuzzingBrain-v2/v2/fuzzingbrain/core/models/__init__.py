@@ -12,6 +12,7 @@ from .fuzzer import Fuzzer, FuzzerStatus
 from .function import Function
 from .callgraph import CallGraphNode
 from .suspicious_point import SuspiciousPoint, ControlFlowItem, SPStatus
+from .direction import Direction, DirectionStatus, RiskLevel
 
 __all__ = [
     "Task", "TaskStatus", "JobType", "ScanMode",
@@ -22,4 +23,5 @@ __all__ = [
     "Function",
     "CallGraphNode",
     "SuspiciousPoint", "ControlFlowItem", "SPStatus",
+    "Direction", "DirectionStatus", "RiskLevel",
 ]

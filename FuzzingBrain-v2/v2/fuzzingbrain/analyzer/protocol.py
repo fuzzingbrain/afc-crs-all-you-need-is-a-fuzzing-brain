@@ -47,6 +47,13 @@ class Method(str, Enum):
     LIST_SUSPICIOUS_POINTS = "list_suspicious_points"
     GET_SUSPICIOUS_POINT = "get_suspicious_point"
 
+    # Direction operations (Full-scan)
+    CREATE_DIRECTION = "create_direction"
+    LIST_DIRECTIONS = "list_directions"
+    GET_DIRECTION = "get_direction"
+    CLAIM_DIRECTION = "claim_direction"
+    COMPLETE_DIRECTION = "complete_direction"
+
 
 @dataclass
 class Request:

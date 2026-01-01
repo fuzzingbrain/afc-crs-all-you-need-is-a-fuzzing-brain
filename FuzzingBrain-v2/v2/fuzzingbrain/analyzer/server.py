@@ -451,6 +451,30 @@ class AnalysisServer:
                 result = await self._get_suspicious_point(params.get("id"))
                 return Response.ok(result, req_id)
 
+            # Direction operations (Full-scan)
+            elif method == Method.CREATE_DIRECTION:
+                result = await self._create_direction(params)
+                return Response.ok(result, req_id)
+
+            elif method == Method.LIST_DIRECTIONS:
+                result = await self._list_directions(params)
+                return Response.ok(result, req_id)
+
+            elif method == Method.GET_DIRECTION:
+                result = await self._get_direction(params.get("id"))
+                return Response.ok(result, req_id)
+
+            elif method == Method.CLAIM_DIRECTION:
+                result = await self._claim_direction(
+                    params.get("fuzzer"),
+                    params.get("processor_id"),
+                )
+                return Response.ok(result, req_id)
+
+            elif method == Method.COMPLETE_DIRECTION:
+                result = await self._complete_direction(params)
+                return Response.ok(result, req_id)
+
             else:
                 return Response.err(f"Unknown method: {method}", req_id)
 
@@ -908,6 +932,110 @@ class AnalysisServer:
         if sp:
             return sp.to_dict()
         return None
+
+    # =========================================================================
+    # Direction operations (Full-scan)
+    # =========================================================================
+
+    async def _create_direction(self, params: dict) -> dict:
+        """Create a new direction for Full-scan analysis."""
+        if not self.repos:
+            return {"created": False, "error": "Database not available"}
+
+        from ..core.models import Direction
+
+        direction = Direction(
+            task_id=self.task_id,
+            name=params.get("name", ""),
+            risk_level=params.get("risk_level", "medium"),
+            risk_reason=params.get("risk_reason", ""),
+            core_functions=params.get("core_functions", []),
+            entry_functions=params.get("entry_functions", []),
+            call_chain_summary=params.get("call_chain_summary", ""),
+            code_summary=params.get("code_summary", ""),
+            fuzzer=params.get("fuzzer", ""),
+        )
+
+        success = self.repos.directions.save(direction)
+        if success:
+            self._log(f"Created direction: {direction.name} ({direction.risk_level})")
+            return {
+                "id": direction.direction_id,
+                "created": True,
+            }
+        else:
+            return {"created": False, "error": "Failed to save direction"}
+
+    async def _list_directions(self, params: dict) -> dict:
+        """List directions with optional filters."""
+        if not self.repos:
+            return {"directions": [], "count": 0, "stats": {}}
+
+        fuzzer = params.get("fuzzer")
+        status = params.get("status")
+
+        if fuzzer:
+            directions = self.repos.directions.find_by_fuzzer(self.task_id, fuzzer)
+        else:
+            directions = self.repos.directions.find_by_task(self.task_id)
+
+        # Filter by status if specified
+        if status:
+            directions = [d for d in directions if d.status == status]
+
+        # Sort by priority
+        directions.sort(key=lambda d: d.get_priority_score(), reverse=True)
+
+        # Get stats
+        stats = self.repos.directions.get_stats(self.task_id, fuzzer)
+
+        return {
+            "directions": [_serialize_doc(d.to_dict()) for d in directions],
+            "count": len(directions),
+            "stats": stats,
+        }
+
+    async def _get_direction(self, direction_id: str) -> Optional[dict]:
+        """Get a single direction by ID."""
+        if not self.repos or not direction_id:
+            return None
+
+        direction = self.repos.directions.find_by_id(direction_id)
+        if direction:
+            return _serialize_doc(direction.to_dict())
+        return None
+
+    async def _claim_direction(self, fuzzer: str, processor_id: str) -> Optional[dict]:
+        """Claim a pending direction for analysis."""
+        if not self.repos or not fuzzer or not processor_id:
+            return None
+
+        direction = self.repos.directions.claim(self.task_id, fuzzer, processor_id)
+        if direction:
+            self._log(f"Direction claimed: {direction.name} by {processor_id}")
+            return _serialize_doc(direction.to_dict())
+        return None
+
+    async def _complete_direction(self, params: dict) -> dict:
+        """Mark a direction as completed."""
+        if not self.repos:
+            return {"updated": False, "error": "Database not available"}
+
+        direction_id = params.get("id")
+        if not direction_id:
+            return {"updated": False, "error": "Direction ID required"}
+
+        success = self.repos.directions.complete(
+            direction_id,
+            sp_count=params.get("sp_count", 0),
+            functions_analyzed=params.get("functions_analyzed", 0),
+        )
+
+        if success:
+            self._log(f"Direction completed: {direction_id}")
+            return {"updated": True}
+        else:
+            return {"updated": False, "error": "Failed to update direction"}
 
     # =========================================================================
     # Lifecycle

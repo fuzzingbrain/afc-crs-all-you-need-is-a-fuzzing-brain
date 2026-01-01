@@ -11,7 +11,7 @@ from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError
 from loguru import logger
 
-from ..core.models import Task, POV, Patch, Worker, Fuzzer, Function, CallGraphNode, SuspiciousPoint
+from ..core.models import Task, POV, Patch, Worker, Fuzzer, Function, CallGraphNode, SuspiciousPoint, Direction, DirectionStatus
 
 
 T = TypeVar("T")
@@ -803,6 +803,227 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             return False
 
 
+class DirectionRepository(BaseRepository[Direction]):
+    """Repository for Direction model (Full-scan analysis directions)"""
+
+    def __init__(self, db: Database):
+        super().__init__(db, "directions", Direction)
+
+    def find_by_task(self, task_id: str) -> List[Direction]:
+        """Find all directions for a task"""
+        return self.find_all({"task_id": task_id})
+
+    def find_by_fuzzer(self, task_id: str, fuzzer: str) -> List[Direction]:
+        """Find all directions for a specific fuzzer"""
+        return self.find_all({"task_id": task_id, "fuzzer": fuzzer})
+
+    def find_pending(self, task_id: str, fuzzer: str = None) -> List[Direction]:
+        """Find pending directions"""
+        query = {"task_id": task_id, "status": DirectionStatus.PENDING.value}
+        if fuzzer:
+            query["fuzzer"] = fuzzer
+        return self.find_all(query)
+
+    def find_by_priority(self, task_id: str, fuzzer: str = None) -> List[Direction]:
+        """Find directions sorted by priority (high risk first)"""
+        try:
+            query = {"task_id": task_id}
+            if fuzzer:
+                query["fuzzer"] = fuzzer
+            # Sort by risk level (high > medium > low) and then by created_at
+            cursor = self.collection.find(query).sort([
+                ("risk_level", 1),  # 'high' < 'low' < 'medium' alphabetically, need custom sort
+                ("created_at", 1)
+            ])
+            directions = [self.model_class.from_dict(doc) for doc in cursor]
+            # Custom sort by priority score (descending)
+            return sorted(directions, key=lambda d: d.get_priority_score(), reverse=True)
+        except Exception as e:
+            logger.error(f"Failed to find directions by priority: {e}")
+            return []
+
+    def claim(self, task_id: str, fuzzer: str, processor_id: str) -> Optional[Direction]:
+        """
+        Atomically claim a direction for analysis.
+
+        Args:
+            task_id: Task ID
+            fuzzer: Fuzzer name
+            processor_id: ID of the agent claiming
+
+        Returns:
+            Claimed Direction, or None if none available
+        """
+        try:
+            from pymongo import ReturnDocument
+
+            # Find pending directions, prioritize high risk
+            # Custom sort needed because risk_level is string
+            pending = self.find_pending(task_id, fuzzer)
+            if not pending:
+                return None
+
+            # Sort by priority
+            pending.sort(key=lambda d: d.get_priority_score(), reverse=True)
+            target = pending[0]
+
+            # Atomic claim
+            result = self.collection.find_one_and_update(
+                {
+                    "_id": target.direction_id,
+                    "status": DirectionStatus.PENDING.value,
+                },
+                {
+                    "$set": {
+                        "status": DirectionStatus.IN_PROGRESS.value,
+                        "processor_id": processor_id,
+                        "started_at": datetime.now(),
+                    }
+                },
+                return_document=ReturnDocument.AFTER,
+            )
+
+            if result:
+                logger.debug(f"Claimed direction {result['_id']} by {processor_id}")
+                return self.model_class.from_dict(result)
+            return None
+
+        except Exception as e:
+            logger.error(f"Failed to claim direction: {e}")
+            return None
+
+    def complete(
+        self,
+        direction_id: str,
+        sp_count: int = 0,
+        functions_analyzed: int = 0,
+    ) -> bool:
+        """
+        Mark direction as completed.
+
+        Args:
+            direction_id: Direction ID
+            sp_count: Number of SPs found
+            functions_analyzed: Number of functions analyzed
+
+        Returns:
+            True if successful
+        """
+        return self.update(direction_id, {
+            "status": DirectionStatus.COMPLETED.value,
+            "processor_id": None,
+            "sp_count": sp_count,
+            "functions_analyzed": functions_analyzed,
+            "completed_at": datetime.now(),
+        })
+
+    def skip(self, direction_id: str, reason: str = "") -> bool:
+        """Mark direction as skipped"""
+        updates = {
+            "status": DirectionStatus.SKIPPED.value,
+            "processor_id": None,
+            "completed_at": datetime.now(),
+        }
+        if reason:
+            updates["risk_reason"] = f"Skipped: {reason}"
+        return self.update(direction_id, updates)
+
+    def release_claim(self, direction_id: str) -> bool:
+        """Release a claimed direction (e.g., on agent failure)"""
+        return self.update(direction_id, {
+            "status": DirectionStatus.PENDING.value,
+            "processor_id": None,
+            "started_at": None,
+        })
+
+    def count_by_status(self, task_id: str, fuzzer: str = None) -> dict:
+        """Get count of directions by status"""
+        try:
+            query = {"task_id": task_id}
+            if fuzzer:
+                query["fuzzer"] = fuzzer
+
+            counts = {
+                "pending": 0,
+                "in_progress": 0,
+                "completed": 0,
+                "skipped": 0,
+            }
+
+            for status in DirectionStatus:
+                q = {**query, "status": status.value}
+                counts[status.value] = self.collection.count_documents(q)
+
+            counts["total"] = sum(counts.values())
+            return counts
+
+        except Exception as e:
+            logger.error(f"Failed to count directions by status: {e}")
+            return {"total": 0}
+
+    def is_all_complete(self, task_id: str, fuzzer: str = None) -> bool:
+        """Check if all directions are completed or skipped"""
+        try:
+            query = {"task_id": task_id}
+            if fuzzer:
+                query["fuzzer"] = fuzzer
+            query["status"] = {"$in": [DirectionStatus.PENDING.value, DirectionStatus.IN_PROGRESS.value]}
+            pending = self.collection.count_documents(query)
+            return pending == 0
+        except Exception as e:
+            logger.error(f"Failed to check direction completion: {e}")
+            return False
+
+    def get_stats(self, task_id: str, fuzzer: str = None) -> dict:
+        """Get statistics for directions"""
+        try:
+            query = {"task_id": task_id}
+            if fuzzer:
+                query["fuzzer"] = fuzzer
+
+            pipeline = [
+                {"$match": query},
+                {"$group": {
+                    "_id": None,
+                    "total_directions": {"$sum": 1},
+                    "total_sp_count": {"$sum": "$sp_count"},
+                    "total_functions_analyzed": {"$sum": "$functions_analyzed"},
+                    "completed": {"$sum": {"$cond": [{"$eq": ["$status", "completed"]}, 1, 0]}},
+                    "high_risk": {"$sum": {"$cond": [{"$eq": ["$risk_level", "high"]}, 1, 0]}},
+                    "medium_risk": {"$sum": {"$cond": [{"$eq": ["$risk_level", "medium"]}, 1, 0]}},
+                    "low_risk": {"$sum": {"$cond": [{"$eq": ["$risk_level", "low"]}, 1, 0]}},
+                }}
+            ]
+
+            result = list(self.collection.aggregate(pipeline))
+            if result:
+                stats = result[0]
+                del stats["_id"]
+                return stats
+            return {
+                "total_directions": 0,
+                "total_sp_count": 0,
+                "total_functions_analyzed": 0,
+                "completed": 0,
+                "high_risk": 0,
+                "medium_risk": 0,
+                "low_risk": 0,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get direction stats: {e}")
+            return {}
+
+    def delete_by_task(self, task_id: str) -> int:
+        """Delete all directions for a task"""
+        try:
+            result = self.collection.delete_many({"task_id": task_id})
+            return result.deleted_count
+        except Exception as e:
+            logger.error(f"Failed to delete directions for task: {e}")
+            return 0
+
+
 class WorkerRepository(BaseRepository[Worker]):
     """Repository for Worker model"""
 
@@ -1034,6 +1255,7 @@ class RepositoryManager:
         self._povs: Optional[POVRepository] = None
         self._patches: Optional[PatchRepository] = None
         self._suspicious_points: Optional[SuspiciousPointRepository] = None
+        self._directions: Optional[DirectionRepository] = None
         self._workers: Optional[WorkerRepository] = None
         self._fuzzers: Optional[FuzzerRepository] = None
         self._functions: Optional[FunctionRepository] = None
@@ -1066,6 +1288,13 @@ class RepositoryManager:
         if self._suspicious_points is None:
             self._suspicious_points = SuspiciousPointRepository(self.db)
         return self._suspicious_points
+
+    @property
+    def directions(self) -> DirectionRepository:
+        """Get DirectionRepository"""
+        if self._directions is None:
+            self._directions = DirectionRepository(self.db)
+        return self._directions
 
     @property
     def workers(self) -> WorkerRepository:

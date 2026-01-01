@@ -199,6 +199,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scan-mode", type=str, choices=["full", "delta"], default="full", help="Scan mode: full or delta")
     parser.add_argument("--sanitizers", type=str, default="address", help="Comma-separated sanitizers")
     parser.add_argument("--timeout", type=int, default=60, help="Timeout in minutes")
+    parser.add_argument("--pov-count", type=int, default=0, help="Stop after N verified POVs (0 = unlimited)")
 
     # Delta scan
     parser.add_argument("--base-commit", type=str, help="Base commit for delta scan")
@@ -241,6 +242,8 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
         config.sanitizers = args.sanitizers.split(",")
     if args.timeout:
         config.timeout_minutes = args.timeout
+    if args.pov_count:
+        config.pov_count = args.pov_count
     if args.base_commit:
         config.base_commit = args.base_commit
     if args.delta_commit:

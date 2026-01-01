@@ -50,6 +50,7 @@ class WorkerDispatcher:
         self.repos = repos
         self.project_name = config.ossfuzz_project or task.project_name
         self.analyze_result = analyze_result
+        self.pov_count_target = config.pov_count  # Target POV count (0 = unlimited)
 
     def dispatch(self, fuzzers: List[Fuzzer]) -> List[Dict[str, Any]]:
         """
@@ -296,6 +297,39 @@ class WorkerDispatcher:
         finished = status["completed"] + status["failed"]
         return finished == status["total"] and status["total"] > 0
 
+    def get_verified_pov_count(self) -> int:
+        """Get count of verified POVs for this task."""
+        return self.repos.povs.count({
+            "task_id": self.task.task_id,
+            "verified": True,
+        })
+
+    def graceful_shutdown(self) -> None:
+        """
+        Gracefully shutdown all running workers.
+
+        Revokes Celery tasks and marks workers as completed.
+        """
+        from celery.result import AsyncResult
+        from ..celery_app import app
+
+        workers = self.repos.workers.find_by_task(self.task.task_id)
+
+        for worker in workers:
+            if worker.status.value in ["pending", "building", "running"]:
+                # Revoke Celery task (terminate=True for immediate stop)
+                if worker.celery_job_id:
+                    try:
+                        app.control.revoke(worker.celery_job_id, terminate=True)
+                        logger.info(f"Revoked worker: {worker.worker_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to revoke {worker.worker_id}: {e}")
+
+                # Mark as completed (graceful shutdown)
+                worker.status = WorkerStatus.COMPLETED
+                worker.error_msg = "Graceful shutdown: POV target reached"
+                self.repos.workers.save(worker)
+
     def wait_for_completion(
         self,
         timeout_minutes: int = 60,
@@ -319,8 +353,12 @@ class WorkerDispatcher:
         start_time = datetime.now()
         timeout_delta = timedelta(minutes=timeout_minutes)
         last_status = None
+        last_pov_count = 0
 
-        logger.info(f"Waiting for workers to complete (timeout: {timeout_minutes}min)")
+        if self.pov_count_target > 0:
+            logger.info(f"Waiting for workers to complete (timeout: {timeout_minutes}min, pov_target: {self.pov_count_target})")
+        else:
+            logger.info(f"Waiting for workers to complete (timeout: {timeout_minutes}min)")
 
         while True:
             # Check timeout
@@ -332,6 +370,24 @@ class WorkerDispatcher:
                     "elapsed_minutes": elapsed.total_seconds() / 60,
                     **self.get_status(),
                 }
+
+            # Check POV count target
+            if self.pov_count_target > 0:
+                current_pov_count = self.get_verified_pov_count()
+                if current_pov_count != last_pov_count:
+                    logger.info(f"Verified POVs: {current_pov_count}/{self.pov_count_target}")
+                    last_pov_count = current_pov_count
+
+                if current_pov_count >= self.pov_count_target:
+                    logger.info(f"🎯 POV target reached! ({current_pov_count}/{self.pov_count_target})")
+                    logger.info("Initiating graceful shutdown...")
+                    self.graceful_shutdown()
+                    return {
+                        "status": "pov_target_reached",
+                        "elapsed_minutes": elapsed.total_seconds() / 60,
+                        "pov_count": current_pov_count,
+                        **self.get_status(),
+                    }
 
             # Get current status
             status = self.get_status()

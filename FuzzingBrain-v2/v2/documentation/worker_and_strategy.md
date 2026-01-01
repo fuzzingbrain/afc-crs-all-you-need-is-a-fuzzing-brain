@@ -970,7 +970,7 @@ Full-scan 模式分析整个代码库（在 fuzzer 可达范围内）来寻找�
 | | Delta-Scan | Full-Scan |
 |---|---|---|
 | 范围 | diff 中修改的函数 | 所有 fuzzer 可达函数 |
-| 过滤方式 | 对 diff 做可达性检查 | 基于调用链分析 |
+| 过滤方式 | 对 diff 做可达性检查 | 方向规划 + 调用链分析 |
 | 数据源 | diff 文件 | introspector（调用图 + 可达函数） |
 | 使用场景 | 新 commit 漏洞检查 | 全面安全审计 |
 
@@ -981,37 +981,325 @@ Full-scan 模式分析整个代码库（在 fuzzer 可达范围内）来寻找�
 
 挑战：可能有数百个可达函数，不可能一个一个分析。
 
-**解决方案**：基于调用链的批量分析。
+**解决方案**：两阶段分析架构
+
+1. **方向规划 Agent**：宏观划分分析方向
+2. **SP Find Agent 池**：在各自方向内微观探索
 
 
-## 基于调用链的分析策略
-
-### 核心想法
-
-利用调用图，提取从 fuzzer 入口到各个深层函数的 **完整调用链**，让 LLM 在有上下文的情况下分析。
+## 架构设计
 
 ```
-调用链示例：
-fuzzer_entry → png_read_info → png_handle_iCCP → png_malloc
-
-LLM 能看到：
-- 数据从哪里来（fuzzer_entry）
-- 经过了哪些处理（png_read_info）
-- 最终到达哪里（png_handle_iCCP）
+┌─────────────────────────────────────────────────────────────────┐
+│                      方向规划 Agent（1个）                        │
+│                                                                 │
+│  输入：调用图 + fuzzer 代码 + 各方向核心代码                        │
+│  输出：方向列表（每个带代码摘要 + 安全风险评估）                      │
+│  所有方向都入队，风险高的优先                                       │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │    方向队列      │
+                    │  按安全风险排序   │
+                    └─────────────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+        ┌──────────┐   ┌──────────┐   ┌──────────┐
+        │ SP Find  │   │ SP Find  │   │ SP Find  │
+        │ Agent 1  │   │ Agent 2  │   │ Agent 3  │
+        │          │   │          │   │          │
+        │ 领取方向  │   │ 领取方向  │   │ 领取方向  │
+        │ 自由探索  │   │ 自由探索  │   │ 自由探索  │
+        └──────────┘   └──────────┘   └──────────┘
+              │               │               │
+              └───────────────┼───────────────┘
+                              ▼
+                    ┌─────────────────┐
+                    │    SP 去重       │
+                    │ 不同方向发现同一  │
+                    │ 漏洞会被合并      │
+                    └─────────────────┘
+                              │
+                              ▼
+                      Verify → POV
 ```
 
-### 为什么用调用链？
 
-1. **上下文**：单独看 `png_handle_iCCP` 不知道输入从哪来，看调用链就清楚了
-2. **数据流**：调用链天然表示数据流向
-3. **多次覆盖**：同一个函数可能出现在多条调用链中，自然实现多角度分析
+## 通用规则：Fuzzer 代码必须作为初始提示词
+
+**所有 Agent 都必须在初始提示词中包含 fuzzer 代码。**
+
+原因：
+- 只有 fuzzer 可达的漏洞才是"真漏洞"
+- Agent 需要理解输入如何进入目标库
+- 避免 Agent 分析 fuzzer 无法触发的代码路径
+
+```
+初始提示词结构：
+1. fuzzer 源码（必须）
+2. 任务描述
+3. 当前方向/目标
+4. 相关上下文
+```
 
 
-## 待讨论
+## 方向规划 Agent
 
-- 每条调用链给 LLM 什么信息？（函数名？签名？源码摘要？）
-- LLM 打分/评估的标准是什么？
-- 如何生成和选择调用链？
-- 批处理的具体设计？
+### 职责
+
+看全局，划分分析方向。不深入分析漏洞，只做方向规划。
+
+### 输入
+
+1. **fuzzer 代码**（必须）：理解输入如何进入目标库
+2. **调用图**：从 fuzzer 入口的完整调用关系
+3. **各子树核心代码**：大概浏览，评估安全风险
+
+### 输出
+
+方向列表，每个方向包含：
+
+```
+方向 ID: direction_001
+名称: Chunk 处理器
+安全风险: 高
+风险理由: 直接解析外部输入，存在类型转换
+核心函数: [png_handle_iCCP, png_handle_tEXt, png_handle_zTXt]
+调用链摘要: fuzzer → png_read_info → png_handle_*
+代码摘要: 这些函数解析 PNG 文件中的各种 chunk，输入直接来自文件...
+```
+
+### 关键设计
+
+1. **所有方向都会被分析**：权重只影响处理顺序，不筛选
+2. **安全风险 ≠ 业务重要性**：漏洞可能藏在"边缘"模块
+3. **一次性规划完**：可以全局去重、加权重、优化分配
+
+
+## SP Find Agent
+
+### 职责
+
+在给定方向内自由探索，寻找可疑点。
+
+### 输入
+
+1. **方向信息**：从方向队列领取
+2. **调用链**：该方向相关的函数调用路径
+3. **源码**：当前分析函数 + 上下 3 层函数的完整源码
+
+### 工作方式
+
+1. 从方向队列领取一个方向
+2. 阅读方向的代码摘要，理解上下文
+3. 使用 `find_all_paths` 获取相关调用链
+4. 深入分析函数源码，寻找漏洞
+5. 创建 SP（通过 `create_suspicious_point`）
+6. 完成后领取下一个方向
+
+### 智能上下文窗口
+
+- 上下文 token 上限：80k
+- 给当前函数 + 上下 3 层的完整源码
+- 像窗口一样移动，保持上下文连贯
+
+
+## SP 去重与反馈机制
+
+### 去重的作用
+
+不同方向可能发现同一个漏洞：
+
+```
+方向 A（Chunk 处理）发现：png_handle_iCCP 有类型混淆
+方向 C（内存管理）发现：png_handle_iCCP 调用 png_malloc 时有问题
+
+→ SP 去重：合并为一个 SP，记录多个来源
+```
+
+**好处**：
+1. 不同角度发现同一漏洞 = 更高可信度
+2. 避免重复验证和 POV 生成
+3. 来源信息保留，便于分析
+
+### 重复反馈机制
+
+**当 Agent 创建的 SP 与已有 SP 重复时，系统会反馈给 Agent：**
+
+```
+反馈消息：
+"你发现的可疑点与已有 SP 重复（SP ID: xxx）。
+另一个 Agent 正在分析这个方向。
+建议：切换到其他路径继续探索。"
+```
+
+**Agent 收到反馈后可以：**
+1. 切换到同方向内的其他函数/调用链
+2. 避免在已被覆盖的区域浪费时间
+3. 提高整体分析效率
+
+**实现方式：**
+- `create_suspicious_point` 返回 `merged: true` 时触发
+- 反馈信息注入到 Agent 的下一轮对话中
+
+
+## 工具支持
+
+### 已实现
+
+| 工具 | 用途 |
+|------|------|
+| `get_reachable_functions(fuzzer)` | 获取所有可达函数 |
+| `get_call_graph(fuzzer, depth)` | 获取调用图 |
+| `find_all_paths(func1, func2)` | 查找两点间所有路径 |
+| `get_function_source(name)` | 获取函数源码 |
+| `get_callers(func)` / `get_callees(func)` | 获取调用者/被调用者 |
+| `create_suspicious_point(...)` | 创建 SP |
+
+### 缓存机制
+
+- `find_all_paths` 结果在 Task 级别缓存
+- 所有 Worker/Agent 共享缓存
+- Task 结束自动清理
+
+
+## 配置参数
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `num_sp_find_agents` | 3 | SP Find Agent 数量 |
+| `context_token_limit` | 80000 | 上下文 token 上限 |
+| `context_depth` | 3 | 上下文包含的调用层数 |
+| `max_path_depth` | 10 | 路径搜索最大深度 |
+| `max_paths_per_query` | 100 | 每次查询最大路径数 |
+
+
+## 函数级别 Coverage 统计
+
+### 目的
+
+统计一次 Full-scan 运行中，Agent 实际查看了多少 fuzzer 可达函数。用于：
+1. 评估分析覆盖率
+2. 发现遗漏的区域
+3. 优化方向规划策略
+
+### 函数池定义
+
+```
+函数池 = fuzzer 可达的所有函数（通过 get_reachable_functions 获取）
+```
+
+### 统计指标
+
+| 指标 | 说明 |
+|------|------|
+| `total_functions` | 函数池总数 |
+| `viewed_functions` | Agent 查看过源码的函数数 |
+| `analyzed_functions` | Agent 深入分析过的函数数（创建过 SP 或明确排除） |
+| `coverage_rate` | viewed / total |
+| `analysis_rate` | analyzed / total |
+
+### 数据收集
+
+每当 Agent 调用以下工具时，记录函数被查看：
+- `get_function_source(name)` → 标记为 viewed
+- `create_suspicious_point(function_name)` → 标记为 analyzed
+
+### 输出报告
+
+```json
+{
+  "task_id": "xxx",
+  "total_functions": 500,
+  "viewed_functions": 420,
+  "analyzed_functions": 380,
+  "coverage_rate": 0.84,
+  "analysis_rate": 0.76,
+  "not_viewed": ["func_a", "func_b", ...],
+  "viewed_but_not_analyzed": ["func_c", "func_d", ...]
+}
+```
+
+### 用途
+
+1. **发现盲区**：`not_viewed` 列表显示哪些函数从未被查看
+2. **评估方向规划质量**：覆盖率低说明方向划分有问题
+3. **迭代优化**：下次运行可以优先关注未覆盖区域
+
+
+### 实现设计：事件驱动架构
+
+考虑到未来会有更多监控需求（各阶段性能监控、详细统计等），采用事件驱动架构：
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         MCP Tools 层                            │
+│                                                                 │
+│  get_function_source() ──→ emit("function_viewed", {...})      │
+│  create_suspicious_point() ──→ emit("sp_created", {...})       │
+│  ...                                                            │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                    ┌─────────────────┐
+                    │   Event Bus     │
+                    │   事件总线       │
+                    └─────────────────┘
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+        ┌──────────┐   ┌──────────┐   ┌──────────┐
+        │Coverage  │   │Performance│   │ Future   │
+        │Tracker   │   │Monitor   │   │ ...      │
+        │          │   │          │   │          │
+        │订阅:      │   │订阅:      │   │          │
+        │function_ │   │tool_call │   │          │
+        │viewed    │   │agent_step│   │          │
+        └──────────┘   └──────────┘   └──────────┘
+```
+
+**好处：**
+1. **完全解耦**：Tool 只发事件，不关心谁在听
+2. **易扩展**：新增监控只需订阅事件，不改 Tool 代码
+3. **并发友好**：事件队列天然串行化
+4. **异步可选**：事件处理可以异步，不阻塞主流程
+
+**事件类型（规划）：**
+
+| 事件 | 触发时机 | 携带数据 |
+|------|---------|---------|
+| `function_viewed` | get_function_source 调用 | function_name, worker_id, agent_type, timestamp |
+| `function_queried` | get_function 调用 | function_name, worker_id, agent_type, timestamp |
+| `sp_created` | create_suspicious_point | sp_id, function_name, worker_id, ... |
+| `sp_merged` | SP 去重合并 | sp_id, merged_with, ... |
+| `tool_call` | 任意 MCP Tool 调用 | tool_name, params, duration, ... |
+| `agent_step` | Agent 每轮对话 | agent_type, iteration, tokens_used, ... |
+
+**实现状态：待实现**
+
+
+## 与 Delta-scan 的复用
+
+Full-scan 复用 Delta-scan 的后半段流程：
+
+```
+Full-scan 独有          共用流程
+─────────────────────────────────────────────
+方向规划 Agent    ┐
+       ↓         │
+SP Find Agent 池 ┘→ SP 队列 → Verify Agent → POV Agent
+                              ↑
+Delta-scan 独有: ────────────┘
+分析 diff 改动
+```
+
+复用的组件：
+- SP 模型结构
+- SP 去重机制
+- Verify Agent 流程
+- POV Agent 流程
+- 并行流水线架构
 
 

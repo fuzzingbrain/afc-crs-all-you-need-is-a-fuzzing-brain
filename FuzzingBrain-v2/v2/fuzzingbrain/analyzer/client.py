@@ -462,6 +462,121 @@ class AnalysisClient:
         """
         return self._request(Method.GET_SUSPICIOUS_POINT, {"id": sp_id})
 
+    # =========================================================================
+    # Direction operations (Full-scan)
+    # =========================================================================
+
+    def create_direction(
+        self,
+        name: str,
+        risk_level: str,
+        risk_reason: str,
+        core_functions: List[str],
+        entry_functions: List[str] = None,
+        call_chain_summary: str = "",
+        code_summary: str = "",
+        fuzzer: str = "",
+    ) -> dict:
+        """
+        Create a new direction for Full-scan analysis.
+
+        Args:
+            name: Direction name (e.g., "Chunk Handlers")
+            risk_level: Security risk level ("high", "medium", "low")
+            risk_reason: Why this risk level was assigned
+            core_functions: Main functions in this direction
+            entry_functions: How fuzzer input reaches this direction
+            call_chain_summary: Summary of call paths
+            code_summary: Brief description of what this code does
+            fuzzer: Fuzzer name
+
+        Returns:
+            {"id": "...", "created": True}
+        """
+        return self._request(Method.CREATE_DIRECTION, {
+            "name": name,
+            "risk_level": risk_level,
+            "risk_reason": risk_reason,
+            "core_functions": core_functions,
+            "entry_functions": entry_functions or [],
+            "call_chain_summary": call_chain_summary,
+            "code_summary": code_summary,
+            "fuzzer": fuzzer,
+        })
+
+    def list_directions(
+        self,
+        fuzzer: str = None,
+        status: str = None,
+    ) -> dict:
+        """
+        List directions with optional filters.
+
+        Args:
+            fuzzer: Filter by fuzzer name
+            status: Filter by status ("pending", "in_progress", "completed")
+
+        Returns:
+            {"directions": [...], "count": N, "stats": {...}}
+        """
+        params = {}
+        if fuzzer:
+            params["fuzzer"] = fuzzer
+        if status:
+            params["status"] = status
+        return self._request(Method.LIST_DIRECTIONS, params)
+
+    def get_direction(self, direction_id: str) -> Optional[dict]:
+        """
+        Get a single direction by ID.
+
+        Args:
+            direction_id: Direction ID
+
+        Returns:
+            Direction dict or None
+        """
+        return self._request(Method.GET_DIRECTION, {"id": direction_id})
+
+    def claim_direction(self, fuzzer: str, processor_id: str) -> Optional[dict]:
+        """
+        Claim a pending direction for analysis.
+
+        Args:
+            fuzzer: Fuzzer name
+            processor_id: ID of the agent claiming
+
+        Returns:
+            Claimed direction dict or None if none available
+        """
+        return self._request(Method.CLAIM_DIRECTION, {
+            "fuzzer": fuzzer,
+            "processor_id": processor_id,
+        })
+
+    def complete_direction(
+        self,
+        direction_id: str,
+        sp_count: int = 0,
+        functions_analyzed: int = 0,
+    ) -> dict:
+        """
+        Mark a direction as completed.
+
+        Args:
+            direction_id: Direction ID
+            sp_count: Number of SPs found
+            functions_analyzed: Number of functions analyzed
+
+        Returns:
+            {"updated": True}
+        """
+        return self._request(Method.COMPLETE_DIRECTION, {
+            "id": direction_id,
+            "sp_count": sp_count,
+            "functions_analyzed": functions_analyzed,
+        })
+
 
 def connect(socket_path: str, timeout: float = 30.0, client_id: str = None) -> AnalysisClient:
     """
