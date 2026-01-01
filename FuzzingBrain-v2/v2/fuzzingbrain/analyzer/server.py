@@ -106,6 +106,9 @@ class AnalysisServer:
         # Query log for experiment tracking
         self.query_log: List[Dict[str, Any]] = []
 
+        # Path cache for find_all_paths (task-level cache)
+        self._path_cache: Dict[tuple, dict] = {}
+
     def _log(self, msg: str, level: str = "INFO"):
         """Log message."""
         if level == "ERROR":
@@ -398,6 +401,15 @@ class AnalysisServer:
                 )
                 return Response.ok(result, req_id)
 
+            elif method == Method.FIND_ALL_PATHS:
+                result = await self._find_all_paths(
+                    params.get("func1"),
+                    params.get("func2"),
+                    params.get("max_depth", 10),
+                    params.get("max_paths", 100),
+                )
+                return Response.ok(result, req_id)
+
             # Reachability queries
             elif method == Method.GET_REACHABILITY:
                 result = await self._get_reachability(
@@ -580,6 +592,117 @@ class AnalysisServer:
                     queue.append((callee, d + 1))
 
         return graph
+
+    async def _find_all_paths(
+        self,
+        func1: str,
+        func2: str,
+        max_depth: int = 10,
+        max_paths: int = 100,
+    ) -> dict:
+        """
+        Find all call paths from func1 to func2.
+
+        Uses DFS with depth limiting and path count limiting.
+        Results are cached at task level.
+
+        Args:
+            func1: Start function
+            func2: End function
+            max_depth: Maximum path length (default 10)
+            max_paths: Maximum number of paths to return (default 100)
+
+        Returns:
+            {
+                "func1": str,
+                "func2": str,
+                "max_depth": int,
+                "path_count": int,
+                "paths": [[func1, ..., func2], ...],
+                "truncated": bool,  # True if more paths exist but hit max_paths
+                "cached": bool,     # True if result was from cache
+            }
+        """
+        if not func1 or not func2 or not self.repos:
+            return {
+                "func1": func1,
+                "func2": func2,
+                "max_depth": max_depth,
+                "path_count": 0,
+                "paths": [],
+                "truncated": False,
+                "cached": False,
+            }
+
+        # Check cache
+        cache_key = (func1, func2, max_depth)
+        if cache_key in self._path_cache:
+            cached_result = self._path_cache[cache_key].copy()
+            cached_result["cached"] = True
+            return cached_result
+
+        # DFS to find all paths
+        paths = []
+        truncated = False
+
+        def dfs(current: str, path: list, visited: set):
+            nonlocal truncated
+
+            # Stop if we have enough paths
+            if len(paths) >= max_paths:
+                truncated = True
+                return
+
+            # Stop if path too long
+            if len(path) > max_depth:
+                return
+
+            # Found target
+            if current == func2:
+                paths.append(path.copy())
+                return
+
+            # Avoid cycles
+            if current in visited:
+                return
+
+            visited.add(current)
+
+            # Get callees synchronously (we're in a sync context within async)
+            node = self.repos.callgraph_nodes.collection.find_one({
+                "task_id": self.task_id,
+                "function_name": current,
+            })
+
+            if node:
+                callees = node.get("callees", [])
+                for callee in callees:
+                    if callee not in visited:
+                        path.append(callee)
+                        dfs(callee, path, visited)
+                        path.pop()
+
+            visited.remove(current)
+
+        # Start DFS
+        dfs(func1, [func1], set())
+
+        result = {
+            "func1": func1,
+            "func2": func2,
+            "max_depth": max_depth,
+            "path_count": len(paths),
+            "paths": paths,
+            "truncated": truncated,
+            "cached": False,
+        }
+
+        # Cache result
+        self._path_cache[cache_key] = result.copy()
+
+        self._log(f"find_all_paths: {func1} -> {func2}, found {len(paths)} paths (truncated={truncated})")
+
+        return result
 
     async def _get_reachability(self, fuzzer: str, function: str) -> dict:
         """Check if function is reachable from fuzzer."""

@@ -239,6 +239,40 @@ class AnalysisClient:
         """
         return self._request(Method.GET_CALL_GRAPH, {"fuzzer": fuzzer, "depth": depth})
 
+    def find_all_paths(
+        self,
+        func1: str,
+        func2: str,
+        max_depth: int = 10,
+        max_paths: int = 100,
+    ) -> dict:
+        """
+        Find all call paths from func1 to func2.
+
+        Args:
+            func1: Start function (e.g., fuzzer entry point)
+            func2: End function (target function)
+            max_depth: Maximum path length (default 10)
+            max_paths: Maximum number of paths to return (default 100)
+
+        Returns:
+            {
+                "func1": str,
+                "func2": str,
+                "max_depth": int,
+                "path_count": int,
+                "paths": [[func1, ..., func2], ...],
+                "truncated": bool,
+                "cached": bool,
+            }
+        """
+        return self._request(Method.FIND_ALL_PATHS, {
+            "func1": func1,
+            "func2": func2,
+            "max_depth": max_depth,
+            "max_paths": max_paths,
+        })
+
     # =========================================================================
     # Reachability queries
     # =========================================================================

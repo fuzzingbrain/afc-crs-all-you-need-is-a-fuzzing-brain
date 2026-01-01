@@ -344,6 +344,49 @@ def get_call_graph(fuzzer: str, depth: int = 3) -> Dict[str, Any]:
         }
 
 
+@tools_mcp.tool
+def find_all_paths(
+    func1: str,
+    func2: str,
+    max_depth: int = 10,
+    max_paths: int = 100,
+) -> Dict[str, Any]:
+    """
+    Find all call paths from func1 to func2.
+
+    Useful for understanding how data flows from a fuzzer entry point
+    to a specific target function.
+
+    Args:
+        func1: Start function (e.g., fuzzer entry point like "LLVMFuzzerTestOneInput")
+        func2: End function (target function to analyze)
+        max_depth: Maximum path length (default: 10)
+        max_paths: Maximum number of paths to return (default: 100)
+
+    Returns:
+        - paths: List of call paths, each path is a list of function names
+        - path_count: Number of paths found
+        - truncated: True if more paths exist but hit max_paths limit
+        - cached: True if result was served from cache
+    """
+    err = _ensure_client()
+    if err:
+        return err
+
+    try:
+        client = _get_client()
+        result = client.find_all_paths(func1, func2, max_depth, max_paths)
+        return {
+            "success": True,
+            **result,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+        }
+
+
 # =============================================================================
 # Reachability Tools
 # =============================================================================
@@ -518,6 +561,7 @@ __all__ = [
     "get_callers",
     "get_callees",
     "get_call_graph",
+    "find_all_paths",
     # Reachability
     "check_reachability",
     "get_reachable_functions",

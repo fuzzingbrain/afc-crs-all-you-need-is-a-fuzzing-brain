@@ -30,6 +30,7 @@ class Method(str, Enum):
     GET_CALLERS = "get_callers"
     GET_CALLEES = "get_callees"
     GET_CALL_GRAPH = "get_call_graph"
+    FIND_ALL_PATHS = "find_all_paths"
 
     # Reachability queries
     GET_REACHABILITY = "get_reachability"
