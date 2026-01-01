@@ -348,21 +348,26 @@ class AnalyzerBuilder:
                 if time.time() - wait_start > 600:  # 10 min timeout
                     return sanitizer, False, "Timeout waiting for resources"
 
-            temp_dir = None
+            temp_fuzz_tooling = None
+            temp_repo = None
             try:
-                # Step 1: Copy fuzz-tooling to temp directory
-                temp_dir = self._create_temp_fuzz_tooling(sanitizer)
-                if not temp_dir:
-                    return sanitizer, False, "Failed to create temp directory"
+                # Step 1: Copy fuzz-tooling and repo to temp directories
+                temp_fuzz_tooling = self._create_temp_fuzz_tooling(sanitizer)
+                if not temp_fuzz_tooling:
+                    return sanitizer, False, "Failed to create temp fuzz-tooling"
+
+                temp_repo = self._create_temp_repo(sanitizer)
+                if not temp_repo:
+                    return sanitizer, False, "Failed to create temp repo"
 
                 self.log(f"[Building] {sanitizer} (parallel)")
 
-                # Step 2: Build in isolated directory
-                success, msg = self._build_sanitizer_in_dir(sanitizer, temp_dir)
+                # Step 2: Build in isolated directory with isolated repo
+                success, msg = self._build_sanitizer_in_dir(sanitizer, temp_fuzz_tooling, temp_repo)
 
                 if success:
                     # Step 3: Move output to main fuzz-tooling
-                    self._move_temp_output_to_main(sanitizer, temp_dir)
+                    self._move_temp_output_to_main(sanitizer, temp_fuzz_tooling)
 
                 with self._lock:
                     completed_count += 1
@@ -374,12 +379,13 @@ class AnalyzerBuilder:
                 return sanitizer, False, str(e)
             finally:
                 self.resource_monitor.release_build_slot()
-                # Step 4: Cleanup temp directory
-                if temp_dir and temp_dir.exists():
-                    try:
-                        shutil.rmtree(temp_dir)
-                    except Exception:
-                        pass
+                # Step 4: Cleanup temp directories
+                for temp_dir in [temp_fuzz_tooling, temp_repo]:
+                    if temp_dir and temp_dir.exists():
+                        try:
+                            shutil.rmtree(temp_dir)
+                        except Exception:
+                            pass
 
         # Run builds in parallel using ThreadPoolExecutor
         with ThreadPoolExecutor(max_workers=self.resource_monitor.max_parallel) as executor:
@@ -454,18 +460,45 @@ class AnalyzerBuilder:
             self.log(f"Failed to create temp fuzz-tooling for {sanitizer}: {e}", "ERROR")
             return None
 
-    def _build_sanitizer_in_dir(self, sanitizer: str, fuzz_tooling_dir: Path) -> Tuple[bool, str]:
+    def _create_temp_repo(self, sanitizer: str) -> Optional[Path]:
+        """
+        Create a temporary copy of repo for isolated build.
+
+        Args:
+            sanitizer: Sanitizer name (used in directory name)
+
+        Returns:
+            Path to temp directory, or None if failed
+        """
+        temp_dir = self.task_path / f"repo-{sanitizer}"
+
+        try:
+            # Remove if exists
+            if temp_dir.exists():
+                shutil.rmtree(temp_dir)
+
+            # Copy repo
+            shutil.copytree(self.repo_path, temp_dir)
+            return temp_dir
+
+        except Exception as e:
+            self.log(f"Failed to create temp repo for {sanitizer}: {e}", "ERROR")
+            return None
+
+    def _build_sanitizer_in_dir(self, sanitizer: str, fuzz_tooling_dir: Path, repo_dir: Path = None) -> Tuple[bool, str]:
         """
         Build with a specific sanitizer in the given directory.
 
         Args:
             sanitizer: Sanitizer type
             fuzz_tooling_dir: Path to fuzz-tooling directory to use
+            repo_dir: Path to repo directory to use (default: self.repo_path)
 
         Returns:
             (success, message)
         """
         helper_path = fuzz_tooling_dir / "infra" / "helper.py"
+        repo_path = repo_dir if repo_dir else self.repo_path
 
         cmd = [
             "python3", str(helper_path),
@@ -473,7 +506,7 @@ class AnalyzerBuilder:
             "--sanitizer", sanitizer,
             "--engine", "libfuzzer",
             self.project_name,
-            str(self.repo_path.absolute()),
+            str(repo_path.absolute()),
         ]
 
         try:
@@ -708,7 +741,7 @@ class AnalyzerBuilder:
 
     def _collect_fuzzers(self, sanitizer: str) -> List[str]:
         """
-        Collect successfully built fuzzers and move to sanitizer-specific dir.
+        Collect successfully built fuzzers from sanitizer-specific dir.
 
         Args:
             sanitizer: Sanitizer that was used for build
@@ -716,11 +749,18 @@ class AnalyzerBuilder:
         Returns:
             List of fuzzer names
         """
-        # First move the build output
-        if not self._move_build_output(sanitizer):
-            return []
-
         out_dir = self.build_out_base / f"{self.project_name}_{sanitizer}"
+
+        # Check if output already exists (parallel build moved it)
+        if not out_dir.exists():
+            # Try to move from default location (sequential build)
+            if not self._move_build_output(sanitizer):
+                return []
+
+        # Verify output directory exists
+        if not out_dir.exists():
+            self.log(f"Output directory not found: {out_dir}", "WARN")
+            return []
 
         fuzzer_names = []
         for f in out_dir.iterdir():
