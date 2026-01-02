@@ -228,8 +228,16 @@ class WorkerDispatcher:
             "diff_path": str(Path(workspace_path) / "diff" / "ref.diff") if self.task.scan_mode.value == "delta" else None,
         }
 
-        # Dispatch Celery task
-        result = run_worker.delay(assignment)
+        # Dispatch Celery task with dynamic time limit based on config
+        # Convert minutes to seconds, add 5 min buffer for soft limit
+        timeout_seconds = self.config.timeout_minutes * 60
+        soft_timeout_seconds = max(timeout_seconds - 300, timeout_seconds // 2)  # 5 min before hard limit
+
+        result = run_worker.apply_async(
+            args=[assignment],
+            time_limit=timeout_seconds,
+            soft_time_limit=soft_timeout_seconds,
+        )
 
         # Update worker with Celery job ID
         worker.celery_job_id = result.id
@@ -298,10 +306,10 @@ class WorkerDispatcher:
         return finished == status["total"] and status["total"] > 0
 
     def get_verified_pov_count(self) -> int:
-        """Get count of verified POVs for this task."""
+        """Get count of verified (successful) POVs for this task."""
         return self.repos.povs.count({
             "task_id": self.task.task_id,
-            "verified": True,
+            "is_successful": True,
         })
 
     def graceful_shutdown(self) -> None:
@@ -449,6 +457,15 @@ class WorkerDispatcher:
                 },
             })
 
+            # Query actual successful POV count from DB (more reliable than worker's self-report)
+            # This handles cases where worker was killed but POVs were already saved
+            actual_pov_count = self.repos.povs.count({
+                "task_id": self.task.task_id,
+                "harness_name": worker.fuzzer,
+                "sanitizer": worker.sanitizer,
+                "is_successful": True,
+            })
+
             result = {
                 "worker_id": worker.worker_id,
                 "fuzzer": worker.fuzzer,
@@ -456,7 +473,7 @@ class WorkerDispatcher:
                 "status": worker.status.value,
                 "sps_found": sp_count,
                 "sps_merged": merged_count,
-                "povs_found": worker.povs_found or 0,
+                "povs_found": actual_pov_count,  # Use DB count instead of worker's self-report
                 "patches_found": worker.patches_found or 0,
                 "error_msg": worker.error_msg,
                 "duration_seconds": worker.get_duration_seconds(),

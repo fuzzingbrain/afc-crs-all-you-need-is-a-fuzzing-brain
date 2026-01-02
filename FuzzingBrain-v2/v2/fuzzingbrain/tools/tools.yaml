@@ -112,15 +112,15 @@ analyzer:
     # Function Queries
     # -------------------------------------------------------------------------
     get_function:
-      description: "Get detailed information about a function by name"
+      description: "Get metadata about a function (file path, line numbers, complexity, parameters)"
       category: "function_query"
       params:
-        name:
+        function_name:
           type: string
           required: true
-          description: "Function name to look up"
+          description: "The exact name of the function to look up (e.g., 'png_read_info')"
       returns:
-        function: "Function metadata (name, file, lines, complexity, args, return_type)"
+        function: "Function metadata (name, file_path, start_line, end_line, complexity, args, return_type)"
 
     get_functions_by_file:
       description: "Get all functions defined in a specific file"
@@ -152,56 +152,56 @@ analyzer:
         count: "Number of matches"
 
     get_function_source:
-      description: "Get the source code of a function"
+      description: "Get the full source code of a function"
       category: "function_query"
       params:
-        name:
+        function_name:
           type: string
           required: true
-          description: "Function name"
+          description: "The exact name of the function (e.g., 'png_handle_iCCP')"
       returns:
-        source: "Source code of the function"
+        source: "The complete source code of the function"
 
     # -------------------------------------------------------------------------
     # Call Graph
     # -------------------------------------------------------------------------
     get_callers:
-      description: "Get all functions that call the specified function"
+      description: "Get all functions that call the specified function (who calls this function?)"
       category: "call_graph"
       params:
-        function:
+        function_name:
           type: string
           required: true
-          description: "Target function name"
+          description: "The function to find callers for (e.g., 'png_handle_iCCP')"
       returns:
-        callers: "List of function names that call the target"
+        callers: "List of function names that call this function"
         count: "Number of callers"
 
     get_callees:
-      description: "Get all functions called by the specified function"
+      description: "Get all functions called by the specified function (what does this function call?)"
       category: "call_graph"
       params:
-        function:
+        function_name:
           type: string
           required: true
-          description: "Source function name"
+          description: "The function to find callees for (e.g., 'png_read_info')"
       returns:
-        callees: "List of function names called by the source"
+        callees: "List of function names called by this function"
         count: "Number of callees"
 
     get_call_graph:
       description: "Get the call graph starting from a fuzzer entry point"
       category: "call_graph"
       params:
-        fuzzer:
+        fuzzer_name:
           type: string
           required: true
-          description: "Fuzzer name (entry point function)"
+          description: "Name of the fuzzer (e.g., 'libpng_read_fuzzer')"
         depth:
           type: int
           required: false
           default: 3
-          description: "Maximum depth to traverse"
+          description: "Maximum call depth to traverse"
       returns:
         call_graph: "Dict mapping function names to their callees"
         node_count: "Number of nodes in the graph"
@@ -210,44 +210,44 @@ analyzer:
     # Reachability Analysis
     # -------------------------------------------------------------------------
     check_reachability:
-      description: "Check if a function is reachable from a fuzzer"
+      description: "Check if a function is reachable from a fuzzer entry point"
       category: "reachability"
       params:
-        fuzzer:
+        fuzzer_name:
           type: string
           required: true
-          description: "Fuzzer name"
-        function:
+          description: "Name of the fuzzer (e.g., 'libpng_read_fuzzer')"
+        function_name:
           type: string
           required: true
-          description: "Target function to check"
+          description: "Target function to check (e.g., 'png_handle_iCCP')"
       returns:
         reachable: "Boolean indicating if function is reachable"
         distance: "Call depth to function if reachable"
 
     get_reachable_functions:
-      description: "Get all functions reachable from a fuzzer"
+      description: "Get all functions reachable from a fuzzer entry point"
       category: "reachability"
       params:
-        fuzzer:
+        fuzzer_name:
           type: string
           required: true
-          description: "Fuzzer name"
+          description: "Name of the fuzzer (e.g., 'libpng_read_fuzzer')"
       returns:
         functions: "List of all reachable function names"
         count: "Number of reachable functions"
 
     get_unreached_functions:
-      description: "Get functions not yet covered by a fuzzer (coverage gaps)"
+      description: "Get functions NOT reachable from a fuzzer (coverage gaps)"
       category: "reachability"
       params:
-        fuzzer:
+        fuzzer_name:
           type: string
           required: true
-          description: "Fuzzer name"
+          description: "Name of the fuzzer (e.g., 'libpng_read_fuzzer')"
       returns:
-        functions: "List of function names not yet reached"
-        count: "Number of unreached functions"
+        functions: "List of unreachable function names"
+        count: "Number of unreachable functions"
 
     # -------------------------------------------------------------------------
     # Build Information

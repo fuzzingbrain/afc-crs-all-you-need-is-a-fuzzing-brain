@@ -82,8 +82,8 @@ app.conf.update(
 
     # Task settings
     task_track_started=True,
-    task_time_limit=3600,  # 1 hour hard limit
-    task_soft_time_limit=3300,  # 55 min soft limit
+    task_time_limit=86400,  # 24 hour default hard limit (overridden per-task by dispatcher)
+    task_soft_time_limit=86100,  # 23h55m default soft limit (overridden per-task by dispatcher)
 
     # Worker settings
     worker_prefetch_multiplier=1,  # Fetch one task at a time

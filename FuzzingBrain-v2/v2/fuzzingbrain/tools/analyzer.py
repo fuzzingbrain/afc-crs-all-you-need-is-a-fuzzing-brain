@@ -116,23 +116,15 @@ def analyzer_status() -> Dict[str, Any]:
 # =============================================================================
 
 @tools_mcp.tool
-def get_function(name: str) -> Dict[str, Any]:
+def get_function(function_name: str) -> Dict[str, Any]:
     """
-    Get detailed information about a function by name.
-
-    Tries OSS_FUZZ_ prefix variants if exact name not found.
+    Get metadata about a function (file path, line numbers, complexity, parameters).
 
     Args:
-        name: Function name to look up (e.g. 'png_read_info' or 'OSS_FUZZ_png_read_info')
+        function_name: The exact name of the function to look up (e.g., "png_read_info")
 
     Returns:
-        Function metadata including:
-        - name: Function name
-        - file: Source file path
-        - line_start, line_end: Line range
-        - complexity: Cyclomatic complexity
-        - arg_count: Number of arguments
-        - return_type: Return type
+        Function metadata: name, file_path, start_line, end_line, complexity, args, return_type
     """
     err = _ensure_client()
     if err:
@@ -140,11 +132,11 @@ def get_function(name: str) -> Dict[str, Any]:
 
     try:
         client = _get_client()
-        func = client.get_function(name)
+        func = client.get_function(function_name)
         if func is None:
             return {
                 "success": False,
-                "error": f"Function '{name}' not found",
+                "error": f"Function '{function_name}' not found",
             }
         return {
             "success": True,
@@ -221,17 +213,18 @@ def search_functions(pattern: str, limit: int = 50) -> Dict[str, Any]:
 
 
 @tools_mcp.tool
-def get_function_source(name: str) -> Dict[str, Any]:
+def get_function_source(function_name: str) -> Dict[str, Any]:
     """
-    Get the source code of a function.
+    Get the full source code of a function.
 
-    Tries OSS_FUZZ_ prefix variants if exact name not found.
+    Use this to read the implementation details of a specific function.
+    For analyzing vulnerability patterns, always read the source code.
 
     Args:
-        name: Function name (e.g. 'png_read_info' or 'OSS_FUZZ_png_read_info')
+        function_name: The exact name of the function (e.g., "png_handle_iCCP")
 
     Returns:
-        Source code of the function.
+        source: The complete source code of the function
     """
     err = _ensure_client()
     if err:
@@ -239,15 +232,15 @@ def get_function_source(name: str) -> Dict[str, Any]:
 
     try:
         client = _get_client()
-        source = client.get_function_source(name)
+        source = client.get_function_source(function_name)
         if source is None:
             return {
                 "success": False,
-                "error": f"Source not available for function '{name}'",
+                "error": f"Source not available for function '{function_name}'",
             }
         return {
             "success": True,
-            "function": name,
+            "function_name": function_name,
             "source": source,
         }
     except Exception as e:
@@ -262,17 +255,17 @@ def get_function_source(name: str) -> Dict[str, Any]:
 # =============================================================================
 
 @tools_mcp.tool
-def get_callers(function: str) -> Dict[str, Any]:
+def get_callers(function_name: str) -> Dict[str, Any]:
     """
-    Get all functions that call the specified function.
+    Get all functions that call the specified function (who calls this function?).
 
-    Tries OSS_FUZZ_ prefix variants if exact name not found.
+    Use this to trace backwards in the call graph to understand how a function is reached.
 
     Args:
-        function: Target function name (e.g. 'png_read_info' or 'OSS_FUZZ_png_read_info')
+        function_name: The function to find callers for (e.g., "png_handle_iCCP")
 
     Returns:
-        List of function names that call the target.
+        callers: List of function names that call this function
     """
     err = _ensure_client()
     if err:
@@ -280,15 +273,14 @@ def get_callers(function: str) -> Dict[str, Any]:
 
     try:
         client = _get_client()
-        result = client.get_callers(function)
+        result = client.get_callers(function_name)
         callers = result.get("callers", []) if isinstance(result, dict) else result
         response = {
             "success": True,
-            "function": result.get("function", function) if isinstance(result, dict) else function,
+            "function_name": result.get("function", function_name) if isinstance(result, dict) else function_name,
             "count": len(callers),
             "callers": callers,
         }
-        # Include original query if it was mapped to a different name
         if isinstance(result, dict) and result.get("queried_as"):
             response["queried_as"] = result["queried_as"]
         return response
@@ -300,17 +292,17 @@ def get_callers(function: str) -> Dict[str, Any]:
 
 
 @tools_mcp.tool
-def get_callees(function: str) -> Dict[str, Any]:
+def get_callees(function_name: str) -> Dict[str, Any]:
     """
-    Get all functions called by the specified function.
+    Get all functions called by the specified function (what does this function call?).
 
-    Tries OSS_FUZZ_ prefix variants if exact name not found.
+    Use this to trace forwards in the call graph to understand what a function does.
 
     Args:
-        function: Source function name (e.g. 'png_read_info' or 'OSS_FUZZ_png_read_info')
+        function_name: The function to find callees for (e.g., "png_read_info")
 
     Returns:
-        List of function names called by the source.
+        callees: List of function names called by this function
     """
     err = _ensure_client()
     if err:
@@ -318,15 +310,14 @@ def get_callees(function: str) -> Dict[str, Any]:
 
     try:
         client = _get_client()
-        result = client.get_callees(function)
+        result = client.get_callees(function_name)
         callees = result.get("callees", []) if isinstance(result, dict) else result
         response = {
             "success": True,
-            "function": result.get("function", function) if isinstance(result, dict) else function,
+            "function_name": result.get("function", function_name) if isinstance(result, dict) else function_name,
             "count": len(callees),
             "callees": callees,
         }
-        # Include original query if it was mapped to a different name
         if isinstance(result, dict) and result.get("queried_as"):
             response["queried_as"] = result["queried_as"]
         return response
@@ -338,16 +329,18 @@ def get_callees(function: str) -> Dict[str, Any]:
 
 
 @tools_mcp.tool
-def get_call_graph(fuzzer: str, depth: int = 3) -> Dict[str, Any]:
+def get_call_graph(fuzzer_name: str, depth: int = 3) -> Dict[str, Any]:
     """
     Get the call graph starting from a fuzzer entry point.
 
+    Returns all functions reachable from the fuzzer up to the specified depth.
+
     Args:
-        fuzzer: Fuzzer name (entry point function)
-        depth: Maximum depth to traverse (default: 3)
+        fuzzer_name: Name of the fuzzer (e.g., "libpng_read_fuzzer")
+        depth: Maximum call depth to traverse (default: 3)
 
     Returns:
-        Call graph as a dict mapping function names to their callees.
+        call_graph: Dict mapping function names to their callees
     """
     err = _ensure_client()
     if err:
@@ -355,10 +348,10 @@ def get_call_graph(fuzzer: str, depth: int = 3) -> Dict[str, Any]:
 
     try:
         client = _get_client()
-        graph = client.get_call_graph(fuzzer, depth)
+        graph = client.get_call_graph(fuzzer_name, depth)
         return {
             "success": True,
-            "fuzzer": fuzzer,
+            "fuzzer_name": fuzzer_name,
             "depth": depth,
             "node_count": len(graph),
             "call_graph": graph,
@@ -372,29 +365,26 @@ def get_call_graph(fuzzer: str, depth: int = 3) -> Dict[str, Any]:
 
 @tools_mcp.tool
 def find_all_paths(
-    func1: str,
-    func2: str,
+    from_function: str,
+    to_function: str,
     max_depth: int = 10,
     max_paths: int = 100,
 ) -> Dict[str, Any]:
     """
-    Find all call paths from func1 to func2.
+    Find all call paths from one function to another.
 
-    Useful for understanding how data flows from a fuzzer entry point
-    to a specific target function.
+    Use this to understand how input flows from entry point to a target function.
+    Essential for reachability analysis and understanding attack paths.
 
     Args:
-        func1: Start function. Use 'LLVMFuzzerTestOneInput' to start from all
-               fuzzer entry points (call_depth=0 functions).
-        func2: End function (target function to analyze)
+        from_function: Start function (e.g., "LLVMFuzzerTestOneInput" or fuzzer name)
+        to_function: Target function to reach (e.g., "png_handle_iCCP")
         max_depth: Maximum path length (default: 10)
         max_paths: Maximum number of paths to return (default: 100)
 
     Returns:
-        - paths: List of call paths, each path is a list of function names
-        - path_count: Number of paths found
-        - truncated: True if more paths exist but hit max_paths limit
-        - cached: True if result was served from cache
+        paths: List of function call chains from start to target
+        path_count: Number of paths found
     """
     err = _ensure_client()
     if err:
@@ -402,7 +392,7 @@ def find_all_paths(
 
     try:
         client = _get_client()
-        result = client.find_all_paths(func1, func2, max_depth, max_paths)
+        result = client.find_all_paths(from_function, to_function, max_depth, max_paths)
         return {
             "success": True,
             **result,
@@ -419,19 +409,19 @@ def find_all_paths(
 # =============================================================================
 
 @tools_mcp.tool
-def check_reachability(fuzzer: str, function: str) -> Dict[str, Any]:
+def check_reachability(fuzzer_name: str, function_name: str) -> Dict[str, Any]:
     """
-    Check if a function is reachable from a fuzzer.
+    Check if a function is reachable from a fuzzer entry point.
+
+    Quick check to verify if fuzzer input can reach a target function.
 
     Args:
-        fuzzer: Fuzzer name (e.g. 'libpng_read_fuzzer') or entry point function
-                name 'LLVMFuzzerTestOneInput'. If 'LLVMFuzzerTestOneInput' is
-                passed, all fuzzers will be searched.
-        function: Target function to check
+        fuzzer_name: Name of the fuzzer (e.g., "libpng_read_fuzzer")
+        function_name: Target function to check (e.g., "png_handle_iCCP")
 
     Returns:
-        Whether the function is reachable and the distance (call depth).
-        If 'LLVMFuzzerTestOneInput' was used, also returns the actual fuzzer name.
+        reachable: True if function is reachable from fuzzer
+        distance: Call depth from fuzzer to function (if reachable)
     """
     err = _ensure_client()
     if err:
@@ -439,17 +429,16 @@ def check_reachability(fuzzer: str, function: str) -> Dict[str, Any]:
 
     try:
         client = _get_client()
-        result = client.get_reachability(fuzzer, function)
+        result = client.get_reachability(fuzzer_name, function_name)
         response = {
             "success": True,
-            "fuzzer": result.get("fuzzer", fuzzer),  # Use actual fuzzer if returned
-            "function": function,
+            "fuzzer_name": result.get("fuzzer", fuzzer_name),
+            "function_name": function_name,
             "reachable": result.get("reachable", False),
             "distance": result.get("distance"),
         }
-        # Include original query fuzzer if it was mapped to a different one
-        if result.get("fuzzer") and result["fuzzer"] != fuzzer:
-            response["queried_as"] = fuzzer
+        if result.get("fuzzer") and result["fuzzer"] != fuzzer_name:
+            response["queried_as"] = fuzzer_name
         return response
     except Exception as e:
         return {
@@ -459,16 +448,18 @@ def check_reachability(fuzzer: str, function: str) -> Dict[str, Any]:
 
 
 @tools_mcp.tool
-def get_reachable_functions(fuzzer: str) -> Dict[str, Any]:
+def get_reachable_functions(fuzzer_name: str) -> Dict[str, Any]:
     """
-    Get all functions reachable from a fuzzer.
+    Get all functions reachable from a fuzzer entry point.
+
+    Returns the complete list of functions that can be reached via the call graph.
 
     Args:
-        fuzzer: Fuzzer name (e.g. 'libpng_read_fuzzer') or 'LLVMFuzzerTestOneInput'
-                to get all reachable functions across all fuzzers.
+        fuzzer_name: Name of the fuzzer (e.g., "libpng_read_fuzzer")
 
     Returns:
-        List of all reachable function names.
+        functions: List of all reachable function names
+        count: Total number of reachable functions
     """
     err = _ensure_client()
     if err:
@@ -476,10 +467,10 @@ def get_reachable_functions(fuzzer: str) -> Dict[str, Any]:
 
     try:
         client = _get_client()
-        functions = client.get_reachable_functions(fuzzer)
+        functions = client.get_reachable_functions(fuzzer_name)
         return {
             "success": True,
-            "fuzzer": fuzzer,
+            "fuzzer_name": fuzzer_name,
             "count": len(functions),
             "functions": functions,
         }
@@ -491,18 +482,18 @@ def get_reachable_functions(fuzzer: str) -> Dict[str, Any]:
 
 
 @tools_mcp.tool
-def get_unreached_functions(fuzzer: str) -> Dict[str, Any]:
+def get_unreached_functions(fuzzer_name: str) -> Dict[str, Any]:
     """
-    Get functions not yet covered by a fuzzer.
+    Get functions NOT reachable from a fuzzer (coverage gaps).
 
-    Useful for identifying coverage gaps and guiding fuzzing strategy.
+    Useful for identifying code that fuzzer cannot reach and may need harness improvements.
 
     Args:
-        fuzzer: Fuzzer name (e.g. 'libpng_read_fuzzer') or 'LLVMFuzzerTestOneInput'
-                to compare against all reachable functions across all fuzzers.
+        fuzzer_name: Name of the fuzzer (e.g., "libpng_read_fuzzer")
 
     Returns:
-        List of function names not yet reached.
+        functions: List of unreachable function names
+        count: Total number of unreachable functions
     """
     err = _ensure_client()
     if err:
@@ -510,10 +501,10 @@ def get_unreached_functions(fuzzer: str) -> Dict[str, Any]:
 
     try:
         client = _get_client()
-        functions = client.get_unreached_functions(fuzzer)
+        functions = client.get_unreached_functions(fuzzer_name)
         return {
             "success": True,
-            "fuzzer": fuzzer,
+            "fuzzer_name": fuzzer_name,
             "count": len(functions),
             "functions": functions,
         }

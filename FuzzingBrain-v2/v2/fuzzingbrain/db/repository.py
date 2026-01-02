@@ -432,9 +432,40 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             "merged_duplicates": {"$exists": True, "$ne": []}
         })
 
-    def count_by_status(self, task_id: str) -> dict:
-        """Get count of suspicious points by status"""
+    def count_by_status(
+        self,
+        task_id: str,
+        status: str = None,
+        harness_name: str = None,
+        sanitizer: str = None,
+    ) -> int | dict:
+        """
+        Get count of suspicious points by status.
+
+        If status is provided, returns int count for that specific status.
+        If status is None, returns dict with all status counts.
+
+        Args:
+            task_id: Task ID
+            status: Optional status to filter by (pending_verify, verifying, pending_pov, etc.)
+            harness_name: Optional fuzzer/harness name filter
+            sanitizer: Optional sanitizer filter
+
+        Returns:
+            int if status specified, dict of counts otherwise
+        """
         try:
+            # If specific status requested, return count for that status
+            if status is not None:
+                query = {"task_id": task_id, "status": status}
+                # Filter by sources array (not top-level fields)
+                if harness_name and sanitizer:
+                    query["sources"] = {
+                        "$elemMatch": {"harness_name": harness_name, "sanitizer": sanitizer}
+                    }
+                return self.collection.count_documents(query)
+
+            # Otherwise return all counts (original behavior)
             total = self.collection.count_documents({"task_id": task_id})
             checked = self.collection.count_documents({"task_id": task_id, "is_checked": True})
             real = self.collection.count_documents({"task_id": task_id, "is_checked": True, "is_real": True})
@@ -449,6 +480,8 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             }
         except Exception as e:
             logger.error(f"Failed to count suspicious points: {e}")
+            if status is not None:
+                return 0
             return {"total": 0, "checked": 0, "unchecked": 0, "real": 0, "false_positive": 0, "important": 0}
 
     # =========================================================================

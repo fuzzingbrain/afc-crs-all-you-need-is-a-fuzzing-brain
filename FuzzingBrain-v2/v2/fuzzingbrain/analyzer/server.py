@@ -369,11 +369,18 @@ class AnalysisServer:
 
         except asyncio.CancelledError:
             pass
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            # Client disconnected abruptly - this is normal, don't log as error
+            pass
         except Exception as e:
             self._log(f"Client {client_id} error: {e}", "ERROR")
         finally:
-            writer.close()
-            await writer.wait_closed()
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                # Connection already closed - ignore
+                pass
             self._log(f"Client {client_id} disconnected", "DEBUG")
 
     def _log_query(self, request: Request):

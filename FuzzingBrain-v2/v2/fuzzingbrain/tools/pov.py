@@ -336,14 +336,15 @@ def get_fuzzer_info() -> Dict[str, Any]:
 
 
 # =============================================================================
-# Sandboxed Python Execution
+# POV Generator Code Execution
 # =============================================================================
 
 def _execute_generator_code(code: str, num_variants: int = 3) -> tuple:
     """
-    Execute POV generator code in a restricted environment.
+    Execute POV generator code with full Python capabilities.
 
     The code must define a generate() function that returns bytes.
+    No restrictions - can import any module and use any Python feature.
 
     Args:
         code: Python code to execute
@@ -352,95 +353,22 @@ def _execute_generator_code(code: str, num_variants: int = 3) -> tuple:
     Returns:
         Tuple of (list of blobs, error message or None)
     """
-    # Create restricted globals with only allowed modules and builtins
-    import struct
-    import zlib
-    import hashlib
-    import base64 as base64_mod
-    import binascii
-    import io
-    import math
-    import random
-    import string
-    import itertools
-    import functools
-    import collections
-
-    restricted_globals = {
-        "__builtins__": {
-            # Basic builtins
-            "range": range,
-            "len": len,
-            "int": int,
-            "float": float,
-            "str": str,
-            "bytes": bytes,
-            "bytearray": bytearray,
-            "list": list,
-            "dict": dict,
-            "tuple": tuple,
-            "set": set,
-            "bool": bool,
-            "None": None,
-            "True": True,
-            "False": False,
-            "min": min,
-            "max": max,
-            "sum": sum,
-            "abs": abs,
-            "enumerate": enumerate,
-            "zip": zip,
-            "map": map,
-            "filter": filter,
-            "sorted": sorted,
-            "reversed": reversed,
-            "chr": chr,
-            "ord": ord,
-            "hex": hex,
-            "oct": oct,
-            "bin": bin,
-            "isinstance": isinstance,
-            "type": type,
-            "hasattr": hasattr,
-            "getattr": getattr,
-            "setattr": setattr,
-            "print": lambda *args, **kwargs: None,  # Suppress print
-            "Exception": Exception,
-            "ValueError": ValueError,
-            "TypeError": TypeError,
-            "IndexError": IndexError,
-            "KeyError": KeyError,
-        },
-        # Allowed modules
-        "struct": struct,
-        "zlib": zlib,
-        "hashlib": hashlib,
-        "base64": base64_mod,
-        "binascii": binascii,
-        "io": io,
-        "math": math,
-        "random": random,
-        "string": string,
-        "itertools": itertools,
-        "functools": functools,
-        "collections": collections,
+    # Full Python execution environment - no restrictions
+    exec_globals = {
+        "__builtins__": __builtins__,
+        "__name__": "__pov_generator__",
     }
 
     try:
-        # Strip import statements (modules are already provided in namespace)
-        import re
-        code = re.sub(r'^import\s+\w+.*$', '', code, flags=re.MULTILINE)
-        code = re.sub(r'^from\s+\w+.*$', '', code, flags=re.MULTILINE)
-
         # Compile and execute the code
         compiled = compile(code, "<pov_generator>", "exec")
-        exec(compiled, restricted_globals)
+        exec(compiled, exec_globals)
 
         # Check for generate function
-        if "generate" not in restricted_globals:
+        if "generate" not in exec_globals:
             return [], "Code must define a generate() function that returns bytes"
 
-        generate_fn = restricted_globals["generate"]
+        generate_fn = exec_globals["generate"]
 
         # Generate variants
         blobs = []

@@ -65,15 +65,23 @@ You have up to 40 POV attempts. Each attempt generates 3 blob variants that are 
 ### POV Generation
 - create_pov: Generate test input blobs using Python code
 - verify_pov: Test if a POV triggers a crash
-- trace_pov: See which code paths a POV executes (use when no crash)
+- trace_pov: See which code paths a POV executes (ONLY available after 15 attempts!)
 - get_fuzzer_info: Get fuzzer source code and sanitizer info (use to refresh your memory)
+
+**IMPORTANT: Greedy Mode**
+For the first 15 POV attempts, trace_pov is DISABLED. You must:
+1. Analyze the code carefully BEFORE generating POVs
+2. Make educated guesses about what input will trigger the bug
+3. Use verify_pov to test - if no crash, iterate with different approaches
+4. After 15 attempts, trace_pov becomes available for debugging
 
 ## Workflow
 
-1. UNDERSTAND THE VULNERABILITY
+1. UNDERSTAND THE VULNERABILITY (do this FIRST, before any POV attempts!)
    - Read the vulnerable function's source code
    - Understand what input conditions trigger the bug
    - Trace back to see how fuzzer input reaches the vulnerable code
+   - Study the fuzzer source to understand input format
 
 2. DESIGN YOUR TEST INPUT
    - Think about what bytes/structure will reach the vulnerable code path
@@ -88,12 +96,12 @@ You have up to 40 POV attempts. Each attempt generates 3 blob variants that are 
 4. VERIFY POV
    - Call verify_pov to test if your POV triggers a crash
    - If crashed=True, you succeeded!
-   - If crashed=False, analyze why and try again
+   - If crashed=False, analyze verify output and iterate
 
-5. DEBUG WITH TRACE (when no crash)
-   - Call trace_pov to see which functions were executed
+5. DEBUG WITH TRACE (only after 15 failed attempts)
+   - trace_pov becomes available after 15 attempts
+   - Use it to see which functions were executed
    - Check if your input reached the target function
-   - Use this info to improve your next POV attempt
 
 ## create_pov Generator Code Format
 
@@ -111,7 +119,8 @@ def generate():
 - Pay attention to file format headers and magic bytes
 - Check size constraints and buffer boundaries
 - Use random variations to explore edge cases
-- If trace shows you're not reaching the target, fix the input structure first
+- In greedy mode (first 15 attempts): iterate quickly, try different approaches
+- After greedy mode: use trace_pov to debug why inputs aren't reaching target
 
 ## IMPORTANT
 
@@ -480,7 +489,10 @@ This is CRITICAL - you need to understand how your input enters the library!
 3. Design a test input that triggers the {vuln_type} vulnerability
 4. Use create_pov to generate the test input
 5. Use verify_pov to check if it causes a crash
-6. If no crash, use trace_pov to debug and try again
+6. Iterate with different approaches (trace_pov available after 15 attempts)
+
+**GREEDY MODE**: For your first 15 POV attempts, trace_pov is disabled.
+Focus on understanding the code and making educated guesses about triggering inputs.
 
 Start by reading the vulnerable function source with get_function_source("{function_name}").
 """
@@ -570,6 +582,9 @@ Start by reading the vulnerable function source with get_function_source("{funct
         self._tools = await self._get_tools(client)
         self._log(f"Loaded {len(self._tools)} MCP tools", level="INFO")
 
+        # Greedy mode: disable trace_pov for first 15 attempts to force direct POV generation
+        self._greedy_attempts_threshold = 15
+
         # Log model info
         model_name = self.model.id if hasattr(self.model, 'id') else (
             self.model or self.llm_client.config.default_model.id
@@ -600,12 +615,23 @@ Start by reading the vulnerable function source with get_function_source("{funct
                 self._log("POV already succeeded, stopping", level="INFO")
                 break
 
+            # Greedy mode: filter out trace_pov for first N attempts
+            # This forces the agent to try direct POV generation instead of tracing
+            if self.pov_attempts < self._greedy_attempts_threshold:
+                available_tools = [t for t in self._tools if t["function"]["name"] != "trace_pov"]
+                if self.pov_attempts == self._greedy_attempts_threshold - 1:
+                    self._log(f"Greedy mode ending after this attempt - trace_pov will be available", level="INFO")
+            else:
+                available_tools = self._tools
+                if self.pov_attempts == self._greedy_attempts_threshold:
+                    self._log(f"Greedy mode ended - trace_pov is now available for debugging", level="INFO")
+
             # Call LLM with tools
             self.llm_client.reset_tried_models()
             try:
                 response = self.llm_client.call_with_tools(
                     messages=self.messages,
-                    tools=self._tools,
+                    tools=available_tools,
                     model=self.model,
                 )
             except Exception as e:

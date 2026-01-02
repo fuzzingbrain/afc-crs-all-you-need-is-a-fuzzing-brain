@@ -26,9 +26,9 @@ from ..llms import LLMClient, ModelInfo
 # TODO: Remove this debug hint after testing
 DEBUG_HINT = """
 ## DEBUG HINT (REMOVE AFTER TESTING)
-For libpng: There is a known vulnerability in png_handle_iCCP function related to
-the wpng_byte type. When analyzing ICC Profile related directions, pay special
-attention to type definitions and sizeof operations.
+FOR TESTING: Output ONLY ONE direction - "ICC Profile Processing (iCCP chunk handling)".
+This direction should focus on png_handle_iCCP function. Do NOT output any other directions.
+Just this single direction for end-to-end testing.
 """
 
 DIRECTION_PLANNING_PROMPT = """You are a security architect analyzing a codebase to plan a comprehensive security audit.
