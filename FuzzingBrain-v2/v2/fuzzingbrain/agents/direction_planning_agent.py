@@ -23,14 +23,6 @@ from ..llms import LLMClient, ModelInfo
 
 
 # System prompt for Direction Planning
-# TODO: Remove this debug hint after testing
-DEBUG_HINT = """
-## DEBUG HINT (REMOVE AFTER TESTING)
-FOR TESTING: Output ONLY ONE direction - "ICC Profile Processing (iCCP chunk handling)".
-This direction should focus on png_handle_iCCP function. Do NOT output any other directions.
-Just this single direction for end-to-end testing.
-"""
-
 DIRECTION_PLANNING_PROMPT = """You are a security architect analyzing a codebase to plan a comprehensive security audit.
 
 ## CRITICAL: Understanding Your Constraints
@@ -135,7 +127,7 @@ LOW RISK:
 - A function can appear in multiple directions if it serves multiple purposes
 - Focus on security-relevant groupings, not business logic
 - Smaller, focused directions are better than large, vague ones
-- Create at least 3 directions, but no more than 10
+- Create at most 15 directions (prioritize by risk level)
 
 ## Output Format
 
@@ -167,6 +159,7 @@ class DirectionPlanningAgent(BaseAgent):
         max_iterations: int = 100,  # Direction planning needs more iterations
         verbose: bool = True,
         log_dir: Optional[Path] = None,
+        max_directions: int = 15,  # Maximum number of directions to create
     ):
         """
         Initialize Direction Planning Agent.
@@ -181,6 +174,7 @@ class DirectionPlanningAgent(BaseAgent):
             max_iterations: Maximum iterations
             verbose: Verbose logging
             log_dir: Log directory
+            max_directions: Maximum number of directions to create (default: 5)
         """
         super().__init__(
             llm_client=llm_client,
@@ -194,6 +188,7 @@ class DirectionPlanningAgent(BaseAgent):
 
         self.fuzzer = fuzzer
         self.sanitizer = sanitizer
+        self.max_directions = max_directions
 
         # Track created directions
         self.directions_created = 0
@@ -282,8 +277,11 @@ class DirectionPlanningAgent(BaseAgent):
 
     @property
     def system_prompt(self) -> str:
-        # Add sanitizer context to prompt
-        prompt = DIRECTION_PLANNING_PROMPT
+        # Replace direction count placeholder with actual config
+        prompt = DIRECTION_PLANNING_PROMPT.replace(
+            "Create at most 15 directions (prioritize by risk level)",
+            f"Create at most {self.max_directions} directions (prioritize by risk level)"
+        )
 
         # Add sanitizer-specific guidance
         sanitizer_context = f"""
@@ -351,8 +349,7 @@ When assigning risk levels, prioritize directions that handle code patterns dete
 - Error handling paths
 """
 
-        # TODO: Remove DEBUG_HINT after testing
-        return prompt + sanitizer_context + DEBUG_HINT
+        return prompt + sanitizer_context
 
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message for direction planning."""

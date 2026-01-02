@@ -411,6 +411,7 @@ class AnalysisClient:
         is_important: bool = None,
         score: float = None,
         verification_notes: str = None,
+        pov_guidance: str = None,
     ) -> dict:
         """
         Update a suspicious point.
@@ -422,6 +423,7 @@ class AnalysisClient:
             is_important: Whether it's high priority
             score: Updated score
             verification_notes: Notes from verification
+            pov_guidance: Guidance for POV agent (input directions, what to watch for)
 
         Returns:
             Dict with 'updated' status
@@ -437,6 +439,8 @@ class AnalysisClient:
             params["score"] = score
         if verification_notes is not None:
             params["verification_notes"] = verification_notes
+        if pov_guidance is not None:
+            params["pov_guidance"] = pov_guidance
         return self._request(Method.UPDATE_SUSPICIOUS_POINT, params)
 
     def list_suspicious_points(

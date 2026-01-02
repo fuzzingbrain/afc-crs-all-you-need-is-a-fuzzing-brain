@@ -482,6 +482,14 @@ This is CRITICAL - you need to understand how your input enters the library!
         if suspicious_point.get("verification_notes"):
             message += f"## Verification Notes\n\n{suspicious_point['verification_notes']}\n\n"
 
+        # Add POV guidance if available (from Verify agent)
+        if suspicious_point.get("pov_guidance"):
+            message += f"""## POV Guidance (Reference from Verify Agent)
+
+{suspicious_point['pov_guidance']}
+
+"""
+
         message += f"""## Your Task
 
 1. Read the source code of `{function_name}` to understand the vulnerability

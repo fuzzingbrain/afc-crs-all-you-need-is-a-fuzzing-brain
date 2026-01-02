@@ -1160,6 +1160,8 @@ class AnalysisServer:
             updates["score"] = params["score"]
         if "verification_notes" in params:
             updates["verification_notes"] = params["verification_notes"]
+        if "pov_guidance" in params:
+            updates["pov_guidance"] = params["pov_guidance"]
         if params.get("is_checked"):
             updates["checked_at"] = datetime.now()
 

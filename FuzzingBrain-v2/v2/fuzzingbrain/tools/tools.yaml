@@ -27,7 +27,7 @@ coverage:
         fuzzer_name:
           type: string
           required: true
-          description: "Name of the fuzzer binary (e.g., 'libpng_read_fuzzer')"
+          description: "Name of the fuzzer binary"
         input_data_base64:
           type: string
           required: true
@@ -118,7 +118,7 @@ analyzer:
         function_name:
           type: string
           required: true
-          description: "The exact name of the function to look up (e.g., 'png_read_info')"
+          description: "The exact name of the function to look up"
       returns:
         function: "Function metadata (name, file_path, start_line, end_line, complexity, args, return_type)"
 
@@ -141,7 +141,7 @@ analyzer:
         pattern:
           type: string
           required: true
-          description: "Regex pattern to match function names (e.g., 'png_read.*')"
+          description: "Regex pattern to match function names"
         limit:
           type: int
           required: false
@@ -158,7 +158,7 @@ analyzer:
         function_name:
           type: string
           required: true
-          description: "The exact name of the function (e.g., 'png_handle_iCCP')"
+          description: "The exact name of the function"
       returns:
         source: "The complete source code of the function"
 
@@ -172,7 +172,7 @@ analyzer:
         function_name:
           type: string
           required: true
-          description: "The function to find callers for (e.g., 'png_handle_iCCP')"
+          description: "The function to find callers for"
       returns:
         callers: "List of function names that call this function"
         count: "Number of callers"
@@ -184,7 +184,7 @@ analyzer:
         function_name:
           type: string
           required: true
-          description: "The function to find callees for (e.g., 'png_read_info')"
+          description: "The function to find callees for"
       returns:
         callees: "List of function names called by this function"
         count: "Number of callees"
@@ -196,7 +196,7 @@ analyzer:
         fuzzer_name:
           type: string
           required: true
-          description: "Name of the fuzzer (e.g., 'libpng_read_fuzzer')"
+          description: "Name of the fuzzer"
         depth:
           type: int
           required: false
@@ -216,11 +216,11 @@ analyzer:
         fuzzer_name:
           type: string
           required: true
-          description: "Name of the fuzzer (e.g., 'libpng_read_fuzzer')"
+          description: "Name of the fuzzer"
         function_name:
           type: string
           required: true
-          description: "Target function to check (e.g., 'png_handle_iCCP')"
+          description: "Target function to check"
       returns:
         reachable: "Boolean indicating if function is reachable"
         distance: "Call depth to function if reachable"
@@ -232,7 +232,7 @@ analyzer:
         fuzzer_name:
           type: string
           required: true
-          description: "Name of the fuzzer (e.g., 'libpng_read_fuzzer')"
+          description: "Name of the fuzzer"
       returns:
         functions: "List of all reachable function names"
         count: "Number of reachable functions"
@@ -244,7 +244,7 @@ analyzer:
         fuzzer_name:
           type: string
           required: true
-          description: "Name of the fuzzer (e.g., 'libpng_read_fuzzer')"
+          description: "Name of the fuzzer"
       returns:
         functions: "List of unreachable function names"
         count: "Number of unreachable functions"

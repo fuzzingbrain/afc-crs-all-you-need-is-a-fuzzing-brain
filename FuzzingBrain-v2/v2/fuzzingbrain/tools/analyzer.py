@@ -48,25 +48,42 @@ def get_analyzer_context() -> Optional[str]:
 
 def _get_client() -> Optional[AnalysisClient]:
     """Get or create the Analysis Client."""
+    import time
+    t0 = time.time()
+
     socket_path = _analysis_socket_path.get()
     if socket_path is None:
         return None
 
     client = _analysis_client.get()
+    t1 = time.time()
+
     if client is None:
+        logger.debug(f"[TIMING] Creating new AnalysisClient (ContextVar was None)")
         try:
             client = AnalysisClient(
                 socket_path,
                 client_id=_client_id.get(),
             )
+            t2 = time.time()
+            logger.debug(f"[TIMING] AnalysisClient created in {t2-t1:.3f}s")
+
             if not client.ping():
                 logger.warning("Analysis Server not responding")
                 client = None
             else:
                 _analysis_client.set(client)
+            t3 = time.time()
+            logger.debug(f"[TIMING] ping() completed in {t3-t2:.3f}s")
         except Exception as e:
             logger.warning(f"Failed to connect to Analysis Server: {e}")
             client = None
+    else:
+        logger.debug(f"[TIMING] Reusing existing AnalysisClient from ContextVar")
+
+    t_end = time.time()
+    if t_end - t0 > 0.1:  # Only log if > 100ms
+        logger.debug(f"[TIMING] _get_client total: {t_end-t0:.3f}s")
 
     return client
 
@@ -121,7 +138,7 @@ def get_function(function_name: str) -> Dict[str, Any]:
     Get metadata about a function (file path, line numbers, complexity, parameters).
 
     Args:
-        function_name: The exact name of the function to look up (e.g., "png_read_info")
+        function_name: The exact name of the function to look up
 
     Returns:
         Function metadata: name, file_path, start_line, end_line, complexity, args, return_type
@@ -167,11 +184,12 @@ def get_functions_by_file(file_path: str) -> Dict[str, Any]:
     try:
         client = _get_client()
         functions = client.get_functions_by_file(file_path)
+        total = len(functions)
         return {
             "success": True,
-            "file_path": file_path,
-            "count": len(functions),
-            "functions": functions,
+            "count": total,
+            "functions": functions[:50],
+            "truncated": total > 50,
         }
     except Exception as e:
         return {
@@ -186,7 +204,7 @@ def search_functions(pattern: str, limit: int = 50) -> Dict[str, Any]:
     Search for functions by name pattern.
 
     Args:
-        pattern: Regex pattern to match function names (e.g., "png_read.*")
+        pattern: Regex pattern to match function names
         limit: Maximum number of results (default: 50)
 
     Returns:
@@ -221,7 +239,7 @@ def get_function_source(function_name: str) -> Dict[str, Any]:
     For analyzing vulnerability patterns, always read the source code.
 
     Args:
-        function_name: The exact name of the function (e.g., "png_handle_iCCP")
+        function_name: The exact name of the function
 
     Returns:
         source: The complete source code of the function
@@ -262,7 +280,7 @@ def get_callers(function_name: str) -> Dict[str, Any]:
     Use this to trace backwards in the call graph to understand how a function is reached.
 
     Args:
-        function_name: The function to find callers for (e.g., "png_handle_iCCP")
+        function_name: The function to find callers for
 
     Returns:
         callers: List of function names that call this function
@@ -275,15 +293,13 @@ def get_callers(function_name: str) -> Dict[str, Any]:
         client = _get_client()
         result = client.get_callers(function_name)
         callers = result.get("callers", []) if isinstance(result, dict) else result
-        response = {
+        total = len(callers)
+        return {
             "success": True,
-            "function_name": result.get("function", function_name) if isinstance(result, dict) else function_name,
-            "count": len(callers),
-            "callers": callers,
+            "count": total,
+            "callers": callers[:30],
+            "truncated": total > 30,
         }
-        if isinstance(result, dict) and result.get("queried_as"):
-            response["queried_as"] = result["queried_as"]
-        return response
     except Exception as e:
         return {
             "success": False,
@@ -299,7 +315,7 @@ def get_callees(function_name: str) -> Dict[str, Any]:
     Use this to trace forwards in the call graph to understand what a function does.
 
     Args:
-        function_name: The function to find callees for (e.g., "png_read_info")
+        function_name: The function to find callees for
 
     Returns:
         callees: List of function names called by this function
@@ -312,15 +328,13 @@ def get_callees(function_name: str) -> Dict[str, Any]:
         client = _get_client()
         result = client.get_callees(function_name)
         callees = result.get("callees", []) if isinstance(result, dict) else result
-        response = {
+        total = len(callees)
+        return {
             "success": True,
-            "function_name": result.get("function", function_name) if isinstance(result, dict) else function_name,
-            "count": len(callees),
-            "callees": callees,
+            "count": total,
+            "callees": callees[:30],
+            "truncated": total > 30,
         }
-        if isinstance(result, dict) and result.get("queried_as"):
-            response["queried_as"] = result["queried_as"]
-        return response
     except Exception as e:
         return {
             "success": False,
@@ -336,7 +350,7 @@ def get_call_graph(fuzzer_name: str, depth: int = 3) -> Dict[str, Any]:
     Returns all functions reachable from the fuzzer up to the specified depth.
 
     Args:
-        fuzzer_name: Name of the fuzzer (e.g., "libpng_read_fuzzer")
+        fuzzer_name: Name of the fuzzer
         depth: Maximum call depth to traverse (default: 3)
 
     Returns:
@@ -368,23 +382,21 @@ def find_all_paths(
     from_function: str,
     to_function: str,
     max_depth: int = 10,
-    max_paths: int = 100,
+    max_paths: int = 20,
 ) -> Dict[str, Any]:
     """
     Find all call paths from one function to another.
 
     Use this to understand how input flows from entry point to a target function.
-    Essential for reachability analysis and understanding attack paths.
 
     Args:
-        from_function: Start function (e.g., "LLVMFuzzerTestOneInput" or fuzzer name)
-        to_function: Target function to reach (e.g., "png_handle_iCCP")
+        from_function: Start function (e.g., fuzzer entry point)
+        to_function: Target function to reach
         max_depth: Maximum path length (default: 10)
-        max_paths: Maximum number of paths to return (default: 100)
+        max_paths: Maximum paths to return (default: 20)
 
     Returns:
         paths: List of function call chains from start to target
-        path_count: Number of paths found
     """
     err = _ensure_client()
     if err:
@@ -393,9 +405,11 @@ def find_all_paths(
     try:
         client = _get_client()
         result = client.find_all_paths(from_function, to_function, max_depth, max_paths)
+        paths = result.get("paths", [])
         return {
             "success": True,
-            **result,
+            "path_count": len(paths),
+            "paths": paths[:20],
         }
     except Exception as e:
         return {
@@ -416,8 +430,8 @@ def check_reachability(fuzzer_name: str, function_name: str) -> Dict[str, Any]:
     Quick check to verify if fuzzer input can reach a target function.
 
     Args:
-        fuzzer_name: Name of the fuzzer (e.g., "libpng_read_fuzzer")
-        function_name: Target function to check (e.g., "png_handle_iCCP")
+        fuzzer_name: Name of the fuzzer
+        function_name: Target function to check
 
     Returns:
         reachable: True if function is reachable from fuzzer
@@ -455,7 +469,7 @@ def get_reachable_functions(fuzzer_name: str) -> Dict[str, Any]:
     Returns the complete list of functions that can be reached via the call graph.
 
     Args:
-        fuzzer_name: Name of the fuzzer (e.g., "libpng_read_fuzzer")
+        fuzzer_name: Name of the fuzzer
 
     Returns:
         functions: List of all reachable function names
@@ -489,7 +503,7 @@ def get_unreached_functions(fuzzer_name: str) -> Dict[str, Any]:
     Useful for identifying code that fuzzer cannot reach and may need harness improvements.
 
     Args:
-        fuzzer_name: Name of the fuzzer (e.g., "libpng_read_fuzzer")
+        fuzzer_name: Name of the fuzzer
 
     Returns:
         functions: List of unreachable function names

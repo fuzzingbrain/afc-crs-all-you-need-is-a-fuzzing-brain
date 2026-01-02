@@ -356,8 +356,14 @@ If you truly found nothing exploitable in this direction, explain why and conclu
         return prompt + sanitizer_guidance
 
     def _filter_tools_for_mode(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Filter tools - exclude update_suspicious_point (only find, not verify)."""
-        excluded = {"update_suspicious_point"}
+        """Filter tools for SP Find mode.
+
+        Excluded:
+        - update_suspicious_point: only find, not verify
+        - find_all_paths: too slow for initial screening, verify agent only
+        - check_reachability: too slow for initial screening, verify agent only
+        """
+        excluded = {"update_suspicious_point", "find_all_paths", "check_reachability"}
         return [t for t in tools if t.get("function", {}).get("name") not in excluded]
 
     async def _get_tools(self, client) -> List[Dict[str, Any]]:

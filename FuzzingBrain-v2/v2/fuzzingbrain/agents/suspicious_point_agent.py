@@ -195,6 +195,18 @@ IMPORTANT: Do NOT set is_real - that will be determined later by actual exploita
 - Always set is_checked=True after analysis
 - Always set is_real=False (updated after actual exploitation)
 - Set is_important=True ONLY if score >= 0.5 AND reachable
+- **pov_guidance**: REQUIRED when is_important=True (see below)
+
+## POV GUIDANCE (Required for is_important=True)
+
+When you set is_important=True, you MUST provide pov_guidance to help the POV agent.
+Keep it brief (1-3 sentences), covering:
+
+1. **Input direction**: What kind of input to generate
+2. **How to reach the vuln**: What input structure/values help the payload pass through
+   earlier functions and reach the vulnerable code
+
+The POV agent will use this as a reference, not a strict requirement.
 
 ## CRITICAL: Correct Wrong Descriptions
 
@@ -431,23 +443,33 @@ class SuspiciousPointAgent(BaseAgent):
         """
         Get urgency message when iterations are running low.
 
-        For verify mode: remind to make a decision in the last 5 iterations.
+        For verify mode:
+        - remaining = 5: gentle reminder to prepare decision
+        - remaining <= 2: must decide now
         """
         if self.mode != "verify":
             return None
 
-        # Only trigger in last 5 iterations and if no result yet
-        if remaining <= 5 and remaining > 0 and self.verify_result is None:
-            return f"""⚠️ **URGENT: You have only {remaining} iteration(s) remaining!**
+        if self.verify_result is not None:
+            return None  # Already made decision
 
-You must call `update_suspicious_point` NOW to record your verification decision.
+        if remaining == 5:
+            # Gentle reminder at iteration 20/25
+            return """⏰ **REMINDER: 5 iterations remaining.**
 
-If you haven't finished all verification steps:
-- Make your best judgment based on what you've analyzed so far
-- Set a score based on your current confidence level
-- Include notes explaining what you verified and what remains uncertain
+Start wrapping up your analysis. You should be ready to call `update_suspicious_point` soon.
+"""
+        elif remaining <= 2 and remaining > 0:
+            # Final warning at iteration 24-25
+            return f"""⚠️ **FINAL: Only {remaining} iteration(s) left! You MUST decide NOW.**
 
-Do NOT let the iterations run out without making a decision. Call update_suspicious_point immediately!
+Call `update_suspicious_point` immediately with your best judgment:
+- Set is_checked=True
+- Set is_important based on whether this looks real
+- Set score based on your confidence
+- Include verification_notes explaining your reasoning
+
+Do NOT let iterations run out without a decision!
 """
         return None
 
@@ -567,14 +589,19 @@ Focus ONLY on these bug types (other bugs won't be detected by this sanitizer):
         """
         Filter tools based on current mode.
 
-        Find mode: Cannot use update_suspicious_point (verification is separate)
-        Verify mode: Cannot use create_suspicious_point (only updates existing)
+        Find mode:
+        - Cannot use update_suspicious_point (verification is separate)
+        - Cannot use find_all_paths/check_reachability (too slow, verify agent only)
+
+        Verify mode:
+        - Cannot use create_suspicious_point (only updates existing)
+        - CAN use find_all_paths/check_reachability for thorough verification
         """
         if self.mode == "find":
-            # Find mode: exclude update_suspicious_point
-            excluded = {"update_suspicious_point"}
+            # Find mode: exclude verification tools and slow path analysis
+            excluded = {"update_suspicious_point", "find_all_paths", "check_reachability"}
         else:
-            # Verify mode: exclude create_suspicious_point
+            # Verify mode: exclude create, but allow thorough analysis tools
             excluded = {"create_suspicious_point"}
 
         return [t for t in tools if t.get("function", {}).get("name") not in excluded]

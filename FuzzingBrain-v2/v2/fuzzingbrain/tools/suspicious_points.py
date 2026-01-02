@@ -96,52 +96,14 @@ def create_suspicious_point_impl(
         sp_id = result.get("id")
 
         if merged:
-            merge_json = json.dumps({
-                "id": sp_id,
-                "function_name": function_name,
-                "vuln_type": vuln_type,
-                "description": description,
-                "harness_name": harness_name,
-                "sanitizer": sanitizer,
-                "merged_with_existing": True,
-            }, ensure_ascii=False)
-            logger.info(f"[MERGED SUSPICIOUS POINT] {merge_json}")
-
-            return {
-                "success": True,
-                "id": sp_id,
-                "created": False,
-                "merged": True,
-                "message": (
-                    f"DUPLICATE DETECTED: This suspicious point was identified as a duplicate "
-                    f"of existing SP '{sp_id}' in function '{function_name}'. "
-                    f"Your source ({harness_name}/{sanitizer}) has been added to the existing SP. "
-                    f"No new SP was created.\n\n"
-                    f"SUGGESTION: Explore other functions or call paths."
-                ),
-            }
+            logger.info(f"[MERGED SP] {sp_id[:8]} <- {function_name} ({vuln_type})")
+            return {"success": True, "merged": True, "id": sp_id[:8]}
         else:
-            sp_json = json.dumps({
-                "id": sp_id,
-                "function_name": function_name,
-                "vuln_type": vuln_type,
-                "score": score,
-                "description": description,
-                "important_controlflow": important_controlflow or [],
-                "harness_name": harness_name,
-                "sanitizer": sanitizer,
-            }, ensure_ascii=False)
-            logger.info(f"[NEW SUSPICIOUS POINT] {sp_json}")
-
-            return {
-                "success": True,
-                "id": sp_id,
-                "created": True,
-                "merged": False,
-            }
+            logger.info(f"[NEW SP] {sp_id[:8]} -> {function_name} ({vuln_type}, score={score})")
+            return {"success": True, "created": True, "id": sp_id[:8]}
     except Exception as e:
         logger.error(f"Failed to create suspicious point: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e)[:100]}
 
 
 def update_suspicious_point_impl(
@@ -151,6 +113,7 @@ def update_suspicious_point_impl(
     is_real: bool = None,
     is_important: bool = None,
     verification_notes: str = None,
+    pov_guidance: str = None,
 ) -> Dict[str, Any]:
     """Implementation of update_suspicious_point (without MCP decorator)."""
     err = _ensure_client()
@@ -166,6 +129,7 @@ def update_suspicious_point_impl(
             is_important=is_important,
             score=score,
             verification_notes=verification_notes,
+            pov_guidance=pov_guidance,
         )
 
         update_json = json.dumps({
@@ -175,6 +139,7 @@ def update_suspicious_point_impl(
             "is_important": is_important,
             "score": score,
             "verification_notes": verification_notes,
+            "pov_guidance": pov_guidance,
         }, ensure_ascii=False)
 
         updated = result.get("updated", False) if result else False
@@ -295,67 +260,18 @@ def create_suspicious_point(
             sanitizer=sanitizer or "",
         )
 
-        # Check if this was merged with an existing SP
         merged = result.get("merged", False)
-        created = result.get("created", not merged)
         sp_id = result.get("id")
 
         if merged:
-            # Log the merge
-            merge_json = json.dumps({
-                "id": sp_id,
-                "function_name": function_name,
-                "vuln_type": vuln_type,
-                "description": description,
-                "harness_name": harness_name,
-                "sanitizer": sanitizer,
-                "merged_with_existing": True,
-            }, ensure_ascii=False)
-            logger.info(f"[MERGED SUSPICIOUS POINT] {merge_json}")
-
-            return {
-                "success": True,
-                "id": sp_id,
-                "created": False,
-                "merged": True,
-                "message": (
-                    f"DUPLICATE DETECTED: This suspicious point was identified as a duplicate "
-                    f"of existing SP '{sp_id}' in function '{function_name}'. "
-                    f"Your source ({harness_name}/{sanitizer}) has been added to the existing SP. "
-                    f"No new SP was created.\n\n"
-                    f"SUGGESTION: You have two options:\n"
-                    f"1. SWITCH: Explore other functions or call paths in your direction to maximize coverage.\n"
-                    f"2. FOCUS: Continue analyzing this area if you believe there are additional "
-                    f"vulnerabilities with different root causes that haven't been identified yet.\n\n"
-                    f"Use your judgment based on how thoroughly this function has been analyzed."
-                ),
-            }
+            logger.info(f"[MERGED SP] {sp_id[:8]} <- {function_name} ({vuln_type})")
+            return {"success": True, "merged": True, "id": sp_id[:8]}
         else:
-            # Log the new suspicious point
-            sp_json = json.dumps({
-                "id": sp_id,
-                "function_name": function_name,
-                "vuln_type": vuln_type,
-                "score": score,
-                "description": description,
-                "important_controlflow": important_controlflow or [],
-                "harness_name": harness_name,
-                "sanitizer": sanitizer,
-            }, ensure_ascii=False)
-            logger.info(f"[NEW SUSPICIOUS POINT] {sp_json}")
-
-            return {
-                "success": True,
-                "id": sp_id,
-                "created": True,
-                "merged": False,
-            }
+            logger.info(f"[NEW SP] {sp_id[:8]} -> {function_name} ({vuln_type}, score={score})")
+            return {"success": True, "created": True, "id": sp_id[:8]}
     except Exception as e:
         logger.error(f"Failed to create suspicious point: {e}")
-        return {
-            "success": False,
-            "error": str(e),
-        }
+        return {"success": False, "error": str(e)[:100]}
 
 
 @tools_mcp.tool
@@ -366,6 +282,7 @@ def update_suspicious_point(
     is_important: bool = None,
     score: float = None,
     verification_notes: str = None,
+    pov_guidance: str = None,
 ) -> Dict[str, Any]:
     """
     Update a suspicious point after verification.
@@ -376,11 +293,16 @@ def update_suspicious_point(
         suspicious_point_id: The ID of the suspicious point to update
         is_checked: Set to True when verification is complete
         is_real: Set to True if confirmed as real vulnerability, False if false positive
-        is_important: Set to True if this is a high-priority vulnerability
+        is_important: Set to True if this is a high-priority vulnerability (will proceed to POV)
         score: Updated confidence score based on analysis
         verification_notes: Notes explaining the verification result.
             Example: "Confirmed: no bounds check before memcpy, attacker-controlled length"
-            Example: "False positive: length is validated in caller function png_read_chunk"
+            Example: "False positive: length is validated in caller function"
+        pov_guidance: REQUIRED when is_important=True. Brief guidance for POV agent:
+            1. Input direction: What kind of input to generate
+            2. How to reach the vuln: What input structure/values help the payload
+               pass through earlier checks and reach the vulnerable code
+            Keep it simple, 1-3 sentences. POV agent uses this as reference only.
 
     Returns:
         {"success": True, "updated": True} on success
@@ -399,6 +321,7 @@ def update_suspicious_point(
             is_important=is_important,
             score=score,
             verification_notes=verification_notes,
+            pov_guidance=pov_guidance,
         )
 
         # Log the update with server result
@@ -409,6 +332,7 @@ def update_suspicious_point(
             "is_important": is_important,
             "score": score,
             "verification_notes": verification_notes,
+            "pov_guidance": pov_guidance,
         }, ensure_ascii=False)
 
         # Check if server actually updated the DB

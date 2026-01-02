@@ -10,7 +10,7 @@ Usage:
     # Each agent gets its own MCP server
     mcp_server = create_isolated_mcp_server(agent_id="agent_1")
     async with Client(mcp_server) as client:
-        result = await client.call_tool("get_function_source", {"function_name": "png_read_info"})
+        result = await client.call_tool("get_function_source", {"function_name": "target_function"})
 """
 
 from fastmcp import FastMCP
@@ -82,7 +82,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         Get metadata about a function (file path, line numbers, complexity, parameters).
 
         Args:
-            function_name: The exact name of the function to look up (e.g., "png_read_info")
+            function_name: The exact name of the function to look up
 
         Returns:
             Function metadata: name, file_path, start_line, end_line, complexity, args, return_type
@@ -113,7 +113,9 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         try:
             client = _get_client()
             functions = client.get_functions_by_file(file_path)
-            return {"success": True, "file_path": file_path, "count": len(functions), "functions": functions}
+            total = len(functions)
+            # Limit to 50 to save context
+            return {"success": True, "count": total, "functions": functions[:50], "truncated": total > 50}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -145,7 +147,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         For analyzing vulnerability patterns, always read the source code.
 
         Args:
-            function_name: The exact name of the function (e.g., "png_handle_iCCP")
+            function_name: The exact name of the function
 
         Returns:
             source: The complete source code of the function
@@ -170,7 +172,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         Use this to trace backwards in the call graph to understand how a function is reached.
 
         Args:
-            function_name: The function to find callers for (e.g., "png_handle_iCCP")
+            function_name: The function to find callers for
 
         Returns:
             callers: List of function names that call this function
@@ -180,8 +182,11 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return err
         try:
             client = _get_client()
-            callers = client.get_callers(function_name)
-            return {"success": True, "function_name": function_name, "count": len(callers), "callers": callers}
+            result = client.get_callers(function_name)
+            callers = result.get("callers", []) if isinstance(result, dict) else result
+            total = len(callers)
+            # Limit to 30 to save context
+            return {"success": True, "count": total, "callers": callers[:30], "truncated": total > 30}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -193,7 +198,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         Use this to trace forwards in the call graph to understand what a function does.
 
         Args:
-            function_name: The function to find callees for (e.g., "png_read_info")
+            function_name: The function to find callees for
 
         Returns:
             callees: List of function names called by this function
@@ -203,8 +208,11 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return err
         try:
             client = _get_client()
-            callees = client.get_callees(function_name)
-            return {"success": True, "function_name": function_name, "count": len(callees), "callees": callees}
+            result = client.get_callees(function_name)
+            callees = result.get("callees", []) if isinstance(result, dict) else result
+            total = len(callees)
+            # Limit to 30 to save context
+            return {"success": True, "count": total, "callees": callees[:30], "truncated": total > 30}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -216,7 +224,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         Returns all functions reachable from the fuzzer up to the specified depth.
 
         Args:
-            fuzzer_name: Name of the fuzzer (e.g., "libpng_read_fuzzer")
+            fuzzer_name: Name of the fuzzer
             depth: Maximum call depth to traverse (default: 3)
 
         Returns:
@@ -233,22 +241,20 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": str(e)}
 
     @mcp.tool
-    def find_all_paths(from_function: str, to_function: str, max_depth: int = 10, max_paths: int = 100) -> Dict[str, Any]:
+    def find_all_paths(from_function: str, to_function: str, max_depth: int = 10, max_paths: int = 20) -> Dict[str, Any]:
         """
         Find all call paths from one function to another.
 
         Use this to understand how input flows from entry point to a target function.
-        Essential for reachability analysis and understanding attack paths.
 
         Args:
-            from_function: Start function (e.g., "LLVMFuzzerTestOneInput" or fuzzer name)
-            to_function: Target function to reach (e.g., "png_handle_iCCP")
+            from_function: Start function (e.g., fuzzer entry point)
+            to_function: Target function to reach
             max_depth: Maximum path length (default: 10)
-            max_paths: Maximum number of paths to return (default: 100)
+            max_paths: Maximum paths to return (default: 20)
 
         Returns:
             paths: List of function call chains from start to target
-            path_count: Number of paths found
         """
         err = _ensure_client()
         if err:
@@ -256,7 +262,8 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         try:
             client = _get_client()
             result = client.find_all_paths(from_function, to_function, max_depth, max_paths)
-            return {"success": True, **result}
+            paths = result.get("paths", [])
+            return {"success": True, "path_count": len(paths), "paths": paths[:20]}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -268,8 +275,8 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         Quick check to verify if fuzzer input can reach a target function.
 
         Args:
-            fuzzer_name: Name of the fuzzer (e.g., "libpng_read_fuzzer")
-            function_name: Target function to check (e.g., "png_handle_iCCP")
+            fuzzer_name: Name of the fuzzer
+            function_name: Target function to check
 
         Returns:
             reachable: True if function is reachable from fuzzer
@@ -299,7 +306,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         Returns the complete list of functions that can be reached via the call graph.
 
         Args:
-            fuzzer_name: Name of the fuzzer (e.g., "libpng_read_fuzzer")
+            fuzzer_name: Name of the fuzzer
 
         Returns:
             functions: List of all reachable function names
@@ -323,7 +330,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         Useful for identifying code that fuzzer cannot reach and may need harness improvements.
 
         Args:
-            fuzzer_name: Name of the fuzzer (e.g., "libpng_read_fuzzer")
+            fuzzer_name: Name of the fuzzer
 
         Returns:
             functions: List of unreachable function names
@@ -361,7 +368,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         ALWAYS read the fuzzer source code FIRST before analyzing any vulnerability.
 
         Args:
-            fuzzer_name: Name of the fuzzer (e.g., 'libpng_read_fuzzer')
+            fuzzer_name: Name of the fuzzer
 
         Returns:
             - fuzzer: Fuzzer name
@@ -490,6 +497,7 @@ def _register_suspicious_point_tools(mcp: FastMCP) -> None:
         is_real: bool = None,
         is_important: bool = None,
         verification_notes: str = None,
+        pov_guidance: str = None,
     ) -> Dict[str, Any]:
         """
         Update an existing suspicious point after verification.
@@ -501,10 +509,11 @@ def _register_suspicious_point_tools(mcp: FastMCP) -> None:
             is_real: Whether it's confirmed as a real vulnerability
             is_important: Whether it's high priority
             verification_notes: Notes from verification analysis
+            pov_guidance: Guidance for POV agent (input direction, how to reach vuln)
         """
         from .suspicious_points import update_suspicious_point_impl
         return update_suspicious_point_impl(
-            suspicious_point_id, score, is_checked, is_real, is_important, verification_notes
+            suspicious_point_id, score, is_checked, is_real, is_important, verification_notes, pov_guidance
         )
 
     @mcp.tool

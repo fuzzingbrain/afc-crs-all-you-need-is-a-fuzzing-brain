@@ -506,14 +506,12 @@ def _create_pov_core(
 
     logger.info(f"[POV] Successfully created {len(pov_ids)} POVs for SP {suspicious_point_id[:8]}")
 
+    # Return minimal info to LLM - full UUIDs needed for verify_pov
     return {
         "success": True,
         "pov_ids": pov_ids,
-        "blob_paths": [p for p in blob_paths if p],
-        "generation_id": generation_id,
         "attempt": current_attempt,
-        "iteration": current_iteration,
-        "variant_count": len(pov_ids),
+        "count": len(pov_ids),
     }
 
 
@@ -803,13 +801,21 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
         pov.verified_at = datetime.now()
         repos.povs.save(pov)
 
-    return {
-        "success": True,
-        "crashed": crashed,
-        "vuln_type": vuln_type,
-        "sanitizer_output": output[:2000],  # Truncated for response
-        "error": None,
-    }
+    # Return minimal info - LLM mainly needs crash status and vuln_type
+    if crashed:
+        return {
+            "success": True,
+            "crashed": True,
+            "vuln_type": vuln_type,
+            "summary": f"CRASH DETECTED: {vuln_type}",
+        }
+    else:
+        # For non-crash, provide brief output hint (first 500 chars)
+        return {
+            "success": True,
+            "crashed": False,
+            "output_hint": output[:500] if output else "No output",
+        }
 
 
 @tools_mcp.tool
@@ -922,10 +928,9 @@ def _trace_pov_core(
 
     return {
         "success": True,
-        "executed_functions": executed_functions[:50],  # Limit for response size
+        "executed_functions": executed_functions[:20],  # Limit for context
         "target_reached": target_reached,
-        "executed_function_count": len(executed_functions),
-        "error": None,
+        "total_executed": len(executed_functions),
     }
 
 

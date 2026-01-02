@@ -90,6 +90,10 @@ class SuspiciousPoint:
     # Verification notes
     verification_notes: Optional[str] = None
 
+    # POV guidance - filled by Verify agent when is_important=True
+    # Brief guidance for POV agent: what input directions to try, what to watch out for
+    pov_guidance: Optional[str] = None
+
     # POV generation result
     pov_id: Optional[str] = None  # ID of generated POV (if any)
     pov_success_by: Optional[Dict] = None  # Which worker succeeded: {"harness_name": "...", "sanitizer": "..."}
@@ -122,6 +126,7 @@ class SuspiciousPoint:
             "important_controlflow": self.important_controlflow,
             "merged_duplicates": self.merged_duplicates,
             "verification_notes": self.verification_notes,
+            "pov_guidance": self.pov_guidance,
             "pov_id": self.pov_id,
             "pov_success_by": self.pov_success_by,
             "pov_attempted_by": self.pov_attempted_by,
@@ -166,6 +171,7 @@ class SuspiciousPoint:
             important_controlflow=data.get("important_controlflow", []),
             merged_duplicates=data.get("merged_duplicates", []),
             verification_notes=data.get("verification_notes"),
+            pov_guidance=data.get("pov_guidance"),
             pov_id=data.get("pov_id"),
             pov_success_by=data.get("pov_success_by"),
             pov_attempted_by=data.get("pov_attempted_by", []),
