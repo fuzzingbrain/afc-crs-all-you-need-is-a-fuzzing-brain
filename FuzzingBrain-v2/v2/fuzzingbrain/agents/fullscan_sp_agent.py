@@ -24,16 +24,32 @@ from ..llms import LLMClient, ModelInfo
 # System prompt for Full-scan SP finding
 FULLSCAN_SP_FIND_PROMPT = """You are a security researcher conducting a comprehensive security audit.
 
+## CRITICAL: Your Constraints (FUZZER + SANITIZER)
+
+You are finding vulnerabilities for ONE SPECIFIC FUZZER with ONE SPECIFIC SANITIZER.
+
+### The Two Rules That Define a Valid Vulnerability:
+
+1. **FUZZER REACHABILITY** (Must be YES)
+   - The vulnerable function MUST be reachable from the fuzzer's entry point
+   - Use find_all_paths or check_reachability to verify BEFORE creating any SP
+   - No path from fuzzer → NOT a vulnerability, don't waste time on it
+
+2. **SANITIZER DETECTABILITY** (Must be YES)
+   - The bug type MUST be detectable by the current sanitizer
+   - AddressSanitizer: buffer overflow, OOB access, use-after-free, double-free
+   - MemorySanitizer: uninitialized memory read
+   - UndefinedBehaviorSanitizer: integer overflow, null deref, div-by-zero
+   - If sanitizer can't catch it → won't trigger crash → not useful
+
+### Before Creating Any Suspicious Point, Ask:
+"Can THIS fuzzer trigger this bug, and will THIS sanitizer catch it?"
+If either answer is NO, skip it.
+
 ## Your Mission
 
-You are analyzing a "direction" - a logical grouping of related functions that may contain vulnerabilities.
-Your goal is to thoroughly analyze this code area and identify potential security issues.
-
-## IMPORTANT: Definition of Vulnerability
-
-A vulnerability is ONLY valid if it can be reached and triggered by the fuzzer.
-Code that has bugs but cannot be reached from the fuzzer entry point is NOT a vulnerability.
-You MUST verify reachability using call chain analysis before creating any suspicious point.
+You are analyzing a "direction" - a logical grouping of related functions.
+Find vulnerabilities that are BOTH reachable AND detectable.
 
 ## Available Tools
 
@@ -152,7 +168,7 @@ class FullscanSPAgent(BaseAgent):
         fuzzer_code: str = "",
         llm_client: Optional[LLMClient] = None,
         model: Optional[Union[ModelInfo, str]] = None,
-        max_iterations: int = 50,  # Full-scan needs more iterations
+        max_iterations: int = 100,  # Full-scan needs more iterations
         verbose: bool = True,
         task_id: str = "",
         worker_id: str = "",
@@ -247,11 +263,27 @@ class FullscanSPAgent(BaseAgent):
         # Build the message with direction context
         message = f"""Analyze the following direction for security vulnerabilities.
 
+## Your Target Configuration (FIXED - cannot change)
+
+**Fuzzer**: `{self.fuzzer}`
+**Sanitizer**: `{self.sanitizer}`
+
+Only find vulnerabilities that are:
+1. REACHABLE from `{self.fuzzer}` (verify with find_all_paths)
+2. DETECTABLE by `{self.sanitizer}` sanitizer
+
+## Fuzzer Source Code (CRITICAL - READ THIS FIRST)
+
+This code shows EXACTLY how input enters the target library.
+Study this carefully - it determines what vulnerabilities can be exploited.
+
+```c
+{self.fuzzer_code if self.fuzzer_code else f"// Not provided - MUST read with get_function_source('{self.fuzzer}')"}
+```
+
 ## Direction: {self.direction_name}
 
 ID: {self.direction_id}
-Fuzzer: {self.fuzzer}
-Sanitizer: {self.sanitizer}
 
 ### Code Summary
 {self.code_summary or "No summary available"}
@@ -263,30 +295,24 @@ Sanitizer: {self.sanitizer}
 ### Entry Points (how fuzzer reaches this direction)
 {chr(10).join(f"- {f}" for f in self.entry_functions) if self.entry_functions else "Not specified - use find_all_paths to discover"}
 
-## Fuzzer Source Code
-```c
-{self.fuzzer_code if self.fuzzer_code else "Not provided - use get_function_source to read it"}
-```
-
 ## Your Task
 
-1. **Start by understanding the fuzzer** (if not provided above)
-   - Read the fuzzer source with get_function_source("{self.fuzzer}")
+1. **FIRST**: Read the fuzzer source code if not shown above
+   - Use get_function_source("{self.fuzzer}") or get_function_source("LLVMFuzzerTestOneInput")
+   - Understand exactly how input flows into the library
 
-2. **Analyze call chains for each entry function**
-   - Use find_all_paths from the fuzzer to core functions
-   - Identify which functions are closest to the fuzzer (highest priority)
+2. **Verify reachability for each core function**
+   - Use find_all_paths from fuzzer to each function
+   - Skip functions that have no path from fuzzer
 
-3. **Deep dive into security-critical functions**
-   - Read source code of functions that handle input directly
-   - Look for the vulnerability patterns described in your instructions
+3. **Focus on {self.sanitizer}-detectable bugs**
+   - Only look for bug types this sanitizer can catch
+   - Don't waste time on bugs the sanitizer won't detect
 
-4. **Create suspicious points for real issues**
-   - Verify reachability before creating any SP
-   - Focus on root causes, not symptoms
-   - One SP per unique vulnerability
-
-Begin your analysis now. Start with the fuzzer if you haven't seen it, then work through the core functions systematically.
+4. **Create SPs only for valid vulnerabilities**
+   - Must be reachable from {self.fuzzer}
+   - Must be detectable by {self.sanitizer}
+   - One SP per unique root cause
 """
         return message
 

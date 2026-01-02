@@ -6,7 +6,8 @@ These tools use the same AnalysisClient context as analyzer tools.
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from contextvars import ContextVar
+from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
@@ -16,11 +17,11 @@ from .analyzer import _get_client, _ensure_client
 
 # =============================================================================
 # SP Context - Track harness_name and sanitizer for SP isolation
+# Using ContextVar for async task isolation (each asyncio.Task has its own context)
 # =============================================================================
 
-# Global context for SP tools (each worker sets its own)
-_sp_harness_name: Optional[str] = None
-_sp_sanitizer: Optional[str] = None
+_sp_harness_name: ContextVar[Optional[str]] = ContextVar('sp_harness_name', default=None)
+_sp_sanitizer: ContextVar[Optional[str]] = ContextVar('sp_sanitizer', default=None)
 
 
 def set_sp_context(harness_name: str, sanitizer: str) -> None:
@@ -31,19 +32,20 @@ def set_sp_context(harness_name: str, sanitizer: str) -> None:
     SPs created will be tagged with this harness_name and sanitizer, ensuring
     each worker only processes its own SPs.
 
+    Uses ContextVar for proper isolation in async/parallel execution.
+
     Args:
         harness_name: Fuzzer harness name (e.g., "fuzz_png")
         sanitizer: Sanitizer type (e.g., "address")
     """
-    global _sp_harness_name, _sp_sanitizer
-    _sp_harness_name = harness_name
-    _sp_sanitizer = sanitizer
+    _sp_harness_name.set(harness_name)
+    _sp_sanitizer.set(sanitizer)
     logger.debug(f"SP context set: harness_name={harness_name}, sanitizer={sanitizer}")
 
 
-def get_sp_context() -> tuple:
+def get_sp_context() -> Tuple[Optional[str], Optional[str]]:
     """Get the current SP context (harness_name, sanitizer)."""
-    return _sp_harness_name, _sp_sanitizer
+    return _sp_harness_name.get(), _sp_sanitizer.get()
 
 
 # =============================================================================

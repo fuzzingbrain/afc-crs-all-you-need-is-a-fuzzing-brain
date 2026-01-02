@@ -24,17 +24,41 @@ from ..llms import LLMClient, ModelInfo
 # System prompt for Direction Planning
 DIRECTION_PLANNING_PROMPT = """You are a security architect analyzing a codebase to plan a comprehensive security audit.
 
+## CRITICAL: Understanding Your Constraints
+
+You are analyzing vulnerabilities for ONE SPECIFIC FUZZER with ONE SPECIFIC SANITIZER.
+
+### What This Means:
+
+1. **FUZZER determines REACHABILITY**
+   - Only code reachable from THIS fuzzer's entry point can be exploited
+   - The fuzzer source code shows exactly how input enters the target library
+   - Functions not in the fuzzer's call graph are IRRELEVANT - ignore them completely
+   - A bug in unreachable code is NOT a vulnerability for this fuzzer
+
+2. **SANITIZER determines DETECTABILITY**
+   - Only bugs that THIS sanitizer can detect will trigger crashes
+   - AddressSanitizer: buffer overflows, use-after-free, double-free
+   - MemorySanitizer: uninitialized memory reads
+   - UndefinedBehaviorSanitizer: integer overflow, null deref, div-by-zero
+   - A bug the sanitizer cannot detect will NOT be caught - deprioritize it
+
+### The Key Question:
+"Can this fuzzer trigger this bug, and will this sanitizer catch it?"
+If BOTH answers are not YES, it's not worth investigating.
+
 ## Your Mission
 
 Given:
-1. A fuzzer's source code (how input enters the target library)
+1. The fuzzer's source code (MUST read this FIRST to understand input flow)
 2. The call graph (all functions reachable from the fuzzer)
 
 You must:
-1. Analyze the code structure and identify logical groupings
-2. Divide the reachable functions into "directions" (cohesive analysis areas)
-3. Assess the security risk level of each direction
-4. Create directions for the analysis team to investigate
+1. FIRST: Read and understand the fuzzer source code
+2. Analyze the code structure and identify logical groupings
+3. Divide the reachable functions into "directions" (cohesive analysis areas)
+4. Assess the security risk level of each direction (considering sanitizer type)
+5. Create directions for the analysis team to investigate
 
 ## What is a Direction?
 
@@ -130,7 +154,7 @@ class DirectionPlanningAgent(BaseAgent):
         worker_id: str = "",
         llm_client: Optional[LLMClient] = None,
         model: Optional[Union[ModelInfo, str]] = None,
-        max_iterations: int = 50,  # Direction planning needs more iterations
+        max_iterations: int = 100,  # Direction planning needs more iterations
         verbose: bool = True,
         log_dir: Optional[Path] = None,
     ):
@@ -211,28 +235,37 @@ Focus on vulnerabilities that {self.sanitizer} sanitizer can detect:
 
         message = f"""Plan the analysis directions for a Full-scan security audit.
 
-## Fuzzer Information
-- Name: {self.fuzzer}
-- Entry Point: LLVMFuzzerTestOneInput (or similar)
-- Sanitizer: {self.sanitizer}
+## Your Target Configuration
+
+**Fuzzer**: `{self.fuzzer}`
+**Sanitizer**: `{self.sanitizer}`
+
+These are FIXED. Only analyze vulnerabilities that:
+1. Are REACHABLE from this specific fuzzer
+2. Are DETECTABLE by {self.sanitizer} sanitizer
+
+## Fuzzer Source Code (CRITICAL - READ THIS CAREFULLY)
+
+This code shows EXACTLY how fuzzer input enters the target library.
+Understanding this is MANDATORY - it defines what code is exploitable.
+
+```c
+{fuzzer_code if fuzzer_code else "// Fuzzer source not provided - use get_function_source to read it"}
+```
 
 ## Codebase Information
-- Approximately {reachable_count} functions reachable from the fuzzer
-
-## Fuzzer Source Code
-```c
-{fuzzer_code}
-```
+- Approximately {reachable_count} functions reachable from this fuzzer
 
 ## Your Task
 
-1. First, use get_reachable_functions to see all functions to analyze
-2. Use get_call_graph to understand the call structure
-3. Identify logical groupings and create directions
-4. Make sure ALL functions are covered by at least one direction
-5. Prioritize directions by security risk
+1. **FIRST**: If fuzzer code is not shown above, read it with get_function_source("{self.fuzzer}")
+2. Understand how input flows from the fuzzer into the library
+3. Use get_reachable_functions to see all functions this fuzzer can reach
+4. Use get_call_graph to understand the call structure
+5. Group reachable functions into logical directions
+6. Prioritize by: (a) closeness to fuzzer input, (b) {self.sanitizer} vulnerability types
 
-Begin your analysis by reading the fuzzer code and the call graph.
+Remember: Only reachable code matters. Only {self.sanitizer}-detectable bugs matter.
 """
         return message
 

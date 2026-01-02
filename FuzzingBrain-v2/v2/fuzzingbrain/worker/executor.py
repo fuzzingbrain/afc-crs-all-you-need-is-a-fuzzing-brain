@@ -169,15 +169,19 @@ class WorkerExecutor:
 
     def _get_strategy(self):
         """
-        Get the appropriate strategy for this job type.
+        Get the appropriate strategy for this job type and scan mode.
 
         Returns:
             Strategy instance
         """
-        from .strategies import POVStrategy, PatchStrategy, HarnessStrategy
+        from .strategies import POVDeltaStrategy, POVFullscanStrategy, PatchStrategy, HarnessStrategy
 
         if self.task_type in ["pov", "pov-patch"]:
-            return POVStrategy(self)
+            # Select POV strategy based on scan mode
+            if self.scan_mode == "delta":
+                return POVDeltaStrategy(self)
+            else:
+                return POVFullscanStrategy(self)
         elif self.task_type == "patch":
             return PatchStrategy(self)
         elif self.task_type == "harness":

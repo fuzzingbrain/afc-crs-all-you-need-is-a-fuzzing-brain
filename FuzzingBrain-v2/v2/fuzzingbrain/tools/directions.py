@@ -5,6 +5,7 @@ MCP tools for AI Agent to create and manage analysis directions for Full-scan mo
 These tools use the same AnalysisClient context as analyzer tools.
 """
 
+from contextvars import ContextVar
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
@@ -15,27 +16,28 @@ from .analyzer import _get_client, _ensure_client
 
 # =============================================================================
 # Direction Context - Track fuzzer for direction isolation
+# Using ContextVar for async task isolation (each asyncio.Task has its own context)
 # =============================================================================
 
-# Global context for direction tools
-_direction_fuzzer: Optional[str] = None
+_direction_fuzzer: ContextVar[Optional[str]] = ContextVar('direction_fuzzer', default=None)
 
 
 def set_direction_context(fuzzer: str) -> None:
     """
     Set the context for direction tools.
 
+    Uses ContextVar for proper isolation in async/parallel execution.
+
     Args:
         fuzzer: Fuzzer name (e.g., "libpng_read_fuzzer")
     """
-    global _direction_fuzzer
-    _direction_fuzzer = fuzzer
+    _direction_fuzzer.set(fuzzer)
     logger.debug(f"Direction context set: fuzzer={fuzzer}")
 
 
 def get_direction_context() -> Optional[str]:
     """Get the current direction context (fuzzer)."""
-    return _direction_fuzzer
+    return _direction_fuzzer.get()
 
 
 # =============================================================================

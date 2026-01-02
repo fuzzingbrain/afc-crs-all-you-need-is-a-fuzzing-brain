@@ -374,7 +374,7 @@ class POVStrategy(BaseStrategy):
             task_id=self.task_id,
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
-            max_iterations=50,
+            max_iterations=100,
         )
 
         try:
@@ -504,7 +504,7 @@ class POVStrategy(BaseStrategy):
             task_id=self.task_id,
             worker_id=f"{self.worker_id}_agent_{index}",
             log_dir=agent_log_dir,
-            max_iterations=50,
+            max_iterations=100,
         )
 
         try:

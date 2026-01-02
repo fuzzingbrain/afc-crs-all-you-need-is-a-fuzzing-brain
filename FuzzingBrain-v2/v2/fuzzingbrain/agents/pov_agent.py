@@ -28,6 +28,27 @@ from ..tools.pov import set_pov_context, update_pov_iteration, get_pov_context
 
 POV_AGENT_SYSTEM_PROMPT = """You are a security researcher creating test inputs to trigger a known vulnerability.
 
+## CRITICAL: Your Target Configuration (FIXED)
+
+You are generating POV for ONE SPECIFIC FUZZER with ONE SPECIFIC SANITIZER.
+These define exactly what input format works and what crashes will be detected.
+
+### FUZZER defines INPUT FORMAT
+- The fuzzer source code shows EXACTLY how input enters the library
+- Your POV must match the format the fuzzer expects
+- Read the fuzzer source code FIRST - it tells you what bytes go where
+
+### SANITIZER defines CRASH DETECTION
+- Only crashes detectable by THIS sanitizer will be registered as success
+- AddressSanitizer: buffer overflow, OOB, use-after-free, double-free
+- MemorySanitizer: uninitialized memory reads
+- UndefinedBehaviorSanitizer: integer overflow, null deref, div-by-zero
+
+### Your POV Must:
+1. Match the fuzzer's expected input format
+2. Trigger a bug type that the sanitizer can detect
+3. Reach the vulnerable function through the fuzzer's call path
+
 ## Your Goal
 
 Generate a test input (blob) that triggers the vulnerability in the target function.
@@ -303,16 +324,24 @@ class POVAgent(BaseAgent):
         description = suspicious_point.get("description", "No description")
         score = suspicious_point.get("score", 0.5)
 
-        message = f"""Generate a POV for the following suspicious point:
+        message = f"""Generate a POV for the following suspicious point.
 
-## Target Information
+## Your Target Configuration (FIXED - cannot change)
 
-- Suspicious Point ID: {sp_id}
+**Fuzzer**: `{self.fuzzer}`
+**Sanitizer**: `{self.sanitizer}`
+
+Your POV must:
+1. Match the input format expected by `{self.fuzzer}`
+2. Trigger a crash detectable by `{self.sanitizer}` sanitizer
+3. Reach the vulnerable function through the fuzzer's call path
+
+## Suspicious Point Details
+
+- ID: {sp_id}
 - Function: {function_name}
 - Vulnerability Type: {vuln_type}
 - Confidence Score: {score}
-- Fuzzer: {self.fuzzer}
-- Sanitizer: {self.sanitizer}
 
 ## Vulnerability Description
 
@@ -323,14 +352,26 @@ class POVAgent(BaseAgent):
         # Add fuzzer source code
         fuzzer_source = self._load_fuzzer_source()
         if fuzzer_source:
-            message += f"""## Fuzzer Harness Source Code
+            message += f"""## Fuzzer Source Code (CRITICAL - READ THIS FIRST!)
 
-This is the fuzzer that processes input and calls the target library.
-Understanding this code is CRITICAL for crafting valid test inputs.
+This code shows EXACTLY how your POV input enters the target library.
+Study it carefully - it determines what input format you must use.
 
 ```c
 {fuzzer_source}
 ```
+
+Key things to identify:
+- How input bytes are read (fread, memcpy, etc.)
+- What library functions are called first
+- Any format requirements (headers, magic bytes, sizes)
+
+"""
+        else:
+            message += f"""## Fuzzer Source Code
+
+Fuzzer source not pre-loaded. Use get_fuzzer_info() or get_function_source("{self.fuzzer}") to read it.
+This is CRITICAL - you need to understand how your input enters the library!
 
 """
 

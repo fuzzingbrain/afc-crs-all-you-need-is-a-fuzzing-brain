@@ -7,6 +7,7 @@ Provides code analysis capabilities to AI agents.
 These tools wrap the AnalysisClient SDK for use via MCP protocol.
 """
 
+from contextvars import ContextVar
 from typing import Any, Dict, Optional
 
 from loguru import logger
@@ -15,52 +16,59 @@ from . import tools_mcp
 from ..analyzer import AnalysisClient
 
 
-# Global context for analyzer tools
-_analysis_socket_path: Optional[str] = None
-_analysis_client: Optional[AnalysisClient] = None
-_client_id: str = "mcp_agent"
+# =============================================================================
+# Context for analyzer tools
+# Using ContextVar for async task isolation (each asyncio.Task has its own context)
+# =============================================================================
+
+_analysis_socket_path: ContextVar[Optional[str]] = ContextVar('analyzer_socket_path', default=None)
+_analysis_client: ContextVar[Optional[AnalysisClient]] = ContextVar('analyzer_client', default=None)
+_client_id: ContextVar[str] = ContextVar('analyzer_client_id', default="mcp_agent")
 
 
 def set_analyzer_context(socket_path: str, client_id: str = "mcp_agent") -> None:
     """
     Set the context for analyzer tools.
 
+    Uses ContextVar for proper isolation in async/parallel execution.
+
     Args:
         socket_path: Path to Analysis Server Unix socket
         client_id: Identifier for this client (for query logging)
     """
-    global _analysis_socket_path, _analysis_client, _client_id
-    _analysis_socket_path = socket_path
-    _client_id = client_id
-    _analysis_client = None  # Reset client to reconnect with new settings
+    _analysis_socket_path.set(socket_path)
+    _client_id.set(client_id)
+    _analysis_client.set(None)  # Reset client to reconnect with new settings
 
 
 def get_analyzer_context() -> Optional[str]:
     """Get the current analyzer socket path."""
-    return _analysis_socket_path
+    return _analysis_socket_path.get()
 
 
 def _get_client() -> Optional[AnalysisClient]:
     """Get or create the Analysis Client."""
-    global _analysis_client
-
-    if _analysis_socket_path is None:
+    socket_path = _analysis_socket_path.get()
+    if socket_path is None:
         return None
 
-    if _analysis_client is None:
+    client = _analysis_client.get()
+    if client is None:
         try:
-            _analysis_client = AnalysisClient(
-                _analysis_socket_path,
-                client_id=_client_id,
+            client = AnalysisClient(
+                socket_path,
+                client_id=_client_id.get(),
             )
-            if not _analysis_client.ping():
+            if not client.ping():
                 logger.warning("Analysis Server not responding")
-                _analysis_client = None
+                client = None
+            else:
+                _analysis_client.set(client)
         except Exception as e:
             logger.warning(f"Failed to connect to Analysis Server: {e}")
-            _analysis_client = None
+            client = None
 
-    return _analysis_client
+    return client
 
 
 def _ensure_client() -> Dict[str, Any]:

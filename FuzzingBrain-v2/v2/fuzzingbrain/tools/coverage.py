@@ -19,6 +19,7 @@ import subprocess
 import tempfile
 import uuid
 from collections import defaultdict
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple, Set
@@ -48,12 +49,16 @@ class CoverageResult:
         }
 
 
-# Global reference to coverage fuzzer directory (set by Controller)
-_coverage_fuzzer_dir: Optional[Path] = None
-_project_name: Optional[str] = None
-_src_dir: Optional[Path] = None
-_docker_image: Optional[str] = None
-_work_dir: Optional[Path] = None  # Permanent work directory (avoids /tmp issues with Docker Snap)
+# =============================================================================
+# Coverage Context - Using ContextVar for async task isolation
+# Each asyncio.Task has its own context, preventing cross-contamination
+# =============================================================================
+
+_coverage_fuzzer_dir: ContextVar[Optional[Path]] = ContextVar('cov_fuzzer_dir', default=None)
+_project_name: ContextVar[Optional[str]] = ContextVar('cov_project_name', default=None)
+_src_dir: ContextVar[Optional[Path]] = ContextVar('cov_src_dir', default=None)
+_docker_image: ContextVar[Optional[str]] = ContextVar('cov_docker_image', default=None)
+_work_dir: ContextVar[Optional[Path]] = ContextVar('cov_work_dir', default=None)  # Permanent work directory
 
 
 def set_coverage_context(
@@ -66,6 +71,8 @@ def set_coverage_context(
     """
     Set the context for coverage analysis.
 
+    Uses ContextVar for proper isolation in async/parallel execution.
+
     Args:
         coverage_fuzzer_dir: Directory containing coverage-instrumented fuzzers
         project_name: OSS-Fuzz project name (for Docker image)
@@ -74,17 +81,16 @@ def set_coverage_context(
                      Can also use "aixcc-afc/{project_name}" for AFC projects
         work_dir: Permanent work directory for coverage output (avoids /tmp Docker Snap issues)
     """
-    global _coverage_fuzzer_dir, _project_name, _src_dir, _docker_image, _work_dir
-    _coverage_fuzzer_dir = coverage_fuzzer_dir
-    _project_name = project_name
-    _src_dir = src_dir
-    _docker_image = docker_image or f"gcr.io/oss-fuzz/{project_name}"
-    _work_dir = work_dir
+    _coverage_fuzzer_dir.set(coverage_fuzzer_dir)
+    _project_name.set(project_name)
+    _src_dir.set(src_dir)
+    _docker_image.set(docker_image or f"gcr.io/oss-fuzz/{project_name}")
+    _work_dir.set(work_dir)
 
 
 def get_coverage_context() -> Tuple[Optional[Path], Optional[str], Optional[Path]]:
     """Get the current coverage context."""
-    return _coverage_fuzzer_dir, _project_name, _src_dir
+    return _coverage_fuzzer_dir.get(), _project_name.get(), _src_dir.get()
 
 
 def set_coverage_fuzzer_path(coverage_fuzzer_dir: Path) -> None:
@@ -97,8 +103,7 @@ def set_coverage_fuzzer_path(coverage_fuzzer_dir: Path) -> None:
     Args:
         coverage_fuzzer_dir: Directory containing coverage-instrumented fuzzers
     """
-    global _coverage_fuzzer_dir
-    _coverage_fuzzer_dir = Path(coverage_fuzzer_dir) if coverage_fuzzer_dir else None
+    _coverage_fuzzer_dir.set(Path(coverage_fuzzer_dir) if coverage_fuzzer_dir else None)
 
 
 # =============================================================================
@@ -184,13 +189,15 @@ def run_coverage_fuzzer(
     Returns:
         (success, lcov_path, message)
     """
-    global _coverage_fuzzer_dir, _project_name, _docker_image
+    coverage_fuzzer_dir = _coverage_fuzzer_dir.get()
+    project_name = _project_name.get()
+    docker_image = _docker_image.get()
 
-    if _coverage_fuzzer_dir is None or _project_name is None:
+    if coverage_fuzzer_dir is None or project_name is None:
         return False, "", "Coverage context not set. Call set_coverage_context() first."
 
     # Check if coverage fuzzer exists
-    coverage_fuzzer = _coverage_fuzzer_dir / fuzzer_name
+    coverage_fuzzer = coverage_fuzzer_dir / fuzzer_name
     if not coverage_fuzzer.exists():
         return False, "", f"Coverage fuzzer not found: {coverage_fuzzer}"
 
@@ -224,7 +231,7 @@ def run_coverage_fuzzer(
             "-e", "LLVM_PROFILE_FILE=/out/coverage.profraw",
             "-v", f"{out_dir.absolute()}:/out",
             "-v", f"{real_fuzzer_dir}:/fuzzers:ro",  # Use resolved path
-            _docker_image,
+            docker_image,
             f"/fuzzers/{real_fuzzer_name}",  # Use resolved name
             "-runs=1",
             "/out/corpus",  # Pass directory, not file
@@ -254,7 +261,7 @@ def run_coverage_fuzzer(
             "docker", "run", "--rm", "--platform", "linux/amd64",
             "-v", f"{out_dir.absolute()}:/out",
             "-v", f"{real_fuzzer_dir}:/fuzzers:ro",  # Use resolved path
-            _docker_image,
+            docker_image,
             "bash", "-c", merge_and_export,
         ]
 
@@ -425,9 +432,10 @@ def _run_coverage_impl(
     target_files: Optional[List[str]] = None,
 ) -> CoverageResult:
     """Internal implementation of coverage analysis."""
-    global _coverage_fuzzer_dir, _project_name, _src_dir, _work_dir
+    coverage_fuzzer_dir = _coverage_fuzzer_dir.get()
+    work_dir = _work_dir.get()
 
-    if _coverage_fuzzer_dir is None:
+    if coverage_fuzzer_dir is None:
         return CoverageResult(
             success=False,
             error="Coverage context not set. Call set_coverage_context() first.",
@@ -443,15 +451,15 @@ def _run_coverage_impl(
         )
 
     # Use permanent work_dir if set, otherwise create temp directory
-    # Note: Docker Snap cannot mount /tmp directories, so use _work_dir when possible
-    if _work_dir is not None:
-        work_path = _work_dir
+    # Note: Docker Snap cannot mount /tmp directories, so use work_dir when possible
+    if work_dir is not None:
+        work_path = work_dir
         work_path.mkdir(parents=True, exist_ok=True)
         return _run_coverage_in_dir(fuzzer_name, input_data, work_path, target_functions, target_files)
     else:
         # Fallback to temp directory (may not work with Docker Snap)
-        with tempfile.TemporaryDirectory(prefix="coverage_") as work_dir:
-            work_path = Path(work_dir)
+        with tempfile.TemporaryDirectory(prefix="coverage_") as temp_dir:
+            work_path = Path(temp_dir)
             return _run_coverage_in_dir(fuzzer_name, input_data, work_path, target_functions, target_files)
 
 
@@ -463,7 +471,7 @@ def _run_coverage_in_dir(
     target_files: Optional[List[str]] = None,
 ) -> CoverageResult:
     """Run coverage analysis in a specific directory."""
-    global _src_dir
+    src_dir = _src_dir.get()
 
     # Run coverage fuzzer
     success, lcov_path, msg = run_coverage_fuzzer(fuzzer_name, input_data, work_path)
@@ -482,9 +490,9 @@ def _run_coverage_in_dir(
 
     # Get code context
     coverage_summary = ""
-    if _src_dir and _src_dir.exists():
+    if src_dir and src_dir.exists():
         coverage_summary = get_executed_code_context(
-            lcov_path, _src_dir, target_files
+            lcov_path, src_dir, target_files
         )
 
     return CoverageResult(
@@ -535,20 +543,20 @@ def list_available_fuzzers() -> Dict[str, Any]:
     Returns:
         List of fuzzer names that can be used for coverage analysis
     """
-    global _coverage_fuzzer_dir
+    coverage_fuzzer_dir = _coverage_fuzzer_dir.get()
 
-    if _coverage_fuzzer_dir is None:
+    if coverage_fuzzer_dir is None:
         return {
             "success": False,
             "fuzzers": [],
             "error": "Coverage context not set",
         }
 
-    if not _coverage_fuzzer_dir.exists():
+    if not coverage_fuzzer_dir.exists():
         return {
             "success": False,
             "fuzzers": [],
-            "error": f"Coverage fuzzer directory not found: {_coverage_fuzzer_dir}",
+            "error": f"Coverage fuzzer directory not found: {coverage_fuzzer_dir}",
         }
 
     # Skip known non-fuzzer files
@@ -563,7 +571,7 @@ def list_available_fuzzers() -> Dict[str, Any]:
     }
 
     fuzzers = []
-    for f in _coverage_fuzzer_dir.iterdir():
+    for f in coverage_fuzzer_dir.iterdir():
         if f.name in skip_files:
             continue
         if f.suffix.lower() in skip_extensions:
@@ -576,7 +584,7 @@ def list_available_fuzzers() -> Dict[str, Any]:
     return {
         "success": True,
         "fuzzers": fuzzers,
-        "path": str(_coverage_fuzzer_dir),
+        "path": str(coverage_fuzzer_dir),
     }
 
 
@@ -647,20 +655,20 @@ def run_coverage_impl(
 
 def list_fuzzers_impl() -> Dict[str, Any]:
     """Direct call version of list_available_fuzzers (bypasses MCP FunctionTool wrapper)."""
-    global _coverage_fuzzer_dir
+    coverage_fuzzer_dir = _coverage_fuzzer_dir.get()
 
-    if _coverage_fuzzer_dir is None:
+    if coverage_fuzzer_dir is None:
         return {
             "success": False,
             "fuzzers": [],
             "error": "Coverage context not set",
         }
 
-    if not _coverage_fuzzer_dir.exists():
+    if not coverage_fuzzer_dir.exists():
         return {
             "success": False,
             "fuzzers": [],
-            "error": f"Coverage fuzzer directory not found: {_coverage_fuzzer_dir}",
+            "error": f"Coverage fuzzer directory not found: {coverage_fuzzer_dir}",
         }
 
     # Skip known non-fuzzer files
@@ -675,7 +683,7 @@ def list_fuzzers_impl() -> Dict[str, Any]:
     }
 
     fuzzers = []
-    for f in _coverage_fuzzer_dir.iterdir():
+    for f in coverage_fuzzer_dir.iterdir():
         if f.name in skip_files:
             continue
         if f.suffix.lower() in skip_extensions:
@@ -690,7 +698,7 @@ def list_fuzzers_impl() -> Dict[str, Any]:
     return {
         "success": True,
         "fuzzers": fuzzers,
-        "path": str(_coverage_fuzzer_dir),
+        "path": str(coverage_fuzzer_dir),
     }
 
 

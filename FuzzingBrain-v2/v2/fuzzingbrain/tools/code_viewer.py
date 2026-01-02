@@ -17,6 +17,7 @@ Usage:
 import os
 import re
 import subprocess
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -25,10 +26,14 @@ from loguru import logger
 from . import tools_mcp
 
 
-# Global context for code viewer tools
-_workspace_path: Optional[Path] = None
-_repo_path: Optional[Path] = None
-_diff_path: Optional[Path] = None
+# =============================================================================
+# Context for code viewer tools
+# Using ContextVar for async task isolation (each asyncio.Task has its own context)
+# =============================================================================
+
+_workspace_path: ContextVar[Optional[Path]] = ContextVar('cv_workspace_path', default=None)
+_repo_path: ContextVar[Optional[Path]] = ContextVar('cv_repo_path', default=None)
+_diff_path: ContextVar[Optional[Path]] = ContextVar('cv_diff_path', default=None)
 
 
 def set_code_viewer_context(
@@ -39,37 +44,43 @@ def set_code_viewer_context(
     """
     Set the context for code viewer tools.
 
+    Uses ContextVar for proper isolation in async/parallel execution.
+
     Args:
         workspace_path: Path to the workspace directory
         repo_subdir: Subdirectory name for the repo (default: "repo")
         diff_filename: Name of the diff file (default: "diff.patch")
     """
-    global _workspace_path, _repo_path, _diff_path
-    _workspace_path = Path(workspace_path)
-    _repo_path = _workspace_path / repo_subdir
-    _diff_path = _workspace_path / diff_filename
+    ws_path = Path(workspace_path)
+    _workspace_path.set(ws_path)
+    _repo_path.set(ws_path / repo_subdir)
+    _diff_path.set(ws_path / diff_filename)
 
 
 def get_code_viewer_context() -> Dict[str, Optional[str]]:
     """Get the current code viewer context."""
+    ws = _workspace_path.get()
+    repo = _repo_path.get()
+    diff = _diff_path.get()
     return {
-        "workspace_path": str(_workspace_path) if _workspace_path else None,
-        "repo_path": str(_repo_path) if _repo_path else None,
-        "diff_path": str(_diff_path) if _diff_path else None,
+        "workspace_path": str(ws) if ws else None,
+        "repo_path": str(repo) if repo else None,
+        "diff_path": str(diff) if diff else None,
     }
 
 
 def _ensure_context() -> Optional[Dict[str, Any]]:
     """Ensure context is set, return error dict if not."""
-    if _workspace_path is None:
+    ws = _workspace_path.get()
+    if ws is None:
         return {
             "success": False,
             "error": "Code viewer context not set. Call set_code_viewer_context() first.",
         }
-    if not _workspace_path.exists():
+    if not ws.exists():
         return {
             "success": False,
-            "error": f"Workspace path does not exist: {_workspace_path}",
+            "error": f"Workspace path does not exist: {ws}",
         }
     return None
 
@@ -93,18 +104,19 @@ def get_diff() -> Dict[str, Any]:
     if err:
         return err
 
-    if _diff_path is None or not _diff_path.exists():
+    diff_path = _diff_path.get()
+    if diff_path is None or not diff_path.exists():
         return {
             "success": False,
-            "error": f"Diff file not found: {_diff_path}",
+            "error": f"Diff file not found: {diff_path}",
         }
 
     try:
-        content = _diff_path.read_text(encoding='utf-8', errors='replace')
+        content = diff_path.read_text(encoding='utf-8', errors='replace')
         return {
             "success": True,
             "content": content,
-            "path": str(_diff_path),
+            "path": str(diff_path),
             "size": len(content),
         }
     except Exception as e:
@@ -120,18 +132,19 @@ def get_diff_impl() -> Dict[str, Any]:
     if err:
         return err
 
-    if _diff_path is None or not _diff_path.exists():
+    diff_path = _diff_path.get()
+    if diff_path is None or not diff_path.exists():
         return {
             "success": False,
-            "error": f"Diff file not found: {_diff_path}",
+            "error": f"Diff file not found: {diff_path}",
         }
 
     try:
-        content = _diff_path.read_text(encoding='utf-8', errors='replace')
+        content = diff_path.read_text(encoding='utf-8', errors='replace')
         return {
             "success": True,
             "content": content,
-            "path": str(_diff_path),
+            "path": str(diff_path),
             "size": len(content),
         }
     except Exception as e:
@@ -172,10 +185,12 @@ def get_file_content(
     if err:
         return err
 
-    if _repo_path is None or not _repo_path.exists():
+    repo_path = _repo_path.get()
+    workspace_path = _workspace_path.get()
+    if repo_path is None or not repo_path.exists():
         return {
             "success": False,
-            "error": f"Repo path does not exist: {_repo_path}",
+            "error": f"Repo path does not exist: {repo_path}",
         }
 
     # Handle both absolute and relative paths
@@ -183,7 +198,7 @@ def get_file_content(
     if target_path.is_absolute():
         full_path = target_path
     else:
-        full_path = _repo_path / file_path
+        full_path = repo_path / file_path
 
     if not full_path.exists():
         return {
@@ -199,7 +214,7 @@ def get_file_content(
 
     # Security check: ensure file is within workspace
     try:
-        full_path.resolve().relative_to(_workspace_path.resolve())
+        full_path.resolve().relative_to(workspace_path.resolve())
     except ValueError:
         return {
             "success": False,
@@ -227,7 +242,7 @@ def get_file_content(
             return {
                 "success": True,
                 "content": content,
-                "path": str(full_path.relative_to(_repo_path)),
+                "path": str(full_path.relative_to(repo_path)),
                 "total_lines": total_lines,
                 "start_line": start_idx + 1,
                 "end_line": end_idx,
@@ -238,7 +253,7 @@ def get_file_content(
             return {
                 "success": True,
                 "content": content,
-                "path": str(full_path.relative_to(_repo_path)),
+                "path": str(full_path.relative_to(repo_path)),
                 "total_lines": total_lines,
             }
 
@@ -259,10 +274,12 @@ def get_file_content_impl(
     if err:
         return err
 
-    if _repo_path is None or not _repo_path.exists():
+    repo_path = _repo_path.get()
+    workspace_path = _workspace_path.get()
+    if repo_path is None or not repo_path.exists():
         return {
             "success": False,
-            "error": f"Repo path does not exist: {_repo_path}",
+            "error": f"Repo path does not exist: {repo_path}",
         }
 
     # Handle both absolute and relative paths
@@ -270,7 +287,7 @@ def get_file_content_impl(
     if target_path.is_absolute():
         full_path = target_path
     else:
-        full_path = _repo_path / file_path
+        full_path = repo_path / file_path
 
     if not full_path.exists():
         return {
@@ -286,7 +303,7 @@ def get_file_content_impl(
 
     # Security check: ensure file is within workspace
     try:
-        full_path.resolve().relative_to(_workspace_path.resolve())
+        full_path.resolve().relative_to(workspace_path.resolve())
     except ValueError:
         return {
             "success": False,
@@ -310,7 +327,7 @@ def get_file_content_impl(
             return {
                 "success": True,
                 "content": content,
-                "path": str(full_path.relative_to(_repo_path)),
+                "path": str(full_path.relative_to(repo_path)),
                 "total_lines": total_lines,
                 "start_line": start_idx + 1,
                 "end_line": end_idx,
@@ -321,7 +338,7 @@ def get_file_content_impl(
             return {
                 "success": True,
                 "content": content,
-                "path": str(full_path.relative_to(_repo_path)),
+                "path": str(full_path.relative_to(repo_path)),
                 "total_lines": total_lines,
             }
 
@@ -370,10 +387,11 @@ def search_code(
     if err:
         return err
 
-    if _repo_path is None or not _repo_path.exists():
+    repo_path = _repo_path.get()
+    if repo_path is None or not repo_path.exists():
         return {
             "success": False,
-            "error": f"Repo path does not exist: {_repo_path}",
+            "error": f"Repo path does not exist: {repo_path}",
         }
 
     try:
@@ -415,7 +433,7 @@ def search_code(
 
         result = subprocess.run(
             cmd,
-            cwd=str(_repo_path),
+            cwd=str(repo_path),
             capture_output=True,
             text=True,
             timeout=60,
@@ -497,10 +515,11 @@ def search_code_impl(
     if err:
         return err
 
-    if _repo_path is None or not _repo_path.exists():
+    repo_path = _repo_path.get()
+    if repo_path is None or not repo_path.exists():
         return {
             "success": False,
-            "error": f"Repo path does not exist: {_repo_path}",
+            "error": f"Repo path does not exist: {repo_path}",
         }
 
     try:
@@ -537,7 +556,7 @@ def search_code_impl(
 
         result = subprocess.run(
             cmd,
-            cwd=str(_repo_path),
+            cwd=str(repo_path),
             capture_output=True,
             text=True,
             timeout=60,
@@ -633,13 +652,14 @@ def list_files(
     if err:
         return err
 
-    if _repo_path is None or not _repo_path.exists():
+    repo_path = _repo_path.get()
+    if repo_path is None or not repo_path.exists():
         return {
             "success": False,
-            "error": f"Repo path does not exist: {_repo_path}",
+            "error": f"Repo path does not exist: {repo_path}",
         }
 
-    target_dir = _repo_path / directory if directory else _repo_path
+    target_dir = repo_path / directory if directory else repo_path
 
     if not target_dir.exists():
         return {
@@ -661,11 +681,11 @@ def list_files(
             # Use glob for recursive pattern matching
             for path in target_dir.rglob(pattern):
                 if path.is_file():
-                    rel_path = str(path.relative_to(_repo_path))
+                    rel_path = str(path.relative_to(repo_path))
                     files.append(rel_path)
         elif recursive:
             for path in target_dir.rglob("*"):
-                rel_path = str(path.relative_to(_repo_path))
+                rel_path = str(path.relative_to(repo_path))
                 if path.is_file():
                     files.append(rel_path)
                 elif path.is_dir():
@@ -673,11 +693,11 @@ def list_files(
         elif pattern:
             for path in target_dir.glob(pattern):
                 if path.is_file():
-                    rel_path = str(path.relative_to(_repo_path))
+                    rel_path = str(path.relative_to(repo_path))
                     files.append(rel_path)
         else:
             for path in target_dir.iterdir():
-                rel_path = str(path.relative_to(_repo_path))
+                rel_path = str(path.relative_to(repo_path))
                 if path.is_file():
                     files.append(rel_path)
                 elif path.is_dir():
@@ -713,13 +733,14 @@ def list_files_impl(
     if err:
         return err
 
-    if _repo_path is None or not _repo_path.exists():
+    repo_path = _repo_path.get()
+    if repo_path is None or not repo_path.exists():
         return {
             "success": False,
-            "error": f"Repo path does not exist: {_repo_path}",
+            "error": f"Repo path does not exist: {repo_path}",
         }
 
-    target_dir = _repo_path / directory if directory else _repo_path
+    target_dir = repo_path / directory if directory else repo_path
 
     if not target_dir.exists():
         return {
@@ -740,11 +761,11 @@ def list_files_impl(
         if recursive and pattern:
             for path in target_dir.rglob(pattern):
                 if path.is_file():
-                    rel_path = str(path.relative_to(_repo_path))
+                    rel_path = str(path.relative_to(repo_path))
                     files.append(rel_path)
         elif recursive:
             for path in target_dir.rglob("*"):
-                rel_path = str(path.relative_to(_repo_path))
+                rel_path = str(path.relative_to(repo_path))
                 if path.is_file():
                     files.append(rel_path)
                 elif path.is_dir():
@@ -752,11 +773,11 @@ def list_files_impl(
         elif pattern:
             for path in target_dir.glob(pattern):
                 if path.is_file():
-                    rel_path = str(path.relative_to(_repo_path))
+                    rel_path = str(path.relative_to(repo_path))
                     files.append(rel_path)
         else:
             for path in target_dir.iterdir():
-                rel_path = str(path.relative_to(_repo_path))
+                rel_path = str(path.relative_to(repo_path))
                 if path.is_file():
                     files.append(rel_path)
                 elif path.is_dir():

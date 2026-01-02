@@ -7,13 +7,15 @@ Uses a thread-safe global dict for context management, allowing multiple
 POV agents to run concurrently without interfering with each other.
 Each agent is identified by its worker_id.
 
-Note: We use a global dict instead of contextvars because fastmcp may execute
-sync tools in a thread pool, which breaks contextvar propagation.
+Context isolation:
+- _pov_contexts: Thread-safe dict keyed by worker_id (shared, protected by lock)
+- _current_worker_id: ContextVar for asyncio task isolation (each async task has its own)
 """
 
 import base64
 import threading
 import uuid
+from contextvars import ContextVar
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -35,14 +37,13 @@ from ..db import RepositoryManager
 # =============================================================================
 
 # Global dict to store context per worker_id
-# Using a dict + lock instead of contextvars because fastmcp may run
-# sync tools in a thread pool, breaking contextvar propagation
+# Using a dict + lock because the context data is shared and mutable
 _pov_contexts: Dict[str, Dict[str, Any]] = {}
 _pov_contexts_lock = threading.Lock()
 
-# Current active worker_id (global, since only one worker runs at a time per process)
-# This is set when set_pov_context is called
-_current_worker_id: Optional[str] = None
+# Current active worker_id - using ContextVar for async task isolation
+# Each asyncio.Task has its own value, preventing cross-contamination
+_current_worker_id: ContextVar[Optional[str]] = ContextVar('pov_current_worker_id', default=None)
 
 
 def set_pov_context(
@@ -91,11 +92,10 @@ def set_pov_context(
         "workspace_path": Path(workspace_path) if workspace_path else None,
         "fuzzer_source": fuzzer_source,
     }
-    global _current_worker_id
     with _pov_contexts_lock:
         _pov_contexts[worker_id] = ctx
-    # Set current worker_id globally
-    _current_worker_id = worker_id
+    # Set current worker_id in context (async task-local)
+    _current_worker_id.set(worker_id)
 
 
 def update_pov_iteration(iteration: int, worker_id: Optional[str] = None) -> None:
@@ -104,9 +104,9 @@ def update_pov_iteration(iteration: int, worker_id: Optional[str] = None) -> Non
 
     Args:
         iteration: Current iteration number
-        worker_id: Worker ID (uses global if not provided)
+        worker_id: Worker ID (uses context-local if not provided)
     """
-    wid = worker_id or _current_worker_id
+    wid = worker_id or _current_worker_id.get()
     if not wid:
         logger.warning("[POV] update_pov_iteration: no worker_id available")
         return
@@ -121,12 +121,12 @@ def get_pov_context(worker_id: Optional[str] = None) -> Dict[str, Any]:
     Get the current POV context (thread-safe).
 
     Args:
-        worker_id: Worker ID (uses global if not provided)
+        worker_id: Worker ID (uses context-local if not provided)
 
     Returns:
         Copy of the context dict
     """
-    wid = worker_id or _current_worker_id
+    wid = worker_id or _current_worker_id.get()
     if not wid:
         return {}
 
@@ -141,10 +141,9 @@ def clear_pov_context(worker_id: Optional[str] = None) -> None:
     Clear the POV context for a worker (thread-safe).
 
     Args:
-        worker_id: Worker ID (uses global if not provided)
+        worker_id: Worker ID (uses context-local if not provided)
     """
-    global _current_worker_id
-    wid = worker_id or _current_worker_id
+    wid = worker_id or _current_worker_id.get()
     if not wid:
         return
 
@@ -152,14 +151,14 @@ def clear_pov_context(worker_id: Optional[str] = None) -> None:
         if wid in _pov_contexts:
             del _pov_contexts[wid]
 
-    # Clear global if matching
-    if _current_worker_id == wid:
-        _current_worker_id = None
+    # Clear context-local if matching
+    if _current_worker_id.get() == wid:
+        _current_worker_id.set(None)
 
 
 def _get_current_context() -> Optional[Dict[str, Any]]:
     """Get the current context for tools (internal use)."""
-    wid = _current_worker_id
+    wid = _current_worker_id.get()
     if not wid:
         return None
 

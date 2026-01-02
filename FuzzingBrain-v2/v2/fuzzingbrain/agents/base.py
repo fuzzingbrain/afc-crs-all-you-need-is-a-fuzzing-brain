@@ -11,11 +11,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from fastmcp import Client
+from fastmcp import Client, FastMCP
 from loguru import logger
 
 from ..llms import LLMClient, LLMResponse, ModelInfo
-from ..tools import tools_mcp
 
 
 class BaseAgent(ABC):
@@ -78,6 +77,7 @@ class BaseAgent(ABC):
         # Agent-specific logger
         self._agent_logger = None
         self._log_file: Optional[Path] = None
+        self._chat_log_file: Optional[Path] = None
 
     @property
     def agent_name(self) -> str:
@@ -128,8 +128,13 @@ class BaseAgent(ABC):
             encoding="utf-8",
         )
 
+        # Create chat log file for detailed conversation tracking
+        self._chat_log_file = self._log_file.with_suffix(".chat.md")
+        self._init_chat_log()
+
         self._log("Logging initialized", level="INFO")
         self._log(f"Log file: {self._log_file}", level="INFO")
+        self._log(f"Chat log file: {self._chat_log_file}", level="INFO")
 
     def _log(self, message: str, level: str = "DEBUG") -> None:
         """Log a message with agent context."""
@@ -143,6 +148,109 @@ class BaseAgent(ABC):
                 prefix = f"[{self.agent_name}:{self.worker_id}]"
             log_func = getattr(logger, level.lower(), logger.debug)
             log_func(f"{prefix} {message}")
+
+    def _init_chat_log(self) -> None:
+        """Initialize the detailed chat log file with markdown header."""
+        if not hasattr(self, '_chat_log_file') or not self._chat_log_file:
+            return
+        try:
+            with open(self._chat_log_file, "w", encoding="utf-8") as f:
+                f.write(f"# Agent Chat Log\n\n")
+                f.write(f"- **Agent**: {self.agent_name}\n")
+                f.write(f"- **Task ID**: {self.task_id}\n")
+                f.write(f"- **Worker ID**: {self.worker_id}\n")
+                f.write(f"- **Start Time**: {datetime.now().isoformat()}\n")
+                f.write(f"- **Model**: {self.model.id if hasattr(self.model, 'id') else (self.model or 'default')}\n")
+                f.write(f"\n{'='*80}\n\n")
+        except Exception as e:
+            self._log(f"Failed to init chat log: {e}", level="ERROR")
+
+    def _log_chat_message(
+        self,
+        role: str,
+        content: str,
+        iteration: int = 0,
+        tool_calls: Optional[List[Dict]] = None,
+        tool_call_id: Optional[str] = None,
+    ) -> None:
+        """
+        Log a chat message with clear visual separation.
+
+        Args:
+            role: Message role (system, user, assistant, tool)
+            content: Message content
+            iteration: Current iteration number
+            tool_calls: List of tool calls (for assistant messages)
+            tool_call_id: Tool call ID (for tool response messages)
+        """
+        if not hasattr(self, '_chat_log_file') or not self._chat_log_file:
+            return
+
+        try:
+            with open(self._chat_log_file, "a", encoding="utf-8") as f:
+                timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
+                # Role-specific formatting with clear visual separators
+                if role == "system":
+                    f.write(f"## 📋 SYSTEM PROMPT\n")
+                    f.write(f"*[{timestamp}]*\n\n")
+                    f.write(f"```\n{content}\n```\n\n")
+                    f.write(f"{'─'*80}\n\n")
+
+                elif role == "user":
+                    f.write(f"## 👤 USER (Iteration {iteration})\n")
+                    f.write(f"*[{timestamp}]*\n\n")
+                    f.write(f"{content}\n\n")
+                    f.write(f"{'─'*80}\n\n")
+
+                elif role == "assistant":
+                    f.write(f"## 🤖 ASSISTANT (Iteration {iteration})\n")
+                    f.write(f"*[{timestamp}]*\n\n")
+                    if content:
+                        f.write(f"{content}\n\n")
+                    if tool_calls:
+                        f.write(f"### Tool Calls:\n")
+                        for tc in tool_calls:
+                            func_name = tc.get("function", {}).get("name", "unknown")
+                            func_args = tc.get("function", {}).get("arguments", "{}")
+                            tc_id = tc.get("id", "")
+                            f.write(f"- **{func_name}** (id: `{tc_id}`)\n")
+                            f.write(f"  ```json\n  {func_args}\n  ```\n")
+                        f.write("\n")
+                    f.write(f"{'─'*80}\n\n")
+
+                elif role == "tool":
+                    f.write(f"## 🔧 TOOL RESULT\n")
+                    f.write(f"*[{timestamp}]* Tool Call ID: `{tool_call_id}`\n\n")
+                    # Truncate very long tool results for readability
+                    if len(content) > 5000:
+                        f.write(f"```\n{content[:5000]}\n... (truncated, {len(content)} total chars)\n```\n\n")
+                    else:
+                        f.write(f"```\n{content}\n```\n\n")
+                    f.write(f"{'─'*80}\n\n")
+
+        except Exception as e:
+            self._log(f"Failed to log chat message: {e}", level="ERROR")
+
+    def _finalize_chat_log(self, final_response: str) -> None:
+        """Finalize the chat log with summary statistics."""
+        if not hasattr(self, '_chat_log_file') or not self._chat_log_file:
+            return
+
+        try:
+            duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
+
+            with open(self._chat_log_file, "a", encoding="utf-8") as f:
+                f.write(f"\n{'='*80}\n")
+                f.write(f"# SUMMARY\n\n")
+                f.write(f"- **End Time**: {self.end_time.isoformat() if self.end_time else 'N/A'}\n")
+                f.write(f"- **Duration**: {duration:.2f} seconds\n")
+                f.write(f"- **Total Iterations**: {self.total_iterations}\n")
+                f.write(f"- **Total Tool Calls**: {self.total_tool_calls}\n")
+                f.write(f"- **Total Messages**: {len(self.messages)}\n\n")
+                f.write(f"## Final Response:\n\n{final_response}\n")
+        except Exception as e:
+            self._log(f"Failed to finalize chat log: {e}", level="ERROR")
 
     def _log_conversation(self) -> None:
         """Log the full conversation history to file."""
@@ -273,6 +381,10 @@ class BaseAgent(ABC):
             {"role": "user", "content": initial_message},
         ]
 
+        # Log initial messages to chat log
+        self._log_chat_message("system", self.system_prompt)
+        self._log_chat_message("user", initial_message, iteration=0)
+
         # Get tools
         self._tools = await self._get_tools(client)
         self._log(f"Loaded {len(self._tools)} MCP tools", level="INFO")
@@ -324,6 +436,14 @@ class BaseAgent(ABC):
                     "tool_calls": response.tool_calls,
                 })
 
+                # Log assistant message with tool calls
+                self._log_chat_message(
+                    "assistant",
+                    response.content or "",
+                    iteration=iteration,
+                    tool_calls=response.tool_calls,
+                )
+
                 # Execute each tool call
                 for tool_call in response.tool_calls:
                     tool_name = tool_call["function"]["name"]
@@ -350,11 +470,26 @@ class BaseAgent(ABC):
                         "content": tool_result,
                     })
 
+                    # Log tool result
+                    self._log_chat_message(
+                        "tool",
+                        tool_result,
+                        iteration=iteration,
+                        tool_call_id=tool_id,
+                    )
+
             else:
                 # No tool calls - agent is done
                 final_response = response.content
                 self._log(f"Agent completed after {iteration} iterations", level="INFO")
                 self._log(f"Final response: {final_response[:500]}...", level="DEBUG")
+
+                # Log final assistant response
+                self._log_chat_message(
+                    "assistant",
+                    final_response or "",
+                    iteration=iteration,
+                )
                 break
 
         if iteration >= self.max_iterations:
@@ -399,8 +534,11 @@ class BaseAgent(ABC):
         self._log(f"Total iterations: {self.total_iterations}", level="INFO")
         self._log(f"Total tool calls: {self.total_tool_calls}", level="INFO")
 
-        # Save conversation log
+        # Save conversation log (JSON format)
         self._log_conversation()
+
+        # Finalize chat log (markdown format with summary)
+        self._finalize_chat_log(result)
 
         return result
 
@@ -432,5 +570,8 @@ class BaseAgent(ABC):
 
         if self._log_file:
             stats["log_file"] = str(self._log_file)
+
+        if self._chat_log_file:
+            stats["chat_log_file"] = str(self._chat_log_file)
 
         return stats
