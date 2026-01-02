@@ -45,15 +45,20 @@ class AnalysisClient:
 
     def _connect(self):
         """Connect to server if not connected."""
+        import time
         if self._sock is not None:
+            logger.debug(f"[TIMING] _connect: socket already connected")
             return
 
+        t0 = time.time()
         if not self.socket_path.exists():
             raise ConnectionError(f"Socket not found: {self.socket_path}")
 
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._sock.settimeout(self.timeout)
         self._sock.connect(str(self.socket_path))
+        t1 = time.time()
+        logger.debug(f"[TIMING] _connect: new socket connected in {t1-t0:.3f}s")
 
     def _disconnect(self):
         """Disconnect from server."""
@@ -80,13 +85,17 @@ class AnalysisClient:
             TimeoutError: If request times out
             RuntimeError: If request fails
         """
+        import time
+        t0 = time.time()
         request = Request(method=method, params=params or {}, source=self.client_id)
 
         try:
             self._connect()
+            t1 = time.time()
 
             # Send request
             self._sock.sendall(encode_message(request.to_json()))
+            t2 = time.time()
 
             # Receive response
             data = b""
@@ -98,10 +107,17 @@ class AnalysisClient:
                 if len(data) > MAX_MESSAGE_SIZE:
                     raise RuntimeError("Response too large")
 
+            t3 = time.time()
             response = Response.from_json(decode_message(data))
 
             if not response.success:
                 raise RuntimeError(response.error or "Request failed")
+
+            t4 = time.time()
+            # Log timing if total > 100ms
+            total = t4 - t0
+            if total > 0.1:
+                logger.debug(f"[TIMING] _request({method}): total={total:.3f}s connect={t1-t0:.3f}s send={t2-t1:.3f}s recv={t3-t2:.3f}s parse={t4-t3:.3f}s")
 
             return response.data
 

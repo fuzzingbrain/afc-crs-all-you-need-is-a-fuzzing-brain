@@ -630,6 +630,7 @@ __all__ = [
     # Context
     "set_analyzer_context",
     "get_analyzer_context",
+    "_analysis_client",  # For debugging ContextVar state
     # Server control
     "analyzer_status",
     # Function queries

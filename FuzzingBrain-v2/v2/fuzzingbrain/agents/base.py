@@ -469,11 +469,16 @@ class BaseAgent(ABC):
         Returns:
             Tool result as string
         """
+        import time
+        t0 = time.time()
         self._log(f"Executing tool: {tool_name}", level="DEBUG")
         self._log(f"  Args: {json.dumps(tool_args, ensure_ascii=False)[:500]}", level="DEBUG")
 
         try:
             result = await client.call_tool(tool_name, tool_args)
+            t1 = time.time()
+            if t1 - t0 > 0.5:  # Log if > 500ms
+                self._log(f"[TIMING] MCP call_tool({tool_name}): {t1-t0:.3f}s", level="INFO")
 
             # Extract text content from result
             if hasattr(result, 'content') and result.content:
