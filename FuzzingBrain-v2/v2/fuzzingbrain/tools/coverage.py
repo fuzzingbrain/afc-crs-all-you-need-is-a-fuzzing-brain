@@ -738,6 +738,26 @@ def get_feedback_impl(
     }
 
 
+def check_pov_reaches_target_impl(
+    fuzzer_name: str,
+    pov_data_base64: str,
+    target_function: str,
+) -> Dict[str, Any]:
+    """Direct call version of check_pov_reaches_target (bypasses MCP FunctionTool wrapper)."""
+    result = _run_coverage_impl(
+        fuzzer_name,
+        pov_data_base64,
+        target_functions=[target_function],
+    )
+
+    return {
+        "reached": result.target_reached.get(target_function, False),
+        "target_function": target_function,
+        "executed_functions": result.executed_functions[:20],
+        "error": result.error,
+    }
+
+
 __all__ = [
     # MCP Tools (FunctionTool objects - use via MCP only)
     "run_coverage",
@@ -748,6 +768,7 @@ __all__ = [
     "run_coverage_impl",  # Alias for _run_coverage_impl
     "list_fuzzers_impl",  # Alias for direct list
     "get_feedback_impl",  # Alias for direct get
+    "check_pov_reaches_target_impl",  # Alias for direct check
     # Setup and utilities
     "set_coverage_context",
     "set_coverage_fuzzer_path",

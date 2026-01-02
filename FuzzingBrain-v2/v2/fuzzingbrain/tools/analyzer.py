@@ -120,8 +120,10 @@ def get_function(name: str) -> Dict[str, Any]:
     """
     Get detailed information about a function by name.
 
+    Tries OSS_FUZZ_ prefix variants if exact name not found.
+
     Args:
-        name: Function name to look up
+        name: Function name to look up (e.g. 'png_read_info' or 'OSS_FUZZ_png_read_info')
 
     Returns:
         Function metadata including:
@@ -223,8 +225,10 @@ def get_function_source(name: str) -> Dict[str, Any]:
     """
     Get the source code of a function.
 
+    Tries OSS_FUZZ_ prefix variants if exact name not found.
+
     Args:
-        name: Function name
+        name: Function name (e.g. 'png_read_info' or 'OSS_FUZZ_png_read_info')
 
     Returns:
         Source code of the function.
@@ -262,8 +266,10 @@ def get_callers(function: str) -> Dict[str, Any]:
     """
     Get all functions that call the specified function.
 
+    Tries OSS_FUZZ_ prefix variants if exact name not found.
+
     Args:
-        function: Target function name
+        function: Target function name (e.g. 'png_read_info' or 'OSS_FUZZ_png_read_info')
 
     Returns:
         List of function names that call the target.
@@ -274,13 +280,18 @@ def get_callers(function: str) -> Dict[str, Any]:
 
     try:
         client = _get_client()
-        callers = client.get_callers(function)
-        return {
+        result = client.get_callers(function)
+        callers = result.get("callers", []) if isinstance(result, dict) else result
+        response = {
             "success": True,
-            "function": function,
+            "function": result.get("function", function) if isinstance(result, dict) else function,
             "count": len(callers),
             "callers": callers,
         }
+        # Include original query if it was mapped to a different name
+        if isinstance(result, dict) and result.get("queried_as"):
+            response["queried_as"] = result["queried_as"]
+        return response
     except Exception as e:
         return {
             "success": False,
@@ -293,8 +304,10 @@ def get_callees(function: str) -> Dict[str, Any]:
     """
     Get all functions called by the specified function.
 
+    Tries OSS_FUZZ_ prefix variants if exact name not found.
+
     Args:
-        function: Source function name
+        function: Source function name (e.g. 'png_read_info' or 'OSS_FUZZ_png_read_info')
 
     Returns:
         List of function names called by the source.
@@ -305,13 +318,18 @@ def get_callees(function: str) -> Dict[str, Any]:
 
     try:
         client = _get_client()
-        callees = client.get_callees(function)
-        return {
+        result = client.get_callees(function)
+        callees = result.get("callees", []) if isinstance(result, dict) else result
+        response = {
             "success": True,
-            "function": function,
+            "function": result.get("function", function) if isinstance(result, dict) else function,
             "count": len(callees),
             "callees": callees,
         }
+        # Include original query if it was mapped to a different name
+        if isinstance(result, dict) and result.get("queried_as"):
+            response["queried_as"] = result["queried_as"]
+        return response
     except Exception as e:
         return {
             "success": False,
@@ -366,7 +384,8 @@ def find_all_paths(
     to a specific target function.
 
     Args:
-        func1: Start function (e.g., fuzzer entry point like "LLVMFuzzerTestOneInput")
+        func1: Start function. Use 'LLVMFuzzerTestOneInput' to start from all
+               fuzzer entry points (call_depth=0 functions).
         func2: End function (target function to analyze)
         max_depth: Maximum path length (default: 10)
         max_paths: Maximum number of paths to return (default: 100)
@@ -405,11 +424,14 @@ def check_reachability(fuzzer: str, function: str) -> Dict[str, Any]:
     Check if a function is reachable from a fuzzer.
 
     Args:
-        fuzzer: Fuzzer name
+        fuzzer: Fuzzer name (e.g. 'libpng_read_fuzzer') or entry point function
+                name 'LLVMFuzzerTestOneInput'. If 'LLVMFuzzerTestOneInput' is
+                passed, all fuzzers will be searched.
         function: Target function to check
 
     Returns:
         Whether the function is reachable and the distance (call depth).
+        If 'LLVMFuzzerTestOneInput' was used, also returns the actual fuzzer name.
     """
     err = _ensure_client()
     if err:
@@ -418,13 +440,17 @@ def check_reachability(fuzzer: str, function: str) -> Dict[str, Any]:
     try:
         client = _get_client()
         result = client.get_reachability(fuzzer, function)
-        return {
+        response = {
             "success": True,
-            "fuzzer": fuzzer,
+            "fuzzer": result.get("fuzzer", fuzzer),  # Use actual fuzzer if returned
             "function": function,
             "reachable": result.get("reachable", False),
             "distance": result.get("distance"),
         }
+        # Include original query fuzzer if it was mapped to a different one
+        if result.get("fuzzer") and result["fuzzer"] != fuzzer:
+            response["queried_as"] = fuzzer
+        return response
     except Exception as e:
         return {
             "success": False,
@@ -438,7 +464,8 @@ def get_reachable_functions(fuzzer: str) -> Dict[str, Any]:
     Get all functions reachable from a fuzzer.
 
     Args:
-        fuzzer: Fuzzer name
+        fuzzer: Fuzzer name (e.g. 'libpng_read_fuzzer') or 'LLVMFuzzerTestOneInput'
+                to get all reachable functions across all fuzzers.
 
     Returns:
         List of all reachable function names.
@@ -471,7 +498,8 @@ def get_unreached_functions(fuzzer: str) -> Dict[str, Any]:
     Useful for identifying coverage gaps and guiding fuzzing strategy.
 
     Args:
-        fuzzer: Fuzzer name
+        fuzzer: Fuzzer name (e.g. 'libpng_read_fuzzer') or 'LLVMFuzzerTestOneInput'
+                to compare against all reachable functions across all fuzzers.
 
     Returns:
         List of function names not yet reached.
@@ -519,6 +547,45 @@ def get_fuzzers() -> Dict[str, Any]:
             "success": True,
             "count": len(fuzzers),
             "fuzzers": fuzzers,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+        }
+
+
+@tools_mcp.tool
+def get_fuzzer_source(fuzzer_name: str) -> Dict[str, Any]:
+    """
+    Get the source code of a fuzzer/harness.
+
+    This is the MOST IMPORTANT tool to understand how input enters the target.
+    ALWAYS read the fuzzer source code FIRST before analyzing any vulnerability.
+
+    Args:
+        fuzzer_name: Name of the fuzzer (e.g., 'libpng_read_fuzzer')
+
+    Returns:
+        - fuzzer: Fuzzer name
+        - source_path: Path to the fuzzer source file
+        - source: The fuzzer source code (shows how input is processed)
+    """
+    err = _ensure_client()
+    if err:
+        return err
+
+    try:
+        client = _get_client()
+        result = client.get_fuzzer_source(fuzzer_name)
+        if "error" in result and "source" not in result:
+            return {
+                "success": False,
+                **result,
+            }
+        return {
+            "success": True,
+            **result,
         }
     except Exception as e:
         return {
@@ -576,5 +643,6 @@ __all__ = [
     "get_unreached_functions",
     # Build info
     "get_fuzzers",
+    "get_fuzzer_source",
     "get_build_paths",
 ]

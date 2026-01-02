@@ -10,9 +10,11 @@ Workflow:
 4. Update points as real bugs or false positives
 """
 
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+from fastmcp import Client
 from loguru import logger
 
 from .base import BaseAgent
@@ -35,10 +37,8 @@ These are FIXED and define exactly what counts as a valid vulnerability.
 
 ### Rule 2: SANITIZER DETECTABILITY (Mandatory)
 - Only bugs detectable by the current sanitizer will cause crashes
-- AddressSanitizer: buffer overflow, OOB access, use-after-free, double-free
-- MemorySanitizer: uninitialized memory reads
-- UndefinedBehaviorSanitizer: integer overflow, null deref, div-by-zero
 - A bug the sanitizer can't detect is useless - don't report it
+- See "Sanitizer-Specific Patterns" section below for what to look for
 
 ### Before Creating ANY Suspicious Point:
 Ask yourself: "Can THIS fuzzer trigger this bug, and will THIS sanitizer catch it?"
@@ -106,45 +106,7 @@ These are DIFFERENT vulnerabilities with different root causes - create separate
 - Specify the vulnerability type (buffer-overflow, use-after-free, integer-overflow, etc.)
 - List related functions/variables that affect the bug
 
-## Sanitizer-Specific Vulnerability Focus
-
-IMPORTANT: Focus on vulnerabilities that the current sanitizer can detect!
-
-### AddressSanitizer (address/asan)
-Primary focus:
-- Buffer overflows (stack, heap, global)
-- Out-of-bounds read/write
-- Use-after-free
-- Double-free
-- Memory leaks
-
-### MemorySanitizer (memory/msan)
-Primary focus:
-- Uninitialized memory reads
-- Using values derived from uninitialized memory
-- Passing uninitialized memory to functions
-
-### UndefinedBehaviorSanitizer (undefined/ubsan)
-Primary focus:
-- Integer overflow (signed)
-- Shift overflow (shift by negative or too large amount)
-- Null pointer dereference
-- Division by zero
-- Invalid enum values
-- Misaligned pointers
-
-## General Vulnerability Patterns
-
-- Buffer overflows (memcpy, strcpy without bounds checking)
-- Use-after-free (dangling pointers)
-- Integer overflows (arithmetic on sizes before allocation)
-- Type confusion (sizeof misuse, wrong type casts)
-- Null pointer dereferences
-- Format string vulnerabilities
-- Double-free
-
 Be thorough but precise. Quality over quantity - fewer accurate points are better than many redundant ones.
-Focus on vulnerabilities that match the current sanitizer type!
 """
 
 # System prompt for verifying suspicious points
@@ -158,21 +120,29 @@ A suspicious point is only valid if it passes BOTH checks:
 1. **FUZZER REACHABILITY**: Can this fuzzer's input reach the vulnerable function?
 2. **SANITIZER DETECTABILITY**: Will this sanitizer catch this bug type?
 
-If either is NO → mark as FALSE POSITIVE immediately.
+## SCORING RULES (MUST FOLLOW!)
+
+### Reachability Penalty:
+- If function is UNREACHABLE from fuzzer → **new_score = original_score - 0.5**
+- If new_score < 0.5 → mark as FALSE POSITIVE immediately, set is_important=False
+
+### Score Thresholds:
+- score >= 0.5 AND is_important=True → proceeds to POV generation
+- score < 0.5 OR is_important=False → STOPS HERE (no POV generation)
 
 ## MANDATORY VERIFICATION STEPS (Complete ALL in order)
 
 ### Step 1: VERIFY FUZZER REACHABILITY (Most Important!)
-- First, read the fuzzer source code to understand how input enters the library
+- Read the fuzzer source code provided to understand how input enters the library
 - Call get_callers on the suspicious function
 - Trace the path from fuzzer entry point to the vulnerable function
-- If NO PATH from fuzzer exists → mark as FALSE POSITIVE immediately (score < 0.3)
+- If NO PATH from fuzzer exists:
+  * Apply -0.5 penalty: new_score = original_score - 0.5
+  * If new_score < 0.5: set is_important=False, mark as FALSE POSITIVE
 
 ### Step 2: VERIFY SANITIZER COMPATIBILITY
-- Check if this bug type is detectable by the current sanitizer:
-  - AddressSanitizer: buffer overflow, OOB, use-after-free, double-free
-  - MemorySanitizer: uninitialized memory reads
-  - UndefinedBehaviorSanitizer: integer overflow, null deref, div-by-zero
+- Check if this bug type is detectable by the current sanitizer
+- Refer to "Sanitizer-Specific Patterns" in the guidance
 - If sanitizer cannot detect this bug type → lower score significantly
 
 ### Step 3: ANALYZE SOURCE CODE
@@ -202,30 +172,41 @@ Available tools:
 - search_code: Search for patterns in the codebase
 - update_suspicious_point: Update the suspicious point with verification result
 
-IMPORTANT: Do NOT set is_real - that will be determined later by actual exploitation.
-Instead, update score and is_important based on your analysis:
+## FINAL SCORING GUIDE
 
-HIGH CONFIDENCE (score >= 0.9, is_important=True):
-- Call chain from fuzzer to vulnerable point is confirmed
+IMPORTANT: Do NOT set is_real - that will be determined later by actual exploitation.
+
+### HIGH CONFIDENCE (score >= 0.8, is_important=True) → Proceeds to POV:
+- Call chain from fuzzer to vulnerable point is CONFIRMED
 - No security checks prevent the vulnerability
 - Data flow from input to vulnerable code is verified
-- The vulnerability is highly likely to be exploitable
 
-MEDIUM CONFIDENCE (score 0.5-0.9):
-- Vulnerability exists but exploitation path is unclear
-- Some security checks may mitigate the issue
-- Need further analysis to confirm
+### MEDIUM CONFIDENCE (score 0.5-0.8, is_important=True) → Proceeds to POV:
+- Vulnerability exists, reachability confirmed
+- Some uncertainty in exploitation path
 
-LOW CONFIDENCE / FALSE POSITIVE (score < 0.5):
-- Function is unreachable from fuzzer
+### FALSE POSITIVE (score < 0.5, is_important=False) → STOPS HERE:
+- Function is UNREACHABLE from fuzzer (-0.5 penalty applied)
 - Input validation exists before vulnerable code
 - Bounds checks prevent the exploit condition
-- The described vulnerability cannot actually occur
+- DOES NOT proceed to POV generation
 
-Always set is_checked=True after analysis.
-Always set is_real=False (this will be updated after actual exploitation).
-Adjust score based on your confidence level.
-Set is_important=True for high-confidence vulnerabilities.
+### Required Fields:
+- Always set is_checked=True after analysis
+- Always set is_real=False (updated after actual exploitation)
+- Set is_important=True ONLY if score >= 0.5 AND reachable
+
+## CRITICAL: Correct Wrong Descriptions
+
+Sometimes upstream agents correctly identify a vulnerability location but provide an INCORRECT
+description of the bug. If you find:
+- The vulnerable LOCATION is correct (function is reachable, has a real bug)
+- But the DESCRIPTION is wrong (e.g., describes "type confusion" when it's actually "integer overflow")
+
+Then you MUST:
+1. CORRECT the description using update_suspicious_point
+2. Set appropriate score based on the REAL vulnerability you discovered
+3. DO NOT mark as false positive just because the description was wrong
 
 IMPORTANT: You must call get_callers and get_function_source before making any judgment.
 Do not rely solely on the suspicious point description - verify it with actual code analysis.
@@ -241,6 +222,9 @@ class SuspiciousPointAgent(BaseAgent):
     2. VERIFY: Verify a suspicious point to determine if it's real
     """
 
+    # Lower temperature for strict verification (more deterministic)
+    default_temperature: float = 0.4
+
     def __init__(
         self,
         mode: str = "find",
@@ -248,7 +232,7 @@ class SuspiciousPointAgent(BaseAgent):
         sanitizer: str = "address",
         llm_client: Optional[LLMClient] = None,
         model: Optional[Union[ModelInfo, str]] = None,
-        max_iterations: int = 30,
+        max_iterations: int = 25,  # 25 iterations for verification
         verbose: bool = True,
         # Logging context
         task_id: str = "",
@@ -285,17 +269,299 @@ class SuspiciousPointAgent(BaseAgent):
 
         # Context for find mode
         self.reachable_changes: List[Dict[str, Any]] = []
+        self.sp_list = []  # List of (func_name, vuln_type, score) for find mode summary
 
         # Context for verify mode
         self.suspicious_point: Optional[Dict[str, Any]] = None
+        self.verify_result: Optional[Dict[str, Any]] = None  # Stores verdict for summary
+
+    def _get_summary_table(self) -> str:
+        """Generate summary table based on mode."""
+        if self.mode == "find":
+            return self._get_find_summary_table()
+        else:
+            return self._get_verify_summary_table()
+
+    def _get_find_summary_table(self) -> str:
+        """Generate summary table for find mode."""
+        duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
+        width = 70
+
+        lines = []
+        lines.append("")
+        lines.append("┌" + "─" * width + "┐")
+        lines.append("│" + " SP FIND (DELTA) SUMMARY ".center(width) + "│")
+        lines.append("├" + "─" * width + "┤")
+        lines.append("│" + f"  Fuzzer: {self.fuzzer}".ljust(width) + "│")
+        lines.append("│" + f"  Sanitizer: {self.sanitizer}".ljust(width) + "│")
+        lines.append("│" + f"  Duration: {duration:.2f}s".ljust(width) + "│")
+        lines.append("│" + f"  Iterations: {self.total_iterations}".ljust(width) + "│")
+        lines.append("│" + f"  Changed Functions: {len(self.reachable_changes)}".ljust(width) + "│")
+        lines.append("│" + f"  SPs Created: {len(self.sp_list)}".ljust(width) + "│")
+        lines.append("├" + "─" * width + "┤")
+        lines.append("│" + " SUSPICIOUS POINTS ".center(width) + "│")
+        lines.append("├" + "─" * width + "┤")
+
+        if self.sp_list:
+            for func_name, vuln_type, score in self.sp_list:
+                score_icon = "🔴" if score >= 0.8 else ("🟡" if score >= 0.5 else "🟢")
+                line = f"  {score_icon} [{score:.1f}] {func_name}: {vuln_type}"
+                if len(line) > width - 2:
+                    line = line[:width - 5] + "..."
+                lines.append("│" + line.ljust(width) + "│")
+        else:
+            lines.append("│" + "  (No SPs created)".ljust(width) + "│")
+
+        lines.append("└" + "─" * width + "┘")
+        lines.append("")
+
+        return "\n".join(lines)
+
+    def _get_verify_summary_table(self) -> str:
+        """Generate summary table for verify mode."""
+        duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
+        width = 70
+
+        sp_id = ""
+        func_name = ""
+        vuln_type = ""
+        original_score = 0.5
+        if self.suspicious_point:
+            sp_id = self.suspicious_point.get("suspicious_point_id", "")[:16]
+            func_name = self.suspicious_point.get("function_name", "unknown")
+            vuln_type = self.suspicious_point.get("vuln_type", "unknown")
+            original_score = self.suspicious_point.get("score", 0.5)
+
+        # Get verdict from result
+        verdict = "UNKNOWN"
+        final_score = original_score
+        is_important = False
+        reason = "No verification performed"
+
+        if self.verify_result:
+            final_score = self.verify_result.get("score", original_score)
+            is_important = self.verify_result.get("is_important", False)
+            if final_score >= 0.5 and is_important:
+                verdict = "REAL VULNERABILITY"
+            else:
+                verdict = "FALSE POSITIVE"
+            reason = self.verify_result.get("reason", "No reason provided")
+
+        verdict_icon = "✅" if verdict == "REAL VULNERABILITY" else "❌"
+
+        lines = []
+        lines.append("")
+        lines.append("┌" + "─" * width + "┐")
+        lines.append("│" + " VERIFICATION SUMMARY ".center(width) + "│")
+        lines.append("├" + "─" * width + "┤")
+        lines.append("│" + f"  SP ID: {sp_id}".ljust(width) + "│")
+        lines.append("│" + f"  Function: {func_name}".ljust(width) + "│")
+        lines.append("│" + f"  Vuln Type: {vuln_type}".ljust(width) + "│")
+        lines.append("│" + f"  Fuzzer: {self.fuzzer}".ljust(width) + "│")
+        lines.append("│" + f"  Sanitizer: {self.sanitizer}".ljust(width) + "│")
+        lines.append("│" + f"  Duration: {duration:.2f}s".ljust(width) + "│")
+        lines.append("│" + f"  Iterations: {self.total_iterations}".ljust(width) + "│")
+        lines.append("├" + "─" * width + "┤")
+        lines.append("│" + " VERDICT ".center(width) + "│")
+        lines.append("├" + "─" * width + "┤")
+        lines.append("│" + f"  {verdict_icon} {verdict}".ljust(width) + "│")
+        lines.append("│" + f"  Original Score: {original_score:.2f}".ljust(width) + "│")
+        lines.append("│" + f"  Final Score: {final_score:.2f}".ljust(width) + "│")
+        lines.append("│" + f"  Is Important: {is_important}".ljust(width) + "│")
+        lines.append("├" + "─" * width + "┤")
+        lines.append("│" + " REASON ".center(width) + "│")
+        lines.append("├" + "─" * width + "┤")
+
+        # Wrap reason text
+        reason_words = reason.split()
+        current_line = "  "
+        for word in reason_words:
+            if len(current_line) + len(word) + 1 > width - 2:
+                lines.append("│" + current_line.ljust(width) + "│")
+                current_line = "  " + word
+            else:
+                current_line += word + " "
+        if current_line.strip():
+            lines.append("│" + current_line.ljust(width) + "│")
+
+        lines.append("└" + "─" * width + "┘")
+        lines.append("")
+
+        return "\n".join(lines)
+
+    async def _execute_tool(
+        self,
+        client: Client,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+    ) -> str:
+        """Execute tool and track results."""
+        result = await super()._execute_tool(client, tool_name, tool_args)
+
+        # Track create_suspicious_point results (find mode)
+        if tool_name == "create_suspicious_point":
+            try:
+                data = json.loads(result)
+                if data.get("success"):
+                    func_name = tool_args.get("function_name", "unknown")
+                    vuln_type = tool_args.get("vuln_type", "unknown")
+                    score = tool_args.get("score", 0.5)
+                    self.sp_list.append((func_name, vuln_type, score))
+                    self._log(f"Tracked SP: {func_name} ({vuln_type})", level="INFO")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Track update_suspicious_point results (verify mode)
+        elif tool_name == "update_suspicious_point":
+            try:
+                data = json.loads(result)
+                if data.get("success"):
+                    self.verify_result = {
+                        "score": tool_args.get("score", 0.5),
+                        "is_important": tool_args.get("is_important", False),
+                        "reason": tool_args.get("verification_notes", "No notes"),
+                    }
+                    self._log(f"Tracked verify result: score={tool_args.get('score')}", level="INFO")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        return result
+
+    def _get_urgency_message(self, iteration: int, remaining: int) -> Optional[str]:
+        """
+        Get urgency message when iterations are running low.
+
+        For verify mode: remind to make a decision in the last 5 iterations.
+        """
+        if self.mode != "verify":
+            return None
+
+        # Only trigger in last 5 iterations and if no result yet
+        if remaining <= 5 and remaining > 0 and self.verify_result is None:
+            return f"""⚠️ **URGENT: You have only {remaining} iteration(s) remaining!**
+
+You must call `update_suspicious_point` NOW to record your verification decision.
+
+If you haven't finished all verification steps:
+- Make your best judgment based on what you've analyzed so far
+- Set a score based on your current confidence level
+- Include notes explaining what you verified and what remains uncertain
+
+Do NOT let the iterations run out without making a decision. Call update_suspicious_point immediately!
+"""
+        return None
+
+    def _get_agent_metadata(self) -> dict:
+        """Get metadata for agent banner."""
+        if self.mode == "find":
+            return {
+                "Agent": "SP Find Agent (Delta)",
+                "Scan Mode": "delta",
+                "Phase": "SP Finding",
+                "Fuzzer": self.fuzzer,
+                "Sanitizer": self.sanitizer,
+                "Worker ID": self.worker_id,
+                "Goal": "Find vulnerabilities in code changes",
+            }
+        else:
+            # Verify mode
+            sp_id = ""
+            func_name = ""
+            vuln_type = ""
+            if self.suspicious_point:
+                sp_id = self.suspicious_point.get("suspicious_point_id", "")[:16]
+                func_name = self.suspicious_point.get("function_name", "")
+                vuln_type = self.suspicious_point.get("vuln_type", "")
+            return {
+                "Agent": "Verify Agent",
+                "Scan Mode": "verification",
+                "Phase": "SP Verification",
+                "Fuzzer": self.fuzzer,
+                "Sanitizer": self.sanitizer,
+                "Worker ID": self.worker_id,
+                "SP ID": sp_id,
+                "Target Function": func_name,
+                "Vulnerability Type": vuln_type,
+                "Goal": "Verify if SP is a real vulnerability",
+            }
 
     @property
     def system_prompt(self) -> str:
-        """Get system prompt based on mode."""
+        """Get system prompt based on mode with sanitizer-specific guidance."""
         if self.mode == "find":
-            return FIND_SUSPICIOUS_POINTS_PROMPT
+            prompt = FIND_SUSPICIOUS_POINTS_PROMPT
         else:
-            return VERIFY_SUSPICIOUS_POINTS_PROMPT
+            prompt = VERIFY_SUSPICIOUS_POINTS_PROMPT
+
+        # Add sanitizer-specific patterns
+        sanitizer_guidance = f"""
+
+## Sanitizer-Specific Patterns: {self.sanitizer}
+
+Focus ONLY on these bug types (other bugs won't be detected by this sanitizer):
+"""
+        if "address" in self.sanitizer.lower():
+            sanitizer_guidance += """
+### AddressSanitizer Detectable Bugs
+
+**Buffer Overflows**
+- memcpy, strcpy, strncpy without proper bounds checking
+- Array access with user-controlled index
+- Off-by-one errors in loops
+
+**Out-of-Bounds Access**
+- Reading/writing past allocated buffer
+- Negative array indices
+
+**Use-After-Free / Double-Free**
+- Accessing memory after free()
+- Dangling pointers after object destruction
+- Double-free vulnerabilities
+"""
+        elif "memory" in self.sanitizer.lower():
+            sanitizer_guidance += """
+### MemorySanitizer Detectable Bugs
+
+**Uninitialized Memory Reads**
+- Using variables before initialization
+- Reading from uninitialized struct fields
+- Uninitialized stack variables
+- Partial struct initialization
+
+**Information Leaks**
+- Copying uninitialized data to output
+- Using uninitialized values in conditions
+- Passing uninitialized data to functions
+"""
+        elif "undefined" in self.sanitizer.lower():
+            sanitizer_guidance += """
+### UndefinedBehaviorSanitizer Detectable Bugs
+
+**Integer Overflow**
+- Signed integer overflow/underflow
+- Multiplication overflow
+- Left shift overflow
+
+**Null Pointer Dereference**
+- Dereferencing NULL pointers
+- Null member access
+
+**Division/Shift Errors**
+- Division by zero
+- Modulo by zero
+- Shift by negative amount
+- Shift by >= type width
+"""
+        else:
+            sanitizer_guidance += """
+### General Vulnerability Patterns
+
+- Buffer overflows and out-of-bounds access
+- Memory corruption issues
+- Integer handling errors
+"""
+
+        return prompt + sanitizer_guidance
 
     def _filter_tools_for_mode(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """

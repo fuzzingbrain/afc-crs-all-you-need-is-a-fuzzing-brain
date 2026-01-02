@@ -28,6 +28,7 @@ from loguru import logger
 from ..agents import SuspiciousPointAgent, POVAgent, POVResult
 from ..core.models import SuspiciousPoint, SPStatus
 from ..db import RepositoryManager
+from ..tools.analyzer import set_analyzer_context
 
 
 @dataclass
@@ -107,6 +108,8 @@ class AgentPipeline:
         output_dir: Path = None,
         log_dir: Path = None,
         workspace_path: Path = None,
+        fuzzer_code: str = "",
+        mcp_socket_path: str = None,
     ):
         """
         Initialize the pipeline.
@@ -120,6 +123,8 @@ class AgentPipeline:
             output_dir: Directory for POV output
             log_dir: Directory for agent logs
             workspace_path: Path to workspace (for reading source code)
+            fuzzer_code: Fuzzer source code (for verify agent context)
+            mcp_socket_path: MCP socket path for analyzer context
         """
         self.task_id = task_id
         self.repos = repos
@@ -129,12 +134,18 @@ class AgentPipeline:
         self.output_dir = output_dir
         self.log_dir = log_dir
         self.workspace_path = workspace_path
+        self.fuzzer_code = fuzzer_code
+        self.mcp_socket_path = mcp_socket_path
 
         # Statistics
         self.stats = PipelineStats()
 
         # Shutdown flag
         self._shutdown = False
+
+        # Upstream completion flags (for streaming pipeline)
+        self._sp_finding_done = False   # Set when SP Find pool completes
+        self._verify_done = False       # Set when Verify pool completes
 
     async def run(self) -> PipelineStats:
         """
@@ -195,6 +206,11 @@ class AgentPipeline:
         Args:
             agent_id: Unique agent identifier
         """
+        # Set analyzer context for this task (ContextVar needs to be set per-task)
+        if self.mcp_socket_path:
+            set_analyzer_context(self.mcp_socket_path, client_id=agent_id)
+            logger.debug(f"[Pipeline:{agent_id}] Set analyzer context: {self.mcp_socket_path}")
+
         logger.info(f"[Pipeline:{agent_id}] Verification agent started")
         idle_cycles = 0
 
@@ -208,19 +224,27 @@ class AgentPipeline:
             )
 
             if sp is None:
-                # No work available
+                # No work available - check if we should exit
                 idle_cycles += 1
-                if idle_cycles >= self.config.max_idle_cycles:
-                    # Check if pipeline is complete (for this worker's SPs only)
-                    if self.repos.suspicious_points.is_pipeline_complete(
+
+                # Only consider exiting if upstream (SP Finding) is done
+                if self._sp_finding_done:
+                    # Check if there are any remaining pending_verify SPs
+                    pending_count = self.repos.suspicious_points.count_by_status(
                         self.task_id,
+                        status="pending_verify",
                         harness_name=self.fuzzer,
                         sanitizer=self.sanitizer,
-                    ):
-                        logger.info(f"[Pipeline:{agent_id}] No more work, exiting")
+                    )
+                    if pending_count == 0 and idle_cycles >= 5:
+                        # SP Finding done + no pending work + waited a bit = exit
+                        logger.info(f"[Pipeline:{agent_id}] SP Finding done, no more work, exiting")
                         break
-                    # Otherwise keep waiting (new SPs might be added)
-                    idle_cycles = self.config.max_idle_cycles // 2
+
+                # Log status periodically
+                if idle_cycles % 30 == 0:
+                    status = "waiting for SP Finding" if not self._sp_finding_done else "draining queue"
+                    logger.debug(f"[Pipeline:{agent_id}] Idle cycle {idle_cycles}, {status}")
 
                 await asyncio.sleep(self.config.poll_interval)
                 continue
@@ -245,8 +269,11 @@ class AgentPipeline:
                 )
                 verify_agent.set_verify_context(sp.to_dict())
 
-                # Run async
-                await verify_agent.run_async(suspicious_point=sp.to_dict())
+                # Run async with fuzzer code for context
+                await verify_agent.run_async(
+                    suspicious_point=sp.to_dict(),
+                    fuzzer_code=self.fuzzer_code,
+                )
 
                 # Get updated SP from database (agent should have updated it via tools)
                 updated_sp = self.repos.suspicious_points.find_by_id(sp.suspicious_point_id)
@@ -314,6 +341,11 @@ class AgentPipeline:
         Args:
             agent_id: Unique agent identifier
         """
+        # Set analyzer context for this task (ContextVar needs to be set per-task)
+        if self.mcp_socket_path:
+            set_analyzer_context(self.mcp_socket_path, client_id=agent_id)
+            logger.debug(f"[Pipeline:{agent_id}] Set analyzer context: {self.mcp_socket_path}")
+
         logger.info(f"[Pipeline:{agent_id}] POV generation agent started")
         idle_cycles = 0
 
@@ -328,19 +360,42 @@ class AgentPipeline:
             )
 
             if sp is None:
-                # No work available
+                # No work available - check if we should exit
                 idle_cycles += 1
-                if idle_cycles >= self.config.max_idle_cycles:
-                    # Check if pipeline is complete (for this worker's SPs only)
-                    if self.repos.suspicious_points.is_pipeline_complete(
+
+                # Only consider exiting if upstream (SP Finding) is done
+                # Once SP Finding is done, both verify and POV will drain their queues
+                if self._sp_finding_done:
+                    # Check if there are any remaining pending_pov or verifying SPs
+                    pending_pov = self.repos.suspicious_points.count_by_status(
                         self.task_id,
+                        status="pending_pov",
                         harness_name=self.fuzzer,
                         sanitizer=self.sanitizer,
-                    ):
-                        logger.info(f"[Pipeline:{agent_id}] No more work, exiting")
+                    )
+                    # Also check if verify is still producing (pending_verify or verifying)
+                    pending_verify = self.repos.suspicious_points.count_by_status(
+                        self.task_id,
+                        status="pending_verify",
+                        harness_name=self.fuzzer,
+                        sanitizer=self.sanitizer,
+                    )
+                    verifying = self.repos.suspicious_points.count_by_status(
+                        self.task_id,
+                        status="verifying",
+                        harness_name=self.fuzzer,
+                        sanitizer=self.sanitizer,
+                    )
+
+                    # Exit only when: SP Finding done + no pending_pov + no pending_verify + no verifying
+                    if pending_pov == 0 and pending_verify == 0 and verifying == 0 and idle_cycles >= 5:
+                        logger.info(f"[Pipeline:{agent_id}] All upstream done, no more work, exiting")
                         break
-                    # Otherwise keep waiting
-                    idle_cycles = self.config.max_idle_cycles // 2
+
+                # Log status periodically
+                if idle_cycles % 30 == 0:
+                    status = "waiting for upstream" if not self._sp_finding_done else "draining queue"
+                    logger.debug(f"[Pipeline:{agent_id}] Idle cycle {idle_cycles}, {status}")
 
                 await asyncio.sleep(self.config.poll_interval)
                 continue
@@ -354,7 +409,7 @@ class AgentPipeline:
             try:
                 logger.info(f"[Pipeline:{agent_id}] Generating POV for SP {sp.suspicious_point_id}")
 
-                # Run POV agent
+                # Run POV agent with fuzzer code
                 pov_agent = POVAgent(
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
@@ -368,6 +423,7 @@ class AgentPipeline:
                     fuzzer_path=self.config.fuzzer_path,
                     docker_image=self.config.docker_image,
                     workspace_path=self.workspace_path,
+                    fuzzer_code=self.fuzzer_code,
                 )
 
                 result = await pov_agent.generate_pov_async(sp.to_dict())
@@ -421,6 +477,7 @@ async def run_pipeline(
     max_iterations: int = 200,
     max_pov_attempts: int = 40,
     workspace_path: Path = None,
+    fuzzer_code: str = "",
 ) -> PipelineStats:
     """
     Convenience function to run the pipeline.
@@ -440,6 +497,7 @@ async def run_pipeline(
         max_iterations: Max POV agent iterations
         max_pov_attempts: Max POV generation attempts
         workspace_path: Path to workspace (for reading source code)
+        fuzzer_code: Fuzzer source code (for verify agent context)
 
     Returns:
         Pipeline statistics
@@ -463,6 +521,7 @@ async def run_pipeline(
         output_dir=output_dir,
         log_dir=log_dir,
         workspace_path=workspace_path,
+        fuzzer_code=fuzzer_code,
     )
 
     return await pipeline.run()

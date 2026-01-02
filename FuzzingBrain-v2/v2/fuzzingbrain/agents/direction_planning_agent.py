@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+from fastmcp import Client
 from loguru import logger
 
 from .base import BaseAgent
@@ -22,6 +23,14 @@ from ..llms import LLMClient, ModelInfo
 
 
 # System prompt for Direction Planning
+# TODO: Remove this debug hint after testing
+DEBUG_HINT = """
+## DEBUG HINT (REMOVE AFTER TESTING)
+For libpng: There is a known vulnerability in png_handle_iCCP function related to
+the wpng_byte type. When analyzing ICC Profile related directions, pay special
+attention to type definitions and sizeof operations.
+"""
+
 DIRECTION_PLANNING_PROMPT = """You are a security architect analyzing a codebase to plan a comprehensive security audit.
 
 ## CRITICAL: Understanding Your Constraints
@@ -38,10 +47,8 @@ You are analyzing vulnerabilities for ONE SPECIFIC FUZZER with ONE SPECIFIC SANI
 
 2. **SANITIZER determines DETECTABILITY**
    - Only bugs that THIS sanitizer can detect will trigger crashes
-   - AddressSanitizer: buffer overflows, use-after-free, double-free
-   - MemorySanitizer: uninitialized memory reads
-   - UndefinedBehaviorSanitizer: integer overflow, null deref, div-by-zero
    - A bug the sanitizer cannot detect will NOT be caught - deprioritize it
+   - See the "Sanitizer-Specific Guidance" section below for what to look for
 
 ### The Key Question:
 "Can this fuzzer trigger this bug, and will this sanitizer catch it?"
@@ -146,6 +153,9 @@ class DirectionPlanningAgent(BaseAgent):
     Analyzes call graph and divides code into directions for parallel analysis.
     """
 
+    # Medium temperature for strategic planning
+    default_temperature: float = 0.5
+
     def __init__(
         self,
         fuzzer: str = "",
@@ -188,45 +198,161 @@ class DirectionPlanningAgent(BaseAgent):
         # Track created directions
         self.directions_created = 0
         self.functions_assigned = set()
+        self.directions_list = []  # List of (name, risk_level, num_functions)
 
     @property
     def agent_name(self) -> str:
         return "DirectionPlanningAgent"
+
+    def _get_summary_table(self) -> str:
+        """Generate summary table for direction planning."""
+        duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
+        width = 70
+
+        lines = []
+        lines.append("")
+        lines.append("┌" + "─" * width + "┐")
+        lines.append("│" + " DIRECTION PLANNING SUMMARY ".center(width) + "│")
+        lines.append("├" + "─" * width + "┤")
+        lines.append("│" + f"  Fuzzer: {self.fuzzer}".ljust(width) + "│")
+        lines.append("│" + f"  Duration: {duration:.2f}s".ljust(width) + "│")
+        lines.append("│" + f"  Iterations: {self.total_iterations}".ljust(width) + "│")
+        lines.append("│" + f"  Directions Created: {self.directions_created}".ljust(width) + "│")
+        lines.append("│" + f"  Functions Assigned: {len(self.functions_assigned)}".ljust(width) + "│")
+        lines.append("├" + "─" * width + "┤")
+        lines.append("│" + " DIRECTIONS ".center(width) + "│")
+        lines.append("├" + "─" * width + "┤")
+
+        if self.directions_list:
+            for name, risk, num_funcs in self.directions_list:
+                risk_icon = "🔴" if risk == "high" else ("🟡" if risk == "medium" else "🟢")
+                line = f"  {risk_icon} {name} ({num_funcs} functions)"
+                lines.append("│" + line.ljust(width) + "│")
+        else:
+            lines.append("│" + "  (No directions recorded)".ljust(width) + "│")
+
+        lines.append("└" + "─" * width + "┘")
+        lines.append("")
+
+        return "\n".join(lines)
+
+    async def _execute_tool(
+        self,
+        client: Client,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+    ) -> str:
+        """Execute tool and track direction creation."""
+        result = await super()._execute_tool(client, tool_name, tool_args)
+
+        # Track create_direction results
+        if tool_name == "create_direction":
+            try:
+                data = json.loads(result)
+                if data.get("success"):
+                    name = tool_args.get("name", "unknown")
+                    risk = tool_args.get("risk_level", "medium")
+                    core_funcs = tool_args.get("core_functions", [])
+                    num_funcs = len(core_funcs) if isinstance(core_funcs, list) else 0
+
+                    self.directions_list.append((name, risk, num_funcs))
+                    self.directions_created += 1
+
+                    # Track functions assigned
+                    if isinstance(core_funcs, list):
+                        self.functions_assigned.update(core_funcs)
+
+                    self._log(f"Tracked direction: {name} ({risk}, {num_funcs} funcs)", level="INFO")
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        return result
+
+    def _get_agent_metadata(self) -> dict:
+        """Get metadata for agent banner."""
+        return {
+            "Agent": "Direction Planning Agent",
+            "Scan Mode": "full-scan",
+            "Phase": "Direction Planning",
+            "Fuzzer": self.fuzzer,
+            "Sanitizer": self.sanitizer,
+            "Worker ID": self.worker_id,
+            "Goal": "Divide call graph into logical directions for parallel analysis",
+        }
 
     @property
     def system_prompt(self) -> str:
         # Add sanitizer context to prompt
         prompt = DIRECTION_PLANNING_PROMPT
 
-        if self.sanitizer:
-            sanitizer_context = f"""
+        # Add sanitizer-specific guidance
+        sanitizer_context = f"""
 
-## Current Sanitizer: {self.sanitizer}
+## Sanitizer-Specific Guidance: {self.sanitizer}
 
-Focus on vulnerabilities that {self.sanitizer} sanitizer can detect:
+When assigning risk levels, prioritize directions that handle code patterns detectable by {self.sanitizer}:
 """
-            if "address" in self.sanitizer.lower():
-                sanitizer_context += """
-- Buffer overflows (heap, stack, global)
-- Out-of-bounds access
-- Use-after-free
-- Double-free
-"""
-            elif "memory" in self.sanitizer.lower():
-                sanitizer_context += """
-- Uninitialized memory reads
-- Use of uninitialized values
-"""
-            elif "undefined" in self.sanitizer.lower():
-                sanitizer_context += """
-- Integer overflow
-- Null pointer dereference
-- Division by zero
-- Shift errors
-"""
-            prompt += sanitizer_context
+        if "address" in self.sanitizer.lower():
+            sanitizer_context += """
+### AddressSanitizer Detectable Patterns (HIGH PRIORITY)
 
-        return prompt
+**Buffer Operations** - Mark as HIGH risk:
+- Functions using memcpy, memmove, strcpy, strncpy
+- Array indexing with external input
+- Pointer arithmetic
+
+**Memory Lifecycle** - Mark as HIGH risk:
+- Allocation functions (malloc, realloc, calloc)
+- Deallocation and cleanup paths
+- Object lifecycle management
+
+**Bounds Checking** - Mark as HIGH risk:
+- Length/size calculations
+- Loop bounds derived from input
+- String length handling
+"""
+        elif "memory" in self.sanitizer.lower():
+            sanitizer_context += """
+### MemorySanitizer Detectable Patterns (HIGH PRIORITY)
+
+**Initialization Paths** - Mark as HIGH risk:
+- Struct/buffer initialization
+- Partial initialization patterns
+- Default value handling
+
+**Data Flow** - Mark as HIGH risk:
+- Functions reading from buffers
+- Conditional branches on data values
+- Output/return value paths
+"""
+        elif "undefined" in self.sanitizer.lower():
+            sanitizer_context += """
+### UndefinedBehaviorSanitizer Detectable Patterns (HIGH PRIORITY)
+
+**Integer Operations** - Mark as HIGH risk:
+- Arithmetic on sizes/lengths
+- Type conversions (narrowing)
+- Multiplication of sizes
+
+**Pointer Operations** - Mark as HIGH risk:
+- Null checks (or lack thereof)
+- Pointer dereferences after conditions
+
+**Division/Shift** - Mark as HIGH risk:
+- Division operations
+- Bit shift operations
+"""
+        else:
+            sanitizer_context += """
+### General Vulnerability Patterns
+
+- Memory safety issues
+- Input validation
+- Error handling paths
+"""
+
+        # TODO: Remove DEBUG_HINT after testing
+        return prompt + sanitizer_context + DEBUG_HINT
 
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message for direction planning."""

@@ -263,6 +263,30 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
 
     def __init__(self, db: Database):
         super().__init__(db, "suspicious_points", SuspiciousPoint)
+        # Create indexes for faster queries
+        self._ensure_indexes()
+
+    def _ensure_indexes(self):
+        """Create indexes for common query patterns."""
+        try:
+            self.collection.create_index("task_id")
+            self.collection.create_index("status")
+            self.collection.create_index("function_name")
+            self.collection.create_index("score")
+            self.collection.create_index([("task_id", 1), ("status", 1)])
+            self.collection.create_index([("task_id", 1), ("function_name", 1)])
+            self.collection.create_index([("task_id", 1), ("score", -1)])
+            self.collection.create_index([("task_id", 1), ("is_checked", 1)])
+            # Compound index for claim_for_verify priority sorting
+            self.collection.create_index([
+                ("task_id", 1),
+                ("status", 1),
+                ("is_important", -1),
+                ("score", -1),
+                ("created_at", 1)
+            ])
+        except Exception as e:
+            logger.debug(f"Index creation for suspicious_points: {e}")
 
     def find_by_task(self, task_id: str) -> List[SuspiciousPoint]:
         """Find all suspicious points for a task"""
@@ -808,6 +832,20 @@ class DirectionRepository(BaseRepository[Direction]):
 
     def __init__(self, db: Database):
         super().__init__(db, "directions", Direction)
+        # Create indexes for faster queries
+        self._ensure_indexes()
+
+    def _ensure_indexes(self):
+        """Create indexes for common query patterns."""
+        try:
+            self.collection.create_index("task_id")
+            self.collection.create_index("status")
+            self.collection.create_index("fuzzer")
+            self.collection.create_index([("task_id", 1), ("fuzzer", 1)])
+            self.collection.create_index([("task_id", 1), ("status", 1)])
+            self.collection.create_index([("task_id", 1), ("fuzzer", 1), ("status", 1)])
+        except Exception as e:
+            logger.debug(f"Index creation for directions: {e}")
 
     def find_by_task(self, task_id: str) -> List[Direction]:
         """Find all directions for a task"""
@@ -1114,6 +1152,18 @@ class FunctionRepository(BaseRepository[Function]):
 
     def __init__(self, db: Database):
         super().__init__(db, "functions", Function)
+        # Create indexes for faster queries
+        self._ensure_indexes()
+
+    def _ensure_indexes(self):
+        """Create indexes for common query patterns."""
+        try:
+            self.collection.create_index("task_id")
+            self.collection.create_index("name")
+            self.collection.create_index([("task_id", 1), ("name", 1)])
+            self.collection.create_index([("task_id", 1), ("file_path", 1)])
+        except Exception as e:
+            logger.debug(f"Index creation for functions: {e}")
 
     def find_by_task(self, task_id: str) -> List[Function]:
         """Find all functions for a task"""
@@ -1166,6 +1216,20 @@ class CallGraphNodeRepository(BaseRepository[CallGraphNode]):
 
     def __init__(self, db: Database):
         super().__init__(db, "callgraph_nodes", CallGraphNode)
+        # Create indexes for faster queries
+        self._ensure_indexes()
+
+    def _ensure_indexes(self):
+        """Create indexes for common query patterns."""
+        try:
+            self.collection.create_index("task_id")
+            self.collection.create_index("function_name")
+            self.collection.create_index("call_depth")
+            self.collection.create_index([("task_id", 1), ("function_name", 1)])
+            self.collection.create_index([("task_id", 1), ("fuzzer_id", 1)])
+            self.collection.create_index([("task_id", 1), ("call_depth", 1)])
+        except Exception as e:
+            logger.debug(f"Index creation for callgraph_nodes: {e}")
 
     def find_by_task(self, task_id: str) -> List[CallGraphNode]:
         """Find all call graph nodes for a task"""

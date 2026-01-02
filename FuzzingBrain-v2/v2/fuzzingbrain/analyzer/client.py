@@ -343,6 +343,18 @@ class AnalysisClient:
         """
         return self._request(Method.GET_FUZZERS)
 
+    def get_fuzzer_source(self, fuzzer_name: str) -> dict:
+        """
+        Get fuzzer/harness source code.
+
+        Args:
+            fuzzer_name: Name of the fuzzer (e.g., 'libpng_read_fuzzer')
+
+        Returns:
+            Dict with fuzzer name, source_path, and source code content
+        """
+        return self._request(Method.GET_FUZZER_SOURCE, {"fuzzer_name": fuzzer_name})
+
     def get_build_paths(self) -> Dict[str, str]:
         """
         Get build output paths.

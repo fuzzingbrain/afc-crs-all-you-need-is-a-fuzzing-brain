@@ -48,8 +48,193 @@ def get_sp_context() -> Tuple[Optional[str], Optional[str]]:
     return _sp_harness_name.get(), _sp_sanitizer.get()
 
 
+# Aliases for mcp_factory compatibility
+_get_sp_context = get_sp_context
+
+
+def _ensure_sp_context() -> Optional[Dict[str, Any]]:
+    """Ensure SP context is set, return error dict if not."""
+    harness_name, sanitizer = get_sp_context()
+    if harness_name is None or sanitizer is None:
+        return {
+            "success": False,
+            "error": "SP context not set. Call set_sp_context() first.",
+        }
+    return None
+
+
 # =============================================================================
-# Suspicious Point Tools
+# Suspicious Point Tools - Implementation Functions
+# =============================================================================
+
+def create_suspicious_point_impl(
+    function_name: str,
+    vuln_type: str,
+    description: str,
+    score: float = 0.5,
+    important_controlflow: List[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """Implementation of create_suspicious_point (without MCP decorator)."""
+    err = _ensure_client()
+    if err:
+        return err
+
+    try:
+        client = _get_client()
+        harness_name, sanitizer = get_sp_context()
+        result = client.create_suspicious_point(
+            function_name=function_name,
+            description=description,
+            vuln_type=vuln_type,
+            score=score,
+            important_controlflow=important_controlflow or [],
+            harness_name=harness_name or "",
+            sanitizer=sanitizer or "",
+        )
+
+        merged = result.get("merged", False)
+        sp_id = result.get("id")
+
+        if merged:
+            merge_json = json.dumps({
+                "id": sp_id,
+                "function_name": function_name,
+                "vuln_type": vuln_type,
+                "description": description,
+                "harness_name": harness_name,
+                "sanitizer": sanitizer,
+                "merged_with_existing": True,
+            }, ensure_ascii=False)
+            logger.info(f"[MERGED SUSPICIOUS POINT] {merge_json}")
+
+            return {
+                "success": True,
+                "id": sp_id,
+                "created": False,
+                "merged": True,
+                "message": (
+                    f"DUPLICATE DETECTED: This suspicious point was identified as a duplicate "
+                    f"of existing SP '{sp_id}' in function '{function_name}'. "
+                    f"Your source ({harness_name}/{sanitizer}) has been added to the existing SP. "
+                    f"No new SP was created.\n\n"
+                    f"SUGGESTION: Explore other functions or call paths."
+                ),
+            }
+        else:
+            sp_json = json.dumps({
+                "id": sp_id,
+                "function_name": function_name,
+                "vuln_type": vuln_type,
+                "score": score,
+                "description": description,
+                "important_controlflow": important_controlflow or [],
+                "harness_name": harness_name,
+                "sanitizer": sanitizer,
+            }, ensure_ascii=False)
+            logger.info(f"[NEW SUSPICIOUS POINT] {sp_json}")
+
+            return {
+                "success": True,
+                "id": sp_id,
+                "created": True,
+                "merged": False,
+            }
+    except Exception as e:
+        logger.error(f"Failed to create suspicious point: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def update_suspicious_point_impl(
+    suspicious_point_id: str,
+    score: float = None,
+    is_checked: bool = None,
+    is_real: bool = None,
+    is_important: bool = None,
+    verification_notes: str = None,
+) -> Dict[str, Any]:
+    """Implementation of update_suspicious_point (without MCP decorator)."""
+    err = _ensure_client()
+    if err:
+        return err
+
+    try:
+        client = _get_client()
+        result = client.update_suspicious_point(
+            sp_id=suspicious_point_id,
+            is_checked=is_checked,
+            is_real=is_real,
+            is_important=is_important,
+            score=score,
+            verification_notes=verification_notes,
+        )
+
+        update_json = json.dumps({
+            "id": suspicious_point_id,
+            "is_checked": is_checked,
+            "is_real": is_real,
+            "is_important": is_important,
+            "score": score,
+            "verification_notes": verification_notes,
+        }, ensure_ascii=False)
+
+        updated = result.get("updated", False) if result else False
+        if updated:
+            logger.info(f"[UPDATE SUSPICIOUS POINT] {update_json}")
+        else:
+            logger.warning(f"[UPDATE SUSPICIOUS POINT FAILED] Server returned: {result}")
+
+        return {"success": updated, "updated": updated, "server_result": result}
+    except Exception as e:
+        logger.error(f"Failed to update suspicious point: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def list_suspicious_points_impl(
+    filter_unchecked: bool = False,
+    filter_real: bool = False,
+    filter_important: bool = False,
+) -> Dict[str, Any]:
+    """Implementation of list_suspicious_points (without MCP decorator)."""
+    err = _ensure_client()
+    if err:
+        return err
+
+    try:
+        client = _get_client()
+        result = client.list_suspicious_points(
+            filter_unchecked=filter_unchecked,
+            filter_real=filter_real,
+            filter_important=filter_important,
+        )
+        return {
+            "success": True,
+            "suspicious_points": result.get("suspicious_points", []),
+            "count": result.get("count", 0),
+        }
+    except Exception as e:
+        logger.error(f"Failed to list suspicious points: {e}")
+        return {"success": False, "error": str(e)}
+
+
+def get_suspicious_point_impl(suspicious_point_id: str) -> Dict[str, Any]:
+    """Implementation of get_suspicious_point (without MCP decorator)."""
+    err = _ensure_client()
+    if err:
+        return err
+
+    try:
+        client = _get_client()
+        result = client.get_suspicious_point(suspicious_point_id)
+        if result is None:
+            return {"success": False, "error": f"Suspicious point '{suspicious_point_id}' not found"}
+        return {"success": True, "suspicious_point": result}
+    except Exception as e:
+        logger.error(f"Failed to get suspicious point: {e}")
+        return {"success": False, "error": str(e)}
+
+
+# =============================================================================
+# Suspicious Point Tools - MCP Decorated
 # =============================================================================
 
 @tools_mcp.tool
@@ -332,9 +517,16 @@ __all__ = [
     # Context
     "set_sp_context",
     "get_sp_context",
-    # SP tools
+    "_get_sp_context",
+    "_ensure_sp_context",
+    # SP tools (MCP decorated)
     "create_suspicious_point",
     "update_suspicious_point",
     "list_suspicious_points",
     "get_suspicious_point",
+    # SP tools (implementation, for mcp_factory)
+    "create_suspicious_point_impl",
+    "update_suspicious_point_impl",
+    "list_suspicious_points_impl",
+    "get_suspicious_point_impl",
 ]

@@ -123,6 +123,7 @@ _SUBTITLES = {
     "controller": "║" + "FuzzingBrain Controller - Autonomous Cyber Reasoning System v2.0".center(100) + "║",
     "worker": "║" + "FuzzingBrain Worker - Autonomous Cyber Reasoning System v2.0".center(100) + "║",
     "analyzer": "║" + "FuzzingBrain Code Analyzer - Static Analysis & Build System v2.0".center(100) + "║",
+    "agent": "║" + "FuzzingBrain Agent - AI-Powered Vulnerability Hunter v2.0".center(100) + "║",
 }
 
 
@@ -276,6 +277,77 @@ def get_analyzer_banner_and_header(metadata: Dict[str, Any]) -> str:
         Formatted banner string ready to write to log
     """
     return get_logo("analyzer") + "\n" + _create_analyzer_header(metadata)
+
+
+def _create_agent_header(metadata: Dict[str, Any]) -> str:
+    """Create a formatted agent metadata header with purpose section."""
+    width = 80  # Fixed width
+
+    lines = []
+    lines.append("┌" + "─" * width + "┐")
+
+    # Agent type as title
+    agent_type = metadata.get("Agent", "Unknown Agent")
+    lines.append("│" + f" {agent_type} ".center(width) + "│")
+    lines.append("├" + "─" * width + "┤")
+
+    # Context section
+    context_keys = ["Scan Mode", "Phase", "Fuzzer", "Sanitizer", "Worker ID"]
+    for key in context_keys:
+        if key in metadata and metadata[key]:
+            lines.append("│" + f"  {key}: {metadata[key]}".ljust(width) + "│")
+
+    # Purpose section
+    lines.append("├" + "─" * width + "┤")
+    lines.append("│" + " PURPOSE ".center(width) + "│")
+    lines.append("├" + "─" * width + "┤")
+
+    purpose_keys = ["Direction", "Target Function", "SP ID", "Vulnerability Type", "Goal"]
+    has_purpose = False
+    for key in purpose_keys:
+        if key in metadata and metadata[key]:
+            has_purpose = True
+            value = str(metadata[key])
+            # Truncate long values
+            if len(value) > width - len(key) - 6:
+                value = value[:width - len(key) - 9] + "..."
+            lines.append("│" + f"  {key}: {value}".ljust(width) + "│")
+
+    if not has_purpose:
+        lines.append("│" + "  (No specific target)".ljust(width) + "│")
+
+    lines.append("└" + "─" * width + "┘")
+    lines.append("")
+    lines.append("=" * (width + 2))
+    lines.append(" AGENT LOG START ".center(width + 2, "="))
+    lines.append("=" * (width + 2))
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def get_agent_banner_and_header(metadata: Dict[str, Any]) -> str:
+    """
+    Get complete agent banner with logo and metadata header.
+
+    Args:
+        metadata: Agent metadata dictionary with keys like:
+            - Agent: Agent class name (e.g., "FullscanSPAgent")
+            - Scan Mode: "full-scan" or "delta"
+            - Phase: "SP Finding", "Verification", "POV Generation"
+            - Fuzzer: Fuzzer name
+            - Sanitizer: Sanitizer type
+            - Worker ID: Worker identifier
+            - Direction: Direction name (for SP agents)
+            - Target Function: Function being analyzed
+            - SP ID: Suspicious point ID (for verify/POV)
+            - Vulnerability Type: Type of vulnerability
+            - Goal: What the agent is trying to achieve
+
+    Returns:
+        Formatted banner string ready to write to log
+    """
+    return get_logo("agent") + "\n" + _create_agent_header(metadata)
 
 
 def get_log_dir() -> Optional[Path]:
@@ -643,6 +715,7 @@ __all__ = [
     "get_logo",
     "get_worker_banner_and_header",
     "get_analyzer_banner_and_header",
+    "get_agent_banner_and_header",
     "add_task_log",
     "get_task_logger",
     "create_worker_summary",

@@ -18,7 +18,6 @@ from loguru import logger
 
 from .base import BaseAgent
 from ..llms import LLMClient, ModelInfo
-from ..tools import tools_mcp
 from ..tools.pov import set_pov_context, update_pov_iteration, get_pov_context
 
 
@@ -192,6 +191,9 @@ class POVAgent(BaseAgent):
     - POV successfully triggers a crash
     """
 
+    # Medium temperature for creative POV input generation
+    default_temperature: float = 0.5
+
     def __init__(
         self,
         fuzzer: str = "",
@@ -212,6 +214,8 @@ class POVAgent(BaseAgent):
         # Verification context
         fuzzer_path: Optional[Path] = None,
         docker_image: Optional[str] = None,
+        # Fuzzer source code (passed directly to avoid DB lookup)
+        fuzzer_code: str = "",
     ):
         """
         Initialize POV Agent.
@@ -232,6 +236,7 @@ class POVAgent(BaseAgent):
             repos: Database repository manager
             fuzzer_path: Path to fuzzer binary (for verification)
             docker_image: Docker image for running fuzzer
+            fuzzer_code: Fuzzer source code (passed directly to avoid DB lookup)
         """
         super().__init__(
             llm_client=llm_client,
@@ -252,8 +257,8 @@ class POVAgent(BaseAgent):
         self.fuzzer_path = Path(fuzzer_path) if fuzzer_path else None
         self.docker_image = docker_image
 
-        # Fuzzer source code (loaded on demand)
-        self._fuzzer_source: Optional[str] = None
+        # Fuzzer source code (passed directly or loaded on demand)
+        self._fuzzer_source: Optional[str] = fuzzer_code if fuzzer_code else None
 
         # Current suspicious point being processed
         self.suspicious_point: Optional[Dict[str, Any]] = None
@@ -267,6 +272,82 @@ class POVAgent(BaseAgent):
     def agent_name(self) -> str:
         """Get agent name for logging."""
         return "POVAgent"
+
+    @property
+    def include_pov_tools(self) -> bool:
+        """POVAgent needs POV tools (create_pov, verify_pov, etc.)."""
+        return True
+
+    def _get_summary_table(self) -> str:
+        """Generate summary table for POV generation."""
+        duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
+        width = 70
+
+        sp_id = ""
+        func_name = ""
+        vuln_type = ""
+        if self.suspicious_point:
+            sp_id = self.suspicious_point.get("suspicious_point_id", "")[:16]
+            func_name = self.suspicious_point.get("function_name", "unknown")
+            vuln_type = self.suspicious_point.get("vuln_type", "unknown")
+
+        # Determine result
+        if self.pov_success:
+            result_icon = "✅"
+            result_text = "SUCCESS - Crash triggered!"
+        else:
+            result_icon = "❌"
+            result_text = "FAILED - No crash achieved"
+
+        lines = []
+        lines.append("")
+        lines.append("┌" + "─" * width + "┐")
+        lines.append("│" + " POV GENERATION SUMMARY ".center(width) + "│")
+        lines.append("├" + "─" * width + "┤")
+        lines.append("│" + f"  SP ID: {sp_id}".ljust(width) + "│")
+        lines.append("│" + f"  Target Function: {func_name}".ljust(width) + "│")
+        lines.append("│" + f"  Vulnerability: {vuln_type}".ljust(width) + "│")
+        lines.append("│" + f"  Fuzzer: {self.fuzzer}".ljust(width) + "│")
+        lines.append("│" + f"  Sanitizer: {self.sanitizer}".ljust(width) + "│")
+        lines.append("├" + "─" * width + "┤")
+        lines.append("│" + f"  Duration: {duration:.2f}s".ljust(width) + "│")
+        lines.append("│" + f"  Iterations: {self.total_iterations}".ljust(width) + "│")
+        lines.append("│" + f"  POV Attempts: {self.pov_attempts}/{self.max_pov_attempts}".ljust(width) + "│")
+        lines.append("│" + f"  Variants Tested: {self.pov_attempts * 3}".ljust(width) + "│")
+        lines.append("├" + "─" * width + "┤")
+        lines.append("│" + " RESULT ".center(width) + "│")
+        lines.append("├" + "─" * width + "┤")
+        lines.append("│" + f"  {result_icon} {result_text}".ljust(width) + "│")
+
+        if self.pov_success and self.successful_pov_id:
+            lines.append("│" + f"  POV ID: {self.successful_pov_id}".ljust(width) + "│")
+
+        lines.append("└" + "─" * width + "┘")
+        lines.append("")
+
+        return "\n".join(lines)
+
+    def _get_agent_metadata(self) -> dict:
+        """Get metadata for agent banner."""
+        sp_id = ""
+        func_name = ""
+        vuln_type = ""
+        if self.suspicious_point:
+            sp_id = self.suspicious_point.get("suspicious_point_id", "")[:16]
+            func_name = self.suspicious_point.get("function_name", "")
+            vuln_type = self.suspicious_point.get("vuln_type", "")
+        return {
+            "Agent": "POV Generation Agent",
+            "Scan Mode": "POV generation",
+            "Phase": "POV Generation",
+            "Fuzzer": self.fuzzer,
+            "Sanitizer": self.sanitizer,
+            "Worker ID": self.worker_id,
+            "SP ID": sp_id,
+            "Target Function": func_name,
+            "Vulnerability Type": vuln_type,
+            "Goal": "Generate crashing input (POV)",
+        }
 
     @property
     def system_prompt(self) -> str:

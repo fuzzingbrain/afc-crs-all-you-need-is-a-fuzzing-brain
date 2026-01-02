@@ -166,9 +166,31 @@ def _get_current_context() -> Optional[Dict[str, Any]]:
         return _pov_contexts.get(wid)
 
 
-def _ensure_context() -> Optional[Dict[str, Any]]:
-    """Ensure POV context is set. Returns error dict if not configured."""
-    ctx = _get_current_context()
+def _get_context_by_worker_id(worker_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get context by explicit worker_id (for isolated MCP servers).
+
+    This is the preferred method when worker_id is known, as it doesn't
+    depend on ContextVar propagation.
+    """
+    if not worker_id:
+        return None
+    with _pov_contexts_lock:
+        return _pov_contexts.get(worker_id)
+
+
+def _ensure_context(worker_id: str = None) -> Optional[Dict[str, Any]]:
+    """
+    Ensure POV context is set. Returns error dict if not configured.
+
+    Args:
+        worker_id: If provided, use explicit worker_id instead of ContextVar
+    """
+    if worker_id:
+        ctx = _get_context_by_worker_id(worker_id)
+    else:
+        ctx = _get_current_context()
+
     if ctx is None or ctx.get("task_id") is None:
         return {
             "success": False,
@@ -180,6 +202,93 @@ def _ensure_context() -> Optional[Dict[str, Any]]:
             "error": "Database repos not available in POV context.",
         }
     return None
+
+
+# =============================================================================
+# POV Tools - Implementation Functions (for mcp_factory)
+# =============================================================================
+
+def get_fuzzer_info_impl(worker_id: str = None) -> Dict[str, Any]:
+    """
+    Implementation of get_fuzzer_info (without MCP decorator).
+
+    Args:
+        worker_id: Explicit worker_id for context lookup (preferred over ContextVar)
+    """
+    err = _ensure_context(worker_id=worker_id)
+    if err:
+        return err
+
+    ctx = _get_context_by_worker_id(worker_id) if worker_id else _get_current_context()
+    fuzzer_source = ctx.get("fuzzer_source") or "(Fuzzer source code not available)"
+
+    return {
+        "success": True,
+        "fuzzer": ctx.get("fuzzer", ""),
+        "sanitizer": ctx.get("sanitizer", "address"),
+        "fuzzer_source": fuzzer_source,
+        "current_attempt": ctx.get("attempt", 0),
+        "current_iteration": ctx.get("iteration", 0),
+    }
+
+
+def create_pov_impl(generator_code: str, worker_id: str = None) -> Dict[str, Any]:
+    """
+    Implementation of create_pov (without MCP decorator).
+
+    Args:
+        generator_code: Python code with generate() function
+        worker_id: Explicit worker_id for context lookup (preferred over ContextVar)
+    """
+    err = _ensure_context(worker_id=worker_id)
+    if err:
+        return err
+
+    ctx = _get_context_by_worker_id(worker_id) if worker_id else _get_current_context()
+    suspicious_point_id = ctx.get("suspicious_point_id", "")
+
+    if not suspicious_point_id:
+        return {"success": False, "error": "suspicious_point_id not set in context"}
+    if not generator_code or not generator_code.strip():
+        return {"success": False, "error": "generator_code is required"}
+
+    # Use the shared implementation logic
+    return _create_pov_core(
+        suspicious_point_id=suspicious_point_id,
+        generator_code=generator_code,
+        description="POV generated via isolated MCP",
+        worker_id=worker_id,
+    )
+
+
+def verify_pov_impl(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
+    """
+    Implementation of verify_pov (without MCP decorator).
+
+    Args:
+        pov_id: POV ID to verify
+        worker_id: Explicit worker_id for context lookup (preferred over ContextVar)
+    """
+    err = _ensure_context(worker_id=worker_id)
+    if err:
+        return err
+
+    return _verify_pov_core(pov_id=pov_id, worker_id=worker_id)
+
+
+def trace_pov_impl(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
+    """
+    Implementation of trace_pov (without MCP decorator).
+
+    Args:
+        pov_id: POV ID to trace
+        worker_id: Explicit worker_id for context lookup (preferred over ContextVar)
+    """
+    err = _ensure_context(worker_id=worker_id)
+    if err:
+        return err
+
+    return _trace_pov_core(pov_id=pov_id, worker_id=worker_id)
 
 
 # =============================================================================
@@ -353,54 +462,24 @@ def _execute_generator_code(code: str, num_variants: int = 3) -> tuple:
 
 
 # =============================================================================
-# POV Tools
+# POV Tools - Core Implementation (shared by MCP-decorated and _impl versions)
 # =============================================================================
 
-@tools_mcp.tool
-def create_pov(
+def _create_pov_core(
     suspicious_point_id: str,
     generator_code: str,
     description: str,
+    worker_id: str = None,
 ) -> Dict[str, Any]:
     """
-    Create POV(s) by executing Python generator code.
-
-    The generator code must define a generate() function that returns bytes.
-    This function will be called 3 times to produce 3 blob variants.
+    Core implementation of create_pov.
 
     Args:
-        suspicious_point_id: ID of the suspicious point this POV targets
-        generator_code: Python code that defines a generate() function.
-            The function must return bytes. Can use: struct, zlib, hashlib, base64, etc.
-        description: Explanation of how this POV reproduces the vulnerability.
-
-    Returns:
-        {
-            "success": True,
-            "pov_ids": [...],
-            "blob_paths": [...],
-            "generation_id": "...",
-            "attempt": N,
-            "iteration": M,
-        }
-
-    Example:
-        generator_code = '''
-        def generate():
-            # Modules are pre-imported: struct, zlib, hashlib, base64, random, etc.
-            # Create test input that triggers the bug
-            value = random.randint(0, 0xFFFFFFFF)
-            data = struct.pack('>I', value)
-            return data
-        '''
+        worker_id: Explicit worker_id for context lookup (preferred over ContextVar)
     """
-    err = _ensure_context()
-    if err:
-        return err
-
-    ctx = _get_current_context()
+    ctx = _get_context_by_worker_id(worker_id) if worker_id else _get_current_context()
     task_id = ctx["task_id"]
-    worker_id = ctx["worker_id"]
+    ctx_worker_id = ctx["worker_id"]
     output_dir = ctx["output_dir"]
     repos = ctx["repos"]
     fuzzer = ctx.get("fuzzer", "")
@@ -409,9 +488,9 @@ def create_pov(
 
     # Increment attempt counter (thread-safe)
     with _pov_contexts_lock:
-        if worker_id in _pov_contexts:
-            _pov_contexts[worker_id]["attempt"] += 1
-            current_attempt = _pov_contexts[worker_id]["attempt"]
+        if ctx_worker_id in _pov_contexts:
+            _pov_contexts[ctx_worker_id]["attempt"] += 1
+            current_attempt = _pov_contexts[ctx_worker_id]["attempt"]
         else:
             current_attempt = 1
 
@@ -444,10 +523,10 @@ def create_pov(
     if not blobs:
         return {"success": False, "error": "Generator code produced no blobs"}
 
-    # Create output directory: povs/{task_id}/{worker_id}/attempt_{n}/
+    # Create output directory: povs/{task_id}/{ctx_worker_id}/attempt_{n}/
     attempt_dir = None
     if output_dir:
-        attempt_dir = output_dir / task_id / worker_id / f"attempt_{current_attempt:03d}"
+        attempt_dir = output_dir / task_id / ctx_worker_id / f"attempt_{current_attempt:03d}"
         attempt_dir.mkdir(parents=True, exist_ok=True)
 
     # Create POV records for each blob
@@ -508,6 +587,64 @@ def create_pov(
         "iteration": current_iteration,
         "variant_count": len(pov_ids),
     }
+
+
+@tools_mcp.tool
+def create_pov(
+    generator_code: str,
+    description: str = "POV generated by AI agent",
+) -> Dict[str, Any]:
+    """
+    Generate test input blobs that may trigger the identified vulnerability.
+
+    Write Python code that generates a bytes object. The code must define a
+    generate() function that returns bytes. The function will be called multiple
+    times to create variants.
+
+    Available modules in the sandbox: struct, zlib, hashlib, base64, binascii,
+    io, math, random, string, itertools, functools, collections.
+
+    Args:
+        generator_code: Python code with a generate() function that returns bytes.
+            Example:
+            ```python
+            def generate():
+                # Create a PNG with oversized chunk
+                header = b'\\x89PNG\\r\\n\\x1a\\n'
+                # IHDR chunk with malformed length
+                chunk_len = struct.pack('>I', 0xFFFFFFFF)
+                chunk_type = b'IHDR'
+                chunk_data = b'\\x00' * 13
+                return header + chunk_len + chunk_type + chunk_data
+            ```
+        description: Brief description of what this POV attempts to trigger
+
+    Returns:
+        {
+            "success": True,
+            "pov_ids": ["id1", "id2", ...],  # IDs for verification
+            "blob_paths": ["path1", ...],
+            "attempt": N,
+            "variant_count": 3,
+        }
+    """
+    err = _ensure_context()
+    if err:
+        return err
+
+    ctx = _get_current_context()
+    suspicious_point_id = ctx.get("suspicious_point_id", "")
+
+    if not suspicious_point_id:
+        return {"success": False, "error": "suspicious_point_id not set in context"}
+    if not generator_code or not generator_code.strip():
+        return {"success": False, "error": "generator_code is required"}
+
+    return _create_pov_core(
+        suspicious_point_id=suspicious_point_id,
+        generator_code=generator_code,
+        description=description or "POV generated by AI agent",
+    )
 
 
 # =============================================================================
@@ -650,33 +787,14 @@ def _run_fuzzer_docker(
             temp_blob.unlink()
 
 
-@tools_mcp.tool
-def verify_pov(
-    pov_id: str,
-) -> Dict[str, Any]:
+def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
     """
-    Verify if a POV triggers a crash in the target fuzzer.
-
-    Runs the fuzzer with the POV blob in a Docker container and checks
-    for sanitizer crash indicators.
+    Core implementation of verify_pov.
 
     Args:
-        pov_id: ID of the POV to verify
-
-    Returns:
-        {
-            "success": True/False,
-            "crashed": True/False,
-            "vuln_type": "heap-buffer-overflow" or None,
-            "sanitizer_output": "..." (truncated),
-            "error": None or error message,
-        }
+        worker_id: Explicit worker_id for context lookup (preferred over ContextVar)
     """
-    err = _ensure_context()
-    if err:
-        return err
-
-    ctx = _get_current_context()
+    ctx = _get_context_by_worker_id(worker_id) if worker_id else _get_current_context()
     repos = ctx["repos"]
     sanitizer = ctx.get("sanitizer", "address")
 
@@ -704,7 +822,6 @@ def verify_pov(
     blob_path = Path(blob_path)
 
     # Get fuzzer path from context or POV
-    # For now, we need fuzzer_path in context
     fuzzer_path = ctx.get("fuzzer_path")
     docker_image = ctx.get("docker_image")
 
@@ -767,35 +884,25 @@ def verify_pov(
     }
 
 
-# =============================================================================
-# POV Execution Trace
-# =============================================================================
-
 @tools_mcp.tool
-def trace_pov(
+def verify_pov(
     pov_id: str,
-    target_functions: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
-    Run a POV with coverage instrumentation to see which code paths it executes.
+    Verify if a POV triggers a crash in the target fuzzer.
 
-    Use this tool after verify_pov returns no crash to understand:
-    - Which functions did the POV input execute?
-    - Did it reach the target vulnerable function?
-    - Where did execution stop?
-
-    This helps you improve the next POV by understanding the execution path.
+    Runs the fuzzer with the POV blob in a Docker container and checks
+    for sanitizer crash indicators.
 
     Args:
-        pov_id: ID of the POV to trace
-        target_functions: Optional list of function names to check for reachability
+        pov_id: ID of the POV to verify
 
     Returns:
         {
             "success": True/False,
-            "executed_functions": ["func1", "func2", ...],
-            "target_reached": {"target_func": True/False, ...},
-            "executed_function_count": N,
+            "crashed": True/False,
+            "vuln_type": "heap-buffer-overflow" or None,
+            "sanitizer_output": "..." (truncated),
             "error": None or error message,
         }
     """
@@ -803,7 +910,25 @@ def trace_pov(
     if err:
         return err
 
-    ctx = _get_current_context()
+    return _verify_pov_core(pov_id=pov_id)
+
+
+# =============================================================================
+# POV Execution Trace
+# =============================================================================
+
+def _trace_pov_core(
+    pov_id: str,
+    target_functions: Optional[List[str]] = None,
+    worker_id: str = None,
+) -> Dict[str, Any]:
+    """
+    Core implementation of trace_pov.
+
+    Args:
+        worker_id: Explicit worker_id for context lookup (preferred over ContextVar)
+    """
+    ctx = _get_context_by_worker_id(worker_id) if worker_id else _get_current_context()
     repos = ctx["repos"]
 
     # Get POV from database
@@ -876,13 +1001,56 @@ def trace_pov(
     }
 
 
+@tools_mcp.tool
+def trace_pov(
+    pov_id: str,
+    target_functions: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Run a POV with coverage instrumentation to see which code paths it executes.
+
+    Use this tool after verify_pov returns no crash to understand:
+    - Which functions did the POV input execute?
+    - Did it reach the target vulnerable function?
+    - Where did execution stop?
+
+    This helps you improve the next POV by understanding the execution path.
+
+    Args:
+        pov_id: ID of the POV to trace
+        target_functions: Optional list of function names to check for reachability
+
+    Returns:
+        {
+            "success": True/False,
+            "executed_functions": ["func1", "func2", ...],
+            "target_reached": {"target_func": True/False, ...},
+            "executed_function_count": N,
+            "error": None or error message,
+        }
+    """
+    err = _ensure_context()
+    if err:
+        return err
+
+    return _trace_pov_core(pov_id=pov_id, target_functions=target_functions)
+
+
 # Export public API
 __all__ = [
+    # Context
     "set_pov_context",
     "update_pov_iteration",
     "get_pov_context",
+    "clear_pov_context",
+    # POV tools (MCP decorated)
     "get_fuzzer_info",
     "create_pov",
     "verify_pov",
     "trace_pov",
+    # POV tools (implementation, for mcp_factory)
+    "get_fuzzer_info_impl",
+    "create_pov_impl",
+    "verify_pov_impl",
+    "trace_pov_impl",
 ]

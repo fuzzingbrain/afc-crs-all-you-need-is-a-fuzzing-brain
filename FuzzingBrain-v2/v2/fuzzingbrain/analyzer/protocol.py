@@ -39,6 +39,7 @@ class Method(str, Enum):
 
     # Build info
     GET_FUZZERS = "get_fuzzers"
+    GET_FUZZER_SOURCE = "get_fuzzer_source"
     GET_BUILD_PATHS = "get_build_paths"
 
     # Suspicious point operations
