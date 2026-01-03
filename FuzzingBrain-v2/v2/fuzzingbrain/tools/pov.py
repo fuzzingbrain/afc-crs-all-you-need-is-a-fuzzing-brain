@@ -180,6 +180,59 @@ def _get_context_by_worker_id(worker_id: str) -> Optional[Dict[str, Any]]:
         return _pov_contexts.get(worker_id)
 
 
+def _get_all_fuzzers(ctx: Dict[str, Any]) -> List[Path]:
+    """
+    Get all available fuzzers from workspace.
+
+    Looks in workspace_path/fuzz-tooling/build/out/{project}_{sanitizer}/
+    for executable files.
+
+    Returns:
+        List of fuzzer paths
+    """
+    workspace_path = ctx.get("workspace_path")
+    sanitizer = ctx.get("sanitizer", "address")
+
+    if not workspace_path:
+        return []
+
+    # Find fuzzer output directory
+    out_base = workspace_path / "fuzz-tooling" / "build" / "out"
+    if not out_base.exists():
+        return []
+
+    # Find directories matching *_{sanitizer}
+    fuzzers = []
+    skip_files = {
+        "llvm-symbolizer", "sancov", "clang", "clang++",
+        "llvm-cov", "llvm-profdata", "llvm-ar",
+    }
+    skip_extensions = {
+        ".bin", ".log", ".dict", ".options", ".bc", ".json",
+        ".o", ".a", ".so", ".h", ".c", ".cpp", ".cc", ".py",
+        ".sh", ".txt", ".md", ".zip", ".tar", ".gz",
+    }
+
+    for out_dir in out_base.iterdir():
+        if not out_dir.is_dir():
+            continue
+        if not out_dir.name.endswith(f"_{sanitizer}"):
+            continue
+
+        # Find executables in this directory
+        for f in out_dir.iterdir():
+            if f.name in skip_files:
+                continue
+            if f.suffix.lower() in skip_extensions:
+                continue
+            if f.is_dir():
+                continue
+            if f.is_file() and os.access(f, os.X_OK):
+                fuzzers.append(f)
+
+    return fuzzers
+
+
 def _ensure_context(worker_id: str = None) -> Optional[Dict[str, Any]]:
     """
     Ensure POV context is set. Returns error dict if not configured.
@@ -413,6 +466,7 @@ def _create_pov_core(
     repos = ctx["repos"]
     fuzzer = ctx.get("fuzzer", "")
     sanitizer = ctx.get("sanitizer", "address")
+    docker_image = ctx.get("docker_image")
     current_iteration = ctx.get("iteration", 0)
 
     # Increment attempt counter (thread-safe)
@@ -507,18 +561,68 @@ def _create_pov_core(
 
     logger.info(f"[POV] Successfully created {len(pov_ids)} POVs for SP {suspicious_point_id[:8]}")
 
+    # Get all available fuzzers for cross-fuzzer verification
+    all_fuzzers = repos.fuzzers.find_by_task(task_id)
+    current_fuzzer_name = ctx.get("fuzzer", "")
+    other_fuzzers = [f for f in all_fuzzers if f.fuzzer_name != current_fuzzer_name and f.binary_path]
+
+    logger.info(f"[POV] Auto-verifying {len(pov_ids)} POVs on {1 + len(other_fuzzers)} fuzzers...")
+
     # Auto-verify all generated POVs
-    logger.info(f"[POV] Auto-verifying {len(pov_ids)} POVs...")
     verify_results = []
     successful_povs = []
+    cross_fuzzer_hits = 0
+
     for pov_id in pov_ids:
+        # First verify on current fuzzer
         result = _verify_pov_core(pov_id=pov_id, worker_id=ctx_worker_id)
         verify_results.append(result)
         if result.get("crashed"):
             successful_povs.append(pov_id)
-            logger.info(f"[POV] ✓ POV {pov_id[:8]} triggered crash!")
+            logger.info(f"[POV] ✓ POV {pov_id[:8]} triggered crash on {current_fuzzer_name}!")
         else:
-            logger.info(f"[POV] ✗ POV {pov_id[:8]} no crash")
+            logger.info(f"[POV] ✗ POV {pov_id[:8]} no crash on {current_fuzzer_name}")
+
+        # Then try on all other fuzzers
+        pov = repos.povs.find_by_id(pov_id)
+        if pov and pov.blob:
+            blob_bytes = base64.b64decode(pov.blob)
+            for other_fuzzer in other_fuzzers:
+                try:
+                    other_result = _verify_blob_on_fuzzer(
+                        blob=blob_bytes,
+                        fuzzer_path=Path(other_fuzzer.binary_path),
+                        docker_image=docker_image,
+                        sanitizer=sanitizer,
+                    )
+                    if other_result.get("crashed"):
+                        cross_fuzzer_hits += 1
+                        logger.info(f"[POV] ✓ POV {pov_id[:8]} also crashed on {other_fuzzer.fuzzer_name}!")
+                        # Create new POV record for this fuzzer
+                        cross_pov_id = str(uuid.uuid4())
+                        cross_pov = POV(
+                            pov_id=cross_pov_id,
+                            task_id=task_id,
+                            suspicious_point_id=suspicious_point_id,
+                            generation_id=generation_id,
+                            iteration=current_iteration,
+                            attempt=current_attempt,
+                            variant=pov.variant,
+                            blob=pov.blob,
+                            blob_path=pov.blob_path,
+                            gen_blob=generator_code,
+                            harness_name=other_fuzzer.fuzzer_name,
+                            sanitizer=sanitizer,
+                            description=f"Cross-fuzzer hit from {current_fuzzer_name}",
+                            is_successful=True,
+                            is_active=True,
+                            verified_at=datetime.now(),
+                            sanitizer_output=other_result.get("output", "")[:5000],
+                        )
+                        repos.povs.save(cross_pov)
+                        successful_povs.append(cross_pov_id)
+                except Exception as e:
+                    logger.debug(f"[POV] Cross-fuzzer check failed on {other_fuzzer.fuzzer_name}: {e}")
 
     # Return results with verification info
     return {
@@ -528,6 +632,7 @@ def _create_pov_core(
         "count": len(pov_ids),
         "verified": len(verify_results),
         "crashed": len(successful_povs),
+        "cross_fuzzer_hits": cross_fuzzer_hits,
         "successful_pov_ids": successful_povs,
     }
 
@@ -654,6 +759,52 @@ def _check_crash(output: str) -> bool:
         if indicator.lower() in output_lower:
             return True
     return False
+
+
+def _verify_blob_on_fuzzer(
+    blob: bytes,
+    fuzzer_path: Path,
+    docker_image: str,
+    sanitizer: str = "address",
+    timeout: int = 30,
+) -> Dict[str, Any]:
+    """
+    Verify a blob on a specific fuzzer.
+
+    Args:
+        blob: Raw blob bytes
+        fuzzer_path: Path to fuzzer binary
+        docker_image: Docker image to use
+        sanitizer: Sanitizer type
+        timeout: Execution timeout
+
+    Returns:
+        Dict with crashed, output, error
+    """
+    import tempfile
+
+    # Write blob to temp file
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as f:
+        f.write(blob)
+        temp_blob_path = Path(f.name)
+
+    try:
+        success, crashed, output, error = _run_fuzzer_docker(
+            fuzzer_path=fuzzer_path,
+            blob_path=temp_blob_path,
+            docker_image=docker_image,
+            sanitizer=sanitizer,
+            timeout=timeout,
+        )
+        return {
+            "success": success,
+            "crashed": crashed,
+            "output": output,
+            "error": error,
+        }
+    finally:
+        if temp_blob_path.exists():
+            temp_blob_path.unlink()
 
 
 def _run_fuzzer_docker(

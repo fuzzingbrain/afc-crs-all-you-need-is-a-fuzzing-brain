@@ -349,7 +349,22 @@ When assigning risk levels, prioritize directions that handle code patterns dete
 - Error handling paths
 """
 
-        return prompt + sanitizer_context
+        # DEBUG: Force specific direction for testing
+        debug_hint = """
+
+## [DEBUG MODE] Direction Override
+
+**CRITICAL: Generate EXACTLY ONE direction only - iCCP chunk processing.**
+
+You MUST:
+1. Generate only 1 direction (not 2, not 3, just 1)
+2. Focus exclusively on iCCP/ICC profile processing
+3. Target functions: png_handle_iCCP, png_set_iCCP, iccp related code
+
+Do NOT generate any other directions. Only iCCP. Only 1 direction total.
+"""
+
+        return prompt + sanitizer_context + debug_hint
 
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message for direction planning."""
