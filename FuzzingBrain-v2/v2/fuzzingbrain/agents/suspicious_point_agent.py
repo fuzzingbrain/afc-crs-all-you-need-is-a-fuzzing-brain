@@ -743,7 +743,11 @@ If either is NO → mark as FALSE POSITIVE immediately.
         if suspicious_point.get('important_controlflow'):
             message += "\n### Related Control Flow\n"
             for item in suspicious_point['important_controlflow']:
-                message += f"  - {item.get('type', 'unknown')}: {item.get('name', 'unknown')} ({item.get('location', '')})\n"
+                if isinstance(item, dict):
+                    message += f"  - {item.get('type', 'unknown')}: {item.get('name', 'unknown')} ({item.get('location', '')})\n"
+                else:
+                    # Handle string format (e.g., just function names)
+                    message += f"  - {item}\n"
 
         message += f"""
 

@@ -7,8 +7,9 @@ Provides code analysis capabilities to AI agents.
 These tools wrap the AnalysisClient SDK for use via MCP protocol.
 """
 
+import threading
 from contextvars import ContextVar
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from loguru import logger
 
@@ -22,8 +23,12 @@ from ..analyzer import AnalysisClient
 # =============================================================================
 
 _analysis_socket_path: ContextVar[Optional[str]] = ContextVar('analyzer_socket_path', default=None)
-_analysis_client: ContextVar[Optional[AnalysisClient]] = ContextVar('analyzer_client', default=None)
 _client_id: ContextVar[str] = ContextVar('analyzer_client_id', default="mcp_agent")
+
+# Thread-safe client cache: key = (socket_path, client_id)
+# This ensures each agent gets its own client, but reuses it across thread calls
+_client_cache: Dict[Tuple[str, str], AnalysisClient] = {}
+_client_cache_lock = threading.Lock()
 
 
 def set_analyzer_context(socket_path: str, client_id: str = "mcp_agent") -> None:
@@ -31,6 +36,7 @@ def set_analyzer_context(socket_path: str, client_id: str = "mcp_agent") -> None
     Set the context for analyzer tools.
 
     Uses ContextVar for proper isolation in async/parallel execution.
+    The actual client is cached in a thread-safe dict keyed by (socket_path, client_id).
 
     Args:
         socket_path: Path to Analysis Server Unix socket
@@ -38,7 +44,6 @@ def set_analyzer_context(socket_path: str, client_id: str = "mcp_agent") -> None
     """
     _analysis_socket_path.set(socket_path)
     _client_id.set(client_id)
-    _analysis_client.set(None)  # Reset client to reconnect with new settings
 
 
 def get_analyzer_context() -> Optional[str]:
@@ -47,7 +52,15 @@ def get_analyzer_context() -> Optional[str]:
 
 
 def _get_client() -> Optional[AnalysisClient]:
-    """Get or create the Analysis Client."""
+    """
+    Get or create the Analysis Client.
+
+    Uses thread-safe caching with (socket_path, client_id) as key.
+    This ensures:
+    - Each agent has its own client (identified by client_id)
+    - Clients are reused across multiple tool calls from the same agent
+    - Thread-safe access from asyncio.to_thread() worker threads
+    """
     import time
     t0 = time.time()
 
@@ -55,31 +68,47 @@ def _get_client() -> Optional[AnalysisClient]:
     if socket_path is None:
         return None
 
-    client = _analysis_client.get()
-    t1 = time.time()
+    client_id = _client_id.get()
+    cache_key = (socket_path, client_id)
 
-    if client is None:
-        logger.debug(f"[TIMING] Creating new AnalysisClient (ContextVar was None)")
+    # Fast path: check if client exists (without lock for read)
+    client = _client_cache.get(cache_key)
+    if client is not None:
+        logger.debug(f"[TIMING] Reusing cached AnalysisClient for {client_id}")
+        return client
+
+    # Slow path: create client with lock
+    with _client_cache_lock:
+        # Double-check after acquiring lock
+        client = _client_cache.get(cache_key)
+        if client is not None:
+            logger.debug(f"[TIMING] Reusing cached AnalysisClient for {client_id} (after lock)")
+            return client
+
+        logger.debug(f"[TIMING] Creating new AnalysisClient for {client_id}")
+        t1 = time.time()
         try:
             client = AnalysisClient(
                 socket_path,
-                client_id=_client_id.get(),
+                client_id=client_id,
             )
             t2 = time.time()
             logger.debug(f"[TIMING] AnalysisClient created in {t2-t1:.3f}s")
 
             if not client.ping():
-                logger.warning("Analysis Server not responding")
-                client = None
-            else:
-                _analysis_client.set(client)
+                logger.warning(f"Analysis Server not responding for {client_id}")
+                return None
+
             t3 = time.time()
             logger.debug(f"[TIMING] ping() completed in {t3-t2:.3f}s")
+
+            # Cache the client
+            _client_cache[cache_key] = client
+            logger.debug(f"[TIMING] Cached AnalysisClient for {client_id}")
+
         except Exception as e:
             logger.warning(f"Failed to connect to Analysis Server: {e}")
-            client = None
-    else:
-        logger.debug(f"[TIMING] Reusing existing AnalysisClient from ContextVar")
+            return None
 
     t_end = time.time()
     if t_end - t0 > 0.1:  # Only log if > 100ms
@@ -630,7 +659,7 @@ __all__ = [
     # Context
     "set_analyzer_context",
     "get_analyzer_context",
-    "_analysis_client",  # For debugging ContextVar state
+    "_client_cache",  # For debugging cache state
     # Server control
     "analyzer_status",
     # Function queries

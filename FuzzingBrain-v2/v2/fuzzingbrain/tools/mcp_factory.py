@@ -16,6 +16,8 @@ Usage:
 from fastmcp import FastMCP
 from typing import Any, Dict, List, Optional
 
+from .utils import async_tool
+
 
 def create_isolated_mcp_server(
     agent_id: str = "default",
@@ -63,10 +65,11 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         _ensure_client,
         set_analyzer_context,
         get_analyzer_context,
-        _analysis_client,  # Import ContextVar directly for debugging
+        _client_cache,  # Thread-safe cache for debugging
     )
 
     @mcp.tool
+    @async_tool
     def analyzer_status() -> Dict[str, Any]:
         """Get Analysis Server status."""
         err = _ensure_client()
@@ -80,6 +83,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": str(e)}
 
     @mcp.tool
+    @async_tool
     def get_function(function_name: str) -> Dict[str, Any]:
         """
         Get metadata about a function (file path, line numbers, complexity, parameters).
@@ -103,6 +107,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": str(e)}
 
     @mcp.tool
+    @async_tool
     def get_functions_by_file(file_path: str) -> Dict[str, Any]:
         """
         Get all functions defined in a specific file.
@@ -123,6 +128,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": str(e)}
 
     @mcp.tool
+    @async_tool
     def search_functions(pattern: str, limit: int = 50) -> Dict[str, Any]:
         """
         Search for functions by name pattern.
@@ -142,6 +148,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": str(e)}
 
     @mcp.tool
+    @async_tool
     def get_function_source(function_name: str) -> Dict[str, Any]:
         """
         Get the full source code of a function.
@@ -156,9 +163,8 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             source: The complete source code of the function
         """
         t0 = time.time()
-        # Debug: Check ContextVar state
-        cached_client = _analysis_client.get()
-        logger.debug(f"[TIMING] get_function_source({function_name}): ContextVar client={id(cached_client) if cached_client else 'None'}")
+        # Debug: Check cache state
+        logger.debug(f"[TIMING] get_function_source({function_name}): cache_size={len(_client_cache)}")
 
         err = _ensure_client()
         if err:
@@ -182,6 +188,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": str(e)}
 
     @mcp.tool
+    @async_tool
     def get_callers(function_name: str) -> Dict[str, Any]:
         """
         Get all functions that call the specified function (who calls this function?).
@@ -195,9 +202,8 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             callers: List of function names that call this function
         """
         t0 = time.time()
-        # Debug: Check ContextVar state
-        cached_client = _analysis_client.get()
-        logger.debug(f"[TIMING] get_callers({function_name}): ContextVar client={id(cached_client) if cached_client else 'None'}")
+        # Debug: Check cache state
+        logger.debug(f"[TIMING] get_callers({function_name}): cache_size={len(_client_cache)}")
 
         err = _ensure_client()
         if err:
@@ -220,6 +226,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": str(e)}
 
     @mcp.tool
+    @async_tool
     def get_callees(function_name: str) -> Dict[str, Any]:
         """
         Get all functions called by the specified function (what does this function call?).
@@ -246,6 +253,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": str(e)}
 
     @mcp.tool
+    @async_tool
     def get_call_graph(fuzzer_name: str, depth: int = 3) -> Dict[str, Any]:
         """
         Get the call graph starting from a fuzzer entry point.
@@ -270,6 +278,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": str(e)}
 
     @mcp.tool
+    @async_tool
     def find_all_paths(from_function: str, to_function: str, max_depth: int = 10, max_paths: int = 20) -> Dict[str, Any]:
         """
         Find all call paths from one function to another.
@@ -297,6 +306,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": str(e)}
 
     @mcp.tool
+    @async_tool
     def check_reachability(fuzzer_name: str, function_name: str) -> Dict[str, Any]:
         """
         Check if a function is reachable from a fuzzer entry point.
@@ -328,6 +338,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": str(e)}
 
     @mcp.tool
+    @async_tool
     def get_reachable_functions(fuzzer_name: str) -> Dict[str, Any]:
         """
         Get all functions reachable from a fuzzer entry point.
@@ -352,6 +363,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": str(e)}
 
     @mcp.tool
+    @async_tool
     def get_unreached_functions(fuzzer_name: str) -> Dict[str, Any]:
         """
         Get functions NOT reachable from a fuzzer (coverage gaps).
@@ -376,6 +388,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": str(e)}
 
     @mcp.tool
+    @async_tool
     def get_fuzzers() -> Dict[str, Any]:
         """Get list of all built fuzzers."""
         err = _ensure_client()
@@ -389,6 +402,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": str(e)}
 
     @mcp.tool
+    @async_tool
     def get_fuzzer_source(fuzzer_name: str) -> Dict[str, Any]:
         """
         Get the source code of a fuzzer/harness.
@@ -417,6 +431,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return {"success": False, "error": str(e)}
 
     @mcp.tool
+    @async_tool
     def get_build_paths() -> Dict[str, Any]:
         """Get build output paths for each sanitizer."""
         err = _ensure_client()
@@ -442,6 +457,7 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
     )
 
     @mcp.tool
+    @async_tool
     def get_diff() -> Dict[str, Any]:
         """
         Read the diff file for the current task.
@@ -450,6 +466,7 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
         return get_diff_impl()
 
     @mcp.tool
+    @async_tool
     def get_file_content(file_path: str, start_line: int = None, end_line: int = None) -> Dict[str, Any]:
         """
         Read the content of a file from the repository.
@@ -462,6 +479,7 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
         return get_file_content_impl(file_path, start_line, end_line)
 
     @mcp.tool
+    @async_tool
     def search_code(pattern: str, file_pattern: str = None, max_results: int = 50, context_lines: int = 2) -> Dict[str, Any]:
         """
         Search for a pattern in the repository source code.
@@ -475,6 +493,7 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
         return search_code_impl(pattern, file_pattern, max_results, context_lines)
 
     @mcp.tool
+    @async_tool
     def list_files(directory: str = "", pattern: str = None, recursive: bool = False) -> Dict[str, Any]:
         """
         List files in the repository.
@@ -496,6 +515,7 @@ def _register_suspicious_point_tools(mcp: FastMCP) -> None:
     )
 
     @mcp.tool
+    @async_tool
     def create_suspicious_point(
         function_name: str,
         vuln_type: str,
@@ -519,6 +539,7 @@ def _register_suspicious_point_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool
+    @async_tool
     def update_suspicious_point(
         suspicious_point_id: str,
         score: float = None,
@@ -546,12 +567,14 @@ def _register_suspicious_point_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool
+    @async_tool
     def list_suspicious_points() -> Dict[str, Any]:
         """List all suspicious points for the current task."""
         from .suspicious_points import list_suspicious_points_impl
         return list_suspicious_points_impl()
 
     @mcp.tool
+    @async_tool
     def get_suspicious_point(suspicious_point_id: str) -> Dict[str, Any]:
         """
         Get details of a specific suspicious point.
@@ -567,6 +590,7 @@ def _register_direction_tools(mcp: FastMCP) -> None:
     """Register direction tools (Full-scan mode)."""
 
     @mcp.tool
+    @async_tool
     def create_direction(
         name: str,
         risk_level: str,
@@ -592,12 +616,14 @@ def _register_direction_tools(mcp: FastMCP) -> None:
         )
 
     @mcp.tool
+    @async_tool
     def list_directions() -> Dict[str, Any]:
         """List all directions for the current task."""
         from .directions import list_directions_impl
         return list_directions_impl()
 
     @mcp.tool
+    @async_tool
     def get_direction(direction_id: str) -> Dict[str, Any]:
         """
         Get details of a specific direction.
@@ -621,6 +647,7 @@ def _register_pov_tools(mcp: FastMCP, worker_id: str = None) -> None:
     bound_worker_id = worker_id
 
     @mcp.tool
+    @async_tool
     def get_fuzzer_info() -> Dict[str, Any]:
         """
         Get fuzzer source code and sanitizer info.
@@ -630,6 +657,7 @@ def _register_pov_tools(mcp: FastMCP, worker_id: str = None) -> None:
         return get_fuzzer_info_impl(worker_id=bound_worker_id)
 
     @mcp.tool
+    @async_tool
     def create_pov(generator_code: str) -> Dict[str, Any]:
         """
         Generate test input blobs using Python code.
@@ -641,6 +669,7 @@ def _register_pov_tools(mcp: FastMCP, worker_id: str = None) -> None:
         return create_pov_impl(generator_code, worker_id=bound_worker_id)
 
     @mcp.tool
+    @async_tool
     def verify_pov(pov_id: str) -> Dict[str, Any]:
         """
         Test if a POV triggers a crash.
@@ -652,6 +681,7 @@ def _register_pov_tools(mcp: FastMCP, worker_id: str = None) -> None:
         return verify_pov_impl(pov_id, worker_id=bound_worker_id)
 
     @mcp.tool
+    @async_tool
     def trace_pov(pov_id: str) -> Dict[str, Any]:
         """
         See which code paths a POV executes (use when no crash).
@@ -667,6 +697,7 @@ def _register_coverage_tools(mcp: FastMCP) -> None:
     """Register coverage analysis tools."""
 
     @mcp.tool
+    @async_tool
     def run_coverage(
         fuzzer_name: str,
         input_data_base64: str,
@@ -686,6 +717,7 @@ def _register_coverage_tools(mcp: FastMCP) -> None:
         return run_coverage_impl(fuzzer_name, input_data_base64, target_functions, target_files)
 
     @mcp.tool
+    @async_tool
     def check_pov_reaches_target(
         fuzzer_name: str,
         pov_data_base64: str,
@@ -703,6 +735,7 @@ def _register_coverage_tools(mcp: FastMCP) -> None:
         return check_pov_reaches_target_impl(fuzzer_name, pov_data_base64, target_function)
 
     @mcp.tool
+    @async_tool
     def list_available_fuzzers() -> Dict[str, Any]:
         """
         List all available coverage-instrumented fuzzers.
@@ -711,6 +744,7 @@ def _register_coverage_tools(mcp: FastMCP) -> None:
         return list_fuzzers_impl()
 
     @mcp.tool
+    @async_tool
     def get_coverage_feedback(
         fuzzer_name: str,
         input_data_base64: str,

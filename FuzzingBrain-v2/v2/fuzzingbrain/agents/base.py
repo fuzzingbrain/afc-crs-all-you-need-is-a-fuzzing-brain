@@ -559,10 +559,10 @@ class BaseAgent(ABC):
                 })
                 self._log_chat_message("user", urgency_message, iteration=iteration)
 
-            # Call LLM with tools
+            # Call LLM with tools (async to avoid blocking event loop)
             self.llm_client.reset_tried_models()
             try:
-                response = self.llm_client.call_with_tools(
+                response = await self.llm_client.acall_with_tools(
                     messages=self.messages,
                     tools=self._tools,
                     model=self.model,
