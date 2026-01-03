@@ -44,6 +44,8 @@ from .reporter import (
     create_reporter,
     get_reporter,
     set_reporter,
+    BudgetExceededError,
+    POVFoundError,
 )
 
 __all__ = [
@@ -68,4 +70,7 @@ __all__ = [
     "create_reporter",
     "get_reporter",
     "set_reporter",
+    # Exceptions
+    "BudgetExceededError",
+    "POVFoundError",
 ]

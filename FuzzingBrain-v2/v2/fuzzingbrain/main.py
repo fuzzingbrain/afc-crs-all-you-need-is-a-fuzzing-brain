@@ -200,6 +200,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sanitizers", type=str, default="address", help="Comma-separated sanitizers")
     parser.add_argument("--timeout", type=int, default=60, help="Timeout in minutes")
     parser.add_argument("--pov-count", type=int, default=0, help="Stop after N verified POVs (0 = unlimited)")
+    parser.add_argument("--fuzzers", type=str, help="Comma-separated list of fuzzers to use (empty = all)")
 
     # Delta scan
     parser.add_argument("--base-commit", type=str, help="Base commit for delta scan")
@@ -244,6 +245,8 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
         config.timeout_minutes = args.timeout
     if args.pov_count:
         config.pov_count = args.pov_count
+    if args.fuzzers:
+        config.fuzzer_filter = [f.strip() for f in args.fuzzers.split(",") if f.strip()]
     if args.base_commit:
         config.base_commit = args.base_commit
     if args.delta_commit:
@@ -516,8 +519,21 @@ def main():
     eval_server = os.environ.get("FUZZINGBRAIN_EVAL_SERVER")
     if eval_server:
         from .eval import create_reporter
-        create_reporter(server_url=eval_server, level="normal")
+        create_reporter(
+            server_url=eval_server,
+            level="normal",
+            budget_limit=config.budget_limit,
+            stop_on_pov=config.stop_on_pov,
+        )
         print(f"\033[0;36m[EVAL]\033[0m Reporting to: {eval_server}")
+        if config.budget_limit > 0:
+            print(f"\033[0;36m[EVAL]\033[0m Budget limit: ${config.budget_limit:.2f}")
+        if config.stop_on_pov:
+            print(f"\033[0;36m[EVAL]\033[0m Stop on POV: enabled")
+
+    # Show fuzzer filter if specified
+    if config.fuzzer_filter:
+        print(f"\033[0;36m[CONFIG]\033[0m Fuzzer filter: {', '.join(config.fuzzer_filter)}")
 
     # Check for API mode from args
     if hasattr(args, 'api') and args.api:

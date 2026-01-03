@@ -37,6 +37,23 @@ from .models import (
 )
 
 
+class BudgetExceededError(Exception):
+    """Raised when budget limit is exceeded."""
+
+    def __init__(self, current_cost: float, budget_limit: float):
+        self.current_cost = current_cost
+        self.budget_limit = budget_limit
+        super().__init__(f"Budget exceeded: ${current_cost:.2f} > ${budget_limit:.2f}")
+
+
+class POVFoundError(Exception):
+    """Raised when a verified POV is found and stop_on_pov is enabled."""
+
+    def __init__(self, pov_count: int = 1):
+        self.pov_count = pov_count
+        super().__init__(f"POV found (count: {pov_count}), stopping as requested")
+
+
 class BaseReporter(ABC):
     """Abstract base class for reporters."""
 
@@ -238,6 +255,8 @@ class Reporter(BaseReporter):
         batch_interval_ms: int = 100,
         max_content_length: int = 500,
         local_fallback_dir: Optional[Path] = None,
+        budget_limit: float = 0.0,
+        stop_on_pov: bool = False,
     ):
         """
         Initialize Reporter.
@@ -250,6 +269,8 @@ class Reporter(BaseReporter):
             batch_interval_ms: Max time before sending batch
             max_content_length: Max length for log content (truncate beyond)
             local_fallback_dir: Directory for local fallback files
+            budget_limit: Max cost in dollars (0 = unlimited)
+            stop_on_pov: Stop after finding first verified POV
         """
         self.server_url = server_url.rstrip("/")
         self.instance_id = instance_id or self._generate_instance_id()
@@ -258,6 +279,11 @@ class Reporter(BaseReporter):
         self.batch_interval_ms = batch_interval_ms
         self.max_content_length = max_content_length
         self.local_fallback_dir = local_fallback_dir or Path("logs/eval_fallback")
+
+        # Budget configuration
+        self.budget_limit = budget_limit
+        self.stop_on_pov = stop_on_pov
+        self._verified_pov_count = 0
 
         # Context stack (thread-local for multi-threaded scenarios)
         self._context = EvalContext(instance_id=self.instance_id)
@@ -1024,6 +1050,55 @@ class Reporter(BaseReporter):
                 by_category=dict(self._tool_summary.by_category),
                 by_error_type=dict(self._tool_summary.by_error_type),
             )
+
+    # ========== Budget and Stop Conditions ==========
+
+    def check_budget(self) -> None:
+        """
+        Check if budget limit is exceeded.
+
+        Raises:
+            BudgetExceededError: If current cost exceeds budget_limit
+        """
+        if self.budget_limit <= 0:
+            return  # No budget limit
+
+        with self._summary_lock:
+            current_cost = self._cost_summary.total_cost
+
+        if current_cost >= self.budget_limit:
+            logger.warning(f"Budget exceeded: ${current_cost:.2f} >= ${self.budget_limit:.2f}")
+            raise BudgetExceededError(current_cost, self.budget_limit)
+
+    def is_budget_exceeded(self) -> bool:
+        """Check if budget limit is exceeded (non-throwing version)."""
+        if self.budget_limit <= 0:
+            return False
+
+        with self._summary_lock:
+            return self._cost_summary.total_cost >= self.budget_limit
+
+    def get_current_cost(self) -> float:
+        """Get current total cost."""
+        with self._summary_lock:
+            return self._cost_summary.total_cost
+
+    def record_pov_found(self) -> None:
+        """
+        Record that a verified POV was found.
+
+        Raises:
+            POVFoundError: If stop_on_pov is enabled
+        """
+        self._verified_pov_count += 1
+        logger.info(f"Verified POV found (count: {self._verified_pov_count})")
+
+        if self.stop_on_pov:
+            raise POVFoundError(self._verified_pov_count)
+
+    def get_verified_pov_count(self) -> int:
+        """Get count of verified POVs found."""
+        return self._verified_pov_count
 
     # ========== SP/Direction/POV Workflow Reporting ==========
 

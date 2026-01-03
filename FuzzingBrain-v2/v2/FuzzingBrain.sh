@@ -550,8 +550,13 @@ SCAN_MODE="full"
 SANITIZERS="address"
 TIMEOUT_MINUTES=60
 POV_COUNT=0
+FUZZ_TOOLING_URL=""
+FUZZ_TOOLING_REF=""
 API_MODE=false
 MCP_MODE=false
+EVAL_PORT=""
+BUDGET_LIMIT=""
+ALLOW_EXPENSIVE=""
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -580,6 +585,14 @@ while [[ $# -gt 0 ]]; do
             POV_COUNT="$2"
             shift 2
             ;;
+        --fuzz-tooling)
+            FUZZ_TOOLING_URL="$2"
+            shift 2
+            ;;
+        --fuzz-tooling-ref)
+            FUZZ_TOOLING_REF="$2"
+            shift 2
+            ;;
         -v|--version)
             TARGET_VERSION="$2"
             shift 2
@@ -605,6 +618,18 @@ while [[ $# -gt 0 ]]; do
             MCP_MODE=true
             shift
             ;;
+        --eval-port)
+            EVAL_PORT="$2"
+            shift 2
+            ;;
+        --budget)
+            BUDGET_LIMIT="$2"
+            shift 2
+            ;;
+        --allow-expensive)
+            ALLOW_EXPENSIVE="$2"
+            shift 2
+            ;;
         -h|-help|--help)
             show_banner
             show_usage
@@ -627,6 +652,21 @@ set -- "${POSITIONAL_ARGS[@]}"
 if [ -n "$DELTA_COMMIT" ] && [ -z "$BASE_COMMIT" ]; then
     print_error "Delta commit (-d) requires base commit (-b)"
     exit 1
+fi
+
+# Set eval server if --eval-port is specified
+if [ -n "$EVAL_PORT" ]; then
+    export FUZZINGBRAIN_EVAL_SERVER="http://localhost:$EVAL_PORT"
+fi
+
+# Set budget limit if specified
+if [ -n "$BUDGET_LIMIT" ]; then
+    export FUZZINGBRAIN_BUDGET_LIMIT="$BUDGET_LIMIT"
+fi
+
+# Set allow expensive fallback if specified
+if [ -n "$ALLOW_EXPENSIVE" ]; then
+    export FUZZINGBRAIN_ALLOW_EXPENSIVE_FALLBACK="$ALLOW_EXPENSIVE"
 fi
 
 # =============================================================================
@@ -746,26 +786,72 @@ if is_git_url "$TARGET"; then
 
     # Setup OSS-Fuzz tooling
     if [ ! -d "$WORKSPACE/fuzz-tooling/projects" ] || [ -z "$(ls -A "$WORKSPACE/fuzz-tooling/projects" 2>/dev/null)" ]; then
-        print_info "Setting up OSS-Fuzz tooling..."
         OSSFUZZ_TMP="/tmp/oss-fuzz-$$"
 
-        if git clone --depth 1 https://github.com/google/oss-fuzz.git "$OSSFUZZ_TMP" 2>/dev/null; then
-            if [ -z "$OSS_FUZZ_PROJECT" ]; then
-                OSS_FUZZ_PROJECT=$(find_ossfuzz_project "$REPO_NAME" "$OSSFUZZ_TMP")
-            fi
+        if [ -n "$FUZZ_TOOLING_URL" ]; then
+            # Use custom fuzz-tooling repository
+            print_info "Setting up custom fuzz-tooling from: $FUZZ_TOOLING_URL"
+            # Clone with --no-single-branch to fetch all branches
+            if git clone --no-single-branch "$FUZZ_TOOLING_URL" "$OSSFUZZ_TMP" 2>/dev/null; then
+                # Checkout specific ref if provided
+                if [ -n "$FUZZ_TOOLING_REF" ]; then
+                    print_info "Checking out ref: $FUZZ_TOOLING_REF"
+                    cd "$OSSFUZZ_TMP"
+                    # Use --force to handle LFS pointer file issues
+                    if ! git checkout --force "$FUZZ_TOOLING_REF" 2>/dev/null; then
+                        # Try as remote tracking branch
+                        if git branch -r | grep -q "origin/$FUZZ_TOOLING_REF"; then
+                            git checkout --force -b "$FUZZ_TOOLING_REF" "origin/$FUZZ_TOOLING_REF" 2>/dev/null
+                        else
+                            # Fetch specific ref and checkout
+                            git fetch origin "$FUZZ_TOOLING_REF":"$FUZZ_TOOLING_REF" 2>/dev/null && \
+                            git checkout --force "$FUZZ_TOOLING_REF" 2>/dev/null
+                        fi
+                    fi
+                    print_info "Checked out: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')"
+                    cd "$SCRIPT_DIR"
+                fi
 
-            if [ -n "$OSS_FUZZ_PROJECT" ]; then
-                print_info "Found OSS-Fuzz project: $OSS_FUZZ_PROJECT"
-                mkdir -p "$WORKSPACE/fuzz-tooling/projects"
-                cp -r "$OSSFUZZ_TMP/projects/$OSS_FUZZ_PROJECT" "$WORKSPACE/fuzz-tooling/projects/"
-                cp -r "$OSSFUZZ_TMP/infra" "$WORKSPACE/fuzz-tooling/" 2>/dev/null || true
+                # Auto-detect project name if not specified
+                if [ -z "$OSS_FUZZ_PROJECT" ]; then
+                    OSS_FUZZ_PROJECT=$(find_ossfuzz_project "$REPO_NAME" "$OSSFUZZ_TMP")
+                fi
+
+                if [ -n "$OSS_FUZZ_PROJECT" ]; then
+                    print_info "Found project: $OSS_FUZZ_PROJECT"
+                    mkdir -p "$WORKSPACE/fuzz-tooling/projects"
+                    cp -r "$OSSFUZZ_TMP/projects/$OSS_FUZZ_PROJECT" "$WORKSPACE/fuzz-tooling/projects/"
+                    cp -r "$OSSFUZZ_TMP/infra" "$WORKSPACE/fuzz-tooling/" 2>/dev/null || true
+                else
+                    print_warn "No matching project found in fuzz-tooling"
+                    print_warn "Use --project NAME to specify manually"
+                fi
+                rm -rf "$OSSFUZZ_TMP"
             else
-                print_warn "No matching OSS-Fuzz project found"
-                print_warn "Use --project NAME to specify manually"
+                print_error "Failed to clone fuzz-tooling from: $FUZZ_TOOLING_URL"
+                exit 1
             fi
-            rm -rf "$OSSFUZZ_TMP"
         else
-            print_warn "Failed to clone oss-fuzz"
+            # Use default google/oss-fuzz
+            print_info "Setting up OSS-Fuzz tooling..."
+            if git clone --depth 1 https://github.com/google/oss-fuzz.git "$OSSFUZZ_TMP" 2>/dev/null; then
+                if [ -z "$OSS_FUZZ_PROJECT" ]; then
+                    OSS_FUZZ_PROJECT=$(find_ossfuzz_project "$REPO_NAME" "$OSSFUZZ_TMP")
+                fi
+
+                if [ -n "$OSS_FUZZ_PROJECT" ]; then
+                    print_info "Found OSS-Fuzz project: $OSS_FUZZ_PROJECT"
+                    mkdir -p "$WORKSPACE/fuzz-tooling/projects"
+                    cp -r "$OSSFUZZ_TMP/projects/$OSS_FUZZ_PROJECT" "$WORKSPACE/fuzz-tooling/projects/"
+                    cp -r "$OSSFUZZ_TMP/infra" "$WORKSPACE/fuzz-tooling/" 2>/dev/null || true
+                else
+                    print_warn "No matching OSS-Fuzz project found"
+                    print_warn "Use --project NAME to specify manually"
+                fi
+                rm -rf "$OSSFUZZ_TMP"
+            else
+                print_warn "Failed to clone oss-fuzz"
+            fi
         fi
     else
         print_info "Using existing fuzz-tooling"
@@ -773,15 +859,57 @@ if is_git_url "$TARGET"; then
 
     # Handle delta scan
     if [ -n "$BASE_COMMIT" ]; then
-        print_info "Delta scan: $BASE_COMMIT → ${DELTA_COMMIT:-HEAD}"
         mkdir -p "$WORKSPACE/diff"
-
         cd "$WORKSPACE/repo"
-        TARGET_COMMIT="${DELTA_COMMIT:-HEAD}"
 
-        if git cat-file -t "$BASE_COMMIT" >/dev/null 2>&1; then
-            git diff "$BASE_COMMIT..$TARGET_COMMIT" > "$WORKSPACE/diff/ref.diff"
-            print_info "Generated diff file"
+        # Resolve branch/tag names to commit hashes
+        resolve_ref() {
+            local ref="$1"
+            # Try direct resolution first (works for commits, tags, local branches)
+            local resolved=$(git rev-parse "$ref" 2>/dev/null)
+            if [ -n "$resolved" ] && [ ${#resolved} -eq 40 ]; then
+                echo "$resolved"
+                return
+            fi
+            # Try as origin/ref (for remote tracking branches)
+            resolved=$(git rev-parse "origin/$ref" 2>/dev/null)
+            if [ -n "$resolved" ] && [ ${#resolved} -eq 40 ]; then
+                echo "$resolved"
+                return
+            fi
+            # Fetch remote branch and use FETCH_HEAD
+            if git fetch origin "$ref" 2>/dev/null; then
+                resolved=$(git rev-parse FETCH_HEAD 2>/dev/null)
+                if [ -n "$resolved" ] && [ ${#resolved} -eq 40 ]; then
+                    echo "$resolved"
+                    return
+                fi
+            fi
+            # Return original if can't resolve
+            echo "$ref"
+        }
+
+        RESOLVED_BASE=$(resolve_ref "$BASE_COMMIT")
+        TARGET_COMMIT="${DELTA_COMMIT:-HEAD}"
+        if [ "$TARGET_COMMIT" != "HEAD" ]; then
+            RESOLVED_TARGET=$(resolve_ref "$TARGET_COMMIT")
+        else
+            RESOLVED_TARGET="HEAD"
+        fi
+
+        print_info "Delta scan: $BASE_COMMIT → ${DELTA_COMMIT:-HEAD}"
+        print_info "Resolved: $RESOLVED_BASE → $RESOLVED_TARGET"
+
+        if git cat-file -t "$RESOLVED_BASE" >/dev/null 2>&1; then
+            # Generate diff excluding .aixcc directory (prevents cheating with vulnerability answers)
+            git diff "$RESOLVED_BASE..$RESOLVED_TARGET" -- . ':!.aixcc' ':!*/.aixcc' > "$WORKSPACE/diff/ref.diff"
+            print_info "Generated diff file (filtered .aixcc)"
+
+            # Update variables for python script (use resolved hashes)
+            BASE_COMMIT="$RESOLVED_BASE"
+            if [ "$TARGET_COMMIT" != "HEAD" ]; then
+                DELTA_COMMIT="$RESOLVED_TARGET"
+            fi
         else
             print_warn "Base commit not found, running full scan"
             rm -rf "$WORKSPACE/diff"

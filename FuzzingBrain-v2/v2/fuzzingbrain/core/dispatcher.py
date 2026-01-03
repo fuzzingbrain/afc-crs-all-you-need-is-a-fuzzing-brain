@@ -69,6 +69,17 @@ class WorkerDispatcher:
             logger.warning("No successful fuzzers to dispatch")
             return []
 
+        # Apply fuzzer filter if specified
+        if self.config.fuzzer_filter:
+            filter_set = set(self.config.fuzzer_filter)
+            before_count = len(successful_fuzzers)
+            successful_fuzzers = [f for f in successful_fuzzers if f.fuzzer_name in filter_set]
+            logger.info(f"Fuzzer filter applied: {before_count} -> {len(successful_fuzzers)} fuzzers (filter: {self.config.fuzzer_filter})")
+
+            if not successful_fuzzers:
+                logger.warning(f"No fuzzers match the filter: {self.config.fuzzer_filter}")
+                return []
+
         # Get sanitizers from config (default: ["address"])
         sanitizers = self.config.sanitizers or ["address"]
 

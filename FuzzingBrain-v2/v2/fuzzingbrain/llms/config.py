@@ -59,6 +59,7 @@ class LLMConfig:
     fallback_enabled: bool = True
     fallback_models: List[ModelInfo] = field(default_factory=lambda: DEFAULT_FALLBACK.copy())
     max_fallback_attempts: int = 3
+    allow_expensive_fallback: bool = True  # Allow fallback to expensive models (opus, o1, o3, etc.)
 
     # Generation parameters
     temperature: float = 0.7
@@ -254,6 +255,11 @@ class LLMConfig:
         fallback_env = os.environ.get("LLM_FALLBACK_ENABLED")
         if fallback_env:
             config.fallback_enabled = fallback_env.lower() in ("true", "1", "yes")
+
+        # Check FUZZINGBRAIN_ALLOW_EXPENSIVE_FALLBACK (shared with core config)
+        expensive_fallback_env = os.environ.get("FUZZINGBRAIN_ALLOW_EXPENSIVE_FALLBACK")
+        if expensive_fallback_env:
+            config.allow_expensive_fallback = expensive_fallback_env.lower() in ("true", "1", "yes")
 
         return config
 

@@ -507,12 +507,28 @@ def _create_pov_core(
 
     logger.info(f"[POV] Successfully created {len(pov_ids)} POVs for SP {suspicious_point_id[:8]}")
 
-    # Return minimal info to LLM - full UUIDs needed for verify_pov
+    # Auto-verify all generated POVs
+    logger.info(f"[POV] Auto-verifying {len(pov_ids)} POVs...")
+    verify_results = []
+    successful_povs = []
+    for pov_id in pov_ids:
+        result = _verify_pov_core(pov_id=pov_id, worker_id=ctx_worker_id)
+        verify_results.append(result)
+        if result.get("crashed"):
+            successful_povs.append(pov_id)
+            logger.info(f"[POV] ✓ POV {pov_id[:8]} triggered crash!")
+        else:
+            logger.info(f"[POV] ✗ POV {pov_id[:8]} no crash")
+
+    # Return results with verification info
     return {
         "success": True,
         "pov_ids": pov_ids,
         "attempt": current_attempt,
         "count": len(pov_ids),
+        "verified": len(verify_results),
+        "crashed": len(successful_povs),
+        "successful_pov_ids": successful_povs,
     }
 
 

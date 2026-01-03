@@ -32,6 +32,14 @@ class Config:
     timeout_minutes: int = 60
     pov_count: int = 0  # Stop after N verified POVs (0 = unlimited)
 
+    # Budget configuration (env: FUZZINGBRAIN_BUDGET_LIMIT, FUZZINGBRAIN_STOP_ON_POV, FUZZINGBRAIN_ALLOW_EXPENSIVE_FALLBACK)
+    budget_limit: float = 100.0  # Max cost in dollars (0 = unlimited)
+    stop_on_pov: bool = True  # Stop after finding first verified POV
+    allow_expensive_fallback: bool = False  # Allow fallback to expensive models (opus, gpt-5.2-pro)
+
+    # Fuzzer filter (env: FUZZINGBRAIN_FUZZER_FILTER)
+    fuzzer_filter: List[str] = field(default_factory=list)  # Only dispatch workers for these fuzzers (empty = all)
+
     # Repository
     repo_url: Optional[str] = None
     repo_path: Optional[str] = None
@@ -111,6 +119,13 @@ class Config:
             scan_mode=os.environ.get("FUZZINGBRAIN_SCAN_MODE", "full"),
             sanitizers=sanitizers.split(","),
             timeout_minutes=int(os.environ.get("FUZZINGBRAIN_TIMEOUT", "60")),
+            # Budget configuration
+            budget_limit=float(os.environ.get("FUZZINGBRAIN_BUDGET_LIMIT", "100.0")),
+            stop_on_pov=os.environ.get("FUZZINGBRAIN_STOP_ON_POV", "true").lower() in ("true", "1", "yes"),
+            allow_expensive_fallback=os.environ.get("FUZZINGBRAIN_ALLOW_EXPENSIVE_FALLBACK", "false").lower() in ("true", "1", "yes"),
+            # Fuzzer filter (comma-separated list)
+            fuzzer_filter=[f.strip() for f in os.environ.get("FUZZINGBRAIN_FUZZER_FILTER", "").split(",") if f.strip()],
+            # Infrastructure
             redis_url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
             mongodb_url=os.environ.get("MONGODB_URL", "mongodb://localhost:27017"),
             mongodb_db=os.environ.get("MONGODB_DB", "fuzzingbrain"),

@@ -476,7 +476,13 @@ class LLMClient:
         Raises:
             LLMAllModelsFailedError: If all models fail
             LLMError: For non-recoverable errors
+            BudgetExceededError: If budget limit is exceeded
         """
+        # Check budget before calling
+        reporter = _get_reporter()
+        if reporter and hasattr(reporter, 'check_budget'):
+            reporter.check_budget()
+
         return self._call_with_fallback(
             messages=messages,
             model=model,
@@ -595,11 +601,19 @@ class LLMClient:
             model_info = failed_model
 
         if model_info:
-            fallback_chain = get_fallback_chain(model_info, self._tried_models)
+            fallback_chain = get_fallback_chain(
+                model_info,
+                self._tried_models,
+                allow_expensive=self.config.allow_expensive_fallback
+            )
         else:
             # Use default fallback
-            from .models import DEFAULT_FALLBACK
-            fallback_chain = [m for m in DEFAULT_FALLBACK if m.id not in self._tried_models]
+            from .models import DEFAULT_FALLBACK, EXPENSIVE_MODELS
+            fallback_chain = [
+                m for m in DEFAULT_FALLBACK
+                if m.id not in self._tried_models
+                and (self.config.allow_expensive_fallback or m.id not in EXPENSIVE_MODELS)
+            ]
 
         if not fallback_chain:
             raise LLMAllModelsFailedError(
@@ -659,7 +673,15 @@ class LLMClient:
         Call LLM asynchronously.
 
         Same parameters as call(), but async.
+
+        Raises:
+            BudgetExceededError: If budget limit is exceeded
         """
+        # Check budget before calling
+        reporter = _get_reporter()
+        if reporter and hasattr(reporter, 'check_budget'):
+            reporter.check_budget()
+
         return await self._acall_with_fallback(
             messages=messages,
             model=model,
@@ -808,10 +830,18 @@ class LLMClient:
             model_info = failed_model
 
         if model_info:
-            fallback_chain = get_fallback_chain(model_info, self._tried_models)
+            fallback_chain = get_fallback_chain(
+                model_info,
+                self._tried_models,
+                allow_expensive=self.config.allow_expensive_fallback
+            )
         else:
-            from .models import DEFAULT_FALLBACK
-            fallback_chain = [m for m in DEFAULT_FALLBACK if m.id not in self._tried_models]
+            from .models import DEFAULT_FALLBACK, EXPENSIVE_MODELS
+            fallback_chain = [
+                m for m in DEFAULT_FALLBACK
+                if m.id not in self._tried_models
+                and (self.config.allow_expensive_fallback or m.id not in EXPENSIVE_MODELS)
+            ]
 
         if not fallback_chain:
             raise LLMAllModelsFailedError(

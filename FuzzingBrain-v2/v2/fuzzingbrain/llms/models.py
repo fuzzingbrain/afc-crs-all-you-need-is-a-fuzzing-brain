@@ -104,8 +104,8 @@ GPT_5_2_PRO = ModelInfo(
     provider=Provider.OPENAI,
     name="GPT-5.2 Pro",
     description="Most accurate, complex problems",
-    price_input=5.0,  # Estimated
-    price_output=40.0,  # Estimated
+    price_input=21.0,
+    price_output=168.0,
     context_window=400_000,
     max_output=128_000,
 )
@@ -146,7 +146,55 @@ O3_MINI = ModelInfo(
     max_output=100_000,
 )
 
-OPENAI_MODELS = [GPT_5_2, GPT_5_2_INSTANT, GPT_5_2_PRO, GPT_5_2_CODEX, O3, O3_MINI]
+GPT_5_MINI = ModelInfo(
+    id="gpt-5-mini",
+    alias="gpt-5-mini",
+    provider=Provider.OPENAI,
+    name="GPT-5 Mini",
+    description="Faster, affordable GPT-5 for clear tasks",
+    price_input=0.25,
+    price_output=2.0,
+    context_window=200_000,
+    max_output=100_000,
+)
+
+GPT_5 = ModelInfo(
+    id="gpt-5",
+    alias="gpt-5",
+    provider=Provider.OPENAI,
+    name="GPT-5",
+    description="OpenAI flagship model",
+    price_input=1.25,
+    price_output=10.0,
+    context_window=200_000,
+    max_output=100_000,
+)
+
+GPT_5_1 = ModelInfo(
+    id="gpt-5.1-chat-latest",
+    alias="gpt-5.1",
+    provider=Provider.OPENAI,
+    name="GPT-5.1",
+    description="GPT-5.1 latest",
+    price_input=1.25,
+    price_output=10.0,
+    context_window=200_000,
+    max_output=100_000,
+)
+
+GPT_5_1_CODEX_MAX = ModelInfo(
+    id="gpt-5.1-codex-max",
+    alias="gpt-5.1-codex-max",
+    provider=Provider.OPENAI,
+    name="GPT-5.1 Codex Max",
+    description="GPT-5.1 Codex Max",
+    price_input=1.25,
+    price_output=10.0,
+    context_window=200_000,
+    max_output=100_000,
+)
+
+OPENAI_MODELS = [GPT_5_2, GPT_5_2_INSTANT, GPT_5_2_PRO, GPT_5_2_CODEX, O3, O3_MINI, GPT_5_MINI, GPT_5, GPT_5_1, GPT_5_1_CODEX_MAX]
 
 
 # =============================================================================
@@ -367,21 +415,44 @@ FALLBACK_CHAINS: Dict[str, List[ModelInfo]] = {
 # Default fallback chain
 DEFAULT_FALLBACK = [CLAUDE_OPUS_4_5, GPT_5_2, GEMINI_3_FLASH, O3]
 
+# Expensive models (input price >= $5/M or output price >= $25/M)
+# These are filtered out when allow_expensive_fallback=False
+EXPENSIVE_MODELS = {
+    CLAUDE_OPUS_4_5.id,      # $5 input, $25 output
+    GPT_5_2_PRO.id,          # $5 input, $40 output
+    O3.id,                   # $10 input, $40 output
+}
 
-def get_fallback_chain(model: ModelInfo, tried_models: set = None) -> List[ModelInfo]:
+
+def is_expensive_model(model: ModelInfo) -> bool:
+    """Check if a model is considered expensive."""
+    return model.id in EXPENSIVE_MODELS
+
+
+def get_fallback_chain(model: ModelInfo, tried_models: set = None, allow_expensive: bool = True) -> List[ModelInfo]:
     """
     Get fallback models for a given model.
 
     Args:
         model: Current model
         tried_models: Set of already tried model IDs
+        allow_expensive: Whether to include expensive models in fallback chain
 
     Returns:
-        List of fallback models (excluding already tried)
+        List of fallback models (excluding already tried and optionally expensive)
     """
     tried = tried_models or set()
     chain = FALLBACK_CHAINS.get(model.id, DEFAULT_FALLBACK)
-    return [m for m in chain if m.id not in tried and m.id != model.id]
+
+    result = []
+    for m in chain:
+        if m.id in tried or m.id == model.id:
+            continue
+        if not allow_expensive and m.id in EXPENSIVE_MODELS:
+            continue
+        result.append(m)
+
+    return result
 
 
 # =============================================================================
