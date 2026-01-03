@@ -136,6 +136,16 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"Worker starting")
     start_time = datetime.now()
 
+    # Initialize evaluation reporter context
+    worker_ctx = None
+    try:
+        from ..eval import get_reporter
+        reporter = get_reporter()
+        worker_ctx = reporter.worker_context(worker_id, fuzzer=fuzzer, sanitizer=sanitizer)
+        worker_ctx.__enter__()
+    except Exception:
+        pass
+
     # Initialize database connection for this worker process
     try:
         from ..core import Config
@@ -144,6 +154,11 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         repos = init_repos(db)
     except Exception as e:
         logger.exception(f"Failed to initialize worker: {e}")
+        if worker_ctx:
+            try:
+                worker_ctx.__exit__(None, None, None)
+            except Exception:
+                pass
         return {
             "worker_id": worker_id,
             "status": "failed",
@@ -257,6 +272,13 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         from .cleanup import cleanup_worker_workspace
         cleanup_worker_workspace(workspace_path)
 
+        # Cleanup reporter context
+        if worker_ctx:
+            try:
+                worker_ctx.__exit__(None, None, None)
+            except Exception:
+                pass
+
         return {
             "worker_id": worker_id,
             "status": "completed",
@@ -288,6 +310,13 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         )
         for line in summary.split("\n"):
             logger.info(line)
+
+        # Cleanup reporter context
+        if worker_ctx:
+            try:
+                worker_ctx.__exit__(None, None, None)
+            except Exception:
+                pass
 
         return {
             "worker_id": worker_id,

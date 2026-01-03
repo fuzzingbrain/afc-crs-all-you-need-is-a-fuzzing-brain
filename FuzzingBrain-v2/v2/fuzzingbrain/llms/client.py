@@ -33,6 +33,46 @@ from .models import (
     get_model_by_id,
 )
 
+# Import reporter (lazy to avoid circular imports)
+_reporter = None
+
+
+def _get_reporter():
+    """Lazy import and get reporter."""
+    global _reporter
+    if _reporter is None:
+        try:
+            from ..eval import get_reporter
+            _reporter = get_reporter
+        except ImportError:
+            _reporter = lambda: None
+    return _reporter()
+
+
+def _calculate_cost(model_id: str, input_tokens: int, output_tokens: int) -> tuple:
+    """
+    Calculate cost for an LLM call.
+
+    Returns:
+        tuple: (cost_input, cost_output, cost_total)
+    """
+    # Try to get model info for pricing
+    model_info = get_model_by_id(model_id)
+
+    if model_info:
+        price_input = model_info.price_input  # per million
+        price_output = model_info.price_output
+    else:
+        # Conservative estimate for unknown models
+        price_input = 3.0  # $3 per million input
+        price_output = 15.0  # $15 per million output
+
+    cost_input = (input_tokens / 1_000_000) * price_input
+    cost_output = (output_tokens / 1_000_000) * price_output
+    cost_total = cost_input + cost_output
+
+    return cost_input, cost_output, cost_total
+
 # Configure litellm
 litellm.drop_params = True  # Drop unsupported params silently
 litellm.set_verbose = False
@@ -376,19 +416,41 @@ class LLMClient:
         elif "grok" in model_id.lower() or "xai" in model_id.lower():
             provider = "xai"
 
-        return LLMResponse(
+        input_tokens = usage.prompt_tokens if usage else 0
+        output_tokens = usage.completion_tokens if usage else 0
+        latency_ms = (time.time() - start_time) * 1000
+
+        result = LLMResponse(
             content=content,
             model=model_id,
             provider=provider,
             success=True,
-            input_tokens=usage.prompt_tokens if usage else 0,
-            output_tokens=usage.completion_tokens if usage else 0,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
             total_tokens=usage.total_tokens if usage else 0,
             tool_calls=tool_calls,
-            latency_ms=(time.time() - start_time) * 1000,
+            latency_ms=latency_ms,
             fallback_used=original_model is not None,
             original_model=original_model,
         )
+
+        # Report to evaluation system
+        reporter = _get_reporter()
+        if reporter:
+            cost_input, cost_output, _ = _calculate_cost(model_id, input_tokens, output_tokens)
+            reporter.llm_called(
+                model=model_id,
+                provider=provider,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_input=cost_input,
+                cost_output=cost_output,
+                latency_ms=int(latency_ms),
+                fallback_used=original_model is not None,
+                original_model=original_model,
+            )
+
+        return result
 
     def call(
         self,

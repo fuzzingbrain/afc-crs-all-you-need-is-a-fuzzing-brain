@@ -510,6 +510,15 @@ def main():
     args = parse_args()
     config = create_config_from_args(args)
 
+    # =========================================================================
+    # Initialize Evaluation Reporter (if FUZZINGBRAIN_EVAL_SERVER is set)
+    # =========================================================================
+    eval_server = os.environ.get("FUZZINGBRAIN_EVAL_SERVER")
+    if eval_server:
+        from .eval import create_reporter
+        create_reporter(server_url=eval_server, level="normal")
+        print(f"\033[0;36m[EVAL]\033[0m Reporting to: {eval_server}")
+
     # Check for API mode from args
     if hasattr(args, 'api') and args.api:
         config.api_mode = True

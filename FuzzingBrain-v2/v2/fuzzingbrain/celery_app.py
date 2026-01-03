@@ -61,13 +61,23 @@ def on_task_failure(sender=None, task_id=None, exception=None, traceback=None, *
 
 @worker_process_init.connect
 def on_worker_init(**kwargs):
-    """Setup error handling when worker process initializes."""
+    """Setup error handling and reporter when worker process initializes."""
     def handle_exception(exc_type, exc_value, exc_tb):
         error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
         sys.stderr.write(f"[CELERY WORKER ERROR]\n{error_msg}\n")
         sys.stderr.flush()
 
     sys.excepthook = handle_exception
+
+    # Initialize evaluation reporter in worker process
+    eval_server = os.getenv("FUZZINGBRAIN_EVAL_SERVER")
+    if eval_server:
+        try:
+            from .eval import create_reporter
+            create_reporter(server_url=eval_server, level="normal")
+        except Exception as e:
+            sys.stderr.write(f"[CELERY WORKER] Failed to init reporter: {e}\n")
+            sys.stderr.flush()
 
 # Celery configuration
 app.conf.update(

@@ -549,6 +549,17 @@ class TaskProcessor:
         """
         logger.info(f"Processing task: {task.task_id}")
 
+        # Initialize evaluation reporter context
+        try:
+            from ..eval import get_reporter
+            reporter = get_reporter()
+            project_name = task.project_name or self.config.ossfuzz_project or ""
+            task_ctx = reporter.task_context(task.task_id, project_name=project_name)
+            task_ctx.__enter__()
+        except Exception:
+            reporter = None
+            task_ctx = None
+
         # Save task to database
         task.mark_running()
         self.repos.tasks.save(task)
@@ -910,6 +921,13 @@ class TaskProcessor:
                 # Stop infrastructure (CLI mode only)
                 if infra:
                     infra.stop()
+
+                # Cleanup reporter context
+                if task_ctx:
+                    try:
+                        task_ctx.__exit__(None, None, None)
+                    except Exception:
+                        pass
 
         except Exception as e:
             logger.exception(f"Task processing failed: {e}")

@@ -100,6 +100,13 @@ def create_suspicious_point_impl(
             return {"success": True, "merged": True, "id": sp_id[:8]}
         else:
             logger.info(f"[NEW SP] {sp_id[:8]} -> {function_name} ({vuln_type}, score={score})")
+            # Report SP creation to eval server
+            try:
+                from ..eval import get_reporter
+                reporter = get_reporter()
+                reporter.sp_created(sp_id, function_name, vuln_type)
+            except Exception:
+                pass
             return {"success": True, "created": True, "id": sp_id[:8]}
     except Exception as e:
         logger.error(f"Failed to create suspicious point: {e}")
@@ -145,6 +152,14 @@ def update_suspicious_point_impl(
         updated = result.get("updated", False) if result else False
         if updated:
             logger.info(f"[UPDATE SUSPICIOUS POINT] {update_json}")
+            # Report SP verification result to eval server
+            if is_real is not None:
+                try:
+                    from ..eval import get_reporter
+                    reporter = get_reporter()
+                    reporter.sp_verified(suspicious_point_id, is_real, score or 0.0)
+                except Exception:
+                    pass
         else:
             logger.warning(f"[UPDATE SUSPICIOUS POINT FAILED] Server returned: {result}")
 

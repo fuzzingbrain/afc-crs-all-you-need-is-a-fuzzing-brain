@@ -18,6 +18,21 @@ from ..llms import LLMClient, LLMResponse, ModelInfo
 from ..tools.mcp_factory import create_isolated_mcp_server
 from ..core.logging import get_agent_banner_and_header
 
+# Lazy import for reporter to avoid circular imports
+_reporter_getter = None
+
+
+def _get_reporter():
+    """Lazy import and get reporter."""
+    global _reporter_getter
+    if _reporter_getter is None:
+        try:
+            from ..eval import get_reporter
+            _reporter_getter = get_reporter
+        except ImportError:
+            _reporter_getter = lambda: None
+    return _reporter_getter()
+
 
 class BaseAgent(ABC):
     """
@@ -302,6 +317,8 @@ class BaseAgent(ABC):
         iteration: int = 0,
         tool_calls: Optional[List[Dict]] = None,
         tool_call_id: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        tool_success: Optional[bool] = None,
     ) -> None:
         """
         Log a chat message with clear visual separation.
@@ -312,7 +329,21 @@ class BaseAgent(ABC):
             iteration: Current iteration number
             tool_calls: List of tool calls (for assistant messages)
             tool_call_id: Tool call ID (for tool response messages)
+            tool_name: Tool name (for tool response messages)
+            tool_success: Whether tool succeeded (for tool response messages)
         """
+        # Report to eval system
+        reporter = _get_reporter()
+        if reporter:
+            reporter.log_message(
+                role=role,
+                content=content,
+                tool_calls=tool_calls,
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                tool_success=tool_success,
+            )
+
         if not hasattr(self, '_chat_log_file') or not self._chat_log_file:
             return
 
@@ -474,9 +505,16 @@ class BaseAgent(ABC):
         self._log(f"Executing tool: {tool_name}", level="DEBUG")
         self._log(f"  Args: {json.dumps(tool_args, ensure_ascii=False)[:500]}", level="DEBUG")
 
+        success = True
+        error_type = None
+        error_message = None
+        result_str = ""
+
         try:
             result = await client.call_tool(tool_name, tool_args)
             t1 = time.time()
+            latency_ms = int((t1 - t0) * 1000)
+
             if t1 - t0 > 0.5:  # Log if > 500ms
                 self._log(f"[TIMING] MCP call_tool({tool_name}): {t1-t0:.3f}s", level="INFO")
 
@@ -494,11 +532,63 @@ class BaseAgent(ABC):
                 result_str = str(result)
 
             self._log(f"  Result: {result_str[:500]}...", level="DEBUG")
+
+            # Report tool call to eval system
+            reporter = _get_reporter()
+            if reporter:
+                # Determine tool category
+                tool_category = "general"
+                if tool_name.startswith("get_") or tool_name in ["search_code", "is_reachable"]:
+                    tool_category = "code_analysis"
+                elif tool_name.startswith("create_pov") or tool_name.startswith("verify_pov") or tool_name == "trace_pov":
+                    tool_category = "pov"
+                elif tool_name.startswith("create_sp") or tool_name == "verify_sp":
+                    tool_category = "sp"
+                elif tool_name.startswith("create_direction"):
+                    tool_category = "direction"
+
+                reporter.tool_called(
+                    tool_name=tool_name,
+                    success=True,
+                    latency_ms=latency_ms,
+                    arguments_summary=json.dumps(tool_args, ensure_ascii=False)[:200],
+                    result_size_bytes=len(result_str.encode('utf-8')),
+                    tool_category=tool_category,
+                )
+
             return result_str
 
         except Exception as e:
-            error_msg = f"Tool execution error: {e}"
-            self._log(error_msg, level="ERROR")
+            t1 = time.time()
+            latency_ms = int((t1 - t0) * 1000)
+            success = False
+            error_message = str(e)
+
+            # Categorize error
+            error_str = str(e).lower()
+            if "not found" in error_str:
+                error_type = "not_found"
+            elif "timeout" in error_str:
+                error_type = "timeout"
+            elif "invalid" in error_str:
+                error_type = "invalid_args"
+            else:
+                error_type = "error"
+
+            self._log(f"Tool execution error: {e}", level="ERROR")
+
+            # Report failed tool call to eval system
+            reporter = _get_reporter()
+            if reporter:
+                reporter.tool_called(
+                    tool_name=tool_name,
+                    success=False,
+                    latency_ms=latency_ms,
+                    arguments_summary=json.dumps(tool_args, ensure_ascii=False)[:200],
+                    error_type=error_type,
+                    error_message=error_message[:200],
+                )
+
             return json.dumps({"success": False, "error": str(e)})
 
     async def _run_agent_loop(
@@ -546,6 +636,11 @@ class BaseAgent(ABC):
             iteration += 1
             self.total_iterations += 1
             remaining = self.max_iterations - iteration
+
+            # Update iteration in reporter context
+            reporter = _get_reporter()
+            if reporter:
+                reporter.set_iteration(iteration)
 
             self._log(f"=== Iteration {iteration}/{self.max_iterations} ===", level="INFO")
 
@@ -672,11 +767,16 @@ class BaseAgent(ABC):
         initial_message = self.get_initial_message(**kwargs)
         self._log(f"Initial message: {initial_message[:500]}...", level="DEBUG")
 
+        # Create unique agent ID
+        agent_id = f"{self.agent_name}_{self.worker_id}_{id(self)}"
+
+        # Get reporter for context tracking
+        reporter = _get_reporter()
+
         try:
             # Create an isolated MCP server for this agent
             # This prevents response mixing when multiple agents run concurrently
             # Pass worker_id so POV tools can find the right context
-            agent_id = f"{self.agent_name}_{self.worker_id}_{id(self)}"
             mcp_server = create_isolated_mcp_server(
                 agent_id=agent_id,
                 worker_id=self.worker_id,  # Bind worker_id for POV context lookup
@@ -684,9 +784,28 @@ class BaseAgent(ABC):
             )
             self._log(f"Created isolated MCP server: {agent_id} (pov_tools={self.include_pov_tools})", level="DEBUG")
 
-            # Connect to the isolated MCP server and run agent loop
-            async with Client(mcp_server) as client:
-                result = await self._run_agent_loop(client, initial_message)
+            # Use reporter agent context if available
+            if reporter:
+                # Map agent name to operation phase for tracking
+                operation_map = {
+                    "FullscanSPAgent": "find_sp",
+                    "DirectionPlanningAgent": "find_sp",
+                    "SuspiciousPointAgent": "verify",
+                    "POVAgent": "pov",
+                    "POVReportAgent": "report",
+                }
+                operation = operation_map.get(self.agent_name, self.agent_name.lower())
+                reporter.set_operation(operation)
+
+                with reporter.agent_context(agent_id, self.agent_name):
+                    # Connect to the isolated MCP server and run agent loop
+                    async with Client(mcp_server) as client:
+                        result = await self._run_agent_loop(client, initial_message)
+            else:
+                # No reporter, run without context
+                async with Client(mcp_server) as client:
+                    result = await self._run_agent_loop(client, initial_message)
+
         except Exception as e:
             self._log(f"Agent run failed: {e}", level="ERROR")
             import traceback

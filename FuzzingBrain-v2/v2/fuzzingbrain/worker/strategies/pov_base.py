@@ -79,6 +79,15 @@ class POVBaseStrategy(BaseStrategy):
         """
         pass
 
+    def _set_operation(self, operation: str) -> None:
+        """Set current operation for evaluation tracking."""
+        try:
+            from ...eval import get_reporter
+            reporter = get_reporter()
+            reporter.set_operation(operation)
+        except Exception:
+            pass
+
     def execute(self) -> Dict[str, Any]:
         """
         Execute POV strategy.
@@ -110,11 +119,13 @@ class POVBaseStrategy(BaseStrategy):
 
         try:
             # Step 1: Mode-specific pre-processing (e.g., delta reachability check)
+            self._set_operation("reachability")
             pre_result = self._pre_find_suspicious_points(result)
             if pre_result.get("skip"):
                 return result
 
             # Step 2: Find suspicious points
+            self._set_operation("find_sp")
             self.log_info(f"[Step 2/5] Finding suspicious points with AI Agent...")
             step_start = time.time()
             suspicious_points = self._find_suspicious_points()
@@ -130,6 +141,7 @@ class POVBaseStrategy(BaseStrategy):
             # Step 3 & 4: Verify and generate POV
             if self.use_pipeline:
                 # Use parallel pipeline for verification and POV generation
+                self._set_operation("verify_pov_pipeline")
                 self.log_info(f"[Step 3-4/5] Running parallel pipeline for verification and POV generation...")
                 step_start = time.time()
                 pipeline_stats = self._run_pipeline()
@@ -145,6 +157,7 @@ class POVBaseStrategy(BaseStrategy):
                 self.log_info(f"  POV generated: {pipeline_stats.pov_generated}")
             else:
                 # Sequential verification (original behavior)
+                self._set_operation("verify")
                 self.log_info(f"[Step 3/5] Verifying {len(suspicious_points)} suspicious points...")
                 step_start = time.time()
                 verified_points = self._verify_suspicious_points(suspicious_points)
@@ -155,6 +168,7 @@ class POVBaseStrategy(BaseStrategy):
                 self.log_info(f"[Step 3/5] Done in {step_duration:.1f}s - Verified {len(verified_points)} points")
 
             # Step 5: Sort and save results
+            self._set_operation("save")
             self.log_info(f"[Step 5/5] Sorting and saving results...")
             step_start = time.time()
 

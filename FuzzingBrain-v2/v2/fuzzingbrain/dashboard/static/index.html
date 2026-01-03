@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FuzzingBrain Dashboard</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1>FuzzingBrain</h1>
+                <span class="subtitle">Evaluation Dashboard</span>
+            </div>
+            <div class="header-right">
+                <span class="status-indicator" id="connection-status">
+                    <span class="dot"></span>
+                    <span class="text">Connecting...</span>
+                </span>
+                <span class="total-cost" id="total-cost">$0.00</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main">
+            <!-- Tasks List View (Default) -->
+            <div class="view active" id="view-tasks-list">
+                <!-- Summary Stats -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Total Tasks</div>
+                        <div class="stat-value" id="stat-total-tasks">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Running</div>
+                        <div class="stat-value running" id="stat-running-tasks">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Completed</div>
+                        <div class="stat-value completed" id="stat-completed-tasks">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Total Cost</div>
+                        <div class="stat-value cost" id="stat-total-cost">$0.00</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">LLM Calls</div>
+                        <div class="stat-value" id="stat-llm-calls">0</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Active Instances</div>
+                        <div class="stat-value" id="stat-instances">0</div>
+                    </div>
+                </div>
+
+                <!-- Tasks Table -->
+                <div class="panel full-width">
+                    <div class="panel-header">
+                        <h2>Tasks</h2>
+                        <button class="refresh-btn" onclick="refreshTasks()">Refresh</button>
+                    </div>
+                    <div class="panel-content">
+                        <table class="tasks-table" id="tasks-table">
+                            <thead>
+                                <tr>
+                                    <th>Task ID</th>
+                                    <th>Project</th>
+                                    <th>Status</th>
+                                    <th>Cost</th>
+                                    <th>LLM Calls</th>
+                                    <th>Started</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="tasks-tbody">
+                                <tr><td colspan="7" class="empty">Loading tasks...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Task Detail View -->
+            <div class="view" id="view-task-detail">
+                <div class="task-detail-header">
+                    <button class="back-btn" onclick="showTasksList()">Back to Tasks</button>
+                    <h2 id="task-detail-title">Task Details</h2>
+                    <button class="refresh-btn" onclick="refreshTaskDetail()">Refresh</button>
+                </div>
+
+                <!-- Task Info -->
+                <div class="task-info-grid" id="task-info-grid">
+                    <!-- Filled by JavaScript -->
+                </div>
+
+                <!-- Tabs -->
+                <div class="detail-tabs">
+                    <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+                    <button class="tab-btn" data-tab="report" onclick="switchTab('report')">Report</button>
+                    <button class="tab-btn" data-tab="directions" onclick="switchTab('directions')">Directions</button>
+                    <button class="tab-btn" data-tab="suspicious-points" onclick="switchTab('suspicious-points')">Suspicious Points</button>
+                    <button class="tab-btn" data-tab="povs" onclick="switchTab('povs')">POVs</button>
+                    <button class="tab-btn" data-tab="workers" onclick="switchTab('workers')">Workers</button>
+                    <button class="tab-btn" data-tab="agents" onclick="switchTab('agents')">Agents</button>
+                    <button class="tab-btn" data-tab="costs" onclick="switchTab('costs')">Costs</button>
+                    <button class="tab-btn" data-tab="llm-calls" onclick="switchTab('llm-calls')">LLM Calls</button>
+                    <button class="tab-btn" data-tab="tools" onclick="switchTab('tools')">Tools</button>
+                    <button class="tab-btn" data-tab="logs" onclick="switchTab('logs')">Logs</button>
+                </div>
+
+                <!-- Tab Content: Overview -->
+                <div class="tab-content active" id="tab-overview">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">Workers</div>
+                            <div class="stat-value" id="task-worker-count">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Agents</div>
+                            <div class="stat-value" id="task-agent-count">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">LLM Calls</div>
+                            <div class="stat-value" id="task-llm-count">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Total Cost</div>
+                            <div class="stat-value cost" id="task-total-cost">$0.00</div>
+                        </div>
+                    </div>
+                    <div class="panel full-width">
+                        <div class="panel-header"><h3>Task Timeline</h3></div>
+                        <div class="panel-content" id="task-timeline">
+                            <div class="empty">No timeline data</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab Content: Report -->
+                <div class="tab-content" id="tab-report">
+                    <div class="panel full-width">
+                        <div class="panel-header">
+                            <h3>Vulnerability Report</h3>
+                            <button class="refresh-btn" onclick="fetchAndRenderReportTab()">Refresh</button>
+                        </div>
+                        <div class="panel-content">
+                            <div class="report-container" id="report-container">
+                                <div class="empty">No report available</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab Content: Directions -->
+                <div class="tab-content" id="tab-directions">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">Total</div>
+                            <div class="stat-value" id="dir-total">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Completed</div>
+                            <div class="stat-value" id="dir-completed">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Pending</div>
+                            <div class="stat-value" id="dir-pending">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Processing</div>
+                            <div class="stat-value" id="dir-processing">0</div>
+                        </div>
+                    </div>
+                    <div class="sp-layout">
+                        <div class="panel sp-list-panel">
+                            <div class="panel-header"><h3>Directions</h3></div>
+                            <div class="panel-content">
+                                <table class="tasks-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Risk</th>
+                                            <th>Status</th>
+                                            <th>SPs</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="dir-tbody">
+                                        <tr><td colspan="4" class="empty">No directions</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="panel sp-detail-panel">
+                            <div class="panel-header"><h3>Direction Details</h3></div>
+                            <div class="panel-content" id="dir-detail-content">
+                                <div class="empty">Select a direction to view details</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab Content: Workers -->
+                <div class="tab-content" id="tab-workers">
+                    <div class="panel full-width">
+                        <div class="panel-header"><h3>Workers</h3></div>
+                        <div class="panel-content">
+                            <table class="tasks-table">
+                                <thead>
+                                    <tr>
+                                        <th>Worker ID</th>
+                                        <th>Fuzzer</th>
+                                        <th>Sanitizer</th>
+                                        <th>Status</th>
+                                        <th>CPU %</th>
+                                        <th>Memory</th>
+                                        <th>Started</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="workers-tbody">
+                                    <tr><td colspan="7" class="empty">No workers</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab Content: Agents -->
+                <div class="tab-content" id="tab-agents">
+                    <div class="panel full-width">
+                        <div class="panel-header"><h3>Agents</h3></div>
+                        <div class="panel-content">
+                            <table class="tasks-table">
+                                <thead>
+                                    <tr>
+                                        <th>Agent ID</th>
+                                        <th>Type</th>
+                                        <th>Operation</th>
+                                        <th>Worker</th>
+                                        <th>Status</th>
+                                        <th>Iterations</th>
+                                        <th>Started</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="agents-tbody">
+                                    <tr><td colspan="6" class="empty">No agents</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab Content: Suspicious Points -->
+                <div class="tab-content" id="tab-suspicious-points">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">Total</div>
+                            <div class="stat-value" id="sp-total">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Checked</div>
+                            <div class="stat-value" id="sp-checked">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Real Bugs</div>
+                            <div class="stat-value cost" id="sp-real">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">False Positives</div>
+                            <div class="stat-value" id="sp-fp">0</div>
+                        </div>
+                    </div>
+                    <div class="sp-layout">
+                        <div class="panel sp-list-panel">
+                            <div class="panel-header"><h3>Suspicious Points</h3></div>
+                            <div class="panel-content">
+                                <table class="tasks-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Function</th>
+                                            <th>Vuln Type</th>
+                                            <th>Score</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="sp-tbody">
+                                        <tr><td colspan="4" class="empty">No suspicious points</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="panel sp-detail-panel">
+                            <div class="panel-header"><h3>SP Details</h3></div>
+                            <div class="panel-content" id="sp-detail-content">
+                                <div class="empty">Select a suspicious point to view details</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab Content: POVs -->
+                <div class="tab-content" id="tab-povs">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-label">Total</div>
+                            <div class="stat-value" id="pov-total">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Crashed</div>
+                            <div class="stat-value cost" id="pov-crashed">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Not Crashed</div>
+                            <div class="stat-value" id="pov-not-crashed">0</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-label">Pending</div>
+                            <div class="stat-value" id="pov-pending">0</div>
+                        </div>
+                    </div>
+                    <div class="sp-layout">
+                        <div class="panel sp-list-panel">
+                            <div class="panel-header"><h3>POVs</h3></div>
+                            <div class="panel-content">
+                                <table class="tasks-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Function</th>
+                                            <th>Vuln Type</th>
+                                            <th>Crashed</th>
+                                            <th>Crash Type</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="pov-tbody">
+                                        <tr><td colspan="4" class="empty">No POVs</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="panel sp-detail-panel">
+                            <div class="panel-header"><h3>POV Details</h3></div>
+                            <div class="panel-content" id="pov-detail-content">
+                                <div class="empty">Select a POV to view details</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab Content: Costs -->
+                <div class="tab-content" id="tab-costs">
+                    <div class="costs-grid">
+                        <div class="panel">
+                            <div class="panel-header"><h3>Cost Summary</h3></div>
+                            <div class="panel-content" id="task-cost-summary"></div>
+                        </div>
+                        <div class="panel">
+                            <div class="panel-header"><h3>Cost by Model</h3></div>
+                            <div class="panel-content" id="task-cost-by-model"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab Content: LLM Calls -->
+                <div class="tab-content" id="tab-llm-calls">
+                    <div class="panel full-width">
+                        <div class="panel-header"><h3>Recent LLM Calls</h3></div>
+                        <div class="panel-content">
+                            <table class="llm-table">
+                                <thead>
+                                    <tr>
+                                        <th>Time</th>
+                                        <th>Operation</th>
+                                        <th>Model</th>
+                                        <th>Tokens</th>
+                                        <th>Cost</th>
+                                        <th>Latency</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="llm-calls-tbody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tab Content: Tools -->
+                <div class="tab-content" id="tab-tools">
+                    <div class="panel full-width">
+                        <div class="panel-header"><h3>Tool Usage</h3></div>
+                        <div class="panel-content" id="task-tools"></div>
+                    </div>
+                </div>
+
+                <!-- Tab Content: Logs -->
+                <div class="tab-content" id="tab-logs">
+                    <div class="logs-container" id="task-logs-container">
+                        <div class="empty">No logs available</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
