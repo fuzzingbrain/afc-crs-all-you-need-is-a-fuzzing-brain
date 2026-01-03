@@ -145,10 +145,19 @@ def _parse_sp_dedup_response(
         if not duplicate_ref:
             return None
 
-        # Parse "SP-N" format
+        # Parse "SP-N" format or plain number
         if duplicate_ref.startswith("SP-"):
             try:
                 idx = int(duplicate_ref[3:]) - 1  # 1-indexed to 0-indexed
+                if 0 <= idx < len(existing_sps):
+                    sp = existing_sps[idx]
+                    return sp.get("suspicious_point_id", sp.get("_id"))
+            except ValueError:
+                pass
+        elif duplicate_ref.isdigit():
+            # Handle plain number (e.g., "1" instead of "SP-1")
+            try:
+                idx = int(duplicate_ref) - 1  # 1-indexed to 0-indexed
                 if 0 <= idx < len(existing_sps):
                     sp = existing_sps[idx]
                     return sp.get("suspicious_point_id", sp.get("_id"))

@@ -81,3 +81,8 @@ class LLMAllModelsFailedError(LLMError):
 class LLMInvalidResponseError(LLMError):
     """Invalid or empty response from LLM"""
     pass
+
+
+class LLMShutdownError(LLMError):
+    """LLM call aborted due to event loop shutdown"""
+    pass

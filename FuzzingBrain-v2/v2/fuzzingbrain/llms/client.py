@@ -23,6 +23,7 @@ from .exceptions import (
     LLMInvalidResponseError,
     LLMModelNotFoundError,
     LLMRateLimitError,
+    LLMShutdownError,
     LLMTimeoutError,
 )
 from .models import (
@@ -201,8 +202,10 @@ class LLMClient:
         if "context" in error_str or "token" in error_str and "limit" in error_str:
             return LLMContextLengthError(str(error), model=model_id)
 
-        # Content filter
-        if "content" in error_str and ("filter" in error_str or "policy" in error_str):
+        # Content filter / policy violations
+        if ("content" in error_str and ("filter" in error_str or "policy" in error_str)) or \
+           "violating" in error_str or "usage policy" in error_str or \
+           "flagged" in error_str or "invalid_prompt" in error_str:
             return LLMContentFilterError(str(error), model=model_id)
 
         # Generic error
@@ -704,6 +707,13 @@ class LLMClient:
                 )
 
             return result
+
+        except RuntimeError as e:
+            # Handle event loop shutdown gracefully
+            if "Event loop is closed" in str(e):
+                logger.warning(f"LLM async call aborted due to shutdown | model={model_id}")
+                raise LLMShutdownError("Event loop closed during LLM call", model=model_id)
+            raise
 
         except Exception as e:
             error = self._handle_error(e, model_id)

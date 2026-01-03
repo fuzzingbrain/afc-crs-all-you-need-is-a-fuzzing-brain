@@ -29,6 +29,7 @@ from .coverage import (
     get_coverage_context,
 )
 from ..core.models import POV
+from ..core.pov_packager import POVPackager
 from ..db import RepositoryManager
 
 
@@ -786,11 +787,59 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
         vuln_type = _parse_vuln_type(output)
         logger.info(f"[POV] CRASH DETECTED! vuln_type={vuln_type}")
 
-        # Update POV record
-        pov.is_successful = True
+        # Prepare POV data for packaging (BEFORE saving is_successful=True)
         pov.vuln_type = vuln_type
         pov.sanitizer_output = output[:10000]  # Truncate for DB
         pov.verified_at = datetime.now()
+
+        # Package POV with report BEFORE marking as successful
+        # This ensures report is generated before dispatcher can stop
+        try:
+            workspace_path = ctx.get("workspace_path")
+            task_id = ctx.get("task_id", "")
+            ctx_worker_id = ctx.get("worker_id", "")
+            if workspace_path:
+                # Get TASK workspace (not worker workspace)
+                # Worker workspace: {task_workspace}/worker_workspace/{harness_sanitizer}/
+                # Task workspace: {task_workspace}/
+                worker_ws = Path(workspace_path)
+                if "worker_workspace" in str(worker_ws):
+                    task_workspace = worker_ws.parent.parent
+                else:
+                    task_workspace = worker_ws
+                results_dir = task_workspace / "results"
+                # Capture analyzer context for restoration in packager's new event loop
+                from .analyzer import get_analyzer_context
+                analyzer_socket = get_analyzer_context()
+                packager = POVPackager(
+                    str(results_dir),
+                    task_id=task_id,
+                    worker_id=ctx_worker_id,
+                    repos=repos,
+                    analyzer_socket_path=analyzer_socket,
+                )
+
+                # Get SP record from database
+                sp = repos.suspicious_points.find_by_id(pov.suspicious_point_id)
+                if sp:
+                    sp_dict = sp.to_dict() if hasattr(sp, 'to_dict') else vars(sp)
+                    pov_dict = pov.to_dict() if hasattr(pov, 'to_dict') else vars(pov)
+
+                    # Package synchronously (non-blocking for DB save)
+                    zip_path = packager.package_pov(pov_dict, sp_dict)
+                    if zip_path:
+                        logger.info(f"[POV] Packaged POV to {zip_path}")
+                    else:
+                        logger.warning(f"[POV] Failed to package POV {pov_id[:8]}")
+                else:
+                    logger.warning(f"[POV] SP not found for packaging: {pov.suspicious_point_id}")
+        except Exception as e:
+            # Don't let packaging errors block POV success
+            logger.error(f"[POV] Packaging failed (non-fatal): {e}")
+
+        # NOW mark as successful and save to DB
+        # Dispatcher can detect this and stop, but report is already generated
+        pov.is_successful = True
         repos.povs.save(pov)
 
         logger.info(f"[POV] POV {pov_id[:8]} marked as successful")

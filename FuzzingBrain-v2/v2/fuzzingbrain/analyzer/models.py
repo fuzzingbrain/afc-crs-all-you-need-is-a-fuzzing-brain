@@ -23,6 +23,7 @@ class AnalyzeRequest:
     language: str = "c"               # "c" / "cpp" / "java"
     ossfuzz_project: Optional[str] = None  # OSS-Fuzz project name if different
     log_dir: Optional[str] = None     # Log directory path
+    skip_build: bool = False          # Skip build/import phases (for cache restore)
 
     def to_dict(self) -> dict:
         return {
@@ -33,6 +34,7 @@ class AnalyzeRequest:
             "language": self.language,
             "ossfuzz_project": self.ossfuzz_project,
             "log_dir": self.log_dir,
+            "skip_build": self.skip_build,
         }
 
     @classmethod
@@ -45,6 +47,7 @@ class AnalyzeRequest:
             language=data.get("language", "c"),
             ossfuzz_project=data.get("ossfuzz_project"),
             log_dir=data.get("log_dir"),
+            skip_build=data.get("skip_build", False),
         )
 
 

@@ -130,6 +130,13 @@ find_ossfuzz_project() {
         return
     fi
 
+    # Try removing afc- prefix (AIxCC competition repos)
+    local afc_stripped=$(echo "$repo_name" | sed -E 's/^afc-//i')
+    if [ -d "$ossfuzz_dir/projects/$afc_stripped" ]; then
+        echo "$afc_stripped"
+        return
+    fi
+
     echo ""
 }
 

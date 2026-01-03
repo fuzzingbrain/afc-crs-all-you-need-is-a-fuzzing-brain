@@ -93,6 +93,7 @@ from .exceptions import (
     LLMContentFilterError,
     LLMAllModelsFailedError,
     LLMInvalidResponseError,
+    LLMShutdownError,
 )
 
 __all__ = [
@@ -120,6 +121,7 @@ __all__ = [
     "LLMContentFilterError",
     "LLMAllModelsFailedError",
     "LLMInvalidResponseError",
+    "LLMShutdownError",
     # OpenAI
     "GPT_5_2",
     "GPT_5_2_INSTANT",

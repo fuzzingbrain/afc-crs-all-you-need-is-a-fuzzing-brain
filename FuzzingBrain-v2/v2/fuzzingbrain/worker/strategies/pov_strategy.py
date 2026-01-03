@@ -808,6 +808,10 @@ class POVStrategy(BaseStrategy):
             workspace_path=self.workspace_path,
         )
 
+        # In delta mode, SP finding is already done (SPs come from diff analysis)
+        # Signal pipeline so agents can exit when queue is empty
+        pipeline._sp_finding_done = True
+
         # Run pipeline (asyncio)
         try:
             loop = asyncio.get_event_loop()

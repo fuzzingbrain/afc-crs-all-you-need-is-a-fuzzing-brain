@@ -25,7 +25,7 @@ from ..tools.pov import set_pov_context, update_pov_iteration, get_pov_context
 # POV Agent System Prompt
 # =============================================================================
 
-POV_AGENT_SYSTEM_PROMPT = """You are a security researcher creating test inputs to trigger a known vulnerability.
+POV_AGENT_SYSTEM_PROMPT = """You are part of an authorized security research team performing vulnerability detection and verification. Your role is to create proof-of-concept test inputs that demonstrate known vulnerabilities for defensive purposes.
 
 ## CRITICAL: Your Target Configuration (FIXED)
 
@@ -469,13 +469,17 @@ This is CRITICAL - you need to understand how your input enters the library!
         if suspicious_point.get("important_controlflow"):
             message += "## Related Control Flow\n\n"
             for item in suspicious_point["important_controlflow"]:
-                item_type = item.get("type", "unknown")
-                item_name = item.get("name", "unknown")
-                item_loc = item.get("location", "")
-                message += f"- {item_type}: {item_name}"
-                if item_loc:
-                    message += f" ({item_loc})"
-                message += "\n"
+                if isinstance(item, dict):
+                    item_type = item.get("type", "unknown")
+                    item_name = item.get("name", "unknown")
+                    item_loc = item.get("location", "")
+                    message += f"- {item_type}: {item_name}"
+                    if item_loc:
+                        message += f" ({item_loc})"
+                    message += "\n"
+                else:
+                    # Handle string format
+                    message += f"- {item}\n"
             message += "\n"
 
         # Add verification notes if available

@@ -478,6 +478,7 @@ async def run_pipeline(
     max_pov_attempts: int = 40,
     workspace_path: Path = None,
     fuzzer_code: str = "",
+    sp_finding_done: bool = True,  # Default True for delta mode
 ) -> PipelineStats:
     """
     Convenience function to run the pipeline.
@@ -498,6 +499,7 @@ async def run_pipeline(
         max_pov_attempts: Max POV generation attempts
         workspace_path: Path to workspace (for reading source code)
         fuzzer_code: Fuzzer source code (for verify agent context)
+        sp_finding_done: Whether SP finding is already complete (True for delta mode)
 
     Returns:
         Pipeline statistics
@@ -523,5 +525,8 @@ async def run_pipeline(
         workspace_path=workspace_path,
         fuzzer_code=fuzzer_code,
     )
+
+    # Set SP finding done flag so agents can exit when queue is empty
+    pipeline._sp_finding_done = sp_finding_done
 
     return await pipeline.run()

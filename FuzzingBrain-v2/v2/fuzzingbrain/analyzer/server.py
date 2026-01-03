@@ -100,6 +100,7 @@ class AnalysisServer:
         ossfuzz_project: Optional[str] = None,
         language: str = "c",
         log_dir: Optional[str] = None,
+        skip_build: bool = False,
     ):
         self.task_id = task_id
         self.task_path = Path(task_path)
@@ -108,6 +109,7 @@ class AnalysisServer:
         self.ossfuzz_project = ossfuzz_project
         self.language = language
         self.log_dir = log_dir
+        self.skip_build = skip_build
 
         # Socket path in /tmp to avoid path length limit (108 chars max for Unix sockets)
         # Use task_id to ensure uniqueness
@@ -170,15 +172,16 @@ class AnalysisServer:
         """
         Start the Analysis Server.
 
-        1. Build fuzzers with all sanitizers
-        2. Import static analysis data
+        1. Build fuzzers with all sanitizers (skipped if skip_build=True)
+        2. Import static analysis data (skipped if skip_build=True)
         3. Start listening on Unix socket
 
         Returns:
             AnalyzeResult with build information
         """
         self.start_time = datetime.now()
-        self._log(f"Starting Analysis Server for task {self.task_id}")
+        self._log(f"Starting Analysis Server for task {self.task_id}" +
+                  (" (skip_build mode)" if self.skip_build else ""))
 
         # Initialize database
         config = Config.from_env()
@@ -189,18 +192,29 @@ class AnalysisServer:
         if self.log_dir:
             self._setup_logging()
 
-        # Phase 1: Build
-        build_success = await self._build_phase()
-        if not build_success:
-            return AnalyzeResult(
-                success=False,
-                task_id=self.task_id,
-                error_msg="Build failed",
-                build_duration_seconds=self.build_duration,
-            )
+        if self.skip_build:
+            # Skip build and import - data already in DB from cache
+            self._log("Skipping build and import phases (restored from cache)")
 
-        # Phase 2: Import static analysis
-        await self._import_phase()
+            # Load fuzzer info from existing build output
+            await self._load_cached_fuzzers()
+
+            # Get function count from database
+            func_count = self._get_function_count()
+            self._log(f"Found {len(self.fuzzers)} fuzzers, {func_count} functions in database")
+        else:
+            # Phase 1: Build
+            build_success = await self._build_phase()
+            if not build_success:
+                return AnalyzeResult(
+                    success=False,
+                    task_id=self.task_id,
+                    error_msg="Build failed",
+                    build_duration_seconds=self.build_duration,
+                )
+
+            # Phase 2: Import static analysis
+            await self._import_phase()
 
         # Phase 3: Start server
         await self._start_server()
@@ -220,6 +234,39 @@ class AnalysisServer:
             build_duration_seconds=self.build_duration,
             analysis_duration_seconds=self.analysis_duration,
         )
+
+    async def _load_cached_fuzzers(self):
+        """Load fuzzer info from existing build output (for skip_build mode)."""
+        build_out = self.task_path / "fuzz-tooling" / "build" / "out"
+
+        if not build_out.exists():
+            self._log(f"Build output not found: {build_out}", "WARN")
+            return
+
+        for sanitizer_dir in build_out.iterdir():
+            if not sanitizer_dir.is_dir() or sanitizer_dir.name.startswith("."):
+                continue
+
+            # Extract sanitizer from directory name (e.g., "libpng_address" -> "address")
+            parts = sanitizer_dir.name.split("_")
+            sanitizer = parts[-1] if len(parts) > 1 else "address"
+
+            for f in sanitizer_dir.iterdir():
+                if f.is_file() and os.access(f, os.X_OK):
+                    fuzzer_info = FuzzerInfo(
+                        name=f.name,
+                        binary_path=str(f),
+                        sanitizer=sanitizer,
+                    )
+                    self.fuzzers.append(fuzzer_info)
+                    self.build_paths[f.name] = str(f)
+
+            # Check for coverage build
+            if "coverage" in sanitizer_dir.name:
+                for f in sanitizer_dir.iterdir():
+                    if f.is_file() and os.access(f, os.X_OK):
+                        self.coverage_path = str(f)
+                        break
 
     def _setup_logging(self):
         """Setup server-specific logging."""

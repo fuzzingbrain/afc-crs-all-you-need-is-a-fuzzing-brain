@@ -99,7 +99,7 @@ class RedisManager:
 class CeleryWorkerManager:
     """Manages Celery worker as subprocess for CLI mode."""
 
-    def __init__(self, concurrency: int = 8):
+    def __init__(self, concurrency: int = 15):
         """
         Initialize Celery worker manager.
 
@@ -192,7 +192,7 @@ class InfrastructureManager:
     # Global instance for signal handler access
     _instance: Optional["InfrastructureManager"] = None
 
-    def __init__(self, redis_url: str = None, concurrency: int = 8):
+    def __init__(self, redis_url: str = None, concurrency: int = 15):
         """
         Initialize infrastructure manager.
 

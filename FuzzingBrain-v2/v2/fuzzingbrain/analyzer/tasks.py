@@ -33,11 +33,15 @@ def _run_server_process(
     language: str,
     log_dir: Optional[str],
     result_queue: multiprocessing.Queue,
+    skip_build: bool = False,
 ):
     """
     Run the Analysis Server in a subprocess.
 
     This function is the entry point for the server subprocess.
+
+    Args:
+        skip_build: If True, skip build and import phases (for cache restore)
     """
     # Setup signal handlers
     def handle_shutdown(signum, frame):
@@ -57,6 +61,7 @@ def _run_server_process(
             ossfuzz_project=ossfuzz_project,
             language=language,
             log_dir=log_dir,
+            skip_build=skip_build,
         )
 
         # Start server (builds, imports, starts listening)
@@ -113,6 +118,8 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
     logger.info(f"[Analyzer] Starting Analysis Server for task {task_id}")
     logger.info(f"[Analyzer] Project: {request.project_name}")
     logger.info(f"[Analyzer] Sanitizers: {request.sanitizers}")
+    if request.skip_build:
+        logger.info(f"[Analyzer] Skip build mode enabled (cache restore)")
 
     # Create result queue for IPC
     result_queue = multiprocessing.Queue()
@@ -129,6 +136,7 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
             request.language,
             request.log_dir,
             result_queue,
+            request.skip_build,
         ),
         daemon=False,  # Server should survive parent
     )
