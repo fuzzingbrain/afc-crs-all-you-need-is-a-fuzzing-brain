@@ -64,7 +64,7 @@ run_test_1() {
     print_header "Test 1: libxml2 lx-delta-01 (html fuzzer)"
     FUZZINGBRAIN_FUZZER_FILTER=html \
     ./FuzzingBrain.sh \
-        --eval-port 8080 \
+        --eval-port 18080 \
         --budget $DELTA_BUDGET \
         --allow-expensive true \
         -b 39ce264d546f93a0ddb7a1d7987670b8b905c165 \
@@ -79,7 +79,7 @@ run_test_2() {
     print_header "Test 2: libxml2 lx-delta-02 (xml fuzzer)"
     FUZZINGBRAIN_FUZZER_FILTER=xml \
     ./FuzzingBrain.sh \
-        --eval-port 8080 \
+        --eval-port 18080 \
         --budget $DELTA_BUDGET \
         --allow-expensive true \
         -b 0f876b983249cd3fb32b53d405f5985e83d8c3bd \
@@ -94,7 +94,7 @@ run_test_3() {
     print_header "Test 3: libxml2 lx-delta-03 (html fuzzer)"
     FUZZINGBRAIN_FUZZER_FILTER=html \
     ./FuzzingBrain.sh \
-        --eval-port 8080 \
+        --eval-port 18080 \
         --budget $DELTA_BUDGET \
         --allow-expensive true \
         -b 40bcc1944c83b15f8647ec0b6ff1d7c440d53a40 \
@@ -109,7 +109,7 @@ run_test_4() {
     print_header "Test 4: libxml2 lx-ex1-delta-01 (html fuzzer)"
     FUZZINGBRAIN_FUZZER_FILTER=html \
     ./FuzzingBrain.sh \
-        --eval-port 8080 \
+        --eval-port 18080 \
         --budget $DELTA_BUDGET \
         --allow-expensive true \
         -b 792cc4a1462d4a969d9d38bd80a52d2e4f7bd137 \
@@ -124,7 +124,7 @@ run_test_5() {
     print_header "Test 5: libavif av-delta-02"
     FUZZINGBRAIN_FUZZER_FILTER="avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert" \
     ./FuzzingBrain.sh \
-        --eval-port 8080 \
+        --eval-port 18080 \
         --budget $DELTA_BUDGET \
         --allow-expensive true \
         -b 1a98b640c5322dfeb69a05c832b0a1ba2f277872 \
@@ -139,7 +139,7 @@ run_test_6() {
     print_header "Test 6: little-cms cm-full-01 (FULL scan)"
     FUZZINGBRAIN_FUZZER_FILTER="cms_virtual_profile_fuzzer,cms_postscript_fuzzer" \
     ./FuzzingBrain.sh \
-        --eval-port 8080 \
+        --eval-port 18080 \
         --budget $FULL_BUDGET \
         --allow-expensive false \
         -v challenges/cm-full-01 \
@@ -154,7 +154,7 @@ run_test_7() {
     print_header "Test 7: curl cu-delta-01"
     FUZZINGBRAIN_FUZZER_FILTER=curl_fuzzer_ws \
     ./FuzzingBrain.sh \
-        --eval-port 8080 \
+        --eval-port 18080 \
         --budget $DELTA_BUDGET \
         --allow-expensive true \
         -b a29184fc5f9b1474c08502d1545cd90375fadd51 \
@@ -169,7 +169,7 @@ run_test_8() {
     print_header "Test 8: curl cu-delta-02"
     FUZZINGBRAIN_FUZZER_FILTER=curl_fuzzer_ws \
     ./FuzzingBrain.sh \
-        --eval-port 8080 \
+        --eval-port 18080 \
         --budget $DELTA_BUDGET \
         --allow-expensive true \
         -b 332850107d906154ec53c0b3dfc16a46fea692a4 \
@@ -184,7 +184,7 @@ run_test_9() {
     print_header "Test 9: curl cu-delta-03"
     FUZZINGBRAIN_FUZZER_FILTER=curl_fuzzer_ws \
     ./FuzzingBrain.sh \
-        --eval-port 8080 \
+        --eval-port 18080 \
         --budget $DELTA_BUDGET \
         --allow-expensive true \
         -b 458897b4ba4d743c1dbc2fce0607dc3802b695e3 \
@@ -199,7 +199,7 @@ run_test_10() {
     print_header "Test 10: curl cu-delta-04"
     FUZZINGBRAIN_FUZZER_FILTER="curl_fuzzer_http,curl_fuzzer_ws" \
     ./FuzzingBrain.sh \
-        --eval-port 8080 \
+        --eval-port 18080 \
         --budget $DELTA_BUDGET \
         --allow-expensive true \
         -b 157e7faac92b4c79e7202de036b45d8ef0f7b35e \
@@ -214,7 +214,7 @@ run_test_11() {
     print_header "Test 11: curl cu-delta-05"
     FUZZINGBRAIN_FUZZER_FILTER="curl_fuzzer_dict,curl_fuzzer_ftp" \
     ./FuzzingBrain.sh \
-        --eval-port 8080 \
+        --eval-port 18080 \
         --budget $DELTA_BUDGET \
         --allow-expensive true \
         -b 150028193bf61131c2436e3f4f76631e5d0a21d7 \
@@ -229,7 +229,7 @@ run_test_12() {
     print_header "Test 12: curl cu-full-01 (FULL scan)"
     FUZZINGBRAIN_FUZZER_FILTER=curl_fuzzer \
     ./FuzzingBrain.sh \
-        --eval-port 8080 \
+        --eval-port 18080 \
         --budget $FULL_BUDGET \
         --allow-expensive false \
         -v challenges/cu-full-01 \
@@ -244,7 +244,7 @@ run_test_13() {
     print_header "Test 13: shadowsocks-libev shadowsocks-full-01 (FULL scan)"
     FUZZINGBRAIN_FUZZER_FILTER=json_fuzz \
     ./FuzzingBrain.sh \
-        --eval-port 8080 \
+        --eval-port 18080 \
         --budget $FULL_BUDGET \
         --allow-expensive false \
         -v challenges/shadowsocks-full-01 \
@@ -258,7 +258,7 @@ run_test_13() {
 run_test_14() {
     print_header "Test 14: libxml2 lx-full-01 (FULL scan)"
     ./FuzzingBrain.sh \
-        --eval-port 8080 \
+        --eval-port 18080 \
         --budget $FULL_BUDGET \
         --allow-expensive false \
         --project libxml2 \

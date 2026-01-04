@@ -412,7 +412,7 @@ def check_port_in_use(port: int) -> tuple[bool, int]:
     return False, 0
 
 
-def run_api_server(host: str = "0.0.0.0", port: int = 8080):
+def run_api_server(host: str = "0.0.0.0", port: int = 18080):
     """Run the FastAPI server"""
     import uvicorn
     import os

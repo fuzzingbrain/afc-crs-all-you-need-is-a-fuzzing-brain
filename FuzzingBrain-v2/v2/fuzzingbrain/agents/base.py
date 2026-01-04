@@ -49,6 +49,9 @@ class BaseAgent(ABC):
     # Default temperature for this agent type (can be overridden by subclasses)
     default_temperature: float = 0.7
 
+    # Enable context compression (can be disabled by subclasses that need full context)
+    enable_context_compression: bool = True
+
     def __init__(
         self,
         llm_client: Optional[LLMClient] = None,
@@ -154,6 +157,85 @@ class BaseAgent(ABC):
             Urgency message to inject, or None if not needed
         """
         return None
+
+    async def _compress_context(self) -> None:
+        """
+        Compress conversation context to reduce token usage.
+
+        Called every 10 iterations. Uses Haiku to summarize old messages.
+        Must preserve tool_call -> tool_result pairs to maintain valid message structure.
+        """
+        # Only compress if we have enough messages
+        if len(self.messages) < 20:
+            return
+
+        # Keep first 2 messages (system + initial user)
+        keep_start = 2
+
+        # Find safe cut point for end - must not break tool_call/tool_result pairs
+        # Start from end and find a position where next message is NOT a tool result
+        keep_end = 8  # Start with 8 messages from end
+        while keep_end < len(self.messages) - keep_start:
+            end_idx = len(self.messages) - keep_end
+            if end_idx >= 0 and self.messages[end_idx].get("role") == "tool":
+                # This would cut in the middle of a tool sequence, extend
+                keep_end += 1
+            else:
+                break
+
+        if len(self.messages) <= keep_start + keep_end:
+            return
+
+        # Messages to summarize
+        middle_messages = self.messages[keep_start:-keep_end]
+
+        # Build conversation text for summarization
+        conv_text = []
+        for msg in middle_messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "assistant" and msg.get("tool_calls"):
+                tools = [tc.get("function", {}).get("name", "") for tc in msg["tool_calls"]]
+                conv_text.append(f"Assistant called: {', '.join(tools)}")
+                if content:
+                    conv_text.append(f"Assistant: {content[:500]}")
+            elif role == "tool":
+                conv_text.append(f"Tool result: {content[:300]}...")
+            elif content:
+                conv_text.append(f"{role.title()}: {content[:500]}")
+
+        # Use Haiku to summarize
+        summary_prompt = f"""Summarize this security analysis conversation concisely. Focus on:
+1. Functions analyzed
+2. Suspicious points found (if any)
+3. Key findings about vulnerabilities
+
+Conversation:
+{chr(10).join(conv_text[-50:])}
+
+Write a brief summary (max 200 words):"""
+
+        try:
+            from ..llms.models import CLAUDE_HAIKU_4_5
+            response = await self.llm_client.acall(
+                messages=[{"role": "user", "content": summary_prompt}],
+                model=CLAUDE_HAIKU_4_5,
+                max_tokens=500,
+            )
+            summary = f"[CONTEXT COMPRESSED - {len(middle_messages)} messages]\n{response.content}"
+        except Exception as e:
+            # Fallback to simple summary
+            self._log(f"Haiku summarization failed: {e}, using fallback", level="WARNING")
+            summary = f"[CONTEXT COMPRESSED - {len(middle_messages)} messages summarized]"
+
+        # Replace middle messages with summary
+        self.messages = (
+            self.messages[:keep_start] +
+            [{"role": "user", "content": summary}] +
+            self.messages[-keep_end:]
+        )
+
+        self._log(f"Context compressed: {len(middle_messages)} messages → 1 summary", level="INFO")
 
     def _setup_logging(self) -> None:
         """Set up agent-specific logging."""
@@ -643,6 +725,10 @@ class BaseAgent(ABC):
                 reporter.set_iteration(iteration)
 
             self._log(f"=== Iteration {iteration}/{self.max_iterations} ===", level="INFO")
+
+            # Compress context every 10 iterations to reduce token usage
+            if self.enable_context_compression and iteration > 0 and iteration % 10 == 0:
+                await self._compress_context()
 
             # Check for urgency message (when running low on iterations)
             urgency_message = self._get_urgency_message(iteration, remaining)

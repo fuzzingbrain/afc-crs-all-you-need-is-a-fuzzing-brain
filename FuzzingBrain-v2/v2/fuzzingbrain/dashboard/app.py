@@ -148,7 +148,7 @@ def create_app(eval_server_url: str = "http://localhost:8765") -> FastAPI:
 
 def run_dashboard(
     host: str = "0.0.0.0",
-    port: int = 8080,
+    port: int = 18081,
     eval_server_url: str = "http://localhost:8765",
 ):
     """Run the dashboard server."""

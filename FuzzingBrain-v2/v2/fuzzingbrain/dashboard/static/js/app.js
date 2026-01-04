@@ -15,8 +15,13 @@ document.addEventListener('DOMContentLoaded', () => {
     updateConnectionStatus('connected');
     refreshAll();
 
-    // Auto-refresh every 10 seconds
-    setInterval(refreshAll, 10000);
+    // Auto-refresh every 5 seconds (including task detail if open)
+    setInterval(() => {
+        refreshAll();
+        if (currentTaskId) {
+            refreshTaskDetail();
+        }
+    }, 5000);
 });
 
 function updateConnectionStatus(status) {

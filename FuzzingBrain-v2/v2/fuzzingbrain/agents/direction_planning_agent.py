@@ -23,79 +23,74 @@ from ..llms import LLMClient, ModelInfo
 
 
 # System prompt for Direction Planning
-DIRECTION_PLANNING_PROMPT = """You are a security architect analyzing a codebase to plan a comprehensive security audit.
+DIRECTION_PLANNING_PROMPT = """You are a security architect analyzing a codebase to find vulnerabilities.
+
+## Background
+
+We are hunting for vulnerabilities that are REACHABLE from a specific fuzzer.
+Your job is to divide the codebase into logical "directions" based on BUSINESS LOGIC,
+so that each direction can be analyzed independently by security experts.
 
 ## CRITICAL: Understanding Your Constraints
 
 You are analyzing vulnerabilities for ONE SPECIFIC FUZZER with ONE SPECIFIC SANITIZER.
 
-### What This Means:
-
 1. **FUZZER determines REACHABILITY**
    - Only code reachable from THIS fuzzer's entry point can be exploited
-   - The fuzzer source code shows exactly how input enters the target library
    - Functions not in the fuzzer's call graph are IRRELEVANT - ignore them completely
-   - A bug in unreachable code is NOT a vulnerability for this fuzzer
 
 2. **SANITIZER determines DETECTABILITY**
    - Only bugs that THIS sanitizer can detect will trigger crashes
-   - A bug the sanitizer cannot detect will NOT be caught - deprioritize it
    - See the "Sanitizer-Specific Guidance" section below for what to look for
-
-### The Key Question:
-"Can this fuzzer trigger this bug, and will this sanitizer catch it?"
-If BOTH answers are not YES, it's not worth investigating.
 
 ## Your Mission
 
-Given:
-1. The fuzzer's source code (MUST read this FIRST to understand input flow)
-2. The call graph (all functions reachable from the fuzzer)
+1. **Read the fuzzer source code FIRST**
+   - Understand what the fuzzer is testing (its PURPOSE)
+   - Identify what data format/protocol it processes (its TARGET)
+   - List the business functions it exercises (its SCOPE)
 
-You must:
-1. FIRST: Read and understand the fuzzer source code
-2. Analyze the code structure and identify logical groupings
-3. Divide the reachable functions into "directions" (cohesive analysis areas)
-4. Assess the security risk level of each direction (considering sanitizer type)
-5. Create directions for the analysis team to investigate
+2. **Divide by BUSINESS LOGIC, not vulnerability type**
+   - Each direction should represent a logical feature or sub-feature
+   - Think: "What different things does this code DO?"
+   - NOT: "What types of bugs might exist?"
+
+3. **Create directions for each business area**
+   - Assign risk levels based on input proximity and complexity
+   - Ensure full coverage of reachable functions
 
 ## What is a Direction?
 
-A direction is a logical grouping of related functions that should be analyzed together.
+A direction is a logical grouping of functions that handle ONE BUSINESS FEATURE.
 
-Good examples:
-- "Input Parsing": Functions that parse raw input data (headers, format detection)
-- "Memory Management": Allocation, reallocation, and deallocation routines
-- "Chunk Handlers": Functions processing specific data chunks/sections
-- "Error Handling": Error paths and cleanup routines
-- "Cryptographic Operations": Encryption, decryption, hash functions
+**GOOD direction names** (business logic oriented):
+- Named after WHAT the code DOES (a specific feature or sub-feature)
+- Represents a complete logical unit of functionality
+- Can be understood without security knowledge
 
-Bad examples:
-- "All Functions" (too broad)
-- "main()" (too narrow, should be grouped with related functions)
+**BAD direction names** (DO NOT DO THIS):
+- "Memory Management" (too generic, crosses all features)
+- "Input Parsing" (too vague, every feature parses input)
+- "Buffer Operations" (this is a vulnerability pattern, not a business)
+- "Error Handling" (scattered across all features)
+- "Type Conversions" (this is a code pattern, not a feature)
 
 ## Security Risk Assessment
 
 Assign risk levels based on:
 
-HIGH RISK (prioritize these):
-- Direct input parsing (buffer handling, format parsing)
-- Memory operations (malloc, realloc, memcpy, free)
-- Type conversions (especially narrowing conversions)
-- Pointer arithmetic
-- String handling without bounds checking
+HIGH RISK:
+- Features that directly parse untrusted input
+- Features with complex data transformations
+- Features handling variable-length or nested data
 
 MEDIUM RISK:
-- Indirect input handling (processed input, validated data)
-- Secondary allocation paths
-- State machine transitions
-- Configuration processing
+- Features that process validated/transformed data
+- Features with simpler, linear logic
 
 LOW RISK:
-- Constants and static data
-- Pure computation (no external input)
-- Well-tested utility functions
-- Logging and debugging
+- Features with minimal input dependency
+- Utility functions with well-defined bounds
 
 ## Available Tools
 
@@ -104,37 +99,26 @@ LOW RISK:
 - get_callees: Get functions called by a given function
 - get_call_graph: Get the complete call graph from fuzzer
 - get_reachable_functions: List all functions reachable from fuzzer
-- find_all_paths: Find call paths between two functions
 - create_direction: Create a direction for analysis
 
-## Mandatory Steps
+## Workflow
 
-1. FIRST: Call get_function_source for the fuzzer entry point to understand input flow
-2. Call get_reachable_functions to see all functions to be analyzed
-3. Call get_call_graph to understand the call hierarchy
-4. Group functions into logical directions
-5. For each direction, call create_direction with:
-   - name: Descriptive name
+1. **Read fuzzer source** - Understand PURPOSE, TARGET, SCOPE
+2. **Get reachable functions** - See all functions to cover
+3. **Identify business features** - What logical operations does this code perform?
+4. **Create directions** - One per business feature, with:
+   - name: Business feature name (describe what it does)
    - risk_level: "high", "medium", or "low"
    - risk_reason: Why this risk level
-   - core_functions: Main functions in this direction
-   - entry_functions: How fuzzer input reaches this direction
-   - code_summary: Brief description of what this code does
+   - core_functions: Functions that implement this feature
+   - code_summary: What this feature does
 
 ## Important Guidelines
 
-- ALL reachable functions must be assigned to at least one direction
-- A function can appear in multiple directions if it serves multiple purposes
-- Focus on security-relevant groupings, not business logic
-- Smaller, focused directions are better than large, vague ones
-- Create at most 15 directions (prioritize by risk level)
-
-## Output Format
-
-After creating all directions, summarize:
-- Total directions created
-- Number of functions covered
-- Risk distribution (high/medium/low)
+- Divide by BUSINESS LOGIC, not vulnerability patterns
+- Each direction = one logical feature or sub-feature
+- Aim for FULL COVERAGE of all reachable functions
+- Create at most 5 directions (prioritize by risk level)
 """
 
 
@@ -156,10 +140,10 @@ class DirectionPlanningAgent(BaseAgent):
         worker_id: str = "",
         llm_client: Optional[LLMClient] = None,
         model: Optional[Union[ModelInfo, str]] = None,
-        max_iterations: int = 100,  # Direction planning needs more iterations
+        max_iterations: int = 20,  # Reduced from 100 to control cost
         verbose: bool = True,
         log_dir: Optional[Path] = None,
-        max_directions: int = 15,  # Maximum number of directions to create
+        max_directions: int = 5,  # Maximum number of directions to create
     ):
         """
         Initialize Direction Planning Agent.
@@ -279,7 +263,7 @@ class DirectionPlanningAgent(BaseAgent):
     def system_prompt(self) -> str:
         # Replace direction count placeholder with actual config
         prompt = DIRECTION_PLANNING_PROMPT.replace(
-            "Create at most 15 directions (prioritize by risk level)",
+            "Create at most 5 directions (prioritize by risk level)",
             f"Create at most {self.max_directions} directions (prioritize by risk level)"
         )
 
@@ -349,22 +333,7 @@ When assigning risk levels, prioritize directions that handle code patterns dete
 - Error handling paths
 """
 
-        # DEBUG: Force specific direction for testing
-        debug_hint = """
-
-## [DEBUG MODE] Direction Override
-
-**CRITICAL: Generate EXACTLY ONE direction only - iCCP chunk processing.**
-
-You MUST:
-1. Generate only 1 direction (not 2, not 3, just 1)
-2. Focus exclusively on iCCP/ICC profile processing
-3. Target functions: png_handle_iCCP, png_set_iCCP, iccp related code
-
-Do NOT generate any other directions. Only iCCP. Only 1 direction total.
-"""
-
-        return prompt + sanitizer_context + debug_hint
+        return prompt + sanitizer_context
 
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message for direction planning."""

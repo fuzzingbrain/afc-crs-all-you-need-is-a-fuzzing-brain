@@ -3,7 +3,7 @@ Entry point for FuzzingBrain Dashboard.
 
 Usage:
     python -m fuzzingbrain.dashboard
-    python -m fuzzingbrain.dashboard --port 8080 --eval-server http://localhost:8765
+    python -m fuzzingbrain.dashboard --port 18081 --eval-server http://localhost:18080
 """
 
 import argparse
@@ -23,8 +23,8 @@ def main():
     parser.add_argument(
         "--port",
         type=int,
-        default=8080,
-        help="Port to listen on (default: 8080)",
+        default=18081,
+        help="Port to listen on (default: 18081)",
     )
     parser.add_argument(
         "--eval-server",

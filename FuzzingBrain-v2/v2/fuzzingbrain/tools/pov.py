@@ -838,6 +838,7 @@ def _run_fuzzer_docker(
         docker_cmd = [
             "docker", "run", "--rm",
             "--platform", "linux/amd64",
+            "--entrypoint", "",  # Bypass base-runner's entrypoint script
             "-e", "FUZZING_ENGINE=libfuzzer",
             "-e", f"SANITIZER={sanitizer}",
             "-e", "ARCHITECTURE=x86_64",

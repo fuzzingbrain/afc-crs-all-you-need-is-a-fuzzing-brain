@@ -195,7 +195,7 @@ class POVAgent(BaseAgent):
     5. Debug with trace_pov if needed
 
     Stop conditions (OR):
-    - max_iterations reached (default 200)
+    - max_iterations reached (default 100)
     - max_pov_attempts reached (default 40)
     - POV successfully triggers a crash
     """
@@ -203,13 +203,16 @@ class POVAgent(BaseAgent):
     # Medium temperature for creative POV input generation
     default_temperature: float = 0.5
 
+    # Disable context compression - POV generation needs full context
+    enable_context_compression: bool = False
+
     def __init__(
         self,
         fuzzer: str = "",
         sanitizer: str = "address",
         llm_client: Optional[LLMClient] = None,
         model: Optional[Union[ModelInfo, str]] = None,
-        max_iterations: int = 200,
+        max_iterations: int = 100,
         max_pov_attempts: int = 40,
         verbose: bool = True,
         # Context

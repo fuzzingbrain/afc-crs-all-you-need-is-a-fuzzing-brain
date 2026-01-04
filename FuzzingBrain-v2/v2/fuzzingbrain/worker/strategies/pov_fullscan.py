@@ -27,6 +27,7 @@ from ...core.models import SuspiciousPoint
 from ...agents import DirectionPlanningAgent, FullscanSPAgent
 from ...tools.directions import set_direction_context
 from ...tools.analyzer import set_analyzer_context
+from ...llms.models import CLAUDE_OPUS_4_5
 
 
 class POVFullscanStrategy(POVBaseStrategy):
@@ -141,6 +142,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
             max_iterations=100,
+            model=CLAUDE_OPUS_4_5,  # Use top-tier model for direction planning
         )
 
         try:
@@ -299,6 +301,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
             max_iterations=100,
+            model=CLAUDE_OPUS_4_5,  # Use top-tier model for direction planning
         )
 
         try:
@@ -426,6 +429,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             sanitizer=self.sanitizer,
             direction_name=direction.name,
             direction_id=direction.direction_id,
+            risk_level=direction.risk_level,  # Pass risk level for min SP requirements
             core_functions=direction.core_functions,
             entry_functions=direction.entry_functions,
             code_summary=direction.code_summary,

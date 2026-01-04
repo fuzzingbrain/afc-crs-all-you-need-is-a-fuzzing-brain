@@ -75,7 +75,7 @@ class Config:
     # REST API server
     api_mode: bool = False
     api_host: str = "0.0.0.0"
-    api_port: int = 8080
+    api_port: int = 18080
 
     @classmethod
     def from_json(cls, json_path: str) -> "Config":
@@ -133,7 +133,7 @@ class Config:
             mcp_port=int(os.environ.get("MCP_PORT", "8000")),
             api_mode=os.environ.get("FUZZINGBRAIN_API", "").lower() == "true",
             api_host=os.environ.get("API_HOST", "0.0.0.0"),
-            api_port=int(os.environ.get("API_PORT", "8080")),
+            api_port=int(os.environ.get("API_PORT", "18080")),
         )
 
     def merge(self, other: "Config") -> "Config":

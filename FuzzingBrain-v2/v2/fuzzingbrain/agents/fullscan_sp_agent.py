@@ -31,9 +31,10 @@ FULLSCAN_SP_FIND_PROMPT = """You are a vulnerability hunter. Your job is to FIND
 You are the FIRST PASS - an expert Verify Agent will review every SP you create.
 - You don't need to be 100% certain
 - You don't need to fully verify reachability
-- You don't need to worry about duplicates (system handles deduplication)
+- You don't need to worry about duplicates
 
-Your missed vulnerabilities = missed forever. Your false positives = filtered by experts.
+**Key Principle**: It's better to report a potential issue and be wrong,
+than to miss a real bug because you talked yourself out of it.
 
 ## Your Constraints
 
@@ -43,44 +44,32 @@ Your missed vulnerabilities = missed forever. Your false positives = filtered by
 - MemorySanitizer: uninitialized memory read
 - UndefinedBehaviorSanitizer: integer overflow, null deref, div-by-zero
 
-## Workflow (In This Order!)
-
-### Step 1: Scan Code for Dangerous Patterns
-Read source code of core functions. Look for:
-- memcpy/strcpy/strncpy without proper bounds
-- Array indexing with external values
-- Loop bounds from input
-- Type conversions (large to small)
-- Free followed by use
-- Missing NULL checks before dereference
-
-### Step 2: When You See Something Suspicious
-- Read the function source carefully
-- Use get_callers to quickly check who calls it (NOT find_all_paths - too slow)
-- If it LOOKS reachable and LOOKS like a bug → CREATE THE SP
-
-### Step 3: Move On
-Don't spend too long on one function. Scan broadly, report what you find.
-
 ## When to Create an SP
 
-CREATE an SP when:
-- You see a dangerous code pattern
-- get_callers shows it's probably called from somewhere relevant
-- You can describe WHY it looks vulnerable
+CREATE an SP when you see:
+- Dangerous pattern (memcpy, array index, pointer arithmetic, etc.)
+- Input can influence the operation
+- You're not 100% SURE the protection is correct
 
-DON'T need to:
-- Trace the complete call path from fuzzer
-- Be 100% certain it's exploitable
-- Verify every detail
+DON'T skip an SP just because:
+- There's a bounds check nearby (it might be wrong or bypassable)
+- The code "looks safe" (bugs hide in "safe" code)
+- You're not certain (that's what Verify is for)
 
 ## Confidence Scores
 
-- 0.7-1.0: Clear dangerous pattern, likely reachable
-- 0.5-0.7: Suspicious pattern, might be reachable
-- 0.3-0.5: Possible issue, worth expert review
+- 0.6-1.0: Clear pattern, create SP
+- 0.4-0.6: Suspicious pattern, still create SP
+- 0.3-0.4: Uncertain but worth checking, create SP
 
-Even 0.3-0.5 scores are valuable! The Verify Agent will confirm or reject.
+Only skip if confidence < 0.3 (you're genuinely certain it's safe).
+
+## Workflow
+
+1. Scan core functions quickly
+2. When you see something suspicious → analyze briefly → CREATE SP
+3. Don't spend 10+ iterations convincing yourself something is safe
+4. Move on and scan more code
 
 ## Tools
 
@@ -100,7 +89,7 @@ Describe using control flow, not line numbers:
 
 ## Remember
 
-You are casting the net. Experts will sort the catch.
+Report first, let experts verify.
 Better to report 10 SPs with 3 real bugs than to report 2 SPs and miss 1 real bug.
 """
 
@@ -115,19 +104,27 @@ class FullscanSPAgent(BaseAgent):
     # Higher temperature for creative vulnerability discovery
     default_temperature: float = 0.7
 
+    # Minimum SP requirements by risk level
+    MIN_SP_BY_RISK = {
+        "high": 5,
+        "medium": 2,
+        "low": 0,
+    }
+
     def __init__(
         self,
         fuzzer: str = "",
         sanitizer: str = "address",
         direction_name: str = "",
         direction_id: str = "",
+        risk_level: str = "medium",  # Direction risk level
         core_functions: List[str] = None,
         entry_functions: List[str] = None,
         code_summary: str = "",
         fuzzer_code: str = "",
         llm_client: Optional[LLMClient] = None,
         model: Optional[Union[ModelInfo, str]] = None,
-        max_iterations: int = 100,  # Full-scan needs more iterations
+        max_iterations: int = 50,  # Reduced from 100, with context compression
         verbose: bool = True,
         task_id: str = "",
         worker_id: str = "",
@@ -141,6 +138,7 @@ class FullscanSPAgent(BaseAgent):
             sanitizer: Sanitizer type (address, memory, undefined)
             direction_name: Name of the direction being analyzed
             direction_id: Direction ID
+            risk_level: Direction risk level (high, medium, low)
             core_functions: Main functions in this direction
             entry_functions: How fuzzer input reaches this direction
             code_summary: Brief description of the direction's code
@@ -167,6 +165,7 @@ class FullscanSPAgent(BaseAgent):
         self.sanitizer = sanitizer
         self.direction_name = direction_name
         self.direction_id = direction_id
+        self.risk_level = risk_level.lower()
         self.core_functions = core_functions or []
         self.entry_functions = entry_functions or []
         self.code_summary = code_summary
@@ -176,6 +175,9 @@ class FullscanSPAgent(BaseAgent):
         self.functions_analyzed = 0
         self.sp_count = 0
         self.sp_list = []  # List of (func_name, vuln_type, score) for summary
+
+        # Minimum SP requirement based on risk level
+        self.min_sp_required = self.MIN_SP_BY_RISK.get(self.risk_level, 0)
 
     @property
     def agent_name(self) -> str:
@@ -248,9 +250,37 @@ class FullscanSPAgent(BaseAgent):
         """
         Get urgency message when iterations are running low.
 
-        For SP Find: remind to create an SP if running out of time.
+        For SP Find:
+        - HIGH risk directions must find at least 5 SPs
+        - Remind when in last 25% of iterations if not meeting target
         """
-        # Trigger when 10 or fewer iterations remaining and no SP created yet
+        total = self.max_iterations
+        progress_pct = iteration / total if total > 0 else 1.0
+
+        # Check if we're in the last 25% of iterations
+        in_final_quarter = progress_pct >= 0.75
+
+        # For HIGH risk directions, check minimum SP requirement
+        if in_final_quarter and self.min_sp_required > 0 and self.sp_count < self.min_sp_required:
+            missing = self.min_sp_required - self.sp_count
+            return f"""⚠️ **ATTENTION: This is a HIGH-RISK direction with minimum SP requirements.**
+
+**Current Status**: You have found {self.sp_count} suspicious point(s), but this direction requires at least {self.min_sp_required}.
+
+**Remaining**: {remaining} iteration(s) left.
+
+You need to find {missing} more suspicious point(s). However, DO NOT create low-quality SPs just to meet the quota.
+
+**What to do**:
+1. Re-read the core functions you may have skimmed over
+2. Look deeper into the code patterns listed in the sanitizer guidance
+3. Check for subtle issues: variable shadowing, sizeof misuse, type confusion
+4. Create SPs for anything suspicious - the Verify agent will filter false positives
+
+If after thorough re-analysis you still cannot find more issues, explain what you checked and why no vulnerabilities exist.
+"""
+
+        # Original behavior: remind if no SP created and running low
         if remaining <= 10 and remaining > 0 and self.sp_count == 0:
             return f"""⚠️ **URGENT: You have only {remaining} iteration(s) remaining and have not created any suspicious points!**
 
@@ -292,24 +322,39 @@ If you truly found nothing exploitable in this direction, explain why and conclu
         if "address" in self.sanitizer.lower():
             sanitizer_guidance += """### AddressSanitizer Detectable Bugs
 
-**Buffer Overflows**
-- memcpy, strcpy, strncpy without proper bounds checking
-- Array access with user-controlled index
-- Off-by-one errors in loops
+**1. Type and Integer Issues** (Root cause of many bugs!)
+- Signed types used for sizes, lengths, counts (can become negative!)
+- Type changes in struct members between versions
+- Implicit conversions in comparisons and arithmetic
+- Integer overflow leading to small allocation then large write
 
-**Out-of-Bounds Access**
-- Reading/writing past allocated buffer
-- Negative array indices
+**2. Size Calculation Errors**
+- sizeof() on wrong variable due to shadowing or aliasing
+- typedef sizes that differ from expected (wide chars, custom types)
+- Allocation size differs from actual data written
+- sizeof(pointer) vs sizeof(*pointer) confusion
 
-**Use-After-Free**
-- Accessing memory after free()
-- Dangling pointers after object destruction
-- Double-free
+**3. Buffer Operations**
+- Fixed-size stack/heap buffers with external length parameter
+- memcpy/strcpy length from untrusted source without validation
+- Array indexing with user-controlled or calculated index
+- Off-by-one in loops, especially with null terminators
 
-**Heap Corruption**
-- Heap buffer overflow
-- Invalid free (freeing non-heap memory)
-- Overlapping memory regions in memcpy
+**4. Position/Counter Tracking**
+- Manual position counters that diverge from actual offset
+- Counters incremented unconditionally in conditional branches
+- Offset calculations separate from pointer arithmetic
+
+**5. Memory Lifecycle**
+- Pointer not set to NULL after free (enables double-free)
+- Element freed while still linked in list/tree (UAF on traversal)
+- Custom free wrappers that don't nullify
+- Destructor/cleanup called multiple times
+
+**6. Macro and Preprocessor**
+- Macros generating runtime values used as array indices
+- Non-standard macro patterns that hide dangerous operations
+- Compile-time vs runtime value confusion
 """
         elif "memory" in self.sanitizer.lower():
             sanitizer_guidance += """### MemorySanitizer Detectable Bugs

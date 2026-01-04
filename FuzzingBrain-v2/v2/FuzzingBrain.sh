@@ -511,7 +511,7 @@ show_usage() {
     echo "  <project_name>      Continue processing workspace/<project_name>"
     echo ""
     echo "OPTIONS:"
-    echo "  --api               Start REST API server (default, port: 8080)"
+    echo "  --api               Start REST API server (default, port: 18080)"
     echo "  --mcp               Start MCP server (for AI agents)"
     echo "  --scan-mode <mode>  Scan mode: full (default), delta"
     echo "  -v <commit>         Target version/commit for full-scan"
