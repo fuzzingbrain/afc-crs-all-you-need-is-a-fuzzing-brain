@@ -54,6 +54,22 @@ def create_isolated_mcp_server(
     return mcp
 
 
+def _is_connection_error(e: Exception) -> bool:
+    """Check if an exception is a connection-related error that should invalidate the client."""
+    error_str = str(e).lower()
+    connection_errors = [
+        "bad file descriptor",
+        "connection reset",
+        "connection refused",
+        "broken pipe",
+        "connection closed",
+        "[errno 9]",  # EBADF
+        "[errno 104]",  # ECONNRESET
+        "[errno 111]",  # ECONNREFUSED
+    ]
+    return any(err in error_str for err in connection_errors)
+
+
 def _register_analyzer_tools(mcp: FastMCP) -> None:
     """Register analyzer tools (code analysis via Analysis Server)."""
     import time
@@ -66,7 +82,25 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         set_analyzer_context,
         get_analyzer_context,
         _client_cache,  # Thread-safe cache for debugging
+        _invalidate_client,
+        _analysis_socket_path,
+        _client_id,
     )
+
+    def _get_cache_key():
+        """Get current cache key for client invalidation."""
+        socket_path = _analysis_socket_path.get()
+        client_id = _client_id.get()
+        return (socket_path, client_id) if socket_path else None
+
+    def _handle_client_error(e: Exception) -> Dict[str, Any]:
+        """Handle client errors, invalidating cache if needed."""
+        if _is_connection_error(e):
+            cache_key = _get_cache_key()
+            if cache_key:
+                _invalidate_client(cache_key)
+                logger.warning(f"Connection error, invalidated client cache: {e}")
+        return {"success": False, "error": str(e)}
 
     @mcp.tool
     @async_tool
@@ -80,7 +114,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             status = client.get_status()
             return {"success": True, "status": status}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -104,7 +138,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
                 return {"success": False, "error": f"Function '{function_name}' not found"}
             return {"success": True, "function": func}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -125,7 +159,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             # Limit to 50 to save context
             return {"success": True, "count": total, "functions": functions[:50], "truncated": total > 50}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -145,7 +179,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             functions = client.search_functions(pattern, limit)
             return {"success": True, "pattern": pattern, "count": len(functions), "functions": functions}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -185,7 +219,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
 
             return {"success": True, "function_name": function_name, "source": source}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -223,7 +257,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             # Limit to 30 to save context
             return {"success": True, "count": total, "callers": callers[:30], "truncated": total > 30}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -250,7 +284,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             # Limit to 30 to save context
             return {"success": True, "count": total, "callees": callees[:30], "truncated": total > 30}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -275,7 +309,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             graph = client.get_call_graph(fuzzer_name, depth)
             return {"success": True, "fuzzer_name": fuzzer_name, "depth": depth, "node_count": len(graph), "call_graph": graph}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -303,7 +337,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             paths = result.get("paths", [])
             return {"success": True, "path_count": len(paths), "paths": paths[:20]}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -335,7 +369,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
                 "distance": result.get("distance"),
             }
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -360,7 +394,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             functions = client.get_reachable_functions(fuzzer_name)
             return {"success": True, "fuzzer_name": fuzzer_name, "count": len(functions), "functions": functions}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -385,7 +419,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             functions = client.get_unreached_functions(fuzzer_name)
             return {"success": True, "fuzzer_name": fuzzer_name, "count": len(functions), "functions": functions}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -399,7 +433,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             fuzzers = client.get_fuzzers()
             return {"success": True, "count": len(fuzzers), "fuzzers": fuzzers}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -428,7 +462,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
                 return {"success": False, **result}
             return {"success": True, **result}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -442,7 +476,7 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             paths = client.get_build_paths()
             return {"success": True, "build_paths": paths}
         except Exception as e:
-            return {"success": False, "error": str(e)}
+            return _handle_client_error(e)
 
 
 def _register_code_viewer_tools(mcp: FastMCP) -> None:

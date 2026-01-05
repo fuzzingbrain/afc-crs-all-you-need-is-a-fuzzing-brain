@@ -31,6 +31,22 @@ _client_cache: Dict[Tuple[str, str], AnalysisClient] = {}
 _client_cache_lock = threading.Lock()
 
 
+def _invalidate_client(cache_key: Tuple[str, str]) -> None:
+    """
+    Remove a client from cache when it becomes invalid.
+
+    Called when a client encounters a connection error (e.g., Bad file descriptor).
+    """
+    with _client_cache_lock:
+        if cache_key in _client_cache:
+            try:
+                _client_cache[cache_key].close()
+            except Exception:
+                pass
+            del _client_cache[cache_key]
+            logger.debug(f"[CACHE] Invalidated client for {cache_key[1]}")
+
+
 def set_analyzer_context(socket_path: str, client_id: str = "mcp_agent") -> None:
     """
     Set the context for analyzer tools.
@@ -598,7 +614,7 @@ def get_fuzzer_source(fuzzer_name: str) -> Dict[str, Any]:
     ALWAYS read the fuzzer source code FIRST before analyzing any vulnerability.
 
     Args:
-        fuzzer_name: Name of the fuzzer (e.g., 'libpng_read_fuzzer')
+        fuzzer_name: Name of the fuzzer
 
     Returns:
         - fuzzer: Fuzzer name

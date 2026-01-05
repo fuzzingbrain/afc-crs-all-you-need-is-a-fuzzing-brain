@@ -74,7 +74,7 @@ def set_pov_context(
         sanitizer: Sanitizer type
         suspicious_point_id: Current suspicious point being processed
         fuzzer_path: Path to fuzzer binary (for verification)
-        docker_image: Docker image for running fuzzer (e.g., "gcr.io/oss-fuzz/libpng")
+        docker_image: Docker image for running fuzzer
         workspace_path: Path to workspace directory
         fuzzer_source: Fuzzer harness source code
     """
@@ -657,13 +657,12 @@ def create_pov(
             Example:
             ```python
             def generate():
-                # Create a PNG with oversized chunk
-                header = b'\\x89PNG\\r\\n\\x1a\\n'
-                # IHDR chunk with malformed length
-                chunk_len = struct.pack('>I', 0xFFFFFFFF)
-                chunk_type = b'IHDR'
-                chunk_data = b'\\x00' * 13
-                return header + chunk_len + chunk_type + chunk_data
+                # Create malformed input with oversized length field
+                header = b'\\x00\\x01\\x02\\x03'
+                # Length field set to trigger integer overflow
+                length = struct.pack('>I', 0xFFFFFFFF)
+                data = b'\\x00' * 16
+                return header + length + data
             ```
         description: Brief description of what this POV attempts to trigger
 

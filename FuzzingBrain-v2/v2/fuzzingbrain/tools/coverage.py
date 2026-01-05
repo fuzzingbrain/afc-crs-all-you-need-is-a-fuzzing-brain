@@ -413,7 +413,7 @@ def run_coverage(
     Run coverage analysis on an input to check code path execution.
 
     Args:
-        fuzzer_name: Name of the fuzzer binary (e.g., "libpng_read_fuzzer")
+        fuzzer_name: Name of the fuzzer binary
         input_data_base64: Base64 encoded input data to analyze
         target_functions: Optional list of function names to check for coverage
         target_files: Optional list of filenames to filter coverage display

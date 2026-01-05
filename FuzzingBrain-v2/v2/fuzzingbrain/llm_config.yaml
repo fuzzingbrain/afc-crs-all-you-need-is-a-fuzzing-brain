@@ -52,7 +52,7 @@ api_keys:
 # Grok (xAI)
 #   - grok-3               xAI flagship, $5/$15 per 1M tokens
 #
-default_model: claude-sonnet-4-5
+default_model: gpt-5.2
 
 
 # -----------------------------------------------------------------------------
@@ -62,19 +62,19 @@ default_model: claude-sonnet-4-5
 #
 task_models:
   # Code analysis - requires deep understanding
-  code_analysis: claude-opus-4-5
+  code_analysis: gpt-5.2
 
   # Code refactoring - large scale modifications
-  code_refactor: claude-sonnet-4-5
+  code_refactor: gpt-5.2-codex
 
   # Fast coding - simple tasks
-  fast_coding: claude-haiku-4-5
+  fast_coding: gpt-5.2
 
   # Fast judgment - yes/no decisions
-  fast_judgment: gemini-3-flash
+  fast_judgment: gpt-5.2
 
   # Complex reasoning - math/logic
-  complex_reasoning: claude-opus-4-5
+  complex_reasoning: o3
 
 
 # -----------------------------------------------------------------------------

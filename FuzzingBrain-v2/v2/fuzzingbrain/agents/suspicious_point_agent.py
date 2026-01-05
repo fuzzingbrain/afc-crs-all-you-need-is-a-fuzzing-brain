@@ -91,7 +91,7 @@ Bad example (DO NOT DO THIS):
 These describe the SAME vulnerability from different angles - only create ONE point.
 
 Good example:
-- ONE point: "Function X has type confusion between wpng_byte (2 bytes) and byte array, leading to buffer overflow and OOB access"
+- ONE point: "Function X has type confusion between wide_byte_t (2 bytes) and byte array, leading to buffer overflow and OOB access"
 
 Another good example (two different vulnerabilities):
 - Point 1: "Function X has integer overflow in size calculation before malloc"
@@ -160,21 +160,38 @@ for common ways that protections can fail.
 - Call get_callers on the suspicious function
 - If NO PATH from fuzzer → mark FP (this is the only clear-cut case)
 
-### Step 2: VERIFY SANITIZER COMPATIBILITY
+### Step 2: VERIFY VULNERABILITY POINT REACHABILITY (CRITICAL!)
+**Function reachability ≠ Vulnerability point reachability!**
+
+The function being reachable only means the fuzzer CAN call it. But the specific
+vulnerable code path described in the SP may require specific conditions:
+- Certain input values or formats
+- Specific branch conditions to be met
+- Particular state to be set up
+
+**You MUST verify**: Can fuzzer input actually REACH the vulnerable code described
+in the SP description? Check:
+1. What conditions/branches lead to the vulnerable code?
+2. Can those conditions be triggered by fuzzer input?
+3. Are there early returns or error checks that would prevent reaching the vuln?
+
+If the vulnerable code path is unreachable even though the function is reachable → mark FP.
+
+### Step 3: VERIFY SANITIZER COMPATIBILITY
 - Check if bug type matches sanitizer capabilities
 - If completely incompatible → mark FP
 
-### Step 3: ANALYZE SOURCE CODE
+### Step 4: ANALYZE SOURCE CODE
 - Call get_function_source for the suspicious function
 - Read the actual code to understand the vulnerability
 - You have access to code tools that other agents don't - USE THEM
 
-### Step 4: CHECK IF DESCRIPTION IS WRONG
+### Step 5: CHECK IF DESCRIPTION IS WRONG
 - The SP location might be correct but description wrong
 - If you find a DIFFERENT vulnerability at the same location → CORRECT IT
 - Do NOT mark FP just because original description was inaccurate
 
-### Step 5: MAKE JUDGMENT
+### Step 6: MAKE JUDGMENT
 - Reachable + sanitizer compatible + no 100% certain protection → PASS IT
 - Only mark FP if you are absolutely certain
 
@@ -551,7 +568,7 @@ Focus ONLY on these bug types (other bugs won't be detected by this sanitizer):
 
 **2. Size Calculation Errors** (CRITICAL - often missed!)
 - sizeof() on wrong variable due to SHADOWING (same name in nested scope!)
-- typedef sizes that differ from expected (wchar, wpng_byte, wide types)
+- typedef sizes that differ from expected (wchar, wide_byte_t, custom types)
 - Allocation size differs from actual data written
 - sizeof(pointer) vs sizeof(*pointer) confusion
 
@@ -577,11 +594,11 @@ Focus ONLY on these bug types (other bugs won't be detected by this sanitizer):
 - Non-standard macro patterns that hide dangerous operations
 - Compile-time vs runtime value confusion
 
-### CRITICAL: Variable Shadowing
+### Variable Shadowing
 
-When analyzing sizeof() or type operations, ALWAYS check if the same variable name
-exists in an outer scope. Inner declarations SHADOW outer ones, causing sizeof()
-to return the WRONG size. This is a common root cause of buffer overflows.
+When analyzing sizeof() or type operations, check if the same variable name
+exists in an outer scope. Inner declarations shadow outer ones, causing sizeof()
+to return the wrong size. This can be a root cause of buffer overflows.
 """
         elif "memory" in self.sanitizer.lower():
             sanitizer_guidance += """

@@ -1195,6 +1195,9 @@ class FunctionRepository(BaseRepository[Function]):
             self.collection.create_index("name")
             self.collection.create_index([("task_id", 1), ("name", 1)])
             self.collection.create_index([("task_id", 1), ("file_path", 1)])
+            # SP Find v2: Index for analysis tracking
+            self.collection.create_index([("task_id", 1), ("analyzed_by_directions", 1)])
+            self.collection.create_index([("task_id", 1), ("reached_by_fuzzers", 1)])
         except Exception as e:
             logger.debug(f"Index creation for functions: {e}")
 
@@ -1204,8 +1207,13 @@ class FunctionRepository(BaseRepository[Function]):
 
     def find_by_name(self, task_id: str, name: str) -> Optional[Function]:
         """Find function by task and name"""
+        # First try by constructed ID
         function_id = f"{task_id}_{name}"
-        return self.find_by_id(function_id)
+        result = self.find_by_id(function_id)
+        if result:
+            return result
+        # Fallback: query by task_id + name fields (for legacy data)
+        return self.find_one({"task_id": task_id, "name": name})
 
     def find_by_file(self, task_id: str, file_path: str) -> List[Function]:
         """Find all functions in a specific file"""
@@ -1242,6 +1250,266 @@ class FunctionRepository(BaseRepository[Function]):
         except Exception as e:
             logger.error(f"Failed to delete functions for task: {e}")
             return 0
+
+    # =========================================================================
+    # SP Find v2: Analysis Tracking Methods
+    # =========================================================================
+
+    def mark_analyzed_by_direction(self, function_id: str, direction_id: str) -> bool:
+        """
+        Mark a function as analyzed by a specific direction.
+
+        Uses $addToSet to prevent duplicates.
+
+        Args:
+            function_id: Function ID
+            direction_id: Direction ID that analyzed this function
+
+        Returns:
+            True if successful
+        """
+        try:
+            result = self.collection.update_one(
+                {"_id": function_id},
+                {"$addToSet": {"analyzed_by_directions": direction_id}}
+            )
+            return result.modified_count > 0 or result.matched_count > 0
+        except Exception as e:
+            logger.error(f"Failed to mark function as analyzed: {e}")
+            return False
+
+    def mark_many_analyzed(self, function_ids: List[str], direction_id: str) -> int:
+        """
+        Mark multiple functions as analyzed by a direction.
+
+        Args:
+            function_ids: List of function IDs
+            direction_id: Direction ID
+
+        Returns:
+            Number of functions updated
+        """
+        if not function_ids:
+            return 0
+        try:
+            result = self.collection.update_many(
+                {"_id": {"$in": function_ids}},
+                {"$addToSet": {"analyzed_by_directions": direction_id}}
+            )
+            return result.modified_count
+        except Exception as e:
+            logger.error(f"Failed to mark functions as analyzed: {e}")
+            return 0
+
+    def get_functions_for_analysis(
+        self,
+        task_id: str,
+        fuzzer_name: str,
+        direction_id: str,
+        function_names: List[str] = None,
+        prioritize_unanalyzed: bool = True,
+        limit: int = 0,
+    ) -> List[Function]:
+        """
+        Get functions for SP Find analysis with priority ordering.
+
+        Priority order (when prioritize_unanalyzed=True):
+        1. Functions not analyzed by ANY direction
+        2. Functions not analyzed by THIS direction
+        3. Functions already analyzed by this direction (if exhausted)
+
+        Args:
+            task_id: Task ID
+            fuzzer_name: Fuzzer name (to filter reachable functions)
+            direction_id: Current direction ID
+            function_names: Optional list of function names (small pool)
+                           If None, uses all reachable functions (big pool)
+            prioritize_unanalyzed: Whether to prioritize unanalyzed functions
+            limit: Max functions to return (0 = no limit)
+
+        Returns:
+            List of Functions ordered by priority
+        """
+        try:
+            # Base query: functions reachable by this fuzzer
+            base_query = {
+                "task_id": task_id,
+                "reached_by_fuzzers": fuzzer_name,
+            }
+
+            # If small pool specified, filter by function names
+            if function_names:
+                base_query["name"] = {"$in": function_names}
+
+            if not prioritize_unanalyzed:
+                # Simple query without priority
+                cursor = self.collection.find(base_query)
+                if limit > 0:
+                    cursor = cursor.limit(limit)
+                return [self.model_class.from_dict(doc) for doc in cursor]
+
+            # Priority 1: Not analyzed by ANY direction
+            query_p1 = {
+                **base_query,
+                "$or": [
+                    {"analyzed_by_directions": {"$exists": False}},
+                    {"analyzed_by_directions": {"$size": 0}},
+                ]
+            }
+
+            # Priority 2: Not analyzed by THIS direction
+            query_p2 = {
+                **base_query,
+                "analyzed_by_directions": {"$nin": [direction_id]},
+            }
+
+            # Priority 3: All functions (including already analyzed)
+            query_p3 = base_query
+
+            results = []
+            seen_ids = set()
+
+            # Collect from each priority level
+            for query in [query_p1, query_p2, query_p3]:
+                if limit > 0 and len(results) >= limit:
+                    break
+                cursor = self.collection.find(query)
+                for doc in cursor:
+                    if doc["_id"] not in seen_ids:
+                        seen_ids.add(doc["_id"])
+                        results.append(self.model_class.from_dict(doc))
+                        if limit > 0 and len(results) >= limit:
+                            break
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Failed to get functions for analysis: {e}")
+            return []
+
+    def get_unanalyzed_count(
+        self,
+        task_id: str,
+        fuzzer_name: str = None,
+        direction_id: str = None,
+    ) -> dict:
+        """
+        Get count of unanalyzed functions.
+
+        Args:
+            task_id: Task ID
+            fuzzer_name: Optional fuzzer name filter
+            direction_id: Optional direction ID to check
+
+        Returns:
+            Dict with counts:
+            - total: Total functions
+            - unanalyzed_by_any: Not analyzed by any direction
+            - unanalyzed_by_direction: Not analyzed by specific direction (if provided)
+        """
+        try:
+            base_query = {"task_id": task_id}
+            if fuzzer_name:
+                base_query["reached_by_fuzzers"] = fuzzer_name
+
+            total = self.collection.count_documents(base_query)
+
+            # Count not analyzed by any direction
+            query_unanalyzed = {
+                **base_query,
+                "$or": [
+                    {"analyzed_by_directions": {"$exists": False}},
+                    {"analyzed_by_directions": {"$size": 0}},
+                ]
+            }
+            unanalyzed_by_any = self.collection.count_documents(query_unanalyzed)
+
+            result = {
+                "total": total,
+                "unanalyzed_by_any": unanalyzed_by_any,
+                "analyzed_by_any": total - unanalyzed_by_any,
+            }
+
+            # If direction specified, count for that direction
+            if direction_id:
+                query_not_by_dir = {
+                    **base_query,
+                    "analyzed_by_directions": {"$nin": [direction_id]},
+                }
+                unanalyzed_by_dir = self.collection.count_documents(query_not_by_dir)
+                result["unanalyzed_by_direction"] = unanalyzed_by_dir
+                result["analyzed_by_direction"] = total - unanalyzed_by_dir
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to get unanalyzed count: {e}")
+            return {"total": 0, "unanalyzed_by_any": 0, "analyzed_by_any": 0}
+
+    def get_analysis_coverage(self, task_id: str, fuzzer_name: str = None) -> dict:
+        """
+        Get analysis coverage statistics.
+
+        Args:
+            task_id: Task ID
+            fuzzer_name: Optional fuzzer name filter
+
+        Returns:
+            Dict with coverage stats:
+            - total_functions: Total function count
+            - analyzed_functions: Functions analyzed by at least one direction
+            - coverage_percent: Percentage of functions analyzed
+            - by_direction: Dict mapping direction_id to count
+        """
+        try:
+            base_query = {"task_id": task_id}
+            if fuzzer_name:
+                base_query["reached_by_fuzzers"] = fuzzer_name
+
+            total = self.collection.count_documents(base_query)
+            if total == 0:
+                return {
+                    "total_functions": 0,
+                    "analyzed_functions": 0,
+                    "coverage_percent": 0.0,
+                    "by_direction": {},
+                }
+
+            # Count analyzed (has at least one direction)
+            query_analyzed = {
+                **base_query,
+                "analyzed_by_directions": {"$exists": True, "$ne": []},
+            }
+            analyzed = self.collection.count_documents(query_analyzed)
+
+            # Aggregate by direction
+            pipeline = [
+                {"$match": base_query},
+                {"$unwind": "$analyzed_by_directions"},
+                {"$group": {
+                    "_id": "$analyzed_by_directions",
+                    "count": {"$sum": 1}
+                }}
+            ]
+            by_direction = {}
+            for doc in self.collection.aggregate(pipeline):
+                by_direction[doc["_id"]] = doc["count"]
+
+            return {
+                "total_functions": total,
+                "analyzed_functions": analyzed,
+                "coverage_percent": round(analyzed / total * 100, 2) if total > 0 else 0.0,
+                "by_direction": by_direction,
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to get analysis coverage: {e}")
+            return {
+                "total_functions": 0,
+                "analyzed_functions": 0,
+                "coverage_percent": 0.0,
+                "by_direction": {},
+            }
 
 
 class CallGraphNodeRepository(BaseRepository[CallGraphNode]):

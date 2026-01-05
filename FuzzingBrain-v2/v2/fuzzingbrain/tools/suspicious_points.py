@@ -22,9 +22,10 @@ from .analyzer import _get_client, _ensure_client
 
 _sp_harness_name: ContextVar[Optional[str]] = ContextVar('sp_harness_name', default=None)
 _sp_sanitizer: ContextVar[Optional[str]] = ContextVar('sp_sanitizer', default=None)
+_sp_direction_id: ContextVar[Optional[str]] = ContextVar('sp_direction_id', default=None)
 
 
-def set_sp_context(harness_name: str, sanitizer: str) -> None:
+def set_sp_context(harness_name: str, sanitizer: str, direction_id: str = "") -> None:
     """
     Set the context for SP tools.
 
@@ -37,15 +38,17 @@ def set_sp_context(harness_name: str, sanitizer: str) -> None:
     Args:
         harness_name: Fuzzer harness name (e.g., "fuzz_png")
         sanitizer: Sanitizer type (e.g., "address")
+        direction_id: Direction ID for linking SP to direction
     """
     _sp_harness_name.set(harness_name)
     _sp_sanitizer.set(sanitizer)
-    logger.debug(f"SP context set: harness_name={harness_name}, sanitizer={sanitizer}")
+    _sp_direction_id.set(direction_id)
+    logger.debug(f"SP context set: harness_name={harness_name}, sanitizer={sanitizer}, direction_id={direction_id}")
 
 
-def get_sp_context() -> Tuple[Optional[str], Optional[str]]:
-    """Get the current SP context (harness_name, sanitizer)."""
-    return _sp_harness_name.get(), _sp_sanitizer.get()
+def get_sp_context() -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """Get the current SP context (harness_name, sanitizer, direction_id)."""
+    return _sp_harness_name.get(), _sp_sanitizer.get(), _sp_direction_id.get()
 
 
 # Aliases for mcp_factory compatibility
@@ -54,7 +57,7 @@ _get_sp_context = get_sp_context
 
 def _ensure_sp_context() -> Optional[Dict[str, Any]]:
     """Ensure SP context is set, return error dict if not."""
-    harness_name, sanitizer = get_sp_context()
+    harness_name, sanitizer, _ = get_sp_context()
     if harness_name is None or sanitizer is None:
         return {
             "success": False,
@@ -81,7 +84,7 @@ def create_suspicious_point_impl(
 
     try:
         client = _get_client()
-        harness_name, sanitizer = get_sp_context()
+        harness_name, sanitizer, direction_id = get_sp_context()
         result = client.create_suspicious_point(
             function_name=function_name,
             description=description,
@@ -90,6 +93,7 @@ def create_suspicious_point_impl(
             important_controlflow=important_controlflow or [],
             harness_name=harness_name or "",
             sanitizer=sanitizer or "",
+            direction_id=direction_id or "",
         )
 
         merged = result.get("merged", False)

@@ -1100,7 +1100,8 @@ class AnalysisServer:
 
     def _save_new_sp_sync(
         self, function_name: str, harness_name: str, sanitizer: str,
-        description: str, vuln_type: str, score: float, important_controlflow: list
+        description: str, vuln_type: str, score: float, important_controlflow: list,
+        direction_id: str = ""
     ) -> str:
         """Sync: Create and save a new SP."""
         from ..core.models import SuspiciousPoint
@@ -1108,6 +1109,7 @@ class AnalysisServer:
         sp = SuspiciousPoint(
             task_id=self.task_id,
             function_name=function_name,
+            direction_id=direction_id,
             sources=[{"harness_name": harness_name, "sanitizer": sanitizer}],
             description=description,
             vuln_type=vuln_type,
@@ -1136,6 +1138,7 @@ class AnalysisServer:
         vuln_type = params.get("vuln_type", "")
         score = params.get("score", 0.0)
         important_controlflow = params.get("important_controlflow", [])
+        direction_id = params.get("direction_id", "")
 
         # Check for duplicates in the same function (MongoDB query in thread pool)
         existing_sp_dicts = await self._run_sync(
@@ -1169,12 +1172,13 @@ class AnalysisServer:
         sp_id = await self._run_sync(
             self._save_new_sp_sync,
             function_name, harness_name, sanitizer,
-            description, vuln_type, score, important_controlflow
+            description, vuln_type, score, important_controlflow,
+            direction_id
         )
 
         self._log(
             f"Created suspicious point: {sp_id} in {function_name} "
-            f"(harness={harness_name}, sanitizer={sanitizer})"
+            f"(harness={harness_name}, sanitizer={sanitizer}, direction={direction_id[:8] if direction_id else 'none'})"
         )
 
         return {

@@ -23,7 +23,7 @@ from .models import (
     ModelInfo,
     Provider,
     TaskType,
-    CLAUDE_SONNET_4_5,
+    GPT_5_2,
     DEFAULT_FALLBACK,
     get_model_by_id,
 )
@@ -50,7 +50,7 @@ class LLMConfig:
     """LLM Client Configuration"""
 
     # Model selection
-    default_model: ModelInfo = field(default_factory=lambda: CLAUDE_SONNET_4_5)
+    default_model: ModelInfo = field(default_factory=lambda: GPT_5_2)
 
     # Task-specific models
     task_models: Dict[TaskType, ModelInfo] = field(default_factory=dict)

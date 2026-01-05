@@ -53,6 +53,7 @@ class SuspiciousPoint:
     suspicious_point_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     task_id: str = ""  # Which task this belongs to
     function_name: str = ""  # Which function this belongs to
+    direction_id: str = ""  # Which direction this belongs to (SP Find v2)
 
     # Sources - which harness/sanitizer combinations discovered this SP
     # Multiple sources indicate the same bug was found by multiple workers (higher confidence)

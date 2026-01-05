@@ -412,8 +412,8 @@ FALLBACK_CHAINS: Dict[str, List[ModelInfo]] = {
     GEMINI_3_FLASH.id: [GEMINI_2_5_FLASH, CLAUDE_SONNET_4_5, GPT_5_2],
 }
 
-# Default fallback chain
-DEFAULT_FALLBACK = [CLAUDE_OPUS_4_5, GPT_5_2, GEMINI_3_FLASH, O3]
+# Default fallback chain (OpenAI first since Anthropic quota exhausted)
+DEFAULT_FALLBACK = [O3, GPT_5_2, GEMINI_3_FLASH, CLAUDE_OPUS_4_5]
 
 # Expensive models (input price >= $5/M or output price >= $25/M)
 # These are filtered out when allow_expensive_fallback=False

@@ -16,7 +16,7 @@ Usage:
     result = run_coverage(fuzzer_name, input_data_base64, target_functions)
 
     from fuzzingbrain.tools.analyzer import get_function
-    result = get_function("png_read_info")
+    result = get_function("target_function")
 """
 
 from fastmcp import FastMCP

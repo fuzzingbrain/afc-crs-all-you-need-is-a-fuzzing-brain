@@ -29,7 +29,7 @@ def set_direction_context(fuzzer: str) -> None:
     Uses ContextVar for proper isolation in async/parallel execution.
 
     Args:
-        fuzzer: Fuzzer name (e.g., "libpng_read_fuzzer")
+        fuzzer: Fuzzer name
     """
     _direction_fuzzer.set(fuzzer)
     logger.debug(f"Direction context set: fuzzer={fuzzer}")
@@ -153,8 +153,7 @@ def create_direction(
     analyzed together for security vulnerabilities.
 
     Args:
-        name: Descriptive name for this direction.
-              Examples: "Chunk Handlers", "Memory Management", "Input Parsing"
+        name: Descriptive name for this direction based on business logic
         risk_level: Security risk level. One of:
             - "high": Direct input parsing, memory ops, type conversions
             - "medium": Indirect input handling, secondary paths

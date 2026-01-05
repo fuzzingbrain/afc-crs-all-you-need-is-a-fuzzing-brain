@@ -46,9 +46,23 @@ class AnalysisClient:
     def _connect(self):
         """Connect to server if not connected."""
         import time
+
+        # Check if existing socket is still valid
         if self._sock is not None:
-            logger.debug(f"[TIMING] _connect: socket already connected")
-            return
+            try:
+                # Check if socket is still connected by testing fileno
+                fd = self._sock.fileno()
+                if fd < 0:
+                    # Invalid file descriptor
+                    logger.debug(f"[TIMING] _connect: socket has invalid fd, reconnecting")
+                    self._disconnect()
+                else:
+                    logger.debug(f"[TIMING] _connect: socket already connected (fd={fd})")
+                    return
+            except (OSError, socket.error):
+                # Socket is broken
+                logger.debug(f"[TIMING] _connect: socket error, reconnecting")
+                self._disconnect()
 
         t0 = time.time()
         if not self.socket_path.exists():
@@ -393,6 +407,7 @@ class AnalysisClient:
         important_controlflow: List[dict] = None,
         harness_name: str = "",
         sanitizer: str = "",
+        direction_id: str = "",
     ) -> dict:
         """
         Create a new suspicious point.
@@ -405,6 +420,7 @@ class AnalysisClient:
             important_controlflow: List of related functions/variables
             harness_name: Fuzzer harness name that created this SP
             sanitizer: Sanitizer type (address, memory, undefined)
+            direction_id: Direction ID that this SP belongs to
 
         Returns:
             Dict with 'id' and 'created' status
@@ -417,6 +433,7 @@ class AnalysisClient:
             "important_controlflow": important_controlflow or [],
             "harness_name": harness_name,
             "sanitizer": sanitizer,
+            "direction_id": direction_id,
         })
 
     def update_suspicious_point(

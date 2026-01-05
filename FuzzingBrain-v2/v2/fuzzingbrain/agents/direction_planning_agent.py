@@ -110,15 +110,23 @@ LOW RISK:
    - name: Business feature name (describe what it does)
    - risk_level: "high", "medium", or "low"
    - risk_reason: Why this risk level
-   - core_functions: Functions that implement this feature
+   - core_functions: Functions that implement this feature (REQUIRED)
+   - entry_functions: Functions where fuzzer input ENTERS this direction (REQUIRED)
    - code_summary: What this feature does
+
+## CRITICAL: entry_functions
+
+For each direction, you MUST identify entry_functions - these are the functions where
+fuzzer input first enters this code area. They are critical for vulnerability analysis.
+
+entry_functions are the "doors" through which untrusted data enters this feature.
 
 ## Important Guidelines
 
 - Divide by BUSINESS LOGIC, not vulnerability patterns
 - Each direction = one logical feature or sub-feature
 - Aim for FULL COVERAGE of all reachable functions
-- Create at most 5 directions (prioritize by risk level)
+- Create exactly 1 direction (focus on the highest risk area)
 """
 
 
@@ -143,13 +151,13 @@ class DirectionPlanningAgent(BaseAgent):
         max_iterations: int = 20,  # Reduced from 100 to control cost
         verbose: bool = True,
         log_dir: Optional[Path] = None,
-        max_directions: int = 5,  # Maximum number of directions to create
+        max_directions: int = 1,  # DEBUG: Only 1 direction for testing
     ):
         """
         Initialize Direction Planning Agent.
 
         Args:
-            fuzzer: Fuzzer name (e.g., "libpng_read_fuzzer")
+            fuzzer: Fuzzer name
             sanitizer: Sanitizer type (for context)
             task_id: Task ID
             worker_id: Worker ID
@@ -203,9 +211,16 @@ class DirectionPlanningAgent(BaseAgent):
         lines.append("├" + "─" * width + "┤")
 
         if self.directions_list:
-            for name, risk, num_funcs in self.directions_list:
+            for item in self.directions_list:
+                # Handle both old format (name, risk, num_funcs) and new format (name, risk, num_core, num_entry)
+                if len(item) == 4:
+                    name, risk, num_core, num_entry = item
+                    func_info = f"{num_core} core, {num_entry} entry"
+                else:
+                    name, risk, num_funcs = item
+                    func_info = f"{num_funcs} functions"
                 risk_icon = "🔴" if risk == "high" else ("🟡" if risk == "medium" else "🟢")
-                line = f"  {risk_icon} {name} ({num_funcs} functions)"
+                line = f"  {risk_icon} {name} ({func_info})"
                 lines.append("│" + line.ljust(width) + "│")
         else:
             lines.append("│" + "  (No directions recorded)".ljust(width) + "│")
@@ -232,16 +247,20 @@ class DirectionPlanningAgent(BaseAgent):
                     name = tool_args.get("name", "unknown")
                     risk = tool_args.get("risk_level", "medium")
                     core_funcs = tool_args.get("core_functions", [])
-                    num_funcs = len(core_funcs) if isinstance(core_funcs, list) else 0
+                    entry_funcs = tool_args.get("entry_functions", [])
+                    num_core = len(core_funcs) if isinstance(core_funcs, list) else 0
+                    num_entry = len(entry_funcs) if isinstance(entry_funcs, list) else 0
 
-                    self.directions_list.append((name, risk, num_funcs))
+                    self.directions_list.append((name, risk, num_core, num_entry))
                     self.directions_created += 1
 
-                    # Track functions assigned
+                    # Track functions assigned (both core and entry)
                     if isinstance(core_funcs, list):
                         self.functions_assigned.update(core_funcs)
+                    if isinstance(entry_funcs, list):
+                        self.functions_assigned.update(entry_funcs)
 
-                    self._log(f"Tracked direction: {name} ({risk}, {num_funcs} funcs)", level="INFO")
+                    self._log(f"Tracked direction: {name} ({risk}, {num_core} core, {num_entry} entry)", level="INFO")
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -373,6 +392,12 @@ Understanding this is MANDATORY - it defines what code is exploitable.
 6. Prioritize by: (a) closeness to fuzzer input, (b) {self.sanitizer} vulnerability types
 
 Remember: Only reachable code matters. Only {self.sanitizer}-detectable bugs matter.
+
+## DEBUG: Priority Functions (MUST include in core_functions)
+The following functions MUST be included in core_functions for testing:
+- xmlNewComment
+- xmlNewDocComment
+- xmlNodeGetContent
 """
         return message
 

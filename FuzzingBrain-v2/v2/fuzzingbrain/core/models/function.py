@@ -45,6 +45,10 @@ class Function:
     # Reachability (which fuzzers can reach this function)
     reached_by_fuzzers: List[str] = field(default_factory=list)
 
+    # SP Find v2: Track which directions have analyzed this function
+    # Used to prioritize unanalyzed functions and avoid duplicate analysis
+    analyzed_by_directions: List[str] = field(default_factory=list)
+
     # Optional metadata
     language: str = "c"  # Programming language
 
@@ -69,6 +73,7 @@ class Function:
             "content": self.content,
             "cyclomatic_complexity": self.cyclomatic_complexity,
             "reached_by_fuzzers": self.reached_by_fuzzers,
+            "analyzed_by_directions": self.analyzed_by_directions,
             "language": self.language,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
@@ -93,6 +98,7 @@ class Function:
             content=data.get("content", ""),
             cyclomatic_complexity=data.get("cyclomatic_complexity", 0),
             reached_by_fuzzers=data.get("reached_by_fuzzers", []),
+            analyzed_by_directions=data.get("analyzed_by_directions", []),
             language=data.get("language", "c"),
             created_at=created_at,
         )

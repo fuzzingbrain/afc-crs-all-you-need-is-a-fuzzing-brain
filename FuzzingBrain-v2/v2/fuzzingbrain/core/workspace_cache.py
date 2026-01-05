@@ -392,6 +392,7 @@ class WorkspaceCache:
                 node_dict = node.to_dict() if hasattr(node, 'to_dict') else vars(node).copy()
                 node_dict.pop('_id', None)
                 node_dict.pop('task_id', None)
+                node_dict.pop('node_id', None)  # MUST remove so __post_init__ regenerates with new task_id
                 db_data["callgraph_nodes"].append(node_dict)
 
             # Write to cache
