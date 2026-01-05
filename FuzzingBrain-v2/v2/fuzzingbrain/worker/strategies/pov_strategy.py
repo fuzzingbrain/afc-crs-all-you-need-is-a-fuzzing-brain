@@ -1262,6 +1262,7 @@ class POVStrategy(BaseStrategy):
             output_dir=self.povs_path,
             log_dir=self.log_dir / "agent" if self.log_dir else None,
             workspace_path=self.workspace_path,
+            worker_id=self.worker_id,  # For SP Fuzzer lifecycle
         )
 
         # In delta mode, SP finding is already done (SPs come from diff analysis)

@@ -12,6 +12,28 @@ from typing import List, Optional
 
 
 @dataclass
+class FuzzerWorkerConfig:
+    """Configuration for Fuzzer Worker (Dual-Layer Fuzzer)"""
+
+    # Enable/disable Fuzzer Worker
+    enabled: bool = True
+
+    # Global Fuzzer config
+    global_fork_level: int = 2          # Parallelism (lower to save resources)
+    global_rss_limit_mb: int = 2048     # Memory limit
+    global_max_time: int = 3600         # Max run time (seconds), 0 = unlimited
+    global_timeout_per_input: int = 30  # Timeout per input (seconds)
+
+    # SP Fuzzer config
+    sp_fork_level: int = 1              # Single process (lightweight)
+    sp_rss_limit_mb: int = 1024         # Memory limit
+    sp_max_count: int = 5               # Max concurrent SP Fuzzers
+
+    # Crash monitoring
+    crash_check_interval: float = 5.0   # Seconds between crash directory checks
+
+
+@dataclass
 class Config:
     """FuzzingBrain configuration"""
 
@@ -31,6 +53,9 @@ class Config:
     sanitizers: List[str] = field(default_factory=lambda: ["address"])
     timeout_minutes: int = 60
     pov_count: int = 0  # Stop after N verified POVs (0 = unlimited)
+
+    # Fuzzer Worker configuration
+    fuzzer_worker: FuzzerWorkerConfig = field(default_factory=FuzzerWorkerConfig)
 
     # Budget configuration (env: FUZZINGBRAIN_BUDGET_LIMIT, FUZZINGBRAIN_STOP_ON_POV, FUZZINGBRAIN_ALLOW_EXPENSIVE_FALLBACK)
     budget_limit: float = 100.0  # Max cost in dollars (0 = unlimited)
@@ -83,6 +108,20 @@ class Config:
         with open(json_path, "r") as f:
             data = json.load(f)
 
+        # Parse fuzzer_worker config if present
+        fw_data = data.get("fuzzer_worker", {})
+        fuzzer_worker = FuzzerWorkerConfig(
+            enabled=fw_data.get("enabled", True),
+            global_fork_level=fw_data.get("global_fork_level", 2),
+            global_rss_limit_mb=fw_data.get("global_rss_limit_mb", 2048),
+            global_max_time=fw_data.get("global_max_time", 3600),
+            global_timeout_per_input=fw_data.get("global_timeout_per_input", 30),
+            sp_fork_level=fw_data.get("sp_fork_level", 1),
+            sp_rss_limit_mb=fw_data.get("sp_rss_limit_mb", 1024),
+            sp_max_count=fw_data.get("sp_max_count", 5),
+            crash_check_interval=fw_data.get("crash_check_interval", 5.0),
+        )
+
         return cls(
             workspace=data.get("workspace"),
             task_type=data.get("task_type", "pov-patch"),
@@ -90,6 +129,7 @@ class Config:
             sanitizers=data.get("sanitizers", ["address"]),
             timeout_minutes=data.get("timeout_minutes", 60),
             pov_count=data.get("pov_count", 0),
+            fuzzer_worker=fuzzer_worker,
             repo_url=data.get("repo_url"),
             repo_path=data.get("repo_path"),
             project_name=data.get("project_name"),
@@ -112,6 +152,17 @@ class Config:
         """Load configuration from environment variables"""
         sanitizers = os.environ.get("FUZZINGBRAIN_SANITIZERS", "address")
 
+        # Parse fuzzer_worker config from env
+        fuzzer_worker = FuzzerWorkerConfig(
+            enabled=os.environ.get("FUZZINGBRAIN_FUZZER_WORKER_ENABLED", "true").lower() in ("true", "1", "yes"),
+            global_fork_level=int(os.environ.get("FUZZINGBRAIN_GLOBAL_FORK_LEVEL", "2")),
+            global_rss_limit_mb=int(os.environ.get("FUZZINGBRAIN_GLOBAL_RSS_LIMIT_MB", "2048")),
+            global_max_time=int(os.environ.get("FUZZINGBRAIN_GLOBAL_MAX_TIME", "3600")),
+            sp_fork_level=int(os.environ.get("FUZZINGBRAIN_SP_FORK_LEVEL", "1")),
+            sp_rss_limit_mb=int(os.environ.get("FUZZINGBRAIN_SP_RSS_LIMIT_MB", "1024")),
+            sp_max_count=int(os.environ.get("FUZZINGBRAIN_SP_MAX_COUNT", "5")),
+        )
+
         return cls(
             mcp_mode=os.environ.get("FUZZINGBRAIN_MCP", "").lower() == "true",
             workspace=os.environ.get("FUZZINGBRAIN_WORKSPACE"),
@@ -119,6 +170,7 @@ class Config:
             scan_mode=os.environ.get("FUZZINGBRAIN_SCAN_MODE", "full"),
             sanitizers=sanitizers.split(","),
             timeout_minutes=int(os.environ.get("FUZZINGBRAIN_TIMEOUT", "60")),
+            fuzzer_worker=fuzzer_worker,
             # Budget configuration
             budget_limit=float(os.environ.get("FUZZINGBRAIN_BUDGET_LIMIT", "100.0")),
             stop_on_pov=os.environ.get("FUZZINGBRAIN_STOP_ON_POV", "true").lower() in ("true", "1", "yes"),
@@ -196,6 +248,17 @@ class Config:
             "sanitizers": self.sanitizers,
             "timeout_minutes": self.timeout_minutes,
             "pov_count": self.pov_count,
+            "fuzzer_worker": {
+                "enabled": self.fuzzer_worker.enabled,
+                "global_fork_level": self.fuzzer_worker.global_fork_level,
+                "global_rss_limit_mb": self.fuzzer_worker.global_rss_limit_mb,
+                "global_max_time": self.fuzzer_worker.global_max_time,
+                "global_timeout_per_input": self.fuzzer_worker.global_timeout_per_input,
+                "sp_fork_level": self.fuzzer_worker.sp_fork_level,
+                "sp_rss_limit_mb": self.fuzzer_worker.sp_rss_limit_mb,
+                "sp_max_count": self.fuzzer_worker.sp_max_count,
+                "crash_check_interval": self.fuzzer_worker.crash_check_interval,
+            },
             "repo_url": self.repo_url,
             "repo_path": self.repo_path,
             "project_name": self.project_name,

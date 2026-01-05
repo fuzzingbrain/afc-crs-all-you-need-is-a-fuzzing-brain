@@ -11,6 +11,13 @@ from typing import Dict, Any, Optional
 from ..core import logger
 from ..db import RepositoryManager
 from ..analyzer import AnalysisClient
+from ..fuzzer import (
+    FuzzerManager,
+    GlobalFuzzerConfig,
+    SPFuzzerConfig,
+    register_fuzzer_manager,
+    unregister_fuzzer_manager,
+)
 
 
 class WorkerExecutor:
@@ -18,9 +25,10 @@ class WorkerExecutor:
     Executes fuzzing strategies for a {fuzzer, sanitizer} pair.
 
     The executor is a thin layer that:
-    1. Initializes common resources (workspace, analysis client)
+    1. Initializes common resources (workspace, analysis client, fuzzer manager)
     2. Selects the appropriate strategy based on task_type
     3. Delegates execution to the strategy
+    4. Manages fuzzer lifecycle (Global Fuzzer + SP Fuzzer Pool)
     """
 
     def __init__(
@@ -37,6 +45,8 @@ class WorkerExecutor:
         analysis_socket_path: str = None,
         diff_path: str = None,
         log_dir: str = None,
+        docker_image: str = "gcr.io/oss-fuzz-base/base-runner",
+        enable_fuzzer_worker: bool = True,
     ):
         """
         Initialize WorkerExecutor.
@@ -54,6 +64,8 @@ class WorkerExecutor:
             analysis_socket_path: Path to Analysis Server socket for code queries
             diff_path: Path to diff file (required for delta mode)
             log_dir: Main task log directory for agent logs
+            docker_image: Docker image for running fuzzers
+            enable_fuzzer_worker: Whether to enable FuzzerManager (default True)
         """
         self.workspace_path = Path(workspace_path)
         self.project_name = project_name
@@ -64,6 +76,8 @@ class WorkerExecutor:
         self.task_id = task_id
         self.scan_mode = scan_mode
         self.log_dir = Path(log_dir) if log_dir else None
+        self.docker_image = docker_image
+        self.enable_fuzzer_worker = enable_fuzzer_worker
 
         # Fuzzer binary path (from Analyzer or built locally)
         self.fuzzer_binary_path = Path(fuzzer_binary_path) if fuzzer_binary_path else None
@@ -71,6 +85,9 @@ class WorkerExecutor:
         # Analysis Server client for code queries
         self.analysis_socket_path = analysis_socket_path
         self._analysis_client: Optional[AnalysisClient] = None
+
+        # FuzzerManager for Global Fuzzer + SP Fuzzer Pool
+        self._fuzzer_manager: Optional[FuzzerManager] = None
 
         # Diff file path (for delta mode)
         # Handle both file path and directory path
@@ -100,6 +117,214 @@ class WorkerExecutor:
     def worker_id(self) -> str:
         """Get worker identifier for logging."""
         return f"worker_{self.task_id}_{self.fuzzer}_{self.sanitizer}"
+
+    @property
+    def fuzzer_manager(self) -> Optional[FuzzerManager]:
+        """
+        Get FuzzerManager (lazy initialization).
+
+        Creates FuzzerManager on first access if enabled and fuzzer binary exists.
+        """
+        if self._fuzzer_manager is None and self.enable_fuzzer_worker:
+            if self.fuzzer_binary_path and self.fuzzer_binary_path.exists():
+                try:
+                    self._fuzzer_manager = FuzzerManager(
+                        task_id=self.task_id,
+                        worker_id=self.worker_id,
+                        fuzzer_path=self.fuzzer_binary_path,
+                        docker_image=self.docker_image,
+                        workspace_path=self.workspace_path,
+                        fuzzer_name=self.fuzzer,
+                        sanitizer=self.sanitizer,
+                        on_crash=self._on_crash_found,
+                    )
+                    # Register for cross-module access
+                    register_fuzzer_manager(self.worker_id, self._fuzzer_manager)
+                    logger.info(f"[{self.worker_id}] FuzzerManager initialized")
+                except Exception as e:
+                    logger.warning(f"[{self.worker_id}] Failed to initialize FuzzerManager: {e}")
+                    self._fuzzer_manager = None
+            else:
+                logger.debug(f"[{self.worker_id}] FuzzerManager not initialized: no fuzzer binary")
+        return self._fuzzer_manager
+
+    def _on_crash_found(self, crash_record) -> None:
+        """
+        Callback when CrashMonitor finds a new crash.
+
+        The crash file IS the PoV - directly create POV record.
+        Flow: Create POV (inactive) -> Generate Report -> Activate POV
+
+        Args:
+            crash_record: CrashRecord from CrashMonitor
+        """
+        import asyncio
+        import base64
+        import uuid
+        from datetime import datetime
+        from pathlib import Path
+
+        from ..core.models import POV
+        from ..core.pov_packager import POVPackager
+
+        logger.info(
+            f"[{self.worker_id}] ╔══════════════════════════════════════════════════════════════╗"
+        )
+        logger.info(
+            f"[{self.worker_id}] ║  🎯 CRASH FOUND BY FUZZER!                                   ║"
+        )
+        logger.info(
+            f"[{self.worker_id}] ║  Hash: {crash_record.crash_hash[:16]:<44} ║"
+        )
+        logger.info(
+            f"[{self.worker_id}] ║  Type: {(crash_record.vuln_type or 'unknown'):<44} ║"
+        )
+        logger.info(
+            f"[{self.worker_id}] ╚══════════════════════════════════════════════════════════════╝"
+        )
+
+        try:
+            # 1. Read crash file bytes
+            crash_path = Path(crash_record.crash_path)
+            if not crash_path.exists():
+                logger.error(f"[{self.worker_id}] Crash file not found: {crash_path}")
+                return
+
+            crash_blob = crash_path.read_bytes()
+            crash_blob_b64 = base64.b64encode(crash_blob).decode("utf-8")
+
+            # 2. Create POV record (is_successful=False - don't trigger dispatcher yet!)
+            pov_id = str(uuid.uuid4())
+
+            # Get task workspace (not worker workspace) for results
+            task_workspace = self.workspace_path
+            if "worker_workspace" in str(task_workspace):
+                task_workspace = task_workspace.parent.parent
+            results_dir = task_workspace / "results"
+            povs_dir = results_dir / "povs"
+            povs_dir.mkdir(parents=True, exist_ok=True)
+
+            # Copy crash file to povs directory
+            pov_blob_path = povs_dir / f"crash_{crash_record.crash_hash[:16]}.bin"
+            pov_blob_path.write_bytes(crash_blob)
+
+            pov = POV(
+                pov_id=pov_id,
+                task_id=self.task_id,
+                suspicious_point_id="",  # No SP - fuzzer-discovered
+                generation_id=str(uuid.uuid4()),  # Unique generation ID
+                iteration=0,
+                attempt=1,
+                variant=1,
+                blob=crash_blob_b64,
+                blob_path=str(pov_blob_path),
+                gen_blob=f"""# Fuzzer-discovered crash
+# Hash: {crash_record.crash_hash}
+# Type: {crash_record.vuln_type}
+
+import base64
+
+# POV blob (base64 encoded)
+POV_BLOB_B64 = "{crash_blob_b64}"
+
+def generate(variant: int = 1) -> bytes:
+    return base64.b64decode(POV_BLOB_B64)
+""",
+                vuln_type=crash_record.vuln_type,
+                harness_name=self.fuzzer,
+                sanitizer=self.sanitizer,
+                sanitizer_output=crash_record.sanitizer_output[:10000] if crash_record.sanitizer_output else "",
+                description=f"Fuzzer-discovered crash ({crash_record.source})",
+                is_successful=False,  # NOT yet! Generate report first
+                is_active=True,
+                verified_at=None,  # Not verified yet
+            )
+
+            # Save POV to database (inactive)
+            self.repos.povs.save(pov)
+            logger.info(f"[{self.worker_id}] POV {pov_id[:8]} created (pending report)")
+
+            # 3. Package POV with report, then activate
+            packager = POVPackager(
+                str(results_dir),
+                task_id=self.task_id,
+                worker_id=self.worker_id,
+                repos=self.repos,
+                analyzer_socket_path=self.analysis_socket_path,
+            )
+
+            # Schedule: package -> activate (called from async context)
+            try:
+                loop = asyncio.get_running_loop()
+                asyncio.create_task(
+                    self._package_and_activate_pov(packager, pov, pov_id)
+                )
+            except RuntimeError:
+                # No running loop - run synchronously
+                self._package_and_activate_pov_sync(packager, pov, pov_id)
+
+        except Exception as e:
+            logger.error(f"[{self.worker_id}] Error processing crash: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+
+    async def _package_and_activate_pov(self, packager, pov, pov_id: str) -> None:
+        """
+        Async: Package POV with report, then activate it.
+
+        Flow: Generate Report -> Package -> Activate (is_successful=True)
+
+        Args:
+            packager: POVPackager instance
+            pov: POV object
+            pov_id: POV ID for logging
+        """
+        try:
+            # 1. Package POV with report
+            logger.info(f"[{self.worker_id}] Generating report for POV {pov_id[:8]}...")
+            zip_path = await packager.package_pov_async(pov.to_dict(), None)
+
+            if zip_path:
+                logger.info(f"[{self.worker_id}] ✅ POV {pov_id[:8]} packaged: {zip_path}")
+
+                # 2. Activate POV (now dispatcher will detect it)
+                self.repos.povs.update(pov_id, {"is_successful": True})
+                logger.info(f"[{self.worker_id}] ✅ POV {pov_id[:8]} activated!")
+            else:
+                logger.warning(f"[{self.worker_id}] Failed to package POV {pov_id[:8]}")
+
+        except Exception as e:
+            logger.error(f"[{self.worker_id}] Error packaging POV {pov_id[:8]}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+
+    def _package_and_activate_pov_sync(self, packager, pov, pov_id: str) -> None:
+        """
+        Sync: Package POV with report, then activate it.
+
+        Args:
+            packager: POVPackager instance
+            pov: POV object
+            pov_id: POV ID for logging
+        """
+        try:
+            # 1. Package POV with report
+            logger.info(f"[{self.worker_id}] Generating report for POV {pov_id[:8]}...")
+            zip_path = packager.package_pov(pov.to_dict(), None)
+
+            if zip_path:
+                logger.info(f"[{self.worker_id}] ✅ POV {pov_id[:8]} packaged: {zip_path}")
+
+                # 2. Activate POV (now dispatcher will detect it)
+                self.repos.povs.update(pov_id, {"is_successful": True})
+                logger.info(f"[{self.worker_id}] ✅ POV {pov_id[:8]} activated!")
+            else:
+                logger.warning(f"[{self.worker_id}] Failed to package POV {pov_id[:8]}")
+
+        except Exception as e:
+            logger.error(f"[{self.worker_id}] Error packaging POV {pov_id[:8]}: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
 
     @property
     def analysis_client(self) -> Optional[AnalysisClient]:
@@ -166,6 +391,22 @@ class WorkerExecutor:
         if self._analysis_client:
             self._analysis_client.close()
             self._analysis_client = None
+
+        # Shutdown FuzzerManager
+        if self._fuzzer_manager:
+            import asyncio
+            try:
+                # Run shutdown in event loop
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(self._fuzzer_manager.shutdown())
+                else:
+                    loop.run_until_complete(self._fuzzer_manager.shutdown())
+            except Exception as e:
+                logger.warning(f"[{self.worker_id}] Error shutting down FuzzerManager: {e}")
+            finally:
+                unregister_fuzzer_manager(self.worker_id)
+                self._fuzzer_manager = None
 
     def _get_strategy(self):
         """

@@ -4,7 +4,7 @@ FuzzingBrain Core Module
 Contains core business logic, configuration, and models.
 """
 
-from .config import Config
+from .config import Config, FuzzerWorkerConfig
 # NOTE: task_processor and dispatcher are NOT imported here to avoid circular dependency
 # Import directly: from fuzzingbrain.core.task_processor import TaskProcessor, process_task
 # Import directly: from fuzzingbrain.core.dispatcher import WorkerDispatcher
@@ -32,6 +32,7 @@ from .models import (
 __all__ = [
     # Config
     "Config",
+    "FuzzerWorkerConfig",
     # NOTE: TaskProcessor, process_task, WorkerDispatcher not exported (circular dependency)
     # Import directly: from fuzzingbrain.core.task_processor import TaskProcessor, process_task
     # Import directly: from fuzzingbrain.core.dispatcher import WorkerDispatcher

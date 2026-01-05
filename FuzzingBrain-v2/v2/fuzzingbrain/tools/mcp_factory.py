@@ -23,6 +23,7 @@ def create_isolated_mcp_server(
     agent_id: str = "default",
     worker_id: str = None,
     include_pov_tools: bool = True,
+    include_seed_tools: bool = False,
 ) -> FastMCP:
     """
     Create an isolated FastMCP server instance with all tools registered.
@@ -32,9 +33,11 @@ def create_isolated_mcp_server(
 
     Args:
         agent_id: Unique identifier for this agent (used in server name)
-        worker_id: Worker ID for context lookup (used by POV tools)
+        worker_id: Worker ID for context lookup (used by POV tools and seed tools)
         include_pov_tools: Whether to include POV tools (default True).
                           Set to False for SP/Verify agents that don't need POV tools.
+        include_seed_tools: Whether to include seed generation tools (default False).
+                           Set to True for SeedAgent.
 
     Returns:
         A new FastMCP instance with all tools registered
@@ -50,6 +53,8 @@ def create_isolated_mcp_server(
     if include_pov_tools:
         _register_pov_tools(mcp, worker_id=worker_id)  # Pass worker_id for context binding
         _register_coverage_tools(mcp)
+    if include_seed_tools:
+        _register_seed_tools(mcp, worker_id=worker_id)  # Pass worker_id for context binding
 
     return mcp
 
@@ -794,6 +799,106 @@ def _register_coverage_tools(mcp: FastMCP) -> None:
         """
         from .coverage import get_feedback_impl
         return get_feedback_impl(fuzzer_name, input_data_base64, target_files)
+
+
+def _register_seed_tools(mcp: FastMCP, worker_id: str = None) -> None:
+    """
+    Register seed generation tools with worker_id bound via closure.
+
+    Args:
+        mcp: FastMCP instance to register tools to
+        worker_id: Worker ID for context lookup (bound to tool functions)
+    """
+    from typing import Dict, Any
+
+    # Capture worker_id in closure
+    bound_worker_id = worker_id
+
+    @mcp.tool
+    @async_tool
+    def create_seed(
+        generator_code: str,
+        num_seeds: int = 5,
+    ) -> Dict[str, Any]:
+        """
+        Generate fuzzer seeds to improve coverage based on analysis direction.
+
+        Write Python code with a generate(seed_num: int) function that returns bytes.
+        The function receives seed number (1, 2, ..., num_seeds) and should return
+        DIFFERENT seeds for each number to maximize coverage exploration.
+
+        These seeds are added to the Global Fuzzer's corpus for mutation.
+
+        Args:
+            generator_code: Python code with generate(seed_num) function.
+                Example 1 - Different sizes:
+                ```python
+                def generate(seed_num: int) -> bytes:
+                    # Generate seeds with increasing sizes
+                    sizes = [16, 64, 256, 1024, 4096]
+                    size = sizes[(seed_num - 1) % len(sizes)]
+                    return b'A' * size
+                ```
+
+                Example 2 - XML/structured data:
+                ```python
+                def generate(seed_num: int) -> bytes:
+                    templates = [
+                        b'<root></root>',
+                        b'<root><child/></root>',
+                        b'<root attr="value"></root>',
+                        b'<root>text</root>',
+                        b'<?xml version="1.0"?><root/>',
+                    ]
+                    return templates[(seed_num - 1) % len(templates)]
+                ```
+            num_seeds: Number of seeds to generate (default 5)
+
+        Returns:
+            {
+                "success": True,
+                "seeds_generated": N,
+                "seed_type": "direction",
+                "seed_paths": ["path1", "path2", ...],
+            }
+        """
+        from ..fuzzer.seed_tools import create_seed_impl
+        return create_seed_impl(
+            generator_code=generator_code,
+            num_seeds=num_seeds,
+            seed_type="direction",  # Default for SeedAgent
+            worker_id=bound_worker_id,
+        )
+
+    @mcp.tool
+    @async_tool
+    def get_seed_context_info() -> Dict[str, Any]:
+        """
+        Get current seed generation context information.
+
+        Returns information about:
+        - Current direction or SP being processed
+        - Fuzzer name and sanitizer
+        - Number of seeds generated so far
+        """
+        from ..fuzzer.seed_tools import get_seed_context, _current_seed_worker_id
+
+        wid = bound_worker_id or _current_seed_worker_id.get()
+        if not wid:
+            return {"success": False, "error": "No seed context available"}
+
+        ctx = get_seed_context(wid)
+        if not ctx:
+            return {"success": False, "error": "Seed context not set"}
+
+        return {
+            "success": True,
+            "direction_id": ctx.get("direction_id"),
+            "sp_id": ctx.get("sp_id"),
+            "fuzzer": ctx.get("fuzzer", ""),
+            "sanitizer": ctx.get("sanitizer", "address"),
+            "seeds_generated": ctx.get("seeds_generated", 0),
+        }
 
 
 # Export

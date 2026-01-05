@@ -227,6 +227,9 @@ class POVBaseStrategy(BaseStrategy):
         The agent performs deeper analysis to determine if each point
         is likely a real vulnerability.
 
+        If a point is determined to be FP (False Positive), triggers
+        SeedAgent to generate FP Seeds for the Global Fuzzer.
+
         Args:
             suspicious_points: List of points to verify
 
@@ -250,6 +253,7 @@ class POVBaseStrategy(BaseStrategy):
         )
 
         verified = []
+        fp_points = []  # Track FP points for seed generation
         total = len(suspicious_points)
 
         for i, point in enumerate(suspicious_points):
@@ -268,7 +272,18 @@ class POVBaseStrategy(BaseStrategy):
                 if updated_point:
                     verified.append(updated_point)
                     elapsed = time.time() - point_start
-                    status = "HIGH" if updated_point.is_important or updated_point.score >= 0.9 else "verified"
+
+                    # Check if this is FP (not important and score < 0.5)
+                    is_fp = not updated_point.is_important and updated_point.score < 0.5
+
+                    if is_fp:
+                        status = "FP"
+                        fp_points.append(updated_point)
+                    elif updated_point.is_important or updated_point.score >= 0.9:
+                        status = "HIGH"
+                    else:
+                        status = "verified"
+
                     self.log_info(f"  [{i+1}/{total}] Done in {elapsed:.1f}s - {status} (score={updated_point.score:.2f})")
                 else:
                     # Point not found, use original
@@ -282,7 +297,71 @@ class POVBaseStrategy(BaseStrategy):
                 point.verification_notes = f"Verification failed: {e}"
                 verified.append(point)
 
+        # Generate FP Seeds for false positive points (if FuzzerManager available)
+        if fp_points:
+            self._generate_fp_seeds(fp_points)
+
         return verified
+
+    def _generate_fp_seeds(self, fp_points: List[SuspiciousPoint]) -> None:
+        """
+        Generate FP Seeds for false positive suspicious points.
+
+        These seeds are added to the Global Fuzzer's corpus to help
+        find similar vulnerabilities.
+
+        Args:
+            fp_points: List of false positive suspicious points
+        """
+        # Check if FuzzerManager is available
+        fuzzer_manager = getattr(self.executor, 'fuzzer_manager', None)
+        if not fuzzer_manager:
+            self.log_debug("FuzzerManager not available, skipping FP seed generation")
+            return
+
+        self.log_info(f"Generating FP Seeds for {len(fp_points)} false positive points...")
+
+        # Lazy import SeedAgent
+        try:
+            from ...fuzzer import SeedAgent
+        except ImportError:
+            self.log_warning("SeedAgent not available, skipping FP seed generation")
+            return
+
+        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+
+        for point in fp_points:
+            try:
+                # Create SeedAgent for this FP
+                seed_agent = SeedAgent(
+                    task_id=self.task_id,
+                    worker_id=self.worker_id,
+                    fuzzer=self.fuzzer,
+                    sanitizer=self.sanitizer,
+                    fuzzer_manager=fuzzer_manager,
+                    repos=self.repos,
+                    log_dir=agent_log_dir,
+                    max_iterations=3,  # Quick seed generation
+                )
+
+                # Run seed generation (sync wrapper for async)
+                result = asyncio.run(seed_agent.generate_fp_seeds(
+                    sp_id=point.suspicious_point_id,
+                    function_name=point.function_name,
+                    vuln_type=point.vuln_type,
+                    description=point.description or "",
+                ))
+
+                if result.get("success"):
+                    self.log_info(
+                        f"  Generated {result.get('seeds_generated', 0)} FP seeds "
+                        f"for {point.function_name}"
+                    )
+                else:
+                    self.log_warning(f"  Failed to generate FP seeds for {point.function_name}")
+
+            except Exception as e:
+                self.log_warning(f"  FP seed generation failed for {point.function_name}: {e}")
 
     def _get_suspicious_point_by_id(self, sp_id: str) -> Optional[SuspiciousPoint]:
         """
@@ -437,6 +516,7 @@ class POVBaseStrategy(BaseStrategy):
             output_dir=self.povs_path,
             log_dir=self.log_dir / "agent" if self.log_dir else None,
             workspace_path=self.workspace_path,
+            worker_id=self.worker_id,  # For SP Fuzzer lifecycle
         )
 
         # In delta mode, SP finding is already done (SPs come from diff analysis)
@@ -449,6 +529,16 @@ class POVBaseStrategy(BaseStrategy):
         except RuntimeError:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
+
+        # Start Global Fuzzer for Delta mode (no Direction Seeds, but FP Seeds need it)
+        # In Fullscan mode, Global Fuzzer is started in _generate_direction_seeds_and_start_global_fuzzer
+        fuzzer_manager = getattr(self.executor, 'fuzzer_manager', None)
+        if fuzzer_manager and not fuzzer_manager.global_fuzzer:
+            self.log_info("Starting Global Fuzzer for FP Seeds collection...")
+            try:
+                loop.run_until_complete(fuzzer_manager.start_global_fuzzer())
+            except Exception as e:
+                self.log_warning(f"Failed to start Global Fuzzer: {e}")
 
         try:
             stats = loop.run_until_complete(pipeline.run())

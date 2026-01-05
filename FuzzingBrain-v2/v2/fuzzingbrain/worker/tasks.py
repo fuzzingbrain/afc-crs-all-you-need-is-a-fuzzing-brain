@@ -291,6 +291,13 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         logger.exception(f"Failed: {e}")
 
+        # Clean up FuzzerManager on error
+        try:
+            if 'executor' in dir() and executor is not None:
+                executor.close()
+        except Exception as cleanup_err:
+            logger.warning(f"Error during cleanup: {cleanup_err}")
+
         worker.status = WorkerStatus.FAILED
         worker.error_msg = str(e)
         worker.finished_at = datetime.now()

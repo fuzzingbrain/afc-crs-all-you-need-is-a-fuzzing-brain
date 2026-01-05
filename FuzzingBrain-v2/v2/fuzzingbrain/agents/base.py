@@ -119,6 +119,14 @@ class BaseAgent(ABC):
         return False
 
     @property
+    def include_seed_tools(self) -> bool:
+        """Whether to include seed generation tools in MCP server.
+
+        Override to True in SeedAgent. Other agents don't need seed tools.
+        """
+        return False
+
+    @property
     @abstractmethod
     def system_prompt(self) -> str:
         """System prompt for the agent."""
@@ -865,10 +873,11 @@ Write a brief summary (max 200 words):"""
             # Pass worker_id so POV tools can find the right context
             mcp_server = create_isolated_mcp_server(
                 agent_id=agent_id,
-                worker_id=self.worker_id,  # Bind worker_id for POV context lookup
+                worker_id=self.worker_id,  # Bind worker_id for POV/seed context lookup
                 include_pov_tools=self.include_pov_tools,  # Only POVAgent needs POV tools
+                include_seed_tools=self.include_seed_tools,  # Only SeedAgent needs seed tools
             )
-            self._log(f"Created isolated MCP server: {agent_id} (pov_tools={self.include_pov_tools})", level="DEBUG")
+            self._log(f"Created isolated MCP server: {agent_id} (pov_tools={self.include_pov_tools}, seed_tools={self.include_seed_tools})", level="DEBUG")
 
             # Use reporter agent context if available
             if reporter:

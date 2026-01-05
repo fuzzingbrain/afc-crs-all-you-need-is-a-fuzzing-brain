@@ -59,6 +59,7 @@ def set_pov_context(
     docker_image: Optional[str] = None,
     workspace_path: Optional[Path] = None,
     fuzzer_source: Optional[str] = None,
+    fuzzer_manager=None,  # FuzzerManager instance for SP Fuzzer integration
 ) -> None:
     """
     Set the context for POV tools (thread-safe).
@@ -77,6 +78,7 @@ def set_pov_context(
         docker_image: Docker image for running fuzzer
         workspace_path: Path to workspace directory
         fuzzer_source: Fuzzer harness source code
+        fuzzer_manager: FuzzerManager instance for SP Fuzzer corpus integration
     """
     ctx = {
         "task_id": task_id,
@@ -92,6 +94,7 @@ def set_pov_context(
         "docker_image": docker_image,
         "workspace_path": Path(workspace_path) if workspace_path else None,
         "fuzzer_source": fuzzer_source,
+        "fuzzer_manager": fuzzer_manager,
     }
     with _pov_contexts_lock:
         _pov_contexts[worker_id] = ctx
@@ -541,6 +544,9 @@ def _create_pov_core(
     pov_ids = []
     blob_paths = []
 
+    # Get FuzzerManager for SP Fuzzer integration
+    fuzzer_manager = ctx.get("fuzzer_manager")
+
     for variant_idx, blob in enumerate(blobs, start=1):
         pov_id = str(uuid.uuid4())
 
@@ -554,6 +560,19 @@ def _create_pov_core(
             logger.debug(f"[POV] Saved blob to {blob_path}")
         else:
             blob_paths.append(None)
+
+        # Add blob to SP Fuzzer corpus for mutation
+        if fuzzer_manager and suspicious_point_id:
+            try:
+                fuzzer_manager.add_pov_blob(
+                    blob=blob,
+                    sp_id=suspicious_point_id,
+                    attempt=current_attempt,
+                    variant=variant_idx,
+                )
+                logger.debug(f"[POV] Added blob to SP Fuzzer corpus: sp={suspicious_point_id[:8]}, v={variant_idx}")
+            except Exception as e:
+                logger.warning(f"[POV] Failed to add blob to SP Fuzzer: {e}")
 
         # Create POV record
         pov = POV(

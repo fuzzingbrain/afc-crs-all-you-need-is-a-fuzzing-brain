@@ -29,6 +29,7 @@ from ..agents import SuspiciousPointAgent, POVAgent, POVResult
 from ..core.models import SuspiciousPoint, SPStatus
 from ..db import RepositoryManager
 from ..tools.analyzer import set_analyzer_context
+from ..fuzzer import FuzzerManager, get_fuzzer_manager
 
 
 @dataclass
@@ -110,6 +111,7 @@ class AgentPipeline:
         workspace_path: Path = None,
         fuzzer_code: str = "",
         mcp_socket_path: str = None,
+        worker_id: str = None,
     ):
         """
         Initialize the pipeline.
@@ -125,6 +127,7 @@ class AgentPipeline:
             workspace_path: Path to workspace (for reading source code)
             fuzzer_code: Fuzzer source code (for verify agent context)
             mcp_socket_path: MCP socket path for analyzer context
+            worker_id: Worker ID for FuzzerManager lookup
         """
         self.task_id = task_id
         self.repos = repos
@@ -136,6 +139,7 @@ class AgentPipeline:
         self.workspace_path = workspace_path
         self.fuzzer_code = fuzzer_code
         self.mcp_socket_path = mcp_socket_path
+        self.worker_id = worker_id
 
         # Statistics
         self.stats = PipelineStats()
@@ -146,6 +150,16 @@ class AgentPipeline:
         # Upstream completion flags (for streaming pipeline)
         self._sp_finding_done = False   # Set when SP Find pool completes
         self._verify_done = False       # Set when Verify pool completes
+
+        # FuzzerManager for SP Fuzzer lifecycle
+        self._fuzzer_manager: Optional[FuzzerManager] = None
+
+    @property
+    def fuzzer_manager(self) -> Optional[FuzzerManager]:
+        """Get FuzzerManager (lazy lookup by worker_id)."""
+        if self._fuzzer_manager is None and self.worker_id:
+            self._fuzzer_manager = get_fuzzer_manager(self.worker_id)
+        return self._fuzzer_manager
 
     async def run(self) -> PipelineStats:
         """
@@ -406,8 +420,19 @@ class AgentPipeline:
             # Process the SP with time tracking
             import time as time_module
             sp_start_time = time_module.time()
+            sp_fuzzer_started = False
+
             try:
                 logger.info(f"[Pipeline:{agent_id}] Generating POV for SP {sp.suspicious_point_id}")
+
+                # Start SP Fuzzer for this SP (design doc: POV Agent 开始处理 SP 时启动)
+                if self.fuzzer_manager:
+                    try:
+                        sp_fuzzer_started = await self.fuzzer_manager.start_sp_fuzzer(sp.suspicious_point_id)
+                        if sp_fuzzer_started:
+                            logger.debug(f"[Pipeline:{agent_id}] Started SP Fuzzer for {sp.suspicious_point_id}")
+                    except Exception as e:
+                        logger.warning(f"[Pipeline:{agent_id}] Failed to start SP Fuzzer: {e}")
 
                 # Run POV agent with fuzzer code
                 pov_agent = POVAgent(
@@ -424,6 +449,7 @@ class AgentPipeline:
                     docker_image=self.config.docker_image,
                     workspace_path=self.workspace_path,
                     fuzzer_code=self.fuzzer_code,
+                    fuzzer_manager=self.fuzzer_manager,  # For SP Fuzzer integration
                 )
 
                 result = await pov_agent.generate_pov_async(sp.to_dict())
@@ -455,6 +481,14 @@ class AgentPipeline:
                 )
                 self.stats.pov_failed += 1
             finally:
+                # Stop SP Fuzzer (design doc: POV 成功/失败时停止)
+                if sp_fuzzer_started and self.fuzzer_manager:
+                    try:
+                        await self.fuzzer_manager.stop_sp_fuzzer(sp.suspicious_point_id)
+                        logger.debug(f"[Pipeline:{agent_id}] Stopped SP Fuzzer for {sp.suspicious_point_id}")
+                    except Exception as e:
+                        logger.warning(f"[Pipeline:{agent_id}] Failed to stop SP Fuzzer: {e}")
+
                 # Track POV generation time
                 sp_duration = time_module.time() - sp_start_time
                 self.stats.pov_time_total += sp_duration
@@ -479,6 +513,7 @@ async def run_pipeline(
     workspace_path: Path = None,
     fuzzer_code: str = "",
     sp_finding_done: bool = True,  # Default True for delta mode
+    worker_id: str = None,
 ) -> PipelineStats:
     """
     Convenience function to run the pipeline.
@@ -500,6 +535,7 @@ async def run_pipeline(
         workspace_path: Path to workspace (for reading source code)
         fuzzer_code: Fuzzer source code (for verify agent context)
         sp_finding_done: Whether SP finding is already complete (True for delta mode)
+        worker_id: Worker ID for FuzzerManager lookup
 
     Returns:
         Pipeline statistics
@@ -524,6 +560,7 @@ async def run_pipeline(
         log_dir=log_dir,
         workspace_path=workspace_path,
         fuzzer_code=fuzzer_code,
+        worker_id=worker_id,
     )
 
     # Set SP finding done flag so agents can exit when queue is empty

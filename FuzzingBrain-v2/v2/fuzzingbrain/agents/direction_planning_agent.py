@@ -392,12 +392,6 @@ Understanding this is MANDATORY - it defines what code is exploitable.
 6. Prioritize by: (a) closeness to fuzzer input, (b) {self.sanitizer} vulnerability types
 
 Remember: Only reachable code matters. Only {self.sanitizer}-detectable bugs matter.
-
-## DEBUG: Priority Functions (MUST include in core_functions)
-The following functions MUST be included in core_functions for testing:
-- xmlNewComment
-- xmlNewDocComment
-- xmlNodeGetContent
 """
         return message
 

@@ -28,7 +28,7 @@ from ...agents import DirectionPlanningAgent, FullscanSPAgent, FunctionAnalysisA
 from ...tools.directions import set_direction_context
 from ...tools.analyzer import set_analyzer_context
 from ...tools.suspicious_points import set_sp_context
-from ...llms.models import O3
+from ...fuzzer import SeedAgent
 
 
 class POVFullscanStrategy(POVBaseStrategy):
@@ -85,26 +85,9 @@ class POVFullscanStrategy(POVBaseStrategy):
         }
 
         try:
-            # Phase 1: Direction Planning (must complete first)
+            # Run everything in a single event loop to avoid litellm client caching issues
             set_direction_context(self.fuzzer)
-            directions = self._run_direction_planning()
-
-            if not directions:
-                self.log_warning("No directions created, cannot continue")
-                return result
-
-            # Phase 2+: SP Finding
-            if self.use_v2:
-                # SP Find v2: Three-phase architecture (Small Pool -> Big Pool -> Free Exploration)
-                self.log_info(f"=== SP Find v2: Three-Phase Architecture ({len(directions)} directions) ===")
-                pipeline_stats = asyncio.run(self._run_v2_pipeline(directions))
-            else:
-                # Legacy: Streaming pipeline with FullscanSPAgent
-                self.log_info(f"=== Starting Streaming Pipeline ({len(directions)} directions) ===")
-                self.log_info(f"  SP Find Pool: {self.num_parallel_agents} agents")
-                self.log_info(f"  Verify Pool: 5 agents")
-                self.log_info(f"  POV Pool: 5 agents")
-                pipeline_stats = asyncio.run(self._run_streaming_pipeline(directions))
+            pipeline_stats = asyncio.run(self._run_full_pipeline())
 
             # Collect results
             all_points = self.repos.suspicious_points.find_by_task(self.task_id)
@@ -151,7 +134,6 @@ class POVFullscanStrategy(POVBaseStrategy):
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
             max_iterations=100,
-            model=O3,  # Use top-tier model for direction planning
         )
 
         try:
@@ -168,6 +150,101 @@ class POVFullscanStrategy(POVBaseStrategy):
         self.log_info(f"Phase 1 completed in {phase1_duration:.1f}s")
 
         return self.repos.directions.find_pending(self.task_id, self.fuzzer)
+
+    async def _run_direction_planning_async(self) -> List:
+        """Run direction planning phase asynchronously."""
+        self.log_info("=== Phase 1: Direction Planning ===")
+        phase1_start = time.time()
+
+        fuzzer_code = self._get_fuzzer_source_code()
+        reachable_count = self._get_reachable_function_count()
+
+        self.log_info(f"Fuzzer: {self.fuzzer}, Reachable functions: {reachable_count}")
+
+        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        planning_agent = DirectionPlanningAgent(
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+            task_id=self.task_id,
+            worker_id=self.worker_id,
+            log_dir=agent_log_dir,
+            max_iterations=100,
+        )
+
+        try:
+            result = await planning_agent.plan_directions_async(
+                fuzzer_code=fuzzer_code,
+                reachable_count=reachable_count,
+            )
+            self.log_info(f"Direction planning completed: {result.get('directions_created', 0)} directions")
+        except Exception as e:
+            self.log_error(f"Direction planning failed: {e}")
+            return []
+
+        phase1_duration = time.time() - phase1_start
+        self.log_info(f"Phase 1 completed in {phase1_duration:.1f}s")
+
+        return self.repos.directions.find_pending(self.task_id, self.fuzzer)
+
+    async def _run_full_pipeline(self):
+        """
+        Run the full pipeline in a single event loop.
+
+        This includes:
+        1. Direction Planning (async)
+        2. Direction Seeds generation + Global Fuzzer startup
+        3. SP Finding pipeline (v2 or streaming)
+
+        Running everything in one event loop avoids litellm client caching issues
+        where HTTP clients get bound to a closed event loop.
+        """
+        # Phase 1: Direction Planning
+        directions = await self._run_direction_planning_async()
+
+        if not directions:
+            self.log_warning("No directions created, cannot continue")
+            # Return empty stats
+            from ..pipeline import PipelineStats
+            return PipelineStats()
+
+        # Phase 2+: SP Finding (Direction Seeds generation is done inside pipeline)
+        if self.use_v2:
+            # SP Find v2: Three-phase architecture (Small Pool -> Big Pool -> Free Exploration)
+            self.log_info(f"=== SP Find v2: Three-Phase Architecture ({len(directions)} directions) ===")
+            return await self._run_v2_pipeline_with_fuzzer_init(directions)
+        else:
+            # Legacy: Streaming pipeline with FullscanSPAgent
+            self.log_info(f"=== Starting Streaming Pipeline ({len(directions)} directions) ===")
+            self.log_info(f"  SP Find Pool: {self.num_parallel_agents} agents")
+            self.log_info(f"  Verify Pool: 5 agents")
+            self.log_info(f"  POV Pool: 5 agents")
+            return await self._run_streaming_pipeline_with_fuzzer_init(directions)
+
+    async def _run_streaming_pipeline_with_fuzzer_init(self, directions: List):
+        """
+        Wrapper that initializes fuzzer (Direction Seeds + Global Fuzzer)
+        before running the streaming pipeline.
+
+        This ensures all async operations run in the same event loop.
+        """
+        # Generate Direction Seeds and start Global Fuzzer first
+        await self._generate_direction_seeds_and_start_global_fuzzer(directions)
+
+        # Then run the streaming pipeline
+        return await self._run_streaming_pipeline(directions)
+
+    async def _run_v2_pipeline_with_fuzzer_init(self, directions: List):
+        """
+        Wrapper that initializes fuzzer (Direction Seeds + Global Fuzzer)
+        before running the v2 pipeline.
+
+        This ensures all async operations run in the same event loop.
+        """
+        # Generate Direction Seeds and start Global Fuzzer first
+        await self._generate_direction_seeds_and_start_global_fuzzer(directions)
+
+        # Then run the v2 pipeline
+        return await self._run_v2_pipeline(directions)
 
     async def _run_streaming_pipeline(self, directions: List):
         """
@@ -220,6 +297,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             workspace_path=self.workspace_path,
             fuzzer_code=fuzzer_code,
             mcp_socket_path=self.executor.analysis_socket_path,
+            worker_id=self.worker_id,  # For SP Fuzzer lifecycle
         )
 
         # Run all pools concurrently
@@ -310,7 +388,6 @@ class POVFullscanStrategy(POVBaseStrategy):
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
             max_iterations=100,
-            model=O3,  # Use top-tier model for direction planning
         )
 
         try:
@@ -577,6 +654,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             workspace_path=self.workspace_path,
             fuzzer_code=fuzzer_code,
             mcp_socket_path=self.executor.analysis_socket_path,
+            worker_id=self.worker_id,  # For SP Fuzzer lifecycle
         )
 
         # Start pipeline in background
@@ -643,13 +721,6 @@ class POVFullscanStrategy(POVBaseStrategy):
         if not functions:
             self.log_info("Phase 1: No functions found in small pool")
             return
-
-        # DEBUG: Test priority functions - uncomment to analyze these first
-        TEST_PRIORITY_FUNCTIONS = ["xmlNewComment", "xmlNewDocComment"]
-        functions.sort(key=lambda f: (0 if f.name in TEST_PRIORITY_FUNCTIONS else 1, f.name))
-        priority_found = [f.name for f in functions if f.name in TEST_PRIORITY_FUNCTIONS]
-        if priority_found:
-            self.log_info(f"Phase 1: Priority functions at front: {priority_found}")
 
         self.log_info(f"Phase 1: Analyzing {len(functions)} functions")
 
@@ -903,3 +974,88 @@ class POVFullscanStrategy(POVBaseStrategy):
         self.log_info(f"  Big Pool: {big_pool_total} total reachable functions")
         self.log_info(f"  Analyzed: {analyzed_count} functions")
         self.log_info(f"  Coverage: {analyzed_count}/{big_pool_total} ({100*analyzed_count/max(big_pool_total,1):.1f}%)")
+
+    # =========================================================================
+    # Fuzzer Worker Integration
+    # =========================================================================
+
+    async def _generate_direction_seeds_and_start_global_fuzzer(
+        self,
+        directions: List,
+    ) -> None:
+        """
+        Generate Direction Seeds using SeedAgent and start Global Fuzzer.
+
+        Called after Direction Planning completes.
+        Design doc: Direction Agent 完成 → SeedAgent 生成初始种子 → Global Fuzzer 启动
+
+        Args:
+            directions: List of Direction objects from Direction Planning
+        """
+        # Check if FuzzerManager is available
+        fuzzer_manager = getattr(self.executor, 'fuzzer_manager', None)
+        if not fuzzer_manager:
+            self.log_debug("FuzzerManager not available, skipping Direction Seeds generation")
+            return
+
+        self.log_info("=== Generating Direction Seeds ===")
+
+        fuzzer_code = self._get_fuzzer_source_code()
+        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+
+        seeds_generated = 0
+
+        # Generate seeds for each direction (high-risk first)
+        sorted_directions = sorted(
+            directions,
+            key=lambda d: {"high": 0, "medium": 1, "low": 2}.get(d.risk_level, 3)
+        )
+
+        for direction in sorted_directions[:5]:  # Top 5 directions
+            try:
+                # Create SeedAgent for this direction
+                seed_agent = SeedAgent(
+                    task_id=self.task_id,
+                    worker_id=self.worker_id,
+                    fuzzer=self.fuzzer,
+                    sanitizer=self.sanitizer,
+                    fuzzer_manager=fuzzer_manager,
+                    repos=self.repos,
+                    fuzzer_source=fuzzer_code,
+                    log_dir=agent_log_dir,
+                    max_iterations=20,  # Same as DirectionPlanningAgent
+                )
+
+                # Generate Direction Seeds
+                result = await seed_agent.generate_direction_seeds(
+                    direction_id=direction.direction_id,
+                    target_functions=direction.core_functions or [],
+                    risk_level=direction.risk_level,
+                    risk_reason=direction.risk_reason or "",
+                )
+
+                if result.get("success"):
+                    seeds_generated += result.get("seeds_generated", 0)
+                    self.log_info(
+                        f"  Generated {result.get('seeds_generated', 0)} seeds "
+                        f"for direction: {direction.name} ({direction.risk_level})"
+                    )
+
+            except Exception as e:
+                self.log_warning(f"  Failed to generate seeds for {direction.name}: {e}")
+
+        self.log_info(f"Direction Seeds generation complete: {seeds_generated} total seeds")
+
+        # Start Global Fuzzer with generated seeds
+        if seeds_generated > 0:
+            self.log_info("┌─────────────────────────────────────────┐")
+            self.log_info("│  Starting Global Fuzzer...              │")
+            self.log_info("└─────────────────────────────────────────┘")
+            try:
+                success = await fuzzer_manager.start_global_fuzzer()
+                if not success:
+                    self.log_warning("Failed to start Global Fuzzer")
+            except Exception as e:
+                self.log_warning(f"Error starting Global Fuzzer: {e}")
+        else:
+            self.log_info("No Direction Seeds generated, skipping Global Fuzzer startup")

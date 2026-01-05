@@ -206,6 +206,8 @@ class POVAgent(BaseAgent):
         docker_image: Optional[str] = None,
         # Fuzzer source code (passed directly to avoid DB lookup)
         fuzzer_code: str = "",
+        # FuzzerManager for SP Fuzzer integration
+        fuzzer_manager: Any = None,
     ):
         """
         Initialize POV Agent.
@@ -227,6 +229,7 @@ class POVAgent(BaseAgent):
             fuzzer_path: Path to fuzzer binary (for verification)
             docker_image: Docker image for running fuzzer
             fuzzer_code: Fuzzer source code (passed directly to avoid DB lookup)
+            fuzzer_manager: FuzzerManager for SP Fuzzer integration
         """
         super().__init__(
             llm_client=llm_client,
@@ -249,6 +252,9 @@ class POVAgent(BaseAgent):
 
         # Fuzzer source code (passed directly or loaded on demand)
         self._fuzzer_source: Optional[str] = fuzzer_code if fuzzer_code else None
+
+        # FuzzerManager for SP Fuzzer integration
+        self.fuzzer_manager = fuzzer_manager
 
         # Current suspicious point being processed
         self.suspicious_point: Optional[Dict[str, Any]] = None
@@ -517,6 +523,7 @@ Start by reading the vulnerable function source with get_function_source("{funct
             docker_image=self.docker_image,
             workspace_path=self.workspace_path,
             fuzzer_source=fuzzer_source,
+            fuzzer_manager=self.fuzzer_manager,  # For SP Fuzzer integration
         )
 
     def _check_tool_result_for_success(self, tool_name: str, result_str: str) -> bool:

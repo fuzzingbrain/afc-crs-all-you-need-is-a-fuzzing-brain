@@ -198,19 +198,34 @@ class POVPackager:
 
     async def _write_sp_details(self, folder: Path, sp: Dict[str, Any]):
         """Write sp_details.json"""
-        # Create a clean copy
-        sp_clean = {
-            "suspicious_point_id": sp.get("suspicious_point_id", sp.get("_id")),
-            "task_id": sp.get("task_id"),
-            "function_name": sp.get("function_name"),
-            "file_path": sp.get("file_path"),
-            "line_number": sp.get("line_number"),
-            "vuln_type": sp.get("vuln_type"),
-            "description": sp.get("description"),
-            "score": sp.get("score"),
-            "harness_name": sp.get("harness_name"),
-            "created_at": self._serialize_datetime(sp.get("created_at")),
-        }
+        # Handle None sp (fuzzer-discovered crash without SP)
+        if sp is None:
+            sp_clean = {
+                "suspicious_point_id": None,
+                "task_id": None,
+                "function_name": "fuzzer-discovered",
+                "file_path": None,
+                "line_number": None,
+                "vuln_type": None,
+                "description": "Crash discovered by fuzzer (no suspicious point)",
+                "score": None,
+                "harness_name": None,
+                "created_at": None,
+            }
+        else:
+            # Create a clean copy
+            sp_clean = {
+                "suspicious_point_id": sp.get("suspicious_point_id", sp.get("_id")),
+                "task_id": sp.get("task_id"),
+                "function_name": sp.get("function_name"),
+                "file_path": sp.get("file_path"),
+                "line_number": sp.get("line_number"),
+                "vuln_type": sp.get("vuln_type"),
+                "description": sp.get("description"),
+                "score": sp.get("score"),
+                "harness_name": sp.get("harness_name"),
+                "created_at": self._serialize_datetime(sp.get("created_at")),
+            }
         details_path = folder / "sp_details.json"
         details_path.write_text(
             json.dumps(sp_clean, indent=2, default=str),

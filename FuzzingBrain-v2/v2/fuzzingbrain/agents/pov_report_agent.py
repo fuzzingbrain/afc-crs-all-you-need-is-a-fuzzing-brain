@@ -161,7 +161,7 @@ class POVReportAgent(BaseAgent):
         Initialize POV Report Agent.
 
         Args:
-            model: LLM model to use (defaults to gpt-4o-mini for speed)
+            model: LLM model to use (defaults to haiku for speed)
             llm_client: LLM client instance
             max_iterations: Maximum agent iterations
             verbose: Whether to log progress
@@ -172,7 +172,7 @@ class POVReportAgent(BaseAgent):
         """
         super().__init__(
             llm_client=llm_client,
-            model=model or "gpt-4o-mini",
+            model=model or "claude-haiku-4-5-20251001",
             max_iterations=max_iterations,
             verbose=verbose,
             task_id=task_id,
