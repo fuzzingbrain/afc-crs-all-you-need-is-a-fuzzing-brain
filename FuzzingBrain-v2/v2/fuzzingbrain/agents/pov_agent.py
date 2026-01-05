@@ -25,109 +25,87 @@ from ..tools.pov import set_pov_context, update_pov_iteration, get_pov_context
 # POV Agent System Prompt
 # =============================================================================
 
-POV_AGENT_SYSTEM_PROMPT = """You are part of an authorized security research team performing vulnerability detection and verification. Your role is to create proof-of-concept test inputs that demonstrate known vulnerabilities for defensive purposes.
+POV_AGENT_SYSTEM_PROMPT = """You are a security researcher generating POV (Proof of Vulnerability) inputs to trigger a specific vulnerability.
 
-## CRITICAL: Your Target Configuration (FIXED)
+## Your Task
 
-You are generating POV for ONE SPECIFIC FUZZER with ONE SPECIFIC SANITIZER.
-These define exactly what input format works and what crashes will be detected.
+Generate binary input (blob) that triggers the identified vulnerability and causes a sanitizer-detectable crash.
 
-### FUZZER defines INPUT FORMAT
-- The fuzzer source code shows EXACTLY how input enters the library
-- Your POV must match the format the fuzzer expects
-- Read the fuzzer source code FIRST - it tells you what bytes go where
+## Target Configuration
 
-### SANITIZER defines CRASH DETECTION
-- Only crashes detectable by THIS sanitizer will be registered as success
-- AddressSanitizer: buffer overflow, OOB, use-after-free, double-free
-- MemorySanitizer: uninitialized memory reads
-- UndefinedBehaviorSanitizer: integer overflow, null deref, div-by-zero
-
-### Your POV Must:
-1. Match the fuzzer's expected input format
-2. Trigger a bug type that the sanitizer can detect
-3. Reach the vulnerable function through the fuzzer's call path
-
-## Your Goal
-
-Generate a test input (blob) that triggers the vulnerability in the target function.
-You have up to 40 POV attempts. Each attempt generates 3 blob variants that are tested.
+- **Fuzzer**: Defines the INPUT FORMAT your blob must match
+- **Sanitizer**: Defines what CRASH TYPES can be detected
+  - AddressSanitizer: buffer overflow, use-after-free, double-free
+  - MemorySanitizer: uninitialized memory reads
+  - UndefinedBehaviorSanitizer: integer overflow, null deref
 
 ## Available Tools
 
 ### Code Analysis
 - get_function_source: Read source code of functions
 - get_file_content: Read source files
-- get_callers: Find functions that call a given function
-- get_callees: Find functions called by a given function
-- search_code: Search for patterns in the codebase
+- get_callers/get_callees: Trace call relationships
+- search_code: Search for patterns
 
 ### POV Generation
-- create_pov: Generate test input blobs using Python code
+- create_pov: Generate 3 different blob variants using Python
 - verify_pov: Test if a POV triggers a crash
-- trace_pov: See which code paths a POV executes (ONLY available after 15 attempts!)
-- get_fuzzer_info: Get fuzzer source code and sanitizer info (use to refresh your memory)
-
-**IMPORTANT: Greedy Mode**
-For the first 15 POV attempts, trace_pov is DISABLED. You must:
-1. Analyze the code carefully BEFORE generating POVs
-2. Make educated guesses about what input will trigger the bug
-3. Use verify_pov to test - if no crash, iterate with different approaches
-4. After 15 attempts, trace_pov becomes available for debugging
+- trace_pov: See execution path (available after 15 attempts)
+- get_fuzzer_info: Get fuzzer source code
 
 ## Workflow
 
-1. UNDERSTAND THE VULNERABILITY (do this FIRST, before any POV attempts!)
-   - Read the vulnerable function's source code
-   - Understand what input conditions trigger the bug
-   - Trace back to see how fuzzer input reaches the vulnerable code
-   - Study the fuzzer source to understand input format
+1. **UNDERSTAND** - Read vulnerable function, trace data flow from fuzzer input
+2. **DESIGN** - Plan what bytes trigger the vulnerability
+3. **CREATE** - Write generator code that produces 3 DIFFERENT blob variants
+4. **VERIFY** - Test each blob, iterate if no crash
 
-2. DESIGN YOUR TEST INPUT
-   - Think about what bytes/structure will reach the vulnerable code path
-   - Consider file format requirements (headers, checksums, etc.)
-   - Plan how to trigger the specific vulnerability condition
+## CRITICAL: Generator Code Format
 
-3. CREATE POV
-   - Write Python code that generates the test input
-   - Call create_pov with your generator code
-   - The generate() function must return bytes
-
-4. VERIFY POV
-   - Call verify_pov to test if your POV triggers a crash
-   - If crashed=True, you succeeded!
-   - If crashed=False, analyze verify output and iterate
-
-5. DEBUG WITH TRACE (only after 15 failed attempts)
-   - trace_pov becomes available after 15 attempts
-   - Use it to see which functions were executed
-   - Check if your input reached the target function
-
-## create_pov Generator Code Format
+Your `generate(variant)` function receives variant number (1, 2, or 3).
+You MUST return DIFFERENT blobs for each variant!
 
 ```python
-def generate():
-    # Modules available: struct, zlib, hashlib, base64, random, io, math, string
-    # Create your test input here
-    data = struct.pack('>I', 0xDEADBEEF)
-    return data  # Must return bytes
+def generate(variant: int) -> bytes:
+    '''
+    Generate POV blob for the given variant (1, 2, or 3).
+    Each variant should try a DIFFERENT approach to trigger the bug!
+    '''
+    import struct
+
+    if variant == 1:
+        # Approach 1: minimal trigger
+        return b'\\x00\\x01\\x02\\x03'
+    elif variant == 2:
+        # Approach 2: with padding
+        return b'\\x00\\x01\\x02\\x03' + b'\\x00' * 100
+    else:
+        # Approach 3: alternative values
+        return struct.pack('<I', 0xFFFFFFFF)
+```
+
+Or use variant to parameterize:
+```python
+def generate(variant: int) -> bytes:
+    import struct
+    sizes = [16, 256, 4096]  # Try different sizes
+    size = sizes[variant - 1]
+    return struct.pack('<I', size) + b'A' * size
 ```
 
 ## Tips
 
-- Start simple, then add complexity
-- Pay attention to file format headers and magic bytes
-- Check size constraints and buffer boundaries
-- Use random variations to explore edge cases
-- In greedy mode (first 15 attempts): iterate quickly, try different approaches
-- After greedy mode: use trace_pov to debug why inputs aren't reaching target
+- Read fuzzer source FIRST to understand input format
+- Each variant should try a different approach/value
+- Start simple, add complexity in later variants
+- If verify fails, analyze output and adjust
 
-## IMPORTANT
+## Limits
 
-- Each create_pov call counts as one attempt (max 40)
-- Each attempt generates 3 variants with the same code
-- Focus on quality over quantity - think before generating
-- When verify_pov shows a crash, you're done!
+- Max 40 create_pov calls (attempts)
+- Each attempt generates 3 variants (stored as v1.bin, v2.bin, v3.bin)
+- trace_pov available after 15 attempts
+- Stop when crashed=True
 """
 
 
@@ -609,6 +587,8 @@ Start by reading the vulnerable function source with get_function_source("{funct
         iteration = 0
         final_response = ""
         response = None
+        consecutive_no_tool_calls = 0  # Track consecutive iterations without tool calls
+        max_consecutive_no_tools = 5   # Give up after this many consecutive refusals
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -661,6 +641,7 @@ Start by reading the vulnerable function source with get_function_source("{funct
 
             # Check for tool calls
             if response.tool_calls:
+                consecutive_no_tool_calls = 0  # Reset counter
                 self._log(f"LLM requested {len(response.tool_calls)} tool call(s)", level="INFO")
 
                 # Add assistant message with tool calls
@@ -711,16 +692,66 @@ Start by reading the vulnerable function source with get_function_source("{funct
                             pass
                         break
 
+                    # Check for verify_pov failure - inject analysis prompt
+                    if tool_name == "verify_pov":
+                        try:
+                            result = json.loads(tool_result)
+                            if result.get("success") and not result.get("crashed"):
+                                # POV didn't crash - inject analysis prompt
+                                output_hint = result.get("output_hint", "")
+                                self.messages.append({
+                                    "role": "user",
+                                    "content": f"""This POV did not trigger a crash. Before trying again, ANALYZE:
+
+1. Did the input reach the vulnerable function? Check the output hint:
+{output_hint[:300] if output_hint else "(no output)"}
+
+2. What conditions are needed to trigger the vulnerability?
+3. What's different between your input and what the vulnerability needs?
+
+Use get_function_source or trace_pov (if available) to understand better, then create a NEW POV with adjusted approach."""
+                                })
+                                self._log("Injected post-failure analysis prompt", level="DEBUG")
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+
                 # Check if we should stop after tool calls
                 if self.pov_success:
                     final_response = f"POV SUCCESS! Found crashing input."
                     break
 
             else:
-                # No tool calls - agent is done or stuck
-                final_response = response.content
-                self._log(f"Agent stopped calling tools after {iteration} iterations", level="INFO")
-                break
+                # No tool calls - LLM might be giving up
+                consecutive_no_tool_calls += 1
+                self._log(f"LLM stopped calling tools ({consecutive_no_tool_calls}/{max_consecutive_no_tools})", level="WARNING")
+
+                # Give up after too many consecutive refusals
+                if consecutive_no_tool_calls >= max_consecutive_no_tools:
+                    self._log(f"LLM refused to call tools {max_consecutive_no_tools} times, giving up", level="ERROR")
+                    final_response = response.content or "LLM stopped trying"
+                    break
+
+                # Add the assistant's response
+                if response.content:
+                    self.messages.append({
+                        "role": "assistant",
+                        "content": response.content,
+                    })
+
+                # Force continuation: remind LLM to keep trying
+                remaining_attempts = self.max_pov_attempts - self.pov_attempts
+                self.messages.append({
+                    "role": "user",
+                    "content": f"""You still have {remaining_attempts} POV attempts remaining. Do NOT give up.
+
+Try a DIFFERENT approach:
+- If previous blobs didn't crash, analyze WHY and adjust
+- Try different byte values, sizes, or structures
+- Look for alternative code paths to the vulnerable function
+
+Call create_pov with a new generator code NOW."""
+                })
+                # Continue the loop
 
         if iteration >= self.max_iterations:
             self._log(f"Max iterations ({self.max_iterations}) reached", level="WARNING")
