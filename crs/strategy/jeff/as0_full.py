@@ -341,13 +341,25 @@ def extract_python_code_from_response(log_file, text, max_retries=2, timeout=30)
     Returns:
         str: Extracted Python code or None if extraction failed
     """
-    quick_pattern = r"```(?:python)?\s*([\s\S]*?)```"
-    m = re.search(quick_pattern, text)
+    # First, try to find explicitly marked Python code blocks
+    python_pattern = r"```python\s*([\s\S]*?)```"
+    m = re.search(python_pattern, text)
     if m:
         candidate = m.group(1).strip()
-        if candidate:                     # non-empty code
+        if candidate:
             log_message(log_file,
-                        f"Quick-path extracted {len(candidate)} chars of code")
+                        f"Quick-path extracted {len(candidate)} chars of Python code")
+            return candidate
+
+    # Fallback: try code blocks without language specifier (but not other languages)
+    # This regex matches ``` followed by newline (no language) or ```python
+    unlabeled_pattern = r"```\s*\n([\s\S]*?)```"
+    m = re.search(unlabeled_pattern, text)
+    if m:
+        candidate = m.group(1).strip()
+        if candidate:
+            log_message(log_file,
+                        f"Quick-path extracted {len(candidate)} chars of unlabeled code")
             return candidate  
             
     prompt = f"Please extract the Python code from the following text to generate a correct exploit. Return with markdown code blocks ```python ```. No comment. No explanation.\n\nHere is the text:\n{text}"
@@ -369,11 +381,17 @@ def extract_python_code_from_response(log_file, text, max_retries=2, timeout=30)
             
             returned_text = response['choices'][0]['message']['content']
             
-            # Extract code from markdown blocks
-            pattern = r"```(?:python)?\s*([\s\S]*?)```"
-            matches = re.findall(pattern, returned_text)
-            if matches:
-                extracted_code = matches[0].strip()
+            # Extract code from markdown blocks - prefer explicit python blocks
+            python_matches = re.findall(r"```python\s*([\s\S]*?)```", returned_text)
+            if python_matches:
+                extracted_code = python_matches[0].strip()
+                if extracted_code:
+                    return extracted_code
+
+            # Fallback to unlabeled code blocks
+            unlabeled_matches = re.findall(r"```\s*\n([\s\S]*?)```", returned_text)
+            if unlabeled_matches:
+                extracted_code = unlabeled_matches[0].strip()
                 if extracted_code:
                     # print(f"Successfully extracted {len(extracted_code)} characters of code")
                     return extracted_code
@@ -402,11 +420,17 @@ def extract_python_code_from_response(log_file, text, max_retries=2, timeout=30)
 
         returned_text, success = call_llm(log_file, messages, use_another_model)
         if success:
-            # Extract code from markdown blocks
-            pattern = r"```(?:python)?\s*([\s\S]*?)```"
-            matches = re.findall(pattern, returned_text)
-            if matches:
-                extracted_code = matches[0].strip()
+            # Extract code from markdown blocks - prefer explicit python blocks
+            python_matches = re.findall(r"```python\s*([\s\S]*?)```", returned_text)
+            if python_matches:
+                extracted_code = python_matches[0].strip()
+                if extracted_code:
+                    return extracted_code
+
+            # Fallback to unlabeled code blocks
+            unlabeled_matches = re.findall(r"```\s*\n([\s\S]*?)```", returned_text)
+            if unlabeled_matches:
+                extracted_code = unlabeled_matches[0].strip()
                 if extracted_code:
                     # print(f"Successfully extracted {len(extracted_code)} characters of code with fallback model")
                     return extracted_code
@@ -2531,7 +2555,7 @@ def cleanup_seed_corpus(dir_path, max_age_minutes=10):
             pass   # ignore files that disappear meanwhile
 
 def doAdvancedPoV0(log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer, project_dir, project_name, focus, language='c') -> bool:
-    log_message(log_file, f"POV_PHASE: {POV_PHASE} doAdvancedPoV0") 
+    log_message(log_file, f"POV_PHASE-{POV_PHASE} doAdvancedPoV0") 
        
     start_time = time.time()
     end_time = start_time + (FUZZING_TIMEOUT_MINUTES * 60)
@@ -2546,7 +2570,7 @@ def doAdvancedPoV0(log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer, p
     
     # Try with different models
     for model_name in MODELS:
-        log_message(log_file, f"Attempting with model: {model_name}")
+        # log_message(log_file, f"Attempting with model: {model_name}")
         messages = [{"role": "system", "content": "You are a security expert specializing in vulnerability detection."}]
         messages.append({"role": "user", "content": initial_msg})
         
@@ -3008,7 +3032,7 @@ def extract_function_body(file_path, function_name):
     return ""
 
 
-def extract_call_paths_from_analysis_service(project_name,fuzzer_path,fuzzer_src_path, focus, project_src_dir, target_functions, use_qx):
+def extract_call_paths_from_analysis_service(project_name,fuzzer_path,fuzzer_src_path, focus, project_src_dir, target_functions):
     """
     Extract call paths leading to vulnerable functions using local static analysis.
     
@@ -3021,13 +3045,12 @@ def extract_call_paths_from_analysis_service(project_name,fuzzer_path,fuzzer_src
         focus (str): Focus area identifier
         project_src_dir (str): Project source directory
         target_functions (dict): Dictionary of target functions
-        use_qx (bool): Whether to use CodeQL analysis
         
     Returns:
         list: List of call paths
     """
     # Delegate to the imported local analysis function
-    return extract_call_paths_local(fuzzer_path, fuzzer_src_path, focus, project_src_dir, target_functions, use_qx)
+    return extract_call_paths_local(fuzzer_path, fuzzer_src_path, focus, project_src_dir, target_functions, False)
 
 
 # Sample call path
@@ -3071,36 +3094,14 @@ TEST_CALL_PATHS = [
     ]
 ]
 
-
-
-def extract_reachable_functions_from_analysis_service_for_c(fuzzer_path, fuzzer_src_path, focus, project_src_dir):
-    """Extract reachable functions for C projects using local static analysis"""
-    return extract_reachable_functions_from_analysis_service(fuzzer_path, fuzzer_src_path, focus, project_src_dir, use_qx=False)
-
-
-
-def extract_reachable_functions_from_analysis_service(fuzzer_path, fuzzer_src_path, focus, project_src_dir, use_qx=True):
+def extract_reachable_functions_from_analysis_service(fuzzer_path, fuzzer_src_path, focus, project_dir):
     """Extract reachable functions using local static analysis"""
     task_id = os.environ.get("TASK_ID")
-    if not task_id:
-        print("Warning: TASK_ID environment variable not set")
-        return []
-
-    # Find the actual task directory
-    task_dir = find_task_directory(task_id)
-    if not task_dir:
-        print(f"Could not find task directory for task_id {task_id}")
-        return []
-
-    # Run analysis if results don't exist
-    if use_qx:
-        results_file = os.path.join(task_dir, f"{focus}_qx.json")
-    else:
-        results_file = os.path.join(task_dir, f"{focus}.json")
+    task_dir = project_dir
+    results_file = os.path.join(task_dir, f"{focus}.json")
 
     if not os.path.exists(results_file):
         print(f"[try 1/1] Running local static analysis for {focus}")
-        print(f"  task_id: {task_id}")
         print(f"  task_dir: {task_dir}")
         print(f"  fuzzer_source_path: {fuzzer_src_path}")
 
@@ -3113,37 +3114,29 @@ def extract_reachable_functions_from_analysis_service(fuzzer_path, fuzzer_src_pa
         import time
         time.sleep(2)
 
-    # Load results
-    if use_qx:
-        results = load_qx_analysis_results(task_id, focus, task_dir)
-        if results:
-            reachable_funcs = get_reachable_functions_qx(fuzzer_src_path, results)
-            return reachable_funcs
-    else:
-        # For non-QX, load regular results
-        if os.path.exists(results_file):
-            import json
-            with open(results_file, 'r') as f:
-                results = json.load(f)
+    if os.path.exists(results_file):
+        import json
+        with open(results_file, 'r') as f:
+            results = json.load(f)
 
-            # Normalize fuzzer path
-            fuzzer_key = fuzzer_src_path.replace(os.sep, '/')
-            entry_point = f"{fuzzer_key}.fuzzerTestOneInput" if fuzzer_src_path.endswith('.java') else f"{fuzzer_key}.LLVMFuzzerTestOneInput"
+        # Normalize fuzzer path
+        fuzzer_key = fuzzer_src_path.replace(os.sep, '/')
+        entry_point = f"{fuzzer_key}.fuzzerTestOneInput" if fuzzer_src_path.endswith('.java') else f"{fuzzer_key}.LLVMFuzzerTestOneInput"
 
-            reachable_names = results.get('reachable', {}).get(entry_point, [])
-            functions_map = results.get('functions', {})
+        reachable_names = results.get('reachable', {}).get(entry_point, [])
+        functions_map = results.get('functions', {})
 
-            reachable_funcs = []
-            for func_name in reachable_names:
-                func_def = functions_map.get(func_name, {})
-                reachable_funcs.append({
-                    'name': func_def.get('Name', func_name),
-                    'file_path': func_def.get('FilePath', ''),
-                    'start_line': func_def.get('StartLine', 0),
-                    'end_line': func_def.get('EndLine', 0),
-                    'body': func_def.get('SourceCode', '')  # Use 'body' for consistency
-                })
-            return reachable_funcs
+        reachable_funcs = []
+        for func_name in reachable_names:
+            func_def = functions_map.get(func_name, {})
+            reachable_funcs.append({
+                'name': func_def.get('Name', func_name),
+                'file_path': func_def.get('FilePath', ''),
+                'start_line': func_def.get('StartLine', 0),
+                'end_line': func_def.get('EndLine', 0),
+                'body': func_def.get('SourceCode', '')  # Use 'body' for consistency
+            })
+        return reachable_funcs
 
     return []
 
@@ -3423,7 +3416,7 @@ Write nothing except the Python script (with embedded comments).
 
 
 def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzzer_name, sanitizer, project_dir, project_name, focus, language='c') -> bool:
-    log_message(log_file, f"POV_PHASE: {POV_PHASE} doAdvancedPoV")
+    log_message(log_file, f"POV_PHASE-{POV_PHASE} doAdvancedPoV")
 
     # TEMPORARY: Skip to Phase 3 only for testing
     # if POV_PHASE != 3:
@@ -3435,27 +3428,25 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
     pov_success = False
     pov_metadata = {}
     if POV_PHASE == 0:
-        if language.startswith('j'):
-            vulnerable_functions = None
-            all_reachable_funcs = extract_reachable_functions_from_analysis_service(fuzzer_path,fuzzer_src_path,focus,project_src_dir,False)
-            reachable_funcs = all_reachable_funcs
-            if len(all_reachable_funcs) > 10:
-                model_name = OPENAI_MODEL_O3
-                top_k = len(all_reachable_funcs) // 10
-                if top_k > 10:
-                    top_k = 10
-                vulnerable_functions = find_most_likely_vulnerable_functions(log_file,all_reachable_funcs,language,model_name,top_k)
-                reachable_funcs = extract_vulnerable_functions(reachable_funcs,vulnerable_functions)
- 
-            initial_msg = create_full_scan_prompt(
-                fuzzer_code,
-                sanitizer,
-                language,
-                reachable_funcs,
-                vulnerable_functions,
-            )
-        else:
-            initial_msg = create_commit_based_prompt(project_name,fuzzer_code, commit_diff,sanitizer,language)
+        vulnerable_functions = None
+        all_reachable_funcs = extract_reachable_functions_from_analysis_service(fuzzer_path,fuzzer_src_path,focus,project_dir)
+        reachable_funcs = all_reachable_funcs
+        if len(all_reachable_funcs) > 10:
+            model_name = OPENAI_MODEL_O3
+            top_k = len(all_reachable_funcs) // 10
+            if top_k > 10:
+                top_k = 10
+            vulnerable_functions = find_most_likely_vulnerable_functions(log_file,all_reachable_funcs,language,model_name,top_k)
+            reachable_funcs = extract_vulnerable_functions(reachable_funcs,vulnerable_functions)
+
+        initial_msg = create_full_scan_prompt(
+            fuzzer_code,
+            sanitizer,
+            language,
+            reachable_funcs,
+            vulnerable_functions,
+        )
+
         print(f"initial_msg: {initial_msg}")
         return doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language)
     elif POV_PHASE == 1:
@@ -3484,11 +3475,7 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
                     break
         return pov_success, pov_metadata
     elif POV_PHASE == 2:
-        if language.startswith('j'):
-            all_reachable_funcs = extract_reachable_functions_from_analysis_service(fuzzer_path,fuzzer_src_path,focus,project_src_dir)
-        else:
-            all_reachable_funcs = extract_reachable_functions_from_analysis_service_for_c(fuzzer_path,fuzzer_src_path,focus,project_src_dir)
-
+        all_reachable_funcs = extract_reachable_functions_from_analysis_service(fuzzer_path,fuzzer_src_path,focus,project_dir)
         reachable_funcs = all_reachable_funcs
         vulnerable_functions = None
         if len(all_reachable_funcs) > 10:
@@ -3517,10 +3504,7 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
         print(f"{initial_msg}")
         return doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language)
     elif POV_PHASE == 3:
-        if language.startswith('j'):
-            all_reachable_funcs = extract_reachable_functions_from_analysis_service(fuzzer_path,fuzzer_src_path,focus,project_src_dir)
-        else:
-            all_reachable_funcs = extract_reachable_functions_from_analysis_service_for_c(fuzzer_path,fuzzer_src_path,focus,project_src_dir)
+        all_reachable_funcs = extract_reachable_functions_from_analysis_service(fuzzer_path,fuzzer_src_path,focus,project_dir)
         reachable_funcs = all_reachable_funcs
         vulnerable_functions = None
         if len(all_reachable_funcs) > 10:
@@ -3553,16 +3537,13 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
         # query static analysis for code paths from fuzzer to target functions
         # format of reachable_funcs [{	Name, FilePath, StartLine, EndLine, SourceCode}...]
         target_functions = covert_target_functions_format(reachable_funcs)
-
-        log_message(log_file, f"target_functions (reachable_funcs): {target_functions}")
-
-        # Always use simple analysis (use_qx=False) since CodeQL/qx is not configured
+        # log_message(log_file, f"target_functions (reachable_funcs): {target_functions}")
         # The simple Joern-based analysis works for both C and Java
-        call_paths = extract_call_paths_from_analysis_service(project_name, fuzzer_path,fuzzer_src_path,focus,project_src_dir,target_functions,False) 
+        call_paths = extract_call_paths_from_analysis_service(project_name, fuzzer_path,fuzzer_src_path,focus,project_src_dir,target_functions) 
         # just for testing
         # call_paths = TEST_CALL_PATHS
         # for each call path, doPOV
-        MAX_CALL_PATHS = 5  # Reduced from 10 to save context window
+        MAX_CALL_PATHS = 10  # Reduced from 10 to save context window
         if len(call_paths) > MAX_CALL_PATHS:
             log_message(log_file, f"Too many call paths ({len(call_paths)}), limiting to first {MAX_CALL_PATHS}")
             call_paths = call_paths[:MAX_CALL_PATHS]
@@ -3590,7 +3571,7 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
         return pov_success, pov_metadata
     
     else:
-        log_message(log_file, f"POV_PHASE: {POV_PHASE} doAdvancedPoV does not exist") 
+        log_message(log_file, f"POV_PHASE-{POV_PHASE} doAdvancedPoV does not exist") 
     
     return pov_success, pov_metadata
 
@@ -4935,8 +4916,6 @@ def main():
 
     fuzzer_name = os.path.basename(fuzzer_path)
     fuzz_dir = os.path.dirname(fuzzer_path)
-
-    task_detail = load_task_detail(fuzz_dir)
 
     global POV_SUCCESS_DIR
     POV_SUCCESS_DIR = os.path.join(fuzz_dir, POV_METADATA_DIR)

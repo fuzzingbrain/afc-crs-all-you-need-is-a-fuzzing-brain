@@ -324,25 +324,12 @@ def extract_call_paths_from_analysis_service(
         WORK_DIR: Working directory for task data (default: /workspace)
     """
     task_id = os.environ.get("TASK_ID")
-    if not task_id:
-        print("Warning: TASK_ID environment variable not set")
-        return []
+    if "/fuzz-tooling/build/out" in fuzzer_path:
+        project_dir = fuzzer_path.split("/fuzz-tooling/build/out")[0] + "/"
+    else:
+        project_dir = os.path.dirname(os.path.dirname(fuzzer_path))
 
-    # Find the actual task directory
-    task_dir = find_task_directory(task_id)
-    if not task_dir:
-        print(f"Could not find task directory for task_id {task_id}")
-        return []
-
-    print(f"Using task directory: {task_dir}")
-
-    # Import tracer if available
-    try:
-        from opentelemetry import trace
-        tracer = trace.get_tracer(__name__)
-        use_tracing = True
-    except ImportError:
-        use_tracing = False
+    task_dir = project_dir
 
     # Initialize result list
     call_paths = []
@@ -365,29 +352,17 @@ def extract_call_paths_from_analysis_service(
             simplified_modified_functions[file_path] = function_info
 
     print(f"[try 1/1] Running local static analysis")
-    print(f"  task_id: {task_id}")
+    print(f"  task_dir: {task_dir}")
     print(f"  focus: {focus}")
     print(f"  project_src_dir: {project_src_dir}")
     print(f"  fuzzer_path: {fuzzer_path}")
     print(f"  fuzzer_source_path: {fuzzer_src_path}")
 
     try:
-        if use_tracing:
-            with tracer.start_as_current_span("static_analysis.local") as span:
-                span.set_attribute("crs.action.category", "static_analysis")
-                span.set_attribute("crs.action.name", "extract_call_paths_local")
-                span.set_attribute("task_id", task_id)
-                span.set_attribute("use_qx", use_qx)
-
-                call_paths = _run_local_analysis(
-                    task_id, task_dir, focus, fuzzer_src_path,
-                    simplified_modified_functions, use_qx
-                )
-        else:
-            call_paths = _run_local_analysis(
-                task_id, task_dir, focus, fuzzer_src_path,
-                simplified_modified_functions, use_qx
-            )
+        call_paths = _run_local_analysis(
+            task_id, task_dir, focus, fuzzer_src_path,
+            simplified_modified_functions, use_qx
+        )
 
     except Exception as e:
         print(f"Error running local static analysis: {str(e)}")
@@ -483,7 +458,7 @@ def _run_local_analysis(
     # If results don't exist, run the analysis
     if not os.path.exists(results_file):
         print(f"Analysis results not found at {results_file}, running analysis...")
-        success = run_static_analysis_local(task_id, task_dir, focus)
+        success = run_static_analysis_local(task_dir, focus)
         if not success:
             print("Failed to run static analysis")
             return []
@@ -617,7 +592,22 @@ def _run_local_analysis(
                 # Filter and score reachable functions
                 scored_funcs = []
                 for func_name in reachable_funcs:
+                    # Skip operators and unresolved namespaces
+                    if func_name.startswith('<operator>') or func_name.startswith('<unresolvedNamespace>'):
+                        continue
+
+                    # Try direct match first
                     func_def = functions_map.get(func_name, {})
+
+                    # If not found, try fuzzy matching by base function name
+                    if not func_def:
+                        # Extract base name (e.g., "Buffer.Buffer" from "Buffer.Buffer:void(ANY,ANY)")
+                        base_name = func_name.split(':')[0] if ':' in func_name else func_name
+                        for key, val in functions_map.items():
+                            if base_name in key or key.endswith(base_name):
+                                func_def = val
+                                break
+
                     if not func_def:
                         continue
 
@@ -634,6 +624,32 @@ def _run_local_analysis(
                 # Sort by score descending, take top targets
                 scored_funcs.sort(reverse=True, key=lambda x: x[0])
                 top_targets = scored_funcs[:10]  # Top 10 interesting functions (reduced to save context)
+
+                # If no targets found from reachability, sample top functions by source code size
+                # This handles cases where Joern produces incomplete reachability (stubs without source)
+                if len(top_targets) == 0:
+                    print(f"No reachable functions with source code found, sampling top functions by size...")
+                    # Score all functions with source code
+                    all_scored = []
+                    for func_name, func_def in functions_map.items():
+                        # Skip operators, globals, and unresolved
+                        if (func_name.startswith('<operator>') or
+                            func_name.startswith('<unresolved') or
+                            func_name.endswith(':<global>') or
+                            func_name.startswith('<includes>')):
+                            continue
+
+                        source_code = func_def.get('SourceCode', '')
+                        file_path = func_def.get('FilePath', '')
+                        if not source_code or not file_path or file_path == '<empty>':
+                            continue
+
+                        score = len(source_code)
+                        all_scored.append((score, func_name, func_def))
+
+                    all_scored.sort(reverse=True, key=lambda x: x[0])
+                    top_targets = all_scored[:10]
+                    print(f"Sampled {len(top_targets)} top functions by source code size")
 
                 print(f"Selected {len(top_targets)} interesting target functions for path computation")
 
@@ -652,19 +668,27 @@ def _run_local_analysis(
 
                 print(f"Built call graph with {len(adj)} nodes, {len(call_graph_edges)} edges")
 
-                # Check if call graph uses abbreviated names (bug in simple parser)
-                sample_callers = list(adj.keys())[:5]
-                uses_abbreviated_names = any(len(caller) <= 3 for caller in sample_callers)
+                # Check if call graph is mostly operators/unresolved (not useful for path finding)
+                sample_callers = list(adj.keys())[:20]
+                useless_callers = sum(1 for c in sample_callers if c.startswith('<operator>') or c.startswith('<unresolved') or len(c) <= 3)
+                uses_abbreviated_names = len(sample_callers) > 0 and (useless_callers / len(sample_callers)) > 0.5
 
                 if uses_abbreviated_names:
-                    print(f"Warning: Call graph uses abbreviated names, cannot compute paths reliably")
-                    print(f"Falling back to sampling interesting reachable functions")
+                    print(f"Warning: Call graph is mostly operators ({useless_callers}/{len(sample_callers)}), cannot compute paths reliably")
+                    print(f"Falling back to sampling {len(top_targets)} interesting reachable functions")
 
                     # Fallback: Return sample of interesting functions as 2-hop paths
                     # Create synthetic paths: entry_point -> interesting_function
+
+                    # Look up entry point function with fuzzy matching
+                    entry_func = functions_map.get(entry_point, {})
+                    if not entry_func:
+                        for key, val in functions_map.items():
+                            if entry_point in key or key.endswith(entry_point):
+                                entry_func = val
+                                break
+
                     for score, target_name, target_def in top_targets[:30]:
-                        # Create 2-node path
-                        entry_func = functions_map.get(entry_point, {})
                         processed_path = [
                             {
                                 "file": entry_func.get('FilePath', ''),

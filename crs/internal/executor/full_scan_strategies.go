@@ -100,12 +100,6 @@ func runFullScanPlaceholderStrategy(fuzzer, taskDir, projectDir, fuzzDir, langua
 		fullScanConfig.WorkerIndex,
 	)
 
-	if povSuccess {
-		log.Printf("✓ Full scan placeholder strategy succeeded")
-	} else {
-		log.Printf("✗ Full scan placeholder strategy did not find POV")
-	}
-
 	return povSuccess
 }
 
