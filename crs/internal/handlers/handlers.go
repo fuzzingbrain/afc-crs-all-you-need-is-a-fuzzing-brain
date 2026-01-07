@@ -14,9 +14,6 @@ import (
     "time"
     "fmt"
     "strings"
-    "context"
-    "crs/internal/telemetry"
-    "go.opentelemetry.io/otel/attribute"
 )
 
 type Handler struct {
@@ -345,24 +342,6 @@ defer resp.Body.Close()
         return
     }
     
-    //send task detail to telemetry server 
-    for i, t := range task.Tasks {
-        ctx := context.Background()
-        ctx, span := telemetry.StartSpan(ctx, "task_detail")
-        defer span.End()
-        for key, value := range t.Metadata {
-            span.SetAttributes(attribute.String(key, value))
-        }
-        span.SetAttributes(
-            attribute.String("task", fmt.Sprint(i)),
-            attribute.String("task_id", t.TaskID.String()),
-            attribute.String("task_type", string(t.Type)),
-            attribute.Int64("deadline", t.Deadline),
-            attribute.String("project_name", t.ProjectName),
-            attribute.String("focus", t.Focus),
-        )
-    }
-
     log.Printf("Successfully processed SubmitTask MessageID: %s", task.MessageID)
     c.Status(http.StatusAccepted)
 }

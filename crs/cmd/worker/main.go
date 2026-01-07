@@ -7,7 +7,6 @@ import (
     "crs/internal/config"
     "crs/internal/handlers"
     "crs/internal/services"
-    "crs/internal/telemetry"
 )
 
 func main() {
@@ -23,12 +22,6 @@ func main() {
     // Validate configuration
     if err := cfg.Validate(); err != nil {
         log.Fatalf("Invalid configuration: %v", err)
-    }
-
-    // Initialize telemetry
-    _, err = telemetry.InitTelemetry("afc-crs-all-you-need-is-a-fuzzing-brain-worker-node")
-    if err != nil {
-        log.Printf("Warning: Failed to initialize telemetry: %v", err)
     }
 
     r := gin.Default()

@@ -1,7 +1,5 @@
 #!/bin/bash
 
-mkdir -p logs
-
 DATE=$(date +"%Y%m%d_%H%M%S")
 IN_PLACE=false
 
@@ -43,13 +41,6 @@ if [ -z "$ORIGINAL_DATASET" ]; then
     exit 1
 fi
 
-# Set log file name
-if [ -n "$LOG_NAME" ]; then
-    LOG_FILE="logs/${LOG_NAME}.log"
-else
-    LOG_FILE="logs/${DATE}.log"
-fi
-
 # Check if the dataset path exists
 if [ ! -d "$ORIGINAL_DATASET" ]; then
     echo "Error: Dataset directory '$ORIGINAL_DATASET' does not exist!"
@@ -59,41 +50,53 @@ fi
 # Determine workspace to use
 if [ "$IN_PLACE" = true ]; then
     WORKSPACE="$ORIGINAL_DATASET"
-    echo "Starting CRS local run at $(date)" | tee "$LOG_FILE"
-    echo "Log file: $LOG_FILE" | tee -a "$LOG_FILE"
-    echo "Using existing dataset directly: $WORKSPACE" | tee -a "$LOG_FILE"
 else
     # Extract project name from the dataset path
     PROJECT_NAME=$(basename "$ORIGINAL_DATASET")
 
     # create new workspace directory
     WORKSPACE="/crs-workdir/workspace_${PROJECT_NAME}_${DATE}"
+fi
 
+# Set log file name (inside the workspace directory)
+if [ -n "$LOG_NAME" ]; then
+    LOG_FILE="$WORKSPACE/${LOG_NAME}.log"
+else
+    LOG_FILE="$WORKSPACE/${DATE}.log"
+fi
+
+# Ensure workspace directory exists before writing log
+mkdir -p "$WORKSPACE"
+
+if [ "$IN_PLACE" = true ]; then
+    echo "Starting CRS local run at $(date)" | tee "$LOG_FILE"
+    echo "Log file: $LOG_FILE" | tee -a "$LOG_FILE"
+    echo "Using existing dataset directly: $WORKSPACE" | tee -a "$LOG_FILE"
+else
     echo "Starting CRS local run at $(date)" | tee "$LOG_FILE"
     echo "Log file: $LOG_FILE" | tee -a "$LOG_FILE"
     echo "Original dataset: $ORIGINAL_DATASET" | tee -a "$LOG_FILE"
     echo "New workspace: $WORKSPACE" | tee -a "$LOG_FILE"
-
-    # create new workspace directory
-    echo "Creating new workspace directory..." | tee -a "$LOG_FILE"
-    mkdir -p "$WORKSPACE"
 
     # copy original dataset to new workspace
     echo "Copying original dataset to new workspace..." | tee -a "$LOG_FILE"
     cp -r "$ORIGINAL_DATASET"/* "$WORKSPACE/"
 fi
 
-# Setup Python virtual environment in workspace
+# Setup Python virtual environment in parent of workspace (shared across tasks)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="$WORKSPACE/crs_venv"
+WORKSPACE_PARENT="$(dirname "$WORKSPACE")"
+VENV_DIR="$WORKSPACE_PARENT/crs_venv"
+VENV_CREATED=false
 if [ ! -d "$VENV_DIR" ]; then
     echo "Creating Python virtual environment at $VENV_DIR..." | tee -a "$LOG_FILE"
     python3 -m venv "$VENV_DIR"
+    VENV_CREATED=true
 fi
 
-# Activate venv and install dependencies
+# Activate venv and install dependencies only if venv was just created
 source "$VENV_DIR/bin/activate"
-if [ -f "$SCRIPT_DIR/strategy/requirements.txt" ]; then
+if [ "$VENV_CREATED" = true ] && [ -f "$SCRIPT_DIR/strategy/requirements.txt" ]; then
     echo "Installing Python dependencies..." | tee -a "$LOG_FILE"
     pip install -q -r "$SCRIPT_DIR/strategy/requirements.txt" 2>/dev/null
 fi
