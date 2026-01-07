@@ -181,8 +181,6 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 			log.Printf("No 'diff' directory found, setting task type to 'full'")
 		}
 
-		log.Printf("Saving Task Detail")
-
 		taskDetail = models.TaskDetail{
 			TaskID:            uuid.New(),
 			ProjectName:       projectName,

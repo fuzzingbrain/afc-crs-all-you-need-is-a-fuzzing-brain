@@ -80,8 +80,6 @@ func main() {
 			log.Printf("No 'diff' directory found, setting task type to 'full'")
 		}
 
-		log.Printf("Saving Task Detail")
-
 		taskDetail = models.TaskDetail{
 			TaskID:            uuid.New(),
 			ProjectName:       projectName,
