@@ -87,18 +87,22 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKSPACE_PARENT="$(dirname "$WORKSPACE")"
 VENV_DIR="$WORKSPACE_PARENT/crs_venv"
-VENV_CREATED=false
-if [ ! -d "$VENV_DIR" ]; then
-    echo "Creating Python virtual environment at $VENV_DIR..." | tee -a "$LOG_FILE"
-    python3 -m venv "$VENV_DIR"
-    VENV_CREATED=true
-fi
 
-# Activate venv and install dependencies only if venv was just created
-source "$VENV_DIR/bin/activate"
-if [ "$VENV_CREATED" = true ] && [ -f "$SCRIPT_DIR/strategy/requirements.txt" ]; then
-    echo "Installing Python dependencies..." | tee -a "$LOG_FILE"
-    pip install -q -r "$SCRIPT_DIR/strategy/requirements.txt" 2>/dev/null
+# Skip venv setup if SKIP_VENV is set (e.g., in Docker where deps are pre-installed)
+if [ "$SKIP_VENV" != "true" ]; then
+    VENV_CREATED=false
+    if [ ! -d "$VENV_DIR" ]; then
+        echo "Creating Python virtual environment at $VENV_DIR..." | tee -a "$LOG_FILE"
+        python3 -m venv "$VENV_DIR"
+        VENV_CREATED=true
+    fi
+
+    # Activate venv and install dependencies only if venv was just created
+    source "$VENV_DIR/bin/activate"
+    if [ "$VENV_CREATED" = true ] && [ -f "$SCRIPT_DIR/strategy/requirements.txt" ]; then
+        echo "Installing Python dependencies..." | tee -a "$LOG_FILE"
+        pip install -q -r "$SCRIPT_DIR/strategy/requirements.txt" 2>/dev/null
+    fi
 fi
 
 # Load and export .env variables for Python strategies

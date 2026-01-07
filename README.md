@@ -15,13 +15,36 @@
 
 ---
 
-## Quick Start
+## Quick Start (Docker)
+
+The easiest way to run FuzzingBrain:
+
+```bash
+# Pull the image
+docker pull o2lab/fuzzingbrain
+
+# Create workspace directory (paths must match for Docker-in-Docker)
+sudo mkdir -p /app/workspace
+
+# Run full scan
+docker run --rm -it \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v /app/workspace:/app/workspace \
+  o2lab/fuzzingbrain https://github.com/OwenSanzas/libpng.git
+```
+
+Results (patches, POVs, logs) will be saved to `/app/workspace/<project>/`.
+
+---
+
+## Quick Start (From Source)
 
 ### 1. Clone and Configure
 
 ```bash
-git clone https://github.com/sefcom/afc-crs-all-you-need-is-a-fuzzing-brain.git
+git clone https://github.com/o2lab/afc-crs-all-you-need-is-a-fuzzing-brain.git
 cd afc-crs-all-you-need-is-a-fuzzing-brain
+git checkout stable
 
 # Set up API keys
 cd crs && cp .env.example .env
@@ -37,26 +60,16 @@ GEMINI_API_KEY=your-key-here
 
 ### 2. Run
 
-**Full Scan** - Analyze entire repository:
 ```bash
-./FuzzingBrain.sh https://github.com/libexpat/libexpat
-```
+# Full scan
+./FuzzingBrain.sh https://github.com/OwenSanzas/libpng.git
 
-**Delta Scan** - Analyze changes between commits:
-```bash
-./FuzzingBrain.sh -b <base_commit> -d <delta_commit> https://github.com/libexpat/libexpat
-```
-
-**Local Workspace**:
-```bash
-./FuzzingBrain.sh /path/to/workspace
-./FuzzingBrain.sh --in-place /path/to/workspace  # Run without copying
+# Delta scan
+./FuzzingBrain.sh -b <base_commit> -d <delta_commit> https://github.com/OwenSanzas/libpng.git
 ```
 
 ### 3. Results
 
-After completion, find results in:
-- **POVs**: `pov/<project>_<timestamp>/`
 - **Patches**: `patch/<project>_<timestamp>/`
 - **Logs**: `workspace/<project>_<timestamp>/task.log`
 
@@ -77,7 +90,7 @@ After completion, find results in:
 
 ```bash
 # Full scan from GitHub
-./FuzzingBrain.sh https://github.com/libexpat/libexpat
+./FuzzingBrain.sh https://github.com/OwenSanzas/libpng.git
 
 # Specify OSS-Fuzz project name if auto-detection fails
 ./FuzzingBrain.sh --project expat https://github.com/libexpat/libexpat
@@ -90,39 +103,6 @@ After completion, find results in:
 
 # Use local workspace
 ./FuzzingBrain.sh /path/to/workspace
-./FuzzingBrain.sh --in-place /path/to/workspace
-```
-
----
-
-## Configuration
-
-Edit `crs/.env` to customize behavior:
-
-```bash
-# Strategy selection (empty = run all, "none" = skip)
-STRATEGY_POV_SELECTED_BASIC=""        # POV strategies
-STRATEGY_PATCH_SELECTED=""            # Patch strategies
-STRATEGY_ENABLE_PATCHING=true         # Enable/disable patching
-
-# Fuzzer settings
-FUZZER_SANITIZERS="address"           # address, memory, undefined
-FUZZER_SELECTED=""                    # Empty = auto-discover all
-```
-
-**Common configurations:**
-
-```bash
-# POV only (no patching)
-STRATEGY_ENABLE_PATCHING=false
-
-# Skip POV, only patch
-STRATEGY_POV_SELECTED_BASIC="none"
-STRATEGY_POV_SELECTED_ADVANCED="none"
-
-# Delta scan specific strategies
-STRATEGY_POV_SELECTED_BASIC="xs0_delta.py"
-STRATEGY_PATCH_SELECTED="patch0_delta.py"
 ```
 
 ---

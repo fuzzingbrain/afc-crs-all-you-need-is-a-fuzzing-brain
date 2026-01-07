@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# Environment files with secrets
+.env
+crs/.env
+**/.env
+
+# Workspace and results
+workspace/
+pov/
+patch/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
