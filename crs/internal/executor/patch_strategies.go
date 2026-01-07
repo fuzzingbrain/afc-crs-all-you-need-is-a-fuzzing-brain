@@ -267,7 +267,7 @@ func runPatchingStrategies(
 				io.WriteString(log.Writer(), "\r\033[K")
 				log.Printf("[Round %d] Running patching strategy: %s", roundNum, strategyPath)
 
-				{
+				if false {
 					// Create a symbolic link to the .env file in the task directory
 					var symlinkCreationErr error
 					envFilePath := filepath.Join("/app/strategy", ".env")
@@ -296,7 +296,8 @@ func runPatchingStrategies(
 
 				// Get workspace directory (parent of projectDir which is typically workspace/repo)
 				workspaceDir := filepath.Dir(projectDir)
-				venvPath := filepath.Join(workspaceDir, "crs_venv")
+				workspaceParent := filepath.Dir(workspaceDir)
+				venvPath := filepath.Join(workspaceParent, "crs_venv")
 
 				// Use the Python interpreter from the virtual environment
 				pythonInterpreter := filepath.Join(venvPath, "bin", "python3")
@@ -695,8 +696,8 @@ func runXPatchingStrategiesWithoutPOV(
 
 			// Get workspace directory (parent of projectDir which is typically workspace/repo)
 			workspaceDir := filepath.Dir(projectDir)
-			venvPath := filepath.Join(workspaceDir, "crs_venv")
-
+			workspaceParent := filepath.Dir(workspaceDir)
+			venvPath := filepath.Join(workspaceParent, "crs_venv")
 			// Use the Python interpreter from the virtual environment
 			pythonInterpreter := filepath.Join(venvPath, "bin", "python3")
 			isRoot := helpers.GetEffectiveUserID() == 0
@@ -938,8 +939,8 @@ func runXPatchSarifStrategies(
 
 			// Get workspace directory (parent of projectDir which is typically workspace/repo)
 			workspaceDir := filepath.Dir(projectDir)
-			venvPath := filepath.Join(workspaceDir, "crs_venv")
-
+			workspaceParent := filepath.Dir(workspaceDir)
+			venvPath := filepath.Join(workspaceParent, "crs_venv")
 			pythonInterpreter := filepath.Join(venvPath, "bin", "python3")
 			isRoot := helpers.GetEffectiveUserID() == 0
 			hasSudo := helpers.CheckSudoAvailable()
