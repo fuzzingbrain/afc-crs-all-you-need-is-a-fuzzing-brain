@@ -655,10 +655,11 @@ else
     run_static_analysis "$TARGET"
     echo ""
 
-    # Pass through to original run_crs.sh
+    # Pass through to original run_crs.sh (suppress bash "Killed" message)
+    set +m  # Disable job control to suppress "Killed" messages
     if [ "$IN_PLACE" = true ]; then
-        cd "$CRS_DIR" && sudo ./run_crs.sh --in-place "$TARGET"
+        cd "$CRS_DIR" && sudo ./run_crs.sh --in-place "$TARGET" || true
     else
-        cd "$CRS_DIR" && sudo ./run_crs.sh "$TARGET"
+        cd "$CRS_DIR" && sudo ./run_crs.sh "$TARGET" || true
     fi
 fi

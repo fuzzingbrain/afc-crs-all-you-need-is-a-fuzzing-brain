@@ -442,23 +442,17 @@ def call_o1_pro_api(log_file, messages, model_name):
     return f"Unexpected error: all retries failed without exception", False
 
 def call_llm(log_file, messages, model_name):
-    """Call LLM with telemetry tracking."""    
-    with tracer.start_as_current_span("genai") as span:
-        span.set_attribute("crs.action.category", "patch_generation")
-        span.set_attribute("crs.action.name", "call_llm")
-        span.set_attribute("genai.model.name", f"{model_name}")
+    try:
+        if model_name.startswith("gemini"):
+            response = call_gemini_api(log_file, messages, model_name)
+        else:
+            response = call_litellm(log_file, messages, model_name)
+        
+        return response
 
-        try:
-            if model_name.startswith("gemini"):
-                response = call_gemini_api(log_file, messages, model_name)
-            else:
-                response = call_litellm(log_file, messages, model_name)
-            
-            return response
-
-        except Exception as e:
-            logging.error(f"Error in LLM call: {str(e)}")
-            return "", False
+    except Exception as e:
+        logging.error(f"Error in LLM call: {str(e)}")
+        return "", False
 
 def strip_license_text(source_code):
     """Strip copyright and license text from source code"""
@@ -625,10 +619,16 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path, 
                     log_message(log_file, f"Failed to find docker image for gcr.io/oss-fuzz/{project_name}: {str(e)}")
 
             if not docker_image:
-                log_message(log_file, f"Failed to find docker image for {project_name}")
-                return False, f"Failed to find docker image for {project_name}"
+                log_message(log_file, f"Docker image not found for {project_name}, attempting to build it...")
+                build_success, built_image = build_docker_image(log_file, project_dir, project_name)
+                if build_success and built_image:
+                    docker_image = built_image
+                    log_message(log_file, f"Successfully built docker image: {docker_image}")
+                else:
+                    log_message(log_file, f"Failed to find or build docker image for {project_name}")
+                    return False, f"Failed to find or build docker image for {project_name}"
 
-            log_message(log_file, f"Found docker image for {project_name}: {docker_image}")
+            log_message(log_file, f"Using docker image for {project_name}: {docker_image}")
 
             # If we haven't defined docker_cmd yet (because we successfully copied to out_dir)
             if not 'docker_cmd' in locals():
@@ -1332,48 +1332,6 @@ def replace_function(log_file, project_src_dir, file_path, func_name, new_func_c
         log_message(log_file,f"Error writing to file {file_path}: {e}")
         return False
 
-def try_load_function_metadata_from_analysis_service(log_file,target_functions,project_src_dir,focus):
-    # Define the analysis service endpoint
-    ANALYSIS_SERVICE_URL = os.environ.get("ANALYSIS_SERVICE_URL", "http://localhost:7082")
-    if not "/v1/funmeta" in ANALYSIS_SERVICE_URL:
-        ANALYSIS_SERVICE_URL = f"{ANALYSIS_SERVICE_URL}/v1/funmeta"
-   
-    payload = {
-        "task_id": os.environ.get("TASK_ID"),
-        "focus": focus,
-        "project_src_dir": project_src_dir,
-        "target_functions": target_functions,
-    }
-    function_metadata = {}
-    
-    try:
-        print(f"ANALYSIS_SERVICE_URL: {ANALYSIS_SERVICE_URL} payload: {payload}")
-        with tracer.start_as_current_span("analysis_service.request") as span:
-            span.set_attribute("crs.action.category", "static_analysis")
-            span.set_attribute("crs.action.name", f"extract_function_metadata")
-            span.set_attribute("payload", f"{payload}")
-            # Make request to analysis service
-            # 5 mins at most
-            response = requests.post(ANALYSIS_SERVICE_URL, json=payload, timeout=300)
-            
-            if response.status_code == 200:
-                result = response.json()
-                
-                if "funmeta" in result and isinstance(result["funmeta"], dict):
-                    function_metadata = result["funmeta"]
-            else:
-                print(f"Analysis service returned non-200 status: {response.status_code}")
-                try:
-                    error_details = response.json()
-                    print("Error details (JSON):", error_details)
-                except Exception:
-                    print("Response body (not JSON):", response.text)
-    
-    except Exception as e:
-        print(f"Error funmeta querying analysis service: {str(e)}")
-    
-    return function_metadata    
-
 def find_function_metadata(log_file, target_functions, project_src_dir0, project_src_dir, project_name, focus="", language='c'):
     """
     Find metadata for target functions using clang.
@@ -1387,9 +1345,7 @@ def find_function_metadata(log_file, target_functions, project_src_dir0, project
     Returns:
         dict: Metadata for the target functions
     """
-    function_metadata =  try_load_function_metadata_from_analysis_service(log_file,target_functions,project_src_dir0,focus)
-    if function_metadata:
-        return function_metadata
+
     function_metadata = {}
     
     extension = '.c' if language == 'c' else '.java'
@@ -1512,6 +1468,92 @@ def find_function_metadata(log_file, target_functions, project_src_dir0, project
     #     log_message(log_file,f"  Content length: {len(metadata['content'])}")
     
     return function_metadata
+
+def build_docker_image(log_file, project_dir, project_name):
+    """
+    Build the Docker image for a project using helper.py.
+
+    Args:
+        log_file: Log file path
+        project_dir: Project directory (e.g., /app/xxx/)
+        project_name: Name of the project
+
+    Returns:
+        tuple: (success, docker_image_name) where success is True if the image was built
+    """
+    helper_path = os.path.join(project_dir, "fuzz-tooling", "infra", "helper.py")
+
+    if not os.path.exists(helper_path):
+        log_message(log_file, f"helper.py not found at {helper_path}")
+        return False, None
+
+    log_message(log_file, f"Building Docker image for {project_name} using helper.py...")
+
+    try:
+        result = subprocess.run(
+            ["python3", helper_path, "build_image", "--pull", project_name],
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10 minute timeout for image build
+            cwd=project_dir
+        )
+
+        if result.returncode != 0:
+            log_message(log_file, f"Failed to build Docker image: {result.stderr[:500]}")
+            return False, None
+
+        log_message(log_file, f"Successfully built Docker image for {project_name}")
+
+        # After building, tag it as aixcc-afc/{project_name}
+        src_image = f"gcr.io/oss-fuzz/{project_name}"
+        dst_image = f"aixcc-afc/{project_name}"
+
+        # Check if source image exists and tag it
+        check_result = subprocess.run(
+            ["docker", "image", "inspect", src_image],
+            capture_output=True,
+            timeout=60
+        )
+
+        if check_result.returncode == 0:
+            tag_result = subprocess.run(
+                ["docker", "tag", src_image, dst_image],
+                capture_output=True,
+                timeout=60
+            )
+            if tag_result.returncode == 0:
+                log_message(log_file, f"Tagged image as {dst_image}")
+                return True, dst_image
+
+        # If we can't tag, try to find what image was created
+        # Check if aixcc-afc version exists
+        check_dst = subprocess.run(
+            ["docker", "images", dst_image, "--format", "{{.Repository}}:{{.Tag}}"],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        if check_dst.returncode == 0 and check_dst.stdout.strip():
+            return True, check_dst.stdout.strip().split('\n')[0]
+
+        # Check if gcr.io/oss-fuzz version exists
+        check_src = subprocess.run(
+            ["docker", "images", src_image, "--format", "{{.Repository}}:{{.Tag}}"],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        if check_src.returncode == 0 and check_src.stdout.strip():
+            return True, check_src.stdout.strip().split('\n')[0]
+
+        return False, None
+
+    except subprocess.TimeoutExpired:
+        log_message(log_file, f"Timeout while building Docker image for {project_name}")
+        return False, None
+    except Exception as e:
+        log_message(log_file, f"Error building Docker image: {str(e)}")
+        return False, None
 
 def apply_patch(log_file, patch_code_dict, project_dir, project_src_dir, language, pov_metadata, patch_id):
     """
@@ -1695,10 +1737,16 @@ def apply_patch(log_file, patch_code_dict, project_dir, project_src_dir, languag
                 log_message(log_file, f"Failed to find docker image for gcr.io/oss-fuzz/{project_name}: {str(e)}")
 
         if not docker_image:
-            log_message(log_file, f"Failed to find docker image for {project_name}")
-            return False, f"Failed to find docker image for {project_name}"
+            log_message(log_file, f"Docker image not found for {project_name}, attempting to build it...")
+            build_success, built_image = build_docker_image(log_file, project_dir, project_name)
+            if build_success and built_image:
+                docker_image = built_image
+                log_message(log_file, f"Successfully built docker image: {docker_image}")
+            else:
+                log_message(log_file, f"Failed to find or build docker image for {project_name}")
+                return False, "", f"Failed to find or build docker image for {project_name}"
 
-        log_message(log_file, f"Found docker image for {project_name}: {docker_image}")
+        log_message(log_file, f"Using docker image for {project_name}: {docker_image}")
 
         # Build Docker command
         cmd_args = [
@@ -2548,7 +2596,6 @@ Please generate a valid patch that can be applied to the code.
                     log_message(log_file, f"Warning: Failed to copy patch to main folder: {str(e)}")
 
                 log_message(log_file, f"PATCH SUCCESS! Vulnerability patched on iteration {iteration}")
-                log_message(log_file, "Successfully patched the vulnerability, exiting the process")
                 return True, patch_id  # Return success status to the caller
             else:
                 log_message(log_file, "Failed to submit PATCH to endpoint")
@@ -2943,8 +2990,6 @@ def main():
     fuzzer_name = os.path.basename(fuzzer_path)
     fuzz_dir = os.path.dirname(fuzzer_path)
 
-    task_detail = load_task_detail(fuzz_dir)
-
     global POV_SUCCESS_DIR, PATCH_SUCCESS_DIR
     POV_SUCCESS_DIR = os.path.join(fuzz_dir, POV_METADATA_DIR)
     PATCH_SUCCESS_DIR = os.path.join(fuzz_dir, PATCH_METADATA_DIR)
@@ -2965,24 +3010,14 @@ def main():
     log_file = setup_logging(fuzzer_name)
     
     patch_success = False
-    with tracer.start_as_current_span("patch_full") as span:
-        span.set_attribute("crs.action.category", "patch_generation")
-        span.set_attribute("crs.action.name", f"patching_full_scan_advanced_strategy_v0")
-        span.set_attribute("service.name", "patch0_full")
-        span.set_attribute("fuzzer.path", f"{fuzzer_path}")
-        if task_detail:
-            for key, value in task_detail["metadata"].items():
-                span.set_attribute(key, value)
-        try:
-            patch_success = doPatchUntilSuccess(log_file,fuzzer_path,project_dir,project_name,focus, language)
-        except Exception as e:
-            span.record_exception(e)
-            # Print the full traceback so errors are visible
-            import traceback
-            print(f"ERROR: {str(e)}")
-            traceback.print_exc()
 
-        span.set_attribute("crs.patch.success", patch_success)
+    try:
+        patch_success = doPatchUntilSuccess(log_file,fuzzer_path,project_dir,project_name,focus, language)
+    except Exception as e:
+        # Print the full traceback so errors are visible
+        import traceback
+        print(f"ERROR: {str(e)}")
+        traceback.print_exc()
     
     return 0 if patch_success else 1
 

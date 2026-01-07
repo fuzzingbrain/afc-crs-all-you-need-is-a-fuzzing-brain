@@ -21,6 +21,9 @@ import (
 	"crs/internal/utils/helpers"
 )
 
+// logMutex protects concurrent log writes with terminal control sequences
+var logMutex sync.Mutex
+
 // killProcessTree kills a process and all its descendants
 func killProcessTree(pid int) error {
 	// Find all descendant PIDs
@@ -781,8 +784,7 @@ func runAdvancedPOVStrategiesWithTimeout(
 			} else {
 				maxIterations = 5
 			}
-			log.Printf("[POV Round-%d Phase-%d] Setting max iterations to %d for timeout %d minutes", roundNum, phase, maxIterations, timeoutMinutes)
-
+			// log.Printf("[POV Round-%d Phase-%d] Setting max iterations to %d for timeout %d minutes", roundNum, phase, maxIterations, timeoutMinutes)
 			args := []string{
 				strategyPath,
 				myFuzzer,
@@ -876,8 +878,11 @@ func runAdvancedPOVStrategiesWithTimeout(
 						if part == "" {
 							continue
 						}
+						// Use mutex to prevent interleaved terminal control sequences
+						logMutex.Lock()
 						io.WriteString(log.Writer(), "\r\033[K")
 						log.Printf("[POV Round-%d][%s Phase-%d] %s", roundNum, strategyName, phase, part)
+						logMutex.Unlock()
 						outputMutex.Lock()
 						outputLines = append(outputLines, part)
 						outputMutex.Unlock()
@@ -904,8 +909,11 @@ func runAdvancedPOVStrategiesWithTimeout(
 						if part == "" {
 							continue
 						}
+						// Use mutex to prevent interleaved terminal control sequences
+						logMutex.Lock()
 						io.WriteString(log.Writer(), "\r\033[K")
 						log.Printf("[POV Round-%d ERR][%s Phase-%d] %s", roundNum, strategyName, phase, part)
+						logMutex.Unlock()
 						outputMutex.Lock()
 						outputLines = append(outputLines, part)
 						outputMutex.Unlock()
