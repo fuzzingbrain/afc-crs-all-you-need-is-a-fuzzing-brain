@@ -87,9 +87,9 @@ func PrepareEnvironment(params PrepareEnvironmentParams) (*ProjectConfig, []stri
 	for _, san := range sanitizersToUse {
 		log.Printf("║   - %-58s║\n", san)
 	}
-	if strings.ToLower(cfg.Language) == "c" || strings.ToLower(cfg.Language) == "c++" {
-		log.Printf("║   - %-58s║\n", "coverage (mandatory for C/C++)")
-	}
+	// if strings.ToLower(cfg.Language) == "c" || strings.ToLower(cfg.Language) == "c++" {
+	// 	log.Printf("║   - %-58s║\n", "coverage (mandatory for C/C++)")
+	// }
 	log.Println("╚════════════════════════════════════════════════════════════════╝")
 	log.Println("")
 

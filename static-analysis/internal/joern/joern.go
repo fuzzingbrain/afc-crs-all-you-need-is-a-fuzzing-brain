@@ -2,15 +2,20 @@ package joern
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"static-analysis/internal/engine/models"
 )
+
+// CPG creation timeout - 30 minutes should be enough for most projects
+const cpgCreationTimeout = 5 * time.Minute
 
 // AnalyzeProjectDirs runs Joern analysis on multiple project directories using local Joern installation
 // This creates a combined CPG and saves it for Python to query directly
@@ -583,6 +588,9 @@ func hasFuzzerFiles(dir string) bool {
 
 // createCPG creates a Code Property Graph using local Joern installation
 func createCPG(projectDirs []string, cpgPath, language string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), cpgCreationTimeout)
+	defer cancel()
+
 	var cmd *exec.Cmd
 	var tempDir string
 	var cleanupFunc func()
@@ -612,14 +620,24 @@ func createCPG(projectDirs []string, cpgPath, language string) error {
 			log.Printf("Warning: joern-parse only supports single directory. Using primary directory: %s", primaryDir)
 			log.Printf("Other directories will be analyzed with simple regex-based analysis: %v", projectDirs[1:])
 		}
-		args := []string{primaryDir, "--output", cpgPath, "--language", "newc"}
-		cmd = exec.Command("joern-parse", args...)
+		// Exclude directories that are typically not relevant for fuzzing analysis
+		// and can significantly slow down CPG creation
+		args := []string{primaryDir, "--output", cpgPath, "--language", "newc",
+			"--frontend-args",
+			"--exclude", "tutorials",
+			"--exclude", "docs",
+			"--exclude", "documentation",
+			"--exclude", "examples",
+			"--exclude", "third_party",
+			"--exclude", "vendor",
+		}
+		cmd = exec.CommandContext(ctx, "joern-parse", args...)
 	case "java":
 		// Use javasrc2cpg for Java - only supports single directory
 		if len(projectDirs) != 1 {
 			return fmt.Errorf("javasrc2cpg requires exactly one input directory (got %d)", len(projectDirs))
 		}
-		cmd = exec.Command("javasrc2cpg", projectDirs[0], "--output", cpgPath)
+		cmd = exec.CommandContext(ctx, "javasrc2cpg", projectDirs[0], "--output", cpgPath)
 	default:
 		return fmt.Errorf("unsupported language: %s", language)
 	}
@@ -632,8 +650,11 @@ func createCPG(projectDirs []string, cpgPath, language string) error {
 	cpgOutputDir := filepath.Dir(cpgPath)
 	cmd.Dir = cpgOutputDir
 
-	log.Printf("Running: %s (workdir: %s)", strings.Join(cmd.Args, " "), cpgOutputDir)
+	log.Printf("Running: %s (workdir: %s) [timeout: %v]", strings.Join(cmd.Args, " "), cpgOutputDir, cpgCreationTimeout)
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("CPG creation timed out after %v - codebase may be too large", cpgCreationTimeout)
+		}
 		return fmt.Errorf("CPG creation failed: %w\nStdout: %s\nStderr: %s",
 			err, stdout.String(), stderr.String())
 	}

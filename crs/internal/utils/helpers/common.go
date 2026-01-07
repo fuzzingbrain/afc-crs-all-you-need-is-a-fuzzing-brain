@@ -81,22 +81,22 @@ func SaveTaskDetailToJson(taskDetail models.TaskDetail, fuzzer, fuzzDir string) 
 func CopyFuzzDirForParallelStrategies(fuzzer, fuzzDir string) error {
 	// Define target directories for parallel strategies
 	targetDirs := []string{"ap0", "ap1", "ap2", "ap3", "xp0", "sarif0"}
-	fuzzerName := filepath.Base(fuzzer) // e.g. html
+	// fuzzerName := filepath.Base(fuzzer) // e.g. html
 
 	// Detect the sanitizer suffix in the parent directory name and strip it
-	sanitizerSuffixes := []string{
-		"-address", "-undefined", "-memory", "-thread", "-ubsan",
-		"-asan", "-msan", "-tsan",
-	}
-	coverageDir := fuzzDir // default
-	for _, suf := range sanitizerSuffixes {
-		if strings.Contains(fuzzDir, suf) {
-			coverageDir = strings.Replace(fuzzDir, suf, "", 1) // e.g. libxml2-address → libxml2
-			break
-		}
-	}
+	// sanitizerSuffixes := []string{
+	// 	"-address", "-undefined", "-memory", "-thread", "-ubsan",
+	// 	"-asan", "-msan", "-tsan",
+	// }
+	// coverageDir := fuzzDir // default
+	// for _, suf := range sanitizerSuffixes {
+	// 	if strings.Contains(fuzzDir, suf) {
+	// 		coverageDir = strings.Replace(fuzzDir, suf, "", 1) // e.g. libxml2-address → libxml2
+	// 		break
+	// 	}
+	// }
 
-	coverageFuzzerPath := filepath.Join(coverageDir, fuzzerName) // sibling binary
+	// coverageFuzzerPath := filepath.Join(coverageDir, fuzzerName) // sibling binary
 
 	// Ensure the source directory exists
 	info, err := os.Stat(fuzzDir)
@@ -171,16 +171,16 @@ func CopyFuzzDirForParallelStrategies(fuzzer, fuzzDir string) error {
 		}
 
 		// Copy the *coverage* fuzzer binary
-		if _, err := os.Stat(coverageFuzzerPath); err == nil {
-			destCoverage := filepath.Join(destPath, fuzzerName+"-coverage")
-			if copyErr := copyFile(coverageFuzzerPath, destCoverage); copyErr != nil {
-				log.Printf("Failed to copy coverage fuzzer to %s: %v", destCoverage, copyErr)
-			} else {
-				log.Printf("Added coverage fuzzer: %s", destCoverage)
-			}
-		} else {
-			log.Printf("Coverage fuzzer not found (skipped): %s", coverageFuzzerPath)
-		}
+		// if _, err := os.Stat(coverageFuzzerPath); err == nil {
+		// 	destCoverage := filepath.Join(destPath, fuzzerName+"-coverage")
+		// 	if copyErr := copyFile(coverageFuzzerPath, destCoverage); copyErr != nil {
+		// 		log.Printf("Failed to copy coverage fuzzer to %s: %v", destCoverage, copyErr)
+		// 	} else {
+		// 		log.Printf("Added coverage fuzzer: %s", destCoverage)
+		// 	}
+		// } else {
+		// 	log.Printf("Coverage fuzzer not found (skipped): %s", coverageFuzzerPath)
+		// }
 
 		log.Printf("Created parallel strategy directory: %s", destPath)
 	}
