@@ -79,48 +79,57 @@ func AnalyzeProjectDirs(projectDirs []string, language string, fuzzers []string)
 	// Step 2.5: If we have fuzzer directories, parse them separately to find fuzzer entry points
 	// This is needed because joern-parse only analyzes the primary directory
 	if err == nil && len(fuzzerDirs) > 0 {
-		log.Printf("Parsing fuzzer directories separately to find fuzzer entry points...")
+		log.Printf("Parsing %d fuzzer directories separately to find fuzzer entry points...", len(fuzzerDirs))
 
-		// Parse just the fuzzer directories to find entry points
-		fuzzerCpgPath := cpgPath + ".fuzzers"
-		if err := createCPG(fuzzerDirs, fuzzerCpgPath, language); err == nil {
-			// Extract entry points from fuzzer-only CPG
+		// Parse each fuzzer directory individually since joern-parse only supports single directory
+		for i, fuzzerDir := range fuzzerDirs {
+			fuzzerCpgPath := fmt.Sprintf("%s.fuzzers.%d", cpgPath, i)
+			log.Printf("Parsing fuzzer directory %d: %s", i, fuzzerDir)
+
+			if err := createCPG([]string{fuzzerDir}, fuzzerCpgPath, language); err != nil {
+				log.Printf("Failed to parse fuzzer directory %s: %v", fuzzerDir, err)
+				continue
+			}
+
+			// Extract entry points from this fuzzer CPG
 			fuzzerResults, err := extractBasicResults(fuzzerCpgPath, projectDir, fuzzers, language)
-			if err == nil && len(fuzzerResults.ReachableFunctions) > 0 {
-				log.Printf("Found %d fuzzer entry points in fuzzer directories!", len(fuzzerResults.ReachableFunctions))
+			if err != nil {
+				log.Printf("Failed to extract results from fuzzer CPG %s: %v", fuzzerDir, err)
+				continue
+			}
+
+			if len(fuzzerResults.ReachableFunctions) > 0 {
+				log.Printf("Found %d fuzzer entry points in %s!", len(fuzzerResults.ReachableFunctions), fuzzerDir)
 				for entryPoint := range fuzzerResults.ReachableFunctions {
 					log.Printf("  - %s", entryPoint)
 				}
-
-				// Merge: keep main CPG's functions and call graph, but add fuzzer entry points
-				// The main CPG has all the library functions, the fuzzer CPG has the entry points
-				for entryPoint, reachable := range fuzzerResults.ReachableFunctions {
-					results.ReachableFunctions[entryPoint] = reachable
-				}
-
-				// Add fuzzer functions to the main results
-				for name, fn := range fuzzerResults.Functions {
-					if _, exists := results.Functions[name]; !exists {
-						results.Functions[name] = fn
-					}
-				}
-
-				// Add fuzzer call graph edges
-				for _, call := range fuzzerResults.CallGraph.Calls {
-					results.CallGraph.Calls = append(results.CallGraph.Calls, call)
-				}
-				for caller, callees := range fuzzerResults.CallGraphAdj {
-					results.CallGraphAdj[caller] = append(results.CallGraphAdj[caller], callees...)
-				}
-
-				log.Printf("Merged results: %d total functions, %d entry points",
-					len(results.Functions), len(results.ReachableFunctions))
+			} else if len(fuzzerResults.Functions) > 0 {
+				log.Printf("Found %d functions but no entry points in %s", len(fuzzerResults.Functions), fuzzerDir)
 			}
-			// Keep the fuzzer CPG for reference
-			// Don't delete fuzzerCpgPath - it may be useful for debugging
-		} else {
-			log.Printf("Failed to parse fuzzer directories: %v", err)
+
+			// Merge: keep main CPG's functions and call graph, but add fuzzer entry points
+			for entryPoint, reachable := range fuzzerResults.ReachableFunctions {
+				results.ReachableFunctions[entryPoint] = reachable
+			}
+
+			// Add fuzzer functions to the main results
+			for name, fn := range fuzzerResults.Functions {
+				if _, exists := results.Functions[name]; !exists {
+					results.Functions[name] = fn
+				}
+			}
+
+			// Add fuzzer call graph edges
+			for _, call := range fuzzerResults.CallGraph.Calls {
+				results.CallGraph.Calls = append(results.CallGraph.Calls, call)
+			}
+			for caller, callees := range fuzzerResults.CallGraphAdj {
+				results.CallGraphAdj[caller] = append(results.CallGraphAdj[caller], callees...)
+			}
 		}
+
+		log.Printf("After merging fuzzer directories: %d total functions, %d entry points",
+			len(results.Functions), len(results.ReachableFunctions))
 	}
 	if err != nil {
 		log.Printf("Warning: failed to extract results from CPG: %v", err)
@@ -162,15 +171,18 @@ func extractBasicResults(cpgPath, projectDir string, fuzzers []string, language 
 
 	switch language {
 	case "c", "c++", "cpp":
-		// For C/C++, look for LLVMFuzzerTestOneInput (exact match) and main as fallback
-		// Use filter with regex for flexible matching, plus exact name matches
-		entryPointQueries = `cpg.method.name("LLVMFuzzerTestOneInput").l ++ cpg.method.filter(_.name.matches(".*LLVMFuzzerTestOneInput.*")).l ++ cpg.method.name("main").l`
+		// For C/C++, look for:
+		// 1. LLVMFuzzerTestOneInput (exact match)
+		// 2. Any function with LLVMFuzzerTestOneInput in name (regex)
+		// 3. Functions named "main"
+		// 4. Functions in files matching fuzz patterns (fallback for custom harnesses)
+		entryPointQueries = `cpg.method.name("LLVMFuzzerTestOneInput").l ++ cpg.method.filter(_.name.matches(".*LLVMFuzzerTestOneInput.*")).l ++ cpg.method.name("main").l ++ cpg.method.filter(m => m.filename.matches("(?i).*fuzz.*\\.c") && !m.name.startsWith("<")).l`
 	case "java":
 		// For Java, look for common fuzzer method patterns
-		entryPointQueries = `cpg.method.filter(_.name.matches(".*fuzzerTestOneInput.*")).l ++ cpg.method.filter(_.name.matches(".*fuzzerInitialize.*")).l ++ cpg.method.filter(_.name.matches(".*testOneInput.*")).l`
+		entryPointQueries = `cpg.method.filter(_.name.matches(".*fuzzerTestOneInput.*")).l ++ cpg.method.filter(_.name.matches(".*fuzzerInitialize.*")).l ++ cpg.method.filter(_.name.matches(".*testOneInput.*")).l ++ cpg.method.filter(m => m.filename.matches("(?i).*fuzz.*\\.java") && !m.name.startsWith("<")).l`
 	default:
 		// Default: try both C and Java patterns
-		entryPointQueries = `cpg.method.name("LLVMFuzzerTestOneInput").l ++ cpg.method.filter(_.name.matches(".*fuzzerTestOneInput.*")).l ++ cpg.method.name("main").l`
+		entryPointQueries = `cpg.method.name("LLVMFuzzerTestOneInput").l ++ cpg.method.filter(_.name.matches(".*fuzzerTestOneInput.*")).l ++ cpg.method.name("main").l ++ cpg.method.filter(m => m.filename.matches("(?i).*fuzz.*") && !m.name.startsWith("<")).l`
 	}
 
 	// Create a Joern script to extract data

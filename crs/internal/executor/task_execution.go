@@ -224,75 +224,76 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 	// 	}()
 	// 	log.Printf("Started LibFuzzer for C/C++ project")
 	// }
+	runBasicPOVFirst := false
+	if runBasicPOVFirst {
+		// Phase 2: Run Strategies (Branch based on task type)
+		// Check if this is a full scan task or delta scan task
+		if params.TaskDetail.Type == models.TaskTypeFull {
 
-	// Phase 2: Run Strategies (Branch based on task type)
-	// Check if this is a full scan task or delta scan task
-	if params.TaskDetail.Type == models.TaskTypeFull {
-
-		if os.Getenv("FUZZER_TEST") == "" {
-			fullScanConfig := FullScanStrategyConfig{
-				Model:                    params.Model,
-				POVMetadataDir:           params.POVMetadataDir,
-				SubmissionEndpoint:       params.SubmissionEndpoint,
-				WorkerIndex:              params.WorkerIndex,
-				AnalysisServiceUrl:       params.AnalysisServiceUrl,
-				StrategyConfig:           params.StrategyConfig,
-				Sanitizer:                sanitizer,
+			if os.Getenv("FUZZER_TEST") == "" {
+				fullScanConfig := FullScanStrategyConfig{
+					Model:                    params.Model,
+					POVMetadataDir:           params.POVMetadataDir,
+					SubmissionEndpoint:       params.SubmissionEndpoint,
+					WorkerIndex:              params.WorkerIndex,
+					AnalysisServiceUrl:       params.AnalysisServiceUrl,
+					StrategyConfig:           params.StrategyConfig,
+					Sanitizer:                sanitizer,
+				}
+				povSuccess = runFullScanStrategy(fuzzer, params.TaskDir, projectDir, fuzzDir,
+					params.ProjectConfig.Language, params.TaskDetail, params.Task, fullScanConfig)
 			}
-			povSuccess = runFullScanStrategy(fuzzer, params.TaskDir, projectDir, fuzzDir,
-				params.ProjectConfig.Language, params.TaskDetail, params.Task, fullScanConfig)
-		}
 
-	} else {
-
-		if os.Getenv("FUZZER_TEST") == "" {
-			basicConfig := BasicStrategiesConfig{
-				Model:                    params.Model,
-				POVMetadataDir:           params.POVMetadataDir,
-				POVMetadataDir0:          params.POVMetadataDir0,
-				SubmissionEndpoint:       params.SubmissionEndpoint,
-				WorkerIndex:              params.WorkerIndex,
-				AnalysisServiceUrl:       params.AnalysisServiceUrl,
-				UnharnessedFuzzerSrcPath: params.UnharnessedFuzzerSrcPath,
-				StrategyConfig:           params.StrategyConfig,
-			}
-			povSuccess = runBasicStrategies(fuzzer, params.TaskDir, projectDir, fuzzDir,
-				params.ProjectConfig.Language, params.TaskDetail, params.Task, basicConfig)
 		} else {
-			// Testing mode: only run libFuzzer and exit
-			// runLibFuzzer(fuzzer, params.TaskDir, projectDir, params.ProjectConfig.Language,
-			// 	params.TaskDetail, params.Task, params.SubmissionEndpoint)
-			// os.Exit(0)
-		}
-	}
 
-	// For full scan tasks without patching enabled, return early after basic phase completes
-	if params.TaskDetail.Type == models.TaskTypeFull && !params.StrategyConfig.EnablePatching {
+			if os.Getenv("FUZZER_TEST") == "" {
+				basicConfig := BasicStrategiesConfig{
+					Model:                    params.Model,
+					POVMetadataDir:           params.POVMetadataDir,
+					POVMetadataDir0:          params.POVMetadataDir0,
+					SubmissionEndpoint:       params.SubmissionEndpoint,
+					WorkerIndex:              params.WorkerIndex,
+					AnalysisServiceUrl:       params.AnalysisServiceUrl,
+					UnharnessedFuzzerSrcPath: params.UnharnessedFuzzerSrcPath,
+					StrategyConfig:           params.StrategyConfig,
+				}
+				povSuccess = runBasicStrategies(fuzzer, params.TaskDir, projectDir, fuzzDir,
+					params.ProjectConfig.Language, params.TaskDetail, params.Task, basicConfig)
+			} else {
+				// Testing mode: only run libFuzzer and exit
+				// runLibFuzzer(fuzzer, params.TaskDir, projectDir, params.ProjectConfig.Language,
+				// 	params.TaskDetail, params.Task, params.SubmissionEndpoint)
+				// os.Exit(0)
+			}
+		}
+
+		// For full scan tasks without patching enabled, return early after basic phase completes
+		if params.TaskDetail.Type == models.TaskTypeFull && !params.StrategyConfig.EnablePatching {
+			if povSuccess {
+				log.Printf("✓ Full scan completed: POV found! (Patching disabled)")
+				return nil
+			} else {
+				log.Printf("✗ Full scan completed: No POV found")
+				return ErrPOVNotFound
+			}
+		}
+
+		// Continue with advanced phases (for delta scan or full scan with patching enabled)
 		if povSuccess {
-			log.Printf("✓ Full scan completed: POV found! (Patching disabled)")
-			return nil
+			log.Printf("POV found in basic phase!")
+			povFound.Do(func() { close(povChan) })
 		} else {
-			log.Printf("✗ Full scan completed: No POV found")
-			return ErrPOVNotFound
+			log.Printf("No POV found in basic phase, will continue with advanced phases")
+			// If LibFuzzer not started (e.g., for Java), start it now
+			// if !libFuzzerStarted {
+			// 	go func() {
+			// 		runLibFuzzer(fuzzer, params.TaskDir, projectDir, params.ProjectConfig.Language,
+			// 			params.TaskDetail, params.Task, params.SubmissionEndpoint)
+			// 	}()
+			// 	log.Printf("Started LibFuzzer for non-C/C++ project")
+			// }
 		}
 	}
-
-	// Continue with advanced phases (for delta scan or full scan with patching enabled)
-	if povSuccess {
-		log.Printf("POV found in basic phase!")
-		povFound.Do(func() { close(povChan) })
-	} else {
-		log.Printf("No POV found in basic phase, will continue with advanced phases")
-		// If LibFuzzer not started (e.g., for Java), start it now
-		// if !libFuzzerStarted {
-		// 	go func() {
-		// 		runLibFuzzer(fuzzer, params.TaskDir, projectDir, params.ProjectConfig.Language,
-		// 			params.TaskDetail, params.Task, params.SubmissionEndpoint)
-		// 	}()
-		// 	log.Printf("Started LibFuzzer for non-C/C++ project")
-		// }
-	}
-
 	// Calculate time budget
 	deadlineTime := time.Unix(params.TaskDetail.Deadline/1000, 0)
 	totalBudgetMinutes := int(time.Until(deadlineTime).Minutes())

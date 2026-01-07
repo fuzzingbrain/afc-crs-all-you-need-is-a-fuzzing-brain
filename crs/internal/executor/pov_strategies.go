@@ -427,9 +427,11 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 			strategyCtx, strategyCancel := context.WithTimeout(ctx, strategyTimeout)
 			defer strategyCancel()
 
-			// Get workspace directory (parent of projectDir which is typically workspace/repo)
+			// Get workspace directory (parent of projectDir which is typically workspace/opendnp3)
+			// venv is at workspace/crs_venv (shared across all tasks)
 			workspaceDir := filepath.Dir(projectDir)
-			venvPath := filepath.Join(workspaceDir, "crs_venv")
+			workspaceParent := filepath.Dir(workspaceDir)
+			venvPath := filepath.Join(workspaceParent, "crs_venv")
 
 			// Use the Python interpreter from the virtual environment
 			pythonInterpreter := filepath.Join(venvPath, "bin", "python3")
@@ -447,7 +449,6 @@ func runBasicStrategies(fuzzer, taskDir, projectDir, fuzzDir, language string,
 				language,
 				"--model", basicConfig.Model,
 				"--pov-metadata-dir", basicConfig.POVMetadataDir0,
-				"--check-patch-success",
 			}
 
 			if taskDetail.Type == "full" {
@@ -761,9 +762,11 @@ func runAdvancedPOVStrategiesWithTimeout(
 
 			log.Printf("[POV Round-%d Phase-%d] Running advanced strategy: %s (timeout: %v)", roundNum, phase, strategyName, strategyTimeout)
 
-			// Get workspace directory (parent of projectDir which is typically workspace/repo)
+			// Get workspace directory (parent of projectDir which is typically workspace/opendnp3)
+			// venv is at workspace/crs_venv (shared across all tasks)
 			workspaceDir := filepath.Dir(projectDir)
-			venvPath := filepath.Join(workspaceDir, "crs_venv")
+			workspaceParent := filepath.Dir(workspaceDir)
+			venvPath := filepath.Join(workspaceParent, "crs_venv")
 
 			pythonInterpreter := filepath.Join(venvPath, "bin", "python3")
 			isRoot := helpers.GetEffectiveUserID() == 0
@@ -787,9 +790,7 @@ func runAdvancedPOVStrategiesWithTimeout(
 				taskDetail.Focus,
 				language,
 				"--model", model,
-				"--do-patch=false",
 				"--pov-metadata-dir", povAdvancedMetadataDir,
-				"--check-patch-success",
 				fmt.Sprintf("--fuzzing-timeout=%d", timeoutMinutes),
 				fmt.Sprintf("--pov-phase=%d", phase),
 				fmt.Sprintf("--max-iterations=%d", maxIterations),
