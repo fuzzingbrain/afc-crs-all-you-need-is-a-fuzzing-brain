@@ -49,14 +49,12 @@ func runFullScanStrategy(fuzzer, taskDir, projectDir, fuzzDir, language string,
 	log.Printf("Metadata: %v", taskDetail.Metadata)
 	log.Printf("=========================================")
 
-	// TODO: Implement full scan workflow
 	// Step 1: Get reachable functions from Analysis Service
 	// Step 2: Identify suspicious points using LLM
 	// Step 3: Store suspicious points in PostgreSQL
 	// Step 4: Run Python strategy
 
 	// For now, run placeholder strategy
-	log.Printf("Running placeholder full scan strategy...")
 	povSuccess := runFullScanPlaceholderStrategy(fuzzer, taskDir, projectDir, fuzzDir,
 		language, taskDetail, task, fullScanConfig)
 
@@ -145,7 +143,7 @@ func runSingleFullScanStrategy(
 		language,
 		"--model", model,
 		"--pov-metadata-dir", povMetadataDir,
-		"--fuzzing-timeout", "45",
+		"--fuzzing-timeout", "30",
 		"--max-iterations", "5",
 	}
 

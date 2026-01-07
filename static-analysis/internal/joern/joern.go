@@ -205,7 +205,9 @@ def findReachable(startMethod: io.shiftleft.codepropertygraph.generated.nodes.Me
     val (currentName, depth) = queue.dequeue()
     if (!visited.contains(currentName) && depth < maxDepth) {
       visited.add(currentName)
-      val currentMethods = cpg.method.fullName(currentName).l
+      // Escape regex special characters in function names (e.g., "main:int(int,char[]*)")
+      val escapedName = java.util.regex.Pattern.quote(currentName)
+      val currentMethods = cpg.method.fullName(escapedName).l
       currentMethods.foreach { m =>
         m.callOut.foreach { call =>
           call.calledMethod.foreach { callee =>

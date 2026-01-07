@@ -14,11 +14,9 @@ import (
 
 	"crs/internal/config"
 	"crs/internal/models"
-	"crs/internal/telemetry"
 	"crs/internal/utils/environment"
 	"crs/internal/utils/helpers"
 
-	"go.opentelemetry.io/otel/attribute"
 )
 
 const (
@@ -138,7 +136,7 @@ func ExecuteFuzzingTask(params TaskExecutionParams) error {
 			fuzzDir := filepath.Dir(fuzzer)
 
 			// Save task detail to JSON for strategy scripts
-			helpers.SaveTaskDetailToJson(fuzzerParams.TaskDetail, fuzzer, fuzzDir)
+			// helpers.SaveTaskDetailToJson(fuzzerParams.TaskDetail, fuzzer, fuzzDir)
 
 			// Create a copy of fuzzDir for parallel strategies
 			err := helpers.CopyFuzzDirForParallelStrategies(fuzzer, fuzzDir)
@@ -216,28 +214,20 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 	ctx := context.Background()
 
 	// Phase 1: Start LibFuzzer for C/C++ projects immediately
-	libFuzzerStarted := false
-	lang := strings.ToLower(params.ProjectConfig.Language)
-	if lang == "c" || lang == "c++" {
-		libFuzzerStarted = true
-		go func() {
-			runLibFuzzer(fuzzer, params.TaskDir, projectDir, params.ProjectConfig.Language,
-				params.TaskDetail, params.Task, params.SubmissionEndpoint)
-		}()
-		log.Printf("Started LibFuzzer for C/C++ project")
-	}
+	// libFuzzerStarted := false
+	// lang := strings.ToLower(params.ProjectConfig.Language)
+	// if lang == "c" || lang == "c++" {
+	// 	libFuzzerStarted = true
+	// 	go func() {
+	// 		runLibFuzzer(fuzzer, params.TaskDir, projectDir, params.ProjectConfig.Language,
+	// 			params.TaskDetail, params.Task, params.SubmissionEndpoint)
+	// 	}()
+	// 	log.Printf("Started LibFuzzer for C/C++ project")
+	// }
 
 	// Phase 2: Run Strategies (Branch based on task type)
 	// Check if this is a full scan task or delta scan task
 	if params.TaskDetail.Type == models.TaskTypeFull {
-		// ========== FULL SCAN WORKFLOW ==========
-		log.Printf("========== FULL SCAN: Running full codebase analysis ==========")
-		_, fullScanSpan := telemetry.StartSpan(ctx, "full_scan_phase")
-		fullScanSpan.SetAttributes(attribute.String("crs.action.category", "fuzzing"))
-		fullScanSpan.SetAttributes(attribute.String("crs.action.name", "runFullScanStrategy"))
-		for key, value := range params.TaskDetail.Metadata {
-			fullScanSpan.SetAttributes(attribute.String(key, value))
-		}
 
 		if os.Getenv("FUZZER_TEST") == "" {
 			fullScanConfig := FullScanStrategyConfig{
@@ -252,17 +242,8 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 			povSuccess = runFullScanStrategy(fuzzer, params.TaskDir, projectDir, fuzzDir,
 				params.ProjectConfig.Language, params.TaskDetail, params.Task, fullScanConfig)
 		}
-		fullScanSpan.End()
 
 	} else {
-		// ========== DELTA SCAN WORKFLOW (default) ==========
-		log.Printf("========== BASIC PHASE: Running initial strategies ==========")
-		_, basicPhasesSpan := telemetry.StartSpan(ctx, "basic_strategies_phase")
-		basicPhasesSpan.SetAttributes(attribute.String("crs.action.category", "fuzzing"))
-		basicPhasesSpan.SetAttributes(attribute.String("crs.action.name", "runBasicStrategies"))
-		for key, value := range params.TaskDetail.Metadata {
-			basicPhasesSpan.SetAttributes(attribute.String(key, value))
-		}
 
 		if os.Getenv("FUZZER_TEST") == "" {
 			basicConfig := BasicStrategiesConfig{
@@ -279,11 +260,10 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 				params.ProjectConfig.Language, params.TaskDetail, params.Task, basicConfig)
 		} else {
 			// Testing mode: only run libFuzzer and exit
-			runLibFuzzer(fuzzer, params.TaskDir, projectDir, params.ProjectConfig.Language,
-				params.TaskDetail, params.Task, params.SubmissionEndpoint)
-			os.Exit(0)
+			// runLibFuzzer(fuzzer, params.TaskDir, projectDir, params.ProjectConfig.Language,
+			// 	params.TaskDetail, params.Task, params.SubmissionEndpoint)
+			// os.Exit(0)
 		}
-		basicPhasesSpan.End()
 	}
 
 	// For full scan tasks without patching enabled, return early after basic phase completes
@@ -304,13 +284,13 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 	} else {
 		log.Printf("No POV found in basic phase, will continue with advanced phases")
 		// If LibFuzzer not started (e.g., for Java), start it now
-		if !libFuzzerStarted {
-			go func() {
-				runLibFuzzer(fuzzer, params.TaskDir, projectDir, params.ProjectConfig.Language,
-					params.TaskDetail, params.Task, params.SubmissionEndpoint)
-			}()
-			log.Printf("Started LibFuzzer for non-C/C++ project")
-		}
+		// if !libFuzzerStarted {
+		// 	go func() {
+		// 		runLibFuzzer(fuzzer, params.TaskDir, projectDir, params.ProjectConfig.Language,
+		// 			params.TaskDetail, params.Task, params.SubmissionEndpoint)
+		// 	}()
+		// 	log.Printf("Started LibFuzzer for non-C/C++ project")
+		// }
 	}
 
 	// Calculate time budget
@@ -404,14 +384,6 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 func executePatchingPhase(ctx context.Context, fuzzer string, params TaskExecutionParams,
 	projectDir, fuzzDir, sanitizer string, deadlineTime time.Time) bool {
 
-	_, patchSpan := telemetry.StartSpan(ctx, "patching_phase")
-	patchSpan.SetAttributes(attribute.String("crs.action.category", "patch_generation"))
-	patchSpan.SetAttributes(attribute.String("crs.action.name", "runPatchingStrategies"))
-	for key, value := range params.TaskDetail.Metadata {
-		patchSpan.SetAttributes(attribute.String(key, value))
-	}
-	defer patchSpan.End()
-
 	var patchSuccess bool
 	advancedMetadataPath := filepath.Join(fuzzDir, params.POVAdvancedMetadataDir)
 
@@ -431,7 +403,6 @@ func executePatchingPhase(ctx context.Context, fuzzer string, params TaskExecuti
 			params.WorkerIndex, params.AnalysisServiceUrl, params.UnharnessedFuzzerSrcPath)
 	}
 
-	patchSpan.SetAttributes(attribute.Bool("crs.patch.success", patchSuccess))
 	return patchSuccess
 }
 

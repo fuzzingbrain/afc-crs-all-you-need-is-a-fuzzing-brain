@@ -41,30 +41,16 @@ import uuid
 
 load_dotenv()
 
-import openlit
-from opentelemetry import trace
-# Initialize openlit
-openlit.init(application_name="afc-crs-all-you-need-is-a-fuzzing-brain")
-# Acquire a tracer
-tracer = trace.get_tracer(__name__)
-
-DO_PATCH_ONLY = False
 FULL_SCAN = False
 
 POV_METADATA_DIR = "successful_povs"
 POV_SUCCESS_DIR = f"/tmp/{POV_METADATA_DIR}"
-PATCH_METADATA_DIR = "successful_patches"
-PATCH_SUCCESS_DIR = f"/tmp/{PATCH_METADATA_DIR}"
-
-PATCH_WORKSPACE_DIR = "patch_workspace"
-SUCCESS_PATCH_METADATA_FILE="successful_patch_metadata.json"
 DETECT_TIMEOUT_CRASH_SENTINEL = "detect_timeout_crash"
 
 # Constants
 MAX_ITERATIONS = 5
 MAX_VULNERABILITIES = 5  # Find up to 5 different vulnerabilities before returning
 FUZZING_TIMEOUT_MINUTES = 45
-PATCHING_TIMEOUT_MINUTES = 30
 OPENAI_MODEL = "chatgpt-4o-latest"
 OPENAI_MODEL_4O_MINI="gpt-4o-mini"
 OPENAI_MODEL_O1 = "o1"
@@ -123,19 +109,16 @@ os.makedirs(LOG_DIR, exist_ok=True)
 
 def setup_logging(fuzzer_name):
     """Set up logging for the strategy"""
-    # Include DO_PATCH_ONLY and FULL_SCAN in the log filename
-    patch_status = "patch_only" if DO_PATCH_ONLY else "pov_strategy"
     scan_type = "full_scan" if FULL_SCAN else "delta_scan"
     
     timestamp = int(time.time())
-    log_file = os.path.join(LOG_DIR, f"as0_{fuzzer_name}_{patch_status}_{scan_type}_phase{POV_PHASE}_{timestamp}.log")
+    log_file = os.path.join(LOG_DIR, f"as0_{fuzzer_name}_{scan_type}_phase{POV_PHASE}_{timestamp}.log")
     
     # Log initial configuration
     with open(log_file, "w") as f:
         f.write(f"Strategy: AS0\n")
         f.write(f"Fuzzer: {fuzzer_name}\n")
         f.write(f"Timestamp: {timestamp} ({datetime.datetime.fromtimestamp(timestamp).strftime('%Y-%m-%d %H:%M:%S')})\n")
-        f.write(f"DO_PATCH_ONLY: {DO_PATCH_ONLY}\n")
         f.write(f"FULL_SCAN: {FULL_SCAN}\n")
         f.write(f"FUZZING_TIMEOUT_MINUTES: {FUZZING_TIMEOUT_MINUTES}\n")
         f.write(f"MAX_ITERATIONS: {MAX_ITERATIONS}\n")
@@ -347,25 +330,6 @@ def call_llm(log_file, messages, model_name):
     except Exception as e:
         logging.error(f"Error in LLM call: {str(e)}")
         return "", False
-
-def call_llm0(log_file, messages, model_name):
-    """Call LLM with telemetry tracking."""    
-    with tracer.start_as_current_span("genai") as span:
-        span.set_attribute("crs.action.category", "fuzzing")
-        span.set_attribute("crs.action.name", "call_llm")
-        span.set_attribute("genai.model.name", f"{model_name}")
-
-        try:
-            if model_name.startswith("gemini"):
-                response = call_gemini_api(log_file, messages, model_name)
-            else:
-                response = call_litellm(log_file, messages, model_name)
-            
-            return response
-
-        except Exception as e:
-            logging.error(f"Error in LLM call: {str(e)}")
-            return "", False
 
 def extract_python_code_from_response(log_file, text, max_retries=2, timeout=30):
     """    
@@ -2359,38 +2323,6 @@ def submit_pov_to_endpoint(log_file, project_dir, blob_path, fuzzer_output,sanit
         log_message(log_file, f"Error submitting POV to endpoint: {str(e)}")
         return False
 
-def check_for_successful_patches(log_file, project_dir):
-    """
-    Check if any successful patches have been created.
-    
-    Args:
-        log_file: Log file path
-        project_dir: Project directory
-        
-    Returns:
-        bool: True if successful patches found, False otherwise
-    """
-    # Check for successful_patch_metadata.json in the project directory
-    success_file = os.path.join(PATCH_SUCCESS_DIR, SUCCESS_PATCH_METADATA_FILE)
-    if os.path.exists(success_file):
-        try:
-            with open(patch_metadata_path, 'r') as f:
-                metadata = json.load(f)
-                log_message(log_file, f"Found successful patch metadata: {metadata}")
-                return True
-        except Exception as e:
-            log_message(log_file, f"Error reading patch metadata: {str(e)}")
-    
-
-    # Check for successful_patches directory with content
-    if os.path.isdir(PATCH_SUCCESS_DIR):
-        patches = os.listdir(patches_dir)
-        if patches:
-            log_message(log_file, f"Found successful patches: {patches}")
-            return True
-    
-    return False
-
 def extract_crash_output(output):
     """
     Extract the relevant crash output from fuzzer output.
@@ -2598,11 +2530,8 @@ def cleanup_seed_corpus(dir_path, max_age_minutes=10):
         except OSError:
             pass   # ignore files that disappear meanwhile
 
-def doAdvancedPoV0(log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer, project_dir, project_name, focus, language='c', check_patch_success=False) -> bool:
+def doAdvancedPoV0(log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer, project_dir, project_name, focus, language='c') -> bool:
     log_message(log_file, f"POV_PHASE: {POV_PHASE} doAdvancedPoV0") 
-
-    if check_patch_success == True:
-        log_message(log_file, "Will check for successful patches periodically")
        
     start_time = time.time()
     end_time = start_time + (FUZZING_TIMEOUT_MINUTES * 60)
@@ -2627,10 +2556,6 @@ def doAdvancedPoV0(log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer, p
                 log_message(log_file, f"Timeout reached after {iteration-1} iterations with {model_name}")
                 break
             
-            if check_patch_success:
-                if check_for_successful_patches(log_file, project_dir):
-                    log_message(log_file, "Successful patch detected, stopping POV generation")
-                    return True, {} # Return empty metadata since we're stopping early
 
             if has_successful_pov(fuzzer_path,project_dir):
                 return True, {}
@@ -3497,7 +3422,7 @@ Write nothing except the Python script (with embedded comments).
     return base_prompt + language_block + ending
 
 
-def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzzer_name, sanitizer, project_dir, project_name, focus, language='c', check_patch_success=False) -> bool:
+def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzzer_name, sanitizer, project_dir, project_name, focus, language='c') -> bool:
     log_message(log_file, f"POV_PHASE: {POV_PHASE} doAdvancedPoV")
 
     # TEMPORARY: Skip to Phase 3 only for testing
@@ -3532,7 +3457,7 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
         else:
             initial_msg = create_commit_based_prompt(project_name,fuzzer_code, commit_diff,sanitizer,language)
         print(f"initial_msg: {initial_msg}")
-        return doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language, check_patch_success)
+        return doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language)
     elif POV_PHASE == 1:
         MAX_ITERATIONS = 3
         MODELS = [CLAUDE_MODEL, OPENAI_MODEL, OPENAI_MODEL_O3]
@@ -3543,7 +3468,7 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
             for category in categories:
                 initial_msg = create_commit_vul_category_based_prompt_for_c(project_name,fuzzer_code, commit_diff,sanitizer, category)
                 print(f"vul_category_c: {category} initial_msg: {initial_msg}")
-                pov_success, pov_metadata = doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language, check_patch_success)
+                pov_success, pov_metadata = doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language)
                 if pov_success:
                     log_message(log_file, f"category: {category} pov_success: {pov_success}") 
                     break
@@ -3553,7 +3478,7 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
             for category in categories:
                 initial_msg = create_commit_vul_category_based_prompt_for_java(project_name,fuzzer_code, commit_diff,sanitizer, category)
                 print(f"vul_category_java: {category} initial_msg: {initial_msg}")
-                pov_success, pov_metadata = doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language, check_patch_success)
+                pov_success, pov_metadata = doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language)
                 if pov_success:
                     log_message(log_file, f"category: {category} pov_success: {pov_success}") 
                     break
@@ -3590,7 +3515,7 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
         char_length = len(initial_msg)
         print(f"initial_msg: {line_count} lines, {char_length} characters")
         print(f"{initial_msg}")
-        return doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language, check_patch_success)
+        return doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language)
     elif POV_PHASE == 3:
         if language.startswith('j'):
             all_reachable_funcs = extract_reachable_functions_from_analysis_service(fuzzer_path,fuzzer_src_path,focus,project_src_dir)
@@ -3619,7 +3544,7 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
         # char_length = len(initial_msg)
         # print(f"initial_msg: {line_count} lines, {char_length} characters")
         # print(f"{initial_msg}")
-        # pov_success, pov_metadata =  doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language, check_patch_success)
+        # pov_success, pov_metadata =  doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language)
         # if pov_success:
         #     log_message(log_file, f"pov_success: {pov_success} pov_metadata: {pov_metadata}\vulnerable_functions: {vulnerable_functions}") 
         #     return pov_success, pov_metadata
@@ -3649,7 +3574,7 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
             char_length = len(initial_msg)
             print(f"initial_msg: {line_count} lines, {char_length} characters")
             print(f"{initial_msg}")
-            pov_success, pov_metadata = doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language, check_patch_success)
+            pov_success, pov_metadata = doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language)
             if pov_success:
                 log_message(log_file, f"pov_success: {pov_success} pov_metadata: {pov_metadata}\ncall_path: {call_path}") 
                 break
@@ -3660,7 +3585,7 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
             char_length = len(initial_msg)
             print(f"initial_msg: {line_count} lines, {char_length} characters")
             print(f"{initial_msg}")
-            return doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language, check_patch_success)
+            return doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language)
         
         return pov_success, pov_metadata
     
@@ -3873,10 +3798,8 @@ clang.cindex.Config.set_library_file('/usr/lib/llvm18/lib/libclang.so')
 def create_commit_based_prompt(project_name,fuzzer_code, commit_diff, sanitizer, language):
     # Base prompt that applies to all languages
     base_prompt = f"""
-You are a top software vulnerability detection expert, which helps to find vulnerabilities. 
 The {project_name} project contains a vulnerability introduced by an unknown commit. Your job is to find the correct input to trigger the vulnerability.
-
-Please output a Python script that creates five blob files (name as xi.bin with i=1..5). Each blob file will be run by this fuzzer code:
+Please output a Python script that creates five blob files (name as xi.bin with i=1..5). Each blob file will be run by the following fuzz harness:
 ```{language}
 {fuzzer_code}
 ```
@@ -3920,12 +3843,10 @@ Your goal is to trigger an UndefinedBehaviorSanitizer error by crafting an input
         }
         
         # Get the guidance for the specified sanitizer, or use a generic one if not found
-        sanitizer_specific = sanitizer_guidance.get(sanitizer.lower(), """
-The project uses sanitizers that can detect various types of errors. Your goal is to trigger a sanitizer error by crafting an input that exploits the vulnerability.
+        sanitizer_specific = sanitizer_guidance.get(sanitizer.lower(), """The project uses sanitizers that can detect various types of errors. Your goal is to trigger a sanitizer error by crafting an input that exploits the vulnerability.
 """)
         
-        language_specific = f"""
-IMPORTANT: Read the harness code carefully to understand how inputs are processed. In each xi.bin, you need to generate a complete blob that will trigger a sanitizer error.
+        language_specific = f"""IMPORTANT: Read the harness code carefully to understand how inputs are processed. In each xi.bin, you need to generate a complete blob that will trigger a sanitizer error.
 
 Think through these steps:
 1. What function contains the vulnerability? How do you reach this function?
@@ -3968,10 +3889,7 @@ Your goal is to trigger any of these sanitizer errors or a Java exception (like 
 """
 
     # Common ending for both languages
-    ending = """
-Limit the blob size to 2MiB max
-
-Your output must be a single Python script that creates five files named exactly x1.bin, x2.bin, x3.bin, x4.bin, and x5.bin. Each file should include a brief description of the targeted vulnerability and the function it affects. The vulnerability can be challenging to trigger, so diversify the contents of the .bin files to maximize the likelihood of success. It's acceptable if only one of the files successfully triggers the vulnerability.
+    ending = """Your output must contain a single Python script (marked by ```python) that creates five files named exactly x1.bin, x2.bin, x3.bin, x4.bin, and x5.bin. Each file should include a brief description of the targeted vulnerability and the function it affects. The vulnerability can be challenging to trigger, so diversify the contents of the .bin files to maximize the likelihood of success. It's acceptable if only one of the files successfully triggers the vulnerability.
 """
 
     # Combine the parts to create the final prompt
@@ -4744,7 +4662,7 @@ def load_suspected_vulns(project_dir: str) -> List[Dict[str, Any]]:
 
 
 def process_full_scan(log_file, fuzzer_src_path, fuzzer_code, fuzzer_path, fuzzer_name, sanitizer, 
-                     project_dir, project_name, focus, language, check_patch_success):
+                     project_dir, project_name, focus, language):
     """
     Process vulnerabilities in FULL_SCAN mode, handling incremental updates to suspected_vulns.json.
     
@@ -4806,7 +4724,7 @@ def process_full_scan(log_file, fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
                     future = executor.submit(
                         doAdvancedPoV, 
                         log_file, fuzzer_src_path,fuzzer_code, commit_diff,fuzzer_path, fuzzer_name, sanitizer,
-                        project_dir, project_name, focus, language, check_patch_success
+                        project_dir, project_name, focus, language
                     )
                     futures[future] = vuln
             # Check for completed futures
@@ -4967,47 +4885,34 @@ def load_task_detail(fuzz_dir):
         return None
 
 def main():
-    parser = argparse.ArgumentParser(description="Advanced Strategy 0: LLM-guided POV and Patch Generation")
+    parser = argparse.ArgumentParser(description="Advanced Strategy 0: LLM-guided POV Generation")
     parser.add_argument("fuzzer_path", help="Path to the fuzzer")
     parser.add_argument("project_name", help="Project name")
     parser.add_argument("focus", help="Focus")
     parser.add_argument("language", help="Language")
 
-    parser.add_argument("--do-patch-only", dest="do_patch_only", type=lambda x: x.lower() == 'true', 
-                        default=False, help="Whether to only run patching (true/false)")
     parser.add_argument("--full-scan", dest="full_scan", type=lambda x: x.lower() == 'true', 
                         default=False, help="Whether full scan (default is delta-scan (true/false)")
     parser.add_argument("--max-iterations", dest="max_iterations", type=int,
                         default=5, help="Maximum number of iterations")
     parser.add_argument("--fuzzing-timeout", dest="fuzzing_timeout", type=int,
                         default=30, help="Fuzzing timeout in minutes")
-    parser.add_argument("--patching-timeout", dest="patching_timeout", type=int,
-                        default=30, help="Patching timeout in minutes")
     parser.add_argument("--pov-phase", dest="pov_phase", type=int,
                         default=0, help="PoV generation phase")
-    parser.add_argument("--patch-phase", dest="patch_phase", type=int,
-                        default=0, help="Patch generation phase")
     parser.add_argument("--pov-metadata-dir", dest="pov_metadata_dir", type=str,
                         default="successful_povs", help="Directory to store POV metadata")
-    parser.add_argument("--patch-workspace-dir", help="Directory for patch workspace", default="patch_workspace")
-    parser.add_argument("--check-patch-success", action="store_true", 
-                        help="Check for successful patches and exit early if found")
     parser.add_argument("--model", type=str, default="", help="Specify the model to use")
                        
     args = parser.parse_args()
     # Set global variables
-    global DO_PATCH_ONLY, MAX_ITERATIONS, FUZZING_TIMEOUT_MINUTES, POV_PHASE, PATCH_PHASE
-    global PATCHING_TIMEOUT_MINUTES, POV_METADATA_DIR, PATCH_WORKSPACE_DIR, MODELS
+    global MAX_ITERATIONS, FUZZING_TIMEOUT_MINUTES, POV_PHASE
+    global POV_METADATA_DIR, MODELS
     global FULL_SCAN
-    DO_PATCH_ONLY = args.do_patch_only
     FULL_SCAN = args.full_scan
     MAX_ITERATIONS = args.max_iterations
     FUZZING_TIMEOUT_MINUTES = args.fuzzing_timeout
-    PATCHING_TIMEOUT_MINUTES = args.patching_timeout
     POV_PHASE=args.pov_phase
-    PATCH_PHASE=args.patch_phase
     POV_METADATA_DIR = args.pov_metadata_dir
-    PATCH_WORKSPACE_DIR = args.patch_workspace_dir
 
     global CLAUDE_MODEL, OPENAI_MODEL, MODELS
     if args.model:
@@ -5016,11 +4921,9 @@ def main():
         MODELS = [args.model]
     print(f"DEBUG: Global MODELS = {MODELS}")
     
-    print(f"DEBUG: Global DO_PATCH_ONLY = {DO_PATCH_ONLY}")
     print(f"DEBUG: Global FULL_SCAN = {FULL_SCAN}")
     print(f"DEBUG: Global MAX_ITERATIONS = {MAX_ITERATIONS}")
     print(f"DEBUG: Global FUZZING_TIMEOUT_MINUTES = {FUZZING_TIMEOUT_MINUTES}")
-    print(f"DEBUG: Global PATCHING_TIMEOUT_MINUTES = {PATCHING_TIMEOUT_MINUTES}")
     print(f"DEBUG: Global POV_METADATA_DIR = {POV_METADATA_DIR}")
 
     fuzzer_path = args.fuzzer_path
@@ -5035,11 +4938,9 @@ def main():
 
     task_detail = load_task_detail(fuzz_dir)
 
-    global POV_SUCCESS_DIR, PATCH_SUCCESS_DIR
+    global POV_SUCCESS_DIR
     POV_SUCCESS_DIR = os.path.join(fuzz_dir, POV_METADATA_DIR)
-    PATCH_SUCCESS_DIR = os.path.join(fuzz_dir, PATCH_METADATA_DIR)
     print(f"DEBUG: Global POV_SUCCESS_DIR = {POV_SUCCESS_DIR}")
-    print(f"DEBUG: Global PATCH_SUCCESS_DIR = {PATCH_SUCCESS_DIR}")
 
     base_name = os.path.basename(fuzz_dir)
     parts = base_name.split("-")
@@ -5056,37 +4957,23 @@ def main():
 
     log_file = setup_logging(fuzzer_name)   
     pov_success = False  # Default value in case the block below doesn't set it
-    # Wrap your entire main execution in a root span
-    with tracer.start_as_current_span("advanced_fuzzing") as span:
-        span.set_attribute("crs.action.category", "fuzzing")
-        span.set_attribute("crs.action.name", f"advanced_fuzzing_full_scan_phase_{POV_PHASE}")
-        span.set_attribute("service.name", "as0_full")
-        span.set_attribute("fuzzer.path", f"{fuzzer_path}")
         
-        if task_detail:
-            for key, value in task_detail["metadata"].items():
-                span.set_attribute(key, value)   
-        
-        fuzzer_code, fuzzer_src_path = find_fuzzer_source(log_file, fuzzer_path, project_name, project_src_dir, language)
+    fuzzer_code, fuzzer_src_path = find_fuzzer_source(log_file, fuzzer_path, project_name, project_src_dir, language)
 
-        log_message(log_file, f"Starting Advanced Strategy as0_full.py for fuzzer: {fuzzer_path}")
-        log_message(log_file, f"Project directory: {project_dir}")
+    log_message(log_file, f"Starting Advanced Strategy as0_full.py for fuzzer: {fuzzer_path}")
+    log_message(log_file, f"Project directory: {project_dir}")
 
-        try:
-            pov_success, pov_metadata = doAdvancedPoV_full(log_file,fuzzer_src_path,fuzzer_code,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language, args.check_patch_success)
+    try:
+        pov_success, pov_metadata = doAdvancedPoV_full(log_file,fuzzer_src_path,fuzzer_code,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language)
 
-        except KeyboardInterrupt:
-            print("\n\n⚠️  Interrupted by user (Ctrl+C)")
-            span.set_attribute("crs.interrupted", True)
-            raise  # Re-raise to properly exit
-        except Exception as e:
-            span.record_exception(e)
-            # Print the full traceback so errors are visible
-            import traceback
-            print(f"ERROR in doAdvancedPoV_full: {str(e)}")
-            traceback.print_exc()
-
-        span.set_attribute("crs.pov.success", pov_success)
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Interrupted by user (Ctrl+C)")
+        raise  # Re-raise to properly exit
+    except Exception as e:
+        # Print the full traceback so errors are visible
+        import traceback
+        print(f"ERROR in doAdvancedPoV_full: {str(e)}")
+        traceback.print_exc()
     
     return 0 if pov_success else 1
 

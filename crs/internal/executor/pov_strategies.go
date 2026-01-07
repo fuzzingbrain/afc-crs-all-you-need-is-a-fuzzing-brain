@@ -18,10 +18,7 @@ import (
 
 	"crs/internal/config"
 	"crs/internal/models"
-	"crs/internal/telemetry"
 	"crs/internal/utils/helpers"
-
-	"go.opentelemetry.io/otel/attribute"
 )
 
 // killProcessTree kills a process and all its descendants
@@ -118,20 +115,8 @@ func runAdvancedPOVPhases(
 ) {
 	log.Printf("========== ADVANCED POV PHASES: Starting iterative POV generation ==========")
 
-	ctx, advancedPhasesSpan := telemetry.StartSpan(ctx, "advanced_pov_phases")
-	advancedPhasesSpan.SetAttributes(attribute.String("crs.action.category", "fuzzing"))
-	advancedPhasesSpan.SetAttributes(attribute.String("crs.action.name", "runAdvancedPOVPhases"))
-	for key, value := range params.TaskDetail.Metadata {
-		advancedPhasesSpan.SetAttributes(attribute.String(key, value))
-	}
-	defer advancedPhasesSpan.End()
-
 	log.Printf("Time budget: total=%d min, working=%d min",
 		workingBudgetMinutes+SafetyBufferMinutes, workingBudgetMinutes)
-
-	advancedPhasesSpan.SetAttributes(attribute.Float64("crs.budget.total_hours", float64(workingBudgetMinutes+SafetyBufferMinutes)/60.0))
-	advancedPhasesSpan.SetAttributes(attribute.Float64("crs.budget.working_hours", float64(workingBudgetMinutes)/60.0))
-
 	// Calculate POV budget (95% of working time to maximize strategy execution time)
 	initialPovBudgetMinutes := int(float64(workingBudgetMinutes) * 0.95)
 	if initialPovBudgetMinutes < 1 {
@@ -270,24 +255,11 @@ func runPOVPhasesSequential(ctx context.Context, fuzzer string, params TaskExecu
 		}
 
 		log.Printf("Phase %d/%d (timeout=%d min)", phase+1, len(phaseTimeouts), timeout)
-		_, phaseSpan := telemetry.StartSpan(ctx, fmt.Sprintf("pov_round%d_phase%d", roundNum, phase+1))
-		phaseSpan.SetAttributes(attribute.String("crs.action.category", "input_generation"))
-		phaseSpan.SetAttributes(attribute.String("crs.action.name", fmt.Sprintf("runPOVPhase%d", phase)))
-		phaseSpan.SetAttributes(attribute.Int("crs.phase.number", phase))
-		phaseSpan.SetAttributes(attribute.Int("crs.round.number", roundNum))
-		phaseSpan.SetAttributes(attribute.Int("crs.phase.timeout_minutes", timeout))
-		for key, value := range params.TaskDetail.Metadata {
-			phaseSpan.SetAttributes(attribute.String(key, value))
-		}
-
 		success := runAdvancedPOVStrategiesWithTimeout(fuzzer, params.TaskDir, projectDir,
 			params.ProjectConfig.Language, params.TaskDetail, params.Task, timeout, phase, roundNum,
 			params.Model, params.POVAdvancedMetadataDir, params.SubmissionEndpoint,
 			params.WorkerIndex, params.AnalysisServiceUrl, params.UnharnessedFuzzerSrcPath,
 			params.StrategyConfig)
-
-		phaseSpan.SetAttributes(attribute.Bool("crs.phase.pov_success", success))
-		phaseSpan.End()
 
 		if success {
 			log.Printf("✓ POV found in sequential phase %d of round %d", phase+1, roundNum)
@@ -322,24 +294,12 @@ func runPOVPhasesParallel(ctx context.Context, fuzzer string, params TaskExecuti
 			}
 
 			log.Printf("Starting parallel phase %d/%d (timeout=%d min)", phase+1, numPhases, roundTimeoutMinutes)
-			_, phaseSpan := telemetry.StartSpan(ctx, fmt.Sprintf("pov_round%d_phase%d", roundNum, phase+1))
-			phaseSpan.SetAttributes(attribute.String("crs.action.category", "input_generation"))
-			phaseSpan.SetAttributes(attribute.String("crs.action.name", fmt.Sprintf("runPOVPhase%d", phase)))
-			phaseSpan.SetAttributes(attribute.Int("crs.phase.number", phase))
-			phaseSpan.SetAttributes(attribute.Int("crs.round.number", roundNum))
-			phaseSpan.SetAttributes(attribute.Int("crs.phase.timeout_minutes", roundTimeoutMinutes))
-			for key, value := range params.TaskDetail.Metadata {
-				phaseSpan.SetAttributes(attribute.String(key, value))
-			}
 
 			success := runAdvancedPOVStrategiesWithTimeout(fuzzer, params.TaskDir, projectDir,
 				params.ProjectConfig.Language, params.TaskDetail, params.Task, roundTimeoutMinutes,
 				phase, roundNum, params.Model, params.POVAdvancedMetadataDir, params.SubmissionEndpoint,
 				params.WorkerIndex, params.AnalysisServiceUrl, params.UnharnessedFuzzerSrcPath,
 				params.StrategyConfig)
-
-			phaseSpan.SetAttributes(attribute.Bool("crs.phase.pov_success", success))
-			phaseSpan.End()
 
 			if success {
 				log.Printf("✓ POV found in parallel phase %d of round %d", phase+1, roundNum)
