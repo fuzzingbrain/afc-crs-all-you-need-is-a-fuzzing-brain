@@ -21,7 +21,7 @@ The easiest way to run FuzzingBrain:
 
 ```bash
 # Pull the image
-docker pull o2lab/fuzzingbrain
+docker pull ghcr.io/o2lab/fuzzingbrain:latest
 
 # Create workspace directory (paths must match for Docker-in-Docker)
 sudo mkdir -p /app/workspace
@@ -30,7 +30,7 @@ sudo mkdir -p /app/workspace
 docker run --rm -it \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v /app/workspace:/app/workspace \
-  o2lab/fuzzingbrain https://github.com/OwenSanzas/libpng.git
+  ghcr.io/o2lab/fuzzingbrain:latest https://github.com/OwenSanzas/libpng.git
 ```
 
 Results (patches, POVs, logs) will be saved to `/app/workspace/<project>/`.
