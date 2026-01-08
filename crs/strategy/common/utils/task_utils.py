@@ -23,11 +23,15 @@ DETECT_TIMEOUT_CRASH_SENTINEL = "detect_timeout_crash"
 _cleanup_in_progress = False
 
 def _cleanup_docker_containers():
-    """Stop all running Docker containers on exit"""
+    """Stop all running Docker containers on exit (skip if running inside Docker)"""
     global _cleanup_in_progress
     if _cleanup_in_progress:
         return
     _cleanup_in_progress = True
+
+    # Skip cleanup if running inside Docker to avoid stopping the parent container
+    if os.path.exists('/.dockerenv'):
+        return
 
     try:
         # Get all running containers
