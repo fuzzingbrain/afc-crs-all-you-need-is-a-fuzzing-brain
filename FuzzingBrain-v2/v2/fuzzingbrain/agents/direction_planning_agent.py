@@ -126,7 +126,7 @@ entry_functions are the "doors" through which untrusted data enters this feature
 - Divide by BUSINESS LOGIC, not vulnerability patterns
 - Each direction = one logical feature or sub-feature
 - Aim for FULL COVERAGE of all reachable functions
-- Create exactly 1 direction (focus on the highest risk area)
+- Prioritize HIGH RISK directions first
 """
 
 
@@ -151,7 +151,7 @@ class DirectionPlanningAgent(BaseAgent):
         max_iterations: int = 20,  # Reduced from 100 to control cost
         verbose: bool = True,
         log_dir: Optional[Path] = None,
-        max_directions: int = 1,  # DEBUG: Only 1 direction for testing
+        max_directions: int = 5,
     ):
         """
         Initialize Direction Planning Agent.

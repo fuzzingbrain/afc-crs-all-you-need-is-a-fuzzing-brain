@@ -45,9 +45,11 @@ redis>=5.0.0
 
 # Database
 pymongo>=4.6.0
+motor>=3.3.0  # Async MongoDB driver
 
 # HTTP Client
 httpx>=0.27.0
+aiohttp>=3.9.0  # Async HTTP client
 
 # Data Validation
 pydantic>=2.0.0

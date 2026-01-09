@@ -5,3 +5,11 @@
 fuzzingbrain/llm_config.local.yaml
 task_view_*/
 documentation/analysis/
+experiment/
+
+# Work configurations (user-specific)
+work/
+
+# Eval server runtime
+.eval_pids/
+logs/eval/

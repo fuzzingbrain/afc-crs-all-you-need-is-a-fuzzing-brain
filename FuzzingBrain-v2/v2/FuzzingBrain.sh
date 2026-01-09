@@ -523,6 +523,12 @@ show_usage() {
     echo "  --timeout <min>     Timeout in minutes (default: 60)"
     echo "  --pov-count <N>     Stop after N verified POVs (default: 0 = unlimited)"
     echo "  --in-place          Run directly without copying workspace"
+    echo ""
+    echo "EVALUATION OPTIONS:"
+    echo "  --eval-port <port>  Connect to eval server on localhost:<port>"
+    echo "  --budget <amount>   LLM budget limit in USD (e.g., 50.0)"
+    echo "  --allow-expensive   Allow expensive model fallback (true/false)"
+    echo ""
     echo "  -h, -help, --help   Show this help message"
     echo ""
     echo "Examples:"
@@ -533,6 +539,9 @@ show_usage() {
     echo "  $0 -b abc123 -d def456 https://github.com/user/repo   # Delta scan"
     echo "  $0 ./task_config.json                                 # From JSON"
     echo "  $0 libpng                                             # Continue project"
+    echo ""
+    echo "With Evaluation (first run ./eval.sh to start eval server):"
+    echo "  $0 --eval-port 18080 --budget 50.0 https://github.com/user/repo.git"
     exit 0
 }
 

@@ -70,6 +70,7 @@ class Config:
     repo_path: Optional[str] = None
     project_name: Optional[str] = None
     ossfuzz_project: Optional[str] = None  # OSS-Fuzz project name (may differ from project_name)
+    target_commit: Optional[str] = None  # Target commit for full scan
 
     # Delta scan commits (used when scan_mode is delta)
     base_commit: Optional[str] = None
@@ -77,6 +78,7 @@ class Config:
 
     # Fuzz tooling
     fuzz_tooling_url: Optional[str] = None
+    fuzz_tooling_ref: Optional[str] = None  # Branch/tag for fuzz-tooling
     fuzz_tooling_path: Optional[str] = None
 
     # Patch mode specific
@@ -102,6 +104,9 @@ class Config:
     api_host: str = "0.0.0.0"
     api_port: int = 18080
 
+    # Eval server (for tracking and dashboard)
+    eval_server: Optional[str] = None  # e.g., "http://localhost:18080"
+
     @classmethod
     def from_json(cls, json_path: str) -> "Config":
         """Load configuration from JSON file"""
@@ -124,18 +129,22 @@ class Config:
 
         return cls(
             workspace=data.get("workspace"),
-            task_type=data.get("task_type", "pov-patch"),
+            task_type=data.get("task_type") or data.get("job_type", "pov-patch"),
             scan_mode=data.get("scan_mode", "full"),
             sanitizers=data.get("sanitizers", ["address"]),
             timeout_minutes=data.get("timeout_minutes", 60),
             pov_count=data.get("pov_count", 0),
+            budget_limit=data.get("budget_limit", 100.0) or 100.0,
             fuzzer_worker=fuzzer_worker,
             repo_url=data.get("repo_url"),
             repo_path=data.get("repo_path"),
             project_name=data.get("project_name"),
+            ossfuzz_project=data.get("ossfuzz_project"),
+            target_commit=data.get("target_commit"),
             base_commit=data.get("base_commit"),
             delta_commit=data.get("delta_commit"),
             fuzz_tooling_url=data.get("fuzz_tooling_url"),
+            fuzz_tooling_ref=data.get("fuzz_tooling_ref"),
             fuzz_tooling_path=data.get("fuzz_tooling_path"),
             commit_id=data.get("commit_id"),
             fuzzer_name=data.get("fuzzer_name"),
@@ -145,6 +154,7 @@ class Config:
             redis_url=data.get("redis_url", "redis://localhost:6379/0"),
             mongodb_url=data.get("mongodb_url", "mongodb://localhost:27017"),
             mongodb_db=data.get("mongodb_db", "fuzzingbrain"),
+            eval_server=data.get("eval_server"),
         )
 
     @classmethod
@@ -262,9 +272,12 @@ class Config:
             "repo_url": self.repo_url,
             "repo_path": self.repo_path,
             "project_name": self.project_name,
+            "ossfuzz_project": self.ossfuzz_project,
+            "target_commit": self.target_commit,
             "base_commit": self.base_commit,
             "delta_commit": self.delta_commit,
             "fuzz_tooling_url": self.fuzz_tooling_url,
+            "fuzz_tooling_ref": self.fuzz_tooling_ref,
             "fuzz_tooling_path": self.fuzz_tooling_path,
             "commit_id": self.commit_id,
             "fuzzer_name": self.fuzzer_name,
@@ -272,4 +285,5 @@ class Config:
             "redis_url": self.redis_url,
             "mongodb_url": self.mongodb_url,
             "mongodb_db": self.mongodb_db,
+            "eval_server": self.eval_server,
         }

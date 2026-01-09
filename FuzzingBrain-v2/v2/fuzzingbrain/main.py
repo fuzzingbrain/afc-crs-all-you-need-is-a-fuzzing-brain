@@ -396,6 +396,220 @@ def run_api(config: Config):
 
 
 # =============================================================================
+# Workspace Setup
+# =============================================================================
+
+def setup_workspace(config: Config) -> Config:
+    """
+    Setup workspace directory with repo and fuzz-tooling.
+
+    This ensures the workspace has:
+    1. A workspace directory
+    2. A cloned repository (if repo_url provided)
+    3. fuzz-tooling from OSS-Fuzz or custom URL
+
+    Returns updated config with workspace path set.
+    """
+    import uuid
+    import subprocess
+    import shutil
+    import tempfile
+
+    script_dir = Path(__file__).parent.parent
+    workspace_base = script_dir / "workspace"
+
+    # Generate task ID if not provided
+    task_id = config.task_id or str(uuid.uuid4())[:8]
+    config.task_id = task_id
+
+    # Determine project name
+    project_name = config.project_name
+    if not project_name and config.repo_url:
+        # Extract from repo URL
+        project_name = config.repo_url.rstrip('/').rstrip('.git').split('/')[-1]
+        config.project_name = project_name
+
+    # Create workspace if not provided
+    if not config.workspace:
+        workspace_name = f"{project_name}_{task_id}" if project_name else task_id
+        config.workspace = str(workspace_base / workspace_name)
+
+    workspace = Path(config.workspace)
+    workspace.mkdir(parents=True, exist_ok=True)
+
+    # Clone repository if needed
+    repo_path = workspace / "repo"
+    if not repo_path.exists() and config.repo_url:
+        print_step("Cloning repository...")
+        print_info(f"URL: {config.repo_url}")
+        try:
+            result = subprocess.run(
+                ["git", "clone", config.repo_url, str(repo_path)],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                print_error(f"Failed to clone repository: {result.stderr}")
+                sys.exit(1)
+            print_info("Repository cloned successfully")
+
+            # Checkout target commit if specified
+            if config.target_commit:
+                print_info(f"Checking out commit: {config.target_commit}")
+                subprocess.run(
+                    ["git", "checkout", config.target_commit],
+                    cwd=str(repo_path),
+                    capture_output=True
+                )
+        except Exception as e:
+            print_error(f"Failed to clone repository: {e}")
+            sys.exit(1)
+
+    # Setup fuzz-tooling if needed
+    fuzz_tooling_path = workspace / "fuzz-tooling"
+    if not fuzz_tooling_path.exists() or not any(fuzz_tooling_path.iterdir()):
+        print_step("Setting up fuzz-tooling...")
+
+        # Determine OSS-Fuzz project name
+        ossfuzz_project = config.ossfuzz_project or project_name
+
+        if config.fuzz_tooling_url:
+            # Use custom fuzz-tooling URL
+            print_info(f"Using custom fuzz-tooling: {config.fuzz_tooling_url}")
+            try:
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    clone_args = ["git", "clone", "--depth", "1"]
+                    if config.fuzz_tooling_ref:
+                        clone_args.extend(["--branch", config.fuzz_tooling_ref])
+                    clone_args.extend([config.fuzz_tooling_url, tmp_dir])
+
+                    result = subprocess.run(clone_args, capture_output=True, text=True)
+                    if result.returncode != 0:
+                        print_error(f"Failed to clone fuzz-tooling: {result.stderr}")
+                    else:
+                        # Copy relevant directories
+                        fuzz_tooling_path.mkdir(parents=True, exist_ok=True)
+
+                        # Look for project directory
+                        projects_dir = Path(tmp_dir) / "projects"
+                        if projects_dir.exists() and ossfuzz_project:
+                            project_dir = _find_ossfuzz_project(projects_dir, ossfuzz_project)
+                            if project_dir:
+                                dest = fuzz_tooling_path / "projects" / project_dir.name
+                                dest.parent.mkdir(parents=True, exist_ok=True)
+                                shutil.copytree(project_dir, dest)
+                                print_info(f"Found project: {project_dir.name}")
+
+                        # Copy infra directory if exists
+                        infra_dir = Path(tmp_dir) / "infra"
+                        if infra_dir.exists():
+                            shutil.copytree(infra_dir, fuzz_tooling_path / "infra")
+
+                        print_info("Custom fuzz-tooling setup complete")
+            except Exception as e:
+                print_warn(f"Failed to setup custom fuzz-tooling: {e}")
+        else:
+            # Use google/oss-fuzz
+            print_info("Fetching from google/oss-fuzz...")
+            try:
+                with tempfile.TemporaryDirectory() as tmp_dir:
+                    result = subprocess.run(
+                        ["git", "clone", "--depth", "1", "https://github.com/google/oss-fuzz.git", tmp_dir],
+                        capture_output=True,
+                        text=True
+                    )
+                    if result.returncode != 0:
+                        print_warn(f"Failed to clone oss-fuzz: {result.stderr}")
+                    else:
+                        projects_dir = Path(tmp_dir) / "projects"
+                        if projects_dir.exists() and ossfuzz_project:
+                            project_dir = _find_ossfuzz_project(projects_dir, ossfuzz_project)
+                            if project_dir:
+                                fuzz_tooling_path.mkdir(parents=True, exist_ok=True)
+                                dest = fuzz_tooling_path / "projects" / project_dir.name
+                                dest.parent.mkdir(parents=True, exist_ok=True)
+                                shutil.copytree(project_dir, dest)
+                                print_info(f"Found OSS-Fuzz project: {project_dir.name}")
+
+                                # Copy infra directory
+                                infra_dir = Path(tmp_dir) / "infra"
+                                if infra_dir.exists():
+                                    shutil.copytree(infra_dir, fuzz_tooling_path / "infra")
+                            else:
+                                print_warn(f"No matching OSS-Fuzz project found for: {ossfuzz_project}")
+                                print_warn("Use 'ossfuzz_project' in config to specify manually")
+            except Exception as e:
+                print_warn(f"Failed to fetch from oss-fuzz: {e}")
+    else:
+        print_info("Using existing fuzz-tooling")
+
+    # Setup diff directory for delta scan
+    if config.scan_mode == "delta" and config.base_commit:
+        diff_path = workspace / "diff"
+        diff_path.mkdir(parents=True, exist_ok=True)
+
+        diff_file = diff_path / "ref.diff"
+        if not diff_file.exists() and repo_path.exists():
+            print_step("Generating diff for delta scan...")
+            delta_commit = config.delta_commit or "HEAD"
+            try:
+                result = subprocess.run(
+                    ["git", "diff", f"{config.base_commit}..{delta_commit}", "--", ".", ":!.aixcc", ":!*/.aixcc"],
+                    cwd=str(repo_path),
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    diff_file.write_text(result.stdout)
+                    print_info(f"Generated diff: {config.base_commit[:8]}..{delta_commit[:8] if delta_commit != 'HEAD' else 'HEAD'}")
+            except Exception as e:
+                print_warn(f"Failed to generate diff: {e}")
+
+    return config
+
+
+def _find_ossfuzz_project(projects_dir: Path, project_name: str) -> Optional[Path]:
+    """
+    Find OSS-Fuzz project directory by name.
+
+    Tries various name variations to match the project.
+    """
+    # Direct match
+    direct = projects_dir / project_name
+    if direct.exists():
+        return direct
+
+    # Lowercase
+    lower = projects_dir / project_name.lower()
+    if lower.exists():
+        return lower
+
+    # Remove common prefixes/suffixes
+    import re
+    stripped = re.sub(r'^(lib|py|go|rust)-?', '', project_name, flags=re.IGNORECASE)
+    stripped = re.sub(r'-?(lib|py|go|rust)$', '', stripped, flags=re.IGNORECASE)
+    if stripped != project_name:
+        stripped_path = projects_dir / stripped
+        if stripped_path.exists():
+            return stripped_path
+        stripped_lower = projects_dir / stripped.lower()
+        if stripped_lower.exists():
+            return stripped_lower
+
+    # Remove afc- prefix (AIxCC repos)
+    if project_name.lower().startswith('afc-'):
+        afc_stripped = project_name[4:]
+        afc_path = projects_dir / afc_stripped
+        if afc_path.exists():
+            return afc_path
+        afc_lower = projects_dir / afc_stripped.lower()
+        if afc_lower.exists():
+            return afc_lower
+
+    return None
+
+
+# =============================================================================
 # Entry Mode: JSON Config
 # =============================================================================
 
@@ -406,6 +620,9 @@ def run_json_mode(config: Config):
     All task parameters are loaded from the JSON file.
     """
     print_step("Starting FuzzingBrain from JSON config...")
+
+    # Setup workspace (clone repo, download fuzz-tooling)
+    config = setup_workspace(config)
 
     # Validate configuration
     errors = config.validate()
@@ -514,9 +731,9 @@ def main():
     config = create_config_from_args(args)
 
     # =========================================================================
-    # Initialize Evaluation Reporter (if FUZZINGBRAIN_EVAL_SERVER is set)
+    # Initialize Evaluation Reporter (from config or environment variable)
     # =========================================================================
-    eval_server = os.environ.get("FUZZINGBRAIN_EVAL_SERVER")
+    eval_server = config.eval_server or os.environ.get("FUZZINGBRAIN_EVAL_SERVER")
     if eval_server:
         from .eval import create_reporter
         create_reporter(

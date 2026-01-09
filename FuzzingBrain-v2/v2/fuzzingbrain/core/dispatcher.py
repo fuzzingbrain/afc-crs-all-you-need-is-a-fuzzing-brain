@@ -237,6 +237,10 @@ class WorkerDispatcher:
             # Use worker's own diff path (copied to worker workspace)
             "scan_mode": self.task.scan_mode.value,
             "diff_path": str(Path(workspace_path) / "diff" / "ref.diff") if self.task.scan_mode.value == "delta" else None,
+            # Evaluation server for cost tracking
+            "eval_server": self.config.eval_server,
+            "budget_limit": self.config.budget_limit,
+            "stop_on_pov": self.config.stop_on_pov,
         }
 
         # Dispatch Celery task with dynamic time limit based on config

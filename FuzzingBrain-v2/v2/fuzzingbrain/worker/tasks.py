@@ -113,6 +113,11 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     scan_mode = assignment.get("scan_mode", "full")
     diff_path = assignment.get("diff_path")
 
+    # Evaluation server for cost tracking
+    eval_server = assignment.get("eval_server")
+    budget_limit = assignment.get("budget_limit", 0.0)
+    stop_on_pov = assignment.get("stop_on_pov", False)
+
     worker_id = f"{task_id}__{fuzzer}__{sanitizer}"
 
     # Build worker metadata for logging
@@ -136,15 +141,23 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"Worker starting")
     start_time = datetime.now()
 
-    # Initialize evaluation reporter context
+    # Initialize evaluation reporter with eval_server from assignment
     worker_ctx = None
     try:
-        from ..eval import get_reporter
+        from ..eval import create_reporter, get_reporter
+        # Create reporter if eval_server is provided in assignment
+        if eval_server:
+            create_reporter(
+                server_url=eval_server,
+                level="normal",
+                budget_limit=budget_limit,
+                stop_on_pov=stop_on_pov,
+            )
         reporter = get_reporter()
-        worker_ctx = reporter.worker_context(worker_id, fuzzer=fuzzer, sanitizer=sanitizer)
+        worker_ctx = reporter.worker_context(worker_id, fuzzer=fuzzer, sanitizer=sanitizer, task_id=task_id)
         worker_ctx.__enter__()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to initialize reporter: {e}")
 
     # Initialize database connection for this worker process
     try:
