@@ -62,15 +62,16 @@ def signal_handler(signum, frame):
     _shutdown_requested = True
     print("\n\033[1;33m[INTERRUPT]\033[0m Shutting down gracefully... (Press Ctrl+C again to force)")
 
-    # Mark all running workers as cancelled
+    # Mark all running workers and tasks as cancelled
     try:
         if _repos:
             from .core.models import WorkerStatus
-            # Find all non-finished workers and mark them cancelled
+
+            # Update workers
             all_workers = _repos.workers.collection.find({
                 "status": {"$in": ["pending", "building", "running"]}
             })
-            cancelled_count = 0
+            worker_count = 0
             for w in all_workers:
                 _repos.workers.collection.update_one(
                     {"_id": w["_id"]},
@@ -79,11 +80,27 @@ def signal_handler(signum, frame):
                         "error_msg": "Cancelled by user (Ctrl+C)"
                     }}
                 )
-                cancelled_count += 1
-            if cancelled_count > 0:
-                print(f"\033[1;33m[INTERRUPT]\033[0m Marked {cancelled_count} worker(s) as cancelled")
+                worker_count += 1
+
+            # Update tasks
+            all_tasks = _repos.tasks.collection.find({
+                "status": {"$in": ["pending", "running"]}
+            })
+            task_count = 0
+            for t in all_tasks:
+                _repos.tasks.collection.update_one(
+                    {"_id": t["_id"]},
+                    {"$set": {
+                        "status": "cancelled",
+                        "error_msg": "Cancelled by user (Ctrl+C)"
+                    }}
+                )
+                task_count += 1
+
+            if worker_count > 0 or task_count > 0:
+                print(f"\033[1;33m[INTERRUPT]\033[0m Marked {worker_count} worker(s) and {task_count} task(s) as cancelled")
     except Exception as e:
-        print(f"\033[0;31m[ERROR]\033[0m Failed to update worker status: {e}")
+        print(f"\033[0;31m[ERROR]\033[0m Failed to update status: {e}")
 
     # Stop infrastructure
     try:

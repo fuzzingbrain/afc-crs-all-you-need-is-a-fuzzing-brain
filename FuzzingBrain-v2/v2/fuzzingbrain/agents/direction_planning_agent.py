@@ -123,6 +123,7 @@ entry_functions are the "doors" through which untrusted data enters this feature
 
 ## Important Guidelines
 
+- Create at most 5 directions (prioritize by risk level)
 - Divide by BUSINESS LOGIC, not vulnerability patterns
 - Each direction = one logical feature or sub-feature
 - Aim for FULL COVERAGE of all reachable functions
