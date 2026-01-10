@@ -25,7 +25,7 @@ Autonomous Cyber Reasoning System for Vulnerability Discovery
 </p>
 
 <p align="center">
-| <a href="https://owensanzas.github.io/all-you-need-is-a-fuzzing-brain.github.io/documentation.html"><b>Documentation</b></a> | <a href="https://owensanzas.github.io/all-you-need-is-a-fuzzing-brain.github.io/blog.html"><b>Blog</b></a> | <a href="https://arxiv.org/abs/2509.07225"><b>Paper</b></a> |
+| <a href="https://all-you-need-is-a-fuzzing-brain.github.io/documentation.html"><b>Documentation</b></a> | <a href="https://all-you-need-is-a-fuzzing-brain.github.io/blog.html"><b>Blog</b></a> | <a href="https://arxiv.org/abs/2509.07225"><b>Paper</b></a> |
 </p>
 
 ---
@@ -51,6 +51,30 @@ Autonomous Cyber Reasoning System for Vulnerability Discovery
 ---
 
 ## Getting Started
+
+### Option A: Using Docker (Recommended)
+
+The easiest way to get started is using our pre-built Docker image:
+
+```bash
+# Pull the image
+docker pull ghcr.io/o2lab/fuzzingbrain:latest
+
+# Run FuzzingBrain
+docker run -it --rm \
+  -e OPENAI_API_KEY=your-key-here \
+  -e ANTHROPIC_API_KEY=your-key-here \
+  -v $(pwd)/output:/app/output \
+  ghcr.io/o2lab/fuzzingbrain:latest \
+  <repo_url>
+```
+
+**Docker Run Options:**
+- `-e`: Set API keys as environment variables (at least one required)
+- `-v`: Mount a local directory to save scan results
+- Add `-b <base_commit> -d <delta_commit>` for delta scans
+
+### Option B: Install from Source
 
 ### 1. Clone Repository
 
@@ -86,8 +110,8 @@ XAI_API_KEY=xai-your-key-here
 
 Visit our documentation to learn more:
 
-- [Installation & Quickstart](https://owensanzas.github.io/all-you-need-is-a-fuzzing-brain.github.io/quickstart.html)
-- [Documentation](https://owensanzas.github.io/all-you-need-is-a-fuzzing-brain.github.io/documentation.html)
+- [Installation & Quickstart](https://all-you-need-is-a-fuzzing-brain.github.io/quickstart.html)
+- [Documentation](https://all-you-need-is-a-fuzzing-brain.github.io/documentation.html)
 
 ---
 
