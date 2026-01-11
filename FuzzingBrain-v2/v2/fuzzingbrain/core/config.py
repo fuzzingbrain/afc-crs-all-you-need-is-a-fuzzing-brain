@@ -107,6 +107,10 @@ class Config:
     # Eval server (for tracking and dashboard)
     eval_server: Optional[str] = None  # e.g., "http://localhost:18080"
 
+    # Prebuild data (for skipping introspector build)
+    prebuild_dir: Optional[str] = None  # Path to prebuild/{work_id}/ directory
+    work_id: Optional[str] = None       # Work ID for prebuild data remapping
+
     @classmethod
     def from_json(cls, json_path: str) -> "Config":
         """Load configuration from JSON file"""
@@ -157,6 +161,8 @@ class Config:
             mongodb_db=data.get("mongodb_db", "fuzzingbrain"),
             eval_server=data.get("eval_server"),
             fuzzer_filter=data.get("fuzzer_filter") or data.get("fuzzers") or [],
+            prebuild_dir=data.get("prebuild_dir"),
+            work_id=data.get("work_id"),
         )
 
     @classmethod

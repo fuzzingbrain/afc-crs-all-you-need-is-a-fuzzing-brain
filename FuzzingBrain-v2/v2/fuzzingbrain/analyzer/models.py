@@ -24,6 +24,8 @@ class AnalyzeRequest:
     ossfuzz_project: Optional[str] = None  # OSS-Fuzz project name if different
     log_dir: Optional[str] = None     # Log directory path
     skip_build: bool = False          # Skip build/import phases (for cache restore)
+    prebuild_dir: Optional[str] = None  # Path to prebuild data directory
+    work_id: Optional[str] = None       # Work ID for prebuild data remapping
 
     def to_dict(self) -> dict:
         return {
@@ -35,6 +37,8 @@ class AnalyzeRequest:
             "ossfuzz_project": self.ossfuzz_project,
             "log_dir": self.log_dir,
             "skip_build": self.skip_build,
+            "prebuild_dir": self.prebuild_dir,
+            "work_id": self.work_id,
         }
 
     @classmethod
@@ -48,6 +52,8 @@ class AnalyzeRequest:
             ossfuzz_project=data.get("ossfuzz_project"),
             log_dir=data.get("log_dir"),
             skip_build=data.get("skip_build", False),
+            prebuild_dir=data.get("prebuild_dir"),
+            work_id=data.get("work_id"),
         )
 
 

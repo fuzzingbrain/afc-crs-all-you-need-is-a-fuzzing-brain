@@ -26,7 +26,7 @@ from .protocol import (
     encode_message, decode_message,
 )
 from .builder import AnalyzerBuilder
-from .importer import StaticAnalysisImporter
+from .importer import StaticAnalysisImporter, import_from_prebuild
 from .models import AnalyzeResult, FuzzerInfo
 from ..db import MongoDB, init_repos
 from ..core import Config
@@ -101,6 +101,8 @@ class AnalysisServer:
         language: str = "c",
         log_dir: Optional[str] = None,
         skip_build: bool = False,
+        prebuild_dir: Optional[str] = None,
+        work_id: Optional[str] = None,
     ):
         self.task_id = task_id
         self.task_path = Path(task_path)
@@ -110,6 +112,8 @@ class AnalysisServer:
         self.language = language
         self.log_dir = log_dir
         self.skip_build = skip_build
+        self.prebuild_dir = Path(prebuild_dir) if prebuild_dir else None
+        self.work_id = work_id
 
         # Socket path in /tmp to avoid path length limit (108 chars max for Unix sockets)
         # Use task_id to ensure uniqueness
@@ -304,6 +308,14 @@ class AnalysisServer:
         self._log("Phase 1: Building fuzzers")
         build_start = time.time()
 
+        # Skip introspector build if we have prebuild data
+        skip_introspector = False
+        if self.prebuild_dir and self.work_id:
+            mongodb_dir = self.prebuild_dir / "mongodb"
+            if mongodb_dir.exists() and (mongodb_dir / "functions.json").exists():
+                skip_introspector = True
+                self._log("Prebuild data detected, will skip introspector build")
+
         builder = AnalyzerBuilder(
             task_path=str(self.task_path),
             project_name=self.project_name,
@@ -311,6 +323,7 @@ class AnalysisServer:
             ossfuzz_project=self.ossfuzz_project,
             log_callback=self._log,
             log_dir=self.log_dir,
+            skip_introspector=skip_introspector,
         )
 
         # Run build in thread pool to not block event loop
@@ -334,12 +347,39 @@ class AnalysisServer:
 
     async def _import_phase(self):
         """Run static analysis import phase."""
+        self._log("Phase 2: Importing static analysis data")
+        import_start = time.time()
+
+        # Check for prebuild data first
+        if self.prebuild_dir and self.work_id:
+            mongodb_dir = self.prebuild_dir / "mongodb"
+            if mongodb_dir.exists():
+                self._log(f"Found prebuild data at {self.prebuild_dir}")
+
+                # Import from prebuild
+                loop = asyncio.get_event_loop()
+                success, msg = await loop.run_in_executor(
+                    None,
+                    import_from_prebuild,
+                    self.task_id,
+                    self.work_id,
+                    self.prebuild_dir,
+                    self.repos,
+                    self._log,
+                )
+
+                self.analysis_duration = time.time() - import_start
+
+                if success:
+                    self._log(f"Prebuild import completed: {msg}")
+                    return
+                else:
+                    self._log(f"Prebuild import failed: {msg}, falling back to introspector", "WARN")
+
+        # Fallback to introspector import
         if not self.introspector_path:
             self._log("No introspector data, skipping import", "WARN")
             return
-
-        self._log("Phase 2: Importing static analysis data")
-        import_start = time.time()
 
         importer = StaticAnalysisImporter(
             task_id=self.task_id,

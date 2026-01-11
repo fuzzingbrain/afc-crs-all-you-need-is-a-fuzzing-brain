@@ -168,13 +168,34 @@ class BaseReporter(ABC):
 
 class NullReporter(BaseReporter):
     """
-    Null reporter that does nothing.
+    Null reporter that tracks costs locally but doesn't send to server.
 
     Used when evaluation is disabled (no --eval-server specified).
+    Still tracks costs for budget management and summary display.
     """
 
-    def llm_called(self, **kwargs) -> None:
-        pass
+    def __init__(self):
+        self._cost_summary = CostSummary()
+        self._total_cost = 0.0
+
+    def llm_called(
+        self,
+        model: str = "",
+        input_tokens: int = 0,
+        output_tokens: int = 0,
+        cost_input: float = 0.0,
+        cost_output: float = 0.0,
+        **kwargs
+    ) -> None:
+        """Track LLM call costs locally."""
+        cost_total = cost_input + cost_output
+        self._total_cost += cost_total
+        self._cost_summary.total_cost += cost_total
+        self._cost_summary.total_calls += 1
+        self._cost_summary.total_input_tokens += input_tokens
+        self._cost_summary.total_output_tokens += output_tokens
+        if model:
+            self._cost_summary.by_model[model] = self._cost_summary.by_model.get(model, 0.0) + cost_total
 
     def tool_called(self, **kwargs) -> None:
         pass
@@ -229,7 +250,11 @@ class NullReporter(BaseReporter):
         pass
 
     def get_cost_summary(self) -> CostSummary:
-        return CostSummary()
+        return self._cost_summary
+
+    def get_current_cost(self) -> float:
+        """Get current total cost."""
+        return self._total_cost
 
     def get_tool_summary(self) -> ToolSummary:
         return ToolSummary()

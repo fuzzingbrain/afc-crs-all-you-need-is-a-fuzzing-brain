@@ -5,17 +5,165 @@ Imports introspector data and function source code to MongoDB.
 Uses:
 - OSS-Fuzz introspector output for function metadata and call graph
 - Tree-sitter for extracting function source code
+- Prebuild JSON files for pre-computed static analysis
 """
 
 import json
 from pathlib import Path
 from typing import List, Optional, Tuple
 from collections import deque
+from datetime import datetime
 
 from loguru import logger as loguru_logger
 
-from ..core.models import Function, CallGraphNode
+from ..core.models import Function, CallGraphNode, Fuzzer, FuzzerStatus
 from ..analysis import extract_functions_from_file
+
+
+def import_from_prebuild(
+    task_id: str,
+    work_id: str,
+    prebuild_dir: Path,
+    repos,  # RepositoryManager
+    log_callback=None,
+) -> Tuple[bool, str]:
+    """
+    Import pre-built static analysis data from JSON files.
+
+    Prebuild data was generated with work_id as task_id.
+    This function remaps all IDs to use the new task_id.
+
+    Args:
+        task_id: New task ID for this run
+        work_id: Original work_id used during prebuild
+        prebuild_dir: Path to prebuild/{work_id}/ directory
+        repos: RepositoryManager for database access
+        log_callback: Optional logging callback
+
+    Returns:
+        (success, message)
+    """
+    def log(msg: str, level: str = "INFO"):
+        if log_callback:
+            log_callback(msg, level)
+        else:
+            loguru_logger.info(f"[PrebuildImporter] {msg}")
+
+    mongodb_dir = prebuild_dir / "mongodb"
+
+    if not mongodb_dir.exists():
+        return False, f"Prebuild mongodb directory not found: {mongodb_dir}"
+
+    # Check required files
+    required_files = ["functions.json", "callgraph.json", "fuzzers.json"]
+    for fname in required_files:
+        if not (mongodb_dir / fname).exists():
+            return False, f"Required file not found: {mongodb_dir / fname}"
+
+    # Prebuild uses task_id format: "prebuild_{work_id}"
+    prebuild_task_id = f"prebuild_{work_id}"
+
+    log(f"Importing prebuild data from {mongodb_dir}")
+    log(f"Remapping IDs: {prebuild_task_id} -> {task_id}")
+
+    stats = {
+        "functions": 0,
+        "callgraph_nodes": 0,
+        "fuzzers": 0,
+    }
+
+    try:
+        # Import fuzzers first (they are referenced by other records)
+        with open(mongodb_dir / "fuzzers.json", "r") as f:
+            fuzzers_data = json.load(f)
+
+        for doc in fuzzers_data:
+            # Remap task_id
+            doc["task_id"] = task_id
+            # Keep fuzzer_id as UUID (no remapping needed)
+
+            # Convert status string to enum
+            status_str = doc.get("status", "pending")
+            try:
+                status = FuzzerStatus(status_str)
+            except ValueError:
+                status = FuzzerStatus.PENDING
+
+            fuzzer = Fuzzer(
+                fuzzer_id=doc.get("fuzzer_id", doc.get("_id")),
+                task_id=task_id,
+                fuzzer_name=doc.get("fuzzer_name", ""),
+                source_path=doc.get("source_path"),
+                repo_name=doc.get("repo_name"),
+                status=status,
+                error_msg=doc.get("error_msg"),
+                binary_path=doc.get("binary_path"),
+            )
+            repos.fuzzers.save(fuzzer)
+            stats["fuzzers"] += 1
+
+        log(f"Imported {stats['fuzzers']} fuzzers")
+
+        # Import functions
+        with open(mongodb_dir / "functions.json", "r") as f:
+            functions_data = json.load(f)
+
+        for doc in functions_data:
+            # Remap IDs: replace prebuild_task_id prefix with new task_id
+            old_func_id = doc.get("function_id", "")
+            if old_func_id.startswith(f"{prebuild_task_id}_"):
+                new_func_id = f"{task_id}_{old_func_id[len(prebuild_task_id)+1:]}"
+            else:
+                new_func_id = f"{task_id}_{doc.get('name', '')}"
+
+            function = Function(
+                task_id=task_id,
+                name=doc.get("name", ""),
+                file_path=doc.get("file_path", ""),
+                start_line=doc.get("start_line", 0),
+                end_line=doc.get("end_line", 0),
+                content=doc.get("content", ""),
+                cyclomatic_complexity=doc.get("cyclomatic_complexity", 0),
+                reached_by_fuzzers=doc.get("reached_by_fuzzers", []),
+                language=doc.get("language", "c"),
+            )
+            repos.functions.save(function)
+            stats["functions"] += 1
+
+        log(f"Imported {stats['functions']} functions")
+
+        # Import callgraph nodes
+        with open(mongodb_dir / "callgraph.json", "r") as f:
+            callgraph_data = json.load(f)
+
+        for doc in callgraph_data:
+            # Remap node_id
+            old_node_id = doc.get("node_id", "")
+            if old_node_id.startswith(f"{prebuild_task_id}_"):
+                # node_id format: {task_id}_{fuzzer_id}_{function_name}
+                suffix = old_node_id[len(prebuild_task_id)+1:]
+                new_node_id = f"{task_id}_{suffix}"
+            else:
+                new_node_id = f"{task_id}_{doc.get('fuzzer_id', '')}_{doc.get('function_name', '')}"
+
+            node = CallGraphNode(
+                task_id=task_id,
+                fuzzer_id=doc.get("fuzzer_id", ""),
+                fuzzer_name=doc.get("fuzzer_name", ""),
+                function_name=doc.get("function_name", ""),
+                callers=doc.get("callers", []),
+                callees=doc.get("callees", []),
+                call_depth=doc.get("call_depth", -1),
+            )
+            repos.callgraph_nodes.save(node)
+            stats["callgraph_nodes"] += 1
+
+        log(f"Imported {stats['callgraph_nodes']} callgraph nodes")
+
+        return True, f"Imported {stats['functions']} functions, {stats['callgraph_nodes']} nodes, {stats['fuzzers']} fuzzers"
+
+    except Exception as e:
+        return False, f"Failed to import prebuild data: {e}"
 
 
 class StaticAnalysisImporter:

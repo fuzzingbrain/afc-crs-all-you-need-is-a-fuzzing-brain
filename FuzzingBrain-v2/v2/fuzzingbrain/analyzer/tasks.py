@@ -34,6 +34,8 @@ def _run_server_process(
     log_dir: Optional[str],
     result_queue: multiprocessing.Queue,
     skip_build: bool = False,
+    prebuild_dir: Optional[str] = None,
+    work_id: Optional[str] = None,
 ):
     """
     Run the Analysis Server in a subprocess.
@@ -42,6 +44,8 @@ def _run_server_process(
 
     Args:
         skip_build: If True, skip build and import phases (for cache restore)
+        prebuild_dir: Path to prebuild data directory (for prebuild import)
+        work_id: Work ID for prebuild data remapping
     """
     # Setup signal handlers
     def handle_shutdown(signum, frame):
@@ -62,6 +66,8 @@ def _run_server_process(
             language=language,
             log_dir=log_dir,
             skip_build=skip_build,
+            prebuild_dir=prebuild_dir,
+            work_id=work_id,
         )
 
         # Start server (builds, imports, starts listening)
@@ -120,6 +126,9 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
     logger.info(f"[Analyzer] Sanitizers: {request.sanitizers}")
     if request.skip_build:
         logger.info(f"[Analyzer] Skip build mode enabled (cache restore)")
+    if request.prebuild_dir:
+        logger.info(f"[Analyzer] Using prebuild data from: {request.prebuild_dir}")
+        logger.info(f"[Analyzer] Work ID for remapping: {request.work_id}")
 
     # Create result queue for IPC
     result_queue = multiprocessing.Queue()
@@ -137,6 +146,8 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
             request.log_dir,
             result_queue,
             request.skip_build,
+            request.prebuild_dir,
+            request.work_id,
         ),
         daemon=False,  # Server should survive parent
     )

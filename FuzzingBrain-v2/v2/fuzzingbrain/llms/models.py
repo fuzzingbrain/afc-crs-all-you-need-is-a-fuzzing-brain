@@ -397,23 +397,23 @@ def get_model_by_id(model_id: str) -> Optional[ModelInfo]:
 # =============================================================================
 
 FALLBACK_CHAINS: Dict[str, List[ModelInfo]] = {
-    # Claude fallbacks
-    CLAUDE_OPUS_4_5.id: [GPT_5_2, GEMINI_3_PRO, O3],
-    CLAUDE_SONNET_4_5.id: [CLAUDE_OPUS_4_5, GPT_5_2, GEMINI_3_FLASH],
-    CLAUDE_HAIKU_4_5.id: [CLAUDE_SONNET_4_5, GEMINI_3_FLASH, GPT_5_2_INSTANT],
+    # Claude fallbacks - Anthropic only
+    CLAUDE_OPUS_4_5.id: [CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
+    CLAUDE_SONNET_4_5.id: [CLAUDE_OPUS_4_5, CLAUDE_HAIKU_4_5],
+    CLAUDE_HAIKU_4_5.id: [CLAUDE_SONNET_4_5, CLAUDE_OPUS_4_5],
 
-    # OpenAI fallbacks
-    GPT_5_2.id: [CLAUDE_OPUS_4_5, GEMINI_3_FLASH, O3],
-    GPT_5_2_PRO.id: [O3, CLAUDE_OPUS_4_5, GPT_5_2],
-    O3.id: [GPT_5_2_PRO, CLAUDE_OPUS_4_5, GEMINI_3_PRO],
+    # OpenAI fallbacks -> Claude
+    GPT_5_2.id: [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
+    GPT_5_2_PRO.id: [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
+    O3.id: [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
 
-    # Gemini fallbacks
-    GEMINI_3_PRO.id: [GEMINI_3_FLASH, CLAUDE_OPUS_4_5, GPT_5_2],
-    GEMINI_3_FLASH.id: [GEMINI_2_5_FLASH, CLAUDE_SONNET_4_5, GPT_5_2],
+    # Gemini fallbacks -> Claude
+    GEMINI_3_PRO.id: [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
+    GEMINI_3_FLASH.id: [CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5, CLAUDE_OPUS_4_5],
 }
 
-# Default fallback chain (OpenAI first since Anthropic quota exhausted)
-DEFAULT_FALLBACK = [O3, GPT_5_2, GEMINI_3_FLASH, CLAUDE_OPUS_4_5]
+# Default fallback chain - Anthropic only
+DEFAULT_FALLBACK = [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5]
 
 # Expensive models (input price >= $5/M or output price >= $25/M)
 # These are filtered out when allow_expensive_fallback=False
@@ -460,12 +460,12 @@ def get_fallback_chain(model: ModelInfo, tried_models: set = None, allow_expensi
 # =============================================================================
 
 TASK_RECOMMENDATIONS: Dict[TaskType, List[ModelInfo]] = {
-    TaskType.CODE_ANALYSIS: [CLAUDE_OPUS_4_5, GPT_5_2, GEMINI_3_PRO],
-    TaskType.CODE_REFACTOR: [GPT_5_2_CODEX, CLAUDE_OPUS_4_5, GPT_5_2],
-    TaskType.FAST_CODING: [CLAUDE_HAIKU_4_5, GEMINI_3_FLASH, GPT_5_2_INSTANT],
-    TaskType.FAST_JUDGMENT: [GEMINI_3_FLASH, CLAUDE_HAIKU_4_5, GPT_5_2_INSTANT],
-    TaskType.COMPLEX_REASONING: [O3, GPT_5_2_PRO, CLAUDE_OPUS_4_5],
-    TaskType.GENERAL: [CLAUDE_SONNET_4_5, GPT_5_2, GEMINI_3_FLASH],
+    TaskType.CODE_ANALYSIS: [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
+    TaskType.CODE_REFACTOR: [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
+    TaskType.FAST_CODING: [CLAUDE_HAIKU_4_5, CLAUDE_SONNET_4_5, CLAUDE_OPUS_4_5],
+    TaskType.FAST_JUDGMENT: [CLAUDE_HAIKU_4_5, CLAUDE_SONNET_4_5, CLAUDE_OPUS_4_5],
+    TaskType.COMPLEX_REASONING: [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
+    TaskType.GENERAL: [CLAUDE_SONNET_4_5, CLAUDE_OPUS_4_5, CLAUDE_HAIKU_4_5],
 }
 
 

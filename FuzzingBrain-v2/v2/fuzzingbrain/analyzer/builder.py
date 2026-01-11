@@ -180,6 +180,7 @@ class AnalyzerBuilder:
         log_dir: Optional[str] = None,
         parallel: bool = True,
         max_parallel: int = None,
+        skip_introspector: bool = False,
     ):
         """
         Initialize AnalyzerBuilder.
@@ -193,10 +194,12 @@ class AnalyzerBuilder:
             log_dir: Directory for build logs (build output saved here, not to console)
             parallel: Enable parallel builds (default: True)
             max_parallel: Maximum parallel builds (default: auto based on CPU)
+            skip_introspector: Skip introspector build (when using prebuild data)
         """
         self.task_path = Path(task_path)
         self.project_name = ossfuzz_project or project_name
         self.sanitizers = sanitizers
+        self.skip_introspector = skip_introspector
         self.log_callback = log_callback or self._default_log
         self.log_dir = Path(log_dir) if log_dir else None
         self.parallel = parallel
@@ -259,7 +262,7 @@ class AnalyzerBuilder:
         if not helper_path.exists():
             return False, f"helper.py not found: {helper_path}"
 
-        total_steps = len(self.sanitizers) + 2  # sanitizers + coverage + introspector
+        total_steps = len(self.sanitizers) + 1 + (0 if self.skip_introspector else 1)  # sanitizers + coverage + introspector
         current_step = 0
 
         # Step 1-N: Build with each sanitizer
@@ -290,15 +293,18 @@ class AnalyzerBuilder:
         else:
             self.log("Coverage build failed, continuing without it", "WARN")
 
-        # Step N+2: Build introspector
-        current_step += 1
-        self.log(f"[{current_step}/{total_steps}] Building with introspector")
-        introspector_success, _ = self._build_sanitizer("introspector")
-        if introspector_success:
-            self._move_build_output("introspector")
-            self.introspector_path = str(self.build_out_base / f"{self.project_name}_introspector")
+        # Step N+2: Build introspector (unless skipped)
+        if not self.skip_introspector:
+            current_step += 1
+            self.log(f"[{current_step}/{total_steps}] Building with introspector")
+            introspector_success, _ = self._build_sanitizer("introspector")
+            if introspector_success:
+                self._move_build_output("introspector")
+                self.introspector_path = str(self.build_out_base / f"{self.project_name}_introspector")
+            else:
+                self.log("Introspector build failed, static analysis will be limited", "WARN")
         else:
-            self.log("Introspector build failed, static analysis will be limited", "WARN")
+            self.log("Skipping introspector build (using prebuild data)")
 
         elapsed = time.time() - start_time
         self.log(f"Build completed in {elapsed:.1f}s. {len(self.fuzzers)} fuzzers available.")
@@ -325,8 +331,12 @@ class AnalyzerBuilder:
         if not helper_path.exists():
             return False, f"helper.py not found: {helper_path}"
 
-        # All builds: sanitizers + coverage + introspector
-        all_builds = self.sanitizers + ["coverage", "introspector"]
+        # All builds: sanitizers + coverage + introspector (unless skipped)
+        all_builds = self.sanitizers + ["coverage"]
+        if not self.skip_introspector:
+            all_builds.append("introspector")
+        else:
+            self.log("Skipping introspector build (using prebuild data)")
         total_builds = len(all_builds)
 
         self.log(f"Starting parallel build: {total_builds} builds, max {self.resource_monitor.max_parallel} parallel")

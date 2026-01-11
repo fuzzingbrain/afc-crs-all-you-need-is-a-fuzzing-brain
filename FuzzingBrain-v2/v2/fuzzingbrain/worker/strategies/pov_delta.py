@@ -46,6 +46,7 @@ class POVDeltaStrategy(POVBaseStrategy):
         self._reachability_result: Optional[DiffReachabilityResult] = None
 
         # Create the suspicious point agent for delta analysis
+        # Note: Use higher max_iterations for finding SPs (not just verifying)
         agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
         self._agent = SuspiciousPointAgent(
             fuzzer=self.fuzzer,
@@ -54,6 +55,7 @@ class POVDeltaStrategy(POVBaseStrategy):
             task_id=self.task_id,
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
+            max_iterations=50,  # Need more iterations for finding SPs in delta mode
         )
 
     @property

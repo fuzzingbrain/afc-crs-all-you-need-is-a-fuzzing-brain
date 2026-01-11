@@ -712,6 +712,8 @@ class TaskProcessor:
                     ossfuzz_project=self.config.ossfuzz_project,
                     log_dir=str(log_dir) if log_dir else None,
                     skip_build=True,  # Skip build, use cached data
+                    prebuild_dir=self.config.prebuild_dir,
+                    work_id=self.config.work_id,
                 )
 
                 # Run analyzer with skip_build
@@ -745,6 +747,8 @@ class TaskProcessor:
                     language="c",  # TODO: detect language
                     ossfuzz_project=self.config.ossfuzz_project,
                     log_dir=str(log_dir) if log_dir else None,
+                    prebuild_dir=self.config.prebuild_dir,
+                    work_id=self.config.work_id,
                 )
 
                 logger.info(f"Analyzer request: sanitizers={self.config.sanitizers}")
@@ -915,15 +919,29 @@ class TaskProcessor:
                     except Exception as e:
                         logger.warning(f"Failed to count merged duplicates: {e}")
 
-                    # Get cost info from reporter
+                    # Get cost info - try eval_server API first, then reporter
                     total_cost = 0.0
                     try:
-                        from ..eval import get_reporter
-                        reporter = get_reporter()
-                        if reporter and hasattr(reporter, 'get_current_cost'):
-                            total_cost = reporter.get_current_cost()
-                    except Exception:
-                        pass
+                        # Try to get from eval_server API if configured
+                        eval_server = self.config.eval_server
+                        if eval_server:
+                            import requests
+                            resp = requests.get(f"{eval_server}/api/tasks/{task.task_id}", timeout=5)
+                            if resp.status_code == 200:
+                                data = resp.json()
+                                total_cost = data.get("costs", {}).get("total_cost", 0.0)
+                    except Exception as e:
+                        logger.debug(f"Failed to get cost from eval_server: {e}")
+
+                    # Fallback to reporter if eval_server didn't work
+                    if total_cost == 0.0:
+                        try:
+                            from ..eval import get_reporter
+                            reporter = get_reporter()
+                            if reporter and hasattr(reporter, 'get_current_cost'):
+                                total_cost = reporter.get_current_cost()
+                        except Exception:
+                            pass
 
                     # Create and output final summary with worker colors via loguru
                     summary = create_final_summary(
