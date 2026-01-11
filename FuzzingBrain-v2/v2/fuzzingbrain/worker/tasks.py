@@ -16,6 +16,7 @@ from ..celery_app import app
 from ..core.models import Worker, WorkerStatus
 from ..core.logging import get_worker_banner_and_header, create_worker_summary
 from ..db import MongoDB, init_repos
+from ..eval import BudgetExceededError
 
 
 # Capture any uncaught exceptions at module level
@@ -299,6 +300,52 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             "sanitizer": sanitizer,
             "povs_found": result.get("povs_found", 0),
             "patches_found": result.get("patches_found", 0),
+        }
+
+    except BudgetExceededError as e:
+        # Budget limit reached - graceful shutdown
+        logger.warning(f"Budget limit exceeded: {e}")
+
+        # Clean up executor
+        try:
+            if 'executor' in dir() and executor is not None:
+                executor.close()
+        except Exception as cleanup_err:
+            logger.warning(f"Error during cleanup: {cleanup_err}")
+
+        worker.status = WorkerStatus.FAILED
+        worker.error_msg = f"Budget limit exceeded: {e}"
+        worker.finished_at = datetime.now()
+        repos.workers.save(worker)
+
+        # Calculate elapsed time
+        elapsed_seconds = (datetime.now() - start_time).total_seconds()
+
+        # Log worker summary
+        summary = create_worker_summary(
+            worker_id=worker_id,
+            status="budget_exceeded",
+            fuzzer=fuzzer,
+            sanitizer=sanitizer,
+            elapsed_seconds=elapsed_seconds,
+            error_msg=str(e),
+        )
+        for line in summary.split("\n"):
+            logger.info(line)
+
+        # Cleanup reporter context
+        if worker_ctx:
+            try:
+                worker_ctx.__exit__(None, None, None)
+            except Exception:
+                pass
+
+        return {
+            "worker_id": worker_id,
+            "status": "budget_exceeded",
+            "fuzzer": fuzzer,
+            "sanitizer": sanitizer,
+            "error": str(e),
         }
 
     except Exception as e:

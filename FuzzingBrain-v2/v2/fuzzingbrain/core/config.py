@@ -134,15 +134,16 @@ class Config:
             sanitizers=data.get("sanitizers", ["address"]),
             timeout_minutes=data.get("timeout_minutes", 60),
             pov_count=data.get("pov_count", 0),
-            budget_limit=data.get("budget_limit", 100.0) or 100.0,
+            budget_limit=float(data.get("budget_limit") or 0) if data.get("budget_limit") is not None else 100.0,
+            stop_on_pov=data.get("stop_on_pov", True),
             fuzzer_worker=fuzzer_worker,
             repo_url=data.get("repo_url"),
             repo_path=data.get("repo_path"),
             project_name=data.get("project_name"),
             ossfuzz_project=data.get("ossfuzz_project"),
-            target_commit=data.get("target_commit"),
-            base_commit=data.get("base_commit"),
-            delta_commit=data.get("delta_commit"),
+            target_commit=(data.get("target_commit") or "").strip() or None,
+            base_commit=(data.get("base_commit") or "").strip() or None,
+            delta_commit=(data.get("delta_commit") or "").strip() or None,
             fuzz_tooling_url=data.get("fuzz_tooling_url"),
             fuzz_tooling_ref=data.get("fuzz_tooling_ref"),
             fuzz_tooling_path=data.get("fuzz_tooling_path"),
@@ -155,6 +156,7 @@ class Config:
             mongodb_url=data.get("mongodb_url", "mongodb://localhost:27017"),
             mongodb_db=data.get("mongodb_db", "fuzzingbrain"),
             eval_server=data.get("eval_server"),
+            fuzzer_filter=data.get("fuzzer_filter") or data.get("fuzzers") or [],
         )
 
     @classmethod

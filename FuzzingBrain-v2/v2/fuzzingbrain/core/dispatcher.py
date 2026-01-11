@@ -394,6 +394,21 @@ class WorkerDispatcher:
                     **self.get_status(),
                 }
 
+            # Check if any worker hit budget limit
+            budget_exceeded_worker = self.repos.workers.collection.find_one({
+                "task_id": self.task.task_id,
+                "error_msg": {"$regex": "Budget limit exceeded", "$options": "i"}
+            })
+            if budget_exceeded_worker:
+                logger.warning(f"Budget limit exceeded - initiating shutdown of all workers")
+                self.graceful_shutdown()
+                return {
+                    "status": "budget_exceeded",
+                    "elapsed_minutes": elapsed.total_seconds() / 60,
+                    "error": budget_exceeded_worker.get("error_msg", "Budget limit exceeded"),
+                    **self.get_status(),
+                }
+
             # Check POV count target
             if self.pov_count_target > 0:
                 current_pov_count = self.get_verified_pov_count()
@@ -402,7 +417,7 @@ class WorkerDispatcher:
                     last_pov_count = current_pov_count
 
                 if current_pov_count >= self.pov_count_target:
-                    logger.info(f"🎯 POV target reached! ({current_pov_count}/{self.pov_count_target})")
+                    logger.info(f"POV target reached! ({current_pov_count}/{self.pov_count_target})")
                     logger.info("Initiating graceful shutdown...")
                     self.graceful_shutdown()
                     return {
@@ -474,12 +489,46 @@ class WorkerDispatcher:
 
             # Query actual successful POV count from DB (more reliable than worker's self-report)
             # This handles cases where worker was killed but POVs were already saved
-            actual_pov_count = self.repos.povs.count({
+            #
+            # Count POVs by suspicious_point_id to include cross-fuzzer hits:
+            # - A POV created for fuzzer "xml" might crash on "xpath" instead
+            # - The cross-fuzzer POV has harness_name="xpath" but same suspicious_point_id
+            # - We want to count it for the worker that created the original SP
+            #
+            # Get all SP IDs created by this worker
+            worker_sp_ids = [
+                sp.suspicious_point_id
+                for sp in self.repos.suspicious_points.find_all({
+                    "task_id": self.task.task_id,
+                    "sources": {
+                        "$elemMatch": {
+                            "harness_name": worker.fuzzer,
+                            "sanitizer": worker.sanitizer,
+                        }
+                    },
+                })
+            ]
+
+            # Count all successful POVs for those SPs (including cross-fuzzer hits)
+            if worker_sp_ids:
+                actual_pov_count = self.repos.povs.count({
+                    "task_id": self.task.task_id,
+                    "suspicious_point_id": {"$in": worker_sp_ids},
+                    "is_successful": True,
+                })
+            else:
+                actual_pov_count = 0
+
+            # Also count fuzzer-discovered POVs (no SP association)
+            # These have suspicious_point_id="" because they were found directly by the fuzzer
+            fuzzer_discovered_count = self.repos.povs.count({
                 "task_id": self.task.task_id,
                 "harness_name": worker.fuzzer,
                 "sanitizer": worker.sanitizer,
+                "suspicious_point_id": {"$in": ["", None]},
                 "is_successful": True,
             })
+            actual_pov_count += fuzzer_discovered_count
 
             result = {
                 "worker_id": worker.worker_id,

@@ -40,8 +40,9 @@ create_full_scan_template() {
     "_instructions": [
         "1. Fill in 'repo_url' with the git repository URL",
         "2. Set 'project_name' (used for workspace naming)",
-        "3. Adjust 'timeout_minutes' as needed",
-        "4. Run: ./FuzzingBrain.sh work/<name>.json"
+        "3. Set 'fuzzers' to specify which fuzzers to run (empty = all)",
+        "4. Adjust 'timeout_minutes' as needed",
+        "5. Run: ./FuzzingBrain.sh work/<name>.json"
     ],
 
     "repo_url": "https://github.com/YOUR_USERNAME/YOUR_REPO.git",
@@ -50,6 +51,7 @@ create_full_scan_template() {
     "job_type": "pov",
     "scan_mode": "full",
 
+    "fuzzers": [],
     "sanitizers": ["address"],
     "timeout_minutes": 60,
 
@@ -80,7 +82,8 @@ create_delta_scan_template() {
         "2. Set 'project_name' (used for workspace naming)",
         "3. Set 'base_commit' (the known-good commit)",
         "4. Set 'delta_commit' (the commit to analyze, default HEAD)",
-        "5. Run: ./FuzzingBrain.sh work/<name>.json"
+        "5. Set 'fuzzers' to specify which fuzzers to run (empty = all)",
+        "6. Run: ./FuzzingBrain.sh work/<name>.json"
     ],
 
     "repo_url": "https://github.com/YOUR_USERNAME/YOUR_REPO.git",
@@ -92,6 +95,7 @@ create_delta_scan_template() {
     "base_commit": "BASE_COMMIT_HASH_HERE",
     "delta_commit": "DELTA_COMMIT_HASH_OR_HEAD",
 
+    "fuzzers": [],
     "sanitizers": ["address"],
     "timeout_minutes": 60,
 

@@ -569,6 +569,9 @@ def create_final_summary(
     total_elapsed_minutes: float = 0,
     use_color: bool = False,
     dedup_count: int = 0,
+    total_cost: float = 0.0,
+    budget_limit: float = 0.0,
+    exit_reason: str = "completed",
 ) -> str:
     """
     Create final task summary with all workers results.
@@ -580,6 +583,9 @@ def create_final_summary(
         total_elapsed_minutes: Total elapsed time in minutes
         use_color: Whether to use ANSI colors for console output
         dedup_count: Number of SPs merged as duplicates
+        total_cost: Total API cost in dollars
+        budget_limit: Budget limit in dollars (0 = unlimited)
+        exit_reason: Why the task ended (completed, budget_exceeded, timeout, etc.)
 
     Returns:
         Formatted summary string
@@ -626,6 +632,23 @@ def create_final_summary(
         lines.append("│" + f"  SPs Merged:    {dedup_count} (duplicates)".ljust(table_width) + "│")
     lines.append("│" + f"  POVs Found:    {total_povs}".ljust(table_width) + "│")
     lines.append("│" + f"  Patches:       {total_patches}".ljust(table_width) + "│")
+
+    # Cost and budget info
+    if budget_limit > 0:
+        lines.append("│" + f"  API Cost:      ${total_cost:.2f} / ${budget_limit:.2f} budget".ljust(table_width) + "│")
+    else:
+        lines.append("│" + f"  API Cost:      ${total_cost:.2f} (no budget limit)".ljust(table_width) + "│")
+
+    # Exit reason
+    if exit_reason == "budget_exceeded":
+        lines.append("│" + f"  Exit Reason:   BUDGET LIMIT EXCEEDED".ljust(table_width) + "│")
+    elif exit_reason == "timeout":
+        lines.append("│" + f"  Exit Reason:   Timeout reached".ljust(table_width) + "│")
+    elif exit_reason == "pov_target_reached":
+        lines.append("│" + f"  Exit Reason:   POV target reached".ljust(table_width) + "│")
+    elif exit_reason == "cancelled":
+        lines.append("│" + f"  Exit Reason:   CANCELLED BY USER (Ctrl+C)".ljust(table_width) + "│")
+
     lines.append("├" + "─" * table_width + "┤")
 
     # Worker table header

@@ -758,6 +758,11 @@ Write a brief summary (max 200 words):"""
                     temperature=self.temperature,
                 )
             except Exception as e:
+                # Re-raise BudgetExceededError to stop all processing
+                from ..eval import BudgetExceededError
+                if isinstance(e, BudgetExceededError):
+                    self._log(f"Budget limit exceeded: {e}", level="WARNING")
+                    raise
                 import traceback
                 self._log(f"LLM call failed: {e}", level="ERROR")
                 self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")

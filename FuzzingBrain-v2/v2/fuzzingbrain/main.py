@@ -99,6 +99,70 @@ def signal_handler(signum, frame):
 
             if worker_count > 0 or task_count > 0:
                 print(f"\033[1;33m[INTERRUPT]\033[0m Marked {worker_count} worker(s) and {task_count} task(s) as cancelled")
+
+            # Display summary for cancelled task
+            try:
+                from .core.logging import create_final_summary
+                from datetime import datetime
+
+                # Find the most recent task
+                recent_task = _repos.tasks.collection.find_one(
+                    {"status": "cancelled"},
+                    sort=[("created_at", -1)]
+                )
+                if recent_task:
+                    task_id = recent_task.get("task_id", recent_task.get("_id", "unknown"))
+                    project_name = recent_task.get("project_name", "unknown")
+
+                    # Get workers for this task
+                    workers = list(_repos.workers.collection.find({"task_id": task_id}))
+                    worker_results = []
+                    for w in workers:
+                        started = w.get("started_at")
+                        finished = w.get("finished_at") or datetime.now()
+                        duration_sec = (finished - started).total_seconds() if started else 0
+                        worker_results.append({
+                            "fuzzer": w.get("fuzzer", "N/A"),
+                            "sanitizer": w.get("sanitizer", "N/A"),
+                            "status": w.get("status", "cancelled"),
+                            "duration_str": f"{duration_sec/60:.1f}m",
+                            "sps_found": w.get("sps_found", 0),
+                            "povs_found": w.get("povs_found", 0),
+                            "patches_found": w.get("patches_found", 0),
+                        })
+
+                    # Get cost info
+                    total_cost = 0.0
+                    budget_limit = 0.0
+                    try:
+                        from .eval import get_reporter
+                        reporter = get_reporter()
+                        if reporter:
+                            if hasattr(reporter, 'get_current_cost'):
+                                total_cost = reporter.get_current_cost()
+                            if hasattr(reporter, 'budget_limit'):
+                                budget_limit = reporter.budget_limit
+                    except Exception:
+                        pass
+
+                    # Calculate elapsed time
+                    created_at = recent_task.get("created_at", datetime.now())
+                    elapsed_minutes = (datetime.now() - created_at).total_seconds() / 60
+
+                    summary = create_final_summary(
+                        project_name=project_name,
+                        task_id=task_id,
+                        workers=worker_results,
+                        total_elapsed_minutes=elapsed_minutes,
+                        use_color=True,
+                        total_cost=total_cost,
+                        budget_limit=budget_limit,
+                        exit_reason="cancelled",
+                    )
+                    print(summary)
+            except Exception as e:
+                print(f"\033[0;31m[ERROR]\033[0m Failed to generate summary: {e}")
+
     except Exception as e:
         print(f"\033[0;31m[ERROR]\033[0m Failed to update status: {e}")
 
@@ -470,7 +534,7 @@ def setup_workspace(config: Config) -> Config:
                 sys.exit(1)
             print_info("Repository cloned successfully")
 
-            # Checkout target commit if specified
+            # Checkout target commit if specified (Full Scan mode)
             if config.target_commit:
                 print_info(f"Checking out commit: {config.target_commit}")
                 subprocess.run(
@@ -478,9 +542,36 @@ def setup_workspace(config: Config) -> Config:
                     cwd=str(repo_path),
                     capture_output=True
                 )
+            # Checkout delta commit for Delta Scan mode
+            elif config.scan_mode == "delta" and config.delta_commit:
+                print_info(f"Checking out delta commit: {config.delta_commit}")
+                subprocess.run(
+                    ["git", "checkout", config.delta_commit],
+                    cwd=str(repo_path),
+                    capture_output=True
+                )
+            elif config.scan_mode == "delta" and config.base_commit and not config.delta_commit:
+                # If no delta_commit specified, use HEAD (default behavior is fine)
+                print_info("Delta scan: using HEAD as delta commit")
         except Exception as e:
             print_error(f"Failed to clone repository: {e}")
             sys.exit(1)
+    elif repo_path.exists():
+        # Repo already exists, ensure correct commit is checked out
+        if config.scan_mode == "delta" and config.delta_commit:
+            print_info(f"Ensuring delta commit is checked out: {config.delta_commit}")
+            subprocess.run(
+                ["git", "checkout", config.delta_commit],
+                cwd=str(repo_path),
+                capture_output=True
+            )
+        elif config.target_commit:
+            print_info(f"Ensuring target commit is checked out: {config.target_commit}")
+            subprocess.run(
+                ["git", "checkout", config.target_commit],
+                cwd=str(repo_path),
+                capture_output=True
+            )
 
     # Setup fuzz-tooling if needed
     fuzz_tooling_path = workspace / "fuzz-tooling"

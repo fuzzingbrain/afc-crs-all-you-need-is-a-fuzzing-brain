@@ -4,6 +4,7 @@ LLM Client
 Unified LLM client with multi-provider support and automatic fallback.
 """
 
+import asyncio
 import os
 import time
 from dataclasses import dataclass, field
@@ -150,6 +151,9 @@ class LLMClient:
         response = client.call_with_tools(messages, tools=tool_definitions)
     """
 
+    # Class variable to track event loop for cache invalidation
+    _current_loop_id: Optional[int] = None
+
     def __init__(self, config: Optional[LLMConfig] = None):
         self.config = config or get_default_config()
         self._tried_models: set = set()
@@ -157,6 +161,35 @@ class LLMClient:
     def reset_tried_models(self) -> None:
         """Reset the set of tried models (call between independent requests)"""
         self._tried_models.clear()
+
+    @classmethod
+    def _ensure_clean_client_cache(cls) -> None:
+        """
+        Ensure litellm's cached httpx clients are valid for the current event loop.
+
+        This fixes the "Event loop is closed" error that occurs when:
+        1. Agent A runs with asyncio.run(), creates httpx client bound to loop A
+        2. asyncio.run() closes loop A
+        3. Agent B runs, litellm returns cached client still bound to closed loop A
+        4. Client fails with "Event loop is closed"
+
+        Solution: Detect when event loop changes and clear the stale cache.
+        """
+        try:
+            current_loop_id = id(asyncio.get_running_loop())
+        except RuntimeError:
+            # No running loop, nothing to check
+            return
+
+        if cls._current_loop_id is not None and cls._current_loop_id != current_loop_id:
+            # Event loop changed! Clear litellm's cached clients
+            if hasattr(litellm, 'in_memory_llm_clients_cache'):
+                cache = litellm.in_memory_llm_clients_cache
+                if cache:
+                    cache.clear()
+                    logger.debug(f"Cleared litellm client cache due to event loop change")
+
+        cls._current_loop_id = current_loop_id
 
     def _get_model_id(self, model: Union[ModelInfo, str, None]) -> str:
         """Get litellm-compatible model ID"""
@@ -483,13 +516,19 @@ class LLMClient:
         if reporter and hasattr(reporter, 'check_budget'):
             reporter.check_budget()
 
-        return self._call_with_fallback(
+        result = self._call_with_fallback(
             messages=messages,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
             **kwargs,
         )
+
+        # Check budget after calling (cost was just recorded)
+        if reporter and hasattr(reporter, 'check_budget'):
+            reporter.check_budget()
+
+        return result
 
     def _call_with_fallback(
         self,
@@ -682,13 +721,19 @@ class LLMClient:
         if reporter and hasattr(reporter, 'check_budget'):
             reporter.check_budget()
 
-        return await self._acall_with_fallback(
+        result = await self._acall_with_fallback(
             messages=messages,
             model=model,
             temperature=temperature,
             max_tokens=max_tokens,
             **kwargs,
         )
+
+        # Check budget after calling (cost was just recorded)
+        if reporter and hasattr(reporter, 'check_budget'):
+            reporter.check_budget()
+
+        return result
 
     async def _acall_with_fallback(
         self,
@@ -698,6 +743,9 @@ class LLMClient:
         **kwargs,
     ) -> LLMResponse:
         """Internal async call with fallback logic"""
+        # Ensure litellm's cached clients are valid for current event loop
+        self._ensure_clean_client_cache()
+
         current_model = model if model else self.config.default_model
         model_id = self._get_model_id(current_model)
 

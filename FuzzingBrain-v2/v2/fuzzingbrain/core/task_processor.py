@@ -627,12 +627,59 @@ class TaskProcessor:
             # Update task in database with new paths
             self.repos.tasks.save(task)
 
+            # Step 3.5: Generate diff for delta scan (before build to fail fast)
+            if self.config.scan_mode == "delta" and self.config.base_commit:
+                diff_path = Path(task.task_path) / "diff"
+                diff_file = diff_path / "ref.diff"
+
+                if not diff_file.exists():
+                    logger.info("Generating diff for delta scan...")
+                    diff_path.mkdir(parents=True, exist_ok=True)
+
+                    repo_path = Path(task.task_path) / "repo"
+                    delta_commit = self.config.delta_commit or "HEAD"
+
+                    try:
+                        import subprocess
+                        result = subprocess.run(
+                            ["git", "diff", f"{self.config.base_commit}..{delta_commit}",
+                             "--", ".", ":!.aixcc", ":!*/.aixcc"],
+                            cwd=str(repo_path),
+                            capture_output=True,
+                            text=True
+                        )
+                        if result.returncode == 0:
+                            diff_content = result.stdout
+                            if diff_content.strip():
+                                diff_file.write_text(diff_content)
+                                logger.info(f"Generated diff: {self.config.base_commit[:8]}..{delta_commit[:8] if delta_commit != 'HEAD' else 'HEAD'}")
+                            else:
+                                raise Exception(f"No changes between {self.config.base_commit[:8]} and {delta_commit[:8] if delta_commit != 'HEAD' else 'HEAD'}")
+                        else:
+                            raise Exception(f"git diff failed: {result.stderr}")
+                    except Exception as e:
+                        raise Exception(f"Failed to generate diff for delta scan: {e}")
+
             # Step 4: Discover fuzzers
             if cache_restored:
                 # Load fuzzers from database (already restored from cache)
                 logger.info("Step 4: Loading fuzzers from cache")
                 fuzzers = self.repos.fuzzers.find_by_task(task.task_id)
                 logger.info(f"Loaded {len(fuzzers)} fuzzers from cache")
+            elif self.config.fuzzer_filter:
+                # Use explicitly specified fuzzers from config
+                logger.info(f"Step 4: Using {len(self.config.fuzzer_filter)} fuzzers from config")
+                fuzzers = []
+                for fuzzer_name in self.config.fuzzer_filter:
+                    fuzzer = Fuzzer(
+                        task_id=task.task_id,
+                        fuzzer_name=fuzzer_name,
+                        repo_name=task.project_name,
+                        status=FuzzerStatus.PENDING,
+                    )
+                    fuzzers.append(fuzzer)
+                    self.repos.fuzzers.save(fuzzer)
+                    logger.info(f"  - {fuzzer_name}")
             else:
                 logger.info("Step 4: Discovering fuzzers")
                 fuzzer_discovery = FuzzerDiscovery(task, self.config, self.repos)
@@ -848,6 +895,9 @@ class TaskProcessor:
                     elif result["status"] == "pov_target_reached":
                         task.mark_completed()
                         logger.info(f"Task completed: POV target reached ({result.get('pov_count', 0)} POVs)")
+                    elif result["status"] == "budget_exceeded":
+                        task.mark_error(result.get("error", "Budget limit exceeded"))
+                        logger.warning(f"Task stopped: {result.get('error', 'Budget limit exceeded')}")
                     else:
                         task.mark_error(f"Timeout after {timeout} minutes")
 
@@ -865,6 +915,16 @@ class TaskProcessor:
                     except Exception as e:
                         logger.warning(f"Failed to count merged duplicates: {e}")
 
+                    # Get cost info from reporter
+                    total_cost = 0.0
+                    try:
+                        from ..eval import get_reporter
+                        reporter = get_reporter()
+                        if reporter and hasattr(reporter, 'get_current_cost'):
+                            total_cost = reporter.get_current_cost()
+                    except Exception:
+                        pass
+
                     # Create and output final summary with worker colors via loguru
                     summary = create_final_summary(
                         project_name=project_name,
@@ -873,6 +933,9 @@ class TaskProcessor:
                         total_elapsed_minutes=result.get("elapsed_minutes", 0),
                         use_color=True,
                         dedup_count=dedup_count,
+                        total_cost=total_cost,
+                        budget_limit=self.config.budget_limit,
+                        exit_reason=result.get("status", "completed"),
                     )
                     # Reset terminal settings before output (subprocess may have changed them)
                     os.system('stty sane 2>/dev/null')
