@@ -78,6 +78,13 @@ class SuspiciousPoint:
     score: float = 0.0  # Score (0.0-1.0), used for queue ordering
     is_important: bool = False  # If marked as high-probability bug, goes to front of queue
 
+    # Reachability analysis (for delta scan)
+    # Static analysis may incorrectly mark function-pointer-called functions as unreachable
+    static_reachable: bool = True  # What static analysis says
+    reachability_status: str = "unknown"  # "direct" | "indirect" | "pointer_call" | "unreachable"
+    reachability_reason: str = ""  # LLM explanation for reachability judgment
+    reachability_multiplier: float = 1.0  # Score multiplier based on reachability (0.3-1.0)
+
     # Related control flow information
     important_controlflow: List[Dict] = field(default_factory=list)
     # Format: [{"type": "function"|"variable", "name": "xxx", "location": "xxx"}, ...]
@@ -124,6 +131,10 @@ class SuspiciousPoint:
             "is_real": self.is_real,
             "score": self.score,
             "is_important": self.is_important,
+            "static_reachable": self.static_reachable,
+            "reachability_status": self.reachability_status,
+            "reachability_reason": self.reachability_reason,
+            "reachability_multiplier": self.reachability_multiplier,
             "important_controlflow": self.important_controlflow,
             "merged_duplicates": self.merged_duplicates,
             "verification_notes": self.verification_notes,
@@ -169,6 +180,10 @@ class SuspiciousPoint:
             is_real=data.get("is_real", False),
             score=data.get("score", 0.0),
             is_important=data.get("is_important", False),
+            static_reachable=data.get("static_reachable", True),
+            reachability_status=data.get("reachability_status", "unknown"),
+            reachability_reason=data.get("reachability_reason", ""),
+            reachability_multiplier=data.get("reachability_multiplier", 1.0),
             important_controlflow=data.get("important_controlflow", []),
             merged_duplicates=data.get("merged_duplicates", []),
             verification_notes=data.get("verification_notes"),

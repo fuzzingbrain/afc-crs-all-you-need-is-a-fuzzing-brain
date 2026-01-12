@@ -36,6 +36,7 @@ def _run_server_process(
     skip_build: bool = False,
     prebuild_dir: Optional[str] = None,
     work_id: Optional[str] = None,
+    fuzzer_sources: Optional[Dict[str, str]] = None,
 ):
     """
     Run the Analysis Server in a subprocess.
@@ -46,6 +47,7 @@ def _run_server_process(
         skip_build: If True, skip build and import phases (for cache restore)
         prebuild_dir: Path to prebuild data directory (for prebuild import)
         work_id: Work ID for prebuild data remapping
+        fuzzer_sources: Dict mapping fuzzer_name -> source_path (relative to fuzz-tooling)
     """
     # Setup signal handlers
     def handle_shutdown(signum, frame):
@@ -68,6 +70,7 @@ def _run_server_process(
             skip_build=skip_build,
             prebuild_dir=prebuild_dir,
             work_id=work_id,
+            fuzzer_sources=fuzzer_sources,
         )
 
         # Start server (builds, imports, starts listening)
@@ -148,6 +151,7 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
             request.skip_build,
             request.prebuild_dir,
             request.work_id,
+            request.fuzzer_sources,
         ),
         daemon=False,  # Server should survive parent
     )

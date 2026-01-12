@@ -103,6 +103,7 @@ class AnalysisServer:
         skip_build: bool = False,
         prebuild_dir: Optional[str] = None,
         work_id: Optional[str] = None,
+        fuzzer_sources: Optional[Dict[str, str]] = None,
     ):
         self.task_id = task_id
         self.task_path = Path(task_path)
@@ -114,6 +115,7 @@ class AnalysisServer:
         self.skip_build = skip_build
         self.prebuild_dir = Path(prebuild_dir) if prebuild_dir else None
         self.work_id = work_id
+        self.fuzzer_sources = fuzzer_sources or {}
 
         # Socket path in /tmp to avoid path length limit (108 chars max for Unix sockets)
         # Use task_id to ensure uniqueness
@@ -771,7 +773,12 @@ class AnalysisServer:
 
         source_path = fuzzer_info.source_path
 
-        # If source_path not in FuzzerInfo, try to get from database
+        # Priority 1: Check fuzzer_sources config (fuzzer_name -> relative path in fuzz-tooling)
+        if not source_path and fuzzer_info.name in self.fuzzer_sources:
+            source_path = self.fuzzer_sources[fuzzer_info.name]
+            self._log(f"Using fuzzer source from config: {fuzzer_info.name} -> {source_path}", "DEBUG")
+
+        # Priority 2: Try to get from database
         if not source_path and self.repos:
             try:
                 db_fuzzer = self.repos.fuzzers.find_by_name(self.task_id, fuzzer_info.name)
@@ -787,17 +794,46 @@ class AnalysisServer:
             }
 
         # Read the source file
-        # source_path is relative to task_path/repo
-        source_file = self.task_path / "repo" / source_path
-        if not source_file.exists():
-            # Try without repo prefix
-            source_file = self.task_path / source_path
+        source_file = None
+        tried_paths = []
 
-        if not source_file.exists():
+        # Check if source_path is absolute
+        if source_path.startswith("/"):
+            abs_path = Path(source_path)
+            tried_paths.append(str(abs_path))
+            if abs_path.exists():
+                source_file = abs_path
+        else:
+            # Try multiple locations for relative paths:
+            # 1. fuzz-tooling directory (for fuzzer_sources config)
+            # 2. task_path/repo (for source_path from DB)
+            # 3. task_path directly
+
+            # Try fuzz-tooling first (for config-based paths)
+            fuzz_tooling_path = self.task_path / "fuzz-tooling" / source_path
+            tried_paths.append(str(fuzz_tooling_path))
+            if fuzz_tooling_path.exists():
+                source_file = fuzz_tooling_path
+
+            # Try repo path
+            if not source_file:
+                repo_path = self.task_path / "repo" / source_path
+                tried_paths.append(str(repo_path))
+                if repo_path.exists():
+                    source_file = repo_path
+
+            # Try task_path directly
+            if not source_file:
+                direct_path = self.task_path / source_path
+                tried_paths.append(str(direct_path))
+                if direct_path.exists():
+                    source_file = direct_path
+
+        if not source_file:
             return {
                 "fuzzer": fuzzer_info.name,
                 "source_path": source_path,
-                "error": f"Source file not found: {source_path}",
+                "error": f"Source file not found. Tried: {tried_paths}",
             }
 
         try:

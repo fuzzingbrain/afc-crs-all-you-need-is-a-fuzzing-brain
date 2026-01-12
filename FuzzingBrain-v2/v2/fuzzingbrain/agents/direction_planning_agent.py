@@ -37,7 +37,9 @@ You are analyzing vulnerabilities for ONE SPECIFIC FUZZER with ONE SPECIFIC SANI
 
 1. **FUZZER determines REACHABILITY**
    - Only code reachable from THIS fuzzer's entry point can be exploited
-   - Functions not in the fuzzer's call graph are IRRELEVANT - ignore them completely
+   - Static call graph shows DIRECT reachability, but MISSES function pointer calls!
+   - Functions called via `handler->method()` patterns ARE reachable but won't show in call graph
+   - You MUST search for indirect call patterns (see "Function Pointer Reachability" section)
 
 2. **SANITIZER determines DETECTABILITY**
    - Only bugs that THIS sanitizer can detect will trigger crashes
@@ -99,14 +101,41 @@ LOW RISK:
 - get_callees: Get functions called by a given function
 - get_call_graph: Get the complete call graph from fuzzer
 - get_reachable_functions: List all functions reachable from fuzzer
+- get_unreached_functions: List functions NOT in call graph (may include pointer-reachable!)
+- search_code: Search for patterns in codebase
 - create_direction: Create a direction for analysis
+
+## ⚠️ CRITICAL: Function Pointer Reachability (DO NOT SKIP!)
+
+Static analysis CANNOT track indirect calls via function pointers. Many important functions
+appear "unreachable" in the call graph but ARE actually called at runtime.
+
+Common patterns that HIDE reachable functions:
+- Struct members holding function pointers (e.g., `obj->method(...)`)
+- Callback registration and invocation
+- Plugin/handler dispatch mechanisms
+- Any pattern where a function address is stored and called later
+
+**These functions are HIGH VALUE targets** because:
+1. They often handle complex parsing or data transformation
+2. They are easily missed by static analysis tools
+3. Vulnerabilities in them are real and exploitable
+
+You MUST actively discover these patterns - they won't appear in get_reachable_functions!
 
 ## Workflow
 
 1. **Read fuzzer source** - Understand PURPOSE, TARGET, SCOPE
-2. **Get reachable functions** - See all functions to cover
-3. **Identify business features** - What logical operations does this code perform?
-4. **Create directions** - One per business feature, with:
+2. **Get reachable functions** - See all functions to cover (from static analysis)
+3. **🔴 DISCOVER INDIRECT CALL PATTERNS** (CRITICAL STEP!)
+   - Study the codebase architecture: How does it dispatch to different handlers/modules?
+   - Look for structs containing function pointer members
+   - Use search_code to find where function addresses are assigned to struct members
+   - Check get_unreached_functions and analyze WHY they appear unreachable
+   - For promising functions, trace back: Is there a dispatcher that IS reachable?
+   - If yes, include these functions in your directions!
+4. **Identify business features** - What logical operations does this code perform?
+5. **Create directions** - One per business feature, with:
    - name: Business feature name (describe what it does)
    - risk_level: "high", "medium", or "low"
    - risk_reason: Why this risk level
@@ -126,8 +155,9 @@ entry_functions are the "doors" through which untrusted data enters this feature
 - Create at most 5 directions (prioritize by risk level)
 - Divide by BUSINESS LOGIC, not vulnerability patterns
 - Each direction = one logical feature or sub-feature
-- Aim for FULL COVERAGE of all reachable functions
+- Aim for FULL COVERAGE of all reachable functions (including pointer-reachable!)
 - Prioritize HIGH RISK directions first
+- **🔴 NEVER skip the function pointer search step** - these are often the most vulnerable functions!
 """
 
 

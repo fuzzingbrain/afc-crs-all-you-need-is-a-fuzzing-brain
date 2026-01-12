@@ -8,7 +8,7 @@ import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -111,6 +111,9 @@ class Config:
     prebuild_dir: Optional[str] = None  # Path to prebuild/{work_id}/ directory
     work_id: Optional[str] = None       # Work ID for prebuild data remapping
 
+    # Fuzzer source paths (fuzzer_name -> relative path in fuzz-tooling)
+    fuzzer_sources: Dict[str, str] = field(default_factory=dict)
+
     @classmethod
     def from_json(cls, json_path: str) -> "Config":
         """Load configuration from JSON file"""
@@ -163,6 +166,7 @@ class Config:
             fuzzer_filter=data.get("fuzzer_filter") or data.get("fuzzers") or [],
             prebuild_dir=data.get("prebuild_dir"),
             work_id=data.get("work_id"),
+            fuzzer_sources=data.get("fuzzer_sources", {}),
         )
 
     @classmethod

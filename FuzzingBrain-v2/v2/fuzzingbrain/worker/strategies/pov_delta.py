@@ -16,7 +16,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 from .pov_base import POVBaseStrategy
-from ...analysis.diff_parser import get_reachable_changes, DiffReachabilityResult
+from ...analysis.diff_parser import get_reachable_changes, get_all_changes, DiffReachabilityResult, FunctionChange
 from ...core.models import SuspiciousPoint
 from ...agents import SuspiciousPointAgent
 
@@ -45,6 +45,9 @@ class POVDeltaStrategy(POVBaseStrategy):
         # Reachability result (populated after check)
         self._reachability_result: Optional[DiffReachabilityResult] = None
 
+        # All changes (including static-unreachable) for new delta scan logic
+        self._all_changes: List[FunctionChange] = []
+
         # Create the suspicious point agent for delta analysis
         # Note: Use higher max_iterations for finding SPs (not just verifying)
         agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
@@ -64,63 +67,101 @@ class POVDeltaStrategy(POVBaseStrategy):
 
     def _pre_find_suspicious_points(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Check diff reachability before finding suspicious points.
+        Analyze diff changes before finding suspicious points.
+
+        NEW LOGIC: Don't filter by reachability! Get ALL changes and let LLM analyze them.
+        Static analysis may incorrectly mark function-pointer-called functions as unreachable.
 
         Args:
             result: Result dictionary to update
 
         Returns:
-            Dict with 'skip': True if no reachable changes
+            Dict with 'skip': True only if no changes at all
         """
         import time
 
-        self.log_info(f"[Step 1/5] Checking diff reachability...")
+        self.log_info(f"[Step 1/5] Analyzing diff changes (ignoring reachability filter)...")
         step_start = time.time()
 
+        # Get ALL changes (not just reachable ones)
+        all_changes = self._get_all_diff_changes()
+        self._all_changes = all_changes
+
+        # Also get reachability result for reporting (but don't use it to filter)
         reachability = self._check_diff_reachability()
+
+        # Report both reachable and unreachable
         result["reachable"] = reachability.reachable
+        result["all_changes"] = [
+            {
+                "function": c.function_name,
+                "file": c.file_path,
+                "static_reachable": c.static_reachable,
+                "distance": c.reachability_distance
+            }
+            for c in all_changes
+        ]
         result["reachable_changes"] = [
             {"function": c.function_name, "file": c.file_path, "distance": c.reachability_distance}
             for c in reachability.reachable_changes
         ]
+        result["unreachable_functions"] = reachability.unreachable_functions
 
         step_duration = time.time() - step_start
         result["phase_reachability"] = step_duration
-        self.log_info(f"[Step 1/5] Done in {step_duration:.1f}s - {len(reachability.reachable_changes)} reachable changes")
 
-        if not reachability.reachable:
-            self.log_info(f"No reachable changes in diff, skipping")
-            result["skip_reason"] = "no_reachable_changes"
+        reachable_count = sum(1 for c in all_changes if c.static_reachable)
+        unreachable_count = len(all_changes) - reachable_count
+        self.log_info(f"[Step 1/5] Done in {step_duration:.1f}s - {len(all_changes)} changes ({reachable_count} reachable, {unreachable_count} static-unreachable)")
+
+        # Only skip if NO changes at all (not based on reachability!)
+        if not all_changes:
+            self.log_info(f"No changes in diff, skipping")
+            result["skip_reason"] = "no_changes"
             return {"skip": True}
+
+        # Log the unreachable functions that will now be analyzed
+        if unreachable_count > 0:
+            unreachable_names = [c.function_name for c in all_changes if not c.static_reachable]
+            self.log_info(f"[NEW] Will analyze {unreachable_count} static-unreachable functions: {unreachable_names}")
+            self.log_info(f"[NEW] These may be reachable via function pointers - LLM will judge")
 
         return {"skip": False}
 
     def _find_suspicious_points(self) -> List[SuspiciousPoint]:
         """
-        Find suspicious points in reachable changed functions.
+        Find suspicious points in ALL changed functions (not just reachable).
+
+        NEW LOGIC: Pass ALL changes to the agent, including static-unreachable ones.
+        The agent will analyze all of them and create SPs. Reachability will be
+        judged in the verify phase.
 
         Returns:
             List of SuspiciousPoint objects
         """
-        self.log_info("Finding suspicious points in reachable changes...")
+        self.log_info("Finding suspicious points in ALL changes (ignoring reachability filter)...")
 
-        if not self._reachability_result:
-            self.log_warning("No reachability result, cannot find suspicious points")
+        if not self._all_changes:
+            self.log_warning("No changes found, cannot find suspicious points")
             return []
 
-        # Prepare reachable changes for agent
-        reachable_changes = [
+        # Prepare ALL changes for agent (including static-unreachable)
+        all_changes = [
             {
                 "function": c.function_name,
                 "file": c.file_path,
+                "static_reachable": c.static_reachable,
                 "distance": c.reachability_distance,
             }
-            for c in self._reachability_result.reachable_changes
+            for c in self._all_changes
         ]
+
+        reachable_count = sum(1 for c in all_changes if c["static_reachable"])
+        self.log_info(f"Passing {len(all_changes)} functions to agent ({reachable_count} reachable, {len(all_changes) - reachable_count} static-unreachable)")
 
         # Run the agent to find suspicious points
         try:
-            response = self._agent.find_suspicious_points_sync(reachable_changes)
+            response = self._agent.find_suspicious_points_sync(all_changes)
             self.log_debug(f"Agent response: {response[:500]}...")
         except Exception as e:
             self.log_error(f"Agent failed to find suspicious points: {e}")
@@ -175,6 +216,45 @@ class POVDeltaStrategy(POVBaseStrategy):
         self._save_reachability_report(result)
 
         return result
+
+    def _get_all_diff_changes(self) -> List[FunctionChange]:
+        """
+        Get ALL changed functions from diff (including static-unreachable).
+
+        This is the new method that doesn't filter by reachability.
+        Static reachability info is included but used for scoring, not filtering.
+
+        Returns:
+            List of FunctionChange objects
+        """
+        self.log_info(f"Getting all diff changes for fuzzer: {self.fuzzer}")
+
+        # Check if diff file exists
+        if not self.diff_path or not self.diff_path.exists():
+            self.log_warning(f"Diff file not found: {self.diff_path}")
+            return []
+
+        # Read diff content
+        try:
+            diff_content = self.diff_path.read_text(encoding='utf-8', errors='replace')
+        except Exception as e:
+            self.log_error(f"Failed to read diff file: {e}")
+            return []
+
+        if not diff_content.strip():
+            self.log_warning("Diff file is empty")
+            return []
+
+        self.log_debug(f"Read diff file: {len(diff_content)} bytes")
+
+        # Check if Analysis Server is available
+        analysis_client = self.get_analysis_client()
+        if not analysis_client:
+            self.log_error("Analysis Server not available")
+            return []
+
+        # Get ALL changes (not filtered by reachability)
+        return get_all_changes(diff_content, self.fuzzer, analysis_client)
 
     def _save_reachability_report(self, result: DiffReachabilityResult) -> None:
         """Save diff reachability report to results directory."""

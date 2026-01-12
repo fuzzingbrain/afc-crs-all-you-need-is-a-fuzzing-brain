@@ -26,6 +26,7 @@ class AnalyzeRequest:
     skip_build: bool = False          # Skip build/import phases (for cache restore)
     prebuild_dir: Optional[str] = None  # Path to prebuild data directory
     work_id: Optional[str] = None       # Work ID for prebuild data remapping
+    fuzzer_sources: Dict[str, str] = field(default_factory=dict)  # fuzzer_name -> source_path
 
     def to_dict(self) -> dict:
         return {
@@ -39,6 +40,7 @@ class AnalyzeRequest:
             "skip_build": self.skip_build,
             "prebuild_dir": self.prebuild_dir,
             "work_id": self.work_id,
+            "fuzzer_sources": self.fuzzer_sources,
         }
 
     @classmethod
@@ -54,6 +56,7 @@ class AnalyzeRequest:
             skip_build=data.get("skip_build", False),
             prebuild_dir=data.get("prebuild_dir"),
             work_id=data.get("work_id"),
+            fuzzer_sources=data.get("fuzzer_sources", {}),
         )
 
 

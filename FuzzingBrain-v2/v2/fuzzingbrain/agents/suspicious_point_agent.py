@@ -29,28 +29,38 @@ FIND_SUSPICIOUS_POINTS_PROMPT = """You are a security researcher analyzing code 
 You are finding vulnerabilities for ONE SPECIFIC FUZZER with ONE SPECIFIC SANITIZER.
 These are FIXED and define exactly what counts as a valid vulnerability.
 
-### Rule 1: FUZZER REACHABILITY (Mandatory)
-- Only code REACHABLE from the fuzzer entry point can be exploited
-- A bug in unreachable code is NOT a vulnerability - skip it completely
-- The fuzzer source code shows EXACTLY how input enters the library
-- ALWAYS read the fuzzer source code FIRST before analyzing anything else
-
-### Rule 2: SANITIZER DETECTABILITY (Mandatory)
+### Rule 1: SANITIZER DETECTABILITY (Mandatory)
 - Only bugs detectable by the current sanitizer will cause crashes
 - A bug the sanitizer can't detect is useless - don't report it
 - See "Sanitizer-Specific Patterns" section below for what to look for
 
+### Rule 2: REACHABILITY (Analyze ALL, Don't Filter!)
+
+**IMPORTANT CHANGE**: You will receive ALL changed functions, including those marked as
+"static-unreachable" by static analysis. DO NOT skip these functions!
+
+Why? Static analysis CANNOT track function pointer calls. For example:
+- `md->methods.load(...)` calls different functions based on runtime data
+- Callback functions registered dynamically
+- Virtual function tables (vtable) patterns in C
+
+These functions ARE reachable at runtime, but static analysis marks them as unreachable.
+
+**Your job**: Analyze ALL changes for vulnerabilities. The Verify agent will judge actual
+reachability later, including detecting function pointer patterns.
+
 ### Before Creating ANY Suspicious Point:
-Ask yourself: "Can THIS fuzzer trigger this bug, and will THIS sanitizer catch it?"
-If either answer is NO, don't create the SP.
+Ask yourself: "Will THIS sanitizer catch this bug?"
+If NO, don't create the SP.
+(Reachability will be judged in the Verify phase, not here!)
 
 ## Your Task
 
 1. **FIRST**: Read the fuzzer source code to understand how input flows into the target
 2. Read the diff to understand what code was changed
-3. Check if changed functions are reachable from the fuzzer
-4. For reachable functions, analyze for vulnerabilities that THIS sanitizer can detect
-5. Create suspicious points ONLY for valid vulnerabilities (reachable + detectable)
+3. **Analyze ALL changed functions** - including static-unreachable ones!
+4. For each function, look for vulnerabilities that THIS sanitizer can detect
+5. Create suspicious points for potential vulnerabilities (reachability judged later)
 
 ## Available Tools
 
@@ -115,24 +125,54 @@ VERIFY_SUSPICIOUS_POINTS_PROMPT = """You are a security researcher filtering out
 ## Your Role: FILTER, Not Deep Verify
 
 You are NOT the final judge. Your job is to:
-- Filter out OBVIOUSLY WRONG SPs (unreachable, wrong sanitizer type)
+- Filter out OBVIOUSLY WRONG SPs (truly unreachable, wrong sanitizer type)
 - Let uncertain cases PASS to POV agent for actual testing
 - POV failure is cheap; missing a real bug is expensive
 
 **Key Principle**: When in doubt, let it through. Only mark FP when you are 100% certain.
+
+## CRITICAL: FUNCTION POINTER REACHABILITY
+
+**IMPORTANT**: Static analysis may mark functions as "unreachable" when they are actually
+called via function pointers. This is a COMMON pattern in C libraries!
+
+### Examples of Function Pointer Patterns:
+- `struct->method(...)` - Method dispatch via struct member
+- `handler->load(...)`, `md->methods.get_value(...)` - Plugin/handler patterns
+- Callback functions passed to APIs
+- Virtual function tables (vtable) in OOP-style C code
+
+### When Static Analysis Says "Unreachable":
+
+1. **CHECK FOR FUNCTION POINTER CALLS**:
+   - Look at where the function is assigned (e.g., `methods.load = exif_mnote_data_canon_load`)
+   - Check if struct methods are called polymorphically
+   - Search for callback registration
+
+2. **If function pointer pattern detected**:
+   - The function IS reachable at runtime
+   - Set `reachability_status` to "pointer_call"
+   - Set `reachability_multiplier` to 0.9-0.95 (slight penalty for indirect call complexity)
+   - DO NOT mark as false positive!
+
+3. **If truly unreachable** (no direct call, no function pointer pattern):
+   - Set `reachability_status` to "unreachable"
+   - Set `reachability_multiplier` to 0.3
+   - Mark as false positive
 
 ## CRITICAL: Your Constraints (FUZZER + SANITIZER)
 
 You are verifying vulnerabilities for ONE SPECIFIC FUZZER with ONE SPECIFIC SANITIZER.
 
 1. **FUZZER REACHABILITY**: Can this fuzzer's input reach the vulnerable function?
+   - Check both direct calls AND function pointer patterns!
 2. **SANITIZER DETECTABILITY**: Will this sanitizer catch this bug type?
 
 ## STRICT FALSE POSITIVE RULES
 
 You can ONLY mark as FALSE POSITIVE when:
 
-1. **UNREACHABLE** - Function is definitively NOT in the fuzzer's call graph
+1. **TRULY UNREACHABLE** - No direct call AND no function pointer pattern found
 2. **WRONG SANITIZER** - Bug type is completely incompatible (e.g., null deref with AddressSanitizer)
 3. **100% CERTAIN protection exists** - See below
 
@@ -156,9 +196,19 @@ for common ways that protections can fail.
 
 ## VERIFICATION STEPS
 
-### Step 1: VERIFY FUZZER REACHABILITY
-- Call get_callers on the suspicious function
-- If NO PATH from fuzzer → mark FP (this is the only clear-cut case)
+### Step 1: CHECK STATIC REACHABILITY INFO
+- Note: The SP may include `static_reachable` field from static analysis
+- If `static_reachable=False`, proceed to Step 1b (function pointer check)
+- If `static_reachable=True`, proceed to Step 2
+
+### Step 1b: CHECK FOR FUNCTION POINTER PATTERNS (if static_reachable=False)
+- Search for where this function is assigned to a struct member or function pointer
+- Look for patterns like: `methods.load = function_name` or `handler->callback = function_name`
+- Check if the struct/handler is used polymorphically from reachable code
+- If function pointer pattern found:
+  - Set `reachability_status="pointer_call"`, `reachability_multiplier=0.95`
+  - Continue to Step 2 (the function IS reachable!)
+- If no pattern found → mark FP with `reachability_status="unreachable"`, `reachability_multiplier=0.3`
 
 ### Step 2: VERIFY VULNERABILITY POINT REACHABILITY (CRITICAL!)
 **Function reachability ≠ Vulnerability point reachability!**
@@ -225,8 +275,11 @@ If the SP matches ANY of these patterns, DO NOT mark as FP without 100% proof.
 ### Required Fields:
 - Always set is_checked=True after analysis
 - Always set is_real=False (updated after actual exploitation)
-- Set is_important=True ONLY if score >= 0.5 AND reachable
+- Set is_important=True ONLY if score >= 0.5 AND reachable (directly or via pointer)
 - **pov_guidance**: REQUIRED when is_important=True (see below)
+- **reachability_status**: "direct" | "indirect" | "pointer_call" | "unreachable"
+- **reachability_multiplier**: 0.3-1.0 (used to adjust final score)
+- **reachability_reason**: Brief explanation of reachability judgment
 
 ## POV GUIDANCE (Required for is_important=True)
 
@@ -717,13 +770,27 @@ This shows how input enters the library - only reachable code matters!
 
 """
         if reachable_changes:
-            message += "## Reachable Changed Functions\n\n"
-            message += "The following changed functions are reachable from the fuzzer:\n\n"
-            for change in reachable_changes:
-                message += f"- Function: {change.get('function', 'unknown')}\n"
-                message += f"  File: {change.get('file', 'unknown')}\n"
-                if 'distance' in change:
-                    message += f"  Distance from fuzzer: {change['distance']}\n"
+            message += "## Changed Functions (ALL - including static-unreachable)\n\n"
+            message += "**IMPORTANT**: Analyze ALL functions below, even those marked as static-unreachable!\n"
+            message += "Static analysis cannot track function pointer calls.\n\n"
+
+            # Group by reachability
+            reachable = [c for c in reachable_changes if c.get('static_reachable', True)]
+            unreachable = [c for c in reachable_changes if not c.get('static_reachable', True)]
+
+            if reachable:
+                message += "### Static-Reachable Functions:\n"
+                for change in reachable:
+                    message += f"- {change.get('function', 'unknown')} ({change.get('file', 'unknown')})\n"
+                    if 'distance' in change and change['distance'] is not None:
+                        message += f"  Distance: {change['distance']}\n"
+                message += "\n"
+
+            if unreachable:
+                message += "### Static-Unreachable Functions (MAY BE REACHABLE VIA FUNCTION POINTERS!):\n"
+                for change in unreachable:
+                    message += f"- {change.get('function', 'unknown')} ({change.get('file', 'unknown')})\n"
+                    message += f"  ⚠️ Check for function pointer patterns!\n"
                 message += "\n"
 
         message += f"""## Your Task
@@ -732,8 +799,8 @@ Follow these steps IN ORDER:
 
 1. **READ THE DIFF**: Call get_diff to see what code was changed
 
-2. **ANALYZE REACHABLE FUNCTIONS**: For each function listed above (or found via check_reachability):
-   - Read its source code with get_function_source
+2. **ANALYZE ALL CHANGED FUNCTIONS** (including static-unreachable!):
+   - Read each function's source code with get_function_source
    - Look for {self.sanitizer}-detectable vulnerabilities:
 """
         # Add sanitizer-specific guidance
@@ -745,12 +812,14 @@ Follow these steps IN ORDER:
             message += "     - Integer overflow, null deref, div-by-zero\n"
 
         message += f"""
-3. **CREATE SUSPICIOUS POINTS**: For each valid vulnerability:
+3. **CREATE SUSPICIOUS POINTS**: For each potential vulnerability:
    - One SP per unique root cause (not per symptom)
    - Use control flow description, not line numbers
-   - Set confidence score based on reachability clarity
+   - Set confidence score based on vulnerability clarity
+   - Include static_reachable info if known
 
-Remember: Skip any function that's not reachable from {self.fuzzer}!
+**IMPORTANT**: Do NOT skip static-unreachable functions! They may be reachable via function pointers.
+The Verify agent will judge actual reachability later.
 """
 
         return message
@@ -791,6 +860,12 @@ If either is NO → mark as FALSE POSITIVE immediately.
 
 """
 
+        # Get reachability info
+        static_reachable = suspicious_point.get('static_reachable', True)
+        reachability_note = ""
+        if not static_reachable:
+            reachability_note = "\n⚠️ **Static analysis says UNREACHABLE** - Check for function pointer patterns!"
+
         message += f"""## Suspicious Point Details
 
 - ID: {sp_id}
@@ -798,6 +873,7 @@ If either is NO → mark as FALSE POSITIVE immediately.
 - Type: {vuln_type}
 - Description: {suspicious_point.get('description', 'No description')}
 - Initial Score: {suspicious_point.get('score', 0.5)}
+- Static Reachable: {static_reachable}{reachability_note}
 """
 
         if suspicious_point.get('important_controlflow'):
@@ -809,12 +885,27 @@ If either is NO → mark as FALSE POSITIVE immediately.
                     # Handle string format (e.g., just function names)
                     message += f"  - {item}\n"
 
+        # Add function pointer check instruction if static-unreachable
+        fp_check = ""
+        if not static_reachable:
+            fp_check = f"""
+**CRITICAL**: This function is marked as static-unreachable.
+Before marking as FP, you MUST check for function pointer patterns:
+- Search for where `{function_name}` is assigned to a struct member
+- Look for patterns like `methods.xxx = {function_name}` or `handler->xxx = {function_name}`
+- If found, the function IS reachable via function pointer!
+
+"""
+
         message += f"""
 
 ## Verification Steps (Complete ALL)
-
-1. **VERIFY REACHABILITY**: Use get_callers to trace path from {self.fuzzer} to {function_name}
-   - If NO PATH exists → mark as FALSE POSITIVE (score < 0.3)
+{fp_check}
+1. **CHECK REACHABILITY**:
+   - If static_reachable=True: Use get_callers to verify direct path exists
+   - If static_reachable=False: Search for function pointer assignment patterns first!
+   - If function pointer pattern found → set reachability_status="pointer_call", reachability_multiplier=0.95
+   - If truly unreachable → mark as FALSE POSITIVE with reachability_multiplier=0.3
 
 2. **VERIFY SANITIZER COMPATIBILITY**: Is {vuln_type} detectable by {self.sanitizer}?
 """

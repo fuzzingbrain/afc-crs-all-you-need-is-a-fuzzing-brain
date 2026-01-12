@@ -472,6 +472,43 @@ class POVBaseStrategy(BaseStrategy):
     # Pipeline Mode
     # =========================================================================
 
+    def _get_fuzzer_code(self) -> str:
+        """
+        Get fuzzer source code for agent context.
+
+        Tries multiple locations:
+        1. fuzz-tooling/projects/{project_name}/{fuzzer}.cc
+        2. fuzz-tooling/projects/{project_name}/{fuzzer}.c
+        3. Analysis Server get_fuzzer_source API
+
+        Returns:
+            Fuzzer source code string, or empty string if not found.
+        """
+        # Common fuzzer source extensions
+        extensions = [".cc", ".c", ".cpp"]
+
+        # Try fuzz-tooling directory first
+        fuzz_tooling_dir = self.workspace_path / "fuzz-tooling" / "projects" / self.project_name
+        for ext in extensions:
+            fuzzer_path = fuzz_tooling_dir / f"{self.fuzzer}{ext}"
+            if fuzzer_path.exists():
+                try:
+                    return fuzzer_path.read_text()
+                except Exception as e:
+                    self.log_warning(f"Failed to read fuzzer source from {fuzzer_path}: {e}")
+
+        # Try Analysis Server API
+        try:
+            client = self.get_analysis_client()
+            if client:
+                result = client.get_fuzzer_source(self.fuzzer)
+                if result and result.get("source"):
+                    return result["source"]
+        except Exception as e:
+            self.log_warning(f"Failed to get fuzzer source from Analysis Server: {e}")
+
+        return ""
+
     def _run_pipeline(self):
         """
         Run parallel pipeline for verification and POV generation.
@@ -506,6 +543,13 @@ class POVBaseStrategy(BaseStrategy):
             docker_image=f"gcr.io/oss-fuzz/{self.project_name}",
         )
 
+        # Get fuzzer source code for agent context
+        fuzzer_code = self._get_fuzzer_code()
+        if fuzzer_code:
+            self.log_info(f"Loaded fuzzer source code ({len(fuzzer_code)} chars)")
+        else:
+            self.log_warning("Could not load fuzzer source code")
+
         # Create pipeline
         pipeline = AgentPipeline(
             task_id=self.task_id,
@@ -517,6 +561,7 @@ class POVBaseStrategy(BaseStrategy):
             log_dir=self.log_dir / "agent" if self.log_dir else None,
             workspace_path=self.workspace_path,
             worker_id=self.worker_id,  # For SP Fuzzer lifecycle
+            fuzzer_code=fuzzer_code,
         )
 
         # In delta mode, SP finding is already done (SPs come from diff analysis)

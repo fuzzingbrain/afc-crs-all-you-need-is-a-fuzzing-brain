@@ -67,6 +67,21 @@ class ReachableChange:
 
 
 @dataclass
+class FunctionChange:
+    """A changed function (regardless of reachability)"""
+    file_path: str
+    function_name: str
+    function_file: str
+    line_start: int
+    line_end: int
+    changed_lines: List[int]
+    diff_content: str
+    # Reachability info (from static analysis - may be wrong for function pointers!)
+    static_reachable: bool = False
+    reachability_distance: Optional[int] = None
+
+
+@dataclass
 class DiffReachabilityResult:
     """Result of diff reachability analysis"""
     reachable: bool  # Are any changes reachable?
@@ -386,14 +401,137 @@ def get_reachable_changes_simple(
     }
 
 
+def get_all_changes(
+    diff_content: str,
+    fuzzer: str,
+    analysis_client: Any,
+) -> List[FunctionChange]:
+    """
+    Get ALL changed functions from diff, with reachability info.
+
+    Unlike get_reachable_changes which filters out unreachable functions,
+    this returns ALL changed functions. The reachability info is included
+    but should be used as a scoring factor, not a hard filter.
+
+    IMPORTANT: Static analysis may incorrectly mark function-pointer-called
+    functions as unreachable. The LLM should judge actual reachability.
+
+    Args:
+        diff_content: Raw diff content (unified diff format)
+        fuzzer: Fuzzer name (entry point)
+        analysis_client: Connected AnalysisClient instance
+
+    Returns:
+        List of FunctionChange objects (ALL changes, not just reachable)
+    """
+    all_changes: List[FunctionChange] = []
+
+    # Parse diff
+    file_diffs = parse_diff(diff_content)
+
+    if not file_diffs:
+        logger.warning("No file changes found in diff")
+        return all_changes
+
+    # Filter to source files only
+    source_diffs = [d for d in file_diffs if _is_source_file(d.path) and not d.is_binary]
+
+    if not source_diffs:
+        logger.info("No source file changes in diff")
+        return all_changes
+
+    logger.info(f"Analyzing {len(source_diffs)} changed source files (ignoring reachability filter)")
+
+    # For each changed file, find affected functions
+    for file_diff in source_diffs:
+        if file_diff.is_deleted:
+            logger.debug(f"Skipping deleted file: {file_diff.path}")
+            continue
+
+        if not file_diff.hunks:
+            continue
+
+        # Get functions in this file from Analysis Server
+        try:
+            functions = analysis_client.get_functions_by_file(file_diff.path)
+        except Exception as e:
+            logger.warning(f"Failed to get functions for {file_diff.path}: {e}")
+            continue
+
+        if not functions:
+            logger.debug(f"No functions found in {file_diff.path}")
+            continue
+
+        # Find which functions overlap with changed lines
+        changed_lines = set(file_diff.changed_lines)
+
+        for func in functions:
+            func_start = func.get('start_line', 0)
+            func_end = func.get('end_line', 0)
+            func_name = func.get('name', '')
+
+            if not func_name or not func_start:
+                continue
+
+            # Check if any changed line is within this function
+            func_lines = set(range(func_start, func_end + 1))
+            overlap = changed_lines & func_lines
+
+            if overlap:
+                # Extract diff content for this function
+                diff_excerpt, func_changed_lines = _extract_hunk_content_for_function(
+                    file_diff.hunks, func_start, func_end
+                )
+
+                # Check reachability (but don't filter!)
+                static_reachable = False
+                distance = None
+                try:
+                    reachability = analysis_client.get_reachability(fuzzer, func_name)
+                    static_reachable = reachability.get('reachable', False)
+                    distance = reachability.get('distance')
+                except Exception as e:
+                    logger.warning(f"Failed to check reachability for {func_name}: {e}")
+
+                reachable_mark = "✓" if static_reachable else "✗(static)"
+                logger.debug(f"  {func_name} [{reachable_mark}] - {len(overlap)} changed lines")
+
+                all_changes.append(FunctionChange(
+                    file_path=file_diff.path,
+                    function_name=func_name,
+                    function_file=func.get('file_path', file_diff.path),
+                    line_start=func_start,
+                    line_end=func_end,
+                    changed_lines=list(overlap),
+                    diff_content=diff_excerpt,
+                    static_reachable=static_reachable,
+                    reachability_distance=distance,
+                ))
+
+    # Sort: reachable first, then by distance
+    all_changes.sort(
+        key=lambda x: (
+            0 if x.static_reachable else 1,
+            x.reachability_distance if x.reachability_distance is not None else 999
+        )
+    )
+
+    reachable_count = sum(1 for c in all_changes if c.static_reachable)
+    logger.info(f"Found {len(all_changes)} changed functions ({reachable_count} static-reachable, {len(all_changes) - reachable_count} static-unreachable)")
+
+    return all_changes
+
+
 __all__ = [
     # Data classes
     "DiffHunk",
     "FileDiff",
     "ReachableChange",
+    "FunctionChange",
     "DiffReachabilityResult",
     # Functions
     "parse_diff",
     "get_reachable_changes",
     "get_reachable_changes_simple",
+    "get_all_changes",
 ]

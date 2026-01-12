@@ -714,6 +714,7 @@ class TaskProcessor:
                     skip_build=True,  # Skip build, use cached data
                     prebuild_dir=self.config.prebuild_dir,
                     work_id=self.config.work_id,
+                    fuzzer_sources=self.config.fuzzer_sources,
                 )
 
                 # Run analyzer with skip_build
@@ -749,6 +750,7 @@ class TaskProcessor:
                     log_dir=str(log_dir) if log_dir else None,
                     prebuild_dir=self.config.prebuild_dir,
                     work_id=self.config.work_id,
+                    fuzzer_sources=self.config.fuzzer_sources,
                 )
 
                 logger.info(f"Analyzer request: sanitizers={self.config.sanitizers}")
