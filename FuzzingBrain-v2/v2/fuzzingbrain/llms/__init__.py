@@ -41,6 +41,8 @@ from .models import (
     GPT_5_2_INSTANT,
     GPT_5_2_PRO,
     GPT_5_2_CODEX,
+    GPT_5_MINI,
+    GPT_5,
     O3,
     O3_MINI,
     # Claude models
@@ -96,10 +98,17 @@ from .exceptions import (
     LLMShutdownError,
 )
 
+from .distributor import (
+    ModelTier,
+    LLMDistributor,
+    get_distributor,
+)
+
 __all__ = [
     # Enums
     "Provider",
     "TaskType",
+    "ModelTier",
     # Model dataclass
     "ModelInfo",
     # Client
@@ -129,6 +138,8 @@ __all__ = [
     "GPT_5_2_CODEX",
     "O3",
     "O3_MINI",
+    "GPT_5_MINI",
+    "GPT_5",
     # Claude
     "CLAUDE_SONNET_4_5",
     "CLAUDE_HAIKU_4_5",
@@ -154,4 +165,7 @@ __all__ = [
     "get_fallback_chain",
     "get_recommended_model",
     "get_recommended_models",
+    # Distributor
+    "LLMDistributor",
+    "get_distributor",
 ]
