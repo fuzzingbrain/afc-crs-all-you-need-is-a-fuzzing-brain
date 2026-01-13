@@ -5,10 +5,10 @@ import re
 import operator
 from pathlib import Path
 import logging
-logger = logging.getLogger(__name__)
 from typing import Optional, List
 
 from pydantic import BaseModel, Field
+from typing_extensions import Annotated
 from langgraph.graph.message import add_messages
 from langgraph.managed import RemainingSteps
 from langgraph.checkpoint.memory import InMemorySaver
@@ -18,16 +18,21 @@ from langgraph.prebuilt.chat_agent_executor import create_react_agent
 from langchain_core.callbacks import BaseCallbackHandler  # type: ignore
 from langchain_core.runnables import RunnableConfig
 
+logger = logging.getLogger(__name__)
+
 from multi_agent.state import PatcherAgentState, CodeSnippetKey, ContextCodeSnippet, PatcherAgentName
 from .base import Agent
+from multi_agent.llm_config import get_llm_kwargs, log_token_usage
 from .ctx_tools import (
     ls,
     grep,
     cat,
     get_lines,
+    get_class,
     get_function,
     get_type,
     get_symbol,
+    get_field_refs,
     get_callers,
     get_callees,
     track_snippet,
@@ -42,6 +47,7 @@ from .ctx_tools import (
 try:
     from langchain_openai import ChatOpenAI  # type: ignore
     from langchain_core.prompts import ChatPromptTemplate  # type: ignore
+
     _LLM = True
 except Exception:
     _LLM = False
@@ -151,11 +157,15 @@ USER_MSG_TMPL = (
     "Files in current directory:\n<ls_cwd>\n{LS_CWD}\n</ls_cwd>\n\n"
     "Guidelines:\n"
     "- Do NOT fabricate code, paths, or functionality.\n"
-    "- First identify the exact function/type/range/declaration using get_function/get_type/get_lines/get_symbol.\n"
+    "- First identify the exact type/class/function/range/declaration using get_type/get_class/get_function/get_lines/get_symbol.\n"
+    "- If you are not sure about the exact function/range/declaration, consider using get_type/get_class to fetch full type definitions before zooming into individual functions or small ranges if needed.\n"
+    "- Avoid repeating the same tool with the same arguments in this turn.\n"
+    "- Do not call ls on the same path twice; if ls returns an empty stdout, adjust to a deeper known source path (e.g., source/src/main/java) or switch to precision tools.\n"
+    "- Prefer precision tools first: get_type/get_class/get_symbol/get_function; use grep/cat only as informational and ideally scoped to a known file.\n"
     "- ONLY use track_snippet after confirming the snippet is correct and complete.\n"
     "- If reflection_guidance indicates rollback, execute the appropriate undo tool(s) BEFORE requesting new snippets. Perform rollback at most once per turn.\n"
     "- Clearly explain your reasoning before calling track_snippet.\n"
-    "- After a successful track_snippet, stop immediately.\n"
+    "- Continue until the current request is fully satisfied.\n"
 )
 
 
@@ -165,13 +175,9 @@ class _ReActCtxState(BaseModel):
     source_dir: Optional[str] = None
     reflection_guidance: Optional[str] = None
     rollback_done: bool = False
-    messages: List[BaseMessage] = Field(default_factory=list)
-    code_snippets: List[ContextCodeSnippet] = Field(default_factory=list)
+    messages: Annotated[List[BaseMessage], add_messages] = Field(default_factory=list)
+    code_snippets: Annotated[List[ContextCodeSnippet], operator.add] = Field(default_factory=list)
     remaining_steps: RemainingSteps = Field(default_factory=RemainingSteps)
-
-    # LangGraph reducers
-    messages: List[BaseMessage] = Field(default_factory=list, json_schema_extra={"reducer": add_messages})
-    code_snippets: List[ContextCodeSnippet] = Field(default_factory=list, json_schema_extra={"reducer": operator.add})
 
 def _llm_requests(
     project_root: Optional[str],
@@ -196,6 +202,11 @@ def _llm_requests(
     # print(os.environ.get("OPENAI_API_KEY"))
     if _LLM and os.environ.get("OPENAI_API_KEY"):
         try:
+            # Filter messages to only include user messages to avoid confusion
+            # AI messages from previous turns can confuse the model into thinking
+            # it already answered, leading to empty responses
+            user_messages = [msg for msg in messages if isinstance(msg, HumanMessage)]
+            
             # Render and log exact request-generation prompt
             vars = {
                 "PROJECT_ROOT": p_root,
@@ -203,7 +214,7 @@ def _llm_requests(
                 "HARNESS_SCRIPT_CONTEXT": harness_script_context,
                 "REFLECTION_CONTEXT": reflection_context,
                 "STACKTRACES": (stacktraces or ""),
-                "messages": messages,
+                "messages": user_messages,  # Only pass user messages, not AI responses
             }
             try:
                 rendered = LLM_PROMPT.format_messages(**vars)  # type: ignore[attr-defined]
@@ -220,26 +231,46 @@ def _llm_requests(
                     len(harness_script_context),
                     len(stacktraces or ""),
                 )
-            llm = ChatOpenAI(model="gpt-5", temperature=0)
-            out = (LLM_PROMPT | llm).invoke(vars).content
-            # Persist response into provided conversation buffer
-            if out:
+            llm = ChatOpenAI(**get_llm_kwargs(default_model="gpt-5", default_temperature=0.0))
+            response = (LLM_PROMPT | llm).invoke(vars)
+            
+            # Log token usage
+            log_token_usage(response, context="CTX")
+            
+            # Handle both direct content access and response object
+            out = getattr(response, "content", None) or (str(response) if response else "")
+            
+            # Log the raw response for debugging
+            try:
+                logger.info("CTX LLM RESP | content_len=%d, content=%s", len(out or ""), (out or "")[:500])
+                if not out or not out.strip():
+                    logger.warning("CTX LLM RESP | Empty response from LLM - this may indicate model confusion or API issue")
+            except Exception:
+                pass
+            
+            # Persist response into provided conversation buffer only if non-empty
+            if out and out.strip():
                 try:
                     messages.append(AIMessage(content=out))
                 except Exception:
                     pass
-            try:
-                logger.info("CTX LLM RESP | content=%s", out or "")
-            except Exception:
-                pass
+            else:
+                # If response is empty, log a warning but don't add to messages
+                logger.warning("CTX LLM | Skipping empty response - not adding to conversation buffer")
+            
             lines = [ln.strip() for ln in (out or "").splitlines() if ln.strip()]
             if not lines:
+                logger.warning("CTX LLM | No lines extracted from response, returning empty list")
                 return []
             reqs: List[str] = []
             for ln in lines:
                 m = re.search(r"<request>(.*?)</request>", ln, re.IGNORECASE | re.DOTALL)
                 if m and m.group(1).strip():
                     reqs.append(m.group(1).strip())
+            
+            if not reqs:
+                logger.warning("CTX LLM | No <request> tags found in response. Response was: %s", (out or "")[:200])
+            
             return reqs or lines
         except Exception:
             logger.exception("CTX LLM ERROR")
@@ -368,6 +399,8 @@ class ContextRetrieverAgent(Agent):
         super().__init__("context_retriever")
         # Private agent-local conversation buffer
         self._conv_messages: List[BaseMessage] = []
+        # Persist ReAct thread ids per request key to avoid repeating tool calls across loops
+        self._react_threads: dict[str, str] = {}
         
         class ToolUseLogger(BaseCallbackHandler):  # type: ignore[misc]
             def __init__(self, outer_logger: logging.Logger) -> None:
@@ -440,8 +473,29 @@ class ContextRetrieverAgent(Agent):
         if _LLM and os.environ.get("OPENAI_API_KEY"):
             try:
                 self._react_checkpointer = InMemorySaver()
-                llm = ChatOpenAI(model="gpt-5", temperature=0)
-                tools = [get_symbol, get_function, get_type, ls, grep, get_lines, cat, get_callers, get_callees, think, track_snippet, editor_list_edits, editor_undo_last_patch, editor_undo_n, editor_undo_all]
+                llm = ChatOpenAI(**get_llm_kwargs(default_model="gpt-5", default_temperature=0.0))
+                # NOTE: We intentionally exclude the 'think' tool here because some models
+                # (especially when proxied via LiteLLM) tend to repeatedly call it and
+                # never progress to actual code tools like get_symbol/get_function,
+                # which results in zero collected snippets.
+                tools = [
+                    get_callers,
+                    get_callees,
+                    get_symbol,
+                    get_function,
+                    get_type,
+                    get_class,
+                    get_field_refs,
+                    # ls,
+                    # grep,
+                    get_lines,
+                    # cat,
+                    track_snippet,
+                    editor_list_edits,
+                    editor_undo_last_patch,
+                    editor_undo_n,
+                    editor_undo_all,
+                ]
 
                 def _prompt(state: _ReActCtxState) -> List[BaseMessage]:  # type: ignore[name-defined]
                     cwd = state.project_root or state.source_dir or os.getcwd()
@@ -502,10 +556,15 @@ class ContextRetrieverAgent(Agent):
                 "rollback_done": False,
                 # Seed with an empty conversation; ReAct will manage tool-turns itself.
                 "messages": [],
+                # Seed prior snippets so they persist across requests
+                "code_snippets": list(getattr(state, "relevant_code_snippets", []) or []),
             }
-            # Fresh thread for each invocation to avoid stale tool messages in checkpoint
+            # Reuse a stable thread per request to retain tool history and avoid repetition
             import uuid as _uuid
-            thread_id = f"ctx:{_uuid.uuid4().hex}"
+            key = f"{request}|{state.project_root}|{state.source_dir}"
+            if key not in self._react_threads:
+                self._react_threads[key] = f"ctx:{_uuid.uuid4().hex}"
+            thread_id = self._react_threads[key]
             cfg = RunnableConfig(recursion_limit=10, configurable={"thread_id": thread_id}, callbacks=[self._tool_logger])
             self._react_agent.invoke(input_state, config=cfg)
             st = self._react_agent.get_state(cfg).values  # type: ignore[attr-defined]
@@ -542,10 +601,19 @@ class ContextRetrieverAgent(Agent):
         collected: List[ContextCodeSnippet] = []
 
         # 2) Use ReAct agent for snippet retrieval for all requests (Buttercup-like)
+        # Persist snippets across requests within a single ContextRetriever run so that
+        # each subsequent "Engineer request" sees prior snippets in <code_snippets>.
         for req in requests:
-                snips = self._process_with_react(req, state)
-                if snips:
-                    collected.extend(snips)
+            # Seed global state with snippets collected so far so _process_with_react
+            # can initialize its ReAct state.code_snippets from them.
+            if collected:
+                try:
+                    state.relevant_code_snippets = set(_dedupe_snippets(collected))
+                except Exception:
+                    pass
+            snips = self._process_with_react(req, state)
+            if snips:
+                collected.extend(snips)
 
         # 3) Deduplicate and finalize
         final = _dedupe_snippets(collected)

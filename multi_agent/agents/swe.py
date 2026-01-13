@@ -9,6 +9,7 @@ from typing import List, Optional, Tuple, Dict
 from pydantic import BaseModel, Field
 
 from multi_agent.state import PatcherAgentState, PatchOutput, CodeSnippetKey, ContextCodeSnippet, PatchStrategy
+from multi_agent.llm_config import get_llm_kwargs, log_token_usage
 
 logger = logging.getLogger(__name__)
 
@@ -28,23 +29,60 @@ class CodeSnippetChanges(BaseModel):
     @classmethod
     def parse(cls, msg: str) -> CodeSnippetChanges:
         import re
+        import logging
+        logger = logging.getLogger(__name__)
+        
         blocks = re.findall(r"<patch>(.*?)</patch>", msg, flags=re.DOTALL | re.IGNORECASE)
+        logger.info(f"Found {len(blocks)} patch blocks to parse")
+        
         items: List[CodeSnippetChange] = []
-        for block in blocks:
+        
+        for i, block in enumerate(blocks):
             fp_m = re.search(r"<file_path>(.*?)</file_path>", block, re.DOTALL | re.IGNORECASE)
             id_m = re.search(r"<identifier>(.*?)</identifier>", block, re.DOTALL | re.IGNORECASE)
             if not fp_m or not id_m:
+                logger.warning(f"Patch block {i+1} missing file_path or identifier, skipping")
                 continue
             file_path = fp_m.group(1).strip()
             identifier = id_m.group(1).strip()
-            for old_code, new_code in re.findall(r"<old_code>(.*?)</old_code>.*?<new_code>(.*?)</new_code>", block, re.DOTALL | re.IGNORECASE):
+            
+            old_new_pairs = re.findall(r"<old_code>(.*?)</old_code>.*?<new_code>(.*?)</new_code>", block, re.DOTALL | re.IGNORECASE)
+            if not old_new_pairs:
+                logger.warning(f"Patch block {i+1} for {file_path} missing old_code/new_code pairs, creating placeholder")
+                # Create a placeholder change with special marker to indicate incomplete patch
+                # Use a special marker in old_code to signal this to the patching agent
                 items.append(
                     CodeSnippetChange(
                         key=CodeSnippetKey(file_path=file_path, identifier=identifier),
-                        old_code=old_code.strip("\n"),
-                        code=new_code.strip("\n"),
+                        old_code="__INCOMPLETE_PATCH_BLOCK__",
+                        code="__INCOMPLETE_PATCH_BLOCK__",
                     )
                 )
+                logger.info(f"Added placeholder for incomplete patch block in {file_path}:{identifier}")
+                continue
+                
+            for old_code, new_code in old_new_pairs:
+                old_code_clean = old_code.strip("\n")
+                new_code_clean = new_code.strip("\n")
+                
+                # Validate patch block completeness
+                if old_code_clean and len(old_code_clean.strip()) < 20:
+                    logger.warning(f"Patch block {i+1} for {file_path} has very short old_code (may be incomplete): {repr(old_code_clean)}")
+                
+                # Check for common incomplete patterns
+                if "Pattern.compile(" in old_code_clean and not old_code_clean.count('"') >= 2:
+                    logger.warning(f"Patch block {i+1} for {file_path} appears to have incomplete regex pattern in old_code")
+                
+                items.append(
+                    CodeSnippetChange(
+                        key=CodeSnippetKey(file_path=file_path, identifier=identifier),
+                        old_code=old_code_clean,
+                        code=new_code_clean,
+                    )
+                )
+                logger.info(f"Added patch change for {file_path}:{identifier} (old: {len(old_code_clean)} chars, new: {len(new_code_clean)} chars)")
+                
+        logger.info(f"Total patch changes parsed: {len(items)}")
         return CodeSnippetChanges(items=items)
 
 
@@ -166,6 +204,16 @@ class SWEAgent:
 PROJECT:
 <project_name>{PROJECT_NAME}</project_name>
 
+ROOT CAUSE ANALYSIS (if available):
+<root_cause>
+{ROOT_CAUSE}
+</root_cause>
+
+REFLECTION GUIDANCE (if available):
+<reflection_guidance>
+{REFLECTION_GUIDANCE}
+</reflection_guidance>
+
 PATCH STRATEGY (optional):
 <patch_strategy>{PATCH_STRATEGY}</patch_strategy>
 
@@ -210,10 +258,13 @@ RULES:
     def generate_changes(self, state: PatcherAgentState) -> CodeSnippetChanges:
         if not self._LLM_OK:
             return CodeSnippetChanges(items=[])
-        llm = self.ChatOpenAI(model="gpt-4o", temperature=0)
+        llm = self.ChatOpenAI(**get_llm_kwargs(default_model="gpt-4o", default_temperature=0.0))
         prompt = self._prompt()
+        reflection_guidance = getattr(state.execution_info, "reflection_guidance", None) or ""
         variables = {
             "PROJECT_NAME": getattr(state.context, "project", "unknown"),
+            "ROOT_CAUSE": getattr(state, "root_cause", None) or "",
+            "REFLECTION_GUIDANCE": reflection_guidance,
             "PATCH_STRATEGY": getattr(state.patch_strategy, "summary", None) or "",
             "CODE_SNIPPETS": self._serialize_snippets(state),
         }
@@ -226,7 +277,9 @@ RULES:
                 logger.info("SWE LLM PROMPT | vars=%s", variables)
             except Exception:
                 pass
-        out = (prompt | llm).invoke(variables).content  # type: ignore[attr-defined]
+        response = (prompt | llm).invoke(variables)  # type: ignore[attr-defined]
+        log_token_usage(response, context="SWE")
+        out = response.content  # type: ignore[attr-defined]
         try:
             logger.info("SWE LLM RESP | len=%d\n%s", len(out or ""), (out or "")[:4000])
         except Exception:
@@ -246,6 +299,17 @@ RULES:
                     """
 INPUT:
 <project_name>{PROJECT_NAME}</project_name>
+
+ROOT CAUSE ANALYSIS (if available):
+<root_cause>
+{ROOT_CAUSE}
+</root_cause>
+
+REFLECTION GUIDANCE (if available):
+<reflection_guidance>
+{REFLECTION_GUIDANCE}
+</reflection_guidance>
+
 <code_snippets>
 {CODE_SNIPPETS}
 </code_snippets>
@@ -281,10 +345,13 @@ Summarize the following patch strategy in 1-2 sentences:
     def generate_patch_strategy(self, state: PatcherAgentState) -> PatchStrategy | None:
         if not self._LLM_OK:
             return None
-        llm = self.ChatOpenAI(model="gpt-4o", temperature=0)
+        llm = self.ChatOpenAI(**get_llm_kwargs(default_model="gpt-4o", default_temperature=0.0))
         prompt = self._strategy_prompt()
+        reflection_guidance = getattr(state.execution_info, "reflection_guidance", None) or ""
         variables = {
             "PROJECT_NAME": getattr(state.context, "project", "unknown"),
+            "ROOT_CAUSE": getattr(state, "root_cause", None) or "",
+            "REFLECTION_GUIDANCE": reflection_guidance,
             "CODE_SNIPPETS": self._serialize_snippets(state),
         }
         try:
@@ -292,7 +359,9 @@ Summarize the following patch strategy in 1-2 sentences:
             logger.info("SWE STRATEGY PROMPT | messages=%s", [str(m) for m in rendered])
         except Exception:
             logger.info("SWE STRATEGY PROMPT | vars=%s", variables)
-        full = (prompt | llm).invoke(variables).content or ""  # type: ignore[attr-defined]
+        response = (prompt | llm).invoke(variables)  # type: ignore[attr-defined]
+        log_token_usage(response, context="SWE_STRATEGY")
+        full = response.content or ""  # type: ignore[attr-defined]
         try:
             logger.info("SWE STRATEGY RESP (full) | len=%d\n%s", len(full), full[:4000])
         except Exception:
@@ -306,7 +375,9 @@ Summarize the following patch strategy in 1-2 sentences:
         # Summarize
         summary_prompt = self._strategy_summary_prompt()
         summary_vars = {"PATCH_STRATEGY": full_text}
-        summary = (summary_prompt | llm).invoke(summary_vars).content or full_text  # type: ignore[attr-defined]
+        summary_response = (summary_prompt | llm).invoke(summary_vars)  # type: ignore[attr-defined]
+        log_token_usage(summary_response, context="SWE_SUMMARY")
+        summary = summary_response.content or full_text  # type: ignore[attr-defined]
         try:
             logger.info("SWE STRATEGY RESP (summary) | %s", summary)
         except Exception:
@@ -331,6 +402,7 @@ Summarize the following patch strategy in 1-2 sentences:
         missed_changes = 0
         for change in changes.items:
             if not change.is_valid():
+                logger.warning(f"Invalid change skipped: {change}")
                 continue
             total_changes += 1
             file_path = change.key.file_path  # type: ignore[assignment]
@@ -379,13 +451,27 @@ Summarize the following patch strategy in 1-2 sentences:
                         # If old_code not within snippet, try file-level once
                         if change.old_code and change.old_code in base_text:
                             new_text = base_text.replace(change.old_code, change.code or "", 1)
+                            logger.info(f"SWE: Applied file-level replacement for {file_path}:{identifier}")
                         else:
-                            logger.warning("SWE: old_code not found in snippet for (%s, %s)", file_path, identifier)
+                            logger.warning(f"SWE: old_code not found in snippet or file for ({file_path}, {identifier})")
+                            logger.warning(f"SWE: Looking for old_code: {repr(change.old_code[:100])}...")
+                            logger.warning(f"SWE: In snippet: {repr(snippet_region[:200])}...")
+                            # Try partial matching for incomplete old_code
+                            if change.old_code and len(change.old_code.strip()) > 10:
+                                # Look for the old_code as a substring in the file
+                                old_lines = change.old_code.strip().split('\n')
+                                if len(old_lines) > 0:
+                                    first_line = old_lines[0].strip()
+                                    if first_line in base_text:
+                                        logger.info(f"SWE: Found partial match for first line: {repr(first_line)}")
+                                        # This suggests the old_code is incomplete - log for debugging
+                                        logger.warning(f"SWE: Incomplete old_code detected - patch may need full context")
                             missed_changes += 1
                             continue
                     else:
                         # Rebuild file content with modified snippet
                         new_text = base_text[:idx_in_file] + replaced_snippet + base_text[idx_in_file + len(snippet_region):]
+                        logger.info(f"SWE: Applied snippet replacement for {file_path}:{identifier}")
             else:
                 # Fallback: try direct old_code replacement within the whole file
                 if change.old_code and change.old_code in base_text:
@@ -420,7 +506,12 @@ Summarize the following patch strategy in 1-2 sentences:
             return None
 
         if not diffs:
+            logger.info(f"create_upatch: No diffs generated from {total_changes} changes")
             return None
+            
+        logger.info(f"create_upatch: total_changes={total_changes}, applied_changes={applied_changes}, missed_changes={missed_changes}")
+        logger.info(f"create_upatch: generated diff with {len(diffs)} file diffs")
+        
         return PatchOutput(diff="\n".join(diffs))
 
 

@@ -119,7 +119,7 @@ class Searcher:
             pass
         return None
 
-    def read_source(self, file_name: str, line_number: int, context: int = 3):
+    def read_source(self, file_name: str, line_number: int, context: int = 20):
         try:
             p = self._resolve_file(file_name)
             if not p:
@@ -131,12 +131,20 @@ class Searcher:
             from pathlib import Path as _P
             funcs = self._cq.get_functions("*", file_path=_P(str(p)), line_number=line_number)
             if funcs:
+                # Prefer the first enclosing function body
                 b = funcs[0].bodies[0]
                 start = max(1, b.start_line)
                 end = min(len(lines), b.end_line)
             else:
-                start = max(1, line_number - context)
-                end = min(len(lines), line_number + context)
+                # Fallback: heuristic window around the requested line.
+                # Near the top of the file, return a larger chunk so the LLM
+                # sees imports/class declarations instead of just the license header.
+                if line_number <= context:
+                    start = 1
+                    end = min(len(lines), max(line_number + context, 2 * context))
+                else:
+                    start = max(1, line_number - context)
+                    end = min(len(lines), line_number + context)
             contents = "\n".join(lines[start - 1 : end])
             return Ok({"start": start, "end": end, "contents": contents})
         except Exception as e:

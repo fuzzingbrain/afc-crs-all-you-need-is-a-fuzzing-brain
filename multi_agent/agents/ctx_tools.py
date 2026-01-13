@@ -63,6 +63,39 @@ def _read_lines(path: Path) -> List[str]:
     except Exception:
         return []
 
+def _already_tracked_function(state: Any, function_name: str, file_path: str | None) -> bool:
+    try:
+        existing = list(getattr(state, "code_snippets", []) or [])
+    except Exception:
+        return False
+    for s in existing:
+        try:
+            fp = getattr(getattr(s, "key", None), "file_path", None)
+            if file_path and fp and Path(fp).as_posix() != Path(file_path).as_posix():
+                continue
+            code_text = getattr(s, "code", "") or ""
+            desc_text = getattr(s, "description", "") or ""
+            if (function_name in code_text and "(" in code_text) or (function_name in desc_text):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _merge_snippets(state: Any, new_snippets: list[ContextCodeSnippet]) -> list[ContextCodeSnippet]:
+    """
+    Merge newly produced snippets into the existing state, avoiding overwrite.
+    This is defensive against state backends that treat list updates as replacement.
+    """
+    try:
+        existing = list(getattr(state, "code_snippets", []) or [])
+    except Exception:
+        existing = []
+    # Simple de-duplication based on full snippet equality
+    for sn in new_snippets:
+        if sn not in existing:
+            existing.append(sn)
+    return existing
 
 def _rglob_many(root: Path, globs: Iterable[str]) -> Iterable[Path]:
     for g in globs:
@@ -355,6 +388,90 @@ def _build_snippet_from_java(p: Path, name: str, kind: Optional[str], part: str)
         can_patch=True,
     )
 
+def _collect_java_field_names(src: str) -> set[str]:
+    if not _TS_OK:
+        return set()
+    try:
+        parser = _ts_parser("java")
+    except Exception:
+        parser = None
+    if not parser:
+        return set()
+    tree = parser.parse(src.encode("utf-8"))
+    lang = get_language("java")  # type: ignore[name-defined]
+    q_code = r"""
+    (
+      (field_declaration
+        (variable_declarator
+          name: (identifier) @fname
+        )+
+      ) @field
+    )
+    """
+    try:
+        q = lang.query(q_code)
+        captures = q.captures(tree.root_node)
+        names: set[str] = set()
+        for node, cap in captures:
+            if cap == "fname":
+                names.add(src[node.start_byte:node.end_byte])
+        return names
+    except Exception:
+        return set()
+
+def _find_java_method_node(src: str, function_name: str):
+    if not _TS_OK:
+        return None
+    try:
+        parser = _ts_parser("java")
+    except Exception:
+        parser = None
+    if not parser:
+        return None
+    tree = parser.parse(src.encode("utf-8"))
+    lang = get_language("java")  # type: ignore[name-defined]
+    q_code = rf"""
+    (
+      (method_declaration
+        name: (identifier) @mname
+      ) @method
+      (#eq? @mname "{function_name}")
+    )
+    (
+      (constructor_declaration
+        name: (identifier) @cname
+      ) @ctor
+      (#eq? @cname "{function_name}")
+    )
+    """
+    try:
+        q = lang.query(q_code)
+        captures = q.captures(tree.root_node)
+        for node, cap in captures:
+            if cap in ("method", "ctor"):
+                return node
+    except Exception:
+        return None
+    return None
+
+def _collect_identifiers_in_node(src: str, node) -> list[tuple[str, int]]:
+    if not _TS_OK or node is None:
+        return []
+    try:
+        lang = get_language("java")  # type: ignore[name-defined]
+        q = lang.query("(identifier) @id")
+        captures = q.captures(node)
+        res: list[tuple[str, int]] = []
+        for id_node, _ in captures:
+            try:
+                name = src[id_node.start_byte:id_node.end_byte]
+                line = id_node.start_point[0] + 1
+                res.append((name, line))
+            except Exception:
+                continue
+        return res
+    except Exception:
+        return []
 
 def _build_field_snippet_java(p: Path, field_name: str) -> Optional[ContextCodeSnippet]:
     """
@@ -690,8 +807,9 @@ def get_symbol(
             snip.can_patch = False
 
         msg = f"Found symbol {symbol_name} in {p}"
-        # Return snippet without ending the ReAct turn
-        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)], "code_snippets": [snip]})
+        # Return snippet without ending the ReAct turn; append to any existing snippets
+        merged = _merge_snippets(state, [snip])
+        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)], "code_snippets": merged})
     except Exception as e:
         return Command(update={"messages": [ToolMessage(content=f"Error: {e}", tool_call_id=tool_call_id)]})
 
@@ -702,13 +820,41 @@ def ls(
     state: Annotated[Any, InjectedState],
     tool_call_id: Annotated[str, InjectedToolCallId],
 ) -> Command:
-    """List files in a directory relative to project root (or absolute path)."""
+    """List files in a directory relative to project root (or absolute path).
+
+    Notes for the LLM:
+    - If you pass a high-level path like 'source' and see only subdirectories,
+      you should usually drill down into likely source roots such as:
+      'source/src/main/java', 'source/src/java', or 'source/src'.
+    - This tool now lists both subdirectories and Java files to help you decide
+      where to look next.
+    """
     root = getattr(state, "project_root", None) or getattr(state, "source_dir", None)
     path = _resolve_path(root, file_path) or Path(file_path)
     try:
-        # Only list Java source filenames to keep context concise and useful to the LLM
-        java_entries = [e.name for e in sorted(path.iterdir(), key=lambda x: x.name) if e.is_file() and e.suffix.lower() == ".java"]
-        out = "\n".join(f"- {name}" for name in java_entries)
+        if not path.exists():
+            msg = _wrap_command_output(["ls", "-la", str(path)], "", f"path does not exist: {path}", returncode=1)
+            return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
+
+        if not path.is_dir():
+            msg = _wrap_command_output(["ls", "-la", str(path)], "", f"not a directory: {path}", returncode=1)
+            return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
+
+        entries = sorted(path.iterdir(), key=lambda x: x.name)
+        dir_entries = [e.name for e in entries if e.is_dir()]
+        java_entries = [e.name for e in entries if e.is_file() and e.suffix.lower() == ".java"]
+
+        lines: list[str] = []
+        if dir_entries:
+            lines.append("# directories")
+            lines.extend(f"[dir] {name}" for name in dir_entries)
+        if java_entries:
+            lines.append("# java files")
+            lines.extend(f"- {name}" for name in java_entries)
+        if not lines:
+            lines.append("<empty>")
+
+        out = "\n".join(lines)
         msg = _wrap_command_output(["ls", "-la", str(path)], out)
         # Do NOT attach snippets for ls; it's informational only
         return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
@@ -739,7 +885,8 @@ def editor_list_edits(
             can_patch=False,
         )
         msg = _wrap_command_output("editor_list_edits", diff, "")
-        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)], "code_snippets": [snippet]})
+        merged = _merge_snippets(state, [snippet])
+        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)], "code_snippets": merged})
     except Exception as e:
         msg = _wrap_command_output("editor_list_edits", "", str(e), returncode=1)
         return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
@@ -911,7 +1058,70 @@ def get_lines(
         description=f"Lines {s}-{e} in {str(p)}",
         can_patch=(p.exists() and p.is_file() and (getattr(state, "source_dir", None) and str(p).startswith(str(getattr(state, "source_dir")))) and _lang_from_ext(p) is not None),
     )
-    return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)], "code_snippets": _append_snippets(state, [snippet])})
+    merged = _merge_snippets(state, [snippet])
+    return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)], "code_snippets": merged})
+
+@tool
+def get_field_refs(
+    function_name: str,
+    file_path: str,
+    *,
+    state: Annotated[Any, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
+    """Within a Java function's span, find references to class fields/constants (tree-sitter-based) and track small context snippets."""
+    root = getattr(state, "project_root", None) or getattr(state, "source_dir", None)
+    p = _resolve_path(root, file_path) or Path(file_path)
+    if not p.exists():
+        msg = f"File not found: {p}"
+        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
+    if _lang_from_ext(p) != "java":
+        msg = f"get_field_refs supports Java only; given {p}"
+        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
+    src = _read_text(p)
+    if not src:
+        msg = f"Empty or unreadable file: {p}"
+        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
+    if not _TS_OK:
+        msg = "Tree-sitter not available; cannot resolve field references precisely"
+        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
+    method_node = _find_java_method_node(src, function_name)
+    if method_node is None:
+        msg = f"Method/constructor {function_name} not found in {p}"
+        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
+    field_names = _collect_java_field_names(src)
+    if not field_names:
+        msg = f"No class fields detected in {p}"
+        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
+    idents = _collect_identifiers_in_node(src, method_node)
+    lines = src.splitlines()
+    snippets: List[ContextCodeSnippet] = []
+    seen_positions: set[tuple[str, int]] = set()
+    for name, line_no in idents:
+        if name not in field_names:
+            continue
+        key = (name, line_no)
+        if key in seen_positions:
+            continue
+        seen_positions.add(key)
+        s = max(1, line_no - 3)
+        e = min(len(lines), line_no + 3)
+        code = "\n".join(lines[s - 1 : e])
+        snip = ContextCodeSnippet(
+            key=CodeSnippetKey(file_path=str(p)),
+            start_line=s,
+            end_line=e,
+            description=f"Use of field {name} inside {function_name} in {p.name}",
+            code=code,
+            can_patch=bool(getattr(state, "source_dir", None) and str(p).startswith(str(getattr(state, "source_dir")))),
+        )
+        snippets.append(snip)
+    if not snippets:
+        msg = f"No field/constant references found within {function_name} in {p}"
+        return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
+        summary = f"Found {len(snippets)} field/constant reference(s) inside {function_name} in {p}"
+        merged = _merge_snippets(state, snippets)
+        return Command(update={"messages": [ToolMessage(content=summary, tool_call_id=tool_call_id)], "code_snippets": merged})
 
 
 def _get_function_snippets(function_name: str, file_path: str | None, state: Any) -> List[ContextCodeSnippet]:
@@ -1042,6 +1252,26 @@ def _get_type_snippets(type_name: str, file_path: str | None, state: Any) -> Lis
 
 
 @tool
+def get_class(
+    class_name: str,
+    file_path: str | None,
+    *,
+    state: Annotated[Any, InjectedState],
+    tool_call_id: Annotated[str, InjectedToolCallId],
+) -> Command:
+    """Get a Java class/interface/enum full definition (alias of get_type). Prefer passing file_path if known."""
+    try:
+        snippets = _get_type_snippets(class_name, file_path, state)
+        if not snippets:
+            msg = f"No definition found for class {class_name} in {file_path}"
+            return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
+        out = "\n".join(str(s) for s in snippets)
+        merged = _merge_snippets(state, snippets)
+        return Command(update={"messages": [ToolMessage(content=out, tool_call_id=tool_call_id)], "code_snippets": merged})
+    except Exception as e:
+        return Command(update={"messages": [ToolMessage(content=f"Error: {e}", tool_call_id=tool_call_id)]})
+
+@tool
 def get_function(
     function_name: str,
     file_path: str | None,
@@ -1051,12 +1281,26 @@ def get_function(
 ) -> Command:
     """Get a function's definition and track it as snippet(s). Prefer passing file_path if known."""
     try:
+        # If this function already exists in tracked snippets for this file, nudge the agent to move on
+        root = getattr(state, "project_root", None) or getattr(state, "source_dir", None)
+        resolved = _resolve_path(root, file_path) if file_path else None
+        if _already_tracked_function(state, function_name, str(resolved) if resolved else None):
+            hint = (
+                f"Function {function_name} already tracked"
+                + (f" in {resolved}" if resolved else "")
+                + "; consider get_callees/get_callers/get_field_refs for related context."
+            )
+            return Command(update={"messages": [ToolMessage(content=hint, tool_call_id=tool_call_id)]})
         snippets = _get_function_snippets(function_name, file_path, state)
         if not snippets:
             msg = f"No definition found for function {function_name} in {file_path}"
             return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
+        # Limit to at most 2 function snippets to avoid expanding many overloads
+        if len(snippets) > 2:
+            snippets = snippets[:2]
         out = "\n".join(str(s) for s in snippets)
-        return Command(update={"messages": [ToolMessage(content=out, tool_call_id=tool_call_id)], "code_snippets": snippets})
+        merged = _merge_snippets(state, snippets)
+        return Command(update={"messages": [ToolMessage(content=out, tool_call_id=tool_call_id)], "code_snippets": merged})
     except Exception as e:
         logger.exception("get_function error")
         return Command(update={"messages": [ToolMessage(content=f"Error: {e}", tool_call_id=tool_call_id)]})
@@ -1119,7 +1363,8 @@ def get_type(
         if not snippets:
             msg = header or f"No definition found for type {type_name} in {file_path}"
             return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
-        return Command(update={"messages": [ToolMessage(content=out, tool_call_id=tool_call_id)], "code_snippets": snippets})
+        merged = _merge_snippets(state, snippets)
+        return Command(update={"messages": [ToolMessage(content=out, tool_call_id=tool_call_id)], "code_snippets": merged})
     except Exception as e:
         logger.exception("get_type error")
         return Command(update={"messages": [ToolMessage(content=f"Error: {e}", tool_call_id=tool_call_id)]})
@@ -1171,10 +1416,13 @@ def get_callers(
                         snippets.extend(_snippets_from_cq_functions(funcs))
                 except Exception:
                     pass
-            return Command(update={
-                "messages": [ToolMessage(content=listing, tool_call_id=tool_call_id)],
-                **({"code_snippets": snippets} if snippets else {})
-            })
+            if snippets:
+                merged = _merge_snippets(state, snippets)
+                return Command(update={
+                    "messages": [ToolMessage(content=listing, tool_call_id=tool_call_id)],
+                    "code_snippets": merged,
+                })
+            return Command(update={"messages": [ToolMessage(content=listing, tool_call_id=tool_call_id)]})
         except Exception:
             msg = f"No callers found for function {function_name}"
             return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
@@ -1286,10 +1534,13 @@ def get_callees(
                         )
                 except Exception:
                     pass
-            return Command(update={
-                "messages": [ToolMessage(content=listing, tool_call_id=tool_call_id)],
-                **({"code_snippets": snippets} if snippets else {})
-            })
+            if snippets:
+                merged = _merge_snippets(state, snippets)
+                return Command(update={
+                    "messages": [ToolMessage(content=listing, tool_call_id=tool_call_id)],
+                    "code_snippets": merged,
+                })
+            return Command(update={"messages": [ToolMessage(content=listing, tool_call_id=tool_call_id)]})
         except Exception:
             msg = f"No callees found for function {function_name}"
             return Command(update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]})
@@ -1370,7 +1621,8 @@ def track_snippet(
             raise ValueError("No code snippets found for request; verify inputs before tracking")
         # Signal the ReAct loop to stop after a successful snippet track
         logger.info("[TOOLS] track_snippet success: %d snippet(s)", len(snippets))
-        return Command(update={"code_snippets": snippets}, goto="__end__")
+        merged = _merge_snippets(state, snippets)
+        return Command(update={"code_snippets": merged}, goto="__end__")
     except Exception as e:
         # Return a benign update without injecting tool messages to the LLM history
         logger.exception("[TOOLS] track_snippet failed: %s", e)

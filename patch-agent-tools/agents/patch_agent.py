@@ -74,7 +74,43 @@ class PatcherAgent(ToolRequiredAgent):
         
         # Parse fuzzer name from vuln.yaml
         self.fuzzer_name = parse_fuzzer_name(self.vuln_yaml_path)
-        self.fuzzer_path = os.path.join(self.patch_benchmark_path, f"afc-{project_name}", "oss-fuzz", "projects", self.project_name, self.fuzzer_name+".java")
+        # Resolve a concrete harness file path for QE. For Java projects this is often
+        # <FuzzerName>.java, but some benchmarks (e.g. logging-log4j2) only provide
+        # a libFuzzer .options file alongside prebuilt fuzz targets.
+        proj_dir = os.path.join(
+            self.patch_benchmark_path,
+            f"afc-{project_name}",
+            "oss-fuzz",
+            "projects",
+            self.project_name,
+        )
+        fuzzer_path: str | None = None
+        if self.fuzzer_name:
+            java_candidate = os.path.join(proj_dir, self.fuzzer_name + ".java")
+            options_candidate = os.path.join(proj_dir, self.fuzzer_name + ".options")
+            if os.path.exists(java_candidate):
+                fuzzer_path = java_candidate
+            elif os.path.exists(options_candidate):
+                # For setups like logging-log4j2 where only an .options file exists;
+                # QE will still derive the harness name from the stem.
+                fuzzer_path = options_candidate
+            else:
+                # Some projects (e.g. tika) place fuzzers under nested Maven modules such as:
+                #   oss-fuzz/projects/tika/project-parent/fuzz-targets/src/main/java/...
+                # As a fallback, search recursively under proj_dir for <FuzzerName>.java.
+                try:
+                    for root, _dirs, files in os.walk(proj_dir):
+                        for fname in files:
+                            if fname == self.fuzzer_name + ".java":
+                                fuzzer_path = os.path.join(root, fname)
+                                raise StopIteration  # break both loops
+                except StopIteration:
+                    pass
+        # Fallback to the historical .java path if nothing was found; test_patch()
+        # will surface a clear error if the path truly does not exist.
+        if not fuzzer_path and self.fuzzer_name:
+            fuzzer_path = os.path.join(proj_dir, self.fuzzer_name + ".java")
+        self.fuzzer_path = fuzzer_path or os.path.join(proj_dir, "UNKNOWN_FUZZER")
         
         # Create test result log file
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -842,7 +878,7 @@ def _run_llm_loop(agent: PatcherAgent, max_steps: int = 100):
         # 打印本轮要“新发送”的最后一条消息
         _dump_msg(">>> SEND", messages[-1])
 
-        res = completion(model=agent.model, messages=messages, tools=tools_schema, tool_choice=agent.tool_choice)
+        res = completion(model=agent.model, messages=messages, tools=tools_schema, tool_choice=agent.tool_choice, context=f"STEP_{step}")
         choice = res["choices"][0]["message"]
         raw_tool_calls = choice.get("tool_calls")
         assistant_content = choice.get("content") or ""
@@ -988,7 +1024,30 @@ def main():
         agent = PatcherAgent(project_name, benchmark_path=_normalized_bench)
         if args.model:
             agent.model = args.model
+        
+        # Track execution time
+        import time
+        start_time = time.time()
         _run_llm_loop(agent)
+        end_time = time.time()
+        duration = end_time - start_time
+        
+        # Print and log duration summary
+        print("\n" + "="*60)
+        print("USAGE SUMMARY")
+        print("="*60)
+        print(f"Duration: {duration:.1f}s ({duration/60:.1f} minutes)")
+        print("="*60)
+        
+        # Also write to log file if available
+        if args.log_file:
+            logf = _P(args.log_file)
+            with open(logf, 'a', encoding='utf-8') as f:
+                f.write(f"\n{'='*60}\n")
+                f.write("USAGE SUMMARY\n")
+                f.write(f"{'='*60}\n")
+                f.write(f"Duration: {duration:.1f}s ({duration/60:.1f} minutes)\n")
+                f.write(f"{'='*60}\n")
     finally:
         # Restore std streams
         if _tee_out:

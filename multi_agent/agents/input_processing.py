@@ -57,7 +57,31 @@ def run(state: PatcherAgentState) -> PatcherAgentState:
 
     harness_script_path: Optional[str] = None
     if harness_name:
-        harness_script_path = os.path.join(project_root, "oss-fuzz", "projects", f"{project}", f"{harness_name}.java")
+        # Resolve harness script similar to patch-agent-tools:
+        # 1) Prefer a direct .java under oss-fuzz/projects/<project>/
+        # 2) Fall back to a .options/.option file (for prebuilt fuzzers)
+        # 3) As a last resort, walk the project tree to find <harness_name>.java
+        proj_dir = os.path.join(project_root, "oss-fuzz", "projects", f"{project}")
+        java_candidate = os.path.join(proj_dir, f"{harness_name}.java")
+        options_candidate = os.path.join(proj_dir, f"{harness_name}.options")
+        option_candidate = os.path.join(proj_dir, f"{harness_name}.option")
+        if Path(java_candidate).is_file():
+            harness_script_path = java_candidate
+        elif Path(options_candidate).is_file():
+            harness_script_path = options_candidate
+        elif Path(option_candidate).is_file():
+            harness_script_path = option_candidate
+        else:
+            # Tika-style layout: fuzzers nested under Maven modules, e.g.:
+            #   oss-fuzz/projects/tika/project-parent/fuzz-targets/src/main/java/.../<Harness>.java
+            try:
+                for root, _dirs, files in os.walk(proj_dir):
+                    for fname in files:
+                        if fname == f"{harness_name}.java":
+                            harness_script_path = os.path.join(root, fname)
+                            raise StopIteration  # break both loops
+            except StopIteration:
+                pass
 
     checks = {
         "project_root": Path(project_root).exists(),

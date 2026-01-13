@@ -6,6 +6,7 @@ from typing import List
 
 from multi_agent.state import PatcherAgentState
 from .base import Agent
+from multi_agent.llm_config import get_llm_kwargs, log_token_usage
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +96,7 @@ OUTPUT ONLY:
         root_cause_text = ""
         if self._LLM_OK:
             try:
-                llm = self.ChatOpenAI(model="gpt-4o", temperature=0)
+                llm = self.ChatOpenAI(**get_llm_kwargs(default_model="gpt-4o", default_temperature=0.0))
                 prompt = self._prompt()
                 vars = {
                     "PROJECT_NAME": project,
@@ -107,7 +108,9 @@ OUTPUT ONLY:
                     logger.info("ROOT_CAUSE PROMPT | messages=%s", [str(m) for m in rendered])
                 except Exception:
                     logger.info("ROOT_CAUSE PROMPT | vars=%s", vars)
-                out = (prompt | llm).invoke(vars).content or ""  # type: ignore[attr-defined]
+                response = (prompt | llm).invoke(vars)  # type: ignore[attr-defined]
+                log_token_usage(response, context="ROOT_CAUSE")
+                out = response.content or ""  # type: ignore[attr-defined]
                 logger.info("ROOT_CAUSE RESP | content=%s", out)
 
                 # Extract inside <root_cause> if present

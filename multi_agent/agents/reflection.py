@@ -5,6 +5,7 @@ from typing import Optional
 
 from multi_agent.state import PatcherAgentState, PatcherAgentName
 from .base import Agent
+from multi_agent.llm_config import get_llm_kwargs, log_token_usage
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,6 @@ class ReflectionAgent(Agent):
                     "user",
                     """
 PROJECT: {PROJECT_NAME}
-STATUS: {STATUS}
 
 LAST PATCH (unified diff):
 <patch>
@@ -97,6 +97,35 @@ Produce concrete guidance for the next patch attempt. Output only:
         except Exception:
             s = ""
         return s[:]
+    
+    @staticmethod
+    def _extract_stack_traces(pov_output: str) -> str:
+        """Extract only the stack traces portion from POV output.
+        
+        For failed POV tests, everything before 'Stack traces of all JVM threads:'
+        is redundant instrumentation output. Extract only the relevant stack trace section.
+        """
+        if not pov_output:
+            return ""
+        
+        # Look for the stack traces marker (case-insensitive)
+        import re
+        # Try to find "Stack traces of all JVM threads:" or similar patterns
+        patterns = [
+            r"(?i)Stack traces of all JVM threads:",
+            r"(?i)Stack traces:",
+            r"(?i)Stack trace of all threads:",
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, pov_output)
+            if match:
+                # Extract everything from the marker onwards
+                extracted = pov_output[match.start():]
+                return extracted
+        
+        # If no stack trace marker found, return the original (might be a different failure type)
+        return pov_output
 
     def run(self, state: PatcherAgentState) -> PatcherAgentState:  # type: ignore[override]
         last = state.patch_attempts[-1] if state.patch_attempts else None
@@ -110,32 +139,39 @@ Produce concrete guidance for the next patch attempt. Output only:
         except Exception:
             overlay_diff = ""
 
+        # Extract stack traces from POV output if present (removes redundant instrumentation output)
+        pov_stdout_raw = self._trunc(getattr(last, "pov_stdout", None))
+        pov_stderr_raw = self._trunc(getattr(last, "pov_stderr", None))
+        pov_stdout = self._extract_stack_traces(pov_stdout_raw)
+        pov_stderr = self._extract_stack_traces(pov_stderr_raw)
+        
+        description = getattr(last, "description", "") if last else ""
         variables = {
             "PROJECT_NAME": project,
             "STATUS": status,
+            "DESCRIPTION": description or "No description available",
             "PATCH": patch_text[:16000],
             "OVERLAY_DIFF": (overlay_diff or "")[:3000],
             "BUILD_STDERR": self._trunc(getattr(last, "build_stderr", None)),
-            "POV_STDOUT": self._trunc(getattr(last, "pov_stdout", None)),
-            "POV_STERR": self._trunc(getattr(last, "pov_stderr", None)),
+            "POV_STDOUT": pov_stdout,
+            "POV_STDERR": pov_stderr,
             "TESTS_STDOUT": self._trunc(getattr(last, "tests_stdout", None)),
             "TESTS_STDERR": self._trunc(getattr(last, "tests_stderr", None)),
         }
 
-        # Typo fix: use correct key in prompt
-        variables["POV_STDERR"] = variables.pop("POV_STERR")
-
         guidance = ""
         if self._LLM_OK:
             try:
-                llm = self.ChatOpenAI(model="gpt-4o", temperature=0)
+                llm = self.ChatOpenAI(**get_llm_kwargs(default_model="gpt-4o", default_temperature=0.0))
                 prompt = self._prompt()
                 try:
                     rendered = prompt.format_messages(**variables)  # type: ignore[attr-defined]
                     logger.info("REFLECTION PROMPT | messages=%s", [str(m) for m in rendered])
                 except Exception:
                     logger.info("REFLECTION PROMPT | vars=%s", variables)
-                out = (prompt | llm).invoke(variables).content  # type: ignore[attr-defined]
+                response = (prompt | llm).invoke(variables)  # type: ignore[attr-defined]
+                log_token_usage(response, context="REFLECTION")
+                out = response.content  # type: ignore[attr-defined]
                 guidance = out or ""
                 logger.info("REFLECTION RESP | len=%d\n%s", len(guidance), guidance[:4000])
             except Exception:
