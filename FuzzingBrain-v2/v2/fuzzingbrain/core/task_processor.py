@@ -123,26 +123,50 @@ class WorkspaceSetup:
         fuzz_tooling_path = task_workspace / "fuzz-tooling"
 
         if self.config.fuzz_tooling_url:
-            # Clone fuzz-tooling from URL
+            # Clone fuzz-tooling from URL (or use existing)
             try:
-                logger.info(f"Cloning fuzz-tooling from {self.config.fuzz_tooling_url}")
-                result = subprocess.run(
-                    ["git", "clone", "--depth", "1", self.config.fuzz_tooling_url, str(fuzz_tooling_path)],
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                )
+                if fuzz_tooling_path.exists():
+                    logger.info(f"Fuzz-tooling directory exists, skipping clone")
+                else:
+                    logger.info(f"Cloning fuzz-tooling from {self.config.fuzz_tooling_url}")
+                    result = subprocess.run(
+                        ["git", "clone", "--depth", "1", self.config.fuzz_tooling_url, str(fuzz_tooling_path)],
+                        capture_output=True,
+                        text=True,
+                        timeout=300,
+                    )
 
-                if result.returncode != 0:
-                    logger.error(f"Fuzz-tooling clone failed: {result.stderr}")
-                    return False, result.stderr
+                    if result.returncode != 0:
+                        logger.error(f"Fuzz-tooling clone failed: {result.stderr}")
+                        return False, result.stderr
+
+                # Checkout to specific ref if provided
+                fuzz_tooling_ref = getattr(self.config, 'fuzz_tooling_ref', None)
+                if fuzz_tooling_ref:
+                    logger.info(f"Checking out fuzz-tooling to ref: {fuzz_tooling_ref}")
+                    # Fetch the ref first (needed for branch refs)
+                    subprocess.run(
+                        ["git", "fetch", "origin", fuzz_tooling_ref],
+                        cwd=str(fuzz_tooling_path),
+                        capture_output=True,
+                        timeout=120,
+                    )
+                    result = subprocess.run(
+                        ["git", "checkout", fuzz_tooling_ref],
+                        cwd=str(fuzz_tooling_path),
+                        capture_output=True,
+                        text=True,
+                        timeout=60,
+                    )
+                    if result.returncode != 0:
+                        logger.warning(f"Fuzz-tooling checkout warning: {result.stderr}")
 
                 self.task.fuzz_tooling_path = str(fuzz_tooling_path)
                 self.task.is_fuzz_tooling_provided = True
-                return True, "Cloned"
+                return True, "Ready"
 
             except Exception as e:
-                logger.error(f"Failed to clone fuzz-tooling: {e}")
+                logger.error(f"Failed to setup fuzz-tooling: {e}")
                 return False, str(e)
 
         elif self.config.fuzz_tooling_path:
