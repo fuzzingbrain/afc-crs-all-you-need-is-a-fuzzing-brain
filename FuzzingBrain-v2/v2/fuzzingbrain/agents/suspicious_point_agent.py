@@ -19,6 +19,7 @@ from loguru import logger
 
 from .base import BaseAgent
 from ..llms import LLMClient, ModelInfo
+from .prompts import VERIFY_SUSPICIOUS_POINTS_DELTA_PROMPT
 
 
 # System prompt for finding suspicious points
@@ -113,7 +114,7 @@ These are DIFFERENT vulnerabilities with different root causes - create separate
 - Use control flow descriptions, NOT line numbers
 - Describe the ROOT CAUSE of the vulnerability
 - Assign a confidence score (0.0-1.0)
-- Specify the vulnerability type (buffer-overflow, use-after-free, integer-overflow, etc.)
+- Specify the vulnerability type (buffer-overflow, use-after-free, integer-overflow, format-string (user input as format argument to printf-like functions), null-pointer-dereference, etc.)
 - List related functions/variables that affect the bug
 - **DO NOT include reachability analysis in description** - focus on the bug itself, not whether it's reachable
 
@@ -320,6 +321,7 @@ class SuspiciousPointAgent(BaseAgent):
         mode: str = "find",
         fuzzer: str = "",
         sanitizer: str = "address",
+        scan_mode: str = "delta",  # "delta" or "full" - affects verify prompt
         llm_client: Optional[LLMClient] = None,
         model: Optional[Union[ModelInfo, str]] = None,
         max_iterations: int = 15,  # 15 iterations for verification
@@ -356,6 +358,7 @@ class SuspiciousPointAgent(BaseAgent):
         self.mode = mode
         self.fuzzer = fuzzer
         self.sanitizer = sanitizer
+        self.scan_mode = scan_mode  # "delta" or "full"
 
         # Context for find mode
         self.reachable_changes: List[Dict[str, Any]] = []
@@ -591,7 +594,11 @@ Do NOT let iterations run out without a decision!
         if self.mode == "find":
             prompt = FIND_SUSPICIOUS_POINTS_PROMPT
         else:
-            prompt = VERIFY_SUSPICIOUS_POINTS_PROMPT
+            # Verify mode: use delta or full prompt based on scan_mode
+            if self.scan_mode == "delta":
+                prompt = VERIFY_SUSPICIOUS_POINTS_DELTA_PROMPT
+            else:
+                prompt = VERIFY_SUSPICIOUS_POINTS_PROMPT
 
         # Add sanitizer-specific patterns
         sanitizer_guidance = f"""
@@ -946,6 +953,7 @@ Start by verifying reachability with get_callers("{function_name}").
         suspicious_point: Dict[str, Any],
         fuzzer: str = None,
         sanitizer: str = None,
+        scan_mode: str = None,
     ) -> None:
         """
         Set context for verify mode.
@@ -954,6 +962,7 @@ Start by verifying reachability with get_callers("{function_name}").
             suspicious_point: Suspicious point to verify
             fuzzer: Fuzzer name (optional)
             sanitizer: Sanitizer type (optional)
+            scan_mode: "delta" or "full" (optional, affects verify prompt)
         """
         self.mode = "verify"
         self.suspicious_point = suspicious_point
@@ -961,6 +970,8 @@ Start by verifying reachability with get_callers("{function_name}").
             self.fuzzer = fuzzer
         if sanitizer:
             self.sanitizer = sanitizer
+        if scan_mode:
+            self.scan_mode = scan_mode
 
     async def find_suspicious_points(
         self,

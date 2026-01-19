@@ -291,6 +291,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             repos=self.repos,
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
+            scan_mode="full",  # Full-scan mode: use full reachability analysis
             config=config,
             output_dir=self.results_path / "povs",
             log_dir=self.log_dir / "agent" if self.log_dir else self.results_path,
@@ -648,6 +649,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             repos=self.repos,
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
+            scan_mode="full",  # Full-scan mode: use full reachability analysis
             config=config,
             output_dir=self.results_path / "povs",
             log_dir=self.log_dir / "agent" if self.log_dir else self.results_path,

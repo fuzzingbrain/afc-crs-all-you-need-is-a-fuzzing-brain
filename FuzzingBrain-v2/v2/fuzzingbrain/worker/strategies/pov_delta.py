@@ -54,6 +54,7 @@ class POVDeltaStrategy(POVBaseStrategy):
         self._agent = SuspiciousPointAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
+            scan_mode="delta",  # Delta mode: skip reachability analysis in verify
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,
@@ -64,6 +65,11 @@ class POVDeltaStrategy(POVBaseStrategy):
     @property
     def strategy_name(self) -> str:
         return "POV Delta Strategy"
+
+    @property
+    def scan_mode(self) -> str:
+        """Delta mode: skip reachability analysis in verify."""
+        return "delta"
 
     def _pre_find_suspicious_points(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -291,6 +297,122 @@ class POVDeltaStrategy(POVBaseStrategy):
             self.log_info(f"Saved reachability report to: {report_path}")
         except Exception as e:
             self.log_error(f"Failed to save reachability report: {e}")
+
+    # =========================================================================
+    # Delta Seeds Generation
+    # =========================================================================
+
+    def _generate_delta_seeds(self, suspicious_points: List[SuspiciousPoint]) -> int:
+        """
+        Generate initial seeds for delta-scan mode.
+
+        Creates seeds targeting the changed functions and identified suspicious points.
+        Seeds are added to the Global Fuzzer's corpus.
+
+        Args:
+            suspicious_points: List of SPs created in the find phase
+
+        Returns:
+            Number of seeds generated
+        """
+        import asyncio
+
+        # Check if FuzzerManager is available
+        fuzzer_manager = getattr(self.executor, 'fuzzer_manager', None)
+        if not fuzzer_manager:
+            self.log_warning("FuzzerManager not available, skipping delta seeds generation")
+            return 0
+
+        # Prepare changed functions context
+        changed_functions = [
+            {
+                "function": c.function_name,
+                "file": c.file_path,
+                "static_reachable": c.static_reachable,
+                "distance": c.reachability_distance,
+            }
+            for c in self._all_changes
+        ]
+
+        if not changed_functions:
+            self.log_warning("No changed functions, skipping delta seeds generation")
+            return 0
+
+        # Prepare suspicious points context
+        sp_context = [
+            {
+                "function": sp.function_name,
+                "vuln_type": sp.vuln_type,
+                "description": sp.description,
+            }
+            for sp in suspicious_points
+        ]
+
+        # Get fuzzer source code
+        fuzzer_source = ""
+        analysis_client = self.get_analysis_client()
+        if analysis_client:
+            try:
+                fuzzer_source = analysis_client.get_file_content(f"{self.fuzzer}.cc") or ""
+                if not fuzzer_source:
+                    fuzzer_source = analysis_client.get_file_content(f"{self.fuzzer}.cpp") or ""
+                if not fuzzer_source:
+                    fuzzer_source = analysis_client.get_file_content(f"{self.fuzzer}.c") or ""
+            except Exception as e:
+                self.log_warning(f"Failed to get fuzzer source: {e}")
+
+        # Create SeedAgent
+        from ...fuzzer import SeedAgent
+
+        agent_log_dir = self.log_dir / "seed_agent" if self.log_dir else self.results_path
+        seed_agent = SeedAgent(
+            task_id=self.task_id,
+            worker_id=self.worker_id,
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+            fuzzer_manager=fuzzer_manager,
+            repos=self.repos,
+            fuzzer_source=fuzzer_source,
+            workspace_path=self.workspace_path,
+            log_dir=agent_log_dir,
+            max_iterations=15,  # Allow more iterations for delta seeds (with urgency forcing on last 2)
+        )
+
+        # Generate seeds (run async in sync context)
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        try:
+            self.log_info(f"Generating delta seeds for {len(changed_functions)} changed functions...")
+
+            result = loop.run_until_complete(
+                seed_agent.generate_delta_seeds(
+                    delta_id=self.task_id,
+                    changed_functions=changed_functions,
+                    suspicious_points=sp_context,
+                )
+            )
+
+            seeds_generated = result.get("seeds_generated", 0)
+            self.log_info(f"Delta seeds generation complete: {seeds_generated} seeds created")
+
+            # Always start Global Fuzzer (even with 0 seeds, fuzzer can run with existing corpus)
+            if not fuzzer_manager.global_fuzzer:
+                self.log_info("Starting Global Fuzzer...")
+                try:
+                    loop.run_until_complete(fuzzer_manager.start_global_fuzzer())
+                    self.log_info("Global Fuzzer started - running in background during SP analysis")
+                except Exception as e:
+                    self.log_warning(f"Failed to start Global Fuzzer: {e}")
+
+            return seeds_generated
+
+        except Exception as e:
+            self.log_error(f"Delta seeds generation failed: {e}")
+            return 0
 
     # =========================================================================
     # Properties

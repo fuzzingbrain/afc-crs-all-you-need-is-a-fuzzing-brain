@@ -16,6 +16,7 @@ from loguru import logger
 from ..agents.base import BaseAgent
 from ..llms import LLMClient, ModelInfo
 from ..db import RepositoryManager
+from ..tools.code_viewer import set_code_viewer_context
 from .seed_tools import set_seed_context, clear_seed_context, update_seed_context
 
 
@@ -126,6 +127,53 @@ Call the create_seed tool to generate the seeds.
 """
 
 
+DELTA_SEED_PROMPT = """## Delta-scan Seed Generation Context
+
+You are generating initial fuzzing seeds for a **delta-scan** analysis.
+The commit/diff has changed specific functions, and we've identified potential vulnerabilities.
+
+**Fuzzer**: {fuzzer}
+**Sanitizer**: {sanitizer}
+
+## Fuzzer Source Code (CRITICAL - how input enters the target)
+```c
+{fuzzer_source}
+```
+
+## Changed Functions in This Commit
+
+{changed_functions}
+
+## Suspicious Points Identified (Potential Vulnerabilities)
+
+{suspicious_points}
+
+## Your Task
+
+Generate 5 diverse seeds that will help the fuzzer:
+
+1. **Reach the changed functions** - Design inputs that flow through the fuzzer to the modified code
+2. **Target the suspicious points** - Create inputs likely to trigger the identified vulnerabilities
+3. **Explore edge cases** - Include boundary values, malformed data, and special cases
+
+### Key Considerations:
+
+- Read the fuzzer source carefully to understand the expected input format
+- Consider what input values would reach the vulnerable code paths
+- Include both valid-looking inputs and malformed inputs
+- Think about integer overflows, buffer boundaries, null values, etc.
+
+Call the create_seed tool with Python code that generates diverse test inputs.
+
+### Example approach:
+- Seed 1: Minimal input that reaches the changed function
+- Seed 2: Input with boundary values (max int, zero, negative)
+- Seed 3: Input with unusual sizes (very small, very large)
+- Seed 4: Malformed input (missing fields, wrong types)
+- Seed 5: Input targeting the specific vulnerability pattern
+"""
+
+
 class SeedAgent(BaseAgent):
     """
     Seed Generation Agent.
@@ -133,6 +181,7 @@ class SeedAgent(BaseAgent):
     Uses AI to generate targeted fuzzer seeds based on:
     - Direction analysis results
     - False positive analysis results
+    - Delta-scan analysis (changed functions + suspicious points)
     """
 
     default_temperature: float = 0.8  # Higher temperature for diversity
@@ -147,6 +196,7 @@ class SeedAgent(BaseAgent):
         fuzzer_manager,
         repos: RepositoryManager,
         fuzzer_source: str = "",
+        workspace_path: Optional[Path] = None,
         llm_client: Optional[LLMClient] = None,
         model: Optional[Union[ModelInfo, str]] = None,
         max_iterations: int = 5,  # Short iterations for seed generation
@@ -163,6 +213,7 @@ class SeedAgent(BaseAgent):
             fuzzer_manager: FuzzerManager instance for adding seeds
             repos: Database repository manager
             fuzzer_source: Fuzzer harness source code
+            workspace_path: Path to workspace (for code viewer tools)
             llm_client: LLM client
             model: Model to use
             max_iterations: Max iterations (default 5)
@@ -183,11 +234,13 @@ class SeedAgent(BaseAgent):
         self.fuzzer_manager = fuzzer_manager
         self.repos = repos
         self.fuzzer_source = fuzzer_source
+        self.workspace_path = workspace_path
 
         # Current context for seed generation
         self.direction_id: Optional[str] = None
         self.sp_id: Optional[str] = None
-        self.seed_type: str = "direction"  # "direction" or "fp"
+        self.delta_id: Optional[str] = None
+        self.seed_type: str = "direction"  # "direction", "fp", or "delta"
 
         # Stats
         self.seeds_generated = 0
@@ -214,7 +267,57 @@ class SeedAgent(BaseAgent):
             metadata["Direction"] = self.direction_id[:8]
         if self.sp_id:
             metadata["SP ID"] = self.sp_id[:8]
+        if self.delta_id:
+            metadata["Delta ID"] = self.delta_id[:8]
         return metadata
+
+    def _get_urgency_message(self, iteration: int, remaining: int) -> Optional[str]:
+        """
+        Get urgency message when iterations are running low.
+
+        Forces seed generation on last iterations to ensure we don't waste the run.
+        """
+        if remaining == 0:
+            # LAST ITERATION - FORCE SEED GENERATION NOW
+            return """⚠️ **FINAL ITERATION - YOU MUST CREATE SEEDS NOW!**
+
+This is your LAST chance to generate seeds. Do NOT do any more research or analysis.
+
+**IMMEDIATELY call the `create_seed` tool** with Python code that generates seeds based on what you've learned so far.
+
+If you don't have perfect information, that's OK - generate seeds anyway based on:
+1. The fuzzer input format you've observed
+2. The changed functions and their parameters
+3. Common vulnerability patterns (overflow values, null bytes, format strings)
+
+Example - just create something like this NOW:
+```python
+def generate(seed_num: int) -> bytes:
+    if seed_num == 1:
+        return b"\\x00\\x01\\x00\\x00" + b"test://example"
+    elif seed_num == 2:
+        return b"\\xff\\xff\\xff\\xff" + b"A" * 100
+    else:
+        return b"\\x00" * 64
+```
+
+**DO NOT RESPOND WITH TEXT. CALL create_seed IMMEDIATELY.**"""
+
+        elif remaining <= 2:
+            # Running low - warn and encourage action
+            return f"""⚠️ **WARNING: Only {remaining} iteration(s) remaining!**
+
+You're running out of time. Stop researching and START GENERATING SEEDS.
+
+Call the `create_seed` tool NOW with whatever information you have.
+Don't wait for perfect understanding - generate diverse seeds based on what you know about:
+- The fuzzer's input format
+- The changed/vulnerable functions
+- Common exploitation patterns
+
+Generate seeds NOW or this run will produce nothing useful."""
+
+        return None
 
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message based on seed type."""
@@ -223,6 +326,8 @@ class SeedAgent(BaseAgent):
 
         if seed_type == "direction":
             return self._get_direction_message(**kwargs)
+        elif seed_type == "delta":
+            return self._get_delta_message(**kwargs)
         else:
             return self._get_fp_message(**kwargs)
 
@@ -262,17 +367,68 @@ class SeedAgent(BaseAgent):
             fuzzer_source=self.fuzzer_source or "(Fuzzer source not available)",
         )
 
+    def _get_delta_message(self, **kwargs) -> str:
+        """Generate message for delta-scan seed generation."""
+        import json
+
+        delta_id = kwargs.get("delta_id", "")
+        changed_functions = kwargs.get("changed_functions", [])
+        suspicious_points = kwargs.get("suspicious_points", [])
+
+        self.delta_id = delta_id
+
+        # Format changed functions
+        if changed_functions:
+            changes_text = "\n".join([
+                f"- **{c.get('function', 'unknown')}** in `{c.get('file', 'unknown')}`"
+                + (f" (reachable, distance={c.get('distance', '?')})" if c.get('static_reachable') else " (static-unreachable, may be reachable via function pointer)")
+                for c in changed_functions
+            ])
+        else:
+            changes_text = "(No changed functions provided)"
+
+        # Format suspicious points
+        if suspicious_points:
+            sp_text = "\n".join([
+                f"- **{sp.get('vuln_type', 'unknown')}** in `{sp.get('function', 'unknown')}`: {sp.get('description', 'No description')}"
+                for sp in suspicious_points
+            ])
+        else:
+            sp_text = "(No suspicious points identified yet - generate seeds to help find them)"
+
+        return DELTA_SEED_PROMPT.format(
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+            fuzzer_source=self.fuzzer_source or "(Fuzzer source not available)",
+            changed_functions=changes_text,
+            suspicious_points=sp_text,
+        )
+
     def _setup_context(self) -> None:
         """Set up seed tool context before running."""
+        # Set seed context for create_seed tool
         set_seed_context(
             task_id=self.task_id,
             worker_id=self.worker_id,
             direction_id=self.direction_id,
             sp_id=self.sp_id,
+            delta_id=self.delta_id,
             fuzzer_manager=self.fuzzer_manager,
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
         )
+
+        # Set code viewer context for code analysis tools (search_code, list_files, etc.)
+        if self.workspace_path:
+            # Extract project_name from workspace directory name (format: {project}_{task_id})
+            ws_name = self.workspace_path.name
+            project_name = ws_name.rsplit("_", 1)[0] if "_" in ws_name else ""
+            set_code_viewer_context(
+                workspace_path=str(self.workspace_path),
+                repo_subdir="repo",
+                diff_filename="diff/ref.diff",
+                project_name=project_name,
+            )
 
     def _cleanup_context(self) -> None:
         """Clean up seed tool context after running."""
@@ -387,6 +543,60 @@ class SeedAgent(BaseAgent):
             "result": result,
         }
 
+    async def generate_delta_seeds(
+        self,
+        delta_id: str,
+        changed_functions: List[Dict[str, Any]] = None,
+        suspicious_points: List[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        Generate seeds for delta-scan mode.
+
+        Creates initial seeds targeting changed functions and suspicious points
+        identified during delta-scan analysis.
+
+        Args:
+            delta_id: Unique identifier for this delta scan (e.g., task_id)
+            changed_functions: List of changed function info dicts, each containing:
+                - function: Function name
+                - file: File path
+                - static_reachable: Whether statically reachable
+                - distance: Call graph distance from fuzzer entry
+            suspicious_points: List of SP info dicts, each containing:
+                - function: Function name
+                - vuln_type: Vulnerability type (CWE)
+                - description: Brief description
+
+        Returns:
+            Result dict with seeds_generated count
+        """
+        self.delta_id = delta_id
+        self.seed_type = "delta"
+
+        # Update context
+        update_seed_context(delta_id=delta_id, worker_id=self.worker_id)
+
+        logger.info(
+            f"[SeedAgent:{self.worker_id}] Generating delta seeds: "
+            f"delta={delta_id[:8]}, changes={len(changed_functions or [])}, "
+            f"sps={len(suspicious_points or [])}"
+        )
+
+        result = await self.run_async(
+            seed_type="delta",
+            delta_id=delta_id,
+            changed_functions=changed_functions or [],
+            suspicious_points=suspicious_points or [],
+        )
+
+        # seeds_generated is updated in run_async() before context cleanup
+        return {
+            "success": True,
+            "seeds_generated": self.seeds_generated,
+            "delta_id": delta_id,
+            "result": result,
+        }
+
     def _get_summary_table(self) -> str:
         """Generate summary table for seed agent."""
         duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
@@ -402,6 +612,8 @@ class SeedAgent(BaseAgent):
             lines.append("│" + f"  Direction: {self.direction_id[:16]}...".ljust(60) + "│")
         if self.sp_id:
             lines.append("│" + f"  SP ID: {self.sp_id[:16]}...".ljust(60) + "│")
+        if self.delta_id:
+            lines.append("│" + f"  Delta ID: {self.delta_id[:16]}...".ljust(60) + "│")
         lines.append("├" + "─" * 60 + "┤")
         lines.append("│" + f"  Duration: {duration:.2f}s".ljust(60) + "│")
         lines.append("│" + f"  Iterations: {self.total_iterations}".ljust(60) + "│")

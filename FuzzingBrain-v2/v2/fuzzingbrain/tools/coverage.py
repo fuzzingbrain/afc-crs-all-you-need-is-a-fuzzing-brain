@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Tuple, Set
 
+from loguru import logger
+
 from . import tools_mcp
 
 
@@ -173,6 +175,9 @@ def parse_lcov(lcov_path: str) -> Tuple[Dict[str, Set[int]], Dict[str, Set[int]]
 # Coverage Execution
 # =============================================================================
 
+FALLBACK_DOCKER_IMAGE = "gcr.io/oss-fuzz-base/base-runner"
+
+
 def run_coverage_fuzzer(
     fuzzer_name: str,
     input_data: bytes,
@@ -180,6 +185,9 @@ def run_coverage_fuzzer(
 ) -> Tuple[bool, str, str]:
     """
     Execute coverage-instrumented fuzzer and generate LCOV.
+
+    Includes fallback mechanism: if the primary docker_image fails due to
+    missing shared libraries, automatically retry with base-runner.
 
     Args:
         fuzzer_name: Name of the fuzzer binary
@@ -221,38 +229,47 @@ def run_coverage_fuzzer(
 
     lcov_path = out_dir / "coverage.lcov"
 
-    try:
-        # Step 1: Run coverage fuzzer in Docker
-        # Pass corpus directory (not file) to libfuzzer
+    def run_fuzzer_with_image(image: str):
+        """Run coverage fuzzer with specified docker image."""
         docker_run = [
             "docker", "run", "--rm", "--platform", "linux/amd64",
             "-e", "FUZZING_ENGINE=libfuzzer",
             "-e", "ARCHITECTURE=x86_64",
             "-e", "LLVM_PROFILE_FILE=/out/coverage.profraw",
             "-v", f"{out_dir.absolute()}:/out",
-            "-v", f"{real_fuzzer_dir}:/fuzzers:ro",  # Use resolved path
-            docker_image,
-            f"/fuzzers/{real_fuzzer_name}",  # Use resolved name
+            "-v", f"{real_fuzzer_dir}:/fuzzers:ro",
+            image,
+            f"/fuzzers/{real_fuzzer_name}",
             "-runs=1",
-            "/out/corpus",  # Pass directory, not file
+            "/out/corpus",
         ]
 
-        result = subprocess.run(
+        return subprocess.run(
             docker_run,
             capture_output=True,
             text=True,
             timeout=120,
         )
 
-        # Check profraw was created
+    try:
+        # Step 1: Run coverage fuzzer in Docker
+        result = run_fuzzer_with_image(docker_image)
+
+        # Check for library loading errors - need to fallback
         profraw_path = out_dir / "coverage.profraw"
+        if "error while loading shared libraries" in result.stderr:
+            if docker_image != FALLBACK_DOCKER_IMAGE:
+                logger.warning(f"[Coverage] Library error with {docker_image}, falling back to {FALLBACK_DOCKER_IMAGE}")
+                result = run_fuzzer_with_image(FALLBACK_DOCKER_IMAGE)
+
+        # Check profraw was created
         if not profraw_path.exists() or profraw_path.stat().st_size == 0:
             return False, "", f"coverage.profraw not generated. Fuzzer output: {result.stderr[:500]}"
 
         # Step 2: Generate LCOV using llvm-profdata and llvm-cov
         merge_and_export = (
             "llvm-profdata merge -sparse /out/coverage.profraw -o /out/coverage.profdata && "
-            f"llvm-cov export /fuzzers/{real_fuzzer_name} "  # Use resolved name
+            f"llvm-cov export /fuzzers/{real_fuzzer_name} "
             "-instr-profile=/out/coverage.profdata "
             "-format=lcov > /out/coverage.lcov"
         )
@@ -260,7 +277,7 @@ def run_coverage_fuzzer(
         docker_cov = [
             "docker", "run", "--rm", "--platform", "linux/amd64",
             "-v", f"{out_dir.absolute()}:/out",
-            "-v", f"{real_fuzzer_dir}:/fuzzers:ro",  # Use resolved path
+            "-v", f"{real_fuzzer_dir}:/fuzzers:ro",
             docker_image,
             "bash", "-c", merge_and_export,
         ]

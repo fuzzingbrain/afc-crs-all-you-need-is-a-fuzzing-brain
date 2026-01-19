@@ -41,7 +41,7 @@ class BaseStrategy(ABC):
         self.task_id = executor.task_id
         self.worker_id = executor.worker_id
         self.repos = executor.repos
-        self.scan_mode = executor.scan_mode
+        # scan_mode is defined as property in POVBaseStrategy
         self.log_dir = executor.log_dir
 
         # Paths
