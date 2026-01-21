@@ -47,6 +47,7 @@ class POVBaseStrategy(BaseStrategy):
             workspace_path=str(self.workspace_path),
             repo_subdir="repo",
             diff_filename="diff/ref.diff",
+            project_name=self.project_name,
         )
 
         # Set analyzer context (socket path)
@@ -68,6 +69,16 @@ class POVBaseStrategy(BaseStrategy):
     def strategy_name(self) -> str:
         """Get strategy name for logging."""
         pass
+
+    @property
+    def scan_mode(self) -> str:
+        """Get scan mode for this strategy. Override in subclass.
+
+        Returns:
+            "delta" for delta-scan (skip reachability in verify)
+            "full" for full-scan (full reachability analysis in verify)
+        """
+        return "full"  # Default to full-scan
 
     @abstractmethod
     def _find_suspicious_points(self) -> List[SuspiciousPoint]:
@@ -109,9 +120,11 @@ class POVBaseStrategy(BaseStrategy):
             "suspicious_points_found": 0,
             "suspicious_points_verified": 0,
             "high_confidence_bugs": 0,
+            "delta_seeds_generated": 0,
             # Phase timing (seconds)
             "phase_reachability": 0.0,
             "phase_find_sp": 0.0,
+            "phase_delta_seeds": 0.0,
             "phase_verify": 0.0,
             "phase_pov": 0.0,
             "phase_save": 0.0,
@@ -124,7 +137,25 @@ class POVBaseStrategy(BaseStrategy):
             if pre_result.get("skip"):
                 return result
 
-            # Step 2: Find suspicious points
+            # Step 1.5: Generate delta seeds BEFORE finding SPs (delta-scan mode only)
+            # This allows the fuzzer to start running while LLM finds SPs
+            if self.scan_mode == "delta" and hasattr(self, '_generate_delta_seeds'):
+                self._set_operation("delta_seeds")
+                self.log_info(f"[Step 1.5/5] Generating delta seeds and starting fuzzer...")
+                step_start = time.time()
+                try:
+                    # Pass empty SPs list - we generate seeds based on changed functions only
+                    seeds_count = self._generate_delta_seeds([])
+                    result["delta_seeds_generated"] = seeds_count
+                except Exception as e:
+                    self.log_warning(f"Delta seeds generation failed: {e}")
+                    result["delta_seeds_generated"] = 0
+                    seeds_count = 0
+                step_duration = time.time() - step_start
+                result["phase_delta_seeds"] = step_duration
+                self.log_info(f"[Step 1.5/5] Done in {step_duration:.1f}s - Generated {seeds_count} seeds, fuzzer started")
+
+            # Step 2: Find suspicious points (fuzzer is already running in background)
             self._set_operation("find_sp")
             self.log_info(f"[Step 2/5] Finding suspicious points with AI Agent...")
             step_start = time.time()
@@ -246,6 +277,7 @@ class POVBaseStrategy(BaseStrategy):
         agent = SuspiciousPointAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
+            scan_mode=self.scan_mode,  # Use strategy's scan_mode for verify prompt
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,
@@ -533,7 +565,7 @@ class POVBaseStrategy(BaseStrategy):
         # Configure pipeline
         config = PipelineConfig(
             num_verify_agents=2,   # 2 verification agents
-            num_pov_agents=1,      # 1 POV generation agent
+            num_pov_agents=5,      # 5 POV generation agents (parallel)
             pov_min_score=0.5,     # Minimum score to proceed to POV
             poll_interval=1.0,     # Poll every 1 second
             max_idle_cycles=10,    # Exit after 10 idle cycles
@@ -556,6 +588,7 @@ class POVBaseStrategy(BaseStrategy):
             repos=self.repos,
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
+            scan_mode=self.scan_mode,  # Pass scan_mode to pipeline
             config=config,
             output_dir=self.povs_path,
             log_dir=self.log_dir / "agent" if self.log_dir else None,

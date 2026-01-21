@@ -27,6 +27,7 @@ from .prompts import (
     GENERAL_SANITIZER_GUIDANCE,
 )
 from ..llms import LLMClient, ModelInfo
+from .prompts import VERIFY_SUSPICIOUS_POINTS_DELTA_PROMPT
 
 
 class SuspiciousPointSummary(NamedTuple):
@@ -89,6 +90,7 @@ class SuspiciousPointAgent(BaseAgent):
         mode: str = MODE_FIND,
         fuzzer: str = "",
         sanitizer: str = "address",
+        scan_mode: str = "delta",  # "delta" or "full" - affects verify prompt
         llm_client: Optional[LLMClient] = None,
         model: Optional[Union[ModelInfo, str]] = None,
         max_iterations: int = 15,  # 15 iterations for verification
@@ -125,6 +127,7 @@ class SuspiciousPointAgent(BaseAgent):
         self.mode = mode
         self.fuzzer = fuzzer
         self.sanitizer = sanitizer
+        self.scan_mode = scan_mode  # "delta" or "full"
 
         # Context for find mode
         self.reachable_changes: List[Dict[str, Any]] = []
@@ -711,6 +714,7 @@ If either is NO → mark as FALSE POSITIVE immediately.
         suspicious_point: Dict[str, Any],
         fuzzer: str = None,
         sanitizer: str = None,
+        scan_mode: str = None,
     ) -> None:
         """
         Set context for verify mode.
@@ -719,6 +723,7 @@ If either is NO → mark as FALSE POSITIVE immediately.
             suspicious_point: Suspicious point to verify
             fuzzer: Fuzzer name (optional)
             sanitizer: Sanitizer type (optional)
+            scan_mode: "delta" or "full" (optional, affects verify prompt)
         """
         self.mode = self.MODE_VERIFY
         self.suspicious_point = suspicious_point
@@ -726,6 +731,8 @@ If either is NO → mark as FALSE POSITIVE immediately.
             self.fuzzer = fuzzer
         if sanitizer:
             self.sanitizer = sanitizer
+        if scan_mode:
+            self.scan_mode = scan_mode
 
     async def find_suspicious_points(
         self,

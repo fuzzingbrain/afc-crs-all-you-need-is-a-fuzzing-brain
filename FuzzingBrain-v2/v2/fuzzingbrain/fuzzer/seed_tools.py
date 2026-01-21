@@ -35,12 +35,17 @@ _current_seed_worker_id: ContextVar[Optional[str]] = ContextVar(
     'seed_current_worker_id', default=None
 )
 
+# Module-level fallback for when ContextVar doesn't propagate to MCP tools
+# This is set when set_seed_context is called and works across all contexts
+_active_seed_worker_id: Optional[str] = None
+
 
 def set_seed_context(
     task_id: str,
     worker_id: str,
     direction_id: Optional[str] = None,
     sp_id: Optional[str] = None,
+    delta_id: Optional[str] = None,
     fuzzer_manager=None,
     fuzzer: str = "",
     sanitizer: str = "address",
@@ -54,6 +59,7 @@ def set_seed_context(
         worker_id: Current worker ID
         direction_id: Direction ID being processed (for direction seeds)
         sp_id: SP ID being processed (for FP seeds)
+        delta_id: Delta ID being processed (for delta seeds)
         fuzzer_manager: FuzzerManager instance for adding seeds
         fuzzer: Fuzzer name
         sanitizer: Sanitizer type
@@ -64,6 +70,7 @@ def set_seed_context(
         "worker_id": worker_id,
         "direction_id": direction_id,
         "sp_id": sp_id,
+        "delta_id": delta_id,
         "fuzzer_manager": fuzzer_manager,
         "fuzzer": fuzzer,
         "sanitizer": sanitizer,
@@ -71,22 +78,26 @@ def set_seed_context(
         "iteration": 0,
         "seeds_generated": 0,
     }
+    global _active_seed_worker_id
     with _seed_contexts_lock:
         _seed_contexts[worker_id] = ctx
     _current_seed_worker_id.set(worker_id)
+    _active_seed_worker_id = worker_id  # Module-level fallback for MCP tools
 
 
 def update_seed_context(
     direction_id: Optional[str] = None,
     sp_id: Optional[str] = None,
+    delta_id: Optional[str] = None,
     worker_id: Optional[str] = None,
 ) -> None:
     """
-    Update seed context with new direction or SP (thread-safe).
+    Update seed context with new direction, SP, or delta (thread-safe).
 
     Args:
         direction_id: New direction ID
         sp_id: New SP ID
+        delta_id: New delta ID
         worker_id: Worker ID (uses context-local if not provided)
     """
     wid = worker_id or _current_seed_worker_id.get()
@@ -99,6 +110,8 @@ def update_seed_context(
                 _seed_contexts[wid]["direction_id"] = direction_id
             if sp_id is not None:
                 _seed_contexts[wid]["sp_id"] = sp_id
+            if delta_id is not None:
+                _seed_contexts[wid]["delta_id"] = delta_id
 
 
 def get_seed_context(worker_id: Optional[str] = None) -> Dict[str, Any]:
@@ -128,6 +141,7 @@ def clear_seed_context(worker_id: Optional[str] = None) -> None:
     Args:
         worker_id: Worker ID (uses context-local if not provided)
     """
+    global _active_seed_worker_id
     wid = worker_id or _current_seed_worker_id.get()
     if not wid:
         return
@@ -139,10 +153,23 @@ def clear_seed_context(worker_id: Optional[str] = None) -> None:
     if _current_seed_worker_id.get() == wid:
         _current_seed_worker_id.set(None)
 
+    if _active_seed_worker_id == wid:
+        _active_seed_worker_id = None
+
 
 def _get_current_context() -> Optional[Dict[str, Any]]:
-    """Get the current context for tools (internal use)."""
+    """Get the current context for tools (internal use).
+
+    Falls back to module-level _active_seed_worker_id if contextvar is not propagated
+    (e.g., when MCP tool runs in separate async context).
+    """
+    # Try contextvar first (works within same async context)
     wid = _current_seed_worker_id.get()
+
+    # Fallback to module-level variable (works across all contexts)
+    if not wid:
+        wid = _active_seed_worker_id
+
     if not wid:
         return None
 
@@ -261,7 +288,7 @@ def create_seed_impl(
     Args:
         generator_code: Python code with generate(seed_num) function
         num_seeds: Number of seeds to generate
-        seed_type: Type of seed ("direction" or "fp")
+        seed_type: Type of seed ("direction", "fp", or "delta")
         worker_id: Explicit worker_id for context lookup
     """
     err = _ensure_context(worker_id=worker_id)
@@ -273,14 +300,15 @@ def create_seed_impl(
     ctx_worker_id = ctx.get("worker_id", "")
     direction_id = ctx.get("direction_id")
     sp_id = ctx.get("sp_id")
+    delta_id = ctx.get("delta_id")
     fuzzer_manager = ctx.get("fuzzer_manager")
 
     if not generator_code or not generator_code.strip():
         return {"success": False, "error": "generator_code is required"}
 
     # Validate seed_type
-    if seed_type not in ["direction", "fp"]:
-        return {"success": False, "error": f"Invalid seed_type: {seed_type}. Must be 'direction' or 'fp'"}
+    if seed_type not in ["direction", "fp", "delta"]:
+        return {"success": False, "error": f"Invalid seed_type: {seed_type}. Must be 'direction', 'fp', or 'delta'"}
 
     # For direction seeds, need direction_id
     if seed_type == "direction" and not direction_id:
@@ -289,6 +317,10 @@ def create_seed_impl(
     # For FP seeds, need sp_id
     if seed_type == "fp" and not sp_id:
         return {"success": False, "error": "sp_id not set for FP seeds"}
+
+    # For delta seeds, need delta_id
+    if seed_type == "delta" and not delta_id:
+        return {"success": False, "error": "delta_id not set for delta seeds"}
 
     # Execute generator code
     logger.info(f"[Seed] Generating {num_seeds} {seed_type} seeds...")
@@ -317,6 +349,9 @@ def create_seed_impl(
             direction_id=direction_id if seed_type == "direction" else None,
             sp_id=sp_id if seed_type == "fp" else None,
         )
+        # For delta seeds, store delta_id in direction_id field for tracking
+        if seed_type == "delta":
+            seed_info.direction_id = delta_id
         seed_infos.append(seed_info)
 
         # Add to FuzzerManager if available
@@ -324,6 +359,9 @@ def create_seed_impl(
             try:
                 if seed_type == "direction":
                     path = fuzzer_manager.add_direction_seed(seed_data, direction_id)
+                elif seed_type == "delta":
+                    # Delta seeds go to Global Fuzzer like direction seeds
+                    path = fuzzer_manager.add_direction_seed(seed_data, f"delta_{delta_id}")
                 else:  # fp
                     path = fuzzer_manager.add_fp_seed(seed_data, sp_id)
                 seed_info.seed_path = str(path)
@@ -337,7 +375,12 @@ def create_seed_impl(
                 seeds_dir = workspace_path / "fuzzer_worker" / "global" / "corpus"
                 seeds_dir.mkdir(parents=True, exist_ok=True)
 
-                prefix = f"dir_{direction_id[:8]}" if seed_type == "direction" else f"fp_{sp_id[:8]}"
+                if seed_type == "direction":
+                    prefix = f"dir_{direction_id[:8]}"
+                elif seed_type == "delta":
+                    prefix = f"delta_{delta_id[:8]}"
+                else:  # fp
+                    prefix = f"fp_{sp_id[:8]}"
                 seed_path = seeds_dir / f"{prefix}_{i:03d}_{seed_hash[:8]}"
                 seed_path.write_bytes(seed_data)
                 seed_info.seed_path = str(seed_path)
@@ -439,12 +482,14 @@ def create_seed(
     ctx = _get_current_context()
 
     # Determine seed type from context
-    if ctx.get("direction_id"):
+    if ctx.get("delta_id"):
+        seed_type = "delta"
+    elif ctx.get("direction_id"):
         seed_type = "direction"
     elif ctx.get("sp_id"):
         seed_type = "fp"
     else:
-        return {"success": False, "error": "No direction_id or sp_id in context"}
+        return {"success": False, "error": "No delta_id, direction_id, or sp_id in context"}
 
     return create_seed_impl(
         generator_code=generator_code,
@@ -459,7 +504,7 @@ def get_seed_context_info() -> Dict[str, Any]:
     Get current seed generation context information.
 
     Returns information about:
-    - Current direction or SP being processed
+    - Current direction, SP, or delta being processed
     - Fuzzer name and sanitizer
     - Number of seeds generated so far
 
@@ -468,6 +513,7 @@ def get_seed_context_info() -> Dict[str, Any]:
             "success": True,
             "direction_id": "..." or None,
             "sp_id": "..." or None,
+            "delta_id": "..." or None,
             "fuzzer": "fuzzer_name",
             "sanitizer": "address",
             "seeds_generated": N,
@@ -483,6 +529,7 @@ def get_seed_context_info() -> Dict[str, Any]:
         "success": True,
         "direction_id": ctx.get("direction_id"),
         "sp_id": ctx.get("sp_id"),
+        "delta_id": ctx.get("delta_id"),
         "fuzzer": ctx.get("fuzzer", ""),
         "sanitizer": ctx.get("sanitizer", "address"),
         "seeds_generated": ctx.get("seeds_generated", 0),

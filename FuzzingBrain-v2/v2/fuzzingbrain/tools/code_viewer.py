@@ -34,12 +34,14 @@ from . import tools_mcp
 _workspace_path: ContextVar[Optional[Path]] = ContextVar('cv_workspace_path', default=None)
 _repo_path: ContextVar[Optional[Path]] = ContextVar('cv_repo_path', default=None)
 _diff_path: ContextVar[Optional[Path]] = ContextVar('cv_diff_path', default=None)
+_search_paths: ContextVar[List[Path]] = ContextVar('cv_search_paths', default=[])
 
 
 def set_code_viewer_context(
     workspace_path: str,
     repo_subdir: str = "repo",
     diff_filename: str = "diff.patch",
+    project_name: str = "",
 ) -> None:
     """
     Set the context for code viewer tools.
@@ -50,11 +52,33 @@ def set_code_viewer_context(
         workspace_path: Path to the workspace directory
         repo_subdir: Subdirectory name for the repo (default: "repo")
         diff_filename: Name of the diff file (default: "diff.patch")
+        project_name: Project name for additional search paths (e.g., "curl")
     """
     ws_path = Path(workspace_path)
     _workspace_path.set(ws_path)
     _repo_path.set(ws_path / repo_subdir)
     _diff_path.set(ws_path / diff_filename)
+
+    # Build search paths list - strict paths only
+    search_paths = []
+
+    # 1. Main repo directory (always included)
+    repo_path = ws_path / repo_subdir
+    if repo_path.exists():
+        search_paths.append(repo_path)
+
+    # 2. fuzz-tooling/build/out/ (fuzzer source code, if exists)
+    fuzz_build_path = ws_path / "fuzz-tooling" / "build" / "out"
+    if fuzz_build_path.exists():
+        search_paths.append(fuzz_build_path)
+
+    # 3. fuzz-tooling/projects/{project_name}/ (project-specific fuzzer config, if exists)
+    if project_name:
+        fuzz_project_path = ws_path / "fuzz-tooling" / "projects" / project_name
+        if fuzz_project_path.exists():
+            search_paths.append(fuzz_project_path)
+
+    _search_paths.set(search_paths)
 
 
 def get_code_viewer_context() -> Dict[str, Optional[str]]:
@@ -387,109 +411,133 @@ def search_code(
     if err:
         return err
 
-    repo_path = _repo_path.get()
-    if repo_path is None or not repo_path.exists():
-        return {
-            "success": False,
-            "error": f"Repo path does not exist: {repo_path}",
-        }
+    # Get all search paths
+    search_paths = _search_paths.get()
+    if not search_paths:
+        # Fallback to repo_path only
+        repo_path = _repo_path.get()
+        if repo_path is None or not repo_path.exists():
+            return {
+                "success": False,
+                "error": f"Repo path does not exist: {repo_path}",
+            }
+        search_paths = [repo_path]
 
     try:
-        # Build grep command
-        # Try ripgrep first, fallback to grep
-        cmd = []
-
         # Check for ripgrep
         rg_available = subprocess.run(
             ["which", "rg"],
             capture_output=True,
         ).returncode == 0
 
-        if rg_available:
-            cmd = [
-                "rg",
-                "--no-heading",
-                "--line-number",
-                "--color=never",
-                f"--context={context_lines}",
-                f"--max-count={max_results}",
-            ]
-            if file_pattern:
-                cmd.extend(["--glob", file_pattern])
-            cmd.append(pattern)
-        else:
-            # Fallback to grep
-            cmd = [
-                "grep",
-                "-rn",
-                f"-C{context_lines}",
-                f"-m{max_results}",
-                "-E",  # Extended regex
-            ]
-            if file_pattern:
-                cmd.extend(["--include", file_pattern])
-            cmd.append(pattern)
-            cmd.append(".")
+        all_matches = []
+        ws_path = _workspace_path.get()
 
-        result = subprocess.run(
-            cmd,
-            cwd=str(repo_path),
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-
-        # Parse results
-        matches = []
-        current_match = None
-        context_before = []
-
-        for line in result.stdout.split('\n'):
-            if not line.strip():
-                if current_match:
-                    matches.append(current_match)
-                    current_match = None
-                    context_before = []
+        for search_path in search_paths:
+            if not search_path.exists():
                 continue
 
-            # Parse line format: file:line:content or file-line-content (context)
-            # ripgrep: file:line:content (match) or file-line-content (context)
-            match = re.match(r'^([^:]+):(\d+)[:-](.*)$', line)
-            if match:
-                file_path, line_no, content = match.groups()
-                is_match_line = ':' in line[:len(file_path)+len(line_no)+2]
+            # Build grep command
+            if rg_available:
+                cmd = [
+                    "rg",
+                    "--no-heading",
+                    "--line-number",
+                    "--color=never",
+                    f"--context={context_lines}",
+                    f"--max-count={max_results}",
+                ]
+                if file_pattern:
+                    cmd.extend(["--glob", file_pattern])
+                cmd.append(pattern)
+            else:
+                # Fallback to grep
+                cmd = [
+                    "grep",
+                    "-rn",
+                    f"-C{context_lines}",
+                    f"-m{max_results}",
+                    "-E",  # Extended regex
+                ]
+                if file_pattern:
+                    cmd.extend(["--include", file_pattern])
+                cmd.append(pattern)
+                cmd.append(".")
 
-                if is_match_line or current_match is None:
-                    if current_match:
-                        matches.append(current_match)
+            result = subprocess.run(
+                cmd,
+                cwd=str(search_path),
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
 
-                    current_match = {
-                        "file": file_path,
-                        "line": int(line_no),
-                        "content": content.strip(),
-                        "context": context_before + [content.strip()],
-                    }
-                    context_before = []
-                else:
-                    # Context line
+            # Parse results
+            current_match = None
+            context_before = []
+
+            for line in result.stdout.split('\n'):
+                if not line.strip():
                     if current_match:
-                        current_match["context"].append(content.strip())
+                        all_matches.append(current_match)
+                        current_match = None
+                        context_before = []
+                    continue
+
+                # Parse line format: file:line:content or file-line-content (context)
+                match = re.match(r'^([^:]+):(\d+)[:-](.*)$', line)
+                if match:
+                    file_path_str, line_no, content = match.groups()
+                    is_match_line = ':' in line[:len(file_path_str)+len(line_no)+2]
+
+                    # Make file path relative to workspace for clarity
+                    full_file_path = search_path / file_path_str
+                    if ws_path and full_file_path.is_relative_to(ws_path):
+                        display_path = str(full_file_path.relative_to(ws_path))
                     else:
-                        context_before.append(content.strip())
+                        display_path = file_path_str
 
-        if current_match:
-            matches.append(current_match)
+                    # Truncate very long lines (e.g., minified JSON/JS)
+                    MAX_LINE_LEN = 500
+                    content_stripped = content.strip()
+                    if len(content_stripped) > MAX_LINE_LEN:
+                        content_stripped = content_stripped[:MAX_LINE_LEN] + "...[truncated]"
+
+                    if is_match_line or current_match is None:
+                        if current_match:
+                            all_matches.append(current_match)
+
+                        current_match = {
+                            "file": display_path,
+                            "line": int(line_no),
+                            "content": content_stripped,
+                            "context": context_before + [content_stripped],
+                        }
+                        context_before = []
+                    else:
+                        # Context line
+                        if current_match:
+                            current_match["context"].append(content_stripped)
+                        else:
+                            context_before.append(content_stripped)
+
+            if current_match:
+                all_matches.append(current_match)
+
+            # Stop early if we have enough results
+            if len(all_matches) >= max_results:
+                break
 
         # Limit results
-        matches = matches[:max_results]
+        all_matches = all_matches[:max_results]
 
         return {
             "success": True,
             "pattern": pattern,
             "file_pattern": file_pattern,
-            "matches": matches,
-            "count": len(matches),
-            "truncated": len(matches) >= max_results,
+            "matches": all_matches,
+            "count": len(all_matches),
+            "truncated": len(all_matches) >= max_results,
         }
 
     except subprocess.TimeoutExpired:
@@ -510,104 +558,134 @@ def search_code_impl(
     max_results: int = 50,
     context_lines: int = 2,
 ) -> Dict[str, Any]:
-    """Direct call version of search_code (bypasses MCP FunctionTool wrapper)."""
+    """Direct call version of search_code (bypasses MCP FunctionTool wrapper).
+
+    Uses the same multi-path search logic as search_code.
+    """
     err = _ensure_context()
     if err:
         return err
 
-    repo_path = _repo_path.get()
-    if repo_path is None or not repo_path.exists():
-        return {
-            "success": False,
-            "error": f"Repo path does not exist: {repo_path}",
-        }
+    # Get all search paths
+    search_paths = _search_paths.get()
+    if not search_paths:
+        # Fallback to repo_path only
+        repo_path = _repo_path.get()
+        if repo_path is None or not repo_path.exists():
+            return {
+                "success": False,
+                "error": f"Repo path does not exist: {repo_path}",
+            }
+        search_paths = [repo_path]
 
     try:
-        cmd = []
         rg_available = subprocess.run(
             ["which", "rg"],
             capture_output=True,
         ).returncode == 0
 
-        if rg_available:
-            cmd = [
-                "rg",
-                "--no-heading",
-                "--line-number",
-                "--color=never",
-                f"--context={context_lines}",
-                f"--max-count={max_results}",
-            ]
-            if file_pattern:
-                cmd.extend(["--glob", file_pattern])
-            cmd.append(pattern)
-        else:
-            cmd = [
-                "grep",
-                "-rn",
-                f"-C{context_lines}",
-                f"-m{max_results}",
-                "-E",
-            ]
-            if file_pattern:
-                cmd.extend(["--include", file_pattern])
-            cmd.append(pattern)
-            cmd.append(".")
+        all_matches = []
+        ws_path = _workspace_path.get()
 
-        result = subprocess.run(
-            cmd,
-            cwd=str(repo_path),
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
-
-        matches = []
-        current_match = None
-        context_before = []
-
-        for line in result.stdout.split('\n'):
-            if not line.strip():
-                if current_match:
-                    matches.append(current_match)
-                    current_match = None
-                    context_before = []
+        for search_path in search_paths:
+            if not search_path.exists():
                 continue
 
-            match = re.match(r'^([^:]+):(\d+)[:-](.*)$', line)
-            if match:
-                file_path, line_no, content = match.groups()
-                is_match_line = ':' in line[:len(file_path)+len(line_no)+2]
+            if rg_available:
+                cmd = [
+                    "rg",
+                    "--no-heading",
+                    "--line-number",
+                    "--color=never",
+                    f"--context={context_lines}",
+                    f"--max-count={max_results}",
+                ]
+                if file_pattern:
+                    cmd.extend(["--glob", file_pattern])
+                cmd.append(pattern)
+            else:
+                cmd = [
+                    "grep",
+                    "-rn",
+                    f"-C{context_lines}",
+                    f"-m{max_results}",
+                    "-E",
+                ]
+                if file_pattern:
+                    cmd.extend(["--include", file_pattern])
+                cmd.append(pattern)
+                cmd.append(".")
 
-                if is_match_line or current_match is None:
-                    if current_match:
-                        matches.append(current_match)
+            result = subprocess.run(
+                cmd,
+                cwd=str(search_path),
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
 
-                    current_match = {
-                        "file": file_path,
-                        "line": int(line_no),
-                        "content": content.strip(),
-                        "context": context_before + [content.strip()],
-                    }
-                    context_before = []
-                else:
+            current_match = None
+            context_before = []
+
+            for line in result.stdout.split('\n'):
+                if not line.strip():
                     if current_match:
-                        current_match["context"].append(content.strip())
+                        all_matches.append(current_match)
+                        current_match = None
+                        context_before = []
+                    continue
+
+                match = re.match(r'^([^:]+):(\d+)[:-](.*)$', line)
+                if match:
+                    file_path_str, line_no, content = match.groups()
+                    is_match_line = ':' in line[:len(file_path_str)+len(line_no)+2]
+
+                    # Make file path relative to workspace for clarity
+                    full_file_path = search_path / file_path_str
+                    if ws_path and full_file_path.is_relative_to(ws_path):
+                        display_path = str(full_file_path.relative_to(ws_path))
                     else:
-                        context_before.append(content.strip())
+                        display_path = file_path_str
 
-        if current_match:
-            matches.append(current_match)
+                    # Truncate very long lines (e.g., minified JSON/JS)
+                    MAX_LINE_LEN = 500
+                    content_stripped = content.strip()
+                    if len(content_stripped) > MAX_LINE_LEN:
+                        content_stripped = content_stripped[:MAX_LINE_LEN] + "...[truncated]"
 
-        matches = matches[:max_results]
+                    if is_match_line or current_match is None:
+                        if current_match:
+                            all_matches.append(current_match)
+
+                        current_match = {
+                            "file": display_path,
+                            "line": int(line_no),
+                            "content": content_stripped,
+                            "context": context_before + [content_stripped],
+                        }
+                        context_before = []
+                    else:
+                        if current_match:
+                            current_match["context"].append(content_stripped)
+                        else:
+                            context_before.append(content_stripped)
+
+            if current_match:
+                all_matches.append(current_match)
+
+            # Stop early if we have enough results
+            if len(all_matches) >= max_results:
+                break
+
+        all_matches = all_matches[:max_results]
 
         return {
             "success": True,
             "pattern": pattern,
             "file_pattern": file_pattern,
-            "matches": matches,
-            "count": len(matches),
-            "truncated": len(matches) >= max_results,
+            "matches": all_matches,
+            "count": len(all_matches),
+            "truncated": len(all_matches) >= max_results,
         }
 
     except subprocess.TimeoutExpired:

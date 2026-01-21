@@ -86,6 +86,7 @@ class POVStrategy(BaseStrategy):
             workspace_path=str(self.workspace_path),
             repo_subdir="repo",
             diff_filename="diff/ref.diff",
+            project_name=self.project_name,
         )
 
         # Set analyzer context (socket path)

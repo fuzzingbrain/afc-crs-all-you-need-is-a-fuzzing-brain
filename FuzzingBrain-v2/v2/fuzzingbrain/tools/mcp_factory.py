@@ -37,7 +37,8 @@ def create_isolated_mcp_server(
         include_pov_tools: Whether to include POV tools (default True).
                           Set to False for SP/Verify agents that don't need POV tools.
         include_seed_tools: Whether to include seed generation tools (default False).
-                           Set to True for SeedAgent.
+                           Set to True for SeedAgent. When True, SP/direction/POV tools
+                           are excluded (SeedAgent only needs code analysis + create_seed).
 
     Returns:
         A new FastMCP instance with all tools registered
@@ -45,16 +46,21 @@ def create_isolated_mcp_server(
     # Create a new FastMCP instance (NOT the singleton)
     mcp = FastMCP(f"FuzzingBrain-Tools-{agent_id}")
 
-    # Register all tools to this instance
+    # Register code analysis tools (always needed)
     _register_analyzer_tools(mcp)
     _register_code_viewer_tools(mcp)
-    _register_suspicious_point_tools(mcp)
-    _register_direction_tools(mcp)
-    if include_pov_tools:
-        _register_pov_tools(mcp, worker_id=worker_id)  # Pass worker_id for context binding
-        _register_coverage_tools(mcp)
+
     if include_seed_tools:
-        _register_seed_tools(mcp, worker_id=worker_id)  # Pass worker_id for context binding
+        # SeedAgent: only code analysis + create_seed
+        # No SP, direction, POV, or coverage tools
+        _register_seed_tools(mcp, worker_id=worker_id)
+    else:
+        # Other agents: full tool set
+        _register_suspicious_point_tools(mcp)
+        _register_direction_tools(mcp)
+        if include_pov_tools:
+            _register_pov_tools(mcp, worker_id=worker_id)
+            _register_coverage_tools(mcp)
 
     return mcp
 
@@ -858,47 +864,29 @@ def _register_seed_tools(mcp: FastMCP, worker_id: str = None) -> None:
             {
                 "success": True,
                 "seeds_generated": N,
-                "seed_type": "direction",
+                "seed_type": "direction" or "delta",
                 "seed_paths": ["path1", "path2", ...],
             }
         """
-        from ..fuzzer.seed_tools import create_seed_impl
+        from ..fuzzer.seed_tools import create_seed_impl, get_seed_context
+
+        # Determine seed_type from context (delta or direction)
+        wid = bound_worker_id
+        ctx = get_seed_context(wid) if wid else {}
+        if ctx.get("delta_id"):
+            seed_type = "delta"
+        elif ctx.get("direction_id"):
+            seed_type = "direction"
+        else:
+            seed_type = "direction"  # Default fallback
+
         return create_seed_impl(
             generator_code=generator_code,
             num_seeds=num_seeds,
-            seed_type="direction",  # Default for SeedAgent
+            seed_type=seed_type,
             worker_id=bound_worker_id,
         )
 
-    @mcp.tool
-    @async_tool
-    def get_seed_context_info() -> Dict[str, Any]:
-        """
-        Get current seed generation context information.
-
-        Returns information about:
-        - Current direction or SP being processed
-        - Fuzzer name and sanitizer
-        - Number of seeds generated so far
-        """
-        from ..fuzzer.seed_tools import get_seed_context, _current_seed_worker_id
-
-        wid = bound_worker_id or _current_seed_worker_id.get()
-        if not wid:
-            return {"success": False, "error": "No seed context available"}
-
-        ctx = get_seed_context(wid)
-        if not ctx:
-            return {"success": False, "error": "Seed context not set"}
-
-        return {
-            "success": True,
-            "direction_id": ctx.get("direction_id"),
-            "sp_id": ctx.get("sp_id"),
-            "fuzzer": ctx.get("fuzzer", ""),
-            "sanitizer": ctx.get("sanitizer", "address"),
-            "seeds_generated": ctx.get("seeds_generated", 0),
-        }
 
 
 # Export

@@ -859,6 +859,9 @@ def _verify_blob_on_fuzzer(
             temp_blob_path.unlink()
 
 
+FALLBACK_DOCKER_IMAGE = "gcr.io/oss-fuzz-base/base-runner"
+
+
 def _run_fuzzer_docker(
     fuzzer_path: Path,
     blob_path: Path,
@@ -868,6 +871,9 @@ def _run_fuzzer_docker(
 ) -> tuple:
     """
     Run fuzzer in Docker container with blob input.
+
+    Includes fallback mechanism: if the primary docker_image fails due to
+    missing shared libraries, automatically retry with base-runner.
 
     Returns:
         Tuple of (success, crashed, output, error)
@@ -886,7 +892,8 @@ def _run_fuzzer_docker(
     temp_blob = work_dir / blob_path.name
     shutil.copy(blob_path, temp_blob)
 
-    try:
+    def run_with_image(image: str):
+        """Run fuzzer with specified docker image."""
         docker_cmd = [
             "docker", "run", "--rm",
             "--platform", "linux/amd64",
@@ -896,7 +903,7 @@ def _run_fuzzer_docker(
             "-e", "ARCHITECTURE=x86_64",
             "-v", f"{fuzzer_dir}:/fuzzers:ro",
             "-v", f"{work_dir}:/work",
-            docker_image,
+            image,
             f"/fuzzers/{fuzzer_name}",
             f"-timeout={timeout}",
             f"/work/{temp_blob.name}",
@@ -912,6 +919,17 @@ def _run_fuzzer_docker(
         )
 
         combined_output = result.stderr + "\n" + result.stdout
+        return result, combined_output
+
+    try:
+        # Try with primary image first
+        result, combined_output = run_with_image(docker_image)
+
+        # Check for library loading errors - need to fallback
+        if "error while loading shared libraries" in combined_output:
+            if docker_image != FALLBACK_DOCKER_IMAGE:
+                logger.warning(f"[POV] Library error with {docker_image}, falling back to {FALLBACK_DOCKER_IMAGE}")
+                result, combined_output = run_with_image(FALLBACK_DOCKER_IMAGE)
 
         # Check for crash
         crashed = _check_crash(combined_output)

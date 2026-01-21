@@ -105,6 +105,7 @@ class AgentPipeline:
         repos: RepositoryManager,
         fuzzer: str = "",
         sanitizer: str = "address",
+        scan_mode: str = "delta",  # "delta" or "full" - affects verify prompt
         config: PipelineConfig = None,
         output_dir: Path = None,
         log_dir: Path = None,
@@ -133,6 +134,7 @@ class AgentPipeline:
         self.repos = repos
         self.fuzzer = fuzzer
         self.sanitizer = sanitizer
+        self.scan_mode = scan_mode
         self.config = config or PipelineConfig()
         self.output_dir = output_dir
         self.log_dir = log_dir
@@ -277,6 +279,7 @@ class AgentPipeline:
                     mode="verify",
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
+                    scan_mode=self.scan_mode,  # Use pipeline's scan_mode
                     task_id=self.task_id,
                     worker_id=agent_id,
                     log_dir=self.log_dir,
@@ -501,6 +504,7 @@ async def run_pipeline(
     repos: RepositoryManager,
     fuzzer: str = "",
     sanitizer: str = "address",
+    scan_mode: str = "delta",  # "delta" or "full" - affects verify prompt
     num_verify_agents: int = 2,
     num_pov_agents: int = 1,
     pov_min_score: float = 0.5,
@@ -555,6 +559,7 @@ async def run_pipeline(
         repos=repos,
         fuzzer=fuzzer,
         sanitizer=sanitizer,
+        scan_mode=scan_mode,
         config=config,
         output_dir=output_dir,
         log_dir=log_dir,
