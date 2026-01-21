@@ -12,14 +12,28 @@ Workflow:
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, NamedTuple
 
 from fastmcp import Client
 from loguru import logger
 
 from .base import BaseAgent
-from .prompts import FIND_SUSPICIOUS_POINTS_PROMPT, VERIFY_SUSPICIOUS_POINTS_PROMPT
+from .prompts import (
+    FIND_SUSPICIOUS_POINTS_PROMPT,
+    VERIFY_SUSPICIOUS_POINTS_PROMPT,
+    ADDRESS_SANITIZER_GUIDANCE,
+    MEMORY_SANITIZER_GUIDANCE,
+    UNDEFINED_SANITIZER_GUIDANCE,
+    GENERAL_SANITIZER_GUIDANCE,
+)
 from ..llms import LLMClient, ModelInfo
+
+
+class SuspiciousPointSummary(NamedTuple):
+    """Summary information for a suspicious point."""
+    func_name: str
+    vuln_type: str
+    score: float
 
 
 class SuspiciousPointAgent(BaseAgent):
@@ -40,6 +54,7 @@ class SuspiciousPointAgent(BaseAgent):
     TOOL_UPDATE_SUSPICIOUS_POINT = "update_suspicious_point"
     TOOL_FIND_ALL_PATHS = "find_all_paths"
     TOOL_CHECK_REACHABILITY = "check_reachability"
+    TOOL_GET_FUNCTION_SOURCE = "get_function_source"
 
     # Score thresholds
     SCORE_HIGH_CONFIDENCE = 0.8
@@ -50,6 +65,10 @@ class SuspiciousPointAgent(BaseAgent):
     # Display constants
     TABLE_WIDTH = 70
     SP_ID_TRUNCATE_LENGTH = 16
+
+    # Urgency thresholds for verify mode
+    URGENCY_REMINDER_THRESHOLD = 5  # Remind agent when this many iterations remain
+    URGENCY_FINAL_THRESHOLD = 2  # Final warning when this many iterations remain
 
     # Default values
     DEFAULT_FUNCTION_NAME = "unknown"
@@ -109,56 +128,44 @@ class SuspiciousPointAgent(BaseAgent):
 
         # Context for find mode
         self.reachable_changes: List[Dict[str, Any]] = []
-        self.sp_list = []  # List of (func_name, vuln_type, score) for find mode summary
+        self.sp_list: List[SuspiciousPointSummary] = []  # List of suspicious point summaries for find mode summary
 
         # Context for verify mode
         self.suspicious_point: Optional[Dict[str, Any]] = None
         self.verify_result: Optional[Dict[str, Any]] = None  # Stores verdict for summary
 
-    def _build_table_header(self, title: str, width: int = None) -> List[str]:
+    def _build_table_header(self, title: str, width: Optional[int] = None) -> List[str]:
         """Build table header lines."""
-        if width is None:
-            width = self.TABLE_WIDTH
-        return [
-            "",
-            "┌" + "─" * width + "┐",
-            "│" + f" {title} ".center(width) + "│",
-            "├" + "─" * width + "┤",
-        ]
+        w = width or self.TABLE_WIDTH
+        return ["", "┌" + "─" * w + "┐", "│" + f" {title} ".center(w) + "│", "├" + "─" * w + "┤"]
 
-    def _build_table_footer(self, width: int = None) -> List[str]:
+    def _build_table_footer(self, width: Optional[int] = None) -> List[str]:
         """Build table footer lines."""
-        if width is None:
-            width = self.TABLE_WIDTH
-        return [
-            "└" + "─" * width + "┘",
-            "",
-        ]
+        w = width or self.TABLE_WIDTH
+        return ["└" + "─" * w + "┘", ""]
 
-    def _build_table_row(self, content: str, width: int = None, prefix: str = "  ") -> str:
+    def _build_table_row(self, content: str, width: Optional[int] = None, prefix: str = "  ") -> str:
         """Build a single table row."""
-        if width is None:
-            width = self.TABLE_WIDTH
+        w = width or self.TABLE_WIDTH
         line = f"{prefix}{content}"
-        if len(line) > width - 2:
-            line = line[:width - 5] + "..."
-        return "│" + line.ljust(width) + "│"
+        if len(line) > w - 2:
+            line = line[: w - 5] + "..."
+        return "│" + line.ljust(w) + "│"
 
-    def _wrap_text_in_table(self, text: str, width: int = None) -> List[str]:
+    def _wrap_text_in_table(self, text: str, width: Optional[int] = None) -> List[str]:
         """Wrap long text into multiple table rows."""
-        if width is None:
-            width = self.TABLE_WIDTH
+        w = width or self.TABLE_WIDTH
         words = text.split()
-        lines = []
+        lines: List[str] = []
         current_line = "  "
         for word in words:
-            if len(current_line) + len(word) + 1 > width - 2:
-                lines.append("│" + current_line.ljust(width) + "│")
+            if len(current_line) + len(word) + 1 > w - 2:
+                lines.append("│" + current_line.ljust(w) + "│")
                 current_line = "  " + word
             else:
                 current_line += word + " "
         if current_line.strip():
-            lines.append("│" + current_line.ljust(width) + "│")
+            lines.append("│" + current_line.ljust(w) + "│")
         return lines
 
     def _is_address_sanitizer(self) -> bool:
@@ -293,7 +300,7 @@ class SuspiciousPointAgent(BaseAgent):
                     func_name = tool_args.get("function_name", self.DEFAULT_FUNCTION_NAME)
                     vuln_type = tool_args.get("vuln_type", self.DEFAULT_VULN_TYPE)
                     score = tool_args.get("score", self.SCORE_DEFAULT)
-                    self.sp_list.append((func_name, vuln_type, score))
+                    self.sp_list.append(SuspiciousPointSummary(func_name, vuln_type, score))
                     self._log(f"Tracked SP: {func_name} ({vuln_type})", level="INFO")
             except (json.JSONDecodeError, TypeError):
                 pass
@@ -314,31 +321,22 @@ class SuspiciousPointAgent(BaseAgent):
 
         return result
 
-    def _get_urgency_message(self, iteration: int, remaining: int) -> Optional[str]:
-        """
-        Get urgency message when iterations are running low.
+    def _should_skip_urgency_message(self) -> bool:
+        """Check if urgency message should be skipped."""
+        return self.mode != self.MODE_VERIFY or self.verify_result is not None
 
-        For verify mode:
-        - remaining = 5: gentle reminder to prepare decision
-        - remaining <= 2: must decide now
-        """
-        if self.mode != self.MODE_VERIFY:
-            return None
+    def _build_reminder_message(self) -> str:
+        """Build gentle reminder message for urgency threshold."""
+        return f"""⏰ **REMINDER: {self.URGENCY_REMINDER_THRESHOLD} iterations remaining.**
 
-        if self.verify_result is not None:
-            return None  # Already made decision
-
-        if remaining == 5:
-            # Gentle reminder at iteration 20/25
-            return """⏰ **REMINDER: 5 iterations remaining.**
-
-Start wrapping up your analysis. You should be ready to call `update_suspicious_point` soon.
+Start wrapping up your analysis. You should be ready to call `{self.TOOL_UPDATE_SUSPICIOUS_POINT}` soon.
 """
-        elif remaining <= 2 and remaining > 0:
-            # Final warning at iteration 24-25
-            return f"""⚠️ **FINAL: Only {remaining} iteration(s) left! You MUST decide NOW.**
 
-Call `update_suspicious_point` immediately with your best judgment:
+    def _build_final_warning_message(self, remaining: int) -> str:
+        """Build final warning message when iterations are critical."""
+        return f"""⚠️ **FINAL: Only {remaining} iteration(s) left! You MUST decide NOW.**
+
+Call `{self.TOOL_UPDATE_SUSPICIOUS_POINT}` immediately with your best judgment:
 - Set is_checked=True
 - Set is_important based on whether this looks real
 - Set score based on your confidence
@@ -346,112 +344,35 @@ Call `update_suspicious_point` immediately with your best judgment:
 
 Do NOT let iterations run out without a decision!
 """
+
+    def _get_urgency_message(self, iteration: int, remaining: int) -> Optional[str]:
+        """
+        Get urgency message when iterations are running low.
+
+        For verify mode only:
+        - At URGENCY_REMINDER_THRESHOLD: gentle reminder to prepare decision
+        - At or below URGENCY_FINAL_THRESHOLD: final warning to decide now
+        """
+        if self._should_skip_urgency_message():
+            return None
+
+        if remaining == self.URGENCY_REMINDER_THRESHOLD:
+            return self._build_reminder_message()
+        elif 0 < remaining <= self.URGENCY_FINAL_THRESHOLD:
+            return self._build_final_warning_message(remaining)
+
         return None
-
-    def _get_address_sanitizer_guidance(self) -> str:
-        """Get AddressSanitizer specific guidance."""
-        return """
-### AddressSanitizer Detectable Bugs
-
-**1. Type and Integer Issues** (Root cause of many bugs!)
-- Signed types used for sizes, lengths, counts (can become negative!)
-- Type changes in struct members between versions
-- Implicit conversions in comparisons and arithmetic
-- Integer overflow leading to small allocation then large write
-
-**2. Size Calculation Errors** (CRITICAL - often missed!)
-- sizeof() on wrong variable due to SHADOWING (same name in nested scope!)
-- typedef sizes that differ from expected (wchar, wide_byte_t, custom types)
-- Allocation size differs from actual data written
-- sizeof(pointer) vs sizeof(*pointer) confusion
-
-**3. Buffer Operations**
-- Fixed-size stack/heap buffers with external length parameter
-- memcpy/strcpy length from untrusted source without validation
-- Array indexing with user-controlled or calculated index
-- Off-by-one in loops, especially with null terminators
-
-**4. Position/Counter Tracking**
-- Manual position counters that diverge from actual offset
-- Counters incremented unconditionally in conditional branches
-- Offset calculations separate from pointer arithmetic
-
-**5. Memory Lifecycle**
-- Pointer not set to NULL after free (enables double-free)
-- Element freed while still linked in list/tree (UAF on traversal)
-- Custom free wrappers that don't nullify
-- Destructor/cleanup called multiple times
-
-**6. Macro and Preprocessor**
-- Macros generating runtime values used as array indices
-- Non-standard macro patterns that hide dangerous operations
-- Compile-time vs runtime value confusion
-
-### Variable Shadowing
-
-When analyzing sizeof() or type operations, check if the same variable name
-exists in an outer scope. Inner declarations shadow outer ones, causing sizeof()
-to return the wrong size. This can be a root cause of buffer overflows.
-"""
-
-    def _get_memory_sanitizer_guidance(self) -> str:
-        """Get MemorySanitizer specific guidance."""
-        return """
-### MemorySanitizer Detectable Bugs
-
-**Uninitialized Memory Reads**
-- Using variables before initialization
-- Reading from uninitialized struct fields
-- Uninitialized stack variables
-- Partial struct initialization
-
-**Information Leaks**
-- Copying uninitialized data to output
-- Using uninitialized values in conditions
-- Passing uninitialized data to functions
-"""
-
-    def _get_undefined_sanitizer_guidance(self) -> str:
-        """Get UndefinedBehaviorSanitizer specific guidance."""
-        return """
-### UndefinedBehaviorSanitizer Detectable Bugs
-
-**Integer Overflow**
-- Signed integer overflow/underflow
-- Multiplication overflow
-- Left shift overflow
-
-**Null Pointer Dereference**
-- Dereferencing NULL pointers
-- Null member access
-
-**Division/Shift Errors**
-- Division by zero
-- Modulo by zero
-- Shift by negative amount
-- Shift by >= type width
-"""
-
-    def _get_general_sanitizer_guidance(self) -> str:
-        """Get general sanitizer guidance."""
-        return """
-### General Vulnerability Patterns
-
-- Buffer overflows and out-of-bounds access
-- Memory corruption issues
-- Integer handling errors
-"""
 
     def _build_sanitizer_guidance(self) -> str:
         """Build sanitizer-specific vulnerability patterns guidance."""
         if self._is_address_sanitizer():
-            return self._get_address_sanitizer_guidance()
+            return ADDRESS_SANITIZER_GUIDANCE
         elif self._is_memory_sanitizer():
-            return self._get_memory_sanitizer_guidance()
+            return MEMORY_SANITIZER_GUIDANCE
         elif self._is_undefined_sanitizer():
-            return self._get_undefined_sanitizer_guidance()
+            return UNDEFINED_SANITIZER_GUIDANCE
         else:
-            return self._get_general_sanitizer_guidance()
+            return GENERAL_SANITIZER_GUIDANCE
 
     def _get_agent_metadata(self) -> dict:
         """Get metadata for agent banner."""
@@ -530,6 +451,57 @@ to return the wrong size. This can be a root cause of buffer overflows.
         else:
             return self._get_verify_message(**kwargs)
 
+    def _format_fuzzer_code_section(self, fuzzer_code: str) -> str:
+        """Format fuzzer source code section for initial message."""
+        if fuzzer_code:
+            return f"""## Fuzzer Source Code (CRITICAL - READ THIS FIRST!)
+
+This code shows EXACTLY how input enters the target library.
+Vulnerabilities must be reachable through this entry point.
+
+```c
+{fuzzer_code}
+```
+
+"""
+        else:
+            return f"""## Fuzzer Source Code
+
+IMPORTANT: First read the fuzzer source with {self.TOOL_GET_FUNCTION_SOURCE}("{self.fuzzer}").
+This shows how input enters the library - only reachable code matters!
+
+"""
+
+    def _format_changed_functions_section(self, reachable_changes: List[Dict[str, Any]]) -> str:
+        """Format changed functions list section."""
+        if not reachable_changes:
+            return ""
+
+        message = "## Changed Functions (ALL - including static-unreachable)\n\n"
+        message += "**IMPORTANT**: Analyze ALL functions below, even those marked as static-unreachable!\n"
+        message += "Static analysis cannot track function pointer calls.\n\n"
+
+        # Group by reachability
+        reachable = [c for c in reachable_changes if c.get("static_reachable", True)]
+        unreachable = [c for c in reachable_changes if not c.get("static_reachable", True)]
+
+        if reachable:
+            message += "### Static-Reachable Functions:\n"
+            for change in reachable:
+                message += f"- {change.get('function', self.DEFAULT_FUNCTION_NAME)} ({change.get('file', self.DEFAULT_FUNCTION_NAME)})\n"
+                if "distance" in change and change["distance"] is not None:
+                    message += f"  Distance: {change['distance']}\n"
+            message += "\n"
+
+        if unreachable:
+            message += "### Static-Unreachable Functions (MAY BE REACHABLE VIA FUNCTION POINTERS!):\n"
+            for change in unreachable:
+                message += f"- {change.get('function', self.DEFAULT_FUNCTION_NAME)} ({change.get('file', self.DEFAULT_FUNCTION_NAME)})\n"
+                message += "  ⚠️ Check for function pointer patterns!\n"
+            message += "\n"
+
+        return message
+
     def _get_find_message(self, **kwargs) -> str:
         """Generate initial message for find mode."""
         reachable_changes = kwargs.get("reachable_changes", self.reachable_changes)
@@ -547,48 +519,11 @@ Only find vulnerabilities that are:
 2. DETECTABLE by `{self.sanitizer}` sanitizer (bug type must match)
 
 """
-        # Add fuzzer source code if provided
-        if fuzzer_code:
-            message += f"""## Fuzzer Source Code (CRITICAL - READ THIS FIRST!)
+        # Add fuzzer source code section
+        message += self._format_fuzzer_code_section(fuzzer_code)
 
-This code shows EXACTLY how input enters the target library.
-Vulnerabilities must be reachable through this entry point.
-
-```c
-{fuzzer_code}
-```
-
-"""
-        else:
-            message += f"""## Fuzzer Source Code
-
-IMPORTANT: First read the fuzzer source with get_function_source("{self.fuzzer}").
-This shows how input enters the library - only reachable code matters!
-
-"""
-        if reachable_changes:
-            message += "## Changed Functions (ALL - including static-unreachable)\n\n"
-            message += "**IMPORTANT**: Analyze ALL functions below, even those marked as static-unreachable!\n"
-            message += "Static analysis cannot track function pointer calls.\n\n"
-
-            # Group by reachability
-            reachable = [c for c in reachable_changes if c.get('static_reachable', True)]
-            unreachable = [c for c in reachable_changes if not c.get('static_reachable', True)]
-
-            if reachable:
-                message += "### Static-Reachable Functions:\n"
-                for change in reachable:
-                    message += f"- {change.get('function', 'unknown')} ({change.get('file', 'unknown')})\n"
-                    if 'distance' in change and change['distance'] is not None:
-                        message += f"  Distance: {change['distance']}\n"
-                message += "\n"
-
-            if unreachable:
-                message += "### Static-Unreachable Functions (MAY BE REACHABLE VIA FUNCTION POINTERS!):\n"
-                for change in unreachable:
-                    message += f"- {change.get('function', self.DEFAULT_FUNCTION_NAME)} ({change.get('file', self.DEFAULT_FUNCTION_NAME)})\n"
-                    message += f"  ⚠️ Check for function pointer patterns!\n"
-                message += "\n"
+        # Add changed functions section
+        message += self._format_changed_functions_section(reachable_changes)
 
         message += f"""## Your Task
 
@@ -615,6 +550,97 @@ The Verify agent will judge actual reachability later.
 
         return message
 
+    def _extract_sp_info(self, suspicious_point: Dict[str, Any]) -> tuple[str, str, str, bool]:
+        """Extract basic information from suspicious point."""
+        sp_id = suspicious_point.get('suspicious_point_id', suspicious_point.get('id', self.DEFAULT_FUNCTION_NAME))
+        function_name = suspicious_point.get('function_name', self.DEFAULT_FUNCTION_NAME)
+        vuln_type = suspicious_point.get('vuln_type', self.DEFAULT_VULN_TYPE)
+        static_reachable = suspicious_point.get('static_reachable', True)
+        return sp_id, function_name, vuln_type, static_reachable
+
+    def _format_sp_details_section(
+        self,
+        sp_id: str,
+        function_name: str,
+        vuln_type: str,
+        suspicious_point: Dict[str, Any],
+        static_reachable: bool,
+    ) -> str:
+        """Format suspicious point details section."""
+        reachability_note = ""
+        if not static_reachable:
+            reachability_note = "\n⚠️ **Static analysis says UNREACHABLE** - Check for function pointer patterns!"
+
+        section = f"""## Suspicious Point Details
+
+- ID: {sp_id}
+- Function: {function_name}
+- Type: {vuln_type}
+- Description: {suspicious_point.get('description', 'No description')}
+- Initial Score: {suspicious_point.get('score', self.SCORE_DEFAULT)}
+- Static Reachable: {static_reachable}{reachability_note}
+"""
+        return section
+
+    def _format_control_flow_section(self, control_flow_items: List[Any]) -> str:
+        """Format control flow section if available."""
+        if not control_flow_items:
+            return ""
+
+        section = "\n### Related Control Flow\n"
+        for item in control_flow_items:
+            if isinstance(item, dict):
+                section += f"  - {item.get('type', self.DEFAULT_FUNCTION_NAME)}: {item.get('name', self.DEFAULT_FUNCTION_NAME)} ({item.get('location', '')})\n"
+            else:
+                # Handle string format (e.g., just function names)
+                section += f"  - {item}\n"
+        return section
+
+    def _format_fp_check_section(self, static_reachable: bool, function_name: str) -> str:
+        """Format function pointer check instruction section."""
+        if static_reachable:
+            return ""
+
+        return f"""
+**CRITICAL**: This function is marked as static-unreachable.
+Before marking as FP, you MUST check for function pointer patterns:
+- Search for where `{function_name}` is assigned to a struct member
+- Look for patterns like `methods.xxx = {function_name}` or `handler->xxx = {function_name}`
+- If found, the function IS reachable via function pointer!
+
+"""
+
+    def _format_verification_steps_section(
+        self,
+        static_reachable: bool,
+        function_name: str,
+        vuln_type: str,
+    ) -> str:
+        """Format verification steps section."""
+        fp_check = self._format_fp_check_section(static_reachable, function_name)
+
+        return f"""
+
+## Verification Steps (Complete ALL)
+{fp_check}
+1. **CHECK REACHABILITY**:
+   - If static_reachable=True: Use get_callers to verify direct path exists
+   - If static_reachable=False: Search for function pointer assignment patterns first!
+   - If function pointer pattern found → set reachability_status="pointer_call", reachability_multiplier=0.95
+   - If truly unreachable → mark as FALSE POSITIVE with reachability_multiplier=0.3
+
+2. **VERIFY SANITIZER COMPATIBILITY**: Is {vuln_type} detectable by {self.sanitizer}?
+   - {self._get_sanitizer_vuln_types()}
+
+3. **READ SOURCE CODE**: Call get_function_source for {function_name} and its callers
+
+4. **CHECK SECURITY BOUNDARIES**: Look for input validation, bounds checks in the path
+
+5. **UPDATE SP**: Call update_suspicious_point with your verdict
+
+Start by verifying reachability with get_callers("{function_name}").
+"""
+
     def _get_verify_message(self, **kwargs) -> str:
         """Generate initial message for verify mode."""
         suspicious_point = kwargs.get("suspicious_point", self.suspicious_point)
@@ -623,9 +649,7 @@ The Verify agent will judge actual reachability later.
         if not suspicious_point:
             return "No suspicious point provided for verification."
 
-        sp_id = suspicious_point.get('suspicious_point_id', suspicious_point.get('id', self.DEFAULT_FUNCTION_NAME))
-        function_name = suspicious_point.get('function_name', self.DEFAULT_FUNCTION_NAME)
-        vuln_type = suspicious_point.get('vuln_type', self.DEFAULT_VULN_TYPE)
+        sp_id, function_name, vuln_type, static_reachable = self._extract_sp_info(suspicious_point)
 
         message = f"""Verify the following suspicious point to determine if it's a real vulnerability.
 
@@ -641,76 +665,23 @@ A suspicious point is VALID only if:
 If either is NO → mark as FALSE POSITIVE immediately.
 
 """
-        # Add fuzzer source code if provided
-        if fuzzer_code:
-            message += f"""## Fuzzer Source Code
+        # Add fuzzer source code section
+        message += self._format_fuzzer_code_section(fuzzer_code)
 
-```c
-{fuzzer_code}
-```
+        # Add suspicious point details
+        message += self._format_sp_details_section(
+            sp_id, function_name, vuln_type, suspicious_point, static_reachable
+        )
 
-"""
+        # Add control flow section if available
+        control_flow = suspicious_point.get('important_controlflow')
+        if control_flow:
+            message += self._format_control_flow_section(control_flow)
 
-        # Get reachability info
-        static_reachable = suspicious_point.get('static_reachable', True)
-        reachability_note = ""
-        if not static_reachable:
-            reachability_note = "\n⚠️ **Static analysis says UNREACHABLE** - Check for function pointer patterns!"
-
-        message += f"""## Suspicious Point Details
-
-- ID: {sp_id}
-- Function: {function_name}
-- Type: {vuln_type}
-- Description: {suspicious_point.get('description', 'No description')}
-- Initial Score: {suspicious_point.get('score', self.SCORE_DEFAULT)}
-- Static Reachable: {static_reachable}{reachability_note}
-"""
-
-        if suspicious_point.get('important_controlflow'):
-            message += "\n### Related Control Flow\n"
-            for item in suspicious_point['important_controlflow']:
-                if isinstance(item, dict):
-                    message += f"  - {item.get('type', self.DEFAULT_FUNCTION_NAME)}: {item.get('name', self.DEFAULT_FUNCTION_NAME)} ({item.get('location', '')})\n"
-                else:
-                    # Handle string format (e.g., just function names)
-                    message += f"  - {item}\n"
-
-        # Add function pointer check instruction if static-unreachable
-        fp_check = ""
-        if not static_reachable:
-            fp_check = f"""
-**CRITICAL**: This function is marked as static-unreachable.
-Before marking as FP, you MUST check for function pointer patterns:
-- Search for where `{function_name}` is assigned to a struct member
-- Look for patterns like `methods.xxx = {function_name}` or `handler->xxx = {function_name}`
-- If found, the function IS reachable via function pointer!
-
-"""
-
-        message += f"""
-
-## Verification Steps (Complete ALL)
-{fp_check}
-1. **CHECK REACHABILITY**:
-   - If static_reachable=True: Use get_callers to verify direct path exists
-   - If static_reachable=False: Search for function pointer assignment patterns first!
-   - If function pointer pattern found → set reachability_status="pointer_call", reachability_multiplier=0.95
-   - If truly unreachable → mark as FALSE POSITIVE with reachability_multiplier=0.3
-
-2. **VERIFY SANITIZER COMPATIBILITY**: Is {vuln_type} detectable by {self.sanitizer}?
-   - {self._get_sanitizer_vuln_types()}
-"""
-
-        message += f"""
-3. **READ SOURCE CODE**: Call get_function_source for {function_name} and its callers
-
-4. **CHECK SECURITY BOUNDARIES**: Look for input validation, bounds checks in the path
-
-5. **UPDATE SP**: Call update_suspicious_point with your verdict
-
-Start by verifying reachability with get_callers("{function_name}").
-"""
+        # Add verification steps
+        message += self._format_verification_steps_section(
+            static_reachable, function_name, vuln_type
+        )
 
         return message
 

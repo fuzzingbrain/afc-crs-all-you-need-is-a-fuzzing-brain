@@ -46,6 +46,14 @@ REPORT_USER_TEMPLATE = _load_prompt_from_markdown("pov_report_user_template.md")
 FIND_SUSPICIOUS_POINTS_PROMPT = _load_prompt_from_markdown("find_suspicious_points_prompt.md")
 VERIFY_SUSPICIOUS_POINTS_PROMPT = _load_prompt_from_markdown("verify_suspicious_points_prompt.md")
 
+# Sanitizer guidance templates
+from .sanitizer_guidance import (
+    ADDRESS_SANITIZER_GUIDANCE,
+    MEMORY_SANITIZER_GUIDANCE,
+    UNDEFINED_SANITIZER_GUIDANCE,
+    GENERAL_SANITIZER_GUIDANCE,
+)
+
 # Sanitizer patterns for function analysis (structured data, kept in Python)
 SANITIZER_PATTERNS = {
     "address": """- Buffer overflow: memcpy, strcpy with unchecked length
