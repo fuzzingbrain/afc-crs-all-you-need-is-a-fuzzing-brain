@@ -168,7 +168,16 @@ class CrashMonitor:
                 pass
             self._monitor_task = None
 
-        logger.info(f"[CrashMonitor:{self.task_id}] Stopped monitoring")
+        # Final sweep: check all directories one last time before stopping
+        # This ensures we don't miss crashes that appeared right before shutdown
+        logger.debug(f"[CrashMonitor:{self.task_id}] Running final sweep...")
+        for watch_entry in self.watch_dirs:
+            try:
+                await self._check_directory(watch_entry)
+            except Exception as e:
+                logger.warning(f"[CrashMonitor:{self.task_id}] Final sweep error for {watch_entry.path}: {e}")
+
+        logger.info(f"[CrashMonitor:{self.task_id}] Stopped monitoring (found {len(self.crash_records)} total crashes)")
 
     async def _monitor_loop(self) -> None:
         """Background monitoring loop."""

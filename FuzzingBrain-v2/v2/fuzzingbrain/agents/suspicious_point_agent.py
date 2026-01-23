@@ -414,7 +414,14 @@ Do NOT let iterations run out without a decision!
     @property
     def system_prompt(self) -> str:
         """Get system prompt based on mode with sanitizer-specific guidance."""
-        prompt = FIND_SUSPICIOUS_POINTS_PROMPT if self.mode == self.MODE_FIND else VERIFY_SUSPICIOUS_POINTS_PROMPT
+        if self.mode == self.MODE_FIND:
+            prompt = FIND_SUSPICIOUS_POINTS_PROMPT
+        else:
+            # Verify mode: choose prompt based on scan_mode
+            if self.scan_mode == "delta":
+                prompt = VERIFY_SUSPICIOUS_POINTS_DELTA_PROMPT
+            else:
+                prompt = VERIFY_SUSPICIOUS_POINTS_PROMPT
         sanitizer_guidance = f"\n\n## Sanitizer-Specific Patterns: {self.sanitizer}\n\nFocus ONLY on these bug types (other bugs won't be detected by this sanitizer):\n"
         sanitizer_guidance += self._build_sanitizer_guidance()
         return prompt + sanitizer_guidance

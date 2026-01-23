@@ -331,6 +331,13 @@ def update_suspicious_point(
     if err:
         return err
 
+    # Validate: pov_guidance is REQUIRED when is_important=True
+    if is_important is True and not pov_guidance:
+        return {
+            "success": False,
+            "error": "pov_guidance is REQUIRED when is_important=True. Please provide brief guidance for POV agent: what input to generate and how to reach the vulnerability.",
+        }
+
     try:
         client = _get_client()
         result = client.update_suspicious_point(

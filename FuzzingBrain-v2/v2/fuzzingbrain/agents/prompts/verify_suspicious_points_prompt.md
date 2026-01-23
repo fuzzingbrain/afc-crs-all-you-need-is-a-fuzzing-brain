@@ -159,16 +159,20 @@ If the SP matches ANY of these patterns, DO NOT mark as FP without 100% proof.
 - **reachability_multiplier**: 0.3-1.0 (used to adjust final score)
 - **reachability_reason**: Brief explanation of reachability judgment
 
-## POV GUIDANCE (Required for is_important=True)
+## POV GUIDANCE (MANDATORY when is_important=True)
 
-When you set is_important=True, you MUST provide pov_guidance to help the POV agent.
-Keep it brief (1-3 sentences), covering:
+**WARNING: The update_suspicious_point tool will REJECT your call if is_important=True but pov_guidance is missing!**
 
-1. **Input direction**: What kind of input to generate
+When you set is_important=True, you MUST provide pov_guidance parameter with:
+
+1. **Input direction**: What kind of input to generate (e.g., specific protocol, file format, API call)
 2. **How to reach the vuln**: What input structure/values help the payload pass through
    earlier functions and reach the vulnerable code
+3. **Key constraints**: Any specific conditions that must be satisfied (e.g., size requirements, magic values)
 
-The POV agent will use this as a reference, not a strict requirement.
+Keep it brief (1-3 sentences). The POV agent will use this as a reference.
+
+Example: "Use alliswellprotocoll:// URL. Must pass 4 state transitions with 128-byte responses satisfying memcmp checks."
 
 ## CRITICAL: Correct Wrong Descriptions
 

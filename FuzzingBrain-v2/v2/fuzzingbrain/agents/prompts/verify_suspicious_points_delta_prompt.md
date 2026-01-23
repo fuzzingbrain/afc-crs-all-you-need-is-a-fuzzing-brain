@@ -86,11 +86,16 @@ You can ONLY mark as FALSE POSITIVE when:
 - **reachability_multiplier**: Always set to 1.0 for delta mode
 - **reachability_reason**: "Delta mode: reachability not analyzed, letting POV test"
 
-## POV GUIDANCE (Required for is_important=True)
+## POV GUIDANCE (MANDATORY when is_important=True)
 
-When you set is_important=True, provide brief pov_guidance:
-1. What kind of input might trigger this bug
-2. Any specific values or patterns to try
+**WARNING: The update_suspicious_point tool will REJECT your call if is_important=True but pov_guidance is missing!**
+
+When you set is_important=True, you MUST provide pov_guidance parameter with:
+1. What kind of input might trigger this bug (e.g., specific protocol, file format, API call)
+2. Any specific values, patterns, or sequences needed to reach the vulnerable code
+3. Key constraints that must be satisfied (e.g., "response must be exactly 128 bytes", "must pass memcmp check")
+
+Example pov_guidance: "Use alliswellprotocoll:// URL scheme. Need to pass 4 state transitions with 128-byte responses that satisfy memcmp checks at each state."
 
 ## CRITICAL: Correct Wrong Descriptions
 
