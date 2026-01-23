@@ -248,6 +248,8 @@ def run_coverage_fuzzer(
             docker_run,
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',
             timeout=120,
         )
 
@@ -274,20 +276,32 @@ def run_coverage_fuzzer(
             "-format=lcov > /out/coverage.lcov"
         )
 
-        docker_cov = [
-            "docker", "run", "--rm", "--platform", "linux/amd64",
-            "-v", f"{out_dir.absolute()}:/out",
-            "-v", f"{real_fuzzer_dir}:/fuzzers:ro",
-            docker_image,
-            "bash", "-c", merge_and_export,
-        ]
+        def run_llvm_cov_with_image(image: str):
+            """Run llvm-profdata and llvm-cov with specified docker image."""
+            docker_cov = [
+                "docker", "run", "--rm", "--platform", "linux/amd64",
+                "-v", f"{out_dir.absolute()}:/out",
+                "-v", f"{real_fuzzer_dir}:/fuzzers:ro",
+                image,
+                "bash", "-c", merge_and_export,
+            ]
+            return subprocess.run(
+                docker_cov,
+                capture_output=True,
+                text=True,
+                encoding='utf-8',
+                errors='replace',
+                timeout=120,
+            )
 
-        result2 = subprocess.run(
-            docker_cov,
-            capture_output=True,
-            text=True,
-            timeout=120,
-        )
+        result2 = run_llvm_cov_with_image(docker_image)
+
+        # Fallback: if version mismatch, try aixcc-afc image
+        if result2.returncode != 0 and "raw profile version mismatch" in result2.stderr:
+            aixcc_image = f"aixcc-afc/{project_name}"
+            if docker_image != aixcc_image:
+                logger.warning(f"[Coverage] LLVM version mismatch with {docker_image}, falling back to {aixcc_image}")
+                result2 = run_llvm_cov_with_image(aixcc_image)
 
         if result2.returncode != 0:
             return False, "", f"llvm-cov failed: {result2.stderr[:500]}"

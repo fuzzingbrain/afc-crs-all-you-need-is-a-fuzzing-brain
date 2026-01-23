@@ -469,6 +469,8 @@ def search_code(
                 cwd=str(search_path),
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=60,
             )
 
@@ -621,6 +623,8 @@ def search_code_impl(
                 cwd=str(search_path),
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=60,
             )
 

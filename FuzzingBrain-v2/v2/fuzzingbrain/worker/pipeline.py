@@ -30,6 +30,7 @@ from ..core.models import SuspiciousPoint, SPStatus
 from ..db import RepositoryManager
 from ..tools.analyzer import set_analyzer_context
 from ..fuzzer import FuzzerManager, get_fuzzer_manager
+from ..llms import CLAUDE_SONNET_4_5
 
 
 @dataclass
@@ -280,6 +281,7 @@ class AgentPipeline:
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
                     scan_mode=self.scan_mode,  # Use pipeline's scan_mode
+                    model=CLAUDE_SONNET_4_5,  # Force Sonnet for SP analysis
                     task_id=self.task_id,
                     worker_id=agent_id,
                     log_dir=self.log_dir,
@@ -441,6 +443,7 @@ class AgentPipeline:
                 pov_agent = POVAgent(
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
+                    model=CLAUDE_SONNET_4_5,  # Force Sonnet for POV generation
                     task_id=self.task_id,
                     worker_id=agent_id,
                     output_dir=self.output_dir,

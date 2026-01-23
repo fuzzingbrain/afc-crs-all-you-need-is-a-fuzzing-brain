@@ -34,6 +34,7 @@ from ...tools.code_viewer import set_code_viewer_context
 from ...tools.directions import set_direction_context
 from ...tools.analyzer import set_analyzer_context
 from ...tools.suspicious_points import set_sp_context
+from ...llms import CLAUDE_SONNET_4_5
 
 
 class POVStrategy(BaseStrategy):
@@ -73,6 +74,7 @@ class POVStrategy(BaseStrategy):
         self._agent = SuspiciousPointAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
+            model=CLAUDE_SONNET_4_5,  # Force Sonnet for SP analysis
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,

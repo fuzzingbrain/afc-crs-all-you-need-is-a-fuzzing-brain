@@ -19,6 +19,7 @@ from .pov_base import POVBaseStrategy
 from ...analysis.diff_parser import get_reachable_changes, get_all_changes, DiffReachabilityResult, FunctionChange
 from ...core.models import SuspiciousPoint
 from ...agents import SuspiciousPointAgent
+from ...llms import CLAUDE_SONNET_4_5
 
 
 class POVDeltaStrategy(POVBaseStrategy):
@@ -55,6 +56,7 @@ class POVDeltaStrategy(POVBaseStrategy):
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             scan_mode="delta",  # Delta mode: skip reachability analysis in verify
+            model=CLAUDE_SONNET_4_5,  # Force Sonnet for SP analysis
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,

@@ -15,6 +15,7 @@ from ...core.models import SuspiciousPoint, SPStatus
 from ...tools.code_viewer import set_code_viewer_context
 from ...tools.analyzer import set_analyzer_context
 from ...tools.suspicious_points import set_sp_context
+from ...llms import CLAUDE_SONNET_4_5
 
 
 class POVBaseStrategy(BaseStrategy):
@@ -278,6 +279,7 @@ class POVBaseStrategy(BaseStrategy):
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             scan_mode=self.scan_mode,  # Use strategy's scan_mode for verify prompt
+            model=CLAUDE_SONNET_4_5,  # Force Sonnet for SP analysis
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,

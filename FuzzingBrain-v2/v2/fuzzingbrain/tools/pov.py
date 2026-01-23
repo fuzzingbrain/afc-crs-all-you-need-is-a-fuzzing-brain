@@ -901,6 +901,7 @@ def _run_fuzzer_docker(
             "-e", "FUZZING_ENGINE=libfuzzer",
             "-e", f"SANITIZER={sanitizer}",
             "-e", "ARCHITECTURE=x86_64",
+            "-e", "FUZZ_VERBOSE=1",  # Enable verbose output for debugging
             "-v", f"{fuzzer_dir}:/fuzzers:ro",
             "-v", f"{work_dir}:/work",
             image,
@@ -915,6 +916,8 @@ def _run_fuzzer_docker(
             docker_cmd,
             capture_output=True,
             text=True,
+            encoding='utf-8',
+            errors='replace',  # Handle binary output gracefully
             timeout=timeout + 30,  # Extra time for Docker overhead
         )
 
@@ -950,6 +953,52 @@ def _run_fuzzer_docker(
         # Cleanup temp blob
         if temp_blob.exists():
             temp_blob.unlink()
+
+
+def _extract_output_summary(output: str) -> str:
+    """
+    Use a fast LLM to extract meaningful information from fuzzer output.
+
+    This helps POV Agent understand why a POV didn't crash, e.g.:
+    - Protocol state transitions (state [0] -> disconnect)
+    - Protocol rejections
+    - Connection errors
+
+    Args:
+        output: Full fuzzer output (may be very long)
+
+    Returns:
+        Brief summary (2-5 lines) of key information
+    """
+    if not output or len(output) < 100:
+        return output or "No output"
+
+    try:
+        from ..llms import quick_call, CLAUDE_HAIKU_4_5
+
+        # Truncate to avoid token explosion
+        truncated = output[:8000] if len(output) > 8000 else output
+
+        prompt = f"""从以下 fuzzer 输出中提取关键调试信息（2-5行）：
+
+重点关注：
+- 协议状态转换（如 "state [0]", "state [1]"）
+- 连接断开原因（如 "Connection disconnected", "Protocol disabled"）
+- 错误信息
+
+Fuzzer 输出:
+```
+{truncated}
+```
+
+关键信息（简洁，2-5行）:"""
+
+        summary = quick_call(prompt, model=CLAUDE_HAIKU_4_5)
+        return summary[:500] if summary else "Failed to extract summary"
+    except Exception as e:
+        logger.warning(f"[POV] Failed to extract output summary: {e}")
+        # Fallback: return first 500 chars
+        return output[:500] if output else "No output"
 
 
 def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
@@ -1097,11 +1146,12 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
             "summary": f"CRASH DETECTED: {vuln_type}",
         }
     else:
-        # For non-crash, provide brief output hint (first 500 chars)
+        # For non-crash, extract meaningful info using fast LLM
+        output_summary = _extract_output_summary(output)
         return {
             "success": True,
             "crashed": False,
-            "output_hint": output[:500] if output else "No output",
+            "output_summary": output_summary,
         }
 
 
