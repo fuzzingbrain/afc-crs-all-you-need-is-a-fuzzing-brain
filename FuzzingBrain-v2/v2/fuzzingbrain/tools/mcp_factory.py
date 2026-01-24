@@ -24,6 +24,8 @@ def create_isolated_mcp_server(
     worker_id: str = None,
     include_pov_tools: bool = True,
     include_seed_tools: bool = False,
+    include_sp_tools: bool = True,
+    include_direction_tools: bool = True,
 ) -> FastMCP:
     """
     Create an isolated FastMCP server instance with all tools registered.
@@ -39,6 +41,10 @@ def create_isolated_mcp_server(
         include_seed_tools: Whether to include seed generation tools (default False).
                            Set to True for SeedAgent. When True, SP/direction/POV tools
                            are excluded (SeedAgent only needs code analysis + create_seed).
+        include_sp_tools: Whether to include suspicious point tools (default True).
+                         Set to False for DirectionPlanningAgent.
+        include_direction_tools: Whether to include direction tools (default True).
+                                Set to False for agents that don't need directions.
 
     Returns:
         A new FastMCP instance with all tools registered
@@ -55,9 +61,12 @@ def create_isolated_mcp_server(
         # No SP, direction, POV, or coverage tools
         _register_seed_tools(mcp, worker_id=worker_id)
     else:
-        # Other agents: full tool set
-        _register_suspicious_point_tools(mcp)
-        _register_direction_tools(mcp)
+        # Register SP tools only if requested
+        if include_sp_tools:
+            _register_suspicious_point_tools(mcp)
+        # Register direction tools only if requested
+        if include_direction_tools:
+            _register_direction_tools(mcp)
         if include_pov_tools:
             _register_pov_tools(mcp, worker_id=worker_id)
             _register_coverage_tools(mcp)

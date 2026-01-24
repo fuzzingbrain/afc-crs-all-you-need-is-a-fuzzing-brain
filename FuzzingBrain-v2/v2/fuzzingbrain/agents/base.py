@@ -127,6 +127,23 @@ class BaseAgent(ABC):
         return False
 
     @property
+    def include_sp_tools(self) -> bool:
+        """Whether to include suspicious point tools in MCP server.
+
+        Override to False in DirectionPlanningAgent (it only needs direction tools).
+        Default True for other agents.
+        """
+        return True
+
+    @property
+    def include_direction_tools(self) -> bool:
+        """Whether to include direction tools in MCP server.
+
+        Default True. Override to False if agent doesn't need direction tools.
+        """
+        return True
+
+    @property
     @abstractmethod
     def system_prompt(self) -> str:
         """System prompt for the agent."""
@@ -949,8 +966,10 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                 worker_id=self.worker_id,  # Bind worker_id for POV/seed context lookup
                 include_pov_tools=self.include_pov_tools,  # Only POVAgent needs POV tools
                 include_seed_tools=self.include_seed_tools,  # Only SeedAgent needs seed tools
+                include_sp_tools=self.include_sp_tools,  # DirectionPlanningAgent doesn't need SP tools
+                include_direction_tools=self.include_direction_tools,
             )
-            self._log(f"Created isolated MCP server: {agent_id} (pov_tools={self.include_pov_tools}, seed_tools={self.include_seed_tools})", level="DEBUG")
+            self._log(f"Created isolated MCP server: {agent_id} (pov_tools={self.include_pov_tools}, seed_tools={self.include_seed_tools}, sp_tools={self.include_sp_tools})", level="DEBUG")
 
             # Use reporter agent context if available
             if reporter:

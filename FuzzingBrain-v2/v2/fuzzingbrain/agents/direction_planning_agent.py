@@ -84,6 +84,15 @@ class DirectionPlanningAgent(BaseAgent):
     def agent_name(self) -> str:
         return "DirectionPlanningAgent"
 
+    @property
+    def include_sp_tools(self) -> bool:
+        """DirectionPlanningAgent should NOT have SP tools.
+
+        It should only focus on analyzing call graphs and creating directions.
+        SP tools distract it from its main task.
+        """
+        return False
+
     def _get_summary_table(self) -> str:
         """Generate summary table for direction planning."""
         duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
