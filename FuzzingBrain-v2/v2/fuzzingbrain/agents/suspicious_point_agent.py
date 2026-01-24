@@ -82,8 +82,8 @@ class SuspiciousPointAgent(BaseAgent):
     # Lower temperature for strict verification (more deterministic)
     default_temperature: float = 0.4
 
-    # Disable context compression - verify needs full context for accurate analysis
-    enable_context_compression: bool = False
+    # Enable context compression for verification sessions
+    enable_context_compression: bool = True
 
     def __init__(
         self,
@@ -453,6 +453,19 @@ Do NOT let iterations run out without a decision!
         all_tools = await super()._get_tools(client)
         # Filter based on mode
         return self._filter_tools_for_mode(all_tools)
+
+    def _get_compression_criteria(self) -> str:
+        """SP verification compression criteria: focus on vulnerability evidence."""
+        return """For suspicious point verification, keep:
+1. Vulnerability evidence: unsafe operations, missing bounds checks, dangerous patterns
+2. Reachability: can the suspicious code be reached from fuzzer entry point
+3. Data flow: how user input reaches the suspicious location
+4. Verdict reasoning: why this is/isn't a real vulnerability
+
+Discard:
+- Functions unrelated to the suspicious point
+- Boilerplate code without security implications
+- Duplicate analysis of the same code"""
 
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message based on mode and context."""

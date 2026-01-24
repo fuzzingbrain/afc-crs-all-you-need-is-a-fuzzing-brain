@@ -346,6 +346,19 @@ If you truly found nothing exploitable in this direction, explain why and conclu
         all_tools = await super()._get_tools(client)
         return self._filter_tools_for_mode(all_tools)
 
+    def _get_compression_criteria(self) -> str:
+        """Fullscan SP compression criteria: focus on vulnerability patterns."""
+        return """For vulnerability hunting, keep:
+1. Suspicious patterns: buffer operations, memory management, input handling
+2. Function relationships: callers/callees in the direction being analyzed
+3. Already found suspicious points: location, type, reasoning
+4. Dead ends: functions confirmed safe (mark as [checked, not relevant])
+
+Discard:
+- Detailed code of safe utility functions
+- Duplicate analysis of the same function
+- Verbose search results after key matches found"""
+
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message for Full-scan analysis."""
         message = f"""Hunt for vulnerabilities in this direction.

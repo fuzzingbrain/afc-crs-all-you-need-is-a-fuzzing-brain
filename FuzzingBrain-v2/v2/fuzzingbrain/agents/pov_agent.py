@@ -86,7 +86,7 @@ class POVAgent(BaseAgent):
     5. Debug with trace_pov if needed
 
     Stop conditions (OR):
-    - max_iterations reached (default 100)
+    - max_iterations reached (default 300)
     - max_pov_attempts reached (default 40)
     - POV successfully triggers a crash
     """
@@ -94,8 +94,8 @@ class POVAgent(BaseAgent):
     # Medium temperature for creative POV input generation
     default_temperature: float = 0.5
 
-    # Disable context compression - POV generation needs full context
-    enable_context_compression: bool = False
+    # Enable context compression for long POV sessions
+    enable_context_compression: bool = True
 
     def __init__(
         self,
@@ -103,7 +103,7 @@ class POVAgent(BaseAgent):
         sanitizer: str = "address",
         llm_client: Optional[LLMClient] = None,
         model: Optional[Union[ModelInfo, str]] = None,
-        max_iterations: int = 100,
+        max_iterations: int = 300,
         max_pov_attempts: int = 40,
         verbose: bool = True,
         # Context
@@ -130,7 +130,7 @@ class POVAgent(BaseAgent):
             sanitizer: Sanitizer type (address, memory, undefined)
             llm_client: LLM client instance
             model: Model to use
-            max_iterations: Maximum agent loop iterations (default 200)
+            max_iterations: Maximum agent loop iterations (default 300)
             max_pov_attempts: Maximum POV generation attempts (default 40)
             verbose: Whether to log progress
             task_id: Task ID
@@ -300,6 +300,20 @@ class POVAgent(BaseAgent):
         except Exception as e:
             logger.warning(f"[POVAgent] Failed to load fuzzer source: {e}")
             return None
+
+    def _get_compression_criteria(self) -> str:
+        """POV-specific compression criteria: focus on data flow and crash triggers."""
+        return """For POV generation, keep:
+1. Data flow: how input reaches the vulnerable function (call chain, parameter passing)
+2. Constraints: size limits, format requirements, magic bytes
+3. Crash conditions: what triggers the vulnerability (buffer size, specific values)
+4. Previous POV attempts: what was tried and why it failed
+5. Trace results: which functions were reached, where execution stopped
+
+Discard:
+- Unrelated functions that don't affect the data flow
+- Duplicate information already captured
+- Verbose tool outputs that don't inform POV construction"""
 
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message with suspicious point context."""

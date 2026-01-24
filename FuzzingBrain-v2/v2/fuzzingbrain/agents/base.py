@@ -166,23 +166,75 @@ class BaseAgent(ABC):
         """
         return None
 
+    def _get_compression_criteria(self) -> str:
+        """
+        Get task-specific compression criteria for context compression.
+
+        Subclasses should override this to provide agent-specific criteria.
+        This tells the compression LLM what to keep vs discard.
+
+        Returns:
+            Compression criteria string describing what's relevant for this agent
+        """
+        return "Keep information relevant to security analysis and vulnerability discovery."
+
+    def _get_compression_context(self) -> str:
+        """
+        Get task context for compression LLM.
+
+        By default, uses system prompt + initial user message as context.
+        These are preserved anyway, but help compression LLM understand what's relevant.
+
+        Returns:
+            Task context string to help compression LLM understand what's important
+        """
+        context_parts = []
+        if len(self.messages) > 0:
+            # System prompt (truncated if too long)
+            sys_content = self.messages[0].get("content", "")
+            if len(sys_content) > 1000:
+                sys_content = sys_content[:1000] + "..."
+            context_parts.append(f"[SYSTEM]: {sys_content}")
+        if len(self.messages) > 1:
+            # Initial user message (task description)
+            user_content = self.messages[1].get("content", "")
+            if len(user_content) > 1500:
+                user_content = user_content[:1500] + "..."
+            context_parts.append(f"[TASK]: {user_content}")
+        return "\n\n".join(context_parts)
+
+    def _load_compression_prompt(self) -> str:
+        """Load the context compression prompt template."""
+        prompt_path = Path(__file__).parent / "prompts" / "context_compression_prompt.md"
+        if prompt_path.exists():
+            return prompt_path.read_text(encoding="utf-8")
+        # Fallback
+        return """Compress tool results. Keep only what's relevant to: {compression_criteria}
+
+Messages:
+{messages_text}
+
+Output compressed version with format:
+Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
+
     async def _compress_context(self) -> None:
         """
         Compress conversation context to reduce token usage.
 
-        Called every 10 iterations. Uses Haiku to summarize old messages.
+        Called every 5 iterations. Uses Sonnet for task-aware compression.
+        Preserves function signatures and relevant code lines, marks irrelevant results.
         Must preserve tool_call -> tool_result pairs to maintain valid message structure.
         """
-        # Only compress if we have enough messages
-        if len(self.messages) < 20:
+        # Only compress if we have enough messages (at least 10)
+        if len(self.messages) < 10:
             return
 
         # Keep first 2 messages (system + initial user)
         keep_start = 2
 
         # Find safe cut point for end - must not break tool_call/tool_result pairs
-        # Start from end and find a position where next message is NOT a tool result
-        keep_end = 8  # Start with 8 messages from end
+        # Start with 3 messages from end, extend if needed
+        keep_end = 3
         while keep_end < len(self.messages) - keep_start:
             end_idx = len(self.messages) - keep_end
             if end_idx >= 0 and self.messages[end_idx].get("role") == "tool":
@@ -194,49 +246,65 @@ class BaseAgent(ABC):
         if len(self.messages) <= keep_start + keep_end:
             return
 
-        # Messages to summarize
+        # Messages to compress
         middle_messages = self.messages[keep_start:-keep_end]
 
-        # Build conversation text for summarization
+        # Build conversation text for compression
         conv_text = []
         for msg in middle_messages:
             role = msg.get("role", "")
             content = msg.get("content", "")
             if role == "assistant" and msg.get("tool_calls"):
-                tools = [tc.get("function", {}).get("name", "") for tc in msg["tool_calls"]]
-                conv_text.append(f"Assistant called: {', '.join(tools)}")
+                tools_info = []
+                for tc in msg["tool_calls"]:
+                    func_name = tc.get("function", {}).get("name", "")
+                    func_args = tc.get("function", {}).get("arguments", "{}")
+                    tools_info.append(f"{func_name}({func_args[:100]})")
+                conv_text.append(f"[ASSISTANT CALLS: {', '.join(tools_info)}]")
                 if content:
-                    conv_text.append(f"Assistant: {content[:500]}")
+                    conv_text.append(f"[ASSISTANT REASONING: {content}]")
             elif role == "tool":
-                conv_text.append(f"Tool result: {content[:300]}...")
+                tool_id = msg.get("tool_call_id", "")
+                # Keep full content for compression LLM to analyze
+                conv_text.append(f"[TOOL RESULT {tool_id}]:\n{content}")
             elif content:
-                conv_text.append(f"{role.title()}: {content[:500]}")
+                conv_text.append(f"[{role.upper()}]: {content}")
 
-        # Use Haiku to summarize
-        summary_prompt = f"""Summarize this security analysis conversation concisely. Focus on:
-1. Functions analyzed
-2. Suspicious points found (if any)
-3. Key findings about vulnerabilities
+        # Get task-specific compression criteria and context
+        compression_criteria = self._get_compression_criteria()
+        task_context = self._get_compression_context()
 
-Conversation:
-{chr(10).join(conv_text[-50:])}
-
-Write a brief summary (max 200 words):"""
+        # Load and format compression prompt
+        prompt_template = self._load_compression_prompt()
+        compression_prompt = prompt_template.format(
+            task_context=task_context or "Security analysis task",
+            compression_criteria=compression_criteria,
+            messages_text="\n\n".join(conv_text),
+        )
 
         try:
-            from ..llms.models import CLAUDE_HAIKU_4_5
+            from ..llms.models import CLAUDE_SONNET_4
             response = await self.llm_client.acall(
-                messages=[{"role": "user", "content": summary_prompt}],
-                model=CLAUDE_HAIKU_4_5,
-                max_tokens=500,
+                messages=[{"role": "user", "content": compression_prompt}],
+                model=CLAUDE_SONNET_4,
+                max_tokens=2000,
             )
-            summary = f"[CONTEXT COMPRESSED - {len(middle_messages)} messages]\n{response.content}"
+            summary = f"[CONTEXT COMPRESSED - {len(middle_messages)} messages]\n\n{response.content}"
         except Exception as e:
             # Fallback to simple summary
-            self._log(f"Haiku summarization failed: {e}, using fallback", level="WARNING")
-            summary = f"[CONTEXT COMPRESSED - {len(middle_messages)} messages summarized]"
+            self._log(f"Sonnet compression failed: {e}, using fallback", level="WARNING")
+            # Mechanical fallback: just keep tool names and truncate results
+            fallback_lines = []
+            for msg in middle_messages:
+                if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                    tools = [tc.get("function", {}).get("name", "") for tc in msg["tool_calls"]]
+                    fallback_lines.append(f"Called: {', '.join(tools)}")
+                elif msg.get("role") == "tool":
+                    content = msg.get("content", "")[:200]
+                    fallback_lines.append(f"Result: {content}...")
+            summary = f"[CONTEXT COMPRESSED - {len(middle_messages)} messages]\n" + "\n".join(fallback_lines)
 
-        # Replace middle messages with summary
+        # Replace middle messages with compressed summary
         self.messages = (
             self.messages[:keep_start] +
             [{"role": "user", "content": summary}] +
@@ -734,8 +802,8 @@ Write a brief summary (max 200 words):"""
 
             self._log(f"=== Iteration {iteration}/{self.max_iterations} ===", level="INFO")
 
-            # Compress context every 10 iterations to reduce token usage
-            if self.enable_context_compression and iteration > 0 and iteration % 10 == 0:
+            # Compress context every 5 iterations to reduce token usage
+            if self.enable_context_compression and iteration > 0 and iteration % 5 == 0:
                 await self._compress_context()
 
             # Check for urgency message (when running low on iterations)
