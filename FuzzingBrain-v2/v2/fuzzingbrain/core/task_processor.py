@@ -126,8 +126,14 @@ class WorkspaceSetup:
             # Clone fuzz-tooling from URL (or use existing)
             try:
                 if fuzz_tooling_path.exists():
-                    logger.info(f"Fuzz-tooling directory exists, skipping clone")
-                else:
+                    # Check if .git exists - if not, remove and re-clone
+                    if not (fuzz_tooling_path / ".git").exists():
+                        logger.warning(f"Fuzz-tooling missing .git directory, re-cloning...")
+                        shutil.rmtree(fuzz_tooling_path)
+                    else:
+                        logger.info(f"Fuzz-tooling directory exists, skipping clone")
+
+                if not fuzz_tooling_path.exists():
                     logger.info(f"Cloning fuzz-tooling from {self.config.fuzz_tooling_url}")
                     result = subprocess.run(
                         ["git", "clone", "--depth", "1", self.config.fuzz_tooling_url, str(fuzz_tooling_path)],
