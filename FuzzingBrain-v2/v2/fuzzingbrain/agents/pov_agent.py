@@ -583,6 +583,8 @@ Start by reading the vulnerable function source with get_function_source("{funct
                     "role": "assistant",
                     "content": response.content or "",
                     "tool_calls": response.tool_calls,
+                    "iteration": f"{iteration}/{self.max_iterations}",
+                    "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
                 })
 
                 # Execute each tool call
@@ -609,6 +611,8 @@ Start by reading the vulnerable function source with get_function_source("{funct
                         "role": "tool",
                         "tool_call_id": tool_id,
                         "content": tool_result,
+                        "iteration": f"{iteration}/{self.max_iterations}",
+                        "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
                     })
 
                     # Check for POV attempt
@@ -643,7 +647,9 @@ Start by reading the vulnerable function source with get_function_source("{funct
 2. What conditions are needed to trigger the vulnerability?
 3. What's different between your input and what the vulnerability needs?
 
-Use get_function_source or trace_pov (if available) to understand better, then create a NEW POV with adjusted approach."""
+Use get_function_source or trace_pov (if available) to understand better, then create a NEW POV with adjusted approach.""",
+                                    "iteration": f"{iteration}/{self.max_iterations}",
+                                    "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
                                 })
                                 self._log("Injected post-failure analysis prompt", level="DEBUG")
                         except (json.JSONDecodeError, TypeError):
@@ -670,6 +676,8 @@ Use get_function_source or trace_pov (if available) to understand better, then c
                     self.messages.append({
                         "role": "assistant",
                         "content": response.content,
+                        "iteration": f"{iteration}/{self.max_iterations}",
+                        "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
                     })
 
                 # Force continuation: remind LLM to keep trying
@@ -683,9 +691,14 @@ Try a DIFFERENT approach:
 - Try different byte values, sizes, or structures
 - Look for alternative code paths to the vulnerable function
 
-Call create_pov with a new generator code NOW."""
+Call create_pov with a new generator code NOW.""",
+                    "iteration": f"{iteration}/{self.max_iterations}",
+                    "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
                 })
                 # Continue the loop
+
+            # Incremental save: save conversation after each iteration
+            self._log_conversation()
 
         if iteration >= self.max_iterations:
             self._log(f"Max iterations ({self.max_iterations}) reached", level="WARNING")

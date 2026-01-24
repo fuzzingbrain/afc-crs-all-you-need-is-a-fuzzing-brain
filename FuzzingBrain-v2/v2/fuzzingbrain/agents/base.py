@@ -242,8 +242,11 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         Preserves function signatures and relevant code lines, marks irrelevant results.
         Must preserve tool_call -> tool_result pairs to maintain valid message structure.
         """
+        self._log(f"Compression check: {len(self.messages)} messages", level="DEBUG")
+
         # Only compress if we have enough messages (at least 10)
         if len(self.messages) < 10:
+            self._log(f"Skipping compression: not enough messages ({len(self.messages)} < 10)", level="DEBUG")
             return
 
         # Keep first 2 messages (system + initial user)
@@ -261,6 +264,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                 break
 
         if len(self.messages) <= keep_start + keep_end:
+            self._log(f"Skipping compression: not enough middle ({len(self.messages)} <= {keep_start}+{keep_end})", level="DEBUG")
             return
 
         # Messages to compress
@@ -924,6 +928,9 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                 )
                 break
 
+            # Incremental save: save conversation after each iteration
+            self._log_conversation()
+
         if iteration >= self.max_iterations:
             self._log(f"Max iterations ({self.max_iterations}) reached", level="WARNING")
             final_response = response.content if response else ""
@@ -1009,8 +1016,8 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         # Write summary table to log
         self._write_summary_table()
 
-        # Save conversation log (JSON format)
-        self._log_conversation()
+        # Note: conversation log is saved incrementally after each iteration
+        # No need to save again here
 
         # Finalize chat log (markdown format with summary)
         self._finalize_chat_log(result)

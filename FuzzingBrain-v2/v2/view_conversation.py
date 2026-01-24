@@ -6,6 +6,15 @@ import html
 import sys
 from pathlib import Path
 
+try:
+    import tiktoken
+    enc = tiktoken.encoding_for_model('gpt-4')
+    def count_tokens(text):
+        return len(enc.encode(str(text)))
+except:
+    def count_tokens(text):
+        return len(str(text)) // 4  # rough estimate
+
 def convert_to_html(json_path: str, output_path: str = None):
     with open(json_path) as f:
         data = json.load(f)
@@ -200,11 +209,19 @@ def convert_to_html(json_path: str, output_path: str = None):
     <div id="messages">
 """
 
+    total_tokens = 0
     for i, msg in enumerate(messages):
         role = msg.get('role', 'unknown')
         content = msg.get('content', '')
         tool_calls = msg.get('tool_calls', [])
         tool_call_id = msg.get('tool_call_id', '')
+
+        # Count tokens for this message
+        msg_tokens = count_tokens(content)
+        if tool_calls:
+            for tc in tool_calls:
+                msg_tokens += count_tokens(json.dumps(tc))
+        total_tokens += msg_tokens
 
         # Escape HTML
         if content:
@@ -214,7 +231,7 @@ def convert_to_html(json_path: str, output_path: str = None):
         <div class="message {role}" id="msg-{i}">
             <div class="message-header">
                 <span class="role">{role.upper()}</span>
-                <span class="message-index">#{i}</span>
+                <span class="message-index">#{i} | {msg_tokens} tokens | cumulative: {total_tokens}</span>
             </div>
 """
 
