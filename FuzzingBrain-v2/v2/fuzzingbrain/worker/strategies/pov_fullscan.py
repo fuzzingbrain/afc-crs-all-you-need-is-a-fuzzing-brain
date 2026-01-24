@@ -989,7 +989,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         Generate Direction Seeds using SeedAgent and start Global Fuzzer.
 
         Called after Direction Planning completes.
-        Design doc: Direction Agent 完成 → SeedAgent 生成初始种子 → Global Fuzzer 启动
+        Flow: Direction Agent completes → SeedAgent generates initial seeds → Global Fuzzer starts
 
         Args:
             directions: List of Direction objects from Direction Planning

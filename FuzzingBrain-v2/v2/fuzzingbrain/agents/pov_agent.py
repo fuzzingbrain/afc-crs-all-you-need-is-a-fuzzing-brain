@@ -495,8 +495,8 @@ Start by reading the vulnerable function source with get_function_source("{funct
         self._tools = await self._get_tools(client)
         self._log(f"Loaded {len(self._tools)} MCP tools", level="INFO")
 
-        # Greedy mode: disable trace_pov for first 15 attempts to force direct POV generation
-        self._greedy_attempts_threshold = 15
+        # Greedy mode: disable trace_pov for first 10 attempts to force direct POV generation
+        self._greedy_attempts_threshold = 10
 
         # Log model info
         model_name = self.model.id if hasattr(self.model, 'id') else (

@@ -430,7 +430,7 @@ class AgentPipeline:
             try:
                 logger.info(f"[Pipeline:{agent_id}] Generating POV for SP {sp.suspicious_point_id}")
 
-                # Start SP Fuzzer for this SP (design doc: POV Agent 开始处理 SP 时启动)
+                # Start SP Fuzzer for this SP (starts when POV Agent begins processing SP)
                 if self.fuzzer_manager:
                     try:
                         sp_fuzzer_started = await self.fuzzer_manager.start_sp_fuzzer(sp.suspicious_point_id)
@@ -487,7 +487,7 @@ class AgentPipeline:
                 )
                 self.stats.pov_failed += 1
             finally:
-                # Stop SP Fuzzer (design doc: POV 成功/失败时停止)
+                # Stop SP Fuzzer (stops when POV succeeds or fails)
                 if sp_fuzzer_started and self.fuzzer_manager:
                     try:
                         await self.fuzzer_manager.stop_sp_fuzzer(sp.suspicious_point_id)

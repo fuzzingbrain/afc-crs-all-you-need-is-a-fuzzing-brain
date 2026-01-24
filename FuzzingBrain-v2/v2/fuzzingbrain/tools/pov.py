@@ -333,19 +333,101 @@ def verify_pov_impl(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
     return _verify_pov_core(pov_id=pov_id, worker_id=worker_id)
 
 
-def trace_pov_impl(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
+def trace_pov_impl(
+    generator_code: str,
+    target_functions: List[str] = None,
+    agent_msg: str = None,
+    worker_id: str = None,
+) -> Dict[str, Any]:
     """
     Implementation of trace_pov (without MCP decorator).
 
     Args:
-        pov_id: POV ID to trace
+        generator_code: Python code with generate() function that returns bytes
+        target_functions: List of function names to check if reached
+        agent_msg: What the agent wants to know about the trace
         worker_id: Explicit worker_id for context lookup (preferred over ContextVar)
     """
     err = _ensure_context(worker_id=worker_id)
     if err:
         return err
 
-    return _trace_pov_core(pov_id=pov_id, worker_id=worker_id)
+    # Execute generator code to get blob
+    blobs, error = _execute_generator_code(generator_code, num_variants=1)
+    if error:
+        return {"success": False, "error": f"Generator code error: {error}"}
+    if not blobs:
+        return {"success": False, "error": "Generator code produced no blob"}
+
+    blob = blobs[0]
+
+    # Get context for coverage
+    ctx = _get_context_by_worker_id(worker_id) if worker_id else _get_current_context()
+    coverage_fuzzer_dir, project_name, src_dir = get_coverage_context()
+    if coverage_fuzzer_dir is None:
+        return {"success": False, "error": "Coverage context not set"}
+
+    fuzzer_name = ctx.get("fuzzer", "")
+    if not fuzzer_name:
+        return {"success": False, "error": "No fuzzer name in context"}
+
+    # Create temp work directory
+    output_dir = ctx.get("output_dir")
+    trace_id = str(uuid.uuid4())[:8]
+    if output_dir:
+        work_dir = Path(output_dir) / "trace" / trace_id
+    else:
+        work_dir = Path("/tmp") / f"pov_trace_{trace_id}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"[POV] Tracing blob ({len(blob)} bytes) with fuzzer {fuzzer_name}")
+
+    # Run coverage fuzzer
+    success, lcov_path, msg = run_coverage_fuzzer(fuzzer_name, blob, work_dir)
+
+    if not success:
+        return {
+            "success": False,
+            "reached_target": False,
+            "target_status": {},
+            "executed_functions": [],
+            "total_executed": 0,
+            "error": msg,
+        }
+
+    # Parse LCOV to get executed functions
+    _, _, executed_functions = parse_lcov(lcov_path)
+
+    # Check target functions
+    target_status = {}
+    reached_target = False
+    if target_functions:
+        for func in target_functions:
+            hit = func in executed_functions
+            target_status[func] = hit
+            if hit:
+                reached_target = True
+
+    logger.info(f"[POV] Trace: {len(executed_functions)} functions, target_reached={reached_target}")
+
+    # LLM analysis
+    analysis = _analyze_trace(
+        blob=blob,
+        executed_functions=executed_functions,
+        target_functions=target_functions,
+        reached_target=reached_target,
+        agent_msg=agent_msg,
+        ctx=ctx,
+    )
+
+    return {
+        "success": True,
+        "reached_target": reached_target,
+        "target_status": target_status,
+        "executed_functions": executed_functions[:30],
+        "total_executed": len(executed_functions),
+        "analysis": analysis,
+    }
 
 
 # =============================================================================
@@ -985,19 +1067,19 @@ def _extract_output_summary(output: str) -> str:
         # Truncate to avoid token explosion
         truncated = output[:8000] if len(output) > 8000 else output
 
-        prompt = f"""从以下 fuzzer 输出中提取关键调试信息（2-5行）：
+        prompt = f"""Extract key debugging info (2-5 lines) from this fuzzer output:
 
-重点关注：
-- 协议状态转换（如 "state [0]", "state [1]"）
-- 连接断开原因（如 "Connection disconnected", "Protocol disabled"）
-- 错误信息
+Focus on:
+- Protocol state transitions (e.g. "state [0]", "state [1]")
+- Disconnection reasons (e.g. "Connection disconnected", "Protocol disabled")
+- Error messages
 
-Fuzzer 输出:
+Fuzzer output:
 ```
 {truncated}
 ```
 
-关键信息（简洁，2-5行）:"""
+Key info (brief, 2-5 lines):"""
 
         summary = quick_call(prompt, model=CLAUDE_HAIKU_4_5)
         return summary[:500] if summary else "Failed to extract summary"
@@ -1277,39 +1359,159 @@ def _trace_pov_core(
     }
 
 
+def _load_trace_analysis_prompt() -> str:
+    """Load trace analysis prompt from markdown file."""
+    prompt_path = Path(__file__).parent.parent / "agents" / "prompts" / "trace_analysis_prompt.md"
+    if prompt_path.exists():
+        return prompt_path.read_text()
+    return ""
+
+
+def _analyze_trace(
+    blob: bytes,
+    executed_functions: List[str],
+    target_functions: Optional[List[str]],
+    reached_target: bool,
+    agent_msg: Optional[str],
+    ctx: Dict[str, Any],
+) -> str:
+    """
+    Use LLM to analyze trace results and provide actionable feedback.
+    """
+    try:
+        from ..llms import quick_call, CLAUDE_HAIKU_4_5
+
+        fuzzer_name = ctx.get("fuzzer", "unknown")
+
+        # Blob preview (hex, first 100 bytes)
+        blob_hex = blob[:100].hex()
+        blob_preview = ' '.join(blob_hex[i:i+2] for i in range(0, min(len(blob_hex), 60), 2))
+        if len(blob) > 100:
+            blob_preview += f"... ({len(blob)} bytes total)"
+
+        # Load and format prompt
+        prompt_template = _load_trace_analysis_prompt()
+        prompt = prompt_template.format(
+            target_functions=target_functions or 'not specified',
+            reached_target=reached_target,
+            fuzzer_name=fuzzer_name,
+            blob_preview=blob_preview,
+            executed_functions=', '.join(executed_functions[:20]),
+            total_executed=len(executed_functions),
+            agent_msg=agent_msg or 'Why did execution stop before reaching target?',
+        )
+
+        analysis = quick_call(prompt, model=CLAUDE_HAIKU_4_5)
+        return analysis[:800] if analysis else "Analysis failed"
+    except Exception as e:
+        logger.warning(f"[POV] Trace analysis failed: {e}")
+        return f"Analysis unavailable: {e}"
+
+
 @tools_mcp.tool
 def trace_pov(
-    pov_id: str,
+    generator_code: str,
     target_functions: Optional[List[str]] = None,
+    agent_msg: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Run a POV with coverage instrumentation to see which code paths it executes.
-
-    Use this tool after verify_pov returns no crash to understand:
-    - Which functions did the POV input execute?
-    - Did it reach the target vulnerable function?
-    - Where did execution stop?
-
-    This helps you improve the next POV by understanding the execution path.
+    Trace execution path of a generated blob to debug why it doesn't crash.
 
     Args:
-        pov_id: ID of the POV to trace
-        target_functions: Optional list of function names to check for reachability
+        generator_code: Python code with a generate() function that returns bytes.
+        target_functions: List of function names to check if reached (e.g. ["vulnerable_func"])
+        agent_msg: What you want to know - helps focus the analysis (e.g. "why is magic byte check failing?")
 
     Returns:
         {
             "success": True/False,
-            "executed_functions": ["func1", "func2", ...],
-            "target_reached": {"target_func": True/False, ...},
-            "executed_function_count": N,
-            "error": None or error message,
+            "reached_target": True/False,
+            "target_status": {"func_name": True/False, ...},
+            "executed_functions": [...] (first 30),
+            "total_executed": N,
+            "analysis": "LLM analysis of why execution stopped and what to fix",
         }
     """
     err = _ensure_context()
     if err:
         return err
 
-    return _trace_pov_core(pov_id=pov_id, target_functions=target_functions)
+    # Execute generator code to get blob
+    blobs, error = _execute_generator_code(generator_code, num_variants=1)
+    if error:
+        return {"success": False, "error": f"Generator code error: {error}"}
+    if not blobs:
+        return {"success": False, "error": "Generator code produced no blob"}
+
+    blob = blobs[0]
+
+    # Get context for coverage
+    ctx = _get_current_context()
+    coverage_fuzzer_dir, project_name, src_dir = get_coverage_context()
+    if coverage_fuzzer_dir is None:
+        return {"success": False, "error": "Coverage context not set"}
+
+    fuzzer_name = ctx.get("fuzzer", "")
+    if not fuzzer_name:
+        return {"success": False, "error": "No fuzzer name in context"}
+
+    # Create temp work directory
+    output_dir = ctx.get("output_dir")
+    trace_id = str(uuid.uuid4())[:8]
+    if output_dir:
+        work_dir = Path(output_dir) / "trace" / trace_id
+    else:
+        work_dir = Path("/tmp") / f"pov_trace_{trace_id}"
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info(f"[POV] Tracing blob ({len(blob)} bytes) with fuzzer {fuzzer_name}")
+
+    # Run coverage fuzzer
+    success, lcov_path, msg = run_coverage_fuzzer(fuzzer_name, blob, work_dir)
+
+    if not success:
+        return {
+            "success": False,
+            "reached_target": False,
+            "target_status": {},
+            "executed_functions": [],
+            "total_executed": 0,
+            "error": msg,
+        }
+
+    # Parse LCOV to get executed functions
+    _, _, executed_functions = parse_lcov(lcov_path)
+
+    # Check target functions
+    target_status = {}
+    reached_target = False
+    if target_functions:
+        for func in target_functions:
+            hit = func in executed_functions
+            target_status[func] = hit
+            if hit:
+                reached_target = True
+
+    logger.info(f"[POV] Trace: {len(executed_functions)} functions, target_reached={reached_target}")
+
+    # LLM analysis
+    analysis = _analyze_trace(
+        blob=blob,
+        executed_functions=executed_functions,
+        target_functions=target_functions,
+        reached_target=reached_target,
+        agent_msg=agent_msg,
+        ctx=ctx,
+    )
+
+    return {
+        "success": True,
+        "reached_target": reached_target,
+        "target_status": target_status,
+        "executed_functions": executed_functions[:30],
+        "total_executed": len(executed_functions),
+        "analysis": analysis,
+    }
 
 
 # Export public API

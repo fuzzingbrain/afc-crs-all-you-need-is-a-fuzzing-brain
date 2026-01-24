@@ -727,15 +727,17 @@ def _register_pov_tools(mcp: FastMCP, worker_id: str = None) -> None:
 
     @mcp.tool
     @async_tool
-    def trace_pov(pov_id: str) -> Dict[str, Any]:
+    def trace_pov(generator_code: str, target_functions: list = None, agent_msg: str = None) -> Dict[str, Any]:
         """
-        See which code paths a POV executes (use when no crash).
+        Trace execution path of ONE blob to see which functions it reaches. An LLM will analyze the trace and provide suggestions.
 
         Args:
-            pov_id: ID of the POV to trace
+            generator_code: Python code with generate() -> bytes (single blob, no variant param)
+            target_functions: Functions to check if reached (e.g. ["vuln_func"])
+            agent_msg: Question to the LLM (e.g. "why is size check failing?")
         """
         from .pov import trace_pov_impl
-        return trace_pov_impl(pov_id, worker_id=bound_worker_id)
+        return trace_pov_impl(generator_code, target_functions, agent_msg, worker_id=bound_worker_id)
 
 
 def _register_coverage_tools(mcp: FastMCP) -> None:
