@@ -150,15 +150,16 @@ class WorkspaceSetup:
                 fuzz_tooling_ref = getattr(self.config, 'fuzz_tooling_ref', None)
                 if fuzz_tooling_ref:
                     logger.info(f"Checking out fuzz-tooling to ref: {fuzz_tooling_ref}")
-                    # Fetch the ref first (needed for branch refs)
+                    # Fetch the ref first (needed for shallow clones)
                     subprocess.run(
-                        ["git", "fetch", "origin", fuzz_tooling_ref],
+                        ["git", "fetch", "--depth", "1", "origin", fuzz_tooling_ref],
                         cwd=str(fuzz_tooling_path),
                         capture_output=True,
                         timeout=120,
                     )
+                    # Checkout FETCH_HEAD (the fetched ref)
                     result = subprocess.run(
-                        ["git", "checkout", fuzz_tooling_ref],
+                        ["git", "checkout", "FETCH_HEAD"],
                         cwd=str(fuzz_tooling_path),
                         capture_output=True,
                         text=True,
