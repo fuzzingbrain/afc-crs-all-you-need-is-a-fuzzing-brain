@@ -925,14 +925,20 @@ def _run_fuzzer_docker(
         return result, combined_output
 
     try:
-        # Try with primary image first
-        result, combined_output = run_with_image(docker_image)
+        # FuzzTest fuzzers MUST use base-runner image (only it has 'reproduce' command)
+        if "@" in fuzzer_name:
+            logger.debug(f"[POV] FuzzTest fuzzer detected, using {FALLBACK_DOCKER_IMAGE}")
+            result, combined_output = run_with_image(FALLBACK_DOCKER_IMAGE)
+        else:
+            # Try with primary image first
+            result, combined_output = run_with_image(docker_image)
 
-        # Check for library loading errors - need to fallback
-        if "error while loading shared libraries" in combined_output:
-            if docker_image != FALLBACK_DOCKER_IMAGE:
-                logger.warning(f"[POV] Library error with {docker_image}, falling back to {FALLBACK_DOCKER_IMAGE}")
-                result, combined_output = run_with_image(FALLBACK_DOCKER_IMAGE)
+            # Check for library loading errors - need to fallback
+            # This includes: "error while loading shared libraries" and "GLIBC" version errors
+            if "error while loading shared libraries" in combined_output or "GLIBC" in combined_output:
+                if docker_image != FALLBACK_DOCKER_IMAGE:
+                    logger.warning(f"[POV] Library error with {docker_image}, falling back to {FALLBACK_DOCKER_IMAGE}")
+                    result, combined_output = run_with_image(FALLBACK_DOCKER_IMAGE)
 
         # Check for crash
         crashed = _check_crash(combined_output)
