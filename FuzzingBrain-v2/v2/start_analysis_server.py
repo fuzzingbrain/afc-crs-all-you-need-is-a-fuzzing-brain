@@ -15,7 +15,7 @@ from fuzzingbrain.db import MongoDB
 
 
 async def main():
-    task_id = "71d6dcb8"
+    task_id = "48a64b24"  # 和 preset-sp/*.json 保持一致
     workspace = Path(f"./workspace/lcms_{task_id}")
 
     # 预构建目录

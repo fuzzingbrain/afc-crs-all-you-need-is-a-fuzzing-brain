@@ -361,6 +361,8 @@ Your POV must:
 This code shows EXACTLY how your POV input enters the target library.
 Study it carefully - it determines what input format you must use.
 
+**NOTE: Fuzzer source is already provided below. Do NOT call get_fuzzer_info() unless you forget it.**
+
 ```c
 {fuzzer_source}
 ```
@@ -374,7 +376,7 @@ Key things to identify:
         else:
             message += f"""## Fuzzer Source Code
 
-Fuzzer source not pre-loaded. Use get_fuzzer_info() or get_function_source("{self.fuzzer}") to read it.
+**Fuzzer source not pre-loaded. You MUST call get_fuzzer_info() to read it first.**
 This is CRITICAL - you need to understand how your input enters the library!
 
 """
@@ -415,9 +417,9 @@ This is CRITICAL - you need to understand how your input enters the library!
 3. Design a test input that triggers the {vuln_type} vulnerability
 4. Use create_pov to generate the test input
 5. Use verify_pov to check if it causes a crash
-6. Iterate with different approaches (trace_pov available after 15 attempts)
+6. Iterate with different approaches (trace_pov available after 3 failed attempts)
 
-**GREEDY MODE**: For your first 15 POV attempts, trace_pov is disabled.
+**GREEDY MODE**: For your first 3 POV attempts, trace_pov is disabled.
 Focus on understanding the code and making educated guesses about triggering inputs.
 
 Start by reading the vulnerable function source with get_function_source("{function_name}").
@@ -510,7 +512,7 @@ Start by reading the vulnerable function source with get_function_source("{funct
         self._log(f"Loaded {len(self._tools)} MCP tools", level="INFO")
 
         # Greedy mode: disable trace_pov for first 10 attempts to force direct POV generation
-        self._greedy_attempts_threshold = 10
+        self._greedy_attempts_threshold = 3
 
         # Log model info
         model_name = self.model.id if hasattr(self.model, 'id') else (

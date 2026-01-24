@@ -83,16 +83,16 @@ def set_pov_context(
     ctx = {
         "task_id": task_id,
         "worker_id": worker_id,
-        "output_dir": Path(output_dir) if output_dir else None,
+        "output_dir": Path(output_dir).absolute() if output_dir else None,
         "repos": repos,
         "fuzzer": fuzzer,
         "sanitizer": sanitizer,
         "suspicious_point_id": suspicious_point_id,
         "iteration": 0,
         "attempt": 0,
-        "fuzzer_path": Path(fuzzer_path) if fuzzer_path else None,
+        "fuzzer_path": Path(fuzzer_path).absolute() if fuzzer_path else None,
         "docker_image": docker_image,
-        "workspace_path": Path(workspace_path) if workspace_path else None,
+        "workspace_path": Path(workspace_path).absolute() if workspace_path else None,
         "fuzzer_source": fuzzer_source,
         "fuzzer_manager": fuzzer_manager,
     }
@@ -371,24 +371,50 @@ def trace_pov_impl(
     if not fuzzer_name:
         return {"success": False, "error": "No fuzzer name in context"}
 
-    # Create temp work directory
+    # Create temp work directory (avoid /tmp - Docker Snap can't mount it)
     output_dir = ctx.get("output_dir")
+    workspace_path = ctx.get("workspace_path")
     trace_id = str(uuid.uuid4())[:8]
     if output_dir:
         work_dir = Path(output_dir) / "trace" / trace_id
+    elif workspace_path:
+        work_dir = Path(workspace_path) / ".trace" / trace_id
     else:
-        work_dir = Path("/tmp") / f"pov_trace_{trace_id}"
+        # Last resort: use current working directory
+        work_dir = Path.cwd() / ".pov_trace" / trace_id
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"[POV] Tracing blob ({len(blob)} bytes) with fuzzer {fuzzer_name}")
+    logger.info(f"[POV] Tracing blob ({len(blob)} bytes) with fuzzer {fuzzer_name}, work_dir={work_dir}")
 
     # Run coverage fuzzer
     success, lcov_path, msg = run_coverage_fuzzer(fuzzer_name, blob, work_dir)
 
     if not success:
+        # Check if failure was due to a crash (crash = success!)
+        # Coverage fuzzer crashes when POV triggers the vulnerability,
+        # which means profraw won't be generated, but the POV is actually correct!
+        crashed = any(indicator in msg for indicator in CRASH_INDICATORS)
+        if crashed:
+            vuln_type = _parse_vuln_type(msg)
+            logger.info(f"[POV] Trace detected CRASH! This POV is correct. vuln_type={vuln_type}")
+            return {
+                "success": True,  # Crash means the POV worked!
+                "crashed": True,
+                "vuln_type": vuln_type,
+                "any_target_reached": True,  # Crash means we reached the vulnerable code
+                "target_status": {func: True for func in (target_functions or [])},
+                "executed_functions": [],
+                "total_executed": 0,
+                "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
+                           "Please call create_pov directly to save and verify it.",
+                "sanitizer_output": msg[:3000],
+            }
+
+        # True failure - no crash and no coverage generated
         return {
             "success": False,
-            "reached_target": False,
+            "crashed": False,
+            "any_target_reached": False,
             "target_status": {},
             "executed_functions": [],
             "total_executed": 0,
@@ -400,29 +426,29 @@ def trace_pov_impl(
 
     # Check target functions
     target_status = {}
-    reached_target = False
+    any_target_reached = False
     if target_functions:
         for func in target_functions:
             hit = func in executed_functions
             target_status[func] = hit
             if hit:
-                reached_target = True
+                any_target_reached = True
 
-    logger.info(f"[POV] Trace: {len(executed_functions)} functions, target_reached={reached_target}")
+    logger.info(f"[POV] Trace: {len(executed_functions)} functions, target_reached={any_target_reached}")
 
     # LLM analysis
     analysis = _analyze_trace(
         blob=blob,
         executed_functions=executed_functions,
         target_functions=target_functions,
-        reached_target=reached_target,
+        any_target_reached=any_target_reached,
         agent_msg=agent_msg,
         ctx=ctx,
     )
 
     return {
         "success": True,
-        "reached_target": reached_target,
+        "any_target_reached": any_target_reached,
         "target_status": target_status,
         "executed_functions": executed_functions[:30],
         "total_executed": len(executed_functions),
@@ -1317,12 +1343,15 @@ def _trace_pov_core(
     if not fuzzer_name:
         return {"success": False, "error": "No fuzzer name in POV or context"}
 
-    # Create work directory for coverage output
+    # Create work directory for coverage output (avoid /tmp - Docker Snap can't mount it)
     output_dir = ctx.get("output_dir")
+    workspace_path = ctx.get("workspace_path")
     if output_dir:
         work_dir = Path(output_dir) / "trace" / pov_id[:8]
+    elif workspace_path:
+        work_dir = Path(workspace_path) / ".trace" / pov_id[:8]
     else:
-        work_dir = Path("/tmp") / f"pov_trace_{pov_id[:8]}"
+        work_dir = Path.cwd() / ".pov_trace" / pov_id[:8]
     work_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info(f"[POV] Tracing POV {pov_id[:8]} with fuzzer {fuzzer_name}")
@@ -1331,9 +1360,30 @@ def _trace_pov_core(
     success, lcov_path, msg = run_coverage_fuzzer(fuzzer_name, blob_data, work_dir)
 
     if not success:
+        # Check if failure was due to a crash (crash = success!)
+        # Coverage fuzzer crashes when POV triggers the vulnerability,
+        # which means profraw won't be generated, but the POV is actually correct!
+        crashed = any(indicator in msg for indicator in CRASH_INDICATORS)
+        if crashed:
+            vuln_type = _parse_vuln_type(msg)
+            logger.info(f"[POV] Trace detected CRASH! POV {pov_id[:8]} is correct. vuln_type={vuln_type}")
+            return {
+                "success": True,  # Crash means the POV worked!
+                "crashed": True,
+                "vuln_type": vuln_type,
+                "executed_functions": [],
+                "target_reached": {func: True for func in (target_functions or [])},
+                "executed_function_count": 0,
+                "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
+                           "Please call create_pov directly to save and verify it.",
+                "sanitizer_output": msg[:3000],
+            }
+
+        # True failure - no crash and no coverage generated
         logger.warning(f"[POV] Trace failed: {msg}")
         return {
             "success": False,
+            "crashed": False,
             "executed_functions": [],
             "target_reached": {},
             "executed_function_count": 0,
@@ -1371,7 +1421,7 @@ def _analyze_trace(
     blob: bytes,
     executed_functions: List[str],
     target_functions: Optional[List[str]],
-    reached_target: bool,
+    any_target_reached: bool,
     agent_msg: Optional[str],
     ctx: Dict[str, Any],
 ) -> str:
@@ -1393,7 +1443,7 @@ def _analyze_trace(
         prompt_template = _load_trace_analysis_prompt()
         prompt = prompt_template.format(
             target_functions=target_functions or 'not specified',
-            reached_target=reached_target,
+            any_target_reached=any_target_reached,
             fuzzer_name=fuzzer_name,
             blob_preview=blob_preview,
             executed_functions=', '.join(executed_functions[:20]),
@@ -1425,7 +1475,7 @@ def trace_pov(
     Returns:
         {
             "success": True/False,
-            "reached_target": True/False,
+            "any_target_reached": True/False,
             "target_status": {"func_name": True/False, ...},
             "executed_functions": [...] (first 30),
             "total_executed": N,
@@ -1455,24 +1505,49 @@ def trace_pov(
     if not fuzzer_name:
         return {"success": False, "error": "No fuzzer name in context"}
 
-    # Create temp work directory
+    # Create temp work directory (avoid /tmp - Docker Snap can't mount it)
     output_dir = ctx.get("output_dir")
+    workspace_path = ctx.get("workspace_path")
     trace_id = str(uuid.uuid4())[:8]
     if output_dir:
         work_dir = Path(output_dir) / "trace" / trace_id
+    elif workspace_path:
+        work_dir = Path(workspace_path) / ".trace" / trace_id
     else:
-        work_dir = Path("/tmp") / f"pov_trace_{trace_id}"
+        work_dir = Path.cwd() / ".pov_trace" / trace_id
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"[POV] Tracing blob ({len(blob)} bytes) with fuzzer {fuzzer_name}")
+    logger.info(f"[POV] Tracing blob ({len(blob)} bytes) with fuzzer {fuzzer_name}, work_dir={work_dir}")
 
     # Run coverage fuzzer
     success, lcov_path, msg = run_coverage_fuzzer(fuzzer_name, blob, work_dir)
 
     if not success:
+        # Check if failure was due to a crash (crash = success!)
+        # Coverage fuzzer crashes when POV triggers the vulnerability,
+        # which means profraw won't be generated, but the POV is actually correct!
+        crashed = any(indicator in msg for indicator in CRASH_INDICATORS)
+        if crashed:
+            vuln_type = _parse_vuln_type(msg)
+            logger.info(f"[POV] Trace detected CRASH! This POV is correct. vuln_type={vuln_type}")
+            return {
+                "success": True,  # Crash means the POV worked!
+                "crashed": True,
+                "vuln_type": vuln_type,
+                "any_target_reached": True,  # Crash means we reached the vulnerable code
+                "target_status": {func: True for func in (target_functions or [])},
+                "executed_functions": [],
+                "total_executed": 0,
+                "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
+                           "Please call create_pov directly to save and verify it.",
+                "sanitizer_output": msg[:3000],
+            }
+
+        # True failure - no crash and no coverage generated
         return {
             "success": False,
-            "reached_target": False,
+            "crashed": False,
+            "any_target_reached": False,
             "target_status": {},
             "executed_functions": [],
             "total_executed": 0,
@@ -1484,29 +1559,29 @@ def trace_pov(
 
     # Check target functions
     target_status = {}
-    reached_target = False
+    any_target_reached = False
     if target_functions:
         for func in target_functions:
             hit = func in executed_functions
             target_status[func] = hit
             if hit:
-                reached_target = True
+                any_target_reached = True
 
-    logger.info(f"[POV] Trace: {len(executed_functions)} functions, target_reached={reached_target}")
+    logger.info(f"[POV] Trace: {len(executed_functions)} functions, target_reached={any_target_reached}")
 
     # LLM analysis
     analysis = _analyze_trace(
         blob=blob,
         executed_functions=executed_functions,
         target_functions=target_functions,
-        reached_target=reached_target,
+        any_target_reached=any_target_reached,
         agent_msg=agent_msg,
         ctx=ctx,
     )
 
     return {
         "success": True,
-        "reached_target": reached_target,
+        "any_target_reached": any_target_reached,
         "target_status": target_status,
         "executed_functions": executed_functions[:30],
         "total_executed": len(executed_functions),

@@ -23,13 +23,13 @@ sp1 = SuspiciousPoint(
 sp2 = SuspiciousPoint(
     task_id='48a64b24',
     function_name='IsProperColorSpace',
-    description='Buffer over-read cmsxform.c:1073-1074',
-    vuln_type='buffer-over-read',
+    description='Stack buffer overflow: IsProperColorSpace (cmsxform.c:1077) returns TRUE for PT_ANY without validating channel count, causing stack-buffer-overflow in UnrollChunkyBytes (cmspack.c:130) via cmsTransform2DeviceLink → cmsDoTransform → CachedXFORM',
+    vuln_type='stack-buffer-overflow',
     score=0.90,
     is_important=True,
     status=SPStatus.PENDING_VERIFY.value,
     sources=[{'harness_name': 'cms_virtual_profile_fuzzer', 'sanitizer': 'address'}],
-    pov_guidance='Target cmsxform.c:1073-1074',
+    pov_guidance='Create ICC profile with PT_ANY colorspace and mismatched channel count. Crash path: cmsTransform2DeviceLink → CreateNamedColorDevicelink → cmsDoTransform → CachedXFORM → UnrollChunkyBytes',
 )
 
 repos.suspicious_points.insert(sp1)

@@ -18,6 +18,15 @@ import os
 import re
 import subprocess
 from contextvars import ContextVar
+
+try:
+    import tiktoken
+    _tokenizer = tiktoken.encoding_for_model("gpt-4")
+    def count_tokens(text: str) -> int:
+        return len(_tokenizer.encode(text))
+except ImportError:
+    def count_tokens(text: str) -> int:
+        return len(text) // 4  # fallback: ~4 chars per token
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -247,9 +256,34 @@ def get_file_content(
 
     try:
         with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
-            lines = f.readlines()
+            content_raw = f.read()
 
+        lines = content_raw.splitlines(keepends=True)
         total_lines = len(lines)
+        total_tokens = count_tokens(content_raw)
+
+        # Limits
+        MAX_TOKENS_THRESHOLD = 100000  # Consider "too large" if > 100k tokens
+        MAX_LINES_OUTPUT = 200
+        MAX_TOKENS_OUTPUT = 5000
+
+        truncated = False
+        truncate_reason = ""
+
+        # If no range specified and file is too large, truncate
+        if start_line is None and end_line is None and total_tokens > MAX_TOKENS_THRESHOLD:
+            truncated = True
+            # Truncate by lines first (max 200)
+            if total_lines > MAX_LINES_OUTPUT:
+                lines = lines[:MAX_LINES_OUTPUT]
+            # Then check token limit
+            truncated_content = "".join(lines)
+            truncated_tokens = count_tokens(truncated_content)
+            if truncated_tokens > MAX_TOKENS_OUTPUT:
+                # Further truncate by tokens
+                while len(lines) > 1 and count_tokens("".join(lines)) > MAX_TOKENS_OUTPUT:
+                    lines = lines[:-1]
+            truncate_reason = f"File too large ({total_tokens} tokens, {total_lines} lines). Truncated to {len(lines)} lines (~{count_tokens(''.join(lines))} tokens). Use start_line/end_line to read specific ranges."
 
         # Apply line range if specified
         if start_line is not None or end_line is not None:
@@ -274,12 +308,18 @@ def get_file_content(
             }
         else:
             content = "".join(lines)
-            return {
+            result = {
                 "success": True,
                 "content": content,
                 "path": str(full_path.relative_to(repo_path)),
                 "total_lines": total_lines,
+                "total_tokens": total_tokens,
+                "lines_returned": len(lines),
             }
+            if truncated:
+                result["truncated"] = True
+                result["warning"] = truncate_reason
+            return result
 
     except Exception as e:
         return {
@@ -492,9 +532,13 @@ def search_code(
                     file_path_str, line_no, content = match.groups()
                     is_match_line = ':' in line[:len(file_path_str)+len(line_no)+2]
 
-                    # Make file path relative to workspace for clarity
+                    # Make file path relative to repo_path for consistency with get_file_content
                     full_file_path = search_path / file_path_str
-                    if ws_path and full_file_path.is_relative_to(ws_path):
+                    repo_path = _repo_path.get()
+                    if repo_path and full_file_path.is_relative_to(repo_path):
+                        display_path = str(full_file_path.relative_to(repo_path))
+                    elif ws_path and full_file_path.is_relative_to(ws_path):
+                        # Fallback to workspace-relative if not in repo
                         display_path = str(full_file_path.relative_to(ws_path))
                     else:
                         display_path = file_path_str
@@ -644,9 +688,13 @@ def search_code_impl(
                     file_path_str, line_no, content = match.groups()
                     is_match_line = ':' in line[:len(file_path_str)+len(line_no)+2]
 
-                    # Make file path relative to workspace for clarity
+                    # Make file path relative to repo_path for consistency with get_file_content
                     full_file_path = search_path / file_path_str
-                    if ws_path and full_file_path.is_relative_to(ws_path):
+                    repo_path = _repo_path.get()
+                    if repo_path and full_file_path.is_relative_to(repo_path):
+                        display_path = str(full_file_path.relative_to(repo_path))
+                    elif ws_path and full_file_path.is_relative_to(ws_path):
+                        # Fallback to workspace-relative if not in repo
                         display_path = str(full_file_path.relative_to(ws_path))
                     else:
                         display_path = file_path_str
