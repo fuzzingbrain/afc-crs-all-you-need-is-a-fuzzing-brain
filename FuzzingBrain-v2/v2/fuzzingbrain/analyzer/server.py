@@ -28,6 +28,7 @@ from .protocol import (
 from .builder import AnalyzerBuilder
 from .importer import StaticAnalysisImporter, import_from_prebuild
 from .models import AnalyzeResult, FuzzerInfo
+from ..analysis import extract_functions_from_file
 from ..db import MongoDB, init_repos
 from ..core import Config
 from ..core.logging import get_analyzer_banner_and_header
@@ -732,12 +733,103 @@ class AnalysisServer:
             return []
         return await self._run_sync(self._search_functions_sync, pattern, limit)
 
-    async def _get_function_source(self, name: str) -> Optional[str]:
-        """Get function source code."""
-        func = await self._get_function(name)
-        if func:
-            return func.get("content", "")
+    def _extract_source_with_treesitter(self, file_path: str, func_name: str) -> Optional[str]:
+        """
+        Extract function source using tree-sitter as fallback.
+
+        Args:
+            file_path: Path to source file (from function metadata)
+            func_name: Function name to extract
+
+        Returns:
+            Function source code or None if extraction fails
+        """
+        if not file_path:
+            return None
+
+        # Try to resolve the file path
+        resolved_path = None
+
+        # Try direct path
+        if Path(file_path).exists():
+            resolved_path = Path(file_path)
+        else:
+            # Try relative to task_path/repo
+            repo_path = self.task_path / "repo"
+
+            # Try stripping /src/ prefix (common in OSS-Fuzz)
+            relative = file_path.lstrip("/")
+            candidates = [
+                repo_path / relative,
+                self.task_path / relative,
+            ]
+
+            if file_path.startswith("/src/"):
+                stripped = file_path[5:]  # Remove "/src/"
+                parts = stripped.split("/", 1)
+                if len(parts) > 1:
+                    candidates.append(repo_path / parts[1])
+                candidates.append(repo_path / stripped)
+
+            for candidate in candidates:
+                if candidate.exists():
+                    resolved_path = candidate
+                    break
+
+            # Last resort: search by filename
+            if not resolved_path:
+                filename = Path(file_path).name
+                for found in repo_path.rglob(filename):
+                    resolved_path = found
+                    break
+
+        if not resolved_path or not resolved_path.exists():
+            return None
+
+        try:
+            # Extract all functions from file
+            extracted = extract_functions_from_file(str(resolved_path))
+
+            # Find the matching function
+            for func_info in extracted:
+                if func_info.name == func_name:
+                    return func_info.content
+
+            # Try without OSS_FUZZ_ prefix
+            for prefix in ["OSS_FUZZ_", "FUZZ_", "ossfuzz_"]:
+                if func_name.startswith(prefix):
+                    stripped_name = func_name[len(prefix):]
+                    for func_info in extracted:
+                        if func_info.name == stripped_name:
+                            return func_info.content
+
+        except Exception as e:
+            self._log(f"Tree-sitter extraction failed for {func_name} in {file_path}: {e}", "DEBUG")
+
         return None
+
+    async def _get_function_source(self, name: str) -> Optional[str]:
+        """Get function source code with tree-sitter fallback."""
+        func = await self._get_function(name)
+        if not func:
+            return None
+
+        content = func.get("content", "")
+
+        # If content is empty, try tree-sitter extraction
+        if not content:
+            file_path = func.get("file_path", "")
+            if file_path:
+                self._log(f"Content empty for {name}, trying tree-sitter fallback", "DEBUG")
+                content = await self._run_sync(
+                    self._extract_source_with_treesitter,
+                    file_path,
+                    name
+                )
+                if content:
+                    self._log(f"Tree-sitter extracted {len(content)} chars for {name}", "DEBUG")
+
+        return content
 
     async def _get_fuzzer_source(self, fuzzer_name: str) -> dict:
         """Get fuzzer/harness source code.
