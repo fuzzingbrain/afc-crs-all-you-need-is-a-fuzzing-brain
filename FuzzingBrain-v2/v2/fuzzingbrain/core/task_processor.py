@@ -595,10 +595,7 @@ class TaskProcessor:
         task.mark_running()
         self.repos.tasks.save(task)
 
-        # Initialize cache
-        from .workspace_cache import WorkspaceCache
-        workspace_root = Path(self.config.workspace).parent if self.config.workspace else Path("workspace")
-        cache = WorkspaceCache(workspace_root / "cache")
+        # Cache disabled - only using prebuild for static analysis
         cache_restored = False
         cache_commit = None
 
@@ -611,34 +608,8 @@ class TaskProcessor:
             if not success:
                 raise Exception(f"Workspace setup failed: {msg}")
 
-            # Step 1.5: Check for cached workspace
-            project_name = self.config.ossfuzz_project or task.project_name
-            cache_commit = self._get_commit_hash()
-
-            if cache_commit:
-                cached_path = cache.find_cache(
-                    project_name,
-                    cache_commit,
-                    self.config.sanitizers,
-                )
-                if cached_path:
-                    logger.info(f"Step 2-5: Restoring from cache: {cached_path.name}")
-                    if cache.restore_to(cached_path, Path(task.task_path)):
-                        cache_restored = True
-                        # Update task paths after restore
-                        task.fuzz_tooling_path = str(Path(task.task_path) / "fuzz-tooling")
-                        task.is_fuzz_tooling_provided = True
-                        self.repos.tasks.save(task)
-
-                        # Restore database data (functions, fuzzers)
-                        if cache.restore_db_data(cached_path, task.task_id, self.repos):
-                            logger.info("Database data restored from cache")
-                        else:
-                            logger.warning("Failed to restore database data from cache")
-
-                        logger.info("Workspace restored from cache, skipping build steps")
-
-            if not cache_restored:
+            # Cache disabled - always do fresh setup
+            if True:
                 # Step 2: Clone repository
                 logger.info("Step 2: Cloning repository")
                 success, msg = workspace_setup.clone_repository()
@@ -806,18 +777,7 @@ class TaskProcessor:
                 logger.info(f"Build duration: {analyze_result.build_duration_seconds:.1f}s")
                 logger.info(f"Static analysis: {analyze_result.reachable_functions_count} functions")
 
-                # Save to cache after successful build
-                if cache_commit:
-                    saved_cache_path = cache.save_from(
-                        Path(task.task_path),
-                        project_name,
-                        cache_commit,
-                        self.config.sanitizers,
-                    )
-                    # Save database data (functions, fuzzers) to cache
-                    # This is done after all fuzzers are saved to database
-                    if saved_cache_path:
-                        self._pending_cache_save = (saved_cache_path, task.task_id)
+                # Cache disabled - skip saving
 
             # Set shared coverage fuzzer path for tools
             if analyze_result.coverage_fuzzer_path:
@@ -867,15 +827,6 @@ class TaskProcessor:
 
             # Log fuzzer build summary
             self._log_fuzzer_summary(fuzzers, project_name)
-
-            # Save database data to cache (after all fuzzers are saved)
-            if hasattr(self, '_pending_cache_save') and self._pending_cache_save:
-                saved_cache_path, cache_task_id = self._pending_cache_save
-                if cache.save_db_data(saved_cache_path, cache_task_id, self.repos):
-                    logger.info("Database data saved to cache")
-                else:
-                    logger.warning("Failed to save database data to cache")
-                self._pending_cache_save = None
 
             # Store analyze_result for dispatcher to use
             self._analyze_result = analyze_result
