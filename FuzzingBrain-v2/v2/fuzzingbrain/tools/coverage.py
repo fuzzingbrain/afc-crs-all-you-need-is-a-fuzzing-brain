@@ -231,18 +231,39 @@ def run_coverage_fuzzer(
 
     def run_fuzzer_with_image(image: str):
         """Run coverage fuzzer with specified docker image."""
-        docker_run = [
-            "docker", "run", "--rm", "--platform", "linux/amd64",
-            "-e", "FUZZING_ENGINE=libfuzzer",
-            "-e", "ARCHITECTURE=x86_64",
-            "-e", "LLVM_PROFILE_FILE=/out/coverage.profraw",
-            "-v", f"{out_dir.absolute()}:/out",
-            "-v", f"{real_fuzzer_dir}:/fuzzers:ro",
-            image,
-            f"/fuzzers/{real_fuzzer_name}",
-            "-runs=1",
-            "/out/corpus",
-        ]
+        # Check if this is a FuzzTest fuzzer (format: binary@TestSuite.TestName)
+        if "@" in real_fuzzer_name:
+            # FuzzTest: need --fuzz=TestName and -- separator
+            binary_name, test_name = real_fuzzer_name.split("@", 1)
+            docker_run = [
+                "docker", "run", "--rm", "--platform", "linux/amd64",
+                "--entrypoint", "",
+                "-e", "FUZZING_ENGINE=libfuzzer",
+                "-e", "ARCHITECTURE=x86_64",
+                "-e", "LLVM_PROFILE_FILE=/out/coverage.profraw",
+                "-v", f"{out_dir.absolute()}:/out",
+                "-v", f"{real_fuzzer_dir}:/fuzzers:ro",
+                image,
+                f"/fuzzers/{binary_name}",
+                f"--fuzz={test_name}",
+                "--",
+                "-runs=1",
+                "/out/corpus",
+            ]
+        else:
+            # Standard libFuzzer
+            docker_run = [
+                "docker", "run", "--rm", "--platform", "linux/amd64",
+                "-e", "FUZZING_ENGINE=libfuzzer",
+                "-e", "ARCHITECTURE=x86_64",
+                "-e", "LLVM_PROFILE_FILE=/out/coverage.profraw",
+                "-v", f"{out_dir.absolute()}:/out",
+                "-v", f"{real_fuzzer_dir}:/fuzzers:ro",
+                image,
+                f"/fuzzers/{real_fuzzer_name}",
+                "-runs=1",
+                "/out/corpus",
+            ]
 
         return subprocess.run(
             docker_run,
