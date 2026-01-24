@@ -25,6 +25,7 @@ from typing import Dict, Any, List
 from .pov_base import POVBaseStrategy
 from ...core.models import SuspiciousPoint
 from ...agents import DirectionPlanningAgent, FullscanSPAgent, FunctionAnalysisAgent, LargeFunctionAnalysisAgent
+from ...llms.models import CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5
 from ...tools.directions import set_direction_context
 from ...tools.analyzer import set_analyzer_context
 from ...tools.suspicious_points import set_sp_context
@@ -130,6 +131,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         planning_agent = DirectionPlanningAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
+            model=CLAUDE_OPUS_4_5,  # Force Opus for direction planning
             task_id=self.task_id,
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
@@ -165,6 +167,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         planning_agent = DirectionPlanningAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
+            model=CLAUDE_OPUS_4_5,  # Force Opus for direction planning
             task_id=self.task_id,
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
@@ -385,6 +388,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         planning_agent = DirectionPlanningAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
+            model=CLAUDE_OPUS_4_5,  # Force Opus for direction planning
             task_id=self.task_id,
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
@@ -879,6 +883,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                 callees=callees,
                 fuzzer=self.fuzzer,
                 sanitizer=self.sanitizer,
+                model=CLAUDE_OPUS_4_5,  # Force Opus for large function analysis
                 direction_id=direction_id,
                 task_id=self.task_id,
                 worker_id=f"{self.worker_id}_func_{index}",
@@ -894,6 +899,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                 callees=callees,
                 fuzzer=self.fuzzer,
                 sanitizer=self.sanitizer,
+                model=CLAUDE_SONNET_4_5,  # Force Sonnet for function analysis
                 direction_id=direction_id,
                 task_id=self.task_id,
                 worker_id=f"{self.worker_id}_func_{index}",
@@ -1021,6 +1027,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                     worker_id=self.worker_id,
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
+                    model=CLAUDE_OPUS_4_5,  # Force Opus for seed generation
                     fuzzer_manager=fuzzer_manager,
                     repos=self.repos,
                     fuzzer_source=fuzzer_code,

@@ -23,16 +23,16 @@ For EACH tool call:
 
 If agent USED it:
 ```
-Tool: {tool_name}({key_args})
-Signature: {function_signature}
+Tool: <tool_name>(<key_args>)
+Signature: <function_signature>
 Agent noted:
-  - Line X: {code agent mentioned}
-  - {agent's finding about this}
+  - Line X: <code agent mentioned>
+  - <agent's finding>
 ```
 
 If agent IGNORED it:
 ```
-Tool: {tool_name}({key_args})
+Tool: <tool_name>(<key_args>)
 [checked, not relevant]
 ```
 
