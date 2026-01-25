@@ -25,6 +25,7 @@ from loguru import logger
 from . import tools_mcp
 from .coverage import (
     run_coverage_fuzzer,
+    run_gdb_trace,
     parse_lcov,
     get_coverage_context,
 )
@@ -342,6 +343,13 @@ def trace_pov_impl(
     """
     Implementation of trace_pov (without MCP decorator).
 
+    Flow:
+    1. Execute generator_code to get blob
+    2. Run ASAN fuzzer to detect crash (_run_fuzzer_docker)
+    3. If crashed -> return success with processor="asan"
+    4. If no crash -> run GDB trace for function tracking (processor="gdb")
+    5. If GDB fails -> fallback to coverage fuzzer (processor="cov")
+
     Args:
         generator_code: Python code with generate() function that returns bytes
         target_functions: List of function names to check if reached
@@ -352,7 +360,9 @@ def trace_pov_impl(
     if err:
         return err
 
-    # Execute generator code to get blob
+    # =========================================================================
+    # Step 1: Execute generator code to get blob
+    # =========================================================================
     blobs, error = _execute_generator_code(generator_code, num_variants=1)
     if error:
         return {"success": False, "error": f"Generator code error: {error}"}
@@ -361,17 +371,20 @@ def trace_pov_impl(
 
     blob = blobs[0]
 
-    # Get context for coverage
+    # Get context
     ctx = _get_context_by_worker_id(worker_id) if worker_id else _get_current_context()
     coverage_fuzzer_dir, project_name, src_dir = get_coverage_context()
-    if coverage_fuzzer_dir is None:
-        return {"success": False, "error": "Coverage context not set"}
 
     fuzzer_name = ctx.get("fuzzer", "")
     if not fuzzer_name:
         return {"success": False, "error": "No fuzzer name in context"}
 
-    # Create temp work directory (avoid /tmp - Docker Snap can't mount it)
+    # Get ASAN fuzzer path and docker image for verification
+    fuzzer_path = ctx.get("fuzzer_path")
+    docker_image = ctx.get("docker_image")
+    sanitizer = ctx.get("sanitizer", "address")
+
+    # Create work directory (avoid /tmp - Docker Snap can't mount it)
     output_dir = ctx.get("output_dir")
     workspace_path = ctx.get("workspace_path")
     trace_id = str(uuid.uuid4())[:8]
@@ -380,63 +393,172 @@ def trace_pov_impl(
     elif workspace_path:
         work_dir = Path(workspace_path) / ".trace" / trace_id
     else:
-        # Last resort: use current working directory
         work_dir = Path.cwd() / ".pov_trace" / trace_id
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"[POV] Tracing blob ({len(blob)} bytes) with fuzzer {fuzzer_name}, work_dir={work_dir}")
+    # Save blob to file for fuzzer
+    blob_path = work_dir / "input.bin"
+    blob_path.write_bytes(blob)
 
-    # Run coverage fuzzer
-    success, lcov_path, msg = run_coverage_fuzzer(fuzzer_name, blob, work_dir)
+    logger.info(f"[POV] trace_pov: blob={len(blob)} bytes, fuzzer={fuzzer_name}, work_dir={work_dir}")
 
-    if not success:
-        # Check if failure was due to a crash (crash = success!)
-        # Coverage fuzzer crashes when POV triggers the vulnerability,
-        # which means profraw won't be generated, but the POV is actually correct!
-        crashed = any(indicator in msg for indicator in CRASH_INDICATORS)
-        if crashed:
-            vuln_type = _parse_vuln_type(msg)
-            logger.info(f"[POV] Trace detected CRASH! This POV is correct. vuln_type={vuln_type}")
-            return {
-                "success": True,  # Crash means the POV worked!
-                "crashed": True,
-                "vuln_type": vuln_type,
-                "any_target_reached": True,  # Crash means we reached the vulnerable code
-                "target_status": {func: True for func in (target_functions or [])},
-                "executed_functions": [],
-                "total_executed": 0,
-                "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
-                           "Please call create_pov directly to save and verify it.",
-                "sanitizer_output": msg[:3000],
-            }
+    # =========================================================================
+    # Step 2: Run ASAN fuzzer to detect crash (_run_fuzzer_docker)
+    # =========================================================================
+    if fuzzer_path and docker_image:
+        fuzzer_path = Path(fuzzer_path)
+        if fuzzer_path.exists():
+            logger.info(f"[POV] Step 2: Running ASAN fuzzer to detect crash...")
+            success, crashed, output, error = _run_fuzzer_docker(
+                fuzzer_path=fuzzer_path,
+                blob_path=blob_path,
+                docker_image=docker_image,
+                sanitizer=sanitizer,
+            )
 
-        # True failure - no crash and no coverage generated
-        return {
-            "success": False,
-            "crashed": False,
-            "any_target_reached": False,
-            "target_status": {},
-            "executed_functions": [],
-            "total_executed": 0,
-            "error": msg,
-        }
+            if success and crashed:
+                # =========================================================
+                # CRASH DETECTED! Return immediately with processor="asan"
+                # =========================================================
+                vuln_type = _parse_vuln_type(output)
+                hit_funcs = _extract_hit_functions(output, target_functions or [])
+                logger.info(f"[POV] ASAN detected CRASH! vuln_type={vuln_type}, hit_funcs={hit_funcs}")
+                return {
+                    "success": True,
+                    "crashed": True,
+                    "processor": "asan",
+                    "vuln_type": vuln_type,
+                    "any_target_reached": len(hit_funcs) > 0,
+                    "target_status": {func: (func in hit_funcs) for func in (target_functions or [])},
+                    "executed_functions": hit_funcs,
+                    "total_executed": len(hit_funcs),
+                    "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
+                               "Please call create_pov directly to save and verify it.",
+                    "sanitizer_output": output[:3000],
+                }
 
-    # Parse LCOV to get executed functions
-    _, _, executed_functions = parse_lcov(lcov_path)
+            logger.info(f"[POV] ASAN fuzzer: no crash detected, continuing to GDB trace...")
+        else:
+            logger.warning(f"[POV] ASAN fuzzer not found: {fuzzer_path}, skipping crash detection")
+    else:
+        logger.warning(f"[POV] fuzzer_path or docker_image not set, skipping ASAN crash detection")
 
-    # Check target functions
+    # =========================================================================
+    # Step 3: No crash - Run GDB trace for function tracking (processor="gdb")
+    # =========================================================================
+    executed_functions = []
     target_status = {}
     any_target_reached = False
-    if target_functions:
-        for func in target_functions:
-            hit = func in executed_functions
-            target_status[func] = hit
-            if hit:
-                any_target_reached = True
+    gdb_failed = False
 
-    logger.info(f"[POV] Trace: {len(executed_functions)} functions, target_reached={any_target_reached}")
+    logger.info(f"[POV] Step 3: Running GDB trace for function tracking...")
+    gdb_success, hit_functions, gdb_crashed, gdb_output = run_gdb_trace(
+        fuzzer_name, blob, work_dir, target_functions
+    )
 
-    # LLM analysis
+    if gdb_success:
+        if gdb_crashed:
+            # GDB detected crash (shouldn't happen if ASAN didn't, but handle it)
+            vuln_type = _parse_vuln_type(gdb_output)
+            logger.info(f"[POV] GDB detected CRASH! vuln_type={vuln_type}, hit_funcs={hit_functions}")
+            return {
+                "success": True,
+                "crashed": True,
+                "processor": "gdb",
+                "vuln_type": vuln_type,
+                "any_target_reached": len(hit_functions) > 0,
+                "target_status": {func: (func in hit_functions) for func in (target_functions or [])},
+                "executed_functions": hit_functions,
+                "total_executed": len(hit_functions),
+                "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
+                           "Please call create_pov directly to save and verify it.",
+                "sanitizer_output": gdb_output[:3000],
+            }
+
+        # GDB succeeded without crash - use breakpoint results
+        if target_functions:
+            for func in target_functions:
+                hit = func in hit_functions
+                target_status[func] = hit
+                if hit:
+                    any_target_reached = True
+
+        executed_functions = hit_functions
+        logger.info(f"[POV] GDB trace complete: {len(hit_functions)} functions hit, target_reached={any_target_reached}")
+    else:
+        logger.warning(f"[POV] GDB trace failed: {gdb_output[:200]}, falling back to coverage...")
+        gdb_failed = True
+
+    # =========================================================================
+    # Step 4: GDB failed - Fallback to coverage fuzzer (processor="cov")
+    # =========================================================================
+    if gdb_failed:
+        if coverage_fuzzer_dir is None:
+            return {
+                "success": False,
+                "crashed": False,
+                "processor": "none",
+                "any_target_reached": False,
+                "target_status": {func: False for func in (target_functions or [])},
+                "executed_functions": [],
+                "total_executed": 0,
+                "error": "GDB failed and coverage context not set",
+            }
+
+        logger.info(f"[POV] Step 4: Running coverage fuzzer as fallback...")
+        success, lcov_path, msg = run_coverage_fuzzer(fuzzer_name, blob, work_dir)
+
+        if not success:
+            # Check if coverage fuzzer crashed
+            crashed = any(indicator in msg for indicator in CRASH_INDICATORS)
+            if crashed:
+                vuln_type = _parse_vuln_type(msg)
+                hit_funcs = _extract_hit_functions(msg, target_functions or [])
+                logger.info(f"[POV] Coverage detected CRASH! vuln_type={vuln_type}, hit_funcs={hit_funcs}")
+                return {
+                    "success": True,
+                    "crashed": True,
+                    "processor": "cov",
+                    "vuln_type": vuln_type,
+                    "any_target_reached": len(hit_funcs) > 0,
+                    "target_status": {func: (func in hit_funcs) for func in (target_functions or [])},
+                    "executed_functions": hit_funcs,
+                    "total_executed": len(hit_funcs),
+                    "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
+                               "Please call create_pov directly to save and verify it.",
+                    "sanitizer_output": msg[:3000],
+                }
+
+            # True failure
+            return {
+                "success": False,
+                "crashed": False,
+                "processor": "cov",
+                "any_target_reached": False,
+                "target_status": {func: False for func in (target_functions or [])},
+                "executed_functions": [],
+                "total_executed": 0,
+                "error": msg,
+            }
+
+        # Parse LCOV to get executed functions
+        _, _, executed_functions = parse_lcov(lcov_path)
+
+        # Check target functions
+        target_status = {}
+        any_target_reached = False
+        if target_functions:
+            for func in target_functions:
+                hit = func in executed_functions
+                target_status[func] = hit
+                if hit:
+                    any_target_reached = True
+
+        logger.info(f"[POV] Coverage trace: {len(executed_functions)} functions, target_reached={any_target_reached}")
+
+    # =========================================================================
+    # Return result with LLM analysis
+    # =========================================================================
     analysis = _analyze_trace(
         blob=blob,
         executed_functions=executed_functions,
@@ -448,6 +570,8 @@ def trace_pov_impl(
 
     return {
         "success": True,
+        "crashed": False,
+        "processor": "cov" if gdb_failed else "gdb",
         "any_target_reached": any_target_reached,
         "target_status": target_status,
         "executed_functions": executed_functions[:30],
@@ -599,6 +723,12 @@ def _create_pov_core(
     task_id = ctx["task_id"]
     ctx_worker_id = ctx["worker_id"]
     output_dir = ctx["output_dir"]
+
+    # TEST_ONLY
+    with open("/tmp/pov_debug.log", "a") as f:
+        f.write(f"\n=== _create_pov_core ===\n")
+        f.write(f"output_dir: {output_dir}\n")
+        f.write(f"docker_image: {ctx.get('docker_image')}\n")
     repos = ctx["repos"]
     fuzzer = ctx.get("fuzzer", "")
     sanitizer = ctx.get("sanitizer", "address")
@@ -921,6 +1051,34 @@ def _check_crash(output: str) -> bool:
     return False
 
 
+def _extract_hit_functions(output: str, target_functions: List[str]) -> List[str]:
+    """
+    Extract which target functions appear in crash backtrace.
+
+    Parses backtrace lines like:
+        #0 0x... in function_name /path/file.c:line:col
+        #1 0x... in another_func ...
+
+    Args:
+        output: Sanitizer crash output
+        target_functions: List of function names to look for
+
+    Returns:
+        List of target functions that appear in the backtrace
+    """
+    if not target_functions:
+        return []
+
+    hit_functions = []
+    for line in output.split('\n'):
+        # Look for backtrace lines: "#N 0x... in func_name"
+        if ' in ' in line and ('#' in line or 'at ' in line):
+            for func in target_functions:
+                if func in line and func not in hit_functions:
+                    hit_functions.append(func)
+    return hit_functions
+
+
 def _verify_blob_on_fuzzer(
     blob: bytes,
     fuzzer_path: Path,
@@ -1018,7 +1176,15 @@ def _run_fuzzer_docker(
             f"/work/{temp_blob.name}",
         ]
 
-        logger.debug(f"[POV] Running Docker: {' '.join(docker_cmd)}")
+        logger.info(f"[POV] Running Docker: {' '.join(docker_cmd)}")
+
+        # TEST_ONLY: 写日志到文件
+        with open("/tmp/pov_debug.log", "a") as f:
+            f.write(f"\n=== _run_fuzzer_docker ===\n")
+            f.write(f"fuzzer_path: {fuzzer_path}\n")
+            f.write(f"blob_path: {blob_path}\n")
+            f.write(f"docker_image: {docker_image}\n")
+            f.write(f"docker_cmd: {' '.join(docker_cmd)}\n")
 
         result = subprocess.run(
             docker_cmd,
@@ -1030,6 +1196,13 @@ def _run_fuzzer_docker(
         )
 
         combined_output = result.stderr + "\n" + result.stdout
+
+        # TEST_ONLY: 写结果到文件
+        with open("/tmp/pov_debug.log", "a") as f:
+            f.write(f"returncode: {result.returncode}\n")
+            f.write(f"output:\n{combined_output}\n")
+            f.write(f"=== END ===\n")
+
         return result, combined_output
 
     try:
@@ -1057,11 +1230,23 @@ def _run_fuzzer_docker(
             if "ABORTING" in combined_output:
                 crashed = True
 
+        # Log execution result
+        logger.info(f"[POV] _run_fuzzer_docker: image={docker_image}, returncode={result.returncode}, crashed={crashed}")
+        print(f"[POV-DEBUG] _run_fuzzer_docker: image={docker_image}, returncode={result.returncode}, crashed={crashed}", flush=True)
+        if crashed:
+            # Log first 500 chars of crash output
+            logger.info(f"[POV] _run_fuzzer_docker crash output: {combined_output[:500]}")
+            print(f"[POV-DEBUG] crash output: {combined_output[:300]}", flush=True)
+        else:
+            logger.debug(f"[POV] _run_fuzzer_docker output (no crash): {combined_output[:300]}")
+
         return True, crashed, combined_output, None
 
     except subprocess.TimeoutExpired:
+        logger.warning(f"[POV] _run_fuzzer_docker: TIMEOUT after {timeout}s")
         return False, False, "", "Execution timed out"
     except Exception as e:
+        logger.error(f"[POV] _run_fuzzer_docker: EXCEPTION {e}")
         return False, False, "", str(e)
     finally:
         # Cleanup temp blob
@@ -1122,6 +1307,12 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
     Args:
         worker_id: Explicit worker_id for context lookup (preferred over ContextVar)
     """
+    # TEST_ONLY
+    with open("/tmp/pov_debug.log", "a") as f:
+        f.write(f"\n=== _verify_pov_core called ===\n")
+        f.write(f"pov_id: {pov_id}\n")
+        f.write(f"worker_id: {worker_id}\n")
+
     ctx = _get_context_by_worker_id(worker_id) if worker_id else _get_current_context()
     repos = ctx["repos"]
     sanitizer = ctx.get("sanitizer", "address")
@@ -1129,10 +1320,17 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
     # Get POV from database
     pov = repos.povs.find_by_id(pov_id)
     if not pov:
+        with open("/tmp/pov_debug.log", "a") as f:
+            f.write(f"ERROR: POV not found\n")
         return {"success": False, "error": f"POV {pov_id} not found"}
 
     # Get blob path
     blob_path = pov.blob_path
+    # TEST_ONLY
+    with open("/tmp/pov_debug.log", "a") as f:
+        f.write(f"blob_path from pov: {blob_path}\n")
+        f.write(f"blob_path exists: {Path(blob_path).exists() if blob_path else 'N/A'}\n")
+
     if not blob_path or not Path(blob_path).exists():
         # Try to reconstruct from base64 blob
         if pov.blob:
@@ -1143,8 +1341,12 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
                 temp_blob.write_bytes(base64.b64decode(pov.blob))
                 blob_path = str(temp_blob)
             else:
+                with open("/tmp/pov_debug.log", "a") as f:
+                    f.write(f"ERROR: No output_dir\n")
                 return {"success": False, "error": "No blob path and no output_dir to reconstruct"}
         else:
+            with open("/tmp/pov_debug.log", "a") as f:
+                f.write(f"ERROR: POV has no blob data\n")
             return {"success": False, "error": "POV has no blob data"}
 
     blob_path = Path(blob_path)
@@ -1152,6 +1354,11 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
     # Get fuzzer path from context or POV
     fuzzer_path = ctx.get("fuzzer_path")
     docker_image = ctx.get("docker_image")
+
+    # TEST_ONLY
+    with open("/tmp/pov_debug.log", "a") as f:
+        f.write(f"fuzzer_path: {fuzzer_path}\n")
+        f.write(f"docker_image: {docker_image}\n")
 
     if not fuzzer_path:
         return {"success": False, "error": "fuzzer_path not set in POV context"}
@@ -1356,54 +1563,105 @@ def _trace_pov_core(
 
     logger.info(f"[POV] Tracing POV {pov_id[:8]} with fuzzer {fuzzer_name}")
 
-    # Run coverage fuzzer
-    success, lcov_path, msg = run_coverage_fuzzer(fuzzer_name, blob_data, work_dir)
+    # =========================================================================
+    # Strategy: Try GDB first (reliable crash detection), fallback to coverage
+    # =========================================================================
 
-    if not success:
-        # Check if failure was due to a crash (crash = success!)
-        # Coverage fuzzer crashes when POV triggers the vulnerability,
-        # which means profraw won't be generated, but the POV is actually correct!
-        crashed = any(indicator in msg for indicator in CRASH_INDICATORS)
+    executed_functions = []
+    target_reached = {}
+    gdb_failed = False
+
+    # Step 1: Try GDB trace first
+    logger.info(f"[POV] Trying GDB trace first for POV {pov_id[:8]}...")
+    gdb_success, hit_functions, crashed, gdb_output = run_gdb_trace(
+        fuzzer_name, blob_data, work_dir, target_functions
+    )
+
+    if gdb_success:
         if crashed:
-            vuln_type = _parse_vuln_type(msg)
-            logger.info(f"[POV] Trace detected CRASH! POV {pov_id[:8]} is correct. vuln_type={vuln_type}")
+            # GDB detected crash - POV is correct!
+            vuln_type = _parse_vuln_type(gdb_output)
+            logger.info(f"[POV] GDB detected CRASH! POV {pov_id[:8]} is correct. vuln_type={vuln_type}, hit_funcs={hit_functions}")
             return {
-                "success": True,  # Crash means the POV worked!
+                "success": True,
                 "crashed": True,
+                "processor": "gdb",
                 "vuln_type": vuln_type,
-                "executed_functions": [],
-                "target_reached": {func: True for func in (target_functions or [])},
-                "executed_function_count": 0,
+                "executed_functions": hit_functions,
+                "target_reached": {func: (func in hit_functions) for func in (target_functions or [])},
+                "executed_function_count": len(hit_functions),
                 "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
                            "Please call create_pov directly to save and verify it.",
-                "sanitizer_output": msg[:3000],
+                "sanitizer_output": gdb_output[:3000],
             }
 
-        # True failure - no crash and no coverage generated
-        logger.warning(f"[POV] Trace failed: {msg}")
-        return {
-            "success": False,
-            "crashed": False,
-            "executed_functions": [],
-            "target_reached": {},
-            "executed_function_count": 0,
-            "error": msg,
-        }
+        # GDB succeeded without crash - check which functions were hit
+        if target_functions:
+            for func in target_functions:
+                target_reached[func] = func in hit_functions
 
-    # Parse LCOV to get executed functions
-    _, _, executed_functions = parse_lcov(lcov_path)
+        any_target_reached = any(target_reached.values()) if target_reached else False
 
-    # Check target functions
-    target_reached = {}
-    if target_functions:
-        for func in target_functions:
-            target_reached[func] = func in executed_functions
+        # If no target hit, try coverage for more detail
+        if not any_target_reached and target_functions:
+            logger.info(f"[POV] GDB: no target hit, trying coverage...")
+            gdb_failed = True
+        else:
+            executed_functions = hit_functions
+            logger.info(f"[POV] GDB trace complete: {len(hit_functions)} breakpoints hit")
+    else:
+        logger.warning(f"[POV] GDB trace failed: {gdb_output[:200]}, falling back to coverage...")
+        gdb_failed = True
 
-    logger.info(f"[POV] Trace complete: {len(executed_functions)} functions executed")
+    # Step 2: Fallback to coverage if GDB failed
+    if gdb_failed:
+        success, lcov_path, msg = run_coverage_fuzzer(fuzzer_name, blob_data, work_dir)
+
+        if not success:
+            crashed = any(indicator in msg for indicator in CRASH_INDICATORS)
+            if crashed:
+                vuln_type = _parse_vuln_type(msg)
+                hit_funcs = _extract_hit_functions(msg, target_functions or [])
+                logger.info(f"[POV] Coverage detected CRASH! POV {pov_id[:8]} is correct. vuln_type={vuln_type}, hit_funcs={hit_funcs}")
+                return {
+                    "success": True,
+                    "crashed": True,
+                    "processor": "cov",
+                    "vuln_type": vuln_type,
+                    "executed_functions": hit_funcs,
+                    "target_reached": {func: (func in hit_funcs) for func in (target_functions or [])},
+                    "executed_function_count": len(hit_funcs),
+                    "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
+                               "Please call create_pov directly to save and verify it.",
+                    "sanitizer_output": msg[:3000],
+                }
+
+            logger.warning(f"[POV] Trace failed: {msg}")
+            return {
+                "success": False,
+                "crashed": False,
+                "processor": "cov",
+                "executed_functions": [],
+                "target_reached": {func: False for func in (target_functions or [])},
+                "executed_function_count": 0,
+                "error": msg,
+            }
+
+        # Parse LCOV
+        _, _, executed_functions = parse_lcov(lcov_path)
+
+        target_reached = {}
+        if target_functions:
+            for func in target_functions:
+                target_reached[func] = func in executed_functions
+
+        logger.info(f"[POV] Coverage trace complete: {len(executed_functions)} functions executed")
 
     return {
         "success": True,
-        "executed_functions": executed_functions[:20],  # Limit for context
+        "crashed": False,
+        "processor": "cov" if gdb_failed else "gdb",
+        "executed_functions": executed_functions[:20],
         "target_reached": target_reached,
         "total_executed": len(executed_functions),
     }
@@ -1519,55 +1777,110 @@ def trace_pov(
 
     logger.info(f"[POV] Tracing blob ({len(blob)} bytes) with fuzzer {fuzzer_name}, work_dir={work_dir}")
 
-    # Run coverage fuzzer
-    success, lcov_path, msg = run_coverage_fuzzer(fuzzer_name, blob, work_dir)
+    # =========================================================================
+    # Strategy: Try GDB first (reliable crash detection), fallback to coverage
+    # =========================================================================
 
-    if not success:
-        # Check if failure was due to a crash (crash = success!)
-        # Coverage fuzzer crashes when POV triggers the vulnerability,
-        # which means profraw won't be generated, but the POV is actually correct!
-        crashed = any(indicator in msg for indicator in CRASH_INDICATORS)
-        if crashed:
-            vuln_type = _parse_vuln_type(msg)
-            logger.info(f"[POV] Trace detected CRASH! This POV is correct. vuln_type={vuln_type}")
-            return {
-                "success": True,  # Crash means the POV worked!
-                "crashed": True,
-                "vuln_type": vuln_type,
-                "any_target_reached": True,  # Crash means we reached the vulnerable code
-                "target_status": {func: True for func in (target_functions or [])},
-                "executed_functions": [],
-                "total_executed": 0,
-                "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
-                           "Please call create_pov directly to save and verify it.",
-                "sanitizer_output": msg[:3000],
-            }
-
-        # True failure - no crash and no coverage generated
-        return {
-            "success": False,
-            "crashed": False,
-            "any_target_reached": False,
-            "target_status": {},
-            "executed_functions": [],
-            "total_executed": 0,
-            "error": msg,
-        }
-
-    # Parse LCOV to get executed functions
-    _, _, executed_functions = parse_lcov(lcov_path)
-
-    # Check target functions
+    executed_functions = []
     target_status = {}
     any_target_reached = False
-    if target_functions:
-        for func in target_functions:
-            hit = func in executed_functions
-            target_status[func] = hit
-            if hit:
-                any_target_reached = True
+    gdb_failed = False
 
-    logger.info(f"[POV] Trace: {len(executed_functions)} functions, target_reached={any_target_reached}")
+    # Step 1: Try GDB trace first
+    logger.info(f"[POV] Trying GDB trace first...")
+    gdb_success, hit_functions, crashed, gdb_output = run_gdb_trace(
+        fuzzer_name, blob, work_dir, target_functions
+    )
+
+    if gdb_success:
+        if crashed:
+            # GDB detected crash - POV is correct!
+            vuln_type = _parse_vuln_type(gdb_output)
+            logger.info(f"[POV] GDB detected CRASH! POV is correct. vuln_type={vuln_type}, hit_funcs={hit_functions}")
+            return {
+                "success": True,
+                "crashed": True,
+                "processor": "gdb",
+                "vuln_type": vuln_type,
+                "any_target_reached": len(hit_functions) > 0,
+                "target_status": {func: (func in hit_functions) for func in (target_functions or [])},
+                "executed_functions": hit_functions,
+                "total_executed": len(hit_functions),
+                "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
+                           "Please call create_pov directly to save and verify it.",
+                "sanitizer_output": gdb_output[:3000],
+            }
+
+        # GDB succeeded without crash - check which functions were hit
+        if target_functions:
+            for func in target_functions:
+                hit = func in hit_functions
+                target_status[func] = hit
+                if hit:
+                    any_target_reached = True
+
+        # GDB gives us limited function info, try coverage for more detail
+        if not any_target_reached and target_functions:
+            logger.info(f"[POV] GDB: no target hit, trying coverage for more detail...")
+            gdb_failed = True  # Fall through to coverage
+        else:
+            executed_functions = hit_functions
+            logger.info(f"[POV] GDB trace complete: {len(hit_functions)} breakpoints hit, target_reached={any_target_reached}")
+    else:
+        logger.warning(f"[POV] GDB trace failed: {gdb_output[:200]}, falling back to coverage...")
+        gdb_failed = True
+
+    # Step 2: Fallback to coverage if GDB failed or didn't give enough info
+    if gdb_failed:
+        success, lcov_path, msg = run_coverage_fuzzer(fuzzer_name, blob, work_dir)
+
+        if not success:
+            # Check if failure was due to a crash (crash = success!)
+            crashed = any(indicator in msg for indicator in CRASH_INDICATORS)
+            if crashed:
+                vuln_type = _parse_vuln_type(msg)
+                hit_funcs = _extract_hit_functions(msg, target_functions or [])
+                logger.info(f"[POV] Coverage detected CRASH! POV is correct. vuln_type={vuln_type}, hit_funcs={hit_funcs}")
+                return {
+                    "success": True,
+                    "crashed": True,
+                    "processor": "cov",
+                    "vuln_type": vuln_type,
+                    "any_target_reached": len(hit_funcs) > 0,
+                    "target_status": {func: (func in hit_funcs) for func in (target_functions or [])},
+                    "executed_functions": hit_funcs,
+                    "total_executed": len(hit_funcs),
+                    "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
+                               "Please call create_pov directly to save and verify it.",
+                    "sanitizer_output": msg[:3000],
+                }
+
+            # True failure - no crash and no coverage
+            return {
+                "success": False,
+                "crashed": False,
+                "processor": "cov",
+                "any_target_reached": False,
+                "target_status": {func: False for func in (target_functions or [])},
+                "executed_functions": [],
+                "total_executed": 0,
+                "error": msg,
+            }
+
+        # Parse LCOV to get executed functions
+        _, _, executed_functions = parse_lcov(lcov_path)
+
+        # Check target functions
+        target_status = {}
+        any_target_reached = False
+        if target_functions:
+            for func in target_functions:
+                hit = func in executed_functions
+                target_status[func] = hit
+                if hit:
+                    any_target_reached = True
+
+        logger.info(f"[POV] Coverage trace: {len(executed_functions)} functions, target_reached={any_target_reached}")
 
     # LLM analysis
     analysis = _analyze_trace(
@@ -1581,6 +1894,8 @@ def trace_pov(
 
     return {
         "success": True,
+        "crashed": False,
+        "processor": "cov" if gdb_failed else "gdb",
         "any_target_reached": any_target_reached,
         "target_status": target_status,
         "executed_functions": executed_functions[:30],

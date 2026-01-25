@@ -339,6 +339,333 @@ def run_coverage_fuzzer(
 
 
 # =============================================================================
+# GDB-based Trace (accurate function reachability analysis)
+# =============================================================================
+
+# Context for GDB trace (ASAN fuzzer path)
+_asan_fuzzer_dir: ContextVar[Optional[Path]] = ContextVar('asan_fuzzer_dir', default=None)
+
+# Cache for GDB-enabled images (image_name -> gdb_image_name)
+_gdb_image_cache: Dict[str, str] = {}
+
+
+def set_asan_fuzzer_dir(asan_fuzzer_dir: Path) -> None:
+    """Set the ASAN fuzzer directory for GDB tracing."""
+    _asan_fuzzer_dir.set(Path(asan_fuzzer_dir) if asan_fuzzer_dir else None)
+
+
+def get_asan_fuzzer_dir() -> Optional[Path]:
+    """Get the ASAN fuzzer directory."""
+    return _asan_fuzzer_dir.get()
+
+
+def _get_or_build_gdb_image(base_image: str) -> str:
+    """
+    Get or build a Docker image with GDB installed.
+
+    Checks if {base_image}-with-gdb exists, if not builds it.
+    Results are cached in memory.
+
+    Args:
+        base_image: Base Docker image name (e.g., "gcr.io/oss-fuzz/lcms")
+
+    Returns:
+        Name of the GDB-enabled image
+    """
+    # Check memory cache first
+    if base_image in _gdb_image_cache:
+        return _gdb_image_cache[base_image]
+
+    # Generate GDB image name
+    # Handle image names with / and :
+    # e.g., "gcr.io/oss-fuzz/lcms" -> "gdb-lcms"
+    # e.g., "aixcc-afc/curl" -> "gdb-curl"
+    image_parts = base_image.split('/')
+    short_name = image_parts[-1].split(':')[0]  # Get last part, remove tag
+    gdb_image = f"gdb-{short_name}"
+
+    # Check if image already exists
+    check_cmd = ["docker", "images", "-q", gdb_image]
+    result = subprocess.run(check_cmd, capture_output=True, text=True)
+
+    if result.stdout.strip():
+        # Image exists
+        logger.info(f"[GDB] Using cached GDB image: {gdb_image}")
+        _gdb_image_cache[base_image] = gdb_image
+        return gdb_image
+
+    # Build new image with GDB
+    logger.info(f"[GDB] Building GDB image from {base_image}...")
+
+    dockerfile_content = f"""FROM {base_image}
+RUN apt-get update && apt-get install -y gdb && rm -rf /var/lib/apt/lists/*
+"""
+
+    # Build using stdin dockerfile
+    build_cmd = [
+        "docker", "build",
+        "-t", gdb_image,
+        "-f", "-",  # Read Dockerfile from stdin
+        "."
+    ]
+
+    result = subprocess.run(
+        build_cmd,
+        input=dockerfile_content,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+
+    if result.returncode != 0:
+        logger.error(f"[GDB] Failed to build GDB image: {result.stderr}")
+        # Return base image as fallback
+        return base_image
+
+    logger.info(f"[GDB] Successfully built GDB image: {gdb_image}")
+    _gdb_image_cache[base_image] = gdb_image
+    return gdb_image
+
+
+def run_gdb_trace(
+    fuzzer_name: str,
+    input_data: bytes,
+    work_dir: Path,
+    target_functions: Optional[List[str]] = None,
+) -> Tuple[bool, List[str], bool, str]:
+    """
+    Execute ASAN fuzzer under GDB for accurate function reachability analysis.
+
+    Uses GDB breakpoints to precisely determine which target functions are executed.
+    Much more accurate than coverage-based tracing.
+
+    Args:
+        fuzzer_name: Name of the fuzzer binary
+        input_data: Input bytes to run
+        work_dir: Working directory for output files
+        target_functions: List of function names to check for reachability
+
+    Returns:
+        (success, hit_functions, crashed, output_message)
+        - success: True if GDB trace completed
+        - hit_functions: List of target functions that were executed
+        - crashed: True if a crash was detected
+        - output_message: GDB output or error message
+    """
+    base_image = _docker_image.get()
+    if not base_image:
+        return False, [], False, "Docker image not set"
+
+    # Try to find ASAN fuzzer
+    asan_fuzzer_dir = _asan_fuzzer_dir.get()
+    if asan_fuzzer_dir is None:
+        coverage_dir = _coverage_fuzzer_dir.get()
+        if coverage_dir:
+            asan_path = str(coverage_dir).replace('_coverage', '_address')
+            asan_fuzzer_dir = Path(asan_path)
+            if not asan_fuzzer_dir.exists():
+                return False, [], False, f"ASAN fuzzer dir not found: {asan_fuzzer_dir}"
+        else:
+            return False, [], False, "ASAN fuzzer context not set"
+
+    # Check if ASAN fuzzer exists
+    asan_fuzzer = asan_fuzzer_dir / fuzzer_name
+    if not asan_fuzzer.exists():
+        return False, [], False, f"ASAN fuzzer not found: {asan_fuzzer}"
+
+    # Resolve symlinks
+    real_fuzzer_path = asan_fuzzer.resolve()
+    real_fuzzer_dir = real_fuzzer_path.parent
+    real_fuzzer_name = real_fuzzer_path.name
+
+    # Get or build GDB-enabled image
+    gdb_image = _get_or_build_gdb_image(base_image)
+
+    # Create output directory
+    out_dir = work_dir / "gdb_out"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    # Write input to file (single file, not corpus dir - for direct execution)
+    input_file = out_dir / "input.bin"
+    input_file.write_bytes(input_data)
+
+    # Generate GDB script
+    gdb_script = _generate_gdb_script(target_functions or [], real_fuzzer_name)
+    gdb_script_file = out_dir / "trace.gdb"
+    gdb_script_file.write_text(gdb_script)
+
+    try:
+        # Build fuzzer command (direct file input, not corpus)
+        if "@" in real_fuzzer_name:
+            binary_name, test_name = real_fuzzer_name.split("@", 1)
+            fuzzer_binary = f"/fuzzers/{binary_name}"
+            fuzzer_args = f"--fuzz={test_name} -- /out/input.bin"
+        else:
+            fuzzer_binary = f"/fuzzers/{real_fuzzer_name}"
+            fuzzer_args = "/out/input.bin"
+
+        # Run GDB in Docker
+        docker_cmd = [
+            "docker", "run", "--rm", "--platform", "linux/amd64",
+            "--cap-add=SYS_PTRACE",
+            "--security-opt", "seccomp=unconfined",
+            "-e", "ASAN_OPTIONS=abort_on_error=0:detect_leaks=0",
+            "-v", f"{out_dir.absolute()}:/out",
+            "-v", f"{real_fuzzer_dir}:/fuzzers:ro",
+            gdb_image,
+            "gdb", "-batch", "-x", "/out/trace.gdb",
+            "--args", fuzzer_binary, *fuzzer_args.split(),
+        ]
+
+        logger.info(f"[GDB] Running trace with {len(target_functions or [])} breakpoints...")
+
+        result = subprocess.run(
+            docker_cmd,
+            capture_output=True,
+            text=True,
+            encoding='utf-8',
+            errors='replace',
+            timeout=60,
+        )
+
+        output = result.stdout + result.stderr
+
+        # Parse GDB output
+        hit_functions, crashed = _parse_gdb_output(output, target_functions or [])
+
+        logger.info(f"[GDB] Trace complete: hit={hit_functions}, crashed={crashed}")
+
+        return True, hit_functions, crashed, output[:3000]
+
+    except subprocess.TimeoutExpired:
+        return False, [], False, "GDB trace timed out (60s)"
+    except Exception as e:
+        return False, [], False, f"GDB trace failed: {e}"
+
+
+def _generate_gdb_script(target_functions: List[str], fuzzer_name: str) -> str:
+    """
+    Generate GDB script for breakpoint-based function tracing.
+
+    Args:
+        target_functions: Functions to set breakpoints on
+        fuzzer_name: Name of fuzzer (for info)
+
+    Returns:
+        GDB script content
+    """
+    lines = [
+        "# GDB trace script - auto-generated",
+        "set pagination off",
+        "set confirm off",
+        "set print thread-events off",
+        "",
+        "# Disable ASAN signal handling so GDB catches crashes",
+        "handle SIGSEGV stop print",
+        "handle SIGABRT stop print",
+        "handle SIGBUS stop print",
+        "handle SIGFPE stop print",
+        "",
+    ]
+
+    # Add breakpoints for each target function
+    for func in target_functions:
+        lines.extend([
+            f"# Breakpoint for {func}",
+            f"break {func}",
+            "commands",
+            "  silent",
+            f'  printf "HIT_FUNCTION:{func}\\n"',
+            "  continue",
+            "end",
+            "",
+        ])
+
+    lines.extend([
+        "# Run the program",
+        "run",
+        "",
+        "# If we get here, check if it was a crash",
+        "if $_siginfo",
+        '  printf "\\nCRASH_DETECTED\\n"',
+        "  bt 20",
+        "end",
+        "",
+        "quit",
+    ])
+
+    return "\n".join(lines)
+
+
+def _parse_gdb_output(output: str, target_functions: List[str]) -> Tuple[List[str], bool]:
+    """
+    Parse GDB output to extract hit functions and crash status.
+
+    Args:
+        output: GDB output text
+        target_functions: List of target function names
+
+    Returns:
+        (hit_functions, crashed)
+    """
+    hit_functions = []
+    crashed = False
+    undefined_functions = set()
+
+    # First pass: find functions that GDB says are not defined
+    for line in output.split('\n'):
+        # GDB outputs: Function "funcName" not defined.
+        if 'not defined' in line and 'Function' in line:
+            # Extract function name from: Function "funcName" not defined.
+            import re
+            match = re.search(r'Function "([^"]+)" not defined', line)
+            if match:
+                undefined_functions.add(match.group(1))
+
+    # Second pass: extract hit functions and crash status
+    for line in output.split('\n'):
+        line = line.strip()
+
+        # Check for hit functions (from our breakpoint printf)
+        if line.startswith("HIT_FUNCTION:"):
+            func_name = line.split(":", 1)[1].strip()
+            # Only count if function was actually defined (breakpoint was set)
+            if func_name not in undefined_functions and func_name not in hit_functions:
+                hit_functions.append(func_name)
+
+        # Check for crash indicators
+        if "CRASH_DETECTED" in line:
+            crashed = True
+        elif "received signal SIG" in line:
+            crashed = True
+        elif "Program received signal" in line:
+            crashed = True
+
+    # Also check for sanitizer crash patterns in output
+    sanitizer_crash_indicators = [
+        "ERROR: AddressSanitizer",
+        "ERROR: MemorySanitizer",
+        "ERROR: UndefinedBehaviorSanitizer",
+        "DEADLYSIGNAL",
+        "SEGV on unknown address",
+    ]
+    for indicator in sanitizer_crash_indicators:
+        if indicator in output:
+            crashed = True
+            break
+
+    # If crashed, also extract functions from backtrace
+    if crashed:
+        for line in output.split('\n'):
+            if ' in ' in line and ('#' in line or 'at ' in line):
+                for func in target_functions:
+                    if func in line and func not in hit_functions:
+                        hit_functions.append(func)
+
+    return hit_functions, crashed
+
+
+# =============================================================================
 # Context Display (like c_coverage.py)
 # =============================================================================
 
@@ -829,4 +1156,8 @@ __all__ = [
     "parse_lcov",
     "run_coverage_fuzzer",
     "get_executed_code_context",
+    # GDB trace
+    "run_gdb_trace",
+    "set_asan_fuzzer_dir",
+    "get_asan_fuzzer_dir",
 ]
