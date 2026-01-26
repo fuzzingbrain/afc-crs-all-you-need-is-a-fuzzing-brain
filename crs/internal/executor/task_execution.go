@@ -103,6 +103,17 @@ func ExecuteFuzzingTask(params TaskExecutionParams) error {
 	sem := make(chan struct{}, maxParallel)
 	var wg sync.WaitGroup
 
+	if len(fuzzersToExecute) > 0 {
+		fuzzDir := filepath.Dir(fuzzersToExecute[0])
+		// Create a copy of fuzzDir for parallel strategies
+		err := helpers.CopyFuzzDirForParallelStrategies(fuzzDir)
+		if err != nil {
+			log.Printf("Failed to copy fuzzDir %s for parallel strategies. Error: %v", fuzzDir, err)
+		} else {
+			log.Printf("Prepared fuzzer directory for execution: %v", fuzzDir)
+		}
+	}
+
 	// Execute fuzzers with controlled parallelism
 	for idx, fuzzer := range fuzzersToExecute {
 		wg.Add(1)
@@ -137,14 +148,6 @@ func ExecuteFuzzingTask(params TaskExecutionParams) error {
 
 			// Save task detail to JSON for strategy scripts
 			// helpers.SaveTaskDetailToJson(fuzzerParams.TaskDetail, fuzzer, fuzzDir)
-
-			// Create a copy of fuzzDir for parallel strategies
-			err := helpers.CopyFuzzDirForParallelStrategies(fuzzer, fuzzDir)
-			if err != nil {
-				log.Printf("Failed to copy fuzzDir %s for parallel strategies. Error: %v", fuzzDir, err)
-			} else {
-				log.Printf("Prepared fuzzer directory for execution: %v", fuzzer)
-			}
 
 			// Determine sanitizer from params or extract from fuzzer directory name
 			sanitizer := fuzzerParams.Sanitizer
