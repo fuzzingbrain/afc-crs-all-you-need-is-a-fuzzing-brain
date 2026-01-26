@@ -1166,7 +1166,7 @@ Please respond with just the full path to the file you believe is the fuzzer sou
             return strip_license_text(source_files[file_path]), file_path
     
     log_message(log_file, "Could not identify fuzzer source")
-    return "// Could not find the source code for the fuzzer", ""
+    return "", ""
 
 def run_python_code(log_file, code, xbin_dir):
     """Run the generated Python code to create x.bin"""
@@ -2695,8 +2695,8 @@ def doAdvancedPoV0(log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer, p
                 else:
                     found_pov = True
                     break
-            
-            if not found_pov:
+            coverage_output = ""
+            if not found_pov and False:
                 log_message(log_file, f"Trying libfuzzer print_coverage running for 60s")
                 found_pov, fuzzer_output, coverage_output, blob_data = run_fuzzer_with_coverage(log_file, fuzzer_path, project_dir, focus,sanitizer,project_name, seed_corpus_dir)
                 if blob_data:
@@ -3777,8 +3777,12 @@ clang.cindex.Config.set_library_file('/usr/lib/llvm18/lib/libclang.so')
 
 
 def create_commit_based_prompt(project_name,fuzzer_code, commit_diff, sanitizer, language):
+    # Check if fuzzer_code is available
+    has_fuzzer_code = fuzzer_code and fuzzer_code.strip()
+
     # Base prompt that applies to all languages
-    base_prompt = f"""
+    if has_fuzzer_code:
+        base_prompt = f"""
 The {project_name} project contains a vulnerability introduced by an unknown commit. Your job is to find the correct input to trigger the vulnerability.
 Please output a Python script that creates five blob files (name as xi.bin with i=1..5). Each blob file will be run by the following fuzz harness:
 ```{language}
@@ -3786,9 +3790,15 @@ Please output a Python script that creates five blob files (name as xi.bin with 
 ```
 
 """
+    else:
+        base_prompt = f"""
+The {project_name} project contains a vulnerability introduced by an unknown commit. Your job is to find the correct input to trigger the vulnerability.
+Please output a Python script that creates five blob files (name as xi.bin with i=1..5). Each blob file should contain input data designed to trigger the vulnerability.
+
+"""
 
     # C/C++ specific prompt with sanitizer targeting
-    if language.startswith('c'):
+    if language.startswith('c') or not language:
         # Define sanitizer-specific guidance
         sanitizer_guidance = {
             "address": """
@@ -3822,12 +3832,13 @@ The project uses UndefinedBehaviorSanitizer, which detects:
 Your goal is to trigger an UndefinedBehaviorSanitizer error by crafting an input that causes undefined behavior.
 """
         }
-        
+
         # Get the guidance for the specified sanitizer, or use a generic one if not found
         sanitizer_specific = sanitizer_guidance.get(sanitizer.lower(), """The project uses sanitizers that can detect various types of errors. Your goal is to trigger a sanitizer error by crafting an input that exploits the vulnerability.
 """)
-        
-        language_specific = f"""IMPORTANT: Read the harness code carefully to understand how inputs are processed. In each xi.bin, you need to generate a complete blob that will trigger a sanitizer error.
+
+        if has_fuzzer_code:
+            language_specific = f"""IMPORTANT: Read the harness code carefully to understand how inputs are processed. In each xi.bin, you need to generate a complete blob that will trigger a sanitizer error.
 
 Think through these steps:
 1. What function contains the vulnerability? How do you reach this function?
@@ -3837,10 +3848,22 @@ Think through these steps:
 5. Combine all this information to generate a complete blob.
 {sanitizer_specific}
 """
+        else:
+            language_specific = f"""IMPORTANT: Analyze the commit diff to understand the vulnerability. In each xi.bin, you need to generate a complete blob that will trigger a sanitizer error.
+
+Think through these steps:
+1. What function contains the vulnerability based on the commit diff?
+2. What input format does this function expect?
+3. What input will trigger the vulnerability?
+4. How can you craft input data to reach and exploit the vulnerable code path?
+5. Generate diverse test cases to maximize the likelihood of triggering the vulnerability.
+{sanitizer_specific}
+"""
 
     # Java specific prompt
     else:
-        language_specific = """
+        if has_fuzzer_code:
+            language_specific = """
 IMPORTANT: Read the harness code carefully to understand how inputs are processed. In each xi.bin, you need to generate a complete blob that will trigger a Jazzer sanitizer error or Java exception.
 
 Think through these steps:
@@ -3849,6 +3872,35 @@ Think through these steps:
 3. Are there any other inputs required before reaching the target method?
 4. How does the harness code process inputs? Follow the instructions in the harness.
 5. Combine all this information to generate a complete blob.
+
+The project uses Jazzer sanitizers that can detect various types of vulnerabilities:
+- ClojureLangHooks: detects vulnerabilities in Clojure code
+- Deserialization: detects unsafe deserialization
+- ExpressionLanguageInjection: detects expression language injection
+- FilePathTraversal: detects path traversal vulnerabilities
+- LdapInjection: detects LDAP injection
+- NamingContextLookup: detects JNDI injection
+- OsCommandInjection: detects OS command injection
+- ReflectiveCall: detects unsafe reflection
+- RegexInjection: detects regex injection
+- RegexRoadblocks: detects regex denial of service
+- ScriptEngineInjection: detects script engine injection
+- ServerSideRequestForgery: detects SSRF vulnerabilities
+- SQLInjection: detects SQL injection
+- XPathInjection: detects XPath injection
+
+Your goal is to trigger any of these sanitizer errors or a Java exception (like NullPointerException, ArrayIndexOutOfBoundsException, etc.) by crafting an input that exploits the vulnerability.
+"""
+        else:
+            language_specific = """
+IMPORTANT: Analyze the commit diff to understand the vulnerability. In each xi.bin, you need to generate a complete blob that will trigger a Jazzer sanitizer error or Java exception.
+
+Think through these steps:
+1. What method contains the vulnerability based on the commit diff?
+2. What input format does this method expect?
+3. What input will trigger the vulnerability?
+4. How can you craft input data to reach and exploit the vulnerable code path?
+5. Generate diverse test cases to maximize the likelihood of triggering the vulnerability.
 
 The project uses Jazzer sanitizers that can detect various types of vulnerabilities:
 - ClojureLangHooks: detects vulnerabilities in Clojure code

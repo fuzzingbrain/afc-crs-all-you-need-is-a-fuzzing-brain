@@ -139,12 +139,17 @@ func AnalyzeProjectDirs(projectDirs []string, language string, fuzzers []string)
 	log.Printf("Extracted %d functions", len(results.Functions))
 
 	// Pass 2: Build call graph now that all functions are known
-	for _, filePath := range sourceFiles {
-		if err := parseCallsOnly(filePath, projectDir, language, results); err != nil {
-			log.Printf("Warning: failed to parse calls from %s: %v", filePath, err)
+	// Skip for large codebases (>10000 files) to avoid timeout
+	if len(sourceFiles) > 10000 {
+		log.Printf("Skipping call graph building for large codebase (%d files)", len(sourceFiles))
+	} else {
+		for _, filePath := range sourceFiles {
+			if err := parseCallsOnly(filePath, projectDir, language, results); err != nil {
+				log.Printf("Warning: failed to parse calls from %s: %v", filePath, err)
+			}
 		}
+		log.Printf("Built call graph with %d edges", len(results.CallGraph.Calls))
 	}
-	log.Printf("Built call graph with %d edges", len(results.CallGraph.Calls))
 
 	// Find fuzzer entry points directly from parsed functions
 	entryPoints := make([]string, 0)
@@ -260,12 +265,17 @@ func AnalyzeProject(projectDir string, language string, fuzzers []string) (*mode
 	log.Printf("Extracted %d functions", len(results.Functions))
 
 	// Pass 2: Build call graph now that all functions are known
-	for _, filePath := range sourceFiles {
-		if err := parseCallsOnly(filePath, projectDir, language, results); err != nil {
-			log.Printf("Warning: failed to parse calls from %s: %v", filePath, err)
+	// Skip for large codebases (>10000 files) to avoid timeout
+	if len(sourceFiles) > 10000 {
+		log.Printf("Skipping call graph building for large codebase (%d files)", len(sourceFiles))
+	} else {
+		for _, filePath := range sourceFiles {
+			if err := parseCallsOnly(filePath, projectDir, language, results); err != nil {
+				log.Printf("Warning: failed to parse calls from %s: %v", filePath, err)
+			}
 		}
+		log.Printf("Built call graph with %d edges", len(results.CallGraph.Calls))
 	}
-	log.Printf("Built call graph with %d edges", len(results.CallGraph.Calls))
 
 	// Extract entry points from fuzzers
 	entryPoints := extractEntryPoints(fuzzers, language, results)

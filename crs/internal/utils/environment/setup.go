@@ -13,11 +13,47 @@ import (
 // setup.go - Project environment setup and configuration loading
 // This file contains functions for loading project.yaml and preparing the fuzzing environment
 
+// SanitizerEntry represents a sanitizer entry that can be either a string or a map
+type SanitizerEntry struct {
+	Name         string
+	Experimental bool
+}
+
+// UnmarshalYAML implements custom unmarshaling for SanitizerEntry
+func (s *SanitizerEntry) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	// Try to unmarshal as a string first
+	var str string
+	if err := unmarshal(&str); err == nil {
+		s.Name = str
+		s.Experimental = false
+		return nil
+	}
+
+	// If that fails, try to unmarshal as a map
+	var m map[string]interface{}
+	if err := unmarshal(&m); err != nil {
+		return err
+	}
+
+	// Extract the sanitizer name (the map key)
+	for key, value := range m {
+		s.Name = key
+		// Check if experimental field exists
+		if valueMap, ok := value.(map[string]interface{}); ok {
+			if exp, ok := valueMap["experimental"].(bool); ok {
+				s.Experimental = exp
+			}
+		}
+		break // Only process the first key
+	}
+	return nil
+}
+
 // ProjectConfig represents the configuration loaded from project.yaml
 type ProjectConfig struct {
-	Sanitizers []string `yaml:"sanitizers"`
-	Language   string   `yaml:"language"`
-	MainRepo   string   `yaml:"main_repo"`
+	Sanitizers []SanitizerEntry `yaml:"sanitizers"`
+	Language   string           `yaml:"language"`
+	MainRepo   string           `yaml:"main_repo"`
 }
 
 // LoadProjectConfig loads and parses project.yaml file
@@ -60,19 +96,25 @@ func PrepareEnvironment(params PrepareEnvironmentParams) (*ProjectConfig, []stri
 	cfg, err := LoadProjectConfig(projectYAMLPath)
 	if err != nil {
 		log.Printf("Warning: Could not parse project.yaml (%v). Defaulting to address sanitizer.", err)
-		cfg = &ProjectConfig{Sanitizers: []string{"address"}}
+		cfg = &ProjectConfig{Sanitizers: []SanitizerEntry{{Name: "address", Experimental: false}}}
 	}
 	if len(cfg.Sanitizers) == 0 {
 		log.Printf("No sanitizers listed in project.yaml; defaulting to address sanitizer.")
-		cfg.Sanitizers = []string{"address"}
+		cfg.Sanitizers = []SanitizerEntry{{Name: "address", Experimental: false}}
 	}
 
 	// Use sanitizer override from config if provided
-	sanitizersToUse := cfg.Sanitizers
+	var sanitizersToUse []string
 	configSource := "project.yaml"
 	if len(params.SanitizerOverride) > 0 {
 		sanitizersToUse = params.SanitizerOverride
 		configSource = ".env"
+	} else {
+		// Extract sanitizer names from SanitizerEntry slice
+		sanitizersToUse = make([]string, 0, len(cfg.Sanitizers))
+		for _, s := range cfg.Sanitizers {
+			sanitizersToUse = append(sanitizersToUse, s.Name)
+		}
 	}
 
 	// Print configuration summary

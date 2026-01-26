@@ -68,7 +68,7 @@ def clone_repository(repo_url, version, target_dir, repo_name):
     logging.info(f"Cloning {repo_name} from {repo_url} at version {version}")
     
     # Clone the repository
-    run_command(f"git clone {repo_url} {target_dir}")
+    run_command(f"git clone --depth 1 {repo_url} {target_dir}")
     
     # Checkout the specific version
     try:
@@ -98,11 +98,11 @@ def generate_diff(base_repo_path, reference_repo_path, output_path):
     with tempfile.TemporaryDirectory() as temp_dir:
         # Clone base repo to temp directory
         base_temp = os.path.join(temp_dir, 'base')
-        run_command(f"git clone {base_repo_path} {base_temp}")
+        run_command(f"git clone --depth 1 {base_repo_path} {base_temp}")
         
         # Clone reference repo to temp directory
         ref_temp = os.path.join(temp_dir, 'reference')
-        run_command(f"git clone {reference_repo_path} {ref_temp}")
+        run_command(f"git clone --depth 1 {reference_repo_path} {ref_temp}")
         
         # Generate diff
         diff_file = os.path.join(output_path, 'diff.patch')

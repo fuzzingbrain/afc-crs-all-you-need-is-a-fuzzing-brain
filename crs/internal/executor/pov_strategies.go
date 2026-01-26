@@ -287,6 +287,11 @@ func runPOVPhasesParallel(ctx context.Context, fuzzer string, params TaskExecuti
 	projectDir := params.TaskDir + "/" + params.TaskDetail.Focus
 
 	for phase := 0; phase < numPhases; phase++ {
+		//for testing only do phase 3 
+		if phase == numPhases-1 {
+			continue
+		}
+
 		roundWG.Add(1)
 		go func(phase int) {
 			defer roundWG.Done()
