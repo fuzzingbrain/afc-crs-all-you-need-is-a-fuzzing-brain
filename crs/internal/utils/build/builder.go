@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
-
-	"crs/internal/utils/helpers"
 )
 
 // BuildAFCFuzzers builds fuzzers for a given project with proper isolation per sanitizer.
@@ -71,7 +69,7 @@ func BuildAFCFuzzers(taskDir string, sanitizer, projectName, projectDir, sanitiz
 	helperCmd.Stdout = &cmdOutput
 	helperCmd.Stderr = &cmdOutput
 
-	log.Printf("[BuildAFCFuzzers] Building fuzzers for %s %s sanitizer\nCommand: %v", projectName,sanitizer, helperCmd.Args)
+	log.Printf("[BuildAFCFuzzers] Building fuzzers for %s %s sanitizer\nCommand: %v", projectName, sanitizer, helperCmd.Args)
 
 	if err := helperCmd.Run(); err != nil {
 		output := cmdOutput.String()
@@ -89,7 +87,47 @@ func BuildAFCFuzzers(taskDir string, sanitizer, projectName, projectDir, sanitiz
 			output = truncatedOutput
 		}
 
-		return output, err
+		log.Printf("[BuildAFCFuzzers] Build failed with local folder mapping. Retrying without local folder parameter (using OSS-Fuzz default)...")
+
+		// Retry without the projectDir parameter (last parameter)
+		retryCmd := exec.Command("python3",
+			filepath.Join(taskDir, "fuzz-tooling/infra/helper.py"),
+			"build_fuzzers",
+			"--clean",
+			"--sanitizer", sanitizer,
+			"--engine", "libfuzzer",
+			projectName,
+		)
+
+		var retryOutput bytes.Buffer
+		retryCmd.Stdout = &retryOutput
+		retryCmd.Stderr = &retryOutput
+
+		log.Printf("[BuildAFCFuzzers] Retry command: %v", retryCmd.Args)
+
+		if retryErr := retryCmd.Run(); retryErr != nil {
+			retryOutputStr := retryOutput.String()
+			retryLines := strings.Split(retryOutputStr, "\n")
+
+			// Truncate retry output if it's very long
+			if len(retryLines) > 30 {
+				firstLines := retryLines[:10]
+				lastLines := retryLines[len(retryLines)-20:]
+
+				retryOutputStr = strings.Join(firstLines, "\n") +
+					"\n\n[...TRUNCATED " + fmt.Sprintf("%d", len(retryLines)-30) + " LINES...]\n\n" +
+					strings.Join(lastLines, "\n")
+			}
+
+			// Both attempts failed
+			log.Printf("[BuildAFCFuzzers] Retry also failed for %s-%s", projectName, sanitizer)
+			combinedOutput := fmt.Sprintf("=== First attempt (with local folder) ===\n%s\n\n=== Retry attempt (without local folder) ===\n%s", output, retryOutputStr)
+			return combinedOutput, retryErr
+		}
+
+		// Retry succeeded
+		log.Printf("[BuildAFCFuzzers] Retry succeeded for %s-%s (without local folder mapping)", projectName, sanitizer)
+		return retryOutput.String(), nil
 	}
 
 	return cmdOutput.String(), nil
