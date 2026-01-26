@@ -7,13 +7,563 @@ import os
 import time
 import json
 import subprocess
+import hashlib
 from pathlib import Path
-from typing import Dict, List, Any, Optional, TYPE_CHECKING
+from typing import Dict, List, Any, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from opentelemetry import trace
 
 # Note: tracer is imported from global scope when needed
+
+
+# ============================================================================
+# LLM-based Vulnerability Scoring
+# ============================================================================
+
+def _compute_cache_key(
+    repo_path: str,
+    entry_point: str,
+    paths: List[List[Dict[str, Any]]],
+    model: str,
+    config: Dict[str, Any]
+) -> str:
+    """
+    Compute a cache key for LLM path analysis results.
+
+    Cache key includes:
+    - Repository path
+    - Entry point name
+    - Hash of all paths (structure + function names)
+    - Model name
+    - Configuration (SIZE_PREFILTER, MAX_PATHS_TO_EXTRACT, etc.)
+
+    This ensures cache is invalidated when code or configuration changes.
+    """
+    # Create a deterministic representation of paths
+    # Include function names and file paths, but not full source (too big)
+    path_fingerprint = []
+    for path in paths:
+        path_sig = tuple((step.get('function', ''), step.get('file', '')) for step in path)
+        path_fingerprint.append(path_sig)
+
+    # Combine all inputs into cache key
+    cache_data = {
+        'repo_path': repo_path,
+        'entry_point': entry_point,
+        'paths': path_fingerprint,
+        'model': model,
+        'config': config
+    }
+
+    # Create hash of cache key
+    cache_str = json.dumps(cache_data, sort_keys=True)
+    cache_hash = hashlib.sha256(cache_str.encode()).hexdigest()[:16]
+
+    return cache_hash
+
+
+def _get_cache_path(repo_path: str) -> str:
+    """Get the path to the LLM analysis cache file."""
+    return os.path.join(repo_path, '.llm_path_analysis_cache.json')
+
+
+def _load_cached_analysis(
+    repo_path: str,
+    entry_point: str,
+    paths: List[List[Dict[str, Any]]],
+    model: str,
+    config: Dict[str, Any]
+) -> Optional[List[Dict[str, Any]]]:
+    """
+    Load cached LLM analysis results if available and valid.
+
+    Returns cached results or None if cache miss/invalid.
+    """
+    cache_file = _get_cache_path(repo_path)
+
+    if not os.path.exists(cache_file):
+        return None
+
+    try:
+        with open(cache_file, 'r') as f:
+            cache_data = json.load(f)
+
+        # Compute cache key for current analysis
+        cache_key = _compute_cache_key(repo_path, entry_point, paths, model, config)
+
+        # Check if cache entry exists
+        if cache_key not in cache_data:
+            return None
+
+        entry = cache_data[cache_key]
+
+        # Check cache age (invalidate after 24 hours)
+        cache_age = time.time() - entry['timestamp']
+        if cache_age > 86400:  # 24 hours
+            print(f"  Cache expired (age: {cache_age / 3600:.1f} hours)")
+            return None
+
+        print(f"  ✓ Found cached LLM analysis (age: {cache_age / 60:.1f} minutes, {len(entry['results'])} paths)")
+        return entry['results']
+
+    except Exception as e:
+        print(f"  Warning: Failed to load cache: {e}")
+        return None
+
+
+def _save_cached_analysis(
+    repo_path: str,
+    entry_point: str,
+    paths: List[List[Dict[str, Any]]],
+    model: str,
+    config: Dict[str, Any],
+    results: List[Dict[str, Any]]
+):
+    """
+    Save LLM analysis results to cache.
+
+    Cache is stored as JSON with timestamp and metadata.
+    """
+    cache_file = _get_cache_path(repo_path)
+
+    try:
+        # Load existing cache
+        if os.path.exists(cache_file):
+            with open(cache_file, 'r') as f:
+                cache_data = json.load(f)
+        else:
+            cache_data = {}
+
+        # Compute cache key
+        cache_key = _compute_cache_key(repo_path, entry_point, paths, model, config)
+
+        # Store results with metadata
+        cache_data[cache_key] = {
+            'timestamp': time.time(),
+            'entry_point': entry_point,
+            'model': model,
+            'num_paths': len(paths),
+            'config': config,
+            'results': results
+        }
+
+        # Clean up old entries (keep last 10)
+        if len(cache_data) > 10:
+            # Sort by timestamp, keep newest 10
+            sorted_keys = sorted(cache_data.keys(),
+                               key=lambda k: cache_data[k]['timestamp'],
+                               reverse=True)
+            cache_data = {k: cache_data[k] for k in sorted_keys[:10]}
+
+        # Save cache
+        with open(cache_file, 'w') as f:
+            json.dump(cache_data, f, indent=2)
+
+        print(f"  ✓ Saved LLM analysis to cache ({len(results)} paths)")
+
+    except Exception as e:
+        print(f"  Warning: Failed to save cache: {e}")
+
+
+def score_functions_with_llm(
+    functions: List[Tuple[str, str, str]],  # (name, source, filepath)
+    model: str = "claude-sonnet-4-5-20250929"
+) -> List[Dict[str, Any]]:
+    """
+    Score functions by vulnerability potential using Claude API
+
+    Args:
+        functions: List of (function_name, source_code, file_path) tuples
+        model: Claude model to use for analysis
+
+    Returns:
+        List of dicts with score, risk_level, reasons, and patterns
+    """
+    try:
+        from anthropic import Anthropic
+    except ImportError as e:
+        # Try adding venv site-packages to path if running from venv
+        import sys
+        import site
+
+        venv_path = os.environ.get('VIRTUAL_ENV')
+        if venv_path:
+            # Add venv site-packages to sys.path
+            python_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+            site_packages = os.path.join(venv_path, "lib", python_version, "site-packages")
+            if os.path.exists(site_packages) and site_packages not in sys.path:
+                sys.path.insert(0, site_packages)
+                print(f"  Added venv site-packages to path: {site_packages}")
+                try:
+                    from anthropic import Anthropic
+                    print("  ✓ Successfully imported anthropic after adding venv to path")
+                except ImportError as e2:
+                    print(f"  Warning: anthropic still not found after adding venv: {e2}")
+                    print(f"  Python executable: {sys.executable}")
+                    print("  Falling back to size-based scoring")
+                    return [{"score": min(100, len(src) // 100), "risk_level": "unknown",
+                             "reasons": ["LLM unavailable - anthropic not found in venv"], "vulnerability_patterns": []}
+                            for _, src, _ in functions]
+            else:
+                print("Warning: anthropic package not installed, falling back to size-based scoring")
+                print(f"  Import error: {e}")
+                print(f"  Python executable: {sys.executable}")
+                print(f"  VIRTUAL_ENV: {venv_path}")
+                print(f"  Site packages path: {site_packages} (exists: {os.path.exists(site_packages)})")
+                print("  Install with: pip install anthropic")
+                return [{"score": min(100, len(src) // 100), "risk_level": "unknown",
+                         "reasons": ["LLM unavailable - anthropic package not installed"], "vulnerability_patterns": []}
+                        for _, src, _ in functions]
+        else:
+            print("Warning: anthropic package not installed, falling back to size-based scoring")
+            print(f"  Import error: {e}")
+            print(f"  Python executable: {sys.executable}")
+            print("  VIRTUAL_ENV not set")
+            print("  Install with: pip install anthropic")
+            return [{"score": min(100, len(src) // 100), "risk_level": "unknown",
+                     "reasons": ["LLM unavailable - anthropic package not installed"], "vulnerability_patterns": []}
+                    for _, src, _ in functions]
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        print("Warning: ANTHROPIC_API_KEY not set, falling back to size-based scoring")
+        print("  Set your API key with: export ANTHROPIC_API_KEY='your-key'")
+        return [{"score": min(100, len(src) // 100), "risk_level": "unknown",
+                 "reasons": ["LLM unavailable - API key not set"], "vulnerability_patterns": []}
+                for _, src, _ in functions]
+
+    client = Anthropic(api_key=api_key)
+    results = []
+
+    for i, (func_name, source_code, file_path) in enumerate(functions):
+        print(f"  [{i+1}/{len(functions)}] Analyzing {func_name} with LLM...")
+
+        prompt = f"""Analyze this C/C++ function for vulnerability potential and fuzzing priority.
+
+Function: {func_name}
+File: {file_path}
+
+Source Code:
+```c
+{source_code[:3000]}
+```
+
+Score 0-100 based on vulnerability risk. Look for:
+- Buffer operations (strcpy, memcpy, sprintf, strcat, gets, scanf)
+- Pointer arithmetic and unchecked derefs
+- Format strings with user input
+- Integer overflow potential
+- Memory allocation without checks
+- Input parsing (especially strings, URLs, headers)
+- Complex branching and error paths
+- Type conversions and casts
+
+High scores (80-100): Buffer ops, parsing, format strings
+Medium scores (50-79): Memory ops, complex logic
+Low scores (0-49): Simple operations
+
+Respond ONLY with JSON:
+{{"score": <0-100>, "risk_level": "<critical|high|medium|low>", "reasons": ["reason1", "reason2"], "vulnerability_patterns": ["pattern1", "pattern2"]}}"""
+
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=512,
+                temperature=0.0,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            result_text = response.content[0].text.strip()
+
+            # Extract JSON from markdown if needed
+            if "```json" in result_text:
+                result_text = result_text.split("```json")[1].split("```")[0].strip()
+            elif "```" in result_text:
+                result_text = result_text.split("```")[1].split("```")[0].strip()
+
+            result = json.loads(result_text)
+            results.append(result)
+
+        except Exception as e:
+            print(f"    Warning: LLM scoring failed for {func_name}: {str(e)}")
+            # Fallback to size heuristic
+            results.append({
+                "score": min(100, len(source_code) // 100),
+                "risk_level": "unknown",
+                "reasons": ["LLM analysis failed"],
+                "vulnerability_patterns": []
+            })
+
+        # Rate limiting
+        if i < len(functions) - 1:
+            time.sleep(0.1)
+
+    return results
+
+
+def _score_single_path_with_llm(
+    path_index: int,
+    path: List[Dict[str, Any]],
+    entry_point: str,
+    model: str,
+    api_key: str,
+    progress_lock: Any
+) -> Dict[str, Any]:
+    """
+    Score a single execution path (used for parallel processing).
+
+    Args:
+        path_index: Index of this path (for progress reporting)
+        path: Single execution path to analyze
+        entry_point: Entry point function name
+        model: Claude model to use
+        api_key: Anthropic API key
+        progress_lock: Threading lock for progress reporting
+
+    Returns:
+        Dict with score, risk_level, reasons, attack_vector, vulnerable_step, blocking_checks
+    """
+    try:
+        from anthropic import Anthropic
+        import json
+
+        client = Anthropic(api_key=api_key)
+
+        # Build path visualization
+        path_steps = []
+        for step in path:
+            func_name = step.get('function', 'unknown')
+            file_path = step.get('file', 'unknown')
+            path_steps.append(f"{func_name} in {file_path}")
+
+        # Build detailed function info for each step
+        function_details = []
+        for j, step in enumerate(path, 1):
+            func_name = step.get('function', 'unknown')
+            source = step.get('body', '')
+            # Truncate very long source code
+            truncated_source = source[:1000] if len(source) > 1000 else source
+            function_details.append(f"""
+Step {j}: {func_name}
+```c
+{truncated_source}
+{'... (truncated)' if len(source) > 1000 else ''}
+```
+""")
+
+        prompt = f"""Analyze this EXECUTION PATH for exploitability in a fuzzing context.
+
+ENTRY POINT: {entry_point}
+
+EXECUTION PATH ({len(path)} functions):
+{' → '.join(path_steps)}
+
+FUNCTION DETAILS:
+{''.join(function_details)}
+
+ANALYSIS QUESTIONS:
+
+1. DATA FLOW:
+   - Can attacker-controlled input reach the final function?
+   - What transformations/validations happen along the way?
+   - Are there sanitization steps that would block exploitation?
+
+2. VULNERABILITY ASSESSMENT:
+   - What dangerous operations exist in this path?
+   - Are they reachable with attacker-controlled data?
+   - Are there exploitable conditions?
+
+3. EXPLOIT FEASIBILITY:
+   - How complex would it be to trigger a vulnerability?
+   - Are there checks that must be bypassed?
+   - What's the most likely vulnerability in this path?
+
+4. FUZZING PRIORITY:
+   - How valuable is this path for fuzzing?
+   - Is it likely to find bugs?
+
+Score 0-100 based on REALISTIC exploitability of this COMPLETE PATH:
+- 90-100: Direct path to exploitable vulnerability (e.g., unchecked buffer op with attacker data)
+- 70-89: Likely exploitable with some effort (some checks but bypassable)
+- 50-69: Potentially exploitable (requires specific conditions)
+- 30-49: Low exploitability (significant mitigations in place)
+- 0-29: Unlikely exploitable (well-protected or no dangerous operations)
+
+Respond ONLY with JSON:
+{{
+  "score": <0-100>,
+  "risk_level": "<critical|high|medium|low>",
+  "reasons": ["reason1", "reason2"],
+  "attack_vector": "description of how to exploit this path",
+  "blocking_checks": ["check1", "check2"],
+  "vulnerable_step": "which function/step is most vulnerable"
+}}"""
+
+        response = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            temperature=0.0,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        result_text = response.content[0].text.strip()
+
+        # Extract JSON from response
+        if "```json" in result_text:
+            result_text = result_text.split("```json")[1].split("```")[0].strip()
+        elif "```" in result_text:
+            result_text = result_text.split("```")[1].split("```")[0].strip()
+
+        result = json.loads(result_text)
+
+        # Thread-safe progress reporting
+        with progress_lock:
+            risk = result.get('risk_level', 'unknown')
+            score = result.get('score', 0)
+            print(f"    [{path_index}] Score: {score}/100, Risk: {risk}")
+
+        return result
+
+    except Exception as e:
+        with progress_lock:
+            print(f"    [{path_index}] Warning: Path analysis failed: {e}")
+        return {
+            "score": 0,
+            "risk_level": "unknown",
+            "reasons": [f"Analysis failed: {e}"],
+            "attack_vector": "unknown",
+            "blocking_checks": [],
+            "vulnerable_step": "unknown"
+        }
+
+
+def score_paths_with_llm(
+    entry_point: str,
+    paths: List[List[Dict[str, Any]]],  # List of paths, each path is list of function dicts
+    model: str = "claude-sonnet-4-5-20250929",
+    repo_path: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Score execution paths for vulnerability potential using Claude API (PARALLEL VERSION with CACHING).
+
+    This analyzes complete execution paths from entry point to target,
+    considering data flow, validations, and realistic exploitability.
+
+    Uses parallel processing to analyze multiple paths concurrently for speed.
+    Results are cached to avoid redundant LLM calls on reruns.
+
+    Args:
+        entry_point: Name of entry point function
+        paths: List of execution paths, each path is a list of function dicts with 'function', 'body', 'file'
+        model: Claude model to use
+        repo_path: Optional path to repository for caching (if None, caching is disabled)
+
+    Returns:
+        List of dicts with: score (0-100), risk_level, reasons, attack_vector, vulnerable_step, blocking_checks
+    """
+    # Try to load from cache if repo_path provided
+    if repo_path:
+        # Build config for cache key
+        config = {
+            'SIZE_PREFILTER': os.environ.get('SIZE_PREFILTER', '200'),
+            'MAX_PATHS_TO_EXTRACT': os.environ.get('MAX_PATHS_TO_EXTRACT', '100'),
+            'LLM_ANALYSIS_WORKERS': os.environ.get('LLM_ANALYSIS_WORKERS', '8'),
+        }
+
+        cached_results = _load_cached_analysis(repo_path, entry_point, paths, model, config)
+        if cached_results is not None:
+            return cached_results
+
+        print(f"  No valid cache found, running fresh LLM analysis")
+    # Check if anthropic is available
+    try:
+        from anthropic import Anthropic
+    except ImportError as e:
+        # Try adding venv site-packages to path if running from venv
+        import sys
+        venv_path = os.environ.get('VIRTUAL_ENV')
+        if venv_path:
+            # Add venv site-packages to sys.path
+            python_version = f"python{sys.version_info.major}.{sys.version_info.minor}"
+            site_packages = os.path.join(venv_path, "lib", python_version, "site-packages")
+            if os.path.exists(site_packages) and site_packages not in sys.path:
+                sys.path.insert(0, site_packages)
+                print(f"  Added venv site-packages to path: {site_packages}")
+                try:
+                    from anthropic import Anthropic
+                    print(f"  ✓ Successfully imported anthropic after adding venv to path")
+                except ImportError:
+                    print(f"Warning: anthropic package not installed, cannot score paths with LLM")
+                    print(f"  Import error: {e}")
+                    print(f"  Python executable: {sys.executable}")
+                    print(f"  VIRTUAL_ENV: {venv_path}")
+                    print(f"  Site packages path: {site_packages} (exists: {os.path.exists(site_packages)})")
+                    print(f"  Install with: pip install anthropic")
+                    return []
+            else:
+                print(f"Warning: anthropic package not installed, cannot score paths with LLM")
+                print(f"  Install with: pip install anthropic")
+                return []
+        else:
+            print(f"Warning: anthropic package not installed, cannot score paths with LLM")
+            print(f"  Install with: pip install anthropic")
+            return []
+
+    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    if not api_key:
+        print(f"Warning: ANTHROPIC_API_KEY not set, cannot score paths with LLM")
+        return []
+
+    # Parallel processing configuration
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import threading
+
+    # Get max workers from environment (default: 8, can go up to 16)
+    max_workers = int(os.environ.get('LLM_ANALYSIS_WORKERS', '8'))
+    print(f"  Using {max_workers} parallel workers for LLM analysis")
+
+    progress_lock = threading.Lock()
+    results = [None] * len(paths)  # Pre-allocate results list to preserve order
+
+    # Submit all paths for parallel processing
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks
+        future_to_index = {
+            executor.submit(
+                _score_single_path_with_llm,
+                i + 1,  # 1-indexed for progress display
+                path,
+                entry_point,
+                model,
+                api_key,
+                progress_lock
+            ): i
+            for i, path in enumerate(paths)
+        }
+
+        # Collect results as they complete
+        completed = 0
+        for future in as_completed(future_to_index):
+            index = future_to_index[future]
+            results[index] = future.result()
+            completed += 1
+
+            # Progress update (thread-safe)
+            with progress_lock:
+                if completed % 10 == 0 or completed == len(paths):
+                    print(f"  Progress: {completed}/{len(paths)} paths analyzed")
+
+    # Save results to cache if repo_path provided
+    if repo_path:
+        config = {
+            'SIZE_PREFILTER': os.environ.get('SIZE_PREFILTER', '200'),
+            'MAX_PATHS_TO_EXTRACT': os.environ.get('MAX_PATHS_TO_EXTRACT', '100'),
+            'LLM_ANALYSIS_WORKERS': os.environ.get('LLM_ANALYSIS_WORKERS', '8'),
+        }
+        _save_cached_analysis(repo_path, entry_point, paths, model, config, results)
+
+    return results
 
 
 def find_task_directory(task_id: str) -> Optional[str]:
@@ -262,7 +812,7 @@ def get_reachable_functions_qx(
 
     # Build list of function definitions
     reachable_funcs = []
-    for func_name in reachable_names:
+    for func_name in (reachable_names or []):
         func_def = functions_map.get(func_name)
         if func_def:
             # Handle both lowercase and uppercase field names
@@ -497,7 +1047,7 @@ def _run_local_analysis(
                 func_name = func_info['name']
 
                 # Try to find paths to this function
-                target_paths = fuzzer_paths.get(func_name, [])
+                target_paths = fuzzer_paths.get(func_name, []) or []
 
                 # Process each path
                 for path in target_paths:
@@ -543,10 +1093,37 @@ def _run_local_analysis(
                     print(f"Matched fuzzer '{fuzzer_name_base}' to entry point: {entry_point}")
                     break
 
-        # If we still don't have an entry point, use the first one available
+        # If we still don't have an entry point, find the best one from available candidates
+        # Prefer entry points with the most reachable functions
         if not entry_point and reachable_data:
-            entry_point = list(reachable_data.keys())[0]
-            print(f"Using first available entry point: {entry_point}")
+            # Sort entry points by number of reachable functions (descending)
+            entry_point_candidates = [
+                (ep, len(reachable_data[ep]) if reachable_data[ep] else 0)
+                for ep in reachable_data.keys()
+            ]
+            entry_point_candidates.sort(key=lambda x: x[1], reverse=True)
+
+            # Use the entry point with the most reachable functions
+            if entry_point_candidates:
+                entry_point = entry_point_candidates[0][0]
+                num_reachable = entry_point_candidates[0][1]
+                print(f"Selected entry point with most reachable functions: {entry_point} ({num_reachable} reachable)")
+
+                # If the top one has 0, show alternatives
+                if num_reachable == 0:
+                    alternatives = [ep for ep, count in entry_point_candidates if count > 0]
+                    if alternatives:
+                        print(f"Note: Found {len(alternatives)} alternative entry points with reachable functions:")
+                        for ep, count in entry_point_candidates[:5]:  # Show top 5
+                            if count > 0:
+                                print(f"  - {ep}: {count} reachable functions")
+                        # Use the best alternative
+                        entry_point = entry_point_candidates[0][0]
+                        for ep, count in entry_point_candidates:
+                            if count > 0:
+                                entry_point = ep
+                                print(f"Switching to entry point: {entry_point} ({count} reachable functions)")
+                                break
 
         if not entry_point:
             print("No entry points found in analysis results")
@@ -581,7 +1158,7 @@ def _run_local_analysis(
             # If no paths found (empty paths_data), compute sample paths on-demand
             if len(call_paths) == 0:
                 print(f"No paths available in analysis results. Computing sample paths on-demand...")
-                reachable_funcs = reachable_data.get(entry_point, [])
+                reachable_funcs = reachable_data.get(entry_point, []) or []
                 print(f"Found {len(reachable_funcs)} reachable functions from entry point")
 
                 # Strategy: Sample a subset of interesting functions and compute paths to them
@@ -623,7 +1200,217 @@ def _run_local_analysis(
 
                 # Sort by score descending, take top targets
                 scored_funcs.sort(reverse=True, key=lambda x: x[0])
-                top_targets = scored_funcs[:10]  # Top 10 interesting functions (reduced to save context)
+
+                # Use LLM-based vulnerability scoring by default
+                # Set USE_LLM_VULNERABILITY_SCORING=false to disable
+                use_llm_scoring = os.environ.get('USE_LLM_VULNERABILITY_SCORING', 'true').lower() == 'true'
+                # Aggressive settings optimized for $100 budget
+                size_prefilter = int(os.environ.get('SIZE_PREFILTER', '200'))  # Top 200 candidates (configurable)
+
+                if use_llm_scoring and len(scored_funcs) > 0:
+                    print(f"PATH-BASED LLM vulnerability scoring enabled")
+                    print(f"Step 1: Size-based prefiltering (top {size_prefilter} candidates)")
+
+                    # Get top candidates by size
+                    size_candidates = scored_funcs[:size_prefilter]
+                    print(f"  Selected {len(size_candidates)} candidates for path extraction")
+
+                    # Step 2: Build call graph and extract paths
+                    print(f"Step 2: Extracting execution paths to candidate functions")
+                    call_graph_edges = call_graph.get('Calls', []) if call_graph else []
+
+                    # Build adjacency list
+                    adj = {}
+                    for edge in call_graph_edges:
+                        caller = edge.get('Caller', '')
+                        callee = edge.get('Callee', '')
+                        if caller and callee:
+                            if caller not in adj:
+                                adj[caller] = []
+                            adj[caller].append(callee)
+
+                    # Check if call graph is usable
+                    sample_callers = list(adj.keys())[:20]
+                    useless_callers = sum(1 for c in sample_callers if c.startswith('<operator>') or c.startswith('<unresolved') or len(c) <= 3)
+                    uses_abbreviated_names = len(sample_callers) > 0 and (useless_callers / len(sample_callers)) > 0.5
+
+                    if uses_abbreviated_names:
+                        print(f"  Warning: Call graph is mostly operators ({useless_callers}/{len(sample_callers)})")
+                        print(f"  Falling back to function-based LLM scoring")
+
+                        # Fallback: Use function-based scoring
+                        functions_to_score = [
+                            (func_name, func_def.get('SourceCode', ''), func_def.get('FilePath', ''))
+                            for _, func_name, func_def in size_candidates[:20]  # Reduced to 20 for fallback
+                        ]
+
+                        llm_results = score_functions_with_llm(functions_to_score)
+
+                        # Re-score with LLM scores
+                        llm_scored = []
+                        for (size_score, func_name, func_def), llm_result in zip(size_candidates[:20], llm_results):
+                            llm_score = llm_result.get('score', size_score // 100)
+                            risk_level = llm_result.get('risk_level', 'unknown')
+                            reasons = llm_result.get('reasons', [])
+
+                            func_def['_llm_score'] = llm_score
+                            func_def['_llm_risk'] = risk_level
+                            func_def['_llm_reasons'] = reasons
+                            func_def['_size_score'] = size_score
+
+                            llm_scored.append((llm_score, func_name, func_def))
+
+                        llm_scored.sort(reverse=True, key=lambda x: x[0])
+                        top_targets = llm_scored[:10]
+
+                    else:
+                        # Extract paths to top candidates
+                        candidate_paths = []
+                        # Aggressive setting: analyze up to 100 paths (optimized for $100 budget)
+                        max_paths_to_extract = int(os.environ.get('MAX_PATHS_TO_EXTRACT', '100'))
+
+                        print(f"  Extracting paths from {entry_point} to top candidates...")
+                        for i, (score, target_name, target_def) in enumerate(size_candidates):
+                            if len(candidate_paths) >= max_paths_to_extract:
+                                break
+
+                            # Find 1-2 paths to each target
+                            paths = _find_paths_bfs(entry_point, target_name, adj, max_depth=15, max_paths=2)
+
+                            for path in paths:
+                                if len(candidate_paths) >= max_paths_to_extract:
+                                    break
+
+                                # Build processed path with function details
+                                processed_path = []
+                                for node_name in path:
+                                    func_def = functions_map.get(node_name, {})
+                                    processed_func = {
+                                        "file": func_def.get('FilePath', ''),
+                                        "function": func_def.get('Name', node_name),
+                                        "body": func_def.get('SourceCode', ''),
+                                        "line": str(func_def.get('StartLine', '')),
+                                    }
+                                    processed_path.append(processed_func)
+
+                                if len(processed_path) > 1:  # Only include paths with at least 2 functions
+                                    candidate_paths.append(processed_path)
+
+                        print(f"  Extracted {len(candidate_paths)} execution paths")
+
+                        if len(candidate_paths) == 0:
+                            print(f"  Warning: No paths found, falling back to function-based scoring")
+                            # Fallback to function-based
+                            functions_to_score = [
+                                (func_name, func_def.get('SourceCode', ''), func_def.get('FilePath', ''))
+                                for _, func_name, func_def in size_candidates[:20]
+                            ]
+                            llm_results = score_functions_with_llm(functions_to_score)
+                            llm_scored = []
+                            for (size_score, func_name, func_def), llm_result in zip(size_candidates[:20], llm_results):
+                                llm_score = llm_result.get('score', size_score // 100)
+                                func_def['_llm_score'] = llm_score
+                                func_def['_llm_risk'] = llm_result.get('risk_level', 'unknown')
+                                func_def['_llm_reasons'] = llm_result.get('reasons', [])
+                                func_def['_size_score'] = size_score
+                                llm_scored.append((llm_score, func_name, func_def))
+                            llm_scored.sort(reverse=True, key=lambda x: x[0])
+                            top_targets = llm_scored[:10]
+                        else:
+                            # Step 3: Score paths with LLM (with caching)
+                            print(f"Step 3: LLM vulnerability analysis ({len(candidate_paths)} paths)")
+                            path_llm_results = score_paths_with_llm(entry_point, candidate_paths, repo_path=task_dir)
+
+                            # Combine paths with scores
+                            scored_paths = []
+                            for path, llm_result in zip(candidate_paths, path_llm_results):
+                                path_score = llm_result.get('score', 0)
+                                risk_level = llm_result.get('risk_level', 'unknown')
+                                reasons = llm_result.get('reasons', [])
+                                attack_vector = llm_result.get('attack_vector', '')
+                                vulnerable_step = llm_result.get('vulnerable_step', '')
+
+                                scored_paths.append({
+                                    'score': path_score,
+                                    'risk': risk_level,
+                                    'reasons': reasons,
+                                    'attack_vector': attack_vector,
+                                    'vulnerable_step': vulnerable_step,
+                                    'path': path
+                                })
+
+                            # Sort by score
+                            scored_paths.sort(reverse=True, key=lambda x: x['score'])
+
+                            # Select top N paths (configurable, default 25 for better coverage)
+                            top_n_paths = int(os.environ.get('TOP_PATHS_FOR_POV', '25'))
+
+                            # Handle case where requested paths exceed available paths
+                            available_paths = len(scored_paths)
+                            actual_paths = min(top_n_paths, available_paths)
+
+                            if top_n_paths > available_paths:
+                                print(f"  Note: Requested {top_n_paths} paths, but only {available_paths} paths available")
+
+                            top_10_paths = scored_paths[:actual_paths]
+
+                            print(f"Step 4: Selected top {len(top_10_paths)} vulnerable execution paths (requested={top_n_paths}, available={available_paths})")
+                            for i, path_data in enumerate(top_10_paths, 1):
+                                path = path_data['path']
+                                path_str = ' → '.join([f['function'] for f in path[:3]])
+                                if len(path) > 3:
+                                    path_str += f" → ... ({len(path)} total)"
+                                print(f"  {i}. {path_str}")
+                                print(f"     Score: {path_data['score']}/100, Risk: {path_data['risk']}")
+                                print(f"     Vulnerable step: {path_data['vulnerable_step']}")
+                                if path_data['attack_vector']:
+                                    print(f"     Attack: {path_data['attack_vector'][:80]}...")
+
+                            # Extract target functions from top paths for compatibility with rest of code
+                            top_targets = []
+                            seen_targets = set()
+                            for path_data in top_10_paths:
+                                path = path_data['path']
+                                if len(path) > 0:
+                                    # Use the last function in the path as the target
+                                    target_func = path[-1]
+                                    target_name = target_func['function']
+
+                                    # Avoid duplicates
+                                    if target_name in seen_targets:
+                                        continue
+                                    seen_targets.add(target_name)
+
+                                    # Find the function definition
+                                    func_def = functions_map.get(target_name, {})
+                                    if not func_def:
+                                        # Try fuzzy match
+                                        for key, val in functions_map.items():
+                                            if target_name in key or key.endswith(target_name):
+                                                func_def = val
+                                                target_name = key
+                                                break
+
+                                    # Store path analysis results
+                                    func_def['_llm_score'] = path_data['score']
+                                    func_def['_llm_risk'] = path_data['risk']
+                                    func_def['_llm_reasons'] = path_data['reasons']
+                                    func_def['_path_attack_vector'] = path_data['attack_vector']
+                                    func_def['_path_vulnerable_step'] = path_data['vulnerable_step']
+
+                                    top_targets.append((path_data['score'], target_name, func_def))
+
+                            # Populate call_paths with the scored paths
+                            # This avoids recomputing paths later
+                            for path_data in top_10_paths:
+                                call_paths.append(path_data['path'])
+
+                            print(f"Populated {len(call_paths)} paths from path-based LLM analysis")
+
+                else:
+                    # Size-only scoring (fallback or disabled)
+                    top_targets = scored_funcs[:10]  # Top 10 interesting functions (reduced to save context)
+                    print(f"Size-based scoring (LLM analysis disabled via USE_LLM_VULNERABILITY_SCORING=false)")
 
                 # If no targets found from reachability, sample top functions by source code size
                 # This handles cases where Joern produces incomplete reachability (stubs without source)
@@ -653,91 +1440,95 @@ def _run_local_analysis(
 
                 print(f"Selected {len(top_targets)} interesting target functions for path computation")
 
-                # Compute paths to these targets using BFS on call graph
-                call_graph_edges = call_graph.get('Calls', []) if call_graph else []
-
-                # Build adjacency list
-                adj = {}
-                for edge in call_graph_edges:
-                    caller = edge.get('Caller', '')
-                    callee = edge.get('Callee', '')
-                    if caller and callee:
-                        if caller not in adj:
-                            adj[caller] = []
-                        adj[caller].append(callee)
-
-                print(f"Built call graph with {len(adj)} nodes, {len(call_graph_edges)} edges")
-
-                # Check if call graph is mostly operators/unresolved (not useful for path finding)
-                sample_callers = list(adj.keys())[:20]
-                useless_callers = sum(1 for c in sample_callers if c.startswith('<operator>') or c.startswith('<unresolved') or len(c) <= 3)
-                uses_abbreviated_names = len(sample_callers) > 0 and (useless_callers / len(sample_callers)) > 0.5
-
-                if uses_abbreviated_names:
-                    print(f"Warning: Call graph is mostly operators ({useless_callers}/{len(sample_callers)}), cannot compute paths reliably")
-                    print(f"Falling back to sampling {len(top_targets)} interesting reachable functions")
-
-                    # Fallback: Return sample of interesting functions as 2-hop paths
-                    # Create synthetic paths: entry_point -> interesting_function
-
-                    # Look up entry point function with fuzzy matching
-                    entry_func = functions_map.get(entry_point, {})
-                    if not entry_func:
-                        for key, val in functions_map.items():
-                            if entry_point in key or key.endswith(entry_point):
-                                entry_func = val
-                                break
-
-                    for score, target_name, target_def in top_targets[:30]:
-                        processed_path = [
-                            {
-                                "file": entry_func.get('FilePath', ''),
-                                "function": entry_func.get('Name', entry_point),
-                                "body": entry_func.get('SourceCode', ''),
-                                "line": str(entry_func.get('StartLine', '')),
-                                "is_modified": False,
-                                "is_vulnerable": False,
-                            },
-                            {
-                                "file": target_def.get('FilePath', ''),
-                                "function": target_def.get('Name', target_name),
-                                "body": target_def.get('SourceCode', ''),
-                                "line": str(target_def.get('StartLine', '')),
-                                "is_modified": False,
-                                "is_vulnerable": False,
-                            }
-                        ]
-                        call_paths.append(processed_path)
+                # Check if paths were already computed during path-based LLM analysis
+                if len(call_paths) > 0:
+                    print(f"Skipping path computation - already have {len(call_paths)} paths from path-based LLM analysis")
                 else:
-                    # Try to compute real paths using BFS
-                    print(f"Entry point in call graph: {entry_point in adj}")
-                    if entry_point in adj:
-                        print(f"Entry point has {len(adj[entry_point])} direct callees")
+                    # Compute paths to these targets using BFS on call graph
+                    call_graph_edges = call_graph.get('Calls', []) if call_graph else []
 
-                    for i, (score, target_name, target_def) in enumerate(top_targets):
-                        # Increased max_depth to 15 to handle long paths, but only return 1 path per target
-                        paths = _find_paths_bfs(entry_point, target_name, adj, max_depth=15, max_paths=1)
+                    # Build adjacency list
+                    adj = {}
+                    for edge in call_graph_edges:
+                        caller = edge.get('Caller', '')
+                        callee = edge.get('Callee', '')
+                        if caller and callee:
+                            if caller not in adj:
+                                adj[caller] = []
+                            adj[caller].append(callee)
 
-                        for path in paths:
-                            processed_path = []
-                            for node_name in path:
-                                func_def = functions_map.get(node_name, {})
-                                processed_func = {
-                                    "file": func_def.get('FilePath', ''),
-                                    "function": func_def.get('Name', node_name),
-                                    "body": func_def.get('SourceCode', ''),
-                                    "line": str(func_def.get('StartLine', '')),
+                    print(f"Built call graph with {len(adj)} nodes, {len(call_graph_edges)} edges")
+
+                    # Check if call graph is mostly operators/unresolved (not useful for path finding)
+                    sample_callers = list(adj.keys())[:20]
+                    useless_callers = sum(1 for c in sample_callers if c.startswith('<operator>') or c.startswith('<unresolved') or len(c) <= 3)
+                    uses_abbreviated_names = len(sample_callers) > 0 and (useless_callers / len(sample_callers)) > 0.5
+
+                    if uses_abbreviated_names:
+                        print(f"Warning: Call graph is mostly operators ({useless_callers}/{len(sample_callers)}), cannot compute paths reliably")
+                        print(f"Falling back to sampling {len(top_targets)} interesting reachable functions")
+
+                        # Fallback: Return sample of interesting functions as 2-hop paths
+                        # Create synthetic paths: entry_point -> interesting_function
+
+                        # Look up entry point function with fuzzy matching
+                        entry_func = functions_map.get(entry_point, {})
+                        if not entry_func:
+                            for key, val in functions_map.items():
+                                if entry_point in key or key.endswith(entry_point):
+                                    entry_func = val
+                                    break
+
+                        for score, target_name, target_def in top_targets[:30]:
+                            processed_path = [
+                                {
+                                    "file": entry_func.get('FilePath', ''),
+                                    "function": entry_func.get('Name', entry_point),
+                                    "body": entry_func.get('SourceCode', ''),
+                                    "line": str(entry_func.get('StartLine', '')),
+                                    "is_modified": False,
+                                    "is_vulnerable": False,
+                                },
+                                {
+                                    "file": target_def.get('FilePath', ''),
+                                    "function": target_def.get('Name', target_name),
+                                    "body": target_def.get('SourceCode', ''),
+                                    "line": str(target_def.get('StartLine', '')),
                                     "is_modified": False,
                                     "is_vulnerable": False,
                                 }
-                                processed_path.append(processed_func)
+                            ]
+                            call_paths.append(processed_path)
+                    else:
+                        # Try to compute real paths using BFS
+                        print(f"Entry point in call graph: {entry_point in adj}")
+                        if entry_point in adj:
+                            print(f"Entry point has {len(adj[entry_point])} direct callees")
 
-                            if len(processed_path) > 1:
-                                call_paths.append(processed_path)
+                        for i, (score, target_name, target_def) in enumerate(top_targets):
+                            # Increased max_depth to 15 to handle long paths, but only return 1 path per target
+                            paths = _find_paths_bfs(entry_point, target_name, adj, max_depth=15, max_paths=1)
 
-                        # Stop if we have enough paths
-                        if len(call_paths) >= 30:
-                            break
+                            for path in paths:
+                                processed_path = []
+                                for node_name in path:
+                                    func_def = functions_map.get(node_name, {})
+                                    processed_func = {
+                                        "file": func_def.get('FilePath', ''),
+                                        "function": func_def.get('Name', node_name),
+                                        "body": func_def.get('SourceCode', ''),
+                                        "line": str(func_def.get('StartLine', '')),
+                                        "is_modified": False,
+                                        "is_vulnerable": False,
+                                    }
+                                    processed_path.append(processed_func)
+
+                                if len(processed_path) > 1:
+                                    call_paths.append(processed_path)
+
+                            # Stop if we have enough paths
+                            if len(call_paths) >= 30:
+                                break
 
             print(f"Extracted {len(call_paths)} paths for entry point {entry_point}")
             return call_paths
@@ -811,7 +1602,7 @@ def _run_local_analysis(
                     target_signature = f"{normalized_file_path}.{func_name}"
                     composite_key = f"{entry_point}-{target_signature}"
 
-                    target_paths = paths_data.get(composite_key, [])
+                    target_paths = paths_data.get(composite_key, []) or []
 
                     if target_paths:
                         print(f"Found {len(target_paths)} paths for {composite_key}")

@@ -95,58 +95,6 @@ func BuildAFCFuzzers(taskDir string, sanitizer, projectName, projectDir, sanitiz
 	return cmdOutput.String(), nil
 }
 
-// BuildAFCFuzzers0 is an older version of BuildAFCFuzzers that copies the output
-// to a sanitizer directory after building.
-func BuildAFCFuzzers0(taskDir string, sanitizer, projectName, projectDir, sanitizerDir string) (string, error) {
-	// Build the command to run helper.py
-	// python3 infra/helper.py build_fuzzers --clean --sanitizer sanitizer --engine "libfuzzer" taskDetail.ProjectName sanitizerProjectDir
-
-	helperCmd := exec.Command("python3",
-		filepath.Join(taskDir, "fuzz-tooling/infra/helper.py"),
-		"build_fuzzers",
-		"--clean",
-		"--sanitizer", sanitizer,
-		"--engine", "libfuzzer",
-		projectName,
-		projectDir,
-	)
-
-	var cmdOutput bytes.Buffer
-	helperCmd.Stdout = &cmdOutput
-	helperCmd.Stderr = &cmdOutput
-
-	log.Printf("[BuildAFCFuzzers] Building fuzzers for %s %s sanitizer\nCommand: %v", projectName,sanitizer, helperCmd.Args)
-
-	if err := helperCmd.Run(); err != nil {
-		output := cmdOutput.String()
-		lines := strings.Split(output, "\n")
-
-		// Truncate output if it's very long
-		if len(lines) > 30 {
-			firstLines := lines[:10]
-			lastLines := lines[len(lines)-20:]
-
-			truncatedOutput := strings.Join(firstLines, "\n") +
-				"\n\n[...TRUNCATED " + fmt.Sprintf("%d", len(lines)-30) + " LINES...]\n\n" +
-				strings.Join(lastLines, "\n")
-
-			output = truncatedOutput
-		}
-
-		return output, err
-	}
-
-	//TODO: copy outDir to sanitizerDir
-	outDir := filepath.Join(taskDir, "fuzz-tooling", "build", "out", projectName)
-	if err := helpers.RobustCopyDir(outDir, sanitizerDir); err != nil {
-		log.Printf("[BuildAFCFuzzers] failed to copy fuzzer files: outDir %s %v", outDir, err)
-	} else {
-		log.Printf("[BuildAFCFuzzers] fuzzer files copied to %s", sanitizerDir)
-	}
-
-	return cmdOutput.String(), nil
-}
-
 // PullAFCDockerImage pulls the OSS-Fuzz Docker image for a project and tags it
 // with the aixcc-afc prefix for local use.
 func PullAFCDockerImage(taskDir string, projectName string) (string, error) {

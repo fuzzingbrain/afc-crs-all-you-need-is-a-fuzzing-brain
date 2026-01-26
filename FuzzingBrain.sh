@@ -543,7 +543,7 @@ elif is_git_url "$TARGET"; then
 
         # Clone target repository
         print_info "Cloning target repository..."
-        if ! git clone "$GIT_URL" "$WORKSPACE/repo"; then
+        if ! git clone --depth 1 "$GIT_URL" "$WORKSPACE/repo"; then
             print_error "Failed to clone repository: $GIT_URL"
             exit 1
         fi

@@ -14,7 +14,7 @@ import (
 	"static-analysis/internal/engine/models"
 )
 
-// CPG creation timeout - 30 minutes should be enough for most projects
+// CPG creation timeout - 5 minutes (large codebases auto-skip to regex-based analysis)
 const cpgCreationTimeout = 5 * time.Minute
 
 // AnalyzeProjectDirs runs Joern analysis on multiple project directories using local Joern installation
@@ -201,7 +201,7 @@ cpg.method.foreach { m =>
 
 // Extract call graph
 cpg.call.foreach { c =>
-  val caller = c.method.fullName.headOption.getOrElse("unknown")
+  val caller = c.method.fullName
   val callee = c.calledMethod.fullName.headOption.getOrElse(c.name)
   println(s"CALL|||${caller}|||${callee}")
 }
@@ -448,6 +448,50 @@ func normalizeLanguage(language string) string {
 	return language
 }
 
+// countSourceFiles counts the number of source files with given extensions in a directory
+// This is used to determine if a codebase is too large for Joern analysis
+func countSourceFiles(dir string, extensions []string) int {
+	count := 0
+	extMap := make(map[string]bool)
+	for _, ext := range extensions {
+		extMap[strings.ToLower(ext)] = true
+	}
+
+	// Use a simple walk with early termination if count exceeds threshold
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil // Skip errors
+		}
+
+		// Skip common non-source directories to speed up counting
+		if info.IsDir() {
+			base := filepath.Base(path)
+			skipDirs := []string{".git", "node_modules", "vendor", "third_party", "build", "cmake-build", "bazel-"}
+			for _, skip := range skipDirs {
+				if strings.HasPrefix(base, skip) || base == skip {
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+
+		// Check extension
+		ext := strings.ToLower(filepath.Ext(path))
+		if extMap[ext] {
+			count++
+		}
+
+		// Early termination if we've found enough files
+		if count > 15000 {
+			return fmt.Errorf("count exceeded threshold")
+		}
+
+		return nil
+	})
+
+	return count
+}
+
 // findTaskDirectory finds the task directory from a project directory
 // It walks up the directory tree looking for characteristic files
 func findTaskDirectory(projectDir string) string {
@@ -634,16 +678,41 @@ func createCPG(projectDirs []string, cpgPath, language string) error {
 			log.Printf("Warning: joern-parse only supports single directory. Using primary directory: %s", primaryDir)
 			log.Printf("Other directories will be analyzed with simple regex-based analysis: %v", projectDirs[1:])
 		}
-		// Exclude directories that are typically not relevant for fuzzing analysis
-		// and can significantly slow down CPG creation
-		args := []string{primaryDir, "--output", cpgPath, "--language", "newc",
-			"--frontend-args",
-			"--exclude", "tutorials",
-			"--exclude", "docs",
-			"--exclude", "documentation",
-			"--exclude", "examples",
-			"--exclude", "third_party",
-			"--exclude", "vendor",
+
+		// Check if this is a very large codebase by counting source files
+		// For large repos (>3000 files), skip Joern and use regex-based analysis
+		// Joern CPG creation is very slow for large C++ codebases
+		log.Printf("Counting source files in %s...", primaryDir)
+		fileCount := countSourceFiles(primaryDir, []string{".c", ".cpp", ".cc", ".cxx", ".h", ".hpp"})
+		log.Printf("Found %d source files", fileCount)
+		if fileCount > 3000 {
+			log.Printf("Large codebase detected (%d source files). Skipping Joern CPG creation - will use regex-based analysis.", fileCount)
+			return fmt.Errorf("codebase too large for Joern analysis (%d files), falling back to regex-based analysis", fileCount)
+		}
+
+		// Build exclusion regex pattern for directories not relevant to fuzzing
+		// This significantly speeds up CPG creation
+		excludePattern := ".*/(" +
+			"tutorials|" +
+			"docs|" +
+			"documentation|" +
+			"examples|" +
+			"third_party|" +
+			"vendor|" +
+			"test/|" +
+			"tests/|" +
+			"benchmarks|" +
+			"build|" +
+			"cmake|" +
+			"scripts|" +
+			"\\.git" +
+			")/.*"
+
+		args := []string{
+			primaryDir,
+			"--output", cpgPath,
+			"--language", "newc",
+			"--frontend-args", "--exclude-regex", excludePattern,
 		}
 		cmd = exec.CommandContext(ctx, "joern-parse", args...)
 	case "java":
