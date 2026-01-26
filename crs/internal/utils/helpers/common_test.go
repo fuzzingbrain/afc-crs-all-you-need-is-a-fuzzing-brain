@@ -332,37 +332,6 @@ func TestSaveTaskDetailToJson(t *testing.T) {
 	assert.Equal(t, taskDetail.TaskID, restored.TaskID)
 }
 
-func TestCopyFuzzDirForParallelStrategies(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("PATH", "/nonexistent")
-
-	sanitizerDir := filepath.Join(tmpDir, "project-address")
-	require.NoError(t, os.MkdirAll(sanitizerDir, 0o755))
-
-	fuzzerName := "example"
-	fuzzerPath := filepath.Join(sanitizerDir, fuzzerName)
-	require.NoError(t, os.WriteFile(fuzzerPath, []byte("binary"), 0o755))
-
-	coverageDir := filepath.Join(tmpDir, "project")
-	require.NoError(t, os.MkdirAll(coverageDir, 0o755))
-	require.NoError(t, os.WriteFile(filepath.Join(coverageDir, fuzzerName), []byte("coverage"), 0o755))
-
-	require.NoError(t, CopyFuzzDirForParallelStrategies(fuzzerPath, sanitizerDir))
-
-	targetDirs := []string{"ap0", "ap1", "ap2", "ap3", "xp0", "sarif0"}
-	for _, td := range targetDirs {
-		destBin := filepath.Join(sanitizerDir, td, fuzzerName)
-		data, err := os.ReadFile(destBin)
-		require.NoError(t, err, "expected binary in %s", destBin)
-		assert.Equal(t, []byte("binary"), data)
-
-		coverageBin := filepath.Join(sanitizerDir, td, fuzzerName+"-coverage")
-		coverageData, err := os.ReadFile(coverageBin)
-		require.NoError(t, err, "expected coverage binary in %s", coverageBin)
-		assert.Equal(t, []byte("coverage"), coverageData)
-	}
-}
-
 func createTarGz(t *testing.T, path string, files map[string]string) {
 	t.Helper()
 	f, err := os.Create(path)

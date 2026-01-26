@@ -424,8 +424,6 @@ func (s *WorkerCRSService) buildFuzzersDocker(myFuzzer *string, taskDir, project
 		return fmt.Errorf("failed to copy project files to sanitizer-specific directory: %v", err)
 	}
 
-	log.Printf("Created sanitizer-specific project directory: %s", sanitizerProjectDir)
-
 	// Check for build.patch in the project's directory
 	projectToolingDir := filepath.Join(taskDir, "fuzz-tooling", "projects", taskDetail.ProjectName)
 	buildPatchPath := filepath.Join(projectToolingDir, "build.patch")
