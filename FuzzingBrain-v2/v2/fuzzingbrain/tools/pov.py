@@ -907,6 +907,20 @@ def _create_pov_core(
                     logger.debug(f"[POV] Cross-fuzzer check failed on {other_fuzzer.fuzzer_name}: {e}")
 
     # Return results with verification info
+    # Extract key info from verify_results for Agent feedback
+    verify_details = []
+    for i, result in enumerate(verify_results):
+        detail = {
+            "variant": i + 1,
+            "crashed": result.get("crashed", False),
+        }
+        if result.get("crashed"):
+            detail["vuln_type"] = result.get("vuln_type")
+        else:
+            # Include LLM-generated summary for non-crash cases
+            detail["output_summary"] = result.get("output_summary", "No details")
+        verify_details.append(detail)
+
     return {
         "success": True,
         "pov_ids": pov_ids,
@@ -916,6 +930,7 @@ def _create_pov_core(
         "crashed": len(successful_povs),
         "cross_fuzzer_hits": cross_fuzzer_hits,
         "successful_pov_ids": successful_povs,
+        "verify_details": verify_details,
     }
 
 

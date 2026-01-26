@@ -157,9 +157,9 @@ class WorkspaceSetup:
                         capture_output=True,
                         timeout=120,
                     )
-                    # Checkout FETCH_HEAD (the fetched ref)
+                    # Force checkout FETCH_HEAD (shallow clone may have different files on default branch)
                     result = subprocess.run(
-                        ["git", "checkout", "FETCH_HEAD"],
+                        ["git", "checkout", "-f", "FETCH_HEAD"],
                         cwd=str(fuzz_tooling_path),
                         capture_output=True,
                         text=True,

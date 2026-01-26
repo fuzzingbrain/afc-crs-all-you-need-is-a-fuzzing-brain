@@ -487,8 +487,8 @@ class AnalyzerBuilder:
             if temp_dir.exists():
                 shutil.rmtree(temp_dir)
 
-            # Copy repo
-            shutil.copytree(self.repo_path, temp_dir)
+            # Copy repo (symlinks=True to avoid following self-referencing symlinks)
+            shutil.copytree(self.repo_path, temp_dir, symlinks=True)
             return temp_dir
 
         except Exception as e:

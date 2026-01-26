@@ -655,9 +655,19 @@ class LLMClient:
             ]
 
         if not fallback_chain:
-            raise LLMAllModelsFailedError(
-                "All fallback models exhausted",
-                tried_models=list(self._tried_models),
+            # All models exhausted - sleep and retry instead of crashing
+            logger.warning(
+                f"All fallback models exhausted (tried: {list(self._tried_models)}). "
+                f"Sleeping 30s before retrying..."
+            )
+            time.sleep(30)
+            # Reset tried models and retry
+            self._tried_models.clear()
+            return self._try_fallback(
+                messages=messages,
+                failed_model=failed_model,
+                original_model=original_model,
+                **kwargs,
             )
 
         # Try next fallback
@@ -892,9 +902,19 @@ class LLMClient:
             ]
 
         if not fallback_chain:
-            raise LLMAllModelsFailedError(
-                "All fallback models exhausted",
-                tried_models=list(self._tried_models),
+            # All models exhausted - sleep and retry instead of crashing
+            logger.warning(
+                f"All fallback models exhausted (tried: {list(self._tried_models)}). "
+                f"Sleeping 30s before retrying..."
+            )
+            await asyncio.sleep(30)
+            # Reset tried models and retry
+            self._tried_models.clear()
+            return await self._atry_fallback(
+                messages=messages,
+                failed_model=failed_model,
+                original_model=original_model,
+                **kwargs,
             )
 
         next_model = fallback_chain[0]

@@ -152,22 +152,22 @@ class WorkerDispatcher:
 
         worker_workspace.mkdir(parents=True, exist_ok=True)
 
-        # Copy repo
+        # Copy repo (symlinks=True to avoid following self-referencing symlinks)
         src_repo = task_workspace / "repo"
         if src_repo.exists():
-            shutil.copytree(src_repo, worker_workspace / "repo")
+            shutil.copytree(src_repo, worker_workspace / "repo", symlinks=True)
             logger.debug(f"Copied repo to {worker_workspace / 'repo'}")
 
         # Copy fuzz-tooling
         src_fuzz_tooling = task_workspace / "fuzz-tooling"
         if src_fuzz_tooling.exists():
-            shutil.copytree(src_fuzz_tooling, worker_workspace / "fuzz-tooling")
+            shutil.copytree(src_fuzz_tooling, worker_workspace / "fuzz-tooling", symlinks=True)
             logger.debug(f"Copied fuzz-tooling to {worker_workspace / 'fuzz-tooling'}")
 
         # Copy diff (if exists)
         src_diff = task_workspace / "diff"
         if src_diff.exists():
-            shutil.copytree(src_diff, worker_workspace / "diff")
+            shutil.copytree(src_diff, worker_workspace / "diff", symlinks=True)
             logger.debug(f"Copied diff to {worker_workspace / 'diff'}")
 
         # Create results directory

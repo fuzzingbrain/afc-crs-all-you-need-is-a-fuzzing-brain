@@ -53,7 +53,7 @@ class FunctionAnalysisAgent(BaseAgent):
         # Agent config
         llm_client: Optional[LLMClient] = None,
         model: Optional[Union[ModelInfo, str]] = None,
-        max_iterations: int = 3,  # Reduced: key info provided upfront
+        max_iterations: int = 5,  # Enough iterations for thorough analysis
         verbose: bool = True,
         task_id: str = "",
         worker_id: str = "",

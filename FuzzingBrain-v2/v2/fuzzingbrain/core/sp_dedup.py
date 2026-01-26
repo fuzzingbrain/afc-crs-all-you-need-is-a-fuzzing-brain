@@ -61,12 +61,12 @@ def check_sp_duplicate(
             {
                 "role": "system",
                 "content": (
-                    "You are a vulnerability analysis assistant. "
-                    "Your task is to determine if a new suspicious point (SP) "
-                    "describes the same vulnerability as any existing SP. "
-                    "Focus on the semantic meaning, not exact wording. "
-                    "Two SPs are duplicates if they describe the same bug at "
-                    "the same location with the same root cause."
+                    "You are a vulnerability deduplication assistant. "
+                    "Your task is to determine if a new SP describes the EXACT SAME "
+                    "vulnerability as an existing SP. Be conservative: only mark as "
+                    "duplicate if you are CERTAIN they are the same bug. "
+                    "When uncertain, say NOT duplicate. "
+                    "It's better to have extra SPs than to miss real vulnerabilities."
                 ),
             },
             {"role": "user", "content": prompt},
@@ -102,7 +102,7 @@ def _build_sp_dedup_prompt(
 
     existing_text = "\n".join(sp_list)
 
-    return f"""Determine if the NEW suspicious point describes the same vulnerability as any EXISTING suspicious point.
+    return f"""Determine if the NEW suspicious point describes the EXACT SAME vulnerability as any EXISTING suspicious point.
 
 NEW SP:
 "{new_description}"
@@ -110,14 +110,23 @@ NEW SP:
 EXISTING SPs:
 {existing_text}
 
-Two SPs are duplicates if they:
-1. Describe the same type of vulnerability (e.g., buffer overflow, use-after-free)
-2. Point to the same code location or control flow
-3. Have the same root cause
+Two SPs are duplicates ONLY if they describe the EXACT SAME bug:
+1. Same vulnerability type AND
+2. Same code location (same variable, same statement, same operation) AND
+3. Same root cause
+
+NOT duplicates if:
+- Different variables or buffers involved
+- Different operations (e.g., different memcpy calls, different array accesses)
+- Different control flow paths
+- Similar but not identical issues
+
+IMPORTANT: When uncertain, answer "no duplicate".
+It's better to have extra SPs than to miss real vulnerabilities.
 
 Respond with JSON only:
-- If duplicate found: {{"duplicate": true, "duplicate_of": "SP-N"}} where N is the number of the matching SP
-- If no duplicate: {{"duplicate": false, "duplicate_of": null}}"""
+- If CERTAIN it's a duplicate: {{"duplicate": true, "duplicate_of": "SP-N"}}
+- If uncertain or not duplicate: {{"duplicate": false, "duplicate_of": null}}"""
 
 
 def _parse_sp_dedup_response(
@@ -232,12 +241,12 @@ async def check_sp_duplicate_async(
             {
                 "role": "system",
                 "content": (
-                    "You are a vulnerability analysis assistant. "
-                    "Your task is to determine if a new suspicious point (SP) "
-                    "describes the same vulnerability as any existing SP. "
-                    "Focus on the semantic meaning, not exact wording. "
-                    "Two SPs are duplicates if they describe the same bug at "
-                    "the same location with the same root cause."
+                    "You are a vulnerability deduplication assistant. "
+                    "Your task is to determine if a new SP describes the EXACT SAME "
+                    "vulnerability as an existing SP. Be conservative: only mark as "
+                    "duplicate if you are CERTAIN they are the same bug. "
+                    "When uncertain, say NOT duplicate. "
+                    "It's better to have extra SPs than to miss real vulnerabilities."
                 ),
             },
             {"role": "user", "content": prompt},

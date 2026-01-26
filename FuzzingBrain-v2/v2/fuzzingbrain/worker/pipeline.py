@@ -298,32 +298,51 @@ class AgentPipeline:
                 updated_sp = self.repos.suspicious_points.find_by_id(sp.suspicious_point_id)
 
                 if updated_sp:
+                    # Check if agent actually updated the SP
+                    # If is_checked is still False, agent terminated abnormally
+                    # In that case, default to letting it pass (is_important=True)
+                    if not updated_sp.is_checked:
+                        logger.warning(
+                            f"[Pipeline:{agent_id}] Agent did not update SP {sp.suspicious_point_id}, "
+                            f"defaulting to pass-through (is_important=True)"
+                        )
+                        # Default to pass-through when agent fails
+                        is_important = True
+                        is_real = False
+                        score = updated_sp.score
+                        notes = "Agent terminated without verdict - defaulting to pass-through"
+                    else:
+                        is_important = updated_sp.is_important
+                        is_real = updated_sp.is_real
+                        score = updated_sp.score
+                        notes = updated_sp.verification_notes
+
                     # Determine if should proceed to POV
                     proceed_to_pov = (
-                        updated_sp.score >= self.config.pov_min_score and
-                        updated_sp.is_important
+                        score >= self.config.pov_min_score and
+                        is_important
                     )
 
                     # Complete verification
                     self.repos.suspicious_points.complete_verify(
                         sp.suspicious_point_id,
-                        is_real=updated_sp.is_real,
-                        score=updated_sp.score,
-                        notes=updated_sp.verification_notes,
-                        is_important=updated_sp.is_important,
+                        is_real=is_real,
+                        score=score,
+                        notes=notes,
+                        is_important=is_important,
                         proceed_to_pov=proceed_to_pov,
                     )
 
                     # Update stats
                     self.stats.sp_verified += 1
-                    if updated_sp.is_real:
+                    if is_real:
                         self.stats.sp_verified_real += 1
                     else:
                         self.stats.sp_verified_fp += 1
 
                     logger.info(
                         f"[Pipeline:{agent_id}] Verified SP {sp.suspicious_point_id}: "
-                        f"score={updated_sp.score:.2f}, real={updated_sp.is_real}, "
+                        f"score={score:.2f}, real={is_real}, "
                         f"proceed_to_pov={proceed_to_pov}"
                     )
                 else:

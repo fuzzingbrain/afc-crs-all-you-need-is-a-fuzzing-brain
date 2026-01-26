@@ -868,15 +868,28 @@ class POVFullscanStrategy(POVBaseStrategy):
         except Exception:
             pass
 
-        # Determine function size
-        func_lines = func.content.count('\n') + 1 if func.content else 0
+        # Get function source - use DB content or fetch via tree-sitter fallback
+        func_source = func.content or ""
+        if not func_source and self.executor.analysis_socket_path:
+            try:
+                from ...analyzer import AnalysisClient
+                client = AnalysisClient(
+                    self.executor.analysis_socket_path,
+                    client_id=f"fullscan_func_{self.worker_id}_{index}",
+                )
+                func_source = client.get_function_source(func.name) or ""
+            except Exception:
+                pass
+
+        # Determine function size based on actual source
+        func_lines = func_source.count('\n') + 1 if func_source else 0
         is_large = func_lines > LargeFunctionAnalysisAgent.LARGE_FUNCTION_THRESHOLD
 
         # Create appropriate agent
         if is_large:
             agent = LargeFunctionAnalysisAgent(
                 function_name=func.name,
-                function_source=func.content or "",
+                function_source=func_source,  # Use fetched source
                 function_file=func.file_path or "",
                 function_lines=(func.start_line or 0, func.end_line or 0),
                 callers=callers,
@@ -892,7 +905,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         else:
             agent = FunctionAnalysisAgent(
                 function_name=func.name,
-                function_source=func.content or "",
+                function_source=func_source,  # Use fetched source
                 function_file=func.file_path or "",
                 function_lines=(func.start_line or 0, func.end_line or 0),
                 callers=callers,
