@@ -3,6 +3,13 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CRS_DIR="$SCRIPT_DIR/crs"
 
+# Python interpreter - use venv if available
+if [ -x "$SCRIPT_DIR/workspace/crs_venv/bin/python" ]; then
+    PYTHON="$SCRIPT_DIR/workspace/crs_venv/bin/python"
+else
+    PYTHON="python3"
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -337,6 +344,59 @@ check_environment() {
     print_info "Environment check passed"
 }
 
+# Build fuzzers and verify success
+# Returns 0 on success, 1 on failure
+# Sets BUILD_OUTPUT variable with build output (for error reporting)
+build_and_verify_fuzzers() {
+    local workspace="$1"
+    local project_name="$2"
+    local sanitizer="${3:-address}"
+
+    print_info "Building fuzzers for '$project_name' (sanitizer: $sanitizer)..."
+
+    local helper_py="$workspace/fuzz-tooling/infra/helper.py"
+    if [ ! -f "$helper_py" ]; then
+        BUILD_OUTPUT="Error: helper.py not found at $helper_py"
+        print_error "$BUILD_OUTPUT"
+        return 1
+    fi
+
+    # Build fuzzers using helper.py
+    local build_log=$(mktemp)
+
+    print_info "Running: python3 $helper_py build_fuzzers --clean --sanitizer $sanitizer --engine libfuzzer $project_name"
+
+    # Bitcoin and other large projects can take 60+ minutes to build with sanitizers
+    if timeout 5400 python3 "$helper_py" build_fuzzers \
+        --clean \
+        --sanitizer "$sanitizer" \
+        --engine libfuzzer \
+        "$project_name" 2>&1 | tee "$build_log"; then
+
+        # Check if any fuzzer binaries were created
+        local out_dir="$workspace/fuzz-tooling/build/out/${project_name}-${sanitizer}"
+        if [ -d "$out_dir" ] && [ "$(ls -A "$out_dir" 2>/dev/null)" ]; then
+            local fuzzer_count=$(find "$out_dir" -maxdepth 1 -type f -executable | wc -l)
+            if [ "$fuzzer_count" -gt 0 ]; then
+                print_info "Successfully built $fuzzer_count fuzzer(s) in $out_dir"
+                BUILD_OUTPUT="Success: Built $fuzzer_count fuzzers"
+                rm -f "$build_log"
+                return 0
+            fi
+        fi
+
+        BUILD_OUTPUT="Build completed but no fuzzer binaries found in $out_dir"
+        print_warn "$BUILD_OUTPUT"
+    fi
+
+    # Capture last 100 lines of build output for error reporting
+    BUILD_OUTPUT=$(tail -100 "$build_log" 2>/dev/null || echo "No build output captured")
+    rm -f "$build_log"
+
+    print_error "Fuzzer build failed"
+    return 1
+}
+
 # Run static analysis on workspace
 run_static_analysis() {
     local workspace="$1"
@@ -399,6 +459,8 @@ show_usage() {
     echo "Options:"
     echo "  --in-place      Run directly without copying workspace"
     echo "  --project NAME  Specify OSS-Fuzz project name (if different from repo name)"
+    echo "  --auto-generate Use Claude Agent to auto-generate OSS-Fuzz integration if not found"
+    echo "                  (requires ANTHROPIC_API_KEY environment variable)"
     echo "  -b COMMIT       Base commit ID (for delta scan)"
     echo "  -d COMMIT       Delta commit ID (for delta scan, requires -b)"
     echo ""
@@ -417,6 +479,7 @@ IN_PLACE=false
 OSS_FUZZ_PROJECT=""
 BASE_COMMIT=""
 DELTA_COMMIT=""
+AUTO_GENERATE=false
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -428,6 +491,10 @@ while [[ $# -gt 0 ]]; do
         --project)
             OSS_FUZZ_PROJECT="$2"
             shift 2
+            ;;
+        --auto-generate)
+            AUTO_GENERATE=true
+            shift
             ;;
         -b)
             BASE_COMMIT="$2"
@@ -568,16 +635,91 @@ elif is_git_url "$TARGET"; then
         fi
 
         if [ -z "$OSS_FUZZ_PROJECT" ]; then
-            print_error "No matching OSS-Fuzz project found for '$REPO_NAME'"
-            print_error "Available projects can be found at: https://github.com/google/oss-fuzz/tree/master/projects"
-            echo ""
-            print_info "Please use --project NAME to specify the correct OSS-Fuzz project name:"
-            print_info "  $0 --project PROJECT_NAME $GIT_URL"
-            echo ""
-            print_info "Example:"
-            print_info "  $0 --project openldap https://git.openldap.org/openldap/openldap"
-            rm -rf "$OSSFUZZ_TMP"
-            exit 1
+            print_warn "No matching OSS-Fuzz project found for '$REPO_NAME'"
+
+            # Try to generate OSS-Fuzz integration using Claude Agent SDK
+            if [ "$AUTO_GENERATE" = true ] || [ -n "$ANTHROPIC_API_KEY" ]; then
+                print_info "Attempting to auto-generate OSS-Fuzz integration using Claude Agent..."
+
+                OUTPUT_DIR="$WORKSPACE/fuzz-tooling/projects/$REPO_NAME"
+                mkdir -p "$OUTPUT_DIR"
+
+                # Copy oss-fuzz infrastructure first (needed for base images)
+                cp -r "$OSSFUZZ_TMP/infra" "$WORKSPACE/fuzz-tooling/" 2>/dev/null || true
+                rm -rf "$OSSFUZZ_TMP"
+
+                # Configuration for retry loop
+                MAX_BUILD_RETRIES=3
+                BUILD_RETRY=0
+                BUILD_SUCCESS=false
+
+                # First, generate the initial OSS-Fuzz integration
+                print_info "Step 1: Generating initial OSS-Fuzz integration..."
+                if ! $PYTHON -m crs.strategy.common.ossfuzz_generator.agent \
+                    "$WORKSPACE/repo" "$REPO_NAME" --output-dir "$OUTPUT_DIR" --verbose; then
+                    print_error "Failed to generate initial OSS-Fuzz integration"
+                    exit 1
+                fi
+
+                # Retry loop: build and fix until success or max retries
+                while [ $BUILD_RETRY -lt $MAX_BUILD_RETRIES ]; do
+                    BUILD_RETRY=$((BUILD_RETRY + 1))
+                    print_info "Step 2: Build attempt $BUILD_RETRY of $MAX_BUILD_RETRIES..."
+
+                    # Try to build the fuzzers
+                    if build_and_verify_fuzzers "$WORKSPACE" "$REPO_NAME" "address"; then
+                        BUILD_SUCCESS=true
+                        print_info "Fuzzer build verified successfully!"
+                        break
+                    fi
+
+                    # Build failed - try to fix with Claude Agent
+                    if [ $BUILD_RETRY -lt $MAX_BUILD_RETRIES ]; then
+                        print_warn "Build failed. Attempting to fix with Claude Agent (attempt $BUILD_RETRY)..."
+
+                        # Save build error to temp file
+                        BUILD_ERROR_FILE=$(mktemp)
+                        echo "$BUILD_OUTPUT" > "$BUILD_ERROR_FILE"
+
+                        # Run Claude Agent to fix the build error
+                        if $PYTHON -m crs.strategy.common.ossfuzz_generator.agent \
+                            "$WORKSPACE/repo" "$REPO_NAME" \
+                            --output-dir "$OUTPUT_DIR" \
+                            --fix-error "$BUILD_ERROR_FILE" \
+                            --verbose; then
+                            print_info "Claude Agent attempted to fix the build error"
+                        else
+                            print_warn "Claude Agent fix attempt failed"
+                        fi
+
+                        rm -f "$BUILD_ERROR_FILE"
+                    fi
+                done
+
+                if [ "$BUILD_SUCCESS" = true ]; then
+                    print_info "Successfully generated and verified OSS-Fuzz integration for '$REPO_NAME'"
+                    OSS_FUZZ_PROJECT="$REPO_NAME"
+                else
+                    print_error "Failed to build fuzzers after $MAX_BUILD_RETRIES attempts"
+                    print_error "Last build error:"
+                    echo "$BUILD_OUTPUT" | tail -50
+                    echo ""
+                    print_info "You can manually fix the files in: $OUTPUT_DIR"
+                    print_info "Then re-run: $0 workspace/$REPO_NAME"
+                    exit 1
+                fi
+            else
+                print_error "No matching OSS-Fuzz project found for '$REPO_NAME'"
+                print_error "Available projects can be found at: https://github.com/google/oss-fuzz/tree/master/projects"
+                echo ""
+                print_info "Please use --project NAME to specify the correct OSS-Fuzz project name:"
+                print_info "  $0 --project PROJECT_NAME $GIT_URL"
+                echo ""
+                print_info "Or set ANTHROPIC_API_KEY to enable auto-generation:"
+                print_info "  export ANTHROPIC_API_KEY=your_key_here"
+                rm -rf "$OSSFUZZ_TMP"
+                exit 1
+            fi
         else
             print_info "Found OSS-Fuzz project: $OSS_FUZZ_PROJECT"
 
