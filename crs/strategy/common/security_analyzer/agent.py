@@ -213,11 +213,11 @@ async def _run_security_agent_async(
     """Run the Claude agent to find and verify security vulnerabilities."""
 
     if not CLAUDE_SDK_AVAILABLE:
-        logger.error("Claude Agent SDK not available")
+        print("[SecurityAnalyzer] ERROR: Claude Agent SDK not available", flush=True)
         return []
 
     if not fuzzer_paths:
-        logger.error("No fuzzers provided")
+        print("[SecurityAnalyzer] ERROR: No fuzzers provided", flush=True)
         return []
 
     os.makedirs(output_dir, exist_ok=True)
@@ -247,7 +247,9 @@ async def _run_security_agent_async(
                     for block in message.content:
                         if isinstance(block, TextBlock):
                             full_response.append(block.text)
-                            logger.info(f"Agent: {block.text[:200]}...")
+                            # Print truncated agent response
+                            preview = block.text[:200].replace('\n', ' ')
+                            print(f"[SecurityAnalyzer] Agent: {preview}...", flush=True)
 
                             # Try to extract vulnerability reports from the response
                             text = block.text
@@ -261,7 +263,7 @@ async def _run_security_agent_async(
                                         vuln = json.loads(match)
                                         if vuln.get('verification') and 'crash' in vuln.get('verification', '').lower():
                                             vulnerabilities.append(vuln)
-                                            logger.info(f"Found verified vulnerability: {vuln.get('vulnerability_type')} at {vuln.get('location')}")
+                                            print(f"[SecurityAnalyzer] Found verified vulnerability: {vuln.get('vulnerability_type')} at {vuln.get('location')}", flush=True)
                                     except json.JSONDecodeError:
                                         pass
 
@@ -273,11 +275,11 @@ async def _run_security_agent_async(
                 'full_response': '\n'.join(full_response)
             }, f, indent=2)
 
-        logger.info(f"Found {len(vulnerabilities)} verified vulnerabilities")
+        print(f"[SecurityAnalyzer] Found {len(vulnerabilities)} verified vulnerabilities", flush=True)
         return vulnerabilities
 
     except Exception as e:
-        logger.error(f"Security analysis failed: {e}")
+        print(f"[SecurityAnalyzer] ERROR: Security analysis failed: {e}", flush=True)
         return []
 
 
@@ -316,13 +318,14 @@ def analyze_and_verify_vulnerabilities(
     if output_dir is None:
         output_dir = os.path.join(repo_path, "..", "security_findings")
 
-    logger.info(f"Starting security analysis for {repo_path}")
-    logger.info(f"Fuzzers available: {len(fuzzer_paths)}")
+    # Use print for clean, aligned output
+    print(f"[SecurityAnalyzer] Starting analysis for {repo_path}", flush=True)
+    print(f"[SecurityAnalyzer] Fuzzers available: {len(fuzzer_paths)}", flush=True)
     for fp in fuzzer_paths:
-        logger.info(f"  - {fp}")
-    logger.info(f"Sanitizer: {sanitizer}")
+        print(f"[SecurityAnalyzer]   - {fp}", flush=True)
+    print(f"[SecurityAnalyzer] Sanitizer: {sanitizer}", flush=True)
     if docker_image:
-        logger.info(f"Docker image: {docker_image}")
+        print(f"[SecurityAnalyzer] Docker image: {docker_image}", flush=True)
 
     return asyncio.run(_run_security_agent_async(
         repo_path, fuzzer_paths, sanitizer, output_dir,
@@ -354,13 +357,13 @@ def main():
 
     args = parser.parse_args()
 
-    # Configure logging with cleaner format
-    log_format = "%(asctime)s [SecurityAnalyzer] %(levelname)s: %(message)s"
-    date_format = "%Y/%m/%d %H:%M:%S"
-    if args.verbose:
-        logging.basicConfig(level=logging.DEBUG, format=log_format, datefmt=date_format)
-    else:
-        logging.basicConfig(level=logging.INFO, format=log_format, datefmt=date_format)
+    # Configure logging - use simple format to avoid alignment issues
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(message)s",
+        stream=sys.stderr,
+        force=True  # Override any existing config
+    )
 
     fuzzer_paths = args.fuzzers or []
     if not fuzzer_paths:
