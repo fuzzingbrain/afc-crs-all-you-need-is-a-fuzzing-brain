@@ -114,6 +114,79 @@ func ExecuteFuzzingTask(params TaskExecutionParams) error {
 		}
 	}
 
+	// Run Security Analyzer (Claude Agent) ONCE for all fuzzers
+	// This runs in the background and uses all available fuzzers for verification
+	go func() {
+		// Check if security analyzer is enabled (can be disabled via environment)
+		if os.Getenv("DISABLE_SECURITY_ANALYZER") != "" {
+			log.Printf("Security analyzer disabled via DISABLE_SECURITY_ANALYZER")
+			return
+		}
+
+		// Create output directory for security findings
+		securityOutputDir := filepath.Join(absTaskDir, "security_findings")
+
+		// Look for static analysis results
+		staticAnalysisPath := ""
+		possibleStaticPaths := []string{
+			filepath.Join(absTaskDir, "static_analysis.json"),
+			filepath.Join(absTaskDir, "static_analysis", "results.json"),
+		}
+		for _, p := range possibleStaticPaths {
+			if _, err := os.Stat(p); err == nil {
+				staticAnalysisPath = p
+				break
+			}
+		}
+
+		// Determine sanitizer and fuzz directory from first fuzzer path
+		sanitizer := params.Sanitizer
+		fuzzDir := ""
+		workDir := ""
+		if len(fuzzersToExecute) > 0 {
+			fuzzDir = filepath.Dir(fuzzersToExecute[0])
+			baseName := filepath.Base(fuzzDir)
+			parts := strings.Split(baseName, "-")
+			if sanitizer == "" && len(parts) > 1 {
+				sanitizer = parts[len(parts)-1]
+			}
+			// Work dir is typically at build/work/<project>-<sanitizer>
+			workDir = filepath.Join(filepath.Dir(filepath.Dir(fuzzDir)), "work", baseName)
+		}
+		if sanitizer == "" {
+			sanitizer = "address"
+		}
+
+		// Construct Docker image name from project name
+		projectName := params.TaskDetail.ProjectName
+		dockerImage := fmt.Sprintf("gcr.io/oss-fuzz/%s:latest", projectName)
+
+		// Run the security analyzer with ALL fuzzers
+		analyzerConfig := SecurityAnalyzerConfig{
+			FuzzerPaths:        fuzzersToExecute,
+			RepoPath:           projectDir,
+			Sanitizer:          sanitizer,
+			OutputDir:          securityOutputDir,
+			StaticAnalysisPath: staticAnalysisPath,
+			MaxTurns:           50,
+			TimeoutMinutes:     45, // 45-min limit for security analysis
+			ProjectName:        projectName,
+			DockerImage:        dockerImage,
+			FuzzDir:            fuzzDir,
+			WorkDir:            workDir,
+		}
+
+		findings, err := RunSecurityAnalyzer(analyzerConfig)
+		if err != nil {
+			log.Printf("Security analyzer error: %v", err)
+			return
+		}
+
+		if len(findings) > 0 {
+			log.Printf("Security analyzer verified %d vulnerabilities across all fuzzers!", len(findings))
+		}
+	}()
+
 	// Execute fuzzers with controlled parallelism
 	for idx, fuzzer := range fuzzersToExecute {
 		wg.Add(1)
