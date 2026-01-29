@@ -2610,7 +2610,8 @@ def doAdvancedPoV0(log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer, p
                     messages.append({"role": "user", "content":  "Python code failed to create x1.bin, please try again."})
                 continue
             
-            blob_files = [f"x{i}.bin" for i in range(1, 6)]  # x1.bin to x5.bin
+            blob_files = ["x.bin"] + [f"x{i}.bin" for i in range(1, 6)]  # x.bin, x1.bin to x5.bin
+            fuzzer_output = ""  # Initialize before blob testing loop
             for blob_num, blob_file in enumerate(blob_files, 1):
                 blob_path = os.path.join(xbin_dir, blob_file)
                 if not os.path.exists(blob_path):
@@ -3415,6 +3416,193 @@ Write nothing except the Python script (with embedded comments).
     return base_prompt + language_block + ending
 
 
+# ============================================================================
+# Security Findings Integration (from Claude Agent Security Analyzer)
+# ============================================================================
+
+def load_security_findings(project_dir: str) -> List[Dict[str, Any]]:
+    """
+    Load security findings from the Claude Agent security analyzer.
+    Looks for security_findings.json in the project directory or parent.
+
+    Returns list of findings sorted by: verified first, then by severity.
+    """
+    possible_paths = [
+        os.path.join(project_dir, "security_findings", "security_findings.json"),
+        os.path.join(project_dir, "security_findings.json"),
+        os.path.join(os.path.dirname(project_dir), "security_findings", "security_findings.json"),
+    ]
+
+    for path in possible_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    data = json.load(f)
+                    findings = data.get('vulnerabilities', [])
+                    if findings:
+                        print(f"[SecurityFindings] Loaded {len(findings)} findings from {path}")
+                        # Sort: verified first, then high severity
+                        severity_order = {'high': 0, 'medium': 1, 'low': 2}
+                        findings.sort(key=lambda v: (
+                            0 if v.get('verified') else 1,
+                            severity_order.get(v.get('severity', 'medium'), 1)
+                        ))
+                        return findings
+            except Exception as e:
+                print(f"[SecurityFindings] Error loading {path}: {e}")
+
+    return []
+
+
+def create_security_finding_prompt(fuzzer_code: str, finding: Dict[str, Any], sanitizer: str, language: str) -> str:
+    """
+    Create a targeted prompt based on a security finding from the Claude agent.
+    These findings contain rich information: location, function, root_cause, trigger_condition.
+    """
+    vuln_type = finding.get('vulnerability_type', 'unknown')
+    location = finding.get('location', 'unknown')
+    function = finding.get('function', '')
+    description = finding.get('description', '')
+    root_cause = finding.get('root_cause', '')
+    trigger_condition = finding.get('trigger_condition', '')
+    verification = finding.get('verification', '')
+    verified = finding.get('verified', False)
+    seed_input_path = finding.get('seed_input_path', '')
+
+    status = "VERIFIED" if verified else "POTENTIAL (high confidence from code analysis)"
+
+    prompt = f"""You are a top software vulnerability expert. A security analysis has identified a {status} vulnerability.
+
+## Vulnerability Details
+- **Type**: {vuln_type}
+- **Location**: {location}
+- **Function**: {function}
+- **Status**: {status}
+
+## Description
+{description}
+
+## Root Cause Analysis
+{root_cause}
+
+## Trigger Condition
+{trigger_condition}
+
+## Previous Verification Attempt
+{verification}
+"""
+
+    if seed_input_path and os.path.exists(seed_input_path):
+        prompt += f"""
+## Existing Seed Input
+A seed input was created at: {seed_input_path}
+You can use this as a starting point and refine it to trigger the vulnerability.
+"""
+
+    prompt += f"""
+## Your Task
+Create a Python script that generates a binary input file named "x.bin" that will trigger this vulnerability.
+
+The input will be fed to this fuzzer harness:
+```
+{fuzzer_code}
+```
+
+## Strategy
+1. Analyze the vulnerability details above - the root cause tells you exactly what pattern causes the bug
+2. The trigger condition tells you what input characteristics are needed
+3. Craft an input that:
+   - Reaches the vulnerable function ({function})
+   - Satisfies the trigger condition: {trigger_condition}
+   - Causes the {vuln_type} to manifest
+
+## Requirements
+- Output ONLY a Python script that creates "x.bin"
+- Maximum blob size: 2MiB
+- Include comments explaining how your input triggers the vulnerability
+"""
+
+    if language.startswith('c'):
+        prompt += """
+## Language-Specific Notes (C/C++)
+- Consider byte-level crafting for buffer overflows
+- Use struct.pack for binary data
+- Pay attention to null terminators, length fields, and alignment
+"""
+    else:
+        prompt += """
+## Language-Specific Notes (Java)
+- Consider serialized objects if relevant
+- Pay attention to class structure and field values
+"""
+
+    return prompt
+
+
+def process_security_findings_phase(log_file, fuzzer_src_path, fuzzer_code, fuzzer_path, fuzzer_name,
+                                    sanitizer, project_dir, project_name, focus, language) -> Tuple[bool, Dict]:
+    """
+    Process security findings from Claude agent as a high-priority POV phase.
+
+    This should run BEFORE generic phases because:
+    1. Security findings contain specific, actionable intelligence
+    2. They have root cause analysis and trigger conditions
+    3. They may already have seed inputs to build upon
+
+    Returns: (success, metadata)
+    """
+    log_message(log_file, "=== Security Findings Phase (Claude Agent Intel) ===")
+
+    findings = load_security_findings(project_dir)
+    if not findings:
+        log_message(log_file, "No security findings available, skipping this phase")
+        return False, {}
+
+    verified = [f for f in findings if f.get('verified')]
+    potential = [f for f in findings if not f.get('verified')]
+
+    log_message(log_file, f"Found {len(findings)} security findings: {len(verified)} verified, {len(potential)} potential")
+
+    # Process verified findings first (highest priority)
+    for i, finding in enumerate(verified):
+        log_message(log_file, f"[{i+1}/{len(verified)}] Processing VERIFIED: {finding.get('vulnerability_type')} at {finding.get('location')}")
+
+        initial_msg = create_security_finding_prompt(fuzzer_code, finding, sanitizer, language)
+        print(f"[SecurityFindings] Prompt for verified finding:\n{initial_msg[:500]}...")
+
+        pov_success, pov_metadata = doAdvancedPoV0(
+            log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer,
+            project_dir, project_name, focus, language
+        )
+
+        if pov_success:
+            log_message(log_file, f"✓ POV SUCCESS from verified security finding: {finding.get('vulnerability_type')}")
+            pov_metadata['source'] = 'security_finding_verified'
+            pov_metadata['finding'] = finding
+            return True, pov_metadata
+
+    # Process potential findings (still high value due to root cause analysis)
+    for i, finding in enumerate(potential):
+        log_message(log_file, f"[{i+1}/{len(potential)}] Processing POTENTIAL: {finding.get('vulnerability_type')} at {finding.get('location')}")
+
+        initial_msg = create_security_finding_prompt(fuzzer_code, finding, sanitizer, language)
+        print(f"[SecurityFindings] Prompt for potential finding:\n{initial_msg[:500]}...")
+
+        pov_success, pov_metadata = doAdvancedPoV0(
+            log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer,
+            project_dir, project_name, focus, language
+        )
+
+        if pov_success:
+            log_message(log_file, f"✓ POV SUCCESS from potential security finding: {finding.get('vulnerability_type')}")
+            pov_metadata['source'] = 'security_finding_potential'
+            pov_metadata['finding'] = finding
+            return True, pov_metadata
+
+    log_message(log_file, "Security findings phase completed without POV success")
+    return False, {}
+
+
 def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzzer_name, sanitizer, project_dir, project_name, focus, language='c') -> bool:
     log_message(log_file, f"POV_PHASE-{POV_PHASE} doAdvancedPoV")
 
@@ -3427,6 +3615,7 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
     commit_diff = ""
     pov_success = False
     pov_metadata = {}
+
     if POV_PHASE == 0:
         vulnerable_functions = None
         all_reachable_funcs = extract_reachable_functions_from_analysis_service(fuzzer_path,fuzzer_src_path,focus,project_dir)
@@ -3569,10 +3758,24 @@ def doAdvancedPoV_full(log_file,fuzzer_src_path, fuzzer_code, fuzzer_path, fuzze
             return doAdvancedPoV0(log_file,initial_msg,fuzzer_path,fuzzer_name,sanitizer,project_dir,project_name,focus,language)
         
         return pov_success, pov_metadata
-    
+
+    elif POV_PHASE == 4:
+        # =========================================================================
+        # Phase 4: Security Findings Phase (Claude Agent Intel)
+        # This phase uses findings from the Claude security analyzer which contain:
+        # - Specific location, function, and root cause analysis
+        # - Trigger conditions that tell us exactly what input to craft
+        # - Optionally, seed inputs to build upon
+        # Called after libfuzzer seed corpus run in security_analyzer.go
+        # =========================================================================
+        return process_security_findings_phase(
+            log_file, fuzzer_src_path, fuzzer_code, fuzzer_path, fuzzer_name,
+            sanitizer, project_dir, project_name, focus, language
+        )
+
     else:
-        log_message(log_file, f"POV_PHASE-{POV_PHASE} doAdvancedPoV does not exist") 
-    
+        log_message(log_file, f"POV_PHASE-{POV_PHASE} doAdvancedPoV does not exist")
+
     return pov_success, pov_metadata
 
 

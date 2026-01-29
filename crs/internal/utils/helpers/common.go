@@ -80,7 +80,7 @@ func SaveTaskDetailToJson(taskDetail models.TaskDetail, fuzzer, fuzzDir string) 
 // CopyFuzzDirForParallelStrategies creates copies of fuzzDir for parallel strategy execution
 func CopyFuzzDirForParallelStrategies(fuzzDir string) error {
 	// Define target directories for parallel strategies
-	targetDirs := []string{"ap0", "ap1", "ap2", "ap3"}
+	targetDirs := []string{"ap0", "ap1", "ap2", "ap3", "ap4"}
 	// fuzzerName := filepath.Base(fuzzer) // e.g. html
 
 	// Detect the sanitizer suffix in the parent directory name and strip it
