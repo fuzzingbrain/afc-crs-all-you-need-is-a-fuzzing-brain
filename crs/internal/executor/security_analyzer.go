@@ -38,10 +38,21 @@ type SecurityAnalyzerConfig struct {
 	MaxTurns           int
 	TimeoutMinutes     int
 	// Docker execution settings
-	ProjectName    string // OSS-Fuzz project name (e.g., "openssh")
-	DockerImage    string // Docker image to use (e.g., "gcr.io/oss-fuzz/openssh:latest")
-	FuzzDir        string // Directory containing fuzzers (mounted as /out)
-	WorkDir        string // Work directory (mounted as /work)
+	ProjectName string // OSS-Fuzz project name (e.g., "openssh")
+	DockerImage string // Docker image to use (e.g., "gcr.io/oss-fuzz/openssh:latest")
+	FuzzDir     string // Directory containing fuzzers (mounted as /out)
+	WorkDir     string // Work directory (mounted as /work)
+	// Phase 4 (Security Findings POV) settings
+	Focus              string // Project focus (e.g., "libpng")
+	Language           string // Programming language (e.g., "c", "c++")
+	Model              string // LLM model to use
+	POVMetadataDir     string // Directory for POV metadata
+	SubmissionEndpoint string // Submission service endpoint
+	TaskID             string // Task ID
+	WorkerIndex        string // Worker index
+	AnalysisServiceUrl string // Analysis service URL
+	StrategyDir        string // Directory containing strategy scripts
+	TaskDir            string // Task directory
 }
 
 // RunSecurityAnalyzer runs the Claude Agent-based security analyzer
@@ -225,6 +236,17 @@ func RunSecurityAnalyzer(config SecurityAnalyzerConfig) ([]SecurityFinding, erro
 		}
 	}
 
+	// Run Phase 4 (Security Findings POV) if we have findings and StrategyDir is set
+	if len(findings) > 0 && config.StrategyDir != "" {
+		log.Printf("Running Phase 4 (Security Findings POV) with %d findings...", len(findings))
+		povSuccess := runSecurityFindingsPhase(config)
+		if povSuccess {
+			log.Printf("✓ Phase 4 found POV using security findings!")
+		} else {
+			log.Printf("Phase 4 did not find POV")
+		}
+	}
+
 	return findings, nil
 }
 
@@ -311,6 +333,123 @@ func runLibfuzzerWithSeedCorpus(config SecurityAnalyzerConfig, seedCorpusDir str
 
 	wg.Wait()
 	log.Printf("All fuzzers completed seed corpus run")
+}
+
+// runSecurityFindingsPhase runs Phase 4 (Security Findings POV) using as0_full.py
+// This phase uses the security_findings.json to guide POV generation
+func runSecurityFindingsPhase(config SecurityAnalyzerConfig) bool {
+	log.Printf("========== PHASE 4: Security Findings POV ==========")
+
+	// Check if we have the required configuration
+	if config.StrategyDir == "" || config.FuzzerPaths == nil || len(config.FuzzerPaths) == 0 {
+		log.Printf("Cannot run Phase 4: missing strategy dir or fuzzers")
+		return false
+	}
+
+	// Use first fuzzer for Phase 4
+	fuzzer := config.FuzzerPaths[0]
+	fuzzerName := filepath.Base(fuzzer)
+
+	// Get workspace directory and Python interpreter
+	projectDir := filepath.Dir(config.RepoPath)
+	workspaceDir := filepath.Dir(projectDir)
+	venvPath := filepath.Join(workspaceDir, "crs_venv")
+	pythonInterpreter := filepath.Join(venvPath, "bin", "python3")
+	if _, err := os.Stat(pythonInterpreter); os.IsNotExist(err) {
+		pythonInterpreter = "python3"
+	}
+
+	// Strategy path
+	strategyPath := filepath.Join(config.StrategyDir, "as0_full.py")
+	if _, err := os.Stat(strategyPath); os.IsNotExist(err) {
+		log.Printf("Strategy file not found: %s", strategyPath)
+		return false
+	}
+
+	// Set defaults
+	language := config.Language
+	if language == "" {
+		language = "c"
+	}
+	focus := config.Focus
+	if focus == "" {
+		focus = config.ProjectName
+	}
+	model := config.Model
+	if model == "" {
+		model = "claude-sonnet-4-20250514"
+	}
+	povMetadataDir := config.POVMetadataDir
+	if povMetadataDir == "" {
+		povMetadataDir = "successful_povs"
+	}
+	taskDir := config.TaskDir
+	if taskDir == "" {
+		taskDir = projectDir
+	}
+
+	// Build command arguments
+	args := []string{
+		strategyPath,
+		fuzzer,
+		config.ProjectName,
+		focus,
+		language,
+		"--model", model,
+		"--pov-metadata-dir", povMetadataDir,
+		"--fuzzing-timeout", "30",
+		"--pov-phase=4", // Phase 4: Security Findings
+		"--max-iterations", "5",
+	}
+
+	log.Printf("Running Phase 4 with fuzzer: %s", fuzzerName)
+	log.Printf("Command: %s %v", pythonInterpreter, args)
+
+	// Set up environment
+	env := os.Environ()
+	env = append(env, "PYTHONUNBUFFERED=1")
+	env = append(env, "VIRTUAL_ENV="+venvPath)
+	env = append(env, "PATH="+filepath.Join(venvPath, "bin")+":"+os.Getenv("PATH"))
+	if config.SubmissionEndpoint != "" {
+		env = append(env, "SUBMISSION_ENDPOINT="+config.SubmissionEndpoint)
+	}
+	if config.TaskID != "" {
+		env = append(env, "TASK_ID="+config.TaskID)
+	}
+	if config.WorkerIndex != "" {
+		env = append(env, "WORKER_INDEX="+config.WorkerIndex)
+	}
+	if config.AnalysisServiceUrl != "" {
+		env = append(env, "ANALYSIS_SERVICE_URL="+config.AnalysisServiceUrl)
+	}
+
+	// Create context with timeout (30 minutes for Phase 4)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	// Create and run command
+	cmd := exec.CommandContext(ctx, pythonInterpreter, args...)
+	cmd.Dir = taskDir
+	cmd.Env = env
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Run()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			if exitErr.ExitCode() == 0 {
+				log.Printf("Phase 4 completed successfully")
+				return true
+			}
+			log.Printf("Phase 4 exited with code %d", exitErr.ExitCode())
+		} else {
+			log.Printf("Phase 4 execution error: %v", err)
+		}
+		return false
+	}
+
+	log.Printf("Phase 4 completed successfully")
+	return true
 }
 
 // readSecurityFindings reads the security findings from the JSON output file

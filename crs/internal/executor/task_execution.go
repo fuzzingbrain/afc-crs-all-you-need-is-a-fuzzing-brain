@@ -164,6 +164,18 @@ func ExecuteFuzzingTask(params TaskExecutionParams) error {
 		projectName := params.TaskDetail.ProjectName
 		dockerImage := fmt.Sprintf("gcr.io/oss-fuzz/%s:latest", projectName)
 
+		// Get strategy directory for Phase 4
+		strategyDir := ""
+		if params.StrategyConfig != nil {
+			strategyDir = params.StrategyConfig.GetStrategyDir()
+		}
+
+		// Get language from project config
+		language := "c"
+		if params.ProjectConfig != nil && params.ProjectConfig.Language != "" {
+			language = strings.ToLower(params.ProjectConfig.Language)
+		}
+
 		// Run the security analyzer with ALL fuzzers
 		analyzerConfig := SecurityAnalyzerConfig{
 			FuzzerPaths:        fuzzersToExecute,
@@ -177,6 +189,17 @@ func ExecuteFuzzingTask(params TaskExecutionParams) error {
 			DockerImage:        dockerImage,
 			FuzzDir:            fuzzDir,
 			WorkDir:            workDir,
+			// Phase 4 (Security Findings POV) settings
+			Focus:              params.TaskDetail.Focus,
+			Language:           language,
+			Model:              params.Model,
+			POVMetadataDir:     params.POVMetadataDir,
+			SubmissionEndpoint: params.SubmissionEndpoint,
+			TaskID:             params.TaskDetail.TaskID.String(),
+			WorkerIndex:        params.WorkerIndex,
+			AnalysisServiceUrl: params.AnalysisServiceUrl,
+			StrategyDir:        strategyDir,
+			TaskDir:            absTaskDir,
 		}
 
 		findings, err := RunSecurityAnalyzer(analyzerConfig)
