@@ -71,20 +71,123 @@ SECURITY_ANALYZER_SYSTEM_PROMPT = """You are an expert security researcher speci
 - Grep to search for vulnerable patterns
 
 ## Output Format:
-For each verified vulnerability, output a JSON block like:
+CRITICAL: For EVERY potential vulnerability you identify, you MUST output a JSON block like this:
 ```json
-{
+VULNERABILITY_FOUND: {
   "vulnerability_type": "buffer-overflow",
   "location": "src/parser.c:123",
-  "description": "Stack buffer overflow in parse_header() when input > 256 bytes",
+  "function": "parse_header",
+  "description": "Stack buffer overflow when input > 256 bytes due to unchecked memcpy",
+  "root_cause": "memcpy(buf, input, len) without bounds check on len",
+  "trigger_condition": "Input length > 256 bytes",
   "seed_input_path": "/path/to/seed_input",
-  "verification": "Fuzzer crashed with ASAN: stack-buffer-overflow",
+  "verified": true,
+  "verification": "ASAN triggered: heap-buffer-overflow",
   "severity": "high"
 }
 ```
 
+### Field Descriptions:
+- **vulnerability_type**: Category (buffer-overflow, integer-overflow, use-after-free, etc.)
+- **location**: File and line number (e.g., "src/parser.c:123")
+- **function**: Function name where the vulnerability exists
+- **description**: Brief description of the vulnerability
+- **root_cause**: The specific code pattern causing the issue
+- **trigger_condition**: What input/conditions trigger the bug
+- **seed_input_path**: Path to seed file you created (if any)
+- **verified**: true if you triggered a sanitizer error, false if potential but unverified
+- **verification**: Evidence of crash OR reason why verification failed
+- **severity**: high/medium/low based on exploitability
+
+### IMPORTANT - Report ALL Findings:
+1. **VERIFIED vulnerabilities**: Set `verified: true` with sanitizer output in verification field
+2. **UNVERIFIED potential vulnerabilities**: Set `verified: false` with explanation why verification failed
+
+Even if you cannot trigger a crash, STILL report the vulnerability with `verified: false`. These findings help guide later fuzzing stages to find POVs. Include:
+- Why you believe it's vulnerable (code analysis)
+- What you tried to trigger it
+- Why it might have failed (e.g., "sanitizer didn't catch", "need specific heap layout", "requires race condition")
+
 Be persistent - if your first input doesn't trigger the bug, analyze the fuzzer output and refine your approach.
 """
+
+
+def _extract_vulnerabilities(text: str) -> List[Dict[str, Any]]:
+    """
+    Extract vulnerability JSON blocks from agent response text.
+    Looks for VULNERABILITY_FOUND: markers or raw JSON with vulnerability_type.
+    Includes ALL findings (verified and unverified) for use by later fuzzing stages.
+    """
+    import re
+    vulnerabilities = []
+    seen_locations = set()  # Deduplicate by location
+
+    # Keywords that indicate a verified finding
+    verification_keywords = [
+        'asan', 'addresssanitizer', 'msan', 'memorysanitizer',
+        'ubsan', 'undefinedbehaviorsanitizer', 'tsan', 'threadsanitizer',
+        'crash', 'triggered', 'error:', 'summary:',
+        'heap-buffer', 'stack-buffer', 'use-after-free', 'double-free',
+        'null-dereference', 'exit code 77', 'segfault', 'sigsegv'
+    ]
+
+    def is_verified(vuln: Dict) -> bool:
+        """Check if vulnerability was verified by sanitizer."""
+        # Explicit verified field takes precedence
+        if 'verified' in vuln:
+            return vuln['verified'] is True or str(vuln['verified']).lower() == 'true'
+        # Fall back to checking verification text
+        verification = vuln.get('verification', '').lower()
+        return any(kw in verification for kw in verification_keywords)
+
+    def normalize_vuln(vuln: Dict) -> Dict:
+        """Normalize vulnerability record with consistent fields."""
+        vuln['verified'] = is_verified(vuln)
+        # Ensure required fields exist
+        vuln.setdefault('severity', 'medium')
+        vuln.setdefault('verification', 'unverified' if not vuln['verified'] else vuln.get('verification', ''))
+        return vuln
+
+    # Method 1: Look for VULNERABILITY_FOUND: marker (handles multi-line JSON)
+    # Use a more permissive pattern that captures until the closing brace
+    marker_pattern = r'VULNERABILITY_FOUND:\s*\{([^{}]*(?:\{[^{}]*\}[^{}]*)*)\}'
+    for match in re.finditer(marker_pattern, text, re.DOTALL | re.IGNORECASE):
+        try:
+            json_str = '{' + match.group(1) + '}'
+            vuln = json.loads(json_str)
+            if vuln.get('vulnerability_type'):
+                location = vuln.get('location', '')
+                if location not in seen_locations:
+                    seen_locations.add(location)
+                    vulnerabilities.append(normalize_vuln(vuln))
+        except json.JSONDecodeError:
+            pass
+
+    # Method 2: Look for JSON blocks with vulnerability_type
+    if '"vulnerability_type"' in text:
+        # Find JSON-like blocks (handles one level of nesting)
+        brace_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+        for match in re.finditer(brace_pattern, text, re.DOTALL):
+            json_str = match.group(0)
+            if '"vulnerability_type"' in json_str:
+                try:
+                    vuln = json.loads(json_str)
+                    if vuln.get('vulnerability_type'):
+                        location = vuln.get('location', '')
+                        if location not in seen_locations:
+                            seen_locations.add(location)
+                            vulnerabilities.append(normalize_vuln(vuln))
+                except json.JSONDecodeError:
+                    pass
+
+    # Sort: verified first, then by severity
+    severity_order = {'high': 0, 'medium': 1, 'low': 2}
+    vulnerabilities.sort(key=lambda v: (
+        0 if v.get('verified') else 1,
+        severity_order.get(v.get('severity', 'medium'), 1)
+    ))
+
+    return vulnerabilities
 
 
 def _get_analysis_prompt(
@@ -272,19 +375,18 @@ async def _run_security_agent_async(
 
                             # Try to extract vulnerability reports from the response
                             text = block.text
-                            if '"vulnerability_type"' in text:
-                                # Try to parse JSON blocks
-                                import re
-                                json_pattern = r'\{[^{}]*"vulnerability_type"[^{}]*\}'
-                                matches = re.findall(json_pattern, text, re.DOTALL)
-                                for match in matches:
-                                    try:
-                                        vuln = json.loads(match)
-                                        if vuln.get('verification') and 'crash' in vuln.get('verification', '').lower():
-                                            vulnerabilities.append(vuln)
-                                            print(f"[SecurityAnalyzer] Found verified vulnerability: {vuln.get('vulnerability_type')} at {vuln.get('location')}", flush=True)
-                                    except json.JSONDecodeError:
-                                        pass
+                            extracted = _extract_vulnerabilities(text)
+                            for vuln in extracted:
+                                # Check if we already have this vulnerability (by location)
+                                existing = [v for v in vulnerabilities if v.get('location') == vuln.get('location')]
+                                if not existing:
+                                    vulnerabilities.append(vuln)
+                                    status = "✓ VERIFIED" if vuln.get('verified') else "○ POTENTIAL"
+                                    print(f"[SecurityAnalyzer] {status}: {vuln.get('vulnerability_type')} at {vuln.get('location')}", flush=True)
+                                    if vuln.get('function'):
+                                        print(f"[SecurityAnalyzer]   Function: {vuln.get('function')}", flush=True)
+                                    if vuln.get('root_cause'):
+                                        print(f"[SecurityAnalyzer]   Root cause: {vuln.get('root_cause')[:100]}", flush=True)
                         elif isinstance(block, ToolUseBlock):
                             # Log tool use, especially Bash commands (Docker commands)
                             tool_name = getattr(block, 'name', 'unknown')
@@ -297,13 +399,24 @@ async def _run_security_agent_async(
 
         # Save results
         results_file = os.path.join(output_dir, "security_findings.json")
+
+        # Count verified vs potential
+        verified_count = sum(1 for v in vulnerabilities if v.get('verified'))
+        potential_count = len(vulnerabilities) - verified_count
+
         with open(results_file, 'w') as f:
             json.dump({
                 'vulnerabilities': vulnerabilities,
+                'summary': {
+                    'total': len(vulnerabilities),
+                    'verified': verified_count,
+                    'potential': potential_count,
+                },
                 'full_response': '\n'.join(full_response)
             }, f, indent=2)
 
-        print(f"[SecurityAnalyzer] Found {len(vulnerabilities)} verified vulnerabilities", flush=True)
+        print(f"[SecurityAnalyzer] Results saved to {results_file}", flush=True)
+        print(f"[SecurityAnalyzer] Total findings: {len(vulnerabilities)} ({verified_count} verified, {potential_count} potential)", flush=True)
         return vulnerabilities
 
     except Exception as e:
