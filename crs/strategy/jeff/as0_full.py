@@ -1170,7 +1170,7 @@ Please respond with just the full path to the file you believe is the fuzzer sou
 
 def run_python_code(log_file, code, xbin_dir):
     """Run the generated Python code to create x.bin"""
-    log_message(log_file, f"run_python_code under: {xbin_dir}")
+    # log_message(log_file, f"run_python_code under: {xbin_dir}")
     # Validate xbin_dir
     if not xbin_dir or not os.path.isdir(xbin_dir):
         log_message(log_file, f"Invalid project directory: '{xbin_dir}'")
@@ -1318,7 +1318,7 @@ def get_same_project_fuzzers(fuzzer_path):
 def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path):
 
     try:
-        log_message(log_file, f"Running fuzzer {fuzzer_path} with blob {blob_path}")
+        # log_message(log_file, f"Running fuzzer {fuzzer_path} with blob {blob_path}")
         
         # Get the directory containing the fuzzer
         fuzzer_dir = os.path.dirname(fuzzer_path)
@@ -1360,7 +1360,7 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path):
         # Approach 1: Try direct copy
         try:
             shutil.copy(blob_path, docker_blob_path)
-            log_message(log_file, f"Copied blob to {docker_blob_path}")
+            # log_message(log_file, f"Copied blob to {docker_blob_path}")
         except Exception as e:
             log_message(log_file, f"Direct copy failed: {str(e)}")
 
@@ -1388,7 +1388,7 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path):
             log_message(log_file, f"Failed to find docker image for {project_name}")
             return False, f"Failed to find docker image for {project_name}"
 
-        log_message(log_file, f"Found docker image for {project_name}: {docker_image}")
+        # log_message(log_file, f"Found docker image for {project_name}: {docker_image}")
 
         # If we haven't defined docker_cmd yet (because we successfully copied to out_dir)
         if not 'docker_cmd' in locals():
@@ -1657,7 +1657,7 @@ def log_fuzzer_output(log_file, combined_output, max_line_length=200):
 def run_fuzzer_with_coverage(log_file, fuzzer_path, project_dir, focus, sanitizer, project_name, seed_corpus_dir):
     """Run the fuzzer with seed corpus dir containing generated blob file"""
     try:
-        log_message(log_file, f"Running fuzzer {fuzzer_path} with {seed_corpus_dir}")
+        # log_message(log_file, f"Running fuzzer {fuzzer_path} with {seed_corpus_dir}")
         # Get the directory containing the fuzzer
         fuzzer_name = os.path.basename(fuzzer_path)
         sanitizer_project_dir = os.path.join(project_dir, focus)
@@ -2597,7 +2597,7 @@ def doAdvancedPoV0(log_file, initial_msg, fuzzer_path, fuzzer_name, sanitizer, p
             # Run the generated code
             unique_id = str(uuid.uuid4())[:8]  #add unique id to avoid race condition
             xbin_dir = os.path.join(project_dir, f"ap{POV_PHASE}", unique_id)
-            log_message(log_file, f"Creating xbin_dir: {xbin_dir}")
+            # log_message(log_file, f"Creating xbin_dir: {xbin_dir}")
             # Create the directory if it doesn't exist
             os.makedirs(xbin_dir, exist_ok=True)
             success, stdout, stderr = run_python_code(log_file, code, xbin_dir)
