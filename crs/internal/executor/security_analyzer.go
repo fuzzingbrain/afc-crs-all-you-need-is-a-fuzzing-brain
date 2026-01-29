@@ -13,12 +13,16 @@ import (
 	"time"
 )
 
-// SecurityFinding represents a verified security vulnerability
+// SecurityFinding represents a security vulnerability (verified or potential)
 type SecurityFinding struct {
 	VulnerabilityType string `json:"vulnerability_type"`
 	Location          string `json:"location"`
+	Function          string `json:"function,omitempty"`
 	Description       string `json:"description"`
-	SeedInputPath     string `json:"seed_input_path"`
+	RootCause         string `json:"root_cause,omitempty"`
+	TriggerCondition  string `json:"trigger_condition,omitempty"`
+	SeedInputPath     string `json:"seed_input_path,omitempty"`
+	Verified          bool   `json:"verified"`
 	Verification      string `json:"verification"`
 	Severity          string `json:"severity"`
 }
@@ -186,13 +190,32 @@ func RunSecurityAnalyzer(config SecurityAnalyzerConfig) ([]SecurityFinding, erro
 		return nil, nil // Not a critical error
 	}
 
-	log.Printf("Security analyzer found %d verified vulnerabilities", len(findings))
+	// Count verified vs potential
+	verifiedCount := 0
+	for _, f := range findings {
+		if f.Verified {
+			verifiedCount++
+		}
+	}
+	potentialCount := len(findings) - verifiedCount
+
+	log.Printf("Security analyzer found %d findings (%d verified, %d potential)", len(findings), verifiedCount, potentialCount)
 	for _, finding := range findings {
-		log.Printf("  [%s] %s at %s", finding.Severity, finding.VulnerabilityType, finding.Location)
+		status := "○ POTENTIAL"
+		if finding.Verified {
+			status = "✓ VERIFIED"
+		}
+		log.Printf("  %s [%s] %s at %s", status, finding.Severity, finding.VulnerabilityType, finding.Location)
+		if finding.Function != "" {
+			log.Printf("    Function: %s", finding.Function)
+		}
+		if finding.RootCause != "" {
+			log.Printf("    Root cause: %s", finding.RootCause)
+		}
 	}
 
-	// If no findings and we have seed_corpus, run libfuzzer with the seeds
-	if len(findings) == 0 && config.FuzzDir != "" {
+	// If no verified findings and we have seed_corpus, run libfuzzer with the seeds
+	if verifiedCount == 0 && config.FuzzDir != "" {
 		seedCorpusDir := filepath.Join(config.FuzzDir, "seed_corpus")
 		if entries, err := os.ReadDir(seedCorpusDir); err == nil && len(entries) > 0 {
 			log.Printf("No verified vulnerabilities found. Running libfuzzer with %d seed corpus files...", len(entries))
