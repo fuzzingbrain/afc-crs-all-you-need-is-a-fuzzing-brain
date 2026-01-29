@@ -22,6 +22,8 @@ try:
         ClaudeAgentOptions,
         AssistantMessage,
         TextBlock,
+        ToolUseBlock,
+        ToolResultBlock,
         tool,
         create_sdk_mcp_server,
     )
@@ -112,6 +114,7 @@ def _get_analysis_prompt(
 
     # Add Docker execution instructions if available
     if docker_image and fuzz_dir and project_name:
+        seed_corpus_dir = f"{fuzz_dir}/seed_corpus"
         prompt += f"""## How to Run Fuzzers (via Docker):
 The fuzzers are built with sanitizers and MUST be run inside Docker. Use this command pattern:
 
@@ -125,7 +128,7 @@ docker run --rm --platform linux/amd64 \\
   -v {fuzz_dir}:/out \\
   -v {work_dir or '/tmp/work'}:/work \\
   {docker_image} \\
-  /out/<fuzzer_name> -timeout=30 -timeout_exitcode=99 /out/<seed_file>
+  /out/<fuzzer_name> -timeout=30 -timeout_exitcode=99 /out/seed_corpus/<seed_file>
 ```
 
 ### Example with a specific fuzzer:
@@ -139,13 +142,29 @@ docker run --rm --platform linux/amd64 \\
   -v {fuzz_dir}:/out \\
   -v {work_dir or '/tmp/work'}:/work \\
   {docker_image} \\
-  /out/{os.path.basename(fuzzer_paths[0]) if fuzzer_paths else 'fuzzer'} -timeout=30 /out/my_seed.bin
+  /out/{os.path.basename(fuzzer_paths[0]) if fuzzer_paths else 'fuzzer'} -timeout=30 /out/seed_corpus/my_seed.bin
 ```
 
+### IMPORTANT - Seed Corpus Directory:
+ALL seed inputs you create MUST be saved in: {seed_corpus_dir}
+First, create this directory:
+```bash
+mkdir -p {seed_corpus_dir}
+```
+
+### IMPORTANT - Docker Command Logging:
+ALWAYS print the FULL docker command before running it, using this format:
+```bash
+echo "[DOCKER_CMD] docker run --rm --platform linux/amd64 -e FUZZING_ENGINE=libfuzzer ... (full command)"
+```
+This helps debug issues when verification fails.
+
 ### Steps to verify a vulnerability:
-1. Create your seed input file in {fuzz_dir} (e.g., {fuzz_dir}/seed_vuln1.bin)
-2. Run the Docker command with that seed file
-3. Look for sanitizer output like "ERROR: AddressSanitizer" or "SUMMARY: AddressSanitizer"
+1. Create the seed_corpus directory: mkdir -p {seed_corpus_dir}
+2. Create your seed input file in the seed_corpus directory (e.g., {seed_corpus_dir}/seed_vuln1.bin)
+3. Print the full docker command with echo "[DOCKER_CMD] ..."
+4. Run the Docker command with that seed file
+5. Look for sanitizer output like "ERROR: AddressSanitizer" or "SUMMARY: AddressSanitizer"
 
 """
     else:
@@ -266,6 +285,15 @@ async def _run_security_agent_async(
                                             print(f"[SecurityAnalyzer] Found verified vulnerability: {vuln.get('vulnerability_type')} at {vuln.get('location')}", flush=True)
                                     except json.JSONDecodeError:
                                         pass
+                        elif isinstance(block, ToolUseBlock):
+                            # Log tool use, especially Bash commands (Docker commands)
+                            tool_name = getattr(block, 'name', 'unknown')
+                            tool_input = getattr(block, 'input', {})
+                            if tool_name == 'Bash':
+                                cmd = tool_input.get('command', '') if isinstance(tool_input, dict) else str(tool_input)
+                                print(f"[SecurityAnalyzer] [BASH_CMD] {cmd}", flush=True)
+                            else:
+                                print(f"[SecurityAnalyzer] Tool: {tool_name}", flush=True)
 
         # Save results
         results_file = os.path.join(output_dir, "security_findings.json")

@@ -114,9 +114,12 @@ func ExecuteFuzzingTask(params TaskExecutionParams) error {
 		}
 	}
 
+	// Check if we should run ONLY the security analyzer (for testing)
+	securityAnalyzerOnly := os.Getenv("SECURITY_ANALYZER_ONLY") != ""
+
 	// Run Security Analyzer (Claude Agent) ONCE for all fuzzers
 	// This runs in the background and uses all available fuzzers for verification
-	go func() {
+	runSecurityAnalyzer := func() {
 		// Check if security analyzer is enabled (can be disabled via environment)
 		if os.Getenv("DISABLE_SECURITY_ANALYZER") != "" {
 			log.Printf("Security analyzer disabled via DISABLE_SECURITY_ANALYZER")
@@ -185,7 +188,23 @@ func ExecuteFuzzingTask(params TaskExecutionParams) error {
 		if len(findings) > 0 {
 			log.Printf("Security analyzer verified %d vulnerabilities across all fuzzers!", len(findings))
 		}
-	}()
+	}
+
+	securityAnalyzerOnly = true
+	// Either run security analyzer only (for testing) or in background (normal mode)
+	if securityAnalyzerOnly {
+		log.Printf("===========================================")
+		log.Printf("SECURITY_ANALYZER_ONLY mode: Running security analyzer synchronously")
+		log.Printf("===========================================")
+		runSecurityAnalyzer()
+		log.Printf("===========================================")
+		log.Printf("Security analyzer completed. Skipping fuzzer execution.")
+		log.Printf("===========================================")
+		return nil
+	}
+
+	// Normal mode: run in background
+	go runSecurityAnalyzer()
 
 	// Execute fuzzers with controlled parallelism
 	for idx, fuzzer := range fuzzersToExecute {
