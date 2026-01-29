@@ -670,7 +670,7 @@ elif is_git_url "$TARGET"; then
                 rm -rf "$OSSFUZZ_TMP"
 
                 # Configuration for retry loop
-                MAX_BUILD_RETRIES=3
+                MAX_BUILD_RETRIES=4
                 BUILD_RETRY=0
                 BUILD_SUCCESS=false
 
