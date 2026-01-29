@@ -213,7 +213,7 @@ func ExecuteFuzzingTask(params TaskExecutionParams) error {
 		}
 	}
 
-	securityAnalyzerOnly = true
+	securityAnalyzerOnly = false
 	// Either run security analyzer only (for testing) or in background (normal mode)
 	if securityAnalyzerOnly {
 		log.Printf("===========================================")
