@@ -500,7 +500,7 @@ IN_PLACE=false
 OSS_FUZZ_PROJECT=""
 BASE_COMMIT=""
 DELTA_COMMIT=""
-AUTO_GENERATE=false
+AUTO_GENERATE=true  # Default to true - use Claude Agent for OSS-Fuzz integration
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
