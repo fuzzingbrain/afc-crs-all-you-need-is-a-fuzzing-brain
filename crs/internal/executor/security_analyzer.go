@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"time"
 )
 
@@ -142,6 +144,9 @@ func RunSecurityAnalyzer(config SecurityAnalyzerConfig) ([]SecurityFinding, erro
 	env := os.Environ()
 	env = append(env, "PYTHONUNBUFFERED=1")
 	env = append(env, "VIRTUAL_ENV="+venvPath)
+	// Enable verbose logging to see Docker commands from Claude Agent
+	env = append(env, "CLAUDE_CODE_DEBUG=1")
+	env = append(env, "CLAUDE_CODE_VERBOSE=1")
 	if crsDir != "" {
 		// Add crs parent directory to PYTHONPATH so "crs.strategy.common..." can be resolved
 		crsParent := filepath.Dir(crsDir)
@@ -186,7 +191,103 @@ func RunSecurityAnalyzer(config SecurityAnalyzerConfig) ([]SecurityFinding, erro
 		log.Printf("  [%s] %s at %s", finding.Severity, finding.VulnerabilityType, finding.Location)
 	}
 
+	// If no findings and we have seed_corpus, run libfuzzer with the seeds
+	if len(findings) == 0 && config.FuzzDir != "" {
+		seedCorpusDir := filepath.Join(config.FuzzDir, "seed_corpus")
+		if entries, err := os.ReadDir(seedCorpusDir); err == nil && len(entries) > 0 {
+			log.Printf("No verified vulnerabilities found. Running libfuzzer with %d seed corpus files...", len(entries))
+			runLibfuzzerWithSeedCorpus(config, seedCorpusDir)
+		} else {
+			log.Printf("No seed corpus found at %s, skipping libfuzzer run", seedCorpusDir)
+		}
+	}
+
 	return findings, nil
+}
+
+// runLibfuzzerWithSeedCorpus runs libfuzzer with the agent-generated seed corpus
+// Runs fuzzers in parallel using 75% of available CPU cores
+func runLibfuzzerWithSeedCorpus(config SecurityAnalyzerConfig, seedCorpusDir string) {
+	if len(config.FuzzerPaths) == 0 || config.DockerImage == "" {
+		log.Printf("Cannot run libfuzzer: missing fuzzer paths or docker image")
+		return
+	}
+
+	// Calculate parallelism: 75% of CPU cores, minimum 1
+	numCPU := runtime.NumCPU()
+	maxParallel := (numCPU * 3) / 4
+	if maxParallel < 1 {
+		maxParallel = 1
+	}
+	if maxParallel > len(config.FuzzerPaths) {
+		maxParallel = len(config.FuzzerPaths)
+	}
+
+	log.Printf("Running %d fuzzers in parallel (75%% of %d cores = %d workers)", len(config.FuzzerPaths), numCPU, maxParallel)
+
+	// Semaphore for limiting parallelism
+	sem := make(chan struct{}, maxParallel)
+	var wg sync.WaitGroup
+
+	for _, fuzzerPath := range config.FuzzerPaths {
+		wg.Add(1)
+		sem <- struct{}{} // Acquire
+
+		go func(fuzzerPath string) {
+			defer wg.Done()
+			defer func() { <-sem }() // Release
+
+			fuzzerName := filepath.Base(fuzzerPath)
+			log.Printf("Starting libfuzzer %s with seed corpus...", fuzzerName)
+
+			// Build docker command
+			dockerArgs := []string{
+				"run", "--rm", "--platform", "linux/amd64",
+				"-e", "FUZZING_ENGINE=libfuzzer",
+				"-e", "SANITIZER=" + config.Sanitizer,
+				"-e", "ARCHITECTURE=x86_64",
+				"-e", "PROJECT_NAME=" + config.ProjectName,
+				"-v", config.RepoPath + ":/src/" + config.ProjectName,
+				"-v", config.FuzzDir + ":/out",
+			}
+			if config.WorkDir != "" {
+				dockerArgs = append(dockerArgs, "-v", config.WorkDir+":/work")
+			}
+			dockerArgs = append(dockerArgs,
+				config.DockerImage,
+				"/out/"+fuzzerName,
+				"-timeout=30",
+				"-max_total_time=120", // 2 minutes per fuzzer
+				"-print_final_stats=1",
+				"/out/seed_corpus",
+			)
+
+			// Log the full command
+			log.Printf("[DOCKER_CMD] docker %v", dockerArgs)
+
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+			cmd := exec.CommandContext(ctx, "docker", dockerArgs...)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+
+			err := cmd.Run()
+			cancel()
+
+			if err != nil {
+				// Exit code 77 means crash found, which is good!
+				if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 77 {
+					log.Printf("✓ Fuzzer %s found a crash with seed corpus!", fuzzerName)
+				} else {
+					log.Printf("Fuzzer %s completed with: %v", fuzzerName, err)
+				}
+			} else {
+				log.Printf("Fuzzer %s completed without crashes", fuzzerName)
+			}
+		}(fuzzerPath)
+	}
+
+	wg.Wait()
+	log.Printf("All fuzzers completed seed corpus run")
 }
 
 // readSecurityFindings reads the security findings from the JSON output file
