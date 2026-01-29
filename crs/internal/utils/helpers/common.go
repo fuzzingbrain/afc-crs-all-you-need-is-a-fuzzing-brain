@@ -196,10 +196,15 @@ func HashString(s string) string {
 }
 
 // copyFile copies a file from src to dst
+// If the source file doesn't exist, it's silently skipped
 func copyFile(src, dst string) error {
 	// Open the source file
 	srcFile, err := os.Open(src)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// Skip missing files instead of failing
+			return nil
+		}
 		return fmt.Errorf("error opening source file: %w", err)
 	}
 	defer srcFile.Close()

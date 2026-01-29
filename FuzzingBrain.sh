@@ -365,14 +365,30 @@ build_and_verify_fuzzers() {
     local build_log=$(mktemp)
 
     print_info "Running: python3 $helper_py build_fuzzers --clean --sanitizer $sanitizer --engine libfuzzer $project_name"
+    print_info "Build log: $build_log"
 
     # Bitcoin and other large projects can take 60+ minutes to build with sanitizers
-    if timeout 5400 python3 "$helper_py" build_fuzzers \
-        --clean \
-        --sanitizer "$sanitizer" \
-        --engine libfuzzer \
-        "$project_name" 2>&1 | tee "$build_log"; then
+    # Run the build directly and capture exit code
+    local build_exit_code=0
 
+    # Use 'script' to allocate a pseudo-TTY for Docker (helper.py uses docker -t)
+    # This prevents Docker from hanging when running in non-interactive mode
+    # Also set PYTHONUNBUFFERED to prevent Python output buffering
+    set +e  # Don't exit on error
+    PYTHONUNBUFFERED=1 script -q -e -c "timeout --foreground 5400 python3 \"$helper_py\" build_fuzzers \
+        --clean \
+        --sanitizer \"$sanitizer\" \
+        --engine libfuzzer \
+        \"$project_name\"" "$build_log"
+    build_exit_code=$?
+    set -e
+
+    # Show last part of build log
+    echo "--- Build output (last 50 lines) ---"
+    tail -50 "$build_log" 2>/dev/null || true
+    echo "--- End of build output ---"
+
+    if [ $build_exit_code -eq 0 ]; then
         # Check if any fuzzer binaries were created
         local out_dir="$workspace/fuzz-tooling/build/out/${project_name}-${sanitizer}"
         if [ -d "$out_dir" ] && [ "$(ls -A "$out_dir" 2>/dev/null)" ]; then
@@ -387,6 +403,11 @@ build_and_verify_fuzzers() {
 
         BUILD_OUTPUT="Build completed but no fuzzer binaries found in $out_dir"
         print_warn "$BUILD_OUTPUT"
+    elif [ $build_exit_code -eq 124 ]; then
+        BUILD_OUTPUT="Build timed out after 90 minutes"
+        print_error "$BUILD_OUTPUT"
+    else
+        print_error "Build failed with exit code: $build_exit_code"
     fi
 
     # Capture last 100 lines of build output for error reporting
