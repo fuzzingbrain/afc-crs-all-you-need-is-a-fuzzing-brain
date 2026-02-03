@@ -390,18 +390,76 @@ build_and_verify_fuzzers() {
 
     if [ $build_exit_code -eq 0 ]; then
         # Check if any fuzzer binaries were created
+        # OSS-Fuzz uses ${project_name}-${sanitizer} for C/C++ but ${project_name} for Python/PHP/JS
         local out_dir="$workspace/fuzz-tooling/build/out/${project_name}-${sanitizer}"
+        local out_dir_alt="$workspace/fuzz-tooling/build/out/${project_name}"
+
+        # Check standard directory first, then fallback to alternative
+        local actual_out_dir=""
         if [ -d "$out_dir" ] && [ "$(ls -A "$out_dir" 2>/dev/null)" ]; then
-            local fuzzer_count=$(find "$out_dir" -maxdepth 1 -type f -executable | wc -l)
+            actual_out_dir="$out_dir"
+        elif [ -d "$out_dir_alt" ] && [ "$(ls -A "$out_dir_alt" 2>/dev/null)" ]; then
+            # Fuzzers are in $out_dir_alt (e.g., "go") but we need them in $out_dir (e.g., "go-address")
+            # Move/rename the directory so go-address is the REAL directory (needed for Docker volume mounts)
+            # Then create symlink: go -> go-address
+
+            print_info "Moving $out_dir_alt to $out_dir (real dir for Docker mounts)"
+
+            # Remove existing go-address if it's empty or a symlink
+            if [ -L "$out_dir" ]; then
+                rm -f "$out_dir"
+            elif [ -d "$out_dir" ] && [ -z "$(ls -A "$out_dir" 2>/dev/null)" ]; then
+                rmdir "$out_dir" 2>/dev/null || true
+            fi
+
+            # Move the alt dir to the standard dir (go -> go-address)
+            if [ ! -e "$out_dir" ]; then
+                mv "$out_dir_alt" "$out_dir"
+                # Create symlink: go -> go-address (for compatibility)
+                ln -sf "$(basename "$out_dir")" "$out_dir_alt"
+                print_info "Created symlink: $(basename "$out_dir_alt") -> $(basename "$out_dir")"
+                actual_out_dir="$out_dir"
+            else
+                print_warn "Could not move directory (target exists with content): $out_dir"
+                actual_out_dir="$out_dir_alt"
+            fi
+        fi
+
+        if [ -n "$actual_out_dir" ]; then
+            local fuzzer_count=$(find "$actual_out_dir" -maxdepth 1 -type f -executable | wc -l)
             if [ "$fuzzer_count" -gt 0 ]; then
-                print_info "Successfully built $fuzzer_count fuzzer(s) in $out_dir"
+                print_info "Successfully built $fuzzer_count fuzzer(s) in $actual_out_dir"
+
+                # Create parallel strategy directories (ap0, ap1, ap2, ap3, ap4)
+                # This mirrors CopyFuzzDirForParallelStrategies in Go
+                print_info "Creating parallel strategy directories..."
+                for apdir in ap0 ap1 ap2 ap3 ap4; do
+                    local dest_dir="$actual_out_dir/$apdir"
+                    mkdir -p "$dest_dir"
+
+                    # Copy all files (not directories) from the fuzz dir to the parallel dir
+                    for file in "$actual_out_dir"/*; do
+                        if [ -f "$file" ]; then
+                            cp "$file" "$dest_dir/" 2>/dev/null || true
+                        fi
+                    done
+
+                    # Also copy seed corpus directories
+                    for corpus_dir in "$actual_out_dir"/*_seed_corpus; do
+                        if [ -d "$corpus_dir" ]; then
+                            cp -r "$corpus_dir" "$dest_dir/" 2>/dev/null || true
+                        fi
+                    done
+                done
+                print_info "Created parallel strategy directories: ap0-ap4"
+
                 BUILD_OUTPUT="Success: Built $fuzzer_count fuzzers"
                 rm -f "$build_log"
                 return 0
             fi
         fi
 
-        BUILD_OUTPUT="Build completed but no fuzzer binaries found in $out_dir"
+        BUILD_OUTPUT="Build completed but no fuzzer binaries found in $out_dir or $out_dir_alt"
         print_warn "$BUILD_OUTPUT"
     elif [ $build_exit_code -eq 124 ]; then
         BUILD_OUTPUT="Build timed out after 90 minutes"
