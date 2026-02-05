@@ -331,6 +331,15 @@ class AnalyzerBuilder:
         if not helper_path.exists():
             return False, f"helper.py not found: {helper_path}"
 
+        # Pre-build Docker image once to avoid race condition in parallel builds.
+        # Each parallel build calls `docker build` internally, which would race
+        # when creating the same image tag simultaneously (containerd "already exists" error).
+        self.log("Pre-building Docker image to avoid parallel build conflicts")
+        prebuild_success = self._prebuild_docker_image()
+        if not prebuild_success:
+            self.log("Docker image pre-build failed", "ERROR")
+            return False, "Docker image pre-build failed"
+
         # All builds: sanitizers + coverage + introspector (unless skipped)
         all_builds = self.sanitizers + ["coverage"]
         if not self.skip_introspector:
@@ -445,6 +454,40 @@ class AnalyzerBuilder:
 
         return True, f"Built {len(self.fuzzers)} fuzzers in {elapsed:.1f}s (parallel)"
 
+    def _prebuild_docker_image(self) -> bool:
+        """
+        Pre-build Docker image once before parallel builds.
+
+        This avoids a race condition where multiple parallel builds try to
+        create the same Docker image tag simultaneously, causing containerd
+        "already exists" errors.
+        """
+        helper_path = self.fuzz_tooling_path / "infra" / "helper.py"
+        cmd = [
+            "python3", str(helper_path),
+            "build_image",
+            self.project_name,
+        ]
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=600,  # 10 minutes
+                cwd=str(self.fuzz_tooling_path),
+            )
+            if result.returncode != 0:
+                output = (result.stdout + result.stderr)[-500:]
+                self.log(f"Docker image pre-build failed: {output}", "ERROR")
+                return False
+            return True
+        except subprocess.TimeoutExpired:
+            self.log("Docker image pre-build timed out", "ERROR")
+            return False
+        except Exception as e:
+            self.log(f"Docker image pre-build exception: {e}", "ERROR")
+            return False
+
     def _create_temp_fuzz_tooling(self, sanitizer: str) -> Optional[Path]:
         """
         Create a temporary copy of fuzz-tooling for isolated build.
@@ -515,6 +558,7 @@ class AnalyzerBuilder:
             "build_fuzzers",
             "--sanitizer", sanitizer,
             "--engine", "libfuzzer",
+            "--mount_path", f"/src/{self.project_name}",
             self.project_name,
             str(repo_path.absolute()),
         ]
@@ -650,6 +694,7 @@ class AnalyzerBuilder:
             "build_fuzzers",
             "--sanitizer", sanitizer,
             "--engine", "libfuzzer",
+            "--mount_path", f"/src/{self.project_name}",
             self.project_name,
             str(self.repo_path.absolute()),
         ]
