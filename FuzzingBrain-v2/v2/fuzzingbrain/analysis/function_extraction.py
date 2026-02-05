@@ -5,8 +5,8 @@ High-level API for extracting function metadata from source code.
 """
 
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-from .parsers.c_parser import parse_c_file, parse_c_files, FunctionInfo
+from typing import List, Dict
+from .parsers.c_parser import parse_c_file, FunctionInfo
 
 
 # Default directories to exclude (system headers, third-party libs, build artifacts)

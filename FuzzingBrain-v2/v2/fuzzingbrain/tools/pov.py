@@ -13,6 +13,7 @@ Context isolation:
 """
 
 import base64
+import os
 import threading
 import uuid
 from contextvars import ContextVar
@@ -408,7 +409,7 @@ def trace_pov_impl(
     if fuzzer_path and docker_image:
         fuzzer_path = Path(fuzzer_path)
         if fuzzer_path.exists():
-            logger.info(f"[POV] Step 2: Running ASAN fuzzer to detect crash...")
+            logger.info("[POV] Step 2: Running ASAN fuzzer to detect crash...")
             success, crashed, output, error = _run_fuzzer_docker(
                 fuzzer_path=fuzzer_path,
                 blob_path=blob_path,
@@ -437,11 +438,11 @@ def trace_pov_impl(
                     "sanitizer_output": output[:3000],
                 }
 
-            logger.info(f"[POV] ASAN fuzzer: no crash detected, continuing to GDB trace...")
+            logger.info("[POV] ASAN fuzzer: no crash detected, continuing to GDB trace...")
         else:
             logger.warning(f"[POV] ASAN fuzzer not found: {fuzzer_path}, skipping crash detection")
     else:
-        logger.warning(f"[POV] fuzzer_path or docker_image not set, skipping ASAN crash detection")
+        logger.warning("[POV] fuzzer_path or docker_image not set, skipping ASAN crash detection")
 
     # =========================================================================
     # Step 3: No crash - Run GDB trace for function tracking (processor="gdb")
@@ -451,7 +452,7 @@ def trace_pov_impl(
     any_target_reached = False
     gdb_failed = False
 
-    logger.info(f"[POV] Step 3: Running GDB trace for function tracking...")
+    logger.info("[POV] Step 3: Running GDB trace for function tracking...")
     gdb_success, hit_functions, gdb_crashed, gdb_output = run_gdb_trace(
         fuzzer_name, blob, work_dir, target_functions
     )
@@ -505,7 +506,7 @@ def trace_pov_impl(
                 "error": "GDB failed and coverage context not set",
             }
 
-        logger.info(f"[POV] Step 4: Running coverage fuzzer as fallback...")
+        logger.info("[POV] Step 4: Running coverage fuzzer as fallback...")
         success, lcov_path, msg = run_coverage_fuzzer(fuzzer_name, blob, work_dir)
 
         if not success:
@@ -677,7 +678,7 @@ def _execute_generator_code(code: str, num_variants: int = 3) -> tuple:
                 else:
                     # Legacy: call without args (will produce same blob each time)
                     blob = generate_fn()
-                    logger.warning(f"[POV] generate() has no variant parameter - all blobs may be identical!")
+                    logger.warning("[POV] generate() has no variant parameter - all blobs may be identical!")
 
                 if not isinstance(blob, bytes):
                     return [], f"generate() must return bytes, got {type(blob).__name__}"
@@ -726,7 +727,7 @@ def _create_pov_core(
 
     # TEST_ONLY
     with open("/tmp/pov_debug.log", "a") as f:
-        f.write(f"\n=== _create_pov_core ===\n")
+        f.write("\n=== _create_pov_core ===\n")
         f.write(f"output_dir: {output_dir}\n")
         f.write(f"docker_image: {ctx.get('docker_image')}\n")
     repos = ctx["repos"]
@@ -1195,7 +1196,7 @@ def _run_fuzzer_docker(
 
         # TEST_ONLY: 写日志到文件
         with open("/tmp/pov_debug.log", "a") as f:
-            f.write(f"\n=== _run_fuzzer_docker ===\n")
+            f.write("\n=== _run_fuzzer_docker ===\n")
             f.write(f"fuzzer_path: {fuzzer_path}\n")
             f.write(f"blob_path: {blob_path}\n")
             f.write(f"docker_image: {docker_image}\n")
@@ -1216,7 +1217,7 @@ def _run_fuzzer_docker(
         with open("/tmp/pov_debug.log", "a") as f:
             f.write(f"returncode: {result.returncode}\n")
             f.write(f"output:\n{combined_output}\n")
-            f.write(f"=== END ===\n")
+            f.write("=== END ===\n")
 
         return result, combined_output
 
@@ -1324,7 +1325,7 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
     """
     # TEST_ONLY
     with open("/tmp/pov_debug.log", "a") as f:
-        f.write(f"\n=== _verify_pov_core called ===\n")
+        f.write("\n=== _verify_pov_core called ===\n")
         f.write(f"pov_id: {pov_id}\n")
         f.write(f"worker_id: {worker_id}\n")
 
@@ -1336,7 +1337,7 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
     pov = repos.povs.find_by_id(pov_id)
     if not pov:
         with open("/tmp/pov_debug.log", "a") as f:
-            f.write(f"ERROR: POV not found\n")
+            f.write("ERROR: POV not found\n")
         return {"success": False, "error": f"POV {pov_id} not found"}
 
     # Get blob path
@@ -1357,11 +1358,11 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
                 blob_path = str(temp_blob)
             else:
                 with open("/tmp/pov_debug.log", "a") as f:
-                    f.write(f"ERROR: No output_dir\n")
+                    f.write("ERROR: No output_dir\n")
                 return {"success": False, "error": "No blob path and no output_dir to reconstruct"}
         else:
             with open("/tmp/pov_debug.log", "a") as f:
-                f.write(f"ERROR: POV has no blob data\n")
+                f.write("ERROR: POV has no blob data\n")
             return {"success": False, "error": "POV has no blob data"}
 
     blob_path = Path(blob_path)
@@ -1619,7 +1620,7 @@ def _trace_pov_core(
 
         # If no target hit, try coverage for more detail
         if not any_target_reached and target_functions:
-            logger.info(f"[POV] GDB: no target hit, trying coverage...")
+            logger.info("[POV] GDB: no target hit, trying coverage...")
             gdb_failed = True
         else:
             executed_functions = hit_functions
@@ -1802,7 +1803,7 @@ def trace_pov(
     gdb_failed = False
 
     # Step 1: Try GDB trace first
-    logger.info(f"[POV] Trying GDB trace first...")
+    logger.info("[POV] Trying GDB trace first...")
     gdb_success, hit_functions, crashed, gdb_output = run_gdb_trace(
         fuzzer_name, blob, work_dir, target_functions
     )
@@ -1836,7 +1837,7 @@ def trace_pov(
 
         # GDB gives us limited function info, try coverage for more detail
         if not any_target_reached and target_functions:
-            logger.info(f"[POV] GDB: no target hit, trying coverage for more detail...")
+            logger.info("[POV] GDB: no target hit, trying coverage for more detail...")
             gdb_failed = True  # Fall through to coverage
         else:
             executed_functions = hit_functions

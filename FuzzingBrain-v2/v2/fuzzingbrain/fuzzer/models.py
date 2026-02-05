@@ -7,8 +7,7 @@ Data classes and enums for the Fuzzer Worker module.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Optional, List
+from typing import Optional
 import hashlib
 
 from ..core.utils import generate_id

@@ -65,7 +65,6 @@ def signal_handler(signum, frame):
     # Mark all running workers and tasks as cancelled
     try:
         if _repos:
-            from .core.models import WorkerStatus
 
             # Update workers
             all_workers = _repos.workers.collection.find({
@@ -885,7 +884,7 @@ def run_local_mode(config: Config):
 
     repo_path = workspace / "repo"
     if not repo_path.exists():
-        print_warn(f"No repo directory found in workspace")
+        print_warn("No repo directory found in workspace")
 
     fuzz_tooling = workspace / "fuzz-tooling"
     if fuzz_tooling.exists():
@@ -904,12 +903,12 @@ def run_local_mode(config: Config):
     print_step("Expected output structure:")
     print_info(f"  {config.workspace}/results/")
     if "pov" in config.task_type:
-        print_info(f"  ├── povs/")
+        print_info("  ├── povs/")
     if "patch" in config.task_type:
-        print_info(f"  ├── patches/")
+        print_info("  ├── patches/")
     if config.task_type == "harness":
-        print_info(f"  ├── harnesses/")
-    print_info(f"  └── report.json")
+        print_info("  ├── harnesses/")
+    print_info("  └── report.json")
 
     return result
 

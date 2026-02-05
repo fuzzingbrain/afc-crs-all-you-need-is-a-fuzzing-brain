@@ -427,7 +427,7 @@ class WorkspaceCache:
         try:
             db_file = cache_path / "db_data.json"
             if not db_file.exists():
-                logger.warning(f"[Cache] No db_data.json found in cache")
+                logger.warning("[Cache] No db_data.json found in cache")
                 return False
 
             with open(db_file) as f:

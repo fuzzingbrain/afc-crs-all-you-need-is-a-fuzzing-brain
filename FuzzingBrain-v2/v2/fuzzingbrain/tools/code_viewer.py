@@ -14,7 +14,6 @@ Usage:
     search_code("malloc")  # Search for patterns in repo
 """
 
-import os
 import re
 import subprocess
 from contextvars import ContextVar
@@ -30,7 +29,6 @@ except ImportError:
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from loguru import logger
 
 from . import tools_mcp
 
@@ -251,7 +249,7 @@ def get_file_content(
     except ValueError:
         return {
             "success": False,
-            "error": f"Access denied: file is outside workspace",
+            "error": "Access denied: file is outside workspace",
         }
 
     try:
@@ -371,7 +369,7 @@ def get_file_content_impl(
     except ValueError:
         return {
             "success": False,
-            "error": f"Access denied: file is outside workspace",
+            "error": "Access denied: file is outside workspace",
         }
 
     try:

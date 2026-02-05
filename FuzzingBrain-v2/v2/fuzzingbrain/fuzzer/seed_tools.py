@@ -10,11 +10,9 @@ Each agent is identified by its worker_id.
 
 import hashlib
 import threading
-import uuid
 from contextvars import ContextVar
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from loguru import logger
 

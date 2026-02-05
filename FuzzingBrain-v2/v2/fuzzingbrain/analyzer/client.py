@@ -6,7 +6,6 @@ Used by Workers and Agents to query code analysis data.
 """
 
 import socket
-import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -54,14 +53,14 @@ class AnalysisClient:
                 fd = self._sock.fileno()
                 if fd < 0:
                     # Invalid file descriptor
-                    logger.debug(f"[TIMING] _connect: socket has invalid fd, reconnecting")
+                    logger.debug("[TIMING] _connect: socket has invalid fd, reconnecting")
                     self._disconnect()
                 else:
                     logger.debug(f"[TIMING] _connect: socket already connected (fd={fd})")
                     return
             except (OSError, socket.error):
                 # Socket is broken
-                logger.debug(f"[TIMING] _connect: socket error, reconnecting")
+                logger.debug("[TIMING] _connect: socket error, reconnecting")
                 self._disconnect()
 
         t0 = time.time()
@@ -138,7 +137,7 @@ class AnalysisClient:
         except socket.timeout:
             self._disconnect()
             raise TimeoutError(f"Request timed out: {method}")
-        except Exception as e:
+        except Exception:
             self._disconnect()
             raise
 

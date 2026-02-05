@@ -22,7 +22,6 @@ from loguru import logger
 
 from .models import (
     AgentLogRecord,
-    AgentSummary,
     CostSummary,
     EvalContext,
     Event,

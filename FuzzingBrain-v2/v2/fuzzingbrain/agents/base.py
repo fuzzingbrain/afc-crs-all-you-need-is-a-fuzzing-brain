@@ -11,10 +11,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from fastmcp import Client, FastMCP
+from fastmcp import Client
 from loguru import logger
 
-from ..llms import LLMClient, LLMResponse, ModelInfo
+from ..llms import LLMClient, ModelInfo
 from ..tools.mcp_factory import create_isolated_mcp_server
 from ..core.logging import get_agent_banner_and_header
 
@@ -475,7 +475,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             sanitizer = getattr(self, 'sanitizer', '') or ''
 
             with open(self._chat_log_file, "w", encoding="utf-8") as f:
-                f.write(f"# Agent Chat Log\n\n")
+                f.write("# Agent Chat Log\n\n")
                 f.write(f"- **Agent**: {self.agent_name}\n")
                 f.write(f"- **Task ID**: {self.task_id}\n")
                 f.write(f"- **Worker ID**: {self.worker_id}\n")
@@ -532,7 +532,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
 
                 # Role-specific formatting with clear visual separators
                 if role == "system":
-                    f.write(f"## 📋 SYSTEM PROMPT\n")
+                    f.write("## 📋 SYSTEM PROMPT\n")
                     f.write(f"*[{timestamp}]*\n\n")
                     f.write(f"```\n{content}\n```\n\n")
                     f.write(f"{'─'*80}\n\n")
@@ -549,7 +549,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                     if content:
                         f.write(f"{content}\n\n")
                     if tool_calls:
-                        f.write(f"### Tool Calls:\n")
+                        f.write("### Tool Calls:\n")
                         for tc in tool_calls:
                             func_name = tc.get("function", {}).get("name", "unknown")
                             func_args = tc.get("function", {}).get("arguments", "{}")
@@ -560,7 +560,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                     f.write(f"{'─'*80}\n\n")
 
                 elif role == "tool":
-                    f.write(f"## 🔧 TOOL RESULT\n")
+                    f.write("## 🔧 TOOL RESULT\n")
                     f.write(f"*[{timestamp}]* Tool Call ID: `{tool_call_id}`\n\n")
                     # Truncate very long tool results for readability
                     if len(content) > 5000:
@@ -582,7 +582,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
 
             with open(self._chat_log_file, "a", encoding="utf-8") as f:
                 f.write(f"\n{'='*80}\n")
-                f.write(f"# SUMMARY\n\n")
+                f.write("# SUMMARY\n\n")
                 f.write(f"- **End Time**: {self.end_time.isoformat() if self.end_time else 'N/A'}\n")
                 f.write(f"- **Duration**: {duration:.2f} seconds\n")
                 f.write(f"- **Total Iterations**: {self.total_iterations}\n")
@@ -951,7 +951,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         self._setup_logging()
 
         self.start_time = datetime.now()
-        self._log(f"Starting agent run", level="INFO")
+        self._log("Starting agent run", level="INFO")
         self._log(f"Task ID: {self.task_id}", level="INFO")
         self._log(f"Worker ID: {self.worker_id}", level="INFO")
 

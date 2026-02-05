@@ -10,7 +10,7 @@ from pydantic import BaseModel
 from typing import Optional, List
 import uuid
 
-from .core import Task, JobType, ScanMode, TaskStatus
+from .core import Task, JobType, ScanMode
 from .db import RepositoryManager
 
 

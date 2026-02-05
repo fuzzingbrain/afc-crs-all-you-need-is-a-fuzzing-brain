@@ -17,16 +17,15 @@ Architecture:
 """
 
 import asyncio
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from loguru import logger
 
-from ..agents import SuspiciousPointAgent, POVAgent, POVResult
-from ..core.models import SuspiciousPoint, SPStatus
+from ..agents import SuspiciousPointAgent, POVAgent
+from ..core.models import SPStatus
 from ..db import RepositoryManager
 from ..tools.analyzer import set_analyzer_context
 from ..fuzzer import FuzzerManager, get_fuzzer_manager
@@ -200,7 +199,7 @@ class AgentPipeline:
             self.stats.end_time = datetime.now()
 
         # Log final stats
-        logger.info(f"[Pipeline] Pipeline completed")
+        logger.info("[Pipeline] Pipeline completed")
         logger.info(f"[Pipeline] Stats: {self.stats.to_dict()}")
 
         return self.stats

@@ -13,8 +13,6 @@ from ..db import RepositoryManager
 from ..analyzer import AnalysisClient
 from ..fuzzer import (
     FuzzerManager,
-    GlobalFuzzerConfig,
-    SPFuzzerConfig,
     register_fuzzer_manager,
     unregister_fuzzer_manager,
 )
@@ -161,7 +159,6 @@ class WorkerExecutor:
         import asyncio
         import base64
         import uuid
-        from datetime import datetime
         from pathlib import Path
 
         from ..core.models import POV

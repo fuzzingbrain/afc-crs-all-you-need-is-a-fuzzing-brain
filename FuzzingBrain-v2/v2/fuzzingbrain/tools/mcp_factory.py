@@ -14,7 +14,7 @@ Usage:
 """
 
 from fastmcp import FastMCP
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from .utils import async_tool
 
@@ -99,8 +99,6 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
     from .analyzer import (
         _get_client,
         _ensure_client,
-        set_analyzer_context,
-        get_analyzer_context,
         _client_cache,  # Thread-safe cache for debugging
         _invalidate_client,
         _analysis_socket_path,
@@ -563,10 +561,6 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
 def _register_suspicious_point_tools(mcp: FastMCP) -> None:
     """Register suspicious point tools."""
 
-    from .suspicious_points import (
-        _get_sp_context,
-        _ensure_sp_context,
-    )
 
     @mcp.tool
     @async_tool

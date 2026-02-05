@@ -8,7 +8,6 @@ from datetime import datetime
 from typing import Optional, List, TypeVar, Generic, Type
 from pymongo.database import Database
 from pymongo.collection import Collection
-from pymongo.errors import DuplicateKeyError
 from loguru import logger
 
 from ..core.models import Task, POV, Patch, Worker, Fuzzer, Function, CallGraphNode, SuspiciousPoint, Direction, DirectionStatus

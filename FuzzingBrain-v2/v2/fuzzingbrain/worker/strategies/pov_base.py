@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 from .base import BaseStrategy
-from ...core.models import SuspiciousPoint, SPStatus
+from ...core.models import SuspiciousPoint
 from ...tools.code_viewer import set_code_viewer_context
 from ...tools.analyzer import set_analyzer_context
 from ...tools.suspicious_points import set_sp_context
@@ -142,7 +142,7 @@ class POVBaseStrategy(BaseStrategy):
             # This allows the fuzzer to start running while LLM finds SPs
             if self.scan_mode == "delta" and hasattr(self, '_generate_delta_seeds'):
                 self._set_operation("delta_seeds")
-                self.log_info(f"[Step 1.5/5] Generating delta seeds and starting fuzzer...")
+                self.log_info("[Step 1.5/5] Generating delta seeds and starting fuzzer...")
                 step_start = time.time()
                 try:
                     # Pass empty SPs list - we generate seeds based on changed functions only
@@ -158,7 +158,7 @@ class POVBaseStrategy(BaseStrategy):
 
             # Step 2: Find suspicious points (fuzzer is already running in background)
             self._set_operation("find_sp")
-            self.log_info(f"[Step 2/5] Finding suspicious points with AI Agent...")
+            self.log_info("[Step 2/5] Finding suspicious points with AI Agent...")
             step_start = time.time()
             suspicious_points = self._find_suspicious_points()
             result["suspicious_points_found"] = len(suspicious_points)
@@ -174,7 +174,7 @@ class POVBaseStrategy(BaseStrategy):
             if self.use_pipeline:
                 # Use parallel pipeline for verification and POV generation
                 self._set_operation("verify_pov_pipeline")
-                self.log_info(f"[Step 3-4/5] Running parallel pipeline for verification and POV generation...")
+                self.log_info("[Step 3-4/5] Running parallel pipeline for verification and POV generation...")
                 step_start = time.time()
                 pipeline_stats = self._run_pipeline()
                 result["suspicious_points_verified"] = pipeline_stats.sp_verified
@@ -201,7 +201,7 @@ class POVBaseStrategy(BaseStrategy):
 
             # Step 5: Sort and save results
             self._set_operation("save")
-            self.log_info(f"[Step 5/5] Sorting and saving results...")
+            self.log_info("[Step 5/5] Sorting and saving results...")
             step_start = time.time()
 
             # Get latest points from DB

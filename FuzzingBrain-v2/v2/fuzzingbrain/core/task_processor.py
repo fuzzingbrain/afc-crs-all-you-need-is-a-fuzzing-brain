@@ -128,10 +128,10 @@ class WorkspaceSetup:
                 if fuzz_tooling_path.exists():
                     # Check if .git exists - if not, remove and re-clone
                     if not (fuzz_tooling_path / ".git").exists():
-                        logger.warning(f"Fuzz-tooling missing .git directory, re-cloning...")
+                        logger.warning("Fuzz-tooling missing .git directory, re-cloning...")
                         shutil.rmtree(fuzz_tooling_path)
                     else:
-                        logger.info(f"Fuzz-tooling directory exists, skipping clone")
+                        logger.info("Fuzz-tooling directory exists, skipping clone")
 
                 if not fuzz_tooling_path.exists():
                     logger.info(f"Cloning fuzz-tooling from {self.config.fuzz_tooling_url}")

@@ -13,10 +13,9 @@ This agent:
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 from fastmcp import Client
-from loguru import logger
 
 from .base import BaseAgent
 from .prompts import DIRECTION_PLANNING_PROMPT

@@ -84,7 +84,7 @@ def _cleanup_git_tracked(repo_path: Path):
         )
 
         if result.returncode != 0:
-            logger.warning(f"git ls-files failed, removing entire repo")
+            logger.warning("git ls-files failed, removing entire repo")
             shutil.rmtree(repo_path)
             return
 

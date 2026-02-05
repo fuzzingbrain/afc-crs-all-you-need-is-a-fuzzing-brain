@@ -10,7 +10,7 @@ Handles worker task dispatch:
 
 import shutil
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 
 from .logging import logger
 from .config import Config
@@ -333,7 +333,6 @@ class WorkerDispatcher:
 
         Revokes Celery tasks and marks workers as completed.
         """
-        from celery.result import AsyncResult
         from ..celery_app import app
 
         workers = self.repos.workers.find_by_task(self.task.task_id)
@@ -400,7 +399,7 @@ class WorkerDispatcher:
                 "error_msg": {"$regex": "Budget limit exceeded", "$options": "i"}
             })
             if budget_exceeded_worker:
-                logger.warning(f"Budget limit exceeded - initiating shutdown of all workers")
+                logger.warning("Budget limit exceeded - initiating shutdown of all workers")
                 self.graceful_shutdown()
                 return {
                     "status": "budget_exceeded",

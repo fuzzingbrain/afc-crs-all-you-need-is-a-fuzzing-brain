@@ -369,7 +369,6 @@ Generate seeds NOW or this run will produce nothing useful."""
 
     def _get_delta_message(self, **kwargs) -> str:
         """Generate message for delta-scan seed generation."""
-        import json
 
         delta_id = kwargs.get("delta_id", "")
         changed_functions = kwargs.get("changed_functions", [])

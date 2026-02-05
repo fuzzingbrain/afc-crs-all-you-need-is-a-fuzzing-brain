@@ -14,7 +14,6 @@ Workflow:
 import base64
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 import uuid

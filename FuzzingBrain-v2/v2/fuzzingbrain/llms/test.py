@@ -156,7 +156,7 @@ def test_default_model(config: LLMConfig) -> bool:
         return False
 
     print(f"  Model: {config.default_model.name}")
-    print(f"  Question: What is the capital of France?")
+    print("  Question: What is the capital of France?")
     print()
 
     try:

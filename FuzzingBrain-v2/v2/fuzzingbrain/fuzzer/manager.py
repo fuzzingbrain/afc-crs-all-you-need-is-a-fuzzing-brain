@@ -5,9 +5,7 @@ Top-level manager for all fuzzer instances within a worker.
 Manages Global Fuzzer and SP Fuzzer Pool.
 """
 
-import asyncio
 import hashlib
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -15,7 +13,6 @@ from loguru import logger
 
 from .models import (
     CrashRecord,
-    FuzzerStatus,
     FuzzerType,
     GlobalFuzzerConfig,
     SPFuzzerConfig,

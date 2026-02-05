@@ -641,13 +641,13 @@ def create_final_summary(
 
     # Exit reason
     if exit_reason == "budget_exceeded":
-        lines.append("│" + f"  Exit Reason:   BUDGET LIMIT EXCEEDED".ljust(table_width) + "│")
+        lines.append("│" + "  Exit Reason:   BUDGET LIMIT EXCEEDED".ljust(table_width) + "│")
     elif exit_reason == "timeout":
-        lines.append("│" + f"  Exit Reason:   Timeout reached".ljust(table_width) + "│")
+        lines.append("│" + "  Exit Reason:   Timeout reached".ljust(table_width) + "│")
     elif exit_reason == "pov_target_reached":
-        lines.append("│" + f"  Exit Reason:   POV target reached".ljust(table_width) + "│")
+        lines.append("│" + "  Exit Reason:   POV target reached".ljust(table_width) + "│")
     elif exit_reason == "cancelled":
-        lines.append("│" + f"  Exit Reason:   CANCELLED BY USER (Ctrl+C)".ljust(table_width) + "│")
+        lines.append("│" + "  Exit Reason:   CANCELLED BY USER (Ctrl+C)".ljust(table_width) + "│")
 
     lines.append("├" + "─" * table_width + "┤")
 

@@ -11,15 +11,12 @@ import signal
 import sys
 import time
 import multiprocessing
-from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 
 from loguru import logger
 
 from ..celery_app import app
-from ..db import MongoDB, init_repos
-from ..core import Config
 from .models import AnalyzeRequest, AnalyzeResult
 from .server import AnalysisServer
 
@@ -128,7 +125,7 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
     logger.info(f"[Analyzer] Project: {request.project_name}")
     logger.info(f"[Analyzer] Sanitizers: {request.sanitizers}")
     if request.skip_build:
-        logger.info(f"[Analyzer] Skip build mode enabled (cache restore)")
+        logger.info("[Analyzer] Skip build mode enabled (cache restore)")
     if request.prebuild_dir:
         logger.info(f"[Analyzer] Using prebuild data from: {request.prebuild_dir}")
         logger.info(f"[Analyzer] Work ID for remapping: {request.work_id}")

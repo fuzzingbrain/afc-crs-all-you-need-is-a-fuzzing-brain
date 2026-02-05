@@ -88,7 +88,7 @@ class POVDeltaStrategy(POVBaseStrategy):
         """
         import time
 
-        self.log_info(f"[Step 1/5] Analyzing diff changes (ignoring reachability filter)...")
+        self.log_info("[Step 1/5] Analyzing diff changes (ignoring reachability filter)...")
         step_start = time.time()
 
         # Get ALL changes (not just reachable ones)
@@ -124,7 +124,7 @@ class POVDeltaStrategy(POVBaseStrategy):
 
         # Only skip if NO changes at all (not based on reachability!)
         if not all_changes:
-            self.log_info(f"No changes in diff, skipping")
+            self.log_info("No changes in diff, skipping")
             result["skip_reason"] = "no_changes"
             return {"skip": True}
 
@@ -132,7 +132,7 @@ class POVDeltaStrategy(POVBaseStrategy):
         if unreachable_count > 0:
             unreachable_names = [c.function_name for c in all_changes if not c.static_reachable]
             self.log_info(f"[NEW] Will analyze {unreachable_count} static-unreachable functions: {unreachable_names}")
-            self.log_info(f"[NEW] These may be reachable via function pointers - LLM will judge")
+            self.log_info("[NEW] These may be reachable via function pointers - LLM will judge")
 
         return {"skip": False}
 

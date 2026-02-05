@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Set, Optional, Tuple
+from typing import Dict, List, Set, Optional
 
 
 @dataclass

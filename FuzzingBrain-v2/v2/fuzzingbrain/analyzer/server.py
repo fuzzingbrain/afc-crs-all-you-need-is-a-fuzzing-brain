@@ -17,12 +17,9 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 from loguru import logger
 
-# Type variable for generic return type
-T = TypeVar('T')
-
 from .protocol import (
     Request, Response, Method,
-    MESSAGE_DELIMITER, ENCODING, MAX_MESSAGE_SIZE,
+    MAX_MESSAGE_SIZE,
     encode_message, decode_message,
 )
 from .builder import AnalyzerBuilder
@@ -32,6 +29,9 @@ from ..analysis import extract_functions_from_file
 from ..db import MongoDB, init_repos
 from ..core import Config
 from ..core.logging import get_analyzer_banner_and_header
+
+# Type variable for generic return type
+T = TypeVar('T')
 
 
 def _serialize_doc(doc: dict) -> dict:
@@ -289,7 +289,6 @@ class AnalysisServer:
 
     def _setup_logging(self):
         """Setup server-specific logging."""
-        from ..core.logging import get_analyzer_banner_and_header
 
         log_path = Path(self.log_dir)
         log_file = log_path / f"analyzer_{self.task_id}.log"

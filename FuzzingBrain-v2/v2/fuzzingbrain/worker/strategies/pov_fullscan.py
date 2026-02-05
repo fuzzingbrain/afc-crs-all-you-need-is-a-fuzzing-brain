@@ -219,8 +219,8 @@ class POVFullscanStrategy(POVBaseStrategy):
             # Legacy: Streaming pipeline with FullscanSPAgent
             self.log_info(f"=== Starting Streaming Pipeline ({len(directions)} directions) ===")
             self.log_info(f"  SP Find Pool: {self.num_parallel_agents} agents")
-            self.log_info(f"  Verify Pool: 5 agents")
-            self.log_info(f"  POV Pool: 5 agents")
+            self.log_info("  Verify Pool: 5 agents")
+            self.log_info("  POV Pool: 5 agents")
             return await self._run_streaming_pipeline_with_fuzzer_init(directions)
 
     async def _run_streaming_pipeline_with_fuzzer_init(self, directions: List):

@@ -6,7 +6,7 @@ Uses JSON over Unix Domain Socket.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from enum import Enum
 import json
 import uuid

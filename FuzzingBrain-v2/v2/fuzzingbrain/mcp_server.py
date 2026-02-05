@@ -6,9 +6,8 @@ Exposes FuzzingBrain as an MCP tool that can be called by other AI systems.
 
 from fastmcp import FastMCP
 from typing import Optional, List, Dict
-import asyncio
 
-from .core import Config, Task, JobType, ScanMode, TaskStatus
+from .core import Config, Task, JobType, ScanMode
 
 
 # Create MCP server instance

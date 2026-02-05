@@ -139,7 +139,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     if log_dir:
         setup_worker_logging(log_dir, worker_id, worker_metadata)
 
-    logger.info(f"Worker starting")
+    logger.info("Worker starting")
     start_time = datetime.now()
 
     # Initialize evaluation reporter with eval_server from assignment
@@ -229,7 +229,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             repos.workers.save(worker)
 
         # Step 2: Run fuzzing strategies
-        logger.info(f"Running fuzzing strategies")
+        logger.info("Running fuzzing strategies")
         worker.status = WorkerStatus.RUNNING
         repos.workers.save(worker)
 

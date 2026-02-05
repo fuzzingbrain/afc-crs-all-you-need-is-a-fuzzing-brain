@@ -22,7 +22,7 @@ from typing import Dict, Any, List, Optional
 
 from .base import BaseStrategy
 from ...analysis.diff_parser import get_reachable_changes, DiffReachabilityResult
-from ...core.models import SuspiciousPoint, SPStatus
+from ...core.models import SuspiciousPoint
 from ...agents import (
     SuspiciousPointAgent,
     DirectionPlanningAgent,
@@ -115,7 +115,7 @@ class POVStrategy(BaseStrategy):
         import time
         start_time = time.time()
 
-        self.log_info(f"========== POV Strategy Start ==========")
+        self.log_info("========== POV Strategy Start ==========")
         self.log_info(f"Fuzzer: {self.fuzzer}, Mode: {self.scan_mode}")
 
         result = {
@@ -137,7 +137,7 @@ class POVStrategy(BaseStrategy):
         try:
             # Step 1: Delta mode - check diff reachability
             if self.scan_mode == "delta":
-                self.log_info(f"[Step 1/4] Checking diff reachability...")
+                self.log_info("[Step 1/4] Checking diff reachability...")
                 step_start = time.time()
                 reachability = self._check_diff_reachability()
                 result["reachable"] = reachability.reachable
@@ -150,12 +150,12 @@ class POVStrategy(BaseStrategy):
                 self.log_info(f"[Step 1/4] Done in {step_duration:.1f}s - {len(reachability.reachable_changes)} reachable changes")
 
                 if not reachability.reachable:
-                    self.log_info(f"No reachable changes in diff, skipping")
+                    self.log_info("No reachable changes in diff, skipping")
                     result["skip_reason"] = "no_reachable_changes"
                     return result
 
             # Step 2: Find suspicious points
-            self.log_info(f"[Step 2/5] Finding suspicious points with AI Agent...")
+            self.log_info("[Step 2/5] Finding suspicious points with AI Agent...")
             step_start = time.time()
             suspicious_points = self._find_suspicious_points()
             result["suspicious_points_found"] = len(suspicious_points)
@@ -170,7 +170,7 @@ class POVStrategy(BaseStrategy):
             # Step 3 & 4: Verify and generate POV
             if self.use_pipeline:
                 # Use parallel pipeline for verification and POV generation
-                self.log_info(f"[Step 3-4/5] Running parallel pipeline for verification and POV generation...")
+                self.log_info("[Step 3-4/5] Running parallel pipeline for verification and POV generation...")
                 step_start = time.time()
                 pipeline_stats = self._run_pipeline()
                 result["suspicious_points_verified"] = pipeline_stats.sp_verified
@@ -195,7 +195,7 @@ class POVStrategy(BaseStrategy):
                 self.log_info(f"[Step 3/5] Done in {step_duration:.1f}s - Verified {len(verified_points)} points")
 
             # Step 5: Sort and save results
-            self.log_info(f"[Step 5/5] Sorting and saving results...")
+            self.log_info("[Step 5/5] Sorting and saving results...")
             step_start = time.time()
 
             # Get latest points from DB
@@ -217,7 +217,7 @@ class POVStrategy(BaseStrategy):
             result["phase_save"] = step_duration
 
             total_time = time.time() - start_time
-            self.log_info(f"========== POV Strategy Complete ==========")
+            self.log_info("========== POV Strategy Complete ==========")
             self.log_info(f"Total time: {total_time:.1f}s")
             self.log_info(f"Results: {result['suspicious_points_found']} found, {result['suspicious_points_verified']} verified, {len(high_conf)} high-confidence, {result.get('pov_generated', 0)} POV generated")
             return result
@@ -425,7 +425,7 @@ class POVStrategy(BaseStrategy):
         self.log_info(f"Phase 1 completed in {phase1_duration:.1f}s")
 
         # Phase 2: Big Pool Analysis (remaining reachable functions)
-        self.log_info(f"=== SP Find v2 Phase 2: Big Pool Analysis ===")
+        self.log_info("=== SP Find v2 Phase 2: Big Pool Analysis ===")
         phase2_start = time.time()
 
         asyncio.run(self._run_phase2_big_pool(
@@ -438,7 +438,7 @@ class POVStrategy(BaseStrategy):
         self.log_info(f"Phase 2 completed in {phase2_duration:.1f}s")
 
         # Phase 3: Free Exploration (fallback)
-        self.log_info(f"=== SP Find v2 Phase 3: Free Exploration ===")
+        self.log_info("=== SP Find v2 Phase 3: Free Exploration ===")
         phase3_start = time.time()
 
         asyncio.run(self._run_phase3_free_exploration(

@@ -54,7 +54,7 @@ class RedisManager:
             logger.info(f"Redis already running at {self.host}:{self.port}")
             return True
 
-        logger.info(f"Redis not running, attempting to start...")
+        logger.info("Redis not running, attempting to start...")
         return self._start_redis()
 
     def _start_redis(self) -> bool:

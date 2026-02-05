@@ -6,10 +6,7 @@ Encapsulates a single libFuzzer process.
 
 import asyncio
 import hashlib
-import os
 import re
-import signal
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -135,7 +132,7 @@ class FuzzerInstance:
         # libFuzzer arguments
         cmd.extend([
             "/corpus",
-            f"-artifact_prefix=/crashes/",
+            "-artifact_prefix=/crashes/",
             f"-fork={self.config.fork_level}",
             f"-rss_limit_mb={self.config.rss_limit_mb}",
             f"-timeout={self.config.timeout_per_input}",

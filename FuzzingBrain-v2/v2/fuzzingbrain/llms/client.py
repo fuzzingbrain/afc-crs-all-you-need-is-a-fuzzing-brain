@@ -5,7 +5,6 @@ Unified LLM client with multi-provider support and automatic fallback.
 """
 
 import asyncio
-import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Union
@@ -16,7 +15,6 @@ from loguru import logger
 
 from .config import LLMConfig, get_default_config
 from .exceptions import (
-    LLMAllModelsFailedError,
     LLMAuthError,
     LLMContentFilterError,
     LLMContextLengthError,
@@ -187,7 +185,7 @@ class LLMClient:
                 cache = litellm.in_memory_llm_clients_cache
                 if cache:
                     cache.clear()
-                    logger.debug(f"Cleared litellm client cache due to event loop change")
+                    logger.debug("Cleared litellm client cache due to event loop change")
 
         cls._current_loop_id = current_loop_id
 

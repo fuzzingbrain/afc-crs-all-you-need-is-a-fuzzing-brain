@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 from fastmcp import Client
 from loguru import logger
@@ -19,7 +19,7 @@ from loguru import logger
 from .base import BaseAgent
 from .prompts import POV_AGENT_SYSTEM_PROMPT
 from ..llms import LLMClient, ModelInfo
-from ..tools.pov import set_pov_context, update_pov_iteration, get_pov_context
+from ..tools.pov import set_pov_context, update_pov_iteration
 
 
 # =============================================================================
@@ -374,7 +374,7 @@ Key things to identify:
 
 """
         else:
-            message += f"""## Fuzzer Source Code
+            message += """## Fuzzer Source Code
 
 **Fuzzer source not pre-loaded. You MUST call get_fuzzer_info() to read it first.**
 This is CRITICAL - you need to understand how your input enters the library!
@@ -551,11 +551,11 @@ Start by reading the vulnerable function source with get_function_source("{funct
             if self.pov_attempts < self._greedy_attempts_threshold:
                 available_tools = [t for t in self._tools if t["function"]["name"] != "trace_pov"]
                 if self.pov_attempts == self._greedy_attempts_threshold - 1:
-                    self._log(f"Greedy mode ending after this attempt - trace_pov will be available", level="INFO")
+                    self._log("Greedy mode ending after this attempt - trace_pov will be available", level="INFO")
             else:
                 available_tools = self._tools
                 if self.pov_attempts == self._greedy_attempts_threshold:
-                    self._log(f"Greedy mode ended - trace_pov is now available for debugging", level="INFO")
+                    self._log("Greedy mode ended - trace_pov is now available for debugging", level="INFO")
 
             # Call LLM with tools
             self.llm_client.reset_tried_models()
@@ -659,7 +659,7 @@ Use get_function_source or trace_pov (if available) to understand better, then c
 
                 # Check if we should stop after tool calls
                 if self.pov_success:
-                    final_response = f"POV SUCCESS! Found crashing input."
+                    final_response = "POV SUCCESS! Found crashing input."
                     break
 
             else:

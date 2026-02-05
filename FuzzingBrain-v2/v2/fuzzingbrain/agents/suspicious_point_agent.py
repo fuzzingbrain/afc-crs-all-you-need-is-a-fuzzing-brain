@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, NamedTuple
 
 from fastmcp import Client
-from loguru import logger
 
 from .base import BaseAgent
 from .prompts import (
@@ -560,7 +559,7 @@ Follow these steps IN ORDER:
      - {self._get_sanitizer_vuln_types()}
 """
 
-        message += f"""
+        message += """
 3. **CREATE SUSPICIOUS POINTS**: For each potential vulnerability:
    - One SP per unique root cause (not per symptom)
    - Use control flow description, not line numbers

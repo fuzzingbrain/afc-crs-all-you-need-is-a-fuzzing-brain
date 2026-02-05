@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-from typing import Optional
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from loguru import logger
