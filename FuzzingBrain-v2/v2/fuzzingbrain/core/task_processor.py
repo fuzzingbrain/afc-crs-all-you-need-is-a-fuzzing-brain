@@ -267,7 +267,7 @@ class FuzzerDiscovery:
         # Search in OSS-Fuzz project directory
         if self.task.fuzz_tooling_path:
             fuzz_tooling = Path(self.task.fuzz_tooling_path)
-            ossfuzz_project = self.config.ossfuzz_project or self.task.project_name
+            ossfuzz_project = self.config.ossfuzz_project_name or self.task.project_name
             if ossfuzz_project:
                 project_dir = fuzz_tooling / "projects" / ossfuzz_project
                 if project_dir.exists():
@@ -292,7 +292,7 @@ class FuzzerDiscovery:
         # Add OSS-Fuzz project directory
         if self.task.fuzz_tooling_path:
             fuzz_tooling = Path(self.task.fuzz_tooling_path)
-            ossfuzz_project = self.config.ossfuzz_project or self.task.project_name
+            ossfuzz_project = self.config.ossfuzz_project_name or self.task.project_name
             if ossfuzz_project:
                 project_dir = fuzz_tooling / "projects" / ossfuzz_project
                 if project_dir.exists():
@@ -584,7 +584,7 @@ class TaskProcessor:
         try:
             from ..eval import get_reporter
             reporter = get_reporter()
-            project_name = task.project_name or self.config.ossfuzz_project or ""
+            project_name = task.project_name or self.config.ossfuzz_project_name or ""
             task_ctx = reporter.task_context(task.task_id, project_name=project_name)
             task_ctx.__enter__()
         except Exception:
@@ -697,7 +697,7 @@ class TaskProcessor:
             from ..analyzer import AnalyzeRequest, AnalyzeResult
             from ..analyzer.tasks import run_analyzer
 
-            project_name = self.config.ossfuzz_project or task.project_name
+            project_name = self.config.ossfuzz_project_name or task.project_name
             analyze_result = None
 
             if cache_restored:
@@ -711,7 +711,7 @@ class TaskProcessor:
                     project_name=project_name,
                     sanitizers=self.config.sanitizers,
                     language="c",
-                    ossfuzz_project=self.config.ossfuzz_project,
+                    ossfuzz_project_name=self.config.ossfuzz_project_name,
                     log_dir=str(log_dir) if log_dir else None,
                     skip_build=True,  # Skip build, use cached data
                     prebuild_dir=self.config.prebuild_dir,
@@ -748,7 +748,7 @@ class TaskProcessor:
                     project_name=project_name,
                     sanitizers=self.config.sanitizers,
                     language="c",  # TODO: detect language
-                    ossfuzz_project=self.config.ossfuzz_project,
+                    ossfuzz_project_name=self.config.ossfuzz_project_name,
                     log_dir=str(log_dir) if log_dir else None,
                     prebuild_dir=self.config.prebuild_dir,
                     work_id=self.config.work_id,

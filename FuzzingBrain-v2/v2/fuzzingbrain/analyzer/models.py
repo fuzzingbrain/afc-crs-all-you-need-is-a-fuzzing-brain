@@ -21,7 +21,7 @@ class AnalyzeRequest:
     project_name: str
     sanitizers: List[str]             # ["address", "memory", "undefined"]
     language: str = "c"               # "c" / "cpp" / "java"
-    ossfuzz_project: Optional[str] = None  # OSS-Fuzz project name if different
+    ossfuzz_project_name: Optional[str] = None  # OSS-Fuzz project name if different
     log_dir: Optional[str] = None     # Log directory path
     skip_build: bool = False          # Skip build/import phases (for cache restore)
     prebuild_dir: Optional[str] = None  # Path to prebuild data directory
@@ -35,7 +35,7 @@ class AnalyzeRequest:
             "project_name": self.project_name,
             "sanitizers": self.sanitizers,
             "language": self.language,
-            "ossfuzz_project": self.ossfuzz_project,
+            "ossfuzz_project_name": self.ossfuzz_project_name,
             "log_dir": self.log_dir,
             "skip_build": self.skip_build,
             "prebuild_dir": self.prebuild_dir,
@@ -51,7 +51,7 @@ class AnalyzeRequest:
             project_name=data["project_name"],
             sanitizers=data.get("sanitizers", ["address"]),
             language=data.get("language", "c"),
-            ossfuzz_project=data.get("ossfuzz_project"),
+            ossfuzz_project_name=data.get("ossfuzz_project_name"),
             log_dir=data.get("log_dir"),
             skip_build=data.get("skip_build", False),
             prebuild_dir=data.get("prebuild_dir"),

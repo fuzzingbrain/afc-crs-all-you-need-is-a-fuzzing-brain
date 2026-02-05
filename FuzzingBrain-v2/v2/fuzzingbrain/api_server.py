@@ -30,32 +30,6 @@ def get_repos() -> RepositoryManager:
 # Pydantic Models (Request/Response)
 # =============================================================================
 
-class POVRequest(BaseModel):
-    """Request model for POV finding"""
-    repo_url: str
-    commit_id: Optional[str] = None
-    project_name: Optional[str] = None
-    fuzz_tooling_url: Optional[str] = None
-    sanitizers: List[str] = ["address"]
-    timeout_minutes: int = 60
-
-
-class PatchRequest(BaseModel):
-    """Request model for patch generation"""
-    pov_id: str
-    timeout_minutes: int = 60
-
-
-class POVPatchRequest(BaseModel):
-    """Request model for POV + Patch combo"""
-    repo_url: str
-    commit_id: Optional[str] = None
-    project_name: Optional[str] = None
-    fuzz_tooling_url: Optional[str] = None
-    sanitizers: List[str] = ["address"]
-    timeout_minutes: int = 120
-
-
 class HarnessTarget(BaseModel):
     """Target function for harness generation"""
     function: str
@@ -63,13 +37,77 @@ class HarnessTarget(BaseModel):
     file_name: Optional[str] = None
 
 
-class HarnessRequest(BaseModel):
-    """Request model for harness generation"""
+class TaskRequest(BaseModel):
+    """
+    Unified request model for all task types.
+
+    All fields match the JSON configuration template.
+    """
+    # Project info (required)
     repo_url: str
-    targets: List[HarnessTarget]
-    commit_id: Optional[str] = None
-    project_name: Optional[str] = None
-    timeout_minutes: int = 60
+    project_name: str
+    ossfuzz_project_name: Optional[str] = None
+
+    # Task configuration
+    task_type: str = "pov"  # pov | patch | pov-patch | harness
+    scan_mode: str = "full"  # full | delta
+
+    # Commit configuration
+    target_commit: Optional[str] = None
+    base_commit: Optional[str] = None
+    delta_commit: Optional[str] = None
+
+    # Fuzzing configuration
+    fuzzer_filter: List[str] = []
+    sanitizers: List[str] = ["address"]
+    timeout_minutes: int = 30
+    pov_count: int = 1
+
+    # Fuzz tooling
+    fuzz_tooling_url: Optional[str] = None
+    fuzz_tooling_ref: Optional[str] = None
+
+    # Fuzzer sources (name -> [paths])
+    fuzzer_sources: Optional[dict] = None
+
+    # Prebuild
+    work_id: Optional[str] = None
+    prebuild_dir: Optional[str] = None
+
+    # Patch mode specific
+    gen_blob: Optional[str] = None
+    input_blob: Optional[str] = None
+
+    # Harness mode specific
+    targets: Optional[List[HarnessTarget]] = None
+
+    # Runtime control
+    budget_limit: float = 50.0
+    eval_server: Optional[str] = None
+
+
+# Legacy request models (for backward compatibility)
+class POVRequest(TaskRequest):
+    """Request model for POV finding (legacy, use TaskRequest)"""
+    task_type: str = "pov"
+
+
+class PatchRequest(BaseModel):
+    """Request model for patch generation from existing POV"""
+    pov_id: str
+    timeout_minutes: int = 30
+    budget_limit: float = 50.0
+
+
+class POVPatchRequest(TaskRequest):
+    """Request model for POV + Patch combo (legacy, use TaskRequest)"""
+    task_type: str = "pov-patch"
+
+
+class HarnessRequest(TaskRequest):
+    """Request model for harness generation (legacy, use TaskRequest)"""
+    task_type: str = "harness"
+    targets: List[HarnessTarget] = []
 
 
 class TaskResponse(BaseModel):
@@ -153,7 +191,54 @@ async def health():
 
 
 # -----------------------------------------------------------------------------
-# POV Endpoints
+# Unified Task Endpoint
+# -----------------------------------------------------------------------------
+
+def create_task_from_request(request: TaskRequest) -> Task:
+    """Create Task from unified TaskRequest"""
+    return Task(
+        task_id=str(uuid.uuid4())[:8],
+        task_type=JobType(request.task_type),
+        scan_mode=ScanMode(request.scan_mode),
+        repo_url=request.repo_url,
+        project_name=request.project_name,
+        sanitizers=request.sanitizers,
+        timeout_minutes=request.timeout_minutes,
+        base_commit=request.base_commit,
+        delta_commit=request.delta_commit,
+    )
+
+
+@app.post("/api/v1/task", response_model=TaskResponse)
+async def create_task(request: TaskRequest, background_tasks: BackgroundTasks):
+    """
+    Create a new FuzzingBrain task (unified endpoint).
+
+    Accepts all task types: pov, patch, pov-patch, harness.
+    All fields match the JSON configuration template.
+    """
+    task = create_task_from_request(request)
+
+    # Route to appropriate handler based on task_type
+    if request.task_type == "pov":
+        background_tasks.add_task(start_pov_task, task)
+    elif request.task_type == "patch":
+        background_tasks.add_task(start_pov_patch_task, task)  # patch from scratch
+    elif request.task_type == "pov-patch":
+        background_tasks.add_task(start_pov_patch_task, task)
+    elif request.task_type == "harness":
+        targets = [t.model_dump() for t in request.targets] if request.targets else []
+        background_tasks.add_task(start_harness_task, task, targets)
+
+    return TaskResponse(
+        task_id=task.task_id,
+        status="pending",
+        message=f"{request.task_type} task started for {request.repo_url}",
+    )
+
+
+# -----------------------------------------------------------------------------
+# Legacy POV Endpoints (for backward compatibility)
 # -----------------------------------------------------------------------------
 
 @app.post("/api/v1/pov", response_model=TaskResponse)
@@ -164,15 +249,7 @@ async def find_pov(request: POVRequest, background_tasks: BackgroundTasks):
     Scans the repository for vulnerabilities using fuzzing.
     Returns a task_id for tracking progress.
     """
-    task = Task(
-        task_id=str(uuid.uuid4())[:8],
-        task_type=JobType.POV,
-        scan_mode=ScanMode.FULL,
-        repo_url=request.repo_url,
-        project_name=request.project_name,
-        sanitizers=request.sanitizers,
-        timeout_minutes=request.timeout_minutes,
-    )
+    task = create_task_from_request(request)
 
     # Start task in background
     background_tasks.add_task(start_pov_task, task)

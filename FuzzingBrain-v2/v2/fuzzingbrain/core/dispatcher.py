@@ -48,7 +48,7 @@ class WorkerDispatcher:
         self.task = task
         self.config = config
         self.repos = repos
-        self.project_name = config.ossfuzz_project or task.project_name
+        self.project_name = config.ossfuzz_project_name or task.project_name
         self.analyze_result = analyze_result
         self.pov_count_target = config.pov_count  # Target POV count (0 = unlimited)
 
@@ -240,7 +240,7 @@ class WorkerDispatcher:
             # Evaluation server for cost tracking
             "eval_server": self.config.eval_server,
             "budget_limit": self.config.budget_limit,
-            "stop_on_pov": self.config.stop_on_pov,
+            "pov_count": self.config.pov_count,
         }
 
         # Dispatch Celery task with dynamic time limit based on config

@@ -40,7 +40,7 @@ create_full_scan_template() {
     "_instructions": [
         "1. Fill in 'repo_url' with the git repository URL",
         "2. Set 'project_name' (used for workspace naming)",
-        "3. Set 'fuzzers' to specify which fuzzers to run (empty = all)",
+        "3. Set 'fuzzer_filter' to specify which fuzzers to run (empty = all)",
         "4. Adjust 'timeout_minutes' as needed",
         "5. Run: ./FuzzingBrain.sh work/<name>.json"
     ],
@@ -48,23 +48,23 @@ create_full_scan_template() {
     "repo_url": "https://github.com/YOUR_USERNAME/YOUR_REPO.git",
     "project_name": "YOUR_PROJECT_NAME",
 
-    "job_type": "pov",
+    "task_type": "pov",
     "scan_mode": "full",
 
-    "fuzzers": [],
+    "fuzzer_filter": [],
     "sanitizers": ["address"],
-    "timeout_minutes": 60,
+    "timeout_minutes": 30,
 
     "_optional_fields": "=== Below are optional fields ===",
 
     "target_commit": null,
-    "ossfuzz_project": null,
+    "ossfuzz_project_name": null,
     "fuzz_tooling_url": null,
     "fuzz_tooling_ref": null,
 
-    "budget_limit": null,
+    "budget_limit": 50,
     "eval_server": null,
-    "pov_count": 0
+    "pov_count": 1
 }
 EOF
     echo "$file"
@@ -82,32 +82,32 @@ create_delta_scan_template() {
         "2. Set 'project_name' (used for workspace naming)",
         "3. Set 'base_commit' (the known-good commit)",
         "4. Set 'delta_commit' (the commit to analyze, default HEAD)",
-        "5. Set 'fuzzers' to specify which fuzzers to run (empty = all)",
+        "5. Set 'fuzzer_filter' to specify which fuzzers to run (empty = all)",
         "6. Run: ./FuzzingBrain.sh work/<name>.json"
     ],
 
     "repo_url": "https://github.com/YOUR_USERNAME/YOUR_REPO.git",
     "project_name": "YOUR_PROJECT_NAME",
 
-    "job_type": "pov",
+    "task_type": "pov",
     "scan_mode": "delta",
 
     "base_commit": "BASE_COMMIT_HASH_HERE",
     "delta_commit": "DELTA_COMMIT_HASH_OR_HEAD",
 
-    "fuzzers": [],
+    "fuzzer_filter": [],
     "sanitizers": ["address"],
-    "timeout_minutes": 60,
+    "timeout_minutes": 30,
 
     "_optional_fields": "=== Below are optional fields ===",
 
-    "ossfuzz_project": null,
+    "ossfuzz_project_name": null,
     "fuzz_tooling_url": null,
     "fuzz_tooling_ref": null,
 
-    "budget_limit": null,
+    "budget_limit": 50,
     "eval_server": null,
-    "pov_count": 0
+    "pov_count": 1
 }
 EOF
     echo "$file"
@@ -167,8 +167,8 @@ list_configs() {
         for f in "$WORK_DIR"/*.json; do
             local name=$(basename "$f" .json)
             local scan_mode=$(grep -o '"scan_mode"[[:space:]]*:[[:space:]]*"[^"]*"' "$f" 2>/dev/null | sed 's/.*"\([^"]*\)"/\1/')
-            local job_type=$(grep -o '"job_type"[[:space:]]*:[[:space:]]*"[^"]*"' "$f" 2>/dev/null | sed 's/.*"\([^"]*\)"/\1/')
-            printf "  ${CYAN}%-20s${NC} [%s, %s]\n" "$name" "${scan_mode:-?}" "${job_type:-?}"
+            local task_type=$(grep -o '"task_type"[[:space:]]*:[[:space:]]*"[^"]*"' "$f" 2>/dev/null | sed 's/.*"\([^"]*\)"/\1/')
+            printf "  ${CYAN}%-20s${NC} [%s, %s]\n" "$name" "${scan_mode:-?}" "${task_type:-?}"
         done
     fi
     echo ""

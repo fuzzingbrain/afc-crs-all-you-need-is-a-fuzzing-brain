@@ -98,7 +98,7 @@ class AnalysisServer:
         task_path: str,
         project_name: str,
         sanitizers: List[str],
-        ossfuzz_project: Optional[str] = None,
+        ossfuzz_project_name: Optional[str] = None,
         language: str = "c",
         log_dir: Optional[str] = None,
         skip_build: bool = False,
@@ -110,7 +110,7 @@ class AnalysisServer:
         self.task_path = Path(task_path)
         self.project_name = project_name
         self.sanitizers = sanitizers
-        self.ossfuzz_project = ossfuzz_project
+        self.ossfuzz_project_name = ossfuzz_project_name
         self.language = language
         self.log_dir = log_dir
         self.skip_build = skip_build
@@ -336,7 +336,7 @@ class AnalysisServer:
             task_path=str(self.task_path),
             project_name=self.project_name,
             sanitizers=self.sanitizers,
-            ossfuzz_project=self.ossfuzz_project,
+            ossfuzz_project_name=self.ossfuzz_project_name,
             log_callback=self._log,
             log_dir=self.log_dir,
             skip_introspector=skip_introspector,
@@ -1628,7 +1628,7 @@ async def run_server(
     task_path: str,
     project_name: str,
     sanitizers: List[str],
-    ossfuzz_project: Optional[str] = None,
+    ossfuzz_project_name: Optional[str] = None,
     language: str = "c",
     log_dir: Optional[str] = None,
 ) -> AnalyzeResult:
@@ -1643,7 +1643,7 @@ async def run_server(
         task_path=task_path,
         project_name=project_name,
         sanitizers=sanitizers,
-        ossfuzz_project=ossfuzz_project,
+        ossfuzz_project_name=ossfuzz_project_name,
         language=language,
         log_dir=log_dir,
     )

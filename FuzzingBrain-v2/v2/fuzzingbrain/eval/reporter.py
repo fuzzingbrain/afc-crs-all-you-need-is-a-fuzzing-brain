@@ -47,7 +47,7 @@ class BudgetExceededError(Exception):
 
 
 class POVFoundError(Exception):
-    """Raised when a verified POV is found and stop_on_pov is enabled."""
+    """Raised when pov_count limit is reached."""
 
     def __init__(self, pov_count: int = 1):
         self.pov_count = pov_count
@@ -281,7 +281,7 @@ class Reporter(BaseReporter):
         max_content_length: int = 500,
         local_fallback_dir: Optional[Path] = None,
         budget_limit: float = 0.0,
-        stop_on_pov: bool = False,
+        pov_count: int = 1,
     ):
         """
         Initialize Reporter.
@@ -295,7 +295,7 @@ class Reporter(BaseReporter):
             max_content_length: Max length for log content (truncate beyond)
             local_fallback_dir: Directory for local fallback files
             budget_limit: Max cost in dollars (0 = unlimited)
-            stop_on_pov: Stop after finding first verified POV
+            pov_count: Stop after N verified POVs (0 = unlimited)
         """
         self.server_url = server_url.rstrip("/")
         self.instance_id = instance_id or self._generate_instance_id()
@@ -307,7 +307,7 @@ class Reporter(BaseReporter):
 
         # Budget configuration
         self.budget_limit = budget_limit
-        self.stop_on_pov = stop_on_pov
+        self.pov_count = pov_count
         self._verified_pov_count = 0
 
         # Context stack (thread-local for multi-threaded scenarios)
@@ -1113,12 +1113,12 @@ class Reporter(BaseReporter):
         Record that a verified POV was found.
 
         Raises:
-            POVFoundError: If stop_on_pov is enabled
+            POVFoundError: If pov_count limit is reached
         """
         self._verified_pov_count += 1
         logger.info(f"Verified POV found (count: {self._verified_pov_count})")
 
-        if self.stop_on_pov:
+        if self.pov_count > 0 and self._verified_pov_count >= self.pov_count:
             raise POVFoundError(self._verified_pov_count)
 
     def get_verified_pov_count(self) -> int:

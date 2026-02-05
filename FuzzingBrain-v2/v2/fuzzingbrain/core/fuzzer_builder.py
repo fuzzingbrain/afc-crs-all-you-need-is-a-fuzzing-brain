@@ -54,7 +54,7 @@ class FuzzerBuilder:
         """
         self.task = task
         self.config = config
-        self.project_name = config.ossfuzz_project or task.project_name
+        self.project_name = config.ossfuzz_project_name or task.project_name
 
         # Shared coverage fuzzer path (accessible by all Workers)
         self.task_path = Path(task.task_path) if task.task_path else None

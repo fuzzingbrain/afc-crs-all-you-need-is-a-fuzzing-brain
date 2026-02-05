@@ -117,7 +117,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     # Evaluation server for cost tracking
     eval_server = assignment.get("eval_server")
     budget_limit = assignment.get("budget_limit", 0.0)
-    stop_on_pov = assignment.get("stop_on_pov", False)
+    pov_count = assignment.get("pov_count", 1)
 
     worker_id = f"{task_id}__{fuzzer}__{sanitizer}"
 
@@ -152,7 +152,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
                 server_url=eval_server,
                 level="normal",
                 budget_limit=budget_limit,
-                stop_on_pov=stop_on_pov,
+                pov_count=pov_count,
             )
         reporter = get_reporter()
         worker_ctx = reporter.worker_context(worker_id, fuzzer=fuzzer, sanitizer=sanitizer, task_id=task_id)

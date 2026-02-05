@@ -18,6 +18,8 @@ DASHBOARD_PORT="${DASHBOARD_PORT:-18081}"
 
 # MongoDB/Redis
 MONGODB_URI="${MONGODB_URI:-mongodb://localhost:27017}"
+MONGODB_PORT="${MONGODB_PORT:-27017}"
+MONGODB_CONTAINER="fuzzingbrain-mongodb"
 REDIS_URL="${REDIS_URL:-redis://localhost:6379}"
 
 # =============================================================================
@@ -76,6 +78,10 @@ check_port() {
         return 0
     fi
     return 1
+}
+
+is_in_docker() {
+    [ -f /.dockerenv ] || grep -q docker /proc/1/cgroup 2>/dev/null
 }
 
 get_pid() {
@@ -140,6 +146,85 @@ check_redis() {
         return 0
     fi
     return 1
+}
+
+start_mongodb() {
+    # Check if MongoDB container already exists
+    if docker ps -a --format '{{.Names}}' | grep -q "^${MONGODB_CONTAINER}$"; then
+        # Container exists, check if running
+        if docker ps --format '{{.Names}}' | grep -q "^${MONGODB_CONTAINER}$"; then
+            print_info "MongoDB container already running"
+            return 0
+        else
+            # Start existing container
+            print_info "Starting existing MongoDB container..."
+            docker start "$MONGODB_CONTAINER" > /dev/null
+            sleep 2
+            if check_mongodb; then
+                return 0
+            fi
+        fi
+    else
+        # Create new container
+        print_info "Starting MongoDB container..."
+        docker run -d \
+            --name "$MONGODB_CONTAINER" \
+            --restart=always \
+            -p 0.0.0.0:${MONGODB_PORT}:27017 \
+            -v fuzzingbrain-mongodb-data:/data/db \
+            mongo:8.0 > /dev/null
+
+        # Wait for MongoDB to start
+        print_info "Waiting for MongoDB to start..."
+        for i in {1..10}; do
+            sleep 1
+            if check_mongodb; then
+                print_info "MongoDB started successfully"
+                return 0
+            fi
+        done
+    fi
+
+    print_error "Failed to start MongoDB"
+    return 1
+}
+
+ensure_mongodb() {
+    # Running inside Docker? Assume MongoDB is managed externally
+    if is_in_docker; then
+        print_info "Running in Docker container"
+        print_info "Assuming MongoDB is managed by docker-compose"
+        if check_mongodb; then
+            print_info "MongoDB is available at $MONGODB_URI"
+            return 0
+        else
+            print_error "MongoDB not reachable at $MONGODB_URI"
+            print_error "Check docker-compose configuration"
+            return 1
+        fi
+    fi
+
+    # Already running?
+    if check_mongodb; then
+        print_info "MongoDB is available"
+        return 0
+    fi
+
+    print_info "MongoDB not running, starting via Docker..."
+
+    # Check Docker available
+    if ! command -v docker &> /dev/null; then
+        print_error "Docker required to start MongoDB"
+        print_error "Either install Docker or start MongoDB manually"
+        return 1
+    fi
+
+    if ! docker info &> /dev/null 2>&1; then
+        print_error "Docker daemon not running"
+        return 1
+    fi
+
+    start_mongodb
 }
 
 # =============================================================================
@@ -376,12 +461,10 @@ case $COMMAND in
     start)
         print_step "Checking dependencies..."
 
-        if ! check_mongodb; then
-            print_error "MongoDB is not running!"
-            print_error "Please start MongoDB first: ./FuzzingBrain.sh (it will auto-start MongoDB)"
+        if ! ensure_mongodb; then
+            print_error "Failed to start MongoDB. Exiting."
             exit 1
         fi
-        print_info "MongoDB is available"
 
         if ! check_redis; then
             print_warn "Redis is not running (some features may be limited)"
@@ -390,8 +473,8 @@ case $COMMAND in
         fi
 
         echo ""
-        start_eval_server
-        start_dashboard
+        start_eval_server || exit 1
+        start_dashboard || exit 1
         show_status
         ;;
 

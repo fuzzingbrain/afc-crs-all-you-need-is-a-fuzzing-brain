@@ -271,25 +271,51 @@ def parse_args() -> argparse.Namespace:
     # Task identification
     parser.add_argument("--task-id", type=str, help="Task ID (auto-generated if not provided)")
 
+    # Project info (required for CLI mode)
+    parser.add_argument("--repo-url", type=str, help="Git repository URL")
+    parser.add_argument("--project", type=str, help="Project name (e.g., libpng)")
+    parser.add_argument("--ossfuzz-project", type=str, help="OSS-Fuzz project name (if different from --project)")
+
     # Workspace
     parser.add_argument("--workspace", type=str, help="Workspace directory path")
     parser.add_argument("--in-place", action="store_true", help="Run without copying workspace")
 
     # Task configuration
-    parser.add_argument("--task-type", type=str, choices=["pov", "patch", "pov-patch", "harness"], default="pov-patch")
+    parser.add_argument("--task-type", type=str, choices=["pov", "patch", "pov-patch", "harness"], default="pov")
     parser.add_argument("--scan-mode", type=str, choices=["full", "delta"], default="full", help="Scan mode: full or delta")
     parser.add_argument("--sanitizers", type=str, default="address", help="Comma-separated sanitizers")
-    parser.add_argument("--timeout", type=int, default=60, help="Timeout in minutes")
-    parser.add_argument("--pov-count", type=int, default=0, help="Stop after N verified POVs (0 = unlimited)")
+    parser.add_argument("--timeout", type=int, default=30, help="Timeout in minutes")
+    parser.add_argument("--pov-count", type=int, default=1, help="Stop after N verified POVs (0 = unlimited)")
     parser.add_argument("--fuzzers", type=str, help="Comma-separated list of fuzzers to use (empty = all)")
+    parser.add_argument("--budget", type=float, default=50.0, help="Budget limit in dollars (0 = unlimited)")
 
-    # Delta scan
+    # Commit configuration
+    parser.add_argument("--target-commit", type=str, help="Target commit for full scan")
     parser.add_argument("--base-commit", type=str, help="Base commit for delta scan")
     parser.add_argument("--delta-commit", type=str, help="Delta commit for delta scan")
 
-    # Project info
-    parser.add_argument("--project", type=str, help="Project name (e.g., libpng)")
-    parser.add_argument("--ossfuzz-project", type=str, help="OSS-Fuzz project name (if different from --project)")
+    # Fuzz tooling
+    parser.add_argument("--fuzz-tooling-url", type=str, help="Custom fuzz-tooling repository URL")
+    parser.add_argument("--fuzz-tooling-ref", type=str, help="Fuzz-tooling branch/tag")
+
+    # Prebuild (advanced)
+    parser.add_argument("--work-id", type=str, help="Work ID for prebuild data")
+    parser.add_argument("--prebuild-dir", type=str, help="Path to prebuild data directory")
+
+    # Evaluation
+    parser.add_argument("--eval-server", type=str, help="Evaluation server URL")
+
+    # Patch mode specific
+    parser.add_argument("--gen-blob", type=str, help="Generator blob for patch mode")
+    parser.add_argument("--input-blob", type=str, help="Input blob (base64) for patch mode")
+
+    # Harness mode specific
+    parser.add_argument("--targets", type=str, help="Target functions as JSON array for harness mode")
+    parser.add_argument("--targets-file", type=str, help="Path to JSON file containing targets")
+
+    # Fuzzer sources (complex type, JSON format)
+    parser.add_argument("--fuzzer-sources", type=str, help="Fuzzer sources as JSON object: {name: [paths]}")
+    parser.add_argument("--fuzzer-sources-file", type=str, help="Path to JSON file containing fuzzer sources")
 
     return parser.parse_args()
 
@@ -307,15 +333,32 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
     # JSON mode - load from file
     if args.config:
         config = Config.from_json(args.config)
+        # Infrastructure config from environment (not from JSON)
+        config.mongodb_url = os.environ.get("MONGODB_URL", "mongodb://localhost:27017")
+        config.mongodb_db = os.environ.get("MONGODB_DB", "fuzzingbrain")
+        config.redis_url = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
         return config
 
-    # Local mode - apply CLI arguments
+    # CLI mode - apply all arguments
+    # Project info
+    if args.repo_url:
+        config.repo_url = args.repo_url
+    if args.project:
+        config.project_name = args.project
+    if args.ossfuzz_project:
+        config.ossfuzz_project_name = args.ossfuzz_project
+
+    # Task identification
     if args.task_id:
         config.task_id = args.task_id
+
+    # Workspace
     if args.workspace:
         config.workspace = args.workspace
     if args.in_place:
         config.in_place = args.in_place
+
+    # Task configuration
     if args.task_type:
         config.task_type = args.task_type
     if args.scan_mode:
@@ -324,18 +367,60 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
         config.sanitizers = args.sanitizers.split(",")
     if args.timeout:
         config.timeout_minutes = args.timeout
-    if args.pov_count:
+    if args.pov_count is not None:
         config.pov_count = args.pov_count
     if args.fuzzers:
         config.fuzzer_filter = [f.strip() for f in args.fuzzers.split(",") if f.strip()]
+    if args.budget:
+        config.budget_limit = args.budget
+
+    # Commit configuration
+    if args.target_commit:
+        config.target_commit = args.target_commit
     if args.base_commit:
         config.base_commit = args.base_commit
     if args.delta_commit:
         config.delta_commit = args.delta_commit
-    if args.project:
-        config.project_name = args.project
-    if args.ossfuzz_project:
-        config.ossfuzz_project = args.ossfuzz_project
+
+    # Fuzz tooling
+    if args.fuzz_tooling_url:
+        config.fuzz_tooling_url = args.fuzz_tooling_url
+    if args.fuzz_tooling_ref:
+        config.fuzz_tooling_ref = args.fuzz_tooling_ref
+
+    # Prebuild
+    if args.work_id:
+        config.work_id = args.work_id
+    if args.prebuild_dir:
+        config.prebuild_dir = args.prebuild_dir
+
+    # Evaluation
+    if args.eval_server:
+        config.eval_server = args.eval_server
+
+    # Patch mode specific
+    if args.gen_blob:
+        config.gen_blob = args.gen_blob
+    if args.input_blob:
+        config.input_blob = args.input_blob
+
+    # Harness mode specific (JSON format or file)
+    if args.targets:
+        import json
+        config.targets = json.loads(args.targets)
+    elif args.targets_file:
+        import json
+        with open(args.targets_file, 'r') as f:
+            config.targets = json.load(f)
+
+    # Fuzzer sources (JSON format or file)
+    if args.fuzzer_sources:
+        import json
+        config.fuzzer_sources = json.loads(args.fuzzer_sources)
+    elif args.fuzzer_sources_file:
+        import json
+        with open(args.fuzzer_sources_file, 'r') as f:
+            config.fuzzer_sources = json.load(f)
 
     return config
 
@@ -579,7 +664,7 @@ def setup_workspace(config: Config) -> Config:
         print_step("Setting up fuzz-tooling...")
 
         # Determine OSS-Fuzz project name
-        ossfuzz_project = config.ossfuzz_project or project_name
+        ossfuzz_project = config.ossfuzz_project_name or project_name
 
         if config.fuzz_tooling_url:
             # Use custom fuzz-tooling URL
@@ -645,7 +730,7 @@ def setup_workspace(config: Config) -> Config:
                                     shutil.copytree(infra_dir, fuzz_tooling_path / "infra")
                             else:
                                 print_warn(f"No matching OSS-Fuzz project found for: {ossfuzz_project}")
-                                print_warn("Use 'ossfuzz_project' in config to specify manually")
+                                print_warn("Use 'ossfuzz_project_name' in config to specify manually")
             except Exception as e:
                 print_warn(f"Failed to fetch from oss-fuzz: {e}")
     else:
@@ -848,13 +933,13 @@ def main():
             server_url=eval_server,
             level="normal",
             budget_limit=config.budget_limit,
-            stop_on_pov=config.stop_on_pov,
+            pov_count=config.pov_count,
         )
         print(f"\033[0;36m[EVAL]\033[0m Reporting to: {eval_server}")
         if config.budget_limit > 0:
             print(f"\033[0;36m[EVAL]\033[0m Budget limit: ${config.budget_limit:.2f}")
-        if config.stop_on_pov:
-            print(f"\033[0;36m[EVAL]\033[0m Stop on POV: enabled")
+        if config.pov_count > 0:
+            print(f"\033[0;36m[EVAL]\033[0m POV count limit: {config.pov_count}")
 
     # Show fuzzer filter if specified
     if config.fuzzer_filter:

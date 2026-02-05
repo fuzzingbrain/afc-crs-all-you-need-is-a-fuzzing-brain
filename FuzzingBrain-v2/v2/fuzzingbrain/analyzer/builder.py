@@ -175,7 +175,7 @@ class AnalyzerBuilder:
         task_path: str,
         project_name: str,
         sanitizers: List[str],
-        ossfuzz_project: Optional[str] = None,
+        ossfuzz_project_name: Optional[str] = None,
         log_callback=None,
         log_dir: Optional[str] = None,
         parallel: bool = True,
@@ -190,7 +190,7 @@ class AnalyzerBuilder:
             task_path: Path to task workspace (contains repo/, fuzz-tooling/)
             project_name: Project name
             sanitizers: List of sanitizers to build (e.g., ["address", "memory"])
-            ossfuzz_project: OSS-Fuzz project name if different from project_name
+            ossfuzz_project_name: OSS-Fuzz project name if different from project_name
             log_callback: Optional callback for logging (func(msg, level))
             log_dir: Directory for build logs (build output saved here, not to console)
             parallel: Enable parallel builds (default: True)
@@ -199,7 +199,7 @@ class AnalyzerBuilder:
             analyzer_only_log_callback: Optional callback for analyzer-only logging (not to main log)
         """
         self.task_path = Path(task_path)
-        self.project_name = ossfuzz_project or project_name
+        self.project_name = ossfuzz_project_name or project_name
         self.sanitizers = sanitizers
         self.skip_introspector = skip_introspector
         self.log_callback = log_callback or self._default_log
