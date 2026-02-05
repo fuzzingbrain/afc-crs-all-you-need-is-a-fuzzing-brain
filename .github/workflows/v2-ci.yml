@@ -1,0 +1,67 @@
+name: FuzzingBrain v2 CI
+
+on:
+  push:
+    paths:
+      - 'FuzzingBrain-v2/v2/**'
+      - '.github/workflows/v2-ci.yml'
+    branches:
+      - dev
+      - main
+      - 'feature/**'
+      - 'refactor/**'
+  pull_request:
+    paths:
+      - 'FuzzingBrain-v2/v2/**'
+      - '.github/workflows/v2-ci.yml'
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: FuzzingBrain-v2/v2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Run ruff check
+        run: |
+          ruff check fuzzingbrain/ --output-format=github
+
+      - name: Run ruff format check
+        run: |
+          ruff format fuzzingbrain/ --check --diff
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: FuzzingBrain-v2/v2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run tests
+        run: |
+          pytest fuzzingbrain/ -v --ignore=fuzzingbrain/tools/test/ --ignore=fuzzingbrain/workspace/ || true
