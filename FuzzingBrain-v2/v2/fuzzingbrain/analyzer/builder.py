@@ -466,30 +466,39 @@ class AnalyzerBuilder:
         cmd = [
             "python3", str(helper_path),
             "build_image",
+            "--pull",  # Pull latest base images, skip interactive prompt
             self.project_name,
         ]
         try:
             start_time = time.time()
+            # Force unbuffered output from helper.py
+            env = os.environ.copy()
+            env["PYTHONUNBUFFERED"] = "1"
             process = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                bufsize=1,  # Line buffered for real-time output
                 cwd=str(self.fuzz_tooling_path),
+                env=env,
             )
 
-            # Stream output with progress indicator
+            # Stream output to Analyzer log
             line_count = 0
             for line in process.stdout:
                 line = line.rstrip()
                 line_count += 1
-                # Log every 20 lines to show progress without flooding
+                # Log progress every 20 lines
                 if line_count % 20 == 0:
                     elapsed = time.time() - start_time
-                    self.log(f"[Docker build] {line_count} lines, {elapsed:.0f}s elapsed...")
+                    self.log(f"[Docker build] {line_count} lines, {elapsed:.0f}s elapsed...", "DEBUG")
                 # Log important Docker build steps
-                if any(kw in line for kw in ["Step ", "Successfully built", "Successfully tagged", "ERROR", "error:"]):
+                if any(kw in line for kw in ["Step ", "Successfully built", "Successfully tagged"]):
                     self.log(f"[Docker] {line}")
+                # Log errors
+                elif any(kw in line.lower() for kw in ["error", "failed"]):
+                    self.log(f"[Docker] {line}", "WARN")
 
             process.wait(timeout=600)
             elapsed = time.time() - start_time
