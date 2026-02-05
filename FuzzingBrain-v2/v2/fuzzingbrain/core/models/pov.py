@@ -5,7 +5,8 @@ POV Model - Proof of Vulnerability
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List
-import uuid
+
+from ..utils import generate_id
 
 
 @dataclass
@@ -19,7 +20,7 @@ class POV:
     """
 
     # Identifiers
-    pov_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    pov_id: str = field(default_factory=generate_id)
     task_id: str = ""  # Required: which task does this POV belong to
     suspicious_point_id: str = ""  # Which suspicious point this POV is for
     generation_id: str = ""  # Group POVs from same generation (same code, multiple variants)
@@ -92,7 +93,7 @@ class POV:
     def from_dict(cls, data: dict) -> "POV":
         """Create POV from dictionary"""
         return cls(
-            pov_id=data.get("pov_id", data.get("_id", str(uuid.uuid4()))),
+            pov_id=data.get("pov_id", data.get("_id", generate_id())),
             task_id=data.get("task_id", ""),
             suspicious_point_id=data.get("suspicious_point_id", ""),
             generation_id=data.get("generation_id", ""),

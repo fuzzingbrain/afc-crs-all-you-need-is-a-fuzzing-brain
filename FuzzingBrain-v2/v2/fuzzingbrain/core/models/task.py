@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Optional, List
-import uuid
+
+from ..utils import generate_id
 
 
 class TaskStatus(str, Enum):
@@ -45,7 +46,7 @@ class Task:
     """
 
     # Core identifiers
-    task_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    task_id: str = field(default_factory=generate_id)
     task_type: JobType = JobType.POV_PATCH
     scan_mode: ScanMode = ScanMode.FULL
     status: TaskStatus = TaskStatus.PENDING

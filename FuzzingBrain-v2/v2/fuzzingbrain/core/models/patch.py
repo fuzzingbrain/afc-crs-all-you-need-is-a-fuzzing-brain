@@ -5,7 +5,8 @@ Patch Model - Bug fix patch
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List
-import uuid
+
+from ..utils import generate_id
 
 
 @dataclass
@@ -21,7 +22,7 @@ class Patch:
     """
 
     # Identifiers
-    patch_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    patch_id: str = field(default_factory=generate_id)
     task_id: str = ""  # Required: which task does this patch belong to
     pov_id: Optional[str] = None  # Optional: which POV is this patch fixing
 
@@ -70,7 +71,7 @@ class Patch:
     def from_dict(cls, data: dict) -> "Patch":
         """Create Patch from dictionary"""
         return cls(
-            patch_id=data.get("patch_id", data.get("_id", str(uuid.uuid4()))),
+            patch_id=data.get("patch_id", data.get("_id", generate_id())),
             task_id=data.get("task_id", ""),
             pov_id=data.get("pov_id"),
             patch_content=data.get("patch_content"),

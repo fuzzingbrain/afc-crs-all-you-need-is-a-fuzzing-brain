@@ -9,7 +9,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Optional, List, Dict
-import uuid
+
+from ..utils import generate_id
 
 
 class SPStatus(str, Enum):
@@ -50,7 +51,7 @@ class SuspiciousPoint:
     """
 
     # Identifiers
-    suspicious_point_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    suspicious_point_id: str = field(default_factory=generate_id)
     task_id: str = ""  # Which task this belongs to
     function_name: str = ""  # Which function this belongs to
     direction_id: str = ""  # Which direction this belongs to (SP Find v2)
@@ -168,7 +169,7 @@ class SuspiciousPoint:
             sources = [{"harness_name": data.get("harness_name", ""), "sanitizer": data.get("sanitizer", "")}]
 
         return cls(
-            suspicious_point_id=data.get("suspicious_point_id", data.get("_id", str(uuid.uuid4()))),
+            suspicious_point_id=data.get("suspicious_point_id", data.get("_id", generate_id())),
             task_id=data.get("task_id", ""),
             function_name=data.get("function_name", ""),
             sources=sources,
