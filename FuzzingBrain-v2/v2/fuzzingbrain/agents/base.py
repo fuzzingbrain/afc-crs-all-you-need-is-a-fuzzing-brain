@@ -30,7 +30,9 @@ def _get_reporter():
             from ..eval import get_reporter
             _reporter_getter = get_reporter
         except ImportError:
-            _reporter_getter = lambda: None
+            def _null_reporter():
+                return None
+            _reporter_getter = _null_reporter
     return _reporter_getter()
 
 
