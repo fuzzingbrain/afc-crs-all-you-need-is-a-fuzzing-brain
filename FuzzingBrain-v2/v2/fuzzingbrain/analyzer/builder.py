@@ -181,6 +181,7 @@ class AnalyzerBuilder:
         parallel: bool = True,
         max_parallel: int = None,
         skip_introspector: bool = False,
+        analyzer_only_log_callback=None,
     ):
         """
         Initialize AnalyzerBuilder.
@@ -195,12 +196,14 @@ class AnalyzerBuilder:
             parallel: Enable parallel builds (default: True)
             max_parallel: Maximum parallel builds (default: auto based on CPU)
             skip_introspector: Skip introspector build (when using prebuild data)
+            analyzer_only_log_callback: Optional callback for analyzer-only logging (not to main log)
         """
         self.task_path = Path(task_path)
         self.project_name = ossfuzz_project or project_name
         self.sanitizers = sanitizers
         self.skip_introspector = skip_introspector
         self.log_callback = log_callback or self._default_log
+        self.analyzer_only_log_callback = analyzer_only_log_callback
         self.log_dir = Path(log_dir) if log_dir else None
         self.parallel = parallel
 
@@ -232,6 +235,14 @@ class AnalyzerBuilder:
     def log(self, msg: str, level: str = "INFO"):
         """Log a message."""
         self.log_callback(msg, level)
+
+    def log_analyzer_only(self, msg: str, level: str = "INFO"):
+        """Log a message only to analyzer log (not to FuzzingBrain.log)."""
+        if self.analyzer_only_log_callback:
+            self.analyzer_only_log_callback(msg, level)
+        else:
+            # Fallback to normal log if no analyzer-only callback
+            self.log_callback(msg, level)
 
     def build_all(self) -> Tuple[bool, str]:
         """
@@ -484,7 +495,7 @@ class AnalyzerBuilder:
                 env=env,
             )
 
-            # Stream output to Analyzer log
+            # Stream output to Analyzer log only (not to FuzzingBrain.log)
             line_count = 0
             for line in process.stdout:
                 line = line.rstrip()
@@ -492,13 +503,13 @@ class AnalyzerBuilder:
                 # Log progress every 20 lines
                 if line_count % 20 == 0:
                     elapsed = time.time() - start_time
-                    self.log(f"[Docker build] {line_count} lines, {elapsed:.0f}s elapsed...", "DEBUG")
+                    self.log_analyzer_only(f"[Docker build] {line_count} lines, {elapsed:.0f}s elapsed...", "DEBUG")
                 # Log important Docker build steps
                 if any(kw in line for kw in ["Step ", "Successfully built", "Successfully tagged"]):
-                    self.log(f"[Docker] {line}")
-                # Log errors
+                    self.log_analyzer_only(f"[Docker] {line}")
+                # Log errors (also to main log for visibility)
                 elif any(kw in line.lower() for kw in ["error", "failed"]):
-                    self.log(f"[Docker] {line}", "WARN")
+                    self.log_analyzer_only(f"[Docker] {line}", "WARN")
 
             process.wait(timeout=600)
             elapsed = time.time() - start_time

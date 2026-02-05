@@ -152,6 +152,9 @@ class AnalysisServer:
         # Use a larger pool since we may have many concurrent agents
         self._executor = ThreadPoolExecutor(max_workers=32, thread_name_prefix="mongo_")
 
+        # Analyzer-only log file (set in _setup_logging)
+        self._analyzer_log_file: Optional[Path] = None
+
     async def _run_sync(self, func: Callable[..., T], *args, **kwargs) -> T:
         """
         Run a blocking function in the thread pool.
@@ -174,6 +177,15 @@ class AnalysisServer:
             logger.debug(f"[AnalysisServer] {msg}")
         else:
             logger.info(f"[AnalysisServer] {msg}")
+
+    def _log_analyzer_only(self, msg: str, level: str = "INFO"):
+        """Log message only to analyzer log file (not to FuzzingBrain.log)."""
+        if not self._analyzer_log_file:
+            return
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        line = f"{timestamp} | {level:<8} | [AnalysisServer] {msg}\n"
+        with open(self._analyzer_log_file, "a", encoding="utf-8") as f:
+            f.write(line)
 
     async def start(self) -> AnalyzeResult:
         """
@@ -281,6 +293,7 @@ class AnalysisServer:
 
         log_path = Path(self.log_dir)
         log_file = log_path / f"analyzer_{self.task_id}.log"
+        self._analyzer_log_file = log_file
 
         metadata = {
             "Task ID": self.task_id,
@@ -327,6 +340,7 @@ class AnalysisServer:
             log_callback=self._log,
             log_dir=self.log_dir,
             skip_introspector=skip_introspector,
+            analyzer_only_log_callback=self._log_analyzer_only,
         )
 
         # Run build in thread pool to not block event loop
