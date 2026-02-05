@@ -5,9 +5,7 @@ Top-level manager for all fuzzer instances within a worker.
 Manages Global Fuzzer and SP Fuzzer Pool.
 """
 
-import asyncio
 import hashlib
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -15,7 +13,6 @@ from loguru import logger
 
 from .models import (
     CrashRecord,
-    FuzzerStatus,
     FuzzerType,
     GlobalFuzzerConfig,
     SPFuzzerConfig,
@@ -106,12 +103,20 @@ class FuzzerManager:
         self.direction_seeds: List[SeedInfo] = []
         self.fp_seeds: List[SeedInfo] = []
 
-        logger.info(f"[{worker_id}] ╔══════════════════════════════════════════════════════════════╗")
-        logger.info(f"[{worker_id}] ║              FUZZER WORKER INITIALIZED                       ║")
-        logger.info(f"[{worker_id}] ╠══════════════════════════════════════════════════════════════╣")
+        logger.info(
+            f"[{worker_id}] ╔══════════════════════════════════════════════════════════════╗"
+        )
+        logger.info(
+            f"[{worker_id}] ║              FUZZER WORKER INITIALIZED                       ║"
+        )
+        logger.info(
+            f"[{worker_id}] ╠══════════════════════════════════════════════════════════════╣"
+        )
         logger.info(f"[{worker_id}] ║  Fuzzer: {self.fuzzer_name:<50} ║")
         logger.info(f"[{worker_id}] ║  Sanitizer: {sanitizer:<47} ║")
-        logger.info(f"[{worker_id}] ╚══════════════════════════════════════════════════════════════╝")
+        logger.info(
+            f"[{worker_id}] ╚══════════════════════════════════════════════════════════════╝"
+        )
 
     # =========================================================================
     # Global Fuzzer Management
@@ -128,7 +133,9 @@ class FuzzerManager:
             True if started successfully
         """
         if self.global_fuzzer and self.global_fuzzer.is_running():
-            logger.warning(f"[FuzzerManager:{self.worker_id}] Global fuzzer already running")
+            logger.warning(
+                f"[FuzzerManager:{self.worker_id}] Global fuzzer already running"
+            )
             return False
 
         # Create instance
@@ -162,9 +169,15 @@ class FuzzerManager:
         # Start fuzzer
         success = await self.global_fuzzer.start()
         if success:
-            logger.info(f"[{self.worker_id}] ┌─────────────────────────────────────────┐")
-            logger.info(f"[{self.worker_id}] │  🚀 GLOBAL FUZZER STARTED (fork={self.global_config.fork_level})     │")
-            logger.info(f"[{self.worker_id}] └─────────────────────────────────────────┘")
+            logger.info(
+                f"[{self.worker_id}] ┌─────────────────────────────────────────┐"
+            )
+            logger.info(
+                f"[{self.worker_id}] │  🚀 GLOBAL FUZZER STARTED (fork={self.global_config.fork_level})     │"
+            )
+            logger.info(
+                f"[{self.worker_id}] └─────────────────────────────────────────┘"
+            )
         else:
             logger.error(f"[{self.worker_id}] ❌ GLOBAL FUZZER FAILED TO START")
 
@@ -191,12 +204,14 @@ class FuzzerManager:
         if not self.global_fuzzer:
             # Save to corpus dir even if fuzzer not started yet
             seed_hash = hashlib.sha1(seed).hexdigest()[:16]
-            seed_path = self.global_corpus_dir / f"direction_{direction_id[:8]}_{seed_hash}"
+            seed_path = (
+                self.global_corpus_dir / f"direction_{direction_id[:8]}_{seed_hash}"
+            )
             seed_path.write_bytes(seed)
         else:
             seed_path = self.global_fuzzer.add_seed(
                 seed,
-                f"direction_{direction_id[:8]}_{hashlib.sha1(seed).hexdigest()[:8]}"
+                f"direction_{direction_id[:8]}_{hashlib.sha1(seed).hexdigest()[:8]}",
             )
 
         # Track seed
@@ -232,8 +247,7 @@ class FuzzerManager:
             seed_path.write_bytes(seed)
         else:
             seed_path = self.global_fuzzer.add_seed(
-                seed,
-                f"fp_{sp_id[:8]}_{hashlib.sha1(seed).hexdigest()[:8]}"
+                seed, f"fp_{sp_id[:8]}_{hashlib.sha1(seed).hexdigest()[:8]}"
             )
 
         # Track seed
@@ -305,7 +319,9 @@ class FuzzerManager:
         success = await sp_fuzzer.start()
         if success:
             self.sp_fuzzers[sp_id] = sp_fuzzer
-            logger.info(f"[{self.worker_id}] ▶ SP FUZZER STARTED: {sp_id[:8]} (total: {len(self.sp_fuzzers)})")
+            logger.info(
+                f"[{self.worker_id}] ▶ SP FUZZER STARTED: {sp_id[:8]} (total: {len(self.sp_fuzzers)})"
+            )
         else:
             logger.error(f"[{self.worker_id}] ❌ SP FUZZER FAILED: {sp_id[:8]}")
 
@@ -363,8 +379,7 @@ class FuzzerManager:
 
         # Add to running SP fuzzer
         blob_path = self.sp_fuzzers[sp_id].add_seed(
-            blob,
-            f"pov_a{attempt}_v{variant}_{hashlib.sha1(blob).hexdigest()[:8]}"
+            blob, f"pov_a{attempt}_v{variant}_{hashlib.sha1(blob).hexdigest()[:8]}"
         )
 
         logger.debug(
@@ -411,8 +426,7 @@ class FuzzerManager:
     def get_active_sp_fuzzers(self) -> List[str]:
         """Get list of active SP fuzzer IDs."""
         return [
-            sp_id for sp_id, fuzzer in self.sp_fuzzers.items()
-            if fuzzer.is_running()
+            sp_id for sp_id, fuzzer in self.sp_fuzzers.items() if fuzzer.is_running()
         ]
 
     def get_total_crashes(self) -> int:

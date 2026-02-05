@@ -22,7 +22,7 @@ from typing import Dict, Any, List, Optional
 
 from .base import BaseStrategy
 from ...analysis.diff_parser import get_reachable_changes, DiffReachabilityResult
-from ...core.models import SuspiciousPoint, SPStatus
+from ...core.models import SuspiciousPoint
 from ...agents import (
     SuspiciousPointAgent,
     DirectionPlanningAgent,
@@ -113,9 +113,10 @@ class POVStrategy(BaseStrategy):
             Result dictionary with findings
         """
         import time
+
         start_time = time.time()
 
-        self.log_info(f"========== POV Strategy Start ==========")
+        self.log_info("========== POV Strategy Start ==========")
         self.log_info(f"Fuzzer: {self.fuzzer}, Mode: {self.scan_mode}")
 
         result = {
@@ -137,31 +138,39 @@ class POVStrategy(BaseStrategy):
         try:
             # Step 1: Delta mode - check diff reachability
             if self.scan_mode == "delta":
-                self.log_info(f"[Step 1/4] Checking diff reachability...")
+                self.log_info("[Step 1/4] Checking diff reachability...")
                 step_start = time.time()
                 reachability = self._check_diff_reachability()
                 result["reachable"] = reachability.reachable
                 result["reachable_changes"] = [
-                    {"function": c.function_name, "file": c.file_path, "distance": c.reachability_distance}
+                    {
+                        "function": c.function_name,
+                        "file": c.file_path,
+                        "distance": c.reachability_distance,
+                    }
                     for c in reachability.reachable_changes
                 ]
                 step_duration = time.time() - step_start
                 result["phase_reachability"] = step_duration
-                self.log_info(f"[Step 1/4] Done in {step_duration:.1f}s - {len(reachability.reachable_changes)} reachable changes")
+                self.log_info(
+                    f"[Step 1/4] Done in {step_duration:.1f}s - {len(reachability.reachable_changes)} reachable changes"
+                )
 
                 if not reachability.reachable:
-                    self.log_info(f"No reachable changes in diff, skipping")
+                    self.log_info("No reachable changes in diff, skipping")
                     result["skip_reason"] = "no_reachable_changes"
                     return result
 
             # Step 2: Find suspicious points
-            self.log_info(f"[Step 2/5] Finding suspicious points with AI Agent...")
+            self.log_info("[Step 2/5] Finding suspicious points with AI Agent...")
             step_start = time.time()
             suspicious_points = self._find_suspicious_points()
             result["suspicious_points_found"] = len(suspicious_points)
             step_duration = time.time() - step_start
             result["phase_find_sp"] = step_duration
-            self.log_info(f"[Step 2/5] Done in {step_duration:.1f}s - Found {len(suspicious_points)} suspicious points")
+            self.log_info(
+                f"[Step 2/5] Done in {step_duration:.1f}s - Found {len(suspicious_points)} suspicious points"
+            )
 
             if not suspicious_points:
                 self.log_info("No suspicious points found")
@@ -170,7 +179,9 @@ class POVStrategy(BaseStrategy):
             # Step 3 & 4: Verify and generate POV
             if self.use_pipeline:
                 # Use parallel pipeline for verification and POV generation
-                self.log_info(f"[Step 3-4/5] Running parallel pipeline for verification and POV generation...")
+                self.log_info(
+                    "[Step 3-4/5] Running parallel pipeline for verification and POV generation..."
+                )
                 step_start = time.time()
                 pipeline_stats = self._run_pipeline()
                 result["suspicious_points_verified"] = pipeline_stats.sp_verified
@@ -180,22 +191,30 @@ class POVStrategy(BaseStrategy):
                 # Extract individual phase times from pipeline stats
                 result["phase_verify"] = pipeline_stats.verify_time_total
                 result["phase_pov"] = pipeline_stats.pov_time_total
-                self.log_info(f"[Step 3-4/5] Done in {step_duration:.1f}s (verify: {pipeline_stats.verify_time_total:.1f}s, pov: {pipeline_stats.pov_time_total:.1f}s)")
-                self.log_info(f"  Verified: {pipeline_stats.sp_verified} (real: {pipeline_stats.sp_verified_real}, fp: {pipeline_stats.sp_verified_fp})")
+                self.log_info(
+                    f"[Step 3-4/5] Done in {step_duration:.1f}s (verify: {pipeline_stats.verify_time_total:.1f}s, pov: {pipeline_stats.pov_time_total:.1f}s)"
+                )
+                self.log_info(
+                    f"  Verified: {pipeline_stats.sp_verified} (real: {pipeline_stats.sp_verified_real}, fp: {pipeline_stats.sp_verified_fp})"
+                )
                 self.log_info(f"  POV generated: {pipeline_stats.pov_generated}")
             else:
                 # Sequential verification (original behavior)
-                self.log_info(f"[Step 3/5] Verifying {len(suspicious_points)} suspicious points...")
+                self.log_info(
+                    f"[Step 3/5] Verifying {len(suspicious_points)} suspicious points..."
+                )
                 step_start = time.time()
                 verified_points = self._verify_suspicious_points(suspicious_points)
                 result["suspicious_points_verified"] = len(verified_points)
                 step_duration = time.time() - step_start
                 result["phase_verify"] = step_duration
                 result["phase_pov"] = 0.0  # No POV in sequential mode
-                self.log_info(f"[Step 3/5] Done in {step_duration:.1f}s - Verified {len(verified_points)} points")
+                self.log_info(
+                    f"[Step 3/5] Done in {step_duration:.1f}s - Verified {len(verified_points)} points"
+                )
 
             # Step 5: Sort and save results
-            self.log_info(f"[Step 5/5] Sorting and saving results...")
+            self.log_info("[Step 5/5] Sorting and saving results...")
             step_start = time.time()
 
             # Get latest points from DB
@@ -217,9 +236,11 @@ class POVStrategy(BaseStrategy):
             result["phase_save"] = step_duration
 
             total_time = time.time() - start_time
-            self.log_info(f"========== POV Strategy Complete ==========")
+            self.log_info("========== POV Strategy Complete ==========")
             self.log_info(f"Total time: {total_time:.1f}s")
-            self.log_info(f"Results: {result['suspicious_points_found']} found, {result['suspicious_points_verified']} verified, {len(high_conf)} high-confidence, {result.get('pov_generated', 0)} POV generated")
+            self.log_info(
+                f"Results: {result['suspicious_points_found']} found, {result['suspicious_points_verified']} verified, {len(high_conf)} high-confidence, {result.get('pov_generated', 0)} POV generated"
+            )
             return result
 
         except Exception as e:
@@ -246,7 +267,7 @@ class POVStrategy(BaseStrategy):
 
         # Read diff content
         try:
-            diff_content = self.diff_path.read_text(encoding='utf-8', errors='replace')
+            diff_content = self.diff_path.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
             self.log_error(f"Failed to read diff file: {e}")
             return DiffReachabilityResult(reachable=False)
@@ -303,7 +324,7 @@ class POVStrategy(BaseStrategy):
 
         report_path = self.results_path / "diff_reachability_report.json"
         try:
-            with open(report_path, 'w', encoding='utf-8') as f:
+            with open(report_path, "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)
             self.log_info(f"Saved reachability report to: {report_path}")
         except Exception as e:
@@ -339,7 +360,9 @@ class POVStrategy(BaseStrategy):
             # Run the agent to find suspicious points
             try:
                 response = self._agent.find_suspicious_points_sync(reachable_changes)
-                self.log_debug(f"Agent response: {response[:500]}...")  # Log first 500 chars
+                self.log_debug(
+                    f"Agent response: {response[:500]}..."
+                )  # Log first 500 chars
             except Exception as e:
                 self.log_error(f"Agent failed to find suspicious points: {e}")
                 return []
@@ -397,7 +420,9 @@ class POVStrategy(BaseStrategy):
                 fuzzer_code=fuzzer_code,
                 reachable_count=reachable_count,
             )
-            self.log_info(f"Direction planning completed: {result.get('directions_created', 0)} directions created")
+            self.log_info(
+                f"Direction planning completed: {result.get('directions_created', 0)} directions created"
+            )
         except Exception as e:
             self.log_error(f"Direction planning failed: {e}")
             return []
@@ -412,40 +437,48 @@ class POVStrategy(BaseStrategy):
             return []
 
         # Phase 1: Small Pool Analysis (core_functions + entry_functions)
-        self.log_info(f"=== SP Find v2 Phase 1: Small Pool Analysis ({len(directions)} directions) ===")
+        self.log_info(
+            f"=== SP Find v2 Phase 1: Small Pool Analysis ({len(directions)} directions) ==="
+        )
         phase1_start = time.time()
 
-        asyncio.run(self._run_phase1_small_pool(
-            directions=directions,
-            agent_log_dir=agent_log_dir,
-            fuzzer_source=fuzzer_code,
-        ))
+        asyncio.run(
+            self._run_phase1_small_pool(
+                directions=directions,
+                agent_log_dir=agent_log_dir,
+                fuzzer_source=fuzzer_code,
+            )
+        )
 
         phase1_duration = time.time() - phase1_start
         self.log_info(f"Phase 1 completed in {phase1_duration:.1f}s")
 
         # Phase 2: Big Pool Analysis (remaining reachable functions)
-        self.log_info(f"=== SP Find v2 Phase 2: Big Pool Analysis ===")
+        self.log_info("=== SP Find v2 Phase 2: Big Pool Analysis ===")
         phase2_start = time.time()
 
-        asyncio.run(self._run_phase2_big_pool(
-            directions=directions,
-            agent_log_dir=agent_log_dir,
-            fuzzer_source=fuzzer_code,
-        ))
+        asyncio.run(
+            self._run_phase2_big_pool(
+                directions=directions,
+                agent_log_dir=agent_log_dir,
+                fuzzer_source=fuzzer_code,
+            )
+        )
 
         phase2_duration = time.time() - phase2_start
         self.log_info(f"Phase 2 completed in {phase2_duration:.1f}s")
 
         # Phase 3: Free Exploration (fallback)
-        self.log_info(f"=== SP Find v2 Phase 3: Free Exploration ===")
+        self.log_info("=== SP Find v2 Phase 3: Free Exploration ===")
         phase3_start = time.time()
 
-        asyncio.run(self._run_phase3_free_exploration(
-            directions=directions,
-            fuzzer_code=fuzzer_code,
-            agent_log_dir=agent_log_dir,
-        ))
+        asyncio.run(
+            self._run_phase3_free_exploration(
+                directions=directions,
+                fuzzer_code=fuzzer_code,
+                agent_log_dir=agent_log_dir,
+            )
+        )
 
         phase3_duration = time.time() - phase3_start
         self.log_info(f"Phase 3 completed in {phase3_duration:.1f}s")
@@ -477,18 +510,25 @@ class POVStrategy(BaseStrategy):
         small_pool_total = len(small_pool_names)
         small_pool_analyzed = 0
         if small_pool_names:
-            small_pool_functions = self.repos.functions.find_all({
-                "task_id": self.task_id,
-                "name": {"$in": list(small_pool_names)},
-                "analyzed_by_directions": {"$ne": []},
-            })
-            small_pool_analyzed = len([
-                f for f in self.repos.functions.find_all({
+            small_pool_functions = self.repos.functions.find_all(
+                {
                     "task_id": self.task_id,
                     "name": {"$in": list(small_pool_names)},
-                })
-                if f.analyzed_by_directions
-            ])
+                    "analyzed_by_directions": {"$ne": []},
+                }
+            )
+            small_pool_analyzed = len(
+                [
+                    f
+                    for f in self.repos.functions.find_all(
+                        {
+                            "task_id": self.task_id,
+                            "name": {"$in": list(small_pool_names)},
+                        }
+                    )
+                    if f.analyzed_by_directions
+                ]
+            )
 
         # Get global coverage stats
         global_coverage = self.repos.functions.get_analysis_coverage(
@@ -502,10 +542,12 @@ class POVStrategy(BaseStrategy):
 
         # Get SP count
         sp_count = self.repos.suspicious_points.count({"task_id": self.task_id})
-        high_conf_count = self.repos.suspicious_points.count({
-            "task_id": self.task_id,
-            "score": {"$gte": 0.7},
-        })
+        high_conf_count = self.repos.suspicious_points.count(
+            {
+                "task_id": self.task_id,
+                "score": {"$gte": 0.7},
+            }
+        )
 
         # Log report
         self.log_info("=" * 60)
@@ -522,14 +564,22 @@ class POVStrategy(BaseStrategy):
         self.log_info("-" * 60)
         self.log_info("  Big Pool Coverage:")
         self.log_info(f"    Total functions: {global_coverage['total_functions']}")
-        self.log_info(f"    Analyzed by this direction: {dir_coverage.get('analyzed_by_direction', 0)}")
-        if global_coverage['total_functions'] > 0:
-            pct = dir_coverage.get('analyzed_by_direction', 0) / global_coverage['total_functions'] * 100
+        self.log_info(
+            f"    Analyzed by this direction: {dir_coverage.get('analyzed_by_direction', 0)}"
+        )
+        if global_coverage["total_functions"] > 0:
+            pct = (
+                dir_coverage.get("analyzed_by_direction", 0)
+                / global_coverage["total_functions"]
+                * 100
+            )
             self.log_info(f"    Coverage: {pct:.1f}%")
         self.log_info("-" * 60)
         self.log_info("  Global Coverage (all directions):")
         self.log_info(f"    Total functions: {global_coverage['total_functions']}")
-        self.log_info(f"    Analyzed by any direction: {global_coverage['analyzed_functions']}")
+        self.log_info(
+            f"    Analyzed by any direction: {global_coverage['analyzed_functions']}"
+        )
         self.log_info(f"    Coverage: {global_coverage['coverage_percent']:.1f}%")
         self.log_info("-" * 60)
         self.log_info("  SP Summary:")
@@ -644,8 +694,12 @@ class POVStrategy(BaseStrategy):
             direction_id=direction_id,
         )
 
-        self.log_info(f"Phase 2: {unanalyzed_count.get('unanalyzed_by_any', 0)} functions not analyzed by any direction")
-        self.log_info(f"Phase 2: {unanalyzed_count.get('unanalyzed_by_direction', 0)} functions not analyzed by this direction")
+        self.log_info(
+            f"Phase 2: {unanalyzed_count.get('unanalyzed_by_any', 0)} functions not analyzed by any direction"
+        )
+        self.log_info(
+            f"Phase 2: {unanalyzed_count.get('unanalyzed_by_direction', 0)} functions not analyzed by this direction"
+        )
 
         if not functions:
             self.log_info("Phase 2: No functions to analyze in big pool")
@@ -653,8 +707,10 @@ class POVStrategy(BaseStrategy):
 
         # Limit to unanalyzed functions for efficiency
         functions_to_analyze = [
-            f for f in functions
-            if not f.analyzed_by_directions or direction_id not in f.analyzed_by_directions
+            f
+            for f in functions
+            if not f.analyzed_by_directions
+            or direction_id not in f.analyzed_by_directions
         ]
 
         if not functions_to_analyze:
@@ -679,12 +735,16 @@ class POVStrategy(BaseStrategy):
                 )
 
         # Create tasks for all functions
-        tasks = [analyze_function(func, i) for i, func in enumerate(functions_to_analyze)]
+        tasks = [
+            analyze_function(func, i) for i, func in enumerate(functions_to_analyze)
+        ]
 
         # Run all tasks concurrently
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        self.log_info(f"Phase 2 completed: analyzed {len(functions_to_analyze)} functions")
+        self.log_info(
+            f"Phase 2 completed: analyzed {len(functions_to_analyze)} functions"
+        )
 
     async def _run_phase3_free_exploration(
         self,
@@ -717,7 +777,9 @@ class POVStrategy(BaseStrategy):
             self.log_info("Phase 3: No high-risk directions for free exploration")
             return
 
-        self.log_info(f"Phase 3: Running free exploration on {len(high_risk_directions)} high-risk directions")
+        self.log_info(
+            f"Phase 3: Running free exploration on {len(high_risk_directions)} high-risk directions"
+        )
 
         # Use original parallel SP find agents for exploration
         await self._run_parallel_sp_find_agents_legacy(
@@ -751,9 +813,10 @@ class POVStrategy(BaseStrategy):
             Analysis result dict
         """
         import time
+
         func_start = time.time()
 
-        self.log_debug(f"[{index+1}/{total}] Analyzing: {func.name}")
+        self.log_debug(f"[{index + 1}/{total}] Analyzing: {func.name}")
 
         # Get caller/callee names from call graph
         callers = self.repos.callgraph_nodes.find_callers(
@@ -775,6 +838,7 @@ class POVStrategy(BaseStrategy):
         if not func_source and self.executor.analysis_socket_path:
             try:
                 from ...analyzer import AnalysisClient
+
                 client = AnalysisClient(
                     self.executor.analysis_socket_path,
                     client_id=f"delta_func_{self.worker_id}_{index}",
@@ -784,7 +848,7 @@ class POVStrategy(BaseStrategy):
                 pass
 
         # Determine if this is a large function based on actual source
-        func_lines = func_source.count('\n') + 1 if func_source else 0
+        func_lines = func_source.count("\n") + 1 if func_source else 0
         is_large = func_lines > LargeFunctionAnalysisAgent.LARGE_FUNCTION_THRESHOLD
 
         # Create appropriate agent
@@ -836,7 +900,9 @@ class POVStrategy(BaseStrategy):
 
             func_duration = time.time() - func_start
             sp_status = "SP!" if result.get("sp_created") else "OK"
-            self.log_debug(f"[{index+1}/{total}] Done: {func.name} in {func_duration:.1f}s - {sp_status}")
+            self.log_debug(
+                f"[{index + 1}/{total}] Done: {func.name} in {func_duration:.1f}s - {sp_status}"
+            )
 
             # Write log block to direction log file
             await self._write_function_log(agent, direction_id, agent_log_dir)
@@ -844,7 +910,7 @@ class POVStrategy(BaseStrategy):
             return result
 
         except Exception as e:
-            self.log_error(f"[{index+1}/{total}] Failed: {func.name} - {e}")
+            self.log_error(f"[{index + 1}/{total}] Failed: {func.name} - {e}")
             return {"success": False, "error": str(e)}
 
     async def _write_function_log(
@@ -919,12 +985,13 @@ class POVStrategy(BaseStrategy):
 
         # Create tasks for all directions
         tasks = [
-            analyze_direction(direction, i)
-            for i, direction in enumerate(directions)
+            analyze_direction(direction, i) for i, direction in enumerate(directions)
         ]
 
         # Run all tasks concurrently (limited by semaphore)
-        self.log_info(f"Starting {len(directions)} direction analyses with {num_parallel} parallel agents")
+        self.log_info(
+            f"Starting {len(directions)} direction analyses with {num_parallel} parallel agents"
+        )
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _analyze_single_direction(
@@ -949,9 +1016,12 @@ class POVStrategy(BaseStrategy):
             Analysis result dict
         """
         import time
+
         direction_start = time.time()
 
-        self.log_info(f"[{index+1}/{total}] Starting: {direction.name} ({direction.risk_level})")
+        self.log_info(
+            f"[{index + 1}/{total}] Starting: {direction.name} ({direction.risk_level})"
+        )
 
         # Claim the direction
         claimed = self.repos.directions.claim(
@@ -960,7 +1030,7 @@ class POVStrategy(BaseStrategy):
             f"{self.worker_id}_sp_agent_{index}",
         )
         if not claimed:
-            self.log_warning(f"[{index+1}/{total}] Could not claim: {direction.name}")
+            self.log_warning(f"[{index + 1}/{total}] Could not claim: {direction.name}")
             return {"success": False, "error": "Could not claim direction"}
 
         # Create SP Find Agent
@@ -993,11 +1063,13 @@ class POVStrategy(BaseStrategy):
             )
 
             direction_duration = time.time() - direction_start
-            self.log_info(f"[{index+1}/{total}] Done: {direction.name} in {direction_duration:.1f}s - {sp_count} SPs")
+            self.log_info(
+                f"[{index + 1}/{total}] Done: {direction.name} in {direction_duration:.1f}s - {sp_count} SPs"
+            )
             return result
 
         except Exception as e:
-            self.log_error(f"[{index+1}/{total}] Failed: {direction.name} - {e}")
+            self.log_error(f"[{index + 1}/{total}] Failed: {direction.name} - {e}")
             self.repos.directions.release_claim(direction.direction_id)
             return {"success": False, "error": str(e)}
 
@@ -1089,7 +1161,9 @@ class POVStrategy(BaseStrategy):
 
         for i, point in enumerate(suspicious_points):
             point_start = time.time()
-            self.log_info(f"  [{i+1}/{total}] Verifying: {point.function_name} ({point.vuln_type}, score={point.score:.2f})")
+            self.log_info(
+                f"  [{i + 1}/{total}] Verifying: {point.function_name} ({point.vuln_type}, score={point.score:.2f})"
+            )
 
             # Convert SuspiciousPoint to dict for agent
             point_dict = point.to_dict()
@@ -1099,19 +1173,29 @@ class POVStrategy(BaseStrategy):
                 response = self._agent.verify_suspicious_point_sync(point_dict)
 
                 # Re-fetch the point from database (agent may have updated it)
-                updated_point = self._get_suspicious_point_by_id(point.suspicious_point_id)
+                updated_point = self._get_suspicious_point_by_id(
+                    point.suspicious_point_id
+                )
                 if updated_point:
                     verified.append(updated_point)
                     elapsed = time.time() - point_start
-                    status = "HIGH" if updated_point.is_important or updated_point.score >= 0.9 else "verified"
-                    self.log_info(f"  [{i+1}/{total}] Done in {elapsed:.1f}s - {status} (score={updated_point.score:.2f})")
+                    status = (
+                        "HIGH"
+                        if updated_point.is_important or updated_point.score >= 0.9
+                        else "verified"
+                    )
+                    self.log_info(
+                        f"  [{i + 1}/{total}] Done in {elapsed:.1f}s - {status} (score={updated_point.score:.2f})"
+                    )
                 else:
                     # Point not found, use original
                     verified.append(point)
-                    self.log_warning(f"  [{i+1}/{total}] Point not found in DB after verification")
+                    self.log_warning(
+                        f"  [{i + 1}/{total}] Point not found in DB after verification"
+                    )
 
             except Exception as e:
-                self.log_error(f"  [{i+1}/{total}] Failed to verify: {e}")
+                self.log_error(f"  [{i + 1}/{total}] Failed to verify: {e}")
                 # Mark as checked but not verified due to error
                 point.is_checked = True
                 point.verification_notes = f"Verification failed: {e}"
@@ -1213,7 +1297,7 @@ class POVStrategy(BaseStrategy):
 
         report_path = self.results_path / "suspicious_points_report.json"
         try:
-            with open(report_path, 'w', encoding='utf-8') as f:
+            with open(report_path, "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)
             self.log_info(f"Saved results to: {report_path}")
         except Exception as e:
@@ -1250,14 +1334,18 @@ class POVStrategy(BaseStrategy):
         extensions = [".cc", ".c", ".cpp"]
 
         # Try fuzz-tooling directory first
-        fuzz_tooling_dir = self.workspace_path / "fuzz-tooling" / "projects" / self.project_name
+        fuzz_tooling_dir = (
+            self.workspace_path / "fuzz-tooling" / "projects" / self.project_name
+        )
         for ext in extensions:
             fuzzer_path = fuzz_tooling_dir / f"{self.fuzzer}{ext}"
             if fuzzer_path.exists():
                 try:
                     return fuzzer_path.read_text()
                 except Exception as e:
-                    self.log_warning(f"Failed to read fuzzer source from {fuzzer_path}: {e}")
+                    self.log_warning(
+                        f"Failed to read fuzzer source from {fuzzer_path}: {e}"
+                    )
 
         # Try Analysis Server API
         try:
@@ -1294,13 +1382,13 @@ class POVStrategy(BaseStrategy):
 
         # Configure pipeline
         config = PipelineConfig(
-            num_verify_agents=2,   # 2 verification agents
-            num_pov_agents=1,      # 1 POV generation agent
-            pov_min_score=0.5,     # Minimum score to proceed to POV
-            poll_interval=1.0,     # Poll every 1 second
-            max_idle_cycles=10,    # Exit after 10 idle cycles
-            max_iterations=200,    # Max POV agent iterations
-            max_pov_attempts=40,   # Max POV generation attempts
+            num_verify_agents=2,  # 2 verification agents
+            num_pov_agents=1,  # 1 POV generation agent
+            pov_min_score=0.5,  # Minimum score to proceed to POV
+            poll_interval=1.0,  # Poll every 1 second
+            max_idle_cycles=10,  # Exit after 10 idle cycles
+            max_iterations=200,  # Max POV agent iterations
+            max_pov_attempts=40,  # Max POV generation attempts
             fuzzer_path=self.executor.fuzzer_binary_path,
             docker_image=f"gcr.io/oss-fuzz/{self.project_name}",
         )

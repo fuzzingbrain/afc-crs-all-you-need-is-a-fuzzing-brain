@@ -5,7 +5,6 @@ Abstract base class for all worker strategies.
 """
 
 from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Dict, Any, Optional, TYPE_CHECKING
 
 from loguru import logger

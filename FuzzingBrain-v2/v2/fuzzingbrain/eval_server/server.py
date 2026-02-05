@@ -68,6 +68,7 @@ def create_app(config: Optional[ServerConfig] = None) -> FastAPI:
     """Create FastAPI application."""
     if config:
         from .config import set_config
+
         set_config(config)
 
     app = FastAPI(

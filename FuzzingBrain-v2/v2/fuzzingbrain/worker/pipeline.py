@@ -17,16 +17,15 @@ Architecture:
 """
 
 import asyncio
-import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from loguru import logger
 
-from ..agents import SuspiciousPointAgent, POVAgent, POVResult
-from ..core.models import SuspiciousPoint, SPStatus
+from ..agents import SuspiciousPointAgent, POVAgent
+from ..core.models import SPStatus
 from ..db import RepositoryManager
 from ..tools.analyzer import set_analyzer_context
 from ..fuzzer import FuzzerManager, get_fuzzer_manager
@@ -39,22 +38,22 @@ class PipelineConfig:
 
     # Agent pool sizes
     num_verify_agents: int = 2  # Number of verification agents
-    num_pov_agents: int = 1     # Number of POV generation agents
+    num_pov_agents: int = 1  # Number of POV generation agents
 
     # Thresholds
     pov_min_score: float = 0.5  # Minimum score to proceed to POV generation
 
     # Timeouts
     poll_interval: float = 1.0  # Seconds between polling for new tasks
-    max_idle_cycles: int = 10   # Max cycles with no work before agent exits
+    max_idle_cycles: int = 10  # Max cycles with no work before agent exits
 
     # POV Agent settings
-    max_iterations: int = 200      # Max agent loop iterations
-    max_pov_attempts: int = 40     # Max POV generation attempts
+    max_iterations: int = 200  # Max agent loop iterations
+    max_pov_attempts: int = 40  # Max POV generation attempts
 
     # Fuzzer settings (for POV verification)
-    fuzzer_path: Optional[Path] = None   # Path to fuzzer binary
-    docker_image: Optional[str] = None   # Docker image for running fuzzer
+    fuzzer_path: Optional[Path] = None  # Path to fuzzer binary
+    docker_image: Optional[str] = None  # Docker image for running fuzzer
 
 
 @dataclass
@@ -73,13 +72,15 @@ class PipelineStats:
 
     # Time tracking (cumulative seconds across all agents)
     verify_time_total: float = 0.0  # Total time spent on verification
-    pov_time_total: float = 0.0     # Total time spent on POV generation
+    pov_time_total: float = 0.0  # Total time spent on POV generation
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "start_time": self.start_time.isoformat(),
             "end_time": self.end_time.isoformat() if self.end_time else None,
-            "duration_seconds": (self.end_time - self.start_time).total_seconds() if self.end_time else None,
+            "duration_seconds": (self.end_time - self.start_time).total_seconds()
+            if self.end_time
+            else None,
             "sp_verified": self.sp_verified,
             "sp_verified_real": self.sp_verified_real,
             "sp_verified_fp": self.sp_verified_fp,
@@ -151,8 +152,8 @@ class AgentPipeline:
         self._shutdown = False
 
         # Upstream completion flags (for streaming pipeline)
-        self._sp_finding_done = False   # Set when SP Find pool completes
-        self._verify_done = False       # Set when Verify pool completes
+        self._sp_finding_done = False  # Set when SP Find pool completes
+        self._verify_done = False  # Set when Verify pool completes
 
         # FuzzerManager for SP Fuzzer lifecycle
         self._fuzzer_manager: Optional[FuzzerManager] = None
@@ -172,7 +173,9 @@ class AgentPipeline:
             Pipeline statistics
         """
         logger.info(f"[Pipeline] Starting pipeline for task {self.task_id}")
-        logger.info(f"[Pipeline] Config: {self.config.num_verify_agents} verify agents, {self.config.num_pov_agents} POV agents")
+        logger.info(
+            f"[Pipeline] Config: {self.config.num_verify_agents} verify agents, {self.config.num_pov_agents} POV agents"
+        )
 
         self.stats = PipelineStats()
 
@@ -182,12 +185,12 @@ class AgentPipeline:
 
             # Verification agents
             for i in range(self.config.num_verify_agents):
-                agent_id = f"verify_{i+1}"
+                agent_id = f"verify_{i + 1}"
                 tasks.append(self._run_verify_agent(agent_id))
 
             # POV generation agents
             for i in range(self.config.num_pov_agents):
-                agent_id = f"pov_{i+1}"
+                agent_id = f"pov_{i + 1}"
                 tasks.append(self._run_pov_agent(agent_id))
 
             # Run all agents concurrently
@@ -200,7 +203,7 @@ class AgentPipeline:
             self.stats.end_time = datetime.now()
 
         # Log final stats
-        logger.info(f"[Pipeline] Pipeline completed")
+        logger.info("[Pipeline] Pipeline completed")
         logger.info(f"[Pipeline] Stats: {self.stats.to_dict()}")
 
         return self.stats
@@ -226,7 +229,9 @@ class AgentPipeline:
         # Set analyzer context for this task (ContextVar needs to be set per-task)
         if self.mcp_socket_path:
             set_analyzer_context(self.mcp_socket_path, client_id=agent_id)
-            logger.debug(f"[Pipeline:{agent_id}] Set analyzer context: {self.mcp_socket_path}")
+            logger.debug(
+                f"[Pipeline:{agent_id}] Set analyzer context: {self.mcp_socket_path}"
+            )
 
         logger.info(f"[Pipeline:{agent_id}] Verification agent started")
         idle_cycles = 0
@@ -255,13 +260,21 @@ class AgentPipeline:
                     )
                     if pending_count == 0 and idle_cycles >= 5:
                         # SP Finding done + no pending work + waited a bit = exit
-                        logger.info(f"[Pipeline:{agent_id}] SP Finding done, no more work, exiting")
+                        logger.info(
+                            f"[Pipeline:{agent_id}] SP Finding done, no more work, exiting"
+                        )
                         break
 
                 # Log status periodically
                 if idle_cycles % 30 == 0:
-                    status = "waiting for SP Finding" if not self._sp_finding_done else "draining queue"
-                    logger.debug(f"[Pipeline:{agent_id}] Idle cycle {idle_cycles}, {status}")
+                    status = (
+                        "waiting for SP Finding"
+                        if not self._sp_finding_done
+                        else "draining queue"
+                    )
+                    logger.debug(
+                        f"[Pipeline:{agent_id}] Idle cycle {idle_cycles}, {status}"
+                    )
 
                 await asyncio.sleep(self.config.poll_interval)
                 continue
@@ -271,9 +284,12 @@ class AgentPipeline:
 
             # Process the SP with time tracking
             import time as time_module
+
             sp_start_time = time_module.time()
             try:
-                logger.info(f"[Pipeline:{agent_id}] Verifying SP {sp.suspicious_point_id}")
+                logger.info(
+                    f"[Pipeline:{agent_id}] Verifying SP {sp.suspicious_point_id}"
+                )
 
                 # Run verification agent
                 verify_agent = SuspiciousPointAgent(
@@ -295,7 +311,9 @@ class AgentPipeline:
                 )
 
                 # Get updated SP from database (agent should have updated it via tools)
-                updated_sp = self.repos.suspicious_points.find_by_id(sp.suspicious_point_id)
+                updated_sp = self.repos.suspicious_points.find_by_id(
+                    sp.suspicious_point_id
+                )
 
                 if updated_sp:
                     # Check if agent actually updated the SP
@@ -318,10 +336,7 @@ class AgentPipeline:
                         notes = updated_sp.verification_notes
 
                     # Determine if should proceed to POV
-                    proceed_to_pov = (
-                        score >= self.config.pov_min_score and
-                        is_important
-                    )
+                    proceed_to_pov = score >= self.config.pov_min_score and is_important
 
                     # Complete verification
                     self.repos.suspicious_points.complete_verify(
@@ -353,7 +368,9 @@ class AgentPipeline:
                     )
 
             except Exception as e:
-                logger.exception(f"[Pipeline:{agent_id}] Error verifying SP {sp.suspicious_point_id}: {e}")
+                logger.exception(
+                    f"[Pipeline:{agent_id}] Error verifying SP {sp.suspicious_point_id}: {e}"
+                )
                 # Release claim on error
                 self.repos.suspicious_points.release_claim(
                     sp.suspicious_point_id,
@@ -382,7 +399,9 @@ class AgentPipeline:
         # Set analyzer context for this task (ContextVar needs to be set per-task)
         if self.mcp_socket_path:
             set_analyzer_context(self.mcp_socket_path, client_id=agent_id)
-            logger.debug(f"[Pipeline:{agent_id}] Set analyzer context: {self.mcp_socket_path}")
+            logger.debug(
+                f"[Pipeline:{agent_id}] Set analyzer context: {self.mcp_socket_path}"
+            )
 
         logger.info(f"[Pipeline:{agent_id}] POV generation agent started")
         idle_cycles = 0
@@ -426,14 +445,27 @@ class AgentPipeline:
                     )
 
                     # Exit only when: SP Finding done + no pending_pov + no pending_verify + no verifying
-                    if pending_pov == 0 and pending_verify == 0 and verifying == 0 and idle_cycles >= 5:
-                        logger.info(f"[Pipeline:{agent_id}] All upstream done, no more work, exiting")
+                    if (
+                        pending_pov == 0
+                        and pending_verify == 0
+                        and verifying == 0
+                        and idle_cycles >= 5
+                    ):
+                        logger.info(
+                            f"[Pipeline:{agent_id}] All upstream done, no more work, exiting"
+                        )
                         break
 
                 # Log status periodically
                 if idle_cycles % 30 == 0:
-                    status = "waiting for upstream" if not self._sp_finding_done else "draining queue"
-                    logger.debug(f"[Pipeline:{agent_id}] Idle cycle {idle_cycles}, {status}")
+                    status = (
+                        "waiting for upstream"
+                        if not self._sp_finding_done
+                        else "draining queue"
+                    )
+                    logger.debug(
+                        f"[Pipeline:{agent_id}] Idle cycle {idle_cycles}, {status}"
+                    )
 
                 await asyncio.sleep(self.config.poll_interval)
                 continue
@@ -443,20 +475,29 @@ class AgentPipeline:
 
             # Process the SP with time tracking
             import time as time_module
+
             sp_start_time = time_module.time()
             sp_fuzzer_started = False
 
             try:
-                logger.info(f"[Pipeline:{agent_id}] Generating POV for SP {sp.suspicious_point_id}")
+                logger.info(
+                    f"[Pipeline:{agent_id}] Generating POV for SP {sp.suspicious_point_id}"
+                )
 
                 # Start SP Fuzzer for this SP (starts when POV Agent begins processing SP)
                 if self.fuzzer_manager:
                     try:
-                        sp_fuzzer_started = await self.fuzzer_manager.start_sp_fuzzer(sp.suspicious_point_id)
+                        sp_fuzzer_started = await self.fuzzer_manager.start_sp_fuzzer(
+                            sp.suspicious_point_id
+                        )
                         if sp_fuzzer_started:
-                            logger.debug(f"[Pipeline:{agent_id}] Started SP Fuzzer for {sp.suspicious_point_id}")
+                            logger.debug(
+                                f"[Pipeline:{agent_id}] Started SP Fuzzer for {sp.suspicious_point_id}"
+                            )
                     except Exception as e:
-                        logger.warning(f"[Pipeline:{agent_id}] Failed to start SP Fuzzer: {e}")
+                        logger.warning(
+                            f"[Pipeline:{agent_id}] Failed to start SP Fuzzer: {e}"
+                        )
 
                 # Run POV agent with fuzzer code
                 pov_agent = POVAgent(
@@ -492,13 +533,19 @@ class AgentPipeline:
                 # Update stats
                 if result.success:
                     self.stats.pov_generated += 1
-                    logger.info(f"[Pipeline:{agent_id}] Generated POV {result.pov_id} for SP {sp.suspicious_point_id}")
+                    logger.info(
+                        f"[Pipeline:{agent_id}] Generated POV {result.pov_id} for SP {sp.suspicious_point_id}"
+                    )
                 else:
                     self.stats.pov_failed += 1
-                    logger.warning(f"[Pipeline:{agent_id}] Failed to generate POV for SP {sp.suspicious_point_id}")
+                    logger.warning(
+                        f"[Pipeline:{agent_id}] Failed to generate POV for SP {sp.suspicious_point_id}"
+                    )
 
             except Exception as e:
-                logger.exception(f"[Pipeline:{agent_id}] Error generating POV for SP {sp.suspicious_point_id}: {e}")
+                logger.exception(
+                    f"[Pipeline:{agent_id}] Error generating POV for SP {sp.suspicious_point_id}: {e}"
+                )
                 # Release claim on error
                 self.repos.suspicious_points.release_claim(
                     sp.suspicious_point_id,
@@ -510,9 +557,13 @@ class AgentPipeline:
                 if sp_fuzzer_started and self.fuzzer_manager:
                     try:
                         await self.fuzzer_manager.stop_sp_fuzzer(sp.suspicious_point_id)
-                        logger.debug(f"[Pipeline:{agent_id}] Stopped SP Fuzzer for {sp.suspicious_point_id}")
+                        logger.debug(
+                            f"[Pipeline:{agent_id}] Stopped SP Fuzzer for {sp.suspicious_point_id}"
+                        )
                     except Exception as e:
-                        logger.warning(f"[Pipeline:{agent_id}] Failed to stop SP Fuzzer: {e}")
+                        logger.warning(
+                            f"[Pipeline:{agent_id}] Failed to stop SP Fuzzer: {e}"
+                        )
 
                 # Track POV generation time
                 sp_duration = time_module.time() - sp_start_time

@@ -11,12 +11,13 @@ import json
 from pathlib import Path
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Dict, List, Set, Optional, Tuple
+from typing import Dict, List, Set, Optional
 
 
 @dataclass
 class FunctionInfo:
     """Information about a reachable function."""
+
     name: str
     file_path: str
     start_line: int
@@ -30,6 +31,7 @@ class FunctionInfo:
 @dataclass
 class CallGraph:
     """Call graph built from introspector data."""
+
     edges: Dict[str, Set[str]]  # caller -> callees
     functions: Dict[str, FunctionInfo]
     entry_points: List[str]
@@ -54,17 +56,17 @@ def parse_introspector_json(json_path: Path) -> CallGraph:
     functions = {}
 
     for func in data:
-        name = func.get('Func name', '')
+        name = func.get("Func name", "")
 
         # Extract function info
         info = FunctionInfo(
             name=name,
-            file_path=func.get('Functions filename', ''),
-            start_line=func.get('source_line_begin', 0),
-            end_line=func.get('source_line_end', 0),
-            callees=list(func.get('callsites', {}).keys()),
-            reached_by_fuzzers=func.get('Reached by Fuzzers', []),
-            cyclomatic_complexity=func.get('Cyclomatic complexity', 0),
+            file_path=func.get("Functions filename", ""),
+            start_line=func.get("source_line_begin", 0),
+            end_line=func.get("source_line_end", 0),
+            callees=list(func.get("callsites", {}).keys()),
+            reached_by_fuzzers=func.get("Reached by Fuzzers", []),
+            cyclomatic_complexity=func.get("Cyclomatic complexity", 0),
         )
         functions[name] = info
 
@@ -75,8 +77,8 @@ def parse_introspector_json(json_path: Path) -> CallGraph:
     # Find entry points (Reached by Fuzzers but Reached by functions = 0)
     entry_points = []
     for func in data:
-        if func.get('Reached by Fuzzers') and func.get('Reached by functions', -1) == 0:
-            entry_points.append(func.get('Func name'))
+        if func.get("Reached by Fuzzers") and func.get("Reached by functions", -1) == 0:
+            entry_points.append(func.get("Func name"))
 
     # BFS to compute distances from entry points
     distances = {}

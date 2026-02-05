@@ -16,7 +16,12 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 from .pov_base import POVBaseStrategy
-from ...analysis.diff_parser import get_reachable_changes, get_all_changes, DiffReachabilityResult, FunctionChange
+from ...analysis.diff_parser import (
+    get_reachable_changes,
+    get_all_changes,
+    DiffReachabilityResult,
+    FunctionChange,
+)
 from ...core.models import SuspiciousPoint
 from ...agents import SuspiciousPointAgent
 from ...llms import CLAUDE_SONNET_4_5
@@ -88,7 +93,9 @@ class POVDeltaStrategy(POVBaseStrategy):
         """
         import time
 
-        self.log_info(f"[Step 1/5] Analyzing diff changes (ignoring reachability filter)...")
+        self.log_info(
+            "[Step 1/5] Analyzing diff changes (ignoring reachability filter)..."
+        )
         step_start = time.time()
 
         # Get ALL changes (not just reachable ones)
@@ -105,12 +112,16 @@ class POVDeltaStrategy(POVBaseStrategy):
                 "function": c.function_name,
                 "file": c.file_path,
                 "static_reachable": c.static_reachable,
-                "distance": c.reachability_distance
+                "distance": c.reachability_distance,
             }
             for c in all_changes
         ]
         result["reachable_changes"] = [
-            {"function": c.function_name, "file": c.file_path, "distance": c.reachability_distance}
+            {
+                "function": c.function_name,
+                "file": c.file_path,
+                "distance": c.reachability_distance,
+            }
             for c in reachability.reachable_changes
         ]
         result["unreachable_functions"] = reachability.unreachable_functions
@@ -120,19 +131,27 @@ class POVDeltaStrategy(POVBaseStrategy):
 
         reachable_count = sum(1 for c in all_changes if c.static_reachable)
         unreachable_count = len(all_changes) - reachable_count
-        self.log_info(f"[Step 1/5] Done in {step_duration:.1f}s - {len(all_changes)} changes ({reachable_count} reachable, {unreachable_count} static-unreachable)")
+        self.log_info(
+            f"[Step 1/5] Done in {step_duration:.1f}s - {len(all_changes)} changes ({reachable_count} reachable, {unreachable_count} static-unreachable)"
+        )
 
         # Only skip if NO changes at all (not based on reachability!)
         if not all_changes:
-            self.log_info(f"No changes in diff, skipping")
+            self.log_info("No changes in diff, skipping")
             result["skip_reason"] = "no_changes"
             return {"skip": True}
 
         # Log the unreachable functions that will now be analyzed
         if unreachable_count > 0:
-            unreachable_names = [c.function_name for c in all_changes if not c.static_reachable]
-            self.log_info(f"[NEW] Will analyze {unreachable_count} static-unreachable functions: {unreachable_names}")
-            self.log_info(f"[NEW] These may be reachable via function pointers - LLM will judge")
+            unreachable_names = [
+                c.function_name for c in all_changes if not c.static_reachable
+            ]
+            self.log_info(
+                f"[NEW] Will analyze {unreachable_count} static-unreachable functions: {unreachable_names}"
+            )
+            self.log_info(
+                "[NEW] These may be reachable via function pointers - LLM will judge"
+            )
 
         return {"skip": False}
 
@@ -147,7 +166,9 @@ class POVDeltaStrategy(POVBaseStrategy):
         Returns:
             List of SuspiciousPoint objects
         """
-        self.log_info("Finding suspicious points in ALL changes (ignoring reachability filter)...")
+        self.log_info(
+            "Finding suspicious points in ALL changes (ignoring reachability filter)..."
+        )
 
         if not self._all_changes:
             self.log_warning("No changes found, cannot find suspicious points")
@@ -165,7 +186,9 @@ class POVDeltaStrategy(POVBaseStrategy):
         ]
 
         reachable_count = sum(1 for c in all_changes if c["static_reachable"])
-        self.log_info(f"Passing {len(all_changes)} functions to agent ({reachable_count} reachable, {len(all_changes) - reachable_count} static-unreachable)")
+        self.log_info(
+            f"Passing {len(all_changes)} functions to agent ({reachable_count} reachable, {len(all_changes) - reachable_count} static-unreachable)"
+        )
 
         # Run the agent to find suspicious points
         try:
@@ -198,7 +221,7 @@ class POVDeltaStrategy(POVBaseStrategy):
 
         # Read diff content
         try:
-            diff_content = self.diff_path.read_text(encoding='utf-8', errors='replace')
+            diff_content = self.diff_path.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
             self.log_error(f"Failed to read diff file: {e}")
             return DiffReachabilityResult(reachable=False)
@@ -244,7 +267,7 @@ class POVDeltaStrategy(POVBaseStrategy):
 
         # Read diff content
         try:
-            diff_content = self.diff_path.read_text(encoding='utf-8', errors='replace')
+            diff_content = self.diff_path.read_text(encoding="utf-8", errors="replace")
         except Exception as e:
             self.log_error(f"Failed to read diff file: {e}")
             return []
@@ -294,7 +317,7 @@ class POVDeltaStrategy(POVBaseStrategy):
 
         report_path = self.results_path / "diff_reachability_report.json"
         try:
-            with open(report_path, 'w', encoding='utf-8') as f:
+            with open(report_path, "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)
             self.log_info(f"Saved reachability report to: {report_path}")
         except Exception as e:
@@ -320,9 +343,11 @@ class POVDeltaStrategy(POVBaseStrategy):
         import asyncio
 
         # Check if FuzzerManager is available
-        fuzzer_manager = getattr(self.executor, 'fuzzer_manager', None)
+        fuzzer_manager = getattr(self.executor, "fuzzer_manager", None)
         if not fuzzer_manager:
-            self.log_warning("FuzzerManager not available, skipping delta seeds generation")
+            self.log_warning(
+                "FuzzerManager not available, skipping delta seeds generation"
+            )
             return 0
 
         # Prepare changed functions context
@@ -355,18 +380,26 @@ class POVDeltaStrategy(POVBaseStrategy):
         analysis_client = self.get_analysis_client()
         if analysis_client:
             try:
-                fuzzer_source = analysis_client.get_file_content(f"{self.fuzzer}.cc") or ""
+                fuzzer_source = (
+                    analysis_client.get_file_content(f"{self.fuzzer}.cc") or ""
+                )
                 if not fuzzer_source:
-                    fuzzer_source = analysis_client.get_file_content(f"{self.fuzzer}.cpp") or ""
+                    fuzzer_source = (
+                        analysis_client.get_file_content(f"{self.fuzzer}.cpp") or ""
+                    )
                 if not fuzzer_source:
-                    fuzzer_source = analysis_client.get_file_content(f"{self.fuzzer}.c") or ""
+                    fuzzer_source = (
+                        analysis_client.get_file_content(f"{self.fuzzer}.c") or ""
+                    )
             except Exception as e:
                 self.log_warning(f"Failed to get fuzzer source: {e}")
 
         # Create SeedAgent
         from ...fuzzer import SeedAgent
 
-        agent_log_dir = self.log_dir / "seed_agent" if self.log_dir else self.results_path
+        agent_log_dir = (
+            self.log_dir / "seed_agent" if self.log_dir else self.results_path
+        )
         seed_agent = SeedAgent(
             task_id=self.task_id,
             worker_id=self.worker_id,
@@ -388,7 +421,9 @@ class POVDeltaStrategy(POVBaseStrategy):
             asyncio.set_event_loop(loop)
 
         try:
-            self.log_info(f"Generating delta seeds for {len(changed_functions)} changed functions...")
+            self.log_info(
+                f"Generating delta seeds for {len(changed_functions)} changed functions..."
+            )
 
             result = loop.run_until_complete(
                 seed_agent.generate_delta_seeds(
@@ -399,14 +434,18 @@ class POVDeltaStrategy(POVBaseStrategy):
             )
 
             seeds_generated = result.get("seeds_generated", 0)
-            self.log_info(f"Delta seeds generation complete: {seeds_generated} seeds created")
+            self.log_info(
+                f"Delta seeds generation complete: {seeds_generated} seeds created"
+            )
 
             # Always start Global Fuzzer (even with 0 seeds, fuzzer can run with existing corpus)
             if not fuzzer_manager.global_fuzzer:
                 self.log_info("Starting Global Fuzzer...")
                 try:
                     loop.run_until_complete(fuzzer_manager.start_global_fuzzer())
-                    self.log_info("Global Fuzzer started - running in background during SP analysis")
+                    self.log_info(
+                        "Global Fuzzer started - running in background during SP analysis"
+                    )
                 except Exception as e:
                     self.log_warning(f"Failed to start Global Fuzzer: {e}")
 

@@ -14,7 +14,6 @@ Workflow:
 import base64
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 import uuid
@@ -32,6 +31,7 @@ from . import tools_mcp
 @dataclass
 class CoverageResult:
     """Result of coverage analysis"""
+
     success: bool
     executed_functions: List[str] = field(default_factory=list)
     executed_lines: Dict[str, Set[int]] = field(default_factory=dict)
@@ -46,7 +46,9 @@ class CoverageResult:
             "executed_functions": self.executed_functions,
             "executed_lines": {k: list(v) for k, v in self.executed_lines.items()},
             "target_reached": self.target_reached,
-            "coverage_summary": self.coverage_summary[:2000] if self.coverage_summary else "",
+            "coverage_summary": self.coverage_summary[:2000]
+            if self.coverage_summary
+            else "",
             "error": self.error,
         }
 
@@ -56,11 +58,15 @@ class CoverageResult:
 # Each asyncio.Task has its own context, preventing cross-contamination
 # =============================================================================
 
-_coverage_fuzzer_dir: ContextVar[Optional[Path]] = ContextVar('cov_fuzzer_dir', default=None)
-_project_name: ContextVar[Optional[str]] = ContextVar('cov_project_name', default=None)
-_src_dir: ContextVar[Optional[Path]] = ContextVar('cov_src_dir', default=None)
-_docker_image: ContextVar[Optional[str]] = ContextVar('cov_docker_image', default=None)
-_work_dir: ContextVar[Optional[Path]] = ContextVar('cov_work_dir', default=None)  # Permanent work directory
+_coverage_fuzzer_dir: ContextVar[Optional[Path]] = ContextVar(
+    "cov_fuzzer_dir", default=None
+)
+_project_name: ContextVar[Optional[str]] = ContextVar("cov_project_name", default=None)
+_src_dir: ContextVar[Optional[Path]] = ContextVar("cov_src_dir", default=None)
+_docker_image: ContextVar[Optional[str]] = ContextVar("cov_docker_image", default=None)
+_work_dir: ContextVar[Optional[Path]] = ContextVar(
+    "cov_work_dir", default=None
+)  # Permanent work directory
 
 
 def set_coverage_context(
@@ -112,7 +118,10 @@ def set_coverage_fuzzer_path(coverage_fuzzer_dir: Path) -> None:
 # LCOV Parsing
 # =============================================================================
 
-def parse_lcov(lcov_path: str) -> Tuple[Dict[str, Set[int]], Dict[str, Set[int]], List[str]]:
+
+def parse_lcov(
+    lcov_path: str,
+) -> Tuple[Dict[str, Set[int]], Dict[str, Set[int]], List[str]]:
     """
     Parse LCOV file to extract coverage data.
 
@@ -127,28 +136,28 @@ def parse_lcov(lcov_path: str) -> Tuple[Dict[str, Set[int]], Dict[str, Set[int]]
     executed_functions = []
     current_file = None
 
-    with open(lcov_path, 'r') as f:
+    with open(lcov_path, "r") as f:
         for line in f:
             line = line.strip()
 
             # Source file
-            if line.startswith('SF:'):
+            if line.startswith("SF:"):
                 current_file = line[3:]
 
             # Branch data: BRDA:line,block,branch,taken
-            elif line.startswith('BRDA:') and current_file:
-                parts = line[5:].split(',')
+            elif line.startswith("BRDA:") and current_file:
+                parts = line[5:].split(",")
                 if len(parts) >= 4:
                     line_no, _, _, taken = parts
-                    if taken != '-' and taken != '0':
+                    if taken != "-" and taken != "0":
                         try:
                             executed_branches[current_file].add(int(line_no))
                         except ValueError:
                             continue
 
             # Line data: DA:line,execution_count
-            elif line.startswith('DA:') and current_file:
-                parts = line[3:].split(',')
+            elif line.startswith("DA:") and current_file:
+                parts = line[3:].split(",")
                 if len(parts) >= 2:
                     line_no, count = parts[0], parts[1]
                     try:
@@ -158,8 +167,8 @@ def parse_lcov(lcov_path: str) -> Tuple[Dict[str, Set[int]], Dict[str, Set[int]]
                         continue
 
             # Function data: FNDA:execution_count,function_name
-            elif line.startswith('FNDA:'):
-                parts = line[5:].split(',', 1)
+            elif line.startswith("FNDA:"):
+                parts = line[5:].split(",", 1)
                 if len(parts) >= 2:
                     count, func_name = parts
                     try:
@@ -236,13 +245,23 @@ def run_coverage_fuzzer(
             # FuzzTest: need --fuzz=TestName and -- separator
             binary_name, test_name = real_fuzzer_name.split("@", 1)
             docker_run = [
-                "docker", "run", "--rm", "--platform", "linux/amd64",
-                "--entrypoint", "",
-                "-e", "FUZZING_ENGINE=libfuzzer",
-                "-e", "ARCHITECTURE=x86_64",
-                "-e", "LLVM_PROFILE_FILE=/out/coverage.profraw",
-                "-v", f"{out_dir.absolute()}:/out",
-                "-v", f"{real_fuzzer_dir}:/fuzzers:ro",
+                "docker",
+                "run",
+                "--rm",
+                "--platform",
+                "linux/amd64",
+                "--entrypoint",
+                "",
+                "-e",
+                "FUZZING_ENGINE=libfuzzer",
+                "-e",
+                "ARCHITECTURE=x86_64",
+                "-e",
+                "LLVM_PROFILE_FILE=/out/coverage.profraw",
+                "-v",
+                f"{out_dir.absolute()}:/out",
+                "-v",
+                f"{real_fuzzer_dir}:/fuzzers:ro",
                 image,
                 f"/fuzzers/{binary_name}",
                 f"--fuzz={test_name}",
@@ -253,12 +272,21 @@ def run_coverage_fuzzer(
         else:
             # Standard libFuzzer
             docker_run = [
-                "docker", "run", "--rm", "--platform", "linux/amd64",
-                "-e", "FUZZING_ENGINE=libfuzzer",
-                "-e", "ARCHITECTURE=x86_64",
-                "-e", "LLVM_PROFILE_FILE=/out/coverage.profraw",
-                "-v", f"{out_dir.absolute()}:/out",
-                "-v", f"{real_fuzzer_dir}:/fuzzers:ro",
+                "docker",
+                "run",
+                "--rm",
+                "--platform",
+                "linux/amd64",
+                "-e",
+                "FUZZING_ENGINE=libfuzzer",
+                "-e",
+                "ARCHITECTURE=x86_64",
+                "-e",
+                "LLVM_PROFILE_FILE=/out/coverage.profraw",
+                "-v",
+                f"{out_dir.absolute()}:/out",
+                "-v",
+                f"{real_fuzzer_dir}:/fuzzers:ro",
                 image,
                 f"/fuzzers/{real_fuzzer_name}",
                 "-runs=1",
@@ -269,8 +297,8 @@ def run_coverage_fuzzer(
             docker_run,
             capture_output=True,
             text=True,
-            encoding='utf-8',
-            errors='replace',
+            encoding="utf-8",
+            errors="replace",
             timeout=120,
         )
 
@@ -282,12 +310,18 @@ def run_coverage_fuzzer(
         profraw_path = out_dir / "coverage.profraw"
         if "error while loading shared libraries" in result.stderr:
             if docker_image != FALLBACK_DOCKER_IMAGE:
-                logger.warning(f"[Coverage] Library error with {docker_image}, falling back to {FALLBACK_DOCKER_IMAGE}")
+                logger.warning(
+                    f"[Coverage] Library error with {docker_image}, falling back to {FALLBACK_DOCKER_IMAGE}"
+                )
                 result = run_fuzzer_with_image(FALLBACK_DOCKER_IMAGE)
 
         # Check profraw was created
         if not profraw_path.exists() or profraw_path.stat().st_size == 0:
-            return False, "", f"coverage.profraw not generated. Fuzzer output: {result.stderr[:500]}"
+            return (
+                False,
+                "",
+                f"coverage.profraw not generated. Fuzzer output: {result.stderr[:500]}",
+            )
 
         # Step 2: Generate LCOV using llvm-profdata and llvm-cov
         merge_and_export = (
@@ -300,18 +334,26 @@ def run_coverage_fuzzer(
         def run_llvm_cov_with_image(image: str):
             """Run llvm-profdata and llvm-cov with specified docker image."""
             docker_cov = [
-                "docker", "run", "--rm", "--platform", "linux/amd64",
-                "-v", f"{out_dir.absolute()}:/out",
-                "-v", f"{real_fuzzer_dir}:/fuzzers:ro",
+                "docker",
+                "run",
+                "--rm",
+                "--platform",
+                "linux/amd64",
+                "-v",
+                f"{out_dir.absolute()}:/out",
+                "-v",
+                f"{real_fuzzer_dir}:/fuzzers:ro",
                 image,
-                "bash", "-c", merge_and_export,
+                "bash",
+                "-c",
+                merge_and_export,
             ]
             return subprocess.run(
                 docker_cov,
                 capture_output=True,
                 text=True,
-                encoding='utf-8',
-                errors='replace',
+                encoding="utf-8",
+                errors="replace",
                 timeout=120,
             )
 
@@ -321,7 +363,9 @@ def run_coverage_fuzzer(
         if result2.returncode != 0 and "raw profile version mismatch" in result2.stderr:
             aixcc_image = f"aixcc-afc/{project_name}"
             if docker_image != aixcc_image:
-                logger.warning(f"[Coverage] LLVM version mismatch with {docker_image}, falling back to {aixcc_image}")
+                logger.warning(
+                    f"[Coverage] LLVM version mismatch with {docker_image}, falling back to {aixcc_image}"
+                )
                 result2 = run_llvm_cov_with_image(aixcc_image)
 
         if result2.returncode != 0:
@@ -330,7 +374,11 @@ def run_coverage_fuzzer(
         if not lcov_path.exists():
             return False, "", "coverage.lcov was not created"
 
-        return True, str(lcov_path), f"Coverage generated ({lcov_path.stat().st_size} bytes)"
+        return (
+            True,
+            str(lcov_path),
+            f"Coverage generated ({lcov_path.stat().st_size} bytes)",
+        )
 
     except subprocess.TimeoutExpired:
         return False, "", "Coverage execution timed out (120s)"
@@ -343,7 +391,9 @@ def run_coverage_fuzzer(
 # =============================================================================
 
 # Context for GDB trace (ASAN fuzzer path)
-_asan_fuzzer_dir: ContextVar[Optional[Path]] = ContextVar('asan_fuzzer_dir', default=None)
+_asan_fuzzer_dir: ContextVar[Optional[Path]] = ContextVar(
+    "asan_fuzzer_dir", default=None
+)
 
 # Cache for GDB-enabled images (image_name -> gdb_image_name)
 _gdb_image_cache: Dict[str, str] = {}
@@ -380,8 +430,8 @@ def _get_or_build_gdb_image(base_image: str) -> str:
     # Handle image names with / and :
     # e.g., "gcr.io/oss-fuzz/lcms" -> "gdb-lcms"
     # e.g., "aixcc-afc/curl" -> "gdb-curl"
-    image_parts = base_image.split('/')
-    short_name = image_parts[-1].split(':')[0]  # Get last part, remove tag
+    image_parts = base_image.split("/")
+    short_name = image_parts[-1].split(":")[0]  # Get last part, remove tag
     gdb_image = f"gdb-{short_name}"
 
     # Check if image already exists
@@ -403,10 +453,13 @@ RUN apt-get update && apt-get install -y gdb && rm -rf /var/lib/apt/lists/*
 
     # Build using stdin dockerfile
     build_cmd = [
-        "docker", "build",
-        "-t", gdb_image,
-        "-f", "-",  # Read Dockerfile from stdin
-        "."
+        "docker",
+        "build",
+        "-t",
+        gdb_image,
+        "-f",
+        "-",  # Read Dockerfile from stdin
+        ".",
     ]
 
     result = subprocess.run(
@@ -461,7 +514,7 @@ def run_gdb_trace(
     if asan_fuzzer_dir is None:
         coverage_dir = _coverage_fuzzer_dir.get()
         if coverage_dir:
-            asan_path = str(coverage_dir).replace('_coverage', '_address')
+            asan_path = str(coverage_dir).replace("_coverage", "_address")
             asan_fuzzer_dir = Path(asan_path)
             if not asan_fuzzer_dir.exists():
                 return False, [], False, f"ASAN fuzzer dir not found: {asan_fuzzer_dir}"
@@ -506,25 +559,40 @@ def run_gdb_trace(
 
         # Run GDB in Docker
         docker_cmd = [
-            "docker", "run", "--rm", "--platform", "linux/amd64",
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            "linux/amd64",
             "--cap-add=SYS_PTRACE",
-            "--security-opt", "seccomp=unconfined",
-            "-e", "ASAN_OPTIONS=abort_on_error=0:detect_leaks=0",
-            "-v", f"{out_dir.absolute()}:/out",
-            "-v", f"{real_fuzzer_dir}:/fuzzers:ro",
+            "--security-opt",
+            "seccomp=unconfined",
+            "-e",
+            "ASAN_OPTIONS=abort_on_error=0:detect_leaks=0",
+            "-v",
+            f"{out_dir.absolute()}:/out",
+            "-v",
+            f"{real_fuzzer_dir}:/fuzzers:ro",
             gdb_image,
-            "gdb", "-batch", "-x", "/out/trace.gdb",
-            "--args", fuzzer_binary, *fuzzer_args.split(),
+            "gdb",
+            "-batch",
+            "-x",
+            "/out/trace.gdb",
+            "--args",
+            fuzzer_binary,
+            *fuzzer_args.split(),
         ]
 
-        logger.info(f"[GDB] Running trace with {len(target_functions or [])} breakpoints...")
+        logger.info(
+            f"[GDB] Running trace with {len(target_functions or [])} breakpoints..."
+        )
 
         result = subprocess.run(
             docker_cmd,
             capture_output=True,
             text=True,
-            encoding='utf-8',
-            errors='replace',
+            encoding="utf-8",
+            errors="replace",
             timeout=60,
         )
 
@@ -570,34 +638,40 @@ def _generate_gdb_script(target_functions: List[str], fuzzer_name: str) -> str:
 
     # Add breakpoints for each target function
     for func in target_functions:
-        lines.extend([
-            f"# Breakpoint for {func}",
-            f"break {func}",
-            "commands",
-            "  silent",
-            f'  printf "HIT_FUNCTION:{func}\\n"',
-            "  continue",
+        lines.extend(
+            [
+                f"# Breakpoint for {func}",
+                f"break {func}",
+                "commands",
+                "  silent",
+                f'  printf "HIT_FUNCTION:{func}\\n"',
+                "  continue",
+                "end",
+                "",
+            ]
+        )
+
+    lines.extend(
+        [
+            "# Run the program",
+            "run",
+            "",
+            "# If we get here, check if it was a crash",
+            "if $_siginfo",
+            '  printf "\\nCRASH_DETECTED\\n"',
+            "  bt 20",
             "end",
             "",
-        ])
-
-    lines.extend([
-        "# Run the program",
-        "run",
-        "",
-        "# If we get here, check if it was a crash",
-        "if $_siginfo",
-        '  printf "\\nCRASH_DETECTED\\n"',
-        "  bt 20",
-        "end",
-        "",
-        "quit",
-    ])
+            "quit",
+        ]
+    )
 
     return "\n".join(lines)
 
 
-def _parse_gdb_output(output: str, target_functions: List[str]) -> Tuple[List[str], bool]:
+def _parse_gdb_output(
+    output: str, target_functions: List[str]
+) -> Tuple[List[str], bool]:
     """
     Parse GDB output to extract hit functions and crash status.
 
@@ -613,17 +687,18 @@ def _parse_gdb_output(output: str, target_functions: List[str]) -> Tuple[List[st
     undefined_functions = set()
 
     # First pass: find functions that GDB says are not defined
-    for line in output.split('\n'):
+    for line in output.split("\n"):
         # GDB outputs: Function "funcName" not defined.
-        if 'not defined' in line and 'Function' in line:
+        if "not defined" in line and "Function" in line:
             # Extract function name from: Function "funcName" not defined.
             import re
+
             match = re.search(r'Function "([^"]+)" not defined', line)
             if match:
                 undefined_functions.add(match.group(1))
 
     # Second pass: extract hit functions and crash status
-    for line in output.split('\n'):
+    for line in output.split("\n"):
         line = line.strip()
 
         # Check for hit functions (from our breakpoint printf)
@@ -656,8 +731,8 @@ def _parse_gdb_output(output: str, target_functions: List[str]) -> Tuple[List[st
 
     # If crashed, also extract functions from backtrace
     if crashed:
-        for line in output.split('\n'):
-            if ' in ' in line and ('#' in line or 'at ' in line):
+        for line in output.split("\n"):
+            if " in " in line and ("#" in line or "at " in line):
                 for func in target_functions:
                     if func in line and func not in hit_functions:
                         hit_functions.append(func)
@@ -669,7 +744,7 @@ def _parse_gdb_output(output: str, target_functions: List[str]) -> Tuple[List[st
 # Context Display (like c_coverage.py)
 # =============================================================================
 
-IF_PATTERN = re.compile(r'^\s*if\b.*[):{;]?$')
+IF_PATTERN = re.compile(r"^\s*if\b.*[):{;]?$")
 
 
 def get_executed_code_context(
@@ -697,8 +772,8 @@ def get_executed_code_context(
     for file_path, lines in executed_branches.items():
         # Extract relative path and filename
         # LCOV paths are usually like /src/project_name/path/to/file.c
-        if file_path.startswith('/src/'):
-            parts = file_path.split('/', 3)
+        if file_path.startswith("/src/"):
+            parts = file_path.split("/", 3)
             if len(parts) >= 4:
                 rel_path = parts[3]  # path after /src/project_name/
             else:
@@ -723,14 +798,15 @@ def get_executed_code_context(
                 continue
 
         try:
-            with open(real_path, 'r', encoding='utf-8', errors='replace') as f:
+            with open(real_path, "r", encoding="utf-8", errors="replace") as f:
                 file_lines = f.readlines()
         except Exception:
             continue
 
         # Find if-branches that were executed
         if_lines = [
-            ln for ln in lines
+            ln
+            for ln in lines
             if 0 < ln <= len(file_lines) and IF_PATTERN.match(file_lines[ln - 1])
         ]
 
@@ -747,8 +823,10 @@ def get_executed_code_context(
             for i in range(start, min(end + 1, len(file_lines) + 1)):
                 if i in printed:
                     continue
-                mark = '>>>' if i in if_lines else '   '
-                line_content = file_lines[i - 1].rstrip() if i <= len(file_lines) else ''
+                mark = ">>>" if i in if_lines else "   "
+                line_content = (
+                    file_lines[i - 1].rstrip() if i <= len(file_lines) else ""
+                )
                 output_lines.append(f"{i:5d} {mark} | {line_content}")
                 printed.add(i)
             output_lines.append("")
@@ -756,7 +834,9 @@ def get_executed_code_context(
     return "\n".join(output_lines)
 
 
-def _get_context_ranges(line_numbers: List[int], context: int = 3) -> List[Tuple[int, int]]:
+def _get_context_ranges(
+    line_numbers: List[int], context: int = 3
+) -> List[Tuple[int, int]]:
     """Get merged ranges with context around line numbers."""
     if not line_numbers:
         return []
@@ -781,6 +861,7 @@ def _get_context_ranges(line_numbers: List[int], context: int = 3) -> List[Tuple
 # MCP Tools
 # =============================================================================
 
+
 @tools_mcp.tool
 def run_coverage(
     fuzzer_name: str,
@@ -800,7 +881,9 @@ def run_coverage(
     Returns:
         Coverage analysis result with executed functions, lines, and code context
     """
-    result = _run_coverage_impl(fuzzer_name, input_data_base64, target_functions, target_files)
+    result = _run_coverage_impl(
+        fuzzer_name, input_data_base64, target_functions, target_files
+    )
     return result.to_dict()
 
 
@@ -834,12 +917,16 @@ def _run_coverage_impl(
     if work_dir is not None:
         work_path = work_dir
         work_path.mkdir(parents=True, exist_ok=True)
-        return _run_coverage_in_dir(fuzzer_name, input_data, work_path, target_functions, target_files)
+        return _run_coverage_in_dir(
+            fuzzer_name, input_data, work_path, target_functions, target_files
+        )
     else:
         # Fallback to temp directory (may not work with Docker Snap)
         with tempfile.TemporaryDirectory(prefix="coverage_") as temp_dir:
             work_path = Path(temp_dir)
-            return _run_coverage_in_dir(fuzzer_name, input_data, work_path, target_functions, target_files)
+            return _run_coverage_in_dir(
+                fuzzer_name, input_data, work_path, target_functions, target_files
+            )
 
 
 def _run_coverage_in_dir(
@@ -870,9 +957,7 @@ def _run_coverage_in_dir(
     # Get code context
     coverage_summary = ""
     if src_dir and src_dir.exists():
-        coverage_summary = get_executed_code_context(
-            lcov_path, src_dir, target_files
-        )
+        coverage_summary = get_executed_code_context(lcov_path, src_dir, target_files)
 
     return CoverageResult(
         success=True,
@@ -940,13 +1025,35 @@ def list_available_fuzzers() -> Dict[str, Any]:
 
     # Skip known non-fuzzer files
     skip_files = {
-        "llvm-symbolizer", "sancov", "clang", "clang++",
-        "llvm-cov", "llvm-profdata", "llvm-ar",
+        "llvm-symbolizer",
+        "sancov",
+        "clang",
+        "clang++",
+        "llvm-cov",
+        "llvm-profdata",
+        "llvm-ar",
     }
     skip_extensions = {
-        ".bin", ".log", ".dict", ".options", ".bc", ".json",
-        ".o", ".a", ".so", ".h", ".c", ".cpp", ".cc", ".py",
-        ".sh", ".txt", ".md", ".zip", ".tar", ".gz",
+        ".bin",
+        ".log",
+        ".dict",
+        ".options",
+        ".bc",
+        ".json",
+        ".o",
+        ".a",
+        ".so",
+        ".h",
+        ".c",
+        ".cpp",
+        ".cc",
+        ".py",
+        ".sh",
+        ".txt",
+        ".md",
+        ".zip",
+        ".tar",
+        ".gz",
     }
 
     fuzzers = []
@@ -1021,6 +1128,7 @@ def get_coverage_feedback(
 # Direct-call functions (for health check and testing - bypass MCP wrapper)
 # =============================================================================
 
+
 def run_coverage_impl(
     fuzzer_name: str,
     input_data_base64: str,
@@ -1028,7 +1136,9 @@ def run_coverage_impl(
     target_files: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """Direct call version of run_coverage (bypasses MCP FunctionTool wrapper)."""
-    result = _run_coverage_impl(fuzzer_name, input_data_base64, target_functions, target_files)
+    result = _run_coverage_impl(
+        fuzzer_name, input_data_base64, target_functions, target_files
+    )
     return result.to_dict()
 
 
@@ -1052,13 +1162,35 @@ def list_fuzzers_impl() -> Dict[str, Any]:
 
     # Skip known non-fuzzer files
     skip_files = {
-        "llvm-symbolizer", "sancov", "clang", "clang++",
-        "llvm-cov", "llvm-profdata", "llvm-ar",
+        "llvm-symbolizer",
+        "sancov",
+        "clang",
+        "clang++",
+        "llvm-cov",
+        "llvm-profdata",
+        "llvm-ar",
     }
     skip_extensions = {
-        ".bin", ".log", ".dict", ".options", ".bc", ".json",
-        ".o", ".a", ".so", ".h", ".c", ".cpp", ".cc", ".py",
-        ".sh", ".txt", ".md", ".zip", ".tar", ".gz",
+        ".bin",
+        ".log",
+        ".dict",
+        ".options",
+        ".bc",
+        ".json",
+        ".o",
+        ".a",
+        ".so",
+        ".h",
+        ".c",
+        ".cpp",
+        ".cc",
+        ".py",
+        ".sh",
+        ".txt",
+        ".md",
+        ".zip",
+        ".tar",
+        ".gz",
     }
 
     fuzzers = []

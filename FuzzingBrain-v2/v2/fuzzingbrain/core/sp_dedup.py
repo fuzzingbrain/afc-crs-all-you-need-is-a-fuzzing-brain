@@ -140,10 +140,7 @@ def _parse_sp_dedup_response(
         if response.startswith("```"):
             # Remove code block markers
             lines = response.split("\n")
-            response = "\n".join(
-                line for line in lines
-                if not line.startswith("```")
-            )
+            response = "\n".join(line for line in lines if not line.startswith("```"))
 
         result = json.loads(response)
 
@@ -193,6 +190,7 @@ def _parse_sp_dedup_response(
         if "duplicate" in response_lower:
             # Try to extract SP-N reference
             import re
+
             match = re.search(r"SP-(\d+)", response, re.IGNORECASE)
             if match:
                 idx = int(match.group(1)) - 1

@@ -33,15 +33,37 @@ class FuzzerBuilder:
 
     # Files to skip when scanning build output
     SKIP_FILES = {
-        "llvm-symbolizer", "sancov", "clang", "clang++",
-        "llvm-cov", "llvm-profdata", "llvm-ar",
+        "llvm-symbolizer",
+        "sancov",
+        "clang",
+        "clang++",
+        "llvm-cov",
+        "llvm-profdata",
+        "llvm-ar",
     }
 
     # Extensions to skip
     SKIP_EXTENSIONS = {
-        ".bin", ".log", ".dict", ".options", ".bc", ".json",
-        ".o", ".a", ".so", ".h", ".c", ".cpp", ".cc", ".py",
-        ".sh", ".txt", ".md", ".zip", ".tar", ".gz",
+        ".bin",
+        ".log",
+        ".dict",
+        ".options",
+        ".bc",
+        ".json",
+        ".o",
+        ".a",
+        ".so",
+        ".h",
+        ".c",
+        ".cpp",
+        ".cc",
+        ".py",
+        ".sh",
+        ".txt",
+        ".md",
+        ".zip",
+        ".tar",
+        ".gz",
     }
 
     def __init__(self, task: Task, config: Config):
@@ -54,14 +76,16 @@ class FuzzerBuilder:
         """
         self.task = task
         self.config = config
-        self.project_name = config.ossfuzz_project or task.project_name
+        self.project_name = config.ossfuzz_project_name or task.project_name
 
         # Shared coverage fuzzer path (accessible by all Workers)
         self.task_path = Path(task.task_path) if task.task_path else None
         self.coverage_fuzzer_path: Optional[Path] = None
         self.static_analysis_path: Optional[Path] = None
         if self.task_path:
-            self.coverage_fuzzer_path = self.task_path / "results" / "coverage_fuzzer" / self.project_name
+            self.coverage_fuzzer_path = (
+                self.task_path / "results" / "coverage_fuzzer" / self.project_name
+            )
             self.static_analysis_path = self.task_path / "static_analysis"
 
     def build(self) -> Tuple[bool, List[str], str]:
@@ -113,11 +137,15 @@ class FuzzerBuilder:
         if not introspector_success:
             logger.warning("Introspector build failed, static analysis will be limited")
         else:
-            logger.info(f"Introspector data available at: {self.static_analysis_path / 'introspector'}")
+            logger.info(
+                f"Introspector data available at: {self.static_analysis_path / 'introspector'}"
+            )
 
         return True, fuzzers, f"Built {len(fuzzers)} fuzzers successfully"
 
-    def _run_helper(self, sanitizer: str = "address", log_suffix: str = "") -> Tuple[bool, str]:
+    def _run_helper(
+        self, sanitizer: str = "address", log_suffix: str = ""
+    ) -> Tuple[bool, str]:
         """
         Call OSS-Fuzz helper.py to build fuzzers.
 
@@ -139,10 +167,13 @@ class FuzzerBuilder:
 
         # Build command
         cmd = [
-            "python3", str(helper_path),
+            "python3",
+            str(helper_path),
             "build_fuzzers",
-            "--sanitizer", sanitizer,
-            "--engine", "libfuzzer",
+            "--sanitizer",
+            sanitizer,
+            "--engine",
+            "libfuzzer",
             self.project_name,
             str(Path(self.task.src_path).absolute()),
         ]
@@ -156,7 +187,9 @@ class FuzzerBuilder:
 
         try:
             # Open log file if available
-            build_log_file = open(build_log_path, "w", encoding="utf-8") if build_log_path else None
+            build_log_file = (
+                open(build_log_path, "w", encoding="utf-8") if build_log_path else None
+            )
 
             if build_log_file:
                 build_log_file.write(f"Build Command: {' '.join(cmd)}\n")
@@ -232,7 +265,9 @@ class FuzzerBuilder:
         Returns:
             List of fuzzer names
         """
-        out_dir = Path(self.task.fuzz_tooling_path) / "build" / "out" / self.project_name
+        out_dir = (
+            Path(self.task.fuzz_tooling_path) / "build" / "out" / self.project_name
+        )
 
         if not out_dir.exists():
             logger.warning(f"Output directory not found: {out_dir}")
@@ -276,7 +311,7 @@ class FuzzerBuilder:
         if not text:
             return ""
 
-        lines = text.strip().split('\n')
+        lines = text.strip().split("\n")
         if len(lines) <= max_lines:
             return text
 
@@ -284,7 +319,7 @@ class FuzzerBuilder:
         last = lines[-20:]
         truncated = len(lines) - 30
 
-        return '\n'.join(first + [f"\n... [{truncated} lines truncated] ...\n"] + last)
+        return "\n".join(first + [f"\n... [{truncated} lines truncated] ...\n"] + last)
 
     def get_fuzzer_binary_path(self, fuzzer_name: str) -> str:
         """
@@ -297,7 +332,11 @@ class FuzzerBuilder:
             Full path to the fuzzer binary
         """
         return str(
-            Path(self.task.fuzz_tooling_path) / "build" / "out" / self.project_name / fuzzer_name
+            Path(self.task.fuzz_tooling_path)
+            / "build"
+            / "out"
+            / self.project_name
+            / fuzzer_name
         )
 
     def get_coverage_fuzzer_dir(self) -> Optional[Path]:
@@ -343,7 +382,9 @@ class FuzzerBuilder:
         Args:
             dest_path: Destination directory
         """
-        out_dir = Path(self.task.fuzz_tooling_path) / "build" / "out" / self.project_name
+        out_dir = (
+            Path(self.task.fuzz_tooling_path) / "build" / "out" / self.project_name
+        )
 
         if not out_dir.exists():
             logger.warning(f"Build output not found: {out_dir}")
@@ -396,10 +437,16 @@ class FuzzerBuilder:
         try:
             subprocess.run(
                 [
-                    "docker", "run", "--rm",
-                    "-v", f"{path.absolute()}:/fix_perms",
+                    "docker",
+                    "run",
+                    "--rm",
+                    "-v",
+                    f"{path.absolute()}:/fix_perms",
                     "alpine:latest",
-                    "chown", "-R", f"{uid}:{gid}", "/fix_perms"
+                    "chown",
+                    "-R",
+                    f"{uid}:{gid}",
+                    "/fix_perms",
                 ],
                 capture_output=True,
                 timeout=120,
@@ -435,8 +482,7 @@ class FuzzerBuilder:
 
         # Build with introspector sanitizer
         success, msg = self._run_helper(
-            sanitizer="introspector",
-            log_suffix="_introspector"
+            sanitizer="introspector", log_suffix="_introspector"
         )
 
         # Fix permissions after Docker build
@@ -468,7 +514,9 @@ class FuzzerBuilder:
         Returns:
             List of collected file paths
         """
-        out_dir = Path(self.task.fuzz_tooling_path) / "build" / "out" / self.project_name
+        out_dir = (
+            Path(self.task.fuzz_tooling_path) / "build" / "out" / self.project_name
+        )
         inspector_dir = out_dir / "inspector"
 
         if not inspector_dir.exists():
@@ -480,8 +528,8 @@ class FuzzerBuilder:
         # Key files to collect
         key_files = [
             "all-fuzz-introspector-functions.json",  # All reachable functions
-            "summary.json",                           # Summary statistics
-            "all_debug_info.json",                    # Debug info
+            "summary.json",  # Summary statistics
+            "all_debug_info.json",  # Debug info
         ]
 
         for filename in key_files:

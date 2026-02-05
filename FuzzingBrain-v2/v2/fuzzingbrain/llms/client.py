@@ -5,7 +5,6 @@ Unified LLM client with multi-provider support and automatic fallback.
 """
 
 import asyncio
-import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Union
@@ -16,7 +15,6 @@ from loguru import logger
 
 from .config import LLMConfig, get_default_config
 from .exceptions import (
-    LLMAllModelsFailedError,
     LLMAuthError,
     LLMContentFilterError,
     LLMContextLengthError,
@@ -44,9 +42,14 @@ def _get_reporter():
     if _reporter is None:
         try:
             from ..eval import get_reporter
+
             _reporter = get_reporter
         except ImportError:
-            _reporter = lambda: None
+
+            def _null_reporter():
+                return None
+
+            _reporter = _null_reporter
     return _reporter()
 
 
@@ -73,6 +76,7 @@ def _calculate_cost(model_id: str, input_tokens: int, output_tokens: int) -> tup
     cost_total = cost_input + cost_output
 
     return cost_input, cost_output, cost_total
+
 
 # Configure litellm
 litellm.drop_params = True  # Drop unsupported params silently
@@ -183,11 +187,13 @@ class LLMClient:
 
         if cls._current_loop_id is not None and cls._current_loop_id != current_loop_id:
             # Event loop changed! Clear litellm's cached clients
-            if hasattr(litellm, 'in_memory_llm_clients_cache'):
+            if hasattr(litellm, "in_memory_llm_clients_cache"):
                 cache = litellm.in_memory_llm_clients_cache
                 if cache:
                     cache.clear()
-                    logger.debug(f"Cleared litellm client cache due to event loop change")
+                    logger.debug(
+                        "Cleared litellm client cache due to event loop change"
+                    )
 
         cls._current_loop_id = current_loop_id
 
@@ -268,7 +274,11 @@ class LLMClient:
             return LLMTimeoutError(str(error), model=model_id)
 
         # Model not found
-        if "not found" in error_str or "does not exist" in error_str or "404" in error_str:
+        if (
+            "not found" in error_str
+            or "does not exist" in error_str
+            or "404" in error_str
+        ):
             return LLMModelNotFoundError(str(error), model=model_id)
 
         # Context length
@@ -276,9 +286,16 @@ class LLMClient:
             return LLMContextLengthError(str(error), model=model_id)
 
         # Content filter / policy violations
-        if ("content" in error_str and ("filter" in error_str or "policy" in error_str)) or \
-           "violating" in error_str or "usage policy" in error_str or \
-           "flagged" in error_str or "invalid_prompt" in error_str:
+        if (
+            (
+                "content" in error_str
+                and ("filter" in error_str or "policy" in error_str)
+            )
+            or "violating" in error_str
+            or "usage policy" in error_str
+            or "flagged" in error_str
+            or "invalid_prompt" in error_str
+        ):
             return LLMContentFilterError(str(error), model=model_id)
 
         # Generic error
@@ -377,12 +394,16 @@ class LLMClient:
     ) -> Dict[str, Any]:
         """Prepare parameters for litellm call"""
         model_id = self._get_model_id(model)
-        api_key = self._get_api_key_for_model(model if model else self.config.default_model)
+        api_key = self._get_api_key_for_model(
+            model if model else self.config.default_model
+        )
 
         params = {
             "model": model_id,
             "messages": messages,
-            "temperature": temperature if temperature is not None else self.config.temperature,
+            "temperature": temperature
+            if temperature is not None
+            else self.config.temperature,
             "timeout": self.config.timeout,
         }
 
@@ -436,7 +457,9 @@ class LLMClient:
                     for tc in choice.message.tool_calls
                 ]
 
-        usage = response.usage if hasattr(response, "usage") and response.usage else None
+        usage = (
+            response.usage if hasattr(response, "usage") and response.usage else None
+        )
 
         # Determine provider from model ID
         provider = "unknown"
@@ -470,7 +493,9 @@ class LLMClient:
         # Report to evaluation system
         reporter = _get_reporter()
         if reporter:
-            cost_input, cost_output, _ = _calculate_cost(model_id, input_tokens, output_tokens)
+            cost_input, cost_output, _ = _calculate_cost(
+                model_id, input_tokens, output_tokens
+            )
             reporter.llm_called(
                 model=model_id,
                 provider=provider,
@@ -513,7 +538,7 @@ class LLMClient:
         """
         # Check budget before calling
         reporter = _get_reporter()
-        if reporter and hasattr(reporter, 'check_budget'):
+        if reporter and hasattr(reporter, "check_budget"):
             reporter.check_budget()
 
         result = self._call_with_fallback(
@@ -525,7 +550,7 @@ class LLMClient:
         )
 
         # Check budget after calling (cost was just recorded)
-        if reporter and hasattr(reporter, 'check_budget'):
+        if reporter and hasattr(reporter, "check_budget"):
             reporter.check_budget()
 
         return result
@@ -549,7 +574,9 @@ class LLMClient:
 
         if model_id in self._tried_models:
             # Skip already tried models
-            return self._try_fallback(messages, current_model, original_model_for_report, **kwargs)
+            return self._try_fallback(
+                messages, current_model, original_model_for_report, **kwargs
+            )
 
         self._tried_models.add(model_id)
 
@@ -582,11 +609,12 @@ class LLMClient:
             else:
                 # Use litellm for other models
                 params = self._prepare_call_params(
-                    messages, current_model,
+                    messages,
+                    current_model,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     tools=tools,
-                    **kwargs
+                    **kwargs,
                 )
                 response = litellm.completion(**params)
 
@@ -643,15 +671,19 @@ class LLMClient:
             fallback_chain = get_fallback_chain(
                 model_info,
                 self._tried_models,
-                allow_expensive=self.config.allow_expensive_fallback
+                allow_expensive=self.config.allow_expensive_fallback,
             )
         else:
             # Use default fallback
             from .models import DEFAULT_FALLBACK, EXPENSIVE_MODELS
+
             fallback_chain = [
-                m for m in DEFAULT_FALLBACK
+                m
+                for m in DEFAULT_FALLBACK
                 if m.id not in self._tried_models
-                and (self.config.allow_expensive_fallback or m.id not in EXPENSIVE_MODELS)
+                and (
+                    self.config.allow_expensive_fallback or m.id not in EXPENSIVE_MODELS
+                )
             ]
 
         if not fallback_chain:
@@ -728,7 +760,7 @@ class LLMClient:
         """
         # Check budget before calling
         reporter = _get_reporter()
-        if reporter and hasattr(reporter, 'check_budget'):
+        if reporter and hasattr(reporter, "check_budget"):
             reporter.check_budget()
 
         result = await self._acall_with_fallback(
@@ -740,7 +772,7 @@ class LLMClient:
         )
 
         # Check budget after calling (cost was just recorded)
-        if reporter and hasattr(reporter, 'check_budget'):
+        if reporter and hasattr(reporter, "check_budget"):
             reporter.check_budget()
 
         return result
@@ -765,7 +797,9 @@ class LLMClient:
             original_model_for_report = original_model
 
         if model_id in self._tried_models:
-            return await self._atry_fallback(messages, current_model, original_model_for_report, **kwargs)
+            return await self._atry_fallback(
+                messages, current_model, original_model_for_report, **kwargs
+            )
 
         self._tried_models.add(model_id)
 
@@ -791,10 +825,16 @@ class LLMClient:
                 if not api_key:
                     raise LLMAuthError("XAI_API_KEY not configured", model=model_id)
 
-                clean_model_id = model_id[4:] if model_id.startswith("xai/") else model_id
+                clean_model_id = (
+                    model_id[4:] if model_id.startswith("xai/") else model_id
+                )
                 client = openai.AsyncOpenAI(api_key=api_key, base_url=XAI_API_BASE)
 
-                params = {"model": clean_model_id, "messages": messages, "temperature": temperature}
+                params = {
+                    "model": clean_model_id,
+                    "messages": messages,
+                    "temperature": temperature,
+                }
                 if max_tokens:
                     params["max_tokens"] = max_tokens
                 if tools:
@@ -823,11 +863,12 @@ class LLMClient:
             else:
                 # Use litellm for other models
                 params = self._prepare_call_params(
-                    messages, current_model,
+                    messages,
+                    current_model,
                     temperature=temperature,
                     max_tokens=max_tokens,
                     tools=tools,
-                    **kwargs
+                    **kwargs,
                 )
                 response = await litellm.acompletion(**params)
 
@@ -853,8 +894,12 @@ class LLMClient:
         except RuntimeError as e:
             # Handle event loop shutdown gracefully
             if "Event loop is closed" in str(e):
-                logger.warning(f"LLM async call aborted due to shutdown | model={model_id}")
-                raise LLMShutdownError("Event loop closed during LLM call", model=model_id)
+                logger.warning(
+                    f"LLM async call aborted due to shutdown | model={model_id}"
+                )
+                raise LLMShutdownError(
+                    "Event loop closed during LLM call", model=model_id
+                )
             raise
 
         except Exception as e:
@@ -891,14 +936,18 @@ class LLMClient:
             fallback_chain = get_fallback_chain(
                 model_info,
                 self._tried_models,
-                allow_expensive=self.config.allow_expensive_fallback
+                allow_expensive=self.config.allow_expensive_fallback,
             )
         else:
             from .models import DEFAULT_FALLBACK, EXPENSIVE_MODELS
+
             fallback_chain = [
-                m for m in DEFAULT_FALLBACK
+                m
+                for m in DEFAULT_FALLBACK
                 if m.id not in self._tried_models
-                and (self.config.allow_expensive_fallback or m.id not in EXPENSIVE_MODELS)
+                and (
+                    self.config.allow_expensive_fallback or m.id not in EXPENSIVE_MODELS
+                )
             ]
 
         if not fallback_chain:

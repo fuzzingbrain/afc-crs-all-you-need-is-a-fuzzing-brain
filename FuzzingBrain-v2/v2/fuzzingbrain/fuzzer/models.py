@@ -7,8 +7,7 @@ Data classes and enums for the Fuzzer Worker module.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from pathlib import Path
-from typing import Optional, List
+from typing import Optional
 import hashlib
 
 from ..core.utils import generate_id
@@ -16,35 +15,39 @@ from ..core.utils import generate_id
 
 class FuzzerStatus(str, Enum):
     """Fuzzer instance status."""
-    IDLE = "idle"                    # Not started
-    STARTING = "starting"            # Starting up
-    RUNNING = "running"              # Running
-    FOUND_CRASH = "found_crash"      # Found crash (still running)
-    STOPPED = "stopped"              # Stopped normally
-    ERROR = "error"                  # Error occurred
+
+    IDLE = "idle"  # Not started
+    STARTING = "starting"  # Starting up
+    RUNNING = "running"  # Running
+    FOUND_CRASH = "found_crash"  # Found crash (still running)
+    STOPPED = "stopped"  # Stopped normally
+    ERROR = "error"  # Error occurred
 
 
 class FuzzerType(str, Enum):
     """Fuzzer type."""
-    GLOBAL = "global"      # Global Fuzzer (broad exploration)
-    SP = "sp"              # SP Fuzzer (deep exploration for specific SP)
+
+    GLOBAL = "global"  # Global Fuzzer (broad exploration)
+    SP = "sp"  # SP Fuzzer (deep exploration for specific SP)
 
 
 @dataclass
 class GlobalFuzzerConfig:
     """Configuration for Global Fuzzer."""
-    fork_level: int = 2              # Parallelism (lower to save resources)
-    rss_limit_mb: int = 2048         # Memory limit
-    max_time: int = 0                # Max runtime in seconds (0 = unlimited)
-    timeout_per_input: int = 30      # Timeout per input in seconds
+
+    fork_level: int = 2  # Parallelism (lower to save resources)
+    rss_limit_mb: int = 2048  # Memory limit
+    max_time: int = 0  # Max runtime in seconds (0 = unlimited)
+    timeout_per_input: int = 30  # Timeout per input in seconds
 
 
 @dataclass
 class SPFuzzerConfig:
     """Configuration for SP Fuzzer."""
-    fork_level: int = 1              # Single process (lightweight)
-    rss_limit_mb: int = 1024         # Memory limit
-    timeout_per_input: int = 30      # Timeout per input in seconds
+
+    fork_level: int = 1  # Single process (lightweight)
+    rss_limit_mb: int = 1024  # Memory limit
+    timeout_per_input: int = 30  # Timeout per input in seconds
     # No max_time - follows POV Agent lifecycle
 
 
@@ -55,18 +58,19 @@ class CrashRecord:
 
     Used for tracking and deduplication.
     """
+
     crash_id: str = field(default_factory=generate_id)
     task_id: str = ""
     crash_path: str = ""
-    crash_hash: str = ""              # SHA1 for deduplication
-    vuln_type: Optional[str] = None   # heap-buffer-overflow, use-after-free, etc.
+    crash_hash: str = ""  # SHA1 for deduplication
+    vuln_type: Optional[str] = None  # heap-buffer-overflow, use-after-free, etc.
     sanitizer_output: str = ""
     found_at: datetime = field(default_factory=datetime.now)
-    source: str = ""                  # "global_fuzzer" | "sp_fuzzer"
-    sp_id: Optional[str] = None       # If from SP Fuzzer
-    fuzzer_name: str = ""             # Fuzzer binary name
-    sanitizer: str = "address"        # Sanitizer type
-    seed_origin: Optional[str] = None # Seed source (if trackable)
+    source: str = ""  # "global_fuzzer" | "sp_fuzzer"
+    sp_id: Optional[str] = None  # If from SP Fuzzer
+    fuzzer_name: str = ""  # Fuzzer binary name
+    sanitizer: str = "address"  # Sanitizer type
+    seed_origin: Optional[str] = None  # Seed source (if trackable)
 
     # Database fields
     created_at: datetime = field(default_factory=datetime.now)
@@ -121,6 +125,7 @@ class CrashRecord:
 @dataclass
 class FuzzerStats:
     """Runtime statistics for a fuzzer instance."""
+
     instance_id: str = ""
     fuzzer_type: FuzzerType = FuzzerType.GLOBAL
     status: FuzzerStatus = FuzzerStatus.IDLE
@@ -167,11 +172,12 @@ class FuzzerStats:
 @dataclass
 class SeedInfo:
     """Information about a seed added to corpus."""
+
     seed_id: str = field(default_factory=generate_id)
     seed_path: str = ""
     seed_hash: str = ""
     seed_size: int = 0
-    source: str = ""          # "direction" | "fp" | "pov_blob"
+    source: str = ""  # "direction" | "fp" | "pov_blob"
     direction_id: Optional[str] = None
     sp_id: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)

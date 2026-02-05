@@ -26,7 +26,7 @@ def _format_datetime(dt):
         return None
     if isinstance(dt, str):
         return dt
-    return dt.isoformat() if hasattr(dt, 'isoformat') else str(dt)
+    return dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
 
 
 @router.get("")
@@ -87,11 +87,17 @@ async def get_sp_stats(task_id: Optional[str] = None) -> Dict[str, Any]:
     total = await db.suspicious_points.count_documents(query)
     checked = await db.suspicious_points.count_documents({**query, "is_checked": True})
     # is_important=True means it's a real bug
-    real_bugs = await db.suspicious_points.count_documents({**query, "is_important": True})
+    real_bugs = await db.suspicious_points.count_documents(
+        {**query, "is_important": True}
+    )
     # verified but not important = false positive
-    false_positives = await db.suspicious_points.count_documents({**query, "is_checked": True, "is_important": False})
+    false_positives = await db.suspicious_points.count_documents(
+        {**query, "is_checked": True, "is_important": False}
+    )
     # is_real means POV was generated
-    pov_generated = await db.suspicious_points.count_documents({**query, "is_real": True})
+    pov_generated = await db.suspicious_points.count_documents(
+        {**query, "is_real": True}
+    )
 
     return {
         "total": total,

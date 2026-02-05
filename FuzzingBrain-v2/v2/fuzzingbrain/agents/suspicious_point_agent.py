@@ -15,7 +15,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, NamedTuple
 
 from fastmcp import Client
-from loguru import logger
 
 from .base import BaseAgent
 from .prompts import (
@@ -32,6 +31,7 @@ from .prompts import VERIFY_SUSPICIOUS_POINTS_DELTA_PROMPT
 
 class SuspiciousPointSummary(NamedTuple):
     """Summary information for a suspicious point."""
+
     func_name: str
     vuln_type: str
     score: float
@@ -131,23 +131,34 @@ class SuspiciousPointAgent(BaseAgent):
 
         # Context for find mode
         self.reachable_changes: List[Dict[str, Any]] = []
-        self.sp_list: List[SuspiciousPointSummary] = []  # List of suspicious point summaries for find mode summary
+        self.sp_list: List[
+            SuspiciousPointSummary
+        ] = []  # List of suspicious point summaries for find mode summary
 
         # Context for verify mode
         self.suspicious_point: Optional[Dict[str, Any]] = None
-        self.verify_result: Optional[Dict[str, Any]] = None  # Stores verdict for summary
+        self.verify_result: Optional[Dict[str, Any]] = (
+            None  # Stores verdict for summary
+        )
 
     def _build_table_header(self, title: str, width: Optional[int] = None) -> List[str]:
         """Build table header lines."""
         w = width or self.TABLE_WIDTH
-        return ["", "┌" + "─" * w + "┐", "│" + f" {title} ".center(w) + "│", "├" + "─" * w + "┤"]
+        return [
+            "",
+            "┌" + "─" * w + "┐",
+            "│" + f" {title} ".center(w) + "│",
+            "├" + "─" * w + "┤",
+        ]
 
     def _build_table_footer(self, width: Optional[int] = None) -> List[str]:
         """Build table footer lines."""
         w = width or self.TABLE_WIDTH
         return ["└" + "─" * w + "┘", ""]
 
-    def _build_table_row(self, content: str, width: Optional[int] = None, prefix: str = "  ") -> str:
+    def _build_table_row(
+        self, content: str, width: Optional[int] = None, prefix: str = "  "
+    ) -> str:
         """Build a single table row."""
         w = width or self.TABLE_WIDTH
         line = f"{prefix}{content}"
@@ -202,7 +213,11 @@ class SuspiciousPointAgent(BaseAgent):
 
     def _get_find_summary_table(self) -> str:
         """Generate summary table for find mode."""
-        duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
+        duration = (
+            (self.end_time - self.start_time).total_seconds()
+            if self.start_time and self.end_time
+            else 0
+        )
 
         lines = []
         lines.extend(self._build_table_header("SP FIND (DELTA) SUMMARY"))
@@ -210,7 +225,9 @@ class SuspiciousPointAgent(BaseAgent):
         lines.append(self._build_table_row(f"Sanitizer: {self.sanitizer}"))
         lines.append(self._build_table_row(f"Duration: {duration:.2f}s"))
         lines.append(self._build_table_row(f"Iterations: {self.total_iterations}"))
-        lines.append(self._build_table_row(f"Changed Functions: {len(self.reachable_changes)}"))
+        lines.append(
+            self._build_table_row(f"Changed Functions: {len(self.reachable_changes)}")
+        )
         lines.append(self._build_table_row(f"SPs Created: {len(self.sp_list)}"))
         lines.append("├" + "─" * self.TABLE_WIDTH + "┤")
         lines.append("│" + " SUSPICIOUS POINTS ".center(self.TABLE_WIDTH) + "│")
@@ -218,7 +235,11 @@ class SuspiciousPointAgent(BaseAgent):
 
         if self.sp_list:
             for func_name, vuln_type, score in self.sp_list:
-                score_icon = "🔴" if score >= self.SCORE_HIGH_CONFIDENCE else ("🟡" if score >= self.SCORE_MEDIUM_CONFIDENCE else "🟢")
+                score_icon = (
+                    "🔴"
+                    if score >= self.SCORE_HIGH_CONFIDENCE
+                    else ("🟡" if score >= self.SCORE_MEDIUM_CONFIDENCE else "🟢")
+                )
                 content = f"{score_icon} [{score:.1f}] {func_name}: {vuln_type}"
                 lines.append(self._build_table_row(content))
         else:
@@ -230,15 +251,23 @@ class SuspiciousPointAgent(BaseAgent):
 
     def _get_verify_summary_table(self) -> str:
         """Generate summary table for verify mode."""
-        duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
+        duration = (
+            (self.end_time - self.start_time).total_seconds()
+            if self.start_time and self.end_time
+            else 0
+        )
 
         sp_id = ""
         func_name = ""
         vuln_type = ""
         original_score = self.SCORE_DEFAULT
         if self.suspicious_point:
-            sp_id = self.suspicious_point.get("suspicious_point_id", "")[:self.SP_ID_TRUNCATE_LENGTH]
-            func_name = self.suspicious_point.get("function_name", self.DEFAULT_FUNCTION_NAME)
+            sp_id = self.suspicious_point.get("suspicious_point_id", "")[
+                : self.SP_ID_TRUNCATE_LENGTH
+            ]
+            func_name = self.suspicious_point.get(
+                "function_name", self.DEFAULT_FUNCTION_NAME
+            )
             vuln_type = self.suspicious_point.get("vuln_type", self.DEFAULT_VULN_TYPE)
             original_score = self.suspicious_point.get("score", self.SCORE_DEFAULT)
 
@@ -300,10 +329,14 @@ class SuspiciousPointAgent(BaseAgent):
             try:
                 data = json.loads(result)
                 if data.get("success"):
-                    func_name = tool_args.get("function_name", self.DEFAULT_FUNCTION_NAME)
+                    func_name = tool_args.get(
+                        "function_name", self.DEFAULT_FUNCTION_NAME
+                    )
                     vuln_type = tool_args.get("vuln_type", self.DEFAULT_VULN_TYPE)
                     score = tool_args.get("score", self.SCORE_DEFAULT)
-                    self.sp_list.append(SuspiciousPointSummary(func_name, vuln_type, score))
+                    self.sp_list.append(
+                        SuspiciousPointSummary(func_name, vuln_type, score)
+                    )
                     self._log(f"Tracked SP: {func_name} ({vuln_type})", level="INFO")
             except (json.JSONDecodeError, TypeError):
                 pass
@@ -318,7 +351,10 @@ class SuspiciousPointAgent(BaseAgent):
                         "is_important": tool_args.get("is_important", False),
                         "reason": tool_args.get("verification_notes", "No notes"),
                     }
-                    self._log(f"Tracked verify result: score={tool_args.get('score')}", level="INFO")
+                    self._log(
+                        f"Tracked verify result: score={tool_args.get('score')}",
+                        level="INFO",
+                    )
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -395,7 +431,9 @@ Do NOT let iterations run out without a decision!
             func_name = ""
             vuln_type = ""
             if self.suspicious_point:
-                sp_id = self.suspicious_point.get("suspicious_point_id", "")[:self.SP_ID_TRUNCATE_LENGTH]
+                sp_id = self.suspicious_point.get("suspicious_point_id", "")[
+                    : self.SP_ID_TRUNCATE_LENGTH
+                ]
                 func_name = self.suspicious_point.get("function_name", "")
                 vuln_type = self.suspicious_point.get("vuln_type", "")
             return {
@@ -426,7 +464,9 @@ Do NOT let iterations run out without a decision!
         sanitizer_guidance += self._build_sanitizer_guidance()
         return prompt + sanitizer_guidance
 
-    def _filter_tools_for_mode(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _filter_tools_for_mode(
+        self, tools: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """
         Filter tools based on current mode.
 
@@ -440,7 +480,11 @@ Do NOT let iterations run out without a decision!
         """
         if self.mode == self.MODE_FIND:
             # Find mode: exclude verification tools and slow path analysis
-            excluded = {self.TOOL_UPDATE_SUSPICIOUS_POINT, self.TOOL_FIND_ALL_PATHS, self.TOOL_CHECK_REACHABILITY}
+            excluded = {
+                self.TOOL_UPDATE_SUSPICIOUS_POINT,
+                self.TOOL_FIND_ALL_PATHS,
+                self.TOOL_CHECK_REACHABILITY,
+            }
         else:
             # Verify mode: exclude create, but allow thorough analysis tools
             excluded = {self.TOOL_CREATE_SUSPICIOUS_POINT}
@@ -495,7 +539,9 @@ This shows how input enters the library - only reachable code matters!
 
 """
 
-    def _format_changed_functions_section(self, reachable_changes: List[Dict[str, Any]]) -> str:
+    def _format_changed_functions_section(
+        self, reachable_changes: List[Dict[str, Any]]
+    ) -> str:
         """Format changed functions list section."""
         if not reachable_changes:
             return ""
@@ -506,7 +552,9 @@ This shows how input enters the library - only reachable code matters!
 
         # Group by reachability
         reachable = [c for c in reachable_changes if c.get("static_reachable", True)]
-        unreachable = [c for c in reachable_changes if not c.get("static_reachable", True)]
+        unreachable = [
+            c for c in reachable_changes if not c.get("static_reachable", True)
+        ]
 
         if reachable:
             message += "### Static-Reachable Functions:\n"
@@ -560,7 +608,7 @@ Follow these steps IN ORDER:
      - {self._get_sanitizer_vuln_types()}
 """
 
-        message += f"""
+        message += """
 3. **CREATE SUSPICIOUS POINTS**: For each potential vulnerability:
    - One SP per unique root cause (not per symptom)
    - Use control flow description, not line numbers
@@ -573,12 +621,19 @@ The Verify agent will judge actual reachability later.
 
         return message
 
-    def _extract_sp_info(self, suspicious_point: Dict[str, Any]) -> tuple[str, str, str, bool]:
+    def _extract_sp_info(
+        self, suspicious_point: Dict[str, Any]
+    ) -> tuple[str, str, str, bool]:
         """Extract basic information from suspicious point."""
-        sp_id = suspicious_point.get('suspicious_point_id', suspicious_point.get('id', self.DEFAULT_FUNCTION_NAME))
-        function_name = suspicious_point.get('function_name', self.DEFAULT_FUNCTION_NAME)
-        vuln_type = suspicious_point.get('vuln_type', self.DEFAULT_VULN_TYPE)
-        static_reachable = suspicious_point.get('static_reachable', True)
+        sp_id = suspicious_point.get(
+            "suspicious_point_id",
+            suspicious_point.get("id", self.DEFAULT_FUNCTION_NAME),
+        )
+        function_name = suspicious_point.get(
+            "function_name", self.DEFAULT_FUNCTION_NAME
+        )
+        vuln_type = suspicious_point.get("vuln_type", self.DEFAULT_VULN_TYPE)
+        static_reachable = suspicious_point.get("static_reachable", True)
         return sp_id, function_name, vuln_type, static_reachable
 
     def _format_sp_details_section(
@@ -599,8 +654,8 @@ The Verify agent will judge actual reachability later.
 - ID: {sp_id}
 - Function: {function_name}
 - Type: {vuln_type}
-- Description: {suspicious_point.get('description', 'No description')}
-- Initial Score: {suspicious_point.get('score', self.SCORE_DEFAULT)}
+- Description: {suspicious_point.get("description", "No description")}
+- Initial Score: {suspicious_point.get("score", self.SCORE_DEFAULT)}
 - Static Reachable: {static_reachable}{reachability_note}
 """
         return section
@@ -619,7 +674,9 @@ The Verify agent will judge actual reachability later.
                 section += f"  - {item}\n"
         return section
 
-    def _format_fp_check_section(self, static_reachable: bool, function_name: str) -> str:
+    def _format_fp_check_section(
+        self, static_reachable: bool, function_name: str
+    ) -> str:
         """Format function pointer check instruction section."""
         if static_reachable:
             return ""
@@ -672,7 +729,9 @@ Start by verifying reachability with get_callers("{function_name}").
         if not suspicious_point:
             return "No suspicious point provided for verification."
 
-        sp_id, function_name, vuln_type, static_reachable = self._extract_sp_info(suspicious_point)
+        sp_id, function_name, vuln_type, static_reachable = self._extract_sp_info(
+            suspicious_point
+        )
 
         message = f"""Verify the following suspicious point to determine if it's a real vulnerability.
 
@@ -697,7 +756,7 @@ If either is NO → mark as FALSE POSITIVE immediately.
         )
 
         # Add control flow section if available
-        control_flow = suspicious_point.get('important_controlflow')
+        control_flow = suspicious_point.get("important_controlflow")
         if control_flow:
             message += self._format_control_flow_section(control_flow)
 

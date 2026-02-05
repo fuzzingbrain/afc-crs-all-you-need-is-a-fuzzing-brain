@@ -65,7 +65,8 @@ class WebSocketManager:
         """Broadcast to all channels matching a pattern."""
         async with self._lock:
             matching_channels = [
-                ch for ch in self._connections.keys()
+                ch
+                for ch in self._connections.keys()
                 if ch.startswith(pattern.rstrip("*"))
             ]
 

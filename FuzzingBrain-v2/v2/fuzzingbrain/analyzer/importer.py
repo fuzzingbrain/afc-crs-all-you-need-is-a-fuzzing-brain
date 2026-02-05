@@ -12,7 +12,6 @@ import json
 from pathlib import Path
 from typing import List, Optional, Tuple
 from collections import deque
-from datetime import datetime
 
 from loguru import logger as loguru_logger
 
@@ -43,6 +42,7 @@ def import_from_prebuild(
     Returns:
         (success, message)
     """
+
     def log(msg: str, level: str = "INFO"):
         if log_callback:
             log_callback(msg, level)
@@ -112,7 +112,7 @@ def import_from_prebuild(
             # Remap IDs: replace prebuild_task_id prefix with new task_id
             old_func_id = doc.get("function_id", "")
             if old_func_id.startswith(f"{prebuild_task_id}_"):
-                new_func_id = f"{task_id}_{old_func_id[len(prebuild_task_id)+1:]}"
+                new_func_id = f"{task_id}_{old_func_id[len(prebuild_task_id) + 1 :]}"
             else:
                 new_func_id = f"{task_id}_{doc.get('name', '')}"
 
@@ -141,7 +141,7 @@ def import_from_prebuild(
             old_node_id = doc.get("node_id", "")
             if old_node_id.startswith(f"{prebuild_task_id}_"):
                 # node_id format: {task_id}_{fuzzer_id}_{function_name}
-                suffix = old_node_id[len(prebuild_task_id)+1:]
+                suffix = old_node_id[len(prebuild_task_id) + 1 :]
                 new_node_id = f"{task_id}_{suffix}"
             else:
                 new_node_id = f"{task_id}_{doc.get('fuzzer_id', '')}_{doc.get('function_name', '')}"
@@ -160,7 +160,10 @@ def import_from_prebuild(
 
         log(f"Imported {stats['callgraph_nodes']} callgraph nodes")
 
-        return True, f"Imported {stats['functions']} functions, {stats['callgraph_nodes']} nodes, {stats['fuzzers']} fuzzers"
+        return (
+            True,
+            f"Imported {stats['functions']} functions, {stats['callgraph_nodes']} nodes, {stats['fuzzers']} fuzzers",
+        )
 
     except Exception as e:
         return False, f"Failed to import prebuild data: {e}"
@@ -235,7 +238,9 @@ class StaticAnalysisImporter:
 
         if not functions_json.exists():
             # Also check directly in introspector_path
-            functions_json = self.introspector_path / "all-fuzz-introspector-functions.json"
+            functions_json = (
+                self.introspector_path / "all-fuzz-introspector-functions.json"
+            )
 
         if not functions_json.exists():
             return False, f"Introspector JSON not found: {functions_json}"
@@ -267,7 +272,10 @@ class StaticAnalysisImporter:
         # Import call graph nodes
         self._import_callgraph(functions_data, call_graph, distances, entry_points)
 
-        return True, f"Imported {self.functions_imported} functions, {self.callgraph_nodes_imported} call graph nodes"
+        return (
+            True,
+            f"Imported {self.functions_imported} functions, {self.callgraph_nodes_imported} call graph nodes",
+        )
 
     def _parse_introspector_functions(self, data: dict) -> List[dict]:
         """
@@ -311,10 +319,12 @@ class StaticAnalysisImporter:
 
             # Get file path from various possible locations
             file_path = (
-                func_data.get("Functions filename") or  # Primary field in introspector JSON
-                func_data.get("Source file") or
-                func_data.get("source_file") or
-                ""
+                func_data.get(
+                    "Functions filename"
+                )  # Primary field in introspector JSON
+                or func_data.get("Source file")
+                or func_data.get("source_file")
+                or ""
             )
             # Also check debug_function_info.source.source_file
             if not file_path:
@@ -322,20 +332,42 @@ class StaticAnalysisImporter:
                 source_info = debug_info.get("source", {})
                 file_path = source_info.get("source_file", "")
 
-            functions.append({
-                "name": name,
-                "file_path": file_path,
-                "start_line": func_data.get("source_line_begin", func_data.get("Func src line begin", func_data.get("start_line", 0))),
-                "end_line": func_data.get("source_line_end", func_data.get("Func src line end", func_data.get("end_line", 0))),
-                "cyclomatic_complexity": func_data.get("Cyclomatic complexity", func_data.get("complexity", 0)),
-                "reached_by_fuzzers": func_data.get("Reached by Fuzzers", func_data.get("reached_by_fuzzers", [])),
-                "reached_by_functions": func_data.get("Reached by functions", func_data.get("reached_by_functions", 0)),
-                "callsites": func_data.get("Callsites", func_data.get("callsites", {})),
-            })
+            functions.append(
+                {
+                    "name": name,
+                    "file_path": file_path,
+                    "start_line": func_data.get(
+                        "source_line_begin",
+                        func_data.get(
+                            "Func src line begin", func_data.get("start_line", 0)
+                        ),
+                    ),
+                    "end_line": func_data.get(
+                        "source_line_end",
+                        func_data.get(
+                            "Func src line end", func_data.get("end_line", 0)
+                        ),
+                    ),
+                    "cyclomatic_complexity": func_data.get(
+                        "Cyclomatic complexity", func_data.get("complexity", 0)
+                    ),
+                    "reached_by_fuzzers": func_data.get(
+                        "Reached by Fuzzers", func_data.get("reached_by_fuzzers", [])
+                    ),
+                    "reached_by_functions": func_data.get(
+                        "Reached by functions", func_data.get("reached_by_functions", 0)
+                    ),
+                    "callsites": func_data.get(
+                        "Callsites", func_data.get("callsites", {})
+                    ),
+                }
+            )
 
         return functions
 
-    def _build_call_graph(self, functions_data: List[dict]) -> Tuple[dict, dict, List[str]]:
+    def _build_call_graph(
+        self, functions_data: List[dict]
+    ) -> Tuple[dict, dict, List[str]]:
         """
         Build call graph and calculate distances from entry points.
 
@@ -433,7 +465,7 @@ class StaticAnalysisImporter:
                     stripped_name = func_name
                     for prefix in ["OSS_FUZZ_", "FUZZ_", "ossfuzz_"]:
                         if func_name.startswith(prefix):
-                            stripped_name = func_name[len(prefix):]
+                            stripped_name = func_name[len(prefix) :]
                             break
 
                     if stripped_name in extracted_by_name:
@@ -469,7 +501,7 @@ class StaticAnalysisImporter:
         functions_data: List[dict],
         call_graph: dict,
         distances: dict,
-        entry_points: List[str]
+        entry_points: List[str],
     ) -> None:
         """
         Import CallGraphNode records to MongoDB.

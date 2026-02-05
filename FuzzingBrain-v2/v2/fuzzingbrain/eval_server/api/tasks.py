@@ -11,6 +11,7 @@ router = APIRouter()
 
 class TaskData(BaseModel):
     """Task data from FuzzingBrain."""
+
     task_id: str
     instance_id: str = ""
     project_name: str = ""
@@ -22,6 +23,7 @@ class TaskData(BaseModel):
 
 class TaskResponse(BaseModel):
     """Task response."""
+
     task_id: str
     instance_id: str
     project_name: str
@@ -51,7 +53,9 @@ async def register_task(data: TaskData) -> Dict[str, Any]:
         "instance_id": data.instance_id,
         "project_name": data.project_name,
         "status": data.status,
-        "started_at": datetime.fromisoformat(data.started_at) if data.started_at else datetime.utcnow(),
+        "started_at": datetime.fromisoformat(data.started_at)
+        if data.started_at
+        else datetime.utcnow(),
         "ended_at": datetime.fromisoformat(data.ended_at) if data.ended_at else None,
         "config": data.config,
         "created_at": datetime.utcnow(),
@@ -105,19 +109,25 @@ async def list_tasks(
         workers = await mongo.get_workers_by_task(task["task_id"])
         agents = await mongo.get_agents_by_task(task["task_id"])
 
-        result.append(TaskResponse(
-            task_id=task["task_id"],
-            instance_id=task.get("instance_id", ""),
-            project_name=task.get("project_name", ""),
-            status=task.get("status", "unknown"),
-            started_at=task.get("started_at").isoformat() if task.get("started_at") else None,
-            ended_at=task.get("ended_at").isoformat() if task.get("ended_at") else None,
-            cost_total=cost_data.get("total_cost", 0.0),
-            llm_calls=cost_data.get("total_calls", 0),
-            tool_calls=0,  # TODO: add tool call count
-            worker_count=len(workers),
-            agent_count=len(agents),
-        ))
+        result.append(
+            TaskResponse(
+                task_id=task["task_id"],
+                instance_id=task.get("instance_id", ""),
+                project_name=task.get("project_name", ""),
+                status=task.get("status", "unknown"),
+                started_at=task.get("started_at").isoformat()
+                if task.get("started_at")
+                else None,
+                ended_at=task.get("ended_at").isoformat()
+                if task.get("ended_at")
+                else None,
+                cost_total=cost_data.get("total_cost", 0.0),
+                llm_calls=cost_data.get("total_calls", 0),
+                tool_calls=0,  # TODO: add tool call count
+                worker_count=len(workers),
+                agent_count=len(agents),
+            )
+        )
 
     return result
 
@@ -172,8 +182,12 @@ async def get_task(task_id: str) -> Dict[str, Any]:
             "instance_id": task.get("instance_id", ""),
             "project_name": task.get("project_name", ""),
             "status": task.get("status", "unknown"),
-            "started_at": task.get("started_at").isoformat() if task.get("started_at") else None,
-            "ended_at": task.get("ended_at").isoformat() if task.get("ended_at") else None,
+            "started_at": task.get("started_at").isoformat()
+            if task.get("started_at")
+            else None,
+            "ended_at": task.get("ended_at").isoformat()
+            if task.get("ended_at")
+            else None,
             "config": task.get("config", {}),
         },
         "costs": {
@@ -196,8 +210,12 @@ async def get_task(task_id: str) -> Dict[str, Any]:
                 "fuzzer": w.get("fuzzer", ""),
                 "sanitizer": w.get("sanitizer", ""),
                 "status": w.get("status", "unknown"),
-                "started_at": w.get("started_at").isoformat() if w.get("started_at") else None,
-                "ended_at": w.get("ended_at").isoformat() if w.get("ended_at") else None,
+                "started_at": w.get("started_at").isoformat()
+                if w.get("started_at")
+                else None,
+                "ended_at": w.get("ended_at").isoformat()
+                if w.get("ended_at")
+                else None,
                 "cpu_percent": w.get("cpu_percent"),
                 "memory_mb": w.get("memory_mb"),
             }
@@ -209,8 +227,12 @@ async def get_task(task_id: str) -> Dict[str, Any]:
                 "worker_id": a.get("worker_id", ""),
                 "agent_type": a.get("agent_type", ""),
                 "status": a.get("status", "unknown"),
-                "started_at": a.get("started_at").isoformat() if a.get("started_at") else None,
-                "ended_at": a.get("ended_at").isoformat() if a.get("ended_at") else None,
+                "started_at": a.get("started_at").isoformat()
+                if a.get("started_at")
+                else None,
+                "ended_at": a.get("ended_at").isoformat()
+                if a.get("ended_at")
+                else None,
                 "iteration": a.get("iteration", 0),
                 "max_iteration": agent_iterations.get(a.get("agent_id", ""), 0),
             }
@@ -233,7 +255,9 @@ async def get_task(task_id: str) -> Dict[str, Any]:
                 "cost": c.get("cost_total", 0.0),
                 "tokens": c.get("total_tokens", 0),
                 "latency_ms": c.get("latency_ms", 0),
-                "timestamp": c.get("timestamp").isoformat() if c.get("timestamp") else None,
+                "timestamp": c.get("timestamp").isoformat()
+                if c.get("timestamp")
+                else None,
             }
             for c in llm_calls
         ],
@@ -242,7 +266,9 @@ async def get_task(task_id: str) -> Dict[str, Any]:
                 "log_id": log.get("log_id", ""),
                 "role": log.get("role", ""),
                 "content": log.get("content", "")[:500],  # Truncate
-                "timestamp": log.get("timestamp").isoformat() if log.get("timestamp") else None,
+                "timestamp": log.get("timestamp").isoformat()
+                if log.get("timestamp")
+                else None,
             }
             for log in logs
         ],

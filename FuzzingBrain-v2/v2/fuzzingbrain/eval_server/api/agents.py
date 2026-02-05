@@ -11,6 +11,7 @@ router = APIRouter()
 
 class AgentData(BaseModel):
     """Agent registration data."""
+
     agent_id: str
     task_id: str = ""
     worker_id: str = ""
@@ -23,12 +24,14 @@ class AgentData(BaseModel):
 
 class AgentStatusUpdate(BaseModel):
     """Agent status update."""
+
     status: str
     iteration: Optional[int] = None
 
 
 class AgentResponse(BaseModel):
     """Agent response."""
+
     agent_id: str
     task_id: str
     worker_id: str
@@ -59,7 +62,9 @@ async def register_agent(data: AgentData) -> Dict[str, Any]:
         "instance_id": data.instance_id,
         "agent_type": data.agent_type,
         "status": data.status,
-        "started_at": datetime.fromisoformat(data.started_at) if data.started_at else datetime.utcnow(),
+        "started_at": datetime.fromisoformat(data.started_at)
+        if data.started_at
+        else datetime.utcnow(),
         "iteration": data.iteration,
         "created_at": datetime.utcnow(),
         "last_heartbeat": datetime.utcnow(),
@@ -120,7 +125,12 @@ async def list_agents(
         agents = await mongo.get_agents_by_worker(worker_id)
     else:
         # Get all agents (limited query)
-        agents = await mongo._db.agents.find({}).sort("started_at", -1).limit(100).to_list(length=100)
+        agents = (
+            await mongo._db.agents.find({})
+            .sort("started_at", -1)
+            .limit(100)
+            .to_list(length=100)
+        )
 
     result = []
     for agent in agents:
@@ -129,18 +139,24 @@ async def list_agents(
         # Get log count for this agent
         logs = await mongo.get_agent_logs(agent["agent_id"], limit=1000)
 
-        result.append(AgentResponse(
-            agent_id=agent["agent_id"],
-            task_id=agent.get("task_id", ""),
-            worker_id=agent.get("worker_id", ""),
-            agent_type=agent.get("agent_type", ""),
-            status=agent.get("status", "unknown"),
-            started_at=agent.get("started_at").isoformat() if agent.get("started_at") else None,
-            ended_at=agent.get("ended_at").isoformat() if agent.get("ended_at") else None,
-            iteration=agent.get("iteration", 0),
-            llm_calls=len(llm_calls),
-            log_count=len(logs),
-        ))
+        result.append(
+            AgentResponse(
+                agent_id=agent["agent_id"],
+                task_id=agent.get("task_id", ""),
+                worker_id=agent.get("worker_id", ""),
+                agent_type=agent.get("agent_type", ""),
+                status=agent.get("status", "unknown"),
+                started_at=agent.get("started_at").isoformat()
+                if agent.get("started_at")
+                else None,
+                ended_at=agent.get("ended_at").isoformat()
+                if agent.get("ended_at")
+                else None,
+                iteration=agent.get("iteration", 0),
+                llm_calls=len(llm_calls),
+                log_count=len(logs),
+            )
+        )
 
     return result
 
@@ -167,17 +183,25 @@ async def get_agent(agent_id: str) -> Dict[str, Any]:
     llm_calls = await mongo.get_llm_calls(agent_id=agent_id, limit=50)
 
     # Get cost summary for this agent
-    cost_data = await mongo._db.llm_calls.aggregate([
-        {"$match": {"agent_id": agent_id}},
-        {"$group": {
-            "_id": None,
-            "total_cost": {"$sum": "$cost_total"},
-            "total_calls": {"$sum": 1},
-            "total_tokens": {"$sum": "$total_tokens"},
-        }},
-    ]).to_list(length=1)
+    cost_data = await mongo._db.llm_calls.aggregate(
+        [
+            {"$match": {"agent_id": agent_id}},
+            {
+                "$group": {
+                    "_id": None,
+                    "total_cost": {"$sum": "$cost_total"},
+                    "total_calls": {"$sum": 1},
+                    "total_tokens": {"$sum": "$total_tokens"},
+                }
+            },
+        ]
+    ).to_list(length=1)
 
-    cost_summary = cost_data[0] if cost_data else {"total_cost": 0, "total_calls": 0, "total_tokens": 0}
+    cost_summary = (
+        cost_data[0]
+        if cost_data
+        else {"total_cost": 0, "total_calls": 0, "total_tokens": 0}
+    )
 
     return {
         "agent": {
@@ -186,8 +210,12 @@ async def get_agent(agent_id: str) -> Dict[str, Any]:
             "worker_id": agent.get("worker_id", ""),
             "agent_type": agent.get("agent_type", ""),
             "status": agent.get("status", "unknown"),
-            "started_at": agent.get("started_at").isoformat() if agent.get("started_at") else None,
-            "ended_at": agent.get("ended_at").isoformat() if agent.get("ended_at") else None,
+            "started_at": agent.get("started_at").isoformat()
+            if agent.get("started_at")
+            else None,
+            "ended_at": agent.get("ended_at").isoformat()
+            if agent.get("ended_at")
+            else None,
             "iteration": agent.get("iteration", 0),
         },
         "costs": {
@@ -200,7 +228,9 @@ async def get_agent(agent_id: str) -> Dict[str, Any]:
                 "log_id": log.get("log_id", ""),
                 "role": log.get("role", ""),
                 "content": log.get("content", "")[:500],
-                "timestamp": log.get("timestamp").isoformat() if log.get("timestamp") else None,
+                "timestamp": log.get("timestamp").isoformat()
+                if log.get("timestamp")
+                else None,
             }
             for log in logs
         ],
@@ -211,7 +241,9 @@ async def get_agent(agent_id: str) -> Dict[str, Any]:
                 "cost": c.get("cost_total", 0.0),
                 "tokens": c.get("total_tokens", 0),
                 "latency_ms": c.get("latency_ms", 0),
-                "timestamp": c.get("timestamp").isoformat() if c.get("timestamp") else None,
+                "timestamp": c.get("timestamp").isoformat()
+                if c.get("timestamp")
+                else None,
             }
             for c in llm_calls
         ],

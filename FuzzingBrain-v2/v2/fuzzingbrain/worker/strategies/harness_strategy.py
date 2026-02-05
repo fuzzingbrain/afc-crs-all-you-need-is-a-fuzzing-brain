@@ -104,7 +104,9 @@ class HarnessStrategy(BaseStrategy):
         # 2. Use AI to generate LLVMFuzzerTestOneInput
         # 3. Return harness code
 
-        self.log_debug(f"Generating harness for: {entry_point.get('function', 'unknown')}")
+        self.log_debug(
+            f"Generating harness for: {entry_point.get('function', 'unknown')}"
+        )
         return None
 
     def _verify_harnesses(self, harnesses: List[dict]) -> List[dict]:

@@ -13,13 +13,15 @@ from typing import Any, Dict, List, Optional
 
 class ReportLevel(Enum):
     """Reporting detail level."""
-    MINIMAL = "minimal"    # Only costs and major events
-    NORMAL = "normal"      # Costs + events + summary logs
-    FULL = "full"          # Complete logs with full content
+
+    MINIMAL = "minimal"  # Only costs and major events
+    NORMAL = "normal"  # Costs + events + summary logs
+    FULL = "full"  # Complete logs with full content
 
 
 class EventType(Enum):
     """Event types for the evaluation system."""
+
     # Lifecycle events
     INSTANCE_STARTED = "instance.started"
     INSTANCE_STOPPED = "instance.stopped"
@@ -64,6 +66,7 @@ class EventType(Enum):
 
 class Severity(Enum):
     """Event severity levels."""
+
     DEBUG = "debug"
     INFO = "info"
     WARNING = "warning"
@@ -74,6 +77,7 @@ class Severity(Enum):
 @dataclass
 class EvalContext:
     """Context for tracking which component is making reports."""
+
     instance_id: str = ""
     task_id: str = ""
     worker_id: str = ""
@@ -86,6 +90,7 @@ class EvalContext:
 @dataclass
 class LLMCallRecord:
     """Record of a single LLM API call."""
+
     call_id: str
     timestamp: datetime
 
@@ -139,6 +144,7 @@ class LLMCallRecord:
 @dataclass
 class ToolCallRecord:
     """Record of a single tool call."""
+
     call_id: str
     timestamp: datetime
     tool_name: str
@@ -183,6 +189,7 @@ class ToolCallRecord:
 @dataclass
 class AgentLogRecord:
     """Record of an agent conversation message."""
+
     log_id: str
     agent_id: str
     timestamp: datetime
@@ -234,6 +241,7 @@ class AgentLogRecord:
 @dataclass
 class Event:
     """An event in the evaluation system."""
+
     event_id: str
     event_type: EventType
     timestamp: datetime
@@ -268,6 +276,7 @@ class Event:
 @dataclass
 class InstanceInfo:
     """Information about a FuzzingBrain instance."""
+
     instance_id: str
     host: str
     pid: int
@@ -289,6 +298,7 @@ class InstanceInfo:
 @dataclass
 class HeartbeatData:
     """Heartbeat data sent periodically."""
+
     instance_id: str
     timestamp: datetime
     status: str = "running"
@@ -315,6 +325,7 @@ class HeartbeatData:
 @dataclass
 class CostSummary:
     """Aggregated cost summary."""
+
     total_cost: float = 0.0
     total_calls: int = 0
     total_input_tokens: int = 0
@@ -329,6 +340,7 @@ class CostSummary:
 @dataclass
 class ToolSummary:
     """Aggregated tool usage summary."""
+
     total_calls: int = 0
     total_success: int = 0
     total_failures: int = 0
@@ -341,6 +353,7 @@ class ToolSummary:
 @dataclass
 class AgentSummary:
     """Aggregated agent summary."""
+
     agent_id: str
     agent_type: str
     status: str = "running"

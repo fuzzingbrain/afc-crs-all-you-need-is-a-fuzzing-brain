@@ -6,7 +6,7 @@ Uses JSON over Unix Domain Socket.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 from enum import Enum
 import json
 import uuid
@@ -59,18 +59,23 @@ class Method(str, Enum):
 @dataclass
 class Request:
     """RPC Request."""
+
     method: str
     params: Dict[str, Any] = field(default_factory=dict)
     request_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
-    source: Optional[str] = None  # e.g., "controller", "worker_libpng_read_fuzzer_address"
+    source: Optional[str] = (
+        None  # e.g., "controller", "worker_libpng_read_fuzzer_address"
+    )
 
     def to_json(self) -> str:
-        return json.dumps({
-            "method": self.method,
-            "params": self.params,
-            "request_id": self.request_id,
-            "source": self.source,
-        })
+        return json.dumps(
+            {
+                "method": self.method,
+                "params": self.params,
+                "request_id": self.request_id,
+                "source": self.source,
+            }
+        )
 
     @classmethod
     def from_json(cls, data: str) -> "Request":
@@ -86,18 +91,21 @@ class Request:
 @dataclass
 class Response:
     """RPC Response."""
+
     success: bool
     data: Any = None
     error: Optional[str] = None
     request_id: str = ""
 
     def to_json(self) -> str:
-        return json.dumps({
-            "success": self.success,
-            "data": self.data,
-            "error": self.error,
-            "request_id": self.request_id,
-        })
+        return json.dumps(
+            {
+                "success": self.success,
+                "data": self.data,
+                "error": self.error,
+                "request_id": self.request_id,
+            }
+        )
 
     @classmethod
     def from_json(cls, data: str) -> "Response":

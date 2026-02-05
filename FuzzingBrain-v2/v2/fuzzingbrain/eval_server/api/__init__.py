@@ -25,7 +25,9 @@ api_router.include_router(agents_router, prefix="/agents", tags=["agents"])
 api_router.include_router(events_router, prefix="/events", tags=["events"])
 api_router.include_router(logs_router, prefix="/logs", tags=["logs"])
 api_router.include_router(costs_router, prefix="/costs", tags=["costs"])
-api_router.include_router(sp_router, prefix="/suspicious-points", tags=["suspicious-points"])
+api_router.include_router(
+    sp_router, prefix="/suspicious-points", tags=["suspicious-points"]
+)
 api_router.include_router(povs_router, prefix="/povs", tags=["povs"])
 api_router.include_router(reports_router, prefix="/reports", tags=["reports"])
 api_router.include_router(directions_router, prefix="/directions", tags=["directions"])

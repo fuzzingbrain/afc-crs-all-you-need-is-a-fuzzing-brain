@@ -123,7 +123,12 @@ def test_each_provider(config: LLMConfig, api_results: dict) -> dict:
 
         try:
             response = client.call(
-                messages=[{"role": "user", "content": "What is 2+2? Reply with just the number."}],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "What is 2+2? Reply with just the number.",
+                    }
+                ],
                 model=model,
                 max_tokens=10,
             )
@@ -131,7 +136,9 @@ def test_each_provider(config: LLMConfig, api_results: dict) -> dict:
             print_status("SUCCESS", True)
             print(f"    Response: {response.content.strip()}")
             print(f"    Latency: {response.latency_ms:.0f}ms")
-            print(f"    Tokens: {response.input_tokens} in / {response.output_tokens} out")
+            print(
+                f"    Tokens: {response.input_tokens} in / {response.output_tokens} out"
+            )
             results[provider] = True
 
         except Exception as e:
@@ -156,14 +163,17 @@ def test_default_model(config: LLMConfig) -> bool:
         return False
 
     print(f"  Model: {config.default_model.name}")
-    print(f"  Question: What is the capital of France?")
+    print("  Question: What is the capital of France?")
     print()
 
     try:
         client = LLMClient(config)
         response = client.call(
             messages=[
-                {"role": "user", "content": "What is the capital of France? Reply in one sentence."}
+                {
+                    "role": "user",
+                    "content": "What is the capital of France? Reply in one sentence.",
+                }
             ],
             max_tokens=100,
         )

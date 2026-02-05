@@ -10,7 +10,7 @@ Handles worker task dispatch:
 
 import shutil
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any
 
 from .logging import logger
 from .config import Config
@@ -48,7 +48,7 @@ class WorkerDispatcher:
         self.task = task
         self.config = config
         self.repos = repos
-        self.project_name = config.ossfuzz_project or task.project_name
+        self.project_name = config.ossfuzz_project_name or task.project_name
         self.analyze_result = analyze_result
         self.pov_count_target = config.pov_count  # Target POV count (0 = unlimited)
 
@@ -73,11 +73,17 @@ class WorkerDispatcher:
         if self.config.fuzzer_filter:
             filter_set = set(self.config.fuzzer_filter)
             before_count = len(successful_fuzzers)
-            successful_fuzzers = [f for f in successful_fuzzers if f.fuzzer_name in filter_set]
-            logger.info(f"Fuzzer filter applied: {before_count} -> {len(successful_fuzzers)} fuzzers (filter: {self.config.fuzzer_filter})")
+            successful_fuzzers = [
+                f for f in successful_fuzzers if f.fuzzer_name in filter_set
+            ]
+            logger.info(
+                f"Fuzzer filter applied: {before_count} -> {len(successful_fuzzers)} fuzzers (filter: {self.config.fuzzer_filter})"
+            )
 
             if not successful_fuzzers:
-                logger.warning(f"No fuzzers match the filter: {self.config.fuzzer_filter}")
+                logger.warning(
+                    f"No fuzzers match the filter: {self.config.fuzzer_filter}"
+                )
                 return []
 
         # Get sanitizers from config (default: ["address"])
@@ -121,10 +127,12 @@ class WorkerDispatcher:
         pairs = []
         for fuzzer in fuzzers:
             for sanitizer in sanitizers:
-                pairs.append({
-                    "fuzzer": fuzzer.fuzzer_name,
-                    "sanitizer": sanitizer,
-                })
+                pairs.append(
+                    {
+                        "fuzzer": fuzzer.fuzzer_name,
+                        "sanitizer": sanitizer,
+                    }
+                )
         return pairs
 
     def _create_worker_workspace(self, pair: Dict[str, str]) -> str:
@@ -144,7 +152,11 @@ class WorkerDispatcher:
 
         # Worker workspace path
         task_workspace = Path(self.task.task_path)
-        worker_workspace = task_workspace / "worker_workspace" / f"{self.project_name}_{fuzzer}_{sanitizer}"
+        worker_workspace = (
+            task_workspace
+            / "worker_workspace"
+            / f"{self.project_name}_{fuzzer}_{sanitizer}"
+        )
 
         # Remove if exists
         if worker_workspace.exists():
@@ -161,7 +173,9 @@ class WorkerDispatcher:
         # Copy fuzz-tooling
         src_fuzz_tooling = task_workspace / "fuzz-tooling"
         if src_fuzz_tooling.exists():
-            shutil.copytree(src_fuzz_tooling, worker_workspace / "fuzz-tooling", symlinks=True)
+            shutil.copytree(
+                src_fuzz_tooling, worker_workspace / "fuzz-tooling", symlinks=True
+            )
             logger.debug(f"Copied fuzz-tooling to {worker_workspace / 'fuzz-tooling'}")
 
         # Copy diff (if exists)
@@ -209,6 +223,7 @@ class WorkerDispatcher:
 
         # Get log directory from current logging config
         from .logging import get_log_dir
+
         log_dir = get_log_dir()
 
         # Get pre-built fuzzer path from analyze_result
@@ -230,23 +245,31 @@ class WorkerDispatcher:
             # Pre-built fuzzer info from Analyzer
             "fuzzer_binary_path": fuzzer_binary_path,
             "build_dir": build_dir,
-            "coverage_fuzzer_path": self.analyze_result.coverage_fuzzer_path if self.analyze_result else None,
+            "coverage_fuzzer_path": self.analyze_result.coverage_fuzzer_path
+            if self.analyze_result
+            else None,
             # Analysis Server socket for code queries
-            "analysis_socket_path": self.analyze_result.socket_path if self.analyze_result else None,
+            "analysis_socket_path": self.analyze_result.socket_path
+            if self.analyze_result
+            else None,
             # Scan mode and diff path for delta mode
             # Use worker's own diff path (copied to worker workspace)
             "scan_mode": self.task.scan_mode.value,
-            "diff_path": str(Path(workspace_path) / "diff" / "ref.diff") if self.task.scan_mode.value == "delta" else None,
+            "diff_path": str(Path(workspace_path) / "diff" / "ref.diff")
+            if self.task.scan_mode.value == "delta"
+            else None,
             # Evaluation server for cost tracking
             "eval_server": self.config.eval_server,
             "budget_limit": self.config.budget_limit,
-            "stop_on_pov": self.config.stop_on_pov,
+            "pov_count": self.config.pov_count,
         }
 
         # Dispatch Celery task with dynamic time limit based on config
         # Convert minutes to seconds, add 5 min buffer for soft limit
         timeout_seconds = self.config.timeout_minutes * 60
-        soft_timeout_seconds = max(timeout_seconds - 300, timeout_seconds // 2)  # 5 min before hard limit
+        soft_timeout_seconds = max(
+            timeout_seconds - 300, timeout_seconds // 2
+        )  # 5 min before hard limit
 
         result = run_worker.apply_async(
             args=[assignment],
@@ -296,16 +319,23 @@ class WorkerDispatcher:
             worker_status = worker.status.value
 
             # If worker is still pending/building/running, check Celery task status
-            if worker_status in ["pending", "building", "running"] and worker.celery_job_id:
+            if (
+                worker_status in ["pending", "building", "running"]
+                and worker.celery_job_id
+            ):
                 try:
                     result = AsyncResult(worker.celery_job_id, app=app)
                     if result.failed():
                         # Celery task failed but DB not updated - mark as failed
                         worker.status = WorkerStatus.FAILED
-                        worker.error_msg = str(result.result) if result.result else "Task failed"
+                        worker.error_msg = (
+                            str(result.result) if result.result else "Task failed"
+                        )
                         self.repos.workers.save(worker)
                         worker_status = "failed"
-                        logger.warning(f"Worker {worker.worker_id} failed (detected via Celery)")
+                        logger.warning(
+                            f"Worker {worker.worker_id} failed (detected via Celery)"
+                        )
                 except Exception:
                     pass  # Ignore Celery check errors
 
@@ -322,10 +352,12 @@ class WorkerDispatcher:
 
     def get_verified_pov_count(self) -> int:
         """Get count of verified (successful) POVs for this task."""
-        return self.repos.povs.count({
-            "task_id": self.task.task_id,
-            "is_successful": True,
-        })
+        return self.repos.povs.count(
+            {
+                "task_id": self.task.task_id,
+                "is_successful": True,
+            }
+        )
 
     def graceful_shutdown(self) -> None:
         """
@@ -333,7 +365,6 @@ class WorkerDispatcher:
 
         Revokes Celery tasks and marks workers as completed.
         """
-        from celery.result import AsyncResult
         from ..celery_app import app
 
         workers = self.repos.workers.find_by_task(self.task.task_id)
@@ -379,9 +410,13 @@ class WorkerDispatcher:
         last_pov_count = 0
 
         if self.pov_count_target > 0:
-            logger.info(f"Waiting for workers to complete (timeout: {timeout_minutes}min, pov_target: {self.pov_count_target})")
+            logger.info(
+                f"Waiting for workers to complete (timeout: {timeout_minutes}min, pov_target: {self.pov_count_target})"
+            )
         else:
-            logger.info(f"Waiting for workers to complete (timeout: {timeout_minutes}min)")
+            logger.info(
+                f"Waiting for workers to complete (timeout: {timeout_minutes}min)"
+            )
 
         while True:
             # Check timeout
@@ -395,17 +430,23 @@ class WorkerDispatcher:
                 }
 
             # Check if any worker hit budget limit
-            budget_exceeded_worker = self.repos.workers.collection.find_one({
-                "task_id": self.task.task_id,
-                "error_msg": {"$regex": "Budget limit exceeded", "$options": "i"}
-            })
+            budget_exceeded_worker = self.repos.workers.collection.find_one(
+                {
+                    "task_id": self.task.task_id,
+                    "error_msg": {"$regex": "Budget limit exceeded", "$options": "i"},
+                }
+            )
             if budget_exceeded_worker:
-                logger.warning(f"Budget limit exceeded - initiating shutdown of all workers")
+                logger.warning(
+                    "Budget limit exceeded - initiating shutdown of all workers"
+                )
                 self.graceful_shutdown()
                 return {
                     "status": "budget_exceeded",
                     "elapsed_minutes": elapsed.total_seconds() / 60,
-                    "error": budget_exceeded_worker.get("error_msg", "Budget limit exceeded"),
+                    "error": budget_exceeded_worker.get(
+                        "error_msg", "Budget limit exceeded"
+                    ),
                     **self.get_status(),
                 }
 
@@ -413,11 +454,15 @@ class WorkerDispatcher:
             if self.pov_count_target > 0:
                 current_pov_count = self.get_verified_pov_count()
                 if current_pov_count != last_pov_count:
-                    logger.info(f"Verified POVs: {current_pov_count}/{self.pov_count_target}")
+                    logger.info(
+                        f"Verified POVs: {current_pov_count}/{self.pov_count_target}"
+                    )
                     last_pov_count = current_pov_count
 
                 if current_pov_count >= self.pov_count_target:
-                    logger.info(f"POV target reached! ({current_pov_count}/{self.pov_count_target})")
+                    logger.info(
+                        f"POV target reached! ({current_pov_count}/{self.pov_count_target})"
+                    )
                     logger.info("Initiating graceful shutdown...")
                     self.graceful_shutdown()
                     return {
@@ -465,27 +510,31 @@ class WorkerDispatcher:
 
         for worker in workers:
             # Count SPs for this worker (by sources array with $elemMatch)
-            sp_count = self.repos.suspicious_points.count({
-                "task_id": self.task.task_id,
-                "sources": {
-                    "$elemMatch": {
-                        "harness_name": worker.fuzzer,
-                        "sanitizer": worker.sanitizer,
-                    }
-                },
-            })
+            sp_count = self.repos.suspicious_points.count(
+                {
+                    "task_id": self.task.task_id,
+                    "sources": {
+                        "$elemMatch": {
+                            "harness_name": worker.fuzzer,
+                            "sanitizer": worker.sanitizer,
+                        }
+                    },
+                }
+            )
 
             # Count merged duplicates for this worker
             # (SPs where this worker's description was merged into existing SP)
-            merged_count = self.repos.suspicious_points.count({
-                "task_id": self.task.task_id,
-                "merged_duplicates": {
-                    "$elemMatch": {
-                        "harness_name": worker.fuzzer,
-                        "sanitizer": worker.sanitizer,
-                    }
-                },
-            })
+            merged_count = self.repos.suspicious_points.count(
+                {
+                    "task_id": self.task.task_id,
+                    "merged_duplicates": {
+                        "$elemMatch": {
+                            "harness_name": worker.fuzzer,
+                            "sanitizer": worker.sanitizer,
+                        }
+                    },
+                }
+            )
 
             # Query actual successful POV count from DB (more reliable than worker's self-report)
             # This handles cases where worker was killed but POVs were already saved
@@ -498,36 +547,42 @@ class WorkerDispatcher:
             # Get all SP IDs created by this worker
             worker_sp_ids = [
                 sp.suspicious_point_id
-                for sp in self.repos.suspicious_points.find_all({
-                    "task_id": self.task.task_id,
-                    "sources": {
-                        "$elemMatch": {
-                            "harness_name": worker.fuzzer,
-                            "sanitizer": worker.sanitizer,
-                        }
-                    },
-                })
+                for sp in self.repos.suspicious_points.find_all(
+                    {
+                        "task_id": self.task.task_id,
+                        "sources": {
+                            "$elemMatch": {
+                                "harness_name": worker.fuzzer,
+                                "sanitizer": worker.sanitizer,
+                            }
+                        },
+                    }
+                )
             ]
 
             # Count all successful POVs for those SPs (including cross-fuzzer hits)
             if worker_sp_ids:
-                actual_pov_count = self.repos.povs.count({
-                    "task_id": self.task.task_id,
-                    "suspicious_point_id": {"$in": worker_sp_ids},
-                    "is_successful": True,
-                })
+                actual_pov_count = self.repos.povs.count(
+                    {
+                        "task_id": self.task.task_id,
+                        "suspicious_point_id": {"$in": worker_sp_ids},
+                        "is_successful": True,
+                    }
+                )
             else:
                 actual_pov_count = 0
 
             # Also count fuzzer-discovered POVs (no SP association)
             # These have suspicious_point_id="" because they were found directly by the fuzzer
-            fuzzer_discovered_count = self.repos.povs.count({
-                "task_id": self.task.task_id,
-                "harness_name": worker.fuzzer,
-                "sanitizer": worker.sanitizer,
-                "suspicious_point_id": {"$in": ["", None]},
-                "is_successful": True,
-            })
+            fuzzer_discovered_count = self.repos.povs.count(
+                {
+                    "task_id": self.task.task_id,
+                    "harness_name": worker.fuzzer,
+                    "sanitizer": worker.sanitizer,
+                    "suspicious_point_id": {"$in": ["", None]},
+                    "is_successful": True,
+                }
+            )
             actual_pov_count += fuzzer_discovered_count
 
             result = {

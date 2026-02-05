@@ -5,8 +5,8 @@ High-level API for extracting function metadata from source code.
 """
 
 from pathlib import Path
-from typing import List, Dict, Any, Optional
-from .parsers.c_parser import parse_c_file, parse_c_files, FunctionInfo
+from typing import List, Dict
+from .parsers.c_parser import parse_c_file, FunctionInfo
 
 
 # Default directories to exclude (system headers, third-party libs, build artifacts)
@@ -34,8 +34,7 @@ DEFAULT_EXCLUDE_DIRS = {
 
 
 def extract_functions_from_file(
-    file_path: Path,
-    language: str = "c"
+    file_path: Path, language: str = "c"
 ) -> List[FunctionInfo]:
     """
     Extract all functions from a source file.
@@ -69,7 +68,7 @@ def extract_functions_from_directory(
     directory: Path,
     language: str = "c",
     extensions: List[str] = None,
-    exclude_dirs: set = None
+    exclude_dirs: set = None,
 ) -> List[FunctionInfo]:
     """
     Extract all functions from a directory of source files.
@@ -108,9 +107,7 @@ def extract_functions_from_directory(
 
 
 def get_function_metadata(
-    function_names: List[str],
-    project_dir: Path,
-    language: str = "c"
+    function_names: List[str], project_dir: Path, language: str = "c"
 ) -> Dict[str, List[FunctionInfo]]:
     """
     Get metadata for specific functions.
@@ -138,9 +135,7 @@ def get_function_metadata(
 
 
 def find_function_by_name(
-    name: str,
-    project_dir: Path,
-    language: str = "c"
+    name: str, project_dir: Path, language: str = "c"
 ) -> List[FunctionInfo]:
     """
     Find a specific function by name.

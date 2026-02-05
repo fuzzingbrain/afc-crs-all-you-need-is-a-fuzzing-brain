@@ -79,10 +79,7 @@ class WorkspaceCache:
         return f"{project}_{commit_short}_{sanitizers_str}"
 
     def find_cache(
-        self,
-        project: str,
-        commit: str,
-        sanitizers: List[str]
+        self, project: str, commit: str, sanitizers: List[str]
     ) -> Optional[Path]:
         """
         Find matching cache entry.
@@ -191,11 +188,7 @@ class WorkspaceCache:
             return False
 
     def save_from(
-        self,
-        workspace: Path,
-        project: str,
-        commit: str,
-        sanitizers: List[str]
+        self, workspace: Path, project: str, commit: str, sanitizers: List[str]
     ) -> Optional[Path]:
         """
         Save workspace to cache.
@@ -329,7 +322,9 @@ class WorkspaceCache:
                     try:
                         with open(meta_file) as f:
                             meta = json.load(f)
-                        last_used = datetime.fromisoformat(meta.get("last_used", meta.get("created_at", "")))
+                        last_used = datetime.fromisoformat(
+                            meta.get("last_used", meta.get("created_at", ""))
+                        )
                         age_days = (now - last_used).days
                         should_clear = age_days > older_than_days
                     except Exception:
@@ -372,27 +367,37 @@ class WorkspaceCache:
             # Export functions
             functions = repos.functions.find_by_task(task_id)
             for func in functions:
-                func_dict = func.to_dict() if hasattr(func, 'to_dict') else vars(func).copy()
+                func_dict = (
+                    func.to_dict() if hasattr(func, "to_dict") else vars(func).copy()
+                )
                 # Remove task-specific fields that will be replaced on restore
-                func_dict.pop('_id', None)
-                func_dict.pop('task_id', None)
+                func_dict.pop("_id", None)
+                func_dict.pop("task_id", None)
                 db_data["functions"].append(func_dict)
 
             # Export fuzzers
             fuzzers = repos.fuzzers.find_by_task(task_id)
             for fuzzer in fuzzers:
-                fuzzer_dict = fuzzer.to_dict() if hasattr(fuzzer, 'to_dict') else vars(fuzzer).copy()
-                fuzzer_dict.pop('_id', None)
-                fuzzer_dict.pop('task_id', None)
+                fuzzer_dict = (
+                    fuzzer.to_dict()
+                    if hasattr(fuzzer, "to_dict")
+                    else vars(fuzzer).copy()
+                )
+                fuzzer_dict.pop("_id", None)
+                fuzzer_dict.pop("task_id", None)
                 db_data["fuzzers"].append(fuzzer_dict)
 
             # Export callgraph nodes (critical for reachability analysis)
             callgraph_nodes = repos.callgraph_nodes.find_by_task(task_id)
             for node in callgraph_nodes:
-                node_dict = node.to_dict() if hasattr(node, 'to_dict') else vars(node).copy()
-                node_dict.pop('_id', None)
-                node_dict.pop('task_id', None)
-                node_dict.pop('node_id', None)  # MUST remove so __post_init__ regenerates with new task_id
+                node_dict = (
+                    node.to_dict() if hasattr(node, "to_dict") else vars(node).copy()
+                )
+                node_dict.pop("_id", None)
+                node_dict.pop("task_id", None)
+                node_dict.pop(
+                    "node_id", None
+                )  # MUST remove so __post_init__ regenerates with new task_id
                 db_data["callgraph_nodes"].append(node_dict)
 
             # Write to cache
@@ -400,7 +405,9 @@ class WorkspaceCache:
             with open(db_file, "w") as f:
                 json.dump(db_data, f, indent=2, default=str)
 
-            logger.info(f"[Cache] Saved {len(db_data['functions'])} functions, {len(db_data['fuzzers'])} fuzzers, {len(db_data['callgraph_nodes'])} callgraph nodes to cache")
+            logger.info(
+                f"[Cache] Saved {len(db_data['functions'])} functions, {len(db_data['fuzzers'])} fuzzers, {len(db_data['callgraph_nodes'])} callgraph nodes to cache"
+            )
             return True
 
         except Exception as e:
@@ -427,7 +434,7 @@ class WorkspaceCache:
         try:
             db_file = cache_path / "db_data.json"
             if not db_file.exists():
-                logger.warning(f"[Cache] No db_data.json found in cache")
+                logger.warning("[Cache] No db_data.json found in cache")
                 return False
 
             with open(db_file) as f:
@@ -435,6 +442,7 @@ class WorkspaceCache:
 
             # Import functions with new task_id
             from .models import Function
+
             functions_imported = 0
             for func_dict in db_data.get("functions", []):
                 func_dict["task_id"] = task_id
@@ -447,6 +455,7 @@ class WorkspaceCache:
 
             # Import fuzzers with new task_id
             from .models import Fuzzer
+
             fuzzers_imported = 0
             for fuzzer_dict in db_data.get("fuzzers", []):
                 fuzzer_dict["task_id"] = task_id
@@ -460,6 +469,7 @@ class WorkspaceCache:
 
             # Import callgraph nodes with new task_id (critical for reachability)
             from .models import CallGraphNode
+
             callgraph_imported = 0
             for node_dict in db_data.get("callgraph_nodes", []):
                 node_dict["task_id"] = task_id
@@ -470,7 +480,9 @@ class WorkspaceCache:
                 except Exception as e:
                     logger.debug(f"[Cache] Failed to import callgraph node: {e}")
 
-            logger.info(f"[Cache] Restored {functions_imported} functions, {fuzzers_imported} fuzzers, {callgraph_imported} callgraph nodes from cache")
+            logger.info(
+                f"[Cache] Restored {functions_imported} functions, {fuzzers_imported} fuzzers, {callgraph_imported} callgraph nodes from cache"
+            )
             return True
 
         except Exception as e:

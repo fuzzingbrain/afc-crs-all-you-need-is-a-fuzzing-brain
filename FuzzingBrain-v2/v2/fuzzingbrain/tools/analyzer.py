@@ -22,8 +22,10 @@ from ..analyzer import AnalysisClient
 # Using ContextVar for async task isolation (each asyncio.Task has its own context)
 # =============================================================================
 
-_analysis_socket_path: ContextVar[Optional[str]] = ContextVar('analyzer_socket_path', default=None)
-_client_id: ContextVar[str] = ContextVar('analyzer_client_id', default="mcp_agent")
+_analysis_socket_path: ContextVar[Optional[str]] = ContextVar(
+    "analyzer_socket_path", default=None
+)
+_client_id: ContextVar[str] = ContextVar("analyzer_client_id", default="mcp_agent")
 
 # Thread-safe client cache: key = (socket_path, client_id)
 # This ensures each agent gets its own client, but reuses it across thread calls
@@ -78,6 +80,7 @@ def _get_client() -> Optional[AnalysisClient]:
     - Thread-safe access from asyncio.to_thread() worker threads
     """
     import time
+
     t0 = time.time()
 
     socket_path = _analysis_socket_path.get()
@@ -98,7 +101,9 @@ def _get_client() -> Optional[AnalysisClient]:
         # Double-check after acquiring lock
         client = _client_cache.get(cache_key)
         if client is not None:
-            logger.debug(f"[TIMING] Reusing cached AnalysisClient for {client_id} (after lock)")
+            logger.debug(
+                f"[TIMING] Reusing cached AnalysisClient for {client_id} (after lock)"
+            )
             return client
 
         logger.debug(f"[TIMING] Creating new AnalysisClient for {client_id}")
@@ -109,14 +114,14 @@ def _get_client() -> Optional[AnalysisClient]:
                 client_id=client_id,
             )
             t2 = time.time()
-            logger.debug(f"[TIMING] AnalysisClient created in {t2-t1:.3f}s")
+            logger.debug(f"[TIMING] AnalysisClient created in {t2 - t1:.3f}s")
 
             if not client.ping():
                 logger.warning(f"Analysis Server not responding for {client_id}")
                 return None
 
             t3 = time.time()
-            logger.debug(f"[TIMING] ping() completed in {t3-t2:.3f}s")
+            logger.debug(f"[TIMING] ping() completed in {t3 - t2:.3f}s")
 
             # Cache the client
             _client_cache[cache_key] = client
@@ -128,7 +133,7 @@ def _get_client() -> Optional[AnalysisClient]:
 
     t_end = time.time()
     if t_end - t0 > 0.1:  # Only log if > 100ms
-        logger.debug(f"[TIMING] _get_client total: {t_end-t0:.3f}s")
+        logger.debug(f"[TIMING] _get_client total: {t_end - t0:.3f}s")
 
     return client
 
@@ -147,6 +152,7 @@ def _ensure_client() -> Dict[str, Any]:
 # =============================================================================
 # Server Control Tools
 # =============================================================================
+
 
 @tools_mcp.tool
 def analyzer_status() -> Dict[str, Any]:
@@ -176,6 +182,7 @@ def analyzer_status() -> Dict[str, Any]:
 # =============================================================================
 # Function Query Tools
 # =============================================================================
+
 
 @tools_mcp.tool
 def get_function(function_name: str) -> Dict[str, Any]:
@@ -316,6 +323,7 @@ def get_function_source(function_name: str) -> Dict[str, Any]:
 # =============================================================================
 # Call Graph Tools
 # =============================================================================
+
 
 @tools_mcp.tool
 def get_callers(function_name: str) -> Dict[str, Any]:
@@ -467,6 +475,7 @@ def find_all_paths(
 # Reachability Tools
 # =============================================================================
 
+
 @tools_mcp.tool
 def check_reachability(fuzzer_name: str, function_name: str) -> Dict[str, Any]:
     """
@@ -577,6 +586,7 @@ def get_unreached_functions(fuzzer_name: str) -> Dict[str, Any]:
 # =============================================================================
 # Build Info Tools
 # =============================================================================
+
 
 @tools_mcp.tool
 def get_fuzzers() -> Dict[str, Any]:

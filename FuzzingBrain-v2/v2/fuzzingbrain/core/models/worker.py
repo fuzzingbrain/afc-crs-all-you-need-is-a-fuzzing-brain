@@ -10,6 +10,7 @@ from typing import Optional, List
 
 class WorkerStatus(str, Enum):
     """Worker status enum"""
+
     PENDING = "pending"
     BUILDING = "building"
     RUNNING = "running"
@@ -63,11 +64,11 @@ class Worker:
     # Build phase
     phase_build: float = 0.0
     # Strategy phases
-    phase_reachability: float = 0.0      # Step 1: Diff reachability check
-    phase_find_sp: float = 0.0           # Step 2: Find suspicious points
-    phase_verify: float = 0.0            # Step 3: Verify suspicious points
-    phase_pov: float = 0.0               # Step 4: POV generation
-    phase_save: float = 0.0              # Step 5: Save results
+    phase_reachability: float = 0.0  # Step 1: Diff reachability check
+    phase_find_sp: float = 0.0  # Step 2: Find suspicious points
+    phase_verify: float = 0.0  # Step 3: Verify suspicious points
+    phase_pov: float = 0.0  # Step 4: POV generation
+    phase_save: float = 0.0  # Step 5: Save results
 
     @staticmethod
     def generate_worker_id(task_id: str, fuzzer: str, sanitizer: str) -> str:
@@ -192,12 +193,12 @@ class Worker:
         """
         total = self.get_duration_seconds()
         phases = [
-            ("Build", self.phase_build, "#4CAF50"),        # Green
+            ("Build", self.phase_build, "#4CAF50"),  # Green
             ("Reachability", self.phase_reachability, "#2196F3"),  # Blue
-            ("Find SP", self.phase_find_sp, "#FF9800"),    # Orange
-            ("Verify", self.phase_verify, "#9C27B0"),      # Purple
-            ("POV", self.phase_pov, "#E91E63"),            # Pink
-            ("Save", self.phase_save, "#607D8B"),          # Grey
+            ("Find SP", self.phase_find_sp, "#FF9800"),  # Orange
+            ("Verify", self.phase_verify, "#9C27B0"),  # Purple
+            ("POV", self.phase_pov, "#E91E63"),  # Pink
+            ("Save", self.phase_save, "#607D8B"),  # Grey
         ]
 
         result = []
@@ -207,24 +208,32 @@ class Worker:
         for name, duration, color in phases:
             if duration > 0:
                 pct = (duration / total * 100) if total > 0 else 0
-                result.append({
-                    "name": name,
-                    "duration": duration,
-                    "duration_str": f"{duration:.1f}s" if duration < 60 else f"{duration/60:.1f}m",
-                    "percentage": pct,
-                    "color": color,
-                })
+                result.append(
+                    {
+                        "name": name,
+                        "duration": duration,
+                        "duration_str": f"{duration:.1f}s"
+                        if duration < 60
+                        else f"{duration / 60:.1f}m",
+                        "percentage": pct,
+                        "color": color,
+                    }
+                )
 
         # Add "Other" if there's untracked time
         if other_time > 1:  # Only show if > 1 second
             pct = (other_time / total * 100) if total > 0 else 0
-            result.append({
-                "name": "Other",
-                "duration": other_time,
-                "duration_str": f"{other_time:.1f}s" if other_time < 60 else f"{other_time/60:.1f}m",
-                "percentage": pct,
-                "color": "#BDBDBD",  # Light grey
-            })
+            result.append(
+                {
+                    "name": "Other",
+                    "duration": other_time,
+                    "duration_str": f"{other_time:.1f}s"
+                    if other_time < 60
+                    else f"{other_time / 60:.1f}m",
+                    "percentage": pct,
+                    "color": "#BDBDBD",  # Light grey
+                }
+            )
 
         return {
             "total_seconds": total,

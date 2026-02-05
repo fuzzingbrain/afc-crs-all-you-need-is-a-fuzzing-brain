@@ -12,7 +12,6 @@ import asyncio
 import os
 import shutil
 import subprocess
-import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -34,7 +33,7 @@ class ResourceMonitor:
 
     # Resource thresholds
     MAX_CPU_PERCENT = 85.0  # Don't start new build if CPU > 85%
-    MIN_MEMORY_GB = 4.0     # Need at least 4GB free memory per build
+    MIN_MEMORY_GB = 4.0  # Need at least 4GB free memory per build
     MIN_MEMORY_PERCENT = 15.0  # Keep at least 15% memory free
 
     # Estimated resource usage per Docker build
@@ -86,7 +85,10 @@ class ResourceMonitor:
         mem_available_gb = mem.available / (1024**3)
 
         if mem_available_gb < self.MIN_MEMORY_GB:
-            return False, f"Not enough memory ({mem_available_gb:.1f}GB < {self.MIN_MEMORY_GB}GB)"
+            return (
+                False,
+                f"Not enough memory ({mem_available_gb:.1f}GB < {self.MIN_MEMORY_GB}GB)",
+            )
 
         if mem.percent > (100 - self.MIN_MEMORY_PERCENT):
             return False, f"Memory usage too high ({mem.percent:.1f}%)"
@@ -117,7 +119,9 @@ class ResourceMonitor:
         with self._state_lock:
             self.current_builds = max(0, self.current_builds - 1)
 
-    async def wait_for_slot(self, poll_interval: float = 2.0, timeout: float = 300.0) -> bool:
+    async def wait_for_slot(
+        self, poll_interval: float = 2.0, timeout: float = 300.0
+    ) -> bool:
         """
         Wait until a build slot is available.
 
@@ -159,15 +163,37 @@ class AnalyzerBuilder:
 
     # Files to skip when scanning build output
     SKIP_FILES = {
-        "llvm-symbolizer", "sancov", "clang", "clang++",
-        "llvm-cov", "llvm-profdata", "llvm-ar",
+        "llvm-symbolizer",
+        "sancov",
+        "clang",
+        "clang++",
+        "llvm-cov",
+        "llvm-profdata",
+        "llvm-ar",
     }
 
     # Extensions to skip
     SKIP_EXTENSIONS = {
-        ".bin", ".log", ".dict", ".options", ".bc", ".json",
-        ".o", ".a", ".so", ".h", ".c", ".cpp", ".cc", ".py",
-        ".sh", ".txt", ".md", ".zip", ".tar", ".gz",
+        ".bin",
+        ".log",
+        ".dict",
+        ".options",
+        ".bc",
+        ".json",
+        ".o",
+        ".a",
+        ".so",
+        ".h",
+        ".c",
+        ".cpp",
+        ".cc",
+        ".py",
+        ".sh",
+        ".txt",
+        ".md",
+        ".zip",
+        ".tar",
+        ".gz",
     }
 
     def __init__(
@@ -175,7 +201,7 @@ class AnalyzerBuilder:
         task_path: str,
         project_name: str,
         sanitizers: List[str],
-        ossfuzz_project: Optional[str] = None,
+        ossfuzz_project_name: Optional[str] = None,
         log_callback=None,
         log_dir: Optional[str] = None,
         parallel: bool = True,
@@ -190,7 +216,7 @@ class AnalyzerBuilder:
             task_path: Path to task workspace (contains repo/, fuzz-tooling/)
             project_name: Project name
             sanitizers: List of sanitizers to build (e.g., ["address", "memory"])
-            ossfuzz_project: OSS-Fuzz project name if different from project_name
+            ossfuzz_project_name: OSS-Fuzz project name if different from project_name
             log_callback: Optional callback for logging (func(msg, level))
             log_dir: Directory for build logs (build output saved here, not to console)
             parallel: Enable parallel builds (default: True)
@@ -199,7 +225,7 @@ class AnalyzerBuilder:
             analyzer_only_log_callback: Optional callback for analyzer-only logging (not to main log)
         """
         self.task_path = Path(task_path)
-        self.project_name = ossfuzz_project or project_name
+        self.project_name = ossfuzz_project_name or project_name
         self.sanitizers = sanitizers
         self.skip_introspector = skip_introspector
         self.log_callback = log_callback or self._default_log
@@ -273,13 +299,17 @@ class AnalyzerBuilder:
         if not helper_path.exists():
             return False, f"helper.py not found: {helper_path}"
 
-        total_steps = len(self.sanitizers) + 1 + (0 if self.skip_introspector else 1)  # sanitizers + coverage + introspector
+        total_steps = (
+            len(self.sanitizers) + 1 + (0 if self.skip_introspector else 1)
+        )  # sanitizers + coverage + introspector
         current_step = 0
 
         # Step 1-N: Build with each sanitizer
         for sanitizer in self.sanitizers:
             current_step += 1
-            self.log(f"[{current_step}/{total_steps}] Building with {sanitizer} sanitizer")
+            self.log(
+                f"[{current_step}/{total_steps}] Building with {sanitizer} sanitizer"
+            )
 
             success, msg = self._build_sanitizer(sanitizer)
             if not success:
@@ -300,7 +330,9 @@ class AnalyzerBuilder:
         coverage_success, _ = self._build_sanitizer("coverage")
         if coverage_success:
             self._move_build_output("coverage")
-            self.coverage_path = str(self.build_out_base / f"{self.project_name}_coverage")
+            self.coverage_path = str(
+                self.build_out_base / f"{self.project_name}_coverage"
+            )
         else:
             self.log("Coverage build failed, continuing without it", "WARN")
 
@@ -311,14 +343,20 @@ class AnalyzerBuilder:
             introspector_success, _ = self._build_sanitizer("introspector")
             if introspector_success:
                 self._move_build_output("introspector")
-                self.introspector_path = str(self.build_out_base / f"{self.project_name}_introspector")
+                self.introspector_path = str(
+                    self.build_out_base / f"{self.project_name}_introspector"
+                )
             else:
-                self.log("Introspector build failed, static analysis will be limited", "WARN")
+                self.log(
+                    "Introspector build failed, static analysis will be limited", "WARN"
+                )
         else:
             self.log("Skipping introspector build (using prebuild data)")
 
         elapsed = time.time() - start_time
-        self.log(f"Build completed in {elapsed:.1f}s. {len(self.fuzzers)} fuzzers available.")
+        self.log(
+            f"Build completed in {elapsed:.1f}s. {len(self.fuzzers)} fuzzers available."
+        )
 
         return True, f"Built {len(self.fuzzers)} fuzzers in {elapsed:.1f}s"
 
@@ -359,9 +397,13 @@ class AnalyzerBuilder:
             self.log("Skipping introspector build (using prebuild data)")
         total_builds = len(all_builds)
 
-        self.log(f"Starting parallel build: {total_builds} builds, max {self.resource_monitor.max_parallel} parallel")
+        self.log(
+            f"Starting parallel build: {total_builds} builds, max {self.resource_monitor.max_parallel} parallel"
+        )
         status = self.resource_monitor.get_status()
-        self.log(f"System resources: CPU {status['cpu_percent']:.1f}%, Memory available {status['memory_available_gb']:.1f}GB")
+        self.log(
+            f"System resources: CPU {status['cpu_percent']:.1f}%, Memory available {status['memory_available_gb']:.1f}GB"
+        )
 
         # Track build results
         build_results: Dict[str, Tuple[bool, str]] = {}
@@ -393,7 +435,9 @@ class AnalyzerBuilder:
                 self.log(f"[Building] {sanitizer} (parallel)")
 
                 # Step 2: Build in isolated directory with isolated repo
-                success, msg = self._build_sanitizer_in_dir(sanitizer, temp_fuzz_tooling, temp_repo)
+                success, msg = self._build_sanitizer_in_dir(
+                    sanitizer, temp_fuzz_tooling, temp_repo
+                )
 
                 if success:
                     # Step 3: Move output to main fuzz-tooling
@@ -401,7 +445,9 @@ class AnalyzerBuilder:
 
                 with self._lock:
                     completed_count += 1
-                    self.log(f"[{completed_count}/{total_builds}] {sanitizer}: {'OK' if success else 'FAILED'}")
+                    self.log(
+                        f"[{completed_count}/{total_builds}] {sanitizer}: {'OK' if success else 'FAILED'}"
+                    )
 
                 return sanitizer, success, msg
 
@@ -418,10 +464,11 @@ class AnalyzerBuilder:
                             pass
 
         # Run builds in parallel using ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=self.resource_monitor.max_parallel) as executor:
+        with ThreadPoolExecutor(
+            max_workers=self.resource_monitor.max_parallel
+        ) as executor:
             futures = {
-                executor.submit(build_with_isolated_dir, san): san
-                for san in all_builds
+                executor.submit(build_with_isolated_dir, san): san for san in all_builds
             }
 
             for future in as_completed(futures):
@@ -448,20 +495,28 @@ class AnalyzerBuilder:
         # Handle coverage result
         cov_success, _ = build_results.get("coverage", (False, "Not built"))
         if cov_success:
-            self.coverage_path = str(self.build_out_base / f"{self.project_name}_coverage")
+            self.coverage_path = str(
+                self.build_out_base / f"{self.project_name}_coverage"
+            )
         else:
             self.log("Coverage build failed, continuing without it", "WARN")
 
         # Handle introspector result
         intro_success, _ = build_results.get("introspector", (False, "Not built"))
         if intro_success:
-            self.introspector_path = str(self.build_out_base / f"{self.project_name}_introspector")
+            self.introspector_path = str(
+                self.build_out_base / f"{self.project_name}_introspector"
+            )
         else:
-            self.log("Introspector build failed, static analysis will be limited", "WARN")
+            self.log(
+                "Introspector build failed, static analysis will be limited", "WARN"
+            )
 
         elapsed = time.time() - start_time
         successful = sum(1 for s, _ in build_results.values() if s)
-        self.log(f"Parallel build completed in {elapsed:.1f}s. {successful}/{total_builds} succeeded, {len(self.fuzzers)} fuzzers available.")
+        self.log(
+            f"Parallel build completed in {elapsed:.1f}s. {successful}/{total_builds} succeeded, {len(self.fuzzers)} fuzzers available."
+        )
 
         return True, f"Built {len(self.fuzzers)} fuzzers in {elapsed:.1f}s (parallel)"
 
@@ -475,7 +530,8 @@ class AnalyzerBuilder:
         """
         helper_path = self.fuzz_tooling_path / "infra" / "helper.py"
         cmd = [
-            "python3", str(helper_path),
+            "python3",
+            str(helper_path),
             "build_image",
             "--pull",  # Pull latest base images, skip interactive prompt
             self.project_name,
@@ -503,9 +559,15 @@ class AnalyzerBuilder:
                 # Log progress every 20 lines
                 if line_count % 20 == 0:
                     elapsed = time.time() - start_time
-                    self.log_analyzer_only(f"[Docker build] {line_count} lines, {elapsed:.0f}s elapsed...", "DEBUG")
+                    self.log_analyzer_only(
+                        f"[Docker build] {line_count} lines, {elapsed:.0f}s elapsed...",
+                        "DEBUG",
+                    )
                 # Log important Docker build steps
-                if any(kw in line for kw in ["Step ", "Successfully built", "Successfully tagged"]):
+                if any(
+                    kw in line
+                    for kw in ["Step ", "Successfully built", "Successfully tagged"]
+                ):
                     self.log_analyzer_only(f"[Docker] {line}")
                 # Log errors (also to main log for visibility)
                 elif any(kw in line.lower() for kw in ["error", "failed"]):
@@ -515,7 +577,10 @@ class AnalyzerBuilder:
             elapsed = time.time() - start_time
 
             if process.returncode != 0:
-                self.log(f"Docker image pre-build failed (exit code {process.returncode})", "ERROR")
+                self.log(
+                    f"Docker image pre-build failed (exit code {process.returncode})",
+                    "ERROR",
+                )
                 return False
 
             self.log(f"Docker image pre-built successfully in {elapsed:.1f}s")
@@ -550,7 +615,9 @@ class AnalyzerBuilder:
             return temp_dir
 
         except Exception as e:
-            self.log(f"Failed to create temp fuzz-tooling for {sanitizer}: {e}", "ERROR")
+            self.log(
+                f"Failed to create temp fuzz-tooling for {sanitizer}: {e}", "ERROR"
+            )
             return None
 
     def _create_temp_repo(self, sanitizer: str) -> Optional[Path]:
@@ -578,7 +645,9 @@ class AnalyzerBuilder:
             self.log(f"Failed to create temp repo for {sanitizer}: {e}", "ERROR")
             return None
 
-    def _build_sanitizer_in_dir(self, sanitizer: str, fuzz_tooling_dir: Path, repo_dir: Path = None) -> Tuple[bool, str]:
+    def _build_sanitizer_in_dir(
+        self, sanitizer: str, fuzz_tooling_dir: Path, repo_dir: Path = None
+    ) -> Tuple[bool, str]:
         """
         Build with a specific sanitizer in the given directory.
 
@@ -594,11 +663,15 @@ class AnalyzerBuilder:
         repo_path = repo_dir if repo_dir else self.repo_path
 
         cmd = [
-            "python3", str(helper_path),
+            "python3",
+            str(helper_path),
             "build_fuzzers",
-            "--sanitizer", sanitizer,
-            "--engine", "libfuzzer",
-            "--mount_path", f"/src/{self.project_name}",
+            "--sanitizer",
+            sanitizer,
+            "--engine",
+            "libfuzzer",
+            "--mount_path",
+            f"/src/{self.project_name}",
             self.project_name,
             str(repo_path.absolute()),
         ]
@@ -642,7 +715,9 @@ class AnalyzerBuilder:
                 if self.log_dir:
                     error_log = self.log_dir / "error.log"
                     with open(error_log, "a", encoding="utf-8") as f:
-                        f.write(f"[BUILD ERROR] {sanitizer} build failed (code {process.returncode})\n")
+                        f.write(
+                            f"[BUILD ERROR] {sanitizer} build failed (code {process.returncode})\n"
+                        )
                         f.write("Last 20 lines of output:\n")
                         for line in build_output[-20:]:
                             f.write(f"  {line}\n")
@@ -706,10 +781,16 @@ class AnalyzerBuilder:
         try:
             subprocess.run(
                 [
-                    "docker", "run", "--rm",
-                    "-v", f"{dir_path.absolute()}:/fix_perms",
+                    "docker",
+                    "run",
+                    "--rm",
+                    "-v",
+                    f"{dir_path.absolute()}:/fix_perms",
                     "alpine:latest",
-                    "chown", "-R", f"{uid}:{gid}", "/fix_perms"
+                    "chown",
+                    "-R",
+                    f"{uid}:{gid}",
+                    "/fix_perms",
                 ],
                 capture_output=True,
                 timeout=120,
@@ -730,11 +811,15 @@ class AnalyzerBuilder:
         helper_path = self.fuzz_tooling_path / "infra" / "helper.py"
 
         cmd = [
-            "python3", str(helper_path),
+            "python3",
+            str(helper_path),
             "build_fuzzers",
-            "--sanitizer", sanitizer,
-            "--engine", "libfuzzer",
-            "--mount_path", f"/src/{self.project_name}",
+            "--sanitizer",
+            sanitizer,
+            "--engine",
+            "libfuzzer",
+            "--mount_path",
+            f"/src/{self.project_name}",
             self.project_name,
             str(self.repo_path.absolute()),
         ]
@@ -779,7 +864,9 @@ class AnalyzerBuilder:
                 if self.log_dir:
                     error_log = self.log_dir / "error.log"
                     with open(error_log, "a", encoding="utf-8") as f:
-                        f.write(f"[BUILD ERROR] {sanitizer} build failed (code {process.returncode})\n")
+                        f.write(
+                            f"[BUILD ERROR] {sanitizer} build failed (code {process.returncode})\n"
+                        )
                         f.write("Last 20 lines of output:\n")
                         for line in build_output[-20:]:
                             f.write(f"  {line}\n")
@@ -872,12 +959,14 @@ class AnalyzerBuilder:
             fuzzer_names.append(f.name)
 
             # Create FuzzerInfo
-            self.fuzzers.append(FuzzerInfo(
-                name=f.name,
-                sanitizer=sanitizer,
-                binary_path=str(f),
-                source_path=None,  # TODO: find source file
-            ))
+            self.fuzzers.append(
+                FuzzerInfo(
+                    name=f.name,
+                    sanitizer=sanitizer,
+                    binary_path=str(f),
+                    source_path=None,  # TODO: find source file
+                )
+            )
 
         self.log(f"Found {len(fuzzer_names)} fuzzers with {sanitizer}: {fuzzer_names}")
         return fuzzer_names
@@ -901,10 +990,16 @@ class AnalyzerBuilder:
                 try:
                     subprocess.run(
                         [
-                            "docker", "run", "--rm",
-                            "-v", f"{dir_path.absolute()}:/fix_perms",
+                            "docker",
+                            "run",
+                            "--rm",
+                            "-v",
+                            f"{dir_path.absolute()}:/fix_perms",
                             "alpine:latest",
-                            "chown", "-R", f"{uid}:{gid}", "/fix_perms"
+                            "chown",
+                            "-R",
+                            f"{uid}:{gid}",
+                            "/fix_perms",
                         ],
                         capture_output=True,
                         timeout=120,

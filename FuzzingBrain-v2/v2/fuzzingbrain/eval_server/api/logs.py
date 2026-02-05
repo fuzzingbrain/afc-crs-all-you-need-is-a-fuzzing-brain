@@ -11,6 +11,7 @@ router = APIRouter()
 
 class LogData(BaseModel):
     """Single log entry."""
+
     log_id: str
     agent_id: str
     timestamp: str
@@ -33,6 +34,7 @@ class LogData(BaseModel):
 
 class LogsBatch(BaseModel):
     """Batch of logs."""
+
     logs: List[LogData]
 
 
@@ -50,26 +52,30 @@ async def receive_logs(batch: LogsBatch) -> Dict[str, Any]:
     # Convert to MongoDB format
     logs = []
     for log in batch.logs:
-        logs.append({
-            "log_id": log.log_id,
-            "agent_id": log.agent_id,
-            "timestamp": datetime.fromisoformat(log.timestamp.replace("Z", "+00:00")),
-            "role": log.role,
-            "content": log.content,
-            "content_truncated": log.content_truncated,
-            "thinking": log.thinking,
-            "tool_calls": log.tool_calls,
-            "tool_call_id": log.tool_call_id,
-            "tool_name": log.tool_name,
-            "tool_success": log.tool_success,
-            "instance_id": log.instance_id,
-            "task_id": log.task_id,
-            "worker_id": log.worker_id,
-            "agent_type": log.agent_type,
-            "iteration": log.iteration,
-            "tokens": log.tokens,
-            "cost": log.cost,
-        })
+        logs.append(
+            {
+                "log_id": log.log_id,
+                "agent_id": log.agent_id,
+                "timestamp": datetime.fromisoformat(
+                    log.timestamp.replace("Z", "+00:00")
+                ),
+                "role": log.role,
+                "content": log.content,
+                "content_truncated": log.content_truncated,
+                "thinking": log.thinking,
+                "tool_calls": log.tool_calls,
+                "tool_call_id": log.tool_call_id,
+                "tool_name": log.tool_name,
+                "tool_success": log.tool_success,
+                "instance_id": log.instance_id,
+                "task_id": log.task_id,
+                "worker_id": log.worker_id,
+                "agent_type": log.agent_type,
+                "iteration": log.iteration,
+                "tokens": log.tokens,
+                "cost": log.cost,
+            }
+        )
 
     # Store in MongoDB
     await mongo.insert_logs(logs)

@@ -12,6 +12,7 @@ from ..utils import generate_id
 
 class FuzzerStatus(str, Enum):
     """Fuzzer build status enum"""
+
     PENDING = "pending"
     BUILDING = "building"
     SUCCESS = "success"

@@ -13,6 +13,7 @@ Context isolation:
 """
 
 import base64
+import os
 import threading
 import uuid
 from contextvars import ContextVar
@@ -45,7 +46,9 @@ _pov_contexts_lock = threading.Lock()
 
 # Current active worker_id - using ContextVar for async task isolation
 # Each asyncio.Task has its own value, preventing cross-contamination
-_current_worker_id: ContextVar[Optional[str]] = ContextVar('pov_current_worker_id', default=None)
+_current_worker_id: ContextVar[Optional[str]] = ContextVar(
+    "pov_current_worker_id", default=None
+)
 
 
 def set_pov_context(
@@ -208,13 +211,35 @@ def _get_all_fuzzers(ctx: Dict[str, Any]) -> List[Path]:
     # Find directories matching *_{sanitizer}
     fuzzers = []
     skip_files = {
-        "llvm-symbolizer", "sancov", "clang", "clang++",
-        "llvm-cov", "llvm-profdata", "llvm-ar",
+        "llvm-symbolizer",
+        "sancov",
+        "clang",
+        "clang++",
+        "llvm-cov",
+        "llvm-profdata",
+        "llvm-ar",
     }
     skip_extensions = {
-        ".bin", ".log", ".dict", ".options", ".bc", ".json",
-        ".o", ".a", ".so", ".h", ".c", ".cpp", ".cc", ".py",
-        ".sh", ".txt", ".md", ".zip", ".tar", ".gz",
+        ".bin",
+        ".log",
+        ".dict",
+        ".options",
+        ".bc",
+        ".json",
+        ".o",
+        ".a",
+        ".so",
+        ".h",
+        ".c",
+        ".cpp",
+        ".cc",
+        ".py",
+        ".sh",
+        ".txt",
+        ".md",
+        ".zip",
+        ".tar",
+        ".gz",
     }
 
     for out_dir in out_base.iterdir():
@@ -265,6 +290,7 @@ def _ensure_context(worker_id: str = None) -> Optional[Dict[str, Any]]:
 # =============================================================================
 # POV Tools - Implementation Functions (for mcp_factory)
 # =============================================================================
+
 
 def get_fuzzer_info_impl(worker_id: str = None) -> Dict[str, Any]:
     """
@@ -400,7 +426,9 @@ def trace_pov_impl(
     blob_path = work_dir / "input.bin"
     blob_path.write_bytes(blob)
 
-    logger.info(f"[POV] trace_pov: blob={len(blob)} bytes, fuzzer={fuzzer_name}, work_dir={work_dir}")
+    logger.info(
+        f"[POV] trace_pov: blob={len(blob)} bytes, fuzzer={fuzzer_name}, work_dir={work_dir}"
+    )
 
     # =========================================================================
     # Step 2: Run ASAN fuzzer to detect crash (_run_fuzzer_docker)
@@ -408,7 +436,7 @@ def trace_pov_impl(
     if fuzzer_path and docker_image:
         fuzzer_path = Path(fuzzer_path)
         if fuzzer_path.exists():
-            logger.info(f"[POV] Step 2: Running ASAN fuzzer to detect crash...")
+            logger.info("[POV] Step 2: Running ASAN fuzzer to detect crash...")
             success, crashed, output, error = _run_fuzzer_docker(
                 fuzzer_path=fuzzer_path,
                 blob_path=blob_path,
@@ -422,26 +450,36 @@ def trace_pov_impl(
                 # =========================================================
                 vuln_type = _parse_vuln_type(output)
                 hit_funcs = _extract_hit_functions(output, target_functions or [])
-                logger.info(f"[POV] ASAN detected CRASH! vuln_type={vuln_type}, hit_funcs={hit_funcs}")
+                logger.info(
+                    f"[POV] ASAN detected CRASH! vuln_type={vuln_type}, hit_funcs={hit_funcs}"
+                )
                 return {
                     "success": True,
                     "crashed": True,
                     "processor": "asan",
                     "vuln_type": vuln_type,
                     "any_target_reached": len(hit_funcs) > 0,
-                    "target_status": {func: (func in hit_funcs) for func in (target_functions or [])},
+                    "target_status": {
+                        func: (func in hit_funcs) for func in (target_functions or [])
+                    },
                     "executed_functions": hit_funcs,
                     "total_executed": len(hit_funcs),
                     "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
-                               "Please call create_pov directly to save and verify it.",
+                    "Please call create_pov directly to save and verify it.",
                     "sanitizer_output": output[:3000],
                 }
 
-            logger.info(f"[POV] ASAN fuzzer: no crash detected, continuing to GDB trace...")
+            logger.info(
+                "[POV] ASAN fuzzer: no crash detected, continuing to GDB trace..."
+            )
         else:
-            logger.warning(f"[POV] ASAN fuzzer not found: {fuzzer_path}, skipping crash detection")
+            logger.warning(
+                f"[POV] ASAN fuzzer not found: {fuzzer_path}, skipping crash detection"
+            )
     else:
-        logger.warning(f"[POV] fuzzer_path or docker_image not set, skipping ASAN crash detection")
+        logger.warning(
+            "[POV] fuzzer_path or docker_image not set, skipping ASAN crash detection"
+        )
 
     # =========================================================================
     # Step 3: No crash - Run GDB trace for function tracking (processor="gdb")
@@ -451,7 +489,7 @@ def trace_pov_impl(
     any_target_reached = False
     gdb_failed = False
 
-    logger.info(f"[POV] Step 3: Running GDB trace for function tracking...")
+    logger.info("[POV] Step 3: Running GDB trace for function tracking...")
     gdb_success, hit_functions, gdb_crashed, gdb_output = run_gdb_trace(
         fuzzer_name, blob, work_dir, target_functions
     )
@@ -460,18 +498,22 @@ def trace_pov_impl(
         if gdb_crashed:
             # GDB detected crash (shouldn't happen if ASAN didn't, but handle it)
             vuln_type = _parse_vuln_type(gdb_output)
-            logger.info(f"[POV] GDB detected CRASH! vuln_type={vuln_type}, hit_funcs={hit_functions}")
+            logger.info(
+                f"[POV] GDB detected CRASH! vuln_type={vuln_type}, hit_funcs={hit_functions}"
+            )
             return {
                 "success": True,
                 "crashed": True,
                 "processor": "gdb",
                 "vuln_type": vuln_type,
                 "any_target_reached": len(hit_functions) > 0,
-                "target_status": {func: (func in hit_functions) for func in (target_functions or [])},
+                "target_status": {
+                    func: (func in hit_functions) for func in (target_functions or [])
+                },
                 "executed_functions": hit_functions,
                 "total_executed": len(hit_functions),
                 "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
-                           "Please call create_pov directly to save and verify it.",
+                "Please call create_pov directly to save and verify it.",
                 "sanitizer_output": gdb_output[:3000],
             }
 
@@ -484,9 +526,13 @@ def trace_pov_impl(
                     any_target_reached = True
 
         executed_functions = hit_functions
-        logger.info(f"[POV] GDB trace complete: {len(hit_functions)} functions hit, target_reached={any_target_reached}")
+        logger.info(
+            f"[POV] GDB trace complete: {len(hit_functions)} functions hit, target_reached={any_target_reached}"
+        )
     else:
-        logger.warning(f"[POV] GDB trace failed: {gdb_output[:200]}, falling back to coverage...")
+        logger.warning(
+            f"[POV] GDB trace failed: {gdb_output[:200]}, falling back to coverage..."
+        )
         gdb_failed = True
 
     # =========================================================================
@@ -505,7 +551,7 @@ def trace_pov_impl(
                 "error": "GDB failed and coverage context not set",
             }
 
-        logger.info(f"[POV] Step 4: Running coverage fuzzer as fallback...")
+        logger.info("[POV] Step 4: Running coverage fuzzer as fallback...")
         success, lcov_path, msg = run_coverage_fuzzer(fuzzer_name, blob, work_dir)
 
         if not success:
@@ -514,18 +560,22 @@ def trace_pov_impl(
             if crashed:
                 vuln_type = _parse_vuln_type(msg)
                 hit_funcs = _extract_hit_functions(msg, target_functions or [])
-                logger.info(f"[POV] Coverage detected CRASH! vuln_type={vuln_type}, hit_funcs={hit_funcs}")
+                logger.info(
+                    f"[POV] Coverage detected CRASH! vuln_type={vuln_type}, hit_funcs={hit_funcs}"
+                )
                 return {
                     "success": True,
                     "crashed": True,
                     "processor": "cov",
                     "vuln_type": vuln_type,
                     "any_target_reached": len(hit_funcs) > 0,
-                    "target_status": {func: (func in hit_funcs) for func in (target_functions or [])},
+                    "target_status": {
+                        func: (func in hit_funcs) for func in (target_functions or [])
+                    },
                     "executed_functions": hit_funcs,
                     "total_executed": len(hit_funcs),
                     "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
-                               "Please call create_pov directly to save and verify it.",
+                    "Please call create_pov directly to save and verify it.",
                     "sanitizer_output": msg[:3000],
                 }
 
@@ -554,7 +604,9 @@ def trace_pov_impl(
                 if hit:
                     any_target_reached = True
 
-        logger.info(f"[POV] Coverage trace: {len(executed_functions)} functions, target_reached={any_target_reached}")
+        logger.info(
+            f"[POV] Coverage trace: {len(executed_functions)} functions, target_reached={any_target_reached}"
+        )
 
     # =========================================================================
     # Return result with LLM analysis
@@ -583,6 +635,7 @@ def trace_pov_impl(
 # =============================================================================
 # Fuzzer Info Tool
 # =============================================================================
+
 
 @tools_mcp.tool
 def get_fuzzer_info() -> Dict[str, Any]:
@@ -628,6 +681,7 @@ def get_fuzzer_info() -> Dict[str, Any]:
 # POV Generator Code Execution
 # =============================================================================
 
+
 def _execute_generator_code(code: str, num_variants: int = 3) -> tuple:
     """
     Execute POV generator code with full Python capabilities.
@@ -658,12 +712,16 @@ def _execute_generator_code(code: str, num_variants: int = 3) -> tuple:
 
         # Check for generate function
         if "generate" not in exec_globals:
-            return [], "Code must define a generate(variant: int) function that returns bytes"
+            return (
+                [],
+                "Code must define a generate(variant: int) function that returns bytes",
+            )
 
         generate_fn = exec_globals["generate"]
 
         # Check if generate accepts a parameter (new style) or not (legacy)
         import inspect
+
         sig = inspect.signature(generate_fn)
         accepts_variant = len(sig.parameters) > 0
 
@@ -677,10 +735,15 @@ def _execute_generator_code(code: str, num_variants: int = 3) -> tuple:
                 else:
                     # Legacy: call without args (will produce same blob each time)
                     blob = generate_fn()
-                    logger.warning(f"[POV] generate() has no variant parameter - all blobs may be identical!")
+                    logger.warning(
+                        "[POV] generate() has no variant parameter - all blobs may be identical!"
+                    )
 
                 if not isinstance(blob, bytes):
-                    return [], f"generate() must return bytes, got {type(blob).__name__}"
+                    return (
+                        [],
+                        f"generate() must return bytes, got {type(blob).__name__}",
+                    )
                 blobs.append(blob)
             except TypeError as e:
                 # If signature mismatch, try the other way
@@ -707,6 +770,7 @@ def _execute_generator_code(code: str, num_variants: int = 3) -> tuple:
 # POV Tools - Core Implementation (shared by MCP-decorated and _impl versions)
 # =============================================================================
 
+
 def _create_pov_core(
     suspicious_point_id: str,
     generator_code: str,
@@ -726,7 +790,7 @@ def _create_pov_core(
 
     # TEST_ONLY
     with open("/tmp/pov_debug.log", "a") as f:
-        f.write(f"\n=== _create_pov_core ===\n")
+        f.write("\n=== _create_pov_core ===\n")
         f.write(f"output_dir: {output_dir}\n")
         f.write(f"docker_image: {ctx.get('docker_image')}\n")
     repos = ctx["repos"]
@@ -775,7 +839,9 @@ def _create_pov_core(
     # Create output directory: povs/{task_id}/{ctx_worker_id}/attempt_{n}/
     attempt_dir = None
     if output_dir:
-        attempt_dir = output_dir / task_id / ctx_worker_id / f"attempt_{current_attempt:03d}"
+        attempt_dir = (
+            output_dir / task_id / ctx_worker_id / f"attempt_{current_attempt:03d}"
+        )
         attempt_dir.mkdir(parents=True, exist_ok=True)
 
     # Create POV records for each blob
@@ -808,7 +874,9 @@ def _create_pov_core(
                     attempt=current_attempt,
                     variant=variant_idx,
                 )
-                logger.debug(f"[POV] Added blob to SP Fuzzer corpus: sp={suspicious_point_id[:8]}, v={variant_idx}")
+                logger.debug(
+                    f"[POV] Added blob to SP Fuzzer corpus: sp={suspicious_point_id[:8]}, v={variant_idx}"
+                )
             except Exception as e:
                 logger.warning(f"[POV] Failed to add blob to SP Fuzzer: {e}")
 
@@ -834,21 +902,29 @@ def _create_pov_core(
         # Save to database
         if repos.povs.save(pov):
             pov_ids.append(pov_id)
-            logger.info(f"[POV] Created POV {pov_id[:8]} (attempt={current_attempt}, variant={variant_idx})")
+            logger.info(
+                f"[POV] Created POV {pov_id[:8]} (attempt={current_attempt}, variant={variant_idx})"
+            )
         else:
             logger.error(f"[POV] Failed to save POV {pov_id[:8]} to database")
 
     if not pov_ids:
         return {"success": False, "error": "Failed to save any POV records to database"}
 
-    logger.info(f"[POV] Successfully created {len(pov_ids)} POVs for SP {suspicious_point_id[:8]}")
+    logger.info(
+        f"[POV] Successfully created {len(pov_ids)} POVs for SP {suspicious_point_id[:8]}"
+    )
 
     # Get all available fuzzers for cross-fuzzer verification
     all_fuzzers = repos.fuzzers.find_by_task(task_id)
     current_fuzzer_name = ctx.get("fuzzer", "")
-    other_fuzzers = [f for f in all_fuzzers if f.fuzzer_name != current_fuzzer_name and f.binary_path]
+    other_fuzzers = [
+        f for f in all_fuzzers if f.fuzzer_name != current_fuzzer_name and f.binary_path
+    ]
 
-    logger.info(f"[POV] Auto-verifying {len(pov_ids)} POVs on {1 + len(other_fuzzers)} fuzzers...")
+    logger.info(
+        f"[POV] Auto-verifying {len(pov_ids)} POVs on {1 + len(other_fuzzers)} fuzzers..."
+    )
 
     # Auto-verify all generated POVs
     verify_results = []
@@ -861,7 +937,9 @@ def _create_pov_core(
         verify_results.append(result)
         if result.get("crashed"):
             successful_povs.append(pov_id)
-            logger.info(f"[POV] ✓ POV {pov_id[:8]} triggered crash on {current_fuzzer_name}!")
+            logger.info(
+                f"[POV] ✓ POV {pov_id[:8]} triggered crash on {current_fuzzer_name}!"
+            )
         else:
             logger.info(f"[POV] ✗ POV {pov_id[:8]} no crash on {current_fuzzer_name}")
 
@@ -879,7 +957,9 @@ def _create_pov_core(
                     )
                     if other_result.get("crashed"):
                         cross_fuzzer_hits += 1
-                        logger.info(f"[POV] ✓ POV {pov_id[:8]} also crashed on {other_fuzzer.fuzzer_name}!")
+                        logger.info(
+                            f"[POV] ✓ POV {pov_id[:8]} also crashed on {other_fuzzer.fuzzer_name}!"
+                        )
                         # Create new POV record for this fuzzer
                         cross_pov_id = str(uuid.uuid4())
                         cross_pov = POV(
@@ -904,7 +984,9 @@ def _create_pov_core(
                         repos.povs.save(cross_pov)
                         successful_povs.append(cross_pov_id)
                 except Exception as e:
-                    logger.debug(f"[POV] Cross-fuzzer check failed on {other_fuzzer.fuzzer_name}: {e}")
+                    logger.debug(
+                        f"[POV] Cross-fuzzer check failed on {other_fuzzer.fuzzer_name}: {e}"
+                    )
 
     # Return results with verification info
     # Extract key info from verify_results for Agent feedback
@@ -1085,9 +1167,9 @@ def _extract_hit_functions(output: str, target_functions: List[str]) -> List[str
         return []
 
     hit_functions = []
-    for line in output.split('\n'):
+    for line in output.split("\n"):
         # Look for backtrace lines: "#N 0x... in func_name"
-        if ' in ' in line and ('#' in line or 'at ' in line):
+        if " in " in line and ("#" in line or "at " in line):
             for func in target_functions:
                 if func in line and func not in hit_functions:
                     hit_functions.append(func)
@@ -1176,15 +1258,25 @@ def _run_fuzzer_docker(
     def run_with_image(image: str):
         """Run fuzzer with specified docker image."""
         docker_cmd = [
-            "docker", "run", "--rm",
-            "--platform", "linux/amd64",
-            "--entrypoint", "",  # Bypass base-runner's entrypoint script
-            "-e", "FUZZING_ENGINE=libfuzzer",
-            "-e", f"SANITIZER={sanitizer}",
-            "-e", "ARCHITECTURE=x86_64",
-            "-e", "FUZZ_VERBOSE=1",  # Enable verbose output for debugging
-            "-v", f"{fuzzer_dir}:/fuzzers:ro",
-            "-v", f"{work_dir}:/work",
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            "linux/amd64",
+            "--entrypoint",
+            "",  # Bypass base-runner's entrypoint script
+            "-e",
+            "FUZZING_ENGINE=libfuzzer",
+            "-e",
+            f"SANITIZER={sanitizer}",
+            "-e",
+            "ARCHITECTURE=x86_64",
+            "-e",
+            "FUZZ_VERBOSE=1",  # Enable verbose output for debugging
+            "-v",
+            f"{fuzzer_dir}:/fuzzers:ro",
+            "-v",
+            f"{work_dir}:/work",
             image,
             f"/fuzzers/{fuzzer_name}",
             f"-timeout={timeout}",
@@ -1195,7 +1287,7 @@ def _run_fuzzer_docker(
 
         # TEST_ONLY: 写日志到文件
         with open("/tmp/pov_debug.log", "a") as f:
-            f.write(f"\n=== _run_fuzzer_docker ===\n")
+            f.write("\n=== _run_fuzzer_docker ===\n")
             f.write(f"fuzzer_path: {fuzzer_path}\n")
             f.write(f"blob_path: {blob_path}\n")
             f.write(f"docker_image: {docker_image}\n")
@@ -1205,8 +1297,8 @@ def _run_fuzzer_docker(
             docker_cmd,
             capture_output=True,
             text=True,
-            encoding='utf-8',
-            errors='replace',  # Handle binary output gracefully
+            encoding="utf-8",
+            errors="replace",  # Handle binary output gracefully
             timeout=timeout + 30,  # Extra time for Docker overhead
         )
 
@@ -1216,14 +1308,16 @@ def _run_fuzzer_docker(
         with open("/tmp/pov_debug.log", "a") as f:
             f.write(f"returncode: {result.returncode}\n")
             f.write(f"output:\n{combined_output}\n")
-            f.write(f"=== END ===\n")
+            f.write("=== END ===\n")
 
         return result, combined_output
 
     try:
         # FuzzTest fuzzers MUST use base-runner image (only it has 'reproduce' command)
         if "@" in fuzzer_name:
-            logger.debug(f"[POV] FuzzTest fuzzer detected, using {FALLBACK_DOCKER_IMAGE}")
+            logger.debug(
+                f"[POV] FuzzTest fuzzer detected, using {FALLBACK_DOCKER_IMAGE}"
+            )
             result, combined_output = run_with_image(FALLBACK_DOCKER_IMAGE)
         else:
             # Try with primary image first
@@ -1231,9 +1325,14 @@ def _run_fuzzer_docker(
 
             # Check for library loading errors - need to fallback
             # This includes: "error while loading shared libraries" and "GLIBC" version errors
-            if "error while loading shared libraries" in combined_output or "GLIBC" in combined_output:
+            if (
+                "error while loading shared libraries" in combined_output
+                or "GLIBC" in combined_output
+            ):
                 if docker_image != FALLBACK_DOCKER_IMAGE:
-                    logger.warning(f"[POV] Library error with {docker_image}, falling back to {FALLBACK_DOCKER_IMAGE}")
+                    logger.warning(
+                        f"[POV] Library error with {docker_image}, falling back to {FALLBACK_DOCKER_IMAGE}"
+                    )
                     result, combined_output = run_with_image(FALLBACK_DOCKER_IMAGE)
 
         # Check for crash
@@ -1246,14 +1345,23 @@ def _run_fuzzer_docker(
                 crashed = True
 
         # Log execution result
-        logger.info(f"[POV] _run_fuzzer_docker: image={docker_image}, returncode={result.returncode}, crashed={crashed}")
-        print(f"[POV-DEBUG] _run_fuzzer_docker: image={docker_image}, returncode={result.returncode}, crashed={crashed}", flush=True)
+        logger.info(
+            f"[POV] _run_fuzzer_docker: image={docker_image}, returncode={result.returncode}, crashed={crashed}"
+        )
+        print(
+            f"[POV-DEBUG] _run_fuzzer_docker: image={docker_image}, returncode={result.returncode}, crashed={crashed}",
+            flush=True,
+        )
         if crashed:
             # Log first 500 chars of crash output
-            logger.info(f"[POV] _run_fuzzer_docker crash output: {combined_output[:500]}")
+            logger.info(
+                f"[POV] _run_fuzzer_docker crash output: {combined_output[:500]}"
+            )
             print(f"[POV-DEBUG] crash output: {combined_output[:300]}", flush=True)
         else:
-            logger.debug(f"[POV] _run_fuzzer_docker output (no crash): {combined_output[:300]}")
+            logger.debug(
+                f"[POV] _run_fuzzer_docker output (no crash): {combined_output[:300]}"
+            )
 
         return True, crashed, combined_output, None
 
@@ -1324,7 +1432,7 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
     """
     # TEST_ONLY
     with open("/tmp/pov_debug.log", "a") as f:
-        f.write(f"\n=== _verify_pov_core called ===\n")
+        f.write("\n=== _verify_pov_core called ===\n")
         f.write(f"pov_id: {pov_id}\n")
         f.write(f"worker_id: {worker_id}\n")
 
@@ -1336,7 +1444,7 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
     pov = repos.povs.find_by_id(pov_id)
     if not pov:
         with open("/tmp/pov_debug.log", "a") as f:
-            f.write(f"ERROR: POV not found\n")
+            f.write("ERROR: POV not found\n")
         return {"success": False, "error": f"POV {pov_id} not found"}
 
     # Get blob path
@@ -1344,7 +1452,9 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
     # TEST_ONLY
     with open("/tmp/pov_debug.log", "a") as f:
         f.write(f"blob_path from pov: {blob_path}\n")
-        f.write(f"blob_path exists: {Path(blob_path).exists() if blob_path else 'N/A'}\n")
+        f.write(
+            f"blob_path exists: {Path(blob_path).exists() if blob_path else 'N/A'}\n"
+        )
 
     if not blob_path or not Path(blob_path).exists():
         # Try to reconstruct from base64 blob
@@ -1357,11 +1467,14 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
                 blob_path = str(temp_blob)
             else:
                 with open("/tmp/pov_debug.log", "a") as f:
-                    f.write(f"ERROR: No output_dir\n")
-                return {"success": False, "error": "No blob path and no output_dir to reconstruct"}
+                    f.write("ERROR: No output_dir\n")
+                return {
+                    "success": False,
+                    "error": "No blob path and no output_dir to reconstruct",
+                }
         else:
             with open("/tmp/pov_debug.log", "a") as f:
-                f.write(f"ERROR: POV has no blob data\n")
+                f.write("ERROR: POV has no blob data\n")
             return {"success": False, "error": "POV has no blob data"}
 
     blob_path = Path(blob_path)
@@ -1433,6 +1546,7 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
                 results_dir = task_workspace / "results"
                 # Capture analyzer context for restoration in packager's new event loop
                 from .analyzer import get_analyzer_context
+
                 analyzer_socket = get_analyzer_context()
                 packager = POVPackager(
                     str(results_dir),
@@ -1445,8 +1559,8 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
                 # Get SP record from database
                 sp = repos.suspicious_points.find_by_id(pov.suspicious_point_id)
                 if sp:
-                    sp_dict = sp.to_dict() if hasattr(sp, 'to_dict') else vars(sp)
-                    pov_dict = pov.to_dict() if hasattr(pov, 'to_dict') else vars(pov)
+                    sp_dict = sp.to_dict() if hasattr(sp, "to_dict") else vars(sp)
+                    pov_dict = pov.to_dict() if hasattr(pov, "to_dict") else vars(pov)
 
                     # Package synchronously (non-blocking for DB save)
                     zip_path = packager.package_pov(pov_dict, sp_dict)
@@ -1455,7 +1569,9 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
                     else:
                         logger.warning(f"[POV] Failed to package POV {pov_id[:8]}")
                 else:
-                    logger.warning(f"[POV] SP not found for packaging: {pov.suspicious_point_id}")
+                    logger.warning(
+                        f"[POV] SP not found for packaging: {pov.suspicious_point_id}"
+                    )
         except Exception as e:
             # Don't let packaging errors block POV success
             logger.error(f"[POV] Packaging failed (non-fatal): {e}")
@@ -1523,6 +1639,7 @@ def verify_pov(
 # =============================================================================
 # POV Execution Trace
 # =============================================================================
+
 
 def _trace_pov_core(
     pov_id: str,
@@ -1596,17 +1713,21 @@ def _trace_pov_core(
         if crashed:
             # GDB detected crash - POV is correct!
             vuln_type = _parse_vuln_type(gdb_output)
-            logger.info(f"[POV] GDB detected CRASH! POV {pov_id[:8]} is correct. vuln_type={vuln_type}, hit_funcs={hit_functions}")
+            logger.info(
+                f"[POV] GDB detected CRASH! POV {pov_id[:8]} is correct. vuln_type={vuln_type}, hit_funcs={hit_functions}"
+            )
             return {
                 "success": True,
                 "crashed": True,
                 "processor": "gdb",
                 "vuln_type": vuln_type,
                 "executed_functions": hit_functions,
-                "target_reached": {func: (func in hit_functions) for func in (target_functions or [])},
+                "target_reached": {
+                    func: (func in hit_functions) for func in (target_functions or [])
+                },
                 "executed_function_count": len(hit_functions),
                 "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
-                           "Please call create_pov directly to save and verify it.",
+                "Please call create_pov directly to save and verify it.",
                 "sanitizer_output": gdb_output[:3000],
             }
 
@@ -1619,13 +1740,17 @@ def _trace_pov_core(
 
         # If no target hit, try coverage for more detail
         if not any_target_reached and target_functions:
-            logger.info(f"[POV] GDB: no target hit, trying coverage...")
+            logger.info("[POV] GDB: no target hit, trying coverage...")
             gdb_failed = True
         else:
             executed_functions = hit_functions
-            logger.info(f"[POV] GDB trace complete: {len(hit_functions)} breakpoints hit")
+            logger.info(
+                f"[POV] GDB trace complete: {len(hit_functions)} breakpoints hit"
+            )
     else:
-        logger.warning(f"[POV] GDB trace failed: {gdb_output[:200]}, falling back to coverage...")
+        logger.warning(
+            f"[POV] GDB trace failed: {gdb_output[:200]}, falling back to coverage..."
+        )
         gdb_failed = True
 
     # Step 2: Fallback to coverage if GDB failed
@@ -1637,17 +1762,21 @@ def _trace_pov_core(
             if crashed:
                 vuln_type = _parse_vuln_type(msg)
                 hit_funcs = _extract_hit_functions(msg, target_functions or [])
-                logger.info(f"[POV] Coverage detected CRASH! POV {pov_id[:8]} is correct. vuln_type={vuln_type}, hit_funcs={hit_funcs}")
+                logger.info(
+                    f"[POV] Coverage detected CRASH! POV {pov_id[:8]} is correct. vuln_type={vuln_type}, hit_funcs={hit_funcs}"
+                )
                 return {
                     "success": True,
                     "crashed": True,
                     "processor": "cov",
                     "vuln_type": vuln_type,
                     "executed_functions": hit_funcs,
-                    "target_reached": {func: (func in hit_funcs) for func in (target_functions or [])},
+                    "target_reached": {
+                        func: (func in hit_funcs) for func in (target_functions or [])
+                    },
                     "executed_function_count": len(hit_funcs),
                     "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
-                               "Please call create_pov directly to save and verify it.",
+                    "Please call create_pov directly to save and verify it.",
                     "sanitizer_output": msg[:3000],
                 }
 
@@ -1670,7 +1799,9 @@ def _trace_pov_core(
             for func in target_functions:
                 target_reached[func] = func in executed_functions
 
-        logger.info(f"[POV] Coverage trace complete: {len(executed_functions)} functions executed")
+        logger.info(
+            f"[POV] Coverage trace complete: {len(executed_functions)} functions executed"
+        )
 
     return {
         "success": True,
@@ -1684,7 +1815,9 @@ def _trace_pov_core(
 
 def _load_trace_analysis_prompt() -> str:
     """Load trace analysis prompt from markdown file."""
-    prompt_path = Path(__file__).parent.parent / "agents" / "prompts" / "trace_analysis_prompt.md"
+    prompt_path = (
+        Path(__file__).parent.parent / "agents" / "prompts" / "trace_analysis_prompt.md"
+    )
     if prompt_path.exists():
         return prompt_path.read_text()
     return ""
@@ -1708,20 +1841,22 @@ def _analyze_trace(
 
         # Blob preview (hex, first 100 bytes)
         blob_hex = blob[:100].hex()
-        blob_preview = ' '.join(blob_hex[i:i+2] for i in range(0, min(len(blob_hex), 60), 2))
+        blob_preview = " ".join(
+            blob_hex[i : i + 2] for i in range(0, min(len(blob_hex), 60), 2)
+        )
         if len(blob) > 100:
             blob_preview += f"... ({len(blob)} bytes total)"
 
         # Load and format prompt
         prompt_template = _load_trace_analysis_prompt()
         prompt = prompt_template.format(
-            target_functions=target_functions or 'not specified',
+            target_functions=target_functions or "not specified",
             any_target_reached=any_target_reached,
             fuzzer_name=fuzzer_name,
             blob_preview=blob_preview,
-            executed_functions=', '.join(executed_functions[:20]),
+            executed_functions=", ".join(executed_functions[:20]),
             total_executed=len(executed_functions),
-            agent_msg=agent_msg or 'Why did execution stop before reaching target?',
+            agent_msg=agent_msg or "Why did execution stop before reaching target?",
         )
 
         analysis = quick_call(prompt, model=CLAUDE_HAIKU_4_5)
@@ -1790,7 +1925,9 @@ def trace_pov(
         work_dir = Path.cwd() / ".pov_trace" / trace_id
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"[POV] Tracing blob ({len(blob)} bytes) with fuzzer {fuzzer_name}, work_dir={work_dir}")
+    logger.info(
+        f"[POV] Tracing blob ({len(blob)} bytes) with fuzzer {fuzzer_name}, work_dir={work_dir}"
+    )
 
     # =========================================================================
     # Strategy: Try GDB first (reliable crash detection), fallback to coverage
@@ -1802,7 +1939,7 @@ def trace_pov(
     gdb_failed = False
 
     # Step 1: Try GDB trace first
-    logger.info(f"[POV] Trying GDB trace first...")
+    logger.info("[POV] Trying GDB trace first...")
     gdb_success, hit_functions, crashed, gdb_output = run_gdb_trace(
         fuzzer_name, blob, work_dir, target_functions
     )
@@ -1811,18 +1948,22 @@ def trace_pov(
         if crashed:
             # GDB detected crash - POV is correct!
             vuln_type = _parse_vuln_type(gdb_output)
-            logger.info(f"[POV] GDB detected CRASH! POV is correct. vuln_type={vuln_type}, hit_funcs={hit_functions}")
+            logger.info(
+                f"[POV] GDB detected CRASH! POV is correct. vuln_type={vuln_type}, hit_funcs={hit_functions}"
+            )
             return {
                 "success": True,
                 "crashed": True,
                 "processor": "gdb",
                 "vuln_type": vuln_type,
                 "any_target_reached": len(hit_functions) > 0,
-                "target_status": {func: (func in hit_functions) for func in (target_functions or [])},
+                "target_status": {
+                    func: (func in hit_functions) for func in (target_functions or [])
+                },
                 "executed_functions": hit_functions,
                 "total_executed": len(hit_functions),
                 "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
-                           "Please call create_pov directly to save and verify it.",
+                "Please call create_pov directly to save and verify it.",
                 "sanitizer_output": gdb_output[:3000],
             }
 
@@ -1836,13 +1977,17 @@ def trace_pov(
 
         # GDB gives us limited function info, try coverage for more detail
         if not any_target_reached and target_functions:
-            logger.info(f"[POV] GDB: no target hit, trying coverage for more detail...")
+            logger.info("[POV] GDB: no target hit, trying coverage for more detail...")
             gdb_failed = True  # Fall through to coverage
         else:
             executed_functions = hit_functions
-            logger.info(f"[POV] GDB trace complete: {len(hit_functions)} breakpoints hit, target_reached={any_target_reached}")
+            logger.info(
+                f"[POV] GDB trace complete: {len(hit_functions)} breakpoints hit, target_reached={any_target_reached}"
+            )
     else:
-        logger.warning(f"[POV] GDB trace failed: {gdb_output[:200]}, falling back to coverage...")
+        logger.warning(
+            f"[POV] GDB trace failed: {gdb_output[:200]}, falling back to coverage..."
+        )
         gdb_failed = True
 
     # Step 2: Fallback to coverage if GDB failed or didn't give enough info
@@ -1855,18 +2000,22 @@ def trace_pov(
             if crashed:
                 vuln_type = _parse_vuln_type(msg)
                 hit_funcs = _extract_hit_functions(msg, target_functions or [])
-                logger.info(f"[POV] Coverage detected CRASH! POV is correct. vuln_type={vuln_type}, hit_funcs={hit_funcs}")
+                logger.info(
+                    f"[POV] Coverage detected CRASH! POV is correct. vuln_type={vuln_type}, hit_funcs={hit_funcs}"
+                )
                 return {
                     "success": True,
                     "crashed": True,
                     "processor": "cov",
                     "vuln_type": vuln_type,
                     "any_target_reached": len(hit_funcs) > 0,
-                    "target_status": {func: (func in hit_funcs) for func in (target_functions or [])},
+                    "target_status": {
+                        func: (func in hit_funcs) for func in (target_functions or [])
+                    },
                     "executed_functions": hit_funcs,
                     "total_executed": len(hit_funcs),
                     "message": "CRASH DETECTED! This POV successfully triggered the vulnerability. "
-                               "Please call create_pov directly to save and verify it.",
+                    "Please call create_pov directly to save and verify it.",
                     "sanitizer_output": msg[:3000],
                 }
 
@@ -1895,7 +2044,9 @@ def trace_pov(
                 if hit:
                     any_target_reached = True
 
-        logger.info(f"[POV] Coverage trace: {len(executed_functions)} functions, target_reached={any_target_reached}")
+        logger.info(
+            f"[POV] Coverage trace: {len(executed_functions)} functions, target_reached={any_target_reached}"
+        )
 
     # LLM analysis
     analysis = _analyze_trace(

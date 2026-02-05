@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 from .base import BaseStrategy
-from ...core.models import SuspiciousPoint, SPStatus
+from ...core.models import SuspiciousPoint
 from ...tools.code_viewer import set_code_viewer_context
 from ...tools.analyzer import set_analyzer_context
 from ...tools.suspicious_points import set_sp_context
@@ -95,6 +95,7 @@ class POVBaseStrategy(BaseStrategy):
         """Set current operation for evaluation tracking."""
         try:
             from ...eval import get_reporter
+
             reporter = get_reporter()
             reporter.set_operation(operation)
         except Exception:
@@ -108,6 +109,7 @@ class POVBaseStrategy(BaseStrategy):
             Result dictionary with findings
         """
         import time
+
         start_time = time.time()
 
         self.log_info(f"========== {self.strategy_name} Start ==========")
@@ -140,9 +142,11 @@ class POVBaseStrategy(BaseStrategy):
 
             # Step 1.5: Generate delta seeds BEFORE finding SPs (delta-scan mode only)
             # This allows the fuzzer to start running while LLM finds SPs
-            if self.scan_mode == "delta" and hasattr(self, '_generate_delta_seeds'):
+            if self.scan_mode == "delta" and hasattr(self, "_generate_delta_seeds"):
                 self._set_operation("delta_seeds")
-                self.log_info(f"[Step 1.5/5] Generating delta seeds and starting fuzzer...")
+                self.log_info(
+                    "[Step 1.5/5] Generating delta seeds and starting fuzzer..."
+                )
                 step_start = time.time()
                 try:
                     # Pass empty SPs list - we generate seeds based on changed functions only
@@ -154,17 +158,21 @@ class POVBaseStrategy(BaseStrategy):
                     seeds_count = 0
                 step_duration = time.time() - step_start
                 result["phase_delta_seeds"] = step_duration
-                self.log_info(f"[Step 1.5/5] Done in {step_duration:.1f}s - Generated {seeds_count} seeds, fuzzer started")
+                self.log_info(
+                    f"[Step 1.5/5] Done in {step_duration:.1f}s - Generated {seeds_count} seeds, fuzzer started"
+                )
 
             # Step 2: Find suspicious points (fuzzer is already running in background)
             self._set_operation("find_sp")
-            self.log_info(f"[Step 2/5] Finding suspicious points with AI Agent...")
+            self.log_info("[Step 2/5] Finding suspicious points with AI Agent...")
             step_start = time.time()
             suspicious_points = self._find_suspicious_points()
             result["suspicious_points_found"] = len(suspicious_points)
             step_duration = time.time() - step_start
             result["phase_find_sp"] = step_duration
-            self.log_info(f"[Step 2/5] Done in {step_duration:.1f}s - Found {len(suspicious_points)} suspicious points")
+            self.log_info(
+                f"[Step 2/5] Done in {step_duration:.1f}s - Found {len(suspicious_points)} suspicious points"
+            )
 
             if not suspicious_points:
                 self.log_info("No suspicious points found")
@@ -174,7 +182,9 @@ class POVBaseStrategy(BaseStrategy):
             if self.use_pipeline:
                 # Use parallel pipeline for verification and POV generation
                 self._set_operation("verify_pov_pipeline")
-                self.log_info(f"[Step 3-4/5] Running parallel pipeline for verification and POV generation...")
+                self.log_info(
+                    "[Step 3-4/5] Running parallel pipeline for verification and POV generation..."
+                )
                 step_start = time.time()
                 pipeline_stats = self._run_pipeline()
                 result["suspicious_points_verified"] = pipeline_stats.sp_verified
@@ -184,24 +194,32 @@ class POVBaseStrategy(BaseStrategy):
                 # Extract individual phase times from pipeline stats
                 result["phase_verify"] = pipeline_stats.verify_time_total
                 result["phase_pov"] = pipeline_stats.pov_time_total
-                self.log_info(f"[Step 3-4/5] Done in {step_duration:.1f}s (verify: {pipeline_stats.verify_time_total:.1f}s, pov: {pipeline_stats.pov_time_total:.1f}s)")
-                self.log_info(f"  Verified: {pipeline_stats.sp_verified} (real: {pipeline_stats.sp_verified_real}, fp: {pipeline_stats.sp_verified_fp})")
+                self.log_info(
+                    f"[Step 3-4/5] Done in {step_duration:.1f}s (verify: {pipeline_stats.verify_time_total:.1f}s, pov: {pipeline_stats.pov_time_total:.1f}s)"
+                )
+                self.log_info(
+                    f"  Verified: {pipeline_stats.sp_verified} (real: {pipeline_stats.sp_verified_real}, fp: {pipeline_stats.sp_verified_fp})"
+                )
                 self.log_info(f"  POV generated: {pipeline_stats.pov_generated}")
             else:
                 # Sequential verification (original behavior)
                 self._set_operation("verify")
-                self.log_info(f"[Step 3/5] Verifying {len(suspicious_points)} suspicious points...")
+                self.log_info(
+                    f"[Step 3/5] Verifying {len(suspicious_points)} suspicious points..."
+                )
                 step_start = time.time()
                 verified_points = self._verify_suspicious_points(suspicious_points)
                 result["suspicious_points_verified"] = len(verified_points)
                 step_duration = time.time() - step_start
                 result["phase_verify"] = step_duration
                 result["phase_pov"] = 0.0  # No POV in sequential mode
-                self.log_info(f"[Step 3/5] Done in {step_duration:.1f}s - Verified {len(verified_points)} points")
+                self.log_info(
+                    f"[Step 3/5] Done in {step_duration:.1f}s - Verified {len(verified_points)} points"
+                )
 
             # Step 5: Sort and save results
             self._set_operation("save")
-            self.log_info(f"[Step 5/5] Sorting and saving results...")
+            self.log_info("[Step 5/5] Sorting and saving results...")
             step_start = time.time()
 
             # Get latest points from DB
@@ -225,7 +243,9 @@ class POVBaseStrategy(BaseStrategy):
             total_time = time.time() - start_time
             self.log_info(f"========== {self.strategy_name} Complete ==========")
             self.log_info(f"Total time: {total_time:.1f}s")
-            self.log_info(f"Results: {result['suspicious_points_found']} found, {result['suspicious_points_verified']} verified, {len(high_conf)} high-confidence, {result.get('pov_generated', 0)} POV generated")
+            self.log_info(
+                f"Results: {result['suspicious_points_found']} found, {result['suspicious_points_verified']} verified, {len(high_conf)} high-confidence, {result.get('pov_generated', 0)} POV generated"
+            )
             return result
 
         except Exception as e:
@@ -292,7 +312,9 @@ class POVBaseStrategy(BaseStrategy):
 
         for i, point in enumerate(suspicious_points):
             point_start = time.time()
-            self.log_info(f"  [{i+1}/{total}] Verifying: {point.function_name} ({point.vuln_type}, score={point.score:.2f})")
+            self.log_info(
+                f"  [{i + 1}/{total}] Verifying: {point.function_name} ({point.vuln_type}, score={point.score:.2f})"
+            )
 
             # Convert SuspiciousPoint to dict for agent
             point_dict = point.to_dict()
@@ -302,7 +324,9 @@ class POVBaseStrategy(BaseStrategy):
                 response = agent.verify_suspicious_point_sync(point_dict)
 
                 # Re-fetch the point from database (agent may have updated it)
-                updated_point = self._get_suspicious_point_by_id(point.suspicious_point_id)
+                updated_point = self._get_suspicious_point_by_id(
+                    point.suspicious_point_id
+                )
                 if updated_point:
                     verified.append(updated_point)
                     elapsed = time.time() - point_start
@@ -318,14 +342,18 @@ class POVBaseStrategy(BaseStrategy):
                     else:
                         status = "verified"
 
-                    self.log_info(f"  [{i+1}/{total}] Done in {elapsed:.1f}s - {status} (score={updated_point.score:.2f})")
+                    self.log_info(
+                        f"  [{i + 1}/{total}] Done in {elapsed:.1f}s - {status} (score={updated_point.score:.2f})"
+                    )
                 else:
                     # Point not found, use original
                     verified.append(point)
-                    self.log_warning(f"  [{i+1}/{total}] Point not found in DB after verification")
+                    self.log_warning(
+                        f"  [{i + 1}/{total}] Point not found in DB after verification"
+                    )
 
             except Exception as e:
-                self.log_error(f"  [{i+1}/{total}] Failed to verify: {e}")
+                self.log_error(f"  [{i + 1}/{total}] Failed to verify: {e}")
                 # Mark as checked but not verified due to error
                 point.is_checked = True
                 point.verification_notes = f"Verification failed: {e}"
@@ -348,12 +376,14 @@ class POVBaseStrategy(BaseStrategy):
             fp_points: List of false positive suspicious points
         """
         # Check if FuzzerManager is available
-        fuzzer_manager = getattr(self.executor, 'fuzzer_manager', None)
+        fuzzer_manager = getattr(self.executor, "fuzzer_manager", None)
         if not fuzzer_manager:
             self.log_debug("FuzzerManager not available, skipping FP seed generation")
             return
 
-        self.log_info(f"Generating FP Seeds for {len(fp_points)} false positive points...")
+        self.log_info(
+            f"Generating FP Seeds for {len(fp_points)} false positive points..."
+        )
 
         # Lazy import SeedAgent
         try:
@@ -379,12 +409,14 @@ class POVBaseStrategy(BaseStrategy):
                 )
 
                 # Run seed generation (sync wrapper for async)
-                result = asyncio.run(seed_agent.generate_fp_seeds(
-                    sp_id=point.suspicious_point_id,
-                    function_name=point.function_name,
-                    vuln_type=point.vuln_type,
-                    description=point.description or "",
-                ))
+                result = asyncio.run(
+                    seed_agent.generate_fp_seeds(
+                        sp_id=point.suspicious_point_id,
+                        function_name=point.function_name,
+                        vuln_type=point.vuln_type,
+                        description=point.description or "",
+                    )
+                )
 
                 if result.get("success"):
                     self.log_info(
@@ -392,10 +424,14 @@ class POVBaseStrategy(BaseStrategy):
                         f"for {point.function_name}"
                     )
                 else:
-                    self.log_warning(f"  Failed to generate FP seeds for {point.function_name}")
+                    self.log_warning(
+                        f"  Failed to generate FP seeds for {point.function_name}"
+                    )
 
             except Exception as e:
-                self.log_warning(f"  FP seed generation failed for {point.function_name}: {e}")
+                self.log_warning(
+                    f"  FP seed generation failed for {point.function_name}: {e}"
+                )
 
     def _get_suspicious_point_by_id(self, sp_id: str) -> Optional[SuspiciousPoint]:
         """
@@ -496,7 +532,7 @@ class POVBaseStrategy(BaseStrategy):
 
         report_path = self.results_path / "suspicious_points_report.json"
         try:
-            with open(report_path, 'w', encoding='utf-8') as f:
+            with open(report_path, "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2, ensure_ascii=False)
             self.log_info(f"Saved results to: {report_path}")
         except Exception as e:
@@ -522,14 +558,18 @@ class POVBaseStrategy(BaseStrategy):
         extensions = [".cc", ".c", ".cpp"]
 
         # Try fuzz-tooling directory first
-        fuzz_tooling_dir = self.workspace_path / "fuzz-tooling" / "projects" / self.project_name
+        fuzz_tooling_dir = (
+            self.workspace_path / "fuzz-tooling" / "projects" / self.project_name
+        )
         for ext in extensions:
             fuzzer_path = fuzz_tooling_dir / f"{self.fuzzer}{ext}"
             if fuzzer_path.exists():
                 try:
                     return fuzzer_path.read_text()
                 except Exception as e:
-                    self.log_warning(f"Failed to read fuzzer source from {fuzzer_path}: {e}")
+                    self.log_warning(
+                        f"Failed to read fuzzer source from {fuzzer_path}: {e}"
+                    )
 
         # Try Analysis Server API
         try:
@@ -566,13 +606,13 @@ class POVBaseStrategy(BaseStrategy):
 
         # Configure pipeline
         config = PipelineConfig(
-            num_verify_agents=2,   # 2 verification agents
-            num_pov_agents=5,      # 5 POV generation agents (parallel)
-            pov_min_score=0.5,     # Minimum score to proceed to POV
-            poll_interval=1.0,     # Poll every 1 second
-            max_idle_cycles=10,    # Exit after 10 idle cycles
-            max_iterations=200,    # Max POV agent iterations
-            max_pov_attempts=40,   # Max POV generation attempts
+            num_verify_agents=2,  # 2 verification agents
+            num_pov_agents=5,  # 5 POV generation agents (parallel)
+            pov_min_score=0.5,  # Minimum score to proceed to POV
+            poll_interval=1.0,  # Poll every 1 second
+            max_idle_cycles=10,  # Exit after 10 idle cycles
+            max_iterations=200,  # Max POV agent iterations
+            max_pov_attempts=40,  # Max POV generation attempts
             fuzzer_path=self.executor.fuzzer_binary_path,
             docker_image=f"gcr.io/oss-fuzz/{self.project_name}",
         )
@@ -612,7 +652,7 @@ class POVBaseStrategy(BaseStrategy):
 
         # Start Global Fuzzer for Delta mode (no Direction Seeds, but FP Seeds need it)
         # In Fullscan mode, Global Fuzzer is started in _generate_direction_seeds_and_start_global_fuzzer
-        fuzzer_manager = getattr(self.executor, 'fuzzer_manager', None)
+        fuzzer_manager = getattr(self.executor, "fuzzer_manager", None)
         if fuzzer_manager and not fuzzer_manager.global_fuzzer:
             self.log_info("Starting Global Fuzzer for FP Seeds collection...")
             try:

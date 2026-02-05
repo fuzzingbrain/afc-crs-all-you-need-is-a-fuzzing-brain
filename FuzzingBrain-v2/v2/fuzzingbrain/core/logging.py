@@ -13,6 +13,7 @@ from typing import Optional, Dict, Any
 
 from loguru import logger
 
+
 # Sanitize stdout/stderr to avoid stray carriage-return progress output
 class _CRSanitizer:
     """Wrap a stream and replace carriage returns with newlines to keep console alignment."""
@@ -49,8 +50,9 @@ def _global_exception_handler(exc_type, exc_value, exc_tb):
         sys.__excepthook__(exc_type, exc_value, exc_tb)
         return
 
-    error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    error_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
     logger.error(f"Uncaught exception:\n{error_msg}")
+
 
 sys.excepthook = _global_exception_handler
 
@@ -66,6 +68,7 @@ _current_log_dir: Optional[Path] = None
 # Worker Colors
 # =============================================================================
 
+
 class WorkerColors:
     """
     Color palette for workers in console output.
@@ -76,11 +79,11 @@ class WorkerColors:
 
     # ANSI color codes - bright/bold colors for better visibility
     PALETTE = [
-        "\033[1;36m",   # Cyan (bright)
-        "\033[1;33m",   # Yellow (bright)
-        "\033[1;35m",   # Magenta (bright)
-        "\033[1;32m",   # Green (bright)
-        "\033[1;34m",   # Blue (bright)
+        "\033[1;36m",  # Cyan (bright)
+        "\033[1;33m",  # Yellow (bright)
+        "\033[1;35m",  # Magenta (bright)
+        "\033[1;32m",  # Green (bright)
+        "\033[1;34m",  # Blue (bright)
         "\033[38;5;208m",  # Orange
         "\033[38;5;141m",  # Purple
         "\033[38;5;229m",  # Light yellow
@@ -102,7 +105,8 @@ class WorkerColors:
     def strip(cls, text: str) -> str:
         """Remove all ANSI color codes from text (for log files)."""
         import re
-        return re.sub(r'\033\[[0-9;]*m', '', text)
+
+        return re.sub(r"\033\[[0-9;]*m", "", text)
 
 
 _LOGO_TOP = """╔════════════════════════════════════════════════════════════════════════════════════════════════════╗
@@ -120,10 +124,18 @@ _LOGO_BOTTOM = """║                                                           
 
 # Role-specific subtitles (centered in 100-char width box)
 _SUBTITLES = {
-    "controller": "║" + "FuzzingBrain Controller - Autonomous Cyber Reasoning System v2.0".center(100) + "║",
-    "worker": "║" + "FuzzingBrain Worker - Autonomous Cyber Reasoning System v2.0".center(100) + "║",
-    "analyzer": "║" + "FuzzingBrain Code Analyzer - Static Analysis & Build System v2.0".center(100) + "║",
-    "agent": "║" + "FuzzingBrain Agent - AI-Powered Vulnerability Hunter v2.0".center(100) + "║",
+    "controller": "║"
+    + "FuzzingBrain Controller - Autonomous Cyber Reasoning System v2.0".center(100)
+    + "║",
+    "worker": "║"
+    + "FuzzingBrain Worker - Autonomous Cyber Reasoning System v2.0".center(100)
+    + "║",
+    "analyzer": "║"
+    + "FuzzingBrain Code Analyzer - Static Analysis & Build System v2.0".center(100)
+    + "║",
+    "agent": "║"
+    + "FuzzingBrain Agent - AI-Powered Vulnerability Hunter v2.0".center(100)
+    + "║",
 }
 
 
@@ -302,7 +314,13 @@ def _create_agent_header(metadata: Dict[str, Any]) -> str:
     lines.append("│" + " PURPOSE ".center(width) + "│")
     lines.append("├" + "─" * width + "┤")
 
-    purpose_keys = ["Direction", "Target Function", "SP ID", "Vulnerability Type", "Goal"]
+    purpose_keys = [
+        "Direction",
+        "Target Function",
+        "SP ID",
+        "Vulnerability Type",
+        "Goal",
+    ]
     has_purpose = False
     for key in purpose_keys:
         if key in metadata and metadata[key]:
@@ -310,7 +328,7 @@ def _create_agent_header(metadata: Dict[str, Any]) -> str:
             value = str(metadata[key])
             # Truncate long values
             if len(value) > width - len(key) - 6:
-                value = value[:width - len(key) - 9] + "..."
+                value = value[: width - len(key) - 9] + "..."
             lines.append("│" + f"  {key}: {value}".ljust(width) + "│")
 
     if not has_purpose:
@@ -609,7 +627,17 @@ def create_final_summary(
     col_patches = 8
 
     # Total width = sum of columns + 7 internal separators (┼)
-    table_width = col_num + col_fuzzer + col_sanitizer + col_status + col_duration + col_sps + col_povs + col_patches + 7
+    table_width = (
+        col_num
+        + col_fuzzer
+        + col_sanitizer
+        + col_status
+        + col_duration
+        + col_sps
+        + col_povs
+        + col_patches
+        + 7
+    )
 
     lines = []
     lines.append("")
@@ -625,51 +653,108 @@ def create_final_summary(
     # Task info
     lines.append("│" + f"  Project:       {project_name}".ljust(table_width) + "│")
     lines.append("│" + f"  Task ID:       {task_id[:16]}...".ljust(table_width) + "│")
-    lines.append("│" + f"  Total Time:    {total_elapsed_minutes:.1f} minutes".ljust(table_width) + "│")
-    lines.append("│" + f"  Workers:       {completed}/{total} completed, {failed} failed".ljust(table_width) + "│")
+    lines.append(
+        "│"
+        + f"  Total Time:    {total_elapsed_minutes:.1f} minutes".ljust(table_width)
+        + "│"
+    )
+    lines.append(
+        "│"
+        + f"  Workers:       {completed}/{total} completed, {failed} failed".ljust(
+            table_width
+        )
+        + "│"
+    )
     lines.append("│" + f"  SPs Found:     {total_sps}".ljust(table_width) + "│")
     if dedup_count > 0:
-        lines.append("│" + f"  SPs Merged:    {dedup_count} (duplicates)".ljust(table_width) + "│")
+        lines.append(
+            "│"
+            + f"  SPs Merged:    {dedup_count} (duplicates)".ljust(table_width)
+            + "│"
+        )
     lines.append("│" + f"  POVs Found:    {total_povs}".ljust(table_width) + "│")
     lines.append("│" + f"  Patches:       {total_patches}".ljust(table_width) + "│")
 
     # Cost and budget info
     if budget_limit > 0:
-        lines.append("│" + f"  API Cost:      ${total_cost:.2f} / ${budget_limit:.2f} budget".ljust(table_width) + "│")
+        lines.append(
+            "│"
+            + f"  API Cost:      ${total_cost:.2f} / ${budget_limit:.2f} budget".ljust(
+                table_width
+            )
+            + "│"
+        )
     else:
-        lines.append("│" + f"  API Cost:      ${total_cost:.2f} (no budget limit)".ljust(table_width) + "│")
+        lines.append(
+            "│"
+            + f"  API Cost:      ${total_cost:.2f} (no budget limit)".ljust(table_width)
+            + "│"
+        )
 
     # Exit reason
     if exit_reason == "budget_exceeded":
-        lines.append("│" + f"  Exit Reason:   BUDGET LIMIT EXCEEDED".ljust(table_width) + "│")
+        lines.append(
+            "│" + "  Exit Reason:   BUDGET LIMIT EXCEEDED".ljust(table_width) + "│"
+        )
     elif exit_reason == "timeout":
-        lines.append("│" + f"  Exit Reason:   Timeout reached".ljust(table_width) + "│")
+        lines.append("│" + "  Exit Reason:   Timeout reached".ljust(table_width) + "│")
     elif exit_reason == "pov_target_reached":
-        lines.append("│" + f"  Exit Reason:   POV target reached".ljust(table_width) + "│")
+        lines.append(
+            "│" + "  Exit Reason:   POV target reached".ljust(table_width) + "│"
+        )
     elif exit_reason == "cancelled":
-        lines.append("│" + f"  Exit Reason:   CANCELLED BY USER (Ctrl+C)".ljust(table_width) + "│")
+        lines.append(
+            "│" + "  Exit Reason:   CANCELLED BY USER (Ctrl+C)".ljust(table_width) + "│"
+        )
 
     lines.append("├" + "─" * table_width + "┤")
 
     # Worker table header
     header = (
-        "│" + " # ".center(col_num) +
-        "│" + " Fuzzer".ljust(col_fuzzer) +
-        "│" + " Sanitizer".ljust(col_sanitizer) +
-        "│" + " Status".ljust(col_status) +
-        "│" + " Duration".center(col_duration) +
-        "│" + " SPs".center(col_sps) +
-        "│" + " POVs".center(col_povs) +
-        "│" + " Patches".center(col_patches) + "│"
+        "│"
+        + " # ".center(col_num)
+        + "│"
+        + " Fuzzer".ljust(col_fuzzer)
+        + "│"
+        + " Sanitizer".ljust(col_sanitizer)
+        + "│"
+        + " Status".ljust(col_status)
+        + "│"
+        + " Duration".center(col_duration)
+        + "│"
+        + " SPs".center(col_sps)
+        + "│"
+        + " POVs".center(col_povs)
+        + "│"
+        + " Patches".center(col_patches)
+        + "│"
     )
     lines.append(header)
-    lines.append("├" + "─" * col_num + "┼" + "─" * col_fuzzer + "┼" + "─" * col_sanitizer + "┼" + "─" * col_status + "┼" + "─" * col_duration + "┼" + "─" * col_sps + "┼" + "─" * col_povs + "┼" + "─" * col_patches + "┤")
+    lines.append(
+        "├"
+        + "─" * col_num
+        + "┼"
+        + "─" * col_fuzzer
+        + "┼"
+        + "─" * col_sanitizer
+        + "┼"
+        + "─" * col_status
+        + "┼"
+        + "─" * col_duration
+        + "┼"
+        + "─" * col_sps
+        + "┼"
+        + "─" * col_povs
+        + "┼"
+        + "─" * col_patches
+        + "┤"
+    )
 
     # Worker rows
     for i, w in enumerate(workers, 1):
         fuzzer = w.get("fuzzer", "N/A")
         if len(fuzzer) > col_fuzzer - 2:
-            fuzzer = fuzzer[:col_fuzzer - 4] + ".."
+            fuzzer = fuzzer[: col_fuzzer - 4] + ".."
 
         status = w.get("status", "unknown")
         status_display = "✓ " + status if status == "completed" else "✗ " + status
@@ -701,29 +786,81 @@ def create_final_summary(
             color = WorkerColors.get(i - 1)
             reset = WorkerColors.RESET
             row = (
-                "│" + color + num_cell + reset +
-                "│" + color + fuzzer_cell + reset +
-                "│" + color + sanitizer_cell + reset +
-                "│" + color + status_cell + reset +
-                "│" + color + duration_cell + reset +
-                "│" + color + sps_cell + reset +
-                "│" + color + povs_cell + reset +
-                "│" + color + patches_cell + reset + "│"
+                "│"
+                + color
+                + num_cell
+                + reset
+                + "│"
+                + color
+                + fuzzer_cell
+                + reset
+                + "│"
+                + color
+                + sanitizer_cell
+                + reset
+                + "│"
+                + color
+                + status_cell
+                + reset
+                + "│"
+                + color
+                + duration_cell
+                + reset
+                + "│"
+                + color
+                + sps_cell
+                + reset
+                + "│"
+                + color
+                + povs_cell
+                + reset
+                + "│"
+                + color
+                + patches_cell
+                + reset
+                + "│"
             )
         else:
             row = (
-                "│" + num_cell +
-                "│" + fuzzer_cell +
-                "│" + sanitizer_cell +
-                "│" + status_cell +
-                "│" + duration_cell +
-                "│" + sps_cell +
-                "│" + povs_cell +
-                "│" + patches_cell + "│"
+                "│"
+                + num_cell
+                + "│"
+                + fuzzer_cell
+                + "│"
+                + sanitizer_cell
+                + "│"
+                + status_cell
+                + "│"
+                + duration_cell
+                + "│"
+                + sps_cell
+                + "│"
+                + povs_cell
+                + "│"
+                + patches_cell
+                + "│"
             )
         lines.append(row)
 
-    lines.append("└" + "─" * col_num + "┴" + "─" * col_fuzzer + "┴" + "─" * col_sanitizer + "┴" + "─" * col_status + "┴" + "─" * col_duration + "┴" + "─" * col_sps + "┴" + "─" * col_povs + "┴" + "─" * col_patches + "┘")
+    lines.append(
+        "└"
+        + "─" * col_num
+        + "┴"
+        + "─" * col_fuzzer
+        + "┴"
+        + "─" * col_sanitizer
+        + "┴"
+        + "─" * col_status
+        + "┴"
+        + "─" * col_duration
+        + "┴"
+        + "─" * col_sps
+        + "┴"
+        + "─" * col_povs
+        + "┴"
+        + "─" * col_patches
+        + "┘"
+    )
     lines.append("")
 
     return "\n".join(lines)

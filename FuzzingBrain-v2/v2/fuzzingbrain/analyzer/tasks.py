@@ -11,15 +11,12 @@ import signal
 import sys
 import time
 import multiprocessing
-from datetime import datetime
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 
 from loguru import logger
 
 from ..celery_app import app
-from ..db import MongoDB, init_repos
-from ..core import Config
 from .models import AnalyzeRequest, AnalyzeResult
 from .server import AnalysisServer
 
@@ -29,7 +26,7 @@ def _run_server_process(
     task_path: str,
     project_name: str,
     sanitizers: list,
-    ossfuzz_project: Optional[str],
+    ossfuzz_project_name: Optional[str],
     language: str,
     log_dir: Optional[str],
     result_queue: multiprocessing.Queue,
@@ -49,6 +46,7 @@ def _run_server_process(
         work_id: Work ID for prebuild data remapping
         fuzzer_sources: Dict mapping fuzzer_name -> source_path (relative to fuzz-tooling)
     """
+
     # Setup signal handlers
     def handle_shutdown(signum, frame):
         logger.info("Received shutdown signal")
@@ -64,7 +62,7 @@ def _run_server_process(
             task_path=task_path,
             project_name=project_name,
             sanitizers=sanitizers,
-            ossfuzz_project=ossfuzz_project,
+            ossfuzz_project_name=ossfuzz_project_name,
             language=language,
             log_dir=log_dir,
             skip_build=skip_build,
@@ -95,11 +93,13 @@ def _run_server_process(
         pass
     except Exception as e:
         logger.error(f"Server process error: {e}")
-        result_queue.put(AnalyzeResult(
-            success=False,
-            task_id=task_id,
-            error_msg=str(e),
-        ).to_dict())
+        result_queue.put(
+            AnalyzeResult(
+                success=False,
+                task_id=task_id,
+                error_msg=str(e),
+            ).to_dict()
+        )
 
 
 @app.task(bind=True, name="analyzer.start_server")
@@ -128,7 +128,7 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
     logger.info(f"[Analyzer] Project: {request.project_name}")
     logger.info(f"[Analyzer] Sanitizers: {request.sanitizers}")
     if request.skip_build:
-        logger.info(f"[Analyzer] Skip build mode enabled (cache restore)")
+        logger.info("[Analyzer] Skip build mode enabled (cache restore)")
     if request.prebuild_dir:
         logger.info(f"[Analyzer] Using prebuild data from: {request.prebuild_dir}")
         logger.info(f"[Analyzer] Work ID for remapping: {request.work_id}")
@@ -144,7 +144,7 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
             request.task_path,
             request.project_name,
             request.sanitizers,
-            request.ossfuzz_project,
+            request.ossfuzz_project_name,
             request.language,
             request.log_dir,
             result_queue,
@@ -176,7 +176,9 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
 
         if result.success:
             logger.info(f"[Analyzer] Server ready: {len(result.fuzzers)} fuzzers")
-            logger.info(f"[Analyzer] Socket: {Path(request.task_path) / 'analyzer.sock'}")
+            logger.info(
+                f"[Analyzer] Socket: {Path(request.task_path) / 'analyzer.sock'}"
+            )
         else:
             logger.error(f"[Analyzer] Server failed: {result.error_msg}")
             # Kill the process if it failed
@@ -233,6 +235,7 @@ def stop_analysis_server(task_path: str) -> bool:
     if socket_path and socket_path.exists():
         try:
             from .client import AnalysisClient
+
             client = AnalysisClient(str(socket_path), timeout=5, client_id="controller")
             client.shutdown()
             client.close()

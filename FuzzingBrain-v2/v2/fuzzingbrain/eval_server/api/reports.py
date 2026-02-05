@@ -35,22 +35,26 @@ async def list_reports(
             if sp:
                 function_name = sp.get("function_name", "")
 
-        reports.append({
-            "id": str(pov.get("_id", "")),
-            "sp_id": sp_id or "",
-            "function_name": function_name,
-            "vuln_type": pov.get("vuln_type", ""),
-            "description": sp.get("description", "") if sp else pov.get("description", ""),
-            "crashed": pov.get("is_successful"),
-            "crash_type": pov.get("vuln_type", ""),
-            "crash_output": pov.get("sanitizer_output", ""),
-            "harness_name": pov.get("harness_name", ""),
-            "sanitizer": pov.get("sanitizer", ""),
-            "pov_input": pov.get("blob", ""),
-            "pov_path": pov.get("blob_path", ""),
-            "gen_code": pov.get("gen_blob", ""),
-            "verification_notes": sp.get("verification_notes", "") if sp else "",
-            "created_at": _format_datetime(pov.get("created_at")),
-        })
+        reports.append(
+            {
+                "id": str(pov.get("_id", "")),
+                "sp_id": sp_id or "",
+                "function_name": function_name,
+                "vuln_type": pov.get("vuln_type", ""),
+                "description": sp.get("description", "")
+                if sp
+                else pov.get("description", ""),
+                "crashed": pov.get("is_successful"),
+                "crash_type": pov.get("vuln_type", ""),
+                "crash_output": pov.get("sanitizer_output", ""),
+                "harness_name": pov.get("harness_name", ""),
+                "sanitizer": pov.get("sanitizer", ""),
+                "pov_input": pov.get("blob", ""),
+                "pov_path": pov.get("blob_path", ""),
+                "gen_code": pov.get("gen_blob", ""),
+                "verification_notes": sp.get("verification_notes", "") if sp else "",
+                "created_at": _format_datetime(pov.get("created_at")),
+            }
+        )
 
     return reports

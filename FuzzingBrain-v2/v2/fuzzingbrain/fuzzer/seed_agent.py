@@ -185,7 +185,9 @@ class SeedAgent(BaseAgent):
     """
 
     default_temperature: float = 0.8  # Higher temperature for diversity
-    enable_context_compression: bool = False  # Short conversations, no compression needed
+    enable_context_compression: bool = (
+        False  # Short conversations, no compression needed
+    )
 
     def __init__(
         self,
@@ -258,11 +260,13 @@ class SeedAgent(BaseAgent):
     def _get_agent_metadata(self) -> dict:
         """Get metadata for agent banner."""
         metadata = super()._get_agent_metadata()
-        metadata.update({
-            "Fuzzer": self.fuzzer,
-            "Sanitizer": self.sanitizer,
-            "Seed Type": self.seed_type,
-        })
+        metadata.update(
+            {
+                "Fuzzer": self.fuzzer,
+                "Sanitizer": self.sanitizer,
+                "Seed Type": self.seed_type,
+            }
+        )
         if self.direction_id:
             metadata["Direction"] = self.direction_id[:8]
         if self.sp_id:
@@ -369,7 +373,6 @@ Generate seeds NOW or this run will produce nothing useful."""
 
     def _get_delta_message(self, **kwargs) -> str:
         """Generate message for delta-scan seed generation."""
-        import json
 
         delta_id = kwargs.get("delta_id", "")
         changed_functions = kwargs.get("changed_functions", [])
@@ -379,20 +382,28 @@ Generate seeds NOW or this run will produce nothing useful."""
 
         # Format changed functions
         if changed_functions:
-            changes_text = "\n".join([
-                f"- **{c.get('function', 'unknown')}** in `{c.get('file', 'unknown')}`"
-                + (f" (reachable, distance={c.get('distance', '?')})" if c.get('static_reachable') else " (static-unreachable, may be reachable via function pointer)")
-                for c in changed_functions
-            ])
+            changes_text = "\n".join(
+                [
+                    f"- **{c.get('function', 'unknown')}** in `{c.get('file', 'unknown')}`"
+                    + (
+                        f" (reachable, distance={c.get('distance', '?')})"
+                        if c.get("static_reachable")
+                        else " (static-unreachable, may be reachable via function pointer)"
+                    )
+                    for c in changed_functions
+                ]
+            )
         else:
             changes_text = "(No changed functions provided)"
 
         # Format suspicious points
         if suspicious_points:
-            sp_text = "\n".join([
-                f"- **{sp.get('vuln_type', 'unknown')}** in `{sp.get('function', 'unknown')}`: {sp.get('description', 'No description')}"
-                for sp in suspicious_points
-            ])
+            sp_text = "\n".join(
+                [
+                    f"- **{sp.get('vuln_type', 'unknown')}** in `{sp.get('function', 'unknown')}`: {sp.get('description', 'No description')}"
+                    for sp in suspicious_points
+                ]
+            )
         else:
             sp_text = "(No suspicious points identified yet - generate seeds to help find them)"
 
@@ -444,6 +455,7 @@ Generate seeds NOW or this run will produce nothing useful."""
         finally:
             # Read seeds_generated from context BEFORE cleanup
             from .seed_tools import get_seed_context
+
             ctx = get_seed_context(self.worker_id)
             self.seeds_generated = ctx.get("seeds_generated", 0)
 
@@ -523,9 +535,7 @@ Generate seeds NOW or this run will produce nothing useful."""
         # Update context
         update_seed_context(sp_id=sp_id, worker_id=self.worker_id)
 
-        logger.info(
-            f"[SeedAgent:{self.worker_id}] Generating FP seeds: sp={sp_id[:8]}"
-        )
+        logger.info(f"[SeedAgent:{self.worker_id}] Generating FP seeds: sp={sp_id[:8]}")
 
         result = await self.run_async(
             seed_type="fp",
@@ -599,7 +609,11 @@ Generate seeds NOW or this run will produce nothing useful."""
 
     def _get_summary_table(self) -> str:
         """Generate summary table for seed agent."""
-        duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
+        duration = (
+            (self.end_time - self.start_time).total_seconds()
+            if self.start_time and self.end_time
+            else 0
+        )
 
         lines = []
         lines.append("")
@@ -609,7 +623,9 @@ Generate seeds NOW or this run will produce nothing useful."""
         lines.append("│" + f"  Fuzzer: {self.fuzzer}".ljust(60) + "│")
         lines.append("│" + f"  Seed Type: {self.seed_type}".ljust(60) + "│")
         if self.direction_id:
-            lines.append("│" + f"  Direction: {self.direction_id[:16]}...".ljust(60) + "│")
+            lines.append(
+                "│" + f"  Direction: {self.direction_id[:16]}...".ljust(60) + "│"
+            )
         if self.sp_id:
             lines.append("│" + f"  SP ID: {self.sp_id[:16]}...".ljust(60) + "│")
         if self.delta_id:

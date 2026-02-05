@@ -90,10 +90,10 @@ class Patch:
     def is_valid(self) -> bool:
         """Check if patch passes all verification"""
         return (
-            self.apply_check and
-            self.compilation_check and
-            self.pov_check and
-            self.test_check
+            self.apply_check
+            and self.compilation_check
+            and self.pov_check
+            and self.test_check
         )
 
     @property

@@ -28,7 +28,9 @@ class MongoDB:
         return cls._instance
 
     @classmethod
-    def connect(cls, url: str = "mongodb://localhost:27017", db_name: str = "fuzzingbrain") -> Database:
+    def connect(
+        cls, url: str = "mongodb://localhost:27017", db_name: str = "fuzzingbrain"
+    ) -> Database:
         """
         Connect to MongoDB and return database instance.
 

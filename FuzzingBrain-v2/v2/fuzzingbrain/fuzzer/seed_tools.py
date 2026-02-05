@@ -10,11 +10,9 @@ Each agent is identified by its worker_id.
 
 import hashlib
 import threading
-import uuid
 from contextvars import ContextVar
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from loguru import logger
 
@@ -32,7 +30,7 @@ _seed_contexts_lock = threading.Lock()
 
 # Current active worker_id - using ContextVar for async task isolation
 _current_seed_worker_id: ContextVar[Optional[str]] = ContextVar(
-    'seed_current_worker_id', default=None
+    "seed_current_worker_id", default=None
 )
 
 # Module-level fallback for when ContextVar doesn't propagate to MCP tools
@@ -208,6 +206,7 @@ def _ensure_context(worker_id: str = None) -> Optional[Dict[str, Any]]:
 # Seed Generator Code Execution
 # =============================================================================
 
+
 def _execute_seed_generator(
     code: str,
     num_seeds: int = 5,
@@ -239,12 +238,16 @@ def _execute_seed_generator(
 
         # Check for generate function
         if "generate" not in exec_globals:
-            return [], "Code must define a generate(seed_num: int) function that returns bytes"
+            return (
+                [],
+                "Code must define a generate(seed_num: int) function that returns bytes",
+            )
 
         generate_fn = exec_globals["generate"]
 
         # Check function signature
         import inspect
+
         sig = inspect.signature(generate_fn)
         accepts_param = len(sig.parameters) > 0
 
@@ -256,10 +259,15 @@ def _execute_seed_generator(
                     seed = generate_fn(seed_num)
                 else:
                     seed = generate_fn()
-                    logger.warning("[Seed] generate() has no parameter - all seeds may be identical!")
+                    logger.warning(
+                        "[Seed] generate() has no parameter - all seeds may be identical!"
+                    )
 
                 if not isinstance(seed, bytes):
-                    return [], f"generate() must return bytes, got {type(seed).__name__}"
+                    return (
+                        [],
+                        f"generate() must return bytes, got {type(seed).__name__}",
+                    )
                 seeds.append(seed)
             except Exception as e:
                 return [], f"Error in generate({seed_num}): {type(e).__name__}: {e}"
@@ -275,6 +283,7 @@ def _execute_seed_generator(
 # =============================================================================
 # Seed Tools - Implementation Functions
 # =============================================================================
+
 
 def create_seed_impl(
     generator_code: str,
@@ -308,7 +317,10 @@ def create_seed_impl(
 
     # Validate seed_type
     if seed_type not in ["direction", "fp", "delta"]:
-        return {"success": False, "error": f"Invalid seed_type: {seed_type}. Must be 'direction', 'fp', or 'delta'"}
+        return {
+            "success": False,
+            "error": f"Invalid seed_type: {seed_type}. Must be 'direction', 'fp', or 'delta'",
+        }
 
     # For direction seeds, need direction_id
     if seed_type == "direction" and not direction_id:
@@ -361,7 +373,9 @@ def create_seed_impl(
                     path = fuzzer_manager.add_direction_seed(seed_data, direction_id)
                 elif seed_type == "delta":
                     # Delta seeds go to Global Fuzzer like direction seeds
-                    path = fuzzer_manager.add_direction_seed(seed_data, f"delta_{delta_id}")
+                    path = fuzzer_manager.add_direction_seed(
+                        seed_data, f"delta_{delta_id}"
+                    )
                 else:  # fp
                     path = fuzzer_manager.add_fp_seed(seed_data, sp_id)
                 seed_info.seed_path = str(path)
@@ -405,6 +419,7 @@ def create_seed_impl(
 # =============================================================================
 # Seed Tools - MCP Decorated
 # =============================================================================
+
 
 @tools_mcp.tool
 def create_seed(
@@ -489,7 +504,10 @@ def create_seed(
     elif ctx.get("sp_id"):
         seed_type = "fp"
     else:
-        return {"success": False, "error": "No delta_id, direction_id, or sp_id in context"}
+        return {
+            "success": False,
+            "error": "No delta_id, direction_id, or sp_id in context",
+        }
 
     return create_seed_impl(
         generator_code=generator_code,

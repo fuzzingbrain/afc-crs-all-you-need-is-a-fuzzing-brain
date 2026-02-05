@@ -11,10 +11,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
-from fastmcp import Client, FastMCP
+from fastmcp import Client
 from loguru import logger
 
-from ..llms import LLMClient, LLMResponse, ModelInfo
+from ..llms import LLMClient, ModelInfo
 from ..tools.mcp_factory import create_isolated_mcp_server
 from ..core.logging import get_agent_banner_and_header
 
@@ -28,9 +28,14 @@ def _get_reporter():
     if _reporter_getter is None:
         try:
             from ..eval import get_reporter
+
             _reporter_getter = get_reporter
         except ImportError:
-            _reporter_getter = lambda: None
+
+            def _null_reporter():
+                return None
+
+            _reporter_getter = _null_reporter
     return _reporter_getter()
 
 
@@ -81,7 +86,9 @@ class BaseAgent(ABC):
         self.model = model
         self.max_iterations = max_iterations
         self.verbose = verbose
-        self.temperature = temperature if temperature is not None else self.default_temperature
+        self.temperature = (
+            temperature if temperature is not None else self.default_temperature
+        )
 
         # Logging context
         self.task_id = task_id
@@ -222,7 +229,9 @@ class BaseAgent(ABC):
 
     def _load_compression_prompt(self) -> str:
         """Load the context compression prompt template."""
-        prompt_path = Path(__file__).parent / "prompts" / "context_compression_prompt.md"
+        prompt_path = (
+            Path(__file__).parent / "prompts" / "context_compression_prompt.md"
+        )
         if prompt_path.exists():
             return prompt_path.read_text(encoding="utf-8")
         # Fallback
@@ -246,7 +255,10 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
 
         # Only compress if we have enough messages (at least 10)
         if len(self.messages) < 10:
-            self._log(f"Skipping compression: not enough messages ({len(self.messages)} < 10)", level="DEBUG")
+            self._log(
+                f"Skipping compression: not enough messages ({len(self.messages)} < 10)",
+                level="DEBUG",
+            )
             return
 
         # Keep first 2 messages (system + initial user)
@@ -264,7 +276,10 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                 break
 
         if len(self.messages) <= keep_start + keep_end:
-            self._log(f"Skipping compression: not enough middle ({len(self.messages)} <= {keep_start}+{keep_end})", level="DEBUG")
+            self._log(
+                f"Skipping compression: not enough middle ({len(self.messages)} <= {keep_start}+{keep_end})",
+                level="DEBUG",
+            )
             return
 
         # Messages to compress
@@ -305,6 +320,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
 
         try:
             from ..llms.models import CLAUDE_SONNET_4
+
             response = await self.llm_client.acall(
                 messages=[{"role": "user", "content": compression_prompt}],
                 model=CLAUDE_SONNET_4,
@@ -313,26 +329,37 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             summary = f"[CONTEXT COMPRESSED - {len(middle_messages)} messages]\n\n{response.content}"
         except Exception as e:
             # Fallback to simple summary
-            self._log(f"Sonnet compression failed: {e}, using fallback", level="WARNING")
+            self._log(
+                f"Sonnet compression failed: {e}, using fallback", level="WARNING"
+            )
             # Mechanical fallback: just keep tool names and truncate results
             fallback_lines = []
             for msg in middle_messages:
                 if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                    tools = [tc.get("function", {}).get("name", "") for tc in msg["tool_calls"]]
+                    tools = [
+                        tc.get("function", {}).get("name", "")
+                        for tc in msg["tool_calls"]
+                    ]
                     fallback_lines.append(f"Called: {', '.join(tools)}")
                 elif msg.get("role") == "tool":
                     content = msg.get("content", "")[:200]
                     fallback_lines.append(f"Result: {content}...")
-            summary = f"[CONTEXT COMPRESSED - {len(middle_messages)} messages]\n" + "\n".join(fallback_lines)
+            summary = (
+                f"[CONTEXT COMPRESSED - {len(middle_messages)} messages]\n"
+                + "\n".join(fallback_lines)
+            )
 
         # Replace middle messages with compressed summary
         self.messages = (
-            self.messages[:keep_start] +
-            [{"role": "user", "content": summary}] +
-            self.messages[-keep_end:]
+            self.messages[:keep_start]
+            + [{"role": "user", "content": summary}]
+            + self.messages[-keep_end:]
         )
 
-        self._log(f"Context compressed: {len(middle_messages)} messages → 1 summary", level="INFO")
+        self._log(
+            f"Context compressed: {len(middle_messages)} messages → 1 summary",
+            level="INFO",
+        )
 
     def _setup_logging(self) -> None:
         """Set up agent-specific logging."""
@@ -363,8 +390,8 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             f.write("\n")
 
         # Get fuzzer and sanitizer from subclass if available
-        fuzzer = getattr(self, 'fuzzer', '') or ''
-        sanitizer = getattr(self, 'sanitizer', '') or ''
+        fuzzer = getattr(self, "fuzzer", "") or ""
+        sanitizer = getattr(self, "sanitizer", "") or ""
 
         # Add file handler with agent-specific filter
         self._agent_logger = logger.bind(
@@ -400,7 +427,9 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             self._log_file,
             level="DEBUG",
             format=log_format,
-            filter=lambda record: record["extra"].get("agent_instance_id") == instance_id,
+            filter=lambda record: (
+                record["extra"].get("agent_instance_id") == instance_id
+            ),
             encoding="utf-8",
             mode="a",  # Append after banner
         )
@@ -415,7 +444,9 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
     def _log(self, message: str, level: str = "DEBUG") -> None:
         """Log a message with agent context."""
         if self._agent_logger:
-            log_func = getattr(self._agent_logger, level.lower(), self._agent_logger.debug)
+            log_func = getattr(
+                self._agent_logger, level.lower(), self._agent_logger.debug
+            )
             log_func(message)
         elif self.verbose:
             # Fallback to standard logger
@@ -434,7 +465,11 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         Returns:
             Formatted summary string with box drawing characters
         """
-        duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
+        duration = (
+            (self.end_time - self.start_time).total_seconds()
+            if self.start_time and self.end_time
+            else 0
+        )
 
         lines = []
         lines.append("")
@@ -467,15 +502,15 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
 
     def _init_chat_log(self) -> None:
         """Initialize the detailed chat log file with markdown header."""
-        if not hasattr(self, '_chat_log_file') or not self._chat_log_file:
+        if not hasattr(self, "_chat_log_file") or not self._chat_log_file:
             return
         try:
             # Get fuzzer and sanitizer from subclass if available
-            fuzzer = getattr(self, 'fuzzer', '') or ''
-            sanitizer = getattr(self, 'sanitizer', '') or ''
+            fuzzer = getattr(self, "fuzzer", "") or ""
+            sanitizer = getattr(self, "sanitizer", "") or ""
 
             with open(self._chat_log_file, "w", encoding="utf-8") as f:
-                f.write(f"# Agent Chat Log\n\n")
+                f.write("# Agent Chat Log\n\n")
                 f.write(f"- **Agent**: {self.agent_name}\n")
                 f.write(f"- **Task ID**: {self.task_id}\n")
                 f.write(f"- **Worker ID**: {self.worker_id}\n")
@@ -484,8 +519,10 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                 if sanitizer:
                     f.write(f"- **Sanitizer**: {sanitizer}\n")
                 f.write(f"- **Start Time**: {datetime.now().isoformat()}\n")
-                f.write(f"- **Model**: {self.model.id if hasattr(self.model, 'id') else (self.model or 'default')}\n")
-                f.write(f"\n{'='*80}\n\n")
+                f.write(
+                    f"- **Model**: {self.model.id if hasattr(self.model, 'id') else (self.model or 'default')}\n"
+                )
+                f.write(f"\n{'=' * 80}\n\n")
         except Exception as e:
             self._log(f"Failed to init chat log: {e}", level="ERROR")
 
@@ -523,7 +560,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                 tool_success=tool_success,
             )
 
-        if not hasattr(self, '_chat_log_file') or not self._chat_log_file:
+        if not hasattr(self, "_chat_log_file") or not self._chat_log_file:
             return
 
         try:
@@ -532,16 +569,16 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
 
                 # Role-specific formatting with clear visual separators
                 if role == "system":
-                    f.write(f"## 📋 SYSTEM PROMPT\n")
+                    f.write("## 📋 SYSTEM PROMPT\n")
                     f.write(f"*[{timestamp}]*\n\n")
                     f.write(f"```\n{content}\n```\n\n")
-                    f.write(f"{'─'*80}\n\n")
+                    f.write(f"{'─' * 80}\n\n")
 
                 elif role == "user":
                     f.write(f"## 👤 USER (Iteration {iteration})\n")
                     f.write(f"*[{timestamp}]*\n\n")
                     f.write(f"{content}\n\n")
-                    f.write(f"{'─'*80}\n\n")
+                    f.write(f"{'─' * 80}\n\n")
 
                 elif role == "assistant":
                     f.write(f"## 🤖 ASSISTANT (Iteration {iteration})\n")
@@ -549,7 +586,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                     if content:
                         f.write(f"{content}\n\n")
                     if tool_calls:
-                        f.write(f"### Tool Calls:\n")
+                        f.write("### Tool Calls:\n")
                         for tc in tool_calls:
                             func_name = tc.get("function", {}).get("name", "unknown")
                             func_args = tc.get("function", {}).get("arguments", "{}")
@@ -557,33 +594,41 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                             f.write(f"- **{func_name}** (id: `{tc_id}`)\n")
                             f.write(f"  ```json\n  {func_args}\n  ```\n")
                         f.write("\n")
-                    f.write(f"{'─'*80}\n\n")
+                    f.write(f"{'─' * 80}\n\n")
 
                 elif role == "tool":
-                    f.write(f"## 🔧 TOOL RESULT\n")
+                    f.write("## 🔧 TOOL RESULT\n")
                     f.write(f"*[{timestamp}]* Tool Call ID: `{tool_call_id}`\n\n")
                     # Truncate very long tool results for readability
                     if len(content) > 5000:
-                        f.write(f"```\n{content[:5000]}\n... (truncated, {len(content)} total chars)\n```\n\n")
+                        f.write(
+                            f"```\n{content[:5000]}\n... (truncated, {len(content)} total chars)\n```\n\n"
+                        )
                     else:
                         f.write(f"```\n{content}\n```\n\n")
-                    f.write(f"{'─'*80}\n\n")
+                    f.write(f"{'─' * 80}\n\n")
 
         except Exception as e:
             self._log(f"Failed to log chat message: {e}", level="ERROR")
 
     def _finalize_chat_log(self, final_response: str) -> None:
         """Finalize the chat log with summary statistics."""
-        if not hasattr(self, '_chat_log_file') or not self._chat_log_file:
+        if not hasattr(self, "_chat_log_file") or not self._chat_log_file:
             return
 
         try:
-            duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
+            duration = (
+                (self.end_time - self.start_time).total_seconds()
+                if self.start_time and self.end_time
+                else 0
+            )
 
             with open(self._chat_log_file, "a", encoding="utf-8") as f:
-                f.write(f"\n{'='*80}\n")
-                f.write(f"# SUMMARY\n\n")
-                f.write(f"- **End Time**: {self.end_time.isoformat() if self.end_time else 'N/A'}\n")
+                f.write(f"\n{'=' * 80}\n")
+                f.write("# SUMMARY\n\n")
+                f.write(
+                    f"- **End Time**: {self.end_time.isoformat() if self.end_time else 'N/A'}\n"
+                )
                 f.write(f"- **Duration**: {duration:.2f} seconds\n")
                 f.write(f"- **Total Iterations**: {self.total_iterations}\n")
                 f.write(f"- **Total Tool Calls**: {self.total_tool_calls}\n")
@@ -598,29 +643,40 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             return
 
         # Get fuzzer and sanitizer from subclass if available
-        fuzzer = getattr(self, 'fuzzer', '') or ''
-        sanitizer = getattr(self, 'sanitizer', '') or ''
+        fuzzer = getattr(self, "fuzzer", "") or ""
+        sanitizer = getattr(self, "sanitizer", "") or ""
 
         conv_file = self._log_file.with_suffix(".conversation.json")
         try:
             with open(conv_file, "w", encoding="utf-8") as f:
-                json.dump({
-                    "agent": self.agent_name,
-                    "task_id": self.task_id,
-                    "worker_id": self.worker_id,
-                    "fuzzer": fuzzer,
-                    "sanitizer": sanitizer,
-                    "start_time": self.start_time.isoformat() if self.start_time else None,
-                    "end_time": self.end_time.isoformat() if self.end_time else None,
-                    "total_iterations": self.total_iterations,
-                    "total_tool_calls": self.total_tool_calls,
-                    "messages": self.messages,
-                }, f, indent=2, ensure_ascii=False)
+                json.dump(
+                    {
+                        "agent": self.agent_name,
+                        "task_id": self.task_id,
+                        "worker_id": self.worker_id,
+                        "fuzzer": fuzzer,
+                        "sanitizer": sanitizer,
+                        "start_time": self.start_time.isoformat()
+                        if self.start_time
+                        else None,
+                        "end_time": self.end_time.isoformat()
+                        if self.end_time
+                        else None,
+                        "total_iterations": self.total_iterations,
+                        "total_tool_calls": self.total_tool_calls,
+                        "messages": self.messages,
+                    },
+                    f,
+                    indent=2,
+                    ensure_ascii=False,
+                )
             self._log(f"Conversation saved to: {conv_file}", level="INFO")
         except Exception as e:
             self._log(f"Failed to save conversation: {e}", level="ERROR")
 
-    def _convert_mcp_tools_to_openai(self, mcp_tools: List[Any]) -> List[Dict[str, Any]]:
+    def _convert_mcp_tools_to_openai(
+        self, mcp_tools: List[Any]
+    ) -> List[Dict[str, Any]]:
         """
         Convert MCP tool definitions to OpenAI function calling format.
 
@@ -639,7 +695,9 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                 "function": {
                     "name": tool.name,
                     "description": tool.description or "",
-                    "parameters": tool.inputSchema if hasattr(tool, 'inputSchema') else {
+                    "parameters": tool.inputSchema
+                    if hasattr(tool, "inputSchema")
+                    else {
                         "type": "object",
                         "properties": {},
                     },
@@ -680,9 +738,12 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             Tool result as string
         """
         import time
+
         t0 = time.time()
         self._log(f"Executing tool: {tool_name}", level="DEBUG")
-        self._log(f"  Args: {json.dumps(tool_args, ensure_ascii=False)[:500]}", level="DEBUG")
+        self._log(
+            f"  Args: {json.dumps(tool_args, ensure_ascii=False)[:500]}", level="DEBUG"
+        )
 
         success = True
         error_type = None
@@ -695,18 +756,20 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             latency_ms = int((t1 - t0) * 1000)
 
             if t1 - t0 > 0.5:  # Log if > 500ms
-                self._log(f"[TIMING] MCP call_tool({tool_name}): {t1-t0:.3f}s", level="INFO")
+                self._log(
+                    f"[TIMING] MCP call_tool({tool_name}): {t1 - t0:.3f}s", level="INFO"
+                )
 
             # Extract text content from result
-            if hasattr(result, 'content') and result.content:
+            if hasattr(result, "content") and result.content:
                 # MCP returns content as list of content blocks
                 texts = []
                 for block in result.content:
-                    if hasattr(block, 'text'):
+                    if hasattr(block, "text"):
                         texts.append(block.text)
                     elif isinstance(block, str):
                         texts.append(block)
-                result_str = '\n'.join(texts) if texts else str(result)
+                result_str = "\n".join(texts) if texts else str(result)
             else:
                 result_str = str(result)
 
@@ -717,9 +780,16 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             if reporter:
                 # Determine tool category
                 tool_category = "general"
-                if tool_name.startswith("get_") or tool_name in ["search_code", "is_reachable"]:
+                if tool_name.startswith("get_") or tool_name in [
+                    "search_code",
+                    "is_reachable",
+                ]:
                     tool_category = "code_analysis"
-                elif tool_name.startswith("create_pov") or tool_name.startswith("verify_pov") or tool_name == "trace_pov":
+                elif (
+                    tool_name.startswith("create_pov")
+                    or tool_name.startswith("verify_pov")
+                    or tool_name == "trace_pov"
+                ):
                     tool_category = "pov"
                 elif tool_name.startswith("create_sp") or tool_name == "verify_sp":
                     tool_category = "sp"
@@ -731,7 +801,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                     success=True,
                     latency_ms=latency_ms,
                     arguments_summary=json.dumps(tool_args, ensure_ascii=False)[:200],
-                    result_size_bytes=len(result_str.encode('utf-8')),
+                    result_size_bytes=len(result_str.encode("utf-8")),
                     tool_category=tool_category,
                 )
 
@@ -804,7 +874,11 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         self._log(f"Available tools: {', '.join(tool_names)}", level="DEBUG")
 
         # Log model info
-        model_name = self.model.id if hasattr(self.model, 'id') else (self.model or self.llm_client.config.default_model.id)
+        model_name = (
+            self.model.id
+            if hasattr(self.model, "id")
+            else (self.model or self.llm_client.config.default_model.id)
+        )
         self._log(f"Using model: {model_name}", level="INFO")
 
         iteration = 0
@@ -821,7 +895,9 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             if reporter:
                 reporter.set_iteration(iteration)
 
-            self._log(f"=== Iteration {iteration}/{self.max_iterations} ===", level="INFO")
+            self._log(
+                f"=== Iteration {iteration}/{self.max_iterations} ===", level="INFO"
+            )
 
             # Compress context every 5 iterations to reduce token usage
             if self.enable_context_compression and iteration > 0 and iteration % 5 == 0:
@@ -830,11 +906,15 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             # Check for urgency message (when running low on iterations)
             urgency_message = self._get_urgency_message(iteration, remaining)
             if urgency_message:
-                self._log(f"Injecting urgency message (remaining={remaining})", level="INFO")
-                self.messages.append({
-                    "role": "user",
-                    "content": urgency_message,
-                })
+                self._log(
+                    f"Injecting urgency message (remaining={remaining})", level="INFO"
+                )
+                self.messages.append(
+                    {
+                        "role": "user",
+                        "content": urgency_message,
+                    }
+                )
                 self._log_chat_message("user", urgency_message, iteration=iteration)
 
             # Call LLM with tools (async to avoid blocking event loop)
@@ -849,10 +929,12 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             except Exception as e:
                 # Re-raise BudgetExceededError to stop all processing
                 from ..eval import BudgetExceededError
+
                 if isinstance(e, BudgetExceededError):
                     self._log(f"Budget limit exceeded: {e}", level="WARNING")
                     raise
                 import traceback
+
                 self._log(f"LLM call failed: {e}", level="ERROR")
                 self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
                 break
@@ -863,14 +945,19 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
 
             # Check for tool calls
             if response.tool_calls:
-                self._log(f"LLM requested {len(response.tool_calls)} tool call(s)", level="INFO")
+                self._log(
+                    f"LLM requested {len(response.tool_calls)} tool call(s)",
+                    level="INFO",
+                )
 
                 # Add assistant message with tool calls
-                self.messages.append({
-                    "role": "assistant",
-                    "content": response.content or "",
-                    "tool_calls": response.tool_calls,
-                })
+                self.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": response.content or "",
+                        "tool_calls": response.tool_calls,
+                    }
+                )
 
                 # Log assistant message with tool calls
                 self._log_chat_message(
@@ -891,7 +978,10 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                         tool_args = json.loads(tool_args_str) if tool_args_str else {}
                     except json.JSONDecodeError:
                         tool_args = {}
-                        self._log(f"Failed to parse tool args: {tool_args_str}", level="WARNING")
+                        self._log(
+                            f"Failed to parse tool args: {tool_args_str}",
+                            level="WARNING",
+                        )
 
                     self._log(f"Calling tool: {tool_name}", level="INFO")
 
@@ -900,11 +990,13 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                     self.total_tool_calls += 1
 
                     # Add tool result to messages
-                    self.messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_id,
-                        "content": tool_result,
-                    })
+                    self.messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_id,
+                            "content": tool_result,
+                        }
+                    )
 
                     # Log tool result
                     self._log_chat_message(
@@ -932,7 +1024,9 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             self._log_conversation()
 
         if iteration >= self.max_iterations:
-            self._log(f"Max iterations ({self.max_iterations}) reached", level="WARNING")
+            self._log(
+                f"Max iterations ({self.max_iterations}) reached", level="WARNING"
+            )
             final_response = response.content if response else ""
 
         return final_response
@@ -951,7 +1045,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         self._setup_logging()
 
         self.start_time = datetime.now()
-        self._log(f"Starting agent run", level="INFO")
+        self._log("Starting agent run", level="INFO")
         self._log(f"Task ID: {self.task_id}", level="INFO")
         self._log(f"Worker ID: {self.worker_id}", level="INFO")
 
@@ -976,7 +1070,10 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                 include_sp_tools=self.include_sp_tools,  # DirectionPlanningAgent doesn't need SP tools
                 include_direction_tools=self.include_direction_tools,
             )
-            self._log(f"Created isolated MCP server: {agent_id} (pov_tools={self.include_pov_tools}, seed_tools={self.include_seed_tools}, sp_tools={self.include_sp_tools})", level="DEBUG")
+            self._log(
+                f"Created isolated MCP server: {agent_id} (pov_tools={self.include_pov_tools}, seed_tools={self.include_seed_tools}, sp_tools={self.include_sp_tools})",
+                level="DEBUG",
+            )
 
             # Use reporter agent context if available
             if reporter:
@@ -1003,6 +1100,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         except Exception as e:
             self._log(f"Agent run failed: {e}", level="ERROR")
             import traceback
+
             self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
             result = f"Agent failed: {e}"
 
@@ -1048,7 +1146,9 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         }
 
         if self.start_time and self.end_time:
-            stats["duration_seconds"] = (self.end_time - self.start_time).total_seconds()
+            stats["duration_seconds"] = (
+                self.end_time - self.start_time
+            ).total_seconds()
 
         if self._log_file:
             stats["log_file"] = str(self._log_file)

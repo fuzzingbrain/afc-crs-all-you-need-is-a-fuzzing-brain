@@ -44,18 +44,20 @@ async def list_povs(
         # Extract crash type from sanitizer_output
         crash_type = pov.get("vuln_type", "")
 
-        pov_list.append({
-            "id": str(pov.get("_id", "")),
-            "sp_id": pov.get("suspicious_point_id", ""),
-            "function_name": function_name,
-            "vuln_type": pov.get("vuln_type", ""),
-            "crashed": pov.get("is_successful"),
-            "crash_type": crash_type,
-            "harness_name": pov.get("harness_name", ""),
-            "sanitizer": pov.get("sanitizer", ""),
-            "attempt": pov.get("attempt", 0),
-            "created_at": _format_datetime(pov.get("created_at")),
-        })
+        pov_list.append(
+            {
+                "id": str(pov.get("_id", "")),
+                "sp_id": pov.get("suspicious_point_id", ""),
+                "function_name": function_name,
+                "vuln_type": pov.get("vuln_type", ""),
+                "crashed": pov.get("is_successful"),
+                "crash_type": crash_type,
+                "harness_name": pov.get("harness_name", ""),
+                "sanitizer": pov.get("sanitizer", ""),
+                "attempt": pov.get("attempt", 0),
+                "created_at": _format_datetime(pov.get("created_at")),
+            }
+        )
 
     return pov_list
 

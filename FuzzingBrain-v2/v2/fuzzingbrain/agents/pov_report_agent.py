@@ -15,9 +15,7 @@ Tools available:
 
 import asyncio
 import json
-import re
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -32,6 +30,7 @@ from ..llms import LLMClient
 @dataclass
 class POVReportResult:
     """Result of POV report generation."""
+
     success: bool
     report_content: str
     title: str
@@ -126,7 +125,7 @@ class POVReportAgent(BaseAgent):
                     "properties": {
                         "vuln_type": {
                             "type": "string",
-                            "description": "Corrected vulnerability type (e.g., 'heap-buffer-overflow', 'use-after-free', 'integer-overflow')"
+                            "description": "Corrected vulnerability type (e.g., 'heap-buffer-overflow', 'use-after-free', 'integer-overflow')",
                         },
                     },
                     "required": ["vuln_type"],
@@ -166,7 +165,9 @@ class POVReportAgent(BaseAgent):
             # Get current POV from database
             pov = self.repos.povs.find_by_id(self._pov_id)
             if not pov:
-                return json.dumps({"success": False, "error": f"POV {self._pov_id} not found"})
+                return json.dumps(
+                    {"success": False, "error": f"POV {self._pov_id} not found"}
+                )
 
             old_type = pov.vuln_type
             pov.vuln_type = vuln_type
@@ -175,14 +176,18 @@ class POVReportAgent(BaseAgent):
             # Also update our local copy for report generation
             self._pov["vuln_type"] = vuln_type
 
-            logger.info(f"[POVReportAgent] Updated POV {self._pov_id[:8]} vuln_type: {old_type} -> {vuln_type}")
+            logger.info(
+                f"[POVReportAgent] Updated POV {self._pov_id[:8]} vuln_type: {old_type} -> {vuln_type}"
+            )
 
-            return json.dumps({
-                "success": True,
-                "old_vuln_type": old_type,
-                "new_vuln_type": vuln_type,
-                "message": f"Vulnerability type updated: {old_type} -> {vuln_type}"
-            })
+            return json.dumps(
+                {
+                    "success": True,
+                    "old_vuln_type": old_type,
+                    "new_vuln_type": vuln_type,
+                    "message": f"Vulnerability type updated: {old_type} -> {vuln_type}",
+                }
+            )
 
         except Exception as e:
             logger.error(f"[POVReportAgent] Failed to update POV: {e}")

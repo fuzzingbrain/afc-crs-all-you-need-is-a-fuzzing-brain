@@ -6,16 +6,19 @@ Used by Workers and Agents to query code analysis data.
 """
 
 import socket
-import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
 from .protocol import (
-    Request, Response, Method,
-    encode_message, decode_message,
-    MESSAGE_DELIMITER, MAX_MESSAGE_SIZE,
+    Request,
+    Response,
+    Method,
+    encode_message,
+    decode_message,
+    MESSAGE_DELIMITER,
+    MAX_MESSAGE_SIZE,
 )
 
 
@@ -54,14 +57,18 @@ class AnalysisClient:
                 fd = self._sock.fileno()
                 if fd < 0:
                     # Invalid file descriptor
-                    logger.debug(f"[TIMING] _connect: socket has invalid fd, reconnecting")
+                    logger.debug(
+                        "[TIMING] _connect: socket has invalid fd, reconnecting"
+                    )
                     self._disconnect()
                 else:
-                    logger.debug(f"[TIMING] _connect: socket already connected (fd={fd})")
+                    logger.debug(
+                        f"[TIMING] _connect: socket already connected (fd={fd})"
+                    )
                     return
             except (OSError, socket.error):
                 # Socket is broken
-                logger.debug(f"[TIMING] _connect: socket error, reconnecting")
+                logger.debug("[TIMING] _connect: socket error, reconnecting")
                 self._disconnect()
 
         t0 = time.time()
@@ -72,7 +79,7 @@ class AnalysisClient:
         self._sock.settimeout(self.timeout)
         self._sock.connect(str(self.socket_path))
         t1 = time.time()
-        logger.debug(f"[TIMING] _connect: new socket connected in {t1-t0:.3f}s")
+        logger.debug(f"[TIMING] _connect: new socket connected in {t1 - t0:.3f}s")
 
     def _disconnect(self):
         """Disconnect from server."""
@@ -100,6 +107,7 @@ class AnalysisClient:
             RuntimeError: If request fails
         """
         import time
+
         t0 = time.time()
         request = Request(method=method, params=params or {}, source=self.client_id)
 
@@ -131,14 +139,16 @@ class AnalysisClient:
             # Log timing if total > 100ms
             total = t4 - t0
             if total > 0.1:
-                logger.debug(f"[TIMING] _request({method}): total={total:.3f}s connect={t1-t0:.3f}s send={t2-t1:.3f}s recv={t3-t2:.3f}s parse={t4-t3:.3f}s")
+                logger.debug(
+                    f"[TIMING] _request({method}): total={total:.3f}s connect={t1 - t0:.3f}s send={t2 - t1:.3f}s recv={t3 - t2:.3f}s parse={t4 - t3:.3f}s"
+                )
 
             return response.data
 
         except socket.timeout:
             self._disconnect()
             raise TimeoutError(f"Request timed out: {method}")
-        except Exception as e:
+        except Exception:
             self._disconnect()
             raise
 
@@ -214,7 +224,9 @@ class AnalysisClient:
         Returns:
             List of matching function info dicts
         """
-        return self._request(Method.SEARCH_FUNCTIONS, {"pattern": pattern, "limit": limit})
+        return self._request(
+            Method.SEARCH_FUNCTIONS, {"pattern": pattern, "limit": limit}
+        )
 
     def get_function_source(self, name: str) -> Optional[str]:
         """
@@ -296,12 +308,15 @@ class AnalysisClient:
                 "cached": bool,
             }
         """
-        return self._request(Method.FIND_ALL_PATHS, {
-            "func1": func1,
-            "func2": func2,
-            "max_depth": max_depth,
-            "max_paths": max_paths,
-        })
+        return self._request(
+            Method.FIND_ALL_PATHS,
+            {
+                "func1": func1,
+                "func2": func2,
+                "max_depth": max_depth,
+                "max_paths": max_paths,
+            },
+        )
 
     # =========================================================================
     # Reachability queries
@@ -318,7 +333,9 @@ class AnalysisClient:
         Returns:
             Dict with 'reachable' (bool) and 'distance' (int) if reachable
         """
-        return self._request(Method.GET_REACHABILITY, {"fuzzer": fuzzer, "function": function})
+        return self._request(
+            Method.GET_REACHABILITY, {"fuzzer": fuzzer, "function": function}
+        )
 
     def is_reachable(self, fuzzer: str, function: str) -> bool:
         """
@@ -425,16 +442,19 @@ class AnalysisClient:
         Returns:
             Dict with 'id' and 'created' status
         """
-        return self._request(Method.CREATE_SUSPICIOUS_POINT, {
-            "function_name": function_name,
-            "description": description,
-            "vuln_type": vuln_type,
-            "score": score,
-            "important_controlflow": important_controlflow or [],
-            "harness_name": harness_name,
-            "sanitizer": sanitizer,
-            "direction_id": direction_id,
-        })
+        return self._request(
+            Method.CREATE_SUSPICIOUS_POINT,
+            {
+                "function_name": function_name,
+                "description": description,
+                "vuln_type": vuln_type,
+                "score": score,
+                "important_controlflow": important_controlflow or [],
+                "harness_name": harness_name,
+                "sanitizer": sanitizer,
+                "direction_id": direction_id,
+            },
+        )
 
     def update_suspicious_point(
         self,
@@ -493,11 +513,14 @@ class AnalysisClient:
         Returns:
             Dict with 'suspicious_points', 'count', and 'stats'
         """
-        return self._request(Method.LIST_SUSPICIOUS_POINTS, {
-            "filter_unchecked": filter_unchecked,
-            "filter_real": filter_real,
-            "filter_important": filter_important,
-        })
+        return self._request(
+            Method.LIST_SUSPICIOUS_POINTS,
+            {
+                "filter_unchecked": filter_unchecked,
+                "filter_real": filter_real,
+                "filter_important": filter_important,
+            },
+        )
 
     def get_suspicious_point(self, sp_id: str) -> Optional[dict]:
         """
@@ -542,16 +565,19 @@ class AnalysisClient:
         Returns:
             {"id": "...", "created": True}
         """
-        return self._request(Method.CREATE_DIRECTION, {
-            "name": name,
-            "risk_level": risk_level,
-            "risk_reason": risk_reason,
-            "core_functions": core_functions,
-            "entry_functions": entry_functions or [],
-            "call_chain_summary": call_chain_summary,
-            "code_summary": code_summary,
-            "fuzzer": fuzzer,
-        })
+        return self._request(
+            Method.CREATE_DIRECTION,
+            {
+                "name": name,
+                "risk_level": risk_level,
+                "risk_reason": risk_reason,
+                "core_functions": core_functions,
+                "entry_functions": entry_functions or [],
+                "call_chain_summary": call_chain_summary,
+                "code_summary": code_summary,
+                "fuzzer": fuzzer,
+            },
+        )
 
     def list_directions(
         self,
@@ -598,10 +624,13 @@ class AnalysisClient:
         Returns:
             Claimed direction dict or None if none available
         """
-        return self._request(Method.CLAIM_DIRECTION, {
-            "fuzzer": fuzzer,
-            "processor_id": processor_id,
-        })
+        return self._request(
+            Method.CLAIM_DIRECTION,
+            {
+                "fuzzer": fuzzer,
+                "processor_id": processor_id,
+            },
+        )
 
     def complete_direction(
         self,
@@ -620,14 +649,19 @@ class AnalysisClient:
         Returns:
             {"updated": True}
         """
-        return self._request(Method.COMPLETE_DIRECTION, {
-            "id": direction_id,
-            "sp_count": sp_count,
-            "functions_analyzed": functions_analyzed,
-        })
+        return self._request(
+            Method.COMPLETE_DIRECTION,
+            {
+                "id": direction_id,
+                "sp_count": sp_count,
+                "functions_analyzed": functions_analyzed,
+            },
+        )
 
 
-def connect(socket_path: str, timeout: float = 30.0, client_id: str = None) -> AnalysisClient:
+def connect(
+    socket_path: str, timeout: float = 30.0, client_id: str = None
+) -> AnalysisClient:
     """
     Create and connect to Analysis Server.
 
@@ -645,7 +679,12 @@ def connect(socket_path: str, timeout: float = 30.0, client_id: str = None) -> A
     return client
 
 
-def wait_for_server(socket_path: str, timeout: float = 300.0, poll_interval: float = 1.0, client_id: str = None) -> AnalysisClient:
+def wait_for_server(
+    socket_path: str,
+    timeout: float = 300.0,
+    poll_interval: float = 1.0,
+    client_id: str = None,
+) -> AnalysisClient:
     """
     Wait for Analysis Server to become available.
 
@@ -662,6 +701,7 @@ def wait_for_server(socket_path: str, timeout: float = 300.0, poll_interval: flo
         TimeoutError: If server doesn't become available within timeout
     """
     import time
+
     start = time.time()
 
     while time.time() - start < timeout:

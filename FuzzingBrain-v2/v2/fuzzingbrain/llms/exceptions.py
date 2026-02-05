@@ -25,6 +25,7 @@ class LLMError(Exception):
 
 class LLMAuthError(LLMError):
     """Authentication failed (invalid API key)"""
+
     pass
 
 
@@ -46,13 +47,16 @@ class LLMTimeoutError(LLMError):
 
 class LLMModelNotFoundError(LLMError):
     """Model not found or not available"""
+
     pass
 
 
 class LLMContextLengthError(LLMError):
     """Context length exceeded"""
 
-    def __init__(self, message: str, max_context: int = None, actual: int = None, **kwargs):
+    def __init__(
+        self, message: str, max_context: int = None, actual: int = None, **kwargs
+    ):
         self.max_context = max_context
         self.actual = actual
         super().__init__(message, **kwargs)
@@ -60,6 +64,7 @@ class LLMContextLengthError(LLMError):
 
 class LLMContentFilterError(LLMError):
     """Content filtered by safety system"""
+
     pass
 
 
@@ -80,9 +85,11 @@ class LLMAllModelsFailedError(LLMError):
 
 class LLMInvalidResponseError(LLMError):
     """Invalid or empty response from LLM"""
+
     pass
 
 
 class LLMShutdownError(LLMError):
     """LLM call aborted due to event loop shutdown"""
+
     pass

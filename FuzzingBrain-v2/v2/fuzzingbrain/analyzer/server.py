@@ -17,13 +17,13 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 from loguru import logger
 
-# Type variable for generic return type
-T = TypeVar('T')
-
 from .protocol import (
-    Request, Response, Method,
-    MESSAGE_DELIMITER, ENCODING, MAX_MESSAGE_SIZE,
-    encode_message, decode_message,
+    Request,
+    Response,
+    Method,
+    MAX_MESSAGE_SIZE,
+    encode_message,
+    decode_message,
 )
 from .builder import AnalyzerBuilder
 from .importer import StaticAnalysisImporter, import_from_prebuild
@@ -32,6 +32,9 @@ from ..analysis import extract_functions_from_file
 from ..db import MongoDB, init_repos
 from ..core import Config
 from ..core.logging import get_analyzer_banner_and_header
+
+# Type variable for generic return type
+T = TypeVar("T")
 
 
 def _serialize_doc(doc: dict) -> dict:
@@ -50,7 +53,9 @@ def _serialize_doc(doc: dict) -> dict:
         elif isinstance(value, dict):
             result[key] = _serialize_doc(value)
         elif isinstance(value, list):
-            result[key] = [_serialize_doc(v) if isinstance(v, dict) else v for v in value]
+            result[key] = [
+                _serialize_doc(v) if isinstance(v, dict) else v for v in value
+            ]
         else:
             result[key] = value
     return result
@@ -73,7 +78,7 @@ def _get_function_name_variants(name: str) -> List[str]:
     variants = [name]
     if name.startswith(OSS_FUZZ_PREFIX):
         # Try without prefix
-        variants.append(name[len(OSS_FUZZ_PREFIX):])
+        variants.append(name[len(OSS_FUZZ_PREFIX) :])
     else:
         # Try with prefix
         variants.append(OSS_FUZZ_PREFIX + name)
@@ -98,7 +103,7 @@ class AnalysisServer:
         task_path: str,
         project_name: str,
         sanitizers: List[str],
-        ossfuzz_project: Optional[str] = None,
+        ossfuzz_project_name: Optional[str] = None,
         language: str = "c",
         log_dir: Optional[str] = None,
         skip_build: bool = False,
@@ -110,7 +115,7 @@ class AnalysisServer:
         self.task_path = Path(task_path)
         self.project_name = project_name
         self.sanitizers = sanitizers
-        self.ossfuzz_project = ossfuzz_project
+        self.ossfuzz_project_name = ossfuzz_project_name
         self.language = language
         self.log_dir = log_dir
         self.skip_build = skip_build
@@ -199,8 +204,10 @@ class AnalysisServer:
             AnalyzeResult with build information
         """
         self.start_time = datetime.now()
-        self._log(f"Starting Analysis Server for task {self.task_id}" +
-                  (" (skip_build mode)" if self.skip_build else ""))
+        self._log(
+            f"Starting Analysis Server for task {self.task_id}"
+            + (" (skip_build mode)" if self.skip_build else "")
+        )
 
         # Initialize database
         config = Config.from_env()
@@ -220,7 +227,9 @@ class AnalysisServer:
 
             # Get function count from database
             func_count = self._get_function_count()
-            self._log(f"Found {len(self.fuzzers)} fuzzers, {func_count} functions in database")
+            self._log(
+                f"Found {len(self.fuzzers)} fuzzers, {func_count} functions in database"
+            )
         else:
             # Phase 1: Build
             build_success = await self._build_phase()
@@ -289,7 +298,6 @@ class AnalysisServer:
 
     def _setup_logging(self):
         """Setup server-specific logging."""
-        from ..core.logging import get_analyzer_banner_and_header
 
         log_path = Path(self.log_dir)
         log_file = log_path / f"analyzer_{self.task_id}.log"
@@ -336,7 +344,7 @@ class AnalysisServer:
             task_path=str(self.task_path),
             project_name=self.project_name,
             sanitizers=self.sanitizers,
-            ossfuzz_project=self.ossfuzz_project,
+            ossfuzz_project_name=self.ossfuzz_project_name,
             log_callback=self._log,
             log_dir=self.log_dir,
             skip_introspector=skip_introspector,
@@ -359,7 +367,9 @@ class AnalysisServer:
         self.coverage_path = builder.get_coverage_path()
         self.introspector_path = builder.get_introspector_path()
 
-        self._log(f"Build completed: {len(self.fuzzers)} fuzzers in {self.build_duration:.1f}s")
+        self._log(
+            f"Build completed: {len(self.fuzzers)} fuzzers in {self.build_duration:.1f}s"
+        )
         return True
 
     async def _import_phase(self):
@@ -391,7 +401,10 @@ class AnalysisServer:
                     self._log(f"Prebuild import completed: {msg}")
                     return
                 else:
-                    self._log(f"Prebuild import failed: {msg}, falling back to introspector", "WARN")
+                    self._log(
+                        f"Prebuild import failed: {msg}, falling back to introspector",
+                        "WARN",
+                    )
 
         # Fallback to introspector import
         if not self.introspector_path:
@@ -435,7 +448,9 @@ class AnalysisServer:
 
         self.running = True
 
-    async def _handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    async def _handle_client(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ):
         """Handle a client connection."""
         client_id = id(writer)
         self._log(f"Client {client_id} connected", "DEBUG")
@@ -482,7 +497,12 @@ class AnalysisServer:
             try:
                 writer.close()
                 await writer.wait_closed()
-            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            except (
+                BrokenPipeError,
+                ConnectionResetError,
+                ConnectionAbortedError,
+                OSError,
+            ):
                 # Connection already closed - ignore
                 pass
             self._log(f"Client {client_id} disconnected", "DEBUG")
@@ -502,19 +522,23 @@ class AnalysisServer:
             params_str = ""
             if request.params:
                 if isinstance(request.params, dict):
-                    params_str = ", ".join(f"{k}={v}" for k, v in list(request.params.items())[:3])
+                    params_str = ", ".join(
+                        f"{k}={v}" for k, v in list(request.params.items())[:3]
+                    )
                 else:
                     params_str = str(request.params)[:50]
             self._log(f"[Query #{self.query_count}] {source} -> {method}({params_str})")
 
-        self.query_log.append({
-            "timestamp": datetime.now().isoformat(),
-            "type": "query" if is_query else "management",
-            "source": request.source,  # e.g., "controller", "worker_libpng_read_fuzzer_address"
-            "method": request.method,
-            "params": request.params,
-            "request_id": request.request_id,
-        })
+        self.query_log.append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "type": "query" if is_query else "management",
+                "source": request.source,  # e.g., "controller", "worker_libpng_read_fuzzer_address"
+                "method": request.method,
+                "params": request.params,
+                "request_id": request.request_id,
+            }
+        )
 
     async def _handle_request(self, request: Request) -> Response:
         """Handle an RPC request."""
@@ -664,7 +688,9 @@ class AnalysisServer:
             "ready": self.ready,
             "running": self.running,
             "start_time": self.start_time.isoformat() if self.start_time else None,
-            "uptime_seconds": (datetime.now() - self.start_time).total_seconds() if self.start_time else 0,
+            "uptime_seconds": (datetime.now() - self.start_time).total_seconds()
+            if self.start_time
+            else 0,
             "fuzzer_count": len(self.fuzzers),
             "function_count": self._get_function_count(),
             "query_count": self.query_count,
@@ -677,7 +703,9 @@ class AnalysisServer:
         if not self.repos:
             return 0
         try:
-            return self.repos.functions.collection.count_documents({"task_id": self.task_id})
+            return self.repos.functions.collection.count_documents(
+                {"task_id": self.task_id}
+            )
         except Exception:
             return 0
 
@@ -689,10 +717,12 @@ class AnalysisServer:
         """Sync implementation of _get_function."""
         # Try function name variants (with/without OSS_FUZZ_ prefix)
         for func_name in _get_function_name_variants(name):
-            func = self.repos.functions.collection.find_one({
-                "task_id": self.task_id,
-                "name": func_name,
-            })
+            func = self.repos.functions.collection.find_one(
+                {
+                    "task_id": self.task_id,
+                    "name": func_name,
+                }
+            )
             if func:
                 func.pop("_id", None)
                 result = _serialize_doc(func)
@@ -713,10 +743,12 @@ class AnalysisServer:
 
     def _get_functions_by_file_sync(self, file_path: str) -> List[dict]:
         """Sync implementation of _get_functions_by_file."""
-        cursor = self.repos.functions.collection.find({
-            "task_id": self.task_id,
-            "file_path": {"$regex": file_path},
-        })
+        cursor = self.repos.functions.collection.find(
+            {
+                "task_id": self.task_id,
+                "file_path": {"$regex": file_path},
+            }
+        )
         results = []
         for func in cursor:
             func.pop("_id", None)
@@ -731,10 +763,12 @@ class AnalysisServer:
 
     def _search_functions_sync(self, pattern: str, limit: int) -> List[dict]:
         """Sync implementation of _search_functions."""
-        cursor = self.repos.functions.collection.find({
-            "task_id": self.task_id,
-            "name": {"$regex": pattern, "$options": "i"},
-        }).limit(limit)
+        cursor = self.repos.functions.collection.find(
+            {
+                "task_id": self.task_id,
+                "name": {"$regex": pattern, "$options": "i"},
+            }
+        ).limit(limit)
         results = []
         for func in cursor:
             func.pop("_id", None)
@@ -747,7 +781,9 @@ class AnalysisServer:
             return []
         return await self._run_sync(self._search_functions_sync, pattern, limit)
 
-    def _extract_source_with_treesitter(self, file_path: str, func_name: str) -> Optional[str]:
+    def _extract_source_with_treesitter(
+        self, file_path: str, func_name: str
+    ) -> Optional[str]:
         """
         Extract function source using tree-sitter as fallback.
 
@@ -812,13 +848,16 @@ class AnalysisServer:
             # Try without OSS_FUZZ_ prefix
             for prefix in ["OSS_FUZZ_", "FUZZ_", "ossfuzz_"]:
                 if func_name.startswith(prefix):
-                    stripped_name = func_name[len(prefix):]
+                    stripped_name = func_name[len(prefix) :]
                     for func_info in extracted:
                         if func_info.name == stripped_name:
                             return func_info.content
 
         except Exception as e:
-            self._log(f"Tree-sitter extraction failed for {func_name} in {file_path}: {e}", "DEBUG")
+            self._log(
+                f"Tree-sitter extraction failed for {func_name} in {file_path}: {e}",
+                "DEBUG",
+            )
 
         return None
 
@@ -834,14 +873,17 @@ class AnalysisServer:
         if not content:
             file_path = func.get("file_path", "")
             if file_path:
-                self._log(f"Content empty for {name}, trying tree-sitter fallback", "DEBUG")
+                self._log(
+                    f"Content empty for {name}, trying tree-sitter fallback", "DEBUG"
+                )
                 content = await self._run_sync(
-                    self._extract_source_with_treesitter,
-                    file_path,
-                    name
+                    self._extract_source_with_treesitter, file_path, name
                 )
                 if content:
-                    self._log(f"Tree-sitter extracted {len(content)} chars for {name}", "DEBUG")
+                    self._log(
+                        f"Tree-sitter extracted {len(content)} chars for {name}",
+                        "DEBUG",
+                    )
 
         return content
 
@@ -882,12 +924,17 @@ class AnalysisServer:
         # Priority 1: Check fuzzer_sources config (fuzzer_name -> relative path in fuzz-tooling)
         if not source_path and fuzzer_info.name in self.fuzzer_sources:
             source_path = self.fuzzer_sources[fuzzer_info.name]
-            self._log(f"Using fuzzer source from config: {fuzzer_info.name} -> {source_path}", "DEBUG")
+            self._log(
+                f"Using fuzzer source from config: {fuzzer_info.name} -> {source_path}",
+                "DEBUG",
+            )
 
         # Priority 2: Try to get from database
         if not source_path and self.repos:
             try:
-                db_fuzzer = self.repos.fuzzers.find_by_name(self.task_id, fuzzer_info.name)
+                db_fuzzer = self.repos.fuzzers.find_by_name(
+                    self.task_id, fuzzer_info.name
+                )
                 if db_fuzzer and db_fuzzer.source_path:
                     source_path = db_fuzzer.source_path
             except Exception as e:
@@ -959,10 +1006,12 @@ class AnalysisServer:
     def _get_callers_sync(self, function: str) -> dict:
         """Sync implementation of _get_callers."""
         for func_name in _get_function_name_variants(function):
-            node = self.repos.callgraph_nodes.collection.find_one({
-                "task_id": self.task_id,
-                "function_name": func_name,
-            })
+            node = self.repos.callgraph_nodes.collection.find_one(
+                {
+                    "task_id": self.task_id,
+                    "function_name": func_name,
+                }
+            )
             if node:
                 result = {"callers": node.get("callers", []), "function": func_name}
                 if func_name != function:
@@ -982,10 +1031,12 @@ class AnalysisServer:
     def _get_callees_sync(self, function: str) -> dict:
         """Sync implementation of _get_callees."""
         for func_name in _get_function_name_variants(function):
-            node = self.repos.callgraph_nodes.collection.find_one({
-                "task_id": self.task_id,
-                "function_name": func_name,
-            })
+            node = self.repos.callgraph_nodes.collection.find_one(
+                {
+                    "task_id": self.task_id,
+                    "function_name": func_name,
+                }
+            )
             if node:
                 result = {"callees": node.get("callees", []), "function": func_name}
                 if func_name != function:
@@ -1044,19 +1095,25 @@ class AnalysisServer:
             use_entry_points = True
         else:
             # Check if func1 exists in callgraph
-            func1_exists = self.repos.callgraph_nodes.collection.find_one({
-                "task_id": self.task_id,
-                "function_name": func1,
-            })
+            func1_exists = self.repos.callgraph_nodes.collection.find_one(
+                {
+                    "task_id": self.task_id,
+                    "function_name": func1,
+                }
+            )
             if not func1_exists:
                 use_entry_points = True
 
         if use_entry_points:
             # Find all entry points (call_depth=0)
-            entry_points = list(self.repos.callgraph_nodes.collection.find({
-                "task_id": self.task_id,
-                "call_depth": 0,
-            }).distinct("function_name"))
+            entry_points = list(
+                self.repos.callgraph_nodes.collection.find(
+                    {
+                        "task_id": self.task_id,
+                        "call_depth": 0,
+                    }
+                ).distinct("function_name")
+            )
             if entry_points:
                 start_functions = entry_points
 
@@ -1088,10 +1145,12 @@ class AnalysisServer:
 
             visited.add(current)
 
-            node = self.repos.callgraph_nodes.collection.find_one({
-                "task_id": self.task_id,
-                "function_name": current,
-            })
+            node = self.repos.callgraph_nodes.collection.find_one(
+                {
+                    "task_id": self.task_id,
+                    "function_name": current,
+                }
+            )
 
             if node:
                 callees = node.get("callees", [])
@@ -1164,7 +1223,9 @@ class AnalysisServer:
         # Cache result
         self._path_cache[cache_key] = result.copy()
 
-        self._log(f"find_all_paths: {func1} -> {result.get('func2')}, found {result['path_count']} paths (truncated={result['truncated']})")
+        self._log(
+            f"find_all_paths: {func1} -> {result.get('func2')}, found {result['path_count']} paths (truncated={result['truncated']})"
+        )
 
         return result
 
@@ -1175,10 +1236,12 @@ class AnalysisServer:
         # If fuzzer is the libfuzzer entry point, search across all fuzzers
         if fuzzer == "LLVMFuzzerTestOneInput":
             for func_name in func_variants:
-                node = self.repos.callgraph_nodes.collection.find_one({
-                    "task_id": self.task_id,
-                    "function_name": func_name,
-                })
+                node = self.repos.callgraph_nodes.collection.find_one(
+                    {
+                        "task_id": self.task_id,
+                        "function_name": func_name,
+                    }
+                )
                 if node:
                     result = {
                         "reachable": True,
@@ -1193,11 +1256,13 @@ class AnalysisServer:
 
         # Normal case: search by specific fuzzer name
         for func_name in func_variants:
-            node = self.repos.callgraph_nodes.collection.find_one({
-                "task_id": self.task_id,
-                "fuzzer_name": fuzzer,
-                "function_name": func_name,
-            })
+            node = self.repos.callgraph_nodes.collection.find_one(
+                {
+                    "task_id": self.task_id,
+                    "fuzzer_name": fuzzer,
+                    "function_name": func_name,
+                }
+            )
             if node:
                 result = {
                     "reachable": True,
@@ -1263,8 +1328,13 @@ class AnalysisServer:
         return [sp.to_dict() for sp in existing_sps] if existing_sps else []
 
     def _merge_sp_source_sync(
-        self, duplicate_id: str, harness_name: str, sanitizer: str,
-        description: str, vuln_type: str, score: float
+        self,
+        duplicate_id: str,
+        harness_name: str,
+        sanitizer: str,
+        description: str,
+        vuln_type: str,
+        score: float,
     ) -> bool:
         """Sync: Merge source into existing SP."""
         source_added = self.repos.suspicious_points.add_source(
@@ -1281,9 +1351,15 @@ class AnalysisServer:
         return source_added
 
     def _save_new_sp_sync(
-        self, function_name: str, harness_name: str, sanitizer: str,
-        description: str, vuln_type: str, score: float, important_controlflow: list,
-        direction_id: str = ""
+        self,
+        function_name: str,
+        harness_name: str,
+        sanitizer: str,
+        description: str,
+        vuln_type: str,
+        score: float,
+        important_controlflow: list,
+        direction_id: str = "",
     ) -> str:
         """Sync: Create and save a new SP."""
         from ..core.models import SuspiciousPoint
@@ -1329,14 +1405,20 @@ class AnalysisServer:
 
         if existing_sp_dicts:
             # Use LLM to check for semantic duplicates (async LLM call)
-            duplicate_id = await check_sp_duplicate_async(description, existing_sp_dicts)
+            duplicate_id = await check_sp_duplicate_async(
+                description, existing_sp_dicts
+            )
 
             if duplicate_id:
                 # Found a duplicate - merge the source (MongoDB in thread pool)
                 source_added = await self._run_sync(
                     self._merge_sp_source_sync,
-                    duplicate_id, harness_name, sanitizer,
-                    description, vuln_type, score
+                    duplicate_id,
+                    harness_name,
+                    sanitizer,
+                    description,
+                    vuln_type,
+                    score,
                 )
 
                 self._log(
@@ -1353,9 +1435,14 @@ class AnalysisServer:
         # No duplicate found - create new SP (MongoDB in thread pool)
         sp_id = await self._run_sync(
             self._save_new_sp_sync,
-            function_name, harness_name, sanitizer,
-            description, vuln_type, score, important_controlflow,
-            direction_id
+            function_name,
+            harness_name,
+            sanitizer,
+            description,
+            vuln_type,
+            score,
+            important_controlflow,
+            direction_id,
         )
 
         self._log(
@@ -1369,7 +1456,9 @@ class AnalysisServer:
             "merged": False,
         }
 
-    def _update_suspicious_point_sync(self, suspicious_point_id: str, updates: dict) -> bool:
+    def _update_suspicious_point_sync(
+        self, suspicious_point_id: str, updates: dict
+    ) -> bool:
         """Sync implementation of _update_suspicious_point."""
         return self.repos.suspicious_points.update(suspicious_point_id, updates)
 
@@ -1398,15 +1487,24 @@ class AnalysisServer:
         if params.get("is_checked"):
             updates["checked_at"] = datetime.now()
 
-        self._log(f"Updating suspicious point {suspicious_point_id[:8]}... with: is_checked={updates.get('is_checked')}, score={updates.get('score')}")
-        success = await self._run_sync(self._update_suspicious_point_sync, suspicious_point_id, updates)
+        self._log(
+            f"Updating suspicious point {suspicious_point_id[:8]}... with: is_checked={updates.get('is_checked')}, score={updates.get('score')}"
+        )
+        success = await self._run_sync(
+            self._update_suspicious_point_sync, suspicious_point_id, updates
+        )
         if success:
             self._log(f"Updated suspicious point: {suspicious_point_id[:8]}...")
         else:
-            self._log(f"Failed to update suspicious point: {suspicious_point_id[:8]}... (not found or no changes)", "WARNING")
+            self._log(
+                f"Failed to update suspicious point: {suspicious_point_id[:8]}... (not found or no changes)",
+                "WARNING",
+            )
         return {"updated": success}
 
-    def _list_suspicious_points_sync(self, filter_unchecked: bool, filter_real: bool, filter_important: bool) -> dict:
+    def _list_suspicious_points_sync(
+        self, filter_unchecked: bool, filter_real: bool, filter_important: bool
+    ) -> dict:
         """Sync implementation of _list_suspicious_points."""
         if filter_unchecked:
             points = self.repos.suspicious_points.find_unchecked(self.task_id)
@@ -1436,7 +1534,9 @@ class AnalysisServer:
 
         return await self._run_sync(
             self._list_suspicious_points_sync,
-            filter_unchecked, filter_real, filter_important
+            filter_unchecked,
+            filter_real,
+            filter_important,
         )
 
     def _get_suspicious_point_sync(self, suspicious_point_id: str) -> Optional[dict]:
@@ -1450,7 +1550,9 @@ class AnalysisServer:
         """Get a single suspicious point by ID."""
         if not self.repos or not suspicious_point_id:
             return None
-        return await self._run_sync(self._get_suspicious_point_sync, suspicious_point_id)
+        return await self._run_sync(
+            self._get_suspicious_point_sync, suspicious_point_id
+        )
 
     # =========================================================================
     # Direction operations (Full-scan)
@@ -1474,7 +1576,12 @@ class AnalysisServer:
 
         success = self.repos.directions.save(direction)
         if success:
-            return {"id": direction.direction_id, "created": True, "name": direction.name, "risk_level": direction.risk_level}
+            return {
+                "id": direction.direction_id,
+                "created": True,
+                "name": direction.name,
+                "risk_level": direction.risk_level,
+            }
         else:
             return {"created": False, "error": "Failed to save direction"}
 
@@ -1485,10 +1592,14 @@ class AnalysisServer:
 
         result = await self._run_sync(self._create_direction_sync, params)
         if result.get("created"):
-            self._log(f"Created direction: {result.get('name')} ({result.get('risk_level')})")
+            self._log(
+                f"Created direction: {result.get('name')} ({result.get('risk_level')})"
+            )
         return {"id": result.get("id"), "created": result.get("created", False)}
 
-    def _list_directions_sync(self, fuzzer: Optional[str], status: Optional[str]) -> dict:
+    def _list_directions_sync(
+        self, fuzzer: Optional[str], status: Optional[str]
+    ) -> dict:
         """Sync implementation of _list_directions."""
         if fuzzer:
             directions = self.repos.directions.find_by_fuzzer(self.task_id, fuzzer)
@@ -1533,7 +1644,10 @@ class AnalysisServer:
         """Sync implementation of _claim_direction."""
         direction = self.repos.directions.claim(self.task_id, fuzzer, processor_id)
         if direction:
-            return {"direction": _serialize_doc(direction.to_dict()), "name": direction.name}
+            return {
+                "direction": _serialize_doc(direction.to_dict()),
+                "name": direction.name,
+            }
         return None
 
     async def _claim_direction(self, fuzzer: str, processor_id: str) -> Optional[dict]:
@@ -1547,7 +1661,9 @@ class AnalysisServer:
             return result.get("direction")
         return None
 
-    def _complete_direction_sync(self, direction_id: str, sp_count: int, functions_analyzed: int) -> bool:
+    def _complete_direction_sync(
+        self, direction_id: str, sp_count: int, functions_analyzed: int
+    ) -> bool:
         """Sync implementation of _complete_direction."""
         return self.repos.directions.complete(
             direction_id,
@@ -1568,7 +1684,7 @@ class AnalysisServer:
             self._complete_direction_sync,
             direction_id,
             params.get("sp_count", 0),
-            params.get("functions_analyzed", 0)
+            params.get("functions_analyzed", 0),
         )
 
         if success:
@@ -1628,7 +1744,7 @@ async def run_server(
     task_path: str,
     project_name: str,
     sanitizers: List[str],
-    ossfuzz_project: Optional[str] = None,
+    ossfuzz_project_name: Optional[str] = None,
     language: str = "c",
     log_dir: Optional[str] = None,
 ) -> AnalyzeResult:
@@ -1643,7 +1759,7 @@ async def run_server(
         task_path=task_path,
         project_name=project_name,
         sanitizers=sanitizers,
-        ossfuzz_project=ossfuzz_project,
+        ossfuzz_project_name=ossfuzz_project_name,
         language=language,
         log_dir=log_dir,
     )

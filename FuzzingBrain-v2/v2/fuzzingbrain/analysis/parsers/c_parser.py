@@ -27,6 +27,7 @@ def get_parser() -> Parser:
 @dataclass
 class FunctionInfo:
     """Extracted function information"""
+
     name: str
     file_path: str
     start_line: int
@@ -58,7 +59,12 @@ def find_function_name(node) -> Optional[str]:
     while declarator.type in ("pointer_declarator", "parenthesized_declarator"):
         # Go deeper to find the actual function_declarator
         for child in declarator.children:
-            if child.type in ("function_declarator", "pointer_declarator", "parenthesized_declarator", "identifier"):
+            if child.type in (
+                "function_declarator",
+                "pointer_declarator",
+                "parenthesized_declarator",
+                "identifier",
+            ):
                 declarator = child
                 break
         else:
@@ -106,8 +112,10 @@ def extract_c_functions(source: bytes, file_path: str) -> List[FunctionInfo]:
                     name=name,
                     file_path=file_path,
                     start_line=node.start_point[0] + 1,  # 1-indexed
-                    end_line=node.end_point[0] + 1,      # 1-indexed
-                    content=source[node.start_byte:node.end_byte].decode("utf-8", errors="replace")
+                    end_line=node.end_point[0] + 1,  # 1-indexed
+                    content=source[node.start_byte : node.end_byte].decode(
+                        "utf-8", errors="replace"
+                    ),
                 )
                 functions.append(func_info)
 

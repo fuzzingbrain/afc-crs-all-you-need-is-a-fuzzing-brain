@@ -24,7 +24,12 @@ from typing import Dict, Any, List
 
 from .pov_base import POVBaseStrategy
 from ...core.models import SuspiciousPoint
-from ...agents import DirectionPlanningAgent, FullscanSPAgent, FunctionAnalysisAgent, LargeFunctionAnalysisAgent
+from ...agents import (
+    DirectionPlanningAgent,
+    FullscanSPAgent,
+    FunctionAnalysisAgent,
+    LargeFunctionAnalysisAgent,
+)
 from ...llms.models import CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5
 from ...tools.directions import set_direction_context
 from ...tools.analyzer import set_analyzer_context
@@ -43,7 +48,13 @@ class POVFullscanStrategy(POVBaseStrategy):
     4. POV Pool: Generate POVs for verified SPs
     """
 
-    def __init__(self, executor, use_pipeline: bool = True, num_parallel_agents: int = 5, use_v2: bool = True):
+    def __init__(
+        self,
+        executor,
+        use_pipeline: bool = True,
+        num_parallel_agents: int = 5,
+        use_v2: bool = True,
+    ):
         """
         Initialize POV Full-scan Strategy.
 
@@ -107,9 +118,11 @@ class POVFullscanStrategy(POVBaseStrategy):
             total_time = time.time() - start_time
             self.log_info(f"========== {self.strategy_name} Complete ==========")
             self.log_info(f"Total time: {total_time:.1f}s")
-            self.log_info(f"Results: {result['suspicious_points_found']} found, "
-                         f"{result['suspicious_points_verified']} verified, "
-                         f"{result['pov_generated']} POV generated")
+            self.log_info(
+                f"Results: {result['suspicious_points_found']} found, "
+                f"{result['suspicious_points_verified']} verified, "
+                f"{result['pov_generated']} POV generated"
+            )
 
             return result
 
@@ -143,7 +156,9 @@ class POVFullscanStrategy(POVBaseStrategy):
                 fuzzer_code=fuzzer_code,
                 reachable_count=reachable_count,
             )
-            self.log_info(f"Direction planning completed: {result.get('directions_created', 0)} directions")
+            self.log_info(
+                f"Direction planning completed: {result.get('directions_created', 0)} directions"
+            )
         except Exception as e:
             self.log_error(f"Direction planning failed: {e}")
             return []
@@ -179,7 +194,9 @@ class POVFullscanStrategy(POVBaseStrategy):
                 fuzzer_code=fuzzer_code,
                 reachable_count=reachable_count,
             )
-            self.log_info(f"Direction planning completed: {result.get('directions_created', 0)} directions")
+            self.log_info(
+                f"Direction planning completed: {result.get('directions_created', 0)} directions"
+            )
         except Exception as e:
             self.log_error(f"Direction planning failed: {e}")
             return []
@@ -208,19 +225,24 @@ class POVFullscanStrategy(POVBaseStrategy):
             self.log_warning("No directions created, cannot continue")
             # Return empty stats
             from ..pipeline import PipelineStats
+
             return PipelineStats()
 
         # Phase 2+: SP Finding (Direction Seeds generation is done inside pipeline)
         if self.use_v2:
             # SP Find v2: Three-phase architecture (Small Pool -> Big Pool -> Free Exploration)
-            self.log_info(f"=== SP Find v2: Three-Phase Architecture ({len(directions)} directions) ===")
+            self.log_info(
+                f"=== SP Find v2: Three-Phase Architecture ({len(directions)} directions) ==="
+            )
             return await self._run_v2_pipeline_with_fuzzer_init(directions)
         else:
             # Legacy: Streaming pipeline with FullscanSPAgent
-            self.log_info(f"=== Starting Streaming Pipeline ({len(directions)} directions) ===")
+            self.log_info(
+                f"=== Starting Streaming Pipeline ({len(directions)} directions) ==="
+            )
             self.log_info(f"  SP Find Pool: {self.num_parallel_agents} agents")
-            self.log_info(f"  Verify Pool: 5 agents")
-            self.log_info(f"  POV Pool: 5 agents")
+            self.log_info("  Verify Pool: 5 agents")
+            self.log_info("  POV Pool: 5 agents")
             return await self._run_streaming_pipeline_with_fuzzer_init(directions)
 
     async def _run_streaming_pipeline_with_fuzzer_init(self, directions: List):
@@ -310,12 +332,9 @@ class POVFullscanStrategy(POVBaseStrategy):
         # Create tasks for concurrent execution
         sp_task = asyncio.create_task(
             self._run_sp_finding_pool(directions, fuzzer_code, agent_log_dir),
-            name="sp_finding_pool"
+            name="sp_finding_pool",
         )
-        pipeline_task = asyncio.create_task(
-            pipeline.run(),
-            name="verify_pov_pipeline"
-        )
+        pipeline_task = asyncio.create_task(pipeline.run(), name="verify_pov_pipeline")
 
         # Wait for SP finding to complete first
         await sp_task
@@ -356,7 +375,9 @@ class POVFullscanStrategy(POVBaseStrategy):
 
         tasks = [analyze_direction(d, i) for i, d in enumerate(directions)]
 
-        self.log_info(f"SP Finding Pool: {len(directions)} directions, {self.num_parallel_agents} concurrent agents")
+        self.log_info(
+            f"SP Finding Pool: {len(directions)} directions, {self.num_parallel_agents} concurrent agents"
+        )
         await asyncio.gather(*tasks, return_exceptions=True)
         self.log_info("SP Finding Pool: All directions processed")
 
@@ -400,7 +421,9 @@ class POVFullscanStrategy(POVBaseStrategy):
                 fuzzer_code=fuzzer_code,
                 reachable_count=reachable_count,
             )
-            self.log_info(f"Direction planning completed: {result.get('directions_created', 0)} directions created")
+            self.log_info(
+                f"Direction planning completed: {result.get('directions_created', 0)} directions created"
+            )
         except Exception as e:
             self.log_error(f"Direction planning failed: {e}")
             return []
@@ -415,16 +438,20 @@ class POVFullscanStrategy(POVBaseStrategy):
             return []
 
         # Phase 2: SP Find Agents (parallel execution)
-        self.log_info(f"=== Full-scan Phase 2: SP Find ({len(directions)} directions) ===")
+        self.log_info(
+            f"=== Full-scan Phase 2: SP Find ({len(directions)} directions) ==="
+        )
         phase2_start = time.time()
 
         # Run SP Find Agents in parallel
-        asyncio.run(self._run_parallel_sp_find_agents(
-            directions=directions,
-            fuzzer_code=fuzzer_code,
-            agent_log_dir=agent_log_dir,
-            num_parallel=self.num_parallel_agents,
-        ))
+        asyncio.run(
+            self._run_parallel_sp_find_agents(
+                directions=directions,
+                fuzzer_code=fuzzer_code,
+                agent_log_dir=agent_log_dir,
+                num_parallel=self.num_parallel_agents,
+            )
+        )
 
         phase2_duration = time.time() - phase2_start
         self.log_info(f"Phase 2 completed in {phase2_duration:.1f}s")
@@ -464,12 +491,13 @@ class POVFullscanStrategy(POVBaseStrategy):
 
         # Create tasks for all directions
         tasks = [
-            analyze_direction(direction, i)
-            for i, direction in enumerate(directions)
+            analyze_direction(direction, i) for i, direction in enumerate(directions)
         ]
 
         # Run all tasks concurrently (limited by semaphore)
-        self.log_info(f"Starting {len(directions)} direction analyses with {num_parallel} parallel agents")
+        self.log_info(
+            f"Starting {len(directions)} direction analyses with {num_parallel} parallel agents"
+        )
         await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _analyze_single_direction(
@@ -497,12 +525,14 @@ class POVFullscanStrategy(POVBaseStrategy):
         if self.executor.analysis_socket_path:
             set_analyzer_context(
                 self.executor.analysis_socket_path,
-                client_id=f"{self.worker_id}_sp_agent_{index}"
+                client_id=f"{self.worker_id}_sp_agent_{index}",
             )
 
         direction_start = time.time()
 
-        self.log_info(f"[{index+1}/{total}] Starting: {direction.name} ({direction.risk_level})")
+        self.log_info(
+            f"[{index + 1}/{total}] Starting: {direction.name} ({direction.risk_level})"
+        )
 
         # Claim the direction
         claimed = self.repos.directions.claim(
@@ -511,7 +541,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             f"{self.worker_id}_sp_agent_{index}",
         )
         if not claimed:
-            self.log_warning(f"[{index+1}/{total}] Could not claim: {direction.name}")
+            self.log_warning(f"[{index + 1}/{total}] Could not claim: {direction.name}")
             return {"success": False, "error": "Could not claim direction"}
 
         # Create SP Find Agent
@@ -545,11 +575,13 @@ class POVFullscanStrategy(POVBaseStrategy):
             )
 
             direction_duration = time.time() - direction_start
-            self.log_info(f"[{index+1}/{total}] Done: {direction.name} in {direction_duration:.1f}s - {sp_count} SPs")
+            self.log_info(
+                f"[{index + 1}/{total}] Done: {direction.name} in {direction_duration:.1f}s - {sp_count} SPs"
+            )
             return result
 
         except Exception as e:
-            self.log_error(f"[{index+1}/{total}] Failed: {direction.name} - {e}")
+            self.log_error(f"[{index + 1}/{total}] Failed: {direction.name} - {e}")
             self.repos.directions.release_claim(direction.direction_id)
             return {"success": False, "error": str(e)}
 
@@ -774,12 +806,18 @@ class POVFullscanStrategy(POVBaseStrategy):
 
         # Filter to functions not in small pool and not already analyzed
         functions_to_analyze = [
-            f for f in all_functions
+            f
+            for f in all_functions
             if f.name not in small_pool_names
-            and (not f.analyzed_by_directions or direction_id not in f.analyzed_by_directions)
+            and (
+                not f.analyzed_by_directions
+                or direction_id not in f.analyzed_by_directions
+            )
         ]
 
-        self.log_info(f"Phase 2: {len(functions_to_analyze)} functions to analyze in big pool")
+        self.log_info(
+            f"Phase 2: {len(functions_to_analyze)} functions to analyze in big pool"
+        )
 
         if not functions_to_analyze:
             self.log_info("Phase 2: No functions to analyze in big pool")
@@ -797,10 +835,14 @@ class POVFullscanStrategy(POVBaseStrategy):
                     direction_id=direction_id,
                 )
 
-        tasks = [analyze_function(func, i) for i, func in enumerate(functions_to_analyze)]
+        tasks = [
+            analyze_function(func, i) for i, func in enumerate(functions_to_analyze)
+        ]
         await asyncio.gather(*tasks, return_exceptions=True)
 
-        self.log_info(f"Phase 2 completed: analyzed {len(functions_to_analyze)} functions")
+        self.log_info(
+            f"Phase 2 completed: analyzed {len(functions_to_analyze)} functions"
+        )
 
     async def _run_phase3_free_exploration(
         self,
@@ -826,7 +868,9 @@ class POVFullscanStrategy(POVBaseStrategy):
             self.log_info("Phase 3: No high-risk directions for free exploration")
             return
 
-        self.log_info(f"Phase 3: Running free exploration on {len(high_risk_directions)} high-risk directions")
+        self.log_info(
+            f"Phase 3: Running free exploration on {len(high_risk_directions)} high-risk directions"
+        )
 
         # Use legacy FullscanSPAgent for exploration
         semaphore = asyncio.Semaphore(num_parallel)
@@ -857,14 +901,24 @@ class POVFullscanStrategy(POVBaseStrategy):
         """
         func_start = time.time()
 
-        self.log_debug(f"[{index+1}/{total}] Analyzing: {func.name}")
+        self.log_debug(f"[{index + 1}/{total}] Analyzing: {func.name}")
 
         # Get caller/callee info
         callers = []
         callees = []
         try:
-            callers = self.repos.callgraph_nodes.find_callers(self.task_id, self.fuzzer, func.name) or []
-            callees = self.repos.callgraph_nodes.find_callees(self.task_id, self.fuzzer, func.name) or []
+            callers = (
+                self.repos.callgraph_nodes.find_callers(
+                    self.task_id, self.fuzzer, func.name
+                )
+                or []
+            )
+            callees = (
+                self.repos.callgraph_nodes.find_callees(
+                    self.task_id, self.fuzzer, func.name
+                )
+                or []
+            )
         except Exception:
             pass
 
@@ -873,6 +927,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         if not func_source and self.executor.analysis_socket_path:
             try:
                 from ...analyzer import AnalysisClient
+
                 client = AnalysisClient(
                     self.executor.analysis_socket_path,
                     client_id=f"fullscan_func_{self.worker_id}_{index}",
@@ -882,7 +937,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                 pass
 
         # Determine function size based on actual source
-        func_lines = func_source.count('\n') + 1 if func_source else 0
+        func_lines = func_source.count("\n") + 1 if func_source else 0
         is_large = func_lines > LargeFunctionAnalysisAgent.LARGE_FUNCTION_THRESHOLD
 
         # Create appropriate agent
@@ -923,12 +978,16 @@ class POVFullscanStrategy(POVBaseStrategy):
             result = await agent.analyze_async()
 
             # Mark function as analyzed by this direction
-            if hasattr(func, 'function_id') and func.function_id:
-                self.repos.functions.mark_analyzed_by_direction(func.function_id, direction_id)
+            if hasattr(func, "function_id") and func.function_id:
+                self.repos.functions.mark_analyzed_by_direction(
+                    func.function_id, direction_id
+                )
 
             func_duration = time.time() - func_start
             sp_status = "SP!" if result.get("sp_created") else "OK"
-            self.log_debug(f"[{index+1}/{total}] Done: {func.name} in {func_duration:.1f}s - {sp_status}")
+            self.log_debug(
+                f"[{index + 1}/{total}] Done: {func.name} in {func_duration:.1f}s - {sp_status}"
+            )
 
             # Write log block
             await self._write_function_log_v2(agent, direction_id, agent_log_dir)
@@ -936,7 +995,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             return result
 
         except Exception as e:
-            self.log_error(f"[{index+1}/{total}] Failed: {func.name} - {e}")
+            self.log_error(f"[{index + 1}/{total}] Failed: {func.name} - {e}")
             return {"success": False, "error": str(e)}
 
     async def _write_function_log_v2(
@@ -955,7 +1014,7 @@ class POVFullscanStrategy(POVBaseStrategy):
 
         lock = self._direction_log_locks[direction_id]
 
-        log_block = agent.get_log_block() if hasattr(agent, 'get_log_block') else ""
+        log_block = agent.get_log_block() if hasattr(agent, "get_log_block") else ""
         if not log_block:
             return
 
@@ -987,14 +1046,17 @@ class POVFullscanStrategy(POVBaseStrategy):
 
         # Analyzed counts
         analyzed_count = sum(
-            1 for f in (all_functions or [])
+            1
+            for f in (all_functions or [])
             if f.analyzed_by_directions and len(f.analyzed_by_directions) > 0
         )
 
         self.log_info(f"  Small Pool: {small_pool_total} functions")
         self.log_info(f"  Big Pool: {big_pool_total} total reachable functions")
         self.log_info(f"  Analyzed: {analyzed_count} functions")
-        self.log_info(f"  Coverage: {analyzed_count}/{big_pool_total} ({100*analyzed_count/max(big_pool_total,1):.1f}%)")
+        self.log_info(
+            f"  Coverage: {analyzed_count}/{big_pool_total} ({100 * analyzed_count / max(big_pool_total, 1):.1f}%)"
+        )
 
     # =========================================================================
     # Fuzzer Worker Integration
@@ -1014,9 +1076,11 @@ class POVFullscanStrategy(POVBaseStrategy):
             directions: List of Direction objects from Direction Planning
         """
         # Check if FuzzerManager is available
-        fuzzer_manager = getattr(self.executor, 'fuzzer_manager', None)
+        fuzzer_manager = getattr(self.executor, "fuzzer_manager", None)
         if not fuzzer_manager:
-            self.log_debug("FuzzerManager not available, skipping Direction Seeds generation")
+            self.log_debug(
+                "FuzzerManager not available, skipping Direction Seeds generation"
+            )
             return
 
         self.log_info("=== Generating Direction Seeds ===")
@@ -1029,7 +1093,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         # Generate seeds for each direction (high-risk first)
         sorted_directions = sorted(
             directions,
-            key=lambda d: {"high": 0, "medium": 1, "low": 2}.get(d.risk_level, 3)
+            key=lambda d: {"high": 0, "medium": 1, "low": 2}.get(d.risk_level, 3),
         )
 
         for direction in sorted_directions[:5]:  # Top 5 directions
@@ -1064,9 +1128,13 @@ class POVFullscanStrategy(POVBaseStrategy):
                     )
 
             except Exception as e:
-                self.log_warning(f"  Failed to generate seeds for {direction.name}: {e}")
+                self.log_warning(
+                    f"  Failed to generate seeds for {direction.name}: {e}"
+                )
 
-        self.log_info(f"Direction Seeds generation complete: {seeds_generated} total seeds")
+        self.log_info(
+            f"Direction Seeds generation complete: {seeds_generated} total seeds"
+        )
 
         # Start Global Fuzzer with generated seeds
         if seeds_generated > 0:
@@ -1080,4 +1148,6 @@ class POVFullscanStrategy(POVBaseStrategy):
             except Exception as e:
                 self.log_warning(f"Error starting Global Fuzzer: {e}")
         else:
-            self.log_info("No Direction Seeds generated, skipping Global Fuzzer startup")
+            self.log_info(
+                "No Direction Seeds generated, skipping Global Fuzzer startup"
+            )

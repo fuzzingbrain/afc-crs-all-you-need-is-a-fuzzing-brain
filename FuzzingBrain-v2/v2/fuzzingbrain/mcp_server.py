@@ -5,10 +5,9 @@ Exposes FuzzingBrain as an MCP tool that can be called by other AI systems.
 """
 
 from fastmcp import FastMCP
-from typing import Optional, List
-import asyncio
+from typing import Optional, List, Dict
 
-from .core import Config, Task, JobType, TaskStatus
+from .core import Config, Task, JobType, ScanMode
 
 
 # Create MCP server instance
@@ -16,13 +15,109 @@ mcp = FastMCP("FuzzingBrain")
 
 
 @mcp.tool()
+async def fuzzingbrain_task(
+    # Project info (required)
+    repo_url: str,
+    project_name: str,
+    # Task configuration
+    task_type: str = "pov",  # pov | patch | pov-patch | harness
+    scan_mode: str = "full",  # full | delta
+    # OSS-Fuzz project name (if different from project_name)
+    ossfuzz_project_name: Optional[str] = None,
+    # Commit configuration
+    target_commit: Optional[str] = None,
+    base_commit: Optional[str] = None,
+    delta_commit: Optional[str] = None,
+    # Fuzzing configuration
+    fuzzer_filter: Optional[List[str]] = None,
+    sanitizers: Optional[List[str]] = None,
+    timeout_minutes: int = 30,
+    pov_count: int = 1,
+    # Fuzz tooling
+    fuzz_tooling_url: Optional[str] = None,
+    fuzz_tooling_ref: Optional[str] = None,
+    # Fuzzer sources (name -> [paths])
+    fuzzer_sources: Optional[Dict[str, List[str]]] = None,
+    # Prebuild
+    work_id: Optional[str] = None,
+    prebuild_dir: Optional[str] = None,
+    # Patch mode specific
+    gen_blob: Optional[str] = None,
+    input_blob: Optional[str] = None,
+    # Harness mode specific
+    targets: Optional[List[dict]] = None,
+    # Runtime control
+    budget_limit: float = 50.0,
+    eval_server: Optional[str] = None,
+) -> dict:
+    """
+    Run a FuzzingBrain task (unified endpoint).
+
+    Supports all task types: pov, patch, pov-patch, harness.
+    All parameters match the JSON configuration template.
+
+    Args:
+        repo_url: Git repository URL (required)
+        project_name: Project name (required)
+        task_type: Task type - pov, patch, pov-patch, or harness
+        scan_mode: Scan mode - full or delta
+        ossfuzz_project_name: OSS-Fuzz project name if different from project_name
+        target_commit: Target commit for full scan
+        base_commit: Base commit for delta scan
+        delta_commit: Delta commit for delta scan
+        fuzzer_filter: List of fuzzers to use (empty = all)
+        sanitizers: List of sanitizers (default: ["address"])
+        timeout_minutes: Timeout in minutes (default: 30)
+        pov_count: Stop after N POVs (0 = unlimited, default: 1)
+        fuzz_tooling_url: Custom fuzz-tooling repository URL
+        fuzz_tooling_ref: Fuzz-tooling branch/tag
+        fuzzer_sources: Dict mapping fuzzer_name -> list of source paths
+        work_id: Work ID for prebuild data
+        prebuild_dir: Path to prebuild data directory
+        gen_blob: Generator blob for patch mode
+        input_blob: Input blob (base64) for patch mode
+        targets: Target functions for harness mode
+        budget_limit: Budget limit in dollars (default: 50.0)
+        eval_server: Evaluation server URL
+
+    Returns:
+        dict with task_id for tracking and initial status
+    """
+    task = Task(
+        task_type=JobType(task_type),
+        scan_mode=ScanMode(scan_mode),
+        repo_url=repo_url,
+        project_name=project_name,
+        sanitizers=sanitizers or ["address"],
+        timeout_minutes=timeout_minutes,
+        base_commit=base_commit,
+        delta_commit=delta_commit,
+    )
+
+    # TODO: Start actual task processing
+    # from .core.task_processor import TaskProcessor
+    # processor = TaskProcessor(task, config)
+    # asyncio.create_task(processor.run())
+
+    return {
+        "task_id": task.task_id,
+        "task_type": task_type,
+        "status": "pending",
+        "message": f"{task_type} task started for {repo_url}",
+    }
+
+
+# Legacy tools for backward compatibility
+
+
+@mcp.tool()
 async def fuzzingbrain_find_pov(
     repo_url: str,
-    commit_id: Optional[str] = None,
     project_name: Optional[str] = None,
+    commit_id: Optional[str] = None,
     fuzz_tooling_url: Optional[str] = None,
     sanitizers: Optional[List[str]] = None,
-    timeout_minutes: int = 60,
+    timeout_minutes: int = 30,
 ) -> dict:
     """
     Find proof-of-vulnerability (POV) in a repository.

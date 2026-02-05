@@ -11,7 +11,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 from fastmcp import Client
 from loguru import logger
@@ -19,12 +19,13 @@ from loguru import logger
 from .base import BaseAgent
 from .prompts import POV_AGENT_SYSTEM_PROMPT
 from ..llms import LLMClient, ModelInfo
-from ..tools.pov import set_pov_context, update_pov_iteration, get_pov_context
+from ..tools.pov import set_pov_context, update_pov_iteration
 
 
 # =============================================================================
 # POV Result Dataclass
 # =============================================================================
+
 
 @dataclass
 class POVResult:
@@ -66,13 +67,16 @@ class POVResult:
             "total_variants": self.total_variants,
             "error_msg": self.error_msg,
             "created_at": self.created_at.isoformat(),
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "completed_at": self.completed_at.isoformat()
+            if self.completed_at
+            else None,
         }
 
 
 # =============================================================================
 # POV Agent
 # =============================================================================
+
 
 class POVAgent(BaseAgent):
     """
@@ -189,7 +193,11 @@ class POVAgent(BaseAgent):
 
     def _get_summary_table(self) -> str:
         """Generate summary table for POV generation."""
-        duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
+        duration = (
+            (self.end_time - self.start_time).total_seconds()
+            if self.start_time and self.end_time
+            else 0
+        )
         width = 70
 
         sp_id = ""
@@ -221,8 +229,16 @@ class POVAgent(BaseAgent):
         lines.append("├" + "─" * width + "┤")
         lines.append("│" + f"  Duration: {duration:.2f}s".ljust(width) + "│")
         lines.append("│" + f"  Iterations: {self.total_iterations}".ljust(width) + "│")
-        lines.append("│" + f"  POV Attempts: {self.pov_attempts}/{self.max_pov_attempts}".ljust(width) + "│")
-        lines.append("│" + f"  Variants Tested: {self.pov_attempts * 3}".ljust(width) + "│")
+        lines.append(
+            "│"
+            + f"  POV Attempts: {self.pov_attempts}/{self.max_pov_attempts}".ljust(
+                width
+            )
+            + "│"
+        )
+        lines.append(
+            "│" + f"  Variants Tested: {self.pov_attempts * 3}".ljust(width) + "│"
+        )
         lines.append("├" + "─" * width + "┤")
         lines.append("│" + " RESULT ".center(width) + "│")
         lines.append("├" + "─" * width + "┤")
@@ -280,17 +296,23 @@ class POVAgent(BaseAgent):
             # Get fuzzer info from database
             fuzzer_obj = self.repos.fuzzers.find_by_name(self.task_id, self.fuzzer)
             if not fuzzer_obj or not fuzzer_obj.source_path:
-                logger.warning(f"[POVAgent] Fuzzer source path not found for {self.fuzzer}")
+                logger.warning(
+                    f"[POVAgent] Fuzzer source path not found for {self.fuzzer}"
+                )
                 return None
 
             # Build full path: workspace/repo/{source_path}
             if not self.workspace_path:
-                logger.warning("[POVAgent] workspace_path not set, cannot load fuzzer source")
+                logger.warning(
+                    "[POVAgent] workspace_path not set, cannot load fuzzer source"
+                )
                 return None
 
             source_file = self.workspace_path / "repo" / fuzzer_obj.source_path
             if not source_file.exists():
-                logger.warning(f"[POVAgent] Fuzzer source file not found: {source_file}")
+                logger.warning(
+                    f"[POVAgent] Fuzzer source file not found: {source_file}"
+                )
                 return None
 
             self._fuzzer_source = source_file.read_text()
@@ -322,7 +344,9 @@ Discard:
         if not suspicious_point:
             return "No suspicious point provided."
 
-        sp_id = suspicious_point.get("suspicious_point_id", suspicious_point.get("_id", "unknown"))
+        sp_id = suspicious_point.get(
+            "suspicious_point_id", suspicious_point.get("_id", "unknown")
+        )
         function_name = suspicious_point.get("function_name", "unknown")
         vuln_type = suspicious_point.get("vuln_type", "unknown")
         description = suspicious_point.get("description", "No description")
@@ -374,7 +398,7 @@ Key things to identify:
 
 """
         else:
-            message += f"""## Fuzzer Source Code
+            message += """## Fuzzer Source Code
 
 **Fuzzer source not pre-loaded. You MUST call get_fuzzer_info() to read it first.**
 This is CRITICAL - you need to understand how your input enters the library!
@@ -400,13 +424,15 @@ This is CRITICAL - you need to understand how your input enters the library!
 
         # Add verification notes if available
         if suspicious_point.get("verification_notes"):
-            message += f"## Verification Notes\n\n{suspicious_point['verification_notes']}\n\n"
+            message += (
+                f"## Verification Notes\n\n{suspicious_point['verification_notes']}\n\n"
+            )
 
         # Add POV guidance if available (from Verify agent)
         if suspicious_point.get("pov_guidance"):
             message += f"""## POV Guidance (Reference from Verify Agent)
 
-{suspicious_point['pov_guidance']}
+{suspicious_point["pov_guidance"]}
 
 """
 
@@ -433,8 +459,7 @@ Start by reading the vulnerable function source with get_function_source("{funct
             return
 
         sp_id = self.suspicious_point.get(
-            "suspicious_point_id",
-            self.suspicious_point.get("_id", "")
+            "suspicious_point_id", self.suspicious_point.get("_id", "")
         )
 
         # Load fuzzer source for context
@@ -482,7 +507,10 @@ Start by reading the vulnerable function source with get_function_source("{funct
                 result = json.loads(result_str)
                 if result.get("success") is True:
                     self.pov_attempts += 1
-                    self._log(f"POV attempt #{self.pov_attempts}/{self.max_pov_attempts}", level="INFO")
+                    self._log(
+                        f"POV attempt #{self.pov_attempts}/{self.max_pov_attempts}",
+                        level="INFO",
+                    )
                     return True
             except (json.JSONDecodeError, TypeError):
                 pass
@@ -515,8 +543,10 @@ Start by reading the vulnerable function source with get_function_source("{funct
         self._greedy_attempts_threshold = 3
 
         # Log model info
-        model_name = self.model.id if hasattr(self.model, 'id') else (
-            self.model or self.llm_client.config.default_model.id
+        model_name = (
+            self.model.id
+            if hasattr(self.model, "id")
+            else (self.model or self.llm_client.config.default_model.id)
         )
         self._log(f"Using model: {model_name}", level="INFO")
 
@@ -524,7 +554,7 @@ Start by reading the vulnerable function source with get_function_source("{funct
         final_response = ""
         response = None
         consecutive_no_tool_calls = 0  # Track consecutive iterations without tool calls
-        max_consecutive_no_tools = 5   # Give up after this many consecutive refusals
+        max_consecutive_no_tools = 5  # Give up after this many consecutive refusals
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -533,11 +563,17 @@ Start by reading the vulnerable function source with get_function_source("{funct
             # Update iteration in POV context (pass worker_id for thread-safety)
             update_pov_iteration(iteration, worker_id=self.worker_id)
 
-            self._log(f"=== Iteration {iteration}/{self.max_iterations} (POV attempts: {self.pov_attempts}/{self.max_pov_attempts}) ===", level="INFO")
+            self._log(
+                f"=== Iteration {iteration}/{self.max_iterations} (POV attempts: {self.pov_attempts}/{self.max_pov_attempts}) ===",
+                level="INFO",
+            )
 
             # Check POV attempts limit
             if self.pov_attempts >= self.max_pov_attempts:
-                self._log(f"Max POV attempts ({self.max_pov_attempts}) reached", level="WARNING")
+                self._log(
+                    f"Max POV attempts ({self.max_pov_attempts}) reached",
+                    level="WARNING",
+                )
                 final_response = f"Reached maximum POV attempts ({self.max_pov_attempts}) without success."
                 break
 
@@ -549,13 +585,21 @@ Start by reading the vulnerable function source with get_function_source("{funct
             # Greedy mode: filter out trace_pov for first N attempts
             # This forces the agent to try direct POV generation instead of tracing
             if self.pov_attempts < self._greedy_attempts_threshold:
-                available_tools = [t for t in self._tools if t["function"]["name"] != "trace_pov"]
+                available_tools = [
+                    t for t in self._tools if t["function"]["name"] != "trace_pov"
+                ]
                 if self.pov_attempts == self._greedy_attempts_threshold - 1:
-                    self._log(f"Greedy mode ending after this attempt - trace_pov will be available", level="INFO")
+                    self._log(
+                        "Greedy mode ending after this attempt - trace_pov will be available",
+                        level="INFO",
+                    )
             else:
                 available_tools = self._tools
                 if self.pov_attempts == self._greedy_attempts_threshold:
-                    self._log(f"Greedy mode ended - trace_pov is now available for debugging", level="INFO")
+                    self._log(
+                        "Greedy mode ended - trace_pov is now available for debugging",
+                        level="INFO",
+                    )
 
             # Call LLM with tools
             self.llm_client.reset_tried_models()
@@ -567,6 +611,7 @@ Start by reading the vulnerable function source with get_function_source("{funct
                 )
             except Exception as e:
                 import traceback
+
                 self._log(f"LLM call failed: {e}", level="ERROR")
                 self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
                 break
@@ -578,16 +623,21 @@ Start by reading the vulnerable function source with get_function_source("{funct
             # Check for tool calls
             if response.tool_calls:
                 consecutive_no_tool_calls = 0  # Reset counter
-                self._log(f"LLM requested {len(response.tool_calls)} tool call(s)", level="INFO")
+                self._log(
+                    f"LLM requested {len(response.tool_calls)} tool call(s)",
+                    level="INFO",
+                )
 
                 # Add assistant message with tool calls
-                self.messages.append({
-                    "role": "assistant",
-                    "content": response.content or "",
-                    "tool_calls": response.tool_calls,
-                    "iteration": f"{iteration}/{self.max_iterations}",
-                    "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
-                })
+                self.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": response.content or "",
+                        "tool_calls": response.tool_calls,
+                        "iteration": f"{iteration}/{self.max_iterations}",
+                        "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
+                    }
+                )
 
                 # Execute each tool call
                 for tool_call in response.tool_calls:
@@ -600,7 +650,10 @@ Start by reading the vulnerable function source with get_function_source("{funct
                         tool_args = json.loads(tool_args_str) if tool_args_str else {}
                     except json.JSONDecodeError:
                         tool_args = {}
-                        self._log(f"Failed to parse tool args: {tool_args_str}", level="WARNING")
+                        self._log(
+                            f"Failed to parse tool args: {tool_args_str}",
+                            level="WARNING",
+                        )
 
                     self._log(f"Calling tool: {tool_name}", level="INFO")
 
@@ -609,13 +662,15 @@ Start by reading the vulnerable function source with get_function_source("{funct
                     self.total_tool_calls += 1
 
                     # Add tool result to messages
-                    self.messages.append({
-                        "role": "tool",
-                        "tool_call_id": tool_id,
-                        "content": tool_result,
-                        "iteration": f"{iteration}/{self.max_iterations}",
-                        "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
-                    })
+                    self.messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_id,
+                            "content": tool_result,
+                            "iteration": f"{iteration}/{self.max_iterations}",
+                            "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
+                        }
+                    )
 
                     # Check for POV attempt
                     self._check_tool_for_pov_attempt(tool_name, tool_result)
@@ -639,9 +694,10 @@ Start by reading the vulnerable function source with get_function_source("{funct
                             if result.get("success") and not result.get("crashed"):
                                 # POV didn't crash - inject analysis prompt
                                 output_hint = result.get("output_hint", "")
-                                self.messages.append({
-                                    "role": "user",
-                                    "content": f"""This POV did not trigger a crash. Before trying again, ANALYZE:
+                                self.messages.append(
+                                    {
+                                        "role": "user",
+                                        "content": f"""This POV did not trigger a crash. Before trying again, ANALYZE:
 
 1. Did the input reach the vulnerable function? Check the output hint:
 {output_hint[:300] if output_hint else "(no output)"}
@@ -650,43 +706,56 @@ Start by reading the vulnerable function source with get_function_source("{funct
 3. What's different between your input and what the vulnerability needs?
 
 Use get_function_source or trace_pov (if available) to understand better, then create a NEW POV with adjusted approach.""",
-                                    "iteration": f"{iteration}/{self.max_iterations}",
-                                    "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
-                                })
-                                self._log("Injected post-failure analysis prompt", level="DEBUG")
+                                        "iteration": f"{iteration}/{self.max_iterations}",
+                                        "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
+                                    }
+                                )
+                                self._log(
+                                    "Injected post-failure analysis prompt",
+                                    level="DEBUG",
+                                )
                         except (json.JSONDecodeError, TypeError):
                             pass
 
                 # Check if we should stop after tool calls
                 if self.pov_success:
-                    final_response = f"POV SUCCESS! Found crashing input."
+                    final_response = "POV SUCCESS! Found crashing input."
                     break
 
             else:
                 # No tool calls - LLM might be giving up
                 consecutive_no_tool_calls += 1
-                self._log(f"LLM stopped calling tools ({consecutive_no_tool_calls}/{max_consecutive_no_tools})", level="WARNING")
+                self._log(
+                    f"LLM stopped calling tools ({consecutive_no_tool_calls}/{max_consecutive_no_tools})",
+                    level="WARNING",
+                )
 
                 # Give up after too many consecutive refusals
                 if consecutive_no_tool_calls >= max_consecutive_no_tools:
-                    self._log(f"LLM refused to call tools {max_consecutive_no_tools} times, giving up", level="ERROR")
+                    self._log(
+                        f"LLM refused to call tools {max_consecutive_no_tools} times, giving up",
+                        level="ERROR",
+                    )
                     final_response = response.content or "LLM stopped trying"
                     break
 
                 # Add the assistant's response
                 if response.content:
-                    self.messages.append({
-                        "role": "assistant",
-                        "content": response.content,
-                        "iteration": f"{iteration}/{self.max_iterations}",
-                        "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
-                    })
+                    self.messages.append(
+                        {
+                            "role": "assistant",
+                            "content": response.content,
+                            "iteration": f"{iteration}/{self.max_iterations}",
+                            "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
+                        }
+                    )
 
                 # Force continuation: remind LLM to keep trying
                 remaining_attempts = self.max_pov_attempts - self.pov_attempts
-                self.messages.append({
-                    "role": "user",
-                    "content": f"""You still have {remaining_attempts} POV attempts remaining. Do NOT give up.
+                self.messages.append(
+                    {
+                        "role": "user",
+                        "content": f"""You still have {remaining_attempts} POV attempts remaining. Do NOT give up.
 
 Try a DIFFERENT approach:
 - If previous blobs didn't crash, analyze WHY and adjust
@@ -694,17 +763,22 @@ Try a DIFFERENT approach:
 - Look for alternative code paths to the vulnerable function
 
 Call create_pov with a new generator code NOW.""",
-                    "iteration": f"{iteration}/{self.max_iterations}",
-                    "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
-                })
+                        "iteration": f"{iteration}/{self.max_iterations}",
+                        "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
+                    }
+                )
                 # Continue the loop
 
             # Incremental save: save conversation after each iteration
             self._log_conversation()
 
         if iteration >= self.max_iterations:
-            self._log(f"Max iterations ({self.max_iterations}) reached", level="WARNING")
-            final_response = f"Reached maximum iterations ({self.max_iterations}) without success."
+            self._log(
+                f"Max iterations ({self.max_iterations}) reached", level="WARNING"
+            )
+            final_response = (
+                f"Reached maximum iterations ({self.max_iterations}) without success."
+            )
 
         return final_response
 
@@ -722,7 +796,9 @@ Call create_pov with a new generator code NOW.""",
             POVResult with generation results
         """
         self.suspicious_point = suspicious_point
-        sp_id = suspicious_point.get("suspicious_point_id", suspicious_point.get("_id", "unknown"))
+        sp_id = suspicious_point.get(
+            "suspicious_point_id", suspicious_point.get("_id", "unknown")
+        )
 
         self._log(f"Starting POV generation for SP {sp_id}", level="INFO")
 
@@ -762,9 +838,15 @@ Call create_pov with a new generator code NOW.""",
         )
 
         if self.pov_success:
-            self._log(f"POV generation succeeded! POV ID: {self.successful_pov_id}", level="INFO")
+            self._log(
+                f"POV generation succeeded! POV ID: {self.successful_pov_id}",
+                level="INFO",
+            )
         else:
-            self._log(f"POV generation failed after {self.pov_attempts} attempts", level="WARNING")
+            self._log(
+                f"POV generation failed after {self.pov_attempts} attempts",
+                level="WARNING",
+            )
 
         return result
 

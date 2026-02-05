@@ -59,7 +59,7 @@ def create_app(eval_server_url: str = "http://localhost:8765") -> FastAPI:
             resp = await app.state.http_client.get(url)
             try:
                 data = resp.json()
-            except:
+            except Exception:
                 data = {"error": resp.text, "status": resp.status_code}
             return JSONResponse(content=data, status_code=resp.status_code)
         except Exception as e:
@@ -83,7 +83,9 @@ def create_app(eval_server_url: str = "http://localhost:8765") -> FastAPI:
         """Proxy WebSocket events from eval server."""
         await websocket.accept()
 
-        ws_url = app.state.eval_server_url.replace("http://", "ws://").replace("https://", "wss://")
+        ws_url = app.state.eval_server_url.replace("http://", "ws://").replace(
+            "https://", "wss://"
+        )
 
         try:
             async with httpx.AsyncClient() as client:

@@ -54,7 +54,7 @@ class RedisManager:
             logger.info(f"Redis already running at {self.host}:{self.port}")
             return True
 
-        logger.info(f"Redis not running, attempting to start...")
+        logger.info("Redis not running, attempting to start...")
         return self._start_redis()
 
     def _start_redis(self) -> bool:
@@ -119,6 +119,7 @@ class CeleryWorkerManager:
         # Setup log file for Celery output
         if log_dir:
             from pathlib import Path
+
             celery_log = Path(log_dir) / "celery_worker.log"
             self._celery_log_file = open(celery_log, "w", encoding="utf-8")
             stderr_target = self._celery_log_file
@@ -132,12 +133,14 @@ class CeleryWorkerManager:
         self._worker_process = subprocess.Popen(
             [
                 "celery",
-                "-A", "fuzzingbrain.celery_app",
+                "-A",
+                "fuzzingbrain.celery_app",
                 "worker",
                 "--loglevel=INFO",
                 f"--concurrency={self.concurrency}",
                 "--pool=prefork",
-                "-Q", "celery,workers",
+                "-Q",
+                "celery,workers",
                 "--without-gossip",
                 "--without-mingle",
                 "--without-heartbeat",
@@ -147,13 +150,15 @@ class CeleryWorkerManager:
             start_new_session=True,  # Detach from terminal
         )
 
-        logger.info(f"Started Celery worker subprocess (pid={self._worker_process.pid}, concurrency={self.concurrency})")
+        logger.info(
+            f"Started Celery worker subprocess (pid={self._worker_process.pid}, concurrency={self.concurrency})"
+        )
 
         # Give worker time to initialize
         time.sleep(2)
 
         # Reset terminal settings (subprocess startup may affect them)
-        os.system('stty sane 2>/dev/null')
+        os.system("stty sane 2>/dev/null")
 
     def stop(self):
         """Stop the Celery worker subprocess."""

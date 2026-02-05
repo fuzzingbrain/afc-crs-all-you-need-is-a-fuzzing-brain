@@ -84,11 +84,11 @@ def _cleanup_git_tracked(repo_path: Path):
         )
 
         if result.returncode != 0:
-            logger.warning(f"git ls-files failed, removing entire repo")
+            logger.warning("git ls-files failed, removing entire repo")
             shutil.rmtree(repo_path)
             return
 
-        tracked_files = result.stdout.strip().split('\n')
+        tracked_files = result.stdout.strip().split("\n")
         tracked_files = [f for f in tracked_files if f]  # Remove empty strings
 
         # Delete tracked files
@@ -115,7 +115,7 @@ def _cleanup_git_tracked(repo_path: Path):
 
 def _remove_empty_dirs(path: Path):
     """Remove all empty directories recursively."""
-    for dir_path in sorted(path.rglob('*'), reverse=True):
+    for dir_path in sorted(path.rglob("*"), reverse=True):
         if dir_path.is_dir():
             try:
                 dir_path.rmdir()  # Only removes if empty

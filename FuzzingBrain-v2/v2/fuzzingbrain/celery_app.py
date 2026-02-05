@@ -11,6 +11,7 @@ import sys
 import traceback
 
 from dotenv import load_dotenv
+
 load_dotenv()  # Load .env file for API keys
 
 from celery import Celery
@@ -50,7 +51,9 @@ def configure_celery_logging(**kwargs):
 
 # Signal handlers for better error logging
 @task_failure.connect
-def on_task_failure(sender=None, task_id=None, exception=None, traceback=None, **kwargs):
+def on_task_failure(
+    sender=None, task_id=None, exception=None, traceback=None, **kwargs
+):
     """Log task failures to stderr."""
     error_msg = f"[CELERY TASK FAILED] Task {sender.name}[{task_id}]: {exception}"
     sys.stderr.write(error_msg + "\n")
@@ -62,8 +65,9 @@ def on_task_failure(sender=None, task_id=None, exception=None, traceback=None, *
 @worker_process_init.connect
 def on_worker_init(**kwargs):
     """Setup error handling and reporter when worker process initializes."""
+
     def handle_exception(exc_type, exc_value, exc_tb):
-        error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
+        error_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
         sys.stderr.write(f"[CELERY WORKER ERROR]\n{error_msg}\n")
         sys.stderr.flush()
 
@@ -74,10 +78,12 @@ def on_worker_init(**kwargs):
     if eval_server:
         try:
             from .eval import create_reporter
+
             create_reporter(server_url=eval_server, level="normal")
         except Exception as e:
             sys.stderr.write(f"[CELERY WORKER] Failed to init reporter: {e}\n")
             sys.stderr.flush()
+
 
 # Celery configuration
 app.conf.update(
@@ -85,23 +91,18 @@ app.conf.update(
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
-
     # Timezone
     timezone="UTC",
     enable_utc=True,
-
     # Task settings
     task_track_started=True,
     task_time_limit=86400,  # 24 hour default hard limit (overridden per-task by dispatcher)
     task_soft_time_limit=86100,  # 23h55m default soft limit (overridden per-task by dispatcher)
-
     # Worker settings
     worker_prefetch_multiplier=1,  # Fetch one task at a time
     worker_concurrency=8,  # Default concurrency
-
     # Result settings
     result_expires=86400,  # 24 hours
-
     # Task routing (optional, for future use)
     task_routes={
         "fuzzingbrain.worker.tasks.run_worker": {"queue": "workers"},

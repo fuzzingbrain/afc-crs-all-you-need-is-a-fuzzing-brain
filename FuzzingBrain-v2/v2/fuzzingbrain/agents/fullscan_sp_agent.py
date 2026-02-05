@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from fastmcp import Client
-from loguru import logger
 
 from .base import BaseAgent
 from .prompts import FULLSCAN_SP_FIND_PROMPT
@@ -115,7 +114,11 @@ class FullscanSPAgent(BaseAgent):
 
     def _get_summary_table(self) -> str:
         """Generate summary table for SP finding."""
-        duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
+        duration = (
+            (self.end_time - self.start_time).total_seconds()
+            if self.start_time and self.end_time
+            else 0
+        )
         width = 70
 
         lines = []
@@ -128,8 +131,12 @@ class FullscanSPAgent(BaseAgent):
         lines.append("│" + f"  Sanitizer: {self.sanitizer}".ljust(width) + "│")
         lines.append("│" + f"  Duration: {duration:.2f}s".ljust(width) + "│")
         lines.append("│" + f"  Iterations: {self.total_iterations}".ljust(width) + "│")
-        lines.append("│" + f"  Core Functions: {len(self.core_functions)}".ljust(width) + "│")
-        lines.append("│" + f"  Functions Analyzed: {self.functions_analyzed}".ljust(width) + "│")
+        lines.append(
+            "│" + f"  Core Functions: {len(self.core_functions)}".ljust(width) + "│"
+        )
+        lines.append(
+            "│" + f"  Functions Analyzed: {self.functions_analyzed}".ljust(width) + "│"
+        )
         lines.append("│" + f"  SPs Created: {self.sp_count}".ljust(width) + "│")
         lines.append("├" + "─" * width + "┤")
         lines.append("│" + " SUSPICIOUS POINTS ".center(width) + "│")
@@ -141,7 +148,7 @@ class FullscanSPAgent(BaseAgent):
                 line = f"  {score_icon} [{score:.1f}] {func_name}: {vuln_type}"
                 # Truncate if too long
                 if len(line) > width - 2:
-                    line = line[:width - 5] + "..."
+                    line = line[: width - 5] + "..."
                 lines.append("│" + line.ljust(width) + "│")
         else:
             lines.append("│" + "  (No SPs created)".ljust(width) + "│")
@@ -191,7 +198,11 @@ class FullscanSPAgent(BaseAgent):
         in_final_quarter = progress_pct >= 0.75
 
         # For HIGH risk directions, check minimum SP requirement
-        if in_final_quarter and self.min_sp_required > 0 and self.sp_count < self.min_sp_required:
+        if (
+            in_final_quarter
+            and self.min_sp_required > 0
+            and self.sp_count < self.min_sp_required
+        ):
             missing = self.min_sp_required - self.sp_count
             return f"""⚠️ **ATTENTION: This is a HIGH-RISK direction with minimum SP requirements.**
 
@@ -246,8 +257,12 @@ If you truly found nothing exploitable in this direction, explain why and conclu
         prompt = FULLSCAN_SP_FIND_PROMPT
 
         # Add current sanitizer context with detailed patterns
-        sanitizer_guidance = f"\n\n## Vulnerability Patterns for {self.sanitizer} Sanitizer\n\n"
-        sanitizer_guidance += "Focus ONLY on these bug types (other bugs won't be detected):\n\n"
+        sanitizer_guidance = (
+            f"\n\n## Vulnerability Patterns for {self.sanitizer} Sanitizer\n\n"
+        )
+        sanitizer_guidance += (
+            "Focus ONLY on these bug types (other bugs won't be detected):\n\n"
+        )
 
         if "address" in self.sanitizer.lower():
             sanitizer_guidance += """### AddressSanitizer Detectable Bugs
@@ -330,7 +345,9 @@ If you truly found nothing exploitable in this direction, explain why and conclu
 
         return prompt + sanitizer_guidance
 
-    def _filter_tools_for_mode(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _filter_tools_for_mode(
+        self, tools: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Filter tools for SP Find mode.
 
         Excluded:

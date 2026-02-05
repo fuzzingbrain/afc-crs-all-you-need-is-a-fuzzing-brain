@@ -48,7 +48,9 @@ class WorkspaceSetup:
                 # Create new workspace (API/MCP mode)
                 workspace_root = Path("workspace")
                 project_name = self.task.project_name or "unknown"
-                task_workspace = workspace_root / f"{project_name}_{self.task.task_id[:8]}"
+                task_workspace = (
+                    workspace_root / f"{project_name}_{self.task.task_id[:8]}"
+                )
                 task_workspace.mkdir(parents=True, exist_ok=True)
                 logger.info(f"Created workspace: {task_workspace}")
 
@@ -128,15 +130,26 @@ class WorkspaceSetup:
                 if fuzz_tooling_path.exists():
                     # Check if .git exists - if not, remove and re-clone
                     if not (fuzz_tooling_path / ".git").exists():
-                        logger.warning(f"Fuzz-tooling missing .git directory, re-cloning...")
+                        logger.warning(
+                            "Fuzz-tooling missing .git directory, re-cloning..."
+                        )
                         shutil.rmtree(fuzz_tooling_path)
                     else:
-                        logger.info(f"Fuzz-tooling directory exists, skipping clone")
+                        logger.info("Fuzz-tooling directory exists, skipping clone")
 
                 if not fuzz_tooling_path.exists():
-                    logger.info(f"Cloning fuzz-tooling from {self.config.fuzz_tooling_url}")
+                    logger.info(
+                        f"Cloning fuzz-tooling from {self.config.fuzz_tooling_url}"
+                    )
                     result = subprocess.run(
-                        ["git", "clone", "--depth", "1", self.config.fuzz_tooling_url, str(fuzz_tooling_path)],
+                        [
+                            "git",
+                            "clone",
+                            "--depth",
+                            "1",
+                            self.config.fuzz_tooling_url,
+                            str(fuzz_tooling_path),
+                        ],
                         capture_output=True,
                         text=True,
                         timeout=300,
@@ -147,7 +160,7 @@ class WorkspaceSetup:
                         return False, result.stderr
 
                 # Checkout to specific ref if provided
-                fuzz_tooling_ref = getattr(self.config, 'fuzz_tooling_ref', None)
+                fuzz_tooling_ref = getattr(self.config, "fuzz_tooling_ref", None)
                 if fuzz_tooling_ref:
                     logger.info(f"Checking out fuzz-tooling to ref: {fuzz_tooling_ref}")
                     # Fetch the ref first (needed for shallow clones)
@@ -166,7 +179,9 @@ class WorkspaceSetup:
                         timeout=60,
                     )
                     if result.returncode != 0:
-                        logger.warning(f"Fuzz-tooling checkout warning: {result.stderr}")
+                        logger.warning(
+                            f"Fuzz-tooling checkout warning: {result.stderr}"
+                        )
 
                 self.task.fuzz_tooling_path = str(fuzz_tooling_path)
                 self.task.is_fuzz_tooling_provided = True
@@ -200,8 +215,12 @@ class WorkspaceSetup:
                 return True, "Found existing"
 
             # No fuzz-tooling provided
-            logger.warning("No fuzz-tooling found. Current version only supports OSS-Fuzz based projects.")
-            logger.warning("Please ensure the project exists in OSS-Fuzz or provide --fuzz-tooling-url")
+            logger.warning(
+                "No fuzz-tooling found. Current version only supports OSS-Fuzz based projects."
+            )
+            logger.warning(
+                "Please ensure the project exists in OSS-Fuzz or provide --fuzz-tooling-url"
+            )
             return True, "Not provided"
 
 
@@ -254,7 +273,9 @@ class FuzzerDiscovery:
             return fuzzers
 
         # Layer 2: LLVMFuzzerTestOneInput search
-        logger.info("Layer 1 found nothing, trying Layer 2: LLVMFuzzerTestOneInput search")
+        logger.info(
+            "Layer 1 found nothing, trying Layer 2: LLVMFuzzerTestOneInput search"
+        )
         self._discover_by_entry_point(fuzzers, seen_names)
 
         if fuzzers:
@@ -267,13 +288,15 @@ class FuzzerDiscovery:
         # Search in OSS-Fuzz project directory
         if self.task.fuzz_tooling_path:
             fuzz_tooling = Path(self.task.fuzz_tooling_path)
-            ossfuzz_project = self.config.ossfuzz_project or self.task.project_name
+            ossfuzz_project = self.config.ossfuzz_project_name or self.task.project_name
             if ossfuzz_project:
                 project_dir = fuzz_tooling / "projects" / ossfuzz_project
                 if project_dir.exists():
                     for pattern in self.FUZZER_PATTERNS:
                         for fuzzer_file in project_dir.glob(pattern):
-                            self._add_fuzzer(fuzzers, seen_names, fuzzer_file, project_dir)
+                            self._add_fuzzer(
+                                fuzzers, seen_names, fuzzer_file, project_dir
+                            )
 
         # Search in source repo
         if self.task.src_path:
@@ -292,7 +315,7 @@ class FuzzerDiscovery:
         # Add OSS-Fuzz project directory
         if self.task.fuzz_tooling_path:
             fuzz_tooling = Path(self.task.fuzz_tooling_path)
-            ossfuzz_project = self.config.ossfuzz_project or self.task.project_name
+            ossfuzz_project = self.config.ossfuzz_project_name or self.task.project_name
             if ossfuzz_project:
                 project_dir = fuzz_tooling / "projects" / ossfuzz_project
                 if project_dir.exists():
@@ -309,8 +332,13 @@ class FuzzerDiscovery:
                 # Use grep to find files containing LLVMFuzzerTestOneInput
                 result = subprocess.run(
                     [
-                        "grep", "-rl", "--include=*.c", "--include=*.cc",
-                        "--include=*.cpp", "LLVMFuzzerTestOneInput", str(search_path)
+                        "grep",
+                        "-rl",
+                        "--include=*.c",
+                        "--include=*.cc",
+                        "--include=*.cpp",
+                        "LLVMFuzzerTestOneInput",
+                        str(search_path),
                     ],
                     capture_output=True,
                     text=True,
@@ -321,14 +349,22 @@ class FuzzerDiscovery:
                     for line in result.stdout.strip().split("\n"):
                         fuzzer_file = Path(line.strip())
                         if fuzzer_file.exists():
-                            self._add_fuzzer(fuzzers, seen_names, fuzzer_file, search_path)
+                            self._add_fuzzer(
+                                fuzzers, seen_names, fuzzer_file, search_path
+                            )
 
             except subprocess.TimeoutExpired:
                 logger.warning(f"Grep timeout searching in {search_path}")
             except Exception as e:
                 logger.warning(f"Grep failed in {search_path}: {e}")
 
-    def _add_fuzzer(self, fuzzers: List[Fuzzer], seen_names: set, fuzzer_file: Path, search_path: Path):
+    def _add_fuzzer(
+        self,
+        fuzzers: List[Fuzzer],
+        seen_names: set,
+        fuzzer_file: Path,
+        search_path: Path,
+    ):
         """Add a fuzzer to the list if not already seen"""
         fuzzer_name = fuzzer_file.stem
         if fuzzer_name in seen_names:
@@ -456,9 +492,15 @@ class TaskProcessor:
             status_icon = "✓" if f.status == FuzzerStatus.SUCCESS else "✗"
             fuzzer_header = f" {status_icon} {f.fuzzer_name} "
             box_lines.append("│" + fuzzer_header.ljust(width) + "│")
-            box_lines.append("│" + f"  Binary Path:  {f.binary_path or 'N/A'}".ljust(width) + "│")
-            box_lines.append("│" + f"  Source Path:  {f.source_path or 'N/A'}".ljust(width) + "│")
-            box_lines.append("│" + f"  Status:       {f.status.value}".ljust(width) + "│")
+            box_lines.append(
+                "│" + f"  Binary Path:  {f.binary_path or 'N/A'}".ljust(width) + "│"
+            )
+            box_lines.append(
+                "│" + f"  Source Path:  {f.source_path or 'N/A'}".ljust(width) + "│"
+            )
+            box_lines.append(
+                "│" + f"  Status:       {f.status.value}".ljust(width) + "│"
+            )
 
             # Separator between fuzzers (except last)
             if i < len(fuzzers) - 1:
@@ -485,7 +527,9 @@ class TaskProcessor:
         col_worker_id = 45
 
         # Total width = sum of columns + 4 internal separators (┬/┼)
-        total_width = col_worker + col_fuzzer + col_sanitizer + col_status + col_worker_id + 4
+        total_width = (
+            col_worker + col_fuzzer + col_sanitizer + col_status + col_worker_id + 4
+        )
 
         # Build header lines (no color)
         header_lines = []
@@ -493,39 +537,83 @@ class TaskProcessor:
         header_lines.append("┌" + "─" * total_width + "┐")
         header = f" {project_name} - Dispatched {len(jobs)} Workers "
         header_lines.append("│" + header.center(total_width) + "│")
-        header_lines.append("├" + "─" * col_worker + "┬" + "─" * col_fuzzer + "┬" + "─" * col_sanitizer + "┬" + "─" * col_status + "┬" + "─" * col_worker_id + "┤")
+        header_lines.append(
+            "├"
+            + "─" * col_worker
+            + "┬"
+            + "─" * col_fuzzer
+            + "┬"
+            + "─" * col_sanitizer
+            + "┬"
+            + "─" * col_status
+            + "┬"
+            + "─" * col_worker_id
+            + "┤"
+        )
         header_row = (
-            "│" + " Worker".center(col_worker) +
-            "│" + " Fuzzer".ljust(col_fuzzer) +
-            "│" + " Sanitizer".ljust(col_sanitizer) +
-            "│" + " Status".ljust(col_status) +
-            "│" + " Worker ID".ljust(col_worker_id) + "│"
+            "│"
+            + " Worker".center(col_worker)
+            + "│"
+            + " Fuzzer".ljust(col_fuzzer)
+            + "│"
+            + " Sanitizer".ljust(col_sanitizer)
+            + "│"
+            + " Status".ljust(col_status)
+            + "│"
+            + " Worker ID".ljust(col_worker_id)
+            + "│"
         )
         header_lines.append(header_row)
-        header_lines.append("├" + "─" * col_worker + "┼" + "─" * col_fuzzer + "┼" + "─" * col_sanitizer + "┼" + "─" * col_status + "┼" + "─" * col_worker_id + "┤")
+        header_lines.append(
+            "├"
+            + "─" * col_worker
+            + "┼"
+            + "─" * col_fuzzer
+            + "┼"
+            + "─" * col_sanitizer
+            + "┼"
+            + "─" * col_status
+            + "┼"
+            + "─" * col_worker_id
+            + "┤"
+        )
 
         # Build data rows (colored and plain versions)
         colored_rows = []
         plain_rows = []
 
         for i, job in enumerate(jobs, 1):
-            fuzzer_name = job['fuzzer'][:col_fuzzer-2] if len(job['fuzzer']) > col_fuzzer-2 else job['fuzzer']
-            worker_id = job['worker_id'][:col_worker_id-2] if len(job['worker_id']) > col_worker_id-2 else job['worker_id']
+            fuzzer_name = (
+                job["fuzzer"][: col_fuzzer - 2]
+                if len(job["fuzzer"]) > col_fuzzer - 2
+                else job["fuzzer"]
+            )
+            worker_id = (
+                job["worker_id"][: col_worker_id - 2]
+                if len(job["worker_id"]) > col_worker_id - 2
+                else job["worker_id"]
+            )
 
             # Build cell content
             worker_cell = f" Worker {i}".ljust(col_worker)
-            fuzzer_cell = " " + fuzzer_name.ljust(col_fuzzer-1)
-            sanitizer_cell = " " + job['sanitizer'].ljust(col_sanitizer-1)
-            status_cell = " " + "PENDING".ljust(col_status-1)
-            id_cell = " " + worker_id.ljust(col_worker_id-1)
+            fuzzer_cell = " " + fuzzer_name.ljust(col_fuzzer - 1)
+            sanitizer_cell = " " + job["sanitizer"].ljust(col_sanitizer - 1)
+            status_cell = " " + "PENDING".ljust(col_status - 1)
+            id_cell = " " + worker_id.ljust(col_worker_id - 1)
 
             # Plain row (for log file)
             plain_row = (
-                "│" + worker_cell +
-                "│" + fuzzer_cell +
-                "│" + sanitizer_cell +
-                "│" + status_cell +
-                "│" + id_cell + "│"
+                "│"
+                + worker_cell
+                + "│"
+                + fuzzer_cell
+                + "│"
+                + sanitizer_cell
+                + "│"
+                + status_cell
+                + "│"
+                + id_cell
+                + "│"
             )
             plain_rows.append(plain_row)
 
@@ -533,16 +621,44 @@ class TaskProcessor:
             color = WorkerColors.get(i - 1)
             reset = WorkerColors.RESET
             colored_row = (
-                "│" + color + worker_cell + reset +
-                "│" + color + fuzzer_cell + reset +
-                "│" + color + sanitizer_cell + reset +
-                "│" + color + status_cell + reset +
-                "│" + color + id_cell + reset + "│"
+                "│"
+                + color
+                + worker_cell
+                + reset
+                + "│"
+                + color
+                + fuzzer_cell
+                + reset
+                + "│"
+                + color
+                + sanitizer_cell
+                + reset
+                + "│"
+                + color
+                + status_cell
+                + reset
+                + "│"
+                + color
+                + id_cell
+                + reset
+                + "│"
             )
             colored_rows.append(colored_row)
 
         # Footer
-        footer = "└" + "─" * col_worker + "┴" + "─" * col_fuzzer + "┴" + "─" * col_sanitizer + "┴" + "─" * col_status + "┴" + "─" * col_worker_id + "┘"
+        footer = (
+            "└"
+            + "─" * col_worker
+            + "┴"
+            + "─" * col_fuzzer
+            + "┴"
+            + "─" * col_sanitizer
+            + "┴"
+            + "─" * col_status
+            + "┴"
+            + "─" * col_worker_id
+            + "┘"
+        )
 
         # Output table - separate handling for console (colored) and file (plain)
         import sys
@@ -583,8 +699,9 @@ class TaskProcessor:
         # Initialize evaluation reporter context
         try:
             from ..eval import get_reporter
+
             reporter = get_reporter()
-            project_name = task.project_name or self.config.ossfuzz_project or ""
+            project_name = task.project_name or self.config.ossfuzz_project_name or ""
             task_ctx = reporter.task_context(task.task_id, project_name=project_name)
             task_ctx.__enter__()
         except Exception:
@@ -643,20 +760,32 @@ class TaskProcessor:
 
                     try:
                         import subprocess
+
                         result = subprocess.run(
-                            ["git", "diff", f"{self.config.base_commit}..{delta_commit}",
-                             "--", ".", ":!.aixcc", ":!*/.aixcc"],
+                            [
+                                "git",
+                                "diff",
+                                f"{self.config.base_commit}..{delta_commit}",
+                                "--",
+                                ".",
+                                ":!.aixcc",
+                                ":!*/.aixcc",
+                            ],
                             cwd=str(repo_path),
                             capture_output=True,
-                            text=True
+                            text=True,
                         )
                         if result.returncode == 0:
                             diff_content = result.stdout
                             if diff_content.strip():
                                 diff_file.write_text(diff_content)
-                                logger.info(f"Generated diff: {self.config.base_commit[:8]}..{delta_commit[:8] if delta_commit != 'HEAD' else 'HEAD'}")
+                                logger.info(
+                                    f"Generated diff: {self.config.base_commit[:8]}..{delta_commit[:8] if delta_commit != 'HEAD' else 'HEAD'}"
+                                )
                             else:
-                                raise Exception(f"No changes between {self.config.base_commit[:8]} and {delta_commit[:8] if delta_commit != 'HEAD' else 'HEAD'}")
+                                raise Exception(
+                                    f"No changes between {self.config.base_commit[:8]} and {delta_commit[:8] if delta_commit != 'HEAD' else 'HEAD'}"
+                                )
                         else:
                             raise Exception(f"git diff failed: {result.stderr}")
                     except Exception as e:
@@ -670,7 +799,9 @@ class TaskProcessor:
                 logger.info(f"Loaded {len(fuzzers)} fuzzers from cache")
             elif self.config.fuzzer_filter:
                 # Use explicitly specified fuzzers from config
-                logger.info(f"Step 4: Using {len(self.config.fuzzer_filter)} fuzzers from config")
+                logger.info(
+                    f"Step 4: Using {len(self.config.fuzzer_filter)} fuzzers from config"
+                )
                 fuzzers = []
                 for fuzzer_name in self.config.fuzzer_filter:
                     fuzzer = Fuzzer(
@@ -697,12 +828,14 @@ class TaskProcessor:
             from ..analyzer import AnalyzeRequest, AnalyzeResult
             from ..analyzer.tasks import run_analyzer
 
-            project_name = self.config.ossfuzz_project or task.project_name
+            project_name = self.config.ossfuzz_project_name or task.project_name
             analyze_result = None
 
             if cache_restored:
                 # Start Analysis Server with skip_build mode (skip build, just start server)
-                logger.info("Step 5: Starting Analysis Server (skip build, data from cache)")
+                logger.info(
+                    "Step 5: Starting Analysis Server (skip build, data from cache)"
+                )
 
                 log_dir = get_log_dir()
                 analyze_request = AnalyzeRequest(
@@ -711,7 +844,7 @@ class TaskProcessor:
                     project_name=project_name,
                     sanitizers=self.config.sanitizers,
                     language="c",
-                    ossfuzz_project=self.config.ossfuzz_project,
+                    ossfuzz_project_name=self.config.ossfuzz_project_name,
                     log_dir=str(log_dir) if log_dir else None,
                     skip_build=True,  # Skip build, use cached data
                     prebuild_dir=self.config.prebuild_dir,
@@ -722,20 +855,26 @@ class TaskProcessor:
                 # Run analyzer with skip_build
                 if self.config.api_mode:
                     celery_result = run_analyzer.delay(analyze_request.to_dict())
-                    result_dict = celery_result.get(timeout=300)  # 5 min timeout for skip_build
+                    result_dict = celery_result.get(
+                        timeout=300
+                    )  # 5 min timeout for skip_build
                 else:
                     result_dict = run_analyzer(analyze_request.to_dict())
 
                 analyze_result = AnalyzeResult.from_dict(result_dict)
 
                 if not analyze_result.success:
-                    raise Exception(f"Analysis Server failed to start: {analyze_result.error_msg}")
+                    raise Exception(
+                        f"Analysis Server failed to start: {analyze_result.error_msg}"
+                    )
 
                 # Get function count from database
                 db_functions = self.repos.functions.find_by_task(task.task_id)
                 reachable_count = len(db_functions)
 
-                logger.info(f"Analysis Server ready: {len(analyze_result.fuzzers)} fuzzers, {reachable_count} functions")
+                logger.info(
+                    f"Analysis Server ready: {len(analyze_result.fuzzers)} fuzzers, {reachable_count} functions"
+                )
 
             else:
                 logger.info("Step 5: Running Code Analyzer")
@@ -748,7 +887,7 @@ class TaskProcessor:
                     project_name=project_name,
                     sanitizers=self.config.sanitizers,
                     language="c",  # TODO: detect language
-                    ossfuzz_project=self.config.ossfuzz_project,
+                    ossfuzz_project_name=self.config.ossfuzz_project_name,
                     log_dir=str(log_dir) if log_dir else None,
                     prebuild_dir=self.config.prebuild_dir,
                     work_id=self.config.work_id,
@@ -756,7 +895,9 @@ class TaskProcessor:
                 )
 
                 logger.info(f"Analyzer request: sanitizers={self.config.sanitizers}")
-                logger.info("Waiting for Analyzer to complete (this may take a while)...")
+                logger.info(
+                    "Waiting for Analyzer to complete (this may take a while)..."
+                )
 
                 # Run analyzer (synchronously for now, can be made async with Celery)
                 # In CLI mode, run directly; in API mode, use Celery task
@@ -773,17 +914,26 @@ class TaskProcessor:
                 if not analyze_result.success:
                     raise Exception(f"Code Analyzer failed: {analyze_result.error_msg}")
 
-                logger.info(f"Analyzer completed: {len(analyze_result.fuzzers)} fuzzers built")
-                logger.info(f"Build duration: {analyze_result.build_duration_seconds:.1f}s")
-                logger.info(f"Static analysis: {analyze_result.reachable_functions_count} functions")
+                logger.info(
+                    f"Analyzer completed: {len(analyze_result.fuzzers)} fuzzers built"
+                )
+                logger.info(
+                    f"Build duration: {analyze_result.build_duration_seconds:.1f}s"
+                )
+                logger.info(
+                    f"Static analysis: {analyze_result.reachable_functions_count} functions"
+                )
 
                 # Cache disabled - skip saving
 
             # Set shared coverage fuzzer path for tools
             if analyze_result.coverage_fuzzer_path:
                 from ..tools.coverage import set_coverage_fuzzer_path
+
                 set_coverage_fuzzer_path(analyze_result.coverage_fuzzer_path)
-                logger.info(f"Coverage fuzzer path set: {analyze_result.coverage_fuzzer_path}")
+                logger.info(
+                    f"Coverage fuzzer path set: {analyze_result.coverage_fuzzer_path}"
+                )
 
             # Update fuzzer status in database based on Analyzer result
             # Skip this when restored from cache (fuzzers already have correct status)
@@ -823,7 +973,9 @@ class TaskProcessor:
                             fuzzer.error_msg = "Not found in build output"
                         self.repos.fuzzers.save(fuzzer)
 
-            successful_fuzzers = [f for f in fuzzers if f.status == FuzzerStatus.SUCCESS]
+            successful_fuzzers = [
+                f for f in fuzzers if f.status == FuzzerStatus.SUCCESS
+            ]
 
             # Log fuzzer build summary
             self._log_fuzzer_summary(fuzzers, project_name)
@@ -852,7 +1004,9 @@ class TaskProcessor:
                 from .dispatcher import WorkerDispatcher
 
                 dispatcher = WorkerDispatcher(
-                    task, self.config, self.repos,
+                    task,
+                    self.config,
+                    self.repos,
                     analyze_result=self._analyze_result,
                 )
                 jobs = dispatcher.dispatch(fuzzers)
@@ -882,10 +1036,14 @@ class TaskProcessor:
                             task.mark_error(f"{result['failed']} workers failed")
                     elif result["status"] == "pov_target_reached":
                         task.mark_completed()
-                        logger.info(f"Task completed: POV target reached ({result.get('pov_count', 0)} POVs)")
+                        logger.info(
+                            f"Task completed: POV target reached ({result.get('pov_count', 0)} POVs)"
+                        )
                     elif result["status"] == "budget_exceeded":
                         task.mark_error(result.get("error", "Budget limit exceeded"))
-                        logger.warning(f"Task stopped: {result.get('error', 'Budget limit exceeded')}")
+                        logger.warning(
+                            f"Task stopped: {result.get('error', 'Budget limit exceeded')}"
+                        )
                     else:
                         task.mark_error(f"Timeout after {timeout} minutes")
 
@@ -897,7 +1055,11 @@ class TaskProcessor:
                     # Count merged duplicates for dedup stats
                     dedup_count = 0
                     try:
-                        sps_with_merges = self.repos.suspicious_points.find_with_merged_duplicates(task.task_id)
+                        sps_with_merges = (
+                            self.repos.suspicious_points.find_with_merged_duplicates(
+                                task.task_id
+                            )
+                        )
                         for sp in sps_with_merges:
                             dedup_count += len(sp.merged_duplicates)
                     except Exception as e:
@@ -910,10 +1072,15 @@ class TaskProcessor:
                         eval_server = self.config.eval_server
                         if eval_server:
                             import requests
-                            resp = requests.get(f"{eval_server}/api/tasks/{task.task_id}", timeout=5)
+
+                            resp = requests.get(
+                                f"{eval_server}/api/tasks/{task.task_id}", timeout=5
+                            )
                             if resp.status_code == 200:
                                 data = resp.json()
-                                total_cost = data.get("costs", {}).get("total_cost", 0.0)
+                                total_cost = data.get("costs", {}).get(
+                                    "total_cost", 0.0
+                                )
                     except Exception as e:
                         logger.debug(f"Failed to get cost from eval_server: {e}")
 
@@ -921,8 +1088,9 @@ class TaskProcessor:
                     if total_cost == 0.0:
                         try:
                             from ..eval import get_reporter
+
                             reporter = get_reporter()
-                            if reporter and hasattr(reporter, 'get_current_cost'):
+                            if reporter and hasattr(reporter, "get_current_cost"):
                                 total_cost = reporter.get_current_cost()
                         except Exception:
                             pass
@@ -940,7 +1108,7 @@ class TaskProcessor:
                         exit_reason=result.get("status", "completed"),
                     )
                     # Reset terminal settings before output (subprocess may have changed them)
-                    os.system('stty sane 2>/dev/null')
+                    os.system("stty sane 2>/dev/null")
 
                     # Print clean summary to console without log prefixes to avoid wrapping
                     # Add ANSI reset at the end to ensure terminal state is restored
@@ -951,7 +1119,9 @@ class TaskProcessor:
                     log_dir = get_log_dir()
                     if log_dir:
                         plain_summary = WorkerColors.strip(summary)
-                        with open(Path(log_dir) / "fuzzingbrain.log", "a", encoding="utf-8") as f:
+                        with open(
+                            Path(log_dir) / "fuzzingbrain.log", "a", encoding="utf-8"
+                        ) as f:
                             f.write("\n" + plain_summary + "\n")
 
                     logger.info("Final summary written to console and log file")
@@ -980,6 +1150,7 @@ class TaskProcessor:
                 # Stop Analysis Server
                 if task and task.task_path:
                     from ..analyzer.tasks import stop_analysis_server
+
                     logger.info("Stopping Analysis Server...")
                     stop_analysis_server(task.task_path)
 
@@ -1021,6 +1192,7 @@ def process_task(task: Task, config: Config, repos: RepositoryManager = None) ->
     # Get from global if repos not provided
     if repos is None:
         from ..main import get_repos
+
         repos = get_repos()
 
     processor = TaskProcessor(config, repos)

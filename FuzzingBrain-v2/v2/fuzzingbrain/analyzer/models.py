@@ -16,17 +16,20 @@ class AnalyzeRequest:
 
     Contains all information needed to build and analyze a project.
     """
+
     task_id: str
-    task_path: str                    # workspace/task_id_{timestamp}/
+    task_path: str  # workspace/task_id_{timestamp}/
     project_name: str
-    sanitizers: List[str]             # ["address", "memory", "undefined"]
-    language: str = "c"               # "c" / "cpp" / "java"
-    ossfuzz_project: Optional[str] = None  # OSS-Fuzz project name if different
-    log_dir: Optional[str] = None     # Log directory path
-    skip_build: bool = False          # Skip build/import phases (for cache restore)
+    sanitizers: List[str]  # ["address", "memory", "undefined"]
+    language: str = "c"  # "c" / "cpp" / "java"
+    ossfuzz_project_name: Optional[str] = None  # OSS-Fuzz project name if different
+    log_dir: Optional[str] = None  # Log directory path
+    skip_build: bool = False  # Skip build/import phases (for cache restore)
     prebuild_dir: Optional[str] = None  # Path to prebuild data directory
-    work_id: Optional[str] = None       # Work ID for prebuild data remapping
-    fuzzer_sources: Dict[str, str] = field(default_factory=dict)  # fuzzer_name -> source_path
+    work_id: Optional[str] = None  # Work ID for prebuild data remapping
+    fuzzer_sources: Dict[str, str] = field(
+        default_factory=dict
+    )  # fuzzer_name -> source_path
 
     def to_dict(self) -> dict:
         return {
@@ -35,7 +38,7 @@ class AnalyzeRequest:
             "project_name": self.project_name,
             "sanitizers": self.sanitizers,
             "language": self.language,
-            "ossfuzz_project": self.ossfuzz_project,
+            "ossfuzz_project_name": self.ossfuzz_project_name,
             "log_dir": self.log_dir,
             "skip_build": self.skip_build,
             "prebuild_dir": self.prebuild_dir,
@@ -51,7 +54,7 @@ class AnalyzeRequest:
             project_name=data["project_name"],
             sanitizers=data.get("sanitizers", ["address"]),
             language=data.get("language", "c"),
-            ossfuzz_project=data.get("ossfuzz_project"),
+            ossfuzz_project_name=data.get("ossfuzz_project_name"),
             log_dir=data.get("log_dir"),
             skip_build=data.get("skip_build", False),
             prebuild_dir=data.get("prebuild_dir"),
@@ -65,10 +68,11 @@ class FuzzerInfo:
     """
     Information about a successfully built fuzzer.
     """
-    name: str                         # e.g., "libpng_read_fuzzer"
-    sanitizer: str                    # e.g., "address"
-    binary_path: str                  # Full path to fuzzer binary
-    source_path: Optional[str] = None # Path to fuzzer source file
+
+    name: str  # e.g., "libpng_read_fuzzer"
+    sanitizer: str  # e.g., "address"
+    binary_path: str  # Full path to fuzzer binary
+    source_path: Optional[str] = None  # Path to fuzzer source file
 
     def to_dict(self) -> dict:
         return {
@@ -95,6 +99,7 @@ class AnalyzeResult:
 
     Contains all information Controller needs to dispatch Workers.
     """
+
     success: bool
     task_id: str
 
@@ -121,7 +126,7 @@ class AnalyzeResult:
 
     # Analysis Server info
     socket_path: Optional[str] = None  # Unix socket path for queries
-    server_pid: Optional[int] = None   # Server process ID
+    server_pid: Optional[int] = None  # Server process ID
 
     # Timestamps
     completed_at: datetime = field(default_factory=datetime.now)
@@ -140,7 +145,9 @@ class AnalyzeResult:
             "error_msg": self.error_msg,
             "socket_path": self.socket_path,
             "server_pid": self.server_pid,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "completed_at": self.completed_at.isoformat()
+            if self.completed_at
+            else None,
         }
 
     @classmethod
@@ -158,7 +165,9 @@ class AnalyzeResult:
             error_msg=data.get("error_msg"),
             socket_path=data.get("socket_path"),
             server_pid=data.get("server_pid"),
-            completed_at=datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else datetime.now(),
+            completed_at=datetime.fromisoformat(data["completed_at"])
+            if data.get("completed_at")
+            else datetime.now(),
         )
 
     def get_fuzzer_names(self) -> List[str]:

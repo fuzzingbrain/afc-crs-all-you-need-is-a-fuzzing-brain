@@ -1,0 +1,47 @@
+{
+    "_comment": "=== FuzzingBrain Configuration Template ===",
+
+    "=== Project Info (required) ===": "----------------------------------------",
+    "project_name": "libpng",
+    "repo_url": "git@github.com:OwenSanzas/libpng.git",
+    "ossfuzz_project_name": null,
+
+    "=== Task Config (required) ===": "----------------------------------------",
+    "task_type": "pov",
+    "scan_mode": "delta",
+
+    "=== Commit Config (conditional) ===": "----------------------------------------",
+    "target_commit": null,
+    "base_commit": "bc841a89aea42b2a2de752171588ce94402b3949",
+    "delta_commit": "fdacd5a1dcff42175117d674b0fda9f8a005ae88",
+
+    "=== Fuzzing Config (optional) ===": "----------------------------------------",
+    "fuzzer_filter": [],
+    "sanitizers": ["address"],
+    "timeout_minutes": 30,
+    "pov_count": 1,
+
+    "=== Fuzz Tooling (optional, default: official OSS-Fuzz HEAD) ===": "----------------------------------------",
+    "fuzz_tooling_url": null,
+    "fuzz_tooling_ref": null,
+
+    "=== Fuzzer Source Paths (optional, name -> [paths]) ===": "----------------------------------------",
+    "fuzzer_sources": {
+        "_example": ["src/fuzz/fuzzer.c", "src/fuzz/fuzzer_config.h", "src/fuzz/wrapper.c"]
+    },
+
+    "=== Prebuild (optional) ===": "----------------------------------------",
+    "work_id": null,
+    "prebuild_dir": null,
+
+    "=== Patch Mode Only (when task_type=patch) ===": "----------------------------------------",
+    "gen_blob": null,
+    "input_blob": null,
+
+    "=== Harness Mode Only (when task_type=harness) ===": "----------------------------------------",
+    "targets": [],
+
+    "=== Runtime Control (optional) ===": "----------------------------------------",
+    "budget_limit": 50,
+    "eval_server": null
+}

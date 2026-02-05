@@ -6,10 +6,7 @@ Encapsulates a single libFuzzer process.
 
 import asyncio
 import hashlib
-import os
 import re
-import signal
-import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -36,7 +33,7 @@ class FuzzerInstance:
 
     def __init__(
         self,
-        instance_id: str,           # "global" or sp_id
+        instance_id: str,  # "global" or sp_id
         fuzzer_path: Path,
         docker_image: str,
         corpus_dir: Path,
@@ -106,25 +103,38 @@ class FuzzerInstance:
 
         # Base command
         cmd = [
-            "docker", "run",
+            "docker",
+            "run",
             "--rm",
-            "--platform", "linux/amd64",
-            "--entrypoint", "",  # Bypass base-runner's entrypoint
+            "--platform",
+            "linux/amd64",
+            "--entrypoint",
+            "",  # Bypass base-runner's entrypoint
         ]
 
         # Environment variables
-        cmd.extend([
-            "-e", "FUZZING_ENGINE=libfuzzer",
-            "-e", "SANITIZER=address",
-            "-e", "ARCHITECTURE=x86_64",
-        ])
+        cmd.extend(
+            [
+                "-e",
+                "FUZZING_ENGINE=libfuzzer",
+                "-e",
+                "SANITIZER=address",
+                "-e",
+                "ARCHITECTURE=x86_64",
+            ]
+        )
 
         # Mount volumes
-        cmd.extend([
-            "-v", f"{fuzzer_dir}:/fuzzers:ro",
-            "-v", f"{self.corpus_dir}:/corpus",
-            "-v", f"{self.crashes_dir}:/crashes",
-        ])
+        cmd.extend(
+            [
+                "-v",
+                f"{fuzzer_dir}:/fuzzers:ro",
+                "-v",
+                f"{self.corpus_dir}:/corpus",
+                "-v",
+                f"{self.crashes_dir}:/crashes",
+            ]
+        )
 
         # Docker image
         cmd.append(self.docker_image)
@@ -133,18 +143,20 @@ class FuzzerInstance:
         cmd.append(f"/fuzzers/{fuzzer_name}")
 
         # libFuzzer arguments
-        cmd.extend([
-            "/corpus",
-            f"-artifact_prefix=/crashes/",
-            f"-fork={self.config.fork_level}",
-            f"-rss_limit_mb={self.config.rss_limit_mb}",
-            f"-timeout={self.config.timeout_per_input}",
-            "-print_final_stats=1",
-        ])
+        cmd.extend(
+            [
+                "/corpus",
+                "-artifact_prefix=/crashes/",
+                f"-fork={self.config.fork_level}",
+                f"-rss_limit_mb={self.config.rss_limit_mb}",
+                f"-timeout={self.config.timeout_per_input}",
+                "-print_final_stats=1",
+            ]
+        )
 
         # Max time for global fuzzer only
         if self.fuzzer_type == FuzzerType.GLOBAL:
-            if hasattr(self.config, 'max_time') and self.config.max_time > 0:
+            if hasattr(self.config, "max_time") and self.config.max_time > 0:
                 cmd.append(f"-max_total_time={self.config.max_time}")
 
         return cmd
@@ -167,7 +179,9 @@ class FuzzerInstance:
         try:
             # Build command
             cmd = self._build_docker_command()
-            logger.info(f"[Fuzzer:{self.instance_id}] Starting: {' '.join(cmd[:10])}...")
+            logger.info(
+                f"[Fuzzer:{self.instance_id}] Starting: {' '.join(cmd[:10])}..."
+            )
 
             # Start process
             self.process = await asyncio.create_subprocess_exec(
@@ -179,7 +193,9 @@ class FuzzerInstance:
             self.status = FuzzerStatus.RUNNING
             self.stats.status = FuzzerStatus.RUNNING
 
-            logger.info(f"[Fuzzer:{self.instance_id}] Started (PID: {self.process.pid})")
+            logger.info(
+                f"[Fuzzer:{self.instance_id}] Started (PID: {self.process.pid})"
+            )
             return True
 
         except Exception as e:
@@ -256,7 +272,9 @@ class FuzzerInstance:
         )
         self.seeds.append(seed_info)
 
-        logger.debug(f"[Fuzzer:{self.instance_id}] Added seed: {name} ({len(seed)} bytes)")
+        logger.debug(
+            f"[Fuzzer:{self.instance_id}] Added seed: {name} ({len(seed)} bytes)"
+        )
         return seed_path
 
     def add_seeds(self, seeds: List[bytes], prefix: str = "seed") -> List[Path]:
@@ -331,20 +349,20 @@ class FuzzerInstance:
 
         try:
             async for line in self.process.stderr:
-                line_str = line.decode('utf-8', errors='replace').strip()
+                line_str = line.decode("utf-8", errors="replace").strip()
 
                 # Parse coverage info
-                cov_match = re.search(r'cov:\s*(\d+)', line_str)
+                cov_match = re.search(r"cov:\s*(\d+)", line_str)
                 if cov_match:
                     self.stats.edge_coverage = int(cov_match.group(1))
 
                 # Parse feature coverage
-                ft_match = re.search(r'ft:\s*(\d+)', line_str)
+                ft_match = re.search(r"ft:\s*(\d+)", line_str)
                 if ft_match:
                     self.stats.feature_coverage = int(ft_match.group(1))
 
                 # Parse exec/s
-                exec_match = re.search(r'exec/s:\s*(\d+)', line_str)
+                exec_match = re.search(r"exec/s:\s*(\d+)", line_str)
                 if exec_match:
                     self.stats.execs_per_sec = float(exec_match.group(1))
 

@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
 from fastmcp import Client
-from loguru import logger
 
 from .base import BaseAgent
 from .prompts import FUNCTION_ANALYSIS_PROMPT, SANITIZER_PATTERNS
@@ -45,7 +44,9 @@ class FunctionAnalysisAgent(BaseAgent):
         callers: List[str] = None,  # Function names that call this function
         callees: List[str] = None,  # Function names this function calls
         fuzzer_source: str = "",  # Pre-extracted fuzzer source code
-        caller_sources: Dict[str, str] = None,  # Pre-extracted caller sources {name: source}
+        caller_sources: Dict[
+            str, str
+        ] = None,  # Pre-extracted caller sources {name: source}
         # Analysis settings
         fuzzer: str = "",
         sanitizer: str = "address",
@@ -136,7 +137,6 @@ class FunctionAnalysisAgent(BaseAgent):
 
         Returns a complete log block ready to append to direction log file.
         """
-        from datetime import datetime
 
         lines = []
 
@@ -144,11 +144,15 @@ class FunctionAnalysisAgent(BaseAgent):
         lines.append("")
         lines.append("=" * 60)
         lines.append(f"Function: {self.function_name}")
-        lines.append(f"File: {self.function_file}:{self.function_lines[0]}-{self.function_lines[1]}")
-        func_lines = self.function_source.count('\n') + 1 if self.function_source else 0
+        lines.append(
+            f"File: {self.function_file}:{self.function_lines[0]}-{self.function_lines[1]}"
+        )
+        func_lines = self.function_source.count("\n") + 1 if self.function_source else 0
         lines.append(f"Size: {func_lines} lines")
         lines.append(f"Callers: {len(self.callers)} | Callees: {len(self.callees)}")
-        lines.append(f"Started: {self.start_time.strftime('%Y-%m-%d %H:%M:%S') if self.start_time else 'N/A'}")
+        lines.append(
+            f"Started: {self.start_time.strftime('%Y-%m-%d %H:%M:%S') if self.start_time else 'N/A'}"
+        )
         lines.append("=" * 60)
         lines.append("")
 
@@ -209,7 +213,11 @@ class FunctionAnalysisAgent(BaseAgent):
 
     def _get_summary_table(self) -> str:
         """Generate summary table."""
-        duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
+        duration = (
+            (self.end_time - self.start_time).total_seconds()
+            if self.start_time and self.end_time
+            else 0
+        )
         width = 60
 
         lines = []
@@ -220,7 +228,11 @@ class FunctionAnalysisAgent(BaseAgent):
         lines.append("|" + f"  Function: {self.function_name}".ljust(width) + "|")
         lines.append("|" + f"  Duration: {duration:.2f}s".ljust(width) + "|")
         lines.append("|" + f"  Iterations: {self.total_iterations}".ljust(width) + "|")
-        lines.append("|" + f"  SP Created: {'Yes' if self.sp_created else 'No'}".ljust(width) + "|")
+        lines.append(
+            "|"
+            + f"  SP Created: {'Yes' if self.sp_created else 'No'}".ljust(width)
+            + "|"
+        )
 
         if self.sp_details:
             lines.append("+" + "-" * width + "+")
@@ -234,7 +246,9 @@ class FunctionAnalysisAgent(BaseAgent):
 
         return "\n".join(lines)
 
-    def _filter_tools_for_mode(self, tools: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def _filter_tools_for_mode(
+        self, tools: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
         """Filter tools for function analysis mode.
 
         Allow:
@@ -276,7 +290,9 @@ class FunctionAnalysisAgent(BaseAgent):
                 if data.get("success"):
                     self.sp_created = True
                     self.sp_details = {
-                        "function_name": tool_args.get("function_name", self.function_name),
+                        "function_name": tool_args.get(
+                            "function_name", self.function_name
+                        ),
                         "vuln_type": tool_args.get("vuln_type", "unknown"),
                         "score": tool_args.get("score", 0.5),
                         "description": tool_args.get("description", ""),
@@ -290,7 +306,7 @@ class FunctionAnalysisAgent(BaseAgent):
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message with all pre-extracted context."""
         # Calculate function size
-        func_lines = self.function_source.count('\n') + 1
+        func_lines = self.function_source.count("\n") + 1
 
         # Build callee list (just names)
         callee_list = ", ".join(self.callees[:15]) if self.callees else "(none)"
@@ -468,7 +484,7 @@ class LargeFunctionAnalysisAgent(FunctionAnalysisAgent):
 
     def _get_function_windows(self) -> List[str]:
         """Split large function into overlapping windows."""
-        lines = self.function_source.split('\n')
+        lines = self.function_source.split("\n")
         windows = []
 
         # Overlap by 20% for context continuity
@@ -476,8 +492,8 @@ class LargeFunctionAnalysisAgent(FunctionAnalysisAgent):
         step = self.window_size - overlap
 
         for i in range(0, len(lines), step):
-            window_lines = lines[i:i + self.window_size]
-            windows.append('\n'.join(window_lines))
+            window_lines = lines[i : i + self.window_size]
+            windows.append("\n".join(window_lines))
 
             # Stop if we've covered the whole function
             if i + self.window_size >= len(lines):
@@ -487,7 +503,7 @@ class LargeFunctionAnalysisAgent(FunctionAnalysisAgent):
 
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message with sliding window support."""
-        func_lines = self.function_source.count('\n') + 1
+        func_lines = self.function_source.count("\n") + 1
 
         # For large functions, use sliding window
         if self.use_sliding_window and func_lines > self.LARGE_FUNCTION_THRESHOLD:
@@ -521,8 +537,8 @@ This function is large ({func_lines} lines). I'll show you sections in windows.
 
 ## Call Context
 
-**Callers**: {', '.join(self.callers[:5]) if self.callers else '(none)'}
-**Callees**: {', '.join(self.callees[:5]) if self.callees else '(none)'}
+**Callers**: {", ".join(self.callers[:5]) if self.callers else "(none)"}
+**Callees**: {", ".join(self.callees[:5]) if self.callees else "(none)"}
 
 ## Your Task
 

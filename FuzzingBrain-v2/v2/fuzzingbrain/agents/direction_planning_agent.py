@@ -13,10 +13,9 @@ This agent:
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 from fastmcp import Client
-from loguru import logger
 
 from .base import BaseAgent
 from .prompts import DIRECTION_PLANNING_PROMPT
@@ -95,7 +94,11 @@ class DirectionPlanningAgent(BaseAgent):
 
     def _get_summary_table(self) -> str:
         """Generate summary table for direction planning."""
-        duration = (self.end_time - self.start_time).total_seconds() if self.start_time and self.end_time else 0
+        duration = (
+            (self.end_time - self.start_time).total_seconds()
+            if self.start_time and self.end_time
+            else 0
+        )
         width = 70
 
         lines = []
@@ -106,8 +109,14 @@ class DirectionPlanningAgent(BaseAgent):
         lines.append("│" + f"  Fuzzer: {self.fuzzer}".ljust(width) + "│")
         lines.append("│" + f"  Duration: {duration:.2f}s".ljust(width) + "│")
         lines.append("│" + f"  Iterations: {self.total_iterations}".ljust(width) + "│")
-        lines.append("│" + f"  Directions Created: {self.directions_created}".ljust(width) + "│")
-        lines.append("│" + f"  Functions Assigned: {len(self.functions_assigned)}".ljust(width) + "│")
+        lines.append(
+            "│" + f"  Directions Created: {self.directions_created}".ljust(width) + "│"
+        )
+        lines.append(
+            "│"
+            + f"  Functions Assigned: {len(self.functions_assigned)}".ljust(width)
+            + "│"
+        )
         lines.append("├" + "─" * width + "┤")
         lines.append("│" + " DIRECTIONS ".center(width) + "│")
         lines.append("├" + "─" * width + "┤")
@@ -121,7 +130,9 @@ class DirectionPlanningAgent(BaseAgent):
                 else:
                     name, risk, num_funcs = item
                     func_info = f"{num_funcs} functions"
-                risk_icon = "🔴" if risk == "high" else ("🟡" if risk == "medium" else "🟢")
+                risk_icon = (
+                    "🔴" if risk == "high" else ("🟡" if risk == "medium" else "🟢")
+                )
                 line = f"  {risk_icon} {name} ({func_info})"
                 lines.append("│" + line.ljust(width) + "│")
         else:
@@ -162,7 +173,10 @@ class DirectionPlanningAgent(BaseAgent):
                     if isinstance(entry_funcs, list):
                         self.functions_assigned.update(entry_funcs)
 
-                    self._log(f"Tracked direction: {name} ({risk}, {num_core} core, {num_entry} entry)", level="INFO")
+                    self._log(
+                        f"Tracked direction: {name} ({risk}, {num_core} core, {num_entry} entry)",
+                        level="INFO",
+                    )
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -185,7 +199,7 @@ class DirectionPlanningAgent(BaseAgent):
         # Replace direction count placeholder with actual config
         prompt = DIRECTION_PLANNING_PROMPT.replace(
             "Create at most 5 directions (prioritize by risk level)",
-            f"Create at most {self.max_directions} directions (prioritize by risk level)"
+            f"Create at most {self.max_directions} directions (prioritize by risk level)",
         )
 
         # Add sanitizer-specific guidance

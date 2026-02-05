@@ -22,11 +22,12 @@ from ..eval import BudgetExceededError
 # Capture any uncaught exceptions at module level
 def _log_uncaught_exception(exc_type, exc_value, exc_tb):
     """Log uncaught exceptions to both stderr and file."""
-    error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    error_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
     logger.error(f"Uncaught exception in worker:\n{error_msg}")
     # Also ensure it goes to stderr
     sys.stderr.write(f"[WORKER ERROR] {error_msg}\n")
     sys.stderr.flush()
+
 
 sys.excepthook = _log_uncaught_exception
 
@@ -61,7 +62,9 @@ def setup_worker_logging(log_dir: str, worker_id: str, metadata: Dict[str, Any])
     logger.add(
         log_path / "fuzzingbrain.log",
         level="DEBUG",
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | [" + worker_id + "] {message}",
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | ["
+        + worker_id
+        + "] {message}",
         encoding="utf-8",
         mode="a",
     )
@@ -117,7 +120,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     # Evaluation server for cost tracking
     eval_server = assignment.get("eval_server")
     budget_limit = assignment.get("budget_limit", 0.0)
-    stop_on_pov = assignment.get("stop_on_pov", False)
+    pov_count = assignment.get("pov_count", 1)
 
     worker_id = f"{task_id}__{fuzzer}__{sanitizer}"
 
@@ -139,23 +142,26 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     if log_dir:
         setup_worker_logging(log_dir, worker_id, worker_metadata)
 
-    logger.info(f"Worker starting")
+    logger.info("Worker starting")
     start_time = datetime.now()
 
     # Initialize evaluation reporter with eval_server from assignment
     worker_ctx = None
     try:
         from ..eval import create_reporter, get_reporter
+
         # Create reporter if eval_server is provided in assignment
         if eval_server:
             create_reporter(
                 server_url=eval_server,
                 level="normal",
                 budget_limit=budget_limit,
-                stop_on_pov=stop_on_pov,
+                pov_count=pov_count,
             )
         reporter = get_reporter()
-        worker_ctx = reporter.worker_context(worker_id, fuzzer=fuzzer, sanitizer=sanitizer, task_id=task_id)
+        worker_ctx = reporter.worker_context(
+            worker_id, fuzzer=fuzzer, sanitizer=sanitizer, task_id=task_id
+        )
         worker_ctx.__enter__()
     except Exception as e:
         logger.debug(f"Failed to initialize reporter: {e}")
@@ -163,6 +169,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     # Initialize database connection for this worker process
     try:
         from ..core import Config
+
         config = Config.from_env()
         db = MongoDB.connect(config.mongodb_url, config.mongodb_db)
         repos = init_repos(db)
@@ -207,6 +214,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             # Set coverage fuzzer path if provided
             if coverage_fuzzer_path:
                 from ..tools.coverage import set_coverage_fuzzer_path
+
                 set_coverage_fuzzer_path(coverage_fuzzer_path)
         else:
             # Legacy mode: build fuzzer in worker
@@ -215,6 +223,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             repos.workers.save(worker)
 
             from .builder import WorkerBuilder
+
             builder = WorkerBuilder(workspace_path, project_name, sanitizer)
             build_success, build_msg = builder.build()
 
@@ -229,11 +238,12 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             repos.workers.save(worker)
 
         # Step 2: Run fuzzing strategies
-        logger.info(f"Running fuzzing strategies")
+        logger.info("Running fuzzing strategies")
         worker.status = WorkerStatus.RUNNING
         repos.workers.save(worker)
 
         from .executor import WorkerExecutor
+
         executor = WorkerExecutor(
             workspace_path=workspace_path,
             project_name=project_name,
@@ -284,6 +294,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
         # Step 4: Cleanup workspace (keep results)
         from .cleanup import cleanup_worker_workspace
+
         cleanup_worker_workspace(workspace_path)
 
         # Cleanup reporter context
@@ -308,7 +319,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
         # Clean up executor
         try:
-            if 'executor' in dir() and executor is not None:
+            if "executor" in dir() and executor is not None:
                 executor.close()
         except Exception as cleanup_err:
             logger.warning(f"Error during cleanup: {cleanup_err}")
@@ -353,7 +364,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
         # Clean up FuzzerManager on error
         try:
-            if 'executor' in dir() and executor is not None:
+            if "executor" in dir() and executor is not None:
                 executor.close()
         except Exception as cleanup_err:
             logger.warning(f"Error during cleanup: {cleanup_err}")

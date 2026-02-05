@@ -14,7 +14,7 @@ Usage:
 """
 
 from fastmcp import FastMCP
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 from .utils import async_tool
 
@@ -99,8 +99,6 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
     from .analyzer import (
         _get_client,
         _ensure_client,
-        set_analyzer_context,
-        get_analyzer_context,
         _client_cache,  # Thread-safe cache for debugging
         _invalidate_client,
         _analysis_socket_path,
@@ -155,7 +153,10 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             client = _get_client()
             func = client.get_function(function_name)
             if func is None:
-                return {"success": False, "error": f"Function '{function_name}' not found"}
+                return {
+                    "success": False,
+                    "error": f"Function '{function_name}' not found",
+                }
             return {"success": True, "function": func}
         except Exception as e:
             return _handle_client_error(e)
@@ -177,7 +178,12 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             functions = client.get_functions_by_file(file_path)
             total = len(functions)
             # Limit to 50 to save context
-            return {"success": True, "count": total, "functions": functions[:50], "truncated": total > 50}
+            return {
+                "success": True,
+                "count": total,
+                "functions": functions[:50],
+                "truncated": total > 50,
+            }
         except Exception as e:
             return _handle_client_error(e)
 
@@ -197,7 +203,12 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         try:
             client = _get_client()
             functions = client.search_functions(pattern, limit)
-            return {"success": True, "pattern": pattern, "count": len(functions), "functions": functions}
+            return {
+                "success": True,
+                "pattern": pattern,
+                "count": len(functions),
+                "functions": functions,
+            }
         except Exception as e:
             return _handle_client_error(e)
 
@@ -218,7 +229,9 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         """
         t0 = time.time()
         # Debug: Check cache state
-        logger.debug(f"[TIMING] get_function_source({function_name}): cache_size={len(_client_cache)}")
+        logger.debug(
+            f"[TIMING] get_function_source({function_name}): cache_size={len(_client_cache)}"
+        )
 
         err = _ensure_client()
         if err:
@@ -230,12 +243,17 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             source = client.get_function_source(function_name)
             t3 = time.time()
             if source is None:
-                return {"success": False, "error": f"Source not available for function '{function_name}'"}
+                return {
+                    "success": False,
+                    "error": f"Source not available for function '{function_name}'",
+                }
 
             # Log timing if slow
             total = t3 - t0
             if total > 0.1:
-                logger.debug(f"[TIMING] get_function_source({function_name}): total={total:.3f}s ensure={t1-t0:.3f}s get_client={t2-t1:.3f}s query={t3-t2:.3f}s")
+                logger.debug(
+                    f"[TIMING] get_function_source({function_name}): total={total:.3f}s ensure={t1 - t0:.3f}s get_client={t2 - t1:.3f}s query={t3 - t2:.3f}s"
+                )
 
             return {"success": True, "function_name": function_name, "source": source}
         except Exception as e:
@@ -257,7 +275,9 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         """
         t0 = time.time()
         # Debug: Check cache state
-        logger.debug(f"[TIMING] get_callers({function_name}): cache_size={len(_client_cache)}")
+        logger.debug(
+            f"[TIMING] get_callers({function_name}): cache_size={len(_client_cache)}"
+        )
 
         err = _ensure_client()
         if err:
@@ -272,10 +292,17 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
 
             # Log timing if slow
             if t2 - t0 > 0.1:
-                logger.debug(f"[TIMING] get_callers({function_name}): total={t2-t0:.3f}s get_client={t1-t0:.3f}s query={t2-t1:.3f}s")
+                logger.debug(
+                    f"[TIMING] get_callers({function_name}): total={t2 - t0:.3f}s get_client={t1 - t0:.3f}s query={t2 - t1:.3f}s"
+                )
 
             # Limit to 30 to save context
-            return {"success": True, "count": total, "callers": callers[:30], "truncated": total > 30}
+            return {
+                "success": True,
+                "count": total,
+                "callers": callers[:30],
+                "truncated": total > 30,
+            }
         except Exception as e:
             return _handle_client_error(e)
 
@@ -302,7 +329,12 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             callees = result.get("callees", []) if isinstance(result, dict) else result
             total = len(callees)
             # Limit to 30 to save context
-            return {"success": True, "count": total, "callees": callees[:30], "truncated": total > 30}
+            return {
+                "success": True,
+                "count": total,
+                "callees": callees[:30],
+                "truncated": total > 30,
+            }
         except Exception as e:
             return _handle_client_error(e)
 
@@ -327,13 +359,21 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         try:
             client = _get_client()
             graph = client.get_call_graph(fuzzer_name, depth)
-            return {"success": True, "fuzzer_name": fuzzer_name, "depth": depth, "node_count": len(graph), "call_graph": graph}
+            return {
+                "success": True,
+                "fuzzer_name": fuzzer_name,
+                "depth": depth,
+                "node_count": len(graph),
+                "call_graph": graph,
+            }
         except Exception as e:
             return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
-    def find_all_paths(from_function: str, to_function: str, max_depth: int = 10, max_paths: int = 20) -> Dict[str, Any]:
+    def find_all_paths(
+        from_function: str, to_function: str, max_depth: int = 10, max_paths: int = 20
+    ) -> Dict[str, Any]:
         """
         Find all call paths from one function to another.
 
@@ -353,7 +393,9 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
             return err
         try:
             client = _get_client()
-            result = client.find_all_paths(from_function, to_function, max_depth, max_paths)
+            result = client.find_all_paths(
+                from_function, to_function, max_depth, max_paths
+            )
             paths = result.get("paths", [])
             return {"success": True, "path_count": len(paths), "paths": paths[:20]}
         except Exception as e:
@@ -412,7 +454,12 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         try:
             client = _get_client()
             functions = client.get_reachable_functions(fuzzer_name)
-            return {"success": True, "fuzzer_name": fuzzer_name, "count": len(functions), "functions": functions}
+            return {
+                "success": True,
+                "fuzzer_name": fuzzer_name,
+                "count": len(functions),
+                "functions": functions,
+            }
         except Exception as e:
             return _handle_client_error(e)
 
@@ -437,7 +484,12 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         try:
             client = _get_client()
             functions = client.get_unreached_functions(fuzzer_name)
-            return {"success": True, "fuzzer_name": fuzzer_name, "count": len(functions), "functions": functions}
+            return {
+                "success": True,
+                "fuzzer_name": fuzzer_name,
+                "count": len(functions),
+                "functions": functions,
+            }
         except Exception as e:
             return _handle_client_error(e)
 
@@ -521,7 +573,9 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
 
     @mcp.tool
     @async_tool
-    def get_file_content(file_path: str, start_line: int = None, end_line: int = None) -> Dict[str, Any]:
+    def get_file_content(
+        file_path: str, start_line: int = None, end_line: int = None
+    ) -> Dict[str, Any]:
         """
         Read the content of a file from the repository.
 
@@ -534,7 +588,12 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
 
     @mcp.tool
     @async_tool
-    def search_code(pattern: str, file_pattern: str = None, max_results: int = 50, context_lines: int = 2) -> Dict[str, Any]:
+    def search_code(
+        pattern: str,
+        file_pattern: str = None,
+        max_results: int = 50,
+        context_lines: int = 2,
+    ) -> Dict[str, Any]:
         """
         Search for a pattern in the repository source code.
 
@@ -548,7 +607,9 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
 
     @mcp.tool
     @async_tool
-    def list_files(directory: str = "", pattern: str = None, recursive: bool = False) -> Dict[str, Any]:
+    def list_files(
+        directory: str = "", pattern: str = None, recursive: bool = False
+    ) -> Dict[str, Any]:
         """
         List files in the repository.
 
@@ -562,11 +623,6 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
 
 def _register_suspicious_point_tools(mcp: FastMCP) -> None:
     """Register suspicious point tools."""
-
-    from .suspicious_points import (
-        _get_sp_context,
-        _ensure_sp_context,
-    )
 
     @mcp.tool
     @async_tool
@@ -588,6 +644,7 @@ def _register_suspicious_point_tools(mcp: FastMCP) -> None:
             important_controlflow: List of related control flow elements
         """
         from .suspicious_points import create_suspicious_point_impl
+
         return create_suspicious_point_impl(
             function_name, vuln_type, description, score, important_controlflow
         )
@@ -616,8 +673,15 @@ def _register_suspicious_point_tools(mcp: FastMCP) -> None:
             pov_guidance: Guidance for POV agent (input direction, how to reach vuln)
         """
         from .suspicious_points import update_suspicious_point_impl
+
         return update_suspicious_point_impl(
-            suspicious_point_id, score, is_checked, is_real, is_important, verification_notes, pov_guidance
+            suspicious_point_id,
+            score,
+            is_checked,
+            is_real,
+            is_important,
+            verification_notes,
+            pov_guidance,
         )
 
     @mcp.tool
@@ -625,6 +689,7 @@ def _register_suspicious_point_tools(mcp: FastMCP) -> None:
     def list_suspicious_points() -> Dict[str, Any]:
         """List all suspicious points for the current task."""
         from .suspicious_points import list_suspicious_points_impl
+
         return list_suspicious_points_impl()
 
     @mcp.tool
@@ -637,6 +702,7 @@ def _register_suspicious_point_tools(mcp: FastMCP) -> None:
             suspicious_point_id: ID of the suspicious point
         """
         from .suspicious_points import get_suspicious_point_impl
+
         return get_suspicious_point_impl(suspicious_point_id)
 
 
@@ -665,6 +731,7 @@ def _register_direction_tools(mcp: FastMCP) -> None:
             code_summary: Brief description of what this code does
         """
         from .directions import create_direction_impl
+
         return create_direction_impl(
             name, risk_level, risk_reason, core_functions, entry_functions, code_summary
         )
@@ -674,6 +741,7 @@ def _register_direction_tools(mcp: FastMCP) -> None:
     def list_directions() -> Dict[str, Any]:
         """List all directions for the current task."""
         from .directions import list_directions_impl
+
         return list_directions_impl()
 
     @mcp.tool
@@ -686,6 +754,7 @@ def _register_direction_tools(mcp: FastMCP) -> None:
             direction_id: ID of the direction
         """
         from .directions import get_direction_impl
+
         return get_direction_impl(direction_id)
 
 
@@ -708,6 +777,7 @@ def _register_pov_tools(mcp: FastMCP, worker_id: str = None) -> None:
         Use this to refresh your memory about how input enters the target.
         """
         from .pov import get_fuzzer_info_impl
+
         return get_fuzzer_info_impl(worker_id=bound_worker_id)
 
     @mcp.tool
@@ -720,6 +790,7 @@ def _register_pov_tools(mcp: FastMCP, worker_id: str = None) -> None:
             generator_code: Python code with a generate() function that returns bytes
         """
         from .pov import create_pov_impl
+
         return create_pov_impl(generator_code, worker_id=bound_worker_id)
 
     @mcp.tool
@@ -732,11 +803,14 @@ def _register_pov_tools(mcp: FastMCP, worker_id: str = None) -> None:
             pov_id: ID of the POV to verify
         """
         from .pov import verify_pov_impl
+
         return verify_pov_impl(pov_id, worker_id=bound_worker_id)
 
     @mcp.tool
     @async_tool
-    def trace_pov(generator_code: str, target_functions: list = None, agent_msg: str = None) -> Dict[str, Any]:
+    def trace_pov(
+        generator_code: str, target_functions: list = None, agent_msg: str = None
+    ) -> Dict[str, Any]:
         """
         Trace execution path of ONE blob to see which functions it reaches. An LLM will analyze the trace and provide suggestions.
 
@@ -746,7 +820,10 @@ def _register_pov_tools(mcp: FastMCP, worker_id: str = None) -> None:
             agent_msg: Question to the LLM (e.g. "why is size check failing?")
         """
         from .pov import trace_pov_impl
-        return trace_pov_impl(generator_code, target_functions, agent_msg, worker_id=bound_worker_id)
+
+        return trace_pov_impl(
+            generator_code, target_functions, agent_msg, worker_id=bound_worker_id
+        )
 
 
 def _register_coverage_tools(mcp: FastMCP) -> None:
@@ -770,7 +847,10 @@ def _register_coverage_tools(mcp: FastMCP) -> None:
             target_files: Optional list of filenames to filter coverage display
         """
         from .coverage import run_coverage_impl
-        return run_coverage_impl(fuzzer_name, input_data_base64, target_functions, target_files)
+
+        return run_coverage_impl(
+            fuzzer_name, input_data_base64, target_functions, target_files
+        )
 
     @mcp.tool
     @async_tool
@@ -788,7 +868,10 @@ def _register_coverage_tools(mcp: FastMCP) -> None:
             target_function: The function name to check
         """
         from .coverage import check_pov_reaches_target_impl
-        return check_pov_reaches_target_impl(fuzzer_name, pov_data_base64, target_function)
+
+        return check_pov_reaches_target_impl(
+            fuzzer_name, pov_data_base64, target_function
+        )
 
     @mcp.tool
     @async_tool
@@ -797,6 +880,7 @@ def _register_coverage_tools(mcp: FastMCP) -> None:
         List all available coverage-instrumented fuzzers.
         """
         from .coverage import list_fuzzers_impl
+
         return list_fuzzers_impl()
 
     @mcp.tool
@@ -815,6 +899,7 @@ def _register_coverage_tools(mcp: FastMCP) -> None:
             target_files: Optional list of filenames to focus on
         """
         from .coverage import get_feedback_impl
+
         return get_feedback_impl(fuzzer_name, input_data_base64, target_files)
 
 
@@ -897,7 +982,6 @@ def _register_seed_tools(mcp: FastMCP, worker_id: str = None) -> None:
             seed_type=seed_type,
             worker_id=bound_worker_id,
         )
-
 
 
 # Export
