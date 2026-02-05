@@ -469,20 +469,40 @@ class AnalyzerBuilder:
             self.project_name,
         ]
         try:
-            result = subprocess.run(
+            start_time = time.time()
+            process = subprocess.Popen(
                 cmd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
-                timeout=600,  # 10 minutes
                 cwd=str(self.fuzz_tooling_path),
             )
-            if result.returncode != 0:
-                output = (result.stdout + result.stderr)[-500:]
-                self.log(f"Docker image pre-build failed: {output}", "ERROR")
+
+            # Stream output with progress indicator
+            line_count = 0
+            for line in process.stdout:
+                line = line.rstrip()
+                line_count += 1
+                # Log every 20 lines to show progress without flooding
+                if line_count % 20 == 0:
+                    elapsed = time.time() - start_time
+                    self.log(f"[Docker build] {line_count} lines, {elapsed:.0f}s elapsed...")
+                # Log important Docker build steps
+                if any(kw in line for kw in ["Step ", "Successfully built", "Successfully tagged", "ERROR", "error:"]):
+                    self.log(f"[Docker] {line}")
+
+            process.wait(timeout=600)
+            elapsed = time.time() - start_time
+
+            if process.returncode != 0:
+                self.log(f"Docker image pre-build failed (exit code {process.returncode})", "ERROR")
                 return False
+
+            self.log(f"Docker image pre-built successfully in {elapsed:.1f}s")
             return True
         except subprocess.TimeoutExpired:
-            self.log("Docker image pre-build timed out", "ERROR")
+            process.kill()
+            self.log("Docker image pre-build timed out (10 minutes)", "ERROR")
             return False
         except Exception as e:
             self.log(f"Docker image pre-build exception: {e}", "ERROR")
