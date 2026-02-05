@@ -10,7 +10,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional, List
 import hashlib
-import uuid
+
+from ..core.utils import generate_id
 
 
 class FuzzerStatus(str, Enum):
@@ -54,7 +55,7 @@ class CrashRecord:
 
     Used for tracking and deduplication.
     """
-    crash_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    crash_id: str = field(default_factory=generate_id)
     task_id: str = ""
     crash_path: str = ""
     crash_hash: str = ""              # SHA1 for deduplication
@@ -166,7 +167,7 @@ class FuzzerStats:
 @dataclass
 class SeedInfo:
     """Information about a seed added to corpus."""
-    seed_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    seed_id: str = field(default_factory=generate_id)
     seed_path: str = ""
     seed_hash: str = ""
     seed_size: int = 0

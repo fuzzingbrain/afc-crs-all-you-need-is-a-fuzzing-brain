@@ -10,7 +10,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Optional, List
-import uuid
+
+from ..utils import generate_id
 
 
 class DirectionStatus(str, Enum):
@@ -39,7 +40,7 @@ class Direction:
     """
 
     # Identifiers
-    direction_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    direction_id: str = field(default_factory=generate_id)
     task_id: str = ""  # Which task this belongs to
     fuzzer: str = ""   # Which fuzzer this direction is for
 
@@ -107,7 +108,7 @@ class Direction:
             created_at = datetime.now()
 
         return cls(
-            direction_id=data.get("direction_id", data.get("_id", str(uuid.uuid4()))),
+            direction_id=data.get("direction_id", data.get("_id", generate_id())),
             task_id=data.get("task_id", ""),
             fuzzer=data.get("fuzzer", ""),
             name=data.get("name", ""),

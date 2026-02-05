@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Optional
-import uuid
+
+from ..utils import generate_id
 
 
 class FuzzerStatus(str, Enum):
@@ -29,7 +30,7 @@ class Fuzzer:
     """
 
     # Identifiers
-    fuzzer_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    fuzzer_id: str = field(default_factory=generate_id)
     task_id: str = ""
 
     # Fuzzer info
@@ -68,7 +69,7 @@ class Fuzzer:
     def from_dict(cls, data: dict) -> "Fuzzer":
         """Create Fuzzer from dictionary"""
         return cls(
-            fuzzer_id=data.get("fuzzer_id", data.get("_id", str(uuid.uuid4()))),
+            fuzzer_id=data.get("fuzzer_id", data.get("_id", generate_id())),
             task_id=data.get("task_id", ""),
             fuzzer_name=data.get("fuzzer_name", ""),
             source_path=data.get("source_path"),
