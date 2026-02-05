@@ -21,6 +21,7 @@ from .models import CrashRecord
 @dataclass
 class WatchEntry:
     """Entry for a watched crash directory."""
+
     path: Path
     source: str  # "global" or sp_id
     fuzzer_name: str
@@ -135,7 +136,9 @@ class CrashMonitor:
             sanitizer=sanitizer,
         )
         self.watch_dirs.append(entry)
-        logger.debug(f"[CrashMonitor:{self.task_id}] Added watch: {crash_dir} ({source})")
+        logger.debug(
+            f"[CrashMonitor:{self.task_id}] Added watch: {crash_dir} ({source})"
+        )
 
     def remove_watch_dir(self, source: str) -> None:
         """
@@ -175,9 +178,13 @@ class CrashMonitor:
             try:
                 await self._check_directory(watch_entry)
             except Exception as e:
-                logger.warning(f"[CrashMonitor:{self.task_id}] Final sweep error for {watch_entry.path}: {e}")
+                logger.warning(
+                    f"[CrashMonitor:{self.task_id}] Final sweep error for {watch_entry.path}: {e}"
+                )
 
-        logger.info(f"[CrashMonitor:{self.task_id}] Stopped monitoring (found {len(self.crash_records)} total crashes)")
+        logger.info(
+            f"[CrashMonitor:{self.task_id}] Stopped monitoring (found {len(self.crash_records)} total crashes)"
+        )
 
     async def _monitor_loop(self) -> None:
         """Background monitoring loop."""
@@ -321,6 +328,7 @@ class CrashMonitor:
 
         # Write crash to work directory
         import hashlib
+
         crash_hash = hashlib.sha1(crash_data).hexdigest()[:16]
         temp_blob = work_dir / f"crash_{crash_hash}.bin"
         temp_blob.write_bytes(crash_data)
@@ -328,14 +336,23 @@ class CrashMonitor:
         try:
             # Build Docker command
             cmd = [
-                "docker", "run", "--rm",
-                "--platform", "linux/amd64",
-                "--entrypoint", "",
-                "-e", "FUZZING_ENGINE=libfuzzer",
-                "-e", f"SANITIZER={sanitizer}",
-                "-e", "ARCHITECTURE=x86_64",
-                "-v", f"{fuzzer_dir}:/fuzzers:ro",
-                "-v", f"{work_dir}:/work",
+                "docker",
+                "run",
+                "--rm",
+                "--platform",
+                "linux/amd64",
+                "--entrypoint",
+                "",
+                "-e",
+                "FUZZING_ENGINE=libfuzzer",
+                "-e",
+                f"SANITIZER={sanitizer}",
+                "-e",
+                "ARCHITECTURE=x86_64",
+                "-v",
+                f"{fuzzer_dir}:/fuzzers:ro",
+                "-v",
+                f"{work_dir}:/work",
                 self.docker_image,
                 f"/fuzzers/{fuzzer_binary}",
                 "-timeout=30",
@@ -415,7 +432,8 @@ class CrashMonitor:
         """
         expected_source = "global_fuzzer" if source == "global" else "sp_fuzzer"
         return [
-            r for r in self.crash_records
+            r
+            for r in self.crash_records
             if r.source == expected_source and (source == "global" or r.sp_id == source)
         ]
 

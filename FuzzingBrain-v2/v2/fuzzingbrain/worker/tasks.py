@@ -22,11 +22,12 @@ from ..eval import BudgetExceededError
 # Capture any uncaught exceptions at module level
 def _log_uncaught_exception(exc_type, exc_value, exc_tb):
     """Log uncaught exceptions to both stderr and file."""
-    error_msg = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    error_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
     logger.error(f"Uncaught exception in worker:\n{error_msg}")
     # Also ensure it goes to stderr
     sys.stderr.write(f"[WORKER ERROR] {error_msg}\n")
     sys.stderr.flush()
+
 
 sys.excepthook = _log_uncaught_exception
 
@@ -61,7 +62,9 @@ def setup_worker_logging(log_dir: str, worker_id: str, metadata: Dict[str, Any])
     logger.add(
         log_path / "fuzzingbrain.log",
         level="DEBUG",
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | [" + worker_id + "] {message}",
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | ["
+        + worker_id
+        + "] {message}",
         encoding="utf-8",
         mode="a",
     )
@@ -146,6 +149,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     worker_ctx = None
     try:
         from ..eval import create_reporter, get_reporter
+
         # Create reporter if eval_server is provided in assignment
         if eval_server:
             create_reporter(
@@ -155,7 +159,9 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
                 pov_count=pov_count,
             )
         reporter = get_reporter()
-        worker_ctx = reporter.worker_context(worker_id, fuzzer=fuzzer, sanitizer=sanitizer, task_id=task_id)
+        worker_ctx = reporter.worker_context(
+            worker_id, fuzzer=fuzzer, sanitizer=sanitizer, task_id=task_id
+        )
         worker_ctx.__enter__()
     except Exception as e:
         logger.debug(f"Failed to initialize reporter: {e}")
@@ -163,6 +169,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     # Initialize database connection for this worker process
     try:
         from ..core import Config
+
         config = Config.from_env()
         db = MongoDB.connect(config.mongodb_url, config.mongodb_db)
         repos = init_repos(db)
@@ -207,6 +214,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             # Set coverage fuzzer path if provided
             if coverage_fuzzer_path:
                 from ..tools.coverage import set_coverage_fuzzer_path
+
                 set_coverage_fuzzer_path(coverage_fuzzer_path)
         else:
             # Legacy mode: build fuzzer in worker
@@ -215,6 +223,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             repos.workers.save(worker)
 
             from .builder import WorkerBuilder
+
             builder = WorkerBuilder(workspace_path, project_name, sanitizer)
             build_success, build_msg = builder.build()
 
@@ -234,6 +243,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         repos.workers.save(worker)
 
         from .executor import WorkerExecutor
+
         executor = WorkerExecutor(
             workspace_path=workspace_path,
             project_name=project_name,
@@ -284,6 +294,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
         # Step 4: Cleanup workspace (keep results)
         from .cleanup import cleanup_worker_workspace
+
         cleanup_worker_workspace(workspace_path)
 
         # Cleanup reporter context
@@ -308,7 +319,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
         # Clean up executor
         try:
-            if 'executor' in dir() and executor is not None:
+            if "executor" in dir() and executor is not None:
                 executor.close()
         except Exception as cleanup_err:
             logger.warning(f"Error during cleanup: {cleanup_err}")
@@ -353,7 +364,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
         # Clean up FuzzerManager on error
         try:
-            if 'executor' in dir() and executor is not None:
+            if "executor" in dir() and executor is not None:
                 executor.close()
         except Exception as cleanup_err:
             logger.warning(f"Error during cleanup: {cleanup_err}")

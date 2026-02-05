@@ -23,7 +23,9 @@ class POV:
     pov_id: str = field(default_factory=generate_id)
     task_id: str = ""  # Required: which task does this POV belong to
     suspicious_point_id: str = ""  # Which suspicious point this POV is for
-    generation_id: str = ""  # Group POVs from same generation (same code, multiple variants)
+    generation_id: str = (
+        ""  # Group POVs from same generation (same code, multiple variants)
+    )
 
     # Iteration tracking (for model evaluation)
     iteration: int = 0  # Which agent loop iteration when created

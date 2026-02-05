@@ -18,18 +18,18 @@ class FuzzerWorkerConfig:
     enabled: bool = True
 
     # Global Fuzzer config
-    global_fork_level: int = 2          # Parallelism (lower to save resources)
-    global_rss_limit_mb: int = 2048     # Memory limit
-    global_max_time: int = 3600         # Max run time (seconds), 0 = unlimited
+    global_fork_level: int = 2  # Parallelism (lower to save resources)
+    global_rss_limit_mb: int = 2048  # Memory limit
+    global_max_time: int = 3600  # Max run time (seconds), 0 = unlimited
     global_timeout_per_input: int = 30  # Timeout per input (seconds)
 
     # SP Fuzzer config
-    sp_fork_level: int = 1              # Single process (lightweight)
-    sp_rss_limit_mb: int = 1024         # Memory limit
-    sp_max_count: int = 5               # Max concurrent SP Fuzzers
+    sp_fork_level: int = 1  # Single process (lightweight)
+    sp_rss_limit_mb: int = 1024  # Memory limit
+    sp_max_count: int = 5  # Max concurrent SP Fuzzers
 
     # Crash monitoring
-    crash_check_interval: float = 5.0   # Seconds between crash directory checks
+    crash_check_interval: float = 5.0  # Seconds between crash directory checks
 
 
 @dataclass
@@ -58,16 +58,22 @@ class Config:
 
     # Budget configuration (env: FUZZINGBRAIN_BUDGET_LIMIT, FUZZINGBRAIN_ALLOW_EXPENSIVE_FALLBACK)
     budget_limit: float = 50.0  # Max cost in dollars (0 = unlimited)
-    allow_expensive_fallback: bool = False  # Allow fallback to expensive models (opus, gpt-5.2-pro)
+    allow_expensive_fallback: bool = (
+        False  # Allow fallback to expensive models (opus, gpt-5.2-pro)
+    )
 
     # Fuzzer filter (env: FUZZINGBRAIN_FUZZER_FILTER)
-    fuzzer_filter: List[str] = field(default_factory=list)  # Only dispatch workers for these fuzzers (empty = all)
+    fuzzer_filter: List[str] = field(
+        default_factory=list
+    )  # Only dispatch workers for these fuzzers (empty = all)
 
     # Repository
     repo_url: Optional[str] = None
     repo_path: Optional[str] = None
     project_name: Optional[str] = None
-    ossfuzz_project_name: Optional[str] = None  # OSS-Fuzz project name (may differ from project_name)
+    ossfuzz_project_name: Optional[str] = (
+        None  # OSS-Fuzz project name (may differ from project_name)
+    )
     target_commit: Optional[str] = None  # Target commit for full scan
 
     # Delta scan commits (used when scan_mode is delta)
@@ -107,7 +113,7 @@ class Config:
 
     # Prebuild data (for skipping introspector build)
     prebuild_dir: Optional[str] = None  # Path to prebuild/{work_id}/ directory
-    work_id: Optional[str] = None       # Work ID for prebuild data remapping
+    work_id: Optional[str] = None  # Work ID for prebuild data remapping
 
     # Fuzzer source paths (fuzzer_name -> list of source file paths)
     fuzzer_sources: Dict[str, List[str]] = field(default_factory=dict)
@@ -139,12 +145,15 @@ class Config:
             sanitizers=data.get("sanitizers", ["address"]),
             timeout_minutes=data.get("timeout_minutes", 30),
             pov_count=data.get("pov_count", 1),
-            budget_limit=float(data.get("budget_limit") or 0) if data.get("budget_limit") is not None else 50.0,
+            budget_limit=float(data.get("budget_limit") or 0)
+            if data.get("budget_limit") is not None
+            else 50.0,
             fuzzer_worker=fuzzer_worker,
             repo_url=data.get("repo_url"),
             repo_path=data.get("repo_path"),
             project_name=data.get("project_name"),
-            ossfuzz_project_name=data.get("ossfuzz_project_name") or data.get("ossfuzz_project"),
+            ossfuzz_project_name=data.get("ossfuzz_project_name")
+            or data.get("ossfuzz_project"),
             target_commit=(data.get("target_commit") or "").strip() or None,
             base_commit=(data.get("base_commit") or "").strip() or None,
             delta_commit=(data.get("delta_commit") or "").strip() or None,
@@ -173,9 +182,14 @@ class Config:
 
         # Parse fuzzer_worker config from env
         fuzzer_worker = FuzzerWorkerConfig(
-            enabled=os.environ.get("FUZZINGBRAIN_FUZZER_WORKER_ENABLED", "true").lower() in ("true", "1", "yes"),
-            global_fork_level=int(os.environ.get("FUZZINGBRAIN_GLOBAL_FORK_LEVEL", "2")),
-            global_rss_limit_mb=int(os.environ.get("FUZZINGBRAIN_GLOBAL_RSS_LIMIT_MB", "2048")),
+            enabled=os.environ.get("FUZZINGBRAIN_FUZZER_WORKER_ENABLED", "true").lower()
+            in ("true", "1", "yes"),
+            global_fork_level=int(
+                os.environ.get("FUZZINGBRAIN_GLOBAL_FORK_LEVEL", "2")
+            ),
+            global_rss_limit_mb=int(
+                os.environ.get("FUZZINGBRAIN_GLOBAL_RSS_LIMIT_MB", "2048")
+            ),
             global_max_time=int(os.environ.get("FUZZINGBRAIN_GLOBAL_MAX_TIME", "3600")),
             sp_fork_level=int(os.environ.get("FUZZINGBRAIN_SP_FORK_LEVEL", "1")),
             sp_rss_limit_mb=int(os.environ.get("FUZZINGBRAIN_SP_RSS_LIMIT_MB", "1024")),
@@ -192,9 +206,16 @@ class Config:
             fuzzer_worker=fuzzer_worker,
             # Budget configuration
             budget_limit=float(os.environ.get("FUZZINGBRAIN_BUDGET_LIMIT", "50.0")),
-            allow_expensive_fallback=os.environ.get("FUZZINGBRAIN_ALLOW_EXPENSIVE_FALLBACK", "false").lower() in ("true", "1", "yes"),
+            allow_expensive_fallback=os.environ.get(
+                "FUZZINGBRAIN_ALLOW_EXPENSIVE_FALLBACK", "false"
+            ).lower()
+            in ("true", "1", "yes"),
             # Fuzzer filter (comma-separated list)
-            fuzzer_filter=[f.strip() for f in os.environ.get("FUZZINGBRAIN_FUZZER_FILTER", "").split(",") if f.strip()],
+            fuzzer_filter=[
+                f.strip()
+                for f in os.environ.get("FUZZINGBRAIN_FUZZER_FILTER", "").split(",")
+                if f.strip()
+            ],
             # Infrastructure
             redis_url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
             mongodb_url=os.environ.get("MONGODB_URL", "mongodb://localhost:27017"),

@@ -20,9 +20,13 @@ from .analyzer import _get_client, _ensure_client
 # Using ContextVar for async task isolation (each asyncio.Task has its own context)
 # =============================================================================
 
-_sp_harness_name: ContextVar[Optional[str]] = ContextVar('sp_harness_name', default=None)
-_sp_sanitizer: ContextVar[Optional[str]] = ContextVar('sp_sanitizer', default=None)
-_sp_direction_id: ContextVar[Optional[str]] = ContextVar('sp_direction_id', default=None)
+_sp_harness_name: ContextVar[Optional[str]] = ContextVar(
+    "sp_harness_name", default=None
+)
+_sp_sanitizer: ContextVar[Optional[str]] = ContextVar("sp_sanitizer", default=None)
+_sp_direction_id: ContextVar[Optional[str]] = ContextVar(
+    "sp_direction_id", default=None
+)
 
 
 def set_sp_context(harness_name: str, sanitizer: str, direction_id: str = "") -> None:
@@ -43,7 +47,9 @@ def set_sp_context(harness_name: str, sanitizer: str, direction_id: str = "") ->
     _sp_harness_name.set(harness_name)
     _sp_sanitizer.set(sanitizer)
     _sp_direction_id.set(direction_id)
-    logger.debug(f"SP context set: harness_name={harness_name}, sanitizer={sanitizer}, direction_id={direction_id}")
+    logger.debug(
+        f"SP context set: harness_name={harness_name}, sanitizer={sanitizer}, direction_id={direction_id}"
+    )
 
 
 def get_sp_context() -> Tuple[Optional[str], Optional[str], Optional[str]]:
@@ -69,6 +75,7 @@ def _ensure_sp_context() -> Optional[Dict[str, Any]]:
 # =============================================================================
 # Suspicious Point Tools - Implementation Functions
 # =============================================================================
+
 
 def create_suspicious_point_impl(
     function_name: str,
@@ -103,10 +110,13 @@ def create_suspicious_point_impl(
             logger.info(f"[MERGED SP] {sp_id[:8]} <- {function_name} ({vuln_type})")
             return {"success": True, "merged": True, "id": sp_id[:8]}
         else:
-            logger.info(f"[NEW SP] {sp_id[:8]} -> {function_name} ({vuln_type}, score={score})")
+            logger.info(
+                f"[NEW SP] {sp_id[:8]} -> {function_name} ({vuln_type}, score={score})"
+            )
             # Report SP creation to eval server
             try:
                 from ..eval import get_reporter
+
                 reporter = get_reporter()
                 reporter.sp_created(sp_id, function_name, vuln_type)
             except Exception:
@@ -143,15 +153,18 @@ def update_suspicious_point_impl(
             pov_guidance=pov_guidance,
         )
 
-        update_json = json.dumps({
-            "id": suspicious_point_id,
-            "is_checked": is_checked,
-            "is_real": is_real,
-            "is_important": is_important,
-            "score": score,
-            "verification_notes": verification_notes,
-            "pov_guidance": pov_guidance,
-        }, ensure_ascii=False)
+        update_json = json.dumps(
+            {
+                "id": suspicious_point_id,
+                "is_checked": is_checked,
+                "is_real": is_real,
+                "is_important": is_important,
+                "score": score,
+                "verification_notes": verification_notes,
+                "pov_guidance": pov_guidance,
+            },
+            ensure_ascii=False,
+        )
 
         updated = result.get("updated", False) if result else False
         if updated:
@@ -160,12 +173,15 @@ def update_suspicious_point_impl(
             if is_real is not None:
                 try:
                     from ..eval import get_reporter
+
                     reporter = get_reporter()
                     reporter.sp_verified(suspicious_point_id, is_real, score or 0.0)
                 except Exception:
                     pass
         else:
-            logger.warning(f"[UPDATE SUSPICIOUS POINT FAILED] Server returned: {result}")
+            logger.warning(
+                f"[UPDATE SUSPICIOUS POINT FAILED] Server returned: {result}"
+            )
 
         return {"success": updated, "updated": updated, "server_result": result}
     except Exception as e:
@@ -210,7 +226,10 @@ def get_suspicious_point_impl(suspicious_point_id: str) -> Dict[str, Any]:
         client = _get_client()
         result = client.get_suspicious_point(suspicious_point_id)
         if result is None:
-            return {"success": False, "error": f"Suspicious point '{suspicious_point_id}' not found"}
+            return {
+                "success": False,
+                "error": f"Suspicious point '{suspicious_point_id}' not found",
+            }
         return {"success": True, "suspicious_point": result}
     except Exception as e:
         logger.error(f"Failed to get suspicious point: {e}")
@@ -220,6 +239,7 @@ def get_suspicious_point_impl(suspicious_point_id: str) -> Dict[str, Any]:
 # =============================================================================
 # Suspicious Point Tools - MCP Decorated
 # =============================================================================
+
 
 @tools_mcp.tool
 def create_suspicious_point(
@@ -286,7 +306,9 @@ def create_suspicious_point(
             logger.info(f"[MERGED SP] {sp_id[:8]} <- {function_name} ({vuln_type})")
             return {"success": True, "merged": True, "id": sp_id[:8]}
         else:
-            logger.info(f"[NEW SP] {sp_id[:8]} -> {function_name} ({vuln_type}, score={score})")
+            logger.info(
+                f"[NEW SP] {sp_id[:8]} -> {function_name} ({vuln_type}, score={score})"
+            )
             return {"success": True, "created": True, "id": sp_id[:8]}
     except Exception as e:
         logger.error(f"Failed to create suspicious point: {e}")
@@ -351,22 +373,27 @@ def update_suspicious_point(
         )
 
         # Log the update with server result
-        update_json = json.dumps({
-            "id": suspicious_point_id,
-            "is_checked": is_checked,
-            "is_real": is_real,
-            "is_important": is_important,
-            "score": score,
-            "verification_notes": verification_notes,
-            "pov_guidance": pov_guidance,
-        }, ensure_ascii=False)
+        update_json = json.dumps(
+            {
+                "id": suspicious_point_id,
+                "is_checked": is_checked,
+                "is_real": is_real,
+                "is_important": is_important,
+                "score": score,
+                "verification_notes": verification_notes,
+                "pov_guidance": pov_guidance,
+            },
+            ensure_ascii=False,
+        )
 
         # Check if server actually updated the DB
         updated = result.get("updated", False) if result else False
         if updated:
             logger.info(f"[UPDATE SUSPICIOUS POINT] {update_json}")
         else:
-            logger.warning(f"[UPDATE SUSPICIOUS POINT FAILED] Server returned: {result}, params: {update_json}")
+            logger.warning(
+                f"[UPDATE SUSPICIOUS POINT FAILED] Server returned: {result}, params: {update_json}"
+            )
 
         return {
             "success": updated,

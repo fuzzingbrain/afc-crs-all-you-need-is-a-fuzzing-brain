@@ -16,14 +16,16 @@ from ..utils import generate_id
 
 class DirectionStatus(str, Enum):
     """Direction pipeline status"""
-    PENDING = "pending"          # Waiting for analysis
+
+    PENDING = "pending"  # Waiting for analysis
     IN_PROGRESS = "in_progress"  # Being analyzed by an agent
-    COMPLETED = "completed"      # Analysis complete
-    SKIPPED = "skipped"          # Skipped (e.g., no interesting functions)
+    COMPLETED = "completed"  # Analysis complete
+    SKIPPED = "skipped"  # Skipped (e.g., no interesting functions)
 
 
 class RiskLevel(str, Enum):
     """Security risk level for a direction"""
+
     HIGH = "high"
     MEDIUM = "medium"
     LOW = "low"
@@ -42,12 +44,12 @@ class Direction:
     # Identifiers
     direction_id: str = field(default_factory=generate_id)
     task_id: str = ""  # Which task this belongs to
-    fuzzer: str = ""   # Which fuzzer this direction is for
+    fuzzer: str = ""  # Which fuzzer this direction is for
 
     # Direction info
-    name: str = ""              # Human-readable name (e.g., "Chunk Handlers")
+    name: str = ""  # Human-readable name (e.g., "Chunk Handlers")
     risk_level: str = RiskLevel.MEDIUM.value  # Security risk assessment
-    risk_reason: str = ""       # Why this risk level was assigned
+    risk_reason: str = ""  # Why this risk level was assigned
 
     # Functions in this direction
     core_functions: List[str] = field(default_factory=list)  # Main functions to analyze
@@ -55,7 +57,7 @@ class Direction:
 
     # Context for SP Find Agent
     call_chain_summary: str = ""  # Summary of call paths
-    code_summary: str = ""        # Brief description of what this code does
+    code_summary: str = ""  # Brief description of what this code does
 
     # Pipeline status
     status: str = DirectionStatus.PENDING.value
@@ -90,12 +92,15 @@ class Direction:
             "functions_analyzed": self.functions_analyzed,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "started_at": self.started_at.isoformat() if self.started_at else None,
-            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "completed_at": self.completed_at.isoformat()
+            if self.completed_at
+            else None,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "Direction":
         """Create Direction from dict"""
+
         def parse_datetime(val):
             if isinstance(val, str):
                 return datetime.fromisoformat(val)

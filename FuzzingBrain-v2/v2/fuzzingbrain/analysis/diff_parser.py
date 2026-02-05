@@ -15,6 +15,7 @@ from loguru import logger
 @dataclass
 class DiffHunk:
     """A single hunk in a diff (one @@ section)"""
+
     old_start: int
     old_count: int
     new_start: int
@@ -30,6 +31,7 @@ class DiffHunk:
 @dataclass
 class FileDiff:
     """Diff for a single file"""
+
     old_path: str
     new_path: str
     hunks: List[DiffHunk] = field(default_factory=list)
@@ -56,9 +58,12 @@ class FileDiff:
 @dataclass
 class ReachableChange:
     """A change that is reachable from a fuzzer"""
+
     file_path: str
     function_name: str
-    function_file: str  # File where function is defined (may differ from diff file for headers)
+    function_file: (
+        str  # File where function is defined (may differ from diff file for headers)
+    )
     line_start: int
     line_end: int
     changed_lines: List[int]  # Which lines in this function were changed
@@ -69,6 +74,7 @@ class ReachableChange:
 @dataclass
 class FunctionChange:
     """A changed function (regardless of reachability)"""
+
     file_path: str
     function_name: str
     function_file: str
@@ -84,6 +90,7 @@ class FunctionChange:
 @dataclass
 class DiffReachabilityResult:
     """Result of diff reachability analysis"""
+
     reachable: bool  # Are any changes reachable?
     reachable_changes: List[ReachableChange] = field(default_factory=list)
     unreachable_functions: List[str] = field(default_factory=list)
@@ -113,26 +120,28 @@ def parse_diff(diff_content: str) -> List[FileDiff]:
 
     # Split by file boundaries
     # Pattern matches "diff --git a/path b/path" or just file headers
-    file_sections = re.split(r'^diff --git ', diff_content, flags=re.MULTILINE)
+    file_sections = re.split(r"^diff --git ", diff_content, flags=re.MULTILINE)
 
     for section in file_sections:
         if not section.strip():
             continue
 
         # Check for binary file
-        if 'Binary files' in section or 'GIT binary patch' in section:
+        if "Binary files" in section or "GIT binary patch" in section:
             # Try to extract path
-            path_match = re.search(r'a/(\S+)\s+b/(\S+)', section)
+            path_match = re.search(r"a/(\S+)\s+b/(\S+)", section)
             if path_match:
-                file_diffs.append(FileDiff(
-                    old_path=path_match.group(1),
-                    new_path=path_match.group(2),
-                    is_binary=True,
-                ))
+                file_diffs.append(
+                    FileDiff(
+                        old_path=path_match.group(1),
+                        new_path=path_match.group(2),
+                        is_binary=True,
+                    )
+                )
             continue
 
         # Extract file paths
-        path_match = re.search(r'a/(\S+)\s+b/(\S+)', section)
+        path_match = re.search(r"a/(\S+)\s+b/(\S+)", section)
         if not path_match:
             continue
 
@@ -140,12 +149,12 @@ def parse_diff(diff_content: str) -> List[FileDiff]:
         new_path = path_match.group(2)
 
         # Check for new/deleted file
-        is_new = 'new file mode' in section
-        is_deleted = 'deleted file mode' in section
+        is_new = "new file mode" in section
+        is_deleted = "deleted file mode" in section
 
         # Parse hunks
         hunks = []
-        hunk_pattern = r'@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*?)(?=^@@|\Z)'
+        hunk_pattern = r"@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*?)(?=^@@|\Z)"
 
         for match in re.finditer(hunk_pattern, section, re.MULTILINE | re.DOTALL):
             old_start = int(match.group(1))
@@ -154,29 +163,33 @@ def parse_diff(diff_content: str) -> List[FileDiff]:
             new_count = int(match.group(4)) if match.group(4) else 1
             content = match.group(5)
 
-            hunks.append(DiffHunk(
-                old_start=old_start,
-                old_count=old_count,
-                new_start=new_start,
-                new_count=new_count,
-                content=content.strip(),
-            ))
+            hunks.append(
+                DiffHunk(
+                    old_start=old_start,
+                    old_count=old_count,
+                    new_start=new_start,
+                    new_count=new_count,
+                    content=content.strip(),
+                )
+            )
 
         if hunks or is_new or is_deleted:
-            file_diffs.append(FileDiff(
-                old_path=old_path,
-                new_path=new_path,
-                hunks=hunks,
-                is_new_file=is_new,
-                is_deleted=is_deleted,
-            ))
+            file_diffs.append(
+                FileDiff(
+                    old_path=old_path,
+                    new_path=new_path,
+                    hunks=hunks,
+                    is_new_file=is_new,
+                    is_deleted=is_deleted,
+                )
+            )
 
     return file_diffs
 
 
 def _is_source_file(path: str) -> bool:
     """Check if file is a source file we care about"""
-    extensions = {'.c', '.h', '.cc', '.cpp', '.cxx', '.hpp', '.java'}
+    extensions = {".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".java"}
     return Path(path).suffix.lower() in extensions
 
 
@@ -203,7 +216,9 @@ def _extract_hunk_content_for_function(
             continue  # No overlap
 
         # There is overlap
-        relevant_content.append(f"@@ -{hunk.old_start},{hunk.old_count} +{hunk.new_start},{hunk.new_count} @@")
+        relevant_content.append(
+            f"@@ -{hunk.old_start},{hunk.old_count} +{hunk.new_start},{hunk.new_count} @@"
+        )
         relevant_content.append(hunk.content)
 
         # Track which lines in the function were changed
@@ -211,7 +226,7 @@ def _extract_hunk_content_for_function(
             if func_start <= line <= func_end:
                 changed_lines.append(line)
 
-    return '\n'.join(relevant_content), changed_lines
+    return "\n".join(relevant_content), changed_lines
 
 
 def get_reachable_changes(
@@ -247,7 +262,9 @@ def get_reachable_changes(
         return result
 
     # Filter to source files only
-    source_diffs = [d for d in file_diffs if _is_source_file(d.path) and not d.is_binary]
+    source_diffs = [
+        d for d in file_diffs if _is_source_file(d.path) and not d.is_binary
+    ]
 
     if not source_diffs:
         logger.info("No source file changes in diff")
@@ -282,9 +299,9 @@ def get_reachable_changes(
         changed_lines = set(file_diff.changed_lines)
 
         for func in functions:
-            func_start = func.get('start_line', 0)
-            func_end = func.get('end_line', 0)
-            func_name = func.get('name', '')
+            func_start = func.get("start_line", 0)
+            func_end = func.get("end_line", 0)
+            func_name = func.get("name", "")
 
             if not func_name or not func_start:
                 continue
@@ -303,19 +320,21 @@ def get_reachable_changes(
         logger.info("No functions contain changed lines")
         return result
 
-    logger.info(f"Found {len(changed_functions)} functions with changes, checking reachability...")
+    logger.info(
+        f"Found {len(changed_functions)} functions with changes, checking reachability..."
+    )
 
     # Check reachability for each changed function
     for func, file_diff in changed_functions:
-        func_name = func.get('name', '')
-        func_file = func.get('file_path', file_diff.path)
-        func_start = func.get('start_line', 0)
-        func_end = func.get('end_line', 0)
+        func_name = func.get("name", "")
+        func_file = func.get("file_path", file_diff.path)
+        func_start = func.get("start_line", 0)
+        func_end = func.get("end_line", 0)
 
         try:
             reachability = analysis_client.get_reachability(fuzzer, func_name)
-            is_reachable = reachability.get('reachable', False)
-            distance = reachability.get('distance')
+            is_reachable = reachability.get("reachable", False)
+            distance = reachability.get("distance")
         except Exception as e:
             logger.warning(f"Failed to check reachability for {func_name}: {e}")
             is_reachable = False
@@ -327,16 +346,18 @@ def get_reachable_changes(
                 file_diff.hunks, func_start, func_end
             )
 
-            result.reachable_changes.append(ReachableChange(
-                file_path=file_diff.path,
-                function_name=func_name,
-                function_file=func_file,
-                line_start=func_start,
-                line_end=func_end,
-                changed_lines=changed_lines,
-                diff_content=diff_excerpt,
-                reachability_distance=distance,
-            ))
+            result.reachable_changes.append(
+                ReachableChange(
+                    file_path=file_diff.path,
+                    function_name=func_name,
+                    function_file=func_file,
+                    line_start=func_start,
+                    line_end=func_end,
+                    changed_lines=changed_lines,
+                    diff_content=diff_excerpt,
+                    reachability_distance=distance,
+                )
+            )
             logger.debug(f"  ✓ {func_name} is reachable (distance: {distance})")
         else:
             result.unreachable_functions.append(func_name)
@@ -346,7 +367,9 @@ def get_reachable_changes(
 
     # Sort by reachability distance (closer = higher priority)
     result.reachable_changes.sort(
-        key=lambda x: x.reachability_distance if x.reachability_distance is not None else 999
+        key=lambda x: (
+            x.reachability_distance if x.reachability_distance is not None else 999
+        )
     )
 
     logger.info(result.summary)
@@ -434,13 +457,17 @@ def get_all_changes(
         return all_changes
 
     # Filter to source files only
-    source_diffs = [d for d in file_diffs if _is_source_file(d.path) and not d.is_binary]
+    source_diffs = [
+        d for d in file_diffs if _is_source_file(d.path) and not d.is_binary
+    ]
 
     if not source_diffs:
         logger.info("No source file changes in diff")
         return all_changes
 
-    logger.info(f"Analyzing {len(source_diffs)} changed source files (ignoring reachability filter)")
+    logger.info(
+        f"Analyzing {len(source_diffs)} changed source files (ignoring reachability filter)"
+    )
 
     # For each changed file, find affected functions
     for file_diff in source_diffs:
@@ -466,9 +493,9 @@ def get_all_changes(
         changed_lines = set(file_diff.changed_lines)
 
         for func in functions:
-            func_start = func.get('start_line', 0)
-            func_end = func.get('end_line', 0)
-            func_name = func.get('name', '')
+            func_start = func.get("start_line", 0)
+            func_end = func.get("end_line", 0)
+            func_name = func.get("name", "")
 
             if not func_name or not func_start:
                 continue
@@ -488,36 +515,42 @@ def get_all_changes(
                 distance = None
                 try:
                     reachability = analysis_client.get_reachability(fuzzer, func_name)
-                    static_reachable = reachability.get('reachable', False)
-                    distance = reachability.get('distance')
+                    static_reachable = reachability.get("reachable", False)
+                    distance = reachability.get("distance")
                 except Exception as e:
                     logger.warning(f"Failed to check reachability for {func_name}: {e}")
 
                 reachable_mark = "✓" if static_reachable else "✗(static)"
-                logger.debug(f"  {func_name} [{reachable_mark}] - {len(overlap)} changed lines")
+                logger.debug(
+                    f"  {func_name} [{reachable_mark}] - {len(overlap)} changed lines"
+                )
 
-                all_changes.append(FunctionChange(
-                    file_path=file_diff.path,
-                    function_name=func_name,
-                    function_file=func.get('file_path', file_diff.path),
-                    line_start=func_start,
-                    line_end=func_end,
-                    changed_lines=list(overlap),
-                    diff_content=diff_excerpt,
-                    static_reachable=static_reachable,
-                    reachability_distance=distance,
-                ))
+                all_changes.append(
+                    FunctionChange(
+                        file_path=file_diff.path,
+                        function_name=func_name,
+                        function_file=func.get("file_path", file_diff.path),
+                        line_start=func_start,
+                        line_end=func_end,
+                        changed_lines=list(overlap),
+                        diff_content=diff_excerpt,
+                        static_reachable=static_reachable,
+                        reachability_distance=distance,
+                    )
+                )
 
     # Sort: reachable first, then by distance
     all_changes.sort(
         key=lambda x: (
             0 if x.static_reachable else 1,
-            x.reachability_distance if x.reachability_distance is not None else 999
+            x.reachability_distance if x.reachability_distance is not None else 999,
         )
     )
 
     reachable_count = sum(1 for c in all_changes if c.static_reachable)
-    logger.info(f"Found {len(all_changes)} changed functions ({reachable_count} static-reachable, {len(all_changes) - reachable_count} static-unreachable)")
+    logger.info(
+        f"Found {len(all_changes)} changed functions ({reachable_count} static-reachable, {len(all_changes) - reachable_count} static-unreachable)"
+    )
 
     return all_changes
 

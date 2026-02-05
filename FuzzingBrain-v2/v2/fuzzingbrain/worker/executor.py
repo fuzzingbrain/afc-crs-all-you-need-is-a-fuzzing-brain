@@ -78,7 +78,9 @@ class WorkerExecutor:
         self.enable_fuzzer_worker = enable_fuzzer_worker
 
         # Fuzzer binary path (from Analyzer or built locally)
-        self.fuzzer_binary_path = Path(fuzzer_binary_path) if fuzzer_binary_path else None
+        self.fuzzer_binary_path = (
+            Path(fuzzer_binary_path) if fuzzer_binary_path else None
+        )
 
         # Analysis Server client for code queries
         self.analysis_socket_path = analysis_socket_path
@@ -140,10 +142,14 @@ class WorkerExecutor:
                     register_fuzzer_manager(self.worker_id, self._fuzzer_manager)
                     logger.info(f"[{self.worker_id}] FuzzerManager initialized")
                 except Exception as e:
-                    logger.warning(f"[{self.worker_id}] Failed to initialize FuzzerManager: {e}")
+                    logger.warning(
+                        f"[{self.worker_id}] Failed to initialize FuzzerManager: {e}"
+                    )
                     self._fuzzer_manager = None
             else:
-                logger.debug(f"[{self.worker_id}] FuzzerManager not initialized: no fuzzer binary")
+                logger.debug(
+                    f"[{self.worker_id}] FuzzerManager not initialized: no fuzzer binary"
+                )
         return self._fuzzer_manager
 
     def _on_crash_found(self, crash_record) -> None:
@@ -170,9 +176,7 @@ class WorkerExecutor:
         logger.info(
             f"[{self.worker_id}] ║  🎯 CRASH FOUND BY FUZZER!                                   ║"
         )
-        logger.info(
-            f"[{self.worker_id}] ║  Hash: {crash_record.crash_hash[:16]:<44} ║"
-        )
+        logger.info(f"[{self.worker_id}] ║  Hash: {crash_record.crash_hash[:16]:<44} ║")
         logger.info(
             f"[{self.worker_id}] ║  Type: {(crash_record.vuln_type or 'unknown'):<44} ║"
         )
@@ -230,7 +234,9 @@ def generate(variant: int = 1) -> bytes:
                 vuln_type=crash_record.vuln_type,
                 harness_name=self.fuzzer,
                 sanitizer=self.sanitizer,
-                sanitizer_output=crash_record.sanitizer_output[:10000] if crash_record.sanitizer_output else "",
+                sanitizer_output=crash_record.sanitizer_output[:10000]
+                if crash_record.sanitizer_output
+                else "",
                 description=f"Fuzzer-discovered crash ({crash_record.source})",
                 is_successful=False,  # NOT yet! Generate report first
                 is_active=True,
@@ -263,6 +269,7 @@ def generate(variant: int = 1) -> bytes:
         except Exception as e:
             logger.error(f"[{self.worker_id}] Error processing crash: {e}")
             import traceback
+
             logger.debug(traceback.format_exc())
 
     async def _package_and_activate_pov(self, packager, pov, pov_id: str) -> None:
@@ -282,7 +289,9 @@ def generate(variant: int = 1) -> bytes:
             zip_path = await packager.package_pov_async(pov.to_dict(), None)
 
             if zip_path:
-                logger.info(f"[{self.worker_id}] ✅ POV {pov_id[:8]} packaged: {zip_path}")
+                logger.info(
+                    f"[{self.worker_id}] ✅ POV {pov_id[:8]} packaged: {zip_path}"
+                )
 
                 # 2. Activate POV (now dispatcher will detect it)
                 self.repos.povs.update(pov_id, {"is_successful": True})
@@ -293,6 +302,7 @@ def generate(variant: int = 1) -> bytes:
         except Exception as e:
             logger.error(f"[{self.worker_id}] Error packaging POV {pov_id[:8]}: {e}")
             import traceback
+
             logger.debug(traceback.format_exc())
 
     def _package_and_activate_pov_sync(self, packager, pov, pov_id: str) -> None:
@@ -310,7 +320,9 @@ def generate(variant: int = 1) -> bytes:
             zip_path = packager.package_pov(pov.to_dict(), None)
 
             if zip_path:
-                logger.info(f"[{self.worker_id}] ✅ POV {pov_id[:8]} packaged: {zip_path}")
+                logger.info(
+                    f"[{self.worker_id}] ✅ POV {pov_id[:8]} packaged: {zip_path}"
+                )
 
                 # 2. Activate POV (now dispatcher will detect it)
                 self.repos.povs.update(pov_id, {"is_successful": True})
@@ -321,6 +333,7 @@ def generate(variant: int = 1) -> bytes:
         except Exception as e:
             logger.error(f"[{self.worker_id}] Error packaging POV {pov_id[:8]}: {e}")
             import traceback
+
             logger.debug(traceback.format_exc())
 
     @property
@@ -338,7 +351,9 @@ def generate(variant: int = 1) -> bytes:
                     client_id=self.worker_id,
                 )
                 if self._analysis_client.ping():
-                    logger.info(f"Connected to Analysis Server: {self.analysis_socket_path}")
+                    logger.info(
+                        f"Connected to Analysis Server: {self.analysis_socket_path}"
+                    )
                 else:
                     logger.warning("Analysis Server not responding")
                     self._analysis_client = None
@@ -392,6 +407,7 @@ def generate(variant: int = 1) -> bytes:
         # Shutdown FuzzerManager
         if self._fuzzer_manager:
             import asyncio
+
             try:
                 # Run shutdown in event loop
                 loop = asyncio.get_event_loop()
@@ -400,7 +416,9 @@ def generate(variant: int = 1) -> bytes:
                 else:
                     loop.run_until_complete(self._fuzzer_manager.shutdown())
             except Exception as e:
-                logger.warning(f"[{self.worker_id}] Error shutting down FuzzerManager: {e}")
+                logger.warning(
+                    f"[{self.worker_id}] Error shutting down FuzzerManager: {e}"
+                )
             finally:
                 unregister_fuzzer_manager(self.worker_id)
                 self._fuzzer_manager = None
@@ -412,7 +430,12 @@ def generate(variant: int = 1) -> bytes:
         Returns:
             Strategy instance
         """
-        from .strategies import POVDeltaStrategy, POVFullscanStrategy, PatchStrategy, HarnessStrategy
+        from .strategies import (
+            POVDeltaStrategy,
+            POVFullscanStrategy,
+            PatchStrategy,
+            HarnessStrategy,
+        )
 
         if self.task_type in ["pov", "pov-patch"]:
             # Select POV strategy based on scan mode
@@ -436,7 +459,9 @@ def generate(variant: int = 1) -> bytes:
         Returns:
             Result dictionary with findings
         """
-        logger.info(f"Starting executor: {self.fuzzer} with {self.sanitizer} (mode: {self.scan_mode}, job: {self.task_type})")
+        logger.info(
+            f"Starting executor: {self.fuzzer} with {self.sanitizer} (mode: {self.scan_mode}, job: {self.task_type})"
+        )
 
         try:
             # Get strategy for this job type

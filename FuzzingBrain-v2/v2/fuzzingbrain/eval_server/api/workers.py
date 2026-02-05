@@ -11,6 +11,7 @@ router = APIRouter()
 
 class WorkerData(BaseModel):
     """Worker registration data."""
+
     worker_id: str
     task_id: str
     instance_id: str = ""
@@ -24,6 +25,7 @@ class WorkerData(BaseModel):
 
 class WorkerStatusUpdate(BaseModel):
     """Worker status update."""
+
     status: str
     cpu_percent: Optional[float] = None
     memory_mb: Optional[float] = None
@@ -31,6 +33,7 @@ class WorkerStatusUpdate(BaseModel):
 
 class WorkerResponse(BaseModel):
     """Worker response."""
+
     worker_id: str
     task_id: str
     fuzzer: str
@@ -61,7 +64,9 @@ async def register_worker(data: WorkerData) -> Dict[str, Any]:
         "fuzzer": data.fuzzer,
         "sanitizer": data.sanitizer,
         "status": data.status,
-        "started_at": datetime.fromisoformat(data.started_at) if data.started_at else datetime.utcnow(),
+        "started_at": datetime.fromisoformat(data.started_at)
+        if data.started_at
+        else datetime.utcnow(),
         "cpu_percent": data.cpu_percent,
         "memory_mb": data.memory_mb,
         "created_at": datetime.utcnow(),
@@ -73,7 +78,9 @@ async def register_worker(data: WorkerData) -> Dict[str, Any]:
 
 
 @router.post("/{worker_id}/status")
-async def update_worker_status(worker_id: str, data: WorkerStatusUpdate) -> Dict[str, Any]:
+async def update_worker_status(
+    worker_id: str, data: WorkerStatusUpdate
+) -> Dict[str, Any]:
     """Update worker status."""
     from ..server import get_storage
 
@@ -125,25 +132,36 @@ async def list_workers(
         workers = await mongo.get_workers_by_task(task_id)
     else:
         # Get all workers (limited query)
-        workers = await mongo._db.workers.find({}).sort("started_at", -1).limit(100).to_list(length=100)
+        workers = (
+            await mongo._db.workers.find({})
+            .sort("started_at", -1)
+            .limit(100)
+            .to_list(length=100)
+        )
 
     result = []
     for worker in workers:
         # Get agent count for this worker
         agents = await mongo.get_agents_by_worker(worker["worker_id"])
 
-        result.append(WorkerResponse(
-            worker_id=worker["worker_id"],
-            task_id=worker.get("task_id", ""),
-            fuzzer=worker.get("fuzzer", ""),
-            sanitizer=worker.get("sanitizer", ""),
-            status=worker.get("status", "unknown"),
-            started_at=worker.get("started_at").isoformat() if worker.get("started_at") else None,
-            ended_at=worker.get("ended_at").isoformat() if worker.get("ended_at") else None,
-            cpu_percent=worker.get("cpu_percent"),
-            memory_mb=worker.get("memory_mb"),
-            agent_count=len(agents),
-        ))
+        result.append(
+            WorkerResponse(
+                worker_id=worker["worker_id"],
+                task_id=worker.get("task_id", ""),
+                fuzzer=worker.get("fuzzer", ""),
+                sanitizer=worker.get("sanitizer", ""),
+                status=worker.get("status", "unknown"),
+                started_at=worker.get("started_at").isoformat()
+                if worker.get("started_at")
+                else None,
+                ended_at=worker.get("ended_at").isoformat()
+                if worker.get("ended_at")
+                else None,
+                cpu_percent=worker.get("cpu_percent"),
+                memory_mb=worker.get("memory_mb"),
+                agent_count=len(agents),
+            )
+        )
 
     return result
 
@@ -173,8 +191,12 @@ async def get_worker(worker_id: str) -> Dict[str, Any]:
             "fuzzer": worker.get("fuzzer", ""),
             "sanitizer": worker.get("sanitizer", ""),
             "status": worker.get("status", "unknown"),
-            "started_at": worker.get("started_at").isoformat() if worker.get("started_at") else None,
-            "ended_at": worker.get("ended_at").isoformat() if worker.get("ended_at") else None,
+            "started_at": worker.get("started_at").isoformat()
+            if worker.get("started_at")
+            else None,
+            "ended_at": worker.get("ended_at").isoformat()
+            if worker.get("ended_at")
+            else None,
             "cpu_percent": worker.get("cpu_percent"),
             "memory_mb": worker.get("memory_mb"),
         },
@@ -183,8 +205,12 @@ async def get_worker(worker_id: str) -> Dict[str, Any]:
                 "agent_id": a.get("agent_id", ""),
                 "agent_type": a.get("agent_type", ""),
                 "status": a.get("status", "unknown"),
-                "started_at": a.get("started_at").isoformat() if a.get("started_at") else None,
-                "ended_at": a.get("ended_at").isoformat() if a.get("ended_at") else None,
+                "started_at": a.get("started_at").isoformat()
+                if a.get("started_at")
+                else None,
+                "ended_at": a.get("ended_at").isoformat()
+                if a.get("ended_at")
+                else None,
             }
             for a in agents
         ],

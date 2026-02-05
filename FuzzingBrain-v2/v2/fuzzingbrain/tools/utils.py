@@ -9,7 +9,7 @@ import contextvars
 import functools
 from typing import Any, Callable, TypeVar
 
-F = TypeVar('F', bound=Callable[..., Any])
+F = TypeVar("F", bound=Callable[..., Any])
 
 
 def async_tool(func: F) -> F:
@@ -43,6 +43,7 @@ def async_tool(func: F) -> F:
     Returns:
         An async function that runs the original in a thread pool
     """
+
     @functools.wraps(func)
     async def wrapper(*args: Any, **kwargs: Any) -> Any:
         # Copy current context to preserve all ContextVars in the thread

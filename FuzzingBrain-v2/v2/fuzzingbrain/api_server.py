@@ -18,6 +18,7 @@ def get_repos() -> RepositoryManager:
     """Get global RepositoryManager instance"""
     from .main import get_repos as main_get_repos, init_database
     from .core import Config
+
     try:
         return main_get_repos()
     except RuntimeError:
@@ -30,8 +31,10 @@ def get_repos() -> RepositoryManager:
 # Pydantic Models (Request/Response)
 # =============================================================================
 
+
 class HarnessTarget(BaseModel):
     """Target function for harness generation"""
+
     function: str
     description: Optional[str] = None
     file_name: Optional[str] = None
@@ -43,6 +46,7 @@ class TaskRequest(BaseModel):
 
     All fields match the JSON configuration template.
     """
+
     # Project info (required)
     repo_url: str
     project_name: str
@@ -89,11 +93,13 @@ class TaskRequest(BaseModel):
 # Legacy request models (for backward compatibility)
 class POVRequest(TaskRequest):
     """Request model for POV finding (legacy, use TaskRequest)"""
+
     task_type: str = "pov"
 
 
 class PatchRequest(BaseModel):
     """Request model for patch generation from existing POV"""
+
     pov_id: str
     timeout_minutes: int = 30
     budget_limit: float = 50.0
@@ -101,17 +107,20 @@ class PatchRequest(BaseModel):
 
 class POVPatchRequest(TaskRequest):
     """Request model for POV + Patch combo (legacy, use TaskRequest)"""
+
     task_type: str = "pov-patch"
 
 
 class HarnessRequest(TaskRequest):
     """Request model for harness generation (legacy, use TaskRequest)"""
+
     task_type: str = "harness"
     targets: List[HarnessTarget] = []
 
 
 class TaskResponse(BaseModel):
     """Standard response with task ID"""
+
     task_id: str
     status: str
     message: str
@@ -119,6 +128,7 @@ class TaskResponse(BaseModel):
 
 class StatusResponse(BaseModel):
     """Task status response"""
+
     task_id: str
     status: str
     task_type: Optional[str] = None
@@ -144,6 +154,7 @@ app = FastAPI(
 # =============================================================================
 # Shared Business Logic (placeholder)
 # =============================================================================
+
 
 async def start_pov_task(task: Task):
     """Start POV finding task - placeholder"""
@@ -173,6 +184,7 @@ async def start_harness_task(task: Task, targets: List[dict]):
 # API Endpoints
 # =============================================================================
 
+
 @app.get("/")
 async def root():
     """API root - health check"""
@@ -193,6 +205,7 @@ async def health():
 # -----------------------------------------------------------------------------
 # Unified Task Endpoint
 # -----------------------------------------------------------------------------
+
 
 def create_task_from_request(request: TaskRequest) -> Task:
     """Create Task from unified TaskRequest"""
@@ -241,6 +254,7 @@ async def create_task(request: TaskRequest, background_tasks: BackgroundTasks):
 # Legacy POV Endpoints (for backward compatibility)
 # -----------------------------------------------------------------------------
 
+
 @app.post("/api/v1/pov", response_model=TaskResponse)
 async def find_pov(request: POVRequest, background_tasks: BackgroundTasks):
     """
@@ -264,6 +278,7 @@ async def find_pov(request: POVRequest, background_tasks: BackgroundTasks):
 # -----------------------------------------------------------------------------
 # Patch Endpoints
 # -----------------------------------------------------------------------------
+
 
 @app.post("/api/v1/patch", response_model=TaskResponse)
 async def generate_patch(request: PatchRequest, background_tasks: BackgroundTasks):
@@ -291,6 +306,7 @@ async def generate_patch(request: PatchRequest, background_tasks: BackgroundTask
 # -----------------------------------------------------------------------------
 # POV + Patch Combo
 # -----------------------------------------------------------------------------
+
 
 @app.post("/api/v1/pov-patch", response_model=TaskResponse)
 async def pov_patch(request: POVPatchRequest, background_tasks: BackgroundTasks):
@@ -323,6 +339,7 @@ async def pov_patch(request: POVPatchRequest, background_tasks: BackgroundTasks)
 # Harness Generation
 # -----------------------------------------------------------------------------
 
+
 @app.post("/api/v1/harness", response_model=TaskResponse)
 async def generate_harness(request: HarnessRequest, background_tasks: BackgroundTasks):
     """
@@ -354,6 +371,7 @@ async def generate_harness(request: HarnessRequest, background_tasks: Background
 # Status Query
 # -----------------------------------------------------------------------------
 
+
 @app.get("/api/v1/status/{task_id}", response_model=StatusResponse)
 async def get_status(task_id: str):
     """
@@ -379,7 +397,9 @@ async def get_status(task_id: str):
         progress={
             "workers_total": len(workers),
             "workers_running": len([w for w in workers if w.status.value == "running"]),
-            "workers_completed": len([w for w in workers if w.status.value == "completed"]),
+            "workers_completed": len(
+                [w for w in workers if w.status.value == "completed"]
+            ),
             "povs_found": len(povs),
             "patches_found": len(patches),
         },
@@ -418,6 +438,7 @@ async def list_tasks(
 # -----------------------------------------------------------------------------
 # Results
 # -----------------------------------------------------------------------------
+
 
 @app.get("/api/v1/pov/{task_id}")
 async def get_povs(task_id: str, active_only: bool = True):
@@ -467,6 +488,7 @@ async def get_patches(task_id: str, valid_only: bool = False):
 # Server Runner
 # =============================================================================
 
+
 def check_port_in_use(port: int) -> tuple[bool, int]:
     """
     Check if a port is in use.
@@ -475,14 +497,13 @@ def check_port_in_use(port: int) -> tuple[bool, int]:
         (is_in_use, pid) - pid is 0 if not in use or can't determine
     """
     import subprocess
+
     try:
         result = subprocess.run(
-            ["lsof", "-i", f":{port}", "-t"],
-            capture_output=True,
-            text=True
+            ["lsof", "-i", f":{port}", "-t"], capture_output=True, text=True
         )
         if result.returncode == 0 and result.stdout.strip():
-            pid = int(result.stdout.strip().split('\n')[0])
+            pid = int(result.stdout.strip().split("\n")[0])
             return True, pid
     except Exception:
         pass
@@ -501,11 +522,12 @@ def run_api_server(host: str = "0.0.0.0", port: int = 18080):
         print(f"\n[WARN] Port {port} is already in use by process {pid}")
         response = input("Kill the process and continue? [y/N]: ").strip().lower()
 
-        if response == 'y':
+        if response == "y":
             try:
                 os.kill(pid, signal.SIGTERM)
                 print(f"[INFO] Killed process {pid}")
                 import time
+
                 time.sleep(1)  # Wait for port to be released
             except ProcessLookupError:
                 print(f"[INFO] Process {pid} already terminated")

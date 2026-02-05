@@ -12,6 +12,7 @@ from ..utils import generate_id
 
 class TaskStatus(str, Enum):
     """Task status enum"""
+
     PENDING = "pending"
     RUNNING = "running"
     COMPLETED = "completed"
@@ -21,6 +22,7 @@ class TaskStatus(str, Enum):
 
 class JobType(str, Enum):
     """Job type enum"""
+
     POV = "pov"
     PATCH = "patch"
     POV_PATCH = "pov-patch"
@@ -29,6 +31,7 @@ class JobType(str, Enum):
 
 class ScanMode(str, Enum):
     """Scan mode enum"""
+
     FULL = "full"
     DELTA = "delta"
 
@@ -53,7 +56,7 @@ class Task:
 
     # Paths
     task_path: Optional[str] = None  # Workspace path
-    src_path: Optional[str] = None   # Source code path (repo)
+    src_path: Optional[str] = None  # Source code path (repo)
     fuzz_tooling_path: Optional[str] = None  # Fuzzing tooling path
     diff_path: Optional[str] = None  # Delta scan diff file path
 

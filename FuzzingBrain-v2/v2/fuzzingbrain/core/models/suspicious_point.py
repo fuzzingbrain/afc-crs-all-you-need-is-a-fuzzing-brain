@@ -15,19 +15,20 @@ from ..utils import generate_id
 
 class SPStatus(str, Enum):
     """SuspiciousPoint pipeline status"""
+
     # Verification stage
     PENDING_VERIFY = "pending_verify"  # Waiting for verification
-    VERIFYING = "verifying"            # Being verified by an agent
-    VERIFIED = "verified"              # Verification complete (low score, won't proceed to POV)
+    VERIFYING = "verifying"  # Being verified by an agent
+    VERIFIED = "verified"  # Verification complete (low score, won't proceed to POV)
 
     # POV generation stage
-    PENDING_POV = "pending_pov"        # High score, waiting for POV generation
+    PENDING_POV = "pending_pov"  # High score, waiting for POV generation
     GENERATING_POV = "generating_pov"  # Being processed by POV agent
-    POV_GENERATED = "pov_generated"    # POV generation complete
+    POV_GENERATED = "pov_generated"  # POV generation complete
 
     # Terminal states
-    FAILED = "failed"                  # Processing failed
-    SKIPPED = "skipped"                # Skipped (e.g., unreachable)
+    FAILED = "failed"  # Processing failed
+    SKIPPED = "skipped"  # Skipped (e.g., unreachable)
 
 
 @dataclass
@@ -35,6 +36,7 @@ class ControlFlowItem:
     """
     Control flow related item, can be function or variable
     """
+
     type: str  # "function" | "variable"
     name: str
     location: str  # Location description
@@ -65,7 +67,9 @@ class SuspiciousPoint:
     description: str = ""
 
     # Vulnerability type
-    vuln_type: str = ""  # buffer-overflow, use-after-free, integer-overflow, null-pointer, etc.
+    vuln_type: str = (
+        ""  # buffer-overflow, use-after-free, integer-overflow, null-pointer, etc.
+    )
 
     # Pipeline status (for parallel processing)
     status: str = SPStatus.PENDING_VERIFY.value  # Current pipeline status
@@ -77,14 +81,20 @@ class SuspiciousPoint:
 
     # Priority
     score: float = 0.0  # Score (0.0-1.0), used for queue ordering
-    is_important: bool = False  # If marked as high-probability bug, goes to front of queue
+    is_important: bool = (
+        False  # If marked as high-probability bug, goes to front of queue
+    )
 
     # Reachability analysis (for delta scan)
     # Static analysis may incorrectly mark function-pointer-called functions as unreachable
     static_reachable: bool = True  # What static analysis says
-    reachability_status: str = "unknown"  # "direct" | "indirect" | "pointer_call" | "unreachable"
+    reachability_status: str = (
+        "unknown"  # "direct" | "indirect" | "pointer_call" | "unreachable"
+    )
     reachability_reason: str = ""  # LLM explanation for reachability judgment
-    reachability_multiplier: float = 1.0  # Score multiplier based on reachability (0.3-1.0)
+    reachability_multiplier: float = (
+        1.0  # Score multiplier based on reachability (0.3-1.0)
+    )
 
     # Related control flow information
     important_controlflow: List[Dict] = field(default_factory=list)
@@ -105,7 +115,9 @@ class SuspiciousPoint:
 
     # POV generation result
     pov_id: Optional[str] = None  # ID of generated POV (if any)
-    pov_success_by: Optional[Dict] = None  # Which worker succeeded: {"harness_name": "...", "sanitizer": "..."}
+    pov_success_by: Optional[Dict] = (
+        None  # Which worker succeeded: {"harness_name": "...", "sanitizer": "..."}
+    )
 
     # POV attempt tracking - which workers are currently attempting or have failed
     # Format: [{"harness_name": "fuzz_png", "sanitizer": "address"}, ...]
@@ -145,12 +157,15 @@ class SuspiciousPoint:
             "pov_attempted_by": self.pov_attempted_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "checked_at": self.checked_at.isoformat() if self.checked_at else None,
-            "pov_generated_at": self.pov_generated_at.isoformat() if self.pov_generated_at else None,
+            "pov_generated_at": self.pov_generated_at.isoformat()
+            if self.pov_generated_at
+            else None,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "SuspiciousPoint":
         """Create SuspiciousPoint from dict"""
+
         # Parse datetime fields (handles both datetime objects and ISO strings)
         def parse_datetime(val):
             if isinstance(val, str):
@@ -166,10 +181,17 @@ class SuspiciousPoint:
         # Handle backward compatibility: convert old harness_name/sanitizer to sources
         sources = data.get("sources", [])
         if not sources and (data.get("harness_name") or data.get("sanitizer")):
-            sources = [{"harness_name": data.get("harness_name", ""), "sanitizer": data.get("sanitizer", "")}]
+            sources = [
+                {
+                    "harness_name": data.get("harness_name", ""),
+                    "sanitizer": data.get("sanitizer", ""),
+                }
+            ]
 
         return cls(
-            suspicious_point_id=data.get("suspicious_point_id", data.get("_id", generate_id())),
+            suspicious_point_id=data.get(
+                "suspicious_point_id", data.get("_id", generate_id())
+            ),
             task_id=data.get("task_id", ""),
             function_name=data.get("function_name", ""),
             sources=sources,
@@ -212,7 +234,10 @@ class SuspiciousPoint:
     def has_source(self, harness_name: str, sanitizer: str) -> bool:
         """Check if this SP has a specific source"""
         for source in self.sources:
-            if source.get("harness_name") == harness_name and source.get("sanitizer") == sanitizer:
+            if (
+                source.get("harness_name") == harness_name
+                and source.get("sanitizer") == sanitizer
+            ):
                 return True
         return False
 

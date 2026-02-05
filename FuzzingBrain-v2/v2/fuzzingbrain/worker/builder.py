@@ -48,7 +48,9 @@ class WorkerBuilder:
         self.fuzzers_path = self.results_path / "fuzzers" / self.project_name
 
         # OSS-Fuzz build output directory
-        self.build_out_path = self.fuzz_tooling_path / "build" / "out" / self.project_name
+        self.build_out_path = (
+            self.fuzz_tooling_path / "build" / "out" / self.project_name
+        )
 
     def build(self) -> Tuple[bool, str]:
         """
@@ -71,9 +73,7 @@ class WorkerBuilder:
         # Build with specified sanitizer
         logger.info(f"Building fuzzer with {self.sanitizer} sanitizer")
         success, msg = self._build_with_sanitizer(
-            helper_path,
-            self.sanitizer,
-            self.results_path / "build.log"
+            helper_path, self.sanitizer, self.results_path / "build.log"
         )
 
         # Fix permissions after Docker build
@@ -89,10 +89,7 @@ class WorkerBuilder:
         return True, "Build successful"
 
     def _build_with_sanitizer(
-        self,
-        helper_path: Path,
-        sanitizer: str,
-        log_path: Path
+        self, helper_path: Path, sanitizer: str, log_path: Path
     ) -> Tuple[bool, str]:
         """
         Build fuzzer with a specific sanitizer.
@@ -106,10 +103,13 @@ class WorkerBuilder:
             (success, message)
         """
         cmd = [
-            "python3", str(helper_path),
+            "python3",
+            str(helper_path),
             "build_fuzzers",
-            "--sanitizer", sanitizer,
-            "--engine", "libfuzzer",
+            "--sanitizer",
+            sanitizer,
+            "--engine",
+            "libfuzzer",
             self.project_name,
             str(self.repo_path.absolute()),
         ]
@@ -208,10 +208,16 @@ class WorkerBuilder:
             # This runs a container that chowns the mounted directory
             subprocess.run(
                 [
-                    "docker", "run", "--rm",
-                    "-v", f"{path.absolute()}:/fix_perms",
+                    "docker",
+                    "run",
+                    "--rm",
+                    "-v",
+                    f"{path.absolute()}:/fix_perms",
                     "alpine:latest",
-                    "chown", "-R", f"{uid}:{gid}", "/fix_perms"
+                    "chown",
+                    "-R",
+                    f"{uid}:{gid}",
+                    "/fix_perms",
                 ],
                 capture_output=True,
                 timeout=60,
@@ -241,10 +247,16 @@ class WorkerBuilder:
                 try:
                     subprocess.run(
                         [
-                            "docker", "run", "--rm",
-                            "-v", f"{dir_path.absolute()}:/fix_perms",
+                            "docker",
+                            "run",
+                            "--rm",
+                            "-v",
+                            f"{dir_path.absolute()}:/fix_perms",
                             "alpine:latest",
-                            "chown", "-R", f"{uid}:{gid}", "/fix_perms"
+                            "chown",
+                            "-R",
+                            f"{uid}:{gid}",
+                            "/fix_perms",
                         ],
                         capture_output=True,
                         timeout=120,

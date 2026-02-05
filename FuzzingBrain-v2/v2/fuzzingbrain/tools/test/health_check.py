@@ -27,6 +27,7 @@ TEST_PROJECT_DIR = Path(__file__).parent / "test_project"
 @dataclass
 class ToolTestResult:
     """Result of a single tool test"""
+
     tool_name: str
     passed: bool
     message: str
@@ -36,6 +37,7 @@ class ToolTestResult:
 @dataclass
 class HealthCheckResult:
     """Overall health check result"""
+
     all_passed: bool
     tool_results: List[ToolTestResult] = field(default_factory=list)
     prerequisites_ok: bool = False
@@ -179,7 +181,11 @@ def test_coverage_list_fuzzers() -> ToolTestResult:
 def test_coverage_run() -> ToolTestResult:
     """Test run_coverage tool"""
     try:
-        from ..coverage import run_coverage_impl, set_coverage_context, list_fuzzers_impl
+        from ..coverage import (
+            run_coverage_impl,
+            set_coverage_context,
+            list_fuzzers_impl,
+        )
 
         config = load_test_config()
         if not config:
@@ -256,7 +262,11 @@ def test_coverage_run() -> ToolTestResult:
 def test_coverage_feedback() -> ToolTestResult:
     """Test get_coverage_feedback tool"""
     try:
-        from ..coverage import get_feedback_impl, set_coverage_context, list_fuzzers_impl
+        from ..coverage import (
+            get_feedback_impl,
+            set_coverage_context,
+            list_fuzzers_impl,
+        )
 
         config = load_test_config()
         if not config:

@@ -46,6 +46,7 @@ def _run_server_process(
         work_id: Work ID for prebuild data remapping
         fuzzer_sources: Dict mapping fuzzer_name -> source_path (relative to fuzz-tooling)
     """
+
     # Setup signal handlers
     def handle_shutdown(signum, frame):
         logger.info("Received shutdown signal")
@@ -92,11 +93,13 @@ def _run_server_process(
         pass
     except Exception as e:
         logger.error(f"Server process error: {e}")
-        result_queue.put(AnalyzeResult(
-            success=False,
-            task_id=task_id,
-            error_msg=str(e),
-        ).to_dict())
+        result_queue.put(
+            AnalyzeResult(
+                success=False,
+                task_id=task_id,
+                error_msg=str(e),
+            ).to_dict()
+        )
 
 
 @app.task(bind=True, name="analyzer.start_server")
@@ -173,7 +176,9 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
 
         if result.success:
             logger.info(f"[Analyzer] Server ready: {len(result.fuzzers)} fuzzers")
-            logger.info(f"[Analyzer] Socket: {Path(request.task_path) / 'analyzer.sock'}")
+            logger.info(
+                f"[Analyzer] Socket: {Path(request.task_path) / 'analyzer.sock'}"
+            )
         else:
             logger.error(f"[Analyzer] Server failed: {result.error_msg}")
             # Kill the process if it failed
@@ -230,6 +235,7 @@ def stop_analysis_server(task_path: str) -> bool:
     if socket_path and socket_path.exists():
         try:
             from .client import AnalysisClient
+
             client = AnalysisClient(str(socket_path), timeout=5, client_id="controller")
             client.shutdown()
             client.close()

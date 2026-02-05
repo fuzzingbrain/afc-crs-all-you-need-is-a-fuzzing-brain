@@ -78,6 +78,7 @@ class POVPackager:
         """Lazy initialization of report agent to avoid circular import."""
         if self._report_agent is None:
             from ..agents.pov_report_agent import POVReportAgent
+
             self._report_agent = POVReportAgent(
                 task_id=self.task_id,
                 worker_id=self.worker_id,
@@ -106,8 +107,13 @@ class POVPackager:
             # Restore analyzer context in new event loop (asyncio.run creates fresh context)
             if self.analyzer_socket_path:
                 from ..tools.analyzer import set_analyzer_context
-                set_analyzer_context(self.analyzer_socket_path, client_id=self.worker_id)
-                logger.debug(f"[POVPackager] Restored analyzer context: {self.analyzer_socket_path}")
+
+                set_analyzer_context(
+                    self.analyzer_socket_path, client_id=self.worker_id
+                )
+                logger.debug(
+                    f"[POVPackager] Restored analyzer context: {self.analyzer_socket_path}"
+                )
 
             pov_id = pov.get("pov_id", pov.get("_id", "unknown"))
             short_id = pov_id[:8] if len(pov_id) > 8 else pov_id
@@ -192,8 +198,7 @@ class POVPackager:
         }
         details_path = folder / "pov_details.json"
         details_path.write_text(
-            json.dumps(pov_clean, indent=2, default=str),
-            encoding="utf-8"
+            json.dumps(pov_clean, indent=2, default=str), encoding="utf-8"
         )
 
     async def _write_sp_details(self, folder: Path, sp: Dict[str, Any]):
@@ -228,8 +233,7 @@ class POVPackager:
             }
         details_path = folder / "sp_details.json"
         details_path.write_text(
-            json.dumps(sp_clean, indent=2, default=str),
-            encoding="utf-8"
+            json.dumps(sp_clean, indent=2, default=str), encoding="utf-8"
         )
 
     async def _write_gen_blob(self, folder: Path, pov: Dict[str, Any]):
@@ -281,9 +285,7 @@ if __name__ == "__main__":
         pov_path.write_text("# POV binary not available\n")
 
     async def _write_conversation(
-        self,
-        folder: Path,
-        conversation: List[Dict[str, Any]] = None
+        self, folder: Path, conversation: List[Dict[str, Any]] = None
     ):
         """Write conversation.json and conversation.md"""
         if not conversation:
@@ -292,8 +294,7 @@ if __name__ == "__main__":
         # Write JSON
         json_path = folder / "conversation.json"
         json_path.write_text(
-            json.dumps(conversation, indent=2, default=str),
-            encoding="utf-8"
+            json.dumps(conversation, indent=2, default=str), encoding="utf-8"
         )
 
         # Write Markdown
@@ -320,7 +321,9 @@ if __name__ == "__main__":
                 lines.append(f"### Assistant ({i})\n\n{content}\n")
             elif role == "tool":
                 tool_name = msg.get("name", "tool")
-                lines.append(f"### Tool: {tool_name} ({i})\n\n```\n{content[:2000]}\n```\n")
+                lines.append(
+                    f"### Tool: {tool_name} ({i})\n\n```\n{content[:2000]}\n```\n"
+                )
 
         return "\n".join(lines)
 

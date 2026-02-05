@@ -27,6 +27,7 @@ from .db import MongoDB, RepositoryManager, init_repos
 # Terminal Cleanup
 # =============================================================================
 
+
 def reset_terminal():
     """Reset terminal to sane state on exit"""
     try:
@@ -34,7 +35,7 @@ def reset_terminal():
         sys.stdout.write("\033[0m")
         sys.stdout.flush()
         # Reset terminal settings (handles raw mode, echo, etc.)
-        os.system('stty sane 2>/dev/null')
+        os.system("stty sane 2>/dev/null")
     except Exception:
         pass
 
@@ -60,44 +61,51 @@ def signal_handler(signum, frame):
         sys.exit(1)
 
     _shutdown_requested = True
-    print("\n\033[1;33m[INTERRUPT]\033[0m Shutting down gracefully... (Press Ctrl+C again to force)")
+    print(
+        "\n\033[1;33m[INTERRUPT]\033[0m Shutting down gracefully... (Press Ctrl+C again to force)"
+    )
 
     # Mark all running workers and tasks as cancelled
     try:
         if _repos:
-
             # Update workers
-            all_workers = _repos.workers.collection.find({
-                "status": {"$in": ["pending", "building", "running"]}
-            })
+            all_workers = _repos.workers.collection.find(
+                {"status": {"$in": ["pending", "building", "running"]}}
+            )
             worker_count = 0
             for w in all_workers:
                 _repos.workers.collection.update_one(
                     {"_id": w["_id"]},
-                    {"$set": {
-                        "status": "failed",
-                        "error_msg": "Cancelled by user (Ctrl+C)"
-                    }}
+                    {
+                        "$set": {
+                            "status": "failed",
+                            "error_msg": "Cancelled by user (Ctrl+C)",
+                        }
+                    },
                 )
                 worker_count += 1
 
             # Update tasks
-            all_tasks = _repos.tasks.collection.find({
-                "status": {"$in": ["pending", "running"]}
-            })
+            all_tasks = _repos.tasks.collection.find(
+                {"status": {"$in": ["pending", "running"]}}
+            )
             task_count = 0
             for t in all_tasks:
                 _repos.tasks.collection.update_one(
                     {"_id": t["_id"]},
-                    {"$set": {
-                        "status": "cancelled",
-                        "error_msg": "Cancelled by user (Ctrl+C)"
-                    }}
+                    {
+                        "$set": {
+                            "status": "cancelled",
+                            "error_msg": "Cancelled by user (Ctrl+C)",
+                        }
+                    },
                 )
                 task_count += 1
 
             if worker_count > 0 or task_count > 0:
-                print(f"\033[1;33m[INTERRUPT]\033[0m Marked {worker_count} worker(s) and {task_count} task(s) as cancelled")
+                print(
+                    f"\033[1;33m[INTERRUPT]\033[0m Marked {worker_count} worker(s) and {task_count} task(s) as cancelled"
+                )
 
             # Display summary for cancelled task
             try:
@@ -106,11 +114,12 @@ def signal_handler(signum, frame):
 
                 # Find the most recent task
                 recent_task = _repos.tasks.collection.find_one(
-                    {"status": "cancelled"},
-                    sort=[("created_at", -1)]
+                    {"status": "cancelled"}, sort=[("created_at", -1)]
                 )
                 if recent_task:
-                    task_id = recent_task.get("task_id", recent_task.get("_id", "unknown"))
+                    task_id = recent_task.get(
+                        "task_id", recent_task.get("_id", "unknown")
+                    )
                     project_name = recent_task.get("project_name", "unknown")
 
                     # Get workers for this task
@@ -119,27 +128,32 @@ def signal_handler(signum, frame):
                     for w in workers:
                         started = w.get("started_at")
                         finished = w.get("finished_at") or datetime.now()
-                        duration_sec = (finished - started).total_seconds() if started else 0
-                        worker_results.append({
-                            "fuzzer": w.get("fuzzer", "N/A"),
-                            "sanitizer": w.get("sanitizer", "N/A"),
-                            "status": w.get("status", "cancelled"),
-                            "duration_str": f"{duration_sec/60:.1f}m",
-                            "sps_found": w.get("sps_found", 0),
-                            "povs_found": w.get("povs_found", 0),
-                            "patches_found": w.get("patches_found", 0),
-                        })
+                        duration_sec = (
+                            (finished - started).total_seconds() if started else 0
+                        )
+                        worker_results.append(
+                            {
+                                "fuzzer": w.get("fuzzer", "N/A"),
+                                "sanitizer": w.get("sanitizer", "N/A"),
+                                "status": w.get("status", "cancelled"),
+                                "duration_str": f"{duration_sec / 60:.1f}m",
+                                "sps_found": w.get("sps_found", 0),
+                                "povs_found": w.get("povs_found", 0),
+                                "patches_found": w.get("patches_found", 0),
+                            }
+                        )
 
                     # Get cost info
                     total_cost = 0.0
                     budget_limit = 0.0
                     try:
                         from .eval import get_reporter
+
                         reporter = get_reporter()
                         if reporter:
-                            if hasattr(reporter, 'get_current_cost'):
+                            if hasattr(reporter, "get_current_cost"):
                                 total_cost = reporter.get_current_cost()
-                            if hasattr(reporter, 'budget_limit'):
+                            if hasattr(reporter, "budget_limit"):
                                 budget_limit = reporter.budget_limit
                     except Exception:
                         pass
@@ -168,6 +182,7 @@ def signal_handler(signum, frame):
     # Stop infrastructure
     try:
         from .core.infrastructure import InfrastructureManager
+
         if InfrastructureManager._instance:
             InfrastructureManager._instance.stop()
     except Exception:
@@ -225,6 +240,7 @@ def init_database(config: Config) -> RepositoryManager:
 # Terminal Output
 # =============================================================================
 
+
 class Colors:
     RED = "\033[0;31m"
     GREEN = "\033[0;32m"
@@ -255,6 +271,7 @@ def print_step(msg: str):
 # Argument Parsing
 # =============================================================================
 
+
 def parse_args() -> argparse.Namespace:
     """Parse command line arguments"""
     parser = argparse.ArgumentParser(
@@ -268,25 +285,60 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=str, help="JSON configuration file path")
 
     # Task identification
-    parser.add_argument("--task-id", type=str, help="Task ID (auto-generated if not provided)")
+    parser.add_argument(
+        "--task-id", type=str, help="Task ID (auto-generated if not provided)"
+    )
 
     # Project info (required for CLI mode)
     parser.add_argument("--repo-url", type=str, help="Git repository URL")
     parser.add_argument("--project", type=str, help="Project name (e.g., libpng)")
-    parser.add_argument("--ossfuzz-project", type=str, help="OSS-Fuzz project name (if different from --project)")
+    parser.add_argument(
+        "--ossfuzz-project",
+        type=str,
+        help="OSS-Fuzz project name (if different from --project)",
+    )
 
     # Workspace
     parser.add_argument("--workspace", type=str, help="Workspace directory path")
-    parser.add_argument("--in-place", action="store_true", help="Run without copying workspace")
+    parser.add_argument(
+        "--in-place", action="store_true", help="Run without copying workspace"
+    )
 
     # Task configuration
-    parser.add_argument("--task-type", type=str, choices=["pov", "patch", "pov-patch", "harness"], default="pov")
-    parser.add_argument("--scan-mode", type=str, choices=["full", "delta"], default="full", help="Scan mode: full or delta")
-    parser.add_argument("--sanitizers", type=str, default="address", help="Comma-separated sanitizers")
+    parser.add_argument(
+        "--task-type",
+        type=str,
+        choices=["pov", "patch", "pov-patch", "harness"],
+        default="pov",
+    )
+    parser.add_argument(
+        "--scan-mode",
+        type=str,
+        choices=["full", "delta"],
+        default="full",
+        help="Scan mode: full or delta",
+    )
+    parser.add_argument(
+        "--sanitizers", type=str, default="address", help="Comma-separated sanitizers"
+    )
     parser.add_argument("--timeout", type=int, default=30, help="Timeout in minutes")
-    parser.add_argument("--pov-count", type=int, default=1, help="Stop after N verified POVs (0 = unlimited)")
-    parser.add_argument("--fuzzers", type=str, help="Comma-separated list of fuzzers to use (empty = all)")
-    parser.add_argument("--budget", type=float, default=50.0, help="Budget limit in dollars (0 = unlimited)")
+    parser.add_argument(
+        "--pov-count",
+        type=int,
+        default=1,
+        help="Stop after N verified POVs (0 = unlimited)",
+    )
+    parser.add_argument(
+        "--fuzzers",
+        type=str,
+        help="Comma-separated list of fuzzers to use (empty = all)",
+    )
+    parser.add_argument(
+        "--budget",
+        type=float,
+        default=50.0,
+        help="Budget limit in dollars (0 = unlimited)",
+    )
 
     # Commit configuration
     parser.add_argument("--target-commit", type=str, help="Target commit for full scan")
@@ -294,27 +346,45 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--delta-commit", type=str, help="Delta commit for delta scan")
 
     # Fuzz tooling
-    parser.add_argument("--fuzz-tooling-url", type=str, help="Custom fuzz-tooling repository URL")
+    parser.add_argument(
+        "--fuzz-tooling-url", type=str, help="Custom fuzz-tooling repository URL"
+    )
     parser.add_argument("--fuzz-tooling-ref", type=str, help="Fuzz-tooling branch/tag")
 
     # Prebuild (advanced)
     parser.add_argument("--work-id", type=str, help="Work ID for prebuild data")
-    parser.add_argument("--prebuild-dir", type=str, help="Path to prebuild data directory")
+    parser.add_argument(
+        "--prebuild-dir", type=str, help="Path to prebuild data directory"
+    )
 
     # Evaluation
     parser.add_argument("--eval-server", type=str, help="Evaluation server URL")
 
     # Patch mode specific
     parser.add_argument("--gen-blob", type=str, help="Generator blob for patch mode")
-    parser.add_argument("--input-blob", type=str, help="Input blob (base64) for patch mode")
+    parser.add_argument(
+        "--input-blob", type=str, help="Input blob (base64) for patch mode"
+    )
 
     # Harness mode specific
-    parser.add_argument("--targets", type=str, help="Target functions as JSON array for harness mode")
-    parser.add_argument("--targets-file", type=str, help="Path to JSON file containing targets")
+    parser.add_argument(
+        "--targets", type=str, help="Target functions as JSON array for harness mode"
+    )
+    parser.add_argument(
+        "--targets-file", type=str, help="Path to JSON file containing targets"
+    )
 
     # Fuzzer sources (complex type, JSON format)
-    parser.add_argument("--fuzzer-sources", type=str, help="Fuzzer sources as JSON object: {name: [paths]}")
-    parser.add_argument("--fuzzer-sources-file", type=str, help="Path to JSON file containing fuzzer sources")
+    parser.add_argument(
+        "--fuzzer-sources",
+        type=str,
+        help="Fuzzer sources as JSON object: {name: [paths]}",
+    )
+    parser.add_argument(
+        "--fuzzer-sources-file",
+        type=str,
+        help="Path to JSON file containing fuzzer sources",
+    )
 
     return parser.parse_args()
 
@@ -406,19 +476,23 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
     # Harness mode specific (JSON format or file)
     if args.targets:
         import json
+
         config.targets = json.loads(args.targets)
     elif args.targets_file:
         import json
-        with open(args.targets_file, 'r') as f:
+
+        with open(args.targets_file, "r") as f:
             config.targets = json.load(f)
 
     # Fuzzer sources (JSON format or file)
     if args.fuzzer_sources:
         import json
+
         config.fuzzer_sources = json.loads(args.fuzzer_sources)
     elif args.fuzzer_sources_file:
         import json
-        with open(args.fuzzer_sources_file, 'r') as f:
+
+        with open(args.fuzzer_sources_file, "r") as f:
             config.fuzzer_sources = json.load(f)
 
     return config
@@ -427,6 +501,7 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
 # =============================================================================
 # Shared Business Logic
 # =============================================================================
+
 
 def process_task(task: Task, config: Config) -> dict:
     """
@@ -453,7 +528,7 @@ def process_task(task: Task, config: Config) -> dict:
             "Timeout": f"{config.timeout_minutes} minutes",
             "Base Commit": config.base_commit,
             "Delta Commit": config.delta_commit,
-        }
+        },
     )
     print_info(f"Logs: {log_dir}")
 
@@ -465,6 +540,7 @@ def process_task(task: Task, config: Config) -> dict:
     print_step("Starting task processing pipeline...")
 
     from .core.task_processor import process_task as run_processor
+
     result = run_processor(task, config, get_repos())
 
     # Display result
@@ -485,6 +561,7 @@ def process_task(task: Task, config: Config) -> dict:
 def create_task_from_config(config: Config) -> Task:
     """Create a Task object from Config"""
     import uuid
+
     task_id = config.task_id or str(uuid.uuid4())[:8]
 
     return Task(
@@ -493,8 +570,12 @@ def create_task_from_config(config: Config) -> Task:
         scan_mode=ScanMode(config.scan_mode),
         task_path=config.workspace,
         src_path=f"{config.workspace}/repo" if config.workspace else None,
-        fuzz_tooling_path=f"{config.workspace}/fuzz-tooling" if config.workspace else None,
-        diff_path=f"{config.workspace}/diff" if config.workspace and config.scan_mode == "delta" else None,
+        fuzz_tooling_path=f"{config.workspace}/fuzz-tooling"
+        if config.workspace
+        else None,
+        diff_path=f"{config.workspace}/diff"
+        if config.workspace and config.scan_mode == "delta"
+        else None,
         repo_url=config.repo_url,
         project_name=config.project_name,
         sanitizers=config.sanitizers,
@@ -508,6 +589,7 @@ def create_task_from_config(config: Config) -> Task:
 # =============================================================================
 # Entry Mode: MCP Server
 # =============================================================================
+
 
 def run_mcp_server(config: Config):
     """
@@ -529,12 +611,14 @@ def run_mcp_server(config: Config):
     print("")
 
     from .mcp_server import run_server as start_mcp_server
+
     start_mcp_server(config)
 
 
 # =============================================================================
 # Entry Mode: REST API
 # =============================================================================
+
 
 def run_api(config: Config):
     """
@@ -557,12 +641,14 @@ def run_api(config: Config):
     print("")
 
     from .api_server import run_api_server
+
     run_api_server(host=config.api_host, port=config.api_port)
 
 
 # =============================================================================
 # Workspace Setup
 # =============================================================================
+
 
 def setup_workspace(config: Config) -> Config:
     """
@@ -591,7 +677,7 @@ def setup_workspace(config: Config) -> Config:
     project_name = config.project_name
     if not project_name and config.repo_url:
         # Extract from repo URL
-        project_name = config.repo_url.rstrip('/').rstrip('.git').split('/')[-1]
+        project_name = config.repo_url.rstrip("/").rstrip(".git").split("/")[-1]
         config.project_name = project_name
 
     # Create workspace if not provided
@@ -611,7 +697,7 @@ def setup_workspace(config: Config) -> Config:
             result = subprocess.run(
                 ["git", "clone", config.repo_url, str(repo_path)],
                 capture_output=True,
-                text=True
+                text=True,
             )
             if result.returncode != 0:
                 print_error(f"Failed to clone repository: {result.stderr}")
@@ -624,7 +710,7 @@ def setup_workspace(config: Config) -> Config:
                 subprocess.run(
                     ["git", "checkout", config.target_commit],
                     cwd=str(repo_path),
-                    capture_output=True
+                    capture_output=True,
                 )
             # Checkout delta commit for Delta Scan mode
             elif config.scan_mode == "delta" and config.delta_commit:
@@ -632,9 +718,13 @@ def setup_workspace(config: Config) -> Config:
                 subprocess.run(
                     ["git", "checkout", config.delta_commit],
                     cwd=str(repo_path),
-                    capture_output=True
+                    capture_output=True,
                 )
-            elif config.scan_mode == "delta" and config.base_commit and not config.delta_commit:
+            elif (
+                config.scan_mode == "delta"
+                and config.base_commit
+                and not config.delta_commit
+            ):
                 # If no delta_commit specified, use HEAD (default behavior is fine)
                 print_info("Delta scan: using HEAD as delta commit")
         except Exception as e:
@@ -647,14 +737,14 @@ def setup_workspace(config: Config) -> Config:
             subprocess.run(
                 ["git", "checkout", config.delta_commit],
                 cwd=str(repo_path),
-                capture_output=True
+                capture_output=True,
             )
         elif config.target_commit:
             print_info(f"Ensuring target commit is checked out: {config.target_commit}")
             subprocess.run(
                 ["git", "checkout", config.target_commit],
                 cwd=str(repo_path),
-                capture_output=True
+                capture_output=True,
             )
 
     # Setup fuzz-tooling if needed
@@ -685,7 +775,9 @@ def setup_workspace(config: Config) -> Config:
                         # Look for project directory
                         projects_dir = Path(tmp_dir) / "projects"
                         if projects_dir.exists() and ossfuzz_project:
-                            project_dir = _find_ossfuzz_project(projects_dir, ossfuzz_project)
+                            project_dir = _find_ossfuzz_project(
+                                projects_dir, ossfuzz_project
+                            )
                             if project_dir:
                                 dest = fuzz_tooling_path / "projects" / project_dir.name
                                 dest.parent.mkdir(parents=True, exist_ok=True)
@@ -706,30 +798,47 @@ def setup_workspace(config: Config) -> Config:
             try:
                 with tempfile.TemporaryDirectory() as tmp_dir:
                     result = subprocess.run(
-                        ["git", "clone", "--depth", "1", "https://github.com/google/oss-fuzz.git", tmp_dir],
+                        [
+                            "git",
+                            "clone",
+                            "--depth",
+                            "1",
+                            "https://github.com/google/oss-fuzz.git",
+                            tmp_dir,
+                        ],
                         capture_output=True,
-                        text=True
+                        text=True,
                     )
                     if result.returncode != 0:
                         print_warn(f"Failed to clone oss-fuzz: {result.stderr}")
                     else:
                         projects_dir = Path(tmp_dir) / "projects"
                         if projects_dir.exists() and ossfuzz_project:
-                            project_dir = _find_ossfuzz_project(projects_dir, ossfuzz_project)
+                            project_dir = _find_ossfuzz_project(
+                                projects_dir, ossfuzz_project
+                            )
                             if project_dir:
                                 fuzz_tooling_path.mkdir(parents=True, exist_ok=True)
                                 dest = fuzz_tooling_path / "projects" / project_dir.name
                                 dest.parent.mkdir(parents=True, exist_ok=True)
                                 shutil.copytree(project_dir, dest)
-                                print_info(f"Found OSS-Fuzz project: {project_dir.name}")
+                                print_info(
+                                    f"Found OSS-Fuzz project: {project_dir.name}"
+                                )
 
                                 # Copy infra directory
                                 infra_dir = Path(tmp_dir) / "infra"
                                 if infra_dir.exists():
-                                    shutil.copytree(infra_dir, fuzz_tooling_path / "infra")
+                                    shutil.copytree(
+                                        infra_dir, fuzz_tooling_path / "infra"
+                                    )
                             else:
-                                print_warn(f"No matching OSS-Fuzz project found for: {ossfuzz_project}")
-                                print_warn("Use 'ossfuzz_project_name' in config to specify manually")
+                                print_warn(
+                                    f"No matching OSS-Fuzz project found for: {ossfuzz_project}"
+                                )
+                                print_warn(
+                                    "Use 'ossfuzz_project_name' in config to specify manually"
+                                )
             except Exception as e:
                 print_warn(f"Failed to fetch from oss-fuzz: {e}")
     else:
@@ -746,14 +855,24 @@ def setup_workspace(config: Config) -> Config:
             delta_commit = config.delta_commit or "HEAD"
             try:
                 result = subprocess.run(
-                    ["git", "diff", f"{config.base_commit}..{delta_commit}", "--", ".", ":!.aixcc", ":!*/.aixcc"],
+                    [
+                        "git",
+                        "diff",
+                        f"{config.base_commit}..{delta_commit}",
+                        "--",
+                        ".",
+                        ":!.aixcc",
+                        ":!*/.aixcc",
+                    ],
                     cwd=str(repo_path),
                     capture_output=True,
-                    text=True
+                    text=True,
                 )
                 if result.returncode == 0:
                     diff_file.write_text(result.stdout)
-                    print_info(f"Generated diff: {config.base_commit[:8]}..{delta_commit[:8] if delta_commit != 'HEAD' else 'HEAD'}")
+                    print_info(
+                        f"Generated diff: {config.base_commit[:8]}..{delta_commit[:8] if delta_commit != 'HEAD' else 'HEAD'}"
+                    )
             except Exception as e:
                 print_warn(f"Failed to generate diff: {e}")
 
@@ -778,8 +897,9 @@ def _find_ossfuzz_project(projects_dir: Path, project_name: str) -> Optional[Pat
 
     # Remove common prefixes/suffixes
     import re
-    stripped = re.sub(r'^(lib|py|go|rust)-?', '', project_name, flags=re.IGNORECASE)
-    stripped = re.sub(r'-?(lib|py|go|rust)$', '', stripped, flags=re.IGNORECASE)
+
+    stripped = re.sub(r"^(lib|py|go|rust)-?", "", project_name, flags=re.IGNORECASE)
+    stripped = re.sub(r"-?(lib|py|go|rust)$", "", stripped, flags=re.IGNORECASE)
     if stripped != project_name:
         stripped_path = projects_dir / stripped
         if stripped_path.exists():
@@ -789,7 +909,7 @@ def _find_ossfuzz_project(projects_dir: Path, project_name: str) -> Optional[Pat
             return stripped_lower
 
     # Remove afc- prefix (AIxCC repos)
-    if project_name.lower().startswith('afc-'):
+    if project_name.lower().startswith("afc-"):
         afc_stripped = project_name[4:]
         afc_path = projects_dir / afc_stripped
         if afc_path.exists():
@@ -804,6 +924,7 @@ def _find_ossfuzz_project(projects_dir: Path, project_name: str) -> Optional[Pat
 # =============================================================================
 # Entry Mode: JSON Config
 # =============================================================================
+
 
 def run_json_mode(config: Config):
     """
@@ -834,7 +955,9 @@ def run_json_mode(config: Config):
     if config.workspace:
         print_info(f"Workspace: {config.workspace}")
     if config.scan_mode == "delta":
-        print_info(f"Delta: {config.base_commit[:8]}..{(config.delta_commit or 'HEAD')[:8] if config.delta_commit else 'HEAD'}")
+        print_info(
+            f"Delta: {config.base_commit[:8]}..{(config.delta_commit or 'HEAD')[:8] if config.delta_commit else 'HEAD'}"
+        )
 
     print("")
 
@@ -848,6 +971,7 @@ def run_json_mode(config: Config):
 # =============================================================================
 # Entry Mode: Local Workspace
 # =============================================================================
+
 
 def run_local_mode(config: Config):
     """
@@ -872,7 +996,9 @@ def run_local_mode(config: Config):
     print_info(f"Timeout: {config.timeout_minutes} minutes")
 
     if config.scan_mode == "delta":
-        print_info(f"Delta: {config.base_commit[:8]}..{(config.delta_commit or 'HEAD')[:8] if config.delta_commit else 'HEAD'}")
+        print_info(
+            f"Delta: {config.base_commit[:8]}..{(config.delta_commit or 'HEAD')[:8] if config.delta_commit else 'HEAD'}"
+        )
 
     print("")
 
@@ -917,6 +1043,7 @@ def run_local_mode(config: Config):
 # Main Entry Point
 # =============================================================================
 
+
 def main():
     """Main entry point - routes to appropriate mode"""
     args = parse_args()
@@ -928,6 +1055,7 @@ def main():
     eval_server = config.eval_server or os.environ.get("FUZZINGBRAIN_EVAL_SERVER")
     if eval_server:
         from .eval import create_reporter
+
         create_reporter(
             server_url=eval_server,
             level="normal",
@@ -942,10 +1070,12 @@ def main():
 
     # Show fuzzer filter if specified
     if config.fuzzer_filter:
-        print(f"\033[0;36m[CONFIG]\033[0m Fuzzer filter: {', '.join(config.fuzzer_filter)}")
+        print(
+            f"\033[0;36m[CONFIG]\033[0m Fuzzer filter: {', '.join(config.fuzzer_filter)}"
+        )
 
     # Check for API mode from args
-    if hasattr(args, 'api') and args.api:
+    if hasattr(args, "api") and args.api:
         config.api_mode = True
 
     # =========================================================================

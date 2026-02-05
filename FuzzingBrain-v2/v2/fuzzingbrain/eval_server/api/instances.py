@@ -11,6 +11,7 @@ router = APIRouter()
 
 class InstanceRegister(BaseModel):
     """Instance registration request."""
+
     instance_id: str
     host: str
     pid: int
@@ -20,6 +21,7 @@ class InstanceRegister(BaseModel):
 
 class HeartbeatData(BaseModel):
     """Heartbeat request."""
+
     status: str = "running"
     tasks_running: int = 0
     agents_running: int = 0
@@ -30,6 +32,7 @@ class HeartbeatData(BaseModel):
 
 class InstanceResponse(BaseModel):
     """Instance response."""
+
     instance_id: str
     host: str
     status: str
@@ -127,8 +130,12 @@ async def list_instances(include_dead: bool = False) -> List[InstanceResponse]:
             instance_id=inst["instance_id"],
             host=inst.get("host", ""),
             status=inst.get("status", "unknown"),
-            started_at=inst.get("started_at", "").isoformat() if inst.get("started_at") else None,
-            last_heartbeat=inst.get("last_heartbeat", "").isoformat() if inst.get("last_heartbeat") else None,
+            started_at=inst.get("started_at", "").isoformat()
+            if inst.get("started_at")
+            else None,
+            last_heartbeat=inst.get("last_heartbeat", "").isoformat()
+            if inst.get("last_heartbeat")
+            else None,
             tasks_running=inst.get("tasks_running", 0),
             cost_total=inst.get("cost_total", 0.0),
         )
@@ -155,8 +162,12 @@ async def get_instance(instance_id: str) -> InstanceResponse:
         instance_id=inst["instance_id"],
         host=inst.get("host", ""),
         status=inst.get("status", "unknown"),
-        started_at=inst.get("started_at", "").isoformat() if inst.get("started_at") else None,
-        last_heartbeat=inst.get("last_heartbeat", "").isoformat() if inst.get("last_heartbeat") else None,
+        started_at=inst.get("started_at", "").isoformat()
+        if inst.get("started_at")
+        else None,
+        last_heartbeat=inst.get("last_heartbeat", "").isoformat()
+        if inst.get("last_heartbeat")
+        else None,
         tasks_running=inst.get("tasks_running", 0),
         cost_total=inst.get("cost_total", 0.0),
     )

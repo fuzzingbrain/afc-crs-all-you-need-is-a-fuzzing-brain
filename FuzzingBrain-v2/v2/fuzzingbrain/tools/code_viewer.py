@@ -20,12 +20,17 @@ from contextvars import ContextVar
 
 try:
     import tiktoken
+
     _tokenizer = tiktoken.encoding_for_model("gpt-4")
+
     def count_tokens(text: str) -> int:
         return len(_tokenizer.encode(text))
 except ImportError:
+
     def count_tokens(text: str) -> int:
         return len(text) // 4  # fallback: ~4 chars per token
+
+
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -38,10 +43,12 @@ from . import tools_mcp
 # Using ContextVar for async task isolation (each asyncio.Task has its own context)
 # =============================================================================
 
-_workspace_path: ContextVar[Optional[Path]] = ContextVar('cv_workspace_path', default=None)
-_repo_path: ContextVar[Optional[Path]] = ContextVar('cv_repo_path', default=None)
-_diff_path: ContextVar[Optional[Path]] = ContextVar('cv_diff_path', default=None)
-_search_paths: ContextVar[List[Path]] = ContextVar('cv_search_paths', default=[])
+_workspace_path: ContextVar[Optional[Path]] = ContextVar(
+    "cv_workspace_path", default=None
+)
+_repo_path: ContextVar[Optional[Path]] = ContextVar("cv_repo_path", default=None)
+_diff_path: ContextVar[Optional[Path]] = ContextVar("cv_diff_path", default=None)
+_search_paths: ContextVar[List[Path]] = ContextVar("cv_search_paths", default=[])
 
 
 def set_code_viewer_context(
@@ -120,6 +127,7 @@ def _ensure_context() -> Optional[Dict[str, Any]]:
 # Diff Tools
 # =============================================================================
 
+
 @tools_mcp.tool
 def get_diff() -> Dict[str, Any]:
     """
@@ -143,7 +151,7 @@ def get_diff() -> Dict[str, Any]:
         }
 
     try:
-        content = diff_path.read_text(encoding='utf-8', errors='replace')
+        content = diff_path.read_text(encoding="utf-8", errors="replace")
         return {
             "success": True,
             "content": content,
@@ -171,7 +179,7 @@ def get_diff_impl() -> Dict[str, Any]:
         }
 
     try:
-        content = diff_path.read_text(encoding='utf-8', errors='replace')
+        content = diff_path.read_text(encoding="utf-8", errors="replace")
         return {
             "success": True,
             "content": content,
@@ -188,6 +196,7 @@ def get_diff_impl() -> Dict[str, Any]:
 # =============================================================================
 # File Content Tools
 # =============================================================================
+
 
 @tools_mcp.tool
 def get_file_content(
@@ -253,7 +262,7 @@ def get_file_content(
         }
 
     try:
-        with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(full_path, "r", encoding="utf-8", errors="replace") as f:
             content_raw = f.read()
 
         lines = content_raw.splitlines(keepends=True)
@@ -269,7 +278,11 @@ def get_file_content(
         truncate_reason = ""
 
         # If no range specified and file is too large, truncate
-        if start_line is None and end_line is None and total_tokens > MAX_TOKENS_THRESHOLD:
+        if (
+            start_line is None
+            and end_line is None
+            and total_tokens > MAX_TOKENS_THRESHOLD
+        ):
             truncated = True
             # Truncate by lines first (max 200)
             if total_lines > MAX_LINES_OUTPUT:
@@ -279,7 +292,9 @@ def get_file_content(
             truncated_tokens = count_tokens(truncated_content)
             if truncated_tokens > MAX_TOKENS_OUTPUT:
                 # Further truncate by tokens
-                while len(lines) > 1 and count_tokens("".join(lines)) > MAX_TOKENS_OUTPUT:
+                while (
+                    len(lines) > 1 and count_tokens("".join(lines)) > MAX_TOKENS_OUTPUT
+                ):
                     lines = lines[:-1]
             truncate_reason = f"File too large ({total_tokens} tokens, {total_lines} lines). Truncated to {len(lines)} lines (~{count_tokens(''.join(lines))} tokens). Use start_line/end_line to read specific ranges."
 
@@ -373,7 +388,7 @@ def get_file_content_impl(
         }
 
     try:
-        with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+        with open(full_path, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
 
         total_lines = len(lines)
@@ -414,6 +429,7 @@ def get_file_content_impl(
 # =============================================================================
 # Code Search Tools
 # =============================================================================
+
 
 @tools_mcp.tool
 def search_code(
@@ -463,10 +479,13 @@ def search_code(
 
     try:
         # Check for ripgrep
-        rg_available = subprocess.run(
-            ["which", "rg"],
-            capture_output=True,
-        ).returncode == 0
+        rg_available = (
+            subprocess.run(
+                ["which", "rg"],
+                capture_output=True,
+            ).returncode
+            == 0
+        )
 
         all_matches = []
         ws_path = _workspace_path.get()
@@ -507,8 +526,8 @@ def search_code(
                 cwd=str(search_path),
                 capture_output=True,
                 text=True,
-                encoding='utf-8',
-                errors='replace',
+                encoding="utf-8",
+                errors="replace",
                 timeout=60,
             )
 
@@ -516,7 +535,7 @@ def search_code(
             current_match = None
             context_before = []
 
-            for line in result.stdout.split('\n'):
+            for line in result.stdout.split("\n"):
                 if not line.strip():
                     if current_match:
                         all_matches.append(current_match)
@@ -525,10 +544,10 @@ def search_code(
                     continue
 
                 # Parse line format: file:line:content or file-line-content (context)
-                match = re.match(r'^([^:]+):(\d+)[:-](.*)$', line)
+                match = re.match(r"^([^:]+):(\d+)[:-](.*)$", line)
                 if match:
                     file_path_str, line_no, content = match.groups()
-                    is_match_line = ':' in line[:len(file_path_str)+len(line_no)+2]
+                    is_match_line = ":" in line[: len(file_path_str) + len(line_no) + 2]
 
                     # Make file path relative to repo_path for consistency with get_file_content
                     full_file_path = search_path / file_path_str
@@ -545,7 +564,9 @@ def search_code(
                     MAX_LINE_LEN = 500
                     content_stripped = content.strip()
                     if len(content_stripped) > MAX_LINE_LEN:
-                        content_stripped = content_stripped[:MAX_LINE_LEN] + "...[truncated]"
+                        content_stripped = (
+                            content_stripped[:MAX_LINE_LEN] + "...[truncated]"
+                        )
 
                     if is_match_line or current_match is None:
                         if current_match:
@@ -623,10 +644,13 @@ def search_code_impl(
         search_paths = [repo_path]
 
     try:
-        rg_available = subprocess.run(
-            ["which", "rg"],
-            capture_output=True,
-        ).returncode == 0
+        rg_available = (
+            subprocess.run(
+                ["which", "rg"],
+                capture_output=True,
+            ).returncode
+            == 0
+        )
 
         all_matches = []
         ws_path = _workspace_path.get()
@@ -665,15 +689,15 @@ def search_code_impl(
                 cwd=str(search_path),
                 capture_output=True,
                 text=True,
-                encoding='utf-8',
-                errors='replace',
+                encoding="utf-8",
+                errors="replace",
                 timeout=60,
             )
 
             current_match = None
             context_before = []
 
-            for line in result.stdout.split('\n'):
+            for line in result.stdout.split("\n"):
                 if not line.strip():
                     if current_match:
                         all_matches.append(current_match)
@@ -681,10 +705,10 @@ def search_code_impl(
                         context_before = []
                     continue
 
-                match = re.match(r'^([^:]+):(\d+)[:-](.*)$', line)
+                match = re.match(r"^([^:]+):(\d+)[:-](.*)$", line)
                 if match:
                     file_path_str, line_no, content = match.groups()
-                    is_match_line = ':' in line[:len(file_path_str)+len(line_no)+2]
+                    is_match_line = ":" in line[: len(file_path_str) + len(line_no) + 2]
 
                     # Make file path relative to repo_path for consistency with get_file_content
                     full_file_path = search_path / file_path_str
@@ -701,7 +725,9 @@ def search_code_impl(
                     MAX_LINE_LEN = 500
                     content_stripped = content.strip()
                     if len(content_stripped) > MAX_LINE_LEN:
-                        content_stripped = content_stripped[:MAX_LINE_LEN] + "...[truncated]"
+                        content_stripped = (
+                            content_stripped[:MAX_LINE_LEN] + "...[truncated]"
+                        )
 
                     if is_match_line or current_match is None:
                         if current_match:
@@ -753,6 +779,7 @@ def search_code_impl(
 # =============================================================================
 # List Files Tool
 # =============================================================================
+
 
 @tools_mcp.tool
 def list_files(
@@ -941,7 +968,7 @@ CODE_VIEWER_TOOLS = [
         "parameters": {
             "type": "object",
             "properties": {},
-        }
+        },
     },
     {
         "name": "get_file_content",
@@ -951,19 +978,19 @@ CODE_VIEWER_TOOLS = [
             "properties": {
                 "file_path": {
                     "type": "string",
-                    "description": "Relative path to the file within the repo (e.g., 'src/png.c')"
+                    "description": "Relative path to the file within the repo (e.g., 'src/png.c')",
                 },
                 "start_line": {
                     "type": "integer",
-                    "description": "Optional starting line number (1-indexed)"
+                    "description": "Optional starting line number (1-indexed)",
                 },
                 "end_line": {
                     "type": "integer",
-                    "description": "Optional ending line number (1-indexed, inclusive)"
-                }
+                    "description": "Optional ending line number (1-indexed, inclusive)",
+                },
             },
-            "required": ["file_path"]
-        }
+            "required": ["file_path"],
+        },
     },
     {
         "name": "search_code",
@@ -973,23 +1000,23 @@ CODE_VIEWER_TOOLS = [
             "properties": {
                 "pattern": {
                     "type": "string",
-                    "description": "Search pattern (supports regex)"
+                    "description": "Search pattern (supports regex)",
                 },
                 "file_pattern": {
                     "type": "string",
-                    "description": "Optional glob pattern to filter files (e.g., '*.c' for C files)"
+                    "description": "Optional glob pattern to filter files (e.g., '*.c' for C files)",
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "Maximum number of matches to return (default: 50)"
+                    "description": "Maximum number of matches to return (default: 50)",
                 },
                 "context_lines": {
                     "type": "integer",
-                    "description": "Number of context lines around matches (default: 2)"
-                }
+                    "description": "Number of context lines around matches (default: 2)",
+                },
             },
-            "required": ["pattern"]
-        }
+            "required": ["pattern"],
+        },
     },
     {
         "name": "list_files",
@@ -999,19 +1026,19 @@ CODE_VIEWER_TOOLS = [
             "properties": {
                 "directory": {
                     "type": "string",
-                    "description": "Subdirectory to list (relative to repo root, default: root)"
+                    "description": "Subdirectory to list (relative to repo root, default: root)",
                 },
                 "pattern": {
                     "type": "string",
-                    "description": "Optional glob pattern to filter files (e.g., '*.c', '*.h')"
+                    "description": "Optional glob pattern to filter files (e.g., '*.c', '*.h')",
                 },
                 "recursive": {
                     "type": "boolean",
-                    "description": "If true, list files recursively"
-                }
-            }
-        }
-    }
+                    "description": "If true, list files recursively",
+                },
+            },
+        },
+    },
 ]
 
 

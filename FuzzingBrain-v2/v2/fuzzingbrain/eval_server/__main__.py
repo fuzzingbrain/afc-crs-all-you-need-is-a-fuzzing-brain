@@ -79,7 +79,7 @@ def main():
 ║  MongoDB:   {config.mongodb_uri:<50} ║
 ║  Redis:     {config.redis_url:<50} ║
 ║                                                               ║
-║  API Docs:  http://{args.host}:{args.port}/docs{' ' * 30} ║
+║  API Docs:  http://{args.host}:{args.port}/docs{" " * 30} ║
 ╚═══════════════════════════════════════════════════════════════╝
     """)
 

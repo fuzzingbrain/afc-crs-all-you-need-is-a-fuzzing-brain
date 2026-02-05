@@ -12,6 +12,7 @@ from typing import List, Optional, Dict
 
 class Provider(Enum):
     """LLM Provider"""
+
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     GOOGLE = "google"
@@ -20,6 +21,7 @@ class Provider(Enum):
 
 class TaskType(Enum):
     """Task types for model recommendation"""
+
     CODE_ANALYSIS = "code_analysis"
     CODE_REFACTOR = "code_refactor"
     FAST_CODING = "fast_coding"
@@ -31,21 +33,22 @@ class TaskType(Enum):
 @dataclass
 class ModelInfo:
     """Model information and pricing"""
-    id: str                          # API model ID
-    alias: Optional[str]             # Short alias (e.g., claude-sonnet-4-5)
-    provider: Provider               # Provider
-    name: str                        # Human-readable name
-    description: str                 # Brief description
+
+    id: str  # API model ID
+    alias: Optional[str]  # Short alias (e.g., claude-sonnet-4-5)
+    provider: Provider  # Provider
+    name: str  # Human-readable name
+    description: str  # Brief description
 
     # Pricing (per million tokens)
-    price_input: float               # Input price per 1M tokens
-    price_output: float              # Output price per 1M tokens
+    price_input: float  # Input price per 1M tokens
+    price_output: float  # Output price per 1M tokens
 
     # Capabilities
-    context_window: int              # Max context tokens
-    max_output: int                  # Max output tokens
-    supports_vision: bool = True     # Vision/image support
-    supports_tools: bool = True      # Function calling support
+    context_window: int  # Max context tokens
+    max_output: int  # Max output tokens
+    supports_vision: bool = True  # Vision/image support
+    supports_tools: bool = True  # Function calling support
     supports_streaming: bool = True  # Streaming support
 
     # Special features
@@ -194,7 +197,18 @@ GPT_5_1_CODEX_MAX = ModelInfo(
     max_output=100_000,
 )
 
-OPENAI_MODELS = [GPT_5_2, GPT_5_2_INSTANT, GPT_5_2_PRO, GPT_5_2_CODEX, O3, O3_MINI, GPT_5_MINI, GPT_5, GPT_5_1, GPT_5_1_CODEX_MAX]
+OPENAI_MODELS = [
+    GPT_5_2,
+    GPT_5_2_INSTANT,
+    GPT_5_2_PRO,
+    GPT_5_2_CODEX,
+    O3,
+    O3_MINI,
+    GPT_5_MINI,
+    GPT_5,
+    GPT_5_1,
+    GPT_5_1_CODEX_MAX,
+]
 
 
 # =============================================================================
@@ -294,8 +308,12 @@ CLAUDE_OPUS_4 = ModelInfo(
 )
 
 CLAUDE_MODELS = [
-    CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5, CLAUDE_OPUS_4_5,
-    CLAUDE_OPUS_4_1, CLAUDE_SONNET_4, CLAUDE_OPUS_4,
+    CLAUDE_SONNET_4_5,
+    CLAUDE_HAIKU_4_5,
+    CLAUDE_OPUS_4_5,
+    CLAUDE_OPUS_4_1,
+    CLAUDE_SONNET_4,
+    CLAUDE_OPUS_4,
 ]
 
 
@@ -377,7 +395,9 @@ GROK_MODELS = [GROK_3]
 # All Models
 # =============================================================================
 
-ALL_MODELS: List[ModelInfo] = OPENAI_MODELS + CLAUDE_MODELS + GEMINI_MODELS + GROK_MODELS
+ALL_MODELS: List[ModelInfo] = (
+    OPENAI_MODELS + CLAUDE_MODELS + GEMINI_MODELS + GROK_MODELS
+)
 
 # Model lookup by ID
 _MODEL_BY_ID: Dict[str, ModelInfo] = {}
@@ -401,12 +421,10 @@ FALLBACK_CHAINS: Dict[str, List[ModelInfo]] = {
     CLAUDE_OPUS_4_5.id: [CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
     CLAUDE_SONNET_4_5.id: [CLAUDE_OPUS_4_5, CLAUDE_HAIKU_4_5],
     CLAUDE_HAIKU_4_5.id: [CLAUDE_SONNET_4_5, CLAUDE_OPUS_4_5],
-
     # OpenAI fallbacks -> Claude
     GPT_5_2.id: [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
     GPT_5_2_PRO.id: [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
     O3.id: [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
-
     # Gemini fallbacks -> Claude
     GEMINI_3_PRO.id: [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
     GEMINI_3_FLASH.id: [CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5, CLAUDE_OPUS_4_5],
@@ -418,9 +436,9 @@ DEFAULT_FALLBACK = [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5]
 # Expensive models (input price >= $5/M or output price >= $25/M)
 # These are filtered out when allow_expensive_fallback=False
 EXPENSIVE_MODELS = {
-    CLAUDE_OPUS_4_5.id,      # $5 input, $25 output
-    GPT_5_2_PRO.id,          # $5 input, $40 output
-    O3.id,                   # $10 input, $40 output
+    CLAUDE_OPUS_4_5.id,  # $5 input, $25 output
+    GPT_5_2_PRO.id,  # $5 input, $40 output
+    O3.id,  # $10 input, $40 output
 }
 
 
@@ -429,7 +447,9 @@ def is_expensive_model(model: ModelInfo) -> bool:
     return model.id in EXPENSIVE_MODELS
 
 
-def get_fallback_chain(model: ModelInfo, tried_models: set = None, allow_expensive: bool = True) -> List[ModelInfo]:
+def get_fallback_chain(
+    model: ModelInfo, tried_models: set = None, allow_expensive: bool = True
+) -> List[ModelInfo]:
     """
     Get fallback models for a given model.
 

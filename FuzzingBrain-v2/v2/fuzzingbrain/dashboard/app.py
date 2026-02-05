@@ -83,7 +83,9 @@ def create_app(eval_server_url: str = "http://localhost:8765") -> FastAPI:
         """Proxy WebSocket events from eval server."""
         await websocket.accept()
 
-        ws_url = app.state.eval_server_url.replace("http://", "ws://").replace("https://", "wss://")
+        ws_url = app.state.eval_server_url.replace("http://", "ws://").replace(
+            "https://", "wss://"
+        )
 
         try:
             async with httpx.AsyncClient() as client:

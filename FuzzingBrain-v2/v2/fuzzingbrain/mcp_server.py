@@ -109,6 +109,7 @@ async def fuzzingbrain_task(
 
 # Legacy tools for backward compatibility
 
+
 @mcp.tool()
 async def fuzzingbrain_find_pov(
     repo_url: str,

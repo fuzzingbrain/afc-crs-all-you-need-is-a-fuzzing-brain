@@ -29,7 +29,9 @@ class RedisStore:
             url: Redis URL (uses config if not provided)
         """
         if redis is None:
-            raise ImportError("redis package not installed. Install with: pip install redis")
+            raise ImportError(
+                "redis package not installed. Install with: pip install redis"
+            )
 
         config = get_config()
         self.url = url or config.redis_url

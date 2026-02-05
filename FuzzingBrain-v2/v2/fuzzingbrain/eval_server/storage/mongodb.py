@@ -11,6 +11,7 @@ from loguru import logger
 
 try:
     from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+
     MOTOR_AVAILABLE = True
 except ImportError:
     MOTOR_AVAILABLE = False
@@ -79,7 +80,9 @@ class MongoStorage:
         await self._db.tasks.create_index("created_at")
 
         # Workers collection
-        await self._db.workers.create_index([("task_id", 1), ("worker_id", 1)], unique=True)
+        await self._db.workers.create_index(
+            [("task_id", 1), ("worker_id", 1)], unique=True
+        )
         await self._db.workers.create_index("status")
 
         # Agents collection
@@ -137,12 +140,16 @@ class MongoStorage:
         """Get instance by ID."""
         return await self._db.instances.find_one({"instance_id": instance_id})
 
-    async def get_all_instances(self, include_dead: bool = False) -> List[Dict[str, Any]]:
+    async def get_all_instances(
+        self, include_dead: bool = False
+    ) -> List[Dict[str, Any]]:
         """Get all instances."""
         config = get_config()
         query = {}
         if not include_dead:
-            cutoff = datetime.utcnow() - timedelta(seconds=config.heartbeat_timeout_seconds)
+            cutoff = datetime.utcnow() - timedelta(
+                seconds=config.heartbeat_timeout_seconds
+            )
             query["last_heartbeat"] = {"$gte": cutoff}
         cursor = self._db.instances.find(query)
         return await cursor.to_list(length=1000)
@@ -533,9 +540,13 @@ class MongoStorage:
         created = await sp_collection.count_documents(query)
         verified = await sp_collection.count_documents({**query, "is_checked": True})
         # is_important=True means it's a real bug (verified as important)
-        marked_real = await sp_collection.count_documents({**query, "is_important": True})
+        marked_real = await sp_collection.count_documents(
+            {**query, "is_important": True}
+        )
         # verified but not important = false positive
-        marked_fp = await sp_collection.count_documents({**query, "is_checked": True, "is_important": False})
+        marked_fp = await sp_collection.count_documents(
+            {**query, "is_checked": True, "is_important": False}
+        )
 
         return {
             "created": created,
@@ -556,7 +567,9 @@ class MongoStorage:
 
         # Count various states
         created = await directions_collection.count_documents(query)
-        completed = await directions_collection.count_documents({**query, "status": "completed"})
+        completed = await directions_collection.count_documents(
+            {**query, "status": "completed"}
+        )
 
         return {
             "created": created,
@@ -576,7 +589,9 @@ class MongoStorage:
         # Count various states (is_successful is the actual field name)
         total = await pov_collection.count_documents(query)
         crashed = await pov_collection.count_documents({**query, "is_successful": True})
-        not_crashed = await pov_collection.count_documents({**query, "is_successful": False})
+        not_crashed = await pov_collection.count_documents(
+            {**query, "is_successful": False}
+        )
 
         return {
             "attempts": total,

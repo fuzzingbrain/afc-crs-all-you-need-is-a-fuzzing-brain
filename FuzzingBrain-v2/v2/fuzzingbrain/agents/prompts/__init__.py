@@ -43,9 +43,15 @@ FUNCTION_ANALYSIS_PROMPT = _load_prompt_from_markdown("function_analysis_prompt.
 POV_AGENT_SYSTEM_PROMPT = _load_prompt_from_markdown("pov_agent_prompt.md")
 REPORT_SYSTEM_PROMPT = _load_prompt_from_markdown("pov_report_prompt.md")
 REPORT_USER_TEMPLATE = _load_prompt_from_markdown("pov_report_user_template.md")
-FIND_SUSPICIOUS_POINTS_PROMPT = _load_prompt_from_markdown("find_suspicious_points_prompt.md")
-VERIFY_SUSPICIOUS_POINTS_PROMPT = _load_prompt_from_markdown("verify_suspicious_points_prompt.md")
-VERIFY_SUSPICIOUS_POINTS_DELTA_PROMPT = _load_prompt_from_markdown("verify_suspicious_points_delta_prompt.md")
+FIND_SUSPICIOUS_POINTS_PROMPT = _load_prompt_from_markdown(
+    "find_suspicious_points_prompt.md"
+)
+VERIFY_SUSPICIOUS_POINTS_PROMPT = _load_prompt_from_markdown(
+    "verify_suspicious_points_prompt.md"
+)
+VERIFY_SUSPICIOUS_POINTS_DELTA_PROMPT = _load_prompt_from_markdown(
+    "verify_suspicious_points_delta_prompt.md"
+)
 
 # Sanitizer guidance templates
 from .sanitizer_guidance import (
@@ -62,11 +68,9 @@ SANITIZER_PATTERNS = {
 - Use-after-free: accessing freed memory
 - Double-free: calling free() twice on same pointer
 - Heap corruption: write beyond allocation size""",
-
     "memory": """- Uninitialized memory read: using variables before initialization
 - Uninitialized struct fields: accessing unset struct members
 - Information leak: copying uninitialized data""",
-
     "undefined": """- Integer overflow: signed arithmetic overflow
 - Null pointer dereference: accessing through NULL
 - Division by zero: unchecked divisor

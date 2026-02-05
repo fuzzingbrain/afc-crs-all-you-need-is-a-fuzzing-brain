@@ -19,7 +19,9 @@ from .analyzer import _get_client, _ensure_client
 # Using ContextVar for async task isolation (each asyncio.Task has its own context)
 # =============================================================================
 
-_direction_fuzzer: ContextVar[Optional[str]] = ContextVar('direction_fuzzer', default=None)
+_direction_fuzzer: ContextVar[Optional[str]] = ContextVar(
+    "direction_fuzzer", default=None
+)
 
 
 def set_direction_context(fuzzer: str) -> None:
@@ -43,6 +45,7 @@ def get_direction_context() -> Optional[str]:
 # =============================================================================
 # Direction Tools - Implementation Functions
 # =============================================================================
+
 
 def create_direction_impl(
     name: str,
@@ -80,7 +83,9 @@ def create_direction_impl(
         )
 
         if result.get("created"):
-            logger.info(f"[DIRECTION] Created: {name} ({risk_level}) with {len(core_functions)} functions")
+            logger.info(
+                f"[DIRECTION] Created: {name} ({risk_level}) with {len(core_functions)} functions"
+            )
             return {
                 "success": True,
                 "id": result.get("id"),
@@ -135,6 +140,7 @@ def get_direction_impl(direction_id: str) -> Dict[str, Any]:
 # =============================================================================
 # Direction Tools - MCP Decorated
 # =============================================================================
+
 
 @tools_mcp.tool
 def create_direction(
@@ -196,7 +202,9 @@ def create_direction(
         )
 
         if result.get("created"):
-            logger.info(f"[DIRECTION] Created: {name} ({risk_level}) with {len(core_functions)} functions")
+            logger.info(
+                f"[DIRECTION] Created: {name} ({risk_level}) with {len(core_functions)} functions"
+            )
             return {
                 "success": True,
                 "id": result.get("id"),

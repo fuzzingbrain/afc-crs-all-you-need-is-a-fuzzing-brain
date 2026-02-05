@@ -184,7 +184,7 @@ class NullReporter(BaseReporter):
         output_tokens: int = 0,
         cost_input: float = 0.0,
         cost_output: float = 0.0,
-        **kwargs
+        **kwargs,
     ) -> None:
         """Track LLM call costs locally."""
         cost_total = cost_input + cost_output
@@ -194,7 +194,9 @@ class NullReporter(BaseReporter):
         self._cost_summary.total_input_tokens += input_tokens
         self._cost_summary.total_output_tokens += output_tokens
         if model:
-            self._cost_summary.by_model[model] = self._cost_summary.by_model.get(model, 0.0) + cost_total
+            self._cost_summary.by_model[model] = (
+                self._cost_summary.by_model.get(model, 0.0) + cost_total
+            )
 
     def tool_called(self, **kwargs) -> None:
         pass
@@ -338,6 +340,7 @@ class Reporter(BaseReporter):
 
     def _start_background_thread(self) -> None:
         """Start a background thread to run the async event loop."""
+
         def run_loop():
             self._loop = asyncio.new_event_loop()
             asyncio.set_event_loop(self._loop)
@@ -349,9 +352,7 @@ class Reporter(BaseReporter):
     async def _background_main(self) -> None:
         """Main async function for background thread."""
         self._running = True
-        self._session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=30)
-        )
+        self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
 
         # Register instance
         try:
@@ -384,9 +385,7 @@ class Reporter(BaseReporter):
 
         self._running = True
         self._loop = asyncio.get_event_loop()
-        self._session = aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=30)
-        )
+        self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30))
 
         # Register instance
         await self._register_instance()
@@ -397,7 +396,9 @@ class Reporter(BaseReporter):
         # Start heartbeat
         asyncio.create_task(self._heartbeat_loop())
 
-        logger.info(f"Reporter started: instance_id={self.instance_id}, server={self.server_url}")
+        logger.info(
+            f"Reporter started: instance_id={self.instance_id}, server={self.server_url}"
+        )
 
     async def stop(self) -> None:
         """Stop the reporter and flush remaining data."""
@@ -632,12 +633,14 @@ class Reporter(BaseReporter):
             agent_type = self._context.agent_type
             if agent_type:
                 self._cost_summary.by_agent_type[agent_type] = (
-                    self._cost_summary.by_agent_type.get(agent_type, 0.0) + record.cost_total
+                    self._cost_summary.by_agent_type.get(agent_type, 0.0)
+                    + record.cost_total
                 )
             operation = self._context.operation
             if operation:
                 self._cost_summary.by_operation[operation] = (
-                    self._cost_summary.by_operation.get(operation, 0.0) + record.cost_total
+                    self._cost_summary.by_operation.get(operation, 0.0)
+                    + record.cost_total
                 )
 
     def tool_called(
@@ -713,7 +716,7 @@ class Reporter(BaseReporter):
         # Truncate content if needed
         content_truncated = len(content) > self.max_content_length
         if content_truncated:
-            content = content[:self.max_content_length] + "..."
+            content = content[: self.max_content_length] + "..."
 
         # For NORMAL level, skip thinking
         if self.level == ReportLevel.NORMAL:
@@ -723,12 +726,16 @@ class Reporter(BaseReporter):
         tool_calls_summary = []
         if tool_calls:
             for tc in tool_calls:
-                tool_calls_summary.append({
-                    "id": tc.get("id", ""),
-                    "name": tc.get("name", ""),
-                    # Don't include full arguments in non-FULL mode
-                    "arguments": tc.get("arguments", {}) if self.level == ReportLevel.FULL else {},
-                })
+                tool_calls_summary.append(
+                    {
+                        "id": tc.get("id", ""),
+                        "name": tc.get("name", ""),
+                        # Don't include full arguments in non-FULL mode
+                        "arguments": tc.get("arguments", {})
+                        if self.level == ReportLevel.FULL
+                        else {},
+                    }
+                )
 
         record = AgentLogRecord(
             log_id=uuid.uuid4().hex,
@@ -813,16 +820,19 @@ class Reporter(BaseReporter):
 
         async def do_register():
             try:
-                await self._post("/api/v1/agents", {
-                    "agent_id": agent_id,
-                    "task_id": self._context.task_id or "",
-                    "worker_id": self._context.worker_id or "",
-                    "instance_id": self.instance_id,
-                    "agent_type": agent_type,
-                    "status": "running",
-                    "started_at": datetime.utcnow().isoformat(),
-                    "iteration": 0,
-                })
+                await self._post(
+                    "/api/v1/agents",
+                    {
+                        "agent_id": agent_id,
+                        "task_id": self._context.task_id or "",
+                        "worker_id": self._context.worker_id or "",
+                        "instance_id": self.instance_id,
+                        "agent_type": agent_type,
+                        "status": "running",
+                        "started_at": datetime.utcnow().isoformat(),
+                        "iteration": 0,
+                    },
+                )
             except Exception as e:
                 logger.debug(f"Failed to register agent: {e}")
 
@@ -856,17 +866,22 @@ class Reporter(BaseReporter):
 
         async def do_update():
             try:
-                await self._post(f"/api/v1/agents/{agent_id}/status", {
-                    "status": "running",
-                    "iteration": iteration,
-                })
+                await self._post(
+                    f"/api/v1/agents/{agent_id}/status",
+                    {
+                        "status": "running",
+                        "iteration": iteration,
+                    },
+                )
             except Exception as e:
                 logger.debug(f"Failed to update agent iteration: {e}")
 
         asyncio.run_coroutine_threadsafe(do_update(), self._loop)
 
     @contextmanager
-    def worker_context(self, worker_id: str, fuzzer: str = "", sanitizer: str = "", task_id: str = ""):
+    def worker_context(
+        self, worker_id: str, fuzzer: str = "", sanitizer: str = "", task_id: str = ""
+    ):
         """Context manager for worker-level tracking."""
         with self._context_lock:
             old_worker_id = self._context.worker_id
@@ -901,7 +916,9 @@ class Reporter(BaseReporter):
                 self._context.worker_id = old_worker_id
                 self._context.task_id = old_task_id
 
-    def _register_worker(self, worker_id: str, fuzzer: str = "", sanitizer: str = "") -> None:
+    def _register_worker(
+        self, worker_id: str, fuzzer: str = "", sanitizer: str = ""
+    ) -> None:
         """Register a worker with the server (non-blocking)."""
         if not self._loop:
             return
@@ -911,6 +928,7 @@ class Reporter(BaseReporter):
         memory_mb = None
         try:
             import psutil
+
             process = psutil.Process()
             cpu_percent = process.cpu_percent()
             memory_mb = process.memory_info().rss / (1024 * 1024)
@@ -919,17 +937,20 @@ class Reporter(BaseReporter):
 
         async def do_register():
             try:
-                await self._post("/api/v1/workers", {
-                    "worker_id": worker_id,
-                    "task_id": self._context.task_id or "",
-                    "instance_id": self.instance_id,
-                    "fuzzer": fuzzer,
-                    "sanitizer": sanitizer,
-                    "status": "running",
-                    "started_at": datetime.utcnow().isoformat(),
-                    "cpu_percent": cpu_percent,
-                    "memory_mb": memory_mb,
-                })
+                await self._post(
+                    "/api/v1/workers",
+                    {
+                        "worker_id": worker_id,
+                        "task_id": self._context.task_id or "",
+                        "instance_id": self.instance_id,
+                        "fuzzer": fuzzer,
+                        "sanitizer": sanitizer,
+                        "status": "running",
+                        "started_at": datetime.utcnow().isoformat(),
+                        "cpu_percent": cpu_percent,
+                        "memory_mb": memory_mb,
+                    },
+                )
             except Exception as e:
                 logger.debug(f"Failed to register worker: {e}")
 
@@ -962,6 +983,7 @@ class Reporter(BaseReporter):
         memory_mb = None
         try:
             import psutil
+
             process = psutil.Process()
             cpu_percent = process.cpu_percent()
             memory_mb = process.memory_info().rss / (1024 * 1024)
@@ -970,11 +992,14 @@ class Reporter(BaseReporter):
 
         async def do_update():
             try:
-                await self._post(f"/api/v1/workers/{worker_id}/status", {
-                    "status": status,
-                    "cpu_percent": cpu_percent,
-                    "memory_mb": memory_mb,
-                })
+                await self._post(
+                    f"/api/v1/workers/{worker_id}/status",
+                    {
+                        "status": status,
+                        "cpu_percent": cpu_percent,
+                        "memory_mb": memory_mb,
+                    },
+                )
             except Exception as e:
                 logger.debug(f"Failed to update worker status: {e}")
 
@@ -1014,13 +1039,16 @@ class Reporter(BaseReporter):
 
         async def do_register():
             try:
-                await self._post("/api/v1/tasks", {
-                    "task_id": task_id,
-                    "instance_id": self.instance_id,
-                    "project_name": project_name,
-                    "status": "running",
-                    "started_at": datetime.utcnow().isoformat(),
-                })
+                await self._post(
+                    "/api/v1/tasks",
+                    {
+                        "task_id": task_id,
+                        "instance_id": self.instance_id,
+                        "project_name": project_name,
+                        "status": "running",
+                        "started_at": datetime.utcnow().isoformat(),
+                    },
+                )
             except Exception as e:
                 logger.debug(f"Failed to register task: {e}")
 
@@ -1091,7 +1119,9 @@ class Reporter(BaseReporter):
             current_cost = self._cost_summary.total_cost
 
         if current_cost >= self.budget_limit:
-            logger.warning(f"Budget exceeded: ${current_cost:.2f} >= ${self.budget_limit:.2f}")
+            logger.warning(
+                f"Budget exceeded: ${current_cost:.2f} >= ${self.budget_limit:.2f}"
+            )
             raise BudgetExceededError(current_cost, self.budget_limit)
 
     def is_budget_exceeded(self) -> bool:

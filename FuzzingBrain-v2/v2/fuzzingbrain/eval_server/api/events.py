@@ -11,6 +11,7 @@ router = APIRouter()
 
 class EventData(BaseModel):
     """Single event data."""
+
     event_id: str
     event_type: str
     timestamp: str
@@ -27,6 +28,7 @@ class EventData(BaseModel):
 
 class EventsBatch(BaseModel):
     """Batch of events."""
+
     events: List[EventData]
 
 
@@ -44,20 +46,24 @@ async def receive_events(batch: EventsBatch) -> Dict[str, Any]:
     # Convert to MongoDB format
     events = []
     for event in batch.events:
-        events.append({
-            "event_id": event.event_id,
-            "event_type": event.event_type,
-            "timestamp": datetime.fromisoformat(event.timestamp.replace("Z", "+00:00")),
-            "severity": event.severity,
-            "instance_id": event.instance_id,
-            "task_id": event.task_id,
-            "worker_id": event.worker_id,
-            "agent_id": event.agent_id,
-            "agent_type": event.agent_type,
-            "operation": event.operation,
-            "payload": event.payload,
-            "tags": event.tags,
-        })
+        events.append(
+            {
+                "event_id": event.event_id,
+                "event_type": event.event_type,
+                "timestamp": datetime.fromisoformat(
+                    event.timestamp.replace("Z", "+00:00")
+                ),
+                "severity": event.severity,
+                "instance_id": event.instance_id,
+                "task_id": event.task_id,
+                "worker_id": event.worker_id,
+                "agent_id": event.agent_id,
+                "agent_type": event.agent_type,
+                "operation": event.operation,
+                "payload": event.payload,
+                "tags": event.tags,
+            }
+        )
 
     # Store in MongoDB
     await mongo.insert_events(events)
