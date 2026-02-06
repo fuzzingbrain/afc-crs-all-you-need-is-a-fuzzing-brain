@@ -25,6 +25,7 @@ from .prompts import (
     GENERAL_SANITIZER_GUIDANCE,
 )
 from ..llms import LLMClient, ModelInfo
+from ..core.models.agent import AgentType
 
 
 class SPGeneratorBase(BaseAgent):
@@ -274,7 +275,7 @@ class FullSPGenerator(SPGeneratorBase):
 
     @property
     def agent_name(self) -> str:
-        return "FullSPGenerator"
+        return AgentType.FULL_SP_GENERATOR.value
 
     def _log(self, message: str, level: str = "INFO") -> None:
         """Override _log to buffer logs for batch writing."""
@@ -534,7 +535,7 @@ class LargeFullSPGenerator(FullSPGenerator):
 
     @property
     def agent_name(self) -> str:
-        return "LargeFullSPGenerator"
+        return AgentType.LARGE_FULL_SP_GENERATOR.value
 
     def _get_agent_metadata(self) -> dict:
         """Get metadata for agent banner."""
@@ -666,7 +667,7 @@ class DeltaSPGenerator(SPGeneratorBase):
 
     @property
     def agent_name(self) -> str:
-        return "DeltaSPGenerator"
+        return AgentType.DELTA_SP_GENERATOR.value
 
     @property
     def is_delta(self) -> bool:

@@ -19,6 +19,7 @@ from ..agents.base import BaseAgent
 from ..llms import LLMClient, ModelInfo
 from ..db import RepositoryManager
 from ..tools.code_viewer import set_code_viewer_context
+from ..core.models.agent import AgentType
 from .seed_tools import set_seed_context, clear_seed_context, update_seed_context
 
 
@@ -190,6 +191,11 @@ class SeedAgent(BaseAgent):
     enable_context_compression: bool = (
         False  # Short conversations, no compression needed
     )
+
+    @property
+    def agent_name(self) -> str:
+        """Get agent name for logging and persistence."""
+        return AgentType.SEED_AGENT.value
 
     @property
     def agent_type(self) -> str:

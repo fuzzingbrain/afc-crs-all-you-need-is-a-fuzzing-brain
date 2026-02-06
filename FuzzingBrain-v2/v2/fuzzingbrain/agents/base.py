@@ -17,6 +17,7 @@ from loguru import logger
 from ..llms import LLMClient, ModelInfo
 from ..tools.mcp_factory import create_isolated_mcp_server
 from ..core.logging import get_agent_banner_and_header, get_agent_log_path
+from ..core.models.agent import AgentType
 from .context import AgentContext
 
 

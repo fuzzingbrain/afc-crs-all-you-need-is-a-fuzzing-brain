@@ -25,6 +25,7 @@ from loguru import logger
 from .base import BaseAgent
 from .prompts import REPORT_SYSTEM_PROMPT, REPORT_USER_TEMPLATE
 from ..llms import LLMClient
+from ..core.models.agent import AgentType
 
 
 @dataclass
@@ -103,7 +104,7 @@ class POVReportAgent(BaseAgent):
 
     @property
     def agent_name(self) -> str:
-        return "POVReportAgent"
+        return AgentType.POV_REPORT_AGENT.value
 
     @property
     def include_pov_tools(self) -> bool:

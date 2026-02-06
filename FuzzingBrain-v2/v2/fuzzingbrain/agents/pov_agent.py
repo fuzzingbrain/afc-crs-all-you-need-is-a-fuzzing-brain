@@ -20,6 +20,7 @@ from .base import BaseAgent
 from .prompts import POV_AGENT_SYSTEM_PROMPT
 from ..llms import LLMClient, ModelInfo
 from ..tools.pov import set_pov_context, update_pov_iteration
+from ..core.models.agent import AgentType
 
 
 # =============================================================================
@@ -195,7 +196,7 @@ class POVAgent(BaseAgent):
     @property
     def agent_name(self) -> str:
         """Get agent name for logging."""
-        return "POVAgent"
+        return AgentType.POV_AGENT.value
 
     @property
     def include_pov_tools(self) -> bool:

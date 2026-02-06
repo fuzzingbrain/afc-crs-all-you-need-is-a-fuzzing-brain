@@ -20,6 +20,7 @@ from .prompts import (
     GENERAL_SANITIZER_GUIDANCE,
 )
 from ..llms import LLMClient, ModelInfo
+from ..core.models.agent import AgentType
 
 
 class SPVerifier(BaseAgent):
@@ -122,7 +123,7 @@ class SPVerifier(BaseAgent):
 
     @property
     def agent_name(self) -> str:
-        return "SPVerifier"
+        return AgentType.SP_VERIFIER.value
 
     def _is_address_sanitizer(self) -> bool:
         """Check if current sanitizer is AddressSanitizer."""

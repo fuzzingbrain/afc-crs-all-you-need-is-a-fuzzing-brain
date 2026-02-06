@@ -20,6 +20,7 @@ from fastmcp import Client
 from .base import BaseAgent
 from .prompts import DIRECTION_PLANNING_PROMPT
 from ..llms import LLMClient, ModelInfo
+from ..core.models.agent import AgentType
 
 
 class DirectionPlanningAgent(BaseAgent):
@@ -85,7 +86,7 @@ class DirectionPlanningAgent(BaseAgent):
 
     @property
     def agent_name(self) -> str:
-        return "DirectionPlanningAgent"
+        return AgentType.DIRECTION_PLANNING.value
 
     @property
     def include_sp_tools(self) -> bool:

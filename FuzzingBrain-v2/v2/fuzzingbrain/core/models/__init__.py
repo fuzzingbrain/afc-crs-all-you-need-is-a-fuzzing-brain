@@ -20,6 +20,7 @@ from .callgraph import CallGraphNode
 from .suspicious_point import SuspiciousPoint, ControlFlowItem, SPStatus
 from .direction import Direction, DirectionStatus, RiskLevel
 from .llm_call import LLMCall
+from .agent import AgentType
 
 __all__ = [
     "Task",
@@ -41,4 +42,5 @@ __all__ = [
     "DirectionStatus",
     "RiskLevel",
     "LLMCall",
+    "AgentType",
 ]
