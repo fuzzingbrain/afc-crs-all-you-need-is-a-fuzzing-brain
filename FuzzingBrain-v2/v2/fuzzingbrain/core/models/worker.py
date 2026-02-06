@@ -87,6 +87,12 @@ class Worker:
     # Result summary
     result_summary: dict = field(default_factory=dict)
 
+    # LLM usage aggregates (updated by flush)
+    llm_calls: int = 0
+    llm_cost: float = 0.0
+    llm_input_tokens: int = 0
+    llm_output_tokens: int = 0
+
     @property
     def display_name(self) -> str:
         """Get human-readable worker name for logging."""
@@ -143,6 +149,11 @@ class Worker:
             "phase_save": self.phase_save,
             # Result
             "result_summary": self.result_summary,
+            # LLM usage
+            "llm_calls": self.llm_calls,
+            "llm_cost": self.llm_cost,
+            "llm_input_tokens": self.llm_input_tokens,
+            "llm_output_tokens": self.llm_output_tokens,
         }
 
     @classmethod
@@ -195,6 +206,11 @@ class Worker:
             phase_save=data.get("phase_save", 0.0),
             # Result
             result_summary=data.get("result_summary", {}),
+            # LLM usage
+            llm_calls=data.get("llm_calls", 0),
+            llm_cost=data.get("llm_cost", 0.0),
+            llm_input_tokens=data.get("llm_input_tokens", 0),
+            llm_output_tokens=data.get("llm_output_tokens", 0),
         )
 
     def mark_running(self):

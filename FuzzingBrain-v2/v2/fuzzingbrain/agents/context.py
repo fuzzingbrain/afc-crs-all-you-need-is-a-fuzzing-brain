@@ -139,6 +139,12 @@ class AgentContext:
         # SP Verifier state
         self.verify_result: Optional[Dict[str, Any]] = None
 
+        # LLM usage aggregates (updated by flush)
+        self.llm_calls: int = 0
+        self.llm_cost: float = 0.0
+        self.llm_input_tokens: int = 0
+        self.llm_output_tokens: int = 0
+
         # Persistence tracking
         self._dirty = False
         self._last_save_time: float = 0
@@ -229,6 +235,11 @@ class AgentContext:
                     "seeds_generated": self.seeds_generated,
                     "pov_iteration": self.pov_iteration,
                     "pov_attempt": self.pov_attempt,
+                    # LLM usage
+                    "llm_calls": self.llm_calls,
+                    "llm_cost": self.llm_cost,
+                    "llm_input_tokens": self.llm_input_tokens,
+                    "llm_output_tokens": self.llm_output_tokens,
                     "updated_at": datetime.now(),
                 }
 

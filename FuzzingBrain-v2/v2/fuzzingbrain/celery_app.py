@@ -16,7 +16,7 @@ from loguru import logger
 load_dotenv()  # Load .env file for API keys
 
 from celery import Celery
-from celery.signals import task_failure, worker_process_init, setup_logging
+from celery.signals import task_failure, worker_process_init, worker_process_shutdown, setup_logging
 
 # Redis configuration from environment
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -88,7 +88,7 @@ def on_task_failure(
 
 @worker_process_init.connect
 def on_worker_init(**kwargs):
-    """Setup error handling when worker process initializes."""
+    """Setup error handling and LLM buffer when worker process initializes."""
 
     def handle_exception(exc_type, exc_value, exc_tb):
         error_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
@@ -99,6 +99,34 @@ def on_worker_init(**kwargs):
 
     # Worker/Agent context is now handled via WorkerContext/AgentContext
     # which persist to MongoDB directly - no reporter needed
+
+    # Initialize LLM call buffer (sync mode - memory only until async context starts)
+    try:
+        from .db import get_db
+        from .llms.buffer import init_llm_call_buffer_sync
+
+        mongo_db = get_db()
+        init_llm_call_buffer_sync(redis_url=REDIS_URL, mongo_db=mongo_db)
+    except Exception as e:
+        logger.warning(f"Failed to init LLM call buffer: {e}")
+
+
+@worker_process_shutdown.connect
+def on_worker_shutdown(**kwargs):
+    """Cleanup when worker process shuts down."""
+    import asyncio
+
+    # Shutdown LLM call buffer (flush remaining records to MongoDB)
+    try:
+        from .llms.buffer import get_llm_call_buffer
+
+        buffer = get_llm_call_buffer()
+        if buffer and buffer._running:
+            # Run async shutdown in a new event loop
+            asyncio.run(buffer.stop())
+            logger.info("LLM call buffer shutdown complete")
+    except Exception as e:
+        logger.warning(f"Failed to shutdown LLM call buffer: {e}")
 
 
 # Celery configuration

@@ -104,6 +104,14 @@ from .distributor import (
     get_distributor,
 )
 
+from .buffer import (
+    LLMCallBuffer,
+    get_llm_call_buffer,
+    init_llm_call_buffer,
+    init_llm_call_buffer_sync,
+    shutdown_llm_call_buffer,
+)
+
 __all__ = [
     # Enums
     "Provider",
@@ -168,4 +176,10 @@ __all__ = [
     # Distributor
     "LLMDistributor",
     "get_distributor",
+    # LLM Call Buffer
+    "LLMCallBuffer",
+    "get_llm_call_buffer",
+    "init_llm_call_buffer",
+    "init_llm_call_buffer_sync",
+    "shutdown_llm_call_buffer",
 ]

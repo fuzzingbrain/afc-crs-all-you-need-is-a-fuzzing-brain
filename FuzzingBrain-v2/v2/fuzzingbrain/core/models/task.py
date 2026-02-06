@@ -85,6 +85,12 @@ class Task:
     # Error info
     error_msg: Optional[str] = None
 
+    # LLM usage aggregates (updated by flush)
+    llm_calls: int = 0
+    llm_cost: float = 0.0
+    llm_input_tokens: int = 0
+    llm_output_tokens: int = 0
+
     def to_dict(self) -> dict:
         """Convert to dictionary for MongoDB storage"""
         return {
@@ -110,6 +116,10 @@ class Task:
             "pov_ids": self.pov_ids,
             "patch_ids": self.patch_ids,
             "error_msg": self.error_msg,
+            "llm_calls": self.llm_calls,
+            "llm_cost": self.llm_cost,
+            "llm_input_tokens": self.llm_input_tokens,
+            "llm_output_tokens": self.llm_output_tokens,
         }
 
     @classmethod
@@ -137,6 +147,10 @@ class Task:
             pov_ids=data.get("pov_ids", []),
             patch_ids=data.get("patch_ids", []),
             error_msg=data.get("error_msg"),
+            llm_calls=data.get("llm_calls", 0),
+            llm_cost=data.get("llm_cost", 0.0),
+            llm_input_tokens=data.get("llm_input_tokens", 0),
+            llm_output_tokens=data.get("llm_output_tokens", 0),
         )
 
     def mark_running(self):

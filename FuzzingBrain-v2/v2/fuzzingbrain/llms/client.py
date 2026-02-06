@@ -31,6 +31,8 @@ from .models import (
     get_fallback_chain,
     get_model_by_id,
 )
+from ..core.models.llm_call import LLMCall
+from .buffer import get_llm_call_buffer
 
 
 
@@ -134,18 +136,112 @@ class LLMClient:
 
         # With tools
         response = client.call_with_tools(messages, tools=tool_definitions)
+
+        # With context for LLM call tracking
+        client = LLMClient(agent_id="...", worker_id="...", task_id="...")
     """
 
     # Class variable to track event loop for cache invalidation
     _current_loop_id: Optional[int] = None
 
-    def __init__(self, config: Optional[LLMConfig] = None):
+    def __init__(
+        self,
+        config: Optional[LLMConfig] = None,
+        agent_id: str = "",
+        worker_id: str = "",
+        task_id: str = "",
+    ):
         self.config = config or get_default_config()
         self._tried_models: set = set()
+
+        # Context for LLM call tracking
+        self.agent_id = agent_id
+        self.worker_id = worker_id
+        self.task_id = task_id
 
     def reset_tried_models(self) -> None:
         """Reset the set of tried models (call between independent requests)"""
         self._tried_models.clear()
+
+    def _record_llm_call(
+        self,
+        response: "LLMResponse",
+        success: bool = True,
+        error_msg: Optional[str] = None,
+    ) -> None:
+        """
+        Record an LLM call to the buffer (sync version - uses memory buffer).
+
+        Args:
+            response: LLMResponse from the call
+            success: Whether the call succeeded
+            error_msg: Error message if failed
+        """
+        buffer = get_llm_call_buffer()
+        if buffer is None:
+            return
+
+        # Calculate cost
+        _, _, cost = _calculate_cost(
+            response.model, response.input_tokens, response.output_tokens
+        )
+
+        call = LLMCall(
+            agent_id=self.agent_id,
+            worker_id=self.worker_id,
+            task_id=self.task_id,
+            model=response.model,
+            provider=response.provider,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cost=cost,
+            latency_ms=int(response.latency_ms),
+            success=success,
+            error_msg=error_msg,
+        )
+
+        # Use memory buffer for sync calls (Redis is async)
+        with buffer._memory_lock:
+            buffer._memory_buffer.append(call.to_dict())
+
+    async def _arecord_llm_call(
+        self,
+        response: "LLMResponse",
+        success: bool = True,
+        error_msg: Optional[str] = None,
+    ) -> None:
+        """
+        Record an LLM call to the buffer (async version - uses Redis).
+
+        Args:
+            response: LLMResponse from the call
+            success: Whether the call succeeded
+            error_msg: Error message if failed
+        """
+        buffer = get_llm_call_buffer()
+        if buffer is None:
+            return
+
+        # Calculate cost
+        _, _, cost = _calculate_cost(
+            response.model, response.input_tokens, response.output_tokens
+        )
+
+        call = LLMCall(
+            agent_id=self.agent_id,
+            worker_id=self.worker_id,
+            task_id=self.task_id,
+            model=response.model,
+            provider=response.provider,
+            input_tokens=response.input_tokens,
+            output_tokens=response.output_tokens,
+            cost=cost,
+            latency_ms=int(response.latency_ms),
+            success=success,
+            error_msg=error_msg,
+        )
+
+        await buffer.record(call)
 
     @classmethod
     def _ensure_clean_client_cache(cls) -> None:
@@ -586,6 +682,9 @@ class LLMClient:
                 original_model_for_report,
             )
 
+            # Record successful LLM call
+            self._record_llm_call(result, success=True)
+
             if self.config.log_requests:
                 logger.debug(
                     f"LLM response: model={model_id}, "
@@ -598,6 +697,16 @@ class LLMClient:
         except Exception as e:
             error = self._handle_error(e, model_id)
             logger.warning(f"LLM call failed: {error}")
+
+            # Record failed LLM call (with minimal info)
+            failed_response = LLMResponse(
+                content="",
+                model=model_id,
+                provider=self._get_provider(current_model).value,
+                success=False,
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            self._record_llm_call(failed_response, success=False, error_msg=str(error))
 
             if self.config.fallback_enabled and self._should_fallback(error):
                 return self._try_fallback(
@@ -832,6 +941,9 @@ class LLMClient:
                 original_model_for_report,
             )
 
+            # Record successful LLM call
+            await self._arecord_llm_call(result, success=True)
+
             if self.config.log_requests:
                 logger.debug(
                     f"LLM async response: model={model_id}, "
@@ -855,6 +967,18 @@ class LLMClient:
         except Exception as e:
             error = self._handle_error(e, model_id)
             logger.warning(f"LLM async call failed: {error}")
+
+            # Record failed LLM call (with minimal info)
+            failed_response = LLMResponse(
+                content="",
+                model=model_id,
+                provider=self._get_provider(current_model).value,
+                success=False,
+                latency_ms=(time.time() - start_time) * 1000,
+            )
+            await self._arecord_llm_call(
+                failed_response, success=False, error_msg=str(error)
+            )
 
             if self.config.fallback_enabled and self._should_fallback(error):
                 return await self._atry_fallback(

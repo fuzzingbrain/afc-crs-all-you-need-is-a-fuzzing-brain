@@ -172,6 +172,16 @@ class WorkerContext:
         # Persist final state to MongoDB (synchronous, must succeed)
         self._save_to_db(force=True)
 
+        # Cleanup Redis counters for this worker
+        try:
+            from ..llms.buffer import get_llm_call_buffer
+
+            buffer = get_llm_call_buffer()
+            if buffer:
+                buffer.cleanup_worker_counters_sync(self.worker_id)
+        except Exception as e:
+            logger.warning(f"Failed to cleanup worker counters: {e}")
+
     def _save_to_db(self, force: bool = False) -> bool:
         """
         Save worker record to MongoDB 'workers' collection.

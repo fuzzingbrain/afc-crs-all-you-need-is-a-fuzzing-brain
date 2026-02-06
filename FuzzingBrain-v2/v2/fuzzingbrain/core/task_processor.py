@@ -1041,6 +1041,16 @@ class TaskProcessor:
 
                     self.repos.tasks.save(task)
 
+                    # Cleanup Redis counters for this task
+                    try:
+                        from ..llms.buffer import get_llm_call_buffer
+
+                        buffer = get_llm_call_buffer()
+                        if buffer:
+                            buffer.cleanup_task_counters_sync(task.task_id)
+                    except Exception as e:
+                        logger.warning(f"Failed to cleanup task counters: {e}")
+
                     # Get worker results for summary
                     worker_results = dispatcher.get_results()
 

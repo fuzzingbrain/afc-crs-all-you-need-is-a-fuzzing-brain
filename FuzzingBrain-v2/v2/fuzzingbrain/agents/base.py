@@ -73,7 +73,10 @@ class BaseAgent(ABC):
             fuzzer: Fuzzer name for log path
             sanitizer: Sanitizer name for log path
         """
-        self.llm_client = llm_client or LLMClient()
+        self.llm_client = llm_client or LLMClient(
+            task_id=task_id,
+            worker_id=worker_id,
+        )
         self.model = model
         self.max_iterations = max_iterations
         self.verbose = verbose
@@ -1010,6 +1013,9 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             self._context = ctx
             agent_id = ctx.agent_id  # Use ObjectId from context
 
+            # Update LLMClient with agent_id for call tracking
+            self.llm_client.agent_id = agent_id
+
             self._log(f"Agent context created: {agent_id}", level="DEBUG")
 
             try:
@@ -1059,6 +1065,16 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                     result = f"Agent failed: {e}"
 
         # Context exits here, automatically persisting to MongoDB
+
+        # Cleanup Redis counters for this agent
+        try:
+            from ..llms.buffer import get_llm_call_buffer
+
+            buffer = get_llm_call_buffer()
+            if buffer:
+                await buffer.cleanup_agent_counters(agent_id)
+        except Exception as e:
+            self._log(f"Failed to cleanup agent counters: {e}", level="WARNING")
 
         self.end_time = datetime.now()
         duration = (self.end_time - self.start_time).total_seconds()
