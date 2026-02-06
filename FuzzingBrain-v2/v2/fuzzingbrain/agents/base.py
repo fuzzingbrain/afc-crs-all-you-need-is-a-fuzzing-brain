@@ -120,6 +120,10 @@ class BaseAgent(ABC):
         self.start_time: Optional[datetime] = None
         self.end_time: Optional[datetime] = None
 
+        # Stop reason for graceful termination tracking
+        # None = normal completion, "budget" = budget exceeded, "timeout" = time limit
+        self.stop_reason: Optional[str] = None
+
         # Agent-specific logger
         self._agent_logger = None
         self._log_file: Optional[Path] = None
@@ -939,6 +943,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
 
                 if isinstance(e, BudgetExceededError):
                     self._log(f"Budget limit exceeded: {e}", level="WARNING")
+                    self.stop_reason = "budget"
                     raise
                 import traceback
 
@@ -1105,11 +1110,19 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                     result = await self._run_agent_loop(client, initial_message)
 
         except Exception as e:
-            self._log(f"Agent run failed: {e}", level="ERROR")
-            import traceback
+            # Check if it's a budget/resource limit (not a real failure)
+            from ..eval import BudgetExceededError
 
-            self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
-            result = f"Agent failed: {e}"
+            if isinstance(e, BudgetExceededError):
+                self._log(f"Agent stopped: {e}", level="INFO")
+                result = f"Agent stopped (budget limit): {e}"
+            else:
+                self._log(f"Agent run failed: {e}", level="ERROR")
+                import traceback
+
+                self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
+                self.stop_reason = "error"  # Mark as actual failure
+                result = f"Agent failed: {e}"
 
         self.end_time = datetime.now()
         duration = (self.end_time - self.start_time).total_seconds()

@@ -223,9 +223,19 @@ class POVAgent(BaseAgent):
         if self.pov_success:
             result_icon = "✅"
             result_text = "SUCCESS - Crash triggered!"
-        else:
+        elif self.stop_reason == "budget":
+            result_icon = "⏹️"
+            result_text = "COMPLETED (Budget Limit Reached)"
+        elif self.stop_reason == "timeout":
+            result_icon = "⏹️"
+            result_text = "COMPLETED (Time Limit Reached)"
+        elif self.stop_reason == "error":
             result_icon = "❌"
-            result_text = "FAILED - No crash achieved"
+            result_text = "FAILED - Error occurred"
+        else:
+            # Normal completion without crash - not a failure
+            result_icon = "⏹️"
+            result_text = "COMPLETED - No crash found"
 
         lines = []
         lines.append("")
