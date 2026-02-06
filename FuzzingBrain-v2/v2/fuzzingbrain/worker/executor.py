@@ -45,6 +45,7 @@ class WorkerExecutor:
         log_dir: str = None,
         docker_image: str = "gcr.io/oss-fuzz-base/base-runner",
         enable_fuzzer_worker: bool = True,
+        celery_job_id: str = None,
     ):
         """
         Initialize WorkerExecutor.
@@ -64,6 +65,7 @@ class WorkerExecutor:
             log_dir: Main task log directory for agent logs
             docker_image: Docker image for running fuzzers
             enable_fuzzer_worker: Whether to enable FuzzerManager (default True)
+            celery_job_id: Celery task ID (for WorkerContext tracking)
         """
         self.workspace_path = Path(workspace_path)
         self.project_name = project_name
@@ -76,6 +78,7 @@ class WorkerExecutor:
         self.log_dir = Path(log_dir) if log_dir else None
         self.docker_image = docker_image
         self.enable_fuzzer_worker = enable_fuzzer_worker
+        self.celery_job_id = celery_job_id
 
         # Fuzzer binary path (from Analyzer or built locally)
         self.fuzzer_binary_path = (
@@ -492,13 +495,16 @@ def generate(variant: int = 1) -> bytes:
         )
 
         # Create WorkerContext for isolation
-        # This provides unique ObjectId for this worker instance
+        # This creates the Worker record in MongoDB with unique ObjectId
         with WorkerContext(
             task_id=self.task_id,
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             scan_mode=self.scan_mode,
             project_name=self.project_name,
+            task_type=self.task_type,
+            workspace_path=str(self.workspace_path),
+            celery_job_id=self.celery_job_id,
         ) as ctx:
             self._worker_context = ctx
 

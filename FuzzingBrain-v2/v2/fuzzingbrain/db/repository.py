@@ -1175,18 +1175,51 @@ class DirectionRepository(BaseRepository[Direction]):
 
 
 class WorkerRepository(BaseRepository[Worker]):
-    """Repository for Worker model"""
+    """
+    Repository for Worker model.
+
+    Workers use MongoDB ObjectId as primary key.
+    Queries by task_id also use ObjectId.
+    """
 
     def __init__(self, db: Database):
         super().__init__(db, "workers", Worker)
 
+    def find_by_id(self, worker_id: str) -> Optional[Worker]:
+        """Find worker by ObjectId string."""
+        from bson import ObjectId
+        try:
+            data = self.collection.find_one({"_id": ObjectId(worker_id)})
+            if data:
+                return Worker.from_dict(data)
+            return None
+        except Exception as e:
+            logger.error(f"Failed to find Worker by id: {e}")
+            return None
+
     def find_by_task(self, task_id: str) -> List[Worker]:
-        """Find all workers for a task"""
-        return self.find_all({"task_id": task_id})
+        """Find all workers for a task (by ObjectId)."""
+        from bson import ObjectId
+        try:
+            # task_id is stored as ObjectId in workers collection
+            cursor = self.collection.find({"task_id": ObjectId(task_id)})
+            return [Worker.from_dict(doc) for doc in cursor]
+        except Exception as e:
+            logger.error(f"Failed to find workers by task: {e}")
+            return []
 
     def find_running_by_task(self, task_id: str) -> List[Worker]:
-        """Find running workers for a task"""
-        return self.find_all({"task_id": task_id, "status": "running"})
+        """Find running workers for a task."""
+        from bson import ObjectId
+        try:
+            cursor = self.collection.find({
+                "task_id": ObjectId(task_id),
+                "status": "running"
+            })
+            return [Worker.from_dict(doc) for doc in cursor]
+        except Exception as e:
+            logger.error(f"Failed to find running workers: {e}")
+            return []
 
     def find_by_status(self, status: str) -> List[Worker]:
         """Find workers by status"""
@@ -1195,9 +1228,48 @@ class WorkerRepository(BaseRepository[Worker]):
     def find_by_fuzzer(
         self, task_id: str, fuzzer: str, sanitizer: str
     ) -> Optional[Worker]:
-        """Find worker by task, fuzzer, and sanitizer"""
-        worker_id = Worker.generate_worker_id(task_id, fuzzer, sanitizer)
-        return self.find_by_id(worker_id)
+        """Find worker by task, fuzzer, and sanitizer."""
+        from bson import ObjectId
+        try:
+            data = self.collection.find_one({
+                "task_id": ObjectId(task_id),
+                "fuzzer": fuzzer,
+                "sanitizer": sanitizer,
+            })
+            if data:
+                return Worker.from_dict(data)
+            return None
+        except Exception as e:
+            logger.error(f"Failed to find worker by fuzzer: {e}")
+            return None
+
+    def save(self, worker: Worker) -> bool:
+        """Save worker to database (upsert by ObjectId)."""
+        from bson import ObjectId
+        try:
+            data = worker.to_dict()
+            # Ensure _id is ObjectId
+            if isinstance(data.get("_id"), str):
+                data["_id"] = ObjectId(data["_id"])
+            self.collection.replace_one({"_id": data["_id"]}, data, upsert=True)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save Worker: {e}")
+            return False
+
+    def update(self, worker_id: str, updates: dict) -> bool:
+        """Update worker fields by ObjectId."""
+        from bson import ObjectId
+        try:
+            updates["updated_at"] = datetime.now()
+            result = self.collection.update_one(
+                {"_id": ObjectId(worker_id)},
+                {"$set": updates}
+            )
+            return result.modified_count > 0
+        except Exception as e:
+            logger.error(f"Failed to update Worker: {e}")
+            return False
 
     def update_status(self, worker_id: str, status: str, error_msg: str = None) -> bool:
         """Update worker status"""
@@ -1212,9 +1284,10 @@ class WorkerRepository(BaseRepository[Worker]):
 
     def update_strategy(self, worker_id: str, strategy: str) -> bool:
         """Update current strategy and add to history"""
+        from bson import ObjectId
         try:
             result = self.collection.update_one(
-                {"_id": worker_id},
+                {"_id": ObjectId(worker_id)},
                 {
                     "$set": {
                         "current_strategy": strategy,

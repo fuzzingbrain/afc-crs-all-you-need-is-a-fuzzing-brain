@@ -472,6 +472,9 @@ def generate(variant: int = 1) -> bytes:
         """
         Dispatch a Celery task for the worker.
 
+        Note: Worker record is NOT created here. WorkerContext creates
+        the Worker record when the Celery task starts executing.
+
         Args:
             pair: {fuzzer, sanitizer} pair
             workspace_path: Path to worker workspace
@@ -483,19 +486,7 @@ def generate(variant: int = 1) -> bytes:
 
         fuzzer = pair["fuzzer"]
         sanitizer = pair["sanitizer"]
-        worker_id = f"{self.task.task_id}__{fuzzer}__{sanitizer}"
-
-        # Create Worker record in database
-        worker = Worker(
-            worker_id=worker_id,
-            task_id=self.task.task_id,
-            task_type=self.task.task_type.value,
-            fuzzer=fuzzer,
-            sanitizer=sanitizer,
-            workspace_path=workspace_path,
-            status=WorkerStatus.PENDING,
-        )
-        self.repos.workers.save(worker)
+        display_name = Worker.generate_display_name(fuzzer, sanitizer)
 
         # Get log directory from current logging config
         from .logging import get_log_dir
@@ -509,7 +500,7 @@ def generate(variant: int = 1) -> bytes:
             fuzzer_binary_path = self.analyze_result.get_fuzzer_path(fuzzer, sanitizer)
             build_dir = self.analyze_result.build_paths.get(sanitizer)
 
-        # Prepare assignment
+        # Prepare assignment - WorkerContext will create Worker record
         assignment = {
             "task_id": self.task.task_id,
             "fuzzer": fuzzer,
@@ -529,7 +520,6 @@ def generate(variant: int = 1) -> bytes:
             if self.analyze_result
             else None,
             # Scan mode and diff path for delta mode
-            # Use worker's own diff path (copied to worker workspace)
             "scan_mode": self.task.scan_mode.value,
             "diff_path": str(Path(workspace_path) / "diff" / "ref.diff")
             if self.task.scan_mode.value == "delta"
@@ -541,7 +531,6 @@ def generate(variant: int = 1) -> bytes:
         }
 
         # Dispatch Celery task with dynamic time limit based on config
-        # Soft timeout at 90% of hard timeout - gives 10% buffer for graceful shutdown
         timeout_seconds = self.config.timeout_minutes * 60
         soft_timeout_seconds = int(timeout_seconds * 0.9)
 
@@ -551,14 +540,14 @@ def generate(variant: int = 1) -> bytes:
             soft_time_limit=soft_timeout_seconds,
         )
 
-        # Update worker with Celery job ID
-        worker.celery_job_id = result.id
-        self.repos.workers.save(worker)
+        # Note: Celery job ID is passed to WorkerContext via assignment
+        # We add it here for the worker to use
+        assignment["celery_job_id"] = result.id
 
-        logger.info(f"Dispatched worker: {worker_id} (celery_id: {result.id})")
+        logger.info(f"Dispatched worker: {display_name} (celery_id: {result.id})")
 
         return {
-            "worker_id": worker_id,
+            "display_name": display_name,
             "celery_id": result.id,
             "fuzzer": fuzzer,
             "sanitizer": sanitizer,
@@ -572,12 +561,17 @@ def generate(variant: int = 1) -> bytes:
         Also checks Celery task status to detect workers that failed
         before updating the database.
 
+        Note: Workers are created by WorkerContext when Celery task starts,
+        so initially there may be fewer workers than dispatched jobs.
+
         Returns:
             Status summary dictionary
         """
         from celery.result import AsyncResult
+        from bson import ObjectId
         from ..celery_app import app
 
+        # Query workers by task_id (ObjectId)
         workers = self.repos.workers.find_by_task(self.task.task_id)
 
         status = {
@@ -608,7 +602,7 @@ def generate(variant: int = 1) -> bytes:
                         self.repos.workers.save(worker)
                         worker_status = "failed"
                         logger.warning(
-                            f"Worker {worker.worker_id} failed (detected via Celery)"
+                            f"Worker {worker.display_name} failed (detected via Celery)"
                         )
                 except Exception:
                     pass  # Ignore Celery check errors
@@ -649,9 +643,9 @@ def generate(variant: int = 1) -> bytes:
                 if worker.celery_job_id:
                     try:
                         app.control.revoke(worker.celery_job_id, terminate=True)
-                        logger.info(f"Revoked worker: {worker.worker_id}")
+                        logger.info(f"Revoked worker: {worker.display_name}")
                     except Exception as e:
-                        logger.warning(f"Failed to revoke {worker.worker_id}: {e}")
+                        logger.warning(f"Failed to revoke {worker.display_name}: {e}")
 
                 # Mark as completed (graceful shutdown)
                 worker.status = WorkerStatus.COMPLETED
@@ -674,6 +668,7 @@ def generate(variant: int = 1) -> bytes:
         shutdown_count = 0
 
         for worker in workers:
+            # FuzzerManager is registered with ObjectId-based worker_id
             manager = get_fuzzer_manager(worker.worker_id)
             if manager:
                 try:
@@ -691,10 +686,10 @@ def generate(variant: int = 1) -> bytes:
                         loop.run_until_complete(manager.shutdown())
 
                     shutdown_count += 1
-                    logger.info(f"Shutdown FuzzerManager: {worker.worker_id}")
+                    logger.info(f"Shutdown FuzzerManager: {worker.display_name}")
                 except Exception as e:
                     logger.warning(
-                        f"Failed to shutdown FuzzerManager {worker.worker_id}: {e}"
+                        f"Failed to shutdown FuzzerManager {worker.display_name}: {e}"
                     )
                 finally:
                     unregister_fuzzer_manager(worker.worker_id)
@@ -943,7 +938,8 @@ def generate(variant: int = 1) -> bytes:
                 effective_status = "interrupted"
 
             result = {
-                "worker_id": worker.worker_id,
+                "worker_id": worker.display_name,  # Use display name for summaries
+                "worker_object_id": worker.worker_id,  # ObjectId for DB queries
                 "fuzzer": worker.fuzzer,
                 "sanitizer": worker.sanitizer,
                 "status": effective_status,

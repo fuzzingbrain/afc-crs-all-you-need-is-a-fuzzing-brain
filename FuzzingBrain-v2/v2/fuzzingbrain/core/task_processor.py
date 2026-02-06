@@ -588,10 +588,11 @@ class TaskProcessor:
                 if len(job["fuzzer"]) > col_fuzzer - 2
                 else job["fuzzer"]
             )
+            display_name = job.get("display_name", f"{job['fuzzer']}_{job['sanitizer']}")
             worker_id = (
-                job["worker_id"][: col_worker_id - 2]
-                if len(job["worker_id"]) > col_worker_id - 2
-                else job["worker_id"]
+                display_name[: col_worker_id - 2]
+                if len(display_name) > col_worker_id - 2
+                else display_name
             )
 
             # Build cell content
@@ -1108,7 +1109,7 @@ class TaskProcessor:
                         "message": f"Dispatched {len(jobs)} workers.",
                         "workspace": task.task_path,
                         "fuzzers": [f.fuzzer_name for f in successful_fuzzers],
-                        "workers": [j["worker_id"] for j in jobs],
+                        "workers": [j.get("display_name", f"{j['fuzzer']}_{j['sanitizer']}") for j in jobs],
                     }
 
             finally:

@@ -4,16 +4,19 @@ Worker Context
 Provides isolated runtime context for each Worker instance.
 Uses MongoDB ObjectId as unique identifier for both runtime isolation and persistence.
 
+This is the ONLY place where Worker records are created and persisted.
+Dispatcher does NOT create Worker records - it only dispatches Celery tasks.
+
 Hierarchy:
     Task (ObjectId)
-    └── Worker (ObjectId)
+    └── Worker (ObjectId)  ← Created here
         └── Agent (ObjectId)
 
 Persistence Strategy:
     - Initial save on __enter__ (status: running)
     - Periodic save every N seconds or on significant events
     - Final save on __exit__ (status: completed/failed)
-    - Incremental updates using $set and $inc for efficiency
+    - Writes directly to 'workers' collection
 """
 
 import threading
@@ -46,12 +49,15 @@ class WorkerContext:
     """
     Encapsulates all runtime resources for a single Worker instance.
 
+    This is the canonical source for Worker records in MongoDB.
+    Dispatcher does NOT create Worker records - WorkerContext does.
+
     Features:
     - Unique ObjectId for isolation and persistence
     - Context manager for automatic lifecycle management
-    - Links to parent Task via task_id
-    - All child Agents link back via worker_id
-    - Periodic persistence to MongoDB
+    - Links to parent Task via task_id (ObjectId)
+    - All child Agents link back via worker_id (ObjectId)
+    - Periodic persistence to MongoDB 'workers' collection
     - Real-time status updates
 
     Usage:
@@ -79,6 +85,9 @@ class WorkerContext:
         sanitizer: str,
         scan_mode: str = "full",
         project_name: str = "",
+        task_type: str = "pov",
+        workspace_path: str = "",
+        celery_job_id: str = None,
     ):
         """
         Initialize worker context.
@@ -89,18 +98,26 @@ class WorkerContext:
             sanitizer: Sanitizer type
             scan_mode: Scan mode ("full" or "delta")
             project_name: Project name
+            task_type: Job type (pov, patch, pov-patch, harness)
+            workspace_path: Worker workspace path
+            celery_job_id: Celery task ID (set by tasks.py)
         """
         # Unique identifier - MongoDB ObjectId
         self.worker_id = str(ObjectId())
 
-        # Parent Task linkage
+        # Parent Task linkage (ObjectId)
         self.task_id = task_id
+
+        # Celery job ID (for tracking)
+        self.celery_job_id = celery_job_id
 
         # Worker identity
         self.fuzzer = fuzzer
         self.sanitizer = sanitizer
         self.scan_mode = scan_mode
         self.project_name = project_name
+        self.task_type = task_type
+        self.workspace_path = workspace_path
 
         # Lifecycle state
         self.started_at: Optional[datetime] = None
@@ -157,7 +174,10 @@ class WorkerContext:
 
     def _save_to_db(self, force: bool = False) -> bool:
         """
-        Save worker record to MongoDB.
+        Save worker record to MongoDB 'workers' collection.
+
+        This writes directly to the same collection used by WorkerRepository,
+        ensuring Worker records are consistent across the system.
 
         Args:
             force: If True, save immediately regardless of dirty state or timing
@@ -181,28 +201,42 @@ class WorkerContext:
                 if db is None:
                     return False
 
+                # Build document matching Worker model schema
                 doc = {
                     "_id": ObjectId(self.worker_id),
+                    "worker_id": self.worker_id,
+                    "celery_job_id": self.celery_job_id,
                     "task_id": ObjectId(self.task_id) if self.task_id else None,
+                    # Identity
+                    "task_type": self.task_type,
                     "fuzzer": self.fuzzer,
                     "sanitizer": self.sanitizer,
                     "scan_mode": self.scan_mode,
                     "project_name": self.project_name,
+                    "workspace_path": self.workspace_path,
+                    # Status
                     "status": self.status,
-                    "started_at": self.started_at,
-                    "ended_at": self.ended_at,
-                    "error": self.error,
+                    "error_msg": self.error,
+                    # Statistics
                     "agents_spawned": self.agents_spawned,
                     "agents_completed": self.agents_completed,
                     "agents_failed": self.agents_failed,
                     "sp_found": self.sp_found,
                     "sp_verified": self.sp_verified,
                     "pov_generated": self.pov_generated,
-                    "result_summary": self.result_summary,
+                    # Legacy compatibility
+                    "povs_found": self.pov_generated,
+                    "patches_found": 0,
+                    # Timestamps
+                    "created_at": self.started_at or datetime.now(),
                     "updated_at": datetime.now(),
+                    "started_at": self.started_at,
+                    "finished_at": self.ended_at,
+                    # Result
+                    "result_summary": self.result_summary,
                 }
 
-                # Upsert - insert or update
+                # Upsert to 'workers' collection
                 db.workers.update_one(
                     {"_id": ObjectId(self.worker_id)},
                     {"$set": doc},

@@ -2,6 +2,9 @@
 Celery Task Definitions
 
 Defines the tasks that can be executed by Celery workers.
+
+Worker record creation and persistence is handled by WorkerContext
+(via WorkerExecutor.run()), NOT by this file.
 """
 
 import sys
@@ -12,7 +15,6 @@ from typing import Dict, Any
 from loguru import logger
 
 from ..celery_app import app
-from ..core.models import Worker, WorkerStatus
 from ..core.logging import (
     set_log_dir,
     setup_worker_logging,
@@ -40,6 +42,9 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     """
     Execute a worker task for a {fuzzer, sanitizer} pair.
 
+    Note: Worker record creation and persistence is handled by WorkerContext
+    (via WorkerExecutor.run()), NOT by this function.
+
     Args:
         assignment: Dictionary containing:
             - task_id: str
@@ -63,7 +68,6 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
     # Pre-built fuzzer info from Analyzer (new architecture)
     fuzzer_binary_path = assignment.get("fuzzer_binary_path")
-    build_dir = assignment.get("build_dir")
     coverage_fuzzer_path = assignment.get("coverage_fuzzer_path")
     analysis_socket_path = assignment.get("analysis_socket_path")
 
@@ -71,16 +75,12 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     scan_mode = assignment.get("scan_mode", "full")
     diff_path = assignment.get("diff_path")
 
-    # Evaluation server for cost tracking
-    eval_server = assignment.get("eval_server")
-    budget_limit = assignment.get("budget_limit", 0.0)
-    pov_count = assignment.get("pov_count", 1)
-
-    worker_id = f"{task_id}__{fuzzer}__{sanitizer}"
+    # Display name for logging (not ObjectId)
+    display_name = f"{fuzzer}_{sanitizer}"
 
     # Build worker metadata for logging
     worker_metadata = {
-        "Worker ID": worker_id,
+        "Display Name": display_name,
         "Task ID": task_id,
         "Project": project_name,
         "Fuzzer": fuzzer,
@@ -102,13 +102,10 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         # Setup worker logging with new structure
         setup_worker_logging(fuzzer, sanitizer, worker_metadata)
         # Bind logger to this worker for filtering
-        logger.configure(extra={"worker": f"{fuzzer}_{sanitizer}"})
+        logger.configure(extra={"worker": display_name})
 
     logger.info("Worker starting")
     start_time = datetime.now()
-
-    # Worker context is now handled by WorkerExecutor using WorkerContext
-    # which persists to MongoDB directly - no reporter needed
 
     # Initialize database connection for this worker process
     try:
@@ -120,66 +117,20 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         logger.exception(f"Failed to initialize worker: {e}")
         return {
-            "worker_id": worker_id,
+            "display_name": display_name,
             "status": "failed",
             "error": f"Initialization failed: {e}",
         }
 
-    # Create worker record with started_at timestamp
-    worker = Worker(
-        worker_id=worker_id,
-        celery_job_id=self.request.id,
-        task_id=task_id,
-        task_type=task_type,
-        fuzzer=fuzzer,
-        sanitizer=sanitizer,
-        workspace_path=workspace_path,
-        status=WorkerStatus.BUILDING,
-        started_at=start_time,
-    )
-    repos.workers.save(worker)
-
     try:
-        # Step 1: Setup fuzzer binary
-        # If pre-built fuzzer path is provided (new architecture), skip building
-        # Otherwise fall back to building (legacy mode)
-        build_start = datetime.now()
-        if fuzzer_binary_path:
-            logger.info(f"Using pre-built fuzzer from Analyzer: {fuzzer_binary_path}")
-            worker.status = WorkerStatus.RUNNING
-            worker.phase_build = 0.0  # Pre-built, no build time
-            repos.workers.save(worker)
+        # Setup coverage fuzzer path if provided
+        if coverage_fuzzer_path:
+            from ..tools.coverage import set_coverage_fuzzer_path
+            set_coverage_fuzzer_path(coverage_fuzzer_path)
 
-            # Set coverage fuzzer path if provided
-            if coverage_fuzzer_path:
-                from ..tools.coverage import set_coverage_fuzzer_path
-
-                set_coverage_fuzzer_path(coverage_fuzzer_path)
-        else:
-            # Legacy mode: build fuzzer in worker
-            logger.info(f"Building fuzzer with {sanitizer} sanitizer (legacy mode)")
-            worker.status = WorkerStatus.BUILDING
-            repos.workers.save(worker)
-
-            from .builder import WorkerBuilder
-
-            builder = WorkerBuilder(workspace_path, project_name, sanitizer)
-            build_success, build_msg = builder.build()
-
-            if not build_success:
-                raise Exception(f"Build failed: {build_msg}")
-
-            # Get fuzzer path from builder
-            fuzzer_binary_path = str(builder.get_fuzzer_path(fuzzer))
-
-            # Record build time
-            worker.phase_build = (datetime.now() - build_start).total_seconds()
-            repos.workers.save(worker)
-
-        # Step 2: Run fuzzing strategies
+        # Run fuzzing strategies via WorkerExecutor
+        # WorkerContext (inside executor.run()) handles Worker record creation
         logger.info("Running fuzzing strategies")
-        worker.status = WorkerStatus.RUNNING
-        repos.workers.save(worker)
 
         from .executor import WorkerExecutor
 
@@ -196,31 +147,20 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             analysis_socket_path=analysis_socket_path,
             diff_path=diff_path,
             log_dir=log_dir,
+            # Pass celery_job_id for WorkerContext
+            celery_job_id=self.request.id,
         )
         result = executor.run()
 
         # Clean up analysis client
         executor.close()
 
-        # Step 3: Mark completed and save phase timing from strategy result
-        worker.status = WorkerStatus.COMPLETED
-        worker.povs_found = result.get("povs_found", 0)
-        worker.patches_found = result.get("patches_found", 0)
-        worker.finished_at = datetime.now()
-        # Copy phase timing from strategy result
-        worker.phase_reachability = result.get("phase_reachability", 0.0)
-        worker.phase_find_sp = result.get("phase_find_sp", 0.0)
-        worker.phase_verify = result.get("phase_verify", 0.0)
-        worker.phase_pov = result.get("phase_pov", 0.0)
-        worker.phase_save = result.get("phase_save", 0.0)
-        repos.workers.save(worker)
-
         # Calculate elapsed time
         elapsed_seconds = (datetime.now() - start_time).total_seconds()
 
         # Log worker completion summary
         summary = create_worker_summary(
-            worker_id=worker_id,
+            worker_id=display_name,
             status="completed",
             fuzzer=fuzzer,
             sanitizer=sanitizer,
@@ -231,13 +171,13 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         for line in summary.split("\n"):
             logger.info(line)
 
-        # Step 4: Cleanup workspace (keep results)
+        # Cleanup workspace (keep results)
         from .cleanup import cleanup_worker_workspace
-
         cleanup_worker_workspace(workspace_path)
 
         return {
-            "worker_id": worker_id,
+            "display_name": display_name,
+            "worker_id": result.get("worker_id"),  # ObjectId from WorkerContext
             "status": "completed",
             "fuzzer": fuzzer,
             "sanitizer": sanitizer,
@@ -256,17 +196,12 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as cleanup_err:
             logger.warning(f"Error during cleanup: {cleanup_err}")
 
-        worker.status = WorkerStatus.FAILED
-        worker.error_msg = f"Budget limit exceeded: {e}"
-        worker.finished_at = datetime.now()
-        repos.workers.save(worker)
-
         # Calculate elapsed time
         elapsed_seconds = (datetime.now() - start_time).total_seconds()
 
         # Log worker summary
         summary = create_worker_summary(
-            worker_id=worker_id,
+            worker_id=display_name,
             status="budget_exceeded",
             fuzzer=fuzzer,
             sanitizer=sanitizer,
@@ -277,7 +212,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             logger.info(line)
 
         return {
-            "worker_id": worker_id,
+            "display_name": display_name,
             "status": "budget_exceeded",
             "fuzzer": fuzzer,
             "sanitizer": sanitizer,
@@ -294,17 +229,12 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as cleanup_err:
             logger.warning(f"Error during cleanup: {cleanup_err}")
 
-        worker.status = WorkerStatus.FAILED
-        worker.error_msg = str(e)
-        worker.finished_at = datetime.now()
-        repos.workers.save(worker)
-
         # Calculate elapsed time
         elapsed_seconds = (datetime.now() - start_time).total_seconds()
 
         # Log worker failure summary
         summary = create_worker_summary(
-            worker_id=worker_id,
+            worker_id=display_name,
             status="failed",
             fuzzer=fuzzer,
             sanitizer=sanitizer,
@@ -315,7 +245,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             logger.info(line)
 
         return {
-            "worker_id": worker_id,
+            "display_name": display_name,
             "status": "failed",
             "fuzzer": fuzzer,
             "sanitizer": sanitizer,

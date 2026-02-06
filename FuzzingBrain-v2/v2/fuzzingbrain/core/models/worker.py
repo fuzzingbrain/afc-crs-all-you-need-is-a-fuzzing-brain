@@ -1,11 +1,18 @@
 """
 Worker Model - CRS execution unit
+
+Uses MongoDB ObjectId as primary key for proper hierarchical linking:
+    Task (ObjectId)
+    └── Worker (ObjectId)
+        └── Agent (ObjectId)
 """
 
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Optional, List
+
+from bson import ObjectId
 
 
 class WorkerStatus(str, Enum):
@@ -24,22 +31,23 @@ class Worker:
     Worker represents a CRS execution unit.
 
     Each Worker is responsible for one {fuzzer, sanitizer} combination.
-    Workers are dynamically created by the Controller and managed via Celery.
+    Workers are created by WorkerContext and persisted to MongoDB.
 
-    ID format: {task_id}__{fuzzer}__{sanitizer}
-    Example: "task_A__fuzz_png__address"
+    ID: MongoDB ObjectId (unique per worker instance)
+    Display name: {fuzzer}_{sanitizer} (for logging)
     """
 
-    # Identifiers
-    # _id is the composite key: task_id__fuzzer__sanitizer
-    worker_id: str = ""
+    # Identifiers - ObjectId based
+    worker_id: str = ""  # ObjectId string (set by WorkerContext)
     celery_job_id: Optional[str] = None  # Celery task ID
-    task_id: str = ""
+    task_id: str = ""  # Parent Task ObjectId
 
     # Assignment
     task_type: str = "pov"  # pov | patch | harness
     fuzzer: str = ""
     sanitizer: str = "address"
+    scan_mode: str = "full"  # full | delta
+    project_name: str = ""
 
     # Execution context
     workspace_path: Optional[str] = None
@@ -50,7 +58,15 @@ class Worker:
     status: WorkerStatus = WorkerStatus.PENDING
     error_msg: Optional[str] = None
 
-    # Results
+    # Statistics
+    agents_spawned: int = 0
+    agents_completed: int = 0
+    agents_failed: int = 0
+    sp_found: int = 0
+    sp_verified: int = 0
+    pov_generated: int = 0
+
+    # Results (legacy compatibility)
     povs_found: int = 0
     patches_found: int = 0
 
@@ -61,44 +77,59 @@ class Worker:
     finished_at: Optional[datetime] = None
 
     # Phase timing (seconds) - for performance analysis
-    # Build phase
     phase_build: float = 0.0
-    # Strategy phases
-    phase_reachability: float = 0.0  # Step 1: Diff reachability check
-    phase_find_sp: float = 0.0  # Step 2: Find suspicious points
-    phase_verify: float = 0.0  # Step 3: Verify suspicious points
-    phase_pov: float = 0.0  # Step 4: POV generation
-    phase_save: float = 0.0  # Step 5: Save results
+    phase_reachability: float = 0.0
+    phase_find_sp: float = 0.0
+    phase_verify: float = 0.0
+    phase_pov: float = 0.0
+    phase_save: float = 0.0
+
+    # Result summary
+    result_summary: dict = field(default_factory=dict)
+
+    @property
+    def display_name(self) -> str:
+        """Get human-readable worker name for logging."""
+        return f"{self.fuzzer}_{self.sanitizer}"
 
     @staticmethod
-    def generate_worker_id(task_id: str, fuzzer: str, sanitizer: str) -> str:
-        """Generate worker ID from components"""
-        return f"{task_id}__{fuzzer}__{sanitizer}"
+    def generate_display_name(fuzzer: str, sanitizer: str) -> str:
+        """Generate display name from components (for logging only)."""
+        return f"{fuzzer}_{sanitizer}"
 
     def __post_init__(self):
-        """Generate worker_id if not provided"""
-        if not self.worker_id and self.task_id and self.fuzzer:
-            self.worker_id = self.generate_worker_id(
-                self.task_id, self.fuzzer, self.sanitizer
-            )
+        """Generate worker_id if not provided."""
+        if not self.worker_id:
+            self.worker_id = str(ObjectId())
 
     def to_dict(self) -> dict:
-        """Convert to dictionary for MongoDB storage"""
+        """Convert to dictionary for MongoDB storage."""
         return {
-            "_id": self.worker_id,
+            "_id": ObjectId(self.worker_id) if self.worker_id else ObjectId(),
             "worker_id": self.worker_id,
             "celery_job_id": self.celery_job_id,
-            "task_id": self.task_id,
+            "task_id": ObjectId(self.task_id) if self.task_id else None,
             "task_type": self.task_type,
             "fuzzer": self.fuzzer,
             "sanitizer": self.sanitizer,
+            "scan_mode": self.scan_mode,
+            "project_name": self.project_name,
             "workspace_path": self.workspace_path,
             "current_strategy": self.current_strategy,
             "strategy_history": self.strategy_history,
             "status": self.status.value,
             "error_msg": self.error_msg,
+            # Statistics
+            "agents_spawned": self.agents_spawned,
+            "agents_completed": self.agents_completed,
+            "agents_failed": self.agents_failed,
+            "sp_found": self.sp_found,
+            "sp_verified": self.sp_verified,
+            "pov_generated": self.pov_generated,
+            # Legacy
             "povs_found": self.povs_found,
             "patches_found": self.patches_found,
+            # Timestamps
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "started_at": self.started_at,
@@ -110,25 +141,47 @@ class Worker:
             "phase_verify": self.phase_verify,
             "phase_pov": self.phase_pov,
             "phase_save": self.phase_save,
+            # Result
+            "result_summary": self.result_summary,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "Worker":
-        """Create Worker from dictionary"""
+        """Create Worker from dictionary."""
+        # Handle ObjectId conversion
+        worker_id = data.get("worker_id") or data.get("_id")
+        if isinstance(worker_id, ObjectId):
+            worker_id = str(worker_id)
+
+        task_id = data.get("task_id")
+        if isinstance(task_id, ObjectId):
+            task_id = str(task_id)
+
         return cls(
-            worker_id=data.get("worker_id", data.get("_id", "")),
+            worker_id=worker_id or "",
             celery_job_id=data.get("celery_job_id"),
-            task_id=data.get("task_id", ""),
+            task_id=task_id or "",
             task_type=data.get("task_type", "pov"),
             fuzzer=data.get("fuzzer", ""),
             sanitizer=data.get("sanitizer", "address"),
+            scan_mode=data.get("scan_mode", "full"),
+            project_name=data.get("project_name", ""),
             workspace_path=data.get("workspace_path"),
             current_strategy=data.get("current_strategy"),
             strategy_history=data.get("strategy_history", []),
             status=WorkerStatus(data.get("status", "pending")),
             error_msg=data.get("error_msg"),
+            # Statistics
+            agents_spawned=data.get("agents_spawned", 0),
+            agents_completed=data.get("agents_completed", 0),
+            agents_failed=data.get("agents_failed", 0),
+            sp_found=data.get("sp_found", 0),
+            sp_verified=data.get("sp_verified", 0),
+            pov_generated=data.get("pov_generated", 0),
+            # Legacy
             povs_found=data.get("povs_found", 0),
             patches_found=data.get("patches_found", 0),
+            # Timestamps
             created_at=data.get("created_at", datetime.now()),
             updated_at=data.get("updated_at", datetime.now()),
             started_at=data.get("started_at"),
@@ -140,6 +193,8 @@ class Worker:
             phase_verify=data.get("phase_verify", 0.0),
             phase_pov=data.get("phase_pov", 0.0),
             phase_save=data.get("phase_save", 0.0),
+            # Result
+            result_summary=data.get("result_summary", {}),
         )
 
     def mark_running(self):
