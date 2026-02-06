@@ -50,7 +50,8 @@ RUN pip3 install --no-cache-dir \
     requests>=2.31.0 \
     python-dotenv>=1.0.0 \
     anthropic \
-    openai
+    openai \
+    claude-agent-sdk
 
 # Create workspace directory
 RUN mkdir -p /app/workspace
