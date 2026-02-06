@@ -177,6 +177,16 @@ class BaseAgent(ABC):
         return True
 
     @property
+    def mcp_context_id(self) -> str:
+        """ID used for MCP tool context lookup.
+
+        Default is worker_id. Override in agents that run in parallel
+        (like SeedAgent) to use a unique per-instance ID to prevent
+        context collision.
+        """
+        return self.worker_id
+
+    @property
     @abstractmethod
     def system_prompt(self) -> str:
         """System prompt for the agent."""
@@ -1061,7 +1071,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             # Pass worker_id so POV tools can find the right context
             mcp_server = create_isolated_mcp_server(
                 agent_id=agent_id,
-                worker_id=self.worker_id,  # Bind worker_id for POV/seed context lookup
+                worker_id=self.mcp_context_id,  # Bind context_id for POV/seed context lookup
                 include_pov_tools=self.include_pov_tools,  # Only POVAgent needs POV tools
                 include_seed_tools=self.include_seed_tools,  # Only SeedAgent needs seed tools
                 include_sp_tools=self.include_sp_tools,  # DirectionPlanningAgent doesn't need SP tools
