@@ -8,7 +8,7 @@ Both share the same business logic.
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, List
-import uuid
+from bson import ObjectId
 
 from .core import Task, JobType, ScanMode
 from .db import RepositoryManager
@@ -210,7 +210,7 @@ async def health():
 def create_task_from_request(request: TaskRequest) -> Task:
     """Create Task from unified TaskRequest"""
     return Task(
-        task_id=str(uuid.uuid4())[:8],
+        task_id=str(ObjectId()),
         task_type=JobType(request.task_type),
         scan_mode=ScanMode(request.scan_mode),
         repo_url=request.repo_url,
@@ -288,7 +288,7 @@ async def generate_patch(request: PatchRequest, background_tasks: BackgroundTask
     Takes a POV ID and attempts to generate a fix.
     """
     task = Task(
-        task_id=str(uuid.uuid4())[:8],
+        task_id=str(ObjectId()),
         task_type=JobType.PATCH,
         timeout_minutes=request.timeout_minutes,
     )
@@ -316,7 +316,7 @@ async def pov_patch(request: POVPatchRequest, background_tasks: BackgroundTasks)
     Combines POV finding and patch generation.
     """
     task = Task(
-        task_id=str(uuid.uuid4())[:8],
+        task_id=str(ObjectId()),
         task_type=JobType.POV_PATCH,
         scan_mode=ScanMode.FULL,
         repo_url=request.repo_url,
@@ -348,7 +348,7 @@ async def generate_harness(request: HarnessRequest, background_tasks: Background
     Creates new fuzz targets to improve code coverage.
     """
     task = Task(
-        task_id=str(uuid.uuid4())[:8],
+        task_id=str(ObjectId()),
         task_type=JobType.HARNESS,
         repo_url=request.repo_url,
         project_name=request.project_name,

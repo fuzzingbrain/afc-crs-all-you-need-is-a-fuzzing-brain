@@ -7,6 +7,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, List
 
+from bson import ObjectId
+
 from ..utils import generate_id
 
 
@@ -94,7 +96,7 @@ class Task:
     def to_dict(self) -> dict:
         """Convert to dictionary for MongoDB storage"""
         return {
-            "_id": self.task_id,
+            "_id": ObjectId(self.task_id) if self.task_id else ObjectId(),
             "task_id": self.task_id,
             "task_type": self.task_type.value,
             "scan_mode": self.scan_mode.value,
@@ -125,8 +127,13 @@ class Task:
     @classmethod
     def from_dict(cls, data: dict) -> "Task":
         """Create Task from dictionary"""
+        # Handle ObjectId conversion
+        task_id = data.get("task_id") or data.get("_id")
+        if isinstance(task_id, ObjectId):
+            task_id = str(task_id)
+
         return cls(
-            task_id=data.get("task_id", data.get("_id")),
+            task_id=task_id,
             task_type=JobType(data.get("task_type", "pov-patch")),
             scan_mode=ScanMode(data.get("scan_mode", "full")),
             status=TaskStatus(data.get("status", "pending")),

@@ -615,9 +615,9 @@ def process_task(task: Task, config: Config) -> dict:
 
 def create_task_from_config(config: Config) -> Task:
     """Create a Task object from Config"""
-    import uuid
+    from bson import ObjectId
 
-    task_id = config.task_id or str(uuid.uuid4())[:8]
+    task_id = config.task_id or str(ObjectId())
 
     return Task(
         task_id=task_id,
@@ -716,7 +716,7 @@ def setup_workspace(config: Config) -> Config:
 
     Returns updated config with workspace path set.
     """
-    import uuid
+    from bson import ObjectId
     import subprocess
     import shutil
     import tempfile
@@ -725,7 +725,7 @@ def setup_workspace(config: Config) -> Config:
     workspace_base = script_dir / "workspace"
 
     # Generate task ID if not provided
-    task_id = config.task_id or str(uuid.uuid4())[:8]
+    task_id = config.task_id or str(ObjectId())
     config.task_id = task_id
 
     # Determine project name
