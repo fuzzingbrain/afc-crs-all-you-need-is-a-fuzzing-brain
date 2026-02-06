@@ -1,0 +1,34 @@
+{
+  "name": "taintsan",
+  "version": "1.0.0",
+  "description": "Taint Tracking Sanitizer for JavaScript/Node.js - Detects injection vulnerabilities during fuzzing",
+  "main": "taintsan.js",
+  "scripts": {
+    "demo": "node demo.js",
+    "test": "node demo.js"
+  },
+  "keywords": [
+    "security",
+    "fuzzing",
+    "taint-tracking",
+    "sanitizer",
+    "injection",
+    "xss",
+    "sql-injection",
+    "command-injection"
+  ],
+  "author": "AFC-CRS Security Research",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "devDependencies": {},
+  "peerDependencies": {
+    "@jazzer.js/core": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@jazzer.js/core": {
+      "optional": true
+    }
+  }
+}

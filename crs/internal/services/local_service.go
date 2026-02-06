@@ -238,6 +238,17 @@ func (s *LocalCRSService) SubmitLocalTask(taskDir string) error {
 		return err
 	}
 
+	// Override preferred sanitizer for JavaScript projects
+	// JavaScript projects MUST use "none" sanitizer - they don't support address/memory/undefined
+	lang := strings.ToLower(cfg.Language)
+	if lang == "javascript" || lang == "typescript" || lang == "js" || lang == "ts" {
+		if s.cfg.Fuzzer.PreferredSanitizer != "none" {
+			log.Printf("JavaScript project detected - overriding preferred sanitizer from '%s' to 'none'",
+				s.cfg.Fuzzer.PreferredSanitizer)
+			s.cfg.Fuzzer.PreferredSanitizer = "none"
+		}
+	}
+
 	// Collect all fuzzers from all sanitizer builds and run them in parallel
 	log.Printf("-------------------- Collecting all fuzzers ----------------------")
 	var allFuzzers []string

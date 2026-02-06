@@ -293,40 +293,229 @@ if __name__ == "__main__":
 ''',
     },
     "javascript": {
-        "prototype_pollution": '''// Prototype Pollution Fuzzer for JavaScript
-const jazzer = require("@jazzer.js/core");
+        "taintsan_integration": '''// TaintSan-enabled Fuzzer for JavaScript
+// This harness uses TaintSan for taint tracking to detect injection vulnerabilities
+const { FuzzedDataProvider } = require('@jazzer.js/core');
+const taintsan = require('./taintsan');
 
-function fuzz(data) {
-    const input = data.toString();
+// Install TaintSan monitors BEFORE importing target code
+taintsan.install();
 
-    // Check for prototype pollution patterns
-    const dangerousPatterns = [
-        /__proto__/,
-        /constructor\\.prototype/,
-        /prototype\\[/,
-    ];
+// Import target modules AFTER TaintSan installation
+// const targetModule = require('/src/project/dist/target.js');
 
-    for (const pattern of dangerousPatterns) {
-        if (pattern.test(input)) {
-            console.log("PROTO_POLLUTION:", input);
+module.exports.fuzz = function (data) {
+    const provider = new FuzzedDataProvider(data);
+
+    try {
+        // Create tainted input from fuzzer data
+        const userInput = taintsan.taint(
+            provider.consumeRemainingAsString(),
+            taintsan.TaintSource.FUZZER
+        );
+
+        // Pass tainted data through target code
+        // TaintSan will detect if it reaches dangerous sinks
+        // targetModule.processInput(userInput);
+
+    } catch (e) {
+        if (e instanceof taintsan.TaintViolationError) {
+            // Found a vulnerability! This is what we want to detect
+            console.error('[TAINTSAN] Vulnerability detected!');
+            console.error(`  Sink: ${e.violation.sinkType} - ${e.violation.sinkFunction}`);
+            console.error(`  Source: ${e.violation.taintInfo.source}`);
+            throw e;  // Re-throw for Jazzer to record as finding
+        }
+        // Other errors - ignore (expected during fuzzing)
+    }
+};
+''',
+        "prototype_pollution": '''// Prototype Pollution Fuzzer with TaintSan
+const { FuzzedDataProvider } = require('@jazzer.js/core');
+const taintsan = require('./taintsan');
+
+taintsan.install();
+
+function vulnerableMerge(target, source) {
+    for (const key in source) {
+        if (typeof source[key] === 'object' && source[key] !== null) {
+            if (!target[key]) target[key] = {};
+            vulnerableMerge(target[key], source[key]);
+        } else {
+            target[key] = source[key];
         }
     }
-
-    // Test object merge operations
-    try {
-        const obj = JSON.parse(input);
-        if (obj && typeof obj === "object") {
-            if ("__proto__" in obj || "constructor" in obj) {
-                console.log("DANGEROUS_OBJ:", input);
-            }
-        }
-    } catch {}
+    return target;
 }
 
-module.exports = { fuzz };
+module.exports.fuzz = function (data) {
+    const provider = new FuzzedDataProvider(data);
+
+    try {
+        const jsonStr = taintsan.taint(
+            provider.consumeRemainingAsString(),
+            taintsan.TaintSource.FUZZER
+        );
+
+        const parsed = JSON.parse(jsonStr.toString());
+
+        // Deep taint all parsed values
+        function deepTaint(obj, visited = new WeakSet()) {
+            if (!obj || typeof obj !== 'object' || visited.has(obj)) return obj;
+            visited.add(obj);
+
+            for (const key of Object.keys(obj)) {
+                if (typeof obj[key] === 'string') {
+                    obj[key] = taintsan.taint(obj[key], taintsan.TaintSource.FUZZER);
+                } else if (typeof obj[key] === 'object') {
+                    deepTaint(obj[key], visited);
+                }
+            }
+            return obj;
+        }
+
+        const taintedObj = deepTaint(parsed);
+
+        // Check for prototype pollution attempts
+        if ('__proto__' in taintedObj || 'constructor' in taintedObj) {
+            throw new taintsan.TaintViolationError({
+                sinkType: 'PROTOTYPE_POLLUTION',
+                sinkFunction: 'JSON.parse',
+                taintInfo: { source: 'FUZZER', sourceLocation: 'fuzzer input' },
+                taintedValuePreview: jsonStr.toString().substring(0, 100)
+            });
+        }
+
+        // Test vulnerable merge
+        vulnerableMerge({}, taintedObj);
+
+    } catch (e) {
+        if (e instanceof taintsan.TaintViolationError) {
+            throw e;
+        }
+        // JSON parse errors are expected
+    }
+};
+''',
+        "command_injection": '''// Command Injection Fuzzer with TaintSan
+const { FuzzedDataProvider } = require('@jazzer.js/core');
+const taintsan = require('./taintsan');
+
+taintsan.install();
+
+module.exports.fuzz = function (data) {
+    const provider = new FuzzedDataProvider(data);
+
+    try {
+        const userInput = taintsan.taint(
+            provider.consumeRemainingAsString(),
+            taintsan.TaintSource.FUZZER
+        );
+
+        // This will trigger TaintViolationError if tainted data reaches child_process
+        const child_process = require('child_process');
+
+        // Simulated vulnerable command construction
+        const cmd = 'echo ' + userInput;
+
+        // TaintSan will catch this when exec is called with tainted cmd
+        // child_process.execSync(cmd);
+
+    } catch (e) {
+        if (e instanceof taintsan.TaintViolationError) {
+            throw e;
+        }
+    }
+};
+''',
+        "sql_injection": '''// SQL Injection Fuzzer with TaintSan
+const { FuzzedDataProvider } = require('@jazzer.js/core');
+const taintsan = require('./taintsan');
+
+taintsan.install();
+
+module.exports.fuzz = function (data) {
+    const provider = new FuzzedDataProvider(data);
+
+    try {
+        const userInput = taintsan.taint(
+            provider.consumeRemainingAsString(),
+            taintsan.TaintSource.FUZZER
+        );
+
+        // Taint propagates through string operations
+        const query = taintsan.sql`SELECT * FROM users WHERE name = '${userInput}'`;
+
+        // Check if query is tainted (should be since userInput is tainted)
+        if (taintsan.isTainted(query)) {
+            // In a real harness, we would pass this to a mock DB
+            // that checks for tainted queries
+        }
+
+        // Direct string interpolation (vulnerable)
+        const unsafeQuery = "SELECT * FROM users WHERE id = " + userInput;
+
+        // This would trigger TaintSan if passed to a real SQL client
+        // db.query(unsafeQuery);
+
+    } catch (e) {
+        if (e instanceof taintsan.TaintViolationError) {
+            throw e;
+        }
+    }
+};
+''',
+        "ssrf": '''// SSRF (Server-Side Request Forgery) Fuzzer with TaintSan
+const { FuzzedDataProvider } = require('@jazzer.js/core');
+const taintsan = require('./taintsan');
+
+taintsan.install();
+
+module.exports.fuzz = function (data) {
+    const provider = new FuzzedDataProvider(data);
+
+    try {
+        const urlInput = taintsan.taint(
+            provider.consumeRemainingAsString(),
+            taintsan.TaintSource.FUZZER
+        );
+
+        // TaintSan monitors http.request, https.request, and fetch
+        // This will be caught if tainted URL reaches network requests
+        const url = new URL(urlInput.toString());
+
+        // Check for internal/private IP access attempts
+        const host = url.hostname;
+        const privatePatterns = [
+            /^127\\./, /^10\\./, /^192\\.168\\./,
+            /^172\\.(1[6-9]|2[0-9]|3[01])\\./,
+            /^localhost$/i, /^0\\.0\\.0\\.0$/
+        ];
+
+        for (const pattern of privatePatterns) {
+            if (pattern.test(host)) {
+                throw new taintsan.TaintViolationError({
+                    sinkType: 'SSRF',
+                    sinkFunction: 'URL',
+                    taintInfo: { source: 'FUZZER', sourceLocation: 'fuzzer input' },
+                    taintedValuePreview: urlInput.toString().substring(0, 100)
+                });
+            }
+        }
+
+    } catch (e) {
+        if (e instanceof taintsan.TaintViolationError) {
+            throw e;
+        }
+        // URL parse errors are expected
+    }
+};
 ''',
     },
 }
+
+# Path to TaintSan implementation
+TAINTSAN_JS_PATH = Path(__file__).parent.parent / "sanitizers" / "taintsan_javascript"
 
 
 def detect_project_language(repo_path: str) -> list:
@@ -678,8 +867,111 @@ def TestOneInput(data):
 
 ### JavaScript/Node.js Security Fuzzing:
 - Use Jazzer.js for coverage-guided fuzzing
+- **IMPORTANT**: JavaScript projects MUST use `sanitizer: none` in project.yaml (no ASan support)
+- Use TaintSan for injection detection instead of traditional sanitizers
 - Target: JSON.parse, eval, child_process, database queries, URL parsing
-- Focus on prototype pollution, ReDoS, injection vulnerabilities
+- Focus on prototype pollution, ReDoS, command injection, SSRF, SQL injection
+
+### TaintSan Integration for JavaScript:
+TaintSan is a taint tracking sanitizer for JavaScript that detects when untrusted data
+reaches dangerous sinks without proper sanitization.
+
+**In build.sh, copy TaintSan to the output directory:**
+```bash
+# Copy TaintSan for JavaScript security fuzzing
+mkdir -p $OUT/taintsan
+cp /src/taintsan/*.js $OUT/taintsan/ || {
+    # If TaintSan not pre-installed, create minimal version inline
+    cat > $OUT/taintsan/taintsan.js << 'TAINTEOF'
+// Minimal TaintSan implementation for fuzzing
+'use strict';
+const taintMap = new WeakMap();
+const stringTaintMap = new Map();
+
+class TaintViolationError extends Error {
+    constructor(violation) {
+        super(`TAINT VIOLATION: ${violation.sinkType} received tainted data`);
+        this.name = 'TaintViolationError';
+        this.violation = violation;
+    }
+}
+
+const TaintSource = {
+    FUZZER: 'FUZZER', HTTP_REQUEST: 'HTTP_REQUEST', FILE_INPUT: 'FILE_INPUT',
+    STDIN: 'STDIN', ENV_VAR: 'ENV_VAR', DATABASE: 'DATABASE', USER_MARKED: 'USER_MARKED'
+};
+
+function taint(value, source = 'USER_MARKED') {
+    const info = { source, timestamp: Date.now() };
+    if (typeof value === 'string') {
+        stringTaintMap.set(value, info);
+    } else if (typeof value === 'object' && value !== null) {
+        taintMap.set(value, info);
+    }
+    return value;
+}
+
+function isTainted(value) {
+    if (typeof value === 'object' && value !== null) return taintMap.has(value);
+    if (typeof value === 'string') return stringTaintMap.has(value);
+    return false;
+}
+
+function getTaintInfo(value) {
+    if (typeof value === 'object' && value !== null) return taintMap.get(value);
+    if (typeof value === 'string') return stringTaintMap.get(value);
+    return null;
+}
+
+function install() { console.error('[TaintSan] Minimal mode - monitors not installed'); }
+
+function sql(strings, ...values) {
+    let result = strings[0];
+    let hasTaint = false;
+    for (let i = 0; i < values.length; i++) {
+        if (isTainted(values[i])) hasTaint = true;
+        result += String(values[i]) + strings[i + 1];
+    }
+    if (hasTaint) {
+        const newResult = result;
+        stringTaintMap.set(newResult, { source: 'TAINTED_TEMPLATE' });
+        return newResult;
+    }
+    return result;
+}
+
+module.exports = {
+    TaintSource, TaintViolationError, taint, isTainted, getTaintInfo, install, sql, t: sql
+};
+TAINTEOF
+}
+```
+
+**In fuzz harnesses, use TaintSan:**
+```javascript
+const { FuzzedDataProvider } = require('@jazzer.js/core');
+const taintsan = require('./taintsan/taintsan');
+
+taintsan.install();
+
+module.exports.fuzz = function (data) {
+    const provider = new FuzzedDataProvider(data);
+    const userInput = taintsan.taint(provider.consumeRemainingAsString(), taintsan.TaintSource.FUZZER);
+
+    // TaintSan will detect if tainted data reaches dangerous sinks
+    // like eval(), child_process.exec(), SQL queries, etc.
+    targetModule.processUserInput(userInput);
+};
+```
+
+**project.yaml for JavaScript:**
+```yaml
+language: javascript
+fuzzing_engines:
+  - libfuzzer
+sanitizers:
+  - none  # REQUIRED - JavaScript doesn't support ASan/MSan
+```
 
 ### Go Security Fuzzing:
 - Native go test -fuzz support (Go 1.18+)

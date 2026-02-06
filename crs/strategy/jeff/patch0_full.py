@@ -570,7 +570,7 @@ def run_fuzzer_with_input(log_file, fuzzer_path, project_dir, focus, blob_path, 
             # Find the part that contains project-sanitizer (e.g., "libpng-address" or "metadata-extractor-address")
             project_sanitizer = None
             for part in path_parts:
-                if '-' in part and any(san in part for san in ['address', 'undefined', 'memory']):
+                if '-' in part and any(san in part for san in ['address', 'undefined', 'memory', 'none']):
                     project_sanitizer = part
                     break
             
