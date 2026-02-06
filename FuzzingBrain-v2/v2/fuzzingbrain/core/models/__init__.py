@@ -2,6 +2,12 @@
 FuzzingBrain Data Models
 
 Models for Task, POV, Patch, Worker, Fuzzer, Function, CallGraphNode, etc.
+
+Hierarchy (ObjectId-based):
+    Task
+    └── Worker
+        └── Agent
+            └── LLMCall
 """
 
 from .task import Task, TaskStatus, JobType, ScanMode
@@ -13,6 +19,7 @@ from .function import Function
 from .callgraph import CallGraphNode
 from .suspicious_point import SuspiciousPoint, ControlFlowItem, SPStatus
 from .direction import Direction, DirectionStatus, RiskLevel
+from .llm_call import LLMCall
 
 __all__ = [
     "Task",
@@ -33,4 +40,5 @@ __all__ = [
     "Direction",
     "DirectionStatus",
     "RiskLevel",
+    "LLMCall",
 ]
