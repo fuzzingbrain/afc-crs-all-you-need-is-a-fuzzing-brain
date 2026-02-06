@@ -152,7 +152,8 @@ def get_agent_log_path(
         is_delta: Whether this is delta scan mode (for SPG)
 
     Returns:
-        Path to agent log file (without extension), or None if logging not initialized
+        Path to agent log file (without extension), or None if logging not initialized.
+        If file already exists, appends timestamp to ensure uniqueness.
     """
     if _current_log_dir is None:
         return None
@@ -165,33 +166,43 @@ def get_agent_log_path(
     if agent_type == "direction":
         agent_dir = worker_dir / "agent" / "direction"
         agent_dir.mkdir(parents=True, exist_ok=True)
-        return agent_dir / "D_agent"
+        base_path = agent_dir / "D_agent"
 
     elif agent_type == "seed":
         agent_dir = worker_dir / "agent" / "seed"
         agent_dir.mkdir(parents=True, exist_ok=True)
-        return agent_dir / f"Seed_{index}{name_suffix}"
+        base_path = agent_dir / f"Seed_{index}{name_suffix}"
 
     elif agent_type == "spg":
         agent_dir = worker_dir / "agent" / "sp" / "generate"
         agent_dir.mkdir(parents=True, exist_ok=True)
         if is_delta:
-            return agent_dir / "SPG_delta"
+            base_path = agent_dir / "SPG_delta"
         else:
-            return agent_dir / f"SPG_{index}{name_suffix}"
+            base_path = agent_dir / f"SPG_{index}{name_suffix}"
 
     elif agent_type == "spv":
         agent_dir = worker_dir / "agent" / "sp" / "verify"
         agent_dir.mkdir(parents=True, exist_ok=True)
-        return agent_dir / f"SPV_{index}{name_suffix}"
+        base_path = agent_dir / f"SPV_{index}{name_suffix}"
 
     elif agent_type == "pov":
         agent_dir = worker_dir / "agent" / "pov"
         agent_dir.mkdir(parents=True, exist_ok=True)
-        return agent_dir / f"POV_{index}{name_suffix}"
+        base_path = agent_dir / f"POV_{index}{name_suffix}"
 
     else:
         raise ValueError(f"Unknown agent type: {agent_type}")
+
+    # Check for filename conflict and add timestamp if needed
+    log_file = Path(str(base_path) + ".log")
+    if log_file.exists():
+        import datetime
+
+        timestamp = datetime.datetime.now().strftime("%H%M%S")
+        return Path(str(base_path) + f"_{timestamp}")
+
+    return base_path
 
 
 # =============================================================================

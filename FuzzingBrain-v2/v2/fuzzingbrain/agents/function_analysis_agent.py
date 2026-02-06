@@ -64,6 +64,8 @@ class FunctionAnalysisAgent(BaseAgent):
         task_id: str = "",
         worker_id: str = "",
         log_dir: Optional[Path] = None,
+        # Log file naming
+        index: int = 0,  # Agent index for numbered log files
     ):
         """
         Initialize Function Analysis Agent.
@@ -96,6 +98,10 @@ class FunctionAnalysisAgent(BaseAgent):
             task_id=task_id,
             worker_id=worker_id,
             log_dir=log_dir,
+            index=index,
+            target_name=function_name,  # Use function name for log file naming
+            fuzzer=fuzzer,
+            sanitizer=sanitizer,
         )
 
         self.function_name = function_name
@@ -442,6 +448,7 @@ class LargeFunctionAnalysisAgent(FunctionAnalysisAgent):
         task_id: str = "",
         worker_id: str = "",
         log_dir: Optional[Path] = None,
+        index: int = 0,  # Agent index for numbered log files
         # Large function specific
         use_sliding_window: bool = True,
         window_size: int = 100,  # Lines per window
@@ -465,6 +472,7 @@ class LargeFunctionAnalysisAgent(FunctionAnalysisAgent):
             task_id=task_id,
             worker_id=worker_id,
             log_dir=log_dir,
+            index=index,
         )
 
         self.use_sliding_window = use_sliding_window

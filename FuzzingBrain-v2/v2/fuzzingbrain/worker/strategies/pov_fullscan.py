@@ -957,6 +957,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                 task_id=self.task_id,
                 worker_id=f"Func_{index}_{self.fuzzer}_{self.sanitizer}",
                 log_dir=agent_log_dir,
+                index=index,  # For log file naming: SPG_{index}_{function_name}.log
             )
         else:
             agent = FunctionAnalysisAgent(
@@ -973,6 +974,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                 task_id=self.task_id,
                 worker_id=f"Func_{index}_{self.fuzzer}_{self.sanitizer}",
                 log_dir=agent_log_dir,
+                index=index,  # For log file naming: SPG_{index}_{function_name}.log
             )
 
         try:
@@ -990,44 +992,14 @@ class POVFullscanStrategy(POVBaseStrategy):
                 f"[{index + 1}/{total}] Done: {func.name} in {func_duration:.1f}s - {sp_status}"
             )
 
-            # Write log block
-            await self._write_function_log_v2(agent, direction_id, agent_log_dir)
+            # Note: Agent logs are now written directly to SPG_{index}_{function_name}.log
+            # No need for separate combined log file
 
             return result
 
         except Exception as e:
             self.log_error(f"[{index + 1}/{total}] Failed: {func.name} - {e}")
             return {"success": False, "error": str(e)}
-
-    async def _write_function_log_v2(
-        self,
-        agent,
-        direction_id: str,
-        agent_log_dir,
-    ) -> None:
-        """
-        Write function analysis log block to direction log file.
-        """
-        from pathlib import Path
-
-        if direction_id not in self._direction_log_locks:
-            self._direction_log_locks[direction_id] = asyncio.Lock()
-
-        lock = self._direction_log_locks[direction_id]
-
-        log_block = agent.get_log_block() if hasattr(agent, "get_log_block") else ""
-        if not log_block:
-            return
-
-        log_file = Path(agent_log_dir) / f"{direction_id}-functioncheck.log"
-
-        async with lock:
-            try:
-                with open(log_file, "a", encoding="utf-8") as f:
-                    f.write(log_block)
-                    f.write("\n")
-            except Exception as e:
-                self.log_warning(f"Failed to write function log: {e}")
 
     def _log_coverage_report(self, directions: List) -> None:
         """
