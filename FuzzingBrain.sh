@@ -726,6 +726,10 @@ if [ -n "$DELTA_COMMIT" ] && [ -z "$BASE_COMMIT" ]; then
     show_usage
 fi
 
+
+# Check environment before running
+check_environment
+
 # ============================================
 # CASE 1: Project Name - Continue fuzzing existing project
 # ============================================
@@ -760,9 +764,6 @@ if is_project_name "$TARGET"; then
     print_info "Found existing project: $PROJECT_NAME"
     print_info "Workspace: $WORKSPACE"
     echo ""
-
-    # Check environment before running
-    check_environment
 
     # Run static analysis on workspace
     run_static_analysis "$WORKSPACE"
@@ -969,9 +970,6 @@ elif is_git_url "$TARGET"; then
 
     print_info "Workspace created successfully: $WORKSPACE"
     echo ""
-
-    # Check environment before running
-    check_environment
 
     # Run static analysis on workspace
     run_static_analysis "$WORKSPACE"
