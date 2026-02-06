@@ -131,14 +131,69 @@ def signal_handler(signum, frame):
                         duration_sec = (
                             (finished - started).total_seconds() if started else 0
                         )
+                        fuzzer = w.get("fuzzer", "N/A")
+                        sanitizer = w.get("sanitizer", "N/A")
+
+                        # Query SP count from database (like get_all_worker_results)
+                        sp_count = _repos.suspicious_points.count(
+                            {
+                                "task_id": task_id,
+                                "sources": {
+                                    "$elemMatch": {
+                                        "harness_name": fuzzer,
+                                        "sanitizer": sanitizer,
+                                    }
+                                },
+                            }
+                        )
+
+                        # Query POV count from database
+                        worker_sp_ids = [
+                            sp.get("suspicious_point_id") or sp.get("_id")
+                            for sp in _repos.suspicious_points.collection.find(
+                                {
+                                    "task_id": task_id,
+                                    "sources": {
+                                        "$elemMatch": {
+                                            "harness_name": fuzzer,
+                                            "sanitizer": sanitizer,
+                                        }
+                                    },
+                                },
+                                {"suspicious_point_id": 1, "_id": 1},
+                            )
+                        ]
+                        pov_count = 0
+                        if worker_sp_ids:
+                            pov_count = _repos.povs.count(
+                                {
+                                    "task_id": task_id,
+                                    "suspicious_point_id": {
+                                        "$in": [str(x) for x in worker_sp_ids]
+                                    },
+                                    "is_successful": True,
+                                }
+                            )
+                        # Also count fuzzer-discovered POVs
+                        fuzzer_pov_count = _repos.povs.count(
+                            {
+                                "task_id": task_id,
+                                "harness_name": fuzzer,
+                                "sanitizer": sanitizer,
+                                "suspicious_point_id": {"$in": ["", None]},
+                                "is_successful": True,
+                            }
+                        )
+                        pov_count += fuzzer_pov_count
+
                         worker_results.append(
                             {
-                                "fuzzer": w.get("fuzzer", "N/A"),
-                                "sanitizer": w.get("sanitizer", "N/A"),
+                                "fuzzer": fuzzer,
+                                "sanitizer": sanitizer,
                                 "status": w.get("status", "cancelled"),
                                 "duration_str": f"{duration_sec / 60:.1f}m",
-                                "sps_found": w.get("sps_found", 0),
-                                "povs_found": w.get("povs_found", 0),
+                                "sps_found": sp_count,
+                                "povs_found": pov_count,
                                 "patches_found": w.get("patches_found", 0),
                             }
                         )
