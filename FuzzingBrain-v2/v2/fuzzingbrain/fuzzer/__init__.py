@@ -6,7 +6,7 @@ Dual-layer fuzzer architecture with Agent-guided seed generation.
 Components:
 - FuzzerManager: Top-level manager for all fuzzers
 - FuzzerInstance: Single fuzzer process wrapper
-- CrashMonitor: Background crash directory monitoring
+- FuzzerMonitor: Background crash directory monitoring
 - SeedAgent: AI-powered seed generation
 - seed_tools: MCP tools for seed generation
 """
@@ -23,7 +23,7 @@ from .models import (
 
 from .instance import FuzzerInstance
 
-from .monitor import CrashMonitor
+from .monitor import FuzzerMonitor
 
 from .manager import (
     FuzzerManager,
@@ -57,7 +57,7 @@ __all__ = [
     # Instance
     "FuzzerInstance",
     # Monitor
-    "CrashMonitor",
+    "FuzzerMonitor",
     # Manager
     "FuzzerManager",
     "register_fuzzer_manager",

@@ -14,7 +14,6 @@ from ..analyzer import AnalysisClient
 from ..fuzzer import (
     FuzzerManager,
     register_fuzzer_manager,
-    unregister_fuzzer_manager,
 )
 
 
@@ -136,7 +135,7 @@ class WorkerExecutor:
                         workspace_path=self.workspace_path,
                         fuzzer_name=self.fuzzer,
                         sanitizer=self.sanitizer,
-                        on_crash=self._on_crash_found,
+                        # Note: crash_monitor is Task-level (in Dispatcher), not Worker-level
                     )
                     # Register for cross-module access
                     register_fuzzer_manager(self.worker_id, self._fuzzer_manager)
@@ -154,13 +153,13 @@ class WorkerExecutor:
 
     def _on_crash_found(self, crash_record) -> None:
         """
-        Callback when CrashMonitor finds a new crash.
+        Callback when FuzzerMonitor finds a new crash.
 
         The crash file IS the PoV - directly create POV record.
         Flow: Create POV (inactive) -> Generate Report -> Activate POV
 
         Args:
-            crash_record: CrashRecord from CrashMonitor
+            crash_record: CrashRecord from FuzzerMonitor
         """
         import asyncio
         import base64
@@ -399,29 +398,36 @@ def generate(variant: int = 1) -> bytes:
         return False
 
     def close(self):
-        """Clean up resources."""
+        """
+        Clean up resources when Worker completes.
+
+        Only shuts down SP Fuzzers; Global Fuzzer and FuzzerMonitor continue
+        running until FuzzingBrain ends (timeout/budget/pov_target/manual).
+        """
         if self._analysis_client:
             self._analysis_client.close()
             self._analysis_client = None
 
-        # Shutdown FuzzerManager
+        # Only shutdown SP Fuzzers, keep Global Fuzzer running
+        # Global Fuzzer will be shut down by Dispatcher when task truly ends
         if self._fuzzer_manager:
             import asyncio
 
             try:
-                # Run shutdown in event loop
+                # Run SP fuzzer shutdown in event loop
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    asyncio.create_task(self._fuzzer_manager.shutdown())
+                    asyncio.create_task(self._fuzzer_manager.shutdown_sp_fuzzers_only())
                 else:
-                    loop.run_until_complete(self._fuzzer_manager.shutdown())
+                    loop.run_until_complete(
+                        self._fuzzer_manager.shutdown_sp_fuzzers_only()
+                    )
             except Exception as e:
                 logger.warning(
-                    f"[{self.worker_id}] Error shutting down FuzzerManager: {e}"
+                    f"[{self.worker_id}] Error shutting down SP fuzzers: {e}"
                 )
-            finally:
-                unregister_fuzzer_manager(self.worker_id)
-                self._fuzzer_manager = None
+            # NOTE: Do NOT unregister or set to None!
+            # FuzzerManager stays registered so Dispatcher can shut it down later
 
     def _get_strategy(self):
         """
