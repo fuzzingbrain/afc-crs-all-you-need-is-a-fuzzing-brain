@@ -289,7 +289,7 @@ def truncate_name(name: str, max_len: int = 20) -> str:
 - [x] 5. 修改 `worker/strategies/*.py` - 传递 index/target_name 给 Agent
 - [x] 6. 修改 `analyzer/builder.py` - Build 日志路径 (`build/{sanitizer}.log`)
 - [x] 7. 修改 `fuzzer/monitor.py` - FuzzerMonitor 日志路径 (`fuzzer/monitor.log`)
-- [ ] 8. 统一所有模块使用 Loguru（替换 logging 模块）
+- [x] 8. 统一所有模块使用 Loguru（Celery 日志通过 InterceptHandler 重定向）
 
 ---
 

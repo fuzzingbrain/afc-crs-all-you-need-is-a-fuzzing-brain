@@ -503,6 +503,24 @@ def get_log_dir() -> Optional[Path]:
     return _current_log_dir
 
 
+def set_log_dir(log_dir: Union[str, Path]) -> Path:
+    """
+    Set current task's log directory.
+
+    Used by worker processes to set the log directory from assignment.
+    The directory must already exist (created by main process).
+
+    Args:
+        log_dir: Path to the log directory
+
+    Returns:
+        Path to the log directory
+    """
+    global _current_log_dir
+    _current_log_dir = Path(log_dir)
+    return _current_log_dir
+
+
 def setup_logging(
     project_name: str,
     task_id: str,
@@ -1222,6 +1240,7 @@ __all__ = [
     "setup_fuzzer_instance_logging",
     "setup_console_only",
     "get_log_dir",
+    "set_log_dir",
     "get_worker_log_dir",
     "get_agent_log_path",
     "get_logo",

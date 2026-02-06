@@ -7,14 +7,17 @@ Defines the tasks that can be executed by Celery workers.
 import sys
 import traceback
 from datetime import datetime
-from pathlib import Path
 from typing import Dict, Any
 
 from loguru import logger
 
 from ..celery_app import app
 from ..core.models import Worker, WorkerStatus
-from ..core.logging import get_worker_banner_and_header, create_worker_summary
+from ..core.logging import (
+    set_log_dir,
+    setup_worker_logging,
+    create_worker_summary,
+)
 from ..db import MongoDB, init_repos
 from ..eval import BudgetExceededError
 
@@ -30,55 +33,6 @@ def _log_uncaught_exception(exc_type, exc_value, exc_tb):
 
 
 sys.excepthook = _log_uncaught_exception
-
-
-def setup_worker_logging(log_dir: str, worker_id: str, metadata: Dict[str, Any]):
-    """
-    Setup logging for a worker process.
-
-    Configures logger to write to:
-    1. Main task log file (fuzzingbrain.log)
-    2. Worker-specific log file (worker_{worker_id}.log)
-
-    Note: Workers do NOT write to console to avoid output interleaving
-    from multiple concurrent worker processes.
-    """
-    logger.remove()
-
-    log_path = Path(log_dir)
-    safe_worker_id = worker_id.replace("__", "_")
-    worker_log_file = log_path / f"worker_{safe_worker_id}.log"
-
-    # Write banner and header to worker log file
-    banner = get_worker_banner_and_header(metadata)
-    with open(worker_log_file, "w", encoding="utf-8") as f:
-        f.write(banner)
-        f.write("\n")
-
-    # NO console output for workers - avoids interleaving from multiple processes
-    # All output goes to log files only
-
-    # Main log file (append)
-    logger.add(
-        log_path / "fuzzingbrain.log",
-        level="DEBUG",
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | ["
-        + worker_id
-        + "] {message}",
-        encoding="utf-8",
-        mode="a",
-    )
-
-    # Worker-specific log file (append mode since we already wrote the header)
-    logger.add(
-        worker_log_file,
-        level="DEBUG",
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {message}",
-        encoding="utf-8",
-        mode="a",
-    )
-
-    return logger
 
 
 @app.task(bind=True, name="fuzzingbrain.worker.tasks.run_worker")
@@ -138,9 +92,17 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         "Celery ID": self.request.id,
     }
 
-    # Setup worker-specific logging with banner
+    # Setup worker-specific logging with new directory structure
+    # worker/{fuzzer}_{sanitizer}/worker.log and error.log
     if log_dir:
-        setup_worker_logging(log_dir, worker_id, worker_metadata)
+        # Remove default handlers (no console output for workers)
+        logger.remove()
+        # Set log directory for this worker process
+        set_log_dir(log_dir)
+        # Setup worker logging with new structure
+        setup_worker_logging(fuzzer, sanitizer, worker_metadata)
+        # Bind logger to this worker for filtering
+        logger.configure(extra={"worker": f"{fuzzer}_{sanitizer}"})
 
     logger.info("Worker starting")
     start_time = datetime.now()
