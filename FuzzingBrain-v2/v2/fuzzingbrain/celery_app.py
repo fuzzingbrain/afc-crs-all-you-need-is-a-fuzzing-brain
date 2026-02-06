@@ -46,9 +46,9 @@ class InterceptHandler(logging.Handler):
             frame = frame.f_back
             depth += 1
 
-        logger.opt(depth=depth, exception=record.exc_info).bind(
-            component="celery"
-        ).log(level, record.getMessage())
+        logger.opt(depth=depth, exception=record.exc_info).bind(component="celery").log(
+            level, record.getMessage()
+        )
 
 
 @setup_logging.connect

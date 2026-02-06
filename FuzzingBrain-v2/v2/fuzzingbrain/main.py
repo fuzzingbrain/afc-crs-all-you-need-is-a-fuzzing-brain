@@ -19,7 +19,15 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from .core import Config, Task, JobType, ScanMode, setup_logging, setup_celery_logging, setup_console_only
+from .core import (
+    Config,
+    Task,
+    JobType,
+    ScanMode,
+    setup_logging,
+    setup_celery_logging,
+    setup_console_only,
+)
 from .db import MongoDB, RepositoryManager, init_repos
 
 

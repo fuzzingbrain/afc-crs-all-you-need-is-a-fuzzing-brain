@@ -109,7 +109,9 @@ def create_log_directories(log_dir: Path, workers: list = None) -> None:
             # Create agent subdirectories
             (worker_dir / "agent" / "direction").mkdir(parents=True, exist_ok=True)
             (worker_dir / "agent" / "seed").mkdir(parents=True, exist_ok=True)
-            (worker_dir / "agent" / "sp" / "generate").mkdir(parents=True, exist_ok=True)
+            (worker_dir / "agent" / "sp" / "generate").mkdir(
+                parents=True, exist_ok=True
+            )
             (worker_dir / "agent" / "sp" / "verify").mkdir(parents=True, exist_ok=True)
             (worker_dir / "agent" / "pov").mkdir(parents=True, exist_ok=True)
 
@@ -1041,9 +1043,7 @@ def create_final_summary(
     if failed > 0:
         workers_parts.append(f"{failed} failed")
     workers_str = ", ".join(workers_parts)
-    lines.append(
-        "│" + f"  Workers:       {workers_str}".ljust(table_width) + "│"
-    )
+    lines.append("│" + f"  Workers:       {workers_str}".ljust(table_width) + "│")
     lines.append("│" + f"  SPs Found:     {total_sps}".ljust(table_width) + "│")
     if dedup_count > 0:
         lines.append(

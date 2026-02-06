@@ -718,7 +718,9 @@ class AnalyzerBuilder:
                 if self.log_dir:
                     build_dir = self.log_dir / "build"
                     build_dir.mkdir(parents=True, exist_ok=True)
-                    with open(build_dir / f"{sanitizer}.log", "a", encoding="utf-8") as f:
+                    with open(
+                        build_dir / f"{sanitizer}.log", "a", encoding="utf-8"
+                    ) as f:
                         f.write("\n" + "=" * 80 + "\n")
                         f.write(f"[BUILD ERROR] Exit code {process.returncode}\n")
                         f.write("=" * 80 + "\n")
@@ -866,7 +868,9 @@ class AnalyzerBuilder:
                 if self.log_dir:
                     build_dir = self.log_dir / "build"
                     build_dir.mkdir(parents=True, exist_ok=True)
-                    with open(build_dir / f"{sanitizer}.log", "a", encoding="utf-8") as f:
+                    with open(
+                        build_dir / f"{sanitizer}.log", "a", encoding="utf-8"
+                    ) as f:
                         f.write("\n" + "=" * 80 + "\n")
                         f.write(f"[BUILD ERROR] Exit code {process.returncode}\n")
                         f.write("=" * 80 + "\n")
