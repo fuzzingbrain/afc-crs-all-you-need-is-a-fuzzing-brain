@@ -1089,17 +1089,16 @@ class POVFullscanStrategy(POVBaseStrategy):
         fuzzer_code = self._get_fuzzer_source_code()
         agent_log_dir = self.agent_log_dir
 
-        seeds_generated = 0
-
         # Generate seeds for each direction (high-risk first)
         sorted_directions = sorted(
             directions,
             key=lambda d: {"high": 0, "medium": 1, "low": 2}.get(d.risk_level, 3),
         )
 
-        for seed_index, direction in enumerate(sorted_directions[:5], start=1):  # Top 5 directions
+        # Create tasks for parallel execution (top 5 directions)
+        async def run_seed_agent(seed_index: int, direction) -> dict:
+            """Run a single SeedAgent and return result."""
             try:
-                # Create SeedAgent for this direction
                 seed_agent = SeedAgent(
                     task_id=self.task_id,
                     worker_id=self.worker_id,
@@ -1110,29 +1109,43 @@ class POVFullscanStrategy(POVBaseStrategy):
                     repos=self.repos,
                     fuzzer_source=fuzzer_code,
                     log_dir=agent_log_dir,
-                    max_iterations=20,  # Same as DirectionPlanningAgent
+                    max_iterations=20,
                     index=seed_index,
                     target_name=direction.name,
                 )
 
-                # Generate Direction Seeds
                 result = await seed_agent.generate_direction_seeds(
                     direction_id=direction.direction_id,
                     target_functions=direction.core_functions or [],
                     risk_level=direction.risk_level,
                     risk_reason=direction.risk_reason or "",
                 )
-
-                if result.get("success"):
-                    seeds_generated += result.get("seeds_generated", 0)
-                    self.log_info(
-                        f"  Generated {result.get('seeds_generated', 0)} seeds "
-                        f"for direction: {direction.name} ({direction.risk_level})"
-                    )
+                return {"direction": direction, "result": result}
 
             except Exception as e:
                 self.log_warning(
                     f"  Failed to generate seeds for {direction.name}: {e}"
+                )
+                return {"direction": direction, "result": None, "error": str(e)}
+
+        # Run all SeedAgents in parallel
+        tasks = [
+            run_seed_agent(idx, d)
+            for idx, d in enumerate(sorted_directions[:5], start=1)
+        ]
+        results = await asyncio.gather(*tasks)
+
+        # Collect results
+        seeds_generated = 0
+        for item in results:
+            direction = item["direction"]
+            result = item.get("result")
+            if result and result.get("success"):
+                count = result.get("seeds_generated", 0)
+                seeds_generated += count
+                self.log_info(
+                    f"  Generated {count} seeds "
+                    f"for direction: {direction.name} ({direction.risk_level})"
                 )
 
         self.log_info(
