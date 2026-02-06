@@ -289,10 +289,10 @@ Please write a Python script that generates the blob file as 'x.bin'.
                 # Example: /app/.../build/out/libpng-address/libpng_read_fuzzer
                 path_parts = fuzzer_dir.split('/')
 
-                # Find project-sanitizer part (e.g., "libpng-address")
+                # Find project-sanitizer part (e.g., "libpng-address" or "openclaw-none")
                 project_sanitizer = None
                 for part in path_parts:
-                    if '-' in part and any(san in part for san in ['address', 'undefined', 'memory']):
+                    if '-' in part and any(san in part for san in ['address', 'undefined', 'memory', 'none']):
                         project_sanitizer = part
                         break
 

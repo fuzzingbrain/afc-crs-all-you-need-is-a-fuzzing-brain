@@ -344,13 +344,127 @@ check_environment() {
     print_info "Environment check passed"
 }
 
+# Detect if a project is JavaScript/TypeScript based
+# Returns 0 if JavaScript, 1 otherwise
+is_javascript_project() {
+    local workspace="$1"
+    local project_name="$2"
+    local project_dir="$workspace/fuzz-tooling/projects/$project_name"
+
+    # Check project.yaml for language: javascript
+    if [ -f "$project_dir/project.yaml" ]; then
+        if grep -qi "^language:\s*javascript" "$project_dir/project.yaml" 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # Check Dockerfile for base-builder-javascript
+    if [ -f "$project_dir/Dockerfile" ]; then
+        if grep -q "base-builder-javascript" "$project_dir/Dockerfile" 2>/dev/null; then
+            return 0
+        fi
+    fi
+
+    # Check for package.json in repo root (Node.js project)
+    if [ -f "$workspace/repo/package.json" ]; then
+        # Check if there's no C/C++ code (pure JS project)
+        local c_files=$(find "$workspace/repo" -name "*.c" -o -name "*.cpp" -o -name "*.cc" 2>/dev/null | head -5)
+        if [ -z "$c_files" ]; then
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+# Get the appropriate sanitizer for a project
+# JavaScript projects must use 'none', others default to 'address'
+get_project_sanitizer() {
+    local workspace="$1"
+    local project_name="$2"
+    local default_sanitizer="${3:-address}"
+
+    if is_javascript_project "$workspace" "$project_name"; then
+        echo "none"
+    else
+        echo "$default_sanitizer"
+    fi
+}
+
+# Copy TaintSan to workspace for JavaScript projects
+# This enables taint tracking for security fuzzing
+setup_taintsan_for_javascript() {
+    local workspace="$1"
+    local project_name="$2"
+
+    if ! is_javascript_project "$workspace" "$project_name"; then
+        return 0
+    fi
+
+    print_info "Setting up TaintSan for JavaScript project..."
+
+    # Source TaintSan directory
+    local taintsan_src="$SCRIPT_DIR/crs/strategy/common/sanitizers/taintsan_javascript"
+
+    if [ ! -d "$taintsan_src" ]; then
+        print_warn "TaintSan source not found at $taintsan_src"
+        return 1
+    fi
+
+    # Destination in the project's OSS-Fuzz structure
+    local project_dir="$workspace/fuzz-tooling/projects/$project_name"
+
+    if [ ! -d "$project_dir" ]; then
+        print_warn "Project directory not found: $project_dir"
+        return 1
+    fi
+
+    # Copy TaintSan files to project directory (for Dockerfile to copy)
+    local taintsan_dest="$project_dir/taintsan"
+    mkdir -p "$taintsan_dest"
+
+    cp "$taintsan_src/taintsan.js" "$taintsan_dest/" 2>/dev/null || true
+    cp "$taintsan_src/jazzer_integration.js" "$taintsan_dest/" 2>/dev/null || true
+    cp "$taintsan_src/package.json" "$taintsan_dest/" 2>/dev/null || true
+
+    if [ -f "$taintsan_dest/taintsan.js" ]; then
+        print_info "TaintSan copied to $taintsan_dest"
+
+        # Update Dockerfile to copy TaintSan (if not already present)
+        local dockerfile="$project_dir/Dockerfile"
+        if [ -f "$dockerfile" ]; then
+            if ! grep -q "COPY taintsan" "$dockerfile" 2>/dev/null; then
+                # Add COPY instruction for TaintSan before COPY build.sh
+                sed -i '/COPY build\.sh/i COPY taintsan $SRC/taintsan' "$dockerfile" 2>/dev/null || {
+                    # If sed fails, append to end
+                    echo "" >> "$dockerfile"
+                    echo "# Copy TaintSan for security fuzzing" >> "$dockerfile"
+                    echo "COPY taintsan \$SRC/taintsan" >> "$dockerfile"
+                }
+                print_info "Updated Dockerfile to include TaintSan"
+            fi
+        fi
+
+        return 0
+    else
+        print_warn "Failed to copy TaintSan files"
+        return 1
+    fi
+}
+
 # Build fuzzers and verify success
 # Returns 0 on success, 1 on failure
 # Sets BUILD_OUTPUT variable with build output (for error reporting)
 build_and_verify_fuzzers() {
     local workspace="$1"
     local project_name="$2"
-    local sanitizer="${3:-address}"
+    local requested_sanitizer="${3:-address}"
+
+    # Auto-detect correct sanitizer for JavaScript projects
+    local sanitizer=$(get_project_sanitizer "$workspace" "$project_name" "$requested_sanitizer")
+    if [ "$sanitizer" != "$requested_sanitizer" ]; then
+        print_info "Detected JavaScript project - using sanitizer: $sanitizer (instead of $requested_sanitizer)"
+    fi
 
     print_info "Building fuzzers for '$project_name' (sanitizer: $sanitizer)..."
 
@@ -740,6 +854,9 @@ elif is_git_url "$TARGET"; then
                     exit 1
                 fi
 
+                # Setup TaintSan for JavaScript projects (provides taint tracking sanitizer)
+                setup_taintsan_for_javascript "$WORKSPACE" "$REPO_NAME"
+
                 # Retry loop: build and fix until success or max retries
                 while [ $BUILD_RETRY -lt $MAX_BUILD_RETRIES ]; do
                     BUILD_RETRY=$((BUILD_RETRY + 1))
@@ -812,6 +929,9 @@ elif is_git_url "$TARGET"; then
             # Cleanup
             rm -rf "$OSSFUZZ_TMP"
             print_info "OSS-Fuzz project copied to workspace"
+
+            # Setup TaintSan for JavaScript projects (existing OSS-Fuzz projects)
+            setup_taintsan_for_javascript "$WORKSPACE" "$OSS_FUZZ_PROJECT"
         fi
     fi
 

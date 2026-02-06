@@ -117,6 +117,26 @@ func PrepareEnvironment(params PrepareEnvironmentParams) (*ProjectConfig, []stri
 		}
 	}
 
+	// CRITICAL: JavaScript projects MUST use "none" sanitizer
+	// OSS-Fuzz does not support address/memory/undefined sanitizers for JavaScript
+	lang := strings.ToLower(cfg.Language)
+	if lang == "javascript" || lang == "typescript" || lang == "js" || lang == "ts" {
+		// Check if current sanitizers include anything other than "none"
+		hasNonNoneSanitizer := false
+		for _, s := range sanitizersToUse {
+			if s != "none" {
+				hasNonNoneSanitizer = true
+				break
+			}
+		}
+		if hasNonNoneSanitizer {
+			log.Printf("WARNING: JavaScript projects cannot use sanitizers other than 'none'")
+			log.Printf("Overriding sanitizers from %v to [none]", sanitizersToUse)
+			sanitizersToUse = []string{"none"}
+			configSource = "auto-detected (JavaScript)"
+		}
+	}
+
 	// Print configuration summary
 	log.Println("")
 	log.Println("╔════════════════════════════════════════════════════════════════╗")
