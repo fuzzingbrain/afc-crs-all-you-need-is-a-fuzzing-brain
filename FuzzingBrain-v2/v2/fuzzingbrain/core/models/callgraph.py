@@ -51,7 +51,7 @@ class CallGraphNode:
             "_id": self.node_id,
             "node_id": self.node_id,
             "task_id": ObjectId(self.task_id) if self.task_id else None,
-            "fuzzer_id": self.fuzzer_id,
+            "fuzzer_id": ObjectId(self.fuzzer_id) if self.fuzzer_id else None,
             "fuzzer_name": self.fuzzer_name,
             "function_name": self.function_name,
             "callers": self.callers,
@@ -68,10 +68,14 @@ class CallGraphNode:
         if isinstance(task_id, ObjectId):
             task_id = str(task_id)
 
+        fuzzer_id = data.get("fuzzer_id", "")
+        if isinstance(fuzzer_id, ObjectId):
+            fuzzer_id = str(fuzzer_id)
+
         return cls(
             node_id=data.get("node_id", data.get("_id", "")),
             task_id=task_id,
-            fuzzer_id=data.get("fuzzer_id", ""),
+            fuzzer_id=fuzzer_id,
             fuzzer_name=data.get("fuzzer_name", ""),
             function_name=data.get("function_name", ""),
             callers=data.get("callers", []),

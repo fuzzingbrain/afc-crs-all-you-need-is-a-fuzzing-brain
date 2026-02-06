@@ -137,7 +137,7 @@ class SuspiciousPoint:
     def to_dict(self) -> dict:
         """Convert to dict for MongoDB storage and JSON serialization"""
         return {
-            "_id": self.suspicious_point_id,
+            "_id": ObjectId(self.suspicious_point_id) if self.suspicious_point_id else ObjectId(),
             "suspicious_point_id": self.suspicious_point_id,
             "task_id": ObjectId(self.task_id) if self.task_id else None,
             "direction_id": ObjectId(self.direction_id) if self.direction_id else None,
@@ -148,7 +148,7 @@ class SuspiciousPoint:
             "description": self.description,
             "vuln_type": self.vuln_type,
             "status": self.status,
-            "processor_id": self.processor_id,
+            "processor_id": ObjectId(self.processor_id) if self.processor_id else None,
             "is_checked": self.is_checked,
             "is_real": self.is_real,
             "score": self.score,
@@ -161,7 +161,7 @@ class SuspiciousPoint:
             "merged_duplicates": self.merged_duplicates,
             "verification_notes": self.verification_notes,
             "pov_guidance": self.pov_guidance,
-            "pov_id": self.pov_id,
+            "pov_id": ObjectId(self.pov_id) if self.pov_id else None,
             "pov_success_by": self.pov_success_by,
             "pov_attempted_by": self.pov_attempted_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -188,6 +188,10 @@ class SuspiciousPoint:
             created_at = datetime.now()
 
         # Handle ObjectId conversion
+        suspicious_point_id = data.get("suspicious_point_id") or data.get("_id")
+        if isinstance(suspicious_point_id, ObjectId):
+            suspicious_point_id = str(suspicious_point_id)
+
         task_id = data.get("task_id", "")
         if isinstance(task_id, ObjectId):
             task_id = str(task_id)
@@ -204,6 +208,14 @@ class SuspiciousPoint:
         if isinstance(verified_by_agent_id, ObjectId):
             verified_by_agent_id = str(verified_by_agent_id)
 
+        pov_id = data.get("pov_id")
+        if isinstance(pov_id, ObjectId):
+            pov_id = str(pov_id)
+
+        processor_id = data.get("processor_id")
+        if isinstance(processor_id, ObjectId):
+            processor_id = str(processor_id)
+
         # Handle backward compatibility: convert old harness_name/sanitizer to sources
         sources = data.get("sources", [])
         if not sources and (data.get("harness_name") or data.get("sanitizer")):
@@ -215,9 +227,7 @@ class SuspiciousPoint:
             ]
 
         return cls(
-            suspicious_point_id=data.get(
-                "suspicious_point_id", data.get("_id", generate_id())
-            ),
+            suspicious_point_id=suspicious_point_id or generate_id(),
             task_id=task_id,
             function_name=data.get("function_name", ""),
             direction_id=direction_id,
@@ -227,7 +237,7 @@ class SuspiciousPoint:
             description=data.get("description", ""),
             vuln_type=data.get("vuln_type", ""),
             status=data.get("status", SPStatus.PENDING_VERIFY.value),
-            processor_id=data.get("processor_id"),
+            processor_id=processor_id,
             is_checked=data.get("is_checked", False),
             is_real=data.get("is_real", False),
             score=data.get("score", 0.0),
@@ -240,7 +250,7 @@ class SuspiciousPoint:
             merged_duplicates=data.get("merged_duplicates", []),
             verification_notes=data.get("verification_notes"),
             pov_guidance=data.get("pov_guidance"),
-            pov_id=data.get("pov_id"),
+            pov_id=pov_id,
             pov_success_by=data.get("pov_success_by"),
             pov_attempted_by=data.get("pov_attempted_by", []),
             created_at=created_at,

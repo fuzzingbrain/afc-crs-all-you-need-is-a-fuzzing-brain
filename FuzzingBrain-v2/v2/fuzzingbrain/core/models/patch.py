@@ -53,10 +53,10 @@ class Patch:
     def to_dict(self) -> dict:
         """Convert to dictionary for MongoDB storage"""
         return {
-            "_id": self.patch_id,
+            "_id": ObjectId(self.patch_id) if self.patch_id else ObjectId(),
             "patch_id": self.patch_id,
             "task_id": ObjectId(self.task_id) if self.task_id else None,
-            "pov_id": self.pov_id,
+            "pov_id": ObjectId(self.pov_id) if self.pov_id else None,
             "patch_content": self.patch_content,
             "description": self.description,
             "pov_detail": self.pov_detail,
@@ -73,14 +73,22 @@ class Patch:
     def from_dict(cls, data: dict) -> "Patch":
         """Create Patch from dictionary"""
         # Handle ObjectId conversion
+        patch_id = data.get("patch_id") or data.get("_id")
+        if isinstance(patch_id, ObjectId):
+            patch_id = str(patch_id)
+
         task_id = data.get("task_id", "")
         if isinstance(task_id, ObjectId):
             task_id = str(task_id)
 
+        pov_id = data.get("pov_id")
+        if isinstance(pov_id, ObjectId):
+            pov_id = str(pov_id)
+
         return cls(
-            patch_id=data.get("patch_id", data.get("_id", generate_id())),
+            patch_id=patch_id or generate_id(),
             task_id=task_id,
-            pov_id=data.get("pov_id"),
+            pov_id=pov_id,
             patch_content=data.get("patch_content"),
             description=data.get("description"),
             pov_detail=data.get("pov_detail"),

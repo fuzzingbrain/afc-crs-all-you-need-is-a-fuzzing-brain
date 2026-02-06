@@ -51,10 +51,22 @@ class BaseRepository(Generic[T]):
             logger.error(f"Failed to save {self.model_class.__name__}: {e}")
             return False
 
+    def _convert_id(self, entity_id: str):
+        """Convert entity_id to ObjectId if it's a valid ObjectId string."""
+        try:
+            # Check if it's a valid ObjectId string (24 hex characters)
+            if len(entity_id) == 24:
+                return ObjectId(entity_id)
+        except Exception:
+            pass
+        return entity_id
+
     def find_by_id(self, entity_id: str) -> Optional[T]:
         """Find entity by ID"""
         try:
-            data = self.collection.find_one({"_id": entity_id})
+            # Try with ObjectId first, then fallback to string
+            _id = self._convert_id(entity_id)
+            data = self.collection.find_one({"_id": _id})
             if data:
                 return self.model_class.from_dict(data)
             return None
@@ -89,7 +101,8 @@ class BaseRepository(Generic[T]):
         """Update entity fields"""
         try:
             updates["updated_at"] = datetime.now()
-            result = self.collection.update_one({"_id": entity_id}, {"$set": updates})
+            _id = self._convert_id(entity_id)
+            result = self.collection.update_one({"_id": _id}, {"$set": updates})
             return result.modified_count > 0
         except Exception as e:
             logger.error(f"Failed to update {self.model_class.__name__}: {e}")
@@ -98,7 +111,8 @@ class BaseRepository(Generic[T]):
     def delete(self, entity_id: str) -> bool:
         """Delete entity by ID"""
         try:
-            result = self.collection.delete_one({"_id": entity_id})
+            _id = self._convert_id(entity_id)
+            result = self.collection.delete_one({"_id": _id})
             return result.deleted_count > 0
         except Exception as e:
             logger.error(f"Failed to delete {self.model_class.__name__}: {e}")
@@ -115,7 +129,8 @@ class BaseRepository(Generic[T]):
 
     def exists(self, entity_id: str) -> bool:
         """Check if entity exists"""
-        return self.collection.count_documents({"_id": entity_id}, limit=1) > 0
+        _id = self._convert_id(entity_id)
+        return self.collection.count_documents({"_id": _id}, limit=1) > 0
 
 
 class TaskRepository(BaseRepository[Task]):
@@ -151,7 +166,7 @@ class TaskRepository(BaseRepository[Task]):
         """Add POV ID to task"""
         try:
             result = self.collection.update_one(
-                {"_id": task_id},
+                {"_id": ObjectId(task_id)},
                 {"$push": {"pov_ids": pov_id}, "$set": {"updated_at": datetime.now()}},
             )
             return result.modified_count > 0
@@ -163,7 +178,7 @@ class TaskRepository(BaseRepository[Task]):
         """Add Patch ID to task"""
         try:
             result = self.collection.update_one(
-                {"_id": task_id},
+                {"_id": ObjectId(task_id)},
                 {
                     "$push": {"patch_ids": patch_id},
                     "$set": {"updated_at": datetime.now()},
@@ -360,7 +375,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             new_source = {"harness_name": harness_name, "sanitizer": sanitizer}
             # Use $addToSet to avoid duplicates
             result = self.collection.update_one(
-                {"_id": sp_id}, {"$addToSet": {"sources": new_source}}
+                {"_id": ObjectId(sp_id)}, {"$addToSet": {"sources": new_source}}
             )
             return result.modified_count > 0
         except Exception as e:
@@ -403,7 +418,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 "merged_at": datetime.now().isoformat(),
             }
             result = self.collection.update_one(
-                {"_id": sp_id}, {"$push": {"merged_duplicates": merged_record}}
+                {"_id": ObjectId(sp_id)}, {"$push": {"merged_duplicates": merged_record}}
             )
             return result.modified_count > 0
         except Exception as e:
@@ -715,7 +730,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 success_record = {"harness_name": harness_name, "sanitizer": sanitizer}
                 result = self.collection.update_one(
                     {
-                        "_id": sp_id,
+                        "_id": ObjectId(sp_id),
                         "pov_success_by": None,  # Only if not already succeeded
                     },
                     {
@@ -1424,7 +1439,7 @@ class FunctionRepository(BaseRepository[Function]):
         try:
             result = self.collection.update_one(
                 {"_id": function_id},
-                {"$addToSet": {"analyzed_by_directions": direction_id}},
+                {"$addToSet": {"analyzed_by_directions": ObjectId(direction_id)}},
             )
             return result.modified_count > 0 or result.matched_count > 0
         except Exception as e:
@@ -1447,7 +1462,7 @@ class FunctionRepository(BaseRepository[Function]):
         try:
             result = self.collection.update_many(
                 {"_id": {"$in": function_ids}},
-                {"$addToSet": {"analyzed_by_directions": direction_id}},
+                {"$addToSet": {"analyzed_by_directions": ObjectId(direction_id)}},
             )
             return result.modified_count
         except Exception as e:
@@ -1513,7 +1528,7 @@ class FunctionRepository(BaseRepository[Function]):
             # Priority 2: Not analyzed by THIS direction
             query_p2 = {
                 **base_query,
-                "analyzed_by_directions": {"$nin": [direction_id]},
+                "analyzed_by_directions": {"$nin": [ObjectId(direction_id)]},
             }
 
             # Priority 3: All functions (including already analyzed)
@@ -1587,7 +1602,7 @@ class FunctionRepository(BaseRepository[Function]):
             if direction_id:
                 query_not_by_dir = {
                     **base_query,
-                    "analyzed_by_directions": {"$nin": [direction_id]},
+                    "analyzed_by_directions": {"$nin": [ObjectId(direction_id)]},
                 }
                 unanalyzed_by_dir = self.collection.count_documents(query_not_by_dir)
                 result["unanalyzed_by_direction"] = unanalyzed_by_dir

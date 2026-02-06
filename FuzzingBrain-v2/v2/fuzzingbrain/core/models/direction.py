@@ -80,7 +80,7 @@ class Direction:
     def to_dict(self) -> dict:
         """Convert to dict for MongoDB storage"""
         return {
-            "_id": self.direction_id,
+            "_id": ObjectId(self.direction_id) if self.direction_id else ObjectId(),
             "direction_id": self.direction_id,
             "task_id": ObjectId(self.task_id) if self.task_id else None,
             "created_by_agent_id": ObjectId(self.created_by_agent_id) if self.created_by_agent_id else None,
@@ -93,7 +93,7 @@ class Direction:
             "call_chain_summary": self.call_chain_summary,
             "code_summary": self.code_summary,
             "status": self.status,
-            "processor_id": self.processor_id,
+            "processor_id": ObjectId(self.processor_id) if self.processor_id else None,
             "sp_count": self.sp_count,
             "functions_analyzed": self.functions_analyzed,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -119,6 +119,10 @@ class Direction:
             created_at = datetime.now()
 
         # Handle ObjectId conversion
+        direction_id = data.get("direction_id") or data.get("_id")
+        if isinstance(direction_id, ObjectId):
+            direction_id = str(direction_id)
+
         task_id = data.get("task_id", "")
         if isinstance(task_id, ObjectId):
             task_id = str(task_id)
@@ -127,8 +131,12 @@ class Direction:
         if isinstance(created_by_agent_id, ObjectId):
             created_by_agent_id = str(created_by_agent_id)
 
+        processor_id = data.get("processor_id")
+        if isinstance(processor_id, ObjectId):
+            processor_id = str(processor_id)
+
         return cls(
-            direction_id=data.get("direction_id", data.get("_id", generate_id())),
+            direction_id=direction_id or generate_id(),
             task_id=task_id,
             created_by_agent_id=created_by_agent_id,
             fuzzer=data.get("fuzzer", ""),
@@ -140,7 +148,7 @@ class Direction:
             call_chain_summary=data.get("call_chain_summary", ""),
             code_summary=data.get("code_summary", ""),
             status=data.get("status", DirectionStatus.PENDING.value),
-            processor_id=data.get("processor_id"),
+            processor_id=processor_id,
             sp_count=data.get("sp_count", 0),
             functions_analyzed=data.get("functions_analyzed", 0),
             created_at=created_at,

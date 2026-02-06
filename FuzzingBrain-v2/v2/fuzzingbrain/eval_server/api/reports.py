@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
+from bson import ObjectId
 from fastapi import APIRouter
 
 from .suspicious_points import get_main_db, _format_datetime
@@ -31,7 +32,7 @@ async def list_reports(
         sp = None
         function_name = ""
         if sp_id:
-            sp = await db.suspicious_points.find_one({"_id": sp_id})
+            sp = await db.suspicious_points.find_one({"_id": ObjectId(sp_id)})
             if sp:
                 function_name = sp.get("function_name", "")
 

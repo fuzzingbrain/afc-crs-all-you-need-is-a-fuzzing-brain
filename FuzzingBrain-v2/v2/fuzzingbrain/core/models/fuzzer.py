@@ -55,7 +55,7 @@ class Fuzzer:
     def to_dict(self) -> dict:
         """Convert to dictionary for MongoDB storage"""
         return {
-            "_id": self.fuzzer_id,
+            "_id": ObjectId(self.fuzzer_id) if self.fuzzer_id else ObjectId(),
             "fuzzer_id": self.fuzzer_id,
             "task_id": ObjectId(self.task_id) if self.task_id else None,
             "fuzzer_name": self.fuzzer_name,
@@ -72,12 +72,16 @@ class Fuzzer:
     def from_dict(cls, data: dict) -> "Fuzzer":
         """Create Fuzzer from dictionary"""
         # Handle ObjectId conversion
+        fuzzer_id = data.get("fuzzer_id") or data.get("_id")
+        if isinstance(fuzzer_id, ObjectId):
+            fuzzer_id = str(fuzzer_id)
+
         task_id = data.get("task_id", "")
         if isinstance(task_id, ObjectId):
             task_id = str(task_id)
 
         return cls(
-            fuzzer_id=data.get("fuzzer_id", data.get("_id", generate_id())),
+            fuzzer_id=fuzzer_id or generate_id(),
             task_id=task_id,
             fuzzer_name=data.get("fuzzer_name", ""),
             source_path=data.get("source_path"),

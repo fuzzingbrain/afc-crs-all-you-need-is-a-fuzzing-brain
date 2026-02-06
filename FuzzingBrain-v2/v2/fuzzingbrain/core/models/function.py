@@ -75,7 +75,7 @@ class Function:
             "content": self.content,
             "cyclomatic_complexity": self.cyclomatic_complexity,
             "reached_by_fuzzers": self.reached_by_fuzzers,
-            "analyzed_by_directions": self.analyzed_by_directions,
+            "analyzed_by_directions": [ObjectId(d) for d in self.analyzed_by_directions] if self.analyzed_by_directions else [],
             "language": self.language,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
@@ -105,7 +105,7 @@ class Function:
             content=data.get("content", ""),
             cyclomatic_complexity=data.get("cyclomatic_complexity", 0),
             reached_by_fuzzers=data.get("reached_by_fuzzers", []),
-            analyzed_by_directions=data.get("analyzed_by_directions", []),
+            analyzed_by_directions=[str(d) if isinstance(d, ObjectId) else d for d in data.get("analyzed_by_directions", [])],
             language=data.get("language", "c"),
             created_at=created_at,
         )
