@@ -26,7 +26,6 @@ from ...core.models import SuspiciousPoint
 from ...agents import (
     SuspiciousPointAgent,
     DirectionPlanningAgent,
-    FullscanSPAgent,
     FunctionAnalysisAgent,
     LargeFunctionAnalysisAgent,
 )
@@ -751,40 +750,15 @@ class POVStrategy(BaseStrategy):
         num_parallel: int = 2,
     ) -> None:
         """
-        Phase 3: Free Exploration (Fallback).
+        Phase 3: Free Exploration.
 
-        Uses large agent with context compression to explore code freely.
-        This is the original FullscanSPAgent behavior as a fallback.
-
-        Args:
-            directions: List of Direction objects
-            fuzzer_code: Fuzzer source code for context
-            agent_log_dir: Log directory for agents
-            num_parallel: Number of concurrent agents
+        Previously used legacy FullscanSPAgent for exploration.
+        Now skipped since Phase 1 and 2 cover all functions with FunctionAnalysisAgent.
         """
-        # Check if we have enough SPs already
+        # Phase 1 and 2 already analyze all functions with FunctionAnalysisAgent
+        # No need for additional exploration
         sp_count = self.repos.suspicious_points.count({"task_id": self.task_id})
-        if sp_count >= 10:
-            self.log_info(f"Phase 3: Skipping - already found {sp_count} SPs")
-            return
-
-        # Only run on high-risk directions
-        high_risk_directions = [d for d in directions if d.risk_level == "high"]
-        if not high_risk_directions:
-            self.log_info("Phase 3: No high-risk directions for free exploration")
-            return
-
-        self.log_info(
-            f"Phase 3: Running free exploration on {len(high_risk_directions)} high-risk directions"
-        )
-
-        # Use original parallel SP find agents for exploration
-        await self._run_parallel_sp_find_agents_legacy(
-            directions=high_risk_directions,
-            fuzzer_code=fuzzer_code,
-            agent_log_dir=agent_log_dir,
-            num_parallel=num_parallel,
-        )
+        self.log_info(f"Phase 3: Skipping (Phase 1+2 found {sp_count} SPs)")
 
     async def _analyze_single_function(
         self,
@@ -907,128 +881,6 @@ class POVStrategy(BaseStrategy):
 
         except Exception as e:
             self.log_error(f"[{index + 1}/{total}] Failed: {func.name} - {e}")
-            return {"success": False, "error": str(e)}
-
-    async def _run_parallel_sp_find_agents_legacy(
-        self,
-        directions: List,
-        fuzzer_code: str,
-        agent_log_dir,
-        num_parallel: int = 3,
-    ) -> None:
-        """
-        Legacy: Run SP Find Agents in parallel using asyncio.
-        Used for Phase 3 free exploration.
-
-        Args:
-            directions: List of Direction objects to analyze
-            fuzzer_code: Fuzzer source code for context
-            agent_log_dir: Log directory for agents
-            num_parallel: Number of concurrent agents
-        """
-        # Create a semaphore to limit concurrency
-        semaphore = asyncio.Semaphore(num_parallel)
-
-        async def analyze_direction(direction, index: int):
-            """Analyze a single direction with semaphore control."""
-            async with semaphore:
-                return await self._analyze_single_direction(
-                    direction=direction,
-                    index=index,
-                    total=len(directions),
-                    fuzzer_code=fuzzer_code,
-                    agent_log_dir=agent_log_dir,
-                )
-
-        # Create tasks for all directions
-        tasks = [
-            analyze_direction(direction, i) for i, direction in enumerate(directions)
-        ]
-
-        # Run all tasks concurrently (limited by semaphore)
-        self.log_info(
-            f"Starting {len(directions)} direction analyses with {num_parallel} parallel agents"
-        )
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-    async def _analyze_single_direction(
-        self,
-        direction,
-        index: int,
-        total: int,
-        fuzzer_code: str,
-        agent_log_dir,
-    ) -> dict:
-        """
-        Analyze a single direction (async wrapper for sync agent).
-
-        Args:
-            direction: Direction object
-            index: Direction index
-            total: Total number of directions
-            fuzzer_code: Fuzzer source code
-            agent_log_dir: Log directory
-
-        Returns:
-            Analysis result dict
-        """
-        import time
-
-        direction_start = time.time()
-
-        self.log_info(
-            f"[{index + 1}/{total}] Starting: {direction.name} ({direction.risk_level})"
-        )
-
-        # Claim the direction
-        claimed = self.repos.directions.claim(
-            self.task_id,
-            self.fuzzer,
-            f"SPG_{index}_{self.fuzzer}_{self.sanitizer}",
-        )
-        if not claimed:
-            self.log_warning(f"[{index + 1}/{total}] Could not claim: {direction.name}")
-            return {"success": False, "error": "Could not claim direction"}
-
-        # Create SP Find Agent
-        sp_agent = FullscanSPAgent(
-            fuzzer=self.fuzzer,
-            sanitizer=self.sanitizer,
-            direction_name=direction.name,
-            direction_id=direction.direction_id,
-            core_functions=direction.core_functions,
-            entry_functions=direction.entry_functions,
-            code_summary=direction.code_summary,
-            fuzzer_code=fuzzer_code,
-            task_id=self.task_id,
-            worker_id=f"SPG_{index}_{self.fuzzer}_{self.sanitizer}",
-            log_dir=agent_log_dir,
-            max_iterations=100,
-            index=index + 1,  # 1-based index for log files
-        )
-
-        try:
-            # Run agent async
-            result = await sp_agent.analyze_direction_async()
-            sp_count = result.get("sp_count", 0)
-            functions_analyzed = result.get("functions_analyzed", 0)
-
-            # Complete the direction
-            self.repos.directions.complete(
-                direction.direction_id,
-                sp_count=sp_count,
-                functions_analyzed=functions_analyzed,
-            )
-
-            direction_duration = time.time() - direction_start
-            self.log_info(
-                f"[{index + 1}/{total}] Done: {direction.name} in {direction_duration:.1f}s - {sp_count} SPs"
-            )
-            return result
-
-        except Exception as e:
-            self.log_error(f"[{index + 1}/{total}] Failed: {direction.name} - {e}")
-            self.repos.directions.release_claim(direction.direction_id)
             return {"success": False, "error": str(e)}
 
     def _get_fuzzer_source_code(self) -> str:

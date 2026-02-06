@@ -1091,8 +1091,9 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             if reporter:
                 # Map agent name to operation phase for tracking
                 operation_map = {
-                    "FullscanSPAgent": "find_sp",
                     "DirectionPlanningAgent": "find_sp",
+                    "FunctionAnalysisAgent": "find_sp",
+                    "LargeFunctionAnalysisAgent": "find_sp",
                     "SuspiciousPointAgent": "verify",
                     "POVAgent": "pov",
                     "POVReportAgent": "report",
