@@ -32,6 +32,10 @@ class POV:
     # Agent reference (ObjectId stored as string)
     agent_id: Optional[str] = None  # Which POVAgent created this POV
 
+    # Source tracking - where this POV came from
+    source: str = "agent"  # "agent" | "global_fuzzer" | "sp_fuzzer"
+    source_worker_id: Optional[str] = None  # Worker ID for fuzzer-discovered POVs
+
     # Iteration tracking (for model evaluation)
     iteration: int = 0  # Which agent loop iteration when created
     attempt: int = 1  # Which POV attempt (1-40)
@@ -77,6 +81,8 @@ class POV:
             "suspicious_point_id": self.suspicious_point_id,
             "generation_id": self.generation_id,
             "agent_id": ObjectId(self.agent_id) if self.agent_id else None,
+            "source": self.source,
+            "source_worker_id": ObjectId(self.source_worker_id) if self.source_worker_id else None,
             "iteration": self.iteration,
             "attempt": self.attempt,
             "variant": self.variant,
@@ -109,12 +115,18 @@ class POV:
         if isinstance(agent_id, ObjectId):
             agent_id = str(agent_id)
 
+        source_worker_id = data.get("source_worker_id")
+        if isinstance(source_worker_id, ObjectId):
+            source_worker_id = str(source_worker_id)
+
         return cls(
             pov_id=data.get("pov_id", data.get("_id", generate_id())),
             task_id=task_id,
             suspicious_point_id=data.get("suspicious_point_id", ""),
             generation_id=data.get("generation_id", ""),
             agent_id=agent_id,
+            source=data.get("source", "agent"),
+            source_worker_id=source_worker_id,
             iteration=data.get("iteration", 0),
             attempt=data.get("attempt", 1),
             variant=data.get("variant", 1),

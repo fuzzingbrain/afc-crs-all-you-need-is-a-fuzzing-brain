@@ -136,17 +136,23 @@ class WorkerDispatcher:
             pov_blob_path = povs_dir / f"crash_{crash_record.crash_hash[:16]}.bin"
             pov_blob_path.write_bytes(crash_blob)
 
+            # Determine source type from crash_record
+            source = crash_record.source  # "global_fuzzer" | "sp_fuzzer"
+
             pov = POV(
                 pov_id=pov_id,
                 task_id=self.task.task_id,
-                suspicious_point_id="",  # No SP - fuzzer-discovered
+                suspicious_point_id=crash_record.sp_id or "",  # SP ID if from SP Fuzzer
                 generation_id=str(uuid.uuid4()),
+                source=source,  # Track POV source
+                source_worker_id=crash_record.worker_id,  # Track which worker found it
                 iteration=0,
                 attempt=1,
                 variant=1,
                 blob=crash_blob_b64,
                 blob_path=str(pov_blob_path),
                 gen_blob=f"""# Fuzzer-discovered crash
+# Source: {source}
 # Hash: {crash_record.crash_hash}
 # Type: {vuln_type}
 # Worker: {crash_record.worker_id}
@@ -162,7 +168,7 @@ def generate(variant: int = 1) -> bytes:
                 harness_name=crash_record.fuzzer_name,
                 sanitizer=crash_record.sanitizer,
                 sanitizer_output=sanitizer_output[:10000] if sanitizer_output else "",
-                description=f"Fuzzer-discovered crash ({crash_record.source})",
+                description=f"Fuzzer-discovered crash ({source})",
                 is_successful=False,  # Will be set True after packaging
                 is_active=True,
             )
