@@ -292,6 +292,8 @@ class AgentPipeline:
                 )
 
                 # Run verification agent
+                # Extract index from agent_id (e.g., "verify_1" -> 1)
+                agent_index = int(agent_id.split("_")[1]) if "_" in agent_id else 0
                 verify_agent = SuspiciousPointAgent(
                     mode="verify",
                     fuzzer=self.fuzzer,
@@ -301,6 +303,8 @@ class AgentPipeline:
                     task_id=self.task_id,
                     worker_id=agent_id,
                     log_dir=self.log_dir,
+                    index=agent_index,
+                    target_name=sp.function_name or "",
                 )
                 verify_agent.set_verify_context(sp.to_dict())
 
@@ -500,6 +504,8 @@ class AgentPipeline:
                         )
 
                 # Run POV agent with fuzzer code
+                # Extract index from agent_id (e.g., "pov_1" -> 1)
+                agent_index = int(agent_id.split("_")[1]) if "_" in agent_id else 0
                 pov_agent = POVAgent(
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
@@ -516,6 +522,8 @@ class AgentPipeline:
                     workspace_path=self.workspace_path,
                     fuzzer_code=self.fuzzer_code,
                     fuzzer_manager=self.fuzzer_manager,  # For SP Fuzzer integration
+                    index=agent_index,
+                    target_name=sp.function_name or "",
                 )
 
                 result = await pov_agent.generate_pov_async(sp.to_dict())

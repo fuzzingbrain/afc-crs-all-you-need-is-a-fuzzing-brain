@@ -293,7 +293,7 @@ class POVBaseStrategy(BaseStrategy):
         # Lazy import to avoid circular dependency
         from ...agents import SuspiciousPointAgent
 
-        # Create verification agent
+        # Create verification agent (reused for all points sequentially)
         agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
         agent = SuspiciousPointAgent(
             fuzzer=self.fuzzer,
@@ -304,6 +304,7 @@ class POVBaseStrategy(BaseStrategy):
             task_id=self.task_id,
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
+            index=1,  # Single agent for sequential verification
         )
 
         verified = []
@@ -394,7 +395,7 @@ class POVBaseStrategy(BaseStrategy):
 
         agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
 
-        for point in fp_points:
+        for seed_index, point in enumerate(fp_points, start=1):
             try:
                 # Create SeedAgent for this FP
                 seed_agent = SeedAgent(
@@ -406,6 +407,8 @@ class POVBaseStrategy(BaseStrategy):
                     repos=self.repos,
                     log_dir=agent_log_dir,
                     max_iterations=3,  # Quick seed generation
+                    index=seed_index,
+                    target_name=point.function_name or "",
                 )
 
                 # Run seed generation (sync wrapper for async)

@@ -1047,6 +1047,7 @@ class POVStrategy(BaseStrategy):
             worker_id=f"{self.worker_id}_agent_{index}",
             log_dir=agent_log_dir,
             max_iterations=100,
+            index=index + 1,  # 1-based index for log files
         )
 
         try:

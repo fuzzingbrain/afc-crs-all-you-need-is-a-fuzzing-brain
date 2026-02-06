@@ -32,6 +32,11 @@ class DirectionPlanningAgent(BaseAgent):
     # Medium temperature for strategic planning
     default_temperature: float = 0.5
 
+    @property
+    def agent_type(self) -> str:
+        """Direction planning agent type."""
+        return "direction"
+
     def __init__(
         self,
         fuzzer: str = "",
@@ -68,10 +73,9 @@ class DirectionPlanningAgent(BaseAgent):
             task_id=task_id,
             worker_id=worker_id,
             log_dir=log_dir,
+            fuzzer=fuzzer,
+            sanitizer=sanitizer,
         )
-
-        self.fuzzer = fuzzer
-        self.sanitizer = sanitizer
         self.max_directions = max_directions
 
         # Track created directions

@@ -189,6 +189,11 @@ class SeedAgent(BaseAgent):
         False  # Short conversations, no compression needed
     )
 
+    @property
+    def agent_type(self) -> str:
+        """Seed agent type."""
+        return "seed"
+
     def __init__(
         self,
         task_id: str,
@@ -203,6 +208,9 @@ class SeedAgent(BaseAgent):
         model: Optional[Union[ModelInfo, str]] = None,
         max_iterations: int = 5,  # Short iterations for seed generation
         log_dir: Optional[Path] = None,
+        # New: for numbered log files
+        index: int = 0,
+        target_name: str = "",
     ):
         """
         Initialize SeedAgent.
@@ -220,6 +228,8 @@ class SeedAgent(BaseAgent):
             model: Model to use
             max_iterations: Max iterations (default 5)
             log_dir: Log directory
+            index: Agent index for numbered log files
+            target_name: direction_name for log filename
         """
         super().__init__(
             llm_client=llm_client,
@@ -229,10 +239,11 @@ class SeedAgent(BaseAgent):
             task_id=task_id,
             worker_id=worker_id,
             log_dir=log_dir,
+            index=index,
+            target_name=target_name,
+            fuzzer=fuzzer,
+            sanitizer=sanitizer,
         )
-
-        self.fuzzer = fuzzer
-        self.sanitizer = sanitizer
         self.fuzzer_manager = fuzzer_manager
         self.repos = repos
         self.fuzzer_source = fuzzer_source

@@ -559,6 +559,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             worker_id=f"{self.worker_id}_agent_{index}",
             log_dir=agent_log_dir,
             max_iterations=100,
+            index=index + 1,  # 1-based index for log files
         )
 
         try:
@@ -1096,7 +1097,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             key=lambda d: {"high": 0, "medium": 1, "low": 2}.get(d.risk_level, 3),
         )
 
-        for direction in sorted_directions[:5]:  # Top 5 directions
+        for seed_index, direction in enumerate(sorted_directions[:5], start=1):  # Top 5 directions
             try:
                 # Create SeedAgent for this direction
                 seed_agent = SeedAgent(
@@ -1110,6 +1111,8 @@ class POVFullscanStrategy(POVBaseStrategy):
                     fuzzer_source=fuzzer_code,
                     log_dir=agent_log_dir,
                     max_iterations=20,  # Same as DirectionPlanningAgent
+                    index=seed_index,
+                    target_name=direction.name,
                 )
 
                 # Generate Direction Seeds

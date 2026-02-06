@@ -85,6 +85,16 @@ class SuspiciousPointAgent(BaseAgent):
     # Enable context compression for verification sessions
     enable_context_compression: bool = True
 
+    @property
+    def agent_type(self) -> str:
+        """Return agent type based on mode: 'spg' for find, 'spv' for verify."""
+        return "spg" if self.mode == self.MODE_FIND else "spv"
+
+    @property
+    def is_delta(self) -> bool:
+        """Delta SPG uses single agent for all changes."""
+        return self.mode == self.MODE_FIND  # Find mode is always delta
+
     def __init__(
         self,
         mode: str = MODE_FIND,
@@ -99,6 +109,9 @@ class SuspiciousPointAgent(BaseAgent):
         task_id: str = "",
         worker_id: str = "",
         log_dir: Optional[Path] = None,
+        # New: for numbered log files
+        index: int = 0,
+        target_name: str = "",
     ):
         """
         Initialize suspicious point agent.
@@ -114,6 +127,8 @@ class SuspiciousPointAgent(BaseAgent):
             task_id: Task ID for logging
             worker_id: Worker ID for logging
             log_dir: Directory for log files
+            index: Agent index for numbered log files
+            target_name: function_name for log filename
         """
         super().__init__(
             llm_client=llm_client,
@@ -123,10 +138,12 @@ class SuspiciousPointAgent(BaseAgent):
             task_id=task_id,
             worker_id=worker_id,
             log_dir=log_dir,
+            index=index,
+            target_name=target_name,
+            fuzzer=fuzzer,
+            sanitizer=sanitizer,
         )
         self.mode = mode
-        self.fuzzer = fuzzer
-        self.sanitizer = sanitizer
         self.scan_mode = scan_mode  # "delta" or "full"
 
         # Context for find mode

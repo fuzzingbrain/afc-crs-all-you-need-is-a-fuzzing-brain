@@ -411,6 +411,8 @@ class POVDeltaStrategy(POVBaseStrategy):
             workspace_path=self.workspace_path,
             log_dir=agent_log_dir,
             max_iterations=15,  # Allow more iterations for delta seeds (with urgency forcing on last 2)
+            index=1,  # Single seed agent for delta
+            target_name="delta",
         )
 
         # Generate seeds (run async in sync context)

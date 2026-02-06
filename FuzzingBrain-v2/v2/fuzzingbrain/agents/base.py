@@ -16,7 +16,7 @@ from loguru import logger
 
 from ..llms import LLMClient, ModelInfo
 from ..tools.mcp_factory import create_isolated_mcp_server
-from ..core.logging import get_agent_banner_and_header
+from ..core.logging import get_agent_banner_and_header, get_agent_log_path
 
 # Lazy import for reporter to avoid circular imports
 _reporter_getter = None
@@ -68,6 +68,11 @@ class BaseAgent(ABC):
         task_id: str = "",
         worker_id: str = "",
         log_dir: Optional[Path] = None,
+        # New: for numbered log files
+        index: int = 0,
+        target_name: str = "",
+        fuzzer: str = "",
+        sanitizer: str = "",
     ):
         """
         Initialize agent.
@@ -81,6 +86,10 @@ class BaseAgent(ABC):
             task_id: Task ID for logging context
             worker_id: Worker ID for logging context
             log_dir: Directory for log files
+            index: Agent index for numbered log files (1-based)
+            target_name: Target name (direction_name or function_name) for log filename
+            fuzzer: Fuzzer name for log path
+            sanitizer: Sanitizer name for log path
         """
         self.llm_client = llm_client or LLMClient()
         self.model = model
@@ -94,6 +103,10 @@ class BaseAgent(ABC):
         self.task_id = task_id
         self.worker_id = worker_id
         self.log_dir = log_dir
+        self.index = index
+        self.target_name = target_name
+        self.fuzzer = fuzzer
+        self.sanitizer = sanitizer
 
         # Conversation history
         self.messages: List[Dict[str, str]] = []
@@ -110,12 +123,25 @@ class BaseAgent(ABC):
         # Agent-specific logger
         self._agent_logger = None
         self._log_file: Optional[Path] = None
-        self._chat_log_file: Optional[Path] = None
 
     @property
     def agent_name(self) -> str:
         """Get agent name for logging."""
         return self.__class__.__name__
+
+    @property
+    def agent_type(self) -> str:
+        """
+        Get agent type for log path generation.
+
+        Override in subclasses. Valid values: "direction", "seed", "spg", "spv", "pov"
+        """
+        return "direction"  # Default, subclasses should override
+
+    @property
+    def is_delta(self) -> bool:
+        """Whether this is a delta scan agent (for SPG log naming)."""
+        return False
 
     @property
     def include_pov_tools(self) -> bool:
@@ -363,6 +389,85 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
 
     def _setup_logging(self) -> None:
         """Set up agent-specific logging."""
+        # Try new structured path first (if fuzzer/sanitizer available)
+        if self.fuzzer and self.sanitizer:
+            log_path = get_agent_log_path(
+                agent_type=self.agent_type,
+                fuzzer=self.fuzzer,
+                sanitizer=self.sanitizer,
+                index=self.index,
+                target_name=self.target_name,
+                is_delta=self.is_delta,
+            )
+            if log_path:
+                self._log_file = Path(str(log_path) + ".log")
+            else:
+                # Fallback to legacy path if get_agent_log_path returns None
+                self._setup_logging_legacy()
+                return
+        elif self.log_dir:
+            # Fallback to legacy path
+            self._setup_logging_legacy()
+            return
+        else:
+            return
+
+        # Create unique instance ID for this agent (for log filtering)
+        self._agent_instance_id = f"{self.agent_name}_{self.worker_id}_{id(self)}"
+
+        # Write banner to log file first
+        metadata = self._get_agent_metadata()
+        banner = get_agent_banner_and_header(metadata)
+        self._log_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._log_file, "w", encoding="utf-8") as f:
+            f.write(banner)
+            f.write("\n")
+
+        # Add file handler with agent-specific filter
+        self._agent_logger = logger.bind(
+            agent=self.agent_name,
+            agent_instance_id=self._agent_instance_id,
+            task_id=self.task_id,
+            worker_id=self.worker_id,
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+        )
+
+        # Build format string - simplified with agent prefix
+        # Format: timestamp | level | [Agent-N] | message
+        agent_prefix = self._get_log_prefix()
+        log_format = f"{{time:YYYY-MM-DD HH:mm:ss.SSS}} | {{level: <8}} | {agent_prefix} | {{message}}"
+
+        # Add file sink for this agent - use instance ID for filtering (append mode)
+        instance_id = self._agent_instance_id  # Capture for closure
+        logger.add(
+            self._log_file,
+            level="DEBUG",
+            format=log_format,
+            filter=lambda record: (
+                record["extra"].get("agent_instance_id") == instance_id
+            ),
+            encoding="utf-8",
+            rotation="50 MB",
+            mode="a",  # Append after banner
+        )
+
+        self._log("Logging initialized", level="INFO")
+        self._log(f"Log file: {self._log_file}", level="INFO")
+
+    def _get_log_prefix(self) -> str:
+        """Get the log prefix for this agent (e.g., [SPG-1], [Direction])."""
+        prefix_map = {
+            "direction": "Direction",
+            "seed": f"Seed-{self.index}",
+            "spg": "SPG-Delta" if self.is_delta else f"SPG-{self.index}",
+            "spv": f"SPV-{self.index}",
+            "pov": f"POV-{self.index}",
+        }
+        return f"[{prefix_map.get(self.agent_type, self.agent_name)}]"
+
+    def _setup_logging_legacy(self) -> None:
+        """Legacy logging setup for backward compatibility."""
         if not self.log_dir:
             return
 
@@ -404,7 +509,6 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         )
 
         # Build format string with context info
-        # Format: timestamp | level | agent | task_id | worker_id | fuzzer | sanitizer | message
         format_parts = [
             "{time:YYYY-MM-DD HH:mm:ss.SSS}",
             "{level: <8}",
@@ -421,8 +525,8 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         format_parts.append("{message}")
         log_format = " | ".join(format_parts)
 
-        # Add file sink for this agent - use instance ID for filtering (append mode)
-        instance_id = self._agent_instance_id  # Capture for closure
+        # Add file sink for this agent
+        instance_id = self._agent_instance_id
         logger.add(
             self._log_file,
             level="DEBUG",
@@ -431,14 +535,10 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                 record["extra"].get("agent_instance_id") == instance_id
             ),
             encoding="utf-8",
-            mode="a",  # Append after banner
+            mode="a",
         )
 
-        # Create chat log file for detailed conversation tracking
-        self._chat_log_file = self._log_file.with_suffix(".chat.md")
-        self._init_chat_log()
-
-        self._log("Logging initialized", level="INFO")
+        self._log("Logging initialized (legacy)", level="INFO")
         self._log(f"Log file: {self._log_file}", level="INFO")
 
     def _log(self, message: str, level: str = "DEBUG") -> None:
@@ -500,32 +600,6 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         except Exception as e:
             self._log(f"Failed to write summary table: {e}", level="ERROR")
 
-    def _init_chat_log(self) -> None:
-        """Initialize the detailed chat log file with markdown header."""
-        if not hasattr(self, "_chat_log_file") or not self._chat_log_file:
-            return
-        try:
-            # Get fuzzer and sanitizer from subclass if available
-            fuzzer = getattr(self, "fuzzer", "") or ""
-            sanitizer = getattr(self, "sanitizer", "") or ""
-
-            with open(self._chat_log_file, "w", encoding="utf-8") as f:
-                f.write("# Agent Chat Log\n\n")
-                f.write(f"- **Agent**: {self.agent_name}\n")
-                f.write(f"- **Task ID**: {self.task_id}\n")
-                f.write(f"- **Worker ID**: {self.worker_id}\n")
-                if fuzzer:
-                    f.write(f"- **Fuzzer**: {fuzzer}\n")
-                if sanitizer:
-                    f.write(f"- **Sanitizer**: {sanitizer}\n")
-                f.write(f"- **Start Time**: {datetime.now().isoformat()}\n")
-                f.write(
-                    f"- **Model**: {self.model.id if hasattr(self.model, 'id') else (self.model or 'default')}\n"
-                )
-                f.write(f"\n{'=' * 80}\n\n")
-        except Exception as e:
-            self._log(f"Failed to init chat log: {e}", level="ERROR")
-
     def _log_chat_message(
         self,
         role: str,
@@ -537,7 +611,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         tool_success: Optional[bool] = None,
     ) -> None:
         """
-        Log a chat message with clear visual separation.
+        Report chat message to eval system.
 
         Args:
             role: Message role (system, user, assistant, tool)
@@ -559,83 +633,6 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                 tool_name=tool_name,
                 tool_success=tool_success,
             )
-
-        if not hasattr(self, "_chat_log_file") or not self._chat_log_file:
-            return
-
-        try:
-            with open(self._chat_log_file, "a", encoding="utf-8") as f:
-                timestamp = datetime.now().strftime("%H:%M:%S.%f")[:-3]
-
-                # Role-specific formatting with clear visual separators
-                if role == "system":
-                    f.write("## 📋 SYSTEM PROMPT\n")
-                    f.write(f"*[{timestamp}]*\n\n")
-                    f.write(f"```\n{content}\n```\n\n")
-                    f.write(f"{'─' * 80}\n\n")
-
-                elif role == "user":
-                    f.write(f"## 👤 USER (Iteration {iteration})\n")
-                    f.write(f"*[{timestamp}]*\n\n")
-                    f.write(f"{content}\n\n")
-                    f.write(f"{'─' * 80}\n\n")
-
-                elif role == "assistant":
-                    f.write(f"## 🤖 ASSISTANT (Iteration {iteration})\n")
-                    f.write(f"*[{timestamp}]*\n\n")
-                    if content:
-                        f.write(f"{content}\n\n")
-                    if tool_calls:
-                        f.write("### Tool Calls:\n")
-                        for tc in tool_calls:
-                            func_name = tc.get("function", {}).get("name", "unknown")
-                            func_args = tc.get("function", {}).get("arguments", "{}")
-                            tc_id = tc.get("id", "")
-                            f.write(f"- **{func_name}** (id: `{tc_id}`)\n")
-                            f.write(f"  ```json\n  {func_args}\n  ```\n")
-                        f.write("\n")
-                    f.write(f"{'─' * 80}\n\n")
-
-                elif role == "tool":
-                    f.write("## 🔧 TOOL RESULT\n")
-                    f.write(f"*[{timestamp}]* Tool Call ID: `{tool_call_id}`\n\n")
-                    # Truncate very long tool results for readability
-                    if len(content) > 5000:
-                        f.write(
-                            f"```\n{content[:5000]}\n... (truncated, {len(content)} total chars)\n```\n\n"
-                        )
-                    else:
-                        f.write(f"```\n{content}\n```\n\n")
-                    f.write(f"{'─' * 80}\n\n")
-
-        except Exception as e:
-            self._log(f"Failed to log chat message: {e}", level="ERROR")
-
-    def _finalize_chat_log(self, final_response: str) -> None:
-        """Finalize the chat log with summary statistics."""
-        if not hasattr(self, "_chat_log_file") or not self._chat_log_file:
-            return
-
-        try:
-            duration = (
-                (self.end_time - self.start_time).total_seconds()
-                if self.start_time and self.end_time
-                else 0
-            )
-
-            with open(self._chat_log_file, "a", encoding="utf-8") as f:
-                f.write(f"\n{'=' * 80}\n")
-                f.write("# SUMMARY\n\n")
-                f.write(
-                    f"- **End Time**: {self.end_time.isoformat() if self.end_time else 'N/A'}\n"
-                )
-                f.write(f"- **Duration**: {duration:.2f} seconds\n")
-                f.write(f"- **Total Iterations**: {self.total_iterations}\n")
-                f.write(f"- **Total Tool Calls**: {self.total_tool_calls}\n")
-                f.write(f"- **Total Messages**: {len(self.messages)}\n\n")
-                f.write(f"## Final Response:\n\n{final_response}\n")
-        except Exception as e:
-            self._log(f"Failed to finalize chat log: {e}", level="ERROR")
 
     def _log_conversation(self) -> None:
         """Log the full conversation history to file."""
@@ -1114,11 +1111,8 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         # Write summary table to log
         self._write_summary_table()
 
-        # Note: conversation log is saved incrementally after each iteration
+        # Note: conversation log (.json) is saved incrementally after each iteration
         # No need to save again here
-
-        # Finalize chat log (markdown format with summary)
-        self._finalize_chat_log(result)
 
         return result
 
@@ -1152,8 +1146,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
 
         if self._log_file:
             stats["log_file"] = str(self._log_file)
-
-        if self._chat_log_file:
-            stats["chat_log_file"] = str(self._chat_log_file)
+            # JSON conversation file is same path with .json extension
+            stats["conversation_file"] = str(self._log_file.with_suffix(".json"))
 
         return stats
