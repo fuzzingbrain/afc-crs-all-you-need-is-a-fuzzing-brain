@@ -541,11 +541,9 @@ def generate(variant: int = 1) -> bytes:
         }
 
         # Dispatch Celery task with dynamic time limit based on config
-        # Convert minutes to seconds, add 5 min buffer for soft limit
+        # Soft timeout at 90% of hard timeout - gives 10% buffer for graceful shutdown
         timeout_seconds = self.config.timeout_minutes * 60
-        soft_timeout_seconds = max(
-            timeout_seconds - 300, timeout_seconds // 2
-        )  # 5 min before hard limit
+        soft_timeout_seconds = int(timeout_seconds * 0.9)
 
         result = run_worker.apply_async(
             args=[assignment],
