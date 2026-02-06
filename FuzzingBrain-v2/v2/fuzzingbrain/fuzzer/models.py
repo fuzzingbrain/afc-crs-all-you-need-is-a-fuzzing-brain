@@ -61,6 +61,7 @@ class CrashRecord:
 
     crash_id: str = field(default_factory=generate_id)
     task_id: str = ""
+    worker_id: str = ""  # Worker that found this crash
     crash_path: str = ""
     crash_hash: str = ""  # SHA1 for deduplication
     vuln_type: Optional[str] = None  # heap-buffer-overflow, use-after-free, etc.
@@ -82,6 +83,7 @@ class CrashRecord:
             "_id": self.crash_id,
             "crash_id": self.crash_id,
             "task_id": self.task_id,
+            "worker_id": self.worker_id,
             "crash_path": self.crash_path,
             "crash_hash": self.crash_hash,
             "vuln_type": self.vuln_type,
@@ -102,6 +104,7 @@ class CrashRecord:
         return cls(
             crash_id=data.get("crash_id", data.get("_id")),
             task_id=data.get("task_id", ""),
+            worker_id=data.get("worker_id", ""),
             crash_path=data.get("crash_path", ""),
             crash_hash=data.get("crash_hash", ""),
             vuln_type=data.get("vuln_type"),

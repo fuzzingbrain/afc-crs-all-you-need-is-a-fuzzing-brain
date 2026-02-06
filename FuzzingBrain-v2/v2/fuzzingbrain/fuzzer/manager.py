@@ -1,13 +1,15 @@
 """
 Fuzzer Manager
 
-Top-level manager for all fuzzer instances within a worker.
+Worker-level manager for fuzzer instances.
 Manages Global Fuzzer and SP Fuzzer Pool.
+
+Note: FuzzerMonitor is now Task-level (passed in from Dispatcher).
 """
 
 import hashlib
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
@@ -19,17 +21,17 @@ from .models import (
     SeedInfo,
 )
 from .instance import FuzzerInstance
-from .monitor import CrashMonitor
+from .monitor import FuzzerMonitor
 
 
 class FuzzerManager:
     """
-    Fuzzer Manager.
+    Worker-level Fuzzer Manager.
 
     Responsibilities:
-    - Manage Global Fuzzer
-    - Manage SP Fuzzer Pool
-    - Unified crash monitoring and reporting
+    - Manage Global Fuzzer for this worker
+    - Manage SP Fuzzer Pool for this worker
+    - Register/unregister crash directories with Task-level FuzzerMonitor
     - Seed routing (Direction/FP -> Global, POV blob -> SP)
     """
 
@@ -44,7 +46,7 @@ class FuzzerManager:
         sanitizer: str = "address",
         global_config: Optional[GlobalFuzzerConfig] = None,
         sp_config: Optional[SPFuzzerConfig] = None,
-        on_crash: Optional[Callable[[CrashRecord], None]] = None,
+        crash_monitor: Optional[FuzzerMonitor] = None,
     ):
         """
         Initialize FuzzerManager.
@@ -59,7 +61,7 @@ class FuzzerManager:
             sanitizer: Sanitizer type
             global_config: Configuration for Global Fuzzer
             sp_config: Configuration for SP Fuzzers
-            on_crash: Callback when crash is found
+            crash_monitor: Task-level FuzzerMonitor (shared across workers)
         """
         self.task_id = task_id
         self.worker_id = worker_id
@@ -79,14 +81,15 @@ class FuzzerManager:
         # SP Fuzzer Pool: sp_id -> FuzzerInstance
         self.sp_fuzzers: Dict[str, FuzzerInstance] = {}
 
-        # Crash Monitor
-        self.crash_monitor = CrashMonitor(
-            task_id=task_id,
-            on_crash=on_crash,
-        )
-        # Set verification context
-        self.crash_monitor.fuzzer_path = self.fuzzer_path
-        self.crash_monitor.docker_image = docker_image
+        # Task-level Crash Monitor (shared, passed from Dispatcher)
+        # If not provided, create a worker-local one (for backward compatibility)
+        if crash_monitor is not None:
+            self.crash_monitor = crash_monitor
+            self._owns_crash_monitor = False
+        else:
+            # Backward compatibility: create worker-local monitor
+            self.crash_monitor = FuzzerMonitor(task_id=task_id)
+            self._owns_crash_monitor = True
 
         # Directories
         self.fuzzer_workspace = workspace_path / "fuzzer_worker"
@@ -154,21 +157,28 @@ class FuzzerManager:
             for i, seed in enumerate(initial_seeds):
                 self.global_fuzzer.add_seed(seed, f"initial_{i:04d}")
 
-        # Register crash directory for monitoring
+        # Register crash directory for monitoring (with worker_id)
         self.crash_monitor.add_watch_dir(
             crash_dir=self.global_crashes_dir,
+            worker_id=self.worker_id,
             source="global",
             fuzzer_name=self.fuzzer_name,
             sanitizer=self.sanitizer,
+            fuzzer_path=self.fuzzer_path,
+            docker_image=self.docker_image,
         )
 
-        # Start monitoring if not already running
-        if not self.crash_monitor._running:
-            await self.crash_monitor.start_monitoring()
+        # Start monitoring if we own the monitor and it's not running
+        if self._owns_crash_monitor and not self.crash_monitor._running:
+            self.crash_monitor.start_monitoring()
 
         # Start fuzzer
         success = await self.global_fuzzer.start()
         if success:
+            # Create .active marker for auto-discovery
+            active_marker = self.fuzzer_workspace / "global" / ".active"
+            active_marker.touch()
+
             logger.info(
                 f"[{self.worker_id}] ┌─────────────────────────────────────────┐"
             )
@@ -187,7 +197,12 @@ class FuzzerManager:
         """Stop the Global Fuzzer."""
         if self.global_fuzzer:
             await self.global_fuzzer.stop()
-            self.crash_monitor.remove_watch_dir("global")
+            self.crash_monitor.remove_watch_dir(self.worker_id, "global")
+
+            # Remove .active marker
+            active_marker = self.fuzzer_workspace / "global" / ".active"
+            active_marker.unlink(missing_ok=True)
+
             logger.info(f"[FuzzerManager:{self.worker_id}] Global fuzzer stopped")
 
     def add_direction_seed(self, seed: bytes, direction_id: str) -> Path:
@@ -303,22 +318,30 @@ class FuzzerManager:
             config=self.sp_config,
         )
 
-        # Register crash directory
+        # Register crash directory (with worker_id)
         self.crash_monitor.add_watch_dir(
             crash_dir=sp_crashes_dir,
+            worker_id=self.worker_id,
             source=sp_id,
             fuzzer_name=self.fuzzer_name,
             sanitizer=self.sanitizer,
+            fuzzer_path=self.fuzzer_path,
+            docker_image=self.docker_image,
         )
 
-        # Start monitoring if not already running
-        if not self.crash_monitor._running:
-            await self.crash_monitor.start_monitoring()
+        # Start monitoring if we own the monitor and it's not running
+        if self._owns_crash_monitor and not self.crash_monitor._running:
+            self.crash_monitor.start_monitoring()
 
         # Start fuzzer
         success = await sp_fuzzer.start()
         if success:
             self.sp_fuzzers[sp_id] = sp_fuzzer
+
+            # Create .active marker for auto-discovery
+            active_marker = self.sp_base_dir / sp_id / ".active"
+            active_marker.touch()
+
             logger.info(
                 f"[{self.worker_id}] ▶ SP FUZZER STARTED: {sp_id[:8]} (total: {len(self.sp_fuzzers)})"
             )
@@ -338,7 +361,12 @@ class FuzzerManager:
             return
 
         await self.sp_fuzzers[sp_id].stop()
-        self.crash_monitor.remove_watch_dir(sp_id)
+        self.crash_monitor.remove_watch_dir(self.worker_id, sp_id)
+
+        # Remove .active marker
+        active_marker = self.sp_base_dir / sp_id / ".active"
+        active_marker.unlink(missing_ok=True)
+
         del self.sp_fuzzers[sp_id]
 
         logger.info(f"[{self.worker_id}] ■ SP FUZZER STOPPED: {sp_id[:8]}")
@@ -430,8 +458,8 @@ class FuzzerManager:
         ]
 
     def get_total_crashes(self) -> int:
-        """Get total number of crashes found by all fuzzers."""
-        return self.crash_monitor.get_crash_count()
+        """Get total number of crashes found by this worker's fuzzers."""
+        return len(self.crash_monitor.get_crashes_by_worker(self.worker_id))
 
     def get_crashes_for_sp(self, sp_id: str) -> List[CrashRecord]:
         """
@@ -443,7 +471,7 @@ class FuzzerManager:
         Returns:
             List of crash records
         """
-        return self.crash_monitor.get_crashes_by_source(sp_id)
+        return self.crash_monitor.get_crashes_by_source(self.worker_id, sp_id)
 
     async def restart_global_fuzzer(self) -> bool:
         """
@@ -458,11 +486,31 @@ class FuzzerManager:
         await self.stop_global_fuzzer()
         return await self.start_global_fuzzer()
 
+    async def shutdown_sp_fuzzers_only(self) -> None:
+        """
+        Shutdown only SP fuzzers, keep Global Fuzzer running.
+
+        Called when Worker completes but Global Fuzzer should continue.
+        """
+        logger.info(
+            f"[FuzzerManager:{self.worker_id}] Shutting down SP fuzzers only, "
+            f"Global Fuzzer continues running..."
+        )
+
+        # Stop all SP fuzzers
+        for sp_id in list(self.sp_fuzzers.keys()):
+            await self.stop_sp_fuzzer(sp_id)
+
+        logger.info(
+            f"[FuzzerManager:{self.worker_id}] SP fuzzers stopped, "
+            f"Global Fuzzer still running"
+        )
+
     async def shutdown(self) -> None:
         """
-        Shutdown all fuzzers and monitoring.
+        Shutdown all fuzzers for this worker.
 
-        Called when FuzzingBrain ends or worker is killed.
+        Note: Does NOT stop the FuzzerMonitor (that's Task-level, managed by Dispatcher).
         """
         logger.info(f"[FuzzerManager:{self.worker_id}] Shutting down...")
 
@@ -473,8 +521,9 @@ class FuzzerManager:
         # Stop global fuzzer
         await self.stop_global_fuzzer()
 
-        # Stop crash monitor
-        await self.crash_monitor.stop_monitoring()
+        # Only stop monitor if we own it (backward compatibility)
+        if self._owns_crash_monitor:
+            self.crash_monitor.stop_monitoring()
 
         logger.info(f"[FuzzerManager:{self.worker_id}] Shutdown complete")
 
