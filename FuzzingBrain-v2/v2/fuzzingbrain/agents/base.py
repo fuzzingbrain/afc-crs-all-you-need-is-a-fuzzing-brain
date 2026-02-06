@@ -210,6 +210,21 @@ class BaseAgent(ABC):
             "Task ID": self.task_id,
         }
 
+    def _configure_context(self, ctx: AgentContext) -> None:
+        """
+        Configure agent context after creation. Subclasses should override to set
+        specific fields like sp_id, direction_id, delta_id.
+
+        Args:
+            ctx: The AgentContext instance to configure
+        """
+        # Default implementation does nothing
+        # Subclasses can override to set:
+        #   ctx.sp_id = self.suspicious_point_id
+        #   ctx.direction_id = self.direction_id
+        #   ctx.delta_id = self.delta_id
+        pass
+
     def _get_urgency_message(self, iteration: int, remaining: int) -> Optional[str]:
         """
         Get urgency message when iterations are running low.
@@ -1013,6 +1028,9 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         ) as ctx:
             self._context = ctx
             agent_id = ctx.agent_id  # Use ObjectId from context
+
+            # Allow subclasses to configure context (set sp_id, direction_id, etc.)
+            self._configure_context(ctx)
 
             # Update LLMClient with agent_id for call tracking
             self.llm_client.agent_id = agent_id

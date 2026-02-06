@@ -296,6 +296,13 @@ class POVAgent(BaseAgent):
             "Goal": "Generate crashing input (POV)",
         }
 
+    def _configure_context(self, ctx) -> None:
+        """Configure agent context with SP ID."""
+        if self.suspicious_point:
+            ctx.sp_id = self.suspicious_point.get(
+                "suspicious_point_id", self.suspicious_point.get("_id")
+            )
+
     @property
     def system_prompt(self) -> str:
         """Get system prompt."""

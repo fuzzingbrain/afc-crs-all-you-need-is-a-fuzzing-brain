@@ -351,6 +351,11 @@ class FullSPGenerator(SPGeneratorBase):
             "Sanitizer": self.sanitizer,
         }
 
+    def _configure_context(self, ctx) -> None:
+        """Configure agent context with direction ID."""
+        if self.direction_id:
+            ctx.direction_id = self.direction_id
+
     def _get_summary_table(self) -> str:
         """Generate summary table."""
         duration = (

@@ -297,6 +297,15 @@ class SeedAgent(BaseAgent):
             metadata["Delta ID"] = self.delta_id[:8]
         return metadata
 
+    def _configure_context(self, ctx) -> None:
+        """Configure agent context with direction/SP/delta IDs."""
+        if self.direction_id:
+            ctx.direction_id = self.direction_id
+        if self.sp_id:
+            ctx.sp_id = self.sp_id
+        if self.delta_id:
+            ctx.delta_id = self.delta_id
+
     def _get_urgency_message(self, iteration: int, remaining: int) -> Optional[str]:
         """
         Get urgency message when iterations are running low.

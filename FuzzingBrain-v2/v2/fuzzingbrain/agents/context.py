@@ -231,6 +231,9 @@ class AgentContext:
                     "result_summary": self.result_summary,
                     "log_path": self.log_path,
                     # Tool-specific state (for recovery/debugging)
+                    "sp_id": self.sp_id,  # SP being processed (POV Agent)
+                    "direction_id": self.direction_id,  # Direction being processed (Seed Agent)
+                    "delta_id": self.delta_id,  # Delta scan ID
                     "sp_created": self.sp_created,
                     "seeds_generated": self.seeds_generated,
                     "pov_iteration": self.pov_iteration,
@@ -345,6 +348,9 @@ class AgentContext:
             "result_summary": self.result_summary,
             "log_path": self.log_path,
             # Tool-specific state
+            "sp_id": self.sp_id,
+            "direction_id": self.direction_id,
+            "delta_id": self.delta_id,
             "sp_created": self.sp_created,
             "seeds_generated": self.seeds_generated,
             "pov_iteration": self.pov_iteration,
