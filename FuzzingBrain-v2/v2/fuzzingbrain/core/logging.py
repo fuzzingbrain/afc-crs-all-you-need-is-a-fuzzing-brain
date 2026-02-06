@@ -906,8 +906,8 @@ def create_worker_summary(
     status: str,
     fuzzer: str,
     sanitizer: str,
-    povs_found: int = 0,
-    patches_found: int = 0,
+    pov_generated: int = 0,
+    patch_generated: int = 0,
     elapsed_seconds: float = 0,
     error_msg: Optional[str] = None,
 ) -> str:
@@ -919,8 +919,8 @@ def create_worker_summary(
         status: completed/failed
         fuzzer: Fuzzer name
         sanitizer: Sanitizer type
-        povs_found: Number of POVs found
-        patches_found: Number of patches found
+        pov_generated: Number of POVs generated
+        patch_generated: Number of patches generated
         elapsed_seconds: Time elapsed
         error_msg: Error message if failed
 
@@ -944,8 +944,8 @@ def create_worker_summary(
     lines.append("│" + f"  Elapsed:      {elapsed_str}".ljust(width) + "│")
 
     if status == "completed":
-        lines.append("│" + f"  POVs Found:   {povs_found}".ljust(width) + "│")
-        lines.append("│" + f"  Patches:      {patches_found}".ljust(width) + "│")
+        lines.append("│" + f"  POVs:         {pov_generated}".ljust(width) + "│")
+        lines.append("│" + f"  Patches:      {patch_generated}".ljust(width) + "│")
     elif error_msg:
         # Truncate error message if too long
         err_display = error_msg[:50] + "..." if len(error_msg) > 50 else error_msg
@@ -991,8 +991,8 @@ def create_final_summary(
     interrupted = sum(1 for w in workers if w.get("status") == "interrupted")
     failed = sum(1 for w in workers if w.get("status") == "failed")
     total_sps = sum(w.get("sps_found", 0) for w in workers)
-    total_povs = sum(w.get("povs_found", 0) for w in workers)
-    total_patches = sum(w.get("patches_found", 0) for w in workers)
+    total_povs = sum(w.get("pov_generated", 0) for w in workers)
+    total_patches = sum(w.get("patch_generated", 0) for w in workers)
 
     # Column widths for worker table
     col_num = 4
@@ -1162,8 +1162,8 @@ def create_final_summary(
             sps_display = str(sps_found)
         sps_cell = sps_display.center(col_sps)
 
-        povs_cell = str(w.get("povs_found", 0)).center(col_povs)
-        patches_cell = str(w.get("patches_found", 0)).center(col_patches)
+        povs_cell = str(w.get("pov_generated", 0)).center(col_povs)
+        patches_cell = str(w.get("patch_generated", 0)).center(col_patches)
 
         # Apply color to worker content (not borders)
         if use_color:

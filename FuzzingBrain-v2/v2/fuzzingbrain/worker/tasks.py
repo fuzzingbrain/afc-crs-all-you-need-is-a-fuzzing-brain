@@ -164,8 +164,8 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             status="completed",
             fuzzer=fuzzer,
             sanitizer=sanitizer,
-            povs_found=result.get("povs_found", 0),
-            patches_found=result.get("patches_found", 0),
+            pov_generated=result.get("pov_generated", 0),
+            patch_generated=result.get("patch_generated", 0),
             elapsed_seconds=elapsed_seconds,
         )
         for line in summary.split("\n"):
@@ -181,8 +181,8 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             "status": "completed",
             "fuzzer": fuzzer,
             "sanitizer": sanitizer,
-            "povs_found": result.get("povs_found", 0),
-            "patches_found": result.get("patches_found", 0),
+            "pov_generated": result.get("pov_generated", 0),
+            "patch_generated": result.get("patch_generated", 0),
         }
 
     except BudgetExceededError as e:

@@ -193,16 +193,16 @@ def generate(variant: int = 1) -> bytes:
                 self.repos.povs.update(pov_id, {"is_successful": True})
                 logger.info(f"[FuzzerMonitor] ✅ POV {pov_id[:8]} activated!")
 
-                # Update worker's povs_found count
+                # Update worker's pov_generated count
                 try:
                     worker = self.repos.workers.collection.find_one(
                         {"worker_id": crash_record.worker_id}
                     )
                     if worker:
-                        current_count = worker.get("povs_found", 0)
+                        current_count = worker.get("pov_generated", 0)
                         self.repos.workers.collection.update_one(
                             {"worker_id": crash_record.worker_id},
-                            {"$set": {"povs_found": current_count + 1}},
+                            {"$set": {"pov_generated": current_count + 1}},
                         )
                 except Exception as e:
                     logger.debug(
@@ -945,8 +945,8 @@ def generate(variant: int = 1) -> bytes:
                 "status": effective_status,
                 "sps_found": sp_count,
                 "sps_merged": merged_count,
-                "povs_found": actual_pov_count,  # Use DB count instead of worker's self-report
-                "patches_found": worker.patches_found or 0,
+                "pov_generated": actual_pov_count,  # Use DB count instead of worker's self-report
+                "patch_generated": worker.patch_generated or 0,
                 "error_msg": worker.error_msg,
                 "duration_seconds": worker.get_duration_seconds(),
                 "duration_str": worker.get_duration_str(),

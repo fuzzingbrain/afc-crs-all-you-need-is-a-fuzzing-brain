@@ -527,15 +527,14 @@ def generate(variant: int = 1) -> bytes:
                 result["worker_id"] = ctx.worker_id  # Include ObjectId in result
 
                 # Map strategy-specific fields to common result fields
-                # (for backward compatibility with tasks.py)
                 if "pov_generated" in result:
-                    result["povs_found"] = result["pov_generated"]
                     ctx.pov_generated = result["pov_generated"]
                 elif "povs_generated" in result:
-                    result["povs_found"] = result["povs_generated"]
+                    result["pov_generated"] = result["povs_generated"]
                     ctx.pov_generated = result["povs_generated"]
                 if "patches_verified" in result:
-                    result["patches_found"] = result["patches_verified"]
+                    result["patch_generated"] = result["patches_verified"]
+                    ctx.patch_generated = result["patches_verified"]
 
                 # Update context statistics
                 ctx.result_summary = result

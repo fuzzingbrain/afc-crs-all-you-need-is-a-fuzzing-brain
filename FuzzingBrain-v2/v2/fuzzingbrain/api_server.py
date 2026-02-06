@@ -419,8 +419,8 @@ async def get_status(task_id: str):
             "workers_completed": len(
                 [w for w in workers if w.status.value == "completed"]
             ),
-            "povs_found": len(povs),
-            "patches_found": len(patches),
+            "pov_generated": len(povs),
+            "patch_generated": len(patches),
         },
         povs=[p.to_dict() for p in povs[:10]],  # Return max 10
         patches=[p.to_dict() for p in patches[:10]],

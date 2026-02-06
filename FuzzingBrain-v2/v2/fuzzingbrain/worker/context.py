@@ -132,6 +132,7 @@ class WorkerContext:
         self.sp_found: int = 0
         self.sp_verified: int = 0
         self.pov_generated: int = 0
+        self.patch_generated: int = 0
 
         # Strategy tracking
         self.current_strategy: Optional[str] = None
@@ -255,9 +256,7 @@ class WorkerContext:
                     "sp_found": self.sp_found,
                     "sp_verified": self.sp_verified,
                     "pov_generated": self.pov_generated,
-                    # Legacy compatibility
-                    "povs_found": self.pov_generated,
-                    "patches_found": 0,
+                    "patch_generated": self.patch_generated,
                     # Timestamps
                     "created_at": self.started_at or datetime.now(),
                     "updated_at": datetime.now(),
@@ -335,6 +334,13 @@ class WorkerContext:
         """Increment POV generated counter and persist."""
         self.pov_generated += count
         # POV generated is significant - force immediate save
+        self._dirty = True
+        self._save_to_db(force=True)
+
+    def increment_patch_generated(self, count: int = 1) -> None:
+        """Increment patch generated counter and persist."""
+        self.patch_generated += count
+        # Patch generated is significant - force immediate save
         self._dirty = True
         self._save_to_db(force=True)
 
@@ -422,6 +428,7 @@ class WorkerContext:
             "sp_found": self.sp_found,
             "sp_verified": self.sp_verified,
             "pov_generated": self.pov_generated,
+            "patch_generated": self.patch_generated,
             "phase_build": self.phase_build,
             "phase_reachability": self.phase_reachability,
             "phase_find_sp": self.phase_find_sp,

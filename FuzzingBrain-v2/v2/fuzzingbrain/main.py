@@ -201,8 +201,8 @@ def signal_handler(signum, frame):
                                 "status": w.get("status", "cancelled"),
                                 "duration_str": f"{duration_sec / 60:.1f}m",
                                 "sps_found": sp_count,
-                                "povs_found": pov_count,
-                                "patches_found": w.get("patches_found", 0),
+                                "pov_generated": pov_count,
+                                "patch_generated": w.get("patch_generated", 0),
                             }
                         )
 

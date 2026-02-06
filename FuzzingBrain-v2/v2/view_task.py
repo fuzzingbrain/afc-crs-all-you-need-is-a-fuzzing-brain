@@ -263,8 +263,8 @@ def generate_html(task_id: str, data: dict) -> str:
             <div class="worker-details">
                 <div><strong>Worker ID:</strong> {w.get('worker_id', 'N/A')}</div>
                 <div><strong>Job Type:</strong> {w.get('task_type', 'N/A')}</div>
-                <div><strong>POVs Found:</strong> {w.get('povs_found', 0)}</div>
-                <div><strong>Patches Found:</strong> {w.get('patches_found', 0)}</div>
+                <div><strong>POVs Generated:</strong> {w.get('pov_generated', 0)}</div>
+                <div><strong>Patches Generated:</strong> {w.get('patch_generated', 0)}</div>
                 {f'<div class="error-msg"><strong>Error:</strong> {w.get("error_msg", "")}</div>' if w.get('error_msg') else ''}
             </div>
             {time_bar_html}

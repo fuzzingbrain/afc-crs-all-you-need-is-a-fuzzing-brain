@@ -65,10 +65,7 @@ class Worker:
     sp_found: int = 0
     sp_verified: int = 0
     pov_generated: int = 0
-
-    # Results (legacy compatibility)
-    povs_found: int = 0
-    patches_found: int = 0
+    patch_generated: int = 0
 
     # Timestamps
     created_at: datetime = field(default_factory=datetime.now)
@@ -132,9 +129,7 @@ class Worker:
             "sp_found": self.sp_found,
             "sp_verified": self.sp_verified,
             "pov_generated": self.pov_generated,
-            # Legacy
-            "povs_found": self.povs_found,
-            "patches_found": self.patches_found,
+            "patch_generated": self.patch_generated,
             # Timestamps
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -188,10 +183,9 @@ class Worker:
             agents_failed=data.get("agents_failed", 0),
             sp_found=data.get("sp_found", 0),
             sp_verified=data.get("sp_verified", 0),
-            pov_generated=data.get("pov_generated", 0),
-            # Legacy
-            povs_found=data.get("povs_found", 0),
-            patches_found=data.get("patches_found", 0),
+            # Support legacy field names for backward compatibility
+            pov_generated=data.get("pov_generated", data.get("povs_found", 0)),
+            patch_generated=data.get("patch_generated", data.get("patches_found", 0)),
             # Timestamps
             created_at=data.get("created_at", datetime.now()),
             updated_at=data.get("updated_at", datetime.now()),
@@ -219,11 +213,11 @@ class Worker:
         self.started_at = datetime.now()
         self.updated_at = datetime.now()
 
-    def mark_completed(self, povs: int = 0, patches: int = 0):
+    def mark_completed(self, pov_count: int = 0, patch_count: int = 0):
         """Mark worker as completed"""
         self.status = WorkerStatus.COMPLETED
-        self.povs_found = povs
-        self.patches_found = patches
+        self.pov_generated = pov_count
+        self.patch_generated = patch_count
         self.finished_at = datetime.now()
         self.updated_at = datetime.now()
 

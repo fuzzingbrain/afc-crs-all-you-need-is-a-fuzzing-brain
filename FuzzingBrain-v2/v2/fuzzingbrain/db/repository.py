@@ -1275,7 +1275,7 @@ class WorkerRepository(BaseRepository[Worker]):
 
     def update_results(self, worker_id: str, povs: int = 0, patches: int = 0) -> bool:
         """Update worker results"""
-        return self.update(worker_id, {"povs_found": povs, "patches_found": patches})
+        return self.update(worker_id, {"pov_generated": povs, "patch_generated": patches})
 
     def update_strategy(self, worker_id: str, strategy: str) -> bool:
         """Update current strategy and add to history"""
