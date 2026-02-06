@@ -101,6 +101,11 @@ class POVAgent(BaseAgent):
     # Enable context compression for long POV sessions
     enable_context_compression: bool = True
 
+    @property
+    def agent_type(self) -> str:
+        """POV agent type."""
+        return "pov"
+
     def __init__(
         self,
         fuzzer: str = "",
@@ -125,6 +130,9 @@ class POVAgent(BaseAgent):
         fuzzer_code: str = "",
         # FuzzerManager for SP Fuzzer integration
         fuzzer_manager: Any = None,
+        # New: for numbered log files
+        index: int = 0,
+        target_name: str = "",
     ):
         """
         Initialize POV Agent.
@@ -147,6 +155,8 @@ class POVAgent(BaseAgent):
             docker_image: Docker image for running fuzzer
             fuzzer_code: Fuzzer source code (passed directly to avoid DB lookup)
             fuzzer_manager: FuzzerManager for SP Fuzzer integration
+            index: Agent index for numbered log files
+            target_name: function_name for log filename
         """
         super().__init__(
             llm_client=llm_client,
@@ -156,10 +166,11 @@ class POVAgent(BaseAgent):
             task_id=task_id,
             worker_id=worker_id,
             log_dir=log_dir,
+            index=index,
+            target_name=target_name,
+            fuzzer=fuzzer,
+            sanitizer=sanitizer,
         )
-
-        self.fuzzer = fuzzer
-        self.sanitizer = sanitizer
         self.max_pov_attempts = max_pov_attempts
         self.output_dir = Path(output_dir) if output_dir else None
         self.workspace_path = Path(workspace_path) if workspace_path else None
@@ -212,9 +223,19 @@ class POVAgent(BaseAgent):
         if self.pov_success:
             result_icon = "✅"
             result_text = "SUCCESS - Crash triggered!"
-        else:
+        elif self.stop_reason == "budget":
+            result_icon = "⏹️"
+            result_text = "COMPLETED (Budget Limit Reached)"
+        elif self.stop_reason == "timeout":
+            result_icon = "⏹️"
+            result_text = "COMPLETED (Time Limit Reached)"
+        elif self.stop_reason == "error":
             result_icon = "❌"
-            result_text = "FAILED - No crash achieved"
+            result_text = "FAILED - Error occurred"
+        else:
+            # Normal completion without crash - not a failure
+            result_icon = "⏹️"
+            result_text = "COMPLETED - No crash found"
 
         lines = []
         lines.append("")

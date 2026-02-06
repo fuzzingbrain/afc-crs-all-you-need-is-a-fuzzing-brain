@@ -40,6 +40,11 @@ class FullscanSPAgent(BaseAgent):
         "low": 0,
     }
 
+    @property
+    def agent_type(self) -> str:
+        """SPG for Full-scan mode."""
+        return "spg"
+
     def __init__(
         self,
         fuzzer: str = "",
@@ -58,6 +63,8 @@ class FullscanSPAgent(BaseAgent):
         task_id: str = "",
         worker_id: str = "",
         log_dir: Optional[Path] = None,
+        # New: for numbered log files
+        index: int = 0,
     ):
         """
         Initialize Full-scan SP Find Agent.
@@ -79,6 +86,7 @@ class FullscanSPAgent(BaseAgent):
             task_id: Task ID
             worker_id: Worker ID
             log_dir: Log directory
+            index: Agent index for numbered log files
         """
         super().__init__(
             llm_client=llm_client,
@@ -88,10 +96,12 @@ class FullscanSPAgent(BaseAgent):
             task_id=task_id,
             worker_id=worker_id,
             log_dir=log_dir,
+            index=index,
+            target_name=direction_name,
+            fuzzer=fuzzer,
+            sanitizer=sanitizer,
         )
 
-        self.fuzzer = fuzzer
-        self.sanitizer = sanitizer
         self.direction_name = direction_name
         self.direction_id = direction_id
         self.risk_level = risk_level.lower()

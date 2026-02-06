@@ -11,6 +11,7 @@ import sys
 import traceback
 
 from dotenv import load_dotenv
+from loguru import logger
 
 load_dotenv()  # Load .env file for API keys
 
@@ -29,23 +30,46 @@ app = Celery(
 )
 
 
+class InterceptHandler(logging.Handler):
+    """Intercept standard logging and redirect to Loguru."""
+
+    def emit(self, record):
+        # Get corresponding Loguru level
+        try:
+            level = logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        # Find caller from where the log originated
+        frame, depth = sys._getframe(6), 6
+        while frame and frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+
+        logger.opt(depth=depth, exception=record.exc_info).bind(component="celery").log(
+            level, record.getMessage()
+        )
+
+
 @setup_logging.connect
 def configure_celery_logging(**kwargs):
     """
-    Disable Celery's default logging to console.
+    Redirect Celery logs to Loguru (celery.log via component="celery" filter).
 
-    This prevents Celery from interfering with our console output.
-    All Celery logs go to file only.
+    This prevents Celery from interfering with console output while
+    still capturing logs to our celery.log file.
     """
-    # Get Celery's logger and remove all handlers
+    # Remove default handlers and redirect to Loguru
     celery_logger = logging.getLogger("celery")
-    celery_logger.handlers = []
+    celery_logger.handlers = [InterceptHandler()]
+    celery_logger.setLevel(logging.INFO)
     celery_logger.propagate = False
 
-    # Also suppress celery.worker and celery.task loggers
+    # Also redirect celery.worker and celery.task loggers
     for name in ["celery.worker", "celery.task", "celery.app.trace"]:
         log = logging.getLogger(name)
-        log.handlers = []
+        log.handlers = [InterceptHandler()]
+        log.setLevel(logging.INFO)
         log.propagate = False
 
 

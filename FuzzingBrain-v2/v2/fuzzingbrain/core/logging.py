@@ -9,7 +9,7 @@ import sys
 import traceback
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union
 
 from loguru import logger
 
@@ -62,6 +62,149 @@ logger.remove()
 
 # Global log directory for current task
 _current_log_dir: Optional[Path] = None
+
+# =============================================================================
+# Log Path Helpers
+# =============================================================================
+
+# Max length for names in filenames (direction_name, function_name)
+MAX_NAME_LENGTH = 20
+
+
+def truncate_name(name: str, max_len: int = MAX_NAME_LENGTH) -> str:
+    """
+    Truncate a name for use in filenames.
+
+    Args:
+        name: The name to truncate
+        max_len: Maximum length (default: 20)
+
+    Returns:
+        Truncated name
+    """
+    if len(name) <= max_len:
+        return name
+    return name[:max_len]
+
+
+def create_log_directories(log_dir: Path, workers: list = None) -> None:
+    """
+    Create the log directory structure.
+
+    Args:
+        log_dir: Base log directory for this task
+        workers: Optional list of (fuzzer, sanitizer) tuples to create worker dirs
+    """
+    # Create top-level directories
+    (log_dir / "build").mkdir(parents=True, exist_ok=True)
+    (log_dir / "analyzer").mkdir(parents=True, exist_ok=True)
+    (log_dir / "fuzzer").mkdir(parents=True, exist_ok=True)
+    (log_dir / "worker").mkdir(parents=True, exist_ok=True)
+
+    # Create worker subdirectories if specified
+    if workers:
+        for fuzzer, sanitizer in workers:
+            worker_dir = log_dir / "worker" / f"{fuzzer}_{sanitizer}"
+            worker_dir.mkdir(parents=True, exist_ok=True)
+            # Create agent subdirectories
+            (worker_dir / "agent" / "direction").mkdir(parents=True, exist_ok=True)
+            (worker_dir / "agent" / "seed").mkdir(parents=True, exist_ok=True)
+            (worker_dir / "agent" / "sp" / "generate").mkdir(
+                parents=True, exist_ok=True
+            )
+            (worker_dir / "agent" / "sp" / "verify").mkdir(parents=True, exist_ok=True)
+            (worker_dir / "agent" / "pov").mkdir(parents=True, exist_ok=True)
+
+
+def get_worker_log_dir(fuzzer: str, sanitizer: str) -> Optional[Path]:
+    """
+    Get the log directory for a specific worker.
+
+    Args:
+        fuzzer: Fuzzer name
+        sanitizer: Sanitizer name
+
+    Returns:
+        Path to worker log directory, or None if logging not initialized
+    """
+    if _current_log_dir is None:
+        return None
+    worker_dir = _current_log_dir / "worker" / f"{fuzzer}_{sanitizer}"
+    worker_dir.mkdir(parents=True, exist_ok=True)
+    return worker_dir
+
+
+def get_agent_log_path(
+    agent_type: str,
+    fuzzer: str,
+    sanitizer: str,
+    index: int = 0,
+    target_name: str = "",
+    is_delta: bool = False,
+) -> Optional[Path]:
+    """
+    Get the log file path for an agent.
+
+    Args:
+        agent_type: One of "direction", "seed", "spg", "spv", "pov"
+        fuzzer: Fuzzer name
+        sanitizer: Sanitizer name
+        index: Agent index (1-based for display, used in filename)
+        target_name: direction_name or function_name
+        is_delta: Whether this is delta scan mode (for SPG)
+
+    Returns:
+        Path to agent log file (without extension), or None if logging not initialized.
+        If file already exists, appends timestamp to ensure uniqueness.
+    """
+    if _current_log_dir is None:
+        return None
+
+    worker_dir = _current_log_dir / "worker" / f"{fuzzer}_{sanitizer}"
+
+    # Truncate target name for filename
+    name_suffix = f"_{truncate_name(target_name)}" if target_name else ""
+
+    if agent_type == "direction":
+        agent_dir = worker_dir / "agent" / "direction"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        base_path = agent_dir / "D_agent"
+
+    elif agent_type == "seed":
+        agent_dir = worker_dir / "agent" / "seed"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        base_path = agent_dir / f"Seed_{index}{name_suffix}"
+
+    elif agent_type == "spg":
+        agent_dir = worker_dir / "agent" / "sp" / "generate"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        if is_delta:
+            base_path = agent_dir / "SPG_delta"
+        else:
+            base_path = agent_dir / f"SPG_{index}{name_suffix}"
+
+    elif agent_type == "spv":
+        agent_dir = worker_dir / "agent" / "sp" / "verify"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        base_path = agent_dir / f"SPV_{index}{name_suffix}"
+
+    elif agent_type == "pov":
+        agent_dir = worker_dir / "agent" / "pov"
+        agent_dir.mkdir(parents=True, exist_ok=True)
+        base_path = agent_dir / f"POV_{index}{name_suffix}"
+
+    else:
+        raise ValueError(f"Unknown agent type: {agent_type}")
+
+    # Check for filename conflict and add timestamp if needed
+    log_file = Path(str(base_path) + ".log")
+    if log_file.exists():
+        import datetime
+
+        timestamp = datetime.datetime.now().strftime("%H%M%S")
+        return Path(str(base_path) + f"_{timestamp}")
+
+    return base_path
 
 
 # =============================================================================
@@ -373,6 +516,24 @@ def get_log_dir() -> Optional[Path]:
     return _current_log_dir
 
 
+def set_log_dir(log_dir: Union[str, Path]) -> Path:
+    """
+    Set current task's log directory.
+
+    Used by worker processes to set the log directory from assignment.
+    The directory must already exist (created by main process).
+
+    Args:
+        log_dir: Path to the log directory
+
+    Returns:
+        Path to the log directory
+    """
+    global _current_log_dir
+    _current_log_dir = Path(log_dir)
+    return _current_log_dir
+
+
 def setup_logging(
     project_name: str,
     task_id: str,
@@ -412,8 +573,11 @@ def setup_logging(
 
     _current_log_dir = log_dir
 
-    # Write logo and metadata header to log file
-    log_file = log_dir / "fuzzingbrain.log"
+    # Create directory structure
+    create_log_directories(log_dir)
+
+    # Write logo and metadata header to controller log
+    log_file = log_dir / "controller.log"
     with open(log_file, "w", encoding="utf-8") as f:
         f.write(LOGO)
         f.write("\n")
@@ -442,7 +606,7 @@ def setup_logging(
         colorize=True,
     )
 
-    # Main log file - append to existing (with header)
+    # Main log file (controller.log) - append to existing (with header)
     logger.add(
         log_file,
         level=file_level,
@@ -453,18 +617,231 @@ def setup_logging(
         mode="a",  # Append mode
     )
 
-    # Error log file - only errors and above
-    logger.add(
-        log_dir / "error.log",
-        level="ERROR",
-        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} - {message}",
-        rotation="10 MB",
-        encoding="utf-8",
-    )
+    # Note: error.log is now per-worker, created by setup_worker_logging()
 
     logger.info(f"Logging initialized: {log_dir}")
 
     return log_dir
+
+
+def setup_worker_logging(
+    fuzzer: str,
+    sanitizer: str,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Optional[Path]:
+    """
+    Setup logging for a worker process.
+
+    Creates worker.log and error.log in the worker directory.
+
+    Args:
+        fuzzer: Fuzzer name
+        sanitizer: Sanitizer name
+        metadata: Worker metadata for header
+
+    Returns:
+        Path to worker log directory, or None if main logging not initialized
+    """
+    if _current_log_dir is None:
+        return None
+
+    worker_dir = get_worker_log_dir(fuzzer, sanitizer)
+    if worker_dir is None:
+        return None
+
+    # Create agent subdirectories
+    (worker_dir / "agent" / "direction").mkdir(parents=True, exist_ok=True)
+    (worker_dir / "agent" / "seed").mkdir(parents=True, exist_ok=True)
+    (worker_dir / "agent" / "sp" / "generate").mkdir(parents=True, exist_ok=True)
+    (worker_dir / "agent" / "sp" / "verify").mkdir(parents=True, exist_ok=True)
+    (worker_dir / "agent" / "pov").mkdir(parents=True, exist_ok=True)
+
+    # Write worker log header
+    worker_log = worker_dir / "worker.log"
+    with open(worker_log, "w", encoding="utf-8") as f:
+        f.write(get_logo("worker"))
+        f.write("\n")
+        if metadata:
+            f.write(_create_worker_header(metadata))
+            f.write("\n")
+
+    # Add worker-specific log handler (with [Worker] prefix per design doc)
+    logger.add(
+        worker_log,
+        level="INFO",
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | [Worker] {message}",
+        filter=lambda record: record["extra"].get("worker") == f"{fuzzer}_{sanitizer}",
+        rotation="50 MB",
+        encoding="utf-8",
+        mode="a",
+    )
+
+    # Add worker error log (with [Worker] prefix per design doc)
+    logger.add(
+        worker_dir / "error.log",
+        level="WARNING",
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | [Worker] {message}",
+        filter=lambda record: record["extra"].get("worker") == f"{fuzzer}_{sanitizer}",
+        rotation="50 MB",
+        encoding="utf-8",
+    )
+
+    return worker_dir
+
+
+def get_worker_logger(fuzzer: str, sanitizer: str):
+    """
+    Get a logger bound to a specific worker.
+
+    Args:
+        fuzzer: Fuzzer name
+        sanitizer: Sanitizer name
+
+    Returns:
+        Bound logger instance
+    """
+    return logger.bind(worker=f"{fuzzer}_{sanitizer}")
+
+
+def setup_analyzer_logging(metadata: Optional[Dict[str, Any]] = None) -> Optional[Path]:
+    """
+    Setup logging for the analyzer server.
+
+    Creates analyzer/server.log in the log directory.
+
+    Args:
+        metadata: Analyzer metadata for header
+
+    Returns:
+        Path to analyzer log file, or None if main logging not initialized
+    """
+    if _current_log_dir is None:
+        return None
+
+    analyzer_dir = _current_log_dir / "analyzer"
+    analyzer_dir.mkdir(parents=True, exist_ok=True)
+
+    analyzer_log = analyzer_dir / "server.log"
+
+    # Write analyzer log header
+    with open(analyzer_log, "w", encoding="utf-8") as f:
+        f.write(get_logo("analyzer"))
+        f.write("\n")
+        if metadata:
+            f.write(_create_analyzer_header(metadata))
+            f.write("\n")
+
+    # Add analyzer-specific log handler
+    logger.add(
+        analyzer_log,
+        level="INFO",
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | [Analyzer] {message}",
+        filter=lambda record: record["extra"].get("component") == "analyzer",
+        rotation="50 MB",
+        encoding="utf-8",
+        mode="a",
+    )
+
+    return analyzer_log
+
+
+def get_analyzer_logger():
+    """
+    Get a logger bound to the analyzer component.
+
+    Returns:
+        Bound logger instance
+    """
+    return logger.bind(component="analyzer")
+
+
+def setup_celery_logging() -> Optional[Path]:
+    """
+    Setup logging for Celery workers.
+
+    Creates celery.log in the root log directory.
+
+    Returns:
+        Path to celery log file, or None if main logging not initialized
+    """
+    if _current_log_dir is None:
+        return None
+
+    celery_log = _current_log_dir / "celery.log"
+
+    # Add celery-specific log handler
+    logger.add(
+        celery_log,
+        level="INFO",
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | [Celery] {message}",
+        filter=lambda record: record["extra"].get("component") == "celery",
+        rotation="50 MB",
+        encoding="utf-8",
+    )
+
+    return celery_log
+
+
+def get_celery_logger():
+    """
+    Get a logger bound to the Celery component.
+
+    Returns:
+        Bound logger instance
+    """
+    return logger.bind(component="celery")
+
+
+def setup_fuzzer_instance_logging(
+    fuzzer: str,
+    sanitizer: str,
+) -> Optional[Path]:
+    """
+    Setup logging for a fuzzer instance.
+
+    Creates fuzzer/{fuzzer}_{sanitizer}/instance.log in the log directory.
+
+    Args:
+        fuzzer: Fuzzer name
+        sanitizer: Sanitizer name
+
+    Returns:
+        Path to fuzzer instance log file, or None if main logging not initialized
+    """
+    if _current_log_dir is None:
+        return None
+
+    fuzzer_dir = _current_log_dir / "fuzzer" / f"{fuzzer}_{sanitizer}"
+    fuzzer_dir.mkdir(parents=True, exist_ok=True)
+
+    instance_log = fuzzer_dir / "instance.log"
+
+    # Add fuzzer instance-specific log handler
+    instance_key = f"{fuzzer}_{sanitizer}"
+    logger.add(
+        instance_log,
+        level="DEBUG",
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | [Fuzzer] {message}",
+        filter=lambda record: record["extra"].get("fuzzer_instance") == instance_key,
+        rotation="50 MB",
+        encoding="utf-8",
+    )
+
+    return instance_log
+
+
+def get_fuzzer_instance_logger(fuzzer: str, sanitizer: str):
+    """
+    Get a logger bound to a specific fuzzer instance.
+
+    Args:
+        fuzzer: Fuzzer name
+        sanitizer: Sanitizer name
+
+    Returns:
+        Bound logger instance
+    """
+    return logger.bind(fuzzer_instance=f"{fuzzer}_{sanitizer}")
 
 
 def setup_console_only(level: str = "INFO"):
@@ -611,6 +988,7 @@ def create_final_summary(
     # Count statistics
     total = len(workers)
     completed = sum(1 for w in workers if w.get("status") == "completed")
+    interrupted = sum(1 for w in workers if w.get("status") == "interrupted")
     failed = sum(1 for w in workers if w.get("status") == "failed")
     total_sps = sum(w.get("sps_found", 0) for w in workers)
     total_povs = sum(w.get("povs_found", 0) for w in workers)
@@ -658,13 +1036,14 @@ def create_final_summary(
         + f"  Total Time:    {total_elapsed_minutes:.1f} minutes".ljust(table_width)
         + "│"
     )
-    lines.append(
-        "│"
-        + f"  Workers:       {completed}/{total} completed, {failed} failed".ljust(
-            table_width
-        )
-        + "│"
-    )
+    # Build workers summary string
+    workers_parts = [f"{completed}/{total} completed"]
+    if interrupted > 0:
+        workers_parts.append(f"{interrupted} interrupted")
+    if failed > 0:
+        workers_parts.append(f"{failed} failed")
+    workers_str = ", ".join(workers_parts)
+    lines.append("│" + f"  Workers:       {workers_str}".ljust(table_width) + "│")
     lines.append("│" + f"  SPs Found:     {total_sps}".ljust(table_width) + "│")
     if dedup_count > 0:
         lines.append(
@@ -757,7 +1136,12 @@ def create_final_summary(
             fuzzer = fuzzer[: col_fuzzer - 4] + ".."
 
         status = w.get("status", "unknown")
-        status_display = "✓ " + status if status == "completed" else "✗ " + status
+        if status == "completed":
+            status_display = "✓ " + status
+        elif status == "interrupted":
+            status_display = "⚡ " + status  # Lightning bolt for interrupted
+        else:
+            status_display = "✗ " + status
 
         # Get duration string
         duration_str = w.get("duration_str", "N/A")
@@ -870,15 +1254,29 @@ def create_final_summary(
 __all__ = [
     "logger",
     "setup_logging",
+    "setup_worker_logging",
+    "setup_analyzer_logging",
+    "setup_celery_logging",
+    "setup_fuzzer_instance_logging",
     "setup_console_only",
     "get_log_dir",
+    "set_log_dir",
+    "get_worker_log_dir",
+    "get_agent_log_path",
     "get_logo",
     "get_worker_banner_and_header",
     "get_analyzer_banner_and_header",
     "get_agent_banner_and_header",
     "add_task_log",
     "get_task_logger",
+    "get_worker_logger",
+    "get_analyzer_logger",
+    "get_celery_logger",
+    "get_fuzzer_instance_logger",
     "create_worker_summary",
     "create_final_summary",
+    "create_log_directories",
+    "truncate_name",
     "WorkerColors",
+    "MAX_NAME_LENGTH",
 ]

@@ -1074,13 +1074,12 @@ class TaskProcessor:
                             import requests
 
                             resp = requests.get(
-                                f"{eval_server}/api/tasks/{task.task_id}", timeout=5
+                                f"{eval_server}/api/v1/costs/task/{task.task_id}",
+                                timeout=5,
                             )
                             if resp.status_code == 200:
                                 data = resp.json()
-                                total_cost = data.get("costs", {}).get(
-                                    "total_cost", 0.0
-                                )
+                                total_cost = data.get("total_cost", 0.0)
                     except Exception as e:
                         logger.debug(f"Failed to get cost from eval_server: {e}")
 

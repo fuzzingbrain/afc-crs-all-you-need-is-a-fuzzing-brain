@@ -19,7 +19,15 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-from .core import Config, Task, JobType, ScanMode, setup_logging, setup_console_only
+from .core import (
+    Config,
+    Task,
+    JobType,
+    ScanMode,
+    setup_logging,
+    setup_celery_logging,
+    setup_console_only,
+)
 from .db import MongoDB, RepositoryManager, init_repos
 
 
@@ -585,6 +593,8 @@ def process_task(task: Task, config: Config) -> dict:
             "Delta Commit": config.delta_commit,
         },
     )
+    # Setup celery.log for Celery process logs
+    setup_celery_logging()
     print_info(f"Logs: {log_dir}")
 
     print_info(f"Task ID: {task.task_id}")

@@ -541,11 +541,9 @@ def generate(variant: int = 1) -> bytes:
         }
 
         # Dispatch Celery task with dynamic time limit based on config
-        # Convert minutes to seconds, add 5 min buffer for soft limit
+        # Soft timeout at 90% of hard timeout - gives 10% buffer for graceful shutdown
         timeout_seconds = self.config.timeout_minutes * 60
-        soft_timeout_seconds = max(
-            timeout_seconds - 300, timeout_seconds // 2
-        )  # 5 min before hard limit
+        soft_timeout_seconds = int(timeout_seconds * 0.9)
 
         result = run_worker.apply_async(
             args=[assignment],
@@ -937,11 +935,18 @@ def generate(variant: int = 1) -> bytes:
             )
             actual_pov_count += fuzzer_discovered_count
 
+            # Determine effective status:
+            # - If worker failed but has results (SPs or POVs), mark as "interrupted"
+            # - This handles timeout cases where work was done but Celery task was killed
+            effective_status = worker.status.value
+            if effective_status == "failed" and (sp_count > 0 or actual_pov_count > 0):
+                effective_status = "interrupted"
+
             result = {
                 "worker_id": worker.worker_id,
                 "fuzzer": worker.fuzzer,
                 "sanitizer": worker.sanitizer,
-                "status": worker.status.value,
+                "status": effective_status,
                 "sps_found": sp_count,
                 "sps_merged": merged_count,
                 "povs_found": actual_pov_count,  # Use DB count instead of worker's self-report

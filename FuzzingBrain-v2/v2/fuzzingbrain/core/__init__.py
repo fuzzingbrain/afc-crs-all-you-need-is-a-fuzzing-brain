@@ -14,6 +14,7 @@ from .infrastructure import InfrastructureManager, RedisManager, CeleryWorkerMan
 from .logging import (
     logger,
     setup_logging,
+    setup_celery_logging,
     setup_console_only,
     get_log_dir,
     add_task_log,
@@ -51,6 +52,7 @@ __all__ = [
     # Logging
     "logger",
     "setup_logging",
+    "setup_celery_logging",
     "setup_console_only",
     "get_log_dir",
     "add_task_log",

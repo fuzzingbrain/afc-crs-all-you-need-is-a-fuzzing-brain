@@ -62,15 +62,12 @@ class POVStrategy(BaseStrategy):
         # Reachability result (populated in delta mode)
         self._reachability_result: Optional[DiffReachabilityResult] = None
 
-        # SP Find v2: Locks for concurrent log writing (one per direction)
-        self._direction_log_locks: Dict[str, asyncio.Lock] = {}
-
         # Set up tool contexts for MCP
         self._setup_tool_contexts()
 
         # Create the suspicious point agent with logging context
         # Agent logs go to main log directory under agent/ subdirectory
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
         self._agent = SuspiciousPointAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
@@ -405,7 +402,7 @@ class POVStrategy(BaseStrategy):
         self.log_info(f"Fuzzer: {self.fuzzer}, Reachable functions: {reachable_count}")
 
         # Create and run Direction Planning Agent
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
         planning_agent = DirectionPlanningAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
@@ -869,6 +866,7 @@ class POVStrategy(BaseStrategy):
                 worker_id=f"{self.worker_id}_func_{index}",
                 log_dir=agent_log_dir,
                 max_iterations=6,  # More iterations for large functions
+                index=index,  # For log file naming: SPG_{index}_{function_name}.log
             )
         else:
             agent = FunctionAnalysisAgent(
@@ -887,6 +885,7 @@ class POVStrategy(BaseStrategy):
                 worker_id=f"{self.worker_id}_func_{index}",
                 log_dir=agent_log_dir,
                 max_iterations=5,  # Enough iterations for thorough analysis
+                index=index,  # For log file naming: SPG_{index}_{function_name}.log
             )
 
         try:
@@ -904,53 +903,11 @@ class POVStrategy(BaseStrategy):
                 f"[{index + 1}/{total}] Done: {func.name} in {func_duration:.1f}s - {sp_status}"
             )
 
-            # Write log block to direction log file
-            await self._write_function_log(agent, direction_id, agent_log_dir)
-
             return result
 
         except Exception as e:
             self.log_error(f"[{index + 1}/{total}] Failed: {func.name} - {e}")
             return {"success": False, "error": str(e)}
-
-    async def _write_function_log(
-        self,
-        agent,
-        direction_id: str,
-        agent_log_dir,
-    ) -> None:
-        """
-        Write function analysis log block to direction log file.
-
-        Uses lock to prevent concurrent writes from corrupting the file.
-
-        Args:
-            agent: FunctionAnalysisAgent instance
-            direction_id: Direction ID for log file naming
-            agent_log_dir: Log directory
-        """
-        from pathlib import Path
-
-        # Get or create lock for this direction
-        if direction_id not in self._direction_log_locks:
-            self._direction_log_locks[direction_id] = asyncio.Lock()
-
-        lock = self._direction_log_locks[direction_id]
-
-        # Get formatted log block from agent
-        log_block = agent.get_log_block()
-
-        # Determine log file path
-        log_dir = Path(agent_log_dir) if agent_log_dir else self.results_path
-        log_file = log_dir / f"{direction_id}-functioncheck.log"
-
-        # Write with lock to prevent interleaving
-        async with lock:
-            try:
-                with open(log_file, "a", encoding="utf-8") as f:
-                    f.write(log_block)
-            except Exception as e:
-                self.log_error(f"Failed to write function log: {e}")
 
     async def _run_parallel_sp_find_agents_legacy(
         self,
@@ -1027,7 +984,7 @@ class POVStrategy(BaseStrategy):
         claimed = self.repos.directions.claim(
             self.task_id,
             self.fuzzer,
-            f"{self.worker_id}_sp_agent_{index}",
+            f"SPG_{index}_{self.fuzzer}_{self.sanitizer}",
         )
         if not claimed:
             self.log_warning(f"[{index + 1}/{total}] Could not claim: {direction.name}")
@@ -1044,9 +1001,10 @@ class POVStrategy(BaseStrategy):
             code_summary=direction.code_summary,
             fuzzer_code=fuzzer_code,
             task_id=self.task_id,
-            worker_id=f"{self.worker_id}_agent_{index}",
+            worker_id=f"SPG_{index}_{self.fuzzer}_{self.sanitizer}",
             log_dir=agent_log_dir,
             max_iterations=100,
+            index=index + 1,  # 1-based index for log files
         )
 
         try:
@@ -1408,7 +1366,7 @@ class POVStrategy(BaseStrategy):
             sanitizer=self.sanitizer,
             config=config,
             output_dir=self.povs_path,
-            log_dir=self.log_dir / "agent" if self.log_dir else None,
+            log_dir=self.agent_log_dir,
             workspace_path=self.workspace_path,
             worker_id=self.worker_id,  # For SP Fuzzer lifecycle
             fuzzer_code=fuzzer_code,

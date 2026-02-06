@@ -140,7 +140,7 @@ class POVFullscanStrategy(POVBaseStrategy):
 
         self.log_info(f"Fuzzer: {self.fuzzer}, Reachable functions: {reachable_count}")
 
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
         planning_agent = DirectionPlanningAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
@@ -178,7 +178,7 @@ class POVFullscanStrategy(POVBaseStrategy):
 
         self.log_info(f"Fuzzer: {self.fuzzer}, Reachable functions: {reachable_count}")
 
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
         planning_agent = DirectionPlanningAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
@@ -297,7 +297,7 @@ class POVFullscanStrategy(POVBaseStrategy):
 
         # Get fuzzer code for all agents (SP Find + Verify)
         fuzzer_code = self._get_fuzzer_source_code()
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
 
         # Configure pipeline
         config = PipelineConfig(
@@ -319,7 +319,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             scan_mode="full",  # Full-scan mode: use full reachability analysis
             config=config,
             output_dir=self.results_path / "povs",
-            log_dir=self.log_dir / "agent" if self.log_dir else self.results_path,
+            log_dir=self.agent_log_dir,
             workspace_path=self.workspace_path,
             fuzzer_code=fuzzer_code,
             mcp_socket_path=self.executor.analysis_socket_path,
@@ -405,7 +405,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         self.log_info(f"Fuzzer: {self.fuzzer}, Reachable functions: {reachable_count}")
 
         # Create and run Direction Planning Agent
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
         planning_agent = DirectionPlanningAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
@@ -525,7 +525,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         if self.executor.analysis_socket_path:
             set_analyzer_context(
                 self.executor.analysis_socket_path,
-                client_id=f"{self.worker_id}_sp_agent_{index}",
+                client_id=f"SPG_{index}_{self.fuzzer}_{self.sanitizer}",
             )
 
         direction_start = time.time()
@@ -538,7 +538,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         claimed = self.repos.directions.claim(
             self.task_id,
             self.fuzzer,
-            f"{self.worker_id}_sp_agent_{index}",
+            f"SPG_{index}_{self.fuzzer}_{self.sanitizer}",
         )
         if not claimed:
             self.log_warning(f"[{index + 1}/{total}] Could not claim: {direction.name}")
@@ -556,9 +556,10 @@ class POVFullscanStrategy(POVBaseStrategy):
             code_summary=direction.code_summary,
             fuzzer_code=fuzzer_code,
             task_id=self.task_id,
-            worker_id=f"{self.worker_id}_agent_{index}",
+            worker_id=f"SPG_{index}_{self.fuzzer}_{self.sanitizer}",
             log_dir=agent_log_dir,
             max_iterations=100,
+            index=index + 1,  # 1-based index for log files
         )
 
         try:
@@ -667,7 +668,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             )
 
         fuzzer_code = self._get_fuzzer_source_code()
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
 
         # Configure pipeline for verification and POV
         config = PipelineConfig(
@@ -688,7 +689,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             scan_mode="full",  # Full-scan mode: use full reachability analysis
             config=config,
             output_dir=self.results_path / "povs",
-            log_dir=self.log_dir / "agent" if self.log_dir else self.results_path,
+            log_dir=self.agent_log_dir,
             workspace_path=self.workspace_path,
             fuzzer_code=fuzzer_code,
             mcp_socket_path=self.executor.analysis_socket_path,
@@ -954,8 +955,9 @@ class POVFullscanStrategy(POVBaseStrategy):
                 model=CLAUDE_OPUS_4_5,  # Force Opus for large function analysis
                 direction_id=direction_id,
                 task_id=self.task_id,
-                worker_id=f"{self.worker_id}_func_{index}",
+                worker_id=f"Func_{index}_{self.fuzzer}_{self.sanitizer}",
                 log_dir=agent_log_dir,
+                index=index,  # For log file naming: SPG_{index}_{function_name}.log
             )
         else:
             agent = FunctionAnalysisAgent(
@@ -970,8 +972,9 @@ class POVFullscanStrategy(POVBaseStrategy):
                 model=CLAUDE_SONNET_4_5,  # Force Sonnet for function analysis
                 direction_id=direction_id,
                 task_id=self.task_id,
-                worker_id=f"{self.worker_id}_func_{index}",
+                worker_id=f"Func_{index}_{self.fuzzer}_{self.sanitizer}",
                 log_dir=agent_log_dir,
+                index=index,  # For log file naming: SPG_{index}_{function_name}.log
             )
 
         try:
@@ -989,44 +992,14 @@ class POVFullscanStrategy(POVBaseStrategy):
                 f"[{index + 1}/{total}] Done: {func.name} in {func_duration:.1f}s - {sp_status}"
             )
 
-            # Write log block
-            await self._write_function_log_v2(agent, direction_id, agent_log_dir)
+            # Note: Agent logs are now written directly to SPG_{index}_{function_name}.log
+            # No need for separate combined log file
 
             return result
 
         except Exception as e:
             self.log_error(f"[{index + 1}/{total}] Failed: {func.name} - {e}")
             return {"success": False, "error": str(e)}
-
-    async def _write_function_log_v2(
-        self,
-        agent,
-        direction_id: str,
-        agent_log_dir,
-    ) -> None:
-        """
-        Write function analysis log block to direction log file.
-        """
-        from pathlib import Path
-
-        if direction_id not in self._direction_log_locks:
-            self._direction_log_locks[direction_id] = asyncio.Lock()
-
-        lock = self._direction_log_locks[direction_id]
-
-        log_block = agent.get_log_block() if hasattr(agent, "get_log_block") else ""
-        if not log_block:
-            return
-
-        log_file = Path(agent_log_dir) / f"{direction_id}-functioncheck.log"
-
-        async with lock:
-            try:
-                with open(log_file, "a", encoding="utf-8") as f:
-                    f.write(log_block)
-                    f.write("\n")
-            except Exception as e:
-                self.log_warning(f"Failed to write function log: {e}")
 
     def _log_coverage_report(self, directions: List) -> None:
         """
@@ -1086,9 +1059,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         self.log_info("=== Generating Direction Seeds ===")
 
         fuzzer_code = self._get_fuzzer_source_code()
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
-
-        seeds_generated = 0
+        agent_log_dir = self.agent_log_dir
 
         # Generate seeds for each direction (high-risk first)
         sorted_directions = sorted(
@@ -1096,12 +1067,13 @@ class POVFullscanStrategy(POVBaseStrategy):
             key=lambda d: {"high": 0, "medium": 1, "low": 2}.get(d.risk_level, 3),
         )
 
-        for direction in sorted_directions[:5]:  # Top 5 directions
+        # Create tasks for parallel execution (top 5 directions)
+        async def run_seed_agent(seed_index: int, direction) -> dict:
+            """Run a single SeedAgent and return result."""
             try:
-                # Create SeedAgent for this direction
                 seed_agent = SeedAgent(
                     task_id=self.task_id,
-                    worker_id=self.worker_id,
+                    worker_id=f"{self.worker_id}_seed_{seed_index}",  # Unique per agent
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
                     model=CLAUDE_OPUS_4_5,  # Force Opus for seed generation
@@ -1109,27 +1081,43 @@ class POVFullscanStrategy(POVBaseStrategy):
                     repos=self.repos,
                     fuzzer_source=fuzzer_code,
                     log_dir=agent_log_dir,
-                    max_iterations=20,  # Same as DirectionPlanningAgent
+                    max_iterations=20,
+                    index=seed_index,
+                    target_name=direction.name,
                 )
 
-                # Generate Direction Seeds
                 result = await seed_agent.generate_direction_seeds(
                     direction_id=direction.direction_id,
                     target_functions=direction.core_functions or [],
                     risk_level=direction.risk_level,
                     risk_reason=direction.risk_reason or "",
                 )
-
-                if result.get("success"):
-                    seeds_generated += result.get("seeds_generated", 0)
-                    self.log_info(
-                        f"  Generated {result.get('seeds_generated', 0)} seeds "
-                        f"for direction: {direction.name} ({direction.risk_level})"
-                    )
+                return {"direction": direction, "result": result}
 
             except Exception as e:
                 self.log_warning(
                     f"  Failed to generate seeds for {direction.name}: {e}"
+                )
+                return {"direction": direction, "result": None, "error": str(e)}
+
+        # Run all SeedAgents in parallel
+        tasks = [
+            run_seed_agent(idx, d)
+            for idx, d in enumerate(sorted_directions[:5], start=1)
+        ]
+        results = await asyncio.gather(*tasks)
+
+        # Collect results
+        seeds_generated = 0
+        for item in results:
+            direction = item["direction"]
+            result = item.get("result")
+            if result and result.get("success"):
+                count = result.get("seeds_generated", 0)
+                seeds_generated += count
+                self.log_info(
+                    f"  Generated {count} seeds "
+                    f"for direction: {direction.name} ({direction.risk_level})"
                 )
 
         self.log_info(

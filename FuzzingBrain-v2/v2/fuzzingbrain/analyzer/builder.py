@@ -697,9 +697,11 @@ class AnalyzerBuilder:
             process.wait(timeout=1800)  # 30 minutes
             elapsed = time.time() - start_time
 
-            # Write build output to log file
+            # Write build output to log file (new structure: build/{sanitizer}.log)
             if self.log_dir:
-                build_log_file = self.log_dir / f"build_{sanitizer}.log"
+                build_dir = self.log_dir / "build"
+                build_dir.mkdir(parents=True, exist_ok=True)
+                build_log_file = build_dir / f"{sanitizer}.log"
                 with open(build_log_file, "w", encoding="utf-8") as f:
                     f.write(f"# Build log for {sanitizer} sanitizer\n")
                     f.write(f"# Command: {' '.join(cmd)}\n")
@@ -712,16 +714,16 @@ class AnalyzerBuilder:
             self._fix_permissions_for_dir(fuzz_tooling_dir / "build" / "out")
 
             if process.returncode != 0:
+                # Append error to build log (no separate error.log for builds)
                 if self.log_dir:
-                    error_log = self.log_dir / "error.log"
-                    with open(error_log, "a", encoding="utf-8") as f:
-                        f.write(
-                            f"[BUILD ERROR] {sanitizer} build failed (code {process.returncode})\n"
-                        )
-                        f.write("Last 20 lines of output:\n")
-                        for line in build_output[-20:]:
-                            f.write(f"  {line}\n")
-                        f.write("\n")
+                    build_dir = self.log_dir / "build"
+                    build_dir.mkdir(parents=True, exist_ok=True)
+                    with open(
+                        build_dir / f"{sanitizer}.log", "a", encoding="utf-8"
+                    ) as f:
+                        f.write("\n" + "=" * 80 + "\n")
+                        f.write(f"[BUILD ERROR] Exit code {process.returncode}\n")
+                        f.write("=" * 80 + "\n")
                 return False, f"Build failed with code {process.returncode}"
 
             self.log(f"Built {sanitizer} in {elapsed:.1f}s")
@@ -845,9 +847,11 @@ class AnalyzerBuilder:
             process.wait(timeout=1800)  # 30 minutes
             elapsed = time.time() - start_time
 
-            # Write build output to separate log file
+            # Write build output to separate log file (new structure: build/{sanitizer}.log)
             if self.log_dir:
-                build_log_file = self.log_dir / f"build_{sanitizer}.log"
+                build_dir = self.log_dir / "build"
+                build_dir.mkdir(parents=True, exist_ok=True)
+                build_log_file = build_dir / f"{sanitizer}.log"
                 with open(build_log_file, "w", encoding="utf-8") as f:
                     f.write(f"# Build log for {sanitizer} sanitizer\n")
                     f.write(f"# Command: {' '.join(cmd)}\n")
@@ -860,17 +864,16 @@ class AnalyzerBuilder:
             self._fix_permissions()
 
             if process.returncode != 0:
-                # Write error to error.log
+                # Append error to build log (no separate error.log for builds)
                 if self.log_dir:
-                    error_log = self.log_dir / "error.log"
-                    with open(error_log, "a", encoding="utf-8") as f:
-                        f.write(
-                            f"[BUILD ERROR] {sanitizer} build failed (code {process.returncode})\n"
-                        )
-                        f.write("Last 20 lines of output:\n")
-                        for line in build_output[-20:]:
-                            f.write(f"  {line}\n")
-                        f.write("\n")
+                    build_dir = self.log_dir / "build"
+                    build_dir.mkdir(parents=True, exist_ok=True)
+                    with open(
+                        build_dir / f"{sanitizer}.log", "a", encoding="utf-8"
+                    ) as f:
+                        f.write("\n" + "=" * 80 + "\n")
+                        f.write(f"[BUILD ERROR] Exit code {process.returncode}\n")
+                        f.write("=" * 80 + "\n")
                 return False, f"Build failed with code {process.returncode}"
 
             self.log(f"Built {sanitizer} in {elapsed:.1f}s")
@@ -878,16 +881,8 @@ class AnalyzerBuilder:
 
         except subprocess.TimeoutExpired:
             process.kill()
-            if self.log_dir:
-                error_log = self.log_dir / "error.log"
-                with open(error_log, "a", encoding="utf-8") as f:
-                    f.write(f"[BUILD ERROR] {sanitizer} build timed out (30 minutes)\n")
             return False, "Build timed out (30 minutes)"
         except Exception as e:
-            if self.log_dir:
-                error_log = self.log_dir / "error.log"
-                with open(error_log, "a", encoding="utf-8") as f:
-                    f.write(f"[BUILD ERROR] {sanitizer} build exception: {e}\n")
             return False, str(e)
 
     def _move_build_output(self, sanitizer: str) -> bool:

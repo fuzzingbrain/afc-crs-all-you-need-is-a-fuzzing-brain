@@ -8,9 +8,11 @@ Uses BaseAgent to generate targeted seeds based on:
 - FP (False Positive) analysis (generate seeds to find similar bugs)
 """
 
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+from fastmcp import Client
 from loguru import logger
 
 from ..agents.base import BaseAgent
@@ -189,6 +191,11 @@ class SeedAgent(BaseAgent):
         False  # Short conversations, no compression needed
     )
 
+    @property
+    def agent_type(self) -> str:
+        """Seed agent type."""
+        return "seed"
+
     def __init__(
         self,
         task_id: str,
@@ -203,6 +210,9 @@ class SeedAgent(BaseAgent):
         model: Optional[Union[ModelInfo, str]] = None,
         max_iterations: int = 5,  # Short iterations for seed generation
         log_dir: Optional[Path] = None,
+        # New: for numbered log files
+        index: int = 0,
+        target_name: str = "",
     ):
         """
         Initialize SeedAgent.
@@ -220,6 +230,8 @@ class SeedAgent(BaseAgent):
             model: Model to use
             max_iterations: Max iterations (default 5)
             log_dir: Log directory
+            index: Agent index for numbered log files
+            target_name: direction_name for log filename
         """
         super().__init__(
             llm_client=llm_client,
@@ -229,10 +241,11 @@ class SeedAgent(BaseAgent):
             task_id=task_id,
             worker_id=worker_id,
             log_dir=log_dir,
+            index=index,
+            target_name=target_name,
+            fuzzer=fuzzer,
+            sanitizer=sanitizer,
         )
-
-        self.fuzzer = fuzzer
-        self.sanitizer = sanitizer
         self.fuzzer_manager = fuzzer_manager
         self.repos = repos
         self.fuzzer_source = fuzzer_source
@@ -243,6 +256,10 @@ class SeedAgent(BaseAgent):
         self.sp_id: Optional[str] = None
         self.delta_id: Optional[str] = None
         self.seed_type: str = "direction"  # "direction", "fp", or "delta"
+
+        # Unique context ID for parallel execution
+        # Prevents context collision when multiple SeedAgents run concurrently
+        self._context_id: str = f"{worker_id}_{id(self)}"
 
         # Stats
         self.seeds_generated = 0
@@ -256,6 +273,15 @@ class SeedAgent(BaseAgent):
     def include_seed_tools(self) -> bool:
         """Include seed tools in MCP server."""
         return True
+
+    @property
+    def mcp_context_id(self) -> str:
+        """Unique context ID for MCP tool lookup.
+
+        SeedAgents may run in parallel, so each needs a unique context_id
+        to prevent collision in _seed_contexts dict.
+        """
+        return self._context_id
 
     def _get_agent_metadata(self) -> dict:
         """Get metadata for agent banner."""
@@ -418,9 +444,10 @@ Generate seeds NOW or this run will produce nothing useful."""
     def _setup_context(self) -> None:
         """Set up seed tool context before running."""
         # Set seed context for create_seed tool
+        # Use _context_id (unique per instance) to prevent collision in parallel execution
         set_seed_context(
             task_id=self.task_id,
-            worker_id=self.worker_id,
+            worker_id=self._context_id,  # Unique context ID, not shared worker_id
             direction_id=self.direction_id,
             sp_id=self.sp_id,
             delta_id=self.delta_id,
@@ -443,7 +470,36 @@ Generate seeds NOW or this run will produce nothing useful."""
 
     def _cleanup_context(self) -> None:
         """Clean up seed tool context after running."""
-        clear_seed_context(self.worker_id)
+        clear_seed_context(self._context_id)
+
+    async def _execute_tool(
+        self,
+        client: Client,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+    ) -> str:
+        """
+        Execute tool and track seeds_generated from create_seed results.
+
+        The MCP server runs in an isolated context, so we need to parse
+        the tool result to get the actual seeds_generated count.
+        """
+        result = await super()._execute_tool(client, tool_name, tool_args)
+
+        # Track seeds from create_seed tool results
+        if tool_name == "create_seed":
+            try:
+                result_data = json.loads(result)
+                if result_data.get("success") and "seeds_generated" in result_data:
+                    self.seeds_generated += result_data["seeds_generated"]
+                    logger.debug(
+                        f"[SeedAgent] Tracked {result_data['seeds_generated']} seeds, "
+                        f"total: {self.seeds_generated}"
+                    )
+            except (json.JSONDecodeError, TypeError):
+                pass  # Non-JSON result, ignore
+
+        return result
 
     async def run_async(self, **kwargs) -> str:
         """Run the seed agent."""
@@ -453,13 +509,8 @@ Generate seeds NOW or this run will produce nothing useful."""
         try:
             result = await super().run_async(**kwargs)
         finally:
-            # Read seeds_generated from context BEFORE cleanup
-            from .seed_tools import get_seed_context
-
-            ctx = get_seed_context(self.worker_id)
-            self.seeds_generated = ctx.get("seeds_generated", 0)
-
             # Always cleanup context
+            # Note: seeds_generated is tracked in _execute_tool via tool results
             self._cleanup_context()
 
         return result

@@ -172,10 +172,15 @@ class FuzzerMonitor:
         self._log_sink_id: Optional[int] = None
         self._log_path: Optional[Path] = None
         # Use log_dir if provided, otherwise fall back to workspace_path
+        # New structure: fuzzer/monitor.log
         if log_dir:
-            self._log_path = Path(log_dir) / "fuzzer_monitor.log"
+            fuzzer_log_dir = Path(log_dir) / "fuzzer"
+            fuzzer_log_dir.mkdir(parents=True, exist_ok=True)
+            self._log_path = fuzzer_log_dir / "monitor.log"
         elif self.workspace_path:
-            self._log_path = self.workspace_path / "fuzzer_monitor.log"
+            fuzzer_log_dir = self.workspace_path / "fuzzer"
+            fuzzer_log_dir.mkdir(parents=True, exist_ok=True)
+            self._log_path = fuzzer_log_dir / "monitor.log"
 
         logger.debug(
             f"[FuzzerMonitor:{task_id}] Initialized (thread-based, "
