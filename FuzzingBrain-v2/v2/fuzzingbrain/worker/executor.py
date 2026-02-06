@@ -417,9 +417,7 @@ def generate(variant: int = 1) -> bytes:
                 # Run SP fuzzer shutdown in event loop
                 loop = asyncio.get_event_loop()
                 if loop.is_running():
-                    asyncio.create_task(
-                        self._fuzzer_manager.shutdown_sp_fuzzers_only()
-                    )
+                    asyncio.create_task(self._fuzzer_manager.shutdown_sp_fuzzers_only())
                 else:
                     loop.run_until_complete(
                         self._fuzzer_manager.shutdown_sp_fuzzers_only()
