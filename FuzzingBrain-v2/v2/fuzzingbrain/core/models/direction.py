@@ -11,6 +11,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, List
 
+from bson import ObjectId
+
 from ..utils import generate_id
 
 
@@ -77,7 +79,7 @@ class Direction:
         return {
             "_id": self.direction_id,
             "direction_id": self.direction_id,
-            "task_id": self.task_id,
+            "task_id": ObjectId(self.task_id) if self.task_id else None,
             "fuzzer": self.fuzzer,
             "name": self.name,
             "risk_level": self.risk_level,
@@ -112,9 +114,14 @@ class Direction:
         if created_at is None:
             created_at = datetime.now()
 
+        # Handle ObjectId conversion
+        task_id = data.get("task_id", "")
+        if isinstance(task_id, ObjectId):
+            task_id = str(task_id)
+
         return cls(
             direction_id=data.get("direction_id", data.get("_id", generate_id())),
-            task_id=data.get("task_id", ""),
+            task_id=task_id,
             fuzzer=data.get("fuzzer", ""),
             name=data.get("name", ""),
             risk_level=data.get("risk_level", RiskLevel.MEDIUM.value),

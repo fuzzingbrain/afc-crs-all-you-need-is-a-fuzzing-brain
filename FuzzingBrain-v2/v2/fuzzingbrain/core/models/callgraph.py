@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List
 
+from bson import ObjectId
+
 
 @dataclass
 class CallGraphNode:
@@ -48,7 +50,7 @@ class CallGraphNode:
         return {
             "_id": self.node_id,
             "node_id": self.node_id,
-            "task_id": self.task_id,
+            "task_id": ObjectId(self.task_id) if self.task_id else None,
             "fuzzer_id": self.fuzzer_id,
             "fuzzer_name": self.fuzzer_name,
             "function_name": self.function_name,
@@ -61,9 +63,14 @@ class CallGraphNode:
     @classmethod
     def from_dict(cls, data: dict) -> "CallGraphNode":
         """Create CallGraphNode from dictionary"""
+        # Handle ObjectId conversion
+        task_id = data.get("task_id", "")
+        if isinstance(task_id, ObjectId):
+            task_id = str(task_id)
+
         return cls(
             node_id=data.get("node_id", data.get("_id", "")),
-            task_id=data.get("task_id", ""),
+            task_id=task_id,
             fuzzer_id=data.get("fuzzer_id", ""),
             fuzzer_name=data.get("fuzzer_name", ""),
             function_name=data.get("function_name", ""),

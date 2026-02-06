@@ -7,6 +7,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
+from bson import ObjectId
+
 from ..utils import generate_id
 
 
@@ -55,7 +57,7 @@ class Fuzzer:
         return {
             "_id": self.fuzzer_id,
             "fuzzer_id": self.fuzzer_id,
-            "task_id": self.task_id,
+            "task_id": ObjectId(self.task_id) if self.task_id else None,
             "fuzzer_name": self.fuzzer_name,
             "source_path": self.source_path,
             "repo_name": self.repo_name,
@@ -69,9 +71,14 @@ class Fuzzer:
     @classmethod
     def from_dict(cls, data: dict) -> "Fuzzer":
         """Create Fuzzer from dictionary"""
+        # Handle ObjectId conversion
+        task_id = data.get("task_id", "")
+        if isinstance(task_id, ObjectId):
+            task_id = str(task_id)
+
         return cls(
             fuzzer_id=data.get("fuzzer_id", data.get("_id", generate_id())),
-            task_id=data.get("task_id", ""),
+            task_id=task_id,
             fuzzer_name=data.get("fuzzer_name", ""),
             source_path=data.get("source_path"),
             repo_name=data.get("repo_name"),

@@ -10,6 +10,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, List, Dict
 
+from bson import ObjectId
+
 from ..utils import generate_id
 
 
@@ -133,7 +135,7 @@ class SuspiciousPoint:
         return {
             "_id": self.suspicious_point_id,
             "suspicious_point_id": self.suspicious_point_id,
-            "task_id": self.task_id,
+            "task_id": ObjectId(self.task_id) if self.task_id else None,
             "function_name": self.function_name,
             "sources": self.sources,
             "description": self.description,
@@ -178,6 +180,11 @@ class SuspiciousPoint:
         if created_at is None:
             created_at = datetime.now()
 
+        # Handle ObjectId conversion
+        task_id = data.get("task_id", "")
+        if isinstance(task_id, ObjectId):
+            task_id = str(task_id)
+
         # Handle backward compatibility: convert old harness_name/sanitizer to sources
         sources = data.get("sources", [])
         if not sources and (data.get("harness_name") or data.get("sanitizer")):
@@ -192,7 +199,7 @@ class SuspiciousPoint:
             suspicious_point_id=data.get(
                 "suspicious_point_id", data.get("_id", generate_id())
             ),
-            task_id=data.get("task_id", ""),
+            task_id=task_id,
             function_name=data.get("function_name", ""),
             sources=sources,
             description=data.get("description", ""),

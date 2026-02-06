@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Optional, List, TypeVar, Generic, Type
 from pymongo.database import Database
 from pymongo.collection import Collection
+from bson import ObjectId
 from loguru import logger
 
 from ..core.models import (
@@ -182,21 +183,21 @@ class POVRepository(BaseRepository[POV]):
 
     def find_by_task(self, task_id: str) -> List[POV]:
         """Find all POVs for a task"""
-        return self.find_all({"task_id": task_id})
+        return self.find_all({"task_id": ObjectId(task_id)})
 
     def find_active_by_task(self, task_id: str) -> List[POV]:
         """Find active POVs for a task"""
-        return self.find_all({"task_id": task_id, "is_active": True})
+        return self.find_all({"task_id": ObjectId(task_id), "is_active": True})
 
     def find_successful_by_task(self, task_id: str) -> List[POV]:
         """Find successful POVs for a task"""
         return self.find_all(
-            {"task_id": task_id, "is_active": True, "is_successful": True}
+            {"task_id": ObjectId(task_id), "is_active": True, "is_successful": True}
         )
 
     def find_by_harness(self, task_id: str, harness_name: str) -> List[POV]:
         """Find POVs for a specific harness"""
-        return self.find_all({"task_id": task_id, "harness_name": harness_name})
+        return self.find_all({"task_id": ObjectId(task_id), "harness_name": harness_name})
 
     def deactivate(self, pov_id: str) -> bool:
         """Mark POV as inactive"""
@@ -215,11 +216,11 @@ class PatchRepository(BaseRepository[Patch]):
 
     def find_by_task(self, task_id: str) -> List[Patch]:
         """Find all patches for a task"""
-        return self.find_all({"task_id": task_id})
+        return self.find_all({"task_id": ObjectId(task_id)})
 
     def find_active_by_task(self, task_id: str) -> List[Patch]:
         """Find active patches for a task"""
-        return self.find_all({"task_id": task_id, "is_active": True})
+        return self.find_all({"task_id": ObjectId(task_id), "is_active": True})
 
     def find_by_pov(self, pov_id: str) -> List[Patch]:
         """Find patches for a specific POV"""
@@ -229,7 +230,7 @@ class PatchRepository(BaseRepository[Patch]):
         """Find valid patches (passes all checks)"""
         return self.find_all(
             {
-                "task_id": task_id,
+                "task_id": ObjectId(task_id),
                 "is_active": True,
                 "apply_check": True,
                 "compilation_check": True,
@@ -295,25 +296,25 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
 
     def find_by_task(self, task_id: str) -> List[SuspiciousPoint]:
         """Find all suspicious points for a task"""
-        return self.find_all({"task_id": task_id})
+        return self.find_all({"task_id": ObjectId(task_id)})
 
     def find_by_function(
         self, task_id: str, function_name: str
     ) -> List[SuspiciousPoint]:
         """Find suspicious points for a specific function"""
-        return self.find_all({"task_id": task_id, "function_name": function_name})
+        return self.find_all({"task_id": ObjectId(task_id), "function_name": function_name})
 
     def find_unchecked(self, task_id: str) -> List[SuspiciousPoint]:
         """Find unchecked suspicious points for a task"""
-        return self.find_all({"task_id": task_id, "is_checked": False})
+        return self.find_all({"task_id": ObjectId(task_id), "is_checked": False})
 
     def find_real(self, task_id: str) -> List[SuspiciousPoint]:
         """Find verified real vulnerabilities for a task"""
-        return self.find_all({"task_id": task_id, "is_checked": True, "is_real": True})
+        return self.find_all({"task_id": ObjectId(task_id), "is_checked": True, "is_real": True})
 
     def find_important(self, task_id: str) -> List[SuspiciousPoint]:
         """Find important (high priority) suspicious points"""
-        return self.find_all({"task_id": task_id, "is_important": True})
+        return self.find_all({"task_id": ObjectId(task_id), "is_important": True})
 
     def find_by_score(
         self, task_id: str, min_score: float = 0.0
@@ -321,7 +322,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         """Find suspicious points with score >= min_score, sorted by score descending"""
         try:
             cursor = self.collection.find(
-                {"task_id": task_id, "score": {"$gte": min_score}}
+                {"task_id": ObjectId(task_id), "score": {"$gte": min_score}}
             ).sort("score", -1)
             return [self.model_class.from_dict(doc) for doc in cursor]
         except Exception as e:
@@ -417,7 +418,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             List of SPs with at least one merged duplicate
         """
         return self.find_all(
-            {"task_id": task_id, "merged_duplicates": {"$exists": True, "$ne": []}}
+            {"task_id": ObjectId(task_id), "merged_duplicates": {"$exists": True, "$ne": []}}
         )
 
     def count_by_status(
@@ -445,7 +446,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         try:
             # If specific status requested, return count for that status
             if status is not None:
-                query = {"task_id": task_id, "status": status}
+                query = {"task_id": ObjectId(task_id), "status": status}
                 # Filter by sources array (not top-level fields)
                 if harness_name and sanitizer:
                     query["sources"] = {
@@ -457,15 +458,15 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 return self.collection.count_documents(query)
 
             # Otherwise return all counts (original behavior)
-            total = self.collection.count_documents({"task_id": task_id})
+            total = self.collection.count_documents({"task_id": ObjectId(task_id)})
             checked = self.collection.count_documents(
-                {"task_id": task_id, "is_checked": True}
+                {"task_id": ObjectId(task_id), "is_checked": True}
             )
             real = self.collection.count_documents(
-                {"task_id": task_id, "is_checked": True, "is_real": True}
+                {"task_id": ObjectId(task_id), "is_checked": True, "is_real": True}
             )
             important = self.collection.count_documents(
-                {"task_id": task_id, "is_important": True}
+                {"task_id": ObjectId(task_id), "is_important": True}
             )
             return {
                 "total": total,
@@ -520,7 +521,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
 
             # Build filter query
             query = {
-                "task_id": task_id,
+                "task_id": ObjectId(task_id),
                 "status": SPStatus.PENDING_VERIFY.value,
             }
             # Filter by sources array for worker isolation
@@ -584,7 +585,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
 
             # Build filter query
             query = {
-                "task_id": task_id,
+                "task_id": ObjectId(task_id),
                 "status": {
                     "$in": [SPStatus.PENDING_POV.value, SPStatus.GENERATING_POV.value]
                 },
@@ -803,7 +804,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             for status in SPStatus:
                 counts[status.value] = self.collection.count_documents(
                     {
-                        "task_id": task_id,
+                        "task_id": ObjectId(task_id),
                         "status": status.value,
                     }
                 )
@@ -844,7 +845,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             if harness_name and sanitizer:
                 # Check verify stage SPs
                 verify_query = {
-                    "task_id": task_id,
+                    "task_id": ObjectId(task_id),
                     "status": {
                         "$in": [SPStatus.PENDING_VERIFY.value, SPStatus.VERIFYING.value]
                     },
@@ -860,7 +861,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 # Check POV stage SPs (parallel mode)
                 # SP is available if: contributor + not succeeded + not attempted by me
                 pov_query = {
-                    "task_id": task_id,
+                    "task_id": ObjectId(task_id),
                     "status": {
                         "$in": [
                             SPStatus.PENDING_POV.value,
@@ -889,7 +890,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             else:
                 # No worker filter - check all pending/in-progress
                 query = {
-                    "task_id": task_id,
+                    "task_id": ObjectId(task_id),
                     "status": {
                         "$in": [
                             SPStatus.PENDING_VERIFY.value,
@@ -929,15 +930,15 @@ class DirectionRepository(BaseRepository[Direction]):
 
     def find_by_task(self, task_id: str) -> List[Direction]:
         """Find all directions for a task"""
-        return self.find_all({"task_id": task_id})
+        return self.find_all({"task_id": ObjectId(task_id)})
 
     def find_by_fuzzer(self, task_id: str, fuzzer: str) -> List[Direction]:
         """Find all directions for a specific fuzzer"""
-        return self.find_all({"task_id": task_id, "fuzzer": fuzzer})
+        return self.find_all({"task_id": ObjectId(task_id), "fuzzer": fuzzer})
 
     def find_pending(self, task_id: str, fuzzer: str = None) -> List[Direction]:
         """Find pending directions"""
-        query = {"task_id": task_id, "status": DirectionStatus.PENDING.value}
+        query = {"task_id": ObjectId(task_id), "status": DirectionStatus.PENDING.value}
         if fuzzer:
             query["fuzzer"] = fuzzer
         return self.find_all(query)
@@ -945,7 +946,7 @@ class DirectionRepository(BaseRepository[Direction]):
     def find_by_priority(self, task_id: str, fuzzer: str = None) -> List[Direction]:
         """Find directions sorted by priority (high risk first)"""
         try:
-            query = {"task_id": task_id}
+            query = {"task_id": ObjectId(task_id)}
             if fuzzer:
                 query["fuzzer"] = fuzzer
             # Sort by risk level (high > medium > low) and then by created_at
@@ -1072,7 +1073,7 @@ class DirectionRepository(BaseRepository[Direction]):
     def count_by_status(self, task_id: str, fuzzer: str = None) -> dict:
         """Get count of directions by status"""
         try:
-            query = {"task_id": task_id}
+            query = {"task_id": ObjectId(task_id)}
             if fuzzer:
                 query["fuzzer"] = fuzzer
 
@@ -1097,7 +1098,7 @@ class DirectionRepository(BaseRepository[Direction]):
     def is_all_complete(self, task_id: str, fuzzer: str = None) -> bool:
         """Check if all directions are completed or skipped"""
         try:
-            query = {"task_id": task_id}
+            query = {"task_id": ObjectId(task_id)}
             if fuzzer:
                 query["fuzzer"] = fuzzer
             query["status"] = {
@@ -1115,7 +1116,7 @@ class DirectionRepository(BaseRepository[Direction]):
     def get_stats(self, task_id: str, fuzzer: str = None) -> dict:
         """Get statistics for directions"""
         try:
-            query = {"task_id": task_id}
+            query = {"task_id": ObjectId(task_id)}
             if fuzzer:
                 query["fuzzer"] = fuzzer
 
@@ -1167,7 +1168,7 @@ class DirectionRepository(BaseRepository[Direction]):
     def delete_by_task(self, task_id: str) -> int:
         """Delete all directions for a task"""
         try:
-            result = self.collection.delete_many({"task_id": task_id})
+            result = self.collection.delete_many({"task_id": ObjectId(task_id)})
             return result.deleted_count
         except Exception as e:
             logger.error(f"Failed to delete directions for task: {e}")
@@ -1187,7 +1188,6 @@ class WorkerRepository(BaseRepository[Worker]):
 
     def find_by_id(self, worker_id: str) -> Optional[Worker]:
         """Find worker by ObjectId string."""
-        from bson import ObjectId
         try:
             data = self.collection.find_one({"_id": ObjectId(worker_id)})
             if data:
@@ -1199,7 +1199,6 @@ class WorkerRepository(BaseRepository[Worker]):
 
     def find_by_task(self, task_id: str) -> List[Worker]:
         """Find all workers for a task (by ObjectId)."""
-        from bson import ObjectId
         try:
             # task_id is stored as ObjectId in workers collection
             cursor = self.collection.find({"task_id": ObjectId(task_id)})
@@ -1210,7 +1209,6 @@ class WorkerRepository(BaseRepository[Worker]):
 
     def find_running_by_task(self, task_id: str) -> List[Worker]:
         """Find running workers for a task."""
-        from bson import ObjectId
         try:
             cursor = self.collection.find({
                 "task_id": ObjectId(task_id),
@@ -1229,7 +1227,6 @@ class WorkerRepository(BaseRepository[Worker]):
         self, task_id: str, fuzzer: str, sanitizer: str
     ) -> Optional[Worker]:
         """Find worker by task, fuzzer, and sanitizer."""
-        from bson import ObjectId
         try:
             data = self.collection.find_one({
                 "task_id": ObjectId(task_id),
@@ -1245,7 +1242,6 @@ class WorkerRepository(BaseRepository[Worker]):
 
     def save(self, worker: Worker) -> bool:
         """Save worker to database (upsert by ObjectId)."""
-        from bson import ObjectId
         try:
             data = worker.to_dict()
             # Ensure _id is ObjectId
@@ -1259,7 +1255,6 @@ class WorkerRepository(BaseRepository[Worker]):
 
     def update(self, worker_id: str, updates: dict) -> bool:
         """Update worker fields by ObjectId."""
-        from bson import ObjectId
         try:
             updates["updated_at"] = datetime.now()
             result = self.collection.update_one(
@@ -1284,7 +1279,6 @@ class WorkerRepository(BaseRepository[Worker]):
 
     def update_strategy(self, worker_id: str, strategy: str) -> bool:
         """Update current strategy and add to history"""
-        from bson import ObjectId
         try:
             result = self.collection.update_one(
                 {"_id": ObjectId(worker_id)},
@@ -1310,15 +1304,15 @@ class FuzzerRepository(BaseRepository[Fuzzer]):
 
     def find_by_task(self, task_id: str) -> List[Fuzzer]:
         """Find all fuzzers for a task"""
-        return self.find_all({"task_id": task_id})
+        return self.find_all({"task_id": ObjectId(task_id)})
 
     def find_successful_by_task(self, task_id: str) -> List[Fuzzer]:
         """Find successfully built fuzzers"""
-        return self.find_all({"task_id": task_id, "status": "success"})
+        return self.find_all({"task_id": ObjectId(task_id), "status": "success"})
 
     def find_by_name(self, task_id: str, fuzzer_name: str) -> Optional[Fuzzer]:
         """Find fuzzer by task and name"""
-        return self.find_one({"task_id": task_id, "fuzzer_name": fuzzer_name})
+        return self.find_one({"task_id": ObjectId(task_id), "fuzzer_name": fuzzer_name})
 
     def update_status(
         self,
@@ -1361,7 +1355,7 @@ class FunctionRepository(BaseRepository[Function]):
 
     def find_by_task(self, task_id: str) -> List[Function]:
         """Find all functions for a task"""
-        return self.find_all({"task_id": task_id})
+        return self.find_all({"task_id": ObjectId(task_id)})
 
     def find_by_name(self, task_id: str, name: str) -> Optional[Function]:
         """Find function by task and name"""
@@ -1371,11 +1365,11 @@ class FunctionRepository(BaseRepository[Function]):
         if result:
             return result
         # Fallback: query by task_id + name fields (for legacy data)
-        return self.find_one({"task_id": task_id, "name": name})
+        return self.find_one({"task_id": ObjectId(task_id), "name": name})
 
     def find_by_file(self, task_id: str, file_path: str) -> List[Function]:
         """Find all functions in a specific file"""
-        return self.find_all({"task_id": task_id, "file_path": file_path})
+        return self.find_all({"task_id": ObjectId(task_id), "file_path": file_path})
 
     def save_many(self, functions: List[Function]) -> int:
         """
@@ -1404,7 +1398,7 @@ class FunctionRepository(BaseRepository[Function]):
     def delete_by_task(self, task_id: str) -> int:
         """Delete all functions for a task"""
         try:
-            result = self.collection.delete_many({"task_id": task_id})
+            result = self.collection.delete_many({"task_id": ObjectId(task_id)})
             return result.deleted_count
         except Exception as e:
             logger.error(f"Failed to delete functions for task: {e}")
@@ -1492,7 +1486,7 @@ class FunctionRepository(BaseRepository[Function]):
         try:
             # Base query: functions reachable by this fuzzer
             base_query = {
-                "task_id": task_id,
+                "task_id": ObjectId(task_id),
                 "reached_by_fuzzers": fuzzer_name,
             }
 
@@ -1567,7 +1561,7 @@ class FunctionRepository(BaseRepository[Function]):
             - unanalyzed_by_direction: Not analyzed by specific direction (if provided)
         """
         try:
-            base_query = {"task_id": task_id}
+            base_query = {"task_id": ObjectId(task_id)}
             if fuzzer_name:
                 base_query["reached_by_fuzzers"] = fuzzer_name
 
@@ -1621,7 +1615,7 @@ class FunctionRepository(BaseRepository[Function]):
             - by_direction: Dict mapping direction_id to count
         """
         try:
-            base_query = {"task_id": task_id}
+            base_query = {"task_id": ObjectId(task_id)}
             if fuzzer_name:
                 base_query["reached_by_fuzzers"] = fuzzer_name
 
@@ -1692,11 +1686,11 @@ class CallGraphNodeRepository(BaseRepository[CallGraphNode]):
 
     def find_by_task(self, task_id: str) -> List[CallGraphNode]:
         """Find all call graph nodes for a task"""
-        return self.find_all({"task_id": task_id})
+        return self.find_all({"task_id": ObjectId(task_id)})
 
     def find_by_fuzzer(self, task_id: str, fuzzer_id: str) -> List[CallGraphNode]:
         """Find all nodes for a specific fuzzer"""
-        return self.find_all({"task_id": task_id, "fuzzer_id": fuzzer_id})
+        return self.find_all({"task_id": ObjectId(task_id), "fuzzer_id": fuzzer_id})
 
     def find_by_function(
         self, task_id: str, fuzzer_id: str, function_name: str
@@ -1724,7 +1718,7 @@ class CallGraphNodeRepository(BaseRepository[CallGraphNode]):
     ) -> List[CallGraphNode]:
         """Find all nodes at a specific call depth"""
         return self.find_all(
-            {"task_id": task_id, "fuzzer_id": fuzzer_id, "call_depth": depth}
+            {"task_id": ObjectId(task_id), "fuzzer_id": fuzzer_id, "call_depth": depth}
         )
 
     def save_many(self, nodes: List[CallGraphNode]) -> int:
@@ -1753,7 +1747,7 @@ class CallGraphNodeRepository(BaseRepository[CallGraphNode]):
     def delete_by_task(self, task_id: str) -> int:
         """Delete all nodes for a task"""
         try:
-            result = self.collection.delete_many({"task_id": task_id})
+            result = self.collection.delete_many({"task_id": ObjectId(task_id)})
             return result.deleted_count
         except Exception as e:
             logger.error(f"Failed to delete call graph nodes for task: {e}")
@@ -1763,7 +1757,7 @@ class CallGraphNodeRepository(BaseRepository[CallGraphNode]):
         """Delete all nodes for a specific fuzzer"""
         try:
             result = self.collection.delete_many(
-                {"task_id": task_id, "fuzzer_id": fuzzer_id}
+                {"task_id": ObjectId(task_id), "fuzzer_id": fuzzer_id}
             )
             return result.deleted_count
         except Exception as e:

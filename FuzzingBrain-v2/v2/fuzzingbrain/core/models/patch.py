@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List
 
+from bson import ObjectId
+
 from ..utils import generate_id
 
 
@@ -53,7 +55,7 @@ class Patch:
         return {
             "_id": self.patch_id,
             "patch_id": self.patch_id,
-            "task_id": self.task_id,
+            "task_id": ObjectId(self.task_id) if self.task_id else None,
             "pov_id": self.pov_id,
             "patch_content": self.patch_content,
             "description": self.description,
@@ -70,9 +72,14 @@ class Patch:
     @classmethod
     def from_dict(cls, data: dict) -> "Patch":
         """Create Patch from dictionary"""
+        # Handle ObjectId conversion
+        task_id = data.get("task_id", "")
+        if isinstance(task_id, ObjectId):
+            task_id = str(task_id)
+
         return cls(
             patch_id=data.get("patch_id", data.get("_id", generate_id())),
-            task_id=data.get("task_id", ""),
+            task_id=task_id,
             pov_id=data.get("pov_id"),
             patch_content=data.get("patch_content"),
             description=data.get("description"),

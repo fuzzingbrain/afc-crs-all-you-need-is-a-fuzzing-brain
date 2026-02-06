@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List
 
+from bson import ObjectId
+
 
 @dataclass
 class Function:
@@ -65,7 +67,7 @@ class Function:
         return {
             "_id": self.function_id,
             "function_id": self.function_id,
-            "task_id": self.task_id,
+            "task_id": ObjectId(self.task_id) if self.task_id else None,
             "name": self.name,
             "file_path": self.file_path,
             "start_line": self.start_line,
@@ -88,9 +90,14 @@ class Function:
         elif created_at is None:
             created_at = datetime.now()
 
+        # Handle ObjectId conversion
+        task_id = data.get("task_id", "")
+        if isinstance(task_id, ObjectId):
+            task_id = str(task_id)
+
         return cls(
             function_id=data.get("function_id", data.get("_id", "")),
-            task_id=data.get("task_id", ""),
+            task_id=task_id,
             name=data.get("name", ""),
             file_path=data.get("file_path", ""),
             start_line=data.get("start_line", 0),

@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List
 
+from bson import ObjectId
+
 from ..utils import generate_id
 
 
@@ -68,7 +70,7 @@ class POV:
         return {
             "_id": self.pov_id,
             "pov_id": self.pov_id,
-            "task_id": self.task_id,
+            "task_id": ObjectId(self.task_id) if self.task_id else None,
             "suspicious_point_id": self.suspicious_point_id,
             "generation_id": self.generation_id,
             "iteration": self.iteration,
@@ -94,9 +96,14 @@ class POV:
     @classmethod
     def from_dict(cls, data: dict) -> "POV":
         """Create POV from dictionary"""
+        # Handle ObjectId conversion
+        task_id = data.get("task_id", "")
+        if isinstance(task_id, ObjectId):
+            task_id = str(task_id)
+
         return cls(
             pov_id=data.get("pov_id", data.get("_id", generate_id())),
-            task_id=data.get("task_id", ""),
+            task_id=task_id,
             suspicious_point_id=data.get("suspicious_point_id", ""),
             generation_id=data.get("generation_id", ""),
             iteration=data.get("iteration", 0),
