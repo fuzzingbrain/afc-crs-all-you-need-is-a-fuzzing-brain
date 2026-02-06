@@ -237,7 +237,8 @@ class FuzzerMonitor:
         """
         with self._lock:
             self.watch_dirs = [
-                w for w in self.watch_dirs
+                w
+                for w in self.watch_dirs
                 if not (w.worker_id == worker_id and w.source == source)
             ]
 
@@ -255,9 +256,7 @@ class FuzzerMonitor:
             worker_id: Worker identifier
         """
         with self._lock:
-            self.watch_dirs = [
-                w for w in self.watch_dirs if w.worker_id != worker_id
-            ]
+            self.watch_dirs = [w for w in self.watch_dirs if w.worker_id != worker_id]
 
         logger.debug(
             f"[FuzzerMonitor:{self.task_id}] Removed all watches for worker={worker_id}"
@@ -296,7 +295,9 @@ class FuzzerMonitor:
                 self._log(f"Check interval: {self.check_interval}s")
                 self._log("=" * 70)
             except Exception as e:
-                logger.warning(f"[FuzzerMonitor:{self.task_id}] Failed to setup log file: {e}")
+                logger.warning(
+                    f"[FuzzerMonitor:{self.task_id}] Failed to setup log file: {e}"
+                )
                 self._log_sink_id = None
 
         self._running = True
@@ -316,7 +317,9 @@ class FuzzerMonitor:
             message: Log message
             level: Log level (INFO, WARNING, ERROR, etc.)
         """
-        log_func = getattr(self._monitor_logger, level.lower(), self._monitor_logger.info)
+        log_func = getattr(
+            self._monitor_logger, level.lower(), self._monitor_logger.info
+        )
         log_func(message)
 
     def stop_monitoring(self) -> None:
@@ -458,7 +461,9 @@ class FuzzerMonitor:
                 worker_id, fuzzer_name, sanitizer = self._worker_cache[worker_dir_str]
             else:
                 # Query database for worker with this workspace_path
-                worker_id, fuzzer_name, sanitizer = self._get_worker_info(worker_dir_str)
+                worker_id, fuzzer_name, sanitizer = self._get_worker_info(
+                    worker_dir_str
+                )
                 self._worker_cache[worker_dir_str] = (worker_id, fuzzer_name, sanitizer)
 
             fuzzer_worker_dir = worker_dir / "fuzzer_worker"
@@ -470,7 +475,9 @@ class FuzzerMonitor:
             global_active = fuzzer_worker_dir / "global" / self.ACTIVE_MARKER
             if global_crashes.exists() and global_active.exists():
                 # Find fuzzer binary path for verification
-                fuzzer_path = self._find_fuzzer_binary(worker_dir, fuzzer_name, sanitizer)
+                fuzzer_path = self._find_fuzzer_binary(
+                    worker_dir, fuzzer_name, sanitizer
+                )
 
                 entry = WatchEntry(
                     path=global_crashes,
@@ -489,7 +496,10 @@ class FuzzerMonitor:
                 # Store verification context
                 if fuzzer_path and self.docker_image:
                     with self._lock:
-                        self._verification_context[worker_id] = (fuzzer_path, self.docker_image)
+                        self._verification_context[worker_id] = (
+                            fuzzer_path,
+                            self.docker_image,
+                        )
 
             # Check SP Fuzzer crashes directories
             sp_fuzzers_dir = fuzzer_worker_dir / "sp_fuzzers"
@@ -585,7 +595,9 @@ class FuzzerMonitor:
                 self._active_fuzzers[fuzzer_key] = info
 
                 # Log the start event
-                fuzzer_type = "Global" if entry.source == "global" else f"SP({entry.source[:8]})"
+                fuzzer_type = (
+                    "Global" if entry.source == "global" else f"SP({entry.source[:8]})"
+                )
                 self._log(
                     f"[FUZZER STARTED] {fuzzer_type} | "
                     f"worker={entry.worker_id} | "
@@ -609,7 +621,9 @@ class FuzzerMonitor:
                 runtime = (datetime.now() - info.started_at).total_seconds()
 
                 # Log the stop event
-                fuzzer_type = "Global" if info.source == "global" else f"SP({info.source[:8]})"
+                fuzzer_type = (
+                    "Global" if info.source == "global" else f"SP({info.source[:8]})"
+                )
                 self._log(
                     f"[FUZZER STOPPED] {fuzzer_type} | "
                     f"worker={info.worker_id} | "
@@ -744,7 +758,11 @@ class FuzzerMonitor:
             self.crash_records.append(record)
 
         # Log crash to dedicated log file
-        fuzzer_type = "Global" if watch_entry.source == "global" else f"SP({watch_entry.source[:8]})"
+        fuzzer_type = (
+            "Global"
+            if watch_entry.source == "global"
+            else f"SP({watch_entry.source[:8]})"
+        )
         self._log(
             f"[CRASH FOUND] {fuzzer_type} | "
             f"worker={watch_entry.worker_id} | "
@@ -956,4 +974,8 @@ class FuzzerMonitor:
 
     def is_running(self) -> bool:
         """Check if monitor is currently running."""
-        return self._running and self._monitor_thread is not None and self._monitor_thread.is_alive()
+        return (
+            self._running
+            and self._monitor_thread is not None
+            and self._monitor_thread.is_alive()
+        )

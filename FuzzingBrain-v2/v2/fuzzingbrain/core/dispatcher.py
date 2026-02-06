@@ -59,6 +59,7 @@ class WorkerDispatcher:
 
         # Get log directory for FuzzerMonitor log file
         from .logging import get_log_dir
+
         log_dir = get_log_dir()
 
         self.crash_monitor: Optional[FuzzerMonitor] = FuzzerMonitor(
@@ -197,6 +198,7 @@ def generate(variant: int = 1) -> bytes:
         except Exception as e:
             logger.error(f"[FuzzerMonitor] Error processing crash: {e}")
             import traceback
+
             logger.debug(traceback.format_exc())
 
     def _verify_crash_with_docker(
@@ -734,9 +736,7 @@ def generate(variant: int = 1) -> bytes:
                 f"Waiting for task to complete (timeout: {timeout_minutes}min, pov_target: {self.pov_count_target})"
             )
         else:
-            logger.info(
-                f"Waiting for task to complete (timeout: {timeout_minutes}min)"
-            )
+            logger.info(f"Waiting for task to complete (timeout: {timeout_minutes}min)")
 
         while True:
             elapsed = datetime.now() - start_time
@@ -763,9 +763,7 @@ def generate(variant: int = 1) -> bytes:
                 }
             )
             if budget_exceeded_worker:
-                logger.warning(
-                    "Budget limit exceeded - initiating shutdown"
-                )
+                logger.warning("Budget limit exceeded - initiating shutdown")
                 self.graceful_shutdown()
                 self.shutdown_all_fuzzers()
                 return {
