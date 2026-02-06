@@ -7,6 +7,7 @@ Handles persistent storage of evaluation data.
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from bson import ObjectId
 from loguru import logger
 
 try:
@@ -165,15 +166,16 @@ class MongoStorage:
 
     async def upsert_task(self, data: Dict[str, Any]) -> None:
         """Insert or update task."""
+        task_id = data.get("task_id") or data.get("_id")
         await self._db.tasks.update_one(
-            {"task_id": data["task_id"]},
+            {"_id": ObjectId(task_id) if task_id else ObjectId()},
             {"$set": data},
             upsert=True,
         )
 
     async def get_task(self, task_id: str) -> Optional[Dict[str, Any]]:
         """Get task by ID."""
-        return await self._db.tasks.find_one({"task_id": task_id})
+        return await self._db.tasks.find_one({"_id": ObjectId(task_id)})
 
     async def get_tasks(
         self,
@@ -194,19 +196,20 @@ class MongoStorage:
 
     async def upsert_worker(self, data: Dict[str, Any]) -> None:
         """Insert or update worker."""
+        worker_id = data.get("worker_id") or data.get("_id")
         await self._db.workers.update_one(
-            {"worker_id": data["worker_id"]},
+            {"_id": ObjectId(worker_id) if worker_id else ObjectId()},
             {"$set": data},
             upsert=True,
         )
 
     async def get_worker(self, worker_id: str) -> Optional[Dict[str, Any]]:
         """Get worker by ID."""
-        return await self._db.workers.find_one({"worker_id": worker_id})
+        return await self._db.workers.find_one({"_id": ObjectId(worker_id)})
 
     async def get_workers_by_task(self, task_id: str) -> List[Dict[str, Any]]:
         """Get all workers for a task."""
-        cursor = self._db.workers.find({"task_id": task_id}).sort("started_at", -1)
+        cursor = self._db.workers.find({"task_id": ObjectId(task_id)}).sort("started_at", -1)
         return await cursor.to_list(length=1000)
 
     async def update_worker_status(
@@ -226,14 +229,14 @@ class MongoStorage:
         if memory_mb is not None:
             update_data["memory_mb"] = memory_mb
         await self._db.workers.update_one(
-            {"worker_id": worker_id},
+            {"_id": ObjectId(worker_id)},
             {"$set": update_data},
         )
 
     async def end_worker(self, worker_id: str, status: str = "completed") -> None:
         """Mark worker as ended."""
         await self._db.workers.update_one(
-            {"worker_id": worker_id},
+            {"_id": ObjectId(worker_id)},
             {"$set": {"status": status, "ended_at": datetime.utcnow()}},
         )
 
@@ -241,34 +244,35 @@ class MongoStorage:
 
     async def upsert_agent(self, data: Dict[str, Any]) -> None:
         """Insert or update agent."""
+        agent_id = data.get("agent_id") or data.get("_id")
         await self._db.agents.update_one(
-            {"agent_id": data["agent_id"]},
+            {"_id": ObjectId(agent_id) if agent_id else ObjectId()},
             {"$set": data},
             upsert=True,
         )
 
     async def get_agent(self, agent_id: str) -> Optional[Dict[str, Any]]:
         """Get agent by ID."""
-        return await self._db.agents.find_one({"agent_id": agent_id})
+        return await self._db.agents.find_one({"_id": ObjectId(agent_id)})
 
     async def get_agents_by_task(self, task_id: str) -> List[Dict[str, Any]]:
         """Get all agents for a task."""
-        cursor = self._db.agents.find({"task_id": task_id}).sort("started_at", -1)
+        cursor = self._db.agents.find({"task_id": ObjectId(task_id)}).sort("started_at", -1)
         return await cursor.to_list(length=1000)
 
     async def get_agents_by_worker(self, worker_id: str) -> List[Dict[str, Any]]:
         """Get all agents for a worker."""
-        cursor = self._db.agents.find({"worker_id": worker_id}).sort("started_at", -1)
+        cursor = self._db.agents.find({"worker_id": ObjectId(worker_id)}).sort("started_at", -1)
         return await cursor.to_list(length=1000)
 
     async def get_agent_max_iterations(self, task_id: str) -> Dict[str, int]:
         """Get max iteration for each agent from LLM calls."""
         pipeline = [
-            {"$match": {"task_id": task_id}},
+            {"$match": {"task_id": ObjectId(task_id)}},
             {"$group": {"_id": "$agent_id", "max_iter": {"$max": "$iteration"}}},
         ]
         result = await self._db.llm_calls.aggregate(pipeline).to_list(length=1000)
-        return {r["_id"]: r["max_iter"] or 0 for r in result if r["_id"]}
+        return {str(r["_id"]): r["max_iter"] or 0 for r in result if r["_id"]}
 
     async def update_agent_status(
         self,
@@ -284,14 +288,14 @@ class MongoStorage:
         if iteration is not None:
             update_data["iteration"] = iteration
         await self._db.agents.update_one(
-            {"agent_id": agent_id},
+            {"_id": ObjectId(agent_id)},
             {"$set": update_data},
         )
 
     async def end_agent(self, agent_id: str, status: str = "completed") -> None:
         """Mark agent as ended."""
         await self._db.agents.update_one(
-            {"agent_id": agent_id},
+            {"_id": ObjectId(agent_id)},
             {"$set": {"status": status, "ended_at": datetime.utcnow()}},
         )
 
@@ -314,9 +318,9 @@ class MongoStorage:
         """Get LLM calls with filters."""
         query = {}
         if task_id:
-            query["task_id"] = task_id
+            query["task_id"] = ObjectId(task_id)
         if agent_id:
-            query["agent_id"] = agent_id
+            query["agent_id"] = ObjectId(agent_id)
         if model:
             query["model"] = model
         if since:
@@ -342,7 +346,7 @@ class MongoStorage:
         """Get tool calls with filters."""
         query = {}
         if agent_id:
-            query["agent_id"] = agent_id
+            query["agent_id"] = ObjectId(agent_id)
         if tool_name:
             query["tool_name"] = tool_name
         if since:
@@ -365,7 +369,7 @@ class MongoStorage:
         limit: int = 1000,
     ) -> List[Dict[str, Any]]:
         """Get logs for an agent."""
-        query = {"agent_id": agent_id}
+        query = {"agent_id": ObjectId(agent_id)}
         if since:
             query["timestamp"] = {"$gte": since}
         cursor = self._db.agent_logs.find(query).sort("timestamp", 1).limit(limit)
@@ -378,7 +382,7 @@ class MongoStorage:
         limit: int = 5000,
     ) -> List[Dict[str, Any]]:
         """Get all logs for a task."""
-        query = {"task_id": task_id}
+        query = {"task_id": ObjectId(task_id)}
         if since:
             query["timestamp"] = {"$gte": since}
         cursor = self._db.agent_logs.find(query).sort("timestamp", -1).limit(limit)
@@ -393,7 +397,7 @@ class MongoStorage:
         """Search logs by content."""
         query = {"$text": {"$search": query_text}}
         if task_id:
-            query["task_id"] = task_id
+            query["task_id"] = ObjectId(task_id)
         cursor = self._db.agent_logs.find(query).limit(limit)
         return await cursor.to_list(length=limit)
 
@@ -415,7 +419,7 @@ class MongoStorage:
         """Get events with filters."""
         query = {}
         if task_id:
-            query["task_id"] = task_id
+            query["task_id"] = ObjectId(task_id)
         if event_type:
             query["event_type"] = event_type
         if since:
@@ -433,7 +437,7 @@ class MongoStorage:
         """Get aggregated cost summary."""
         match_stage = {}
         if task_id:
-            match_stage["task_id"] = task_id
+            match_stage["task_id"] = ObjectId(task_id)
         if since:
             match_stage["timestamp"] = {"$gte": since}
 
@@ -468,7 +472,7 @@ class MongoStorage:
         """Get cost breakdown by model."""
         match_stage = {}
         if task_id:
-            match_stage["task_id"] = task_id
+            match_stage["task_id"] = ObjectId(task_id)
         if since:
             match_stage["timestamp"] = {"$gte": since}
 
@@ -495,7 +499,7 @@ class MongoStorage:
         """Get tool usage summary."""
         match_stage = {}
         if task_id:
-            match_stage["task_id"] = task_id
+            match_stage["task_id"] = ObjectId(task_id)
         if since:
             match_stage["timestamp"] = {"$gte": since}
 
@@ -534,7 +538,7 @@ class MongoStorage:
         main_db = self._client["fuzzingbrain"]
         sp_collection = main_db.suspicious_points
 
-        query = {"task_id": task_id}
+        query = {"task_id": ObjectId(task_id)}
 
         # Count various states
         created = await sp_collection.count_documents(query)
@@ -563,7 +567,7 @@ class MongoStorage:
         main_db = self._client["fuzzingbrain"]
         directions_collection = main_db.directions
 
-        query = {"task_id": task_id}
+        query = {"task_id": ObjectId(task_id)}
 
         # Count various states
         created = await directions_collection.count_documents(query)
@@ -584,7 +588,7 @@ class MongoStorage:
         main_db = self._client["fuzzingbrain"]
         pov_collection = main_db.povs
 
-        query = {"task_id": task_id}
+        query = {"task_id": ObjectId(task_id)}
 
         # Count various states (is_successful is the actual field name)
         total = await pov_collection.count_documents(query)
