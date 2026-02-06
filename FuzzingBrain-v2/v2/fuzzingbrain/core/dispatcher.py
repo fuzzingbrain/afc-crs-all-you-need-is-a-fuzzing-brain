@@ -937,11 +937,18 @@ def generate(variant: int = 1) -> bytes:
             )
             actual_pov_count += fuzzer_discovered_count
 
+            # Determine effective status:
+            # - If worker failed but has results (SPs or POVs), mark as "interrupted"
+            # - This handles timeout cases where work was done but Celery task was killed
+            effective_status = worker.status.value
+            if effective_status == "failed" and (sp_count > 0 or actual_pov_count > 0):
+                effective_status = "interrupted"
+
             result = {
                 "worker_id": worker.worker_id,
                 "fuzzer": worker.fuzzer,
                 "sanitizer": worker.sanitizer,
-                "status": worker.status.value,
+                "status": effective_status,
                 "sps_found": sp_count,
                 "sps_merged": merged_count,
                 "povs_found": actual_pov_count,  # Use DB count instead of worker's self-report

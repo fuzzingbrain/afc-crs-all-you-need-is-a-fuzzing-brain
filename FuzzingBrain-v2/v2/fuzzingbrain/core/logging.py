@@ -986,6 +986,7 @@ def create_final_summary(
     # Count statistics
     total = len(workers)
     completed = sum(1 for w in workers if w.get("status") == "completed")
+    interrupted = sum(1 for w in workers if w.get("status") == "interrupted")
     failed = sum(1 for w in workers if w.get("status") == "failed")
     total_sps = sum(w.get("sps_found", 0) for w in workers)
     total_povs = sum(w.get("povs_found", 0) for w in workers)
@@ -1033,12 +1034,15 @@ def create_final_summary(
         + f"  Total Time:    {total_elapsed_minutes:.1f} minutes".ljust(table_width)
         + "│"
     )
+    # Build workers summary string
+    workers_parts = [f"{completed}/{total} completed"]
+    if interrupted > 0:
+        workers_parts.append(f"{interrupted} interrupted")
+    if failed > 0:
+        workers_parts.append(f"{failed} failed")
+    workers_str = ", ".join(workers_parts)
     lines.append(
-        "│"
-        + f"  Workers:       {completed}/{total} completed, {failed} failed".ljust(
-            table_width
-        )
-        + "│"
+        "│" + f"  Workers:       {workers_str}".ljust(table_width) + "│"
     )
     lines.append("│" + f"  SPs Found:     {total_sps}".ljust(table_width) + "│")
     if dedup_count > 0:
@@ -1132,7 +1136,12 @@ def create_final_summary(
             fuzzer = fuzzer[: col_fuzzer - 4] + ".."
 
         status = w.get("status", "unknown")
-        status_display = "✓ " + status if status == "completed" else "✗ " + status
+        if status == "completed":
+            status_display = "✓ " + status
+        elif status == "interrupted":
+            status_display = "⚡ " + status  # Lightning bolt for interrupted
+        else:
+            status_display = "✗ " + status
 
         # Get duration string
         duration_str = w.get("duration_str", "N/A")
