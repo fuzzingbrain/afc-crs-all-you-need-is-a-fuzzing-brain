@@ -48,6 +48,9 @@ class Direction:
     task_id: str = ""  # Which task this belongs to
     fuzzer: str = ""  # Which fuzzer this direction is for
 
+    # Agent reference (ObjectId stored as string)
+    created_by_agent_id: Optional[str] = None  # Which DirectionPlanningAgent created this
+
     # Direction info
     name: str = ""  # Human-readable name (e.g., "Chunk Handlers")
     risk_level: str = RiskLevel.MEDIUM.value  # Security risk assessment
@@ -80,6 +83,7 @@ class Direction:
             "_id": self.direction_id,
             "direction_id": self.direction_id,
             "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "created_by_agent_id": ObjectId(self.created_by_agent_id) if self.created_by_agent_id else None,
             "fuzzer": self.fuzzer,
             "name": self.name,
             "risk_level": self.risk_level,
@@ -119,9 +123,14 @@ class Direction:
         if isinstance(task_id, ObjectId):
             task_id = str(task_id)
 
+        created_by_agent_id = data.get("created_by_agent_id")
+        if isinstance(created_by_agent_id, ObjectId):
+            created_by_agent_id = str(created_by_agent_id)
+
         return cls(
             direction_id=data.get("direction_id", data.get("_id", generate_id())),
             task_id=task_id,
+            created_by_agent_id=created_by_agent_id,
             fuzzer=data.get("fuzzer", ""),
             name=data.get("name", ""),
             risk_level=data.get("risk_level", RiskLevel.MEDIUM.value),

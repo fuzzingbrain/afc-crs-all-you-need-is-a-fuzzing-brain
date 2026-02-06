@@ -1360,6 +1360,7 @@ class AnalysisServer:
         score: float,
         important_controlflow: list,
         direction_id: str = "",
+        agent_id: str = "",
     ) -> str:
         """Sync: Create and save a new SP."""
         from ..core.models import SuspiciousPoint
@@ -1368,6 +1369,7 @@ class AnalysisServer:
             task_id=self.task_id,
             function_name=function_name,
             direction_id=direction_id,
+            created_by_agent_id=agent_id if agent_id else None,
             sources=[{"harness_name": harness_name, "sanitizer": sanitizer}],
             description=description,
             vuln_type=vuln_type,
@@ -1397,6 +1399,7 @@ class AnalysisServer:
         score = params.get("score", 0.0)
         important_controlflow = params.get("important_controlflow", [])
         direction_id = params.get("direction_id", "")
+        agent_id = params.get("agent_id", "")  # Agent that created this SP
 
         # Check for duplicates in the same function (MongoDB query in thread pool)
         existing_sp_dicts = await self._run_sync(
@@ -1443,6 +1446,7 @@ class AnalysisServer:
             score,
             important_controlflow,
             direction_id,
+            agent_id,
         )
 
         self._log(
@@ -1486,6 +1490,10 @@ class AnalysisServer:
             updates["pov_guidance"] = params["pov_guidance"]
         if params.get("is_checked"):
             updates["checked_at"] = datetime.now()
+        # Track which agent verified this SP
+        if params.get("agent_id") and params.get("is_checked"):
+            from bson import ObjectId
+            updates["verified_by_agent_id"] = ObjectId(params["agent_id"])
 
         self._log(
             f"Updating suspicious point {suspicious_point_id[:8]}... with: is_checked={updates.get('is_checked')}, score={updates.get('score')}"
@@ -1562,8 +1570,10 @@ class AnalysisServer:
         """Sync implementation of _create_direction."""
         from ..core.models import Direction
 
+        agent_id = params.get("agent_id", "")
         direction = Direction(
             task_id=self.task_id,
+            created_by_agent_id=agent_id if agent_id else None,
             name=params.get("name", ""),
             risk_level=params.get("risk_level", "medium"),
             risk_reason=params.get("risk_reason", ""),

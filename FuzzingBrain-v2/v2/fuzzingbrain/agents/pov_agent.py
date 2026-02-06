@@ -500,6 +500,7 @@ Start by reading the vulnerable function source with get_function_source("{funct
             workspace_path=self.workspace_path,
             fuzzer_source=fuzzer_source,
             fuzzer_manager=self.fuzzer_manager,  # For SP Fuzzer integration
+            agent_id=self.mcp_context_id,  # Track which agent created POVs
         )
 
     def _check_tool_result_for_success(self, tool_name: str, result_str: str) -> bool:

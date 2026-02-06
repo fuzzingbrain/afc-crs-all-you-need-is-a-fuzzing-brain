@@ -60,6 +60,10 @@ class SuspiciousPoint:
     function_name: str = ""  # Which function this belongs to
     direction_id: str = ""  # Which direction this belongs to (SP Find v2)
 
+    # Agent references (ObjectId stored as string)
+    created_by_agent_id: Optional[str] = None  # Which SPG agent created this SP
+    verified_by_agent_id: Optional[str] = None  # Which SPV agent verified this SP
+
     # Sources - which harness/sanitizer combinations discovered this SP
     # Multiple sources indicate the same bug was found by multiple workers (higher confidence)
     # Format: [{"harness_name": "fuzz_png", "sanitizer": "address"}, ...]
@@ -136,7 +140,10 @@ class SuspiciousPoint:
             "_id": self.suspicious_point_id,
             "suspicious_point_id": self.suspicious_point_id,
             "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "direction_id": ObjectId(self.direction_id) if self.direction_id else None,
             "function_name": self.function_name,
+            "created_by_agent_id": ObjectId(self.created_by_agent_id) if self.created_by_agent_id else None,
+            "verified_by_agent_id": ObjectId(self.verified_by_agent_id) if self.verified_by_agent_id else None,
             "sources": self.sources,
             "description": self.description,
             "vuln_type": self.vuln_type,
@@ -185,6 +192,18 @@ class SuspiciousPoint:
         if isinstance(task_id, ObjectId):
             task_id = str(task_id)
 
+        direction_id = data.get("direction_id", "")
+        if isinstance(direction_id, ObjectId):
+            direction_id = str(direction_id)
+
+        created_by_agent_id = data.get("created_by_agent_id")
+        if isinstance(created_by_agent_id, ObjectId):
+            created_by_agent_id = str(created_by_agent_id)
+
+        verified_by_agent_id = data.get("verified_by_agent_id")
+        if isinstance(verified_by_agent_id, ObjectId):
+            verified_by_agent_id = str(verified_by_agent_id)
+
         # Handle backward compatibility: convert old harness_name/sanitizer to sources
         sources = data.get("sources", [])
         if not sources and (data.get("harness_name") or data.get("sanitizer")):
@@ -201,6 +220,9 @@ class SuspiciousPoint:
             ),
             task_id=task_id,
             function_name=data.get("function_name", ""),
+            direction_id=direction_id,
+            created_by_agent_id=created_by_agent_id,
+            verified_by_agent_id=verified_by_agent_id,
             sources=sources,
             description=data.get("description", ""),
             vuln_type=data.get("vuln_type", ""),

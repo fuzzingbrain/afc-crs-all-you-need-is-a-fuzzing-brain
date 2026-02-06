@@ -1017,6 +1017,10 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             # Update LLMClient with agent_id for call tracking
             self.llm_client.agent_id = agent_id
 
+            # Update SP context with agent_id for tracking SP creator/verifier
+            from ..tools.suspicious_points import set_sp_agent_id
+            set_sp_agent_id(agent_id)
+
             self._log(f"Agent context created: {agent_id}", level="DEBUG")
 
             try:

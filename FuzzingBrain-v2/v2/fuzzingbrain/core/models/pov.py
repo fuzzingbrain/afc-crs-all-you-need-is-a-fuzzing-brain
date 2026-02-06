@@ -29,6 +29,9 @@ class POV:
         ""  # Group POVs from same generation (same code, multiple variants)
     )
 
+    # Agent reference (ObjectId stored as string)
+    agent_id: Optional[str] = None  # Which POVAgent created this POV
+
     # Iteration tracking (for model evaluation)
     iteration: int = 0  # Which agent loop iteration when created
     attempt: int = 1  # Which POV attempt (1-40)
@@ -73,6 +76,7 @@ class POV:
             "task_id": ObjectId(self.task_id) if self.task_id else None,
             "suspicious_point_id": self.suspicious_point_id,
             "generation_id": self.generation_id,
+            "agent_id": ObjectId(self.agent_id) if self.agent_id else None,
             "iteration": self.iteration,
             "attempt": self.attempt,
             "variant": self.variant,
@@ -101,11 +105,16 @@ class POV:
         if isinstance(task_id, ObjectId):
             task_id = str(task_id)
 
+        agent_id = data.get("agent_id")
+        if isinstance(agent_id, ObjectId):
+            agent_id = str(agent_id)
+
         return cls(
             pov_id=data.get("pov_id", data.get("_id", generate_id())),
             task_id=task_id,
             suspicious_point_id=data.get("suspicious_point_id", ""),
             generation_id=data.get("generation_id", ""),
+            agent_id=agent_id,
             iteration=data.get("iteration", 0),
             attempt=data.get("attempt", 1),
             variant=data.get("variant", 1),

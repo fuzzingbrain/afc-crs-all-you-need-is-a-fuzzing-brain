@@ -425,6 +425,7 @@ class AnalysisClient:
         harness_name: str = "",
         sanitizer: str = "",
         direction_id: str = "",
+        agent_id: str = "",
     ) -> dict:
         """
         Create a new suspicious point.
@@ -438,6 +439,7 @@ class AnalysisClient:
             harness_name: Fuzzer harness name that created this SP
             sanitizer: Sanitizer type (address, memory, undefined)
             direction_id: Direction ID that this SP belongs to
+            agent_id: Agent ObjectId that created this SP
 
         Returns:
             Dict with 'id' and 'created' status
@@ -453,6 +455,7 @@ class AnalysisClient:
                 "harness_name": harness_name,
                 "sanitizer": sanitizer,
                 "direction_id": direction_id,
+                "agent_id": agent_id,
             },
         )
 
@@ -465,6 +468,7 @@ class AnalysisClient:
         score: float = None,
         verification_notes: str = None,
         pov_guidance: str = None,
+        agent_id: str = "",
     ) -> dict:
         """
         Update a suspicious point.
@@ -477,6 +481,7 @@ class AnalysisClient:
             score: Updated score
             verification_notes: Notes from verification
             pov_guidance: Guidance for POV agent (input directions, what to watch for)
+            agent_id: Agent ObjectId that verified this SP
 
         Returns:
             Dict with 'updated' status
@@ -494,6 +499,8 @@ class AnalysisClient:
             params["verification_notes"] = verification_notes
         if pov_guidance is not None:
             params["pov_guidance"] = pov_guidance
+        if agent_id:
+            params["agent_id"] = agent_id
         return self._request(Method.UPDATE_SUSPICIOUS_POINT, params)
 
     def list_suspicious_points(

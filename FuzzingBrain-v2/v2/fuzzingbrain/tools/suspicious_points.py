@@ -27,9 +27,17 @@ _sp_sanitizer: ContextVar[Optional[str]] = ContextVar("sp_sanitizer", default=No
 _sp_direction_id: ContextVar[Optional[str]] = ContextVar(
     "sp_direction_id", default=None
 )
+_sp_agent_id: ContextVar[Optional[str]] = ContextVar(
+    "sp_agent_id", default=None
+)
 
 
-def set_sp_context(harness_name: str, sanitizer: str, direction_id: str = "") -> None:
+def set_sp_context(
+    harness_name: str,
+    sanitizer: str,
+    direction_id: str = "",
+    agent_id: str = "",
+) -> None:
     """
     Set the context for SP tools.
 
@@ -43,18 +51,34 @@ def set_sp_context(harness_name: str, sanitizer: str, direction_id: str = "") ->
         harness_name: Fuzzer harness name (e.g., "fuzz_png")
         sanitizer: Sanitizer type (e.g., "address")
         direction_id: Direction ID for linking SP to direction
+        agent_id: Agent ObjectId for tracking SP creator/verifier
     """
     _sp_harness_name.set(harness_name)
     _sp_sanitizer.set(sanitizer)
     _sp_direction_id.set(direction_id)
+    _sp_agent_id.set(agent_id)
     logger.debug(
-        f"SP context set: harness_name={harness_name}, sanitizer={sanitizer}, direction_id={direction_id}"
+        f"SP context set: harness_name={harness_name}, sanitizer={sanitizer}, direction_id={direction_id}, agent_id={agent_id[:8] if agent_id else 'none'}"
     )
 
 
-def get_sp_context() -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    """Get the current SP context (harness_name, sanitizer, direction_id)."""
-    return _sp_harness_name.get(), _sp_sanitizer.get(), _sp_direction_id.get()
+def get_sp_context() -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """Get the current SP context (harness_name, sanitizer, direction_id, agent_id)."""
+    return _sp_harness_name.get(), _sp_sanitizer.get(), _sp_direction_id.get(), _sp_agent_id.get()
+
+
+def set_sp_agent_id(agent_id: str) -> None:
+    """
+    Set only the agent_id in SP context.
+
+    This should be called by agents when they start running, so they can
+    be tracked as the creator/verifier of SPs without changing other context.
+
+    Args:
+        agent_id: Agent ObjectId for tracking SP creator/verifier
+    """
+    _sp_agent_id.set(agent_id)
+    logger.debug(f"SP agent_id set: {agent_id[:8] if agent_id else 'none'}")
 
 
 # Aliases for mcp_factory compatibility
@@ -91,7 +115,7 @@ def create_suspicious_point_impl(
 
     try:
         client = _get_client()
-        harness_name, sanitizer, direction_id = get_sp_context()
+        harness_name, sanitizer, direction_id, agent_id = get_sp_context()
         result = client.create_suspicious_point(
             function_name=function_name,
             description=description,
@@ -101,6 +125,7 @@ def create_suspicious_point_impl(
             harness_name=harness_name or "",
             sanitizer=sanitizer or "",
             direction_id=direction_id or "",
+            agent_id=agent_id or "",  # Track which agent created this SP
         )
 
         merged = result.get("merged", False)
@@ -137,6 +162,8 @@ def update_suspicious_point_impl(
 
     try:
         client = _get_client()
+        # Get agent_id from context for tracking verified_by_agent_id
+        _, _, _, agent_id = get_sp_context()
         result = client.update_suspicious_point(
             sp_id=suspicious_point_id,
             is_checked=is_checked,
@@ -145,6 +172,7 @@ def update_suspicious_point_impl(
             score=score,
             verification_notes=verification_notes,
             pov_guidance=pov_guidance,
+            agent_id=agent_id or "",  # Track which agent verified this SP
         )
 
         update_json = json.dumps(
@@ -274,8 +302,8 @@ def create_suspicious_point(
 
     try:
         client = _get_client()
-        # Include harness_name and sanitizer from context
-        harness_name, sanitizer = get_sp_context()
+        # Include harness_name, sanitizer, and agent_id from context
+        harness_name, sanitizer, direction_id, agent_id = get_sp_context()
         result = client.create_suspicious_point(
             function_name=function_name,
             description=description,
@@ -284,6 +312,8 @@ def create_suspicious_point(
             important_controlflow=important_controlflow or [],
             harness_name=harness_name or "",
             sanitizer=sanitizer or "",
+            direction_id=direction_id or "",
+            agent_id=agent_id or "",  # Track which agent created this SP
         )
 
         merged = result.get("merged", False)
@@ -349,6 +379,8 @@ def update_suspicious_point(
 
     try:
         client = _get_client()
+        # Get agent_id from context for tracking verified_by_agent_id
+        _, _, _, agent_id = get_sp_context()
         result = client.update_suspicious_point(
             sp_id=suspicious_point_id,
             is_checked=is_checked,
@@ -357,6 +389,7 @@ def update_suspicious_point(
             score=score,
             verification_notes=verification_notes,
             pov_guidance=pov_guidance,
+            agent_id=agent_id or "",  # Track which agent verified this SP
         )
 
         # Log the update with server result
@@ -480,6 +513,7 @@ def get_suspicious_point(suspicious_point_id: str) -> Dict[str, Any]:
 __all__ = [
     # Context
     "set_sp_context",
+    "set_sp_agent_id",
     "get_sp_context",
     "_get_sp_context",
     "_ensure_sp_context",
