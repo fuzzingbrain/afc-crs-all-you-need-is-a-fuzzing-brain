@@ -1101,7 +1101,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             try:
                 seed_agent = SeedAgent(
                     task_id=self.task_id,
-                    worker_id=self.worker_id,
+                    worker_id=f"{self.worker_id}_seed_{seed_index}",  # Unique per agent
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
                     model=CLAUDE_OPUS_4_5,  # Force Opus for seed generation

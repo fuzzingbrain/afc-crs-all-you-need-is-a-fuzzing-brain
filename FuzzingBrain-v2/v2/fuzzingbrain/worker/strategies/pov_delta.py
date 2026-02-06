@@ -400,7 +400,7 @@ class POVDeltaStrategy(POVBaseStrategy):
         agent_log_dir = self.agent_log_dir
         seed_agent = SeedAgent(
             task_id=self.task_id,
-            worker_id=self.worker_id,
+            worker_id=f"{self.worker_id}_delta_seed",  # Unique for delta seed agent
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             fuzzer_manager=fuzzer_manager,

@@ -411,7 +411,7 @@ class POVBaseStrategy(BaseStrategy):
                 # Create SeedAgent for this FP
                 seed_agent = SeedAgent(
                     task_id=self.task_id,
-                    worker_id=self.worker_id,
+                    worker_id=f"{self.worker_id}_fp_seed_{seed_index}",  # Unique per agent
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
                     fuzzer_manager=fuzzer_manager,
