@@ -48,6 +48,11 @@ class POVReportAgent(BaseAgent):
     4. Write a detailed, accurate report
     """
 
+    @property
+    def agent_type(self) -> str:
+        """POV type for report generation."""
+        return "pov"
+
     # Lower temperature for factual report writing
     default_temperature: float = 0.3
 

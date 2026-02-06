@@ -33,6 +33,11 @@ class FunctionAnalysisAgent(BaseAgent):
     # Lower temperature for focused analysis
     default_temperature: float = 0.5
 
+    @property
+    def agent_type(self) -> str:
+        """SPG type for function analysis (SP Find v2)."""
+        return "spg"
+
     def __init__(
         self,
         # Target function info
