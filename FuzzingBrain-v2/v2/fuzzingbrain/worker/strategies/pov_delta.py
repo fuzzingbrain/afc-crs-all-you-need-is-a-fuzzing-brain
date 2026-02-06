@@ -23,7 +23,7 @@ from ...analysis.diff_parser import (
     FunctionChange,
 )
 from ...core.models import SuspiciousPoint
-from ...agents import SuspiciousPointAgent
+from ...agents import DeltaSPGenerator
 from ...llms import CLAUDE_SONNET_4_5
 
 
@@ -54,14 +54,13 @@ class POVDeltaStrategy(POVBaseStrategy):
         # All changes (including static-unreachable) for new delta scan logic
         self._all_changes: List[FunctionChange] = []
 
-        # Create the suspicious point agent for delta analysis
+        # Create Delta SP Generator for finding SPs in code changes
         # Note: Use higher max_iterations for finding SPs (not just verifying)
         agent_log_dir = self.agent_log_dir
-        self._agent = SuspiciousPointAgent(
+        self._sp_generator = DeltaSPGenerator(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
-            scan_mode="delta",  # Delta mode: skip reachability analysis in verify
-            model=CLAUDE_SONNET_4_5,  # Force Sonnet for SP analysis
+            model=CLAUDE_SONNET_4_5,
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,
@@ -190,12 +189,12 @@ class POVDeltaStrategy(POVBaseStrategy):
             f"Passing {len(all_changes)} functions to agent ({reachable_count} reachable, {len(all_changes) - reachable_count} static-unreachable)"
         )
 
-        # Run the agent to find suspicious points
+        # Run the generator to find suspicious points
         try:
-            response = self._agent.find_suspicious_points_sync(all_changes)
+            response = self._sp_generator.find_suspicious_points_sync(all_changes)
             self.log_debug(f"Agent response: {response[:500]}...")
         except Exception as e:
-            self.log_error(f"Agent failed to find suspicious points: {e}")
+            self.log_error(f"SP Generator failed to find suspicious points: {e}")
             return []
 
         # Query database for suspicious points created by agent
@@ -400,7 +399,7 @@ class POVDeltaStrategy(POVBaseStrategy):
         agent_log_dir = self.agent_log_dir
         seed_agent = SeedAgent(
             task_id=self.task_id,
-            worker_id=f"{self.worker_id}_delta_seed",  # Unique for delta seed agent
+            worker_id=self.worker_id,  # ObjectId for MongoDB linking
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             fuzzer_manager=fuzzer_manager,

@@ -257,10 +257,6 @@ class SeedAgent(BaseAgent):
         self.delta_id: Optional[str] = None
         self.seed_type: str = "direction"  # "direction", "fp", or "delta"
 
-        # Unique context ID for parallel execution
-        # Prevents context collision when multiple SeedAgents run concurrently
-        self._context_id: str = f"{worker_id}_{id(self)}"
-
         # Stats
         self.seeds_generated = 0
 
@@ -274,14 +270,8 @@ class SeedAgent(BaseAgent):
         """Include seed tools in MCP server."""
         return True
 
-    @property
-    def mcp_context_id(self) -> str:
-        """Unique context ID for MCP tool lookup.
-
-        SeedAgents may run in parallel, so each needs a unique context_id
-        to prevent collision in _seed_contexts dict.
-        """
-        return self._context_id
+    # Note: mcp_context_id now uses AgentContext.agent_id from BaseAgent
+    # This provides unique ObjectId for each instance, preventing collision
 
     def _get_agent_metadata(self) -> dict:
         """Get metadata for agent banner."""
@@ -444,10 +434,10 @@ Generate seeds NOW or this run will produce nothing useful."""
     def _setup_context(self) -> None:
         """Set up seed tool context before running."""
         # Set seed context for create_seed tool
-        # Use _context_id (unique per instance) to prevent collision in parallel execution
+        # Use mcp_context_id (AgentContext.agent_id) for unique isolation
         set_seed_context(
             task_id=self.task_id,
-            worker_id=self._context_id,  # Unique context ID, not shared worker_id
+            worker_id=self.mcp_context_id,  # Unique ObjectId from AgentContext
             direction_id=self.direction_id,
             sp_id=self.sp_id,
             delta_id=self.delta_id,
@@ -470,7 +460,7 @@ Generate seeds NOW or this run will produce nothing useful."""
 
     def _cleanup_context(self) -> None:
         """Clean up seed tool context after running."""
-        clear_seed_context(self._context_id)
+        clear_seed_context(self.mcp_context_id)
 
     async def _execute_tool(
         self,

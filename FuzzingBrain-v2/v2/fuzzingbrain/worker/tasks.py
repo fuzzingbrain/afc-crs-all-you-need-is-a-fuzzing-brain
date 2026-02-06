@@ -107,26 +107,8 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     logger.info("Worker starting")
     start_time = datetime.now()
 
-    # Initialize evaluation reporter with eval_server from assignment
-    worker_ctx = None
-    try:
-        from ..eval import create_reporter, get_reporter
-
-        # Create reporter if eval_server is provided in assignment
-        if eval_server:
-            create_reporter(
-                server_url=eval_server,
-                level="normal",
-                budget_limit=budget_limit,
-                pov_count=pov_count,
-            )
-        reporter = get_reporter()
-        worker_ctx = reporter.worker_context(
-            worker_id, fuzzer=fuzzer, sanitizer=sanitizer, task_id=task_id
-        )
-        worker_ctx.__enter__()
-    except Exception as e:
-        logger.debug(f"Failed to initialize reporter: {e}")
+    # Worker context is now handled by WorkerExecutor using WorkerContext
+    # which persists to MongoDB directly - no reporter needed
 
     # Initialize database connection for this worker process
     try:
@@ -137,11 +119,6 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         repos = init_repos(db)
     except Exception as e:
         logger.exception(f"Failed to initialize worker: {e}")
-        if worker_ctx:
-            try:
-                worker_ctx.__exit__(None, None, None)
-            except Exception:
-                pass
         return {
             "worker_id": worker_id,
             "status": "failed",
@@ -259,13 +236,6 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
         cleanup_worker_workspace(workspace_path)
 
-        # Cleanup reporter context
-        if worker_ctx:
-            try:
-                worker_ctx.__exit__(None, None, None)
-            except Exception:
-                pass
-
         return {
             "worker_id": worker_id,
             "status": "completed",
@@ -306,13 +276,6 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         for line in summary.split("\n"):
             logger.info(line)
 
-        # Cleanup reporter context
-        if worker_ctx:
-            try:
-                worker_ctx.__exit__(None, None, None)
-            except Exception:
-                pass
-
         return {
             "worker_id": worker_id,
             "status": "budget_exceeded",
@@ -350,13 +313,6 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         )
         for line in summary.split("\n"):
             logger.info(line)
-
-        # Cleanup reporter context
-        if worker_ctx:
-            try:
-                worker_ctx.__exit__(None, None, None)
-            except Exception:
-                pass
 
         return {
             "worker_id": worker_id,

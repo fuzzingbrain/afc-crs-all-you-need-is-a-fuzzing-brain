@@ -32,25 +32,6 @@ from .models import (
     get_model_by_id,
 )
 
-# Import reporter (lazy to avoid circular imports)
-_reporter = None
-
-
-def _get_reporter():
-    """Lazy import and get reporter."""
-    global _reporter
-    if _reporter is None:
-        try:
-            from ..eval import get_reporter
-
-            _reporter = get_reporter
-        except ImportError:
-
-            def _null_reporter():
-                return None
-
-            _reporter = _null_reporter
-    return _reporter()
 
 
 def _calculate_cost(model_id: str, input_tokens: int, output_tokens: int) -> tuple:
@@ -490,23 +471,8 @@ class LLMClient:
             original_model=original_model,
         )
 
-        # Report to evaluation system
-        reporter = _get_reporter()
-        if reporter:
-            cost_input, cost_output, _ = _calculate_cost(
-                model_id, input_tokens, output_tokens
-            )
-            reporter.llm_called(
-                model=model_id,
-                provider=provider,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cost_input=cost_input,
-                cost_output=cost_output,
-                latency_ms=int(latency_ms),
-                fallback_used=original_model is not None,
-                original_model=original_model,
-            )
+        # LLM usage is now tracked via AgentContext and MongoDB
+        # Cost tracking handled at Task level via database queries
 
         return result
 
@@ -536,11 +502,7 @@ class LLMClient:
             LLMError: For non-recoverable errors
             BudgetExceededError: If budget limit is exceeded
         """
-        # Check budget before calling
-        reporter = _get_reporter()
-        if reporter and hasattr(reporter, "check_budget"):
-            reporter.check_budget()
-
+        # Budget checking now handled at Task level via database
         result = self._call_with_fallback(
             messages=messages,
             model=model,
@@ -548,10 +510,6 @@ class LLMClient:
             max_tokens=max_tokens,
             **kwargs,
         )
-
-        # Check budget after calling (cost was just recorded)
-        if reporter and hasattr(reporter, "check_budget"):
-            reporter.check_budget()
 
         return result
 
@@ -758,11 +716,7 @@ class LLMClient:
         Raises:
             BudgetExceededError: If budget limit is exceeded
         """
-        # Check budget before calling
-        reporter = _get_reporter()
-        if reporter and hasattr(reporter, "check_budget"):
-            reporter.check_budget()
-
+        # Budget checking now handled at Task level via database
         result = await self._acall_with_fallback(
             messages=messages,
             model=model,
@@ -770,10 +724,6 @@ class LLMClient:
             max_tokens=max_tokens,
             **kwargs,
         )
-
-        # Check budget after calling (cost was just recorded)
-        if reporter and hasattr(reporter, "check_budget"):
-            reporter.check_budget()
 
         return result
 

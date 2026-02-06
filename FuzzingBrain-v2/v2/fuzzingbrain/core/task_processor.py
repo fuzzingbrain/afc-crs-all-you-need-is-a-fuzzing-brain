@@ -696,17 +696,8 @@ class TaskProcessor:
         """
         logger.info(f"Processing task: {task.task_id}")
 
-        # Initialize evaluation reporter context
-        try:
-            from ..eval import get_reporter
-
-            reporter = get_reporter()
-            project_name = task.project_name or self.config.ossfuzz_project_name or ""
-            task_ctx = reporter.task_context(task.task_id, project_name=project_name)
-            task_ctx.__enter__()
-        except Exception:
-            reporter = None
-            task_ctx = None
+        # Task/Worker/Agent context is now handled via WorkerContext/AgentContext
+        # which persist to MongoDB directly - no reporter needed
 
         # Save task to database
         task.mark_running()
@@ -1065,34 +1056,9 @@ class TaskProcessor:
                     except Exception as e:
                         logger.warning(f"Failed to count merged duplicates: {e}")
 
-                    # Get cost info - try eval_server API first, then reporter
+                    # Cost tracking now handled via database
+                    # TODO: Implement cost aggregation from agents collection
                     total_cost = 0.0
-                    try:
-                        # Try to get from eval_server API if configured
-                        eval_server = self.config.eval_server
-                        if eval_server:
-                            import requests
-
-                            resp = requests.get(
-                                f"{eval_server}/api/v1/costs/task/{task.task_id}",
-                                timeout=5,
-                            )
-                            if resp.status_code == 200:
-                                data = resp.json()
-                                total_cost = data.get("total_cost", 0.0)
-                    except Exception as e:
-                        logger.debug(f"Failed to get cost from eval_server: {e}")
-
-                    # Fallback to reporter if eval_server didn't work
-                    if total_cost == 0.0:
-                        try:
-                            from ..eval import get_reporter
-
-                            reporter = get_reporter()
-                            if reporter and hasattr(reporter, "get_current_cost"):
-                                total_cost = reporter.get_current_cost()
-                        except Exception:
-                            pass
 
                     # Create and output final summary with worker colors via loguru
                     summary = create_final_summary(
@@ -1156,13 +1122,6 @@ class TaskProcessor:
                 # Stop infrastructure (CLI mode only)
                 if infra:
                     infra.stop()
-
-                # Cleanup reporter context
-                if task_ctx:
-                    try:
-                        task_ctx.__exit__(None, None, None)
-                    except Exception:
-                        pass
 
         except Exception as e:
             logger.exception(f"Task processing failed: {e}")

@@ -19,8 +19,8 @@ from typing import Dict, Any, List
 from .pov_base import POVBaseStrategy
 from ...agents import (
     DirectionPlanningAgent,
-    FunctionAnalysisAgent,
-    LargeFunctionAnalysisAgent,
+    FullSPGenerator,
+    LargeFullSPGenerator,
 )
 from ...llms.models import CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5
 from ...tools.directions import set_direction_context
@@ -504,9 +504,9 @@ class POVFullscanStrategy(POVBaseStrategy):
         Phase 3: Free Exploration.
 
         Previously used legacy FullscanSPAgent for exploration.
-        Now skipped since Phase 1 and 2 cover all functions with FunctionAnalysisAgent.
+        Now skipped since Phase 1 and 2 cover all functions with FullSPGenerator.
         """
-        # Phase 1 and 2 already analyze all functions with FunctionAnalysisAgent
+        # Phase 1 and 2 already analyze all functions with FullSPGenerator
         # No need for additional exploration
         sp_count = self.repos.suspicious_points.count({"task_id": self.task_id})
         self.log_info(f"Phase 3: Skipping (Phase 1+2 found {sp_count} SPs)")
@@ -520,7 +520,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         direction_id: str,
     ) -> dict:
         """
-        Analyze a single function using FunctionAnalysisAgent (v2 small agent).
+        Analyze a single function using FullSPGenerator (v2 small agent).
         """
         func_start = time.time()
 
@@ -561,11 +561,11 @@ class POVFullscanStrategy(POVBaseStrategy):
 
         # Determine function size based on actual source
         func_lines = func_source.count("\n") + 1 if func_source else 0
-        is_large = func_lines > LargeFunctionAnalysisAgent.LARGE_FUNCTION_THRESHOLD
+        is_large = func_lines > LargeFullSPGenerator.LARGE_FUNCTION_THRESHOLD
 
-        # Create appropriate agent
+        # Create appropriate generator
         if is_large:
-            agent = LargeFunctionAnalysisAgent(
+            agent = LargeFullSPGenerator(
                 function_name=func.name,
                 function_source=func_source,  # Use fetched source
                 function_file=func.file_path or "",
@@ -582,7 +582,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                 index=index,  # For log file naming: SPG_{index}_{function_name}.log
             )
         else:
-            agent = FunctionAnalysisAgent(
+            agent = FullSPGenerator(
                 function_name=func.name,
                 function_source=func_source,  # Use fetched source
                 function_file=func.file_path or "",
@@ -695,7 +695,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             try:
                 seed_agent = SeedAgent(
                     task_id=self.task_id,
-                    worker_id=f"{self.worker_id}_seed_{seed_index}",  # Unique per agent
+                    worker_id=self.worker_id,  # ObjectId for MongoDB linking
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
                     model=CLAUDE_OPUS_4_5,  # Force Opus for seed generation

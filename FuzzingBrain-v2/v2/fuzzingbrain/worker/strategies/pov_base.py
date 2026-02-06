@@ -103,14 +103,13 @@ class POVBaseStrategy(BaseStrategy):
         pass
 
     def _set_operation(self, operation: str) -> None:
-        """Set current operation for evaluation tracking."""
-        try:
-            from ...eval import get_reporter
+        """Set current operation for evaluation tracking.
 
-            reporter = get_reporter()
-            reporter.set_operation(operation)
-        except Exception:
-            pass
+        Note: Previously used reporter, now operation tracking is handled
+        by AgentContext which persists agent_type to MongoDB.
+        """
+        # Operation tracking now handled by AgentContext.agent_type
+        pass
 
     def execute(self) -> Dict[str, Any]:
         """
@@ -302,15 +301,15 @@ class POVBaseStrategy(BaseStrategy):
         import time
 
         # Lazy import to avoid circular dependency
-        from ...agents import SuspiciousPointAgent
+        from ...agents import SPVerifier
 
-        # Create verification agent (reused for all points sequentially)
+        # Create SP verifier (reused for all points sequentially)
         agent_log_dir = self.agent_log_dir
-        agent = SuspiciousPointAgent(
+        verifier = SPVerifier(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             scan_mode=self.scan_mode,  # Use strategy's scan_mode for verify prompt
-            model=CLAUDE_SONNET_4_5,  # Force Sonnet for SP analysis
+            model=CLAUDE_SONNET_4_5,
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,
@@ -332,8 +331,8 @@ class POVBaseStrategy(BaseStrategy):
             point_dict = point.to_dict()
 
             try:
-                # Run agent to verify this point
-                response = agent.verify_suspicious_point_sync(point_dict)
+                # Run verifier to verify this point
+                response = verifier.verify_sync(point_dict)
 
                 # Re-fetch the point from database (agent may have updated it)
                 updated_point = self._get_suspicious_point_by_id(
@@ -411,7 +410,7 @@ class POVBaseStrategy(BaseStrategy):
                 # Create SeedAgent for this FP
                 seed_agent = SeedAgent(
                     task_id=self.task_id,
-                    worker_id=f"{self.worker_id}_fp_seed_{seed_index}",  # Unique per agent
+                    worker_id=self.worker_id,  # ObjectId for MongoDB linking
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
                     fuzzer_manager=fuzzer_manager,

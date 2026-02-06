@@ -206,20 +206,10 @@ def signal_handler(signum, frame):
                             }
                         )
 
-                    # Get cost info
+                    # Cost tracking now handled via database
+                    # TODO: Implement cost aggregation from agents collection
                     total_cost = 0.0
                     budget_limit = 0.0
-                    try:
-                        from .eval import get_reporter
-
-                        reporter = get_reporter()
-                        if reporter:
-                            if hasattr(reporter, "get_current_cost"):
-                                total_cost = reporter.get_current_cost()
-                            if hasattr(reporter, "budget_limit"):
-                                budget_limit = reporter.budget_limit
-                    except Exception:
-                        pass
 
                     # Calculate elapsed time
                     created_at = recent_task.get("created_at", datetime.now())
@@ -1115,23 +1105,13 @@ def main():
     config = create_config_from_args(args)
 
     # =========================================================================
-    # Initialize Evaluation Reporter (from config or environment variable)
+    # Evaluation Reporter removed - using MongoDB persistence instead
+    # Worker/Agent context is now handled via WorkerContext/AgentContext
     # =========================================================================
-    eval_server = config.eval_server or os.environ.get("FUZZINGBRAIN_EVAL_SERVER")
-    if eval_server:
-        from .eval import create_reporter
-
-        create_reporter(
-            server_url=eval_server,
-            level="normal",
-            budget_limit=config.budget_limit,
-            pov_count=config.pov_count,
-        )
-        print(f"\033[0;36m[EVAL]\033[0m Reporting to: {eval_server}")
-        if config.budget_limit > 0:
-            print(f"\033[0;36m[EVAL]\033[0m Budget limit: ${config.budget_limit:.2f}")
-        if config.pov_count > 0:
-            print(f"\033[0;36m[EVAL]\033[0m POV count limit: {config.pov_count}")
+    if config.budget_limit > 0:
+        print(f"\033[0;36m[CONFIG]\033[0m Budget limit: ${config.budget_limit:.2f}")
+    if config.pov_count > 0:
+        print(f"\033[0;36m[CONFIG]\033[0m POV count limit: {config.pov_count}")
 
     # Show fuzzer filter if specified
     if config.fuzzer_filter:

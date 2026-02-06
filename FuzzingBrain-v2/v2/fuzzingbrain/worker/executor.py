@@ -15,6 +15,7 @@ from ..fuzzer import (
     FuzzerManager,
     register_fuzzer_manager,
 )
+from .context import WorkerContext
 
 
 class WorkerExecutor:
@@ -88,6 +89,9 @@ class WorkerExecutor:
         # FuzzerManager for Global Fuzzer + SP Fuzzer Pool
         self._fuzzer_manager: Optional[FuzzerManager] = None
 
+        # WorkerContext for isolation (set during run())
+        self._worker_context: Optional[WorkerContext] = None
+
         # Diff file path (for delta mode)
         # Handle both file path and directory path
         if diff_path:
@@ -114,7 +118,19 @@ class WorkerExecutor:
 
     @property
     def worker_id(self) -> str:
-        """Get worker identifier for logging."""
+        """
+        Get worker identifier.
+
+        Returns ObjectId from WorkerContext if available (for isolation and MongoDB linking),
+        otherwise returns descriptive string for logging during initialization.
+        """
+        if self._worker_context:
+            return self._worker_context.worker_id
+        return f"worker_{self.task_id}_{self.fuzzer}_{self.sanitizer}"
+
+    @property
+    def worker_display_name(self) -> str:
+        """Get human-readable worker name for logging."""
         return f"worker_{self.task_id}_{self.fuzzer}_{self.sanitizer}"
 
     @property
@@ -137,17 +153,17 @@ class WorkerExecutor:
                         sanitizer=self.sanitizer,
                         # Note: crash_monitor is Task-level (in Dispatcher), not Worker-level
                     )
-                    # Register for cross-module access
+                    # Register for cross-module access using ObjectId
                     register_fuzzer_manager(self.worker_id, self._fuzzer_manager)
-                    logger.info(f"[{self.worker_id}] FuzzerManager initialized")
+                    logger.info(f"[{self.worker_display_name}] FuzzerManager initialized")
                 except Exception as e:
                     logger.warning(
-                        f"[{self.worker_id}] Failed to initialize FuzzerManager: {e}"
+                        f"[{self.worker_display_name}] Failed to initialize FuzzerManager: {e}"
                     )
                     self._fuzzer_manager = None
             else:
                 logger.debug(
-                    f"[{self.worker_id}] FuzzerManager not initialized: no fuzzer binary"
+                    f"[{self.worker_display_name}] FuzzerManager not initialized: no fuzzer binary"
                 )
         return self._fuzzer_manager
 
@@ -170,24 +186,24 @@ class WorkerExecutor:
         from ..core.pov_packager import POVPackager
 
         logger.info(
-            f"[{self.worker_id}] ╔══════════════════════════════════════════════════════════════╗"
+            f"[{self.worker_display_name}] ╔══════════════════════════════════════════════════════════════╗"
         )
         logger.info(
-            f"[{self.worker_id}] ║  🎯 CRASH FOUND BY FUZZER!                                   ║"
+            f"[{self.worker_display_name}] ║  🎯 CRASH FOUND BY FUZZER!                                   ║"
         )
-        logger.info(f"[{self.worker_id}] ║  Hash: {crash_record.crash_hash[:16]:<44} ║")
+        logger.info(f"[{self.worker_display_name}] ║  Hash: {crash_record.crash_hash[:16]:<44} ║")
         logger.info(
-            f"[{self.worker_id}] ║  Type: {(crash_record.vuln_type or 'unknown'):<44} ║"
+            f"[{self.worker_display_name}] ║  Type: {(crash_record.vuln_type or 'unknown'):<44} ║"
         )
         logger.info(
-            f"[{self.worker_id}] ╚══════════════════════════════════════════════════════════════╝"
+            f"[{self.worker_display_name}] ╚══════════════════════════════════════════════════════════════╝"
         )
 
         try:
             # 1. Read crash file bytes
             crash_path = Path(crash_record.crash_path)
             if not crash_path.exists():
-                logger.error(f"[{self.worker_id}] Crash file not found: {crash_path}")
+                logger.error(f"[{self.worker_display_name}] Crash file not found: {crash_path}")
                 return
 
             crash_blob = crash_path.read_bytes()
@@ -244,7 +260,7 @@ def generate(variant: int = 1) -> bytes:
 
             # Save POV to database (inactive)
             self.repos.povs.save(pov)
-            logger.info(f"[{self.worker_id}] POV {pov_id[:8]} created (pending report)")
+            logger.info(f"[{self.worker_display_name}] POV {pov_id[:8]} created (pending report)")
 
             # 3. Package POV with report, then activate
             packager = POVPackager(
@@ -266,7 +282,7 @@ def generate(variant: int = 1) -> bytes:
                 self._package_and_activate_pov_sync(packager, pov, pov_id)
 
         except Exception as e:
-            logger.error(f"[{self.worker_id}] Error processing crash: {e}")
+            logger.error(f"[{self.worker_display_name}] Error processing crash: {e}")
             import traceback
 
             logger.debug(traceback.format_exc())
@@ -284,22 +300,22 @@ def generate(variant: int = 1) -> bytes:
         """
         try:
             # 1. Package POV with report
-            logger.info(f"[{self.worker_id}] Generating report for POV {pov_id[:8]}...")
+            logger.info(f"[{self.worker_display_name}] Generating report for POV {pov_id[:8]}...")
             zip_path = await packager.package_pov_async(pov.to_dict(), None)
 
             if zip_path:
                 logger.info(
-                    f"[{self.worker_id}] ✅ POV {pov_id[:8]} packaged: {zip_path}"
+                    f"[{self.worker_display_name}] ✅ POV {pov_id[:8]} packaged: {zip_path}"
                 )
 
                 # 2. Activate POV (now dispatcher will detect it)
                 self.repos.povs.update(pov_id, {"is_successful": True})
-                logger.info(f"[{self.worker_id}] ✅ POV {pov_id[:8]} activated!")
+                logger.info(f"[{self.worker_display_name}] ✅ POV {pov_id[:8]} activated!")
             else:
-                logger.warning(f"[{self.worker_id}] Failed to package POV {pov_id[:8]}")
+                logger.warning(f"[{self.worker_display_name}] Failed to package POV {pov_id[:8]}")
 
         except Exception as e:
-            logger.error(f"[{self.worker_id}] Error packaging POV {pov_id[:8]}: {e}")
+            logger.error(f"[{self.worker_display_name}] Error packaging POV {pov_id[:8]}: {e}")
             import traceback
 
             logger.debug(traceback.format_exc())
@@ -315,22 +331,22 @@ def generate(variant: int = 1) -> bytes:
         """
         try:
             # 1. Package POV with report
-            logger.info(f"[{self.worker_id}] Generating report for POV {pov_id[:8]}...")
+            logger.info(f"[{self.worker_display_name}] Generating report for POV {pov_id[:8]}...")
             zip_path = packager.package_pov(pov.to_dict(), None)
 
             if zip_path:
                 logger.info(
-                    f"[{self.worker_id}] ✅ POV {pov_id[:8]} packaged: {zip_path}"
+                    f"[{self.worker_display_name}] ✅ POV {pov_id[:8]} packaged: {zip_path}"
                 )
 
                 # 2. Activate POV (now dispatcher will detect it)
                 self.repos.povs.update(pov_id, {"is_successful": True})
-                logger.info(f"[{self.worker_id}] ✅ POV {pov_id[:8]} activated!")
+                logger.info(f"[{self.worker_display_name}] ✅ POV {pov_id[:8]} activated!")
             else:
-                logger.warning(f"[{self.worker_id}] Failed to package POV {pov_id[:8]}")
+                logger.warning(f"[{self.worker_display_name}] Failed to package POV {pov_id[:8]}")
 
         except Exception as e:
-            logger.error(f"[{self.worker_id}] Error packaging POV {pov_id[:8]}: {e}")
+            logger.error(f"[{self.worker_display_name}] Error packaging POV {pov_id[:8]}: {e}")
             import traceback
 
             logger.debug(traceback.format_exc())
@@ -424,7 +440,7 @@ def generate(variant: int = 1) -> bytes:
                     )
             except Exception as e:
                 logger.warning(
-                    f"[{self.worker_id}] Error shutting down SP fuzzers: {e}"
+                    f"[{self.worker_display_name}] Error shutting down SP fuzzers: {e}"
                 )
             # NOTE: Do NOT unregister or set to None!
             # FuzzerManager stays registered so Dispatcher can shut it down later
@@ -461,6 +477,12 @@ def generate(variant: int = 1) -> bytes:
         Run the worker execution pipeline.
 
         Selects and executes the appropriate strategy based on task_type.
+        Uses WorkerContext for proper isolation and MongoDB linking.
+
+        Hierarchy:
+            Task (ObjectId)
+            └── Worker (ObjectId) ← WorkerContext provides this
+                └── Agent (ObjectId) ← AgentContext provides this
 
         Returns:
             Result dictionary with findings
@@ -469,30 +491,53 @@ def generate(variant: int = 1) -> bytes:
             f"Starting executor: {self.fuzzer} with {self.sanitizer} (mode: {self.scan_mode}, job: {self.task_type})"
         )
 
-        try:
-            # Get strategy for this job type
-            strategy = self._get_strategy()
-            logger.info(f"Using strategy: {strategy.strategy_name}")
+        # Create WorkerContext for isolation
+        # This provides unique ObjectId for this worker instance
+        with WorkerContext(
+            task_id=self.task_id,
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+            scan_mode=self.scan_mode,
+            project_name=self.project_name,
+        ) as ctx:
+            self._worker_context = ctx
 
-            # Execute strategy
-            result = strategy.execute()
+            logger.info(
+                f"[{self.worker_display_name}] Worker context created: {ctx.worker_id}"
+            )
 
-            # Add common fields
-            result["fuzzer"] = self.fuzzer
-            result["sanitizer"] = self.sanitizer
-            result["task_type"] = self.task_type
+            try:
+                # Get strategy for this job type
+                strategy = self._get_strategy()
+                logger.info(f"Using strategy: {strategy.strategy_name}")
 
-            # Map strategy-specific fields to common result fields
-            # (for backward compatibility with tasks.py)
-            if "pov_generated" in result:
-                result["povs_found"] = result["pov_generated"]
-            elif "povs_generated" in result:
-                result["povs_found"] = result["povs_generated"]
-            if "patches_verified" in result:
-                result["patches_found"] = result["patches_verified"]
+                # Execute strategy
+                result = strategy.execute()
 
-            return result
+                # Add common fields
+                result["fuzzer"] = self.fuzzer
+                result["sanitizer"] = self.sanitizer
+                result["task_type"] = self.task_type
+                result["worker_id"] = ctx.worker_id  # Include ObjectId in result
 
-        except Exception as e:
-            logger.exception(f"Executor failed: {e}")
-            raise
+                # Map strategy-specific fields to common result fields
+                # (for backward compatibility with tasks.py)
+                if "pov_generated" in result:
+                    result["povs_found"] = result["pov_generated"]
+                    ctx.pov_generated = result["pov_generated"]
+                elif "povs_generated" in result:
+                    result["povs_found"] = result["povs_generated"]
+                    ctx.pov_generated = result["povs_generated"]
+                if "patches_verified" in result:
+                    result["patches_found"] = result["patches_verified"]
+
+                # Update context statistics
+                ctx.result_summary = result
+
+                return result
+
+            except Exception as e:
+                logger.exception(f"Executor failed: {e}")
+                raise
+
+        # Context exits here, automatically persisting to MongoDB

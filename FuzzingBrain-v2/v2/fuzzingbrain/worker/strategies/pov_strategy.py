@@ -24,10 +24,11 @@ from .base import BaseStrategy
 from ...analysis.diff_parser import get_reachable_changes, DiffReachabilityResult
 from ...core.models import SuspiciousPoint
 from ...agents import (
-    SuspiciousPointAgent,
     DirectionPlanningAgent,
-    FunctionAnalysisAgent,
-    LargeFunctionAnalysisAgent,
+    FullSPGenerator,
+    LargeFullSPGenerator,
+    DeltaSPGenerator,
+    SPVerifier,
 )
 from ...tools.code_viewer import set_code_viewer_context
 from ...tools.directions import set_direction_context
@@ -64,13 +65,27 @@ class POVStrategy(BaseStrategy):
         # Set up tool contexts for MCP
         self._setup_tool_contexts()
 
-        # Create the suspicious point agent with logging context
+        # Create SP agents with logging context
         # Agent logs go to main log directory under agent/ subdirectory
         agent_log_dir = self.agent_log_dir
-        self._agent = SuspiciousPointAgent(
+
+        # Delta SP Generator for finding suspicious points
+        self._sp_generator = DeltaSPGenerator(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
-            model=CLAUDE_SONNET_4_5,  # Force Sonnet for SP analysis
+            model=CLAUDE_SONNET_4_5,
+            verbose=True,
+            task_id=self.task_id,
+            worker_id=self.worker_id,
+            log_dir=agent_log_dir,
+        )
+
+        # SP Verifier for verifying suspicious points
+        self._sp_verifier = SPVerifier(
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+            scan_mode="delta",
+            model=CLAUDE_SONNET_4_5,
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,
@@ -353,14 +368,14 @@ class POVStrategy(BaseStrategy):
                 for c in self._reachability_result.reachable_changes
             ]
 
-            # Run the agent to find suspicious points
+            # Run the generator to find suspicious points
             try:
-                response = self._agent.find_suspicious_points_sync(reachable_changes)
+                response = self._sp_generator.find_suspicious_points_sync(reachable_changes)
                 self.log_debug(
                     f"Agent response: {response[:500]}..."
                 )  # Log first 500 chars
             except Exception as e:
-                self.log_error(f"Agent failed to find suspicious points: {e}")
+                self.log_error(f"SP Generator failed to find suspicious points: {e}")
                 return []
 
             # Query database for suspicious points created by agent
@@ -753,9 +768,9 @@ class POVStrategy(BaseStrategy):
         Phase 3: Free Exploration.
 
         Previously used legacy FullscanSPAgent for exploration.
-        Now skipped since Phase 1 and 2 cover all functions with FunctionAnalysisAgent.
+        Now skipped since Phase 1 and 2 cover all functions with FullSPGenerator.
         """
-        # Phase 1 and 2 already analyze all functions with FunctionAnalysisAgent
+        # Phase 1 and 2 already analyze all functions with FullSPGenerator
         # No need for additional exploration
         sp_count = self.repos.suspicious_points.count({"task_id": self.task_id})
         self.log_info(f"Phase 3: Skipping (Phase 1+2 found {sp_count} SPs)")
@@ -770,7 +785,7 @@ class POVStrategy(BaseStrategy):
         fuzzer_source: str = "",
     ) -> dict:
         """
-        Analyze a single function using FunctionAnalysisAgent.
+        Analyze a single function using FullSPGenerator.
 
         Args:
             func: Function object from database
@@ -820,11 +835,11 @@ class POVStrategy(BaseStrategy):
 
         # Determine if this is a large function based on actual source
         func_lines = func_source.count("\n") + 1 if func_source else 0
-        is_large = func_lines > LargeFunctionAnalysisAgent.LARGE_FUNCTION_THRESHOLD
+        is_large = func_lines > LargeFullSPGenerator.LARGE_FUNCTION_THRESHOLD
 
         # Create appropriate agent
         if is_large:
-            agent = LargeFunctionAnalysisAgent(
+            agent = LargeFullSPGenerator(
                 function_name=func.name,
                 function_source=func_source,  # Use fetched source
                 function_file=func.file_path,
@@ -837,13 +852,13 @@ class POVStrategy(BaseStrategy):
                 sanitizer=self.sanitizer,
                 direction_id=direction_id,
                 task_id=self.task_id,
-                worker_id=f"{self.worker_id}_func_{index}",
+                worker_id=self.worker_id,  # ObjectId for MongoDB linking
                 log_dir=agent_log_dir,
                 max_iterations=6,  # More iterations for large functions
                 index=index,  # For log file naming: SPG_{index}_{function_name}.log
             )
         else:
-            agent = FunctionAnalysisAgent(
+            agent = FullSPGenerator(
                 function_name=func.name,
                 function_source=func_source,  # Use fetched source
                 function_file=func.file_path,
@@ -856,7 +871,7 @@ class POVStrategy(BaseStrategy):
                 sanitizer=self.sanitizer,
                 direction_id=direction_id,
                 task_id=self.task_id,
-                worker_id=f"{self.worker_id}_func_{index}",
+                worker_id=self.worker_id,  # ObjectId for MongoDB linking
                 log_dir=agent_log_dir,
                 max_iterations=5,  # Enough iterations for thorough analysis
                 index=index,  # For log file naming: SPG_{index}_{function_name}.log
@@ -979,8 +994,8 @@ class POVStrategy(BaseStrategy):
             point_dict = point.to_dict()
 
             try:
-                # Run agent to verify this point
-                response = self._agent.verify_suspicious_point_sync(point_dict)
+                # Run verifier to verify this point
+                response = self._sp_verifier.verify_sync(point_dict)
 
                 # Re-fetch the point from database (agent may have updated it)
                 updated_point = self._get_suspicious_point_by_id(
