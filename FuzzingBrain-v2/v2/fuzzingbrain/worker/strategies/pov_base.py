@@ -55,7 +55,7 @@ class POVBaseStrategy(BaseStrategy):
         if self.executor.analysis_socket_path:
             set_analyzer_context(
                 socket_path=self.executor.analysis_socket_path,
-                client_id=f"agent_{self.fuzzer}_{self.sanitizer}",
+                client_id=f"{self.fuzzer}_{self.sanitizer}",
             )
 
         # Set SP context (harness_name, sanitizer) for SP isolation
@@ -80,6 +80,17 @@ class POVBaseStrategy(BaseStrategy):
             "full" for full-scan (full reachability analysis in verify)
         """
         return "full"  # Default to full-scan
+
+    @property
+    def agent_log_dir(self):
+        """Get correct agent log directory path.
+
+        Returns:
+            Path to worker/{fuzzer}_{sanitizer}/agent/ directory
+        """
+        if self.log_dir:
+            return self.log_dir / "worker" / f"{self.fuzzer}_{self.sanitizer}" / "agent"
+        return self.results_path
 
     @abstractmethod
     def _find_suspicious_points(self) -> List[SuspiciousPoint]:
@@ -294,7 +305,7 @@ class POVBaseStrategy(BaseStrategy):
         from ...agents import SuspiciousPointAgent
 
         # Create verification agent (reused for all points sequentially)
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
         agent = SuspiciousPointAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
@@ -393,7 +404,7 @@ class POVBaseStrategy(BaseStrategy):
             self.log_warning("SeedAgent not available, skipping FP seed generation")
             return
 
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
 
         for seed_index, point in enumerate(fp_points, start=1):
             try:
@@ -636,7 +647,7 @@ class POVBaseStrategy(BaseStrategy):
             scan_mode=self.scan_mode,  # Pass scan_mode to pipeline
             config=config,
             output_dir=self.povs_path,
-            log_dir=self.log_dir / "agent" if self.log_dir else None,
+            log_dir=self.agent_log_dir,
             workspace_path=self.workspace_path,
             worker_id=self.worker_id,  # For SP Fuzzer lifecycle
             fuzzer_code=fuzzer_code,

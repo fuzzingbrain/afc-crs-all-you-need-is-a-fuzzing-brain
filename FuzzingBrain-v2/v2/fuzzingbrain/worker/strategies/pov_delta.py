@@ -56,7 +56,7 @@ class POVDeltaStrategy(POVBaseStrategy):
 
         # Create the suspicious point agent for delta analysis
         # Note: Use higher max_iterations for finding SPs (not just verifying)
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
         self._agent = SuspiciousPointAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
@@ -397,9 +397,7 @@ class POVDeltaStrategy(POVBaseStrategy):
         # Create SeedAgent
         from ...fuzzer import SeedAgent
 
-        agent_log_dir = (
-            self.log_dir / "seed_agent" if self.log_dir else self.results_path
-        )
+        agent_log_dir = self.agent_log_dir
         seed_agent = SeedAgent(
             task_id=self.task_id,
             worker_id=self.worker_id,

@@ -70,7 +70,7 @@ class POVStrategy(BaseStrategy):
 
         # Create the suspicious point agent with logging context
         # Agent logs go to main log directory under agent/ subdirectory
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
         self._agent = SuspiciousPointAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
@@ -405,7 +405,7 @@ class POVStrategy(BaseStrategy):
         self.log_info(f"Fuzzer: {self.fuzzer}, Reachable functions: {reachable_count}")
 
         # Create and run Direction Planning Agent
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
         planning_agent = DirectionPlanningAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
@@ -1027,7 +1027,7 @@ class POVStrategy(BaseStrategy):
         claimed = self.repos.directions.claim(
             self.task_id,
             self.fuzzer,
-            f"{self.worker_id}_sp_agent_{index}",
+            f"SPG_{index}_{self.fuzzer}_{self.sanitizer}",
         )
         if not claimed:
             self.log_warning(f"[{index + 1}/{total}] Could not claim: {direction.name}")
@@ -1044,7 +1044,7 @@ class POVStrategy(BaseStrategy):
             code_summary=direction.code_summary,
             fuzzer_code=fuzzer_code,
             task_id=self.task_id,
-            worker_id=f"{self.worker_id}_agent_{index}",
+            worker_id=f"SPG_{index}_{self.fuzzer}_{self.sanitizer}",
             log_dir=agent_log_dir,
             max_iterations=100,
             index=index + 1,  # 1-based index for log files
@@ -1409,7 +1409,7 @@ class POVStrategy(BaseStrategy):
             sanitizer=self.sanitizer,
             config=config,
             output_dir=self.povs_path,
-            log_dir=self.log_dir / "agent" if self.log_dir else None,
+            log_dir=self.agent_log_dir,
             workspace_path=self.workspace_path,
             worker_id=self.worker_id,  # For SP Fuzzer lifecycle
             fuzzer_code=fuzzer_code,

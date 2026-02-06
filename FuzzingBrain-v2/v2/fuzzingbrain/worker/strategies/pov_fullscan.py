@@ -140,7 +140,7 @@ class POVFullscanStrategy(POVBaseStrategy):
 
         self.log_info(f"Fuzzer: {self.fuzzer}, Reachable functions: {reachable_count}")
 
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
         planning_agent = DirectionPlanningAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
@@ -178,7 +178,7 @@ class POVFullscanStrategy(POVBaseStrategy):
 
         self.log_info(f"Fuzzer: {self.fuzzer}, Reachable functions: {reachable_count}")
 
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
         planning_agent = DirectionPlanningAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
@@ -297,7 +297,7 @@ class POVFullscanStrategy(POVBaseStrategy):
 
         # Get fuzzer code for all agents (SP Find + Verify)
         fuzzer_code = self._get_fuzzer_source_code()
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
 
         # Configure pipeline
         config = PipelineConfig(
@@ -319,7 +319,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             scan_mode="full",  # Full-scan mode: use full reachability analysis
             config=config,
             output_dir=self.results_path / "povs",
-            log_dir=self.log_dir / "agent" if self.log_dir else self.results_path,
+            log_dir=self.agent_log_dir,
             workspace_path=self.workspace_path,
             fuzzer_code=fuzzer_code,
             mcp_socket_path=self.executor.analysis_socket_path,
@@ -405,7 +405,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         self.log_info(f"Fuzzer: {self.fuzzer}, Reachable functions: {reachable_count}")
 
         # Create and run Direction Planning Agent
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
         planning_agent = DirectionPlanningAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
@@ -525,7 +525,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         if self.executor.analysis_socket_path:
             set_analyzer_context(
                 self.executor.analysis_socket_path,
-                client_id=f"{self.worker_id}_sp_agent_{index}",
+                client_id=f"SPG_{index}_{self.fuzzer}_{self.sanitizer}",
             )
 
         direction_start = time.time()
@@ -538,7 +538,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         claimed = self.repos.directions.claim(
             self.task_id,
             self.fuzzer,
-            f"{self.worker_id}_sp_agent_{index}",
+            f"SPG_{index}_{self.fuzzer}_{self.sanitizer}",
         )
         if not claimed:
             self.log_warning(f"[{index + 1}/{total}] Could not claim: {direction.name}")
@@ -556,7 +556,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             code_summary=direction.code_summary,
             fuzzer_code=fuzzer_code,
             task_id=self.task_id,
-            worker_id=f"{self.worker_id}_agent_{index}",
+            worker_id=f"SPG_{index}_{self.fuzzer}_{self.sanitizer}",
             log_dir=agent_log_dir,
             max_iterations=100,
             index=index + 1,  # 1-based index for log files
@@ -668,7 +668,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             )
 
         fuzzer_code = self._get_fuzzer_source_code()
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
 
         # Configure pipeline for verification and POV
         config = PipelineConfig(
@@ -689,7 +689,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             scan_mode="full",  # Full-scan mode: use full reachability analysis
             config=config,
             output_dir=self.results_path / "povs",
-            log_dir=self.log_dir / "agent" if self.log_dir else self.results_path,
+            log_dir=self.agent_log_dir,
             workspace_path=self.workspace_path,
             fuzzer_code=fuzzer_code,
             mcp_socket_path=self.executor.analysis_socket_path,
@@ -955,7 +955,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                 model=CLAUDE_OPUS_4_5,  # Force Opus for large function analysis
                 direction_id=direction_id,
                 task_id=self.task_id,
-                worker_id=f"{self.worker_id}_func_{index}",
+                worker_id=f"Func_{index}_{self.fuzzer}_{self.sanitizer}",
                 log_dir=agent_log_dir,
             )
         else:
@@ -971,7 +971,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                 model=CLAUDE_SONNET_4_5,  # Force Sonnet for function analysis
                 direction_id=direction_id,
                 task_id=self.task_id,
-                worker_id=f"{self.worker_id}_func_{index}",
+                worker_id=f"Func_{index}_{self.fuzzer}_{self.sanitizer}",
                 log_dir=agent_log_dir,
             )
 
@@ -1087,7 +1087,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         self.log_info("=== Generating Direction Seeds ===")
 
         fuzzer_code = self._get_fuzzer_source_code()
-        agent_log_dir = self.log_dir / "agent" if self.log_dir else self.results_path
+        agent_log_dir = self.agent_log_dir
 
         seeds_generated = 0
 
