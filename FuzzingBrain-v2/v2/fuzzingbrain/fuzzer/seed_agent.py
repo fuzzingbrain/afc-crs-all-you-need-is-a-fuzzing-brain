@@ -8,9 +8,11 @@ Uses BaseAgent to generate targeted seeds based on:
 - FP (False Positive) analysis (generate seeds to find similar bugs)
 """
 
+import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
+from fastmcp import Client
 from loguru import logger
 
 from ..agents.base import BaseAgent
@@ -456,6 +458,35 @@ Generate seeds NOW or this run will produce nothing useful."""
         """Clean up seed tool context after running."""
         clear_seed_context(self.worker_id)
 
+    async def _execute_tool(
+        self,
+        client: Client,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+    ) -> str:
+        """
+        Execute tool and track seeds_generated from create_seed results.
+
+        The MCP server runs in an isolated context, so we need to parse
+        the tool result to get the actual seeds_generated count.
+        """
+        result = await super()._execute_tool(client, tool_name, tool_args)
+
+        # Track seeds from create_seed tool results
+        if tool_name == "create_seed":
+            try:
+                result_data = json.loads(result)
+                if result_data.get("success") and "seeds_generated" in result_data:
+                    self.seeds_generated += result_data["seeds_generated"]
+                    logger.debug(
+                        f"[SeedAgent] Tracked {result_data['seeds_generated']} seeds, "
+                        f"total: {self.seeds_generated}"
+                    )
+            except (json.JSONDecodeError, TypeError):
+                pass  # Non-JSON result, ignore
+
+        return result
+
     async def run_async(self, **kwargs) -> str:
         """Run the seed agent."""
         # Setup context before running
@@ -464,13 +495,8 @@ Generate seeds NOW or this run will produce nothing useful."""
         try:
             result = await super().run_async(**kwargs)
         finally:
-            # Read seeds_generated from context BEFORE cleanup
-            from .seed_tools import get_seed_context
-
-            ctx = get_seed_context(self.worker_id)
-            self.seeds_generated = ctx.get("seeds_generated", 0)
-
             # Always cleanup context
+            # Note: seeds_generated is tracked in _execute_tool via tool results
             self._cleanup_context()
 
         return result
