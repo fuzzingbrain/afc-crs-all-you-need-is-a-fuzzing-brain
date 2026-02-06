@@ -67,9 +67,9 @@ class SuspiciousPointAgent(BaseAgent):
     TABLE_WIDTH = 70
     SP_ID_TRUNCATE_LENGTH = 16
 
-    # Urgency thresholds for verify mode
-    URGENCY_REMINDER_THRESHOLD = 5  # Remind agent when this many iterations remain
-    URGENCY_FINAL_THRESHOLD = 2  # Final warning when this many iterations remain
+    # Urgency thresholds (dynamic, based on fraction of max_iterations)
+    URGENCY_REMINDER_FRACTION = 0.2  # Remind when 20% iterations remain
+    URGENCY_FINAL_FRACTION = 0.1  # Final warning when 10% iterations remain
 
     # Default values
     DEFAULT_FUNCTION_NAME = "unknown"
@@ -379,18 +379,38 @@ class SuspiciousPointAgent(BaseAgent):
 
     def _should_skip_urgency_message(self) -> bool:
         """Check if urgency message should be skipped."""
-        return self.mode != self.MODE_VERIFY or self.verify_result is not None
+        if self.mode == self.MODE_VERIFY:
+            # Skip if already have a verdict
+            return self.verify_result is not None
+        # Find mode: never skip
+        return False
 
-    def _build_reminder_message(self) -> str:
+    def _build_reminder_message(self, remaining: int) -> str:
         """Build gentle reminder message for urgency threshold."""
-        return f"""⏰ **REMINDER: {self.URGENCY_REMINDER_THRESHOLD} iterations remaining.**
+        if self.mode == self.MODE_FIND:
+            return f"""⏰ **REMINDER: {remaining} iterations remaining.**
+
+You're running low on iterations. Start wrapping up:
+- If you found suspicious patterns, call `{self.TOOL_CREATE_SUSPICIOUS_POINT}` NOW
+- Focus on the most critical vulnerabilities first
+- Don't spend more iterations gathering evidence - create SPs with what you have
+"""
+        else:
+            return f"""⏰ **REMINDER: {remaining} iterations remaining.**
 
 Start wrapping up your analysis. You should be ready to call `{self.TOOL_UPDATE_SUSPICIOUS_POINT}` soon.
 """
 
     def _build_final_warning_message(self, remaining: int) -> str:
         """Build final warning message when iterations are critical."""
-        return f"""⚠️ **FINAL: Only {remaining} iteration(s) left! You MUST decide NOW.**
+        if self.mode == self.MODE_FIND:
+            return f"""⚠️ **FINAL: Only {remaining} iteration(s) left!**
+
+Call `{self.TOOL_CREATE_SUSPICIOUS_POINT}` IMMEDIATELY for any findings you have.
+Do NOT let iterations run out without saving your discoveries!
+"""
+        else:
+            return f"""⚠️ **FINAL: Only {remaining} iteration(s) left! You MUST decide NOW.**
 
 Call `{self.TOOL_UPDATE_SUSPICIOUS_POINT}` immediately with your best judgment:
 - Set is_checked=True
@@ -405,16 +425,22 @@ Do NOT let iterations run out without a decision!
         """
         Get urgency message when iterations are running low.
 
-        For verify mode only:
-        - At URGENCY_REMINDER_THRESHOLD: gentle reminder to prepare decision
-        - At or below URGENCY_FINAL_THRESHOLD: final warning to decide now
+        Uses dynamic thresholds based on max_iterations:
+        - At 20% remaining: gentle reminder to wrap up
+        - At 10% or less remaining: final warning
         """
         if self._should_skip_urgency_message():
             return None
 
-        if remaining == self.URGENCY_REMINDER_THRESHOLD:
-            return self._build_reminder_message()
-        elif 0 < remaining <= self.URGENCY_FINAL_THRESHOLD:
+        # Calculate dynamic thresholds
+        reminder_threshold = max(
+            int(self.max_iterations * self.URGENCY_REMINDER_FRACTION), 3
+        )
+        final_threshold = max(int(self.max_iterations * self.URGENCY_FINAL_FRACTION), 2)
+
+        if remaining == reminder_threshold:
+            return self._build_reminder_message(remaining)
+        elif 0 < remaining <= final_threshold:
             return self._build_final_warning_message(remaining)
 
         return None
