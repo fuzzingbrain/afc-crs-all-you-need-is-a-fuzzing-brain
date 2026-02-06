@@ -192,6 +192,22 @@ def generate(variant: int = 1) -> bytes:
                 # Activate POV
                 self.repos.povs.update(pov_id, {"is_successful": True})
                 logger.info(f"[FuzzerMonitor] ✅ POV {pov_id[:8]} activated!")
+
+                # Update worker's povs_found count
+                try:
+                    worker = self.repos.workers.collection.find_one(
+                        {"worker_id": crash_record.worker_id}
+                    )
+                    if worker:
+                        current_count = worker.get("povs_found", 0)
+                        self.repos.workers.collection.update_one(
+                            {"worker_id": crash_record.worker_id},
+                            {"$set": {"povs_found": current_count + 1}},
+                        )
+                except Exception as e:
+                    logger.debug(
+                        f"[FuzzerMonitor] Failed to update worker POV count: {e}"
+                    )
             else:
                 logger.warning(f"[FuzzerMonitor] Failed to package POV {pov_id[:8]}")
 
