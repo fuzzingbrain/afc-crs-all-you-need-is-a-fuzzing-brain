@@ -633,10 +633,16 @@ def create_task_from_config(config: Config) -> Task:
         else None,
         repo_url=config.repo_url,
         project_name=config.project_name,
+        ossfuzz_project_name=config.ossfuzz_project_name,
         sanitizers=config.sanitizers,
         timeout_minutes=config.timeout_minutes,
+        pov_count=config.pov_count,
+        budget_limit=config.budget_limit,
+        target_commit=config.target_commit,
         base_commit=config.base_commit,
         delta_commit=config.delta_commit,
+        fuzz_tooling_url=config.fuzz_tooling_url,
+        fuzz_tooling_ref=config.fuzz_tooling_ref,
         is_fuzz_tooling_provided=config.fuzz_tooling_path is not None,
     )
 

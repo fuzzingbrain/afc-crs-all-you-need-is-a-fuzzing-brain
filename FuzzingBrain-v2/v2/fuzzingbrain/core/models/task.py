@@ -65,12 +65,20 @@ class Task:
     # Task configuration
     repo_url: Optional[str] = None
     project_name: Optional[str] = None
+    ossfuzz_project_name: Optional[str] = None
     sanitizers: List[str] = field(default_factory=lambda: ["address"])
     timeout_minutes: int = 60
+    pov_count: int = 1
+    budget_limit: float = 50.0
 
-    # Delta scan commits
+    # Commit configuration
+    target_commit: Optional[str] = None
     base_commit: Optional[str] = None
     delta_commit: Optional[str] = None
+
+    # Fuzz tooling source
+    fuzz_tooling_url: Optional[str] = None
+    fuzz_tooling_ref: Optional[str] = None
 
     # Flags
     is_sarif_check: bool = False
@@ -107,10 +115,16 @@ class Task:
             "diff_path": self.diff_path,
             "repo_url": self.repo_url,
             "project_name": self.project_name,
+            "ossfuzz_project_name": self.ossfuzz_project_name,
             "sanitizers": self.sanitizers,
             "timeout_minutes": self.timeout_minutes,
+            "pov_count": self.pov_count,
+            "budget_limit": self.budget_limit,
+            "target_commit": self.target_commit,
             "base_commit": self.base_commit,
             "delta_commit": self.delta_commit,
+            "fuzz_tooling_url": self.fuzz_tooling_url,
+            "fuzz_tooling_ref": self.fuzz_tooling_ref,
             "is_sarif_check": self.is_sarif_check,
             "is_fuzz_tooling_provided": self.is_fuzz_tooling_provided,
             "created_at": self.created_at,
@@ -143,10 +157,16 @@ class Task:
             diff_path=data.get("diff_path"),
             repo_url=data.get("repo_url"),
             project_name=data.get("project_name"),
+            ossfuzz_project_name=data.get("ossfuzz_project_name"),
             sanitizers=data.get("sanitizers", ["address"]),
             timeout_minutes=data.get("timeout_minutes", 60),
+            pov_count=data.get("pov_count", 1),
+            budget_limit=data.get("budget_limit", 50.0),
+            target_commit=data.get("target_commit"),
             base_commit=data.get("base_commit"),
             delta_commit=data.get("delta_commit"),
+            fuzz_tooling_url=data.get("fuzz_tooling_url"),
+            fuzz_tooling_ref=data.get("fuzz_tooling_ref"),
             is_sarif_check=data.get("is_sarif_check", False),
             is_fuzz_tooling_provided=data.get("is_fuzz_tooling_provided", False),
             created_at=data.get("created_at", datetime.now()),

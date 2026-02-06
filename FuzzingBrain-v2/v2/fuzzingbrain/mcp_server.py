@@ -88,10 +88,16 @@ async def fuzzingbrain_task(
         scan_mode=ScanMode(scan_mode),
         repo_url=repo_url,
         project_name=project_name,
+        ossfuzz_project_name=ossfuzz_project_name,
         sanitizers=sanitizers or ["address"],
         timeout_minutes=timeout_minutes,
+        pov_count=pov_count,
+        budget_limit=budget_limit,
+        target_commit=target_commit,
         base_commit=base_commit,
         delta_commit=delta_commit,
+        fuzz_tooling_url=fuzz_tooling_url,
+        fuzz_tooling_ref=fuzz_tooling_ref,
     )
 
     # TODO: Start actual task processing

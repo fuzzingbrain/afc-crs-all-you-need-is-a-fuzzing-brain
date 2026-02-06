@@ -215,10 +215,16 @@ def create_task_from_request(request: TaskRequest) -> Task:
         scan_mode=ScanMode(request.scan_mode),
         repo_url=request.repo_url,
         project_name=request.project_name,
+        ossfuzz_project_name=request.ossfuzz_project_name,
         sanitizers=request.sanitizers,
         timeout_minutes=request.timeout_minutes,
+        pov_count=request.pov_count,
+        budget_limit=request.budget_limit,
+        target_commit=request.target_commit,
         base_commit=request.base_commit,
         delta_commit=request.delta_commit,
+        fuzz_tooling_url=request.fuzz_tooling_url,
+        fuzz_tooling_ref=request.fuzz_tooling_ref,
     )
 
 
@@ -321,8 +327,16 @@ async def pov_patch(request: POVPatchRequest, background_tasks: BackgroundTasks)
         scan_mode=ScanMode.FULL,
         repo_url=request.repo_url,
         project_name=request.project_name,
+        ossfuzz_project_name=request.ossfuzz_project_name,
         sanitizers=request.sanitizers,
         timeout_minutes=request.timeout_minutes,
+        pov_count=request.pov_count,
+        budget_limit=request.budget_limit,
+        target_commit=request.target_commit,
+        base_commit=request.base_commit,
+        delta_commit=request.delta_commit,
+        fuzz_tooling_url=request.fuzz_tooling_url,
+        fuzz_tooling_ref=request.fuzz_tooling_ref,
     )
 
     # Start task in background
@@ -352,7 +366,12 @@ async def generate_harness(request: HarnessRequest, background_tasks: Background
         task_type=JobType.HARNESS,
         repo_url=request.repo_url,
         project_name=request.project_name,
+        ossfuzz_project_name=request.ossfuzz_project_name,
+        sanitizers=request.sanitizers,
         timeout_minutes=request.timeout_minutes,
+        budget_limit=request.budget_limit,
+        fuzz_tooling_url=request.fuzz_tooling_url,
+        fuzz_tooling_ref=request.fuzz_tooling_ref,
     )
 
     targets = [t.model_dump() for t in request.targets]
