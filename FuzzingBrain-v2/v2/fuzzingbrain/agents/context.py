@@ -344,8 +344,16 @@ class AgentContext:
             "error": self.error,
             "result_summary": self.result_summary,
             "log_path": self.log_path,
+            # Tool-specific state
             "sp_created": self.sp_created,
             "seeds_generated": self.seeds_generated,
+            "pov_iteration": self.pov_iteration,
+            "pov_attempt": self.pov_attempt,
+            # LLM usage
+            "llm_calls": self.llm_calls,
+            "llm_cost": self.llm_cost,
+            "llm_input_tokens": self.llm_input_tokens,
+            "llm_output_tokens": self.llm_output_tokens,
         }
 
     def __repr__(self) -> str:
