@@ -133,6 +133,24 @@ class WorkerContext:
         self.sp_verified: int = 0
         self.pov_generated: int = 0
 
+        # Strategy tracking
+        self.current_strategy: Optional[str] = None
+        self.strategy_history: list = []
+
+        # Phase timing (seconds) - for performance analysis
+        self.phase_build: float = 0.0
+        self.phase_reachability: float = 0.0
+        self.phase_find_sp: float = 0.0
+        self.phase_verify: float = 0.0
+        self.phase_pov: float = 0.0
+        self.phase_save: float = 0.0
+
+        # LLM usage aggregates (updated by buffer flush)
+        self.llm_calls: int = 0
+        self.llm_cost: float = 0.0
+        self.llm_input_tokens: int = 0
+        self.llm_output_tokens: int = 0
+
         # Result summary
         self.result_summary: Dict[str, Any] = {}
 
@@ -224,6 +242,9 @@ class WorkerContext:
                     "scan_mode": self.scan_mode,
                     "project_name": self.project_name,
                     "workspace_path": self.workspace_path,
+                    # Strategy
+                    "current_strategy": self.current_strategy,
+                    "strategy_history": self.strategy_history,
                     # Status
                     "status": self.status,
                     "error_msg": self.error,
@@ -242,6 +263,18 @@ class WorkerContext:
                     "updated_at": datetime.now(),
                     "started_at": self.started_at,
                     "finished_at": self.ended_at,
+                    # Phase timing
+                    "phase_build": self.phase_build,
+                    "phase_reachability": self.phase_reachability,
+                    "phase_find_sp": self.phase_find_sp,
+                    "phase_verify": self.phase_verify,
+                    "phase_pov": self.phase_pov,
+                    "phase_save": self.phase_save,
+                    # LLM usage
+                    "llm_calls": self.llm_calls,
+                    "llm_cost": self.llm_cost,
+                    "llm_input_tokens": self.llm_input_tokens,
+                    "llm_output_tokens": self.llm_output_tokens,
                     # Result
                     "result_summary": self.result_summary,
                 }
@@ -318,6 +351,37 @@ class WorkerContext:
         self.result_summary = summary
         self._mark_dirty_and_maybe_save()
 
+    def set_strategy(self, strategy: str) -> None:
+        """Set current strategy and add to history."""
+        self.current_strategy = strategy
+        if strategy not in self.strategy_history:
+            self.strategy_history.append(strategy)
+        self._mark_dirty_and_maybe_save()
+
+    def set_phase_timing(
+        self,
+        build: float = None,
+        reachability: float = None,
+        find_sp: float = None,
+        verify: float = None,
+        pov: float = None,
+        save: float = None,
+    ) -> None:
+        """Update phase timing values."""
+        if build is not None:
+            self.phase_build = build
+        if reachability is not None:
+            self.phase_reachability = reachability
+        if find_sp is not None:
+            self.phase_find_sp = find_sp
+        if verify is not None:
+            self.phase_verify = verify
+        if pov is not None:
+            self.phase_pov = pov
+        if save is not None:
+            self.phase_save = save
+        self._mark_dirty_and_maybe_save()
+
     # =========================================================================
     # Properties
     # =========================================================================
@@ -345,6 +409,8 @@ class WorkerContext:
             "sanitizer": self.sanitizer,
             "scan_mode": self.scan_mode,
             "project_name": self.project_name,
+            "current_strategy": self.current_strategy,
+            "strategy_history": self.strategy_history,
             "status": self.status,
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "ended_at": self.ended_at.isoformat() if self.ended_at else None,
@@ -356,6 +422,16 @@ class WorkerContext:
             "sp_found": self.sp_found,
             "sp_verified": self.sp_verified,
             "pov_generated": self.pov_generated,
+            "phase_build": self.phase_build,
+            "phase_reachability": self.phase_reachability,
+            "phase_find_sp": self.phase_find_sp,
+            "phase_verify": self.phase_verify,
+            "phase_pov": self.phase_pov,
+            "phase_save": self.phase_save,
+            "llm_calls": self.llm_calls,
+            "llm_cost": self.llm_cost,
+            "llm_input_tokens": self.llm_input_tokens,
+            "llm_output_tokens": self.llm_output_tokens,
             "result_summary": self.result_summary,
         }
 
