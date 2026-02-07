@@ -343,7 +343,9 @@ def generate(variant: int = 1) -> bytes:
             logger.info(f"Dispatcher Redis connected: {redis_url}")
             return client
         except Exception as e:
-            logger.warning(f"Dispatcher Redis connection failed: {e}, falling back to MongoDB for budget checks")
+            logger.warning(
+                f"Dispatcher Redis connection failed: {e}, falling back to MongoDB for budget checks"
+            )
             return None
 
     def _get_realtime_cost(self) -> float:
@@ -357,7 +359,9 @@ def generate(variant: int = 1) -> bytes:
         # Try Redis first (real-time, sub-millisecond)
         if self._redis:
             try:
-                cost_str = self._redis.get(f"{COUNTER_PREFIX}:task:{self.task.task_id}:cost")
+                cost_str = self._redis.get(
+                    f"{COUNTER_PREFIX}:task:{self.task.task_id}:cost"
+                )
                 if cost_str is not None:
                     return float(cost_str)
                 # Key doesn't exist yet (no LLM calls made) — cost is 0
@@ -630,7 +634,6 @@ def generate(variant: int = 1) -> bytes:
             Status summary dictionary
         """
         from celery.result import AsyncResult
-        from bson import ObjectId
         from ..celery_app import app
 
         # Query workers by task_id (ObjectId)
@@ -852,11 +855,18 @@ def generate(variant: int = 1) -> bytes:
                 if current_pov_count != last_pov_count:
                     logger.info(
                         f"Verified POVs: {current_pov_count}"
-                        + (f"/{self.pov_count_target}" if self.pov_count_target > 0 else "")
+                        + (
+                            f"/{self.pov_count_target}"
+                            if self.pov_count_target > 0
+                            else ""
+                        )
                     )
                     last_pov_count = current_pov_count
 
-                if self.pov_count_target > 0 and current_pov_count >= self.pov_count_target:
+                if (
+                    self.pov_count_target > 0
+                    and current_pov_count >= self.pov_count_target
+                ):
                     logger.info(
                         f"POV target reached! ({current_pov_count}/{self.pov_count_target})"
                     )
@@ -906,7 +916,9 @@ def generate(variant: int = 1) -> bytes:
                 time.sleep(poll_interval)
 
         except KeyboardInterrupt:
-            logger.warning("KeyboardInterrupt received — shutting down fuzzers and cleaning up")
+            logger.warning(
+                "KeyboardInterrupt received — shutting down fuzzers and cleaning up"
+            )
             self.shutdown_all_fuzzers()
             self._close_redis()
             raise

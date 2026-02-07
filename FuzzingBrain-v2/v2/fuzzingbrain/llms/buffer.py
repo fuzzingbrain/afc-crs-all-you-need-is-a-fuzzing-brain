@@ -16,11 +16,9 @@ Lifecycle:
     WorkerContext.__exit__   -> buffer.stop() (final flush)
 """
 
-import os
 import threading
-import time
 from collections import defaultdict
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 
 from bson import ObjectId
 from loguru import logger
@@ -219,14 +217,18 @@ class WorkerLLMBuffer:
 
         keys_to_delete = []
         if task_id:
-            keys_to_delete.extend([
-                f"{self.COUNTER_PREFIX}:task:{task_id}:cost",
-                f"{self.COUNTER_PREFIX}:task:{task_id}:calls",
-            ])
+            keys_to_delete.extend(
+                [
+                    f"{self.COUNTER_PREFIX}:task:{task_id}:cost",
+                    f"{self.COUNTER_PREFIX}:task:{task_id}:calls",
+                ]
+            )
         if worker_id:
-            keys_to_delete.extend([
-                f"{self.COUNTER_PREFIX}:worker:{worker_id}:cost",
-            ])
+            keys_to_delete.extend(
+                [
+                    f"{self.COUNTER_PREFIX}:worker:{worker_id}:cost",
+                ]
+            )
 
         if keys_to_delete:
             try:
@@ -246,8 +248,12 @@ def _update_aggregates(mongo_db, docs: list) -> None:
         docs: List of LLMCall dicts (from to_dict())
     """
     task_stats = defaultdict(lambda: {"calls": 0, "cost": 0.0, "input": 0, "output": 0})
-    worker_stats = defaultdict(lambda: {"calls": 0, "cost": 0.0, "input": 0, "output": 0})
-    agent_stats = defaultdict(lambda: {"calls": 0, "cost": 0.0, "input": 0, "output": 0})
+    worker_stats = defaultdict(
+        lambda: {"calls": 0, "cost": 0.0, "input": 0, "output": 0}
+    )
+    agent_stats = defaultdict(
+        lambda: {"calls": 0, "cost": 0.0, "input": 0, "output": 0}
+    )
 
     for doc in docs:
         task_id = doc.get("task_id")
@@ -279,13 +285,19 @@ def _update_aggregates(mongo_db, docs: list) -> None:
     for task_id, stats in task_stats.items():
         try:
             mongo_db.tasks.update_one(
-                {"_id": task_id if isinstance(task_id, ObjectId) else ObjectId(task_id)},
-                {"$inc": {
-                    "llm_calls": stats["calls"],
-                    "llm_cost": stats["cost"],
-                    "llm_input_tokens": stats["input"],
-                    "llm_output_tokens": stats["output"],
-                }},
+                {
+                    "_id": task_id
+                    if isinstance(task_id, ObjectId)
+                    else ObjectId(task_id)
+                },
+                {
+                    "$inc": {
+                        "llm_calls": stats["calls"],
+                        "llm_cost": stats["cost"],
+                        "llm_input_tokens": stats["input"],
+                        "llm_output_tokens": stats["output"],
+                    }
+                },
             )
         except Exception as e:
             logger.warning(f"Failed to update task aggregates: {e}")
@@ -294,13 +306,19 @@ def _update_aggregates(mongo_db, docs: list) -> None:
     for worker_id, stats in worker_stats.items():
         try:
             mongo_db.workers.update_one(
-                {"_id": worker_id if isinstance(worker_id, ObjectId) else ObjectId(worker_id)},
-                {"$inc": {
-                    "llm_calls": stats["calls"],
-                    "llm_cost": stats["cost"],
-                    "llm_input_tokens": stats["input"],
-                    "llm_output_tokens": stats["output"],
-                }},
+                {
+                    "_id": worker_id
+                    if isinstance(worker_id, ObjectId)
+                    else ObjectId(worker_id)
+                },
+                {
+                    "$inc": {
+                        "llm_calls": stats["calls"],
+                        "llm_cost": stats["cost"],
+                        "llm_input_tokens": stats["input"],
+                        "llm_output_tokens": stats["output"],
+                    }
+                },
             )
         except Exception as e:
             logger.warning(f"Failed to update worker aggregates: {e}")
@@ -309,13 +327,19 @@ def _update_aggregates(mongo_db, docs: list) -> None:
     for agent_id, stats in agent_stats.items():
         try:
             mongo_db.agents.update_one(
-                {"_id": agent_id if isinstance(agent_id, ObjectId) else ObjectId(agent_id)},
-                {"$inc": {
-                    "llm_calls": stats["calls"],
-                    "llm_cost": stats["cost"],
-                    "llm_input_tokens": stats["input"],
-                    "llm_output_tokens": stats["output"],
-                }},
+                {
+                    "_id": agent_id
+                    if isinstance(agent_id, ObjectId)
+                    else ObjectId(agent_id)
+                },
+                {
+                    "$inc": {
+                        "llm_calls": stats["calls"],
+                        "llm_cost": stats["cost"],
+                        "llm_input_tokens": stats["input"],
+                        "llm_output_tokens": stats["output"],
+                    }
+                },
             )
         except Exception as e:
             logger.warning(f"Failed to update agent aggregates: {e}")
@@ -342,6 +366,7 @@ def set_worker_buffer(buffer: Optional[WorkerLLMBuffer]) -> None:
 # =============================================================================
 # Backward compatibility aliases
 # =============================================================================
+
 
 def get_llm_call_buffer() -> Optional[WorkerLLMBuffer]:
     """Backward compatibility: returns the current worker buffer."""

@@ -129,7 +129,9 @@ class Task:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "pov_ids": [ObjectId(pid) for pid in self.pov_ids] if self.pov_ids else [],
-            "patch_ids": [ObjectId(pid) for pid in self.patch_ids] if self.patch_ids else [],
+            "patch_ids": [ObjectId(pid) for pid in self.patch_ids]
+            if self.patch_ids
+            else [],
             "error_msg": self.error_msg,
             "llm_calls": self.llm_calls,
             "llm_cost": self.llm_cost,
@@ -170,8 +172,14 @@ class Task:
             is_fuzz_tooling_provided=data.get("is_fuzz_tooling_provided", False),
             created_at=data.get("created_at", datetime.now()),
             updated_at=data.get("updated_at", datetime.now()),
-            pov_ids=[str(pid) if isinstance(pid, ObjectId) else pid for pid in data.get("pov_ids", [])],
-            patch_ids=[str(pid) if isinstance(pid, ObjectId) else pid for pid in data.get("patch_ids", [])],
+            pov_ids=[
+                str(pid) if isinstance(pid, ObjectId) else pid
+                for pid in data.get("pov_ids", [])
+            ],
+            patch_ids=[
+                str(pid) if isinstance(pid, ObjectId) else pid
+                for pid in data.get("patch_ids", [])
+            ],
             error_msg=data.get("error_msg"),
             llm_calls=data.get("llm_calls", 0),
             llm_cost=data.get("llm_cost", 0.0),

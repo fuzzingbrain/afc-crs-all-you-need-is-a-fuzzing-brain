@@ -591,7 +591,9 @@ class TaskProcessor:
                 if len(job["fuzzer"]) > col_fuzzer - 2
                 else job["fuzzer"]
             )
-            display_name = job.get("display_name", f"{job['fuzzer']}_{job['sanitizer']}")
+            display_name = job.get(
+                "display_name", f"{job['fuzzer']}_{job['sanitizer']}"
+            )
             worker_id = (
                 display_name[: col_worker_id - 2]
                 if len(display_name) > col_worker_id - 2
@@ -1044,7 +1046,10 @@ class TaskProcessor:
 
                     # Use update() instead of save() to avoid overwriting
                     # llm_cost/llm_calls fields that buffer.$inc has accumulated
-                    updates = {"status": task.status.value, "updated_at": task.updated_at}
+                    updates = {
+                        "status": task.status.value,
+                        "updated_at": task.updated_at,
+                    }
                     if task.error_msg:
                         updates["error_msg"] = task.error_msg
                     self.repos.tasks.update(task.task_id, updates)
@@ -1122,7 +1127,10 @@ class TaskProcessor:
                         "message": f"Dispatched {len(jobs)} workers.",
                         "workspace": task.task_path,
                         "fuzzers": [f.fuzzer_name for f in successful_fuzzers],
-                        "workers": [j.get("display_name", f"{j['fuzzer']}_{j['sanitizer']}") for j in jobs],
+                        "workers": [
+                            j.get("display_name", f"{j['fuzzer']}_{j['sanitizer']}")
+                            for j in jobs
+                        ],
                     }
 
             finally:
@@ -1140,11 +1148,14 @@ class TaskProcessor:
         except Exception as e:
             logger.exception(f"Task processing failed: {e}")
             task.mark_error(str(e))
-            self.repos.tasks.update(task.task_id, {
-                "status": task.status.value,
-                "error_msg": task.error_msg,
-                "updated_at": task.updated_at,
-            })
+            self.repos.tasks.update(
+                task.task_id,
+                {
+                    "status": task.status.value,
+                    "error_msg": task.error_msg,
+                    "updated_at": task.updated_at,
+                },
+            )
 
             return {
                 "task_id": task.task_id,

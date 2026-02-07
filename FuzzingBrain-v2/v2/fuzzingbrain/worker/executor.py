@@ -158,7 +158,9 @@ class WorkerExecutor:
                     )
                     # Register for cross-module access using ObjectId
                     register_fuzzer_manager(self.worker_id, self._fuzzer_manager)
-                    logger.info(f"[{self.worker_display_name}] FuzzerManager initialized")
+                    logger.info(
+                        f"[{self.worker_display_name}] FuzzerManager initialized"
+                    )
                 except Exception as e:
                     logger.warning(
                         f"[{self.worker_display_name}] Failed to initialize FuzzerManager: {e}"
@@ -182,7 +184,6 @@ class WorkerExecutor:
         """
         import asyncio
         import base64
-        import uuid
         from pathlib import Path
 
         from ..core.models import POV
@@ -194,7 +195,9 @@ class WorkerExecutor:
         logger.info(
             f"[{self.worker_display_name}] ║  🎯 CRASH FOUND BY FUZZER!                                   ║"
         )
-        logger.info(f"[{self.worker_display_name}] ║  Hash: {crash_record.crash_hash[:16]:<44} ║")
+        logger.info(
+            f"[{self.worker_display_name}] ║  Hash: {crash_record.crash_hash[:16]:<44} ║"
+        )
         logger.info(
             f"[{self.worker_display_name}] ║  Type: {(crash_record.vuln_type or 'unknown'):<44} ║"
         )
@@ -206,7 +209,9 @@ class WorkerExecutor:
             # 1. Read crash file bytes
             crash_path = Path(crash_record.crash_path)
             if not crash_path.exists():
-                logger.error(f"[{self.worker_display_name}] Crash file not found: {crash_path}")
+                logger.error(
+                    f"[{self.worker_display_name}] Crash file not found: {crash_path}"
+                )
                 return
 
             crash_blob = crash_path.read_bytes()
@@ -214,6 +219,7 @@ class WorkerExecutor:
 
             # 2. Create POV record (is_successful=False - don't trigger dispatcher yet!)
             from ..core.utils import generate_id
+
             pov_id = generate_id()
 
             # Get task workspace (not worker workspace) for results
@@ -264,7 +270,9 @@ def generate(variant: int = 1) -> bytes:
 
             # Save POV to database (inactive)
             self.repos.povs.save(pov)
-            logger.info(f"[{self.worker_display_name}] POV {pov_id[:8]} created (pending report)")
+            logger.info(
+                f"[{self.worker_display_name}] POV {pov_id[:8]} created (pending report)"
+            )
 
             # 3. Package POV with report, then activate
             packager = POVPackager(
@@ -304,7 +312,9 @@ def generate(variant: int = 1) -> bytes:
         """
         try:
             # 1. Package POV with report
-            logger.info(f"[{self.worker_display_name}] Generating report for POV {pov_id[:8]}...")
+            logger.info(
+                f"[{self.worker_display_name}] Generating report for POV {pov_id[:8]}..."
+            )
             zip_path = await packager.package_pov_async(pov.to_dict(), None)
 
             if zip_path:
@@ -314,12 +324,18 @@ def generate(variant: int = 1) -> bytes:
 
                 # 2. Activate POV (now dispatcher will detect it)
                 self.repos.povs.update(pov_id, {"is_successful": True})
-                logger.info(f"[{self.worker_display_name}] ✅ POV {pov_id[:8]} activated!")
+                logger.info(
+                    f"[{self.worker_display_name}] ✅ POV {pov_id[:8]} activated!"
+                )
             else:
-                logger.warning(f"[{self.worker_display_name}] Failed to package POV {pov_id[:8]}")
+                logger.warning(
+                    f"[{self.worker_display_name}] Failed to package POV {pov_id[:8]}"
+                )
 
         except Exception as e:
-            logger.error(f"[{self.worker_display_name}] Error packaging POV {pov_id[:8]}: {e}")
+            logger.error(
+                f"[{self.worker_display_name}] Error packaging POV {pov_id[:8]}: {e}"
+            )
             import traceback
 
             logger.debug(traceback.format_exc())
@@ -335,7 +351,9 @@ def generate(variant: int = 1) -> bytes:
         """
         try:
             # 1. Package POV with report
-            logger.info(f"[{self.worker_display_name}] Generating report for POV {pov_id[:8]}...")
+            logger.info(
+                f"[{self.worker_display_name}] Generating report for POV {pov_id[:8]}..."
+            )
             zip_path = packager.package_pov(pov.to_dict(), None)
 
             if zip_path:
@@ -345,12 +363,18 @@ def generate(variant: int = 1) -> bytes:
 
                 # 2. Activate POV (now dispatcher will detect it)
                 self.repos.povs.update(pov_id, {"is_successful": True})
-                logger.info(f"[{self.worker_display_name}] ✅ POV {pov_id[:8]} activated!")
+                logger.info(
+                    f"[{self.worker_display_name}] ✅ POV {pov_id[:8]} activated!"
+                )
             else:
-                logger.warning(f"[{self.worker_display_name}] Failed to package POV {pov_id[:8]}")
+                logger.warning(
+                    f"[{self.worker_display_name}] Failed to package POV {pov_id[:8]}"
+                )
 
         except Exception as e:
-            logger.error(f"[{self.worker_display_name}] Error packaging POV {pov_id[:8]}: {e}")
+            logger.error(
+                f"[{self.worker_display_name}] Error packaging POV {pov_id[:8]}: {e}"
+            )
             import traceback
 
             logger.debug(traceback.format_exc())

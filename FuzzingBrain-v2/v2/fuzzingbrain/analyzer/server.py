@@ -58,8 +58,10 @@ def _serialize_doc(doc: dict) -> dict:
             result[key] = _serialize_doc(value)
         elif isinstance(value, list):
             result[key] = [
-                _serialize_doc(v) if isinstance(v, dict)
-                else str(v) if isinstance(v, ObjectId)
+                _serialize_doc(v)
+                if isinstance(v, dict)
+                else str(v)
+                if isinstance(v, ObjectId)
                 else v
                 for v in value
             ]
@@ -1508,6 +1510,7 @@ class AnalysisServer:
         # Track which agent verified this SP
         if params.get("agent_id") and params.get("is_checked"):
             from bson import ObjectId
+
             updates["verified_by_agent_id"] = ObjectId(params["agent_id"])
 
         self._log(

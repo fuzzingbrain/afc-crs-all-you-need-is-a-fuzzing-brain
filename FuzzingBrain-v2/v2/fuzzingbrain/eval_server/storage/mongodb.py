@@ -209,7 +209,9 @@ class MongoStorage:
 
     async def get_workers_by_task(self, task_id: str) -> List[Dict[str, Any]]:
         """Get all workers for a task."""
-        cursor = self._db.workers.find({"task_id": ObjectId(task_id)}).sort("started_at", -1)
+        cursor = self._db.workers.find({"task_id": ObjectId(task_id)}).sort(
+            "started_at", -1
+        )
         return await cursor.to_list(length=1000)
 
     async def update_worker_status(
@@ -257,12 +259,16 @@ class MongoStorage:
 
     async def get_agents_by_task(self, task_id: str) -> List[Dict[str, Any]]:
         """Get all agents for a task."""
-        cursor = self._db.agents.find({"task_id": ObjectId(task_id)}).sort("started_at", -1)
+        cursor = self._db.agents.find({"task_id": ObjectId(task_id)}).sort(
+            "started_at", -1
+        )
         return await cursor.to_list(length=1000)
 
     async def get_agents_by_worker(self, worker_id: str) -> List[Dict[str, Any]]:
         """Get all agents for a worker."""
-        cursor = self._db.agents.find({"worker_id": ObjectId(worker_id)}).sort("started_at", -1)
+        cursor = self._db.agents.find({"worker_id": ObjectId(worker_id)}).sort(
+            "started_at", -1
+        )
         return await cursor.to_list(length=1000)
 
     async def get_agent_max_iterations(self, task_id: str) -> Dict[str, int]:

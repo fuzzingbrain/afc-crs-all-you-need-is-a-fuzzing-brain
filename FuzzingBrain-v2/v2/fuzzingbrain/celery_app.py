@@ -16,7 +16,12 @@ from loguru import logger
 load_dotenv()  # Load .env file for API keys
 
 from celery import Celery
-from celery.signals import task_failure, worker_process_init, worker_process_shutdown, setup_logging
+from celery.signals import (
+    task_failure,
+    worker_process_init,
+    worker_process_shutdown,
+    setup_logging,
+)
 
 # Redis configuration from environment
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")

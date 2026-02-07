@@ -216,7 +216,9 @@ class AgentContext:
                     return False
 
                 doc = {
-                    "_id": safe_object_id(self.agent_id),  # May be ObjectId or custom string
+                    "_id": safe_object_id(
+                        self.agent_id
+                    ),  # May be ObjectId or custom string
                     "task_id": safe_object_id(self.task_id),
                     # Store worker_id as ObjectId reference for proper foreign key linking
                     "worker_id": safe_object_id(self.worker_id),

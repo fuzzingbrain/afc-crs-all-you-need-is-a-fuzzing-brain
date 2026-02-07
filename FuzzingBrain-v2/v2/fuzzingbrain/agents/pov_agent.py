@@ -299,7 +299,9 @@ class POVAgent(BaseAgent):
     def _configure_context(self, ctx) -> None:
         """Configure agent context with SP ID."""
         if self.suspicious_point:
-            sp_id = self.suspicious_point.get("suspicious_point_id") or self.suspicious_point.get("_id")
+            sp_id = self.suspicious_point.get(
+                "suspicious_point_id"
+            ) or self.suspicious_point.get("_id")
             ctx.sp_id = str(sp_id) if sp_id else None
 
     @property

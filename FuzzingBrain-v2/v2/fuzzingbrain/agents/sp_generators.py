@@ -775,7 +775,9 @@ class DeltaSPGenerator(SPGeneratorBase):
             try:
                 data = json.loads(result)
                 if data.get("success"):
-                    func_name = tool_args.get("function_name", self.DEFAULT_FUNCTION_NAME)
+                    func_name = tool_args.get(
+                        "function_name", self.DEFAULT_FUNCTION_NAME
+                    )
                     vuln_type = tool_args.get("vuln_type", self.DEFAULT_VULN_TYPE)
                     score = tool_args.get("score", self.SCORE_DEFAULT)
                     self.sp_list.append((func_name, vuln_type, score))

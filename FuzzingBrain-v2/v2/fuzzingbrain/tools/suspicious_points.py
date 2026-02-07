@@ -27,9 +27,7 @@ _sp_sanitizer: ContextVar[Optional[str]] = ContextVar("sp_sanitizer", default=No
 _sp_direction_id: ContextVar[Optional[str]] = ContextVar(
     "sp_direction_id", default=None
 )
-_sp_agent_id: ContextVar[Optional[str]] = ContextVar(
-    "sp_agent_id", default=None
-)
+_sp_agent_id: ContextVar[Optional[str]] = ContextVar("sp_agent_id", default=None)
 
 
 def set_sp_context(
@@ -62,9 +60,16 @@ def set_sp_context(
     )
 
 
-def get_sp_context() -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
+def get_sp_context() -> Tuple[
+    Optional[str], Optional[str], Optional[str], Optional[str]
+]:
     """Get the current SP context (harness_name, sanitizer, direction_id, agent_id)."""
-    return _sp_harness_name.get(), _sp_sanitizer.get(), _sp_direction_id.get(), _sp_agent_id.get()
+    return (
+        _sp_harness_name.get(),
+        _sp_sanitizer.get(),
+        _sp_direction_id.get(),
+        _sp_agent_id.get(),
+    )
 
 
 def set_sp_agent_id(agent_id: str) -> None:

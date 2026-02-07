@@ -126,6 +126,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         # Setup coverage fuzzer path if provided
         if coverage_fuzzer_path:
             from ..tools.coverage import set_coverage_fuzzer_path
+
             set_coverage_fuzzer_path(coverage_fuzzer_path)
 
         # Run fuzzing strategies via WorkerExecutor
@@ -173,6 +174,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
         # Cleanup workspace (keep results)
         from .cleanup import cleanup_worker_workspace
+
         cleanup_worker_workspace(workspace_path)
 
         return {

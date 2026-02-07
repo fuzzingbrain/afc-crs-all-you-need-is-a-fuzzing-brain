@@ -406,9 +406,7 @@ Discard:
 - Boilerplate code without security implications
 - Duplicate analysis of the same code"""
 
-    def _extract_sp_info(
-        self, suspicious_point: Dict[str, Any]
-    ) -> tuple:
+    def _extract_sp_info(self, suspicious_point: Dict[str, Any]) -> tuple:
         """Extract basic information from suspicious point."""
         sp_id = suspicious_point.get(
             "suspicious_point_id",

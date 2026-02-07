@@ -126,13 +126,19 @@ def signal_handler(signum, frame):
                     {"status": "cancelled"}, sort=[("created_at", -1)]
                 )
                 if recent_task:
-                    raw_task_id = recent_task.get("task_id") or recent_task.get("_id") or "unknown"
+                    raw_task_id = (
+                        recent_task.get("task_id")
+                        or recent_task.get("_id")
+                        or "unknown"
+                    )
                     task_id = str(raw_task_id)
                     task_oid = _ObjectId(task_id) if len(task_id) == 24 else task_id
                     project_name = recent_task.get("project_name", "unknown")
 
                     # Get workers for this task
-                    workers = list(_repos.workers.collection.find({"task_id": task_oid}))
+                    workers = list(
+                        _repos.workers.collection.find({"task_id": task_oid})
+                    )
                     worker_results = []
                     for w in workers:
                         started = w.get("started_at")
@@ -184,9 +190,7 @@ def signal_handler(signum, frame):
                             pov_count = _repos.povs.count(
                                 {
                                     "task_id": task_oid,
-                                    "suspicious_point_id": {
-                                        "$in": sp_oids
-                                    },
+                                    "suspicious_point_id": {"$in": sp_oids},
                                     "is_successful": True,
                                 }
                             )

@@ -370,7 +370,9 @@ class POVStrategy(BaseStrategy):
 
             # Run the generator to find suspicious points
             try:
-                response = self._sp_generator.find_suspicious_points_sync(reachable_changes)
+                response = self._sp_generator.find_suspicious_points_sync(
+                    reachable_changes
+                )
                 self.log_debug(
                     f"Agent response: {response[:500]}..."
                 )  # Log first 500 chars

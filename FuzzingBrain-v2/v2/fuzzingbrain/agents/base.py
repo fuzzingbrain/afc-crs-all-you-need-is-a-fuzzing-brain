@@ -17,9 +17,7 @@ from loguru import logger
 from ..llms import LLMClient, ModelInfo
 from ..tools.mcp_factory import create_isolated_mcp_server
 from ..core.logging import get_agent_banner_and_header, get_agent_log_path
-from ..core.models.agent import AgentType
 from .context import AgentContext
-
 
 
 class BaseAgent(ABC):
@@ -1037,6 +1035,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
 
             # Update SP context with agent_id for tracking SP creator/verifier
             from ..tools.suspicious_points import set_sp_agent_id
+
             set_sp_agent_id(agent_id)
 
             self._log(f"Agent context created: {agent_id}", level="DEBUG")

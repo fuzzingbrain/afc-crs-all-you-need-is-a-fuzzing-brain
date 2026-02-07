@@ -23,7 +23,7 @@ import os
 import threading
 import time
 from datetime import datetime
-from typing import Any, Dict, Optional, Callable
+from typing import Any, Dict, Optional
 
 from bson import ObjectId
 from loguru import logger

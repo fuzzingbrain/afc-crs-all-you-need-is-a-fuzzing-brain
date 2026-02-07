@@ -78,7 +78,9 @@ class POV:
             "_id": ObjectId(self.pov_id) if self.pov_id else ObjectId(),
             # Note: pov_id removed - use _id only
             "task_id": ObjectId(self.task_id) if self.task_id else None,
-            "suspicious_point_id": ObjectId(self.suspicious_point_id) if self.suspicious_point_id else None,
+            "suspicious_point_id": ObjectId(self.suspicious_point_id)
+            if self.suspicious_point_id
+            else None,
             "generation_id": self.generation_id,
             "agent_id": ObjectId(self.agent_id) if self.agent_id else None,
             "source": self.source,

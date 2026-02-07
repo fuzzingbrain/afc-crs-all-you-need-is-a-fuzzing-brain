@@ -212,7 +212,9 @@ class POVRepository(BaseRepository[POV]):
 
     def find_by_harness(self, task_id: str, harness_name: str) -> List[POV]:
         """Find POVs for a specific harness"""
-        return self.find_all({"task_id": ObjectId(task_id), "harness_name": harness_name})
+        return self.find_all(
+            {"task_id": ObjectId(task_id), "harness_name": harness_name}
+        )
 
     def deactivate(self, pov_id: str) -> bool:
         """Mark POV as inactive"""
@@ -317,7 +319,9 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         self, task_id: str, function_name: str
     ) -> List[SuspiciousPoint]:
         """Find suspicious points for a specific function"""
-        return self.find_all({"task_id": ObjectId(task_id), "function_name": function_name})
+        return self.find_all(
+            {"task_id": ObjectId(task_id), "function_name": function_name}
+        )
 
     def find_unchecked(self, task_id: str) -> List[SuspiciousPoint]:
         """Find unchecked suspicious points for a task"""
@@ -325,7 +329,9 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
 
     def find_real(self, task_id: str) -> List[SuspiciousPoint]:
         """Find verified real vulnerabilities for a task"""
-        return self.find_all({"task_id": ObjectId(task_id), "is_checked": True, "is_real": True})
+        return self.find_all(
+            {"task_id": ObjectId(task_id), "is_checked": True, "is_real": True}
+        )
 
     def find_important(self, task_id: str) -> List[SuspiciousPoint]:
         """Find important (high priority) suspicious points"""
@@ -418,7 +424,8 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 "merged_at": datetime.now().isoformat(),
             }
             result = self.collection.update_one(
-                {"_id": ObjectId(sp_id)}, {"$push": {"merged_duplicates": merged_record}}
+                {"_id": ObjectId(sp_id)},
+                {"$push": {"merged_duplicates": merged_record}},
             )
             return result.modified_count > 0
         except Exception as e:
@@ -433,7 +440,10 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             List of SPs with at least one merged duplicate
         """
         return self.find_all(
-            {"task_id": ObjectId(task_id), "merged_duplicates": {"$exists": True, "$ne": []}}
+            {
+                "task_id": ObjectId(task_id),
+                "merged_duplicates": {"$exists": True, "$ne": []},
+            }
         )
 
     def count_by_status(
@@ -1225,10 +1235,9 @@ class WorkerRepository(BaseRepository[Worker]):
     def find_running_by_task(self, task_id: str) -> List[Worker]:
         """Find running workers for a task."""
         try:
-            cursor = self.collection.find({
-                "task_id": ObjectId(task_id),
-                "status": "running"
-            })
+            cursor = self.collection.find(
+                {"task_id": ObjectId(task_id), "status": "running"}
+            )
             return [Worker.from_dict(doc) for doc in cursor]
         except Exception as e:
             logger.error(f"Failed to find running workers: {e}")
@@ -1243,11 +1252,13 @@ class WorkerRepository(BaseRepository[Worker]):
     ) -> Optional[Worker]:
         """Find worker by task, fuzzer, and sanitizer."""
         try:
-            data = self.collection.find_one({
-                "task_id": ObjectId(task_id),
-                "fuzzer": fuzzer,
-                "sanitizer": sanitizer,
-            })
+            data = self.collection.find_one(
+                {
+                    "task_id": ObjectId(task_id),
+                    "fuzzer": fuzzer,
+                    "sanitizer": sanitizer,
+                }
+            )
             if data:
                 return Worker.from_dict(data)
             return None
@@ -1273,8 +1284,7 @@ class WorkerRepository(BaseRepository[Worker]):
         try:
             updates["updated_at"] = datetime.now()
             result = self.collection.update_one(
-                {"_id": ObjectId(worker_id)},
-                {"$set": updates}
+                {"_id": ObjectId(worker_id)}, {"$set": updates}
             )
             return result.modified_count > 0
         except Exception as e:
@@ -1290,7 +1300,9 @@ class WorkerRepository(BaseRepository[Worker]):
 
     def update_results(self, worker_id: str, povs: int = 0, patches: int = 0) -> bool:
         """Update worker results"""
-        return self.update(worker_id, {"pov_generated": povs, "patch_generated": patches})
+        return self.update(
+            worker_id, {"pov_generated": povs, "patch_generated": patches}
+        )
 
     def update_strategy(self, worker_id: str, strategy: str) -> bool:
         """Update current strategy and add to history"""

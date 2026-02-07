@@ -35,7 +35,6 @@ from ..core.models.llm_call import LLMCall
 from .buffer import get_worker_buffer
 
 
-
 def _calculate_cost(model_id: str, input_tokens: int, output_tokens: int) -> tuple:
     """
     Calculate cost for an LLM call.
