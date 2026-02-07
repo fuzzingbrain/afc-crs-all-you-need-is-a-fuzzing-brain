@@ -6,6 +6,7 @@
 
 **/tmp_*
 **/test_*
+!FuzzingBrain-v2/v2/tests/test_*
 
 **/__pycache__/
 *.pyc
