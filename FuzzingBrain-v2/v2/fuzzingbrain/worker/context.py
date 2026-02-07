@@ -27,6 +27,8 @@ from typing import Any, Dict, Optional, Callable
 from bson import ObjectId
 from loguru import logger
 
+from ..core.utils import safe_object_id
+
 
 # Global registry of active worker contexts
 _worker_contexts: Dict[str, "WorkerContext"] = {}
@@ -224,7 +226,7 @@ class WorkerContext:
                 return False
 
             try:
-                from ..database import get_database
+                from ..db import get_database
 
                 db = get_database()
                 if db is None:
@@ -232,10 +234,10 @@ class WorkerContext:
 
                 # Build document matching Worker model schema
                 doc = {
-                    "_id": ObjectId(self.worker_id),
-                    "worker_id": self.worker_id,
+                    "_id": safe_object_id(self.worker_id),
+                    # Note: worker_id removed - use _id only
                     "celery_job_id": self.celery_job_id,
-                    "task_id": ObjectId(self.task_id) if self.task_id else None,
+                    "task_id": safe_object_id(self.task_id),
                     # Identity
                     "task_type": self.task_type,
                     "fuzzer": self.fuzzer,
@@ -280,7 +282,7 @@ class WorkerContext:
 
                 # Upsert to 'workers' collection
                 db.workers.update_one(
-                    {"_id": ObjectId(self.worker_id)},
+                    {"_id": safe_object_id(self.worker_id)},
                     {"$set": doc},
                     upsert=True,
                 )
@@ -474,7 +476,7 @@ def get_worker_status(worker_id: str) -> Optional[Dict[str, Any]]:
 
     # Fall back to database (completed workers)
     try:
-        from ..database import get_database
+        from ..db import get_database
 
         db = get_database()
         if db is None:
@@ -506,7 +508,7 @@ def get_workers_by_task(task_id: str) -> list:
     workers = []
 
     try:
-        from ..database import get_database
+        from ..db import get_database
 
         db = get_database()
         if db is None:

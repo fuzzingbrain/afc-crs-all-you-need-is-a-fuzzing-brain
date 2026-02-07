@@ -213,7 +213,8 @@ class WorkerExecutor:
             crash_blob_b64 = base64.b64encode(crash_blob).decode("utf-8")
 
             # 2. Create POV record (is_successful=False - don't trigger dispatcher yet!)
-            pov_id = str(uuid.uuid4())
+            from ..core.utils import generate_id
+            pov_id = generate_id()
 
             # Get task workspace (not worker workspace) for results
             task_workspace = self.workspace_path
@@ -231,7 +232,7 @@ class WorkerExecutor:
                 pov_id=pov_id,
                 task_id=self.task_id,
                 suspicious_point_id="",  # No SP - fuzzer-discovered
-                generation_id=str(uuid.uuid4()),  # Unique generation ID
+                generation_id=generate_id(),  # Unique generation ID
                 iteration=0,
                 attempt=1,
                 variant=1,

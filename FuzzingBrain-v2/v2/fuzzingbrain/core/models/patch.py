@@ -54,7 +54,7 @@ class Patch:
         """Convert to dictionary for MongoDB storage"""
         return {
             "_id": ObjectId(self.patch_id) if self.patch_id else ObjectId(),
-            "patch_id": self.patch_id,
+            # Note: patch_id removed - use _id only
             "task_id": ObjectId(self.task_id) if self.task_id else None,
             "pov_id": ObjectId(self.pov_id) if self.pov_id else None,
             "patch_content": self.patch_content,

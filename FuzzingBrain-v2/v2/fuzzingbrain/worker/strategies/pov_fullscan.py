@@ -61,6 +61,16 @@ class POVFullscanStrategy(POVBaseStrategy):
     def strategy_name(self) -> str:
         return "POV Fullscan Strategy (Streaming)"
 
+    def _find_suspicious_points(self) -> List:
+        """
+        Not used in Full-scan strategy.
+
+        Full-scan uses a streaming pipeline with Direction Planning and
+        parallel SP finding, which bypasses this method entirely.
+        The execute() method is overridden to implement the full pipeline.
+        """
+        return []
+
     def execute(self) -> Dict[str, Any]:
         """
         Execute streaming pipeline - all pools run concurrently.
@@ -587,7 +597,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                 model=CLAUDE_OPUS_4_5,  # Force Opus for large function analysis
                 direction_id=direction_id,
                 task_id=self.task_id,
-                worker_id=f"Func_{index}_{self.fuzzer}_{self.sanitizer}",
+                worker_id=self.worker_id,
                 log_dir=agent_log_dir,
                 index=index,  # For log file naming: SPG_{index}_{function_name}.log
             )
@@ -604,7 +614,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                 model=CLAUDE_SONNET_4_5,  # Force Sonnet for function analysis
                 direction_id=direction_id,
                 task_id=self.task_id,
-                worker_id=f"Func_{index}_{self.fuzzer}_{self.sanitizer}",
+                worker_id=self.worker_id,
                 log_dir=agent_log_dir,
                 index=index,  # For log file naming: SPG_{index}_{function_name}.log
             )

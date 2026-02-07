@@ -65,8 +65,8 @@ class Function:
     def to_dict(self) -> dict:
         """Convert to dictionary for MongoDB storage and JSON serialization"""
         return {
-            "_id": self.function_id,
-            "function_id": self.function_id,
+            "_id": self.function_id,  # Composite key: {task_id}_{name}
+            # Note: function_id removed - use _id only
             "task_id": ObjectId(self.task_id) if self.task_id else None,
             "name": self.name,
             "file_path": self.file_path,

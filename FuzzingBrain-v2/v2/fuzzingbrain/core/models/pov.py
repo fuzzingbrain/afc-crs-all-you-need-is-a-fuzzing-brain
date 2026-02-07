@@ -76,13 +76,13 @@ class POV:
         """Convert to dictionary for MongoDB storage"""
         return {
             "_id": ObjectId(self.pov_id) if self.pov_id else ObjectId(),
-            "pov_id": self.pov_id,
+            # Note: pov_id removed - use _id only
             "task_id": ObjectId(self.task_id) if self.task_id else None,
             "suspicious_point_id": ObjectId(self.suspicious_point_id) if self.suspicious_point_id else None,
             "generation_id": self.generation_id,
             "agent_id": ObjectId(self.agent_id) if self.agent_id else None,
             "source": self.source,
-            "source_worker_id": ObjectId(self.source_worker_id) if self.source_worker_id else None,
+            "source_worker_id": self.source_worker_id,  # Store as string (metadata, not a reference)
             "iteration": self.iteration,
             "attempt": self.attempt,
             "variant": self.variant,

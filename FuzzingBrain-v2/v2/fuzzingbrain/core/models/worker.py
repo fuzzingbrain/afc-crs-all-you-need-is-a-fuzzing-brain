@@ -109,7 +109,7 @@ class Worker:
         """Convert to dictionary for MongoDB storage."""
         return {
             "_id": ObjectId(self.worker_id) if self.worker_id else ObjectId(),
-            "worker_id": self.worker_id,
+            # Note: worker_id removed - use _id only
             "celery_job_id": self.celery_job_id,
             "task_id": ObjectId(self.task_id) if self.task_id else None,
             "task_type": self.task_type,

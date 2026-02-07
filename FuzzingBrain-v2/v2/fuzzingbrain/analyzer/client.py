@@ -130,7 +130,8 @@ class AnalysisClient:
                     raise RuntimeError("Response too large")
 
             t3 = time.time()
-            response = Response.from_json(decode_message(data))
+            raw_msg = decode_message(data)
+            response = Response.from_json(raw_msg)
 
             if not response.success:
                 raise RuntimeError(response.error or "Request failed")
@@ -141,6 +142,13 @@ class AnalysisClient:
             if total > 0.1:
                 logger.debug(
                     f"[TIMING] _request({method}): total={total:.3f}s connect={t1 - t0:.3f}s send={t2 - t1:.3f}s recv={t3 - t2:.3f}s parse={t4 - t3:.3f}s"
+                )
+
+            # Warn if response data is unexpected type for mutation methods
+            if response.data is not None and not isinstance(response.data, (dict, list)):
+                logger.warning(
+                    f"[CLIENT] {method} returned unexpected type {type(response.data).__name__}: "
+                    f"{str(response.data)[:200]}  |  raw={raw_msg[:300]}"
                 )
 
             return response.data
@@ -468,6 +476,9 @@ class AnalysisClient:
         score: float = None,
         verification_notes: str = None,
         pov_guidance: str = None,
+        reachability_status: str = None,
+        reachability_multiplier: float = None,
+        reachability_reason: str = None,
         agent_id: str = "",
     ) -> dict:
         """
@@ -481,6 +492,9 @@ class AnalysisClient:
             score: Updated score
             verification_notes: Notes from verification
             pov_guidance: Guidance for POV agent (input directions, what to watch for)
+            reachability_status: Reachability status (direct, pointer_call, unreachable)
+            reachability_multiplier: Score multiplier based on reachability (0.0-1.0)
+            reachability_reason: Explanation for reachability determination
             agent_id: Agent ObjectId that verified this SP
 
         Returns:
@@ -499,6 +513,12 @@ class AnalysisClient:
             params["verification_notes"] = verification_notes
         if pov_guidance is not None:
             params["pov_guidance"] = pov_guidance
+        if reachability_status is not None:
+            params["reachability_status"] = reachability_status
+        if reachability_multiplier is not None:
+            params["reachability_multiplier"] = reachability_multiplier
+        if reachability_reason is not None:
+            params["reachability_reason"] = reachability_reason
         if agent_id:
             params["agent_id"] = agent_id
         return self._request(Method.UPDATE_SUSPICIOUS_POINT, params)

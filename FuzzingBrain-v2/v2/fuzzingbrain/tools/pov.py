@@ -32,6 +32,7 @@ from .coverage import (
 )
 from ..core.models import POV
 from ..core.pov_packager import POVPackager
+from ..core.utils import generate_id
 from ..db import RepositoryManager
 
 
@@ -823,7 +824,7 @@ def _create_pov_core(
         return {"success": False, "error": "description is required"}
 
     # Generate unique generation_id for this batch
-    generation_id = str(uuid.uuid4())
+    generation_id = generate_id()
 
     # Execute generator code
     logger.info(f"[POV] Executing generator code for SP {suspicious_point_id[:8]}...")
@@ -855,7 +856,7 @@ def _create_pov_core(
     fuzzer_manager = ctx.get("fuzzer_manager")
 
     for variant_idx, blob in enumerate(blobs, start=1):
-        pov_id = str(uuid.uuid4())
+        pov_id = generate_id()
 
         # Save blob to file
         blob_path = None
@@ -965,7 +966,7 @@ def _create_pov_core(
                             f"[POV] ✓ POV {pov_id[:8]} also crashed on {other_fuzzer.fuzzer_name}!"
                         )
                         # Create new POV record for this fuzzer
-                        cross_pov_id = str(uuid.uuid4())
+                        cross_pov_id = generate_id()
                         cross_pov = POV(
                             pov_id=cross_pov_id,
                             task_id=task_id,

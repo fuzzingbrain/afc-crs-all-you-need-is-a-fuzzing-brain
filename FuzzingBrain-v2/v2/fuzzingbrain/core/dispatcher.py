@@ -83,10 +83,10 @@ class WorkerDispatcher:
             crash_record: CrashRecord from the monitor
         """
         import base64
-        import uuid
         from pathlib import Path
         from .models import POV
         from .pov_packager import POVPackager
+        from .utils import generate_id
 
         logger.info(
             f"[FuzzerMonitor] New crash detected: {crash_record.crash_hash[:8]} "
@@ -126,7 +126,7 @@ class WorkerDispatcher:
                         )
 
             # 3. Create POV record
-            pov_id = str(uuid.uuid4())
+            pov_id = generate_id()
             task_workspace = Path(self.task.task_path)
             results_dir = task_workspace / "results"
             povs_dir = results_dir / "povs"
@@ -143,7 +143,7 @@ class WorkerDispatcher:
                 pov_id=pov_id,
                 task_id=self.task.task_id,
                 suspicious_point_id=crash_record.sp_id or "",  # SP ID if from SP Fuzzer
-                generation_id=str(uuid.uuid4()),
+                generation_id=generate_id(),
                 source=source,  # Track POV source
                 source_worker_id=crash_record.worker_id,  # Track which worker found it
                 iteration=0,

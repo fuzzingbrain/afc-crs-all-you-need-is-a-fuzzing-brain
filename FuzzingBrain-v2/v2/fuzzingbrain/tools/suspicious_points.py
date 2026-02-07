@@ -87,7 +87,7 @@ _get_sp_context = get_sp_context
 
 def _ensure_sp_context() -> Optional[Dict[str, Any]]:
     """Ensure SP context is set, return error dict if not."""
-    harness_name, sanitizer, _ = get_sp_context()
+    harness_name, sanitizer, _, _ = get_sp_context()
     if harness_name is None or sanitizer is None:
         return {
             "success": False,
@@ -128,6 +128,11 @@ def create_suspicious_point_impl(
             agent_id=agent_id or "",  # Track which agent created this SP
         )
 
+        # Defensive check: server may return non-dict on connection issues
+        if not isinstance(result, dict):
+            logger.error(f"Unexpected response type from server: {type(result).__name__}: {result}")
+            return {"success": False, "error": f"Server returned {type(result).__name__} instead of dict"}
+
         merged = result.get("merged", False)
         sp_id = result.get("id")
 
@@ -154,6 +159,9 @@ def update_suspicious_point_impl(
     is_important: bool = None,
     verification_notes: str = None,
     pov_guidance: str = None,
+    reachability_status: str = None,
+    reachability_multiplier: float = None,
+    reachability_reason: str = None,
 ) -> Dict[str, Any]:
     """Implementation of update_suspicious_point (without MCP decorator)."""
     err = _ensure_client()
@@ -172,6 +180,9 @@ def update_suspicious_point_impl(
             score=score,
             verification_notes=verification_notes,
             pov_guidance=pov_guidance,
+            reachability_status=reachability_status,
+            reachability_multiplier=reachability_multiplier,
+            reachability_reason=reachability_reason,
             agent_id=agent_id or "",  # Track which agent verified this SP
         )
 
@@ -315,6 +326,11 @@ def create_suspicious_point(
             direction_id=direction_id or "",
             agent_id=agent_id or "",  # Track which agent created this SP
         )
+
+        # Defensive check: server may return non-dict on connection issues
+        if not isinstance(result, dict):
+            logger.error(f"Unexpected response type from server: {type(result).__name__}: {result}")
+            return {"success": False, "error": f"Server returned {type(result).__name__} instead of dict"}
 
         merged = result.get("merged", False)
         sp_id = result.get("id")

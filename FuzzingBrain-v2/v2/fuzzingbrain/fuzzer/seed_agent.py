@@ -266,6 +266,9 @@ class SeedAgent(BaseAgent):
         # Stats
         self.seeds_generated = 0
 
+        # Agent ID for context cleanup (set in _configure_context)
+        self._seed_agent_id: Optional[str] = None
+
     @property
     def system_prompt(self) -> str:
         """System prompt for seed generation."""
@@ -298,13 +301,40 @@ class SeedAgent(BaseAgent):
         return metadata
 
     def _configure_context(self, ctx) -> None:
-        """Configure agent context with direction/SP/delta IDs."""
+        """Configure agent context with direction/SP/delta IDs and set up seed tools."""
         if self.direction_id:
             ctx.direction_id = self.direction_id
         if self.sp_id:
             ctx.sp_id = self.sp_id
         if self.delta_id:
             ctx.delta_id = self.delta_id
+
+        # Store agent_id for cleanup later
+        self._seed_agent_id = ctx.agent_id
+
+        # Set seed context using ctx.agent_id (the actual ObjectId used by MCP tools)
+        # This MUST happen here, after AgentContext is created but before MCP server starts
+        set_seed_context(
+            task_id=self.task_id,
+            worker_id=ctx.agent_id,  # Use the SAME agent_id that MCP server will use
+            direction_id=self.direction_id,
+            sp_id=self.sp_id,
+            delta_id=self.delta_id,
+            fuzzer_manager=self.fuzzer_manager,
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+        )
+
+        # Set code viewer context for code analysis tools
+        if self.workspace_path:
+            ws_name = self.workspace_path.name
+            project_name = ws_name.rsplit("_", 1)[0] if "_" in ws_name else ""
+            set_code_viewer_context(
+                workspace_path=str(self.workspace_path),
+                repo_subdir="repo",
+                diff_filename="diff/ref.diff",
+                project_name=project_name,
+            )
 
     def _get_urgency_message(self, iteration: int, remaining: int) -> Optional[str]:
         """
@@ -447,35 +477,22 @@ Generate seeds NOW or this run will produce nothing useful."""
         )
 
     def _setup_context(self) -> None:
-        """Set up seed tool context before running."""
-        # Set seed context for create_seed tool
-        # Use mcp_context_id (AgentContext.agent_id) for unique isolation
-        set_seed_context(
-            task_id=self.task_id,
-            worker_id=self.mcp_context_id,  # Unique ObjectId from AgentContext
-            direction_id=self.direction_id,
-            sp_id=self.sp_id,
-            delta_id=self.delta_id,
-            fuzzer_manager=self.fuzzer_manager,
-            fuzzer=self.fuzzer,
-            sanitizer=self.sanitizer,
-        )
+        """
+        DEPRECATED: Context setup is now done in _configure_context().
 
-        # Set code viewer context for code analysis tools (search_code, list_files, etc.)
-        if self.workspace_path:
-            # Extract project_name from workspace directory name (format: {project}_{task_id})
-            ws_name = self.workspace_path.name
-            project_name = ws_name.rsplit("_", 1)[0] if "_" in ws_name else ""
-            set_code_viewer_context(
-                workspace_path=str(self.workspace_path),
-                repo_subdir="repo",
-                diff_filename="diff/ref.diff",
-                project_name=project_name,
-            )
+        This method is kept for backwards compatibility but does nothing.
+        The seed context is set in _configure_context() where ctx.agent_id
+        is available and matches the worker_id used by MCP tools.
+        """
+        # Context setup moved to _configure_context() where ctx.agent_id is available
+        pass
 
     def _cleanup_context(self) -> None:
         """Clean up seed tool context after running."""
-        clear_seed_context(self.mcp_context_id)
+        # Use the stored agent_id from _configure_context (same ID used for MCP tools)
+        if self._seed_agent_id:
+            clear_seed_context(self._seed_agent_id)
+            self._seed_agent_id = None
 
     async def _execute_tool(
         self,
@@ -507,10 +524,12 @@ Generate seeds NOW or this run will produce nothing useful."""
         return result
 
     async def run_async(self, **kwargs) -> str:
-        """Run the seed agent."""
-        # Setup context before running
-        self._setup_context()
+        """Run the seed agent.
 
+        Note: Context setup is handled by _configure_context() which is called
+        by BaseAgent after AgentContext is created. This ensures the correct
+        agent_id is used for MCP tool context isolation.
+        """
         try:
             result = await super().run_async(**kwargs)
         finally:

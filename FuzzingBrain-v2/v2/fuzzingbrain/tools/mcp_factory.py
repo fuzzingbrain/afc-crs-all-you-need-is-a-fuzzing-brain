@@ -659,6 +659,9 @@ def _register_suspicious_point_tools(mcp: FastMCP) -> None:
         is_important: bool = None,
         verification_notes: str = None,
         pov_guidance: str = None,
+        reachability_status: str = None,
+        reachability_multiplier: float = None,
+        reachability_reason: str = None,
     ) -> Dict[str, Any]:
         """
         Update an existing suspicious point after verification.
@@ -671,6 +674,9 @@ def _register_suspicious_point_tools(mcp: FastMCP) -> None:
             is_important: Whether it's high priority
             verification_notes: Notes from verification analysis
             pov_guidance: Guidance for POV agent (input direction, how to reach vuln)
+            reachability_status: Reachability status (direct, pointer_call, unreachable)
+            reachability_multiplier: Score multiplier based on reachability (0.0-1.0)
+            reachability_reason: Explanation for reachability determination
         """
         from .suspicious_points import update_suspicious_point_impl
 
@@ -682,6 +688,9 @@ def _register_suspicious_point_tools(mcp: FastMCP) -> None:
             is_important,
             verification_notes,
             pov_guidance,
+            reachability_status,
+            reachability_multiplier,
+            reachability_reason,
         )
 
     @mcp.tool

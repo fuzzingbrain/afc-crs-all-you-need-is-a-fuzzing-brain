@@ -96,7 +96,8 @@ def _build_sp_dedup_prompt(
     """Build the prompt for SP dedup comparison."""
     sp_list = []
     for i, sp in enumerate(existing_sps, 1):
-        sp_id = sp.get("suspicious_point_id", sp.get("_id", "unknown"))
+        raw_id = sp.get("suspicious_point_id") or sp.get("_id") or "unknown"
+        sp_id = str(raw_id)
         desc = sp.get("description", "")
         sp_list.append(f"SP-{i} (ID: {sp_id}): {desc}")
 
@@ -151,13 +152,17 @@ def _parse_sp_dedup_response(
         if not duplicate_ref:
             return None
 
+        # Helper to get SP ID as string (handles ObjectId from MongoDB)
+        def get_sp_id(sp_dict):
+            sp_id = sp_dict.get("suspicious_point_id") or sp_dict.get("_id")
+            return str(sp_id) if sp_id else None
+
         # Parse "SP-N" format or plain number
         if duplicate_ref.startswith("SP-"):
             try:
                 idx = int(duplicate_ref[3:]) - 1  # 1-indexed to 0-indexed
                 if 0 <= idx < len(existing_sps):
-                    sp = existing_sps[idx]
-                    return sp.get("suspicious_point_id", sp.get("_id"))
+                    return get_sp_id(existing_sps[idx])
             except ValueError:
                 pass
         elif duplicate_ref.isdigit():
@@ -165,14 +170,13 @@ def _parse_sp_dedup_response(
             try:
                 idx = int(duplicate_ref) - 1  # 1-indexed to 0-indexed
                 if 0 <= idx < len(existing_sps):
-                    sp = existing_sps[idx]
-                    return sp.get("suspicious_point_id", sp.get("_id"))
+                    return get_sp_id(existing_sps[idx])
             except ValueError:
                 pass
 
         # Maybe it's a direct ID
         for sp in existing_sps:
-            sp_id = sp.get("suspicious_point_id", sp.get("_id"))
+            sp_id = get_sp_id(sp)
             if sp_id == duplicate_ref:
                 return sp_id
 
@@ -195,8 +199,7 @@ def _parse_sp_dedup_response(
             if match:
                 idx = int(match.group(1)) - 1
                 if 0 <= idx < len(existing_sps):
-                    sp = existing_sps[idx]
-                    return sp.get("suspicious_point_id", sp.get("_id"))
+                    return get_sp_id(existing_sps[idx])
 
         return None
 

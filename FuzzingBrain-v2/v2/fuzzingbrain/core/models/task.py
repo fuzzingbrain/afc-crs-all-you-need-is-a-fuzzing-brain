@@ -105,7 +105,6 @@ class Task:
         """Convert to dictionary for MongoDB storage"""
         return {
             "_id": ObjectId(self.task_id) if self.task_id else ObjectId(),
-            "task_id": self.task_id,
             "task_type": self.task_type.value,
             "scan_mode": self.scan_mode.value,
             "status": self.status.value,

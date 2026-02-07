@@ -9,7 +9,7 @@ from typing import Optional
 
 from bson import ObjectId
 
-from ..utils import generate_id
+from ..utils import generate_id, safe_object_id
 
 
 class FuzzerStatus(str, Enum):
@@ -54,9 +54,13 @@ class Fuzzer:
 
     def to_dict(self) -> dict:
         """Convert to dictionary for MongoDB storage"""
+        # Use safe_object_id for _id to handle UUID4 format from prebuild data
+        _id = safe_object_id(self.fuzzer_id)
+        if _id is None:
+            _id = ObjectId()
         return {
-            "_id": ObjectId(self.fuzzer_id) if self.fuzzer_id else ObjectId(),
-            "fuzzer_id": self.fuzzer_id,
+            "_id": _id,
+            # Note: fuzzer_id removed - use _id only
             "task_id": ObjectId(self.task_id) if self.task_id else None,
             "fuzzer_name": self.fuzzer_name,
             "source_path": self.source_path,

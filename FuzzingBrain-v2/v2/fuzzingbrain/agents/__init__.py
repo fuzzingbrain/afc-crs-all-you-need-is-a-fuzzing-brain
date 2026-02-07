@@ -27,12 +27,6 @@ from .sp_generators import (
 )
 from .sp_verifier import SPVerifier
 
-# Legacy aliases for backward compatibility
-# These will be removed in a future version
-from .sp_generators import FullSPGenerator as FunctionAnalysisAgent
-from .sp_generators import LargeFullSPGenerator as LargeFunctionAnalysisAgent
-from .sp_verifier import SPVerifier as SuspiciousPointAgent
-
 __all__ = [
     # Base
     "BaseAgent",
@@ -47,18 +41,14 @@ __all__ = [
     "get_active_agents",
     # Direction
     "DirectionPlanningAgent",
-    # SP Generators (new)
+    # SP Generators
     "SPGeneratorBase",
     "FullSPGenerator",
     "LargeFullSPGenerator",
     "DeltaSPGenerator",
-    # SP Verifier (new)
+    # SP Verifier
     "SPVerifier",
     # POV
     "POVAgent",
     "POVResult",
-    # Legacy aliases (deprecated)
-    "FunctionAnalysisAgent",
-    "LargeFunctionAnalysisAgent",
-    "SuspiciousPointAgent",
 ]

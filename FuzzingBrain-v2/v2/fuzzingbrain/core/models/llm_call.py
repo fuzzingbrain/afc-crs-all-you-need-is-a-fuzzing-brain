@@ -70,7 +70,7 @@ class LLMCall:
         """Convert to dictionary for MongoDB/Redis storage."""
         return {
             "_id": ObjectId(self.call_id) if self.call_id else ObjectId(),
-            "call_id": self.call_id,
+            # Note: call_id removed - use _id only
             "agent_id": ObjectId(self.agent_id) if self.agent_id else None,
             "worker_id": ObjectId(self.worker_id) if self.worker_id else None,
             "task_id": ObjectId(self.task_id) if self.task_id else None,

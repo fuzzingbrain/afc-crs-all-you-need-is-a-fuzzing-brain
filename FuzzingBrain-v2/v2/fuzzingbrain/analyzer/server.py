@@ -17,6 +17,8 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 from loguru import logger
 
+from bson import ObjectId
+
 from .protocol import (
     Request,
     Response,
@@ -41,20 +43,25 @@ def _serialize_doc(doc: dict) -> dict:
     """
     Serialize MongoDB document for JSON response.
 
-    Converts datetime objects to ISO strings.
+    Converts ObjectId and datetime objects to strings for JSON serialization.
     """
     if not doc:
         return doc
 
     result = {}
     for key, value in doc.items():
-        if isinstance(value, datetime):
+        if isinstance(value, ObjectId):
+            result[key] = str(value)
+        elif isinstance(value, datetime):
             result[key] = value.isoformat()
         elif isinstance(value, dict):
             result[key] = _serialize_doc(value)
         elif isinstance(value, list):
             result[key] = [
-                _serialize_doc(v) if isinstance(v, dict) else v for v in value
+                _serialize_doc(v) if isinstance(v, dict)
+                else str(v) if isinstance(v, ObjectId)
+                else v
+                for v in value
             ]
         else:
             result[key] = value
@@ -111,7 +118,9 @@ class AnalysisServer:
         work_id: Optional[str] = None,
         fuzzer_sources: Optional[Dict[str, str]] = None,
     ):
-        self.task_id = task_id
+        # Store task_id as ObjectId for consistent MongoDB queries
+        # String representation is used for socket paths and logging
+        self.task_id = ObjectId(task_id) if isinstance(task_id, str) else task_id
         self.task_path = Path(task_path)
         self.project_name = project_name
         self.sanitizers = sanitizers
@@ -125,7 +134,7 @@ class AnalysisServer:
 
         # Socket path in /tmp to avoid path length limit (108 chars max for Unix sockets)
         # Use task_id to ensure uniqueness
-        self.socket_path = Path(f"/tmp/fuzzingbrain_{task_id}.sock")
+        self.socket_path = Path(f"/tmp/fuzzingbrain_{self.task_id}.sock")
 
         # Server state
         self.server: Optional[asyncio.AbstractServer] = None
@@ -1488,6 +1497,12 @@ class AnalysisServer:
             updates["verification_notes"] = params["verification_notes"]
         if "pov_guidance" in params:
             updates["pov_guidance"] = params["pov_guidance"]
+        if "reachability_status" in params:
+            updates["reachability_status"] = params["reachability_status"]
+        if "reachability_multiplier" in params:
+            updates["reachability_multiplier"] = params["reachability_multiplier"]
+        if "reachability_reason" in params:
+            updates["reachability_reason"] = params["reachability_reason"]
         if params.get("is_checked"):
             updates["checked_at"] = datetime.now()
         # Track which agent verified this SP

@@ -13,7 +13,7 @@ from typing import Optional, List
 
 from bson import ObjectId
 
-from ..utils import generate_id
+from ..utils import generate_id, safe_object_id
 
 
 class DirectionStatus(str, Enum):
@@ -81,7 +81,7 @@ class Direction:
         """Convert to dict for MongoDB storage"""
         return {
             "_id": ObjectId(self.direction_id) if self.direction_id else ObjectId(),
-            "direction_id": self.direction_id,
+            # Note: direction_id removed - use _id only
             "task_id": ObjectId(self.task_id) if self.task_id else None,
             "created_by_agent_id": ObjectId(self.created_by_agent_id) if self.created_by_agent_id else None,
             "fuzzer": self.fuzzer,
@@ -93,7 +93,7 @@ class Direction:
             "call_chain_summary": self.call_chain_summary,
             "code_summary": self.code_summary,
             "status": self.status,
-            "processor_id": ObjectId(self.processor_id) if self.processor_id else None,
+            "processor_id": safe_object_id(self.processor_id) if self.processor_id else None,
             "sp_count": self.sp_count,
             "functions_analyzed": self.functions_analyzed,
             "created_at": self.created_at.isoformat() if self.created_at else None,

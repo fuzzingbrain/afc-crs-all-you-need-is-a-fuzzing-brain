@@ -10,6 +10,8 @@ from typing import List
 
 from bson import ObjectId
 
+from ..utils import safe_object_id
+
 
 @dataclass
 class CallGraphNode:
@@ -47,11 +49,12 @@ class CallGraphNode:
 
     def to_dict(self) -> dict:
         """Convert to dictionary for MongoDB storage"""
+        # Use safe_object_id for fuzzer_id to handle fuzzer names from introspector
         return {
-            "_id": self.node_id,
-            "node_id": self.node_id,
+            "_id": self.node_id,  # Composite key: {task_id}_{fuzzer_id}_{function_name}
+            # Note: node_id removed - use _id only
             "task_id": ObjectId(self.task_id) if self.task_id else None,
-            "fuzzer_id": ObjectId(self.fuzzer_id) if self.fuzzer_id else None,
+            "fuzzer_id": safe_object_id(self.fuzzer_id),
             "fuzzer_name": self.fuzzer_name,
             "function_name": self.function_name,
             "callers": self.callers,

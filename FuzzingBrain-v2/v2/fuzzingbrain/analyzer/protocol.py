@@ -6,10 +6,34 @@ Uses JSON over Unix Domain Socket.
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any, Dict, Optional
 from enum import Enum
 import json
 import uuid
+
+from bson import ObjectId
+
+
+class MongoJSONEncoder(json.JSONEncoder):
+    """
+    Custom JSON encoder that handles MongoDB types.
+
+    This encoder automatically converts:
+    - ObjectId -> str
+    - datetime -> ISO format string
+    - bytes -> base64 string
+    """
+
+    def default(self, obj):
+        if isinstance(obj, ObjectId):
+            return str(obj)
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, bytes):
+            import base64
+            return base64.b64encode(obj).decode('utf-8')
+        return super().default(obj)
 
 
 class Method(str, Enum):
@@ -74,7 +98,8 @@ class Request:
                 "params": self.params,
                 "request_id": self.request_id,
                 "source": self.source,
-            }
+            },
+            cls=MongoJSONEncoder,
         )
 
     @classmethod
@@ -104,7 +129,8 @@ class Response:
                 "data": self.data,
                 "error": self.error,
                 "request_id": self.request_id,
-            }
+            },
+            cls=MongoJSONEncoder,
         )
 
     @classmethod

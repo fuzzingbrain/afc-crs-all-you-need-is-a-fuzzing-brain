@@ -12,7 +12,7 @@ from typing import Optional, List, Dict
 
 from bson import ObjectId
 
-from ..utils import generate_id
+from ..utils import generate_id, safe_object_id
 
 
 class SPStatus(str, Enum):
@@ -138,7 +138,7 @@ class SuspiciousPoint:
         """Convert to dict for MongoDB storage and JSON serialization"""
         return {
             "_id": ObjectId(self.suspicious_point_id) if self.suspicious_point_id else ObjectId(),
-            "suspicious_point_id": self.suspicious_point_id,
+            # Note: suspicious_point_id removed - use _id only
             "task_id": ObjectId(self.task_id) if self.task_id else None,
             "direction_id": ObjectId(self.direction_id) if self.direction_id else None,
             "function_name": self.function_name,
@@ -148,7 +148,7 @@ class SuspiciousPoint:
             "description": self.description,
             "vuln_type": self.vuln_type,
             "status": self.status,
-            "processor_id": ObjectId(self.processor_id) if self.processor_id else None,
+            "processor_id": safe_object_id(self.processor_id) if self.processor_id else None,
             "is_checked": self.is_checked,
             "is_real": self.is_real,
             "score": self.score,

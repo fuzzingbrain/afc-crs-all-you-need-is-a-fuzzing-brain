@@ -24,6 +24,8 @@ from typing import Any, Dict, Optional
 from bson import ObjectId
 from loguru import logger
 
+from ..core.utils import safe_object_id
+
 
 # Global registry of active agent contexts
 _agent_contexts: Dict[str, "AgentContext"] = {}
@@ -207,17 +209,17 @@ class AgentContext:
                         return False
 
             try:
-                from ..database import get_database
+                from ..db import get_database
 
                 db = get_database()
                 if db is None:
                     return False
 
                 doc = {
-                    "_id": ObjectId(self.agent_id),
-                    "task_id": ObjectId(self.task_id) if self.task_id else None,
+                    "_id": safe_object_id(self.agent_id),  # May be ObjectId or custom string
+                    "task_id": safe_object_id(self.task_id),
                     # Store worker_id as ObjectId reference for proper foreign key linking
-                    "worker_id": ObjectId(self.worker_id) if self.worker_id else None,
+                    "worker_id": safe_object_id(self.worker_id),
                     "agent_type": self.agent_type,
                     "target": self.target,
                     "fuzzer": self.fuzzer,
@@ -248,7 +250,7 @@ class AgentContext:
 
                 # Upsert - insert or update
                 db.agents.update_one(
-                    {"_id": ObjectId(self.agent_id)},
+                    {"_id": safe_object_id(self.agent_id)},
                     {"$set": doc},
                     upsert=True,
                 )
@@ -394,7 +396,7 @@ def get_agent_status(agent_id: str) -> Optional[Dict[str, Any]]:
 
     # Fall back to database (completed agents)
     try:
-        from ..database import get_database
+        from ..db import get_database
 
         db = get_database()
         if db is None:
@@ -427,7 +429,7 @@ def get_agents_by_worker(worker_id: str) -> list:
     agents = []
 
     try:
-        from ..database import get_database
+        from ..db import get_database
 
         db = get_database()
         if db is None:
@@ -473,7 +475,7 @@ def get_agents_by_task(task_id: str) -> list:
     agents = []
 
     try:
-        from ..database import get_database
+        from ..db import get_database
 
         db = get_database()
         if db is None:

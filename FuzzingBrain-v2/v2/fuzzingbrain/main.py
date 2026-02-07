@@ -125,9 +125,8 @@ def signal_handler(signum, frame):
                     {"status": "cancelled"}, sort=[("created_at", -1)]
                 )
                 if recent_task:
-                    task_id = recent_task.get(
-                        "task_id", recent_task.get("_id", "unknown")
-                    )
+                    raw_task_id = recent_task.get("task_id") or recent_task.get("_id") or "unknown"
+                    task_id = str(raw_task_id)
                     project_name = recent_task.get("project_name", "unknown")
 
                     # Get workers for this task
@@ -157,7 +156,7 @@ def signal_handler(signum, frame):
 
                         # Query POV count from database
                         worker_sp_ids = [
-                            sp.get("suspicious_point_id") or sp.get("_id")
+                            str(sp.get("suspicious_point_id") or sp.get("_id"))
                             for sp in _repos.suspicious_points.collection.find(
                                 {
                                     "task_id": task_id,
