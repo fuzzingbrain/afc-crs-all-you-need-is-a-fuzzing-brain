@@ -119,6 +119,7 @@ def signal_handler(signum, frame):
             try:
                 from .core.logging import create_final_summary
                 from datetime import datetime
+                from bson import ObjectId as _ObjectId
 
                 # Find the most recent task
                 recent_task = _repos.tasks.collection.find_one(
@@ -127,10 +128,11 @@ def signal_handler(signum, frame):
                 if recent_task:
                     raw_task_id = recent_task.get("task_id") or recent_task.get("_id") or "unknown"
                     task_id = str(raw_task_id)
+                    task_oid = _ObjectId(task_id) if len(task_id) == 24 else task_id
                     project_name = recent_task.get("project_name", "unknown")
 
                     # Get workers for this task
-                    workers = list(_repos.workers.collection.find({"task_id": task_id}))
+                    workers = list(_repos.workers.collection.find({"task_id": task_oid}))
                     worker_results = []
                     for w in workers:
                         started = w.get("started_at")
@@ -144,7 +146,7 @@ def signal_handler(signum, frame):
                         # Query SP count from database (like get_all_worker_results)
                         sp_count = _repos.suspicious_points.count(
                             {
-                                "task_id": task_id,
+                                "task_id": task_oid,
                                 "sources": {
                                     "$elemMatch": {
                                         "harness_name": fuzzer,
@@ -159,7 +161,7 @@ def signal_handler(signum, frame):
                             str(sp.get("suspicious_point_id") or sp.get("_id"))
                             for sp in _repos.suspicious_points.collection.find(
                                 {
-                                    "task_id": task_id,
+                                    "task_id": task_oid,
                                     "sources": {
                                         "$elemMatch": {
                                             "harness_name": fuzzer,
@@ -172,11 +174,18 @@ def signal_handler(signum, frame):
                         ]
                         pov_count = 0
                         if worker_sp_ids:
+                            # Convert to ObjectId — POV documents store suspicious_point_id as ObjectId
+                            sp_oids = []
+                            for x in worker_sp_ids:
+                                try:
+                                    sp_oids.append(_ObjectId(x))
+                                except Exception:
+                                    sp_oids.append(x)
                             pov_count = _repos.povs.count(
                                 {
-                                    "task_id": task_id,
+                                    "task_id": task_oid,
                                     "suspicious_point_id": {
-                                        "$in": [str(x) for x in worker_sp_ids]
+                                        "$in": sp_oids
                                     },
                                     "is_successful": True,
                                 }
@@ -184,7 +193,7 @@ def signal_handler(signum, frame):
                         # Also count fuzzer-discovered POVs
                         fuzzer_pov_count = _repos.povs.count(
                             {
-                                "task_id": task_id,
+                                "task_id": task_oid,
                                 "harness_name": fuzzer,
                                 "sanitizer": sanitizer,
                                 "suspicious_point_id": {"$in": ["", None]},
@@ -205,10 +214,9 @@ def signal_handler(signum, frame):
                             }
                         )
 
-                    # Cost tracking now handled via database
-                    # TODO: Implement cost aggregation from agents collection
-                    total_cost = 0.0
-                    budget_limit = 0.0
+                    # Read cost from database
+                    total_cost = recent_task.get("llm_cost", 0.0)
+                    budget_limit = recent_task.get("budget_limit", 0.0)
 
                     # Calculate elapsed time
                     created_at = recent_task.get("created_at", datetime.now())

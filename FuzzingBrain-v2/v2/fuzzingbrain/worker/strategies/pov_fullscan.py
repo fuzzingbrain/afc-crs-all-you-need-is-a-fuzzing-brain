@@ -215,13 +215,6 @@ class POVFullscanStrategy(POVBaseStrategy):
         Running everything in one event loop avoids litellm client caching issues
         where HTTP clients get bound to a closed event loop.
         """
-        # Ensure LLM call buffer is running (idempotent - safe to call multiple times)
-        from ...llms.buffer import get_llm_call_buffer
-
-        buffer = get_llm_call_buffer()
-        if buffer:
-            await buffer.start()  # No-op if already running
-
         # Phase 1: Direction Planning
         directions = await self._run_direction_planning_async()
 

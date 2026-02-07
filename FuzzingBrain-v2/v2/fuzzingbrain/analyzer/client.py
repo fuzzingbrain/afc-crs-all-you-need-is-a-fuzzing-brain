@@ -6,10 +6,9 @@ Used by Workers and Agents to query code analysis data.
 """
 
 import socket
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
-from loguru import logger
 
 from .protocol import (
     Request,
@@ -45,41 +44,27 @@ class AnalysisClient:
         self.timeout = timeout
         self.client_id = client_id
         self._sock: Optional[socket.socket] = None
+        self._lock = threading.Lock()  # Serialize access to socket
 
     def _connect(self):
         """Connect to server if not connected."""
-        import time
-
         # Check if existing socket is still valid
         if self._sock is not None:
             try:
-                # Check if socket is still connected by testing fileno
                 fd = self._sock.fileno()
                 if fd < 0:
-                    # Invalid file descriptor
-                    logger.debug(
-                        "[TIMING] _connect: socket has invalid fd, reconnecting"
-                    )
                     self._disconnect()
                 else:
-                    logger.debug(
-                        f"[TIMING] _connect: socket already connected (fd={fd})"
-                    )
                     return
             except (OSError, socket.error):
-                # Socket is broken
-                logger.debug("[TIMING] _connect: socket error, reconnecting")
                 self._disconnect()
 
-        t0 = time.time()
         if not self.socket_path.exists():
             raise ConnectionError(f"Socket not found: {self.socket_path}")
 
         self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self._sock.settimeout(self.timeout)
         self._sock.connect(str(self.socket_path))
-        t1 = time.time()
-        logger.debug(f"[TIMING] _connect: new socket connected in {t1 - t0:.3f}s")
 
     def _disconnect(self):
         """Disconnect from server."""
@@ -94,6 +79,11 @@ class AnalysisClient:
         """
         Send request and get response.
 
+        Thread-safe: uses a lock to prevent concurrent access to the socket.
+        Without this lock, parallel tool calls from the same agent (via
+        asyncio.to_thread) could race on recv(), causing response swapping
+        (e.g., create_suspicious_point gets a str from get_function_source).
+
         Args:
             method: RPC method name
             params: Method parameters
@@ -106,59 +96,39 @@ class AnalysisClient:
             TimeoutError: If request times out
             RuntimeError: If request fails
         """
-        import time
-
-        t0 = time.time()
         request = Request(method=method, params=params or {}, source=self.client_id)
 
-        try:
-            self._connect()
-            t1 = time.time()
+        with self._lock:
+            try:
+                self._connect()
 
-            # Send request
-            self._sock.sendall(encode_message(request.to_json()))
-            t2 = time.time()
+                # Send request
+                self._sock.sendall(encode_message(request.to_json()))
 
-            # Receive response
-            data = b""
-            while MESSAGE_DELIMITER not in data:
-                chunk = self._sock.recv(4096)
-                if not chunk:
-                    raise ConnectionError("Connection closed")
-                data += chunk
-                if len(data) > MAX_MESSAGE_SIZE:
-                    raise RuntimeError("Response too large")
+                # Receive response
+                data = b""
+                while MESSAGE_DELIMITER not in data:
+                    chunk = self._sock.recv(4096)
+                    if not chunk:
+                        raise ConnectionError("Connection closed")
+                    data += chunk
+                    if len(data) > MAX_MESSAGE_SIZE:
+                        raise RuntimeError("Response too large")
 
-            t3 = time.time()
-            raw_msg = decode_message(data)
-            response = Response.from_json(raw_msg)
+                raw_msg = decode_message(data)
+                response = Response.from_json(raw_msg)
 
-            if not response.success:
-                raise RuntimeError(response.error or "Request failed")
+                if not response.success:
+                    raise RuntimeError(response.error or "Request failed")
 
-            t4 = time.time()
-            # Log timing if total > 100ms
-            total = t4 - t0
-            if total > 0.1:
-                logger.debug(
-                    f"[TIMING] _request({method}): total={total:.3f}s connect={t1 - t0:.3f}s send={t2 - t1:.3f}s recv={t3 - t2:.3f}s parse={t4 - t3:.3f}s"
-                )
+                return response.data
 
-            # Warn if response data is unexpected type for mutation methods
-            if response.data is not None and not isinstance(response.data, (dict, list)):
-                logger.warning(
-                    f"[CLIENT] {method} returned unexpected type {type(response.data).__name__}: "
-                    f"{str(response.data)[:200]}  |  raw={raw_msg[:300]}"
-                )
-
-            return response.data
-
-        except socket.timeout:
-            self._disconnect()
-            raise TimeoutError(f"Request timed out: {method}")
-        except Exception:
-            self._disconnect()
-            raise
+            except socket.timeout:
+                self._disconnect()
+                raise TimeoutError(f"Request timed out: {method}")
+            except Exception:
+                self._disconnect()
+                raise
 
     def close(self):
         """Close the connection."""

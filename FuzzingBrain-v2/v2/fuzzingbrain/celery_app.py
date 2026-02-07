@@ -100,33 +100,36 @@ def on_worker_init(**kwargs):
     # Worker/Agent context is now handled via WorkerContext/AgentContext
     # which persist to MongoDB directly - no reporter needed
 
-    # Initialize LLM call buffer (sync mode - memory only until async context starts)
+    # Initialize MongoDB connection for this worker process
+    # WorkerContext will create per-worker LLM buffers on __enter__
     try:
-        from .db import get_db
-        from .llms.buffer import init_llm_call_buffer_sync
+        from .core import Config
+        from .db import MongoDB
 
-        mongo_db = get_db()
-        init_llm_call_buffer_sync(redis_url=REDIS_URL, mongo_db=mongo_db)
+        config = Config.from_env()
+        MongoDB.connect(config.mongodb_url, config.mongodb_db)
     except Exception as e:
-        logger.warning(f"Failed to init LLM call buffer: {e}")
+        logger.warning(f"Failed to connect MongoDB in worker init: {e}")
 
 
 @worker_process_shutdown.connect
 def on_worker_shutdown(**kwargs):
-    """Cleanup when worker process shuts down."""
-    import asyncio
+    """Safety net: flush LLM buffer if WorkerContext.__exit__ didn't run.
 
-    # Shutdown LLM call buffer (flush remaining records to MongoDB)
+    This handles the case where Celery kills the worker process (SIGTERM)
+    before the context manager's __exit__ has a chance to run.
+    buffer.stop() is idempotent — safe to call even if already stopped.
+    """
     try:
-        from .llms.buffer import get_llm_call_buffer
+        from .llms.buffer import get_worker_buffer
 
-        buffer = get_llm_call_buffer()
+        buffer = get_worker_buffer()
         if buffer and buffer._running:
-            # Run async shutdown in a new event loop
-            asyncio.run(buffer.stop())
-            logger.info("LLM call buffer shutdown complete")
+            logger.info("worker_process_shutdown: flushing LLM buffer (safety net)")
+            buffer.stop()
     except Exception as e:
-        logger.warning(f"Failed to shutdown LLM call buffer: {e}")
+        sys.stderr.write(f"[CELERY SHUTDOWN] Failed to flush buffer: {e}\n")
+        sys.stderr.flush()
 
 
 # Celery configuration

@@ -19,6 +19,7 @@ Persistence Strategy:
     - Writes directly to 'workers' collection
 """
 
+import os
 import threading
 import time
 from datetime import datetime
@@ -163,12 +164,28 @@ class WorkerContext:
         self._save_lock = threading.Lock()
 
     def __enter__(self) -> "WorkerContext":
-        """Enter context - register and start tracking."""
+        """Enter context - register, start LLM buffer, and start tracking."""
         self.started_at = datetime.now()
         self.status = "running"
 
         with _worker_contexts_lock:
             _worker_contexts[self.worker_id] = self
+
+        # Start per-worker LLM call buffer (Redis real-time + MongoDB periodic flush)
+        try:
+            from ..llms.buffer import WorkerLLMBuffer, set_worker_buffer
+            from ..db import get_database
+
+            redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+            mongo_db = get_database()
+
+            self._llm_buffer = WorkerLLMBuffer(redis_url=redis_url, mongo_db=mongo_db)
+            self._llm_buffer.start()
+            set_worker_buffer(self._llm_buffer)
+            logger.info(f"Worker {self.worker_id[:8]}: LLM buffer started")
+        except Exception as e:
+            logger.warning(f"Failed to start LLM buffer: {e}")
+            self._llm_buffer = None
 
         # Persist initial record to MongoDB (synchronous, must succeed)
         self._save_to_db(force=True)
@@ -177,7 +194,7 @@ class WorkerContext:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Exit context - cleanup and persist."""
+        """Exit context - stop LLM buffer, cleanup, and persist."""
         self.ended_at = datetime.now()
 
         if exc_type:
@@ -186,22 +203,27 @@ class WorkerContext:
         else:
             self.status = "completed"
 
+        # Stop LLM buffer (final flush to MongoDB + cleanup Redis keys)
+        try:
+            from ..llms.buffer import set_worker_buffer
+
+            if getattr(self, "_llm_buffer", None):
+                self._llm_buffer.cleanup_redis_keys(
+                    task_id=self.task_id,
+                    worker_id=self.worker_id,
+                )
+                self._llm_buffer.stop()
+                logger.info(f"Worker {self.worker_id[:8]}: LLM buffer stopped")
+            set_worker_buffer(None)
+        except Exception as e:
+            logger.warning(f"Failed to stop LLM buffer: {e}")
+
         # Remove from global registry
         with _worker_contexts_lock:
             _worker_contexts.pop(self.worker_id, None)
 
         # Persist final state to MongoDB (synchronous, must succeed)
         self._save_to_db(force=True)
-
-        # Cleanup Redis counters for this worker
-        try:
-            from ..llms.buffer import get_llm_call_buffer
-
-            buffer = get_llm_call_buffer()
-            if buffer:
-                buffer.cleanup_worker_counters_sync(self.worker_id)
-        except Exception as e:
-            logger.warning(f"Failed to cleanup worker counters: {e}")
 
     def _save_to_db(self, force: bool = False) -> bool:
         """

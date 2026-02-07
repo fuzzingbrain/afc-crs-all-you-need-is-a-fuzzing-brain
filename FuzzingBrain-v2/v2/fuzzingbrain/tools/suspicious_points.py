@@ -125,13 +125,8 @@ def create_suspicious_point_impl(
             harness_name=harness_name or "",
             sanitizer=sanitizer or "",
             direction_id=direction_id or "",
-            agent_id=agent_id or "",  # Track which agent created this SP
+            agent_id=agent_id or "",
         )
-
-        # Defensive check: server may return non-dict on connection issues
-        if not isinstance(result, dict):
-            logger.error(f"Unexpected response type from server: {type(result).__name__}: {result}")
-            return {"success": False, "error": f"Server returned {type(result).__name__} instead of dict"}
 
         merged = result.get("merged", False)
         sp_id = result.get("id")
@@ -143,8 +138,6 @@ def create_suspicious_point_impl(
             logger.info(
                 f"[NEW SP] {sp_id[:8]} -> {function_name} ({vuln_type}, score={score})"
             )
-            # SP creation is now tracked via AgentContext and MongoDB
-            # No need for reporter - data persisted directly
             return {"success": True, "created": True, "id": sp_id[:8]}
     except Exception as e:
         logger.error(f"Failed to create suspicious point: {e}")
@@ -324,13 +317,8 @@ def create_suspicious_point(
             harness_name=harness_name or "",
             sanitizer=sanitizer or "",
             direction_id=direction_id or "",
-            agent_id=agent_id or "",  # Track which agent created this SP
+            agent_id=agent_id or "",
         )
-
-        # Defensive check: server may return non-dict on connection issues
-        if not isinstance(result, dict):
-            logger.error(f"Unexpected response type from server: {type(result).__name__}: {result}")
-            return {"success": False, "error": f"Server returned {type(result).__name__} instead of dict"}
 
         merged = result.get("merged", False)
         sp_id = result.get("id")

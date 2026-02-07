@@ -92,14 +92,12 @@ def _is_connection_error(e: Exception) -> bool:
 
 def _register_analyzer_tools(mcp: FastMCP) -> None:
     """Register analyzer tools (code analysis via Analysis Server)."""
-    import time
     from loguru import logger
 
     # Import helper functions from analyzer module
     from .analyzer import (
         _get_client,
         _ensure_client,
-        _client_cache,  # Thread-safe cache for debugging
         _invalidate_client,
         _analysis_socket_path,
         _client_id,
@@ -227,34 +225,17 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         Returns:
             source: The complete source code of the function
         """
-        t0 = time.time()
-        # Debug: Check cache state
-        logger.debug(
-            f"[TIMING] get_function_source({function_name}): cache_size={len(_client_cache)}"
-        )
-
         err = _ensure_client()
         if err:
             return err
-        t1 = time.time()
         try:
             client = _get_client()
-            t2 = time.time()
             source = client.get_function_source(function_name)
-            t3 = time.time()
             if source is None:
                 return {
                     "success": False,
                     "error": f"Source not available for function '{function_name}'",
                 }
-
-            # Log timing if slow
-            total = t3 - t0
-            if total > 0.1:
-                logger.debug(
-                    f"[TIMING] get_function_source({function_name}): total={total:.3f}s ensure={t1 - t0:.3f}s get_client={t2 - t1:.3f}s query={t3 - t2:.3f}s"
-                )
-
             return {"success": True, "function_name": function_name, "source": source}
         except Exception as e:
             return _handle_client_error(e)
@@ -273,29 +254,14 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         Returns:
             callers: List of function names that call this function
         """
-        t0 = time.time()
-        # Debug: Check cache state
-        logger.debug(
-            f"[TIMING] get_callers({function_name}): cache_size={len(_client_cache)}"
-        )
-
         err = _ensure_client()
         if err:
             return err
         try:
             client = _get_client()
-            t1 = time.time()
             result = client.get_callers(function_name)
-            t2 = time.time()
             callers = result.get("callers", []) if isinstance(result, dict) else result
             total = len(callers)
-
-            # Log timing if slow
-            if t2 - t0 > 0.1:
-                logger.debug(
-                    f"[TIMING] get_callers({function_name}): total={t2 - t0:.3f}s get_client={t1 - t0:.3f}s query={t2 - t1:.3f}s"
-                )
-
             # Limit to 30 to save context
             return {
                 "success": True,

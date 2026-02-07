@@ -1013,7 +1013,7 @@ class DirectionRepository(BaseRepository[Direction]):
             # Atomic claim
             result = self.collection.find_one_and_update(
                 {
-                    "_id": target.direction_id,
+                    "_id": ObjectId(target.direction_id),
                     "status": DirectionStatus.PENDING.value,
                 },
                 {

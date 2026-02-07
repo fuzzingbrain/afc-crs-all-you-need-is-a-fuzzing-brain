@@ -1089,16 +1089,6 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
 
         # Context exits here, automatically persisting to MongoDB
 
-        # Cleanup Redis counters for this agent
-        try:
-            from ..llms.buffer import get_llm_call_buffer
-
-            buffer = get_llm_call_buffer()
-            if buffer:
-                await buffer.cleanup_agent_counters(agent_id)
-        except Exception as e:
-            self._log(f"Failed to cleanup agent counters: {e}", level="WARNING")
-
         self.end_time = datetime.now()
         duration = (self.end_time - self.start_time).total_seconds()
 

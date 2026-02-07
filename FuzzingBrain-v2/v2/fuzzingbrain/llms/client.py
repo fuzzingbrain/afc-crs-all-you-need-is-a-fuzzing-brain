@@ -32,7 +32,7 @@ from .models import (
     get_model_by_id,
 )
 from ..core.models.llm_call import LLMCall
-from .buffer import get_llm_call_buffer
+from .buffer import get_worker_buffer
 
 
 
@@ -170,14 +170,16 @@ class LLMClient:
         error_msg: Optional[str] = None,
     ) -> None:
         """
-        Record an LLM call to the buffer (sync version - uses memory buffer).
+        Record an LLM call to the worker buffer.
+
+        Thread-safe: buffer.record() is protected by internal lock.
 
         Args:
             response: LLMResponse from the call
             success: Whether the call succeeded
             error_msg: Error message if failed
         """
-        buffer = get_llm_call_buffer()
+        buffer = get_worker_buffer()
         if buffer is None:
             return
 
@@ -200,9 +202,7 @@ class LLMClient:
             error_msg=error_msg,
         )
 
-        # Use memory buffer for sync calls (Redis is async)
-        with buffer._memory_lock:
-            buffer._memory_buffer.append(call.to_dict())
+        buffer.record(call)
 
     async def _arecord_llm_call(
         self,
@@ -211,14 +211,16 @@ class LLMClient:
         error_msg: Optional[str] = None,
     ) -> None:
         """
-        Record an LLM call to the buffer (async version - uses Redis).
+        Record an LLM call to the worker buffer (async version).
+
+        The buffer is sync (threading-based), so this just calls record() directly.
 
         Args:
             response: LLMResponse from the call
             success: Whether the call succeeded
             error_msg: Error message if failed
         """
-        buffer = get_llm_call_buffer()
+        buffer = get_worker_buffer()
         if buffer is None:
             return
 
@@ -241,7 +243,7 @@ class LLMClient:
             error_msg=error_msg,
         )
 
-        await buffer.record(call)
+        buffer.record(call)
 
     @classmethod
     def _ensure_clean_client_cache(cls) -> None:

@@ -105,11 +105,10 @@ from .distributor import (
 )
 
 from .buffer import (
-    LLMCallBuffer,
+    WorkerLLMBuffer,
+    get_worker_buffer,
+    set_worker_buffer,
     get_llm_call_buffer,
-    init_llm_call_buffer,
-    init_llm_call_buffer_sync,
-    shutdown_llm_call_buffer,
 )
 
 __all__ = [
@@ -177,9 +176,8 @@ __all__ = [
     "LLMDistributor",
     "get_distributor",
     # LLM Call Buffer
-    "LLMCallBuffer",
+    "WorkerLLMBuffer",
+    "get_worker_buffer",
+    "set_worker_buffer",
     "get_llm_call_buffer",
-    "init_llm_call_buffer",
-    "init_llm_call_buffer_sync",
-    "shutdown_llm_call_buffer",
 ]

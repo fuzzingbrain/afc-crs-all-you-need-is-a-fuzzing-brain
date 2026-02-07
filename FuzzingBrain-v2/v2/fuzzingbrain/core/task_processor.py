@@ -16,6 +16,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Tuple
+
+from bson import ObjectId
+
 from .logging import logger, create_final_summary, WorkerColors, get_log_dir
 from .config import Config
 from .models import Task, TaskStatus, Fuzzer, FuzzerStatus
@@ -1039,17 +1042,14 @@ class TaskProcessor:
                     else:
                         task.mark_error(f"Timeout after {timeout} minutes")
 
-                    self.repos.tasks.save(task)
+                    # Use update() instead of save() to avoid overwriting
+                    # llm_cost/llm_calls fields that buffer.$inc has accumulated
+                    updates = {"status": task.status.value, "updated_at": task.updated_at}
+                    if task.error_msg:
+                        updates["error_msg"] = task.error_msg
+                    self.repos.tasks.update(task.task_id, updates)
 
-                    # Cleanup Redis counters for this task
-                    try:
-                        from ..llms.buffer import get_llm_call_buffer
-
-                        buffer = get_llm_call_buffer()
-                        if buffer:
-                            buffer.cleanup_task_counters_sync(task.task_id)
-                    except Exception as e:
-                        logger.warning(f"Failed to cleanup task counters: {e}")
+                    # Redis counter cleanup is handled by WorkerContext.__exit__
 
                     # Get worker results for summary
                     worker_results = dispatcher.get_results()
@@ -1067,9 +1067,12 @@ class TaskProcessor:
                     except Exception as e:
                         logger.warning(f"Failed to count merged duplicates: {e}")
 
-                    # Cost tracking now handled via database
-                    # TODO: Implement cost aggregation from agents collection
-                    total_cost = 0.0
+                    # Read cost from database
+                    task_doc = self.repos.tasks.collection.find_one(
+                        {"_id": ObjectId(task.task_id)},
+                        {"llm_cost": 1},
+                    )
+                    total_cost = (task_doc or {}).get("llm_cost", 0.0)
 
                     # Create and output final summary with worker colors via loguru
                     summary = create_final_summary(
@@ -1137,7 +1140,11 @@ class TaskProcessor:
         except Exception as e:
             logger.exception(f"Task processing failed: {e}")
             task.mark_error(str(e))
-            self.repos.tasks.save(task)
+            self.repos.tasks.update(task.task_id, {
+                "status": task.status.value,
+                "error_msg": task.error_msg,
+                "updated_at": task.updated_at,
+            })
 
             return {
                 "task_id": task.task_id,
