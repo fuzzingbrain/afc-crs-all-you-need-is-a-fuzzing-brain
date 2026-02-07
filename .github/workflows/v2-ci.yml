@@ -61,13 +61,27 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt pytest
 
-      - name: Run tests
+      - name: Debug test collection
         run: |
-          python -m pytest tests/ -v --tb=long --import-mode=importlib 2>&1 || {
-            echo "--- Debug: trying direct import ---"
-            python -c "import fuzzingbrain; print('fuzzingbrain OK')"
-            python -c "from tests.test_models import *; print('test_models OK')"
-            exit 1
-          }
+          echo "=== Files in tests/ ==="
+          ls -la tests/
+          echo "=== Try importing test file directly ==="
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          try:
+              import tests.test_models as m
+              print('test_models imported OK, tests:', [x for x in dir(m) if x.startswith('test_')])
+          except Exception as e:
+              print(f'Import failed: {e}')
+              import traceback; traceback.print_exc()
+          "
+          echo "=== pytest collect-only ==="
+          python -m pytest tests/ --collect-only -q 2>&1 || true
+        env:
+          PYTHONPATH: .
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
         env:
           PYTHONPATH: .
