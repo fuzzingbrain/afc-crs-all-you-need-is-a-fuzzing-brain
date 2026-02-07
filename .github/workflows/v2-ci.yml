@@ -62,6 +62,12 @@ jobs:
         run: pip install -r requirements.txt pytest
 
       - name: Run tests
-        run: pytest tests/ -v
+        run: |
+          python -m pytest tests/ -v --tb=long --import-mode=importlib 2>&1 || {
+            echo "--- Debug: trying direct import ---"
+            python -c "import fuzzingbrain; print('fuzzingbrain OK')"
+            python -c "from tests.test_models import *; print('test_models OK')"
+            exit 1
+          }
         env:
           PYTHONPATH: .
