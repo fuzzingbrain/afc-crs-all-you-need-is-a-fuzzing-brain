@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
+from bson import ObjectId
 from fastapi import APIRouter, HTTPException
 import motor.motor_asyncio
 
@@ -114,7 +115,7 @@ async def get_suspicious_point(sp_id: str) -> Dict[str, Any]:
     """Get suspicious point details."""
     db = get_main_db()
 
-    sp = await db.suspicious_points.find_one({"_id": sp_id})
+    sp = await db.suspicious_points.find_one({"_id": ObjectId(sp_id)})
     if not sp:
         raise HTTPException(status_code=404, detail="Suspicious point not found")
 

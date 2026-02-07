@@ -17,26 +17,7 @@ from loguru import logger
 from ..llms import LLMClient, ModelInfo
 from ..tools.mcp_factory import create_isolated_mcp_server
 from ..core.logging import get_agent_banner_and_header, get_agent_log_path
-
-# Lazy import for reporter to avoid circular imports
-_reporter_getter = None
-
-
-def _get_reporter():
-    """Lazy import and get reporter."""
-    global _reporter_getter
-    if _reporter_getter is None:
-        try:
-            from ..eval import get_reporter
-
-            _reporter_getter = get_reporter
-        except ImportError:
-
-            def _null_reporter():
-                return None
-
-            _reporter_getter = _null_reporter
-    return _reporter_getter()
+from .context import AgentContext
 
 
 class BaseAgent(ABC):
@@ -91,7 +72,10 @@ class BaseAgent(ABC):
             fuzzer: Fuzzer name for log path
             sanitizer: Sanitizer name for log path
         """
-        self.llm_client = llm_client or LLMClient()
+        self.llm_client = llm_client or LLMClient(
+            task_id=task_id,
+            worker_id=worker_id,
+        )
         self.model = model
         self.max_iterations = max_iterations
         self.verbose = verbose
@@ -127,6 +111,9 @@ class BaseAgent(ABC):
         # Agent-specific logger
         self._agent_logger = None
         self._log_file: Optional[Path] = None
+
+        # Agent context for isolation (set during run_async)
+        self._context: Optional[AgentContext] = None
 
     @property
     def agent_name(self) -> str:
@@ -184,10 +171,16 @@ class BaseAgent(ABC):
     def mcp_context_id(self) -> str:
         """ID used for MCP tool context lookup.
 
-        Default is worker_id. Override in agents that run in parallel
-        (like SeedAgent) to use a unique per-instance ID to prevent
-        context collision.
+        Returns agent_id from AgentContext if available (unique per instance),
+        otherwise falls back to worker_id.
+
+        AgentContext provides ObjectId-based unique IDs that:
+        - Are globally unique (no collision between parallel agents)
+        - Are persistent (can be stored in MongoDB)
+        - Include timestamp for traceability
         """
+        if self._context:
+            return self._context.agent_id
         return self.worker_id
 
     @property
@@ -214,6 +207,21 @@ class BaseAgent(ABC):
             "Worker ID": self.worker_id,
             "Task ID": self.task_id,
         }
+
+    def _configure_context(self, ctx: AgentContext) -> None:
+        """
+        Configure agent context after creation. Subclasses should override to set
+        specific fields like sp_id, direction_id, delta_id.
+
+        Args:
+            ctx: The AgentContext instance to configure
+        """
+        # Default implementation does nothing
+        # Subclasses can override to set:
+        #   ctx.sp_id = self.suspicious_point_id
+        #   ctx.direction_id = self.direction_id
+        #   ctx.delta_id = self.delta_id
+        pass
 
     def _get_urgency_message(self, iteration: int, remaining: int) -> Optional[str]:
         """
@@ -636,17 +644,9 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             tool_name: Tool name (for tool response messages)
             tool_success: Whether tool succeeded (for tool response messages)
         """
-        # Report to eval system
-        reporter = _get_reporter()
-        if reporter:
-            reporter.log_message(
-                role=role,
-                content=content,
-                tool_calls=tool_calls,
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                tool_success=tool_success,
-            )
+        # Logging is now handled by AgentContext persistence
+        # No need for reporter - data goes directly to MongoDB
+        pass
 
     def _log_conversation(self) -> None:
         """Log the full conversation history to file."""
@@ -786,68 +786,18 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
 
             self._log(f"  Result: {result_str[:500]}...", level="DEBUG")
 
-            # Report tool call to eval system
-            reporter = _get_reporter()
-            if reporter:
-                # Determine tool category
-                tool_category = "general"
-                if tool_name.startswith("get_") or tool_name in [
-                    "search_code",
-                    "is_reachable",
-                ]:
-                    tool_category = "code_analysis"
-                elif (
-                    tool_name.startswith("create_pov")
-                    or tool_name.startswith("verify_pov")
-                    or tool_name == "trace_pov"
-                ):
-                    tool_category = "pov"
-                elif tool_name.startswith("create_sp") or tool_name == "verify_sp":
-                    tool_category = "sp"
-                elif tool_name.startswith("create_direction"):
-                    tool_category = "direction"
-
-                reporter.tool_called(
-                    tool_name=tool_name,
-                    success=True,
-                    latency_ms=latency_ms,
-                    arguments_summary=json.dumps(tool_args, ensure_ascii=False)[:200],
-                    result_size_bytes=len(result_str.encode("utf-8")),
-                    tool_category=tool_category,
-                )
+            # Track tool call in AgentContext (persisted to MongoDB)
+            if self._context:
+                self._context.increment_tool_calls()
 
             return result_str
 
         except Exception as e:
-            t1 = time.time()
-            latency_ms = int((t1 - t0) * 1000)
-            success = False
-            error_message = str(e)
-
-            # Categorize error
-            error_str = str(e).lower()
-            if "not found" in error_str:
-                error_type = "not_found"
-            elif "timeout" in error_str:
-                error_type = "timeout"
-            elif "invalid" in error_str:
-                error_type = "invalid_args"
-            else:
-                error_type = "error"
-
             self._log(f"Tool execution error: {e}", level="ERROR")
 
-            # Report failed tool call to eval system
-            reporter = _get_reporter()
-            if reporter:
-                reporter.tool_called(
-                    tool_name=tool_name,
-                    success=False,
-                    latency_ms=latency_ms,
-                    arguments_summary=json.dumps(tool_args, ensure_ascii=False)[:200],
-                    error_type=error_type,
-                    error_message=error_message[:200],
-                )
+            # Track tool call in AgentContext even on failure
+            if self._context:
+                self._context.increment_tool_calls()
 
             return json.dumps({"success": False, "error": str(e)})
 
@@ -901,10 +851,9 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             self.total_iterations += 1
             remaining = self.max_iterations - iteration
 
-            # Update iteration in reporter context
-            reporter = _get_reporter()
-            if reporter:
-                reporter.set_iteration(iteration)
+            # Update iteration in AgentContext (persisted to MongoDB)
+            if self._context:
+                self._context.increment_iteration()
 
             self._log(
                 f"=== Iteration {iteration}/{self.max_iterations} ===", level="INFO"
@@ -1064,65 +1013,80 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         initial_message = self.get_initial_message(**kwargs)
         self._log(f"Initial message: {initial_message[:500]}...", level="DEBUG")
 
-        # Create unique agent ID
-        agent_id = f"{self.agent_name}_{self.worker_id}_{id(self)}"
+        # Create AgentContext for isolation and persistence
+        # This provides unique ObjectId and lifecycle management for each agent instance
+        # All state is persisted to MongoDB automatically
+        with AgentContext(
+            task_id=self.task_id,
+            worker_id=self.worker_id,
+            agent_type=self.agent_name,
+            target=self.target_name,
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+        ) as ctx:
+            self._context = ctx
+            agent_id = ctx.agent_id  # Use ObjectId from context
 
-        # Get reporter for context tracking
-        reporter = _get_reporter()
+            # Allow subclasses to configure context (set sp_id, direction_id, etc.)
+            self._configure_context(ctx)
 
-        try:
-            # Create an isolated MCP server for this agent
-            # This prevents response mixing when multiple agents run concurrently
-            # Pass worker_id so POV tools can find the right context
-            mcp_server = create_isolated_mcp_server(
-                agent_id=agent_id,
-                worker_id=self.mcp_context_id,  # Bind context_id for POV/seed context lookup
-                include_pov_tools=self.include_pov_tools,  # Only POVAgent needs POV tools
-                include_seed_tools=self.include_seed_tools,  # Only SeedAgent needs seed tools
-                include_sp_tools=self.include_sp_tools,  # DirectionPlanningAgent doesn't need SP tools
-                include_direction_tools=self.include_direction_tools,
-            )
-            self._log(
-                f"Created isolated MCP server: {agent_id} (pov_tools={self.include_pov_tools}, seed_tools={self.include_seed_tools}, sp_tools={self.include_sp_tools})",
-                level="DEBUG",
-            )
+            # Update LLMClient with agent_id for call tracking
+            self.llm_client.agent_id = agent_id
 
-            # Use reporter agent context if available
-            if reporter:
-                # Map agent name to operation phase for tracking
-                operation_map = {
-                    "FullscanSPAgent": "find_sp",
-                    "DirectionPlanningAgent": "find_sp",
-                    "SuspiciousPointAgent": "verify",
-                    "POVAgent": "pov",
-                    "POVReportAgent": "report",
-                }
-                operation = operation_map.get(self.agent_name, self.agent_name.lower())
-                reporter.set_operation(operation)
+            # Update SP context with agent_id for tracking SP creator/verifier
+            from ..tools.suspicious_points import set_sp_agent_id
 
-                with reporter.agent_context(agent_id, self.agent_name):
-                    # Connect to the isolated MCP server and run agent loop
-                    async with Client(mcp_server) as client:
-                        result = await self._run_agent_loop(client, initial_message)
-            else:
-                # No reporter, run without context
+            set_sp_agent_id(agent_id)
+
+            self._log(f"Agent context created: {agent_id}", level="DEBUG")
+
+            try:
+                # Create an isolated MCP server for this agent
+                # This prevents response mixing when multiple agents run concurrently
+                # Pass agent_id for unique context lookup
+                mcp_server = create_isolated_mcp_server(
+                    agent_id=agent_id,
+                    worker_id=agent_id,  # Use agent_id for context isolation
+                    include_pov_tools=self.include_pov_tools,
+                    include_seed_tools=self.include_seed_tools,
+                    include_sp_tools=self.include_sp_tools,
+                    include_direction_tools=self.include_direction_tools,
+                )
+                self._log(
+                    f"Created isolated MCP server: {agent_id} (pov_tools={self.include_pov_tools}, seed_tools={self.include_seed_tools}, sp_tools={self.include_sp_tools})",
+                    level="DEBUG",
+                )
+
+                # Connect to the isolated MCP server and run agent loop
                 async with Client(mcp_server) as client:
                     result = await self._run_agent_loop(client, initial_message)
 
-        except Exception as e:
-            # Check if it's a budget/resource limit (not a real failure)
-            from ..eval import BudgetExceededError
+                # Update context with final stats (auto-persisted on exit)
+                ctx.iterations = self.total_iterations
+                ctx.tool_calls = self.total_tool_calls
+                ctx.result_summary = {
+                    "iterations": self.total_iterations,
+                    "tool_calls": self.total_tool_calls,
+                }
+                if self._log_file:
+                    ctx.log_path = str(self._log_file)
 
-            if isinstance(e, BudgetExceededError):
-                self._log(f"Agent stopped: {e}", level="INFO")
-                result = f"Agent stopped (budget limit): {e}"
-            else:
-                self._log(f"Agent run failed: {e}", level="ERROR")
-                import traceback
+            except Exception as e:
+                # Check if it's a budget/resource limit (not a real failure)
+                from ..eval import BudgetExceededError
 
-                self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
-                self.stop_reason = "error"  # Mark as actual failure
-                result = f"Agent failed: {e}"
+                if isinstance(e, BudgetExceededError):
+                    self._log(f"Agent stopped: {e}", level="INFO")
+                    result = f"Agent stopped (budget limit): {e}"
+                else:
+                    self._log(f"Agent run failed: {e}", level="ERROR")
+                    import traceback
+
+                    self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
+                    self.stop_reason = "error"  # Mark as actual failure
+                    result = f"Agent failed: {e}"
+
+        # Context exits here, automatically persisting to MongoDB
 
         self.end_time = datetime.now()
         duration = (self.end_time - self.start_time).total_seconds()

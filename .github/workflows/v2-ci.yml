@@ -10,6 +10,7 @@ on:
       - main
       - 'feature/**'
       - 'refactor/**'
+      - 'fix/**'
   pull_request:
     paths:
       - 'FuzzingBrain-v2/v2/**'
@@ -41,3 +42,26 @@ jobs:
       - name: Run ruff format check
         run: |
           ruff format fuzzingbrain/ --check --diff
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: FuzzingBrain-v2/v2
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Run tests
+        run: python -m pytest tests/ -v
+        env:
+          PYTHONPATH: .

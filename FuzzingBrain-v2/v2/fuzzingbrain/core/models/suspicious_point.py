@@ -10,7 +10,9 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional, List, Dict
 
-from ..utils import generate_id
+from bson import ObjectId
+
+from ..utils import generate_id, safe_object_id
 
 
 class SPStatus(str, Enum):
@@ -57,6 +59,10 @@ class SuspiciousPoint:
     task_id: str = ""  # Which task this belongs to
     function_name: str = ""  # Which function this belongs to
     direction_id: str = ""  # Which direction this belongs to (SP Find v2)
+
+    # Agent references (ObjectId stored as string)
+    created_by_agent_id: Optional[str] = None  # Which SPG agent created this SP
+    verified_by_agent_id: Optional[str] = None  # Which SPV agent verified this SP
 
     # Sources - which harness/sanitizer combinations discovered this SP
     # Multiple sources indicate the same bug was found by multiple workers (higher confidence)
@@ -131,15 +137,26 @@ class SuspiciousPoint:
     def to_dict(self) -> dict:
         """Convert to dict for MongoDB storage and JSON serialization"""
         return {
-            "_id": self.suspicious_point_id,
-            "suspicious_point_id": self.suspicious_point_id,
-            "task_id": self.task_id,
+            "_id": ObjectId(self.suspicious_point_id)
+            if self.suspicious_point_id
+            else ObjectId(),
+            # Note: suspicious_point_id removed - use _id only
+            "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "direction_id": ObjectId(self.direction_id) if self.direction_id else None,
             "function_name": self.function_name,
+            "created_by_agent_id": ObjectId(self.created_by_agent_id)
+            if self.created_by_agent_id
+            else None,
+            "verified_by_agent_id": ObjectId(self.verified_by_agent_id)
+            if self.verified_by_agent_id
+            else None,
             "sources": self.sources,
             "description": self.description,
             "vuln_type": self.vuln_type,
             "status": self.status,
-            "processor_id": self.processor_id,
+            "processor_id": safe_object_id(self.processor_id)
+            if self.processor_id
+            else None,
             "is_checked": self.is_checked,
             "is_real": self.is_real,
             "score": self.score,
@@ -152,7 +169,7 @@ class SuspiciousPoint:
             "merged_duplicates": self.merged_duplicates,
             "verification_notes": self.verification_notes,
             "pov_guidance": self.pov_guidance,
-            "pov_id": self.pov_id,
+            "pov_id": ObjectId(self.pov_id) if self.pov_id else None,
             "pov_success_by": self.pov_success_by,
             "pov_attempted_by": self.pov_attempted_by,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -178,6 +195,35 @@ class SuspiciousPoint:
         if created_at is None:
             created_at = datetime.now()
 
+        # Handle ObjectId conversion
+        suspicious_point_id = data.get("suspicious_point_id") or data.get("_id")
+        if isinstance(suspicious_point_id, ObjectId):
+            suspicious_point_id = str(suspicious_point_id)
+
+        task_id = data.get("task_id", "")
+        if isinstance(task_id, ObjectId):
+            task_id = str(task_id)
+
+        direction_id = data.get("direction_id", "")
+        if isinstance(direction_id, ObjectId):
+            direction_id = str(direction_id)
+
+        created_by_agent_id = data.get("created_by_agent_id")
+        if isinstance(created_by_agent_id, ObjectId):
+            created_by_agent_id = str(created_by_agent_id)
+
+        verified_by_agent_id = data.get("verified_by_agent_id")
+        if isinstance(verified_by_agent_id, ObjectId):
+            verified_by_agent_id = str(verified_by_agent_id)
+
+        pov_id = data.get("pov_id")
+        if isinstance(pov_id, ObjectId):
+            pov_id = str(pov_id)
+
+        processor_id = data.get("processor_id")
+        if isinstance(processor_id, ObjectId):
+            processor_id = str(processor_id)
+
         # Handle backward compatibility: convert old harness_name/sanitizer to sources
         sources = data.get("sources", [])
         if not sources and (data.get("harness_name") or data.get("sanitizer")):
@@ -189,16 +235,17 @@ class SuspiciousPoint:
             ]
 
         return cls(
-            suspicious_point_id=data.get(
-                "suspicious_point_id", data.get("_id", generate_id())
-            ),
-            task_id=data.get("task_id", ""),
+            suspicious_point_id=suspicious_point_id or generate_id(),
+            task_id=task_id,
             function_name=data.get("function_name", ""),
+            direction_id=direction_id,
+            created_by_agent_id=created_by_agent_id,
+            verified_by_agent_id=verified_by_agent_id,
             sources=sources,
             description=data.get("description", ""),
             vuln_type=data.get("vuln_type", ""),
             status=data.get("status", SPStatus.PENDING_VERIFY.value),
-            processor_id=data.get("processor_id"),
+            processor_id=processor_id,
             is_checked=data.get("is_checked", False),
             is_real=data.get("is_real", False),
             score=data.get("score", 0.0),
@@ -211,7 +258,7 @@ class SuspiciousPoint:
             merged_duplicates=data.get("merged_duplicates", []),
             verification_notes=data.get("verification_notes"),
             pov_guidance=data.get("pov_guidance"),
-            pov_id=data.get("pov_id"),
+            pov_id=pov_id,
             pov_success_by=data.get("pov_success_by"),
             pov_attempted_by=data.get("pov_attempted_by", []),
             created_at=created_at,

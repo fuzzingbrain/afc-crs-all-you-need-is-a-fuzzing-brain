@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
+from bson import ObjectId
 from fastapi import APIRouter, HTTPException
 
 from .suspicious_points import get_main_db, _format_datetime
@@ -75,7 +76,7 @@ async def get_direction(direction_id: str) -> Dict[str, Any]:
     """Get direction details."""
     db = get_main_db()
 
-    d = await db.directions.find_one({"_id": direction_id})
+    d = await db.directions.find_one({"_id": ObjectId(direction_id)})
     if not d:
         raise HTTPException(status_code=404, detail="Direction not found")
 

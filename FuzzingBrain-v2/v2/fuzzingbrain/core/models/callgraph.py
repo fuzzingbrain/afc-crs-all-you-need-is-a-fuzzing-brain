@@ -8,6 +8,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List
 
+from bson import ObjectId
+
+from ..utils import safe_object_id
+
 
 @dataclass
 class CallGraphNode:
@@ -45,11 +49,12 @@ class CallGraphNode:
 
     def to_dict(self) -> dict:
         """Convert to dictionary for MongoDB storage"""
+        # Use safe_object_id for fuzzer_id to handle fuzzer names from introspector
         return {
-            "_id": self.node_id,
-            "node_id": self.node_id,
-            "task_id": self.task_id,
-            "fuzzer_id": self.fuzzer_id,
+            "_id": self.node_id,  # Composite key: {task_id}_{fuzzer_id}_{function_name}
+            # Note: node_id removed - use _id only
+            "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "fuzzer_id": safe_object_id(self.fuzzer_id),
             "fuzzer_name": self.fuzzer_name,
             "function_name": self.function_name,
             "callers": self.callers,
@@ -61,10 +66,19 @@ class CallGraphNode:
     @classmethod
     def from_dict(cls, data: dict) -> "CallGraphNode":
         """Create CallGraphNode from dictionary"""
+        # Handle ObjectId conversion
+        task_id = data.get("task_id", "")
+        if isinstance(task_id, ObjectId):
+            task_id = str(task_id)
+
+        fuzzer_id = data.get("fuzzer_id", "")
+        if isinstance(fuzzer_id, ObjectId):
+            fuzzer_id = str(fuzzer_id)
+
         return cls(
             node_id=data.get("node_id", data.get("_id", "")),
-            task_id=data.get("task_id", ""),
-            fuzzer_id=data.get("fuzzer_id", ""),
+            task_id=task_id,
+            fuzzer_id=fuzzer_id,
             fuzzer_name=data.get("fuzzer_name", ""),
             function_name=data.get("function_name", ""),
             callers=data.get("callers", []),

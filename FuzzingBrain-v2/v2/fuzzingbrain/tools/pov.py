@@ -32,6 +32,7 @@ from .coverage import (
 )
 from ..core.models import POV
 from ..core.pov_packager import POVPackager
+from ..core.utils import generate_id
 from ..db import RepositoryManager
 
 
@@ -64,6 +65,7 @@ def set_pov_context(
     workspace_path: Optional[Path] = None,
     fuzzer_source: Optional[str] = None,
     fuzzer_manager=None,  # FuzzerManager instance for SP Fuzzer integration
+    agent_id: Optional[str] = None,  # Agent ObjectId for tracking POV creator
 ) -> None:
     """
     Set the context for POV tools (thread-safe).
@@ -83,6 +85,7 @@ def set_pov_context(
         workspace_path: Path to workspace directory
         fuzzer_source: Fuzzer harness source code
         fuzzer_manager: FuzzerManager instance for SP Fuzzer corpus integration
+        agent_id: Agent ObjectId for tracking which POVAgent created POVs
     """
     ctx = {
         "task_id": task_id,
@@ -99,6 +102,7 @@ def set_pov_context(
         "workspace_path": Path(workspace_path).absolute() if workspace_path else None,
         "fuzzer_source": fuzzer_source,
         "fuzzer_manager": fuzzer_manager,
+        "agent_id": agent_id,
     }
     with _pov_contexts_lock:
         _pov_contexts[worker_id] = ctx
@@ -820,7 +824,7 @@ def _create_pov_core(
         return {"success": False, "error": "description is required"}
 
     # Generate unique generation_id for this batch
-    generation_id = str(uuid.uuid4())
+    generation_id = generate_id()
 
     # Execute generator code
     logger.info(f"[POV] Executing generator code for SP {suspicious_point_id[:8]}...")
@@ -852,7 +856,7 @@ def _create_pov_core(
     fuzzer_manager = ctx.get("fuzzer_manager")
 
     for variant_idx, blob in enumerate(blobs, start=1):
-        pov_id = str(uuid.uuid4())
+        pov_id = generate_id()
 
         # Save blob to file
         blob_path = None
@@ -886,6 +890,7 @@ def _create_pov_core(
             task_id=task_id,
             suspicious_point_id=suspicious_point_id,
             generation_id=generation_id,
+            agent_id=ctx.get("agent_id"),  # Track which POVAgent created this
             iteration=current_iteration,
             attempt=current_attempt,
             variant=variant_idx,
@@ -961,12 +966,13 @@ def _create_pov_core(
                             f"[POV] ✓ POV {pov_id[:8]} also crashed on {other_fuzzer.fuzzer_name}!"
                         )
                         # Create new POV record for this fuzzer
-                        cross_pov_id = str(uuid.uuid4())
+                        cross_pov_id = generate_id()
                         cross_pov = POV(
                             pov_id=cross_pov_id,
                             task_id=task_id,
                             suspicious_point_id=suspicious_point_id,
                             generation_id=generation_id,
+                            agent_id=ctx.get("agent_id"),  # Inherit from original POV
                             iteration=current_iteration,
                             attempt=current_attempt,
                             variant=pov.variant,

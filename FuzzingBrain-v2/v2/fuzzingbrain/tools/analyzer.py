@@ -46,7 +46,6 @@ def _invalidate_client(cache_key: Tuple[str, str]) -> None:
             except Exception:
                 pass
             del _client_cache[cache_key]
-            logger.debug(f"[CACHE] Invalidated client for {cache_key[1]}")
 
 
 def set_analyzer_context(socket_path: str, client_id: str = "mcp_agent") -> None:
@@ -79,10 +78,6 @@ def _get_client() -> Optional[AnalysisClient]:
     - Clients are reused across multiple tool calls from the same agent
     - Thread-safe access from asyncio.to_thread() worker threads
     """
-    import time
-
-    t0 = time.time()
-
     socket_path = _analysis_socket_path.get()
     if socket_path is None:
         return None
@@ -93,7 +88,6 @@ def _get_client() -> Optional[AnalysisClient]:
     # Fast path: check if client exists (without lock for read)
     client = _client_cache.get(cache_key)
     if client is not None:
-        logger.debug(f"[TIMING] Reusing cached AnalysisClient for {client_id}")
         return client
 
     # Slow path: create client with lock
@@ -101,39 +95,23 @@ def _get_client() -> Optional[AnalysisClient]:
         # Double-check after acquiring lock
         client = _client_cache.get(cache_key)
         if client is not None:
-            logger.debug(
-                f"[TIMING] Reusing cached AnalysisClient for {client_id} (after lock)"
-            )
             return client
 
-        logger.debug(f"[TIMING] Creating new AnalysisClient for {client_id}")
-        t1 = time.time()
         try:
             client = AnalysisClient(
                 socket_path,
                 client_id=client_id,
             )
-            t2 = time.time()
-            logger.debug(f"[TIMING] AnalysisClient created in {t2 - t1:.3f}s")
 
             if not client.ping():
                 logger.warning(f"Analysis Server not responding for {client_id}")
                 return None
 
-            t3 = time.time()
-            logger.debug(f"[TIMING] ping() completed in {t3 - t2:.3f}s")
-
-            # Cache the client
             _client_cache[cache_key] = client
-            logger.debug(f"[TIMING] Cached AnalysisClient for {client_id}")
 
         except Exception as e:
             logger.warning(f"Failed to connect to Analysis Server: {e}")
             return None
-
-    t_end = time.time()
-    if t_end - t0 > 0.1:  # Only log if > 100ms
-        logger.debug(f"[TIMING] _get_client total: {t_end - t0:.3f}s")
 
     return client
 
@@ -685,7 +663,7 @@ __all__ = [
     # Context
     "set_analyzer_context",
     "get_analyzer_context",
-    "_client_cache",  # For debugging cache state
+    "_client_cache",
     # Server control
     "analyzer_status",
     # Function queries

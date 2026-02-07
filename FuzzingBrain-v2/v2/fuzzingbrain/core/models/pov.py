@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional, List
 
+from bson import ObjectId
+
 from ..utils import generate_id
 
 
@@ -26,6 +28,13 @@ class POV:
     generation_id: str = (
         ""  # Group POVs from same generation (same code, multiple variants)
     )
+
+    # Agent reference (ObjectId stored as string)
+    agent_id: Optional[str] = None  # Which POVAgent created this POV
+
+    # Source tracking - where this POV came from
+    source: str = "agent"  # "agent" | "global_fuzzer" | "sp_fuzzer"
+    source_worker_id: Optional[str] = None  # Worker ID for fuzzer-discovered POVs
 
     # Iteration tracking (for model evaluation)
     iteration: int = 0  # Which agent loop iteration when created
@@ -66,11 +75,16 @@ class POV:
     def to_dict(self) -> dict:
         """Convert to dictionary for MongoDB storage"""
         return {
-            "_id": self.pov_id,
-            "pov_id": self.pov_id,
-            "task_id": self.task_id,
-            "suspicious_point_id": self.suspicious_point_id,
+            "_id": ObjectId(self.pov_id) if self.pov_id else ObjectId(),
+            # Note: pov_id removed - use _id only
+            "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "suspicious_point_id": ObjectId(self.suspicious_point_id)
+            if self.suspicious_point_id
+            else None,
             "generation_id": self.generation_id,
+            "agent_id": ObjectId(self.agent_id) if self.agent_id else None,
+            "source": self.source,
+            "source_worker_id": self.source_worker_id,  # Store as string (metadata, not a reference)
             "iteration": self.iteration,
             "attempt": self.attempt,
             "variant": self.variant,
@@ -94,11 +108,35 @@ class POV:
     @classmethod
     def from_dict(cls, data: dict) -> "POV":
         """Create POV from dictionary"""
+        # Handle ObjectId conversion
+        pov_id = data.get("pov_id") or data.get("_id")
+        if isinstance(pov_id, ObjectId):
+            pov_id = str(pov_id)
+
+        task_id = data.get("task_id", "")
+        if isinstance(task_id, ObjectId):
+            task_id = str(task_id)
+
+        agent_id = data.get("agent_id")
+        if isinstance(agent_id, ObjectId):
+            agent_id = str(agent_id)
+
+        source_worker_id = data.get("source_worker_id")
+        if isinstance(source_worker_id, ObjectId):
+            source_worker_id = str(source_worker_id)
+
+        suspicious_point_id = data.get("suspicious_point_id", "")
+        if isinstance(suspicious_point_id, ObjectId):
+            suspicious_point_id = str(suspicious_point_id)
+
         return cls(
-            pov_id=data.get("pov_id", data.get("_id", generate_id())),
-            task_id=data.get("task_id", ""),
-            suspicious_point_id=data.get("suspicious_point_id", ""),
+            pov_id=pov_id or generate_id(),
+            task_id=task_id,
+            suspicious_point_id=suspicious_point_id,
             generation_id=data.get("generation_id", ""),
+            agent_id=agent_id,
+            source=data.get("source", "agent"),
+            source_worker_id=source_worker_id,
             iteration=data.get("iteration", 0),
             attempt=data.get("attempt", 1),
             variant=data.get("variant", 1),

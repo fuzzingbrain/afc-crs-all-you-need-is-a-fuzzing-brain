@@ -17,6 +17,8 @@ from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 from loguru import logger
 
+from bson import ObjectId
+
 from .protocol import (
     Request,
     Response,
@@ -41,20 +43,27 @@ def _serialize_doc(doc: dict) -> dict:
     """
     Serialize MongoDB document for JSON response.
 
-    Converts datetime objects to ISO strings.
+    Converts ObjectId and datetime objects to strings for JSON serialization.
     """
     if not doc:
         return doc
 
     result = {}
     for key, value in doc.items():
-        if isinstance(value, datetime):
+        if isinstance(value, ObjectId):
+            result[key] = str(value)
+        elif isinstance(value, datetime):
             result[key] = value.isoformat()
         elif isinstance(value, dict):
             result[key] = _serialize_doc(value)
         elif isinstance(value, list):
             result[key] = [
-                _serialize_doc(v) if isinstance(v, dict) else v for v in value
+                _serialize_doc(v)
+                if isinstance(v, dict)
+                else str(v)
+                if isinstance(v, ObjectId)
+                else v
+                for v in value
             ]
         else:
             result[key] = value
@@ -111,7 +120,9 @@ class AnalysisServer:
         work_id: Optional[str] = None,
         fuzzer_sources: Optional[Dict[str, str]] = None,
     ):
-        self.task_id = task_id
+        # Store task_id as ObjectId for consistent MongoDB queries
+        # String representation is used for socket paths and logging
+        self.task_id = ObjectId(task_id) if isinstance(task_id, str) else task_id
         self.task_path = Path(task_path)
         self.project_name = project_name
         self.sanitizers = sanitizers
@@ -125,7 +136,7 @@ class AnalysisServer:
 
         # Socket path in /tmp to avoid path length limit (108 chars max for Unix sockets)
         # Use task_id to ensure uniqueness
-        self.socket_path = Path(f"/tmp/fuzzingbrain_{task_id}.sock")
+        self.socket_path = Path(f"/tmp/fuzzingbrain_{self.task_id}.sock")
 
         # Server state
         self.server: Optional[asyncio.AbstractServer] = None
@@ -1360,6 +1371,7 @@ class AnalysisServer:
         score: float,
         important_controlflow: list,
         direction_id: str = "",
+        agent_id: str = "",
     ) -> str:
         """Sync: Create and save a new SP."""
         from ..core.models import SuspiciousPoint
@@ -1368,6 +1380,7 @@ class AnalysisServer:
             task_id=self.task_id,
             function_name=function_name,
             direction_id=direction_id,
+            created_by_agent_id=agent_id if agent_id else None,
             sources=[{"harness_name": harness_name, "sanitizer": sanitizer}],
             description=description,
             vuln_type=vuln_type,
@@ -1397,6 +1410,7 @@ class AnalysisServer:
         score = params.get("score", 0.0)
         important_controlflow = params.get("important_controlflow", [])
         direction_id = params.get("direction_id", "")
+        agent_id = params.get("agent_id", "")  # Agent that created this SP
 
         # Check for duplicates in the same function (MongoDB query in thread pool)
         existing_sp_dicts = await self._run_sync(
@@ -1443,6 +1457,7 @@ class AnalysisServer:
             score,
             important_controlflow,
             direction_id,
+            agent_id,
         )
 
         self._log(
@@ -1484,8 +1499,19 @@ class AnalysisServer:
             updates["verification_notes"] = params["verification_notes"]
         if "pov_guidance" in params:
             updates["pov_guidance"] = params["pov_guidance"]
+        if "reachability_status" in params:
+            updates["reachability_status"] = params["reachability_status"]
+        if "reachability_multiplier" in params:
+            updates["reachability_multiplier"] = params["reachability_multiplier"]
+        if "reachability_reason" in params:
+            updates["reachability_reason"] = params["reachability_reason"]
         if params.get("is_checked"):
             updates["checked_at"] = datetime.now()
+        # Track which agent verified this SP
+        if params.get("agent_id") and params.get("is_checked"):
+            from bson import ObjectId
+
+            updates["verified_by_agent_id"] = ObjectId(params["agent_id"])
 
         self._log(
             f"Updating suspicious point {suspicious_point_id[:8]}... with: is_checked={updates.get('is_checked')}, score={updates.get('score')}"
@@ -1562,8 +1588,10 @@ class AnalysisServer:
         """Sync implementation of _create_direction."""
         from ..core.models import Direction
 
+        agent_id = params.get("agent_id", "")
         direction = Direction(
             task_id=self.task_id,
+            created_by_agent_id=agent_id if agent_id else None,
             name=params.get("name", ""),
             risk_level=params.get("risk_level", "medium"),
             risk_reason=params.get("risk_reason", ""),

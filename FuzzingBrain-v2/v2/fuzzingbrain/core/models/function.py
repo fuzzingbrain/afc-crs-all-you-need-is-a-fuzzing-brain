@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import List
 
+from bson import ObjectId
+
 
 @dataclass
 class Function:
@@ -63,9 +65,9 @@ class Function:
     def to_dict(self) -> dict:
         """Convert to dictionary for MongoDB storage and JSON serialization"""
         return {
-            "_id": self.function_id,
-            "function_id": self.function_id,
-            "task_id": self.task_id,
+            "_id": self.function_id,  # Composite key: {task_id}_{name}
+            # Note: function_id removed - use _id only
+            "task_id": ObjectId(self.task_id) if self.task_id else None,
             "name": self.name,
             "file_path": self.file_path,
             "start_line": self.start_line,
@@ -73,7 +75,9 @@ class Function:
             "content": self.content,
             "cyclomatic_complexity": self.cyclomatic_complexity,
             "reached_by_fuzzers": self.reached_by_fuzzers,
-            "analyzed_by_directions": self.analyzed_by_directions,
+            "analyzed_by_directions": [ObjectId(d) for d in self.analyzed_by_directions]
+            if self.analyzed_by_directions
+            else [],
             "language": self.language,
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
@@ -88,9 +92,14 @@ class Function:
         elif created_at is None:
             created_at = datetime.now()
 
+        # Handle ObjectId conversion
+        task_id = data.get("task_id", "")
+        if isinstance(task_id, ObjectId):
+            task_id = str(task_id)
+
         return cls(
             function_id=data.get("function_id", data.get("_id", "")),
-            task_id=data.get("task_id", ""),
+            task_id=task_id,
             name=data.get("name", ""),
             file_path=data.get("file_path", ""),
             start_line=data.get("start_line", 0),
@@ -98,7 +107,10 @@ class Function:
             content=data.get("content", ""),
             cyclomatic_complexity=data.get("cyclomatic_complexity", 0),
             reached_by_fuzzers=data.get("reached_by_fuzzers", []),
-            analyzed_by_directions=data.get("analyzed_by_directions", []),
+            analyzed_by_directions=[
+                str(d) if isinstance(d, ObjectId) else d
+                for d in data.get("analyzed_by_directions", [])
+            ],
             language=data.get("language", "c"),
             created_at=created_at,
         )

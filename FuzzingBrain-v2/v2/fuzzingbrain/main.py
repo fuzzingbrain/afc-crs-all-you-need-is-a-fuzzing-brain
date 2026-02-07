@@ -119,19 +119,26 @@ def signal_handler(signum, frame):
             try:
                 from .core.logging import create_final_summary
                 from datetime import datetime
+                from bson import ObjectId as _ObjectId
 
                 # Find the most recent task
                 recent_task = _repos.tasks.collection.find_one(
                     {"status": "cancelled"}, sort=[("created_at", -1)]
                 )
                 if recent_task:
-                    task_id = recent_task.get(
-                        "task_id", recent_task.get("_id", "unknown")
+                    raw_task_id = (
+                        recent_task.get("task_id")
+                        or recent_task.get("_id")
+                        or "unknown"
                     )
+                    task_id = str(raw_task_id)
+                    task_oid = _ObjectId(task_id) if len(task_id) == 24 else task_id
                     project_name = recent_task.get("project_name", "unknown")
 
                     # Get workers for this task
-                    workers = list(_repos.workers.collection.find({"task_id": task_id}))
+                    workers = list(
+                        _repos.workers.collection.find({"task_id": task_oid})
+                    )
                     worker_results = []
                     for w in workers:
                         started = w.get("started_at")
@@ -145,7 +152,7 @@ def signal_handler(signum, frame):
                         # Query SP count from database (like get_all_worker_results)
                         sp_count = _repos.suspicious_points.count(
                             {
-                                "task_id": task_id,
+                                "task_id": task_oid,
                                 "sources": {
                                     "$elemMatch": {
                                         "harness_name": fuzzer,
@@ -157,10 +164,10 @@ def signal_handler(signum, frame):
 
                         # Query POV count from database
                         worker_sp_ids = [
-                            sp.get("suspicious_point_id") or sp.get("_id")
+                            str(sp.get("suspicious_point_id") or sp.get("_id"))
                             for sp in _repos.suspicious_points.collection.find(
                                 {
-                                    "task_id": task_id,
+                                    "task_id": task_oid,
                                     "sources": {
                                         "$elemMatch": {
                                             "harness_name": fuzzer,
@@ -173,19 +180,24 @@ def signal_handler(signum, frame):
                         ]
                         pov_count = 0
                         if worker_sp_ids:
+                            # Convert to ObjectId — POV documents store suspicious_point_id as ObjectId
+                            sp_oids = []
+                            for x in worker_sp_ids:
+                                try:
+                                    sp_oids.append(_ObjectId(x))
+                                except Exception:
+                                    sp_oids.append(x)
                             pov_count = _repos.povs.count(
                                 {
-                                    "task_id": task_id,
-                                    "suspicious_point_id": {
-                                        "$in": [str(x) for x in worker_sp_ids]
-                                    },
+                                    "task_id": task_oid,
+                                    "suspicious_point_id": {"$in": sp_oids},
                                     "is_successful": True,
                                 }
                             )
                         # Also count fuzzer-discovered POVs
                         fuzzer_pov_count = _repos.povs.count(
                             {
-                                "task_id": task_id,
+                                "task_id": task_oid,
                                 "harness_name": fuzzer,
                                 "sanitizer": sanitizer,
                                 "suspicious_point_id": {"$in": ["", None]},
@@ -201,25 +213,14 @@ def signal_handler(signum, frame):
                                 "status": w.get("status", "cancelled"),
                                 "duration_str": f"{duration_sec / 60:.1f}m",
                                 "sps_found": sp_count,
-                                "povs_found": pov_count,
-                                "patches_found": w.get("patches_found", 0),
+                                "pov_generated": pov_count,
+                                "patch_generated": w.get("patch_generated", 0),
                             }
                         )
 
-                    # Get cost info
-                    total_cost = 0.0
-                    budget_limit = 0.0
-                    try:
-                        from .eval import get_reporter
-
-                        reporter = get_reporter()
-                        if reporter:
-                            if hasattr(reporter, "get_current_cost"):
-                                total_cost = reporter.get_current_cost()
-                            if hasattr(reporter, "budget_limit"):
-                                budget_limit = reporter.budget_limit
-                    except Exception:
-                        pass
+                    # Read cost from database
+                    total_cost = recent_task.get("llm_cost", 0.0)
+                    budget_limit = recent_task.get("budget_limit", 0.0)
 
                     # Calculate elapsed time
                     created_at = recent_task.get("created_at", datetime.now())
@@ -625,9 +626,9 @@ def process_task(task: Task, config: Config) -> dict:
 
 def create_task_from_config(config: Config) -> Task:
     """Create a Task object from Config"""
-    import uuid
+    from bson import ObjectId
 
-    task_id = config.task_id or str(uuid.uuid4())[:8]
+    task_id = config.task_id or str(ObjectId())
 
     return Task(
         task_id=task_id,
@@ -643,10 +644,16 @@ def create_task_from_config(config: Config) -> Task:
         else None,
         repo_url=config.repo_url,
         project_name=config.project_name,
+        ossfuzz_project_name=config.ossfuzz_project_name,
         sanitizers=config.sanitizers,
         timeout_minutes=config.timeout_minutes,
+        pov_count=config.pov_count,
+        budget_limit=config.budget_limit,
+        target_commit=config.target_commit,
         base_commit=config.base_commit,
         delta_commit=config.delta_commit,
+        fuzz_tooling_url=config.fuzz_tooling_url,
+        fuzz_tooling_ref=config.fuzz_tooling_ref,
         is_fuzz_tooling_provided=config.fuzz_tooling_path is not None,
     )
 
@@ -726,7 +733,7 @@ def setup_workspace(config: Config) -> Config:
 
     Returns updated config with workspace path set.
     """
-    import uuid
+    from bson import ObjectId
     import subprocess
     import shutil
     import tempfile
@@ -735,7 +742,7 @@ def setup_workspace(config: Config) -> Config:
     workspace_base = script_dir / "workspace"
 
     # Generate task ID if not provided
-    task_id = config.task_id or str(uuid.uuid4())[:8]
+    task_id = config.task_id or str(ObjectId())
     config.task_id = task_id
 
     # Determine project name
@@ -1115,23 +1122,13 @@ def main():
     config = create_config_from_args(args)
 
     # =========================================================================
-    # Initialize Evaluation Reporter (from config or environment variable)
+    # Evaluation Reporter removed - using MongoDB persistence instead
+    # Worker/Agent context is now handled via WorkerContext/AgentContext
     # =========================================================================
-    eval_server = config.eval_server or os.environ.get("FUZZINGBRAIN_EVAL_SERVER")
-    if eval_server:
-        from .eval import create_reporter
-
-        create_reporter(
-            server_url=eval_server,
-            level="normal",
-            budget_limit=config.budget_limit,
-            pov_count=config.pov_count,
-        )
-        print(f"\033[0;36m[EVAL]\033[0m Reporting to: {eval_server}")
-        if config.budget_limit > 0:
-            print(f"\033[0;36m[EVAL]\033[0m Budget limit: ${config.budget_limit:.2f}")
-        if config.pov_count > 0:
-            print(f"\033[0;36m[EVAL]\033[0m POV count limit: {config.pov_count}")
+    if config.budget_limit > 0:
+        print(f"\033[0;36m[CONFIG]\033[0m Budget limit: ${config.budget_limit:.2f}")
+    if config.pov_count > 0:
+        print(f"\033[0;36m[CONFIG]\033[0m POV count limit: {config.pov_count}")
 
     # Show fuzzer filter if specified
     if config.fuzzer_filter:

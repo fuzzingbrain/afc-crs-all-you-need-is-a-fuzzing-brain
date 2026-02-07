@@ -24,7 +24,7 @@ from typing import Any, Dict, Optional
 
 from loguru import logger
 
-from ..agents import SuspiciousPointAgent, POVAgent
+from ..agents import SPVerifier, POVAgent
 from ..core.models import SPStatus
 from ..db import RepositoryManager
 from ..tools.analyzer import set_analyzer_context
@@ -219,7 +219,7 @@ class AgentPipeline:
 
         Agent continuously:
         1. Claims a pending_verify SP
-        2. Verifies it using SuspiciousPointAgent
+        2. Verifies it using SPVerifier
         3. Updates status (verified or pending_pov)
         4. Repeats until no more work
 
@@ -294,19 +294,19 @@ class AgentPipeline:
                 # Run verification agent
                 # Extract index from agent_id (e.g., "verify_1" -> 1)
                 agent_index = int(agent_id.split("_")[1]) if "_" in agent_id else 0
-                verify_agent = SuspiciousPointAgent(
-                    mode="verify",
+                verify_agent = SPVerifier(
+                    # Note: mode removed - SPVerifier is always for verification
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
                     scan_mode=self.scan_mode,  # Use pipeline's scan_mode
                     model=CLAUDE_SONNET_4_5,  # Force Sonnet for SP analysis
                     task_id=self.task_id,
-                    worker_id=agent_id,
+                    worker_id=self.worker_id,  # Use actual worker_id, not agent_id
                     log_dir=self.log_dir,
                     index=agent_index,
                     target_name=sp.function_name or "",
                 )
-                verify_agent.set_verify_context(sp.to_dict())
+                verify_agent.set_context(suspicious_point=sp.to_dict())
 
                 # Run async with fuzzer code for context
                 await verify_agent.run_async(
@@ -511,7 +511,7 @@ class AgentPipeline:
                     sanitizer=self.sanitizer,
                     model=CLAUDE_SONNET_4_5,  # Force Sonnet for POV generation
                     task_id=self.task_id,
-                    worker_id=agent_id,
+                    worker_id=self.worker_id,  # Use actual worker_id, not agent_id
                     output_dir=self.output_dir,
                     log_dir=self.log_dir,
                     repos=self.repos,

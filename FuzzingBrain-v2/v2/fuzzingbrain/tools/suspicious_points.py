@@ -27,9 +27,15 @@ _sp_sanitizer: ContextVar[Optional[str]] = ContextVar("sp_sanitizer", default=No
 _sp_direction_id: ContextVar[Optional[str]] = ContextVar(
     "sp_direction_id", default=None
 )
+_sp_agent_id: ContextVar[Optional[str]] = ContextVar("sp_agent_id", default=None)
 
 
-def set_sp_context(harness_name: str, sanitizer: str, direction_id: str = "") -> None:
+def set_sp_context(
+    harness_name: str,
+    sanitizer: str,
+    direction_id: str = "",
+    agent_id: str = "",
+) -> None:
     """
     Set the context for SP tools.
 
@@ -43,18 +49,41 @@ def set_sp_context(harness_name: str, sanitizer: str, direction_id: str = "") ->
         harness_name: Fuzzer harness name (e.g., "fuzz_png")
         sanitizer: Sanitizer type (e.g., "address")
         direction_id: Direction ID for linking SP to direction
+        agent_id: Agent ObjectId for tracking SP creator/verifier
     """
     _sp_harness_name.set(harness_name)
     _sp_sanitizer.set(sanitizer)
     _sp_direction_id.set(direction_id)
+    _sp_agent_id.set(agent_id)
     logger.debug(
-        f"SP context set: harness_name={harness_name}, sanitizer={sanitizer}, direction_id={direction_id}"
+        f"SP context set: harness_name={harness_name}, sanitizer={sanitizer}, direction_id={direction_id}, agent_id={agent_id[:8] if agent_id else 'none'}"
     )
 
 
-def get_sp_context() -> Tuple[Optional[str], Optional[str], Optional[str]]:
-    """Get the current SP context (harness_name, sanitizer, direction_id)."""
-    return _sp_harness_name.get(), _sp_sanitizer.get(), _sp_direction_id.get()
+def get_sp_context() -> Tuple[
+    Optional[str], Optional[str], Optional[str], Optional[str]
+]:
+    """Get the current SP context (harness_name, sanitizer, direction_id, agent_id)."""
+    return (
+        _sp_harness_name.get(),
+        _sp_sanitizer.get(),
+        _sp_direction_id.get(),
+        _sp_agent_id.get(),
+    )
+
+
+def set_sp_agent_id(agent_id: str) -> None:
+    """
+    Set only the agent_id in SP context.
+
+    This should be called by agents when they start running, so they can
+    be tracked as the creator/verifier of SPs without changing other context.
+
+    Args:
+        agent_id: Agent ObjectId for tracking SP creator/verifier
+    """
+    _sp_agent_id.set(agent_id)
+    logger.debug(f"SP agent_id set: {agent_id[:8] if agent_id else 'none'}")
 
 
 # Aliases for mcp_factory compatibility
@@ -63,7 +92,7 @@ _get_sp_context = get_sp_context
 
 def _ensure_sp_context() -> Optional[Dict[str, Any]]:
     """Ensure SP context is set, return error dict if not."""
-    harness_name, sanitizer, _ = get_sp_context()
+    harness_name, sanitizer, _, _ = get_sp_context()
     if harness_name is None or sanitizer is None:
         return {
             "success": False,
@@ -91,7 +120,7 @@ def create_suspicious_point_impl(
 
     try:
         client = _get_client()
-        harness_name, sanitizer, direction_id = get_sp_context()
+        harness_name, sanitizer, direction_id, agent_id = get_sp_context()
         result = client.create_suspicious_point(
             function_name=function_name,
             description=description,
@@ -101,6 +130,7 @@ def create_suspicious_point_impl(
             harness_name=harness_name or "",
             sanitizer=sanitizer or "",
             direction_id=direction_id or "",
+            agent_id=agent_id or "",
         )
 
         merged = result.get("merged", False)
@@ -113,14 +143,6 @@ def create_suspicious_point_impl(
             logger.info(
                 f"[NEW SP] {sp_id[:8]} -> {function_name} ({vuln_type}, score={score})"
             )
-            # Report SP creation to eval server
-            try:
-                from ..eval import get_reporter
-
-                reporter = get_reporter()
-                reporter.sp_created(sp_id, function_name, vuln_type)
-            except Exception:
-                pass
             return {"success": True, "created": True, "id": sp_id[:8]}
     except Exception as e:
         logger.error(f"Failed to create suspicious point: {e}")
@@ -135,6 +157,9 @@ def update_suspicious_point_impl(
     is_important: bool = None,
     verification_notes: str = None,
     pov_guidance: str = None,
+    reachability_status: str = None,
+    reachability_multiplier: float = None,
+    reachability_reason: str = None,
 ) -> Dict[str, Any]:
     """Implementation of update_suspicious_point (without MCP decorator)."""
     err = _ensure_client()
@@ -143,6 +168,8 @@ def update_suspicious_point_impl(
 
     try:
         client = _get_client()
+        # Get agent_id from context for tracking verified_by_agent_id
+        _, _, _, agent_id = get_sp_context()
         result = client.update_suspicious_point(
             sp_id=suspicious_point_id,
             is_checked=is_checked,
@@ -151,6 +178,10 @@ def update_suspicious_point_impl(
             score=score,
             verification_notes=verification_notes,
             pov_guidance=pov_guidance,
+            reachability_status=reachability_status,
+            reachability_multiplier=reachability_multiplier,
+            reachability_reason=reachability_reason,
+            agent_id=agent_id or "",  # Track which agent verified this SP
         )
 
         update_json = json.dumps(
@@ -169,15 +200,8 @@ def update_suspicious_point_impl(
         updated = result.get("updated", False) if result else False
         if updated:
             logger.info(f"[UPDATE SUSPICIOUS POINT] {update_json}")
-            # Report SP verification result to eval server
-            if is_real is not None:
-                try:
-                    from ..eval import get_reporter
-
-                    reporter = get_reporter()
-                    reporter.sp_verified(suspicious_point_id, is_real, score or 0.0)
-                except Exception:
-                    pass
+            # SP verification is now tracked via AgentContext and MongoDB
+            # No need for reporter - data persisted directly
         else:
             logger.warning(
                 f"[UPDATE SUSPICIOUS POINT FAILED] Server returned: {result}"
@@ -287,8 +311,8 @@ def create_suspicious_point(
 
     try:
         client = _get_client()
-        # Include harness_name and sanitizer from context
-        harness_name, sanitizer = get_sp_context()
+        # Include harness_name, sanitizer, and agent_id from context
+        harness_name, sanitizer, direction_id, agent_id = get_sp_context()
         result = client.create_suspicious_point(
             function_name=function_name,
             description=description,
@@ -297,6 +321,8 @@ def create_suspicious_point(
             important_controlflow=important_controlflow or [],
             harness_name=harness_name or "",
             sanitizer=sanitizer or "",
+            direction_id=direction_id or "",
+            agent_id=agent_id or "",
         )
 
         merged = result.get("merged", False)
@@ -362,6 +388,8 @@ def update_suspicious_point(
 
     try:
         client = _get_client()
+        # Get agent_id from context for tracking verified_by_agent_id
+        _, _, _, agent_id = get_sp_context()
         result = client.update_suspicious_point(
             sp_id=suspicious_point_id,
             is_checked=is_checked,
@@ -370,6 +398,7 @@ def update_suspicious_point(
             score=score,
             verification_notes=verification_notes,
             pov_guidance=pov_guidance,
+            agent_id=agent_id or "",  # Track which agent verified this SP
         )
 
         # Log the update with server result
@@ -493,6 +522,7 @@ def get_suspicious_point(suspicious_point_id: str) -> Dict[str, Any]:
 __all__ = [
     # Context
     "set_sp_context",
+    "set_sp_agent_id",
     "get_sp_context",
     "_get_sp_context",
     "_ensure_sp_context",

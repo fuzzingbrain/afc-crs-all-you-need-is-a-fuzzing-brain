@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, List, Optional
 
+from bson import ObjectId
 from fastapi import APIRouter, HTTPException
 
 from .suspicious_points import get_main_db, _format_datetime
@@ -37,7 +38,7 @@ async def list_povs(
         if not function_name:
             sp_id = pov.get("suspicious_point_id")
             if sp_id:
-                sp = await db.suspicious_points.find_one({"_id": sp_id})
+                sp = await db.suspicious_points.find_one({"_id": ObjectId(sp_id)})
                 if sp:
                     function_name = sp.get("function_name", "")
 
@@ -89,7 +90,7 @@ async def get_pov(pov_id: str) -> Dict[str, Any]:
     """Get POV details."""
     db = get_main_db()
 
-    pov = await db.povs.find_one({"_id": pov_id})
+    pov = await db.povs.find_one({"_id": ObjectId(pov_id)})
     if not pov:
         raise HTTPException(status_code=404, detail="POV not found")
 
@@ -99,7 +100,7 @@ async def get_pov(pov_id: str) -> Dict[str, Any]:
     if not function_name or True:  # Always try to get SP info
         sp_id = pov.get("suspicious_point_id")
         if sp_id:
-            sp = await db.suspicious_points.find_one({"_id": sp_id})
+            sp = await db.suspicious_points.find_one({"_id": ObjectId(sp_id)})
             if sp:
                 function_name = function_name or sp.get("function_name", "")
                 sp_description = sp.get("description", "")

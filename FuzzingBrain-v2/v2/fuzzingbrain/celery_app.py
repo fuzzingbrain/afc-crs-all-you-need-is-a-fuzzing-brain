@@ -16,7 +16,12 @@ from loguru import logger
 load_dotenv()  # Load .env file for API keys
 
 from celery import Celery
-from celery.signals import task_failure, worker_process_init, setup_logging
+from celery.signals import (
+    task_failure,
+    worker_process_init,
+    worker_process_shutdown,
+    setup_logging,
+)
 
 # Redis configuration from environment
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -88,7 +93,7 @@ def on_task_failure(
 
 @worker_process_init.connect
 def on_worker_init(**kwargs):
-    """Setup error handling and reporter when worker process initializes."""
+    """Setup error handling and LLM buffer when worker process initializes."""
 
     def handle_exception(exc_type, exc_value, exc_tb):
         error_msg = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
@@ -97,16 +102,39 @@ def on_worker_init(**kwargs):
 
     sys.excepthook = handle_exception
 
-    # Initialize evaluation reporter in worker process
-    eval_server = os.getenv("FUZZINGBRAIN_EVAL_SERVER")
-    if eval_server:
-        try:
-            from .eval import create_reporter
+    # Worker/Agent context is now handled via WorkerContext/AgentContext
+    # which persist to MongoDB directly - no reporter needed
 
-            create_reporter(server_url=eval_server, level="normal")
-        except Exception as e:
-            sys.stderr.write(f"[CELERY WORKER] Failed to init reporter: {e}\n")
-            sys.stderr.flush()
+    # Initialize MongoDB connection for this worker process
+    # WorkerContext will create per-worker LLM buffers on __enter__
+    try:
+        from .core import Config
+        from .db import MongoDB
+
+        config = Config.from_env()
+        MongoDB.connect(config.mongodb_url, config.mongodb_db)
+    except Exception as e:
+        logger.warning(f"Failed to connect MongoDB in worker init: {e}")
+
+
+@worker_process_shutdown.connect
+def on_worker_shutdown(**kwargs):
+    """Safety net: flush LLM buffer if WorkerContext.__exit__ didn't run.
+
+    This handles the case where Celery kills the worker process (SIGTERM)
+    before the context manager's __exit__ has a chance to run.
+    buffer.stop() is idempotent — safe to call even if already stopped.
+    """
+    try:
+        from .llms.buffer import get_worker_buffer
+
+        buffer = get_worker_buffer()
+        if buffer and buffer._running:
+            logger.info("worker_process_shutdown: flushing LLM buffer (safety net)")
+            buffer.stop()
+    except Exception as e:
+        sys.stderr.write(f"[CELERY SHUTDOWN] Failed to flush buffer: {e}\n")
+        sys.stderr.flush()
 
 
 # Celery configuration

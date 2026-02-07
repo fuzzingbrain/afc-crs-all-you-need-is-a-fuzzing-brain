@@ -13,6 +13,8 @@ import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
+from bson import ObjectId
+
 from .logging import logger
 from .config import Config
 from .models import Task, Fuzzer, FuzzerStatus, Worker, WorkerStatus
@@ -53,6 +55,10 @@ class WorkerDispatcher:
         self.project_name = config.ossfuzz_project_name or task.project_name
         self.analyze_result = analyze_result
         self.pov_count_target = config.pov_count  # Target POV count (0 = unlimited)
+        self._task_oid = ObjectId(task.task_id)  # Cached ObjectId for MongoDB queries
+
+        # Redis client for real-time budget reads (millisecond latency vs MongoDB's 2-7s)
+        self._redis = self._connect_redis(config.redis_url)
 
         # Task-level FuzzerMonitor (auto-discovers crash directories)
         docker_image = f"gcr.io/oss-fuzz/{self.project_name}"
@@ -83,10 +89,10 @@ class WorkerDispatcher:
             crash_record: CrashRecord from the monitor
         """
         import base64
-        import uuid
         from pathlib import Path
         from .models import POV
         from .pov_packager import POVPackager
+        from .utils import generate_id
 
         logger.info(
             f"[FuzzerMonitor] New crash detected: {crash_record.crash_hash[:8]} "
@@ -126,7 +132,7 @@ class WorkerDispatcher:
                         )
 
             # 3. Create POV record
-            pov_id = str(uuid.uuid4())
+            pov_id = generate_id()
             task_workspace = Path(self.task.task_path)
             results_dir = task_workspace / "results"
             povs_dir = results_dir / "povs"
@@ -136,17 +142,23 @@ class WorkerDispatcher:
             pov_blob_path = povs_dir / f"crash_{crash_record.crash_hash[:16]}.bin"
             pov_blob_path.write_bytes(crash_blob)
 
+            # Determine source type from crash_record
+            source = crash_record.source  # "global_fuzzer" | "sp_fuzzer"
+
             pov = POV(
                 pov_id=pov_id,
                 task_id=self.task.task_id,
-                suspicious_point_id="",  # No SP - fuzzer-discovered
-                generation_id=str(uuid.uuid4()),
+                suspicious_point_id=crash_record.sp_id or "",  # SP ID if from SP Fuzzer
+                generation_id=generate_id(),
+                source=source,  # Track POV source
+                source_worker_id=crash_record.worker_id,  # Track which worker found it
                 iteration=0,
                 attempt=1,
                 variant=1,
                 blob=crash_blob_b64,
                 blob_path=str(pov_blob_path),
                 gen_blob=f"""# Fuzzer-discovered crash
+# Source: {source}
 # Hash: {crash_record.crash_hash}
 # Type: {vuln_type}
 # Worker: {crash_record.worker_id}
@@ -162,7 +174,7 @@ def generate(variant: int = 1) -> bytes:
                 harness_name=crash_record.fuzzer_name,
                 sanitizer=crash_record.sanitizer,
                 sanitizer_output=sanitizer_output[:10000] if sanitizer_output else "",
-                description=f"Fuzzer-discovered crash ({crash_record.source})",
+                description=f"Fuzzer-discovered crash ({source})",
                 is_successful=False,  # Will be set True after packaging
                 is_active=True,
             )
@@ -193,16 +205,14 @@ def generate(variant: int = 1) -> bytes:
                 self.repos.povs.update(pov_id, {"is_successful": True})
                 logger.info(f"[FuzzerMonitor] ✅ POV {pov_id[:8]} activated!")
 
-                # Update worker's povs_found count
+                # Update worker's pov_generated count
                 try:
-                    worker = self.repos.workers.collection.find_one(
-                        {"worker_id": crash_record.worker_id}
-                    )
-                    if worker:
-                        current_count = worker.get("povs_found", 0)
-                        self.repos.workers.collection.update_one(
-                            {"worker_id": crash_record.worker_id},
-                            {"$set": {"povs_found": current_count + 1}},
+                    worker_obj = self.repos.workers.find_by_id(crash_record.worker_id)
+                    if worker_obj:
+                        current_count = worker_obj.pov_generated or 0
+                        self.repos.workers.update(
+                            crash_record.worker_id,
+                            {"pov_generated": current_count + 1},
                         )
                 except Exception as e:
                     logger.debug(
@@ -318,6 +328,62 @@ def generate(variant: int = 1) -> bytes:
         except Exception as e:
             logger.warning(f"[FuzzerMonitor] Crash verification failed: {e}")
             return None
+
+    def _connect_redis(self, redis_url: str):
+        """Connect sync Redis client for real-time cost reads."""
+        try:
+            import redis as sync_redis
+
+            client = sync_redis.Redis.from_url(
+                redis_url,
+                decode_responses=True,
+                socket_connect_timeout=5,
+            )
+            client.ping()
+            logger.info(f"Dispatcher Redis connected: {redis_url}")
+            return client
+        except Exception as e:
+            logger.warning(
+                f"Dispatcher Redis connection failed: {e}, falling back to MongoDB for budget checks"
+            )
+            return None
+
+    def _get_realtime_cost(self) -> float:
+        """
+        Get real-time task cost from Redis (millisecond latency).
+
+        Falls back to MongoDB if Redis is unavailable.
+        """
+        COUNTER_PREFIX = "fuzzingbrain:counters"
+
+        # Try Redis first (real-time, sub-millisecond)
+        if self._redis:
+            try:
+                cost_str = self._redis.get(
+                    f"{COUNTER_PREFIX}:task:{self.task.task_id}:cost"
+                )
+                if cost_str is not None:
+                    return float(cost_str)
+                # Key doesn't exist yet (no LLM calls made) — cost is 0
+                return 0.0
+            except Exception as e:
+                logger.warning(f"Redis cost read failed: {e}, falling back to MongoDB")
+
+        # Fallback to MongoDB
+        task_doc = self.repos.tasks.collection.find_one(
+            {"_id": self._task_oid},
+            {"llm_cost": 1},
+        )
+        return (task_doc or {}).get("llm_cost", 0.0)
+
+    def _close_redis(self) -> None:
+        """Close Redis connection."""
+        if self._redis:
+            try:
+                self._redis.close()
+            except Exception:
+                pass
+            self._redis = None
 
     def dispatch(self, fuzzers: List[Fuzzer]) -> List[Dict[str, Any]]:
         """
@@ -472,6 +538,9 @@ def generate(variant: int = 1) -> bytes:
         """
         Dispatch a Celery task for the worker.
 
+        Note: Worker record is NOT created here. WorkerContext creates
+        the Worker record when the Celery task starts executing.
+
         Args:
             pair: {fuzzer, sanitizer} pair
             workspace_path: Path to worker workspace
@@ -483,19 +552,7 @@ def generate(variant: int = 1) -> bytes:
 
         fuzzer = pair["fuzzer"]
         sanitizer = pair["sanitizer"]
-        worker_id = f"{self.task.task_id}__{fuzzer}__{sanitizer}"
-
-        # Create Worker record in database
-        worker = Worker(
-            worker_id=worker_id,
-            task_id=self.task.task_id,
-            task_type=self.task.task_type.value,
-            fuzzer=fuzzer,
-            sanitizer=sanitizer,
-            workspace_path=workspace_path,
-            status=WorkerStatus.PENDING,
-        )
-        self.repos.workers.save(worker)
+        display_name = Worker.generate_display_name(fuzzer, sanitizer)
 
         # Get log directory from current logging config
         from .logging import get_log_dir
@@ -509,7 +566,7 @@ def generate(variant: int = 1) -> bytes:
             fuzzer_binary_path = self.analyze_result.get_fuzzer_path(fuzzer, sanitizer)
             build_dir = self.analyze_result.build_paths.get(sanitizer)
 
-        # Prepare assignment
+        # Prepare assignment - WorkerContext will create Worker record
         assignment = {
             "task_id": self.task.task_id,
             "fuzzer": fuzzer,
@@ -529,7 +586,6 @@ def generate(variant: int = 1) -> bytes:
             if self.analyze_result
             else None,
             # Scan mode and diff path for delta mode
-            # Use worker's own diff path (copied to worker workspace)
             "scan_mode": self.task.scan_mode.value,
             "diff_path": str(Path(workspace_path) / "diff" / "ref.diff")
             if self.task.scan_mode.value == "delta"
@@ -541,7 +597,6 @@ def generate(variant: int = 1) -> bytes:
         }
 
         # Dispatch Celery task with dynamic time limit based on config
-        # Soft timeout at 90% of hard timeout - gives 10% buffer for graceful shutdown
         timeout_seconds = self.config.timeout_minutes * 60
         soft_timeout_seconds = int(timeout_seconds * 0.9)
 
@@ -551,14 +606,14 @@ def generate(variant: int = 1) -> bytes:
             soft_time_limit=soft_timeout_seconds,
         )
 
-        # Update worker with Celery job ID
-        worker.celery_job_id = result.id
-        self.repos.workers.save(worker)
+        # Note: Celery job ID is passed to WorkerContext via assignment
+        # We add it here for the worker to use
+        assignment["celery_job_id"] = result.id
 
-        logger.info(f"Dispatched worker: {worker_id} (celery_id: {result.id})")
+        logger.info(f"Dispatched worker: {display_name} (celery_id: {result.id})")
 
         return {
-            "worker_id": worker_id,
+            "display_name": display_name,
             "celery_id": result.id,
             "fuzzer": fuzzer,
             "sanitizer": sanitizer,
@@ -572,12 +627,16 @@ def generate(variant: int = 1) -> bytes:
         Also checks Celery task status to detect workers that failed
         before updating the database.
 
+        Note: Workers are created by WorkerContext when Celery task starts,
+        so initially there may be fewer workers than dispatched jobs.
+
         Returns:
             Status summary dictionary
         """
         from celery.result import AsyncResult
         from ..celery_app import app
 
+        # Query workers by task_id (ObjectId)
         workers = self.repos.workers.find_by_task(self.task.task_id)
 
         status = {
@@ -608,7 +667,7 @@ def generate(variant: int = 1) -> bytes:
                         self.repos.workers.save(worker)
                         worker_status = "failed"
                         logger.warning(
-                            f"Worker {worker.worker_id} failed (detected via Celery)"
+                            f"Worker {worker.display_name} failed (detected via Celery)"
                         )
                 except Exception:
                     pass  # Ignore Celery check errors
@@ -628,7 +687,7 @@ def generate(variant: int = 1) -> bytes:
         """Get count of verified (successful) POVs for this task."""
         return self.repos.povs.count(
             {
-                "task_id": self.task.task_id,
+                "task_id": self._task_oid,
                 "is_successful": True,
             }
         )
@@ -649,9 +708,9 @@ def generate(variant: int = 1) -> bytes:
                 if worker.celery_job_id:
                     try:
                         app.control.revoke(worker.celery_job_id, terminate=True)
-                        logger.info(f"Revoked worker: {worker.worker_id}")
+                        logger.info(f"Revoked worker: {worker.display_name}")
                     except Exception as e:
-                        logger.warning(f"Failed to revoke {worker.worker_id}: {e}")
+                        logger.warning(f"Failed to revoke {worker.display_name}: {e}")
 
                 # Mark as completed (graceful shutdown)
                 worker.status = WorkerStatus.COMPLETED
@@ -674,6 +733,7 @@ def generate(variant: int = 1) -> bytes:
         shutdown_count = 0
 
         for worker in workers:
+            # FuzzerManager is registered with ObjectId-based worker_id
             manager = get_fuzzer_manager(worker.worker_id)
             if manager:
                 try:
@@ -691,10 +751,10 @@ def generate(variant: int = 1) -> bytes:
                         loop.run_until_complete(manager.shutdown())
 
                     shutdown_count += 1
-                    logger.info(f"Shutdown FuzzerManager: {worker.worker_id}")
+                    logger.info(f"Shutdown FuzzerManager: {worker.display_name}")
                 except Exception as e:
                     logger.warning(
-                        f"Failed to shutdown FuzzerManager {worker.worker_id}: {e}"
+                        f"Failed to shutdown FuzzerManager {worker.display_name}: {e}"
                     )
                 finally:
                     unregister_fuzzer_manager(worker.worker_id)
@@ -752,101 +812,116 @@ def generate(variant: int = 1) -> bytes:
         else:
             logger.info(f"Waiting for task to complete (timeout: {timeout_minutes}min)")
 
-        while True:
-            elapsed = datetime.now() - start_time
+        try:
+            while True:
+                elapsed = datetime.now() - start_time
 
-            # ================================================================
-            # Exit condition 1: Timeout
-            # ================================================================
-            if elapsed > timeout_delta:
-                logger.warning(f"Timeout reached after {timeout_minutes} minutes")
-                self.shutdown_all_fuzzers()
-                return {
-                    "status": "timeout",
-                    "elapsed_minutes": elapsed.total_seconds() / 60,
-                    **self.get_status(),
-                }
+                # ================================================================
+                # Exit condition 1: Timeout
+                # ================================================================
+                if elapsed > timeout_delta:
+                    logger.warning(f"Timeout reached after {timeout_minutes} minutes")
+                    self.shutdown_all_fuzzers()
+                    self._close_redis()
+                    return {
+                        "status": "timeout",
+                        "elapsed_minutes": elapsed.total_seconds() / 60,
+                        **self.get_status(),
+                    }
 
-            # ================================================================
-            # Exit condition 2: Budget exceeded
-            # ================================================================
-            budget_exceeded_worker = self.repos.workers.collection.find_one(
-                {
-                    "task_id": self.task.task_id,
-                    "error_msg": {"$regex": "Budget limit exceeded", "$options": "i"},
-                }
+                # ================================================================
+                # Exit condition 2: Budget exceeded
+                # ================================================================
+                if self.config.budget_limit > 0:
+                    current_cost = self._get_realtime_cost()
+                    if current_cost >= self.config.budget_limit:
+                        logger.warning(
+                            f"Budget limit exceeded: ${current_cost:.2f} >= ${self.config.budget_limit:.2f}"
+                        )
+                        self.graceful_shutdown()
+                        self.shutdown_all_fuzzers()
+                        self._close_redis()
+                        return {
+                            "status": "budget_exceeded",
+                            "elapsed_minutes": elapsed.total_seconds() / 60,
+                            "error": f"Budget exceeded: ${current_cost:.2f} >= ${self.config.budget_limit:.2f}",
+                            **self.get_status(),
+                        }
+
+                # ================================================================
+                # Exit condition 3: POV target reached
+                # ================================================================
+                current_pov_count = self.get_verified_pov_count()
+                if current_pov_count != last_pov_count:
+                    logger.info(
+                        f"Verified POVs: {current_pov_count}"
+                        + (
+                            f"/{self.pov_count_target}"
+                            if self.pov_count_target > 0
+                            else ""
+                        )
+                    )
+                    last_pov_count = current_pov_count
+
+                if (
+                    self.pov_count_target > 0
+                    and current_pov_count >= self.pov_count_target
+                ):
+                    logger.info(
+                        f"POV target reached! ({current_pov_count}/{self.pov_count_target})"
+                    )
+                    logger.info("Initiating graceful shutdown...")
+                    self.graceful_shutdown()
+                    self.shutdown_all_fuzzers()
+                    self._close_redis()
+                    return {
+                        "status": "pov_target_reached",
+                        "elapsed_minutes": elapsed.total_seconds() / 60,
+                        "pov_count": current_pov_count,
+                        **self.get_status(),
+                    }
+
+                # ================================================================
+                # Status check: Workers progress
+                # ================================================================
+                status = self.get_status()
+
+                # Log progress if changed
+                if status != last_status:
+                    logger.info(
+                        f"Progress: {status['completed']}/{status['total']} completed, "
+                        f"{status['failed']} failed, {status['running']} running"
+                    )
+                    last_status = status
+
+                    if on_progress:
+                        on_progress(status)
+
+                # ================================================================
+                # All workers completed: Enter "Global Fuzzer Only" mode
+                # ================================================================
+                if self.is_complete() and not global_fuzzer_only_logged:
+                    logger.info("")
+                    logger.info("=" * 60)
+                    logger.info(
+                        f"All Workers Completed with {current_pov_count} POV(s) found"
+                    )
+                    logger.info("Global Fuzzer continues running...")
+                    logger.info("Waiting for: timeout / budget / POV target / Ctrl+C")
+                    logger.info("=" * 60)
+                    logger.info("")
+                    global_fuzzer_only_logged = True
+
+                # Wait before next poll
+                time.sleep(poll_interval)
+
+        except KeyboardInterrupt:
+            logger.warning(
+                "KeyboardInterrupt received — shutting down fuzzers and cleaning up"
             )
-            if budget_exceeded_worker:
-                logger.warning("Budget limit exceeded - initiating shutdown")
-                self.graceful_shutdown()
-                self.shutdown_all_fuzzers()
-                return {
-                    "status": "budget_exceeded",
-                    "elapsed_minutes": elapsed.total_seconds() / 60,
-                    "error": budget_exceeded_worker.get(
-                        "error_msg", "Budget limit exceeded"
-                    ),
-                    **self.get_status(),
-                }
-
-            # ================================================================
-            # Exit condition 3: POV target reached
-            # ================================================================
-            current_pov_count = self.get_verified_pov_count()
-            if current_pov_count != last_pov_count:
-                logger.info(
-                    f"Verified POVs: {current_pov_count}"
-                    + (f"/{self.pov_count_target}" if self.pov_count_target > 0 else "")
-                )
-                last_pov_count = current_pov_count
-
-            if self.pov_count_target > 0 and current_pov_count >= self.pov_count_target:
-                logger.info(
-                    f"POV target reached! ({current_pov_count}/{self.pov_count_target})"
-                )
-                logger.info("Initiating graceful shutdown...")
-                self.graceful_shutdown()
-                self.shutdown_all_fuzzers()
-                return {
-                    "status": "pov_target_reached",
-                    "elapsed_minutes": elapsed.total_seconds() / 60,
-                    "pov_count": current_pov_count,
-                    **self.get_status(),
-                }
-
-            # ================================================================
-            # Status check: Workers progress
-            # ================================================================
-            status = self.get_status()
-
-            # Log progress if changed
-            if status != last_status:
-                logger.info(
-                    f"Progress: {status['completed']}/{status['total']} completed, "
-                    f"{status['failed']} failed, {status['running']} running"
-                )
-                last_status = status
-
-                if on_progress:
-                    on_progress(status)
-
-            # ================================================================
-            # All workers completed: Enter "Global Fuzzer Only" mode
-            # ================================================================
-            if self.is_complete() and not global_fuzzer_only_logged:
-                logger.info("")
-                logger.info("=" * 60)
-                logger.info(
-                    f"All Workers Completed with {current_pov_count} POV(s) found"
-                )
-                logger.info("Global Fuzzer continues running...")
-                logger.info("Waiting for: timeout / budget / POV target / Ctrl+C")
-                logger.info("=" * 60)
-                logger.info("")
-                global_fuzzer_only_logged = True
-
-            # Wait before next poll
-            time.sleep(poll_interval)
+            self.shutdown_all_fuzzers()
+            self._close_redis()
+            raise
 
     def get_results(self) -> List[Dict[str, Any]]:
         """
@@ -862,7 +937,7 @@ def generate(variant: int = 1) -> bytes:
             # Count SPs for this worker (by sources array with $elemMatch)
             sp_count = self.repos.suspicious_points.count(
                 {
-                    "task_id": self.task.task_id,
+                    "task_id": self._task_oid,
                     "sources": {
                         "$elemMatch": {
                             "harness_name": worker.fuzzer,
@@ -876,7 +951,7 @@ def generate(variant: int = 1) -> bytes:
             # (SPs where this worker's description was merged into existing SP)
             merged_count = self.repos.suspicious_points.count(
                 {
-                    "task_id": self.task.task_id,
+                    "task_id": self._task_oid,
                     "merged_duplicates": {
                         "$elemMatch": {
                             "harness_name": worker.fuzzer,
@@ -899,7 +974,7 @@ def generate(variant: int = 1) -> bytes:
                 sp.suspicious_point_id
                 for sp in self.repos.suspicious_points.find_all(
                     {
-                        "task_id": self.task.task_id,
+                        "task_id": self._task_oid,
                         "sources": {
                             "$elemMatch": {
                                 "harness_name": worker.fuzzer,
@@ -912,10 +987,17 @@ def generate(variant: int = 1) -> bytes:
 
             # Count all successful POVs for those SPs (including cross-fuzzer hits)
             if worker_sp_ids:
+                # Convert str IDs to ObjectId — POV documents store suspicious_point_id as ObjectId
+                worker_sp_oids = []
+                for sp_id in worker_sp_ids:
+                    try:
+                        worker_sp_oids.append(ObjectId(sp_id))
+                    except Exception:
+                        worker_sp_oids.append(sp_id)
                 actual_pov_count = self.repos.povs.count(
                     {
-                        "task_id": self.task.task_id,
-                        "suspicious_point_id": {"$in": worker_sp_ids},
+                        "task_id": self._task_oid,
+                        "suspicious_point_id": {"$in": worker_sp_oids},
                         "is_successful": True,
                     }
                 )
@@ -926,7 +1008,7 @@ def generate(variant: int = 1) -> bytes:
             # These have suspicious_point_id="" because they were found directly by the fuzzer
             fuzzer_discovered_count = self.repos.povs.count(
                 {
-                    "task_id": self.task.task_id,
+                    "task_id": self._task_oid,
                     "harness_name": worker.fuzzer,
                     "sanitizer": worker.sanitizer,
                     "suspicious_point_id": {"$in": ["", None]},
@@ -943,14 +1025,15 @@ def generate(variant: int = 1) -> bytes:
                 effective_status = "interrupted"
 
             result = {
-                "worker_id": worker.worker_id,
+                "worker_id": worker.display_name,  # Use display name for summaries
+                "worker_object_id": worker.worker_id,  # ObjectId for DB queries
                 "fuzzer": worker.fuzzer,
                 "sanitizer": worker.sanitizer,
                 "status": effective_status,
                 "sps_found": sp_count,
                 "sps_merged": merged_count,
-                "povs_found": actual_pov_count,  # Use DB count instead of worker's self-report
-                "patches_found": worker.patches_found or 0,
+                "pov_generated": actual_pov_count,  # Use DB count instead of worker's self-report
+                "patch_generated": worker.patch_generated or 0,
                 "error_msg": worker.error_msg,
                 "duration_seconds": worker.get_duration_seconds(),
                 "duration_str": worker.get_duration_str(),

@@ -10,6 +10,8 @@ from enum import Enum
 from typing import Optional
 import hashlib
 
+from bson import ObjectId
+
 from ..core.utils import generate_id
 
 
@@ -80,10 +82,10 @@ class CrashRecord:
     def to_dict(self) -> dict:
         """Convert to dictionary for MongoDB storage."""
         return {
-            "_id": self.crash_id,
+            "_id": ObjectId(self.crash_id) if self.crash_id else ObjectId(),
             "crash_id": self.crash_id,
-            "task_id": self.task_id,
-            "worker_id": self.worker_id,
+            "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "worker_id": ObjectId(self.worker_id) if self.worker_id else None,
             "crash_path": self.crash_path,
             "crash_hash": self.crash_hash,
             "vuln_type": self.vuln_type,
@@ -101,10 +103,23 @@ class CrashRecord:
     @classmethod
     def from_dict(cls, data: dict) -> "CrashRecord":
         """Create CrashRecord from dictionary."""
+        # Handle ObjectId conversion
+        crash_id = data.get("crash_id") or data.get("_id")
+        if isinstance(crash_id, ObjectId):
+            crash_id = str(crash_id)
+
+        task_id = data.get("task_id", "")
+        if isinstance(task_id, ObjectId):
+            task_id = str(task_id)
+
+        worker_id = data.get("worker_id", "")
+        if isinstance(worker_id, ObjectId):
+            worker_id = str(worker_id)
+
         return cls(
-            crash_id=data.get("crash_id", data.get("_id")),
-            task_id=data.get("task_id", ""),
-            worker_id=data.get("worker_id", ""),
+            crash_id=crash_id or generate_id(),
+            task_id=task_id,
+            worker_id=worker_id,
             crash_path=data.get("crash_path", ""),
             crash_hash=data.get("crash_hash", ""),
             vuln_type=data.get("vuln_type"),

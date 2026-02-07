@@ -8,7 +8,7 @@ Both share the same business logic.
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, List
-import uuid
+from bson import ObjectId
 
 from .core import Task, JobType, ScanMode
 from .db import RepositoryManager
@@ -210,15 +210,21 @@ async def health():
 def create_task_from_request(request: TaskRequest) -> Task:
     """Create Task from unified TaskRequest"""
     return Task(
-        task_id=str(uuid.uuid4())[:8],
+        task_id=str(ObjectId()),
         task_type=JobType(request.task_type),
         scan_mode=ScanMode(request.scan_mode),
         repo_url=request.repo_url,
         project_name=request.project_name,
+        ossfuzz_project_name=request.ossfuzz_project_name,
         sanitizers=request.sanitizers,
         timeout_minutes=request.timeout_minutes,
+        pov_count=request.pov_count,
+        budget_limit=request.budget_limit,
+        target_commit=request.target_commit,
         base_commit=request.base_commit,
         delta_commit=request.delta_commit,
+        fuzz_tooling_url=request.fuzz_tooling_url,
+        fuzz_tooling_ref=request.fuzz_tooling_ref,
     )
 
 
@@ -288,7 +294,7 @@ async def generate_patch(request: PatchRequest, background_tasks: BackgroundTask
     Takes a POV ID and attempts to generate a fix.
     """
     task = Task(
-        task_id=str(uuid.uuid4())[:8],
+        task_id=str(ObjectId()),
         task_type=JobType.PATCH,
         timeout_minutes=request.timeout_minutes,
     )
@@ -316,13 +322,21 @@ async def pov_patch(request: POVPatchRequest, background_tasks: BackgroundTasks)
     Combines POV finding and patch generation.
     """
     task = Task(
-        task_id=str(uuid.uuid4())[:8],
+        task_id=str(ObjectId()),
         task_type=JobType.POV_PATCH,
         scan_mode=ScanMode.FULL,
         repo_url=request.repo_url,
         project_name=request.project_name,
+        ossfuzz_project_name=request.ossfuzz_project_name,
         sanitizers=request.sanitizers,
         timeout_minutes=request.timeout_minutes,
+        pov_count=request.pov_count,
+        budget_limit=request.budget_limit,
+        target_commit=request.target_commit,
+        base_commit=request.base_commit,
+        delta_commit=request.delta_commit,
+        fuzz_tooling_url=request.fuzz_tooling_url,
+        fuzz_tooling_ref=request.fuzz_tooling_ref,
     )
 
     # Start task in background
@@ -348,11 +362,16 @@ async def generate_harness(request: HarnessRequest, background_tasks: Background
     Creates new fuzz targets to improve code coverage.
     """
     task = Task(
-        task_id=str(uuid.uuid4())[:8],
+        task_id=str(ObjectId()),
         task_type=JobType.HARNESS,
         repo_url=request.repo_url,
         project_name=request.project_name,
+        ossfuzz_project_name=request.ossfuzz_project_name,
+        sanitizers=request.sanitizers,
         timeout_minutes=request.timeout_minutes,
+        budget_limit=request.budget_limit,
+        fuzz_tooling_url=request.fuzz_tooling_url,
+        fuzz_tooling_ref=request.fuzz_tooling_ref,
     )
 
     targets = [t.model_dump() for t in request.targets]
@@ -400,8 +419,8 @@ async def get_status(task_id: str):
             "workers_completed": len(
                 [w for w in workers if w.status.value == "completed"]
             ),
-            "povs_found": len(povs),
-            "patches_found": len(patches),
+            "pov_generated": len(povs),
+            "patch_generated": len(patches),
         },
         povs=[p.to_dict() for p in povs[:10]],  # Return max 10
         patches=[p.to_dict() for p in patches[:10]],

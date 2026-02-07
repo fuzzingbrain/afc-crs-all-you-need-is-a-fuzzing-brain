@@ -20,6 +20,7 @@ from .base import BaseAgent
 from .prompts import POV_AGENT_SYSTEM_PROMPT
 from ..llms import LLMClient, ModelInfo
 from ..tools.pov import set_pov_context, update_pov_iteration
+from ..core.models.agent import AgentType
 
 
 # =============================================================================
@@ -195,7 +196,7 @@ class POVAgent(BaseAgent):
     @property
     def agent_name(self) -> str:
         """Get agent name for logging."""
-        return "POVAgent"
+        return AgentType.POV_AGENT.value
 
     @property
     def include_pov_tools(self) -> bool:
@@ -294,6 +295,14 @@ class POVAgent(BaseAgent):
             "Vulnerability Type": vuln_type,
             "Goal": "Generate crashing input (POV)",
         }
+
+    def _configure_context(self, ctx) -> None:
+        """Configure agent context with SP ID."""
+        if self.suspicious_point:
+            sp_id = self.suspicious_point.get(
+                "suspicious_point_id"
+            ) or self.suspicious_point.get("_id")
+            ctx.sp_id = str(sp_id) if sp_id else None
 
     @property
     def system_prompt(self) -> str:
@@ -488,7 +497,7 @@ Start by reading the vulnerable function source with get_function_source("{funct
 
         set_pov_context(
             task_id=self.task_id,
-            worker_id=self.worker_id,
+            worker_id=self.mcp_context_id,  # Use unique ObjectId from AgentContext
             output_dir=self.output_dir,
             repos=self.repos,
             fuzzer=self.fuzzer,
@@ -499,6 +508,7 @@ Start by reading the vulnerable function source with get_function_source("{funct
             workspace_path=self.workspace_path,
             fuzzer_source=fuzzer_source,
             fuzzer_manager=self.fuzzer_manager,  # For SP Fuzzer integration
+            agent_id=self.mcp_context_id,  # Track which agent created POVs
         )
 
     def _check_tool_result_for_success(self, tool_name: str, result_str: str) -> bool:
@@ -581,8 +591,8 @@ Start by reading the vulnerable function source with get_function_source("{funct
             iteration += 1
             self.total_iterations += 1
 
-            # Update iteration in POV context (pass worker_id for thread-safety)
-            update_pov_iteration(iteration, worker_id=self.worker_id)
+            # Update iteration in POV context (use unique ObjectId for thread-safety)
+            update_pov_iteration(iteration, worker_id=self.mcp_context_id)
 
             self._log(
                 f"=== Iteration {iteration}/{self.max_iterations} (POV attempts: {self.pov_attempts}/{self.max_pov_attempts}) ===",

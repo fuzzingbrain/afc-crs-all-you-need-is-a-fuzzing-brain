@@ -89,8 +89,9 @@ def import_from_prebuild(
             except ValueError:
                 status = FuzzerStatus.PENDING
 
+            raw_fuzzer_id = doc.get("fuzzer_id") or doc.get("_id")
             fuzzer = Fuzzer(
-                fuzzer_id=doc.get("fuzzer_id", doc.get("_id")),
+                fuzzer_id=str(raw_fuzzer_id) if raw_fuzzer_id else None,
                 task_id=task_id,
                 fuzzer_name=doc.get("fuzzer_name", ""),
                 source_path=doc.get("source_path"),

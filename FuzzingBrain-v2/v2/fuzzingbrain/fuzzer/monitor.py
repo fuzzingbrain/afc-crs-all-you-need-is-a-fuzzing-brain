@@ -554,8 +554,11 @@ class FuzzerMonitor:
                     {"workspace_path": workspace_path}
                 )
                 if worker:
+                    # Worker model stores _id (ObjectId), not worker_id
+                    raw_id = worker.get("_id")
+                    worker_id = str(raw_id) if raw_id else workspace_path
                     return (
-                        worker.get("worker_id", workspace_path),
+                        worker_id,
                         worker.get("fuzzer", "unknown"),
                         worker.get("sanitizer", "address"),
                     )

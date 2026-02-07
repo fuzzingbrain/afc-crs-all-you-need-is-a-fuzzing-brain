@@ -16,6 +16,9 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Tuple
+
+from bson import ObjectId
+
 from .logging import logger, create_final_summary, WorkerColors, get_log_dir
 from .config import Config
 from .models import Task, TaskStatus, Fuzzer, FuzzerStatus
@@ -588,10 +591,13 @@ class TaskProcessor:
                 if len(job["fuzzer"]) > col_fuzzer - 2
                 else job["fuzzer"]
             )
+            display_name = job.get(
+                "display_name", f"{job['fuzzer']}_{job['sanitizer']}"
+            )
             worker_id = (
-                job["worker_id"][: col_worker_id - 2]
-                if len(job["worker_id"]) > col_worker_id - 2
-                else job["worker_id"]
+                display_name[: col_worker_id - 2]
+                if len(display_name) > col_worker_id - 2
+                else display_name
             )
 
             # Build cell content
@@ -696,17 +702,8 @@ class TaskProcessor:
         """
         logger.info(f"Processing task: {task.task_id}")
 
-        # Initialize evaluation reporter context
-        try:
-            from ..eval import get_reporter
-
-            reporter = get_reporter()
-            project_name = task.project_name or self.config.ossfuzz_project_name or ""
-            task_ctx = reporter.task_context(task.task_id, project_name=project_name)
-            task_ctx.__enter__()
-        except Exception:
-            reporter = None
-            task_ctx = None
+        # Task/Worker/Agent context is now handled via WorkerContext/AgentContext
+        # which persist to MongoDB directly - no reporter needed
 
         # Save task to database
         task.mark_running()
@@ -1047,7 +1044,17 @@ class TaskProcessor:
                     else:
                         task.mark_error(f"Timeout after {timeout} minutes")
 
-                    self.repos.tasks.save(task)
+                    # Use update() instead of save() to avoid overwriting
+                    # llm_cost/llm_calls fields that buffer.$inc has accumulated
+                    updates = {
+                        "status": task.status.value,
+                        "updated_at": task.updated_at,
+                    }
+                    if task.error_msg:
+                        updates["error_msg"] = task.error_msg
+                    self.repos.tasks.update(task.task_id, updates)
+
+                    # Redis counter cleanup is handled by WorkerContext.__exit__
 
                     # Get worker results for summary
                     worker_results = dispatcher.get_results()
@@ -1065,34 +1072,12 @@ class TaskProcessor:
                     except Exception as e:
                         logger.warning(f"Failed to count merged duplicates: {e}")
 
-                    # Get cost info - try eval_server API first, then reporter
-                    total_cost = 0.0
-                    try:
-                        # Try to get from eval_server API if configured
-                        eval_server = self.config.eval_server
-                        if eval_server:
-                            import requests
-
-                            resp = requests.get(
-                                f"{eval_server}/api/v1/costs/task/{task.task_id}",
-                                timeout=5,
-                            )
-                            if resp.status_code == 200:
-                                data = resp.json()
-                                total_cost = data.get("total_cost", 0.0)
-                    except Exception as e:
-                        logger.debug(f"Failed to get cost from eval_server: {e}")
-
-                    # Fallback to reporter if eval_server didn't work
-                    if total_cost == 0.0:
-                        try:
-                            from ..eval import get_reporter
-
-                            reporter = get_reporter()
-                            if reporter and hasattr(reporter, "get_current_cost"):
-                                total_cost = reporter.get_current_cost()
-                        except Exception:
-                            pass
+                    # Read cost from database
+                    task_doc = self.repos.tasks.collection.find_one(
+                        {"_id": ObjectId(task.task_id)},
+                        {"llm_cost": 1},
+                    )
+                    total_cost = (task_doc or {}).get("llm_cost", 0.0)
 
                     # Create and output final summary with worker colors via loguru
                     summary = create_final_summary(
@@ -1142,7 +1127,10 @@ class TaskProcessor:
                         "message": f"Dispatched {len(jobs)} workers.",
                         "workspace": task.task_path,
                         "fuzzers": [f.fuzzer_name for f in successful_fuzzers],
-                        "workers": [j["worker_id"] for j in jobs],
+                        "workers": [
+                            j.get("display_name", f"{j['fuzzer']}_{j['sanitizer']}")
+                            for j in jobs
+                        ],
                     }
 
             finally:
@@ -1157,17 +1145,17 @@ class TaskProcessor:
                 if infra:
                     infra.stop()
 
-                # Cleanup reporter context
-                if task_ctx:
-                    try:
-                        task_ctx.__exit__(None, None, None)
-                    except Exception:
-                        pass
-
         except Exception as e:
             logger.exception(f"Task processing failed: {e}")
             task.mark_error(str(e))
-            self.repos.tasks.save(task)
+            self.repos.tasks.update(
+                task.task_id,
+                {
+                    "status": task.status.value,
+                    "error_msg": task.error_msg,
+                    "updated_at": task.updated_at,
+                },
+            )
 
             return {
                 "task_id": task.task_id,

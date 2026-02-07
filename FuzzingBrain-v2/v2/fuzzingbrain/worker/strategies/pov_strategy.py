@@ -24,11 +24,11 @@ from .base import BaseStrategy
 from ...analysis.diff_parser import get_reachable_changes, DiffReachabilityResult
 from ...core.models import SuspiciousPoint
 from ...agents import (
-    SuspiciousPointAgent,
     DirectionPlanningAgent,
-    FullscanSPAgent,
-    FunctionAnalysisAgent,
-    LargeFunctionAnalysisAgent,
+    FullSPGenerator,
+    LargeFullSPGenerator,
+    DeltaSPGenerator,
+    SPVerifier,
 )
 from ...tools.code_viewer import set_code_viewer_context
 from ...tools.directions import set_direction_context
@@ -65,13 +65,27 @@ class POVStrategy(BaseStrategy):
         # Set up tool contexts for MCP
         self._setup_tool_contexts()
 
-        # Create the suspicious point agent with logging context
+        # Create SP agents with logging context
         # Agent logs go to main log directory under agent/ subdirectory
         agent_log_dir = self.agent_log_dir
-        self._agent = SuspiciousPointAgent(
+
+        # Delta SP Generator for finding suspicious points
+        self._sp_generator = DeltaSPGenerator(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
-            model=CLAUDE_SONNET_4_5,  # Force Sonnet for SP analysis
+            model=CLAUDE_SONNET_4_5,
+            verbose=True,
+            task_id=self.task_id,
+            worker_id=self.worker_id,
+            log_dir=agent_log_dir,
+        )
+
+        # SP Verifier for verifying suspicious points
+        self._sp_verifier = SPVerifier(
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+            scan_mode="delta",
+            model=CLAUDE_SONNET_4_5,
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,
@@ -354,14 +368,16 @@ class POVStrategy(BaseStrategy):
                 for c in self._reachability_result.reachable_changes
             ]
 
-            # Run the agent to find suspicious points
+            # Run the generator to find suspicious points
             try:
-                response = self._agent.find_suspicious_points_sync(reachable_changes)
+                response = self._sp_generator.find_suspicious_points_sync(
+                    reachable_changes
+                )
                 self.log_debug(
                     f"Agent response: {response[:500]}..."
                 )  # Log first 500 chars
             except Exception as e:
-                self.log_error(f"Agent failed to find suspicious points: {e}")
+                self.log_error(f"SP Generator failed to find suspicious points: {e}")
                 return []
 
             # Query database for suspicious points created by agent
@@ -751,40 +767,15 @@ class POVStrategy(BaseStrategy):
         num_parallel: int = 2,
     ) -> None:
         """
-        Phase 3: Free Exploration (Fallback).
+        Phase 3: Free Exploration.
 
-        Uses large agent with context compression to explore code freely.
-        This is the original FullscanSPAgent behavior as a fallback.
-
-        Args:
-            directions: List of Direction objects
-            fuzzer_code: Fuzzer source code for context
-            agent_log_dir: Log directory for agents
-            num_parallel: Number of concurrent agents
+        Previously used legacy FullscanSPAgent for exploration.
+        Now skipped since Phase 1 and 2 cover all functions with FullSPGenerator.
         """
-        # Check if we have enough SPs already
+        # Phase 1 and 2 already analyze all functions with FullSPGenerator
+        # No need for additional exploration
         sp_count = self.repos.suspicious_points.count({"task_id": self.task_id})
-        if sp_count >= 10:
-            self.log_info(f"Phase 3: Skipping - already found {sp_count} SPs")
-            return
-
-        # Only run on high-risk directions
-        high_risk_directions = [d for d in directions if d.risk_level == "high"]
-        if not high_risk_directions:
-            self.log_info("Phase 3: No high-risk directions for free exploration")
-            return
-
-        self.log_info(
-            f"Phase 3: Running free exploration on {len(high_risk_directions)} high-risk directions"
-        )
-
-        # Use original parallel SP find agents for exploration
-        await self._run_parallel_sp_find_agents_legacy(
-            directions=high_risk_directions,
-            fuzzer_code=fuzzer_code,
-            agent_log_dir=agent_log_dir,
-            num_parallel=num_parallel,
-        )
+        self.log_info(f"Phase 3: Skipping (Phase 1+2 found {sp_count} SPs)")
 
     async def _analyze_single_function(
         self,
@@ -796,7 +787,7 @@ class POVStrategy(BaseStrategy):
         fuzzer_source: str = "",
     ) -> dict:
         """
-        Analyze a single function using FunctionAnalysisAgent.
+        Analyze a single function using FullSPGenerator.
 
         Args:
             func: Function object from database
@@ -846,11 +837,11 @@ class POVStrategy(BaseStrategy):
 
         # Determine if this is a large function based on actual source
         func_lines = func_source.count("\n") + 1 if func_source else 0
-        is_large = func_lines > LargeFunctionAnalysisAgent.LARGE_FUNCTION_THRESHOLD
+        is_large = func_lines > LargeFullSPGenerator.LARGE_FUNCTION_THRESHOLD
 
         # Create appropriate agent
         if is_large:
-            agent = LargeFunctionAnalysisAgent(
+            agent = LargeFullSPGenerator(
                 function_name=func.name,
                 function_source=func_source,  # Use fetched source
                 function_file=func.file_path,
@@ -863,13 +854,13 @@ class POVStrategy(BaseStrategy):
                 sanitizer=self.sanitizer,
                 direction_id=direction_id,
                 task_id=self.task_id,
-                worker_id=f"{self.worker_id}_func_{index}",
+                worker_id=self.worker_id,  # ObjectId for MongoDB linking
                 log_dir=agent_log_dir,
                 max_iterations=6,  # More iterations for large functions
                 index=index,  # For log file naming: SPG_{index}_{function_name}.log
             )
         else:
-            agent = FunctionAnalysisAgent(
+            agent = FullSPGenerator(
                 function_name=func.name,
                 function_source=func_source,  # Use fetched source
                 function_file=func.file_path,
@@ -882,7 +873,7 @@ class POVStrategy(BaseStrategy):
                 sanitizer=self.sanitizer,
                 direction_id=direction_id,
                 task_id=self.task_id,
-                worker_id=f"{self.worker_id}_func_{index}",
+                worker_id=self.worker_id,  # ObjectId for MongoDB linking
                 log_dir=agent_log_dir,
                 max_iterations=5,  # Enough iterations for thorough analysis
                 index=index,  # For log file naming: SPG_{index}_{function_name}.log
@@ -907,128 +898,6 @@ class POVStrategy(BaseStrategy):
 
         except Exception as e:
             self.log_error(f"[{index + 1}/{total}] Failed: {func.name} - {e}")
-            return {"success": False, "error": str(e)}
-
-    async def _run_parallel_sp_find_agents_legacy(
-        self,
-        directions: List,
-        fuzzer_code: str,
-        agent_log_dir,
-        num_parallel: int = 3,
-    ) -> None:
-        """
-        Legacy: Run SP Find Agents in parallel using asyncio.
-        Used for Phase 3 free exploration.
-
-        Args:
-            directions: List of Direction objects to analyze
-            fuzzer_code: Fuzzer source code for context
-            agent_log_dir: Log directory for agents
-            num_parallel: Number of concurrent agents
-        """
-        # Create a semaphore to limit concurrency
-        semaphore = asyncio.Semaphore(num_parallel)
-
-        async def analyze_direction(direction, index: int):
-            """Analyze a single direction with semaphore control."""
-            async with semaphore:
-                return await self._analyze_single_direction(
-                    direction=direction,
-                    index=index,
-                    total=len(directions),
-                    fuzzer_code=fuzzer_code,
-                    agent_log_dir=agent_log_dir,
-                )
-
-        # Create tasks for all directions
-        tasks = [
-            analyze_direction(direction, i) for i, direction in enumerate(directions)
-        ]
-
-        # Run all tasks concurrently (limited by semaphore)
-        self.log_info(
-            f"Starting {len(directions)} direction analyses with {num_parallel} parallel agents"
-        )
-        await asyncio.gather(*tasks, return_exceptions=True)
-
-    async def _analyze_single_direction(
-        self,
-        direction,
-        index: int,
-        total: int,
-        fuzzer_code: str,
-        agent_log_dir,
-    ) -> dict:
-        """
-        Analyze a single direction (async wrapper for sync agent).
-
-        Args:
-            direction: Direction object
-            index: Direction index
-            total: Total number of directions
-            fuzzer_code: Fuzzer source code
-            agent_log_dir: Log directory
-
-        Returns:
-            Analysis result dict
-        """
-        import time
-
-        direction_start = time.time()
-
-        self.log_info(
-            f"[{index + 1}/{total}] Starting: {direction.name} ({direction.risk_level})"
-        )
-
-        # Claim the direction
-        claimed = self.repos.directions.claim(
-            self.task_id,
-            self.fuzzer,
-            f"SPG_{index}_{self.fuzzer}_{self.sanitizer}",
-        )
-        if not claimed:
-            self.log_warning(f"[{index + 1}/{total}] Could not claim: {direction.name}")
-            return {"success": False, "error": "Could not claim direction"}
-
-        # Create SP Find Agent
-        sp_agent = FullscanSPAgent(
-            fuzzer=self.fuzzer,
-            sanitizer=self.sanitizer,
-            direction_name=direction.name,
-            direction_id=direction.direction_id,
-            core_functions=direction.core_functions,
-            entry_functions=direction.entry_functions,
-            code_summary=direction.code_summary,
-            fuzzer_code=fuzzer_code,
-            task_id=self.task_id,
-            worker_id=f"SPG_{index}_{self.fuzzer}_{self.sanitizer}",
-            log_dir=agent_log_dir,
-            max_iterations=100,
-            index=index + 1,  # 1-based index for log files
-        )
-
-        try:
-            # Run agent async
-            result = await sp_agent.analyze_direction_async()
-            sp_count = result.get("sp_count", 0)
-            functions_analyzed = result.get("functions_analyzed", 0)
-
-            # Complete the direction
-            self.repos.directions.complete(
-                direction.direction_id,
-                sp_count=sp_count,
-                functions_analyzed=functions_analyzed,
-            )
-
-            direction_duration = time.time() - direction_start
-            self.log_info(
-                f"[{index + 1}/{total}] Done: {direction.name} in {direction_duration:.1f}s - {sp_count} SPs"
-            )
-            return result
-
-        except Exception as e:
-            self.log_error(f"[{index + 1}/{total}] Failed: {direction.name} - {e}")
-            self.repos.directions.release_claim(direction.direction_id)
             return {"success": False, "error": str(e)}
 
     def _get_fuzzer_source_code(self) -> str:
@@ -1127,8 +996,8 @@ class POVStrategy(BaseStrategy):
             point_dict = point.to_dict()
 
             try:
-                # Run agent to verify this point
-                response = self._agent.verify_suspicious_point_sync(point_dict)
+                # Run verifier to verify this point
+                response = self._sp_verifier.verify_sync(point_dict)
 
                 # Re-fetch the point from database (agent may have updated it)
                 updated_point = self._get_suspicious_point_by_id(

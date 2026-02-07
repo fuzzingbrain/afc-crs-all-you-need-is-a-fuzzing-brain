@@ -115,7 +115,8 @@ class POVPackager:
                     f"[POVPackager] Restored analyzer context: {self.analyzer_socket_path}"
                 )
 
-            pov_id = pov.get("pov_id", pov.get("_id", "unknown"))
+            raw_pov_id = pov.get("pov_id") or pov.get("_id") or "unknown"
+            pov_id = str(raw_pov_id)
             short_id = pov_id[:8] if len(pov_id) > 8 else pov_id
 
             logger.info(f"[POVPackager] Packaging POV {short_id}...")
@@ -179,8 +180,9 @@ class POVPackager:
     async def _write_pov_details(self, folder: Path, pov: Dict[str, Any]):
         """Write pov_details.json"""
         # Create a clean copy without binary data
+        raw_pov_id = pov.get("pov_id") or pov.get("_id")
         pov_clean = {
-            "pov_id": pov.get("pov_id", pov.get("_id")),
+            "pov_id": str(raw_pov_id) if raw_pov_id else None,
             "task_id": pov.get("task_id"),
             "suspicious_point_id": pov.get("suspicious_point_id"),
             "harness_name": pov.get("harness_name"),
@@ -219,8 +221,9 @@ class POVPackager:
             }
         else:
             # Create a clean copy
+            raw_sp_id = sp.get("suspicious_point_id") or sp.get("_id")
             sp_clean = {
-                "suspicious_point_id": sp.get("suspicious_point_id", sp.get("_id")),
+                "suspicious_point_id": str(raw_sp_id) if raw_sp_id else None,
                 "task_id": sp.get("task_id"),
                 "function_name": sp.get("function_name"),
                 "file_path": sp.get("file_path"),
