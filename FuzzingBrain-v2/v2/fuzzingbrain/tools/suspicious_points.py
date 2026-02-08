@@ -74,22 +74,18 @@ def get_sp_context() -> Tuple[
 
 def set_sp_agent_id(agent_id: str) -> None:
     """
-    Set only the agent_id in SP context and clear direction_id.
+    Set only the agent_id in SP context.
 
-    This should be called by agents when they start running, so they can
-    be tracked as the creator/verifier of SPs without changing other context.
-
-    IMPORTANT: Clears direction_id to prevent context leak between pipeline
-    phases. Only set_sp_context() should set direction_id (for SP Finding agents).
+    Called by agents on startup for tracking SP creator/verifier.
+    Does NOT touch direction_id — direction leak is prevented by
+    Layer 2 (guard in create_suspicious_point_impl) and
+    Layer 3 (SPVerifier/POVAgent don't have create_suspicious_point tool).
 
     Args:
         agent_id: Agent ObjectId for tracking SP creator/verifier
     """
     _sp_agent_id.set(agent_id)
-    _sp_direction_id.set(None)
-    logger.debug(
-        f"SP agent_id set: {agent_id[:8] if agent_id else 'none'} (direction_id cleared)"
-    )
+    logger.debug(f"SP agent_id set: {agent_id[:8] if agent_id else 'none'}")
 
 
 # Aliases for mcp_factory compatibility

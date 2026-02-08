@@ -517,17 +517,18 @@ class TestContextLeakBetweenPipelinePhases:
     @patch("fuzzingbrain.tools.suspicious_points._ensure_client", return_value=None)
     def test_set_sp_agent_id_must_not_leak_direction(self, _ensure, mock_get_client):
         """
-        Invariant: set_sp_agent_id() clears direction_id to prevent leak.
+        Direction leak prevention relies on two layers:
+        - Layer 2: Guard in create_suspicious_point_impl rejects if no direction_id
+        - Layer 3: SPVerifier/POVAgent don't have create_suspicious_point tool
 
-        Fix: set_sp_agent_id() now clears direction_id. Combined with
-        Layer A guard in create_suspicious_point_impl (rejects if no
-        direction_id), this provides two-layer protection against
-        non-SP-Finding agents accidentally creating SPs.
+        set_sp_agent_id() does NOT clear direction_id (it would break SPG agents
+        that need direction_id to create SPs). Instead, pipeline transitions
+        use set_sp_context() without direction_id when entering verify/POV phase.
         """
         client = _mock_client()
         mock_get_client.return_value = client
 
-        # --- Direction-1 SPG ---
+        # --- SP Finding phase: direction_id is set ---
         set_sp_context(
             harness_name="fuzz_png",
             sanitizer="address",
@@ -543,15 +544,21 @@ class TestContextLeakBetweenPipelinePhases:
         kw_dir1 = client.create_suspicious_point.call_args[1]
         assert kw_dir1["direction_id"] == "dir_chunk"
 
-        # --- Direction-2 SPG — only updates agent_id ---
+        # set_sp_agent_id preserves direction_id (needed for SPG agents)
         set_sp_agent_id("spg_dir2")
-
-        # Layer 1: set_sp_agent_id clears direction_id
         from fuzzingbrain.tools.suspicious_points import get_sp_context
         _, _, direction_id, agent_id = get_sp_context()
-        assert direction_id is None or direction_id == "", \
-            "Direction leak: set_sp_agent_id must clear direction_id"
+        assert direction_id == "dir_chunk", \
+            "set_sp_agent_id must NOT clear direction_id"
         assert agent_id == "spg_dir2"
+
+        # --- Verify phase: pipeline clears direction_id via set_sp_context ---
+        set_sp_context(
+            harness_name="fuzz_png",
+            sanitizer="address",
+            direction_id="",
+            agent_id="verifier_1",
+        )
 
         # Layer 2: create_suspicious_point_impl rejects without direction_id
         result2 = create_suspicious_point_impl(
@@ -563,7 +570,7 @@ class TestContextLeakBetweenPipelinePhases:
             "SP creation must be blocked without direction_id"
         assert "direction_id" in result2["error"]
 
-        # Server was only called once (Direction-1), not twice
+        # Server was only called once (SP Finding phase), not twice
         assert client.create_suspicious_point.call_count == 1
 
     @patch("fuzzingbrain.tools.suspicious_points._get_client")
