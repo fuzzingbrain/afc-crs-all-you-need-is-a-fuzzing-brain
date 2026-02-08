@@ -76,7 +76,7 @@ class POV:
         """Convert to dictionary for MongoDB storage"""
         return {
             "_id": ObjectId(self.pov_id) if self.pov_id else ObjectId(),
-            # Note: pov_id removed - use _id only
+            "pov_id": self.pov_id,
             "task_id": ObjectId(self.task_id) if self.task_id else None,
             "suspicious_point_id": ObjectId(self.suspicious_point_id)
             if self.suspicious_point_id
