@@ -83,7 +83,7 @@ class Direction:
         """Convert to dict for MongoDB storage"""
         return {
             "_id": ObjectId(self.direction_id) if self.direction_id else ObjectId(),
-            # Note: direction_id removed - use _id only
+            "direction_id": self.direction_id,
             "task_id": ObjectId(self.task_id) if self.task_id else None,
             "created_by_agent_id": ObjectId(self.created_by_agent_id)
             if self.created_by_agent_id

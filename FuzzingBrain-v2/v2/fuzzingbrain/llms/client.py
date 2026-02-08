@@ -967,7 +967,7 @@ class LLMClient:
 
         except Exception as e:
             error = self._handle_error(e, model_id)
-            logger.warning(f"LLM async call failed: {error}")
+            logger.warning(f"LLM async call failed: {type(error).__name__} | model={model_id}")
 
             # Record failed LLM call (with minimal info)
             failed_response = LLMResponse(
