@@ -48,7 +48,6 @@ async def fuzzingbrain_task(
     targets: Optional[List[dict]] = None,
     # Runtime control
     budget_limit: float = 50.0,
-    eval_server: Optional[str] = None,
 ) -> dict:
     """
     Run a FuzzingBrain task (unified endpoint).
@@ -78,7 +77,6 @@ async def fuzzingbrain_task(
         input_blob: Input blob (base64) for patch mode
         targets: Target functions for harness mode
         budget_limit: Budget limit in dollars (default: 50.0)
-        eval_server: Evaluation server URL
 
     Returns:
         dict with task_id for tracking and initial status

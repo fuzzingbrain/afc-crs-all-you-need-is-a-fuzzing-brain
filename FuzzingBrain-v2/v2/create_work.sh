@@ -63,7 +63,6 @@ create_full_scan_template() {
     "fuzz_tooling_ref": null,
 
     "budget_limit": 50,
-    "eval_server": null,
     "pov_count": 1
 }
 EOF
@@ -106,7 +105,6 @@ create_delta_scan_template() {
     "fuzz_tooling_ref": null,
 
     "budget_limit": 50,
-    "eval_server": null,
     "pov_count": 1
 }
 EOF

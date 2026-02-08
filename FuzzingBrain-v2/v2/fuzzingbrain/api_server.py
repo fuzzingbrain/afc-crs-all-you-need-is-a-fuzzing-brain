@@ -87,7 +87,6 @@ class TaskRequest(BaseModel):
 
     # Runtime control
     budget_limit: float = 50.0
-    eval_server: Optional[str] = None
 
 
 # Legacy request models (for backward compatibility)

@@ -102,9 +102,6 @@ def on_worker_init(**kwargs):
 
     sys.excepthook = handle_exception
 
-    # Worker/Agent context is now handled via WorkerContext/AgentContext
-    # which persist to MongoDB directly - no reporter needed
-
     # Initialize MongoDB connection for this worker process
     # WorkerContext will create per-worker LLM buffers on __enter__
     try:

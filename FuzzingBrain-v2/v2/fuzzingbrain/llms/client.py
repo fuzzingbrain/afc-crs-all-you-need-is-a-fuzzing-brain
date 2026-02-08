@@ -597,9 +597,7 @@ class LLMClient:
         Raises:
             LLMAllModelsFailedError: If all models fail
             LLMError: For non-recoverable errors
-            BudgetExceededError: If budget limit is exceeded
         """
-        # Budget checking now handled at Task level via database
         result = self._call_with_fallback(
             messages=messages,
             model=model,
@@ -823,10 +821,7 @@ class LLMClient:
 
         Same parameters as call(), but async.
 
-        Raises:
-            BudgetExceededError: If budget limit is exceeded
         """
-        # Budget checking now handled at Task level via database
         result = await self._acall_with_fallback(
             messages=messages,
             model=model,
