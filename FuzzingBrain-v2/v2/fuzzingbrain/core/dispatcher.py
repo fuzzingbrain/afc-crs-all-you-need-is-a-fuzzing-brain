@@ -652,6 +652,7 @@ def generate(variant: int = 1) -> bytes:
             worker_status = worker.status.value
 
             # If worker is still pending/building/running, check Celery task status
+            # to detect workers whose __exit__ DB save failed (zombie detection)
             if (
                 worker_status in ["pending", "building", "running"]
                 and worker.celery_job_id
@@ -668,6 +669,22 @@ def generate(variant: int = 1) -> bytes:
                         worker_status = "failed"
                         logger.warning(
                             f"Worker {worker.display_name} failed (detected via Celery)"
+                        )
+                    elif result.successful():
+                        # Celery task succeeded but DB still shows running/pending.
+                        # This means __exit__'s DB save failed (zombie worker).
+                        # Compensate by force-updating DB to completed.
+                        stale_status = worker_status
+                        worker.status = WorkerStatus.COMPLETED
+                        worker.error_msg = (
+                            "Status recovered by dispatcher: "
+                            "__exit__ DB save failed but Celery task succeeded"
+                        )
+                        self.repos.workers.save(worker)
+                        worker_status = "completed"
+                        logger.warning(
+                            f"Worker {worker.display_name} completed "
+                            f"(recovered zombie: Celery SUCCESS but DB was '{stale_status}')"
                         )
                 except Exception:
                     pass  # Ignore Celery check errors

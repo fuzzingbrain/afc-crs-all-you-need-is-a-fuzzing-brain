@@ -70,6 +70,11 @@ class SPVerifier(BaseAgent):
         """SP Verifier type."""
         return "spv"
 
+    @property
+    def include_sp_create_tools(self) -> bool:
+        """SPVerifier only reads/updates SPs, never creates new ones."""
+        return False
+
     def __init__(
         self,
         fuzzer: str = "",
