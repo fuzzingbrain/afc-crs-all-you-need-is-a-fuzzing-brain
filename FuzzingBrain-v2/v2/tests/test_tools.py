@@ -61,6 +61,7 @@ class TestUpdateSuspiciousPointParameters:
             score=0.8,
             is_checked=True,
             is_important=True,
+            pov_guidance="Trigger via oversized input to function pointer path",
             reachability_status="pointer_call",
             reachability_multiplier=0.95,
             reachability_reason="Reachable via function pointer",
