@@ -159,6 +159,9 @@ def create_suspicious_point_impl(
                 f"[NEW SP] {sp_id[:8]} -> {function_name} ({vuln_type}, score={score})"
             )
             return {"success": True, "created": True, "id": sp_id[:8]}
+    except (BrokenPipeError, ConnectionError, OSError) as e:
+        logger.warning(f"SP creation skipped (connection closed, task may have ended): {type(e).__name__}")
+        return {"success": False, "error": "analyzer connection closed"}
     except Exception as e:
         logger.error(f"Failed to create suspicious point: {e}")
         return {"success": False, "error": str(e)[:100]}
@@ -354,6 +357,9 @@ def create_suspicious_point(
                 f"[NEW SP] {sp_id[:8]} -> {function_name} ({vuln_type}, score={score})"
             )
             return {"success": True, "created": True, "id": sp_id[:8]}
+    except (BrokenPipeError, ConnectionError, OSError) as e:
+        logger.warning(f"SP creation skipped (connection closed, task may have ended): {type(e).__name__}")
+        return {"success": False, "error": "analyzer connection closed"}
     except Exception as e:
         logger.error(f"Failed to create suspicious point: {e}")
         return {"success": False, "error": str(e)[:100]}
