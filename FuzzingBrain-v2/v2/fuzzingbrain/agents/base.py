@@ -1044,8 +1044,10 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
 
             # Update SP context with agent_id for tracking SP creator/verifier
             from ..tools.suspicious_points import set_sp_agent_id
+            from ..tools.directions import set_direction_agent_id
 
             set_sp_agent_id(agent_id)
+            set_direction_agent_id(agent_id)
 
             self._log(f"Agent context created: {agent_id}", level="DEBUG")
 

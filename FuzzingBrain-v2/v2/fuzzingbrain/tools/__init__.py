@@ -60,6 +60,7 @@ from .pov import (
 )
 from .directions import (
     set_direction_context,
+    set_direction_agent_id,
     get_direction_context,
     create_direction,
     list_directions,
@@ -98,6 +99,7 @@ __all__ = [
     "trace_pov",
     # Direction tools (Full-scan)
     "set_direction_context",
+    "set_direction_agent_id",
     "get_direction_context",
     "create_direction",
     "list_directions",
