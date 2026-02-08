@@ -22,6 +22,9 @@ from .analyzer import _get_client, _ensure_client
 _direction_fuzzer: ContextVar[Optional[str]] = ContextVar(
     "direction_fuzzer", default=None
 )
+_direction_agent_id: ContextVar[Optional[str]] = ContextVar(
+    "direction_agent_id", default=None
+)
 
 
 def set_direction_context(fuzzer: str) -> None:
@@ -35,6 +38,18 @@ def set_direction_context(fuzzer: str) -> None:
     """
     _direction_fuzzer.set(fuzzer)
     logger.debug(f"Direction context set: fuzzer={fuzzer}")
+
+
+def set_direction_agent_id(agent_id: str) -> None:
+    """
+    Set the agent_id for direction tools.
+
+    Called by agents on startup to track which agent created a direction.
+
+    Args:
+        agent_id: Agent ObjectId string
+    """
+    _direction_agent_id.set(agent_id)
 
 
 def get_direction_context() -> Optional[str]:
@@ -70,6 +85,7 @@ def create_direction_impl(
     try:
         client = _get_client()
         fuzzer = get_direction_context() or ""
+        agent_id = _direction_agent_id.get() or ""
 
         result = client.create_direction(
             name=name,
@@ -80,6 +96,7 @@ def create_direction_impl(
             call_chain_summary="",
             code_summary=code_summary,
             fuzzer=fuzzer,
+            agent_id=agent_id,
         )
 
         if result.get("created"):
@@ -189,6 +206,7 @@ def create_direction(
     try:
         client = _get_client()
         fuzzer = get_direction_context() or ""
+        agent_id = _direction_agent_id.get() or ""
 
         result = client.create_direction(
             name=name,
@@ -199,6 +217,7 @@ def create_direction(
             call_chain_summary=call_chain_summary,
             code_summary=code_summary,
             fuzzer=fuzzer,
+            agent_id=agent_id,
         )
 
         if result.get("created"):
@@ -306,6 +325,7 @@ def get_direction(
 __all__ = [
     # Context
     "set_direction_context",
+    "set_direction_agent_id",
     "get_direction_context",
     # Direction tools (MCP decorated)
     "create_direction",

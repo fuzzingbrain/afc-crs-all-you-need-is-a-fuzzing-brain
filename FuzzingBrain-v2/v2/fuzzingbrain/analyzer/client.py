@@ -545,6 +545,7 @@ class AnalysisClient:
         call_chain_summary: str = "",
         code_summary: str = "",
         fuzzer: str = "",
+        agent_id: str = "",
     ) -> dict:
         """
         Create a new direction for Full-scan analysis.
@@ -558,6 +559,7 @@ class AnalysisClient:
             call_chain_summary: Summary of call paths
             code_summary: Brief description of what this code does
             fuzzer: Fuzzer name
+            agent_id: Agent ObjectId that created this direction
 
         Returns:
             {"id": "...", "created": True}
@@ -573,6 +575,7 @@ class AnalysisClient:
                 "call_chain_summary": call_chain_summary,
                 "code_summary": code_summary,
                 "fuzzer": fuzzer,
+                "agent_id": agent_id,
             },
         )
 

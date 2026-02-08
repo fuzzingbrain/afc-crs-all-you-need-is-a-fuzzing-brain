@@ -24,6 +24,7 @@ from fuzzingbrain.db.repository import DirectionRepository
 from fuzzingbrain.tools.directions import (
     create_direction_impl,
     set_direction_context,
+    set_direction_agent_id,
     get_direction_context,
 )
 
@@ -415,3 +416,114 @@ class TestSeedPriority:
         # This is the exact slice from pov_fullscan.py line 741
         selected = directions[:5]
         assert len(selected) == 5
+
+
+# =========================================================================
+# Tests: created_by_agent_id tracking (issue #96)
+# =========================================================================
+
+
+class TestCreatedByAgentId:
+    """
+    Business rule: when a DirectionPlanningAgent creates a direction,
+    created_by_agent_id must be set to the DPAgent's ObjectId.
+    Without this, we can't trace which agent created which direction.
+    """
+
+    @patch("fuzzingbrain.tools.directions._get_client")
+    @patch("fuzzingbrain.tools.directions._ensure_client", return_value=None)
+    def test_agent_id_forwarded_to_client(self, _ensure, mock_get_client):
+        """agent_id from ContextVar must reach client.create_direction."""
+        client = _mock_client_create_success()
+        mock_get_client.return_value = client
+
+        agent_id = str(ObjectId())
+        set_direction_context("fuzz_png")
+        set_direction_agent_id(agent_id)
+
+        create_direction_impl(
+            name="Chunk Parsing",
+            risk_level="high",
+            risk_reason="test",
+            core_functions=["parse_chunk"],
+        )
+
+        call_kwargs = client.create_direction.call_args[1]
+        assert call_kwargs["agent_id"] == agent_id
+
+    @patch("fuzzingbrain.tools.directions._get_client")
+    @patch("fuzzingbrain.tools.directions._ensure_client", return_value=None)
+    def test_no_agent_id_defaults_to_empty(self, _ensure, mock_get_client):
+        """Without set_direction_agent_id, agent_id defaults to empty string."""
+        client = _mock_client_create_success()
+        mock_get_client.return_value = client
+
+        set_direction_context("fuzz_png")
+        # Reset agent_id to None (simulate no agent context)
+        from fuzzingbrain.tools.directions import _direction_agent_id
+
+        _direction_agent_id.set(None)
+
+        create_direction_impl(
+            name="test",
+            risk_level="medium",
+            risk_reason="test",
+            core_functions=["foo"],
+        )
+
+        call_kwargs = client.create_direction.call_args[1]
+        assert call_kwargs["agent_id"] == ""
+
+    @patch("fuzzingbrain.tools.directions._get_client")
+    @patch("fuzzingbrain.tools.directions._ensure_client", return_value=None)
+    def test_different_agents_different_ids(self, _ensure, mock_get_client):
+        """Two agents setting different agent_ids must produce different values."""
+        client = _mock_client_create_success()
+        mock_get_client.return_value = client
+        set_direction_context("fuzz_png")
+
+        agent_a = str(ObjectId())
+        set_direction_agent_id(agent_a)
+        create_direction_impl(
+            name="dir_a", risk_level="high", risk_reason="r", core_functions=["a"]
+        )
+        first_id = client.create_direction.call_args[1]["agent_id"]
+
+        agent_b = str(ObjectId())
+        set_direction_agent_id(agent_b)
+        create_direction_impl(
+            name="dir_b", risk_level="high", risk_reason="r", core_functions=["b"]
+        )
+        second_id = client.create_direction.call_args[1]["agent_id"]
+
+        assert first_id == agent_a
+        assert second_id == agent_b
+        assert first_id != second_id
+
+    def test_server_uses_agent_id_in_direction(self):
+        """Server _create_direction_sync must set created_by_agent_id from params."""
+        from unittest.mock import MagicMock
+        from fuzzingbrain.analyzer.server import AnalysisServer
+
+        repos = MagicMock()
+        repos.directions.save.return_value = True
+
+        server = AnalysisServer.__new__(AnalysisServer)
+        server.repos = repos
+        server.task_id = str(ObjectId())
+
+        agent_id = str(ObjectId())
+        result = server._create_direction_sync(
+            {
+                "name": "Chunk Parsing",
+                "risk_level": "high",
+                "risk_reason": "test",
+                "core_functions": ["parse_chunk"],
+                "agent_id": agent_id,
+            }
+        )
+
+        assert result["created"] is True
+        # Verify the Direction object passed to save had the agent_id
+        saved_direction = repos.directions.save.call_args[0][0]
+        assert saved_direction.created_by_agent_id == agent_id
