@@ -155,6 +155,9 @@ class AgentContext:
 
     def __enter__(self) -> "AgentContext":
         """Enter context - register and start tracking."""
+        if self.status == "running":
+            return self
+
         self.started_at = datetime.now()
         self.status = "running"
 
@@ -177,12 +180,26 @@ class AgentContext:
         else:
             self.status = "completed"
 
-        # Remove from global registry
-        with _agent_contexts_lock:
-            _agent_contexts.pop(self.agent_id, None)
+        # Persist final state to MongoDB with retry.
+        # Layer 1: Retry with backoff for transient DB failures.
+        # Layer 2: If all retries fail, keep in memory registry so
+        #          query APIs return correct status via in-memory merge.
+        saved = False
+        for attempt in range(3):
+            saved = self._save_to_db(force=True)
+            if saved:
+                break
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))
 
-        # Persist final state to MongoDB
-        self._save_to_db(force=True)
+        if saved:
+            with _agent_contexts_lock:
+                _agent_contexts.pop(self.agent_id, None)
+        else:
+            logger.warning(
+                f"Agent {self.agent_id[:8]}: final save failed after 3 attempts, "
+                f"keeping in memory registry with status={self.status}"
+            )
 
     def _save_to_db(self, force: bool = False) -> bool:
         """

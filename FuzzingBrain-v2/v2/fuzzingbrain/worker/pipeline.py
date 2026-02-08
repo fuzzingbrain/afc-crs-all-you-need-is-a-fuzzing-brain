@@ -286,6 +286,7 @@ class AgentPipeline:
             import time as time_module
 
             sp_start_time = time_module.time()
+            claimed_sp_id = sp.suspicious_point_id
             try:
                 logger.info(
                     f"[Pipeline:{agent_id}] Verifying SP {sp.suspicious_point_id}"
@@ -351,6 +352,7 @@ class AgentPipeline:
                         is_important=is_important,
                         proceed_to_pov=proceed_to_pov,
                     )
+                    claimed_sp_id = None  # Successfully processed
 
                     # Update stats
                     self.stats.sp_verified += 1
@@ -370,17 +372,25 @@ class AgentPipeline:
                         sp.suspicious_point_id,
                         SPStatus.FAILED.value,
                     )
+                    claimed_sp_id = None  # Handled
 
             except Exception as e:
                 logger.exception(
                     f"[Pipeline:{agent_id}] Error verifying SP {sp.suspicious_point_id}: {e}"
                 )
-                # Release claim on error
-                self.repos.suspicious_points.release_claim(
-                    sp.suspicious_point_id,
-                    SPStatus.PENDING_VERIFY.value,  # Revert to pending for retry
-                )
             finally:
+                # Release claim if not successfully completed
+                # Catches all exit paths including KeyboardInterrupt/CancelledError
+                if claimed_sp_id:
+                    try:
+                        self.repos.suspicious_points.release_claim(
+                            claimed_sp_id,
+                            SPStatus.PENDING_VERIFY.value,
+                        )
+                    except Exception:
+                        logger.warning(
+                            f"[Pipeline:{agent_id}] Failed to release claim for {claimed_sp_id}"
+                        )
                 # Track verification time
                 sp_duration = time_module.time() - sp_start_time
                 self.stats.verify_time_total += sp_duration
@@ -482,6 +492,7 @@ class AgentPipeline:
 
             sp_start_time = time_module.time()
             sp_fuzzer_started = False
+            claimed_sp_id = sp.suspicious_point_id
 
             try:
                 logger.info(
@@ -537,6 +548,7 @@ class AgentPipeline:
                     harness_name=self.fuzzer,
                     sanitizer=self.sanitizer,
                 )
+                claimed_sp_id = None  # Successfully processed
 
                 # Update stats
                 if result.success:
@@ -554,13 +566,25 @@ class AgentPipeline:
                 logger.exception(
                     f"[Pipeline:{agent_id}] Error generating POV for SP {sp.suspicious_point_id}: {e}"
                 )
-                # Release claim on error
-                self.repos.suspicious_points.release_claim(
-                    sp.suspicious_point_id,
-                    SPStatus.PENDING_POV.value,  # Revert to pending for retry
-                )
                 self.stats.pov_failed += 1
             finally:
+                # Release claim if not successfully completed
+                # Catches all exit paths including KeyboardInterrupt/CancelledError
+                # Pass harness_name/sanitizer to also clean pov_attempted_by
+                # so the same worker can retry after crash recovery
+                if claimed_sp_id:
+                    try:
+                        self.repos.suspicious_points.release_claim(
+                            claimed_sp_id,
+                            SPStatus.PENDING_POV.value,
+                            harness_name=self.fuzzer,
+                            sanitizer=self.sanitizer,
+                        )
+                    except Exception:
+                        logger.warning(
+                            f"[Pipeline:{agent_id}] Failed to release claim for {claimed_sp_id}"
+                        )
+
                 # Stop SP Fuzzer (stops when POV succeeds or fails)
                 if sp_fuzzer_started and self.fuzzer_manager:
                     try:

@@ -160,6 +160,15 @@ class BaseAgent(ABC):
         return True
 
     @property
+    def include_sp_create_tools(self) -> bool:
+        """Whether to include SP creation tool in MCP server.
+
+        Override to False in SPVerifier and POVAgent — they should only
+        read/update SPs, not create new ones. Only SP Finding agents create SPs.
+        """
+        return True
+
+    @property
     def include_direction_tools(self) -> bool:
         """Whether to include direction tools in MCP server.
 
@@ -1050,6 +1059,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                     include_pov_tools=self.include_pov_tools,
                     include_seed_tools=self.include_seed_tools,
                     include_sp_tools=self.include_sp_tools,
+                    include_sp_create_tools=self.include_sp_create_tools,
                     include_direction_tools=self.include_direction_tools,
                 )
                 self._log(

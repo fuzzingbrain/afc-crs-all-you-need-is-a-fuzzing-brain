@@ -10,6 +10,11 @@ experiment/
 # Work configurations (user-specific)
 work/
 
+# Test / coverage artifacts
+.coverage
+htmlcov/
+.pytest_cache/
+
 # Eval server runtime
 .eval_pids/
 logs/eval/

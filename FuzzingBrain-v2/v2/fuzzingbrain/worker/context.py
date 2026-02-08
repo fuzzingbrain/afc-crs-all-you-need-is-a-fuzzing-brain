@@ -48,6 +48,10 @@ def get_all_worker_contexts() -> Dict[str, "WorkerContext"]:
         return dict(_worker_contexts)
 
 
+# Status priority: higher number = later in lifecycle, cannot go backward
+_STATUS_ORDER = {"pending": 0, "running": 1, "completed": 2, "failed": 2}
+
+
 class WorkerContext:
     """
     Encapsulates all runtime resources for a single Worker instance.
@@ -165,6 +169,9 @@ class WorkerContext:
 
     def __enter__(self) -> "WorkerContext":
         """Enter context - register, start LLM buffer, and start tracking."""
+        if self.status == "running":
+            return self
+
         self.started_at = datetime.now()
         self.status = "running"
 
@@ -194,7 +201,18 @@ class WorkerContext:
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-        """Exit context - stop LLM buffer, cleanup, and persist."""
+        """Exit context - stop LLM buffer, cleanup, and persist.
+
+        Guards against double-exit: if status is already terminal
+        (completed/failed), skip to avoid flipping the status.
+        """
+        if self.status in ("completed", "failed"):
+            logger.debug(
+                f"Worker {self.worker_id[:8]}: __exit__ called again "
+                f"(already {self.status}), skipping"
+            )
+            return
+
         self.ended_at = datetime.now()
 
         if exc_type:
@@ -218,12 +236,26 @@ class WorkerContext:
         except Exception as e:
             logger.warning(f"Failed to stop LLM buffer: {e}")
 
-        # Remove from global registry
-        with _worker_contexts_lock:
-            _worker_contexts.pop(self.worker_id, None)
+        # Persist final state to MongoDB with retry.
+        # Layer 1: Retry with backoff for transient DB failures.
+        # Layer 2: If all retries fail, keep in memory registry so
+        #          get_workers_by_task() returns correct status via in-memory merge.
+        saved = False
+        for attempt in range(3):
+            saved = self._save_to_db(force=True)
+            if saved:
+                break
+            if attempt < 2:
+                time.sleep(0.5 * (attempt + 1))  # 0.5s, 1.0s backoff
 
-        # Persist final state to MongoDB (synchronous, must succeed)
-        self._save_to_db(force=True)
+        if saved:
+            with _worker_contexts_lock:
+                _worker_contexts.pop(self.worker_id, None)
+        else:
+            logger.warning(
+                f"Worker {self.worker_id[:8]}: final save failed after 3 attempts, "
+                f"keeping in memory registry with status={self.status}"
+            )
 
     def _save_to_db(self, force: bool = False) -> bool:
         """
@@ -369,7 +401,18 @@ class WorkerContext:
         self._save_to_db(force=True)
 
     def update_status(self, status: str, error: Optional[str] = None) -> None:
-        """Update worker status and persist immediately."""
+        """Update worker status and persist immediately.
+
+        Rejects backward transitions (e.g. completed → running).
+        """
+        current_order = _STATUS_ORDER.get(self.status, 0)
+        new_order = _STATUS_ORDER.get(status, 0)
+        if new_order < current_order:
+            logger.warning(
+                f"Worker {self.worker_id[:8]}: rejected status transition "
+                f"{self.status} → {status} (backward)"
+            )
+            return
         self.status = status
         if error:
             self.error = error

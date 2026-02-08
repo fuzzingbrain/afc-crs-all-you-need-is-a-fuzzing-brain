@@ -791,22 +791,42 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             logger.error(f"Failed to complete POV generation: {e}")
             return False
 
-    def release_claim(self, sp_id: str, revert_status: str = None) -> bool:
+    def release_claim(
+        self,
+        sp_id: str,
+        revert_status: str = None,
+        harness_name: str = None,
+        sanitizer: str = None,
+    ) -> bool:
         """
         Release a claimed SP (e.g., on agent failure).
 
         Args:
             sp_id: Suspicious point ID
             revert_status: Status to revert to (if None, keeps current status)
+            harness_name: If provided with sanitizer, also remove from pov_attempted_by
+                         so the same worker can retry on crash recovery
+            sanitizer: If provided with harness_name, also remove from pov_attempted_by
 
         Returns:
             True if successful
         """
         try:
-            updates = {"processor_id": None}
+            update_ops = {"$set": {"processor_id": None, "updated_at": datetime.now()}}
             if revert_status:
-                updates["status"] = revert_status
-            return self.update(sp_id, updates)
+                update_ops["$set"]["status"] = revert_status
+            # Clean up pov_attempted_by so same worker can retry after crash
+            if harness_name and sanitizer:
+                update_ops["$pull"] = {
+                    "pov_attempted_by": {
+                        "harness_name": harness_name,
+                        "sanitizer": sanitizer,
+                    }
+                }
+
+            _id = self._convert_id(sp_id)
+            result = self.collection.update_one({"_id": _id}, update_ops)
+            return result.modified_count > 0
         except Exception as e:
             logger.error(f"Failed to release claim: {e}")
             return False

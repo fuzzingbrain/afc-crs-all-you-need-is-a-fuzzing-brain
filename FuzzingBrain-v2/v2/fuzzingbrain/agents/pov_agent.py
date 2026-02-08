@@ -203,6 +203,11 @@ class POVAgent(BaseAgent):
         """POVAgent needs POV tools (create_pov, verify_pov, etc.)."""
         return True
 
+    @property
+    def include_sp_create_tools(self) -> bool:
+        """POVAgent only reads SPs for context, never creates new ones."""
+        return False
+
     def _get_summary_table(self) -> str:
         """Generate summary table for POV generation."""
         duration = (

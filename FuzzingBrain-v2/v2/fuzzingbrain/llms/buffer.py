@@ -82,7 +82,7 @@ class WorkerLLMBuffer:
         logger.info("WorkerLLMBuffer started (2s flush interval)")
 
     def stop(self) -> None:
-        """Stop the flush thread and do a final flush."""
+        """Stop the flush thread and do a final flush with retry."""
         if not self._running:
             return
 
@@ -93,8 +93,25 @@ class WorkerLLMBuffer:
         if self._flush_thread:
             self._flush_thread.join(timeout=10)
 
-        # Final flush
-        self._flush()
+        # Final flush with retry — if _flush() fails, records are put back
+        # into _records but this buffer is about to be discarded. Retry to
+        # avoid silent data loss.
+        for attempt in range(3):
+            self._flush()
+            with self._lock:
+                remaining = len(self._records)
+            if remaining == 0:
+                break
+            if attempt < 2:
+                import time
+                time.sleep(0.5 * (attempt + 1))
+
+        with self._lock:
+            if self._records:
+                logger.error(
+                    f"WorkerLLMBuffer: {len(self._records)} LLM call records "
+                    f"lost after 3 flush attempts"
+                )
 
         # Close Redis
         if self._redis:

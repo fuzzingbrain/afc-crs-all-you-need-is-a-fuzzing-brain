@@ -25,6 +25,7 @@ def create_isolated_mcp_server(
     include_pov_tools: bool = True,
     include_seed_tools: bool = False,
     include_sp_tools: bool = True,
+    include_sp_create_tools: bool = True,
     include_direction_tools: bool = True,
 ) -> FastMCP:
     """
@@ -43,6 +44,9 @@ def create_isolated_mcp_server(
                            are excluded (SeedAgent only needs code analysis + create_seed).
         include_sp_tools: Whether to include suspicious point tools (default True).
                          Set to False for DirectionPlanningAgent.
+        include_sp_create_tools: Whether to include SP creation tool (default True).
+                               Set to False for SPVerifier/POVAgent — they should only
+                               read/update SPs, not create new ones.
         include_direction_tools: Whether to include direction tools (default True).
                                 Set to False for agents that don't need directions.
 
@@ -63,7 +67,9 @@ def create_isolated_mcp_server(
     else:
         # Register SP tools only if requested
         if include_sp_tools:
-            _register_suspicious_point_tools(mcp)
+            if include_sp_create_tools:
+                _register_sp_create_tools(mcp)
+            _register_sp_read_update_tools(mcp)
         # Register direction tools only if requested
         if include_direction_tools:
             _register_direction_tools(mcp)
@@ -587,8 +593,8 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
         return list_files_impl(directory, pattern, recursive)
 
 
-def _register_suspicious_point_tools(mcp: FastMCP) -> None:
-    """Register suspicious point tools."""
+def _register_sp_create_tools(mcp: FastMCP) -> None:
+    """Register SP creation tool (only for SP Finding agents)."""
 
     @mcp.tool
     @async_tool
@@ -614,6 +620,10 @@ def _register_suspicious_point_tools(mcp: FastMCP) -> None:
         return create_suspicious_point_impl(
             function_name, vuln_type, description, score, important_controlflow
         )
+
+
+def _register_sp_read_update_tools(mcp: FastMCP) -> None:
+    """Register SP read/update tools (for all agents that need SP access)."""
 
     @mcp.tool
     @async_tool
@@ -679,6 +689,13 @@ def _register_suspicious_point_tools(mcp: FastMCP) -> None:
         from .suspicious_points import get_suspicious_point_impl
 
         return get_suspicious_point_impl(suspicious_point_id)
+
+
+# Keep backward-compatible alias
+def _register_suspicious_point_tools(mcp: FastMCP) -> None:
+    """Register all suspicious point tools (backward compatibility)."""
+    _register_sp_create_tools(mcp)
+    _register_sp_read_update_tools(mcp)
 
 
 def _register_direction_tools(mcp: FastMCP) -> None:
