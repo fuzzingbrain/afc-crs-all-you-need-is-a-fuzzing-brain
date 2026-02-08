@@ -120,19 +120,6 @@ def create_suspicious_point_impl(
     if err:
         return err
 
-    # Layer A guard: only SP Finding agents (with direction_id set) may create SPs
-    _, _, direction_id, _ = get_sp_context()
-    if not direction_id:
-        logger.warning(
-            f"Blocked SP creation for '{function_name}': no direction_id in context. "
-            "Only SP Finding agents may create suspicious points."
-        )
-        return {
-            "success": False,
-            "error": "Cannot create suspicious point: no direction_id in context. "
-            "Only SP Finding agents are allowed to create suspicious points.",
-        }
-
     try:
         client = _get_client()
         harness_name, sanitizer, direction_id, agent_id = get_sp_context()
