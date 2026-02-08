@@ -104,6 +104,7 @@ class WorkerLLMBuffer:
                 break
             if attempt < 2:
                 import time
+
                 time.sleep(0.5 * (attempt + 1))
 
         with self._lock:

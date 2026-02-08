@@ -87,7 +87,9 @@ def set_sp_agent_id(agent_id: str) -> None:
     """
     _sp_agent_id.set(agent_id)
     _sp_direction_id.set(None)
-    logger.debug(f"SP agent_id set: {agent_id[:8] if agent_id else 'none'} (direction_id cleared)")
+    logger.debug(
+        f"SP agent_id set: {agent_id[:8] if agent_id else 'none'} (direction_id cleared)"
+    )
 
 
 # Aliases for mcp_factory compatibility
@@ -132,7 +134,7 @@ def create_suspicious_point_impl(
         return {
             "success": False,
             "error": "Cannot create suspicious point: no direction_id in context. "
-                     "Only SP Finding agents are allowed to create suspicious points.",
+            "Only SP Finding agents are allowed to create suspicious points.",
         }
 
     try:
