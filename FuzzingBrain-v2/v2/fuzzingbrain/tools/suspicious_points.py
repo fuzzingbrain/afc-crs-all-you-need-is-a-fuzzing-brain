@@ -177,6 +177,9 @@ def update_suspicious_point_impl(
     reachability_reason: str = None,
 ) -> Dict[str, Any]:
     """Implementation of update_suspicious_point (without MCP decorator)."""
+    if is_important and not pov_guidance:
+        return {"success": False, "error": "pov_guidance is required when is_important=True"}
+
     err = _ensure_client()
     if err:
         return err

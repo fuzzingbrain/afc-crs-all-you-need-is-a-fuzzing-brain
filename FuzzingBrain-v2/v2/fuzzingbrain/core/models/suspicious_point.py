@@ -140,7 +140,7 @@ class SuspiciousPoint:
             "_id": ObjectId(self.suspicious_point_id)
             if self.suspicious_point_id
             else ObjectId(),
-            # Note: suspicious_point_id removed - use _id only
+            "suspicious_point_id": self.suspicious_point_id,
             "task_id": ObjectId(self.task_id) if self.task_id else None,
             "direction_id": ObjectId(self.direction_id) if self.direction_id else None,
             "function_name": self.function_name,
