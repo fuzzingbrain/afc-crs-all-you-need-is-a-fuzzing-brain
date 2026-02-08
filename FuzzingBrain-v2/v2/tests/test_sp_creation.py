@@ -18,7 +18,7 @@ from unittest.mock import patch, MagicMock
 
 from bson import ObjectId
 
-from fuzzingbrain.core.models.suspicious_point import SuspiciousPoint, SPStatus
+from fuzzingbrain.core.models.suspicious_point import SuspiciousPoint
 from fuzzingbrain.db.repository import SuspiciousPointRepository
 from fuzzingbrain.tools.suspicious_points import (
     create_suspicious_point_impl,
@@ -60,19 +60,17 @@ def sp_repo():
 
 class TestDirectionGuard:
     """
-    Business rule: only SP Finding agents (with direction_id set) may create SPs.
-    SPVerifier and POVAgent must NOT be able to create SPs even if they
-    somehow get access to the tool.
+    SP creation access is controlled at the agent level via include_sp_create_tools.
+    The tool itself does not gate on direction_id — delta mode has no directions.
     """
 
     @patch("fuzzingbrain.tools.suspicious_points._get_client")
     @patch("fuzzingbrain.tools.suspicious_points._ensure_client", return_value=None)
-    def test_no_direction_id_blocks_creation(self, _ensure, mock_get_client):
-        """Without direction_id in context, create must fail."""
+    def test_no_direction_id_allows_creation(self, _ensure, mock_get_client):
+        """Without direction_id (delta mode), create must succeed."""
         client = _mock_client_create_success()
         mock_get_client.return_value = client
 
-        # Set context WITHOUT direction_id (simulates SPVerifier/POVAgent)
         set_sp_context("fuzz_png", "address", direction_id="", agent_id=str(ObjectId()))
 
         result = create_suspicious_point_impl(
@@ -81,14 +79,13 @@ class TestDirectionGuard:
             description="heap overflow in chunk parser",
         )
 
-        assert result["success"] is False
-        assert "no direction_id" in result["error"]
-        client.create_suspicious_point.assert_not_called()
+        assert result["success"] is True
+        client.create_suspicious_point.assert_called_once()
 
     @patch("fuzzingbrain.tools.suspicious_points._get_client")
     @patch("fuzzingbrain.tools.suspicious_points._ensure_client", return_value=None)
     def test_with_direction_id_allows_creation(self, _ensure, mock_get_client):
-        """With direction_id set (SPG agent), create must succeed."""
+        """With direction_id set (fullscan SPG agent), create must succeed."""
         client = _mock_client_create_success()
         mock_get_client.return_value = client
 
@@ -103,29 +100,6 @@ class TestDirectionGuard:
 
         assert result["success"] is True
         client.create_suspicious_point.assert_called_once()
-
-    @patch("fuzzingbrain.tools.suspicious_points._get_client")
-    @patch("fuzzingbrain.tools.suspicious_points._ensure_client", return_value=None)
-    def test_set_sp_agent_id_does_not_bypass_guard(self, _ensure, mock_get_client):
-        """
-        set_sp_agent_id() only sets agent_id, not direction_id.
-        An agent that only calls set_sp_agent_id (SPVerifier) must still be blocked.
-        """
-        client = _mock_client_create_success()
-        mock_get_client.return_value = client
-
-        # Simulate SPVerifier: set_sp_context without direction, then set_sp_agent_id
-        set_sp_context("fuzz_png", "address", direction_id="")
-        set_sp_agent_id(str(ObjectId()))
-
-        result = create_suspicious_point_impl(
-            function_name="parse_chunk",
-            vuln_type="buffer-overflow",
-            description="test",
-        )
-
-        assert result["success"] is False
-        client.create_suspicious_point.assert_not_called()
 
 
 # =========================================================================
@@ -155,7 +129,9 @@ class TestSPFieldFlow:
             vuln_type="use-after-free",
             description="UAF after realloc in decompression loop",
             score=0.85,
-            important_controlflow=[{"type": "function", "name": "realloc", "location": "line 42"}],
+            important_controlflow=[
+                {"type": "function", "name": "realloc", "location": "line 42"}
+            ],
         )
 
         kw = client.create_suspicious_point.call_args[1]
@@ -176,7 +152,9 @@ class TestSPFieldFlow:
 
         direction_id = str(ObjectId())
         agent_id = str(ObjectId())
-        set_sp_context("fuzz_png", "address", direction_id=direction_id, agent_id=agent_id)
+        set_sp_context(
+            "fuzz_png", "address", direction_id=direction_id, agent_id=agent_id
+        )
 
         create_suspicious_point_impl(
             function_name="f",
@@ -309,7 +287,9 @@ class TestSPInitialState:
 
         found = sp_repo.find_by_task(task_id)
         assert len(found) == 1
-        assert found[0].sources == [{"harness_name": "fuzz_png", "sanitizer": "address"}]
+        assert found[0].sources == [
+            {"harness_name": "fuzz_png", "sanitizer": "address"}
+        ]
 
     def test_direction_id_persisted(self, sp_repo):
         """SP must record which direction it belongs to."""
@@ -355,8 +335,12 @@ class TestSPContextIsolation:
 
     def test_set_sp_context_replaces_all_fields(self):
         """set_sp_context replaces everything including direction_id."""
-        set_sp_context("fuzz_png", "address", direction_id="old_dir", agent_id="old_agent")
-        set_sp_context("fuzz_icc", "memory", direction_id="new_dir", agent_id="new_agent")
+        set_sp_context(
+            "fuzz_png", "address", direction_id="old_dir", agent_id="old_agent"
+        )
+        set_sp_context(
+            "fuzz_icc", "memory", direction_id="new_dir", agent_id="new_agent"
+        )
 
         harness, san, direction, agent = get_sp_context()
         assert harness == "fuzz_icc"

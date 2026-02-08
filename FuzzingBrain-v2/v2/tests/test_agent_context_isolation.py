@@ -140,21 +140,24 @@ class TestSPCreateContextFlow:
                     await e.wait()
 
                 mock_client = _mock_client()
-                with patch(
-                    "fuzzingbrain.tools.suspicious_points._get_client",
-                    return_value=mock_client,
-                ), patch(
-                    "fuzzingbrain.tools.suspicious_points._ensure_client",
-                    return_value=None,
+                with (
+                    patch(
+                        "fuzzingbrain.tools.suspicious_points._get_client",
+                        return_value=mock_client,
+                    ),
+                    patch(
+                        "fuzzingbrain.tools.suspicious_points._ensure_client",
+                        return_value=None,
+                    ),
                 ):
                     create_suspicious_point_impl(
                         function_name=func_name,
                         vuln_type="buffer-overflow",
                         description=f"Bug in {func_name}",
                     )
-                    captured[func_name] = (
-                        mock_client.create_suspicious_point.call_args[1]
-                    )
+                    captured[func_name] = mock_client.create_suspicious_point.call_args[
+                        1
+                    ]
 
             await asyncio.gather(
                 spg_mini_agent("png_read_chunk", 0),
@@ -304,7 +307,9 @@ class TestDirectionContextFlow:
 
     @patch("fuzzingbrain.tools.directions._get_client")
     @patch("fuzzingbrain.tools.directions._ensure_client", return_value=None)
-    def test_planner_creates_multiple_directions_same_fuzzer(self, _ensure, mock_get_client):
+    def test_planner_creates_multiple_directions_same_fuzzer(
+        self, _ensure, mock_get_client
+    ):
         """
         Direction planner creates 3 directions in one session.
         All must carry the same fuzzer="fuzz_png" from context.
@@ -378,12 +383,15 @@ class TestParallelAgentToolCalls:
 
                 # Both contexts are set — now call tool function
                 mock_client = _mock_client()
-                with patch(
-                    "fuzzingbrain.tools.suspicious_points._get_client",
-                    return_value=mock_client,
-                ), patch(
-                    "fuzzingbrain.tools.suspicious_points._ensure_client",
-                    return_value=None,
+                with (
+                    patch(
+                        "fuzzingbrain.tools.suspicious_points._get_client",
+                        return_value=mock_client,
+                    ),
+                    patch(
+                        "fuzzingbrain.tools.suspicious_points._ensure_client",
+                        return_value=None,
+                    ),
                 ):
                     create_suspicious_point_impl(
                         function_name=f"func_{name}",
@@ -441,21 +449,24 @@ class TestParallelAgentToolCalls:
                 await other_event.wait()
 
                 mock_client = _mock_client()
-                with patch(
-                    "fuzzingbrain.tools.suspicious_points._get_client",
-                    return_value=mock_client,
-                ), patch(
-                    "fuzzingbrain.tools.suspicious_points._ensure_client",
-                    return_value=None,
+                with (
+                    patch(
+                        "fuzzingbrain.tools.suspicious_points._get_client",
+                        return_value=mock_client,
+                    ),
+                    patch(
+                        "fuzzingbrain.tools.suspicious_points._ensure_client",
+                        return_value=None,
+                    ),
                 ):
                     create_suspicious_point_impl(
                         function_name="png_read_chunk",
                         vuln_type="buffer-overflow",
                         description="New SP from Phase 1",
                     )
-                    captured["sp_find"] = (
-                        mock_client.create_suspicious_point.call_args[1]
-                    )
+                    captured["sp_find"] = mock_client.create_suspicious_point.call_args[
+                        1
+                    ]
 
             async def verify_pipeline(my_event, other_event):
                 # Verify agent sets its own context (pipeline.py:231)
@@ -469,12 +480,15 @@ class TestParallelAgentToolCalls:
                 await other_event.wait()
 
                 mock_client = _mock_client()
-                with patch(
-                    "fuzzingbrain.tools.suspicious_points._get_client",
-                    return_value=mock_client,
-                ), patch(
-                    "fuzzingbrain.tools.suspicious_points._ensure_client",
-                    return_value=None,
+                with (
+                    patch(
+                        "fuzzingbrain.tools.suspicious_points._get_client",
+                        return_value=mock_client,
+                    ),
+                    patch(
+                        "fuzzingbrain.tools.suspicious_points._ensure_client",
+                        return_value=None,
+                    ),
                 ):
                     update_suspicious_point_impl(
                         suspicious_point_id="sp_earlier_001",
@@ -484,9 +498,9 @@ class TestParallelAgentToolCalls:
                         verification_notes="Confirmed from earlier SP",
                         pov_guidance="Craft ICC profile",
                     )
-                    captured["verify"] = (
-                        mock_client.update_suspicious_point.call_args[1]
-                    )
+                    captured["verify"] = mock_client.update_suspicious_point.call_args[
+                        1
+                    ]
 
             await asyncio.gather(
                 sp_find_phase(event_1, event_2),
@@ -515,15 +529,11 @@ class TestContextLeakBetweenPipelinePhases:
 
     @patch("fuzzingbrain.tools.suspicious_points._get_client")
     @patch("fuzzingbrain.tools.suspicious_points._ensure_client", return_value=None)
-    def test_set_sp_agent_id_must_not_leak_direction(self, _ensure, mock_get_client):
+    def test_set_sp_agent_id_preserves_direction(self, _ensure, mock_get_client):
         """
-        Direction leak prevention relies on two layers:
-        - Layer 2: Guard in create_suspicious_point_impl rejects if no direction_id
-        - Layer 3: SPVerifier/POVAgent don't have create_suspicious_point tool
-
-        set_sp_agent_id() does NOT clear direction_id (it would break SPG agents
-        that need direction_id to create SPs). Instead, pipeline transitions
-        use set_sp_context() without direction_id when entering verify/POV phase.
+        set_sp_agent_id() does NOT clear direction_id (needed for SPG agents).
+        Access control for SPVerifier/POVAgent is handled at agent level
+        via include_sp_create_tools, not in the tool itself.
         """
         client = _mock_client()
         mock_get_client.return_value = client
@@ -547,31 +557,12 @@ class TestContextLeakBetweenPipelinePhases:
         # set_sp_agent_id preserves direction_id (needed for SPG agents)
         set_sp_agent_id("spg_dir2")
         from fuzzingbrain.tools.suspicious_points import get_sp_context
+
         _, _, direction_id, agent_id = get_sp_context()
-        assert direction_id == "dir_chunk", \
+        assert direction_id == "dir_chunk", (
             "set_sp_agent_id must NOT clear direction_id"
+        )
         assert agent_id == "spg_dir2"
-
-        # --- Verify phase: pipeline clears direction_id via set_sp_context ---
-        set_sp_context(
-            harness_name="fuzz_png",
-            sanitizer="address",
-            direction_id="",
-            agent_id="verifier_1",
-        )
-
-        # Layer 2: create_suspicious_point_impl rejects without direction_id
-        result2 = create_suspicious_point_impl(
-            function_name="parse_icc",
-            vuln_type="out-of-bounds-read",
-            description="test",
-        )
-        assert result2["success"] is False, \
-            "SP creation must be blocked without direction_id"
-        assert "direction_id" in result2["error"]
-
-        # Server was only called once (SP Finding phase), not twice
-        assert client.create_suspicious_point.call_count == 1
 
     @patch("fuzzingbrain.tools.suspicious_points._get_client")
     @patch("fuzzingbrain.tools.suspicious_points._ensure_client", return_value=None)
@@ -636,12 +627,15 @@ class TestContextLeakBetweenPipelinePhases:
                 await other_event.wait()
 
                 mock_client = _mock_client()
-                with patch(
-                    "fuzzingbrain.tools.suspicious_points._get_client",
-                    return_value=mock_client,
-                ), patch(
-                    "fuzzingbrain.tools.suspicious_points._ensure_client",
-                    return_value=None,
+                with (
+                    patch(
+                        "fuzzingbrain.tools.suspicious_points._get_client",
+                        return_value=mock_client,
+                    ),
+                    patch(
+                        "fuzzingbrain.tools.suspicious_points._ensure_client",
+                        return_value=None,
+                    ),
                 ):
                     update_suspicious_point_impl(
                         suspicious_point_id="sp_001",
@@ -666,12 +660,15 @@ class TestContextLeakBetweenPipelinePhases:
                 await other_event.wait()
 
                 mock_client = _mock_client()
-                with patch(
-                    "fuzzingbrain.tools.suspicious_points._get_client",
-                    return_value=mock_client,
-                ), patch(
-                    "fuzzingbrain.tools.suspicious_points._ensure_client",
-                    return_value=None,
+                with (
+                    patch(
+                        "fuzzingbrain.tools.suspicious_points._get_client",
+                        return_value=mock_client,
+                    ),
+                    patch(
+                        "fuzzingbrain.tools.suspicious_points._ensure_client",
+                        return_value=None,
+                    ),
                 ):
                     update_suspicious_point_impl(
                         suspicious_point_id="sp_002",
@@ -681,9 +678,7 @@ class TestContextLeakBetweenPipelinePhases:
                         verification_notes="Also confirmed",
                         pov_guidance="Crafted ICC profile",
                     )
-                    captured["pov"] = (
-                        mock_client.update_suspicious_point.call_args[1]
-                    )
+                    captured["pov"] = mock_client.update_suspicious_point.call_args[1]
 
             await asyncio.gather(
                 verifier(event_1, event_2),
