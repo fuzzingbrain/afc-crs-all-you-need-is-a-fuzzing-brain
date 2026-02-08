@@ -160,7 +160,9 @@ def create_suspicious_point_impl(
             )
             return {"success": True, "created": True, "id": sp_id[:8]}
     except (BrokenPipeError, ConnectionError, OSError) as e:
-        logger.warning(f"SP creation skipped (connection closed, task may have ended): {type(e).__name__}")
+        logger.warning(
+            f"SP creation skipped (connection closed, task may have ended): {type(e).__name__}"
+        )
         return {"success": False, "error": "analyzer connection closed"}
     except Exception as e:
         logger.error(f"Failed to create suspicious point: {e}")
@@ -181,7 +183,10 @@ def update_suspicious_point_impl(
 ) -> Dict[str, Any]:
     """Implementation of update_suspicious_point (without MCP decorator)."""
     if is_important and not pov_guidance:
-        return {"success": False, "error": "pov_guidance is required when is_important=True"}
+        return {
+            "success": False,
+            "error": "pov_guidance is required when is_important=True",
+        }
 
     err = _ensure_client()
     if err:
@@ -358,7 +363,9 @@ def create_suspicious_point(
             )
             return {"success": True, "created": True, "id": sp_id[:8]}
     except (BrokenPipeError, ConnectionError, OSError) as e:
-        logger.warning(f"SP creation skipped (connection closed, task may have ended): {type(e).__name__}")
+        logger.warning(
+            f"SP creation skipped (connection closed, task may have ended): {type(e).__name__}"
+        )
         return {"success": False, "error": "analyzer connection closed"}
     except Exception as e:
         logger.error(f"Failed to create suspicious point: {e}")
