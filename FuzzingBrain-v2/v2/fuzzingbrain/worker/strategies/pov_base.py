@@ -103,12 +103,7 @@ class POVBaseStrategy(BaseStrategy):
         pass
 
     def _set_operation(self, operation: str) -> None:
-        """Set current operation for evaluation tracking.
-
-        Note: Previously used reporter, now operation tracking is handled
-        by AgentContext which persists agent_type to MongoDB.
-        """
-        # Operation tracking now handled by AgentContext.agent_type
+        """Set current operation for evaluation tracking."""
         pass
 
     def execute(self) -> Dict[str, Any]:

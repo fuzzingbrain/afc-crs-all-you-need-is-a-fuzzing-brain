@@ -226,8 +226,6 @@ def update_suspicious_point_impl(
         updated = result.get("updated", False) if result else False
         if updated:
             logger.info(f"[UPDATE SUSPICIOUS POINT] {update_json}")
-            # SP verification is now tracked via AgentContext and MongoDB
-            # No need for reporter - data persisted directly
         else:
             logger.warning(
                 f"[UPDATE SUSPICIOUS POINT FAILED] Server returned: {result}"

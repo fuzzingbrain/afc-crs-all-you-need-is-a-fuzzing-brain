@@ -590,8 +590,6 @@ def generate(variant: int = 1) -> bytes:
             "diff_path": str(Path(workspace_path) / "diff" / "ref.diff")
             if self.task.scan_mode.value == "delta"
             else None,
-            # Evaluation server for cost tracking
-            "eval_server": self.config.eval_server,
             "budget_limit": self.config.budget_limit,
             "pov_count": self.config.pov_count,
         }

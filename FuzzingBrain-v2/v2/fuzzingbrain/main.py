@@ -421,9 +421,6 @@ def parse_args() -> argparse.Namespace:
         "--prebuild-dir", type=str, help="Path to prebuild data directory"
     )
 
-    # Evaluation
-    parser.add_argument("--eval-server", type=str, help="Evaluation server URL")
-
     # Patch mode specific
     parser.add_argument("--gen-blob", type=str, help="Generator blob for patch mode")
     parser.add_argument(
@@ -526,10 +523,6 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
         config.work_id = args.work_id
     if args.prebuild_dir:
         config.prebuild_dir = args.prebuild_dir
-
-    # Evaluation
-    if args.eval_server:
-        config.eval_server = args.eval_server
 
     # Patch mode specific
     if args.gen_blob:
@@ -1121,10 +1114,6 @@ def main():
     args = parse_args()
     config = create_config_from_args(args)
 
-    # =========================================================================
-    # Evaluation Reporter removed - using MongoDB persistence instead
-    # Worker/Agent context is now handled via WorkerContext/AgentContext
-    # =========================================================================
     if config.budget_limit > 0:
         print(f"\033[0;36m[CONFIG]\033[0m Budget limit: ${config.budget_limit:.2f}")
     if config.pov_count > 0:

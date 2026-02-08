@@ -21,7 +21,6 @@ from ..core.logging import (
     create_worker_summary,
 )
 from ..db import MongoDB, init_repos
-from ..eval import BudgetExceededError
 
 
 # Capture any uncaught exceptions at module level
@@ -185,40 +184,6 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             "sanitizer": sanitizer,
             "pov_generated": result.get("pov_generated", 0),
             "patch_generated": result.get("patch_generated", 0),
-        }
-
-    except BudgetExceededError as e:
-        # Budget limit reached - graceful shutdown
-        logger.warning(f"Budget limit exceeded: {e}")
-
-        # Clean up executor
-        try:
-            if "executor" in dir() and executor is not None:
-                executor.close()
-        except Exception as cleanup_err:
-            logger.warning(f"Error during cleanup: {cleanup_err}")
-
-        # Calculate elapsed time
-        elapsed_seconds = (datetime.now() - start_time).total_seconds()
-
-        # Log worker summary
-        summary = create_worker_summary(
-            worker_id=display_name,
-            status="budget_exceeded",
-            fuzzer=fuzzer,
-            sanitizer=sanitizer,
-            elapsed_seconds=elapsed_seconds,
-            error_msg=str(e),
-        )
-        for line in summary.split("\n"):
-            logger.info(line)
-
-        return {
-            "display_name": display_name,
-            "status": "budget_exceeded",
-            "fuzzer": fuzzer,
-            "sanitizer": sanitizer,
-            "error": str(e),
         }
 
     except Exception as e:

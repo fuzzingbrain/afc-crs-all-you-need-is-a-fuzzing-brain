@@ -702,9 +702,6 @@ class TaskProcessor:
         """
         logger.info(f"Processing task: {task.task_id}")
 
-        # Task/Worker/Agent context is now handled via WorkerContext/AgentContext
-        # which persist to MongoDB directly - no reporter needed
-
         # Save task to database
         task.mark_running()
         self.repos.tasks.save(task)

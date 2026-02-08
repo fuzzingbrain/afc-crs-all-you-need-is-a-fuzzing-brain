@@ -42,6 +42,5 @@
     "targets": [],
 
     "=== Runtime Control (optional) ===": "----------------------------------------",
-    "budget_limit": 50,
-    "eval_server": null
+    "budget_limit": 50
 }

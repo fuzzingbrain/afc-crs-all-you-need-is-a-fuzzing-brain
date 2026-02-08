@@ -653,8 +653,6 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             tool_name: Tool name (for tool response messages)
             tool_success: Whether tool succeeded (for tool response messages)
         """
-        # Logging is now handled by AgentContext persistence
-        # No need for reporter - data goes directly to MongoDB
         pass
 
     def _log_conversation(self) -> None:
@@ -896,13 +894,6 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                     temperature=self.temperature,
                 )
             except Exception as e:
-                # Re-raise BudgetExceededError to stop all processing
-                from ..eval import BudgetExceededError
-
-                if isinstance(e, BudgetExceededError):
-                    self._log(f"Budget limit exceeded: {e}", level="WARNING")
-                    self.stop_reason = "budget"
-                    raise
                 import traceback
 
                 self._log(f"LLM call failed: {e}", level="ERROR")
@@ -1084,19 +1075,12 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                     ctx.log_path = str(self._log_file)
 
             except Exception as e:
-                # Check if it's a budget/resource limit (not a real failure)
-                from ..eval import BudgetExceededError
+                self._log(f"Agent run failed: {e}", level="ERROR")
+                import traceback
 
-                if isinstance(e, BudgetExceededError):
-                    self._log(f"Agent stopped: {e}", level="INFO")
-                    result = f"Agent stopped (budget limit): {e}"
-                else:
-                    self._log(f"Agent run failed: {e}", level="ERROR")
-                    import traceback
-
-                    self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
-                    self.stop_reason = "error"  # Mark as actual failure
-                    result = f"Agent failed: {e}"
+                self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
+                self.stop_reason = "error"  # Mark as actual failure
+                result = f"Agent failed: {e}"
 
         # Context exits here, automatically persisting to MongoDB
 
