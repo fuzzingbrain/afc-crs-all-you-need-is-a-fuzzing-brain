@@ -502,15 +502,17 @@ class AnalyzerBuilder:
             self.log("Coverage build failed, continuing without it", "WARN")
 
         # Handle introspector result
-        intro_success, _ = build_results.get("introspector", (False, "Not built"))
-        if intro_success:
-            self.introspector_path = str(
-                self.build_out_base / f"{self.project_name}_introspector"
-            )
-        else:
-            self.log(
-                "Introspector build failed, static analysis will be limited", "WARN"
-            )
+        if "introspector" in build_results:
+            intro_success, _ = build_results["introspector"]
+            if intro_success:
+                self.introspector_path = str(
+                    self.build_out_base / f"{self.project_name}_introspector"
+                )
+            else:
+                self.log(
+                    "Introspector build failed, static analysis will be limited",
+                    "WARN",
+                )
 
         elapsed = time.time() - start_time
         successful = sum(1 for s, _ in build_results.values() if s)

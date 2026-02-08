@@ -30,7 +30,6 @@ def _run_server_process(
     language: str,
     log_dir: Optional[str],
     result_queue: multiprocessing.Queue,
-    skip_build: bool = False,
     prebuild_dir: Optional[str] = None,
     work_id: Optional[str] = None,
     fuzzer_sources: Optional[Dict[str, str]] = None,
@@ -41,7 +40,6 @@ def _run_server_process(
     This function is the entry point for the server subprocess.
 
     Args:
-        skip_build: If True, skip build and import phases (for cache restore)
         prebuild_dir: Path to prebuild data directory (for prebuild import)
         work_id: Work ID for prebuild data remapping
         fuzzer_sources: Dict mapping fuzzer_name -> source_path (relative to fuzz-tooling)
@@ -65,7 +63,6 @@ def _run_server_process(
             ossfuzz_project_name=ossfuzz_project_name,
             language=language,
             log_dir=log_dir,
-            skip_build=skip_build,
             prebuild_dir=prebuild_dir,
             work_id=work_id,
             fuzzer_sources=fuzzer_sources,
@@ -127,8 +124,6 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
     logger.info(f"[Analyzer] Starting Analysis Server for task {task_id}")
     logger.info(f"[Analyzer] Project: {request.project_name}")
     logger.info(f"[Analyzer] Sanitizers: {request.sanitizers}")
-    if request.skip_build:
-        logger.info("[Analyzer] Skip build mode enabled (cache restore)")
     if request.prebuild_dir:
         logger.info(f"[Analyzer] Using prebuild data from: {request.prebuild_dir}")
         logger.info(f"[Analyzer] Work ID for remapping: {request.work_id}")
@@ -148,7 +143,6 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
             request.language,
             request.log_dir,
             result_queue,
-            request.skip_build,
             request.prebuild_dir,
             request.work_id,
             request.fuzzer_sources,

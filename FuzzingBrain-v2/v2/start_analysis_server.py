@@ -74,7 +74,6 @@ async def main(sp_name: str):
         sanitizers=["address"],
         ossfuzz_project=project_name,
         language="c",
-        skip_build=True,  # 跳过 build，使用预构建
         prebuild_dir=str(prebuild_dir),
     )
 

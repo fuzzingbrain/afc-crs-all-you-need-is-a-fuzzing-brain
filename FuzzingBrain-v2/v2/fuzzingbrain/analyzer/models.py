@@ -24,7 +24,6 @@ class AnalyzeRequest:
     language: str = "c"  # "c" / "cpp" / "java"
     ossfuzz_project_name: Optional[str] = None  # OSS-Fuzz project name if different
     log_dir: Optional[str] = None  # Log directory path
-    skip_build: bool = False  # Skip build/import phases (for cache restore)
     prebuild_dir: Optional[str] = None  # Path to prebuild data directory
     work_id: Optional[str] = None  # Work ID for prebuild data remapping
     fuzzer_sources: Dict[str, str] = field(
@@ -40,7 +39,6 @@ class AnalyzeRequest:
             "language": self.language,
             "ossfuzz_project_name": self.ossfuzz_project_name,
             "log_dir": self.log_dir,
-            "skip_build": self.skip_build,
             "prebuild_dir": self.prebuild_dir,
             "work_id": self.work_id,
             "fuzzer_sources": self.fuzzer_sources,
@@ -56,7 +54,6 @@ class AnalyzeRequest:
             language=data.get("language", "c"),
             ossfuzz_project_name=data.get("ossfuzz_project_name"),
             log_dir=data.get("log_dir"),
-            skip_build=data.get("skip_build", False),
             prebuild_dir=data.get("prebuild_dir"),
             work_id=data.get("work_id"),
             fuzzer_sources=data.get("fuzzer_sources", {}),

@@ -709,10 +709,6 @@ class TaskProcessor:
         task.mark_running()
         self.repos.tasks.save(task)
 
-        # Cache disabled - only using prebuild for static analysis
-        cache_restored = False
-        cache_commit = None
-
         try:
             # Step 1: Setup workspace
             logger.info("Step 1: Setting up workspace")
@@ -722,23 +718,17 @@ class TaskProcessor:
             if not success:
                 raise Exception(f"Workspace setup failed: {msg}")
 
-            # Cache disabled - always do fresh setup
-            if True:
-                # Step 2: Clone repository
-                logger.info("Step 2: Cloning repository")
-                success, msg = workspace_setup.clone_repository()
-                if not success:
-                    raise Exception(f"Repository clone failed: {msg}")
+            # Step 2: Clone repository
+            logger.info("Step 2: Cloning repository")
+            success, msg = workspace_setup.clone_repository()
+            if not success:
+                raise Exception(f"Repository clone failed: {msg}")
 
-                # Get commit hash after clone (if not already have it)
-                if not cache_commit:
-                    cache_commit = self._get_commit_hash()
-
-                # Step 3: Setup fuzz-tooling
-                logger.info("Step 3: Setting up fuzz-tooling")
-                success, msg = workspace_setup.setup_fuzz_tooling()
-                if not success:
-                    raise Exception(f"Fuzz-tooling setup failed: {msg}")
+            # Step 3: Setup fuzz-tooling
+            logger.info("Step 3: Setting up fuzz-tooling")
+            success, msg = workspace_setup.setup_fuzz_tooling()
+            if not success:
+                raise Exception(f"Fuzz-tooling setup failed: {msg}")
 
             # Update task in database with new paths
             self.repos.tasks.save(task)
@@ -789,12 +779,7 @@ class TaskProcessor:
                         raise Exception(f"Failed to generate diff for delta scan: {e}")
 
             # Step 4: Discover fuzzers
-            if cache_restored:
-                # Load fuzzers from database (already restored from cache)
-                logger.info("Step 4: Loading fuzzers from cache")
-                fuzzers = self.repos.fuzzers.find_by_task(task.task_id)
-                logger.info(f"Loaded {len(fuzzers)} fuzzers from cache")
-            elif self.config.fuzzer_filter:
+            if self.config.fuzzer_filter:
                 # Use explicitly specified fuzzers from config
                 logger.info(
                     f"Step 4: Using {len(self.config.fuzzer_filter)} fuzzers from config"
@@ -828,100 +813,49 @@ class TaskProcessor:
             project_name = self.config.ossfuzz_project_name or task.project_name
             analyze_result = None
 
-            if cache_restored:
-                # Start Analysis Server with skip_build mode (skip build, just start server)
-                logger.info(
-                    "Step 5: Starting Analysis Server (skip build, data from cache)"
-                )
+            logger.info("Step 5: Running Code Analyzer")
 
-                log_dir = get_log_dir()
-                analyze_request = AnalyzeRequest(
-                    task_id=task.task_id,
-                    task_path=task.task_path,
-                    project_name=project_name,
-                    sanitizers=self.config.sanitizers,
-                    language="c",
-                    ossfuzz_project_name=self.config.ossfuzz_project_name,
-                    log_dir=str(log_dir) if log_dir else None,
-                    skip_build=True,  # Skip build, use cached data
-                    prebuild_dir=self.config.prebuild_dir,
-                    work_id=self.config.work_id,
-                    fuzzer_sources=self.config.fuzzer_sources,
-                )
+            # Create analyze request
+            log_dir = get_log_dir()
+            analyze_request = AnalyzeRequest(
+                task_id=task.task_id,
+                task_path=task.task_path,
+                project_name=project_name,
+                sanitizers=self.config.sanitizers,
+                language="c",  # TODO: detect language
+                ossfuzz_project_name=self.config.ossfuzz_project_name,
+                log_dir=str(log_dir) if log_dir else None,
+                prebuild_dir=self.config.prebuild_dir,
+                work_id=self.config.work_id,
+                fuzzer_sources=self.config.fuzzer_sources,
+            )
 
-                # Run analyzer with skip_build
-                if self.config.api_mode:
-                    celery_result = run_analyzer.delay(analyze_request.to_dict())
-                    result_dict = celery_result.get(
-                        timeout=300
-                    )  # 5 min timeout for skip_build
-                else:
-                    result_dict = run_analyzer(analyze_request.to_dict())
+            logger.info(f"Analyzer request: sanitizers={self.config.sanitizers}")
+            logger.info(
+                "Waiting for Analyzer to complete (this may take a while)..."
+            )
 
-                analyze_result = AnalyzeResult.from_dict(result_dict)
-
-                if not analyze_result.success:
-                    raise Exception(
-                        f"Analysis Server failed to start: {analyze_result.error_msg}"
-                    )
-
-                # Get function count from database
-                db_functions = self.repos.functions.find_by_task(task.task_id)
-                reachable_count = len(db_functions)
-
-                logger.info(
-                    f"Analysis Server ready: {len(analyze_result.fuzzers)} fuzzers, {reachable_count} functions"
-                )
-
+            # Run analyzer: in CLI mode run directly; in API mode use Celery task
+            if self.config.api_mode:
+                celery_result = run_analyzer.delay(analyze_request.to_dict())
+                result_dict = celery_result.get(timeout=3600)  # 1 hour timeout
             else:
-                logger.info("Step 5: Running Code Analyzer")
+                result_dict = run_analyzer(analyze_request.to_dict())
 
-                # Create analyze request
-                log_dir = get_log_dir()
-                analyze_request = AnalyzeRequest(
-                    task_id=task.task_id,
-                    task_path=task.task_path,
-                    project_name=project_name,
-                    sanitizers=self.config.sanitizers,
-                    language="c",  # TODO: detect language
-                    ossfuzz_project_name=self.config.ossfuzz_project_name,
-                    log_dir=str(log_dir) if log_dir else None,
-                    prebuild_dir=self.config.prebuild_dir,
-                    work_id=self.config.work_id,
-                    fuzzer_sources=self.config.fuzzer_sources,
-                )
+            analyze_result = AnalyzeResult.from_dict(result_dict)
 
-                logger.info(f"Analyzer request: sanitizers={self.config.sanitizers}")
-                logger.info(
-                    "Waiting for Analyzer to complete (this may take a while)..."
-                )
+            if not analyze_result.success:
+                raise Exception(f"Code Analyzer failed: {analyze_result.error_msg}")
 
-                # Run analyzer (synchronously for now, can be made async with Celery)
-                # In CLI mode, run directly; in API mode, use Celery task
-                if self.config.api_mode:
-                    # Dispatch to Celery and wait
-                    celery_result = run_analyzer.delay(analyze_request.to_dict())
-                    result_dict = celery_result.get(timeout=3600)  # 1 hour timeout
-                else:
-                    # Run directly in same process
-                    result_dict = run_analyzer(analyze_request.to_dict())
-
-                analyze_result = AnalyzeResult.from_dict(result_dict)
-
-                if not analyze_result.success:
-                    raise Exception(f"Code Analyzer failed: {analyze_result.error_msg}")
-
-                logger.info(
-                    f"Analyzer completed: {len(analyze_result.fuzzers)} fuzzers built"
-                )
-                logger.info(
-                    f"Build duration: {analyze_result.build_duration_seconds:.1f}s"
-                )
-                logger.info(
-                    f"Static analysis: {analyze_result.reachable_functions_count} functions"
-                )
-
-                # Cache disabled - skip saving
+            logger.info(
+                f"Analyzer completed: {len(analyze_result.fuzzers)} fuzzers built"
+            )
+            logger.info(
+                f"Build duration: {analyze_result.build_duration_seconds:.1f}s"
+            )
+            logger.info(
+                f"Static analysis: {analyze_result.reachable_functions_count} functions"
+            )
 
             # Set shared coverage fuzzer path for tools
             if analyze_result.coverage_fuzzer_path:
@@ -933,42 +867,40 @@ class TaskProcessor:
                 )
 
             # Update fuzzer status in database based on Analyzer result
-            # Skip this when restored from cache (fuzzers already have correct status)
-            if not cache_restored:
-                built_fuzzer_names = analyze_result.get_fuzzer_names()
+            built_fuzzer_names = analyze_result.get_fuzzer_names()
 
-                # Layer 3: If discovery (Layer 1 & 2) found nothing, create from analyzer results
-                if not fuzzers and analyze_result.fuzzers:
-                    logger.info("Layer 3: Creating fuzzers from analyzer build results")
-                    seen_names = set()
-                    for fi in analyze_result.fuzzers:
-                        if fi.name in seen_names:
-                            continue
-                        seen_names.add(fi.name)
-                        fuzzer = Fuzzer(
-                            task_id=task.task_id,
-                            fuzzer_name=fi.name,
-                            source_path="",  # Unknown from build output
-                            repo_name=task.project_name,
-                            status=FuzzerStatus.SUCCESS,
-                            binary_path=fi.binary_path,
-                        )
-                        fuzzers.append(fuzzer)
-                        self.repos.fuzzers.save(fuzzer)
-                    logger.info(f"Layer 3 created {len(fuzzers)} fuzzers from analyzer")
-                else:
-                    # Normal path: update discovered fuzzers with build status
-                    for fuzzer in fuzzers:
-                        if fuzzer.fuzzer_name in built_fuzzer_names:
-                            fuzzer.status = FuzzerStatus.SUCCESS
-                            for fi in analyze_result.fuzzers:
-                                if fi.name == fuzzer.fuzzer_name:
-                                    fuzzer.binary_path = fi.binary_path
-                                    break
-                        else:
-                            fuzzer.status = FuzzerStatus.FAILED
-                            fuzzer.error_msg = "Not found in build output"
-                        self.repos.fuzzers.save(fuzzer)
+            # Layer 3: If discovery (Layer 1 & 2) found nothing, create from analyzer results
+            if not fuzzers and analyze_result.fuzzers:
+                logger.info("Layer 3: Creating fuzzers from analyzer build results")
+                seen_names = set()
+                for fi in analyze_result.fuzzers:
+                    if fi.name in seen_names:
+                        continue
+                    seen_names.add(fi.name)
+                    fuzzer = Fuzzer(
+                        task_id=task.task_id,
+                        fuzzer_name=fi.name,
+                        source_path="",  # Unknown from build output
+                        repo_name=task.project_name,
+                        status=FuzzerStatus.SUCCESS,
+                        binary_path=fi.binary_path,
+                    )
+                    fuzzers.append(fuzzer)
+                    self.repos.fuzzers.save(fuzzer)
+                logger.info(f"Layer 3 created {len(fuzzers)} fuzzers from analyzer")
+            else:
+                # Normal path: update discovered fuzzers with build status
+                for fuzzer in fuzzers:
+                    if fuzzer.fuzzer_name in built_fuzzer_names:
+                        fuzzer.status = FuzzerStatus.SUCCESS
+                        for fi in analyze_result.fuzzers:
+                            if fi.name == fuzzer.fuzzer_name:
+                                fuzzer.binary_path = fi.binary_path
+                                break
+                    else:
+                        fuzzer.status = FuzzerStatus.FAILED
+                        fuzzer.error_msg = "Not found in build output"
+                    self.repos.fuzzers.save(fuzzer)
 
             successful_fuzzers = [
                 f for f in fuzzers if f.status == FuzzerStatus.SUCCESS
