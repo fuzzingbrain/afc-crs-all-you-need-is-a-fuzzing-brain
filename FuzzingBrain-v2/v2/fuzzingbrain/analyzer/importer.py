@@ -15,7 +15,7 @@ from collections import deque
 
 from loguru import logger as loguru_logger
 
-from ..core.models import Function, CallGraphNode, Fuzzer, FuzzerStatus
+from ..core.models import Function, CallGraphNode
 from ..analysis import extract_functions_from_file
 
 
@@ -55,7 +55,7 @@ def import_from_prebuild(
         return False, f"Prebuild mongodb directory not found: {mongodb_dir}"
 
     # Check required files
-    required_files = ["functions.json", "callgraph.json", "fuzzers.json"]
+    required_files = ["functions.json", "callgraph.json"]
     for fname in required_files:
         if not (mongodb_dir / fname).exists():
             return False, f"Required file not found: {mongodb_dir / fname}"
@@ -69,42 +69,9 @@ def import_from_prebuild(
     stats = {
         "functions": 0,
         "callgraph_nodes": 0,
-        "fuzzers": 0,
     }
 
     try:
-        # Import fuzzers first (they are referenced by other records)
-        with open(mongodb_dir / "fuzzers.json", "r") as f:
-            fuzzers_data = json.load(f)
-
-        for doc in fuzzers_data:
-            # Remap task_id
-            doc["task_id"] = task_id
-            # Keep fuzzer_id as UUID (no remapping needed)
-
-            # Convert status string to enum
-            status_str = doc.get("status", "pending")
-            try:
-                status = FuzzerStatus(status_str)
-            except ValueError:
-                status = FuzzerStatus.PENDING
-
-            raw_fuzzer_id = doc.get("fuzzer_id") or doc.get("_id")
-            fuzzer = Fuzzer(
-                fuzzer_id=str(raw_fuzzer_id) if raw_fuzzer_id else None,
-                task_id=task_id,
-                fuzzer_name=doc.get("fuzzer_name", ""),
-                source_path=doc.get("source_path"),
-                repo_name=doc.get("repo_name"),
-                status=status,
-                error_msg=doc.get("error_msg"),
-                binary_path=doc.get("binary_path"),
-            )
-            repos.fuzzers.save(fuzzer)
-            stats["fuzzers"] += 1
-
-        log(f"Imported {stats['fuzzers']} fuzzers")
-
         # Import functions
         with open(mongodb_dir / "functions.json", "r") as f:
             functions_data = json.load(f)
@@ -163,7 +130,7 @@ def import_from_prebuild(
 
         return (
             True,
-            f"Imported {stats['functions']} functions, {stats['callgraph_nodes']} nodes, {stats['fuzzers']} fuzzers",
+            f"Imported {stats['functions']} functions, {stats['callgraph_nodes']} nodes",
         )
 
     except Exception as e:
