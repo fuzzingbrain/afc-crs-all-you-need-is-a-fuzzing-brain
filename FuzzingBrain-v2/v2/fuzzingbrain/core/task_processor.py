@@ -831,9 +831,7 @@ class TaskProcessor:
             )
 
             logger.info(f"Analyzer request: sanitizers={self.config.sanitizers}")
-            logger.info(
-                "Waiting for Analyzer to complete (this may take a while)..."
-            )
+            logger.info("Waiting for Analyzer to complete (this may take a while)...")
 
             # Run analyzer: in CLI mode run directly; in API mode use Celery task
             if self.config.api_mode:
@@ -850,9 +848,7 @@ class TaskProcessor:
             logger.info(
                 f"Analyzer completed: {len(analyze_result.fuzzers)} fuzzers built"
             )
-            logger.info(
-                f"Build duration: {analyze_result.build_duration_seconds:.1f}s"
-            )
+            logger.info(f"Build duration: {analyze_result.build_duration_seconds:.1f}s")
             logger.info(
                 f"Static analysis: {analyze_result.reachable_functions_count} functions"
             )
