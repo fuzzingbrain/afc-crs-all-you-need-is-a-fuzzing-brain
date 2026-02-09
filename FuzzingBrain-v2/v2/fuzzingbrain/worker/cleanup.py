@@ -16,11 +16,9 @@ def cleanup_worker_workspace(workspace_path: str, keep_results: bool = True):
     """
     Clean up worker workspace after completion.
 
-    Strategy:
-    - For repo/: Remove only git-tracked files, keep generated files
-    - For fuzz-tooling/: Remove entirely (no generated files expected)
-    - For diff/: Remove entirely
-    - For results/: Always keep
+    Workers share the main task workspace's repo/, fuzz-tooling/, and diff/
+    (read-only), so there is nothing to clean in those directories.
+    Only worker-specific output directories exist here (results/, fuzzer_worker/).
 
     Args:
         workspace_path: Path to worker workspace
@@ -33,23 +31,6 @@ def cleanup_worker_workspace(workspace_path: str, keep_results: bool = True):
         return
 
     logger.info(f"Cleaning up workspace: {workspace}")
-
-    # Clean repo/ using git
-    repo_path = workspace / "repo"
-    if repo_path.exists():
-        _cleanup_git_tracked(repo_path)
-
-    # Remove fuzz-tooling/ entirely
-    fuzz_tooling_path = workspace / "fuzz-tooling"
-    if fuzz_tooling_path.exists():
-        shutil.rmtree(fuzz_tooling_path)
-        logger.info(f"Removed: {fuzz_tooling_path}")
-
-    # Remove diff/ entirely
-    diff_path = workspace / "diff"
-    if diff_path.exists():
-        shutil.rmtree(diff_path)
-        logger.info(f"Removed: {diff_path}")
 
     # Results are always kept
     results_path = workspace / "results"

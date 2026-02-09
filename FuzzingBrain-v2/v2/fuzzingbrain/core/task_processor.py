@@ -916,6 +916,7 @@ class TaskProcessor:
                 infra = InfrastructureManager(
                     redis_url=self.config.redis_url,
                     concurrency=15,
+                    task_id=task.task_id,
                 )
                 if not infra.start(log_dir=str(log_dir) if log_dir else None):
                     raise Exception("Failed to start infrastructure (Redis/Celery)")
@@ -930,6 +931,7 @@ class TaskProcessor:
                     self.config,
                     self.repos,
                     analyze_result=self._analyze_result,
+                    celery_queue=infra.queue_name if infra else None,
                 )
                 jobs = dispatcher.dispatch(fuzzers)
 

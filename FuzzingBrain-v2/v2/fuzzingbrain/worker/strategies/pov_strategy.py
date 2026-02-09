@@ -94,9 +94,9 @@ class POVStrategy(BaseStrategy):
 
     def _setup_tool_contexts(self) -> None:
         """Set up contexts for MCP tools."""
-        # Set code viewer context (workspace path, repo subdir, diff filename)
+        # Set code viewer context using main task workspace (shared repo/diff)
         set_code_viewer_context(
-            workspace_path=str(self.workspace_path),
+            workspace_path=str(self.executor.task_workspace_path),
             repo_subdir="repo",
             diff_filename="diff/ref.diff",
             project_name=self.project_name,
@@ -1160,9 +1160,12 @@ class POVStrategy(BaseStrategy):
         # Common fuzzer source extensions
         extensions = [".cc", ".c", ".cpp"]
 
-        # Try fuzz-tooling directory first
+        # Try fuzz-tooling directory in main task workspace (shared, read-only)
         fuzz_tooling_dir = (
-            self.workspace_path / "fuzz-tooling" / "projects" / self.project_name
+            self.executor.task_workspace_path
+            / "fuzz-tooling"
+            / "projects"
+            / self.project_name
         )
         for ext in extensions:
             fuzzer_path = fuzz_tooling_dir / f"{self.fuzzer}{ext}"
@@ -1202,7 +1205,7 @@ class POVStrategy(BaseStrategy):
             set_coverage_context(
                 coverage_fuzzer_dir=coverage_fuzzer_dir,
                 project_name=self.project_name,
-                src_dir=self.workspace_path / "repo",
+                src_dir=self.executor.task_workspace_path / "repo",
                 docker_image=f"gcr.io/oss-fuzz/{self.project_name}",
                 work_dir=self.results_path / "coverage_work",
             )
@@ -1236,7 +1239,7 @@ class POVStrategy(BaseStrategy):
             config=config,
             output_dir=self.povs_path,
             log_dir=self.agent_log_dir,
-            workspace_path=self.workspace_path,
+            workspace_path=self.executor.task_workspace_path,
             worker_id=self.worker_id,  # For SP Fuzzer lifecycle
             fuzzer_code=fuzzer_code,
         )

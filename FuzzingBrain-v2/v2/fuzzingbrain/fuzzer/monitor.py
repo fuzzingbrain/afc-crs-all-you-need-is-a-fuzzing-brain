@@ -11,7 +11,6 @@ Maintains its own log file (fuzzer_monitor.log) for real-time tracking of:
 - Crash discoveries
 """
 
-import hashlib
 import re
 import subprocess
 import threading
@@ -737,7 +736,7 @@ class FuzzerMonitor:
         if verify_ctx:
             fuzzer_path, docker_image = verify_ctx
             verify_result = self._verify_crash(
-                crash_data,
+                crash_path,
                 fuzzer_path,
                 docker_image,
                 watch_entry.fuzzer_name,
@@ -796,7 +795,7 @@ class FuzzerMonitor:
 
     def _verify_crash(
         self,
-        crash_data: bytes,
+        crash_path: Path,
         fuzzer_path: Path,
         docker_image: str,
         fuzzer_name: str,
@@ -805,8 +804,11 @@ class FuzzerMonitor:
         """
         Verify a crash by re-running with sanitizer.
 
+        Mounts the crash file's directory directly — no copying needed
+        since crash files are already in the worker workspace.
+
         Args:
-            crash_data: Raw crash data
+            crash_path: Path to crash file (in worker workspace)
             fuzzer_path: Path to fuzzer binary
             docker_image: Docker image to use
             fuzzer_name: Fuzzer binary name
@@ -817,18 +819,9 @@ class FuzzerMonitor:
         """
         fuzzer_dir = fuzzer_path.parent
         fuzzer_binary = fuzzer_path.name
-
-        # Create work directory under fuzzer_dir (Docker can access this)
-        work_dir = fuzzer_dir / "crash_verify"
-        work_dir.mkdir(parents=True, exist_ok=True)
-
-        # Write crash to work directory
-        crash_hash = hashlib.sha1(crash_data).hexdigest()[:16]
-        temp_blob = work_dir / f"crash_{crash_hash}.bin"
-        temp_blob.write_bytes(crash_data)
+        work_dir = crash_path.parent
 
         try:
-            # Build Docker command
             cmd = [
                 "docker",
                 "run",
@@ -850,12 +843,11 @@ class FuzzerMonitor:
                 docker_image,
                 f"/fuzzers/{fuzzer_binary}",
                 "-timeout=30",
-                f"/work/{temp_blob.name}",
+                f"/work/{crash_path.name}",
             ]
 
             logger.debug(f"[FuzzerMonitor:{self.task_id}] Verifying: {' '.join(cmd)}")
 
-            # Run verification
             result = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -865,7 +857,6 @@ class FuzzerMonitor:
 
             combined_output = result.stderr + "\n" + result.stdout
 
-            # Check for crash and parse type
             crashed = self._check_crash(combined_output)
             vuln_type = self._parse_vuln_type(combined_output) if crashed else None
 
@@ -879,9 +870,6 @@ class FuzzerMonitor:
             return {"vuln_type": None, "output": "Verification timed out"}
         except Exception as e:
             return {"vuln_type": None, "output": f"Verification error: {e}"}
-        finally:
-            if temp_blob.exists():
-                temp_blob.unlink()
 
     def _check_crash(self, output: str) -> bool:
         """Check if output contains crash indicators."""

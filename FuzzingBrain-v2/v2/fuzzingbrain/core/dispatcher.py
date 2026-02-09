@@ -39,6 +39,7 @@ class WorkerDispatcher:
         config: Config,
         repos: RepositoryManager,
         analyze_result: AnalyzeResult = None,
+        celery_queue: str = None,
     ):
         """
         Initialize WorkerDispatcher.
@@ -48,12 +49,14 @@ class WorkerDispatcher:
             config: Configuration
             repos: Database repository manager
             analyze_result: Result from Code Analyzer (contains pre-built fuzzer paths)
+            celery_queue: Task-scoped Celery queue name for worker isolation
         """
         self.task = task
         self.config = config
         self.repos = repos
         self.project_name = config.ossfuzz_project_name or task.project_name
         self.analyze_result = analyze_result
+        self.celery_queue = celery_queue
         self.pov_count_target = config.pov_count  # Target POV count (0 = unlimited)
         self._task_oid = ObjectId(task.task_id)  # Cached ObjectId for MongoDB queries
 
@@ -120,7 +123,7 @@ class WorkerDispatcher:
                 )
                 if fuzzer_path:
                     verify_result = self._verify_crash_with_docker(
-                        crash_blob,
+                        crash_path,
                         fuzzer_path,
                         crash_record.sanitizer,
                     )
@@ -203,6 +206,7 @@ def generate(variant: int = 1) -> bytes:
                 logger.info(f"[FuzzerMonitor] ✅ POV {pov_id[:8]} packaged: {zip_path}")
                 # Activate POV
                 self.repos.povs.update(pov_id, {"is_successful": True})
+                self.repos.tasks.add_pov(self.task.task_id, pov_id)
                 logger.info(f"[FuzzerMonitor] ✅ POV {pov_id[:8]} activated!")
 
                 # Update worker's pov_generated count
@@ -229,42 +233,36 @@ def generate(variant: int = 1) -> bytes:
 
     def _verify_crash_with_docker(
         self,
-        crash_blob: bytes,
+        crash_path,
         fuzzer_path: str,
         sanitizer: str,
     ) -> Optional[Dict[str, Any]]:
         """
         Verify a crash by running it against the fuzzer in Docker.
 
+        Mounts the crash file's directory directly — crash files are
+        already in the worker workspace, no copying needed.
+
         Args:
-            crash_blob: The crash data
+            crash_path: Path to crash file (in worker workspace)
             fuzzer_path: Path to the fuzzer binary
             sanitizer: Sanitizer type
 
         Returns:
             Dict with 'vuln_type' and 'output', or None if verification failed
         """
-        import hashlib
         import re
         import subprocess
-        import tempfile
         from pathlib import Path
 
         docker_image = f"gcr.io/oss-fuzz/{self.project_name}"
         fuzzer_path = Path(fuzzer_path)
+        crash_path = Path(crash_path)
         fuzzer_dir = fuzzer_path.parent
         fuzzer_binary = fuzzer_path.name
+        work_dir = crash_path.parent
 
         try:
-            # Write crash to temp file
-            crash_hash = hashlib.sha1(crash_blob).hexdigest()[:16]
-            with tempfile.NamedTemporaryFile(
-                delete=False, suffix=f"_{crash_hash}.bin"
-            ) as f:
-                f.write(crash_blob)
-                temp_blob = Path(f.name)
-
-            # Build Docker command
             cmd = [
                 "docker",
                 "run",
@@ -282,11 +280,11 @@ def generate(variant: int = 1) -> bytes:
                 "-v",
                 f"{fuzzer_dir}:/fuzzers:ro",
                 "-v",
-                f"{temp_blob.parent}:/work",
+                f"{work_dir}:/work",
                 docker_image,
                 f"/fuzzers/{fuzzer_binary}",
                 "-timeout=30",
-                f"/work/{temp_blob.name}",
+                f"/work/{crash_path.name}",
             ]
 
             logger.debug(f"[FuzzerMonitor] Verifying crash: {' '.join(cmd[:10])}...")
@@ -313,9 +311,6 @@ def generate(variant: int = 1) -> bytes:
                 if match:
                     vuln_type = match.group(group).strip()
                     break
-
-            # Cleanup
-            temp_blob.unlink(missing_ok=True)
 
             return {
                 "vuln_type": vuln_type,
@@ -481,7 +476,8 @@ def generate(variant: int = 1) -> bytes:
         """
         Create isolated workspace for a worker.
 
-        Copies repo, fuzz-tooling, and diff (if exists) to worker workspace.
+        Workers share the main task workspace's repo/, fuzz-tooling/, and diff/
+        directories (read-only). Only worker-specific output directories are created.
 
         Args:
             pair: {fuzzer, sanitizer} pair
@@ -505,26 +501,6 @@ def generate(variant: int = 1) -> bytes:
             shutil.rmtree(worker_workspace)
 
         worker_workspace.mkdir(parents=True, exist_ok=True)
-
-        # Copy repo (symlinks=True to avoid following self-referencing symlinks)
-        src_repo = task_workspace / "repo"
-        if src_repo.exists():
-            shutil.copytree(src_repo, worker_workspace / "repo", symlinks=True)
-            logger.debug(f"Copied repo to {worker_workspace / 'repo'}")
-
-        # Copy fuzz-tooling
-        src_fuzz_tooling = task_workspace / "fuzz-tooling"
-        if src_fuzz_tooling.exists():
-            shutil.copytree(
-                src_fuzz_tooling, worker_workspace / "fuzz-tooling", symlinks=True
-            )
-            logger.debug(f"Copied fuzz-tooling to {worker_workspace / 'fuzz-tooling'}")
-
-        # Copy diff (if exists)
-        src_diff = task_workspace / "diff"
-        if src_diff.exists():
-            shutil.copytree(src_diff, worker_workspace / "diff", symlinks=True)
-            logger.debug(f"Copied diff to {worker_workspace / 'diff'}")
 
         # Create results directory
         (worker_workspace / "results").mkdir(exist_ok=True)
@@ -567,12 +543,14 @@ def generate(variant: int = 1) -> bytes:
             build_dir = self.analyze_result.build_paths.get(sanitizer)
 
         # Prepare assignment - WorkerContext will create Worker record
+        task_workspace = Path(self.task.task_path)
         assignment = {
             "task_id": self.task.task_id,
             "fuzzer": fuzzer,
             "sanitizer": sanitizer,
             "task_type": self.task.task_type.value,
             "workspace_path": workspace_path,
+            "task_workspace_path": str(task_workspace),
             "project_name": self.project_name,
             "log_dir": str(log_dir) if log_dir else None,
             # Pre-built fuzzer info from Analyzer
@@ -587,7 +565,7 @@ def generate(variant: int = 1) -> bytes:
             else None,
             # Scan mode and diff path for delta mode
             "scan_mode": self.task.scan_mode.value,
-            "diff_path": str(Path(workspace_path) / "diff" / "ref.diff")
+            "diff_path": str(task_workspace / "diff" / "ref.diff")
             if self.task.scan_mode.value == "delta"
             else None,
             "budget_limit": self.config.budget_limit,
@@ -598,11 +576,15 @@ def generate(variant: int = 1) -> bytes:
         timeout_seconds = self.config.timeout_minutes * 60
         soft_timeout_seconds = int(timeout_seconds * 0.9)
 
-        result = run_worker.apply_async(
-            args=[assignment],
-            time_limit=timeout_seconds,
-            soft_time_limit=soft_timeout_seconds,
-        )
+        dispatch_kwargs = {
+            "args": [assignment],
+            "time_limit": timeout_seconds,
+            "soft_time_limit": soft_timeout_seconds,
+        }
+        if self.celery_queue:
+            dispatch_kwargs["queue"] = self.celery_queue
+
+        result = run_worker.apply_async(**dispatch_kwargs)
 
         # Note: Celery job ID is passed to WorkerContext via assignment
         # We add it here for the worker to use

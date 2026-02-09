@@ -1248,18 +1248,12 @@ def _run_fuzzer_docker(
         Tuple of (success, crashed, output, error)
     """
     import subprocess
-    import shutil
 
     fuzzer_dir = fuzzer_path.parent
     fuzzer_name = fuzzer_path.name
 
-    # Create temp directory for blob (Docker needs access)
-    work_dir = fuzzer_dir / "pov_verify"
-    work_dir.mkdir(parents=True, exist_ok=True)
-
-    # Copy blob to work directory
-    temp_blob = work_dir / blob_path.name
-    shutil.copy(blob_path, temp_blob)
+    # Mount blob's parent directory directly — blob is already in worker workspace
+    work_dir = blob_path.parent
 
     def run_with_image(image: str):
         """Run fuzzer with specified docker image."""
@@ -1286,7 +1280,7 @@ def _run_fuzzer_docker(
             image,
             f"/fuzzers/{fuzzer_name}",
             f"-timeout={timeout}",
-            f"/work/{temp_blob.name}",
+            f"/work/{blob_path.name}",
         ]
 
         logger.info(f"[POV] Running Docker: {' '.join(docker_cmd)}")
@@ -1378,9 +1372,7 @@ def _run_fuzzer_docker(
         logger.error(f"[POV] _run_fuzzer_docker: EXCEPTION {e}")
         return False, False, "", str(e)
     finally:
-        # Cleanup temp blob
-        if temp_blob.exists():
-            temp_blob.unlink()
+        pass  # No temp files to clean — blob is in worker workspace
 
 
 def _extract_output_summary(output: str) -> str:

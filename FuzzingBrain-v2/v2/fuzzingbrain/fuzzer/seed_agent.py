@@ -514,6 +514,9 @@ Generate seeds NOW or this run will produce nothing useful."""
                 result_data = json.loads(result)
                 if result_data.get("success") and "seeds_generated" in result_data:
                     self.seeds_generated += result_data["seeds_generated"]
+                    # Sync to AgentContext so it persists to MongoDB
+                    if self._context:
+                        self._context.set_seeds_generated(self.seeds_generated)
                     logger.debug(
                         f"[SeedAgent] Tracked {result_data['seeds_generated']} seeds, "
                         f"total: {self.seeds_generated}"
