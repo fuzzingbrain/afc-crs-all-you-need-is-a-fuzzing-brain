@@ -594,14 +594,17 @@ class POVBaseStrategy(BaseStrategy):
 
         return ""
 
-    def _run_pipeline(self):
+    def _create_pipeline(self):
         """
-        Run parallel pipeline for verification and POV generation.
+        Create and configure an AgentPipeline instance.
+
+        Sets up coverage context, pipeline config, and loads fuzzer code.
+        Does NOT set ``_sp_finding_done`` — callers decide when SP finding is complete.
 
         Returns:
-            PipelineStats with execution statistics
+            (pipeline, fuzzer_code) tuple
         """
-        from ..pipeline import AgentPipeline, PipelineConfig, PipelineStats
+        from ..pipeline import AgentPipeline, PipelineConfig
         from ...tools.coverage import set_coverage_context, get_coverage_context
 
         # Ensure coverage context is fully set for trace_pov
@@ -650,7 +653,20 @@ class POVBaseStrategy(BaseStrategy):
             fuzzer_code=fuzzer_code,
         )
 
-        # In delta mode, SP finding is already done (SPs come from diff analysis)
+        return pipeline
+
+    def _run_pipeline(self):
+        """
+        Run parallel pipeline for verification and POV generation.
+
+        Returns:
+            PipelineStats with execution statistics
+        """
+        from ..pipeline import PipelineStats
+
+        pipeline = self._create_pipeline()
+
+        # In base mode, SP finding is already done (SPs come from diff analysis)
         # Signal pipeline so agents can exit when queue is empty
         pipeline._sp_finding_done = True
 

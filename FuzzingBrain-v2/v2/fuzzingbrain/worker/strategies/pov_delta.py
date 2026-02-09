@@ -9,9 +9,15 @@ Workflow:
 3. Verify suspicious points with AI Agent (parallel pipeline)
 4. Generate POV for high-confidence points (parallel pipeline)
 5. Save results
+
+SP finding and pipeline verification/POV run in parallel:
+the pipeline starts polling for new SPs immediately while
+the SP generator is still creating them.
 """
 
+import asyncio
 import json
+import time
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
@@ -76,6 +82,200 @@ class POVDeltaStrategy(POVBaseStrategy):
     def scan_mode(self) -> str:
         """Delta mode: skip reachability analysis in verify."""
         return "delta"
+
+    def execute(self) -> Dict[str, Any]:
+        """
+        Execute POV Delta strategy with parallel SP finding + pipeline.
+
+        SP finding and the verification/POV pipeline run concurrently:
+        the pipeline starts immediately and polls for new SPs while
+        the SP generator creates them.
+        """
+        start_time = time.time()
+
+        self.log_info(f"========== {self.strategy_name} Start ==========")
+        self.log_info(f"Fuzzer: {self.fuzzer}, Mode: {self.scan_mode}")
+
+        result: Dict[str, Any] = {
+            "strategy": self.strategy_name,
+            "scan_mode": self.scan_mode,
+            "reachable": True,
+            "reachable_changes": [],
+            "suspicious_points_found": 0,
+            "suspicious_points_verified": 0,
+            "high_confidence_bugs": 0,
+            "delta_seeds_generated": 0,
+            "phase_reachability": 0.0,
+            "phase_find_sp": 0.0,
+            "phase_delta_seeds": 0.0,
+            "phase_verify": 0.0,
+            "phase_pov": 0.0,
+            "phase_save": 0.0,
+        }
+
+        try:
+            # Step 1: Pre-processing (reachability analysis)
+            self._set_operation("reachability")
+            pre_result = self._pre_find_suspicious_points(result)
+            if pre_result.get("skip"):
+                return result
+
+            # Step 1.5: Generate delta seeds and start Global Fuzzer
+            if hasattr(self, "_generate_delta_seeds"):
+                self._set_operation("delta_seeds")
+                self.log_info(
+                    "[Step 1.5/5] Generating delta seeds and starting fuzzer..."
+                )
+                step_start = time.time()
+                try:
+                    seeds_count = self._generate_delta_seeds([])
+                    result["delta_seeds_generated"] = seeds_count
+                except Exception as e:
+                    self.log_warning(f"Delta seeds generation failed: {e}")
+                    result["delta_seeds_generated"] = 0
+                    seeds_count = 0
+                step_duration = time.time() - step_start
+                result["phase_delta_seeds"] = step_duration
+                self.log_info(
+                    f"[Step 1.5/5] Done in {step_duration:.1f}s - Generated {seeds_count} seeds"
+                )
+
+            # Steps 2-4: Parallel SP finding + pipeline
+            if self.use_pipeline:
+                self._set_operation("find_sp_and_pipeline")
+                self.log_info(
+                    "[Step 2-4/5] Running SP finding + pipeline in parallel..."
+                )
+                step_start = time.time()
+                pipeline_stats = self._run_delta_pipeline()
+                result["suspicious_points_found"] = len(
+                    self._get_suspicious_points_from_db()
+                )
+                result["suspicious_points_verified"] = pipeline_stats.sp_verified
+                result["pov_generated"] = pipeline_stats.pov_generated
+                result["pipeline_stats"] = pipeline_stats.to_dict()
+                result["phase_verify"] = pipeline_stats.verify_time_total
+                result["phase_pov"] = pipeline_stats.pov_time_total
+                step_duration = time.time() - step_start
+                self.log_info(
+                    f"[Step 2-4/5] Done in {step_duration:.1f}s "
+                    f"(verify: {pipeline_stats.verify_time_total:.1f}s, pov: {pipeline_stats.pov_time_total:.1f}s)"
+                )
+                self.log_info(
+                    f"  Verified: {pipeline_stats.sp_verified} "
+                    f"(real: {pipeline_stats.sp_verified_real}, fp: {pipeline_stats.sp_verified_fp})"
+                )
+                self.log_info(f"  POV generated: {pipeline_stats.pov_generated}")
+            else:
+                # Fallback: sequential (original base class behavior)
+                self._set_operation("find_sp")
+                self.log_info("[Step 2/5] Finding suspicious points...")
+                step_start = time.time()
+                suspicious_points = self._find_suspicious_points()
+                result["suspicious_points_found"] = len(suspicious_points)
+                result["phase_find_sp"] = time.time() - step_start
+
+                if suspicious_points:
+                    self._set_operation("verify")
+                    self.log_info(
+                        f"[Step 3/5] Verifying {len(suspicious_points)} SPs..."
+                    )
+                    step_start = time.time()
+                    verified = self._verify_suspicious_points(suspicious_points)
+                    result["suspicious_points_verified"] = len(verified)
+                    result["phase_verify"] = time.time() - step_start
+
+            # Step 5: Sort and save results
+            self._set_operation("save")
+            self.log_info("[Step 5/5] Sorting and saving results...")
+            step_start = time.time()
+
+            all_points = self.repos.suspicious_points.find_by_task(self.task_id)
+            sorted_points = self._sort_by_priority(all_points)
+
+            high_conf = [p for p in sorted_points if p.is_important or p.score >= 0.9]
+            result["high_confidence_bugs"] = len(high_conf)
+
+            pov_points = [p for p in sorted_points if p.pov_id]
+            result["pov_generated"] = result.get("pov_generated", len(pov_points))
+
+            self._save_results(sorted_points)
+            result["phase_save"] = time.time() - step_start
+
+            total_time = time.time() - start_time
+            self.log_info(f"========== {self.strategy_name} Complete ==========")
+            self.log_info(f"Total time: {total_time:.1f}s")
+            self.log_info(
+                f"Results: {result['suspicious_points_found']} found, "
+                f"{result['suspicious_points_verified']} verified, "
+                f"{len(high_conf)} high-confidence, "
+                f"{result.get('pov_generated', 0)} POV generated"
+            )
+            return result
+
+        except Exception as e:
+            self.log_error(f"Strategy failed: {e}")
+            raise
+
+    def _run_delta_pipeline(self):
+        """
+        Run SP finding and pipeline verification/POV in parallel.
+
+        1. Create pipeline (don't set _sp_finding_done)
+        2. Start pipeline in background
+        3. Run SP finding (blocking)
+        4. Signal pipeline that SP finding is done
+        5. Wait for pipeline to drain
+
+        Returns:
+            PipelineStats with execution statistics
+        """
+        from ..pipeline import PipelineStats
+
+        pipeline = self._create_pipeline()
+        # Do NOT set _sp_finding_done — pipeline will keep polling until we signal
+
+        # Start Global Fuzzer if not already running
+        fuzzer_manager = getattr(self.executor, "fuzzer_manager", None)
+        if fuzzer_manager and not fuzzer_manager.global_fuzzer:
+            self.log_info("Starting Global Fuzzer for FP Seeds collection...")
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(fuzzer_manager.start_global_fuzzer())
+            except Exception as e:
+                self.log_warning(f"Failed to start Global Fuzzer: {e}")
+
+        async def _parallel_run():
+            # Start pipeline in background (polls DB for new SPs)
+            pipeline_task = asyncio.create_task(
+                pipeline.run(), name="delta_verify_pov_pipeline"
+            )
+
+            # Run SP finding in a thread (it's synchronous/blocking)
+            self.log_info("Starting parallel SP finding + pipeline...")
+            try:
+                await asyncio.to_thread(self._find_suspicious_points)
+            except Exception as e:
+                self.log_error(f"SP finding failed: {e}")
+
+            # Signal pipeline that no more SPs will be created
+            pipeline._sp_finding_done = True
+            self.log_info("SP finding complete, waiting for pipeline to drain...")
+
+            # Wait for pipeline to finish processing remaining SPs
+            stats = await pipeline_task
+            return stats
+
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            stats = loop.run_until_complete(_parallel_run())
+        except Exception as e:
+            self.log_error(f"Delta pipeline failed: {e}")
+            stats = PipelineStats()
+
+        return stats
 
     def _pre_find_suspicious_points(self, result: Dict[str, Any]) -> Dict[str, Any]:
         """
