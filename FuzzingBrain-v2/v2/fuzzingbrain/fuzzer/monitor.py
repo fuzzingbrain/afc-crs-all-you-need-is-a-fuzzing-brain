@@ -817,11 +817,13 @@ class FuzzerMonitor:
         Returns:
             Dict with vuln_type and output
         """
+        FALLBACK_IMAGE = "gcr.io/oss-fuzz-base/base-runner"
+
         fuzzer_dir = fuzzer_path.parent
         fuzzer_binary = fuzzer_path.name
         work_dir = crash_path.parent
 
-        try:
+        def _run_with_image(image: str):
             cmd = [
                 "docker",
                 "run",
@@ -840,7 +842,7 @@ class FuzzerMonitor:
                 f"{fuzzer_dir}:/fuzzers:ro",
                 "-v",
                 f"{work_dir}:/work",
-                docker_image,
+                image,
                 f"/fuzzers/{fuzzer_binary}",
                 "-timeout=30",
                 f"/work/{crash_path.name}",
@@ -855,7 +857,21 @@ class FuzzerMonitor:
                 timeout=60,
             )
 
-            combined_output = result.stderr + "\n" + result.stdout
+            return result.stderr + "\n" + result.stdout
+
+        try:
+            combined_output = _run_with_image(docker_image)
+
+            # Fallback to base-runner on GLIBC / shared library errors
+            if (
+                "error while loading shared libraries" in combined_output
+                or "GLIBC" in combined_output
+            ) and docker_image != FALLBACK_IMAGE:
+                logger.warning(
+                    f"[FuzzerMonitor:{self.task_id}] Library error with {docker_image}, "
+                    f"falling back to {FALLBACK_IMAGE}"
+                )
+                combined_output = _run_with_image(FALLBACK_IMAGE)
 
             crashed = self._check_crash(combined_output)
             vuln_type = self._parse_vuln_type(combined_output) if crashed else None

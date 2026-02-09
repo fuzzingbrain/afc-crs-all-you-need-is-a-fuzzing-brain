@@ -281,6 +281,8 @@ def generate(variant: int = 1) -> bytes:
         import subprocess
         from pathlib import Path
 
+        FALLBACK_IMAGE = "gcr.io/oss-fuzz-base/base-runner"
+
         docker_image = f"gcr.io/oss-fuzz/{self.project_name}"
         fuzzer_path = Path(fuzzer_path)
         crash_path = Path(crash_path)
@@ -288,7 +290,7 @@ def generate(variant: int = 1) -> bytes:
         fuzzer_binary = fuzzer_path.name
         work_dir = crash_path.parent
 
-        try:
+        def _run_with_image(image: str):
             cmd = [
                 "docker",
                 "run",
@@ -307,7 +309,7 @@ def generate(variant: int = 1) -> bytes:
                 f"{fuzzer_dir}:/fuzzers:ro",
                 "-v",
                 f"{work_dir}:/work",
-                docker_image,
+                image,
                 f"/fuzzers/{fuzzer_binary}",
                 "-timeout=30",
                 f"/work/{crash_path.name}",
@@ -322,7 +324,21 @@ def generate(variant: int = 1) -> bytes:
                 timeout=60,
             )
 
-            combined_output = result.stderr + "\n" + result.stdout
+            return result.stderr + "\n" + result.stdout
+
+        try:
+            combined_output = _run_with_image(docker_image)
+
+            # Fallback to base-runner on GLIBC / shared library errors
+            if (
+                "error while loading shared libraries" in combined_output
+                or "GLIBC" in combined_output
+            ) and docker_image != FALLBACK_IMAGE:
+                logger.warning(
+                    f"[FuzzerMonitor] Library error with {docker_image}, "
+                    f"falling back to {FALLBACK_IMAGE}"
+                )
+                combined_output = _run_with_image(FALLBACK_IMAGE)
 
             # Parse vulnerability type
             vuln_type = None
@@ -371,31 +387,37 @@ def generate(variant: int = 1) -> bytes:
 
     def _get_realtime_cost(self) -> float:
         """
-        Get real-time task cost from Redis (millisecond latency).
+        Get real-time task cost from Redis + MongoDB cross-check.
 
-        Falls back to MongoDB if Redis is unavailable.
+        Uses the higher of Redis and MongoDB values to guard against
+        either source being stale or incomplete.
         """
         COUNTER_PREFIX = "fuzzingbrain:counters"
 
-        # Try Redis first (real-time, sub-millisecond)
+        redis_cost = 0.0
         if self._redis:
             try:
                 cost_str = self._redis.get(
                     f"{COUNTER_PREFIX}:task:{self.task.task_id}:cost"
                 )
                 if cost_str is not None:
-                    return float(cost_str)
-                # Key doesn't exist yet (no LLM calls made) — cost is 0
-                return 0.0
+                    redis_cost = float(cost_str)
             except Exception as e:
-                logger.warning(f"Redis cost read failed: {e}, falling back to MongoDB")
+                logger.warning(f"Redis cost read failed: {e}")
 
-        # Fallback to MongoDB
-        task_doc = self.repos.tasks.collection.find_one(
-            {"_id": self._task_oid},
-            {"llm_cost": 1},
-        )
-        return (task_doc or {}).get("llm_cost", 0.0)
+        # Always check MongoDB as well (sub-ms for _id lookup)
+        mongo_cost = 0.0
+        try:
+            task_doc = self.repos.tasks.collection.find_one(
+                {"_id": self._task_oid},
+                {"llm_cost": 1},
+            )
+            mongo_cost = (task_doc or {}).get("llm_cost", 0.0)
+        except Exception:
+            pass
+
+        # Use the higher value — guards against either source being stale
+        return max(redis_cost, mongo_cost)
 
     def _close_redis(self) -> None:
         """Close Redis connection."""
