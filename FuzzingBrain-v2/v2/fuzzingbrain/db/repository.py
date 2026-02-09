@@ -136,8 +136,29 @@ class BaseRepository(Generic[T]):
 class TaskRepository(BaseRepository[Task]):
     """Repository for Task model"""
 
+    # Fields managed exclusively by WorkerLLMBuffer via $inc.
+    # Must NOT be included in save() to avoid overwriting buffer increments.
+    _LLM_FIELDS = ("llm_calls", "llm_cost", "llm_input_tokens", "llm_output_tokens")
+
     def __init__(self, db: Database):
         super().__init__(db, "tasks", Task)
+
+    def save(self, task: Task) -> bool:
+        """Save task to database (upsert).
+
+        Uses $set instead of replace_one to avoid overwriting llm_* fields
+        that are managed by WorkerLLMBuffer via atomic $inc.
+        """
+        try:
+            data = task.to_dict()
+            doc_id = data.pop("_id")
+            for key in self._LLM_FIELDS:
+                data.pop(key, None)
+            self.collection.update_one({"_id": doc_id}, {"$set": data}, upsert=True)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save Task: {e}")
+            return False
 
     def find_by_status(self, status: str) -> List[Task]:
         """Find tasks by status"""
@@ -1286,14 +1307,25 @@ class WorkerRepository(BaseRepository[Worker]):
             logger.error(f"Failed to find worker by fuzzer: {e}")
             return None
 
+    # Fields managed exclusively by WorkerLLMBuffer via $inc.
+    # Must NOT be included in save() to avoid overwriting buffer increments.
+    _LLM_FIELDS = ("llm_calls", "llm_cost", "llm_input_tokens", "llm_output_tokens")
+
     def save(self, worker: Worker) -> bool:
-        """Save worker to database (upsert by ObjectId)."""
+        """Save worker to database (upsert by ObjectId).
+
+        Uses $set instead of replace_one to avoid overwriting llm_* fields
+        that are managed by WorkerLLMBuffer via atomic $inc.
+        """
         try:
             data = worker.to_dict()
             # Ensure _id is ObjectId
             if isinstance(data.get("_id"), str):
                 data["_id"] = ObjectId(data["_id"])
-            self.collection.replace_one({"_id": data["_id"]}, data, upsert=True)
+            doc_id = data.pop("_id")
+            for key in self._LLM_FIELDS:
+                data.pop(key, None)
+            self.collection.update_one({"_id": doc_id}, {"$set": data}, upsert=True)
             return True
         except Exception as e:
             logger.error(f"Failed to save Worker: {e}")
