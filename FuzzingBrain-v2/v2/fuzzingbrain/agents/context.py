@@ -106,6 +106,9 @@ class AgentContext:
         self.fuzzer = fuzzer
         self.sanitizer = sanitizer
 
+        # Reference to the BaseAgent (set by BaseAgent.run_async for cancel)
+        self.agent: Any = None
+
         # Lifecycle state
         self.started_at: Optional[datetime] = None
         self.ended_at: Optional[datetime] = None
@@ -200,6 +203,15 @@ class AgentContext:
                 f"Agent {self.agent_id[:8]}: final save failed after 3 attempts, "
                 f"keeping in memory registry with status={self.status}"
             )
+
+    def cancel(self) -> None:
+        """Request graceful cancellation of this agent context and its agent."""
+        self.status = "cancelled"
+        if self.agent is not None:
+            try:
+                self.agent.cancel()
+            except Exception:
+                pass
 
     def _save_to_db(self, force: bool = False) -> bool:
         """
@@ -534,3 +546,64 @@ def get_active_agents() -> list:
         List of active agent status dicts
     """
     return [ctx.to_dict() for ctx in get_all_agent_contexts().values()]
+
+
+def cancel_agents_by_worker(worker_id: str) -> int:
+    """
+    Best-effort cancel all running agents for a given worker.
+
+    Iterates the in-memory registry and calls cancel() on matching contexts.
+
+    Args:
+        worker_id: Worker ID to match
+
+    Returns:
+        Number of agents cancelled
+    """
+    cancelled = 0
+    with _agent_contexts_lock:
+        for ctx in _agent_contexts.values():
+            if ctx.worker_id == worker_id and ctx.status == "running":
+                try:
+                    ctx.cancel()
+                    cancelled += 1
+                except Exception:
+                    pass
+    return cancelled
+
+
+def force_cleanup_agents(task_id: str) -> int:
+    """
+    Force-update all running agents for a task to 'cancelled' in MongoDB.
+
+    This is the backstop guarantee: regardless of whether in-memory cancel
+    succeeded, this ensures no zombie 'running' agents remain in the database.
+
+    Args:
+        task_id: Task ID (ObjectId string)
+
+    Returns:
+        Number of documents updated
+    """
+    try:
+        from ..db import get_database
+        from ..core.utils import safe_object_id
+
+        db = get_database()
+        if db is None:
+            return 0
+
+        result = db.agents.update_many(
+            {"task_id": safe_object_id(task_id), "status": "running"},
+            {"$set": {"status": "cancelled", "ended_at": datetime.now()}},
+        )
+        updated = result.modified_count
+        if updated:
+            logger.info(
+                f"force_cleanup_agents: marked {updated} running agents as cancelled "
+                f"for task {task_id}"
+            )
+        return updated
+    except Exception as e:
+        logger.warning(f"force_cleanup_agents failed: {e}")
+        return 0

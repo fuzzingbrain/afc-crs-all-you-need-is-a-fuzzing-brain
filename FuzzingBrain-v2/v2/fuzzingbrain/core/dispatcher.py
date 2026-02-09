@@ -719,15 +719,33 @@ def generate(variant: int = 1) -> bytes:
         """
         Gracefully shutdown all running workers.
 
-        Revokes Celery tasks and marks workers as completed.
+        Four-step process:
+        1. Best-effort cancel in-memory agents (set cancel flags)
+        2. Sleep 2s to let current iterations finish
+        3. Revoke Celery tasks (force-kill)
+        4. Force-cleanup MongoDB (backstop: no zombie 'running' agents)
         """
+        import time
         from ..celery_app import app
+        from ..agents.context import cancel_agents_by_worker, force_cleanup_agents
 
         workers = self.repos.workers.find_by_task(self.task.task_id)
 
         for worker in workers:
             if worker.status.value in ["pending", "building", "running"]:
-                # Revoke Celery task (terminate=True for immediate stop)
+                # Step 1: Best-effort cancel in-memory agents
+                cancelled = cancel_agents_by_worker(worker.worker_id)
+                if cancelled:
+                    logger.info(
+                        f"Cancelled {cancelled} agent(s) for worker {worker.display_name}"
+                    )
+
+        # Step 2: Give agents 2 seconds to finish current iteration
+        time.sleep(2)
+
+        for worker in workers:
+            if worker.status.value in ["pending", "building", "running"]:
+                # Step 3: Revoke Celery task (terminate=True for immediate stop)
                 if worker.celery_job_id:
                     try:
                         app.control.revoke(worker.celery_job_id, terminate=True)
@@ -735,10 +753,13 @@ def generate(variant: int = 1) -> bytes:
                     except Exception as e:
                         logger.warning(f"Failed to revoke {worker.display_name}: {e}")
 
-                # Mark as completed (graceful shutdown)
+                # Mark worker as completed (graceful shutdown)
                 worker.status = WorkerStatus.COMPLETED
                 worker.error_msg = "Graceful shutdown: POV target reached"
                 self.repos.workers.save(worker)
+
+        # Step 4: Force-cleanup MongoDB — guarantee no zombie running agents
+        force_cleanup_agents(self.task.task_id)
 
     def shutdown_all_fuzzers(self) -> None:
         """
