@@ -57,11 +57,12 @@ atexit.register(reset_terminal)
 # =============================================================================
 
 _shutdown_requested = False
+_current_task_id: Optional[str] = None
 
 
 def signal_handler(signum, frame):
     """Handle Ctrl+C gracefully"""
-    global _shutdown_requested, _repos
+    global _shutdown_requested, _repos, _current_task_id
     if _shutdown_requested:
         # Second Ctrl+C - force exit
         print("\n\033[0;31m[FORCE]\033[0m Forcing shutdown...")
@@ -73,84 +74,119 @@ def signal_handler(signum, frame):
         "\n\033[1;33m[INTERRUPT]\033[0m Shutting down gracefully... (Press Ctrl+C again to force)"
     )
 
-    # Mark all running workers and tasks as cancelled
+    # If no task was started, exit immediately
+    if not _repos or not _current_task_id:
+        reset_terminal()
+        sys.exit(0)
+
+    # Mark workers and task as cancelled (scoped to current task only)
     try:
-        if _repos:
-            # Update workers
-            all_workers = _repos.workers.collection.find(
-                {"status": {"$in": ["pending", "building", "running"]}}
-            )
-            worker_count = 0
-            for w in all_workers:
-                _repos.workers.collection.update_one(
-                    {"_id": w["_id"]},
-                    {
-                        "$set": {
-                            "status": "failed",
-                            "error_msg": "Cancelled by user (Ctrl+C)",
-                        }
-                    },
-                )
-                worker_count += 1
+        from bson import ObjectId as _ObjectId
 
-            # Update tasks
-            all_tasks = _repos.tasks.collection.find(
-                {"status": {"$in": ["pending", "running"]}}
-            )
-            task_count = 0
-            for t in all_tasks:
-                _repos.tasks.collection.update_one(
-                    {"_id": t["_id"]},
-                    {
-                        "$set": {
-                            "status": "cancelled",
-                            "error_msg": "Cancelled by user (Ctrl+C)",
-                        }
-                    },
-                )
-                task_count += 1
+        task_oid = (
+            _ObjectId(_current_task_id)
+            if len(_current_task_id) == 24
+            else _current_task_id
+        )
 
-            if worker_count > 0 or task_count > 0:
-                print(
-                    f"\033[1;33m[INTERRUPT]\033[0m Marked {worker_count} worker(s) and {task_count} task(s) as cancelled"
-                )
+        # Update workers for THIS task only
+        result = _repos.workers.collection.update_many(
+            {
+                "task_id": task_oid,
+                "status": {"$in": ["pending", "building", "running"]},
+            },
+            {
+                "$set": {
+                    "status": "failed",
+                    "error_msg": "Cancelled by user (Ctrl+C)",
+                }
+            },
+        )
+        worker_count = result.modified_count
 
-            # Display summary for cancelled task
+        # Update THIS task only
+        task_result = _repos.tasks.collection.update_one(
+            {
+                "_id": task_oid,
+                "status": {"$in": ["pending", "running"]},
+            },
+            {
+                "$set": {
+                    "status": "cancelled",
+                    "error_msg": "Cancelled by user (Ctrl+C)",
+                }
+            },
+        )
+        task_count = task_result.modified_count
+
+        # Cancel in-memory agents for this task
+        try:
+            from .agents.context import get_all_agent_contexts, force_cleanup_agents
+            from .db import get_database
+
+            for ctx in get_all_agent_contexts().values():
+                if ctx.task_id == _current_task_id and ctx.status == "running":
+                    try:
+                        ctx.cancel()
+                    except Exception:
+                        pass
+
+            # Force-cleanup zombie agents in DB
             try:
-                from .core.logging import create_final_summary
-                from datetime import datetime
-                from bson import ObjectId as _ObjectId
+                db = get_database()
+            except Exception:
+                db = None
+            if db is not None:
+                force_cleanup_agents(_current_task_id, db)
+        except Exception:
+            pass
 
-                # Find the most recent task
-                recent_task = _repos.tasks.collection.find_one(
-                    {"status": "cancelled"}, sort=[("created_at", -1)]
+        if worker_count > 0 or task_count > 0:
+            print(
+                f"\033[1;33m[INTERRUPT]\033[0m Marked {worker_count} worker(s) and {task_count} task(s) as cancelled"
+            )
+
+        # Display summary for current task
+        try:
+            from .core.logging import create_final_summary
+            from datetime import datetime
+
+            recent_task = _repos.tasks.collection.find_one({"_id": task_oid})
+            if recent_task:
+                task_id = str(
+                    recent_task.get("task_id") or recent_task.get("_id") or "unknown"
                 )
-                if recent_task:
-                    raw_task_id = (
-                        recent_task.get("task_id")
-                        or recent_task.get("_id")
-                        or "unknown"
-                    )
-                    task_id = str(raw_task_id)
-                    task_oid = _ObjectId(task_id) if len(task_id) == 24 else task_id
-                    project_name = recent_task.get("project_name", "unknown")
+                project_name = recent_task.get("project_name", "unknown")
 
-                    # Get workers for this task
-                    workers = list(
-                        _repos.workers.collection.find({"task_id": task_oid})
+                # Get workers for this task
+                workers = list(_repos.workers.collection.find({"task_id": task_oid}))
+                worker_results = []
+                for w in workers:
+                    started = w.get("started_at")
+                    finished = w.get("finished_at") or datetime.now()
+                    duration_sec = (
+                        (finished - started).total_seconds() if started else 0
                     )
-                    worker_results = []
-                    for w in workers:
-                        started = w.get("started_at")
-                        finished = w.get("finished_at") or datetime.now()
-                        duration_sec = (
-                            (finished - started).total_seconds() if started else 0
-                        )
-                        fuzzer = w.get("fuzzer", "N/A")
-                        sanitizer = w.get("sanitizer", "N/A")
+                    fuzzer = w.get("fuzzer", "N/A")
+                    sanitizer = w.get("sanitizer", "N/A")
 
-                        # Query SP count from database (like get_all_worker_results)
-                        sp_count = _repos.suspicious_points.count(
+                    # Query SP count from database
+                    sp_count = _repos.suspicious_points.count(
+                        {
+                            "task_id": task_oid,
+                            "sources": {
+                                "$elemMatch": {
+                                    "harness_name": fuzzer,
+                                    "sanitizer": sanitizer,
+                                }
+                            },
+                        }
+                    )
+
+                    # Query POV count from database
+                    worker_sp_ids = [
+                        str(sp.get("suspicious_point_id") or sp.get("_id"))
+                        for sp in _repos.suspicious_points.collection.find(
                             {
                                 "task_id": task_oid,
                                 "sources": {
@@ -159,89 +195,82 @@ def signal_handler(signum, frame):
                                         "sanitizer": sanitizer,
                                     }
                                 },
-                            }
+                            },
+                            {"suspicious_point_id": 1, "_id": 1},
                         )
-
-                        # Query POV count from database
-                        worker_sp_ids = [
-                            str(sp.get("suspicious_point_id") or sp.get("_id"))
-                            for sp in _repos.suspicious_points.collection.find(
-                                {
-                                    "task_id": task_oid,
-                                    "sources": {
-                                        "$elemMatch": {
-                                            "harness_name": fuzzer,
-                                            "sanitizer": sanitizer,
-                                        }
-                                    },
-                                },
-                                {"suspicious_point_id": 1, "_id": 1},
-                            )
-                        ]
-                        pov_count = 0
-                        if worker_sp_ids:
-                            # Convert to ObjectId — POV documents store suspicious_point_id as ObjectId
-                            sp_oids = []
-                            for x in worker_sp_ids:
-                                try:
-                                    sp_oids.append(_ObjectId(x))
-                                except Exception:
-                                    sp_oids.append(x)
-                            pov_count = _repos.povs.count(
-                                {
-                                    "task_id": task_oid,
-                                    "suspicious_point_id": {"$in": sp_oids},
-                                    "is_successful": True,
-                                }
-                            )
-                        # Also count fuzzer-discovered POVs
-                        fuzzer_pov_count = _repos.povs.count(
+                    ]
+                    pov_count = 0
+                    if worker_sp_ids:
+                        sp_oids = []
+                        for x in worker_sp_ids:
+                            try:
+                                sp_oids.append(_ObjectId(x))
+                            except Exception:
+                                sp_oids.append(x)
+                        pov_count = _repos.povs.count(
                             {
                                 "task_id": task_oid,
-                                "harness_name": fuzzer,
-                                "sanitizer": sanitizer,
-                                "suspicious_point_id": {"$in": ["", None]},
+                                "suspicious_point_id": {"$in": sp_oids},
                                 "is_successful": True,
                             }
                         )
-                        pov_count += fuzzer_pov_count
-
-                        worker_results.append(
-                            {
-                                "fuzzer": fuzzer,
-                                "sanitizer": sanitizer,
-                                "status": w.get("status", "cancelled"),
-                                "duration_str": f"{duration_sec / 60:.1f}m",
-                                "sps_found": sp_count,
-                                "pov_generated": pov_count,
-                                "patch_generated": w.get("patch_generated", 0),
-                            }
-                        )
-
-                    # Read cost from database
-                    total_cost = recent_task.get("llm_cost", 0.0)
-                    budget_limit = recent_task.get("budget_limit", 0.0)
-
-                    # Calculate elapsed time
-                    created_at = recent_task.get("created_at", datetime.now())
-                    elapsed_minutes = (datetime.now() - created_at).total_seconds() / 60
-
-                    summary = create_final_summary(
-                        project_name=project_name,
-                        task_id=task_id,
-                        workers=worker_results,
-                        total_elapsed_minutes=elapsed_minutes,
-                        use_color=True,
-                        total_cost=total_cost,
-                        budget_limit=budget_limit,
-                        exit_reason="cancelled",
+                    # Also count fuzzer-discovered POVs
+                    fuzzer_pov_count = _repos.povs.count(
+                        {
+                            "task_id": task_oid,
+                            "harness_name": fuzzer,
+                            "sanitizer": sanitizer,
+                            "suspicious_point_id": {"$in": ["", None]},
+                            "is_successful": True,
+                        }
                     )
-                    print(summary)
-            except Exception as e:
-                print(f"\033[0;31m[ERROR]\033[0m Failed to generate summary: {e}")
+                    pov_count += fuzzer_pov_count
+
+                    worker_results.append(
+                        {
+                            "fuzzer": fuzzer,
+                            "sanitizer": sanitizer,
+                            "status": w.get("status", "cancelled"),
+                            "duration_str": f"{duration_sec / 60:.1f}m",
+                            "sps_found": sp_count,
+                            "pov_generated": pov_count,
+                            "patch_generated": w.get("patch_generated", 0),
+                        }
+                    )
+
+                # Read cost from database
+                total_cost = recent_task.get("llm_cost", 0.0)
+                budget_limit = recent_task.get("budget_limit", 0.0)
+
+                # Calculate elapsed time
+                created_at = recent_task.get("created_at", datetime.now())
+                elapsed_minutes = (datetime.now() - created_at).total_seconds() / 60
+
+                summary = create_final_summary(
+                    project_name=project_name,
+                    task_id=task_id,
+                    workers=worker_results,
+                    total_elapsed_minutes=elapsed_minutes,
+                    use_color=True,
+                    total_cost=total_cost,
+                    budget_limit=budget_limit,
+                    exit_reason="cancelled",
+                )
+                print(summary)
+        except Exception as e:
+            print(f"\033[0;31m[ERROR]\033[0m Failed to generate summary: {e}")
 
     except Exception as e:
         print(f"\033[0;31m[ERROR]\033[0m Failed to update status: {e}")
+
+    # Close LLM clients before stopping infrastructure
+    # (prevents SSL transport errors when event loop closes)
+    try:
+        from .llms import LLMClient
+
+        LLMClient.close_all()
+    except Exception:
+        pass
 
     # Stop infrastructure
     try:
@@ -572,6 +601,9 @@ def process_task(task: Task, config: Config) -> dict:
     5. Dispatches workers via Celery
     6. Monitors and collects results
     """
+    global _current_task_id
+    _current_task_id = task.task_id
+
     # Setup logging for this task
     project_name = config.project_name or "unknown"
     log_dir = setup_logging(

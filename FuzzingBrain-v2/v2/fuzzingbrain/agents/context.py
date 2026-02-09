@@ -147,6 +147,9 @@ class AgentContext:
         self.llm_input_tokens: int = 0
         self.llm_output_tokens: int = 0
 
+        # Back-reference to BaseAgent (set by run_async for cancellation)
+        self.agent = None
+
         # Persistence tracking
         self._dirty = False
         self._last_save_time: float = 0
@@ -177,7 +180,7 @@ class AgentContext:
         if exc_type:
             self.status = "failed"
             self.error = str(exc_val) if exc_val else str(exc_type)
-        else:
+        elif self.status != "cancelled":
             self.status = "completed"
 
         # Persist final state to MongoDB with retry.
@@ -200,6 +203,12 @@ class AgentContext:
                 f"Agent {self.agent_id[:8]}: final save failed after 3 attempts, "
                 f"keeping in memory registry with status={self.status}"
             )
+
+    def cancel(self) -> None:
+        """Cancel this agent context and its underlying agent."""
+        self.status = "cancelled"
+        if self.agent is not None:
+            self.agent.cancel()
 
     def _save_to_db(self, force: bool = False) -> bool:
         """
@@ -534,3 +543,55 @@ def get_active_agents() -> list:
         List of active agent status dicts
     """
     return [ctx.to_dict() for ctx in get_all_agent_contexts().values()]
+
+
+def cancel_agents_by_worker(worker_id: str) -> int:
+    """
+    Cancel all running agents for a given worker.
+
+    Best-effort: logs errors but does not raise.
+
+    Args:
+        worker_id: Worker ID (ObjectId string)
+
+    Returns:
+        Number of agents cancelled
+    """
+    cancelled = 0
+    for ctx in get_all_agent_contexts().values():
+        if ctx.worker_id == worker_id and ctx.status == "running":
+            try:
+                ctx.cancel()
+                cancelled += 1
+                logger.info(f"Cancelled agent {ctx.agent_id[:8]} ({ctx.agent_type})")
+            except Exception as e:
+                logger.warning(f"Failed to cancel agent {ctx.agent_id[:8]}: {e}")
+    return cancelled
+
+
+def force_cleanup_agents(task_id: str, db) -> int:
+    """
+    Force-update any still-running agent records in MongoDB for a task.
+
+    Catches agents whose in-memory cancel did not persist
+    (e.g. process was killed before __exit__).
+
+    Args:
+        task_id: Task ID (ObjectId string)
+        db: MongoDB database handle
+
+    Returns:
+        Number of agent records updated
+    """
+    try:
+        result = db.agents.update_many(
+            {"task_id": ObjectId(task_id), "status": "running"},
+            {"$set": {"status": "cancelled", "ended_at": datetime.now()}},
+        )
+        count = result.modified_count
+        if count:
+            logger.info(f"Force-cleaned {count} zombie agent(s) for task {task_id[:8]}")
+        return count
+    except Exception as e:
+        logger.warning(f"force_cleanup_agents failed: {e}")
+        return 0

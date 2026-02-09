@@ -1061,6 +1061,11 @@ class TaskProcessor:
                     }
 
             finally:
+                # Close cached LLM httpx clients (prevents SSL transport warnings)
+                from ..llms import LLMClient
+
+                LLMClient.close_all()
+
                 # Stop Analysis Server
                 if task and task.task_path:
                     from ..analyzer.tasks import stop_analysis_server
