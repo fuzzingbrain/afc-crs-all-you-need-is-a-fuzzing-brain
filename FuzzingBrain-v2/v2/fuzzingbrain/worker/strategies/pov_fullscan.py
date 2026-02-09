@@ -323,7 +323,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             set_coverage_context(
                 coverage_fuzzer_dir=coverage_fuzzer_dir,
                 project_name=self.project_name,
-                src_dir=self.workspace_path / "repo",
+                src_dir=self.executor.task_workspace_path / "repo",
                 docker_image=f"gcr.io/oss-fuzz/{self.project_name}",
                 work_dir=self.results_path / "coverage_work",
             )
@@ -351,7 +351,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             config=config,
             output_dir=self.results_path / "povs",
             log_dir=self.agent_log_dir,
-            workspace_path=self.workspace_path,
+            workspace_path=self.executor.task_workspace_path,
             fuzzer_code=fuzzer_code,
             mcp_socket_path=self.executor.analysis_socket_path,
             worker_id=self.worker_id,  # For SP Fuzzer lifecycle

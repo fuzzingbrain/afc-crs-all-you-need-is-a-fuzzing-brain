@@ -46,6 +46,7 @@ class WorkerExecutor:
         docker_image: str = "gcr.io/oss-fuzz-base/base-runner",
         enable_fuzzer_worker: bool = True,
         celery_job_id: str = None,
+        task_workspace_path: str = None,
     ):
         """
         Initialize WorkerExecutor.
@@ -66,8 +67,12 @@ class WorkerExecutor:
             docker_image: Docker image for running fuzzers
             enable_fuzzer_worker: Whether to enable FuzzerManager (default True)
             celery_job_id: Celery task ID (for WorkerContext tracking)
+            task_workspace_path: Path to main task workspace (shared repo/fuzz-tooling/diff)
         """
         self.workspace_path = Path(workspace_path)
+        self.task_workspace_path = (
+            Path(task_workspace_path) if task_workspace_path else self.workspace_path
+        )
         self.project_name = project_name
         self.fuzzer = fuzzer
         self.sanitizer = sanitizer
@@ -105,7 +110,7 @@ class WorkerExecutor:
             else:
                 self.diff_path = diff_p
         else:
-            self.diff_path = self.workspace_path / "diff" / "ref.diff"
+            self.diff_path = self.task_workspace_path / "diff" / "ref.diff"
 
         # Paths
         self.results_path = self.workspace_path / "results"
@@ -222,11 +227,8 @@ class WorkerExecutor:
 
             pov_id = generate_id()
 
-            # Get task workspace (not worker workspace) for results
-            task_workspace = self.workspace_path
-            if "worker_workspace" in str(task_workspace):
-                task_workspace = task_workspace.parent.parent
-            results_dir = task_workspace / "results"
+            # Get task workspace for results
+            results_dir = self.task_workspace_path / "results"
             povs_dir = results_dir / "povs"
             povs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -324,6 +326,7 @@ def generate(variant: int = 1) -> bytes:
 
                 # 2. Activate POV (now dispatcher will detect it)
                 self.repos.povs.update(pov_id, {"is_successful": True})
+                self.repos.tasks.add_pov(self.task_id, pov_id)
                 logger.info(
                     f"[{self.worker_display_name}] ✅ POV {pov_id[:8]} activated!"
                 )
@@ -363,6 +366,7 @@ def generate(variant: int = 1) -> bytes:
 
                 # 2. Activate POV (now dispatcher will detect it)
                 self.repos.povs.update(pov_id, {"is_successful": True})
+                self.repos.tasks.add_pov(self.task_id, pov_id)
                 logger.info(
                     f"[{self.worker_display_name}] ✅ POV {pov_id[:8]} activated!"
                 )

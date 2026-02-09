@@ -85,28 +85,32 @@ class RedisManager:
             return False
 
     def stop(self):
-        """Stop Redis if we started it."""
+        """Stop Redis if we started it and no other processes need it.
+
+        In practice, Redis is shared across concurrent tasks (same port).
+        We intentionally leave Redis running so other tasks aren't disrupted.
+        Redis is lightweight and will be reused by subsequent tasks.
+        """
+        # Don't kill Redis — it may be shared by concurrent tasks.
+        # Redis is lightweight and persists safely between task runs.
         if self._redis_process:
-            logger.info("Stopping Redis...")
-            self._redis_process.terminate()
-            try:
-                self._redis_process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self._redis_process.kill()
+            logger.info("Leaving Redis running (shared resource)")
             self._redis_process = None
 
 
 class CeleryWorkerManager:
     """Manages Celery worker as subprocess for CLI mode."""
 
-    def __init__(self, concurrency: int = 15):
+    def __init__(self, concurrency: int = 15, queue_name: str = None):
         """
         Initialize Celery worker manager.
 
         Args:
             concurrency: Number of concurrent worker processes
+            queue_name: Task-scoped queue name for isolation (default: "celery,workers")
         """
         self.concurrency = concurrency
+        self.queue_name = queue_name or "celery,workers"
         self._worker_process: Optional[subprocess.Popen] = None
         self._celery_log_file = None
 
@@ -140,7 +144,7 @@ class CeleryWorkerManager:
                 f"--concurrency={self.concurrency}",
                 "--pool=prefork",
                 "-Q",
-                "celery,workers",
+                self.queue_name,
                 "--without-gossip",
                 "--without-mingle",
                 "--without-heartbeat",
@@ -197,16 +201,24 @@ class InfrastructureManager:
     # Global instance for signal handler access
     _instance: Optional["InfrastructureManager"] = None
 
-    def __init__(self, redis_url: str = None, concurrency: int = 15):
+    def __init__(
+        self, redis_url: str = None, concurrency: int = 15, task_id: str = None
+    ):
         """
         Initialize infrastructure manager.
 
         Args:
             redis_url: Redis URL
             concurrency: Celery worker concurrency
+            task_id: Task ID for queue isolation (prevents concurrent tasks from interfering)
         """
         self.redis = RedisManager(redis_url)
-        self.celery = CeleryWorkerManager(concurrency)
+        # Use task-scoped queue so each task's Celery pool is isolated
+        if task_id:
+            self.queue_name = f"workers_{task_id}"
+        else:
+            self.queue_name = "celery,workers"
+        self.celery = CeleryWorkerManager(concurrency, queue_name=self.queue_name)
         self._started = False
 
         # Store instance for signal handler

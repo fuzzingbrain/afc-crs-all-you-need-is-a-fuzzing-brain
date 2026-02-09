@@ -405,7 +405,7 @@ class POVDeltaStrategy(POVBaseStrategy):
             fuzzer_manager=fuzzer_manager,
             repos=self.repos,
             fuzzer_source=fuzzer_source,
-            workspace_path=self.workspace_path,
+            workspace_path=self.executor.task_workspace_path,
             log_dir=agent_log_dir,
             max_iterations=15,  # Allow more iterations for delta seeds (with urgency forcing on last 2)
             index=1,  # Single seed agent for delta

@@ -61,6 +61,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     fuzzer = assignment["fuzzer"]
     sanitizer = assignment["sanitizer"]
     workspace_path = assignment["workspace_path"]
+    task_workspace_path = assignment.get("task_workspace_path")
     task_type = assignment["task_type"]
     project_name = assignment["project_name"]
     log_dir = assignment.get("log_dir")
@@ -136,6 +137,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
         executor = WorkerExecutor(
             workspace_path=workspace_path,
+            task_workspace_path=task_workspace_path,
             project_name=project_name,
             fuzzer=fuzzer,
             sanitizer=sanitizer,
