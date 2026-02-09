@@ -140,23 +140,41 @@ class WorkerLLMBuffer:
         if self._redis and call.cost > 0:
             try:
                 pipe = self._redis.pipeline(transaction=False)
+                cmd_names = []
                 if call.task_id:
                     pipe.incrbyfloat(
                         f"{self.COUNTER_PREFIX}:task:{call.task_id}:cost",
                         call.cost,
                     )
+                    cmd_names.append("task:cost")
                     pipe.incr(f"{self.COUNTER_PREFIX}:task:{call.task_id}:calls")
+                    cmd_names.append("task:calls")
+                else:
+                    logger.warning(
+                        f"Redis: call has no task_id (worker={call.worker_id}, "
+                        f"agent={call.agent_id}, cost=${call.cost:.4f})"
+                    )
                 if call.worker_id:
                     pipe.incrbyfloat(
                         f"{self.COUNTER_PREFIX}:worker:{call.worker_id}:cost",
                         call.cost,
                     )
+                    cmd_names.append("worker:cost")
                 if call.agent_id:
                     pipe.incrbyfloat(
                         f"{self.COUNTER_PREFIX}:agent:{call.agent_id}:cost",
                         call.cost,
                     )
-                pipe.execute()
+                    cmd_names.append("agent:cost")
+                results = pipe.execute()
+                # Check for per-command errors in non-transactional pipeline
+                for i, res in enumerate(results):
+                    if isinstance(res, Exception):
+                        name = cmd_names[i] if i < len(cmd_names) else f"cmd[{i}]"
+                        logger.error(
+                            f"Redis pipeline cmd '{name}' failed: {res} "
+                            f"(task={call.task_id}, worker={call.worker_id})"
+                        )
             except Exception as e:
                 logger.warning(f"Redis INCRBYFLOAT failed: {e}")
 
