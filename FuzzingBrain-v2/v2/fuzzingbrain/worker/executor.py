@@ -236,19 +236,54 @@ class WorkerExecutor:
             pov_blob_path = povs_dir / f"crash_{crash_record.crash_hash[:16]}.bin"
             pov_blob_path.write_bytes(crash_blob)
 
+            # Determine source from crash_record
+            source = crash_record.source  # "global_fuzzer" | "sp_fuzzer"
+
+            # Look up the POVAgent that triggered this SP Fuzzer
+            agent_id = None
+            if source == "sp_fuzzer" and crash_record.sp_id:
+                try:
+                    from ..db import get_database
+
+                    db = get_database()
+                    if db is not None:
+                        from bson import ObjectId
+
+                        agent_doc = db.agents.find_one(
+                            {
+                                "sp_id": crash_record.sp_id,
+                                "task_id": ObjectId(self.task_id),
+                                "agent_type": "POVAgent",
+                            }
+                        )
+                        if agent_doc:
+                            agent_id = str(agent_doc["_id"])
+                            logger.info(
+                                f"[{self.worker_display_name}] Linked SP Fuzzer POV to POVAgent {agent_id[:8]}"
+                            )
+                except Exception as e:
+                    logger.debug(
+                        f"[{self.worker_display_name}] Failed to look up POVAgent for SP: {e}"
+                    )
+
             pov = POV(
                 pov_id=pov_id,
                 task_id=self.task_id,
-                suspicious_point_id="",  # No SP - fuzzer-discovered
+                suspicious_point_id=crash_record.sp_id or "",  # SP ID if from SP Fuzzer
                 generation_id=generate_id(),  # Unique generation ID
+                source=source,  # Track POV source
+                source_worker_id=crash_record.worker_id,  # Track which worker found it
+                agent_id=agent_id,  # POVAgent that initiated fuzzing (if SP Fuzzer)
                 iteration=0,
                 attempt=1,
                 variant=1,
                 blob=crash_blob_b64,
                 blob_path=str(pov_blob_path),
                 gen_blob=f"""# Fuzzer-discovered crash
+# Source: {source}
 # Hash: {crash_record.crash_hash}
 # Type: {crash_record.vuln_type}
+# Worker: {crash_record.worker_id}
 
 import base64
 
@@ -264,7 +299,7 @@ def generate(variant: int = 1) -> bytes:
                 sanitizer_output=crash_record.sanitizer_output[:10000]
                 if crash_record.sanitizer_output
                 else "",
-                description=f"Fuzzer-discovered crash ({crash_record.source})",
+                description=f"Fuzzer-discovered crash ({source})",
                 is_successful=False,  # NOT yet! Generate report first
                 is_active=True,
                 verified_at=None,  # Not verified yet
