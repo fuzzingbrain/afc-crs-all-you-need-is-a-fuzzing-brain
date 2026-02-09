@@ -211,7 +211,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         This includes:
         1. Direction Planning (async)
         2. Direction Seeds generation + Global Fuzzer startup
-        3. SP Finding (three-phase architecture)
+        3. SP Finding (breadth-first per-direction architecture)
 
         Running everything in one event loop avoids litellm client caching issues
         where HTTP clients get bound to a closed event loop.
@@ -226,9 +226,9 @@ class POVFullscanStrategy(POVBaseStrategy):
 
             return PipelineStats()
 
-        # Phase 2+: SP Finding with three-phase architecture
+        # Phase 2+: SP Finding with breadth-first per-direction architecture
         self.log_info(
-            f"=== SP Find: Three-Phase Architecture ({len(directions)} directions) ==="
+            f"=== SP Find: Breadth-First Per-Direction ({len(directions)} directions) ==="
         )
         return await self._run_v2_pipeline_with_fuzzer_init(directions)
 
@@ -301,7 +301,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             return 0
 
     # =========================================================================
-    # SP Find v2: Three-Phase Architecture
+    # SP Find v2: Breadth-First Per-Direction Architecture
     # =========================================================================
 
     async def _run_v2_pipeline(self, directions: List):
@@ -399,6 +399,15 @@ class POVFullscanStrategy(POVBaseStrategy):
             ("big/re", "Big Pool - Re-analyzed"),
         ]
 
+        # Pre-compute grand total for consistent log display
+        grand_total = 0
+        for _, pools in direction_pools:
+            for (
+                key,
+                _,
+            ) in phase_labels:
+                grand_total += len(pools.get(key, []))
+
         global_index = 0
         for phase_key, phase_label in phase_labels:
             phase_start = time.time()
@@ -417,6 +426,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                 work=phase_work,
                 agent_log_dir=agent_log_dir,
                 global_index_start=global_index,
+                grand_total=grand_total,
             )
             global_index += len(phase_work)
             self.log_info(
@@ -538,6 +548,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         work: List[tuple],
         agent_log_dir,
         global_index_start: int = 0,
+        grand_total: int = 0,
     ) -> None:
         """
         Run a batch of (function, direction_id) pairs with semaphore-limited concurrency.
@@ -549,12 +560,13 @@ class POVFullscanStrategy(POVBaseStrategy):
             work: List of (func_object, direction_id) tuples
             agent_log_dir: Directory for agent log files
             global_index_start: Starting index for log numbering
+            grand_total: Total functions across all phases (for log display)
         """
         if not work:
             return
 
         semaphore = asyncio.Semaphore(self.num_parallel_agents)
-        total = len(work)
+        total = grand_total if grand_total > 0 else len(work)
 
         async def analyze_one(func, direction_id: str, index: int):
             async with semaphore:
