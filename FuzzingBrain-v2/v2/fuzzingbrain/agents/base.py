@@ -106,7 +106,11 @@ class BaseAgent(ABC):
 
         # Stop reason for graceful termination tracking
         # None = normal completion, "budget" = budget exceeded, "timeout" = time limit
+        # "cancelled" = graceful shutdown
         self.stop_reason: Optional[str] = None
+
+        # Cancellation flag (set by cancel() for graceful shutdown)
+        self._cancelled = False
 
         # Agent-specific logger
         self._agent_logger = None
@@ -114,6 +118,10 @@ class BaseAgent(ABC):
 
         # Agent context for isolation (set during run_async)
         self._context: Optional[AgentContext] = None
+
+    def cancel(self) -> None:
+        """Request graceful cancellation of the agent loop."""
+        self._cancelled = True
 
     @property
     def agent_name(self) -> str:
@@ -854,6 +862,12 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         response = None
 
         while iteration < self.max_iterations:
+            # Check for graceful cancellation
+            if self._cancelled:
+                self._log("Agent cancelled by shutdown", level="WARNING")
+                self.stop_reason = "cancelled"
+                break
+
             iteration += 1
             self.total_iterations += 1
             remaining = self.max_iterations - iteration
@@ -1025,6 +1039,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             sanitizer=self.sanitizer,
         ) as ctx:
             self._context = ctx
+            ctx.agent = self  # Back-reference for cancellation
             agent_id = ctx.agent_id  # Use ObjectId from context
 
             # Allow subclasses to configure context (set sp_id, direction_id, etc.)

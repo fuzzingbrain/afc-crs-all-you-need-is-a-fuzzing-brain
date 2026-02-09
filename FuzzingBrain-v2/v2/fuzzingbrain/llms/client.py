@@ -245,6 +245,33 @@ class LLMClient:
         buffer.record(call)
 
     @classmethod
+    def close_all(cls) -> None:
+        """
+        Close all cached httpx clients in litellm's in-memory cache.
+
+        Best-effort: logs errors but does not raise.
+        Call this during shutdown to avoid SSL transport warnings
+        when the event loop is closed.
+        """
+        try:
+            if not hasattr(litellm, "in_memory_llm_clients_cache"):
+                return
+            cache = litellm.in_memory_llm_clients_cache
+            if not cache:
+                return
+            for key in list(cache.keys()):
+                try:
+                    client = cache[key]
+                    if hasattr(client, "close"):
+                        client.close()
+                except Exception:
+                    pass
+            cache.clear()
+            logger.debug("Closed all cached LLM clients")
+        except Exception as e:
+            logger.debug(f"LLMClient.close_all best-effort cleanup: {e}")
+
+    @classmethod
     def _ensure_clean_client_cache(cls) -> None:
         """
         Ensure litellm's cached httpx clients are valid for the current event loop.

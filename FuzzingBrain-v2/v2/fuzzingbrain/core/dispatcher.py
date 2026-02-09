@@ -741,15 +741,36 @@ def generate(variant: int = 1) -> bytes:
         """
         Gracefully shutdown all running workers.
 
-        Revokes Celery tasks and marks workers as completed.
+        4-step process:
+        1. Cancel in-memory agents (best-effort, lets LLM loop exit cleanly)
+        2. Brief grace period for agents to finish current iteration
+        3. Revoke Celery tasks (terminate=True for hard stop)
+        4. Force-cleanup any zombie agent records in MongoDB
         """
+        import time as _time
+
         from ..celery_app import app
+        from ..agents.context import cancel_agents_by_worker, force_cleanup_agents
+        from ..db import get_database
 
         workers = self.repos.workers.find_by_task(self.task.task_id)
 
         for worker in workers:
             if worker.status.value in ["pending", "building", "running"]:
-                # Revoke Celery task (terminate=True for immediate stop)
+                # Step 1: Cancel in-memory agents (best-effort)
+                try:
+                    cancel_agents_by_worker(worker.worker_id)
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to cancel agents for {worker.display_name}: {e}"
+                    )
+
+        # Step 2: Grace period for agents to finish current iteration
+        _time.sleep(2)
+
+        for worker in workers:
+            if worker.status.value in ["pending", "building", "running"]:
+                # Step 3: Revoke Celery task (terminate=True for immediate stop)
                 if worker.celery_job_id:
                     try:
                         app.control.revoke(worker.celery_job_id, terminate=True)
@@ -759,8 +780,16 @@ def generate(variant: int = 1) -> bytes:
 
                 # Mark as completed (graceful shutdown)
                 worker.status = WorkerStatus.COMPLETED
-                worker.error_msg = "Graceful shutdown: POV target reached"
+                worker.error_msg = "Graceful shutdown"
                 self.repos.workers.save(worker)
+
+        # Step 4: Force-cleanup zombie agent records in MongoDB
+        try:
+            db = get_database()
+        except Exception:
+            db = None
+        if db is not None:
+            force_cleanup_agents(self.task.task_id, db)
 
     def shutdown_all_fuzzers(self) -> None:
         """
@@ -866,6 +895,7 @@ def generate(variant: int = 1) -> bytes:
                 # ================================================================
                 if elapsed > timeout_delta:
                     logger.warning(f"Timeout reached after {timeout_minutes} minutes")
+                    self.graceful_shutdown()
                     self.shutdown_all_fuzzers()
                     self._close_redis()
                     return {
@@ -964,6 +994,7 @@ def generate(variant: int = 1) -> bytes:
             logger.warning(
                 "KeyboardInterrupt received — shutting down fuzzers and cleaning up"
             )
+            self.graceful_shutdown()
             self.shutdown_all_fuzzers()
             self._close_redis()
             raise
