@@ -405,65 +405,10 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
         except Exception as e:
             return _handle_client_error(e)
 
-    @mcp.tool
-    @async_tool
-    def get_reachable_functions(fuzzer_name: str) -> Dict[str, Any]:
-        """
-        Get all functions reachable from a fuzzer entry point.
-
-        Returns the complete list of functions that can be reached via the call graph.
-
-        Args:
-            fuzzer_name: Name of the fuzzer
-
-        Returns:
-            functions: List of all reachable function names
-            count: Total number of reachable functions
-        """
-        err = _ensure_client()
-        if err:
-            return err
-        try:
-            client = _get_client()
-            functions = client.get_reachable_functions(fuzzer_name)
-            return {
-                "success": True,
-                "fuzzer_name": fuzzer_name,
-                "count": len(functions),
-                "functions": functions,
-            }
-        except Exception as e:
-            return _handle_client_error(e)
-
-    @mcp.tool
-    @async_tool
-    def get_unreached_functions(fuzzer_name: str) -> Dict[str, Any]:
-        """
-        Get functions NOT reachable from a fuzzer (coverage gaps).
-
-        Useful for identifying code that fuzzer cannot reach and may need harness improvements.
-
-        Args:
-            fuzzer_name: Name of the fuzzer
-
-        Returns:
-            functions: List of unreachable function names
-            count: Total number of unreachable functions
-        """
-        err = _ensure_client()
-        if err:
-            return err
-        try:
-            client = _get_client()
-            functions = client.get_unreached_functions(fuzzer_name)
-            return {
-                "success": True,
-                "fuzzer_name": fuzzer_name,
-                "count": len(functions),
-                "functions": functions,
-            }
-        except Exception as e:
-            return _handle_client_error(e)
+    # NOTE: get_reachable_functions and get_unreached_functions are disabled
+    # as MCP tools. On large projects (e.g. Wireshark with 123k functions),
+    # they return multi-MB responses that blow up the LLM context.
+    # The underlying AnalysisClient methods remain available for internal use.
 
     @mcp.tool
     @async_tool

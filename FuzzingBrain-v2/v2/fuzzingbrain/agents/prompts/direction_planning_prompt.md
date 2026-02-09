@@ -75,8 +75,6 @@ LOW RISK:
 - get_callers: Get functions that call a given function
 - get_callees: Get functions called by a given function
 - get_call_graph: Get the complete call graph from fuzzer
-- get_reachable_functions: List all functions reachable from fuzzer
-- get_unreached_functions: List functions NOT in call graph (may include pointer-reachable!)
 - search_code: Search for patterns in codebase
 - create_direction: Create a direction for analysis
 
@@ -96,17 +94,16 @@ Common patterns that HIDE reachable functions:
 2. They are easily missed by static analysis tools
 3. Vulnerabilities in them are real and exploitable
 
-You MUST actively discover these patterns - they won't appear in get_reachable_functions!
+You MUST actively discover these patterns using search_code and get_call_graph!
 
 ## Workflow
 
 1. **Read fuzzer source** - Understand PURPOSE, TARGET, SCOPE
-2. **Get reachable functions** - See all functions to cover (from static analysis)
+2. **Get call graph** - See the call graph from fuzzer entry point
 3. **🔴 DISCOVER INDIRECT CALL PATTERNS** (CRITICAL STEP!)
    - Study the codebase architecture: How does it dispatch to different handlers/modules?
    - Look for structs containing function pointer members
    - Use search_code to find where function addresses are assigned to struct members
-   - Check get_unreached_functions and analyze WHY they appear unreachable
    - For promising functions, trace back: Is there a dispatcher that IS reachable?
    - If yes, include these functions in your directions!
 4. **Identify business features** - What logical operations does this code perform?
