@@ -148,6 +148,31 @@ class WorkerDispatcher:
             # Determine source type from crash_record
             source = crash_record.source  # "global_fuzzer" | "sp_fuzzer"
 
+            # Look up the POVAgent that triggered this SP Fuzzer
+            agent_id = None
+            if source == "sp_fuzzer" and crash_record.sp_id:
+                try:
+                    from ..db import get_database
+
+                    db = get_database()
+                    if db is not None:
+                        agent_doc = db.agents.find_one(
+                            {
+                                "sp_id": crash_record.sp_id,
+                                "task_id": ObjectId(self.task.task_id),
+                                "agent_type": "POVAgent",
+                            }
+                        )
+                        if agent_doc:
+                            agent_id = str(agent_doc["_id"])
+                            logger.info(
+                                f"[FuzzerMonitor] Linked SP Fuzzer POV to POVAgent {agent_id[:8]}"
+                            )
+                except Exception as e:
+                    logger.debug(
+                        f"[FuzzerMonitor] Failed to look up POVAgent for SP: {e}"
+                    )
+
             pov = POV(
                 pov_id=pov_id,
                 task_id=self.task.task_id,
@@ -155,6 +180,7 @@ class WorkerDispatcher:
                 generation_id=generate_id(),
                 source=source,  # Track POV source
                 source_worker_id=crash_record.worker_id,  # Track which worker found it
+                agent_id=agent_id,  # POVAgent that initiated fuzzing (if SP Fuzzer)
                 iteration=0,
                 attempt=1,
                 variant=1,
