@@ -268,11 +268,9 @@ class AgentContext:
                     "seeds_generated": self.seeds_generated,
                     "pov_iteration": self.pov_iteration,
                     "pov_attempt": self.pov_attempt,
-                    # LLM usage
-                    "llm_calls": self.llm_calls,
-                    "llm_cost": self.llm_cost,
-                    "llm_input_tokens": self.llm_input_tokens,
-                    "llm_output_tokens": self.llm_output_tokens,
+                    # NOTE: llm_calls/llm_cost/llm_input_tokens/llm_output_tokens
+                    # are managed exclusively by WorkerLLMBuffer via $inc.
+                    # Do NOT $set them here — it would overwrite the buffer's increments.
                     "updated_at": datetime.now(),
                 }
 
