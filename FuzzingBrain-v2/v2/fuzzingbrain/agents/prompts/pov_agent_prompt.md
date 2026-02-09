@@ -76,6 +76,6 @@ def generate() -> bytes:
 
 ## Limits
 
-- Max 40 create_pov calls
+- Max 20 create_pov calls
 - Each create_pov generates 3 variants
 - Stop when crashed=True

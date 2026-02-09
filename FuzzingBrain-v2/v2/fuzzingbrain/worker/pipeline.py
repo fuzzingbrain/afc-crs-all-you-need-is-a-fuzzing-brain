@@ -48,8 +48,8 @@ class PipelineConfig:
     max_idle_cycles: int = 10  # Max cycles with no work before agent exits
 
     # POV Agent settings
-    max_iterations: int = 200  # Max agent loop iterations
-    max_pov_attempts: int = 40  # Max POV generation attempts
+    max_iterations: int = 100  # Max agent loop iterations
+    max_pov_attempts: int = 20  # Max POV generation attempts
 
     # Fuzzer settings (for POV verification)
     fuzzer_path: Optional[Path] = None  # Path to fuzzer binary
