@@ -307,9 +307,8 @@ Understanding this is MANDATORY - it defines what code is exploitable.
 
 1. **FIRST**: If fuzzer code is not shown above, read it with get_function_source("{self.fuzzer}")
 2. Understand how input flows from the fuzzer into the library
-3. Use get_reachable_functions to see all functions this fuzzer can reach
-4. Use get_call_graph to understand the call structure
-5. Group reachable functions into logical directions
+3. Use get_call_graph to understand the call structure
+4. Group reachable functions into logical directions
 6. Prioritize by: (a) closeness to fuzzer input, (b) {self.sanitizer} vulnerability types
 
 Remember: Only reachable code matters. Only {self.sanitizer}-detectable bugs matter.
