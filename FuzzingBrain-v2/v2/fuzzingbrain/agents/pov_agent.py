@@ -113,8 +113,8 @@ class POVAgent(BaseAgent):
         sanitizer: str = "address",
         llm_client: Optional[LLMClient] = None,
         model: Optional[Union[ModelInfo, str]] = None,
-        max_iterations: int = 300,
-        max_pov_attempts: int = 40,
+        max_iterations: int = 100,
+        max_pov_attempts: int = 20,
         verbose: bool = True,
         # Context
         task_id: str = "",
@@ -357,6 +357,13 @@ class POVAgent(BaseAgent):
         except Exception as e:
             logger.warning(f"[POVAgent] Failed to load fuzzer source: {e}")
             return None
+
+    def _load_compression_prompt(self) -> str:
+        """Load POV-specific compression prompt that discards irrelevant tool calls."""
+        prompt_path = Path(__file__).parent / "prompts" / "pov_compression_prompt.md"
+        if prompt_path.exists():
+            return prompt_path.read_text(encoding="utf-8")
+        return super()._load_compression_prompt()
 
     def _get_compression_criteria(self) -> str:
         """POV-specific compression criteria: focus on data flow and crash triggers."""
@@ -637,10 +644,10 @@ Start by reading the vulnerable function source with get_function_source("{funct
                         level="INFO",
                     )
 
-            # Call LLM with tools
+            # Call LLM with tools (async to avoid blocking event loop)
             self.llm_client.reset_tried_models()
             try:
-                response = self.llm_client.call_with_tools(
+                response = await self.llm_client.acall_with_tools(
                     messages=self.messages,
                     tools=available_tools,
                     model=self.model,
@@ -651,6 +658,10 @@ Start by reading the vulnerable function source with get_function_source("{funct
                 self._log(f"LLM call failed: {e}", level="ERROR")
                 self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
                 break
+
+            # Compress context when input tokens exceed 100K
+            if self.enable_context_compression and response.input_tokens >= 60_000:
+                await self._compress_context()
 
             # Log LLM response
             if response.content:
@@ -757,6 +768,29 @@ Use get_function_source or trace_pov (if available) to understand better, then c
                 if self.pov_success:
                     final_response = "POV SUCCESS! Found crashing input."
                     break
+
+                # Greedy mode nudge: if agent didn't call create_pov this iteration,
+                # inject a prompt pushing it to stop analyzing and generate a POV
+                if (
+                    self.pov_attempts < self._greedy_attempts_threshold
+                    and iteration > 2
+                    and not any(
+                        tc["function"]["name"] == "create_pov"
+                        for tc in response.tool_calls
+                    )
+                ):
+                    self.messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "GREEDY MODE: You are spending too much time analyzing. "
+                                "You have enough context. Call create_pov NOW with your "
+                                "best guess. You can refine after seeing the result. "
+                                "Do NOT call any more analysis tools before create_pov."
+                            ),
+                        }
+                    )
+                    self._log("Injected greedy mode nudge", level="DEBUG")
 
             else:
                 # No tool calls - LLM might be giving up

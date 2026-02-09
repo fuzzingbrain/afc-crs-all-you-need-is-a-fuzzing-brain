@@ -622,8 +622,8 @@ class POVBaseStrategy(BaseStrategy):
             pov_min_score=0.5,  # Minimum score to proceed to POV
             poll_interval=1.0,  # Poll every 1 second
             max_idle_cycles=10,  # Exit after 10 idle cycles
-            max_iterations=200,  # Max POV agent iterations
-            max_pov_attempts=40,  # Max POV generation attempts
+            max_iterations=100,  # Max POV agent iterations
+            max_pov_attempts=20,  # Max POV generation attempts
             fuzzer_path=self.executor.fuzzer_binary_path,
             docker_image=f"gcr.io/oss-fuzz/{self.project_name}",
         )
