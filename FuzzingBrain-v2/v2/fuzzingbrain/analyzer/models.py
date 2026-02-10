@@ -5,7 +5,7 @@ Request/Response models for communication between Controller and Analyzer.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 from datetime import datetime
 
 
@@ -26,9 +26,9 @@ class AnalyzeRequest:
     log_dir: Optional[str] = None  # Log directory path
     prebuild_dir: Optional[str] = None  # Path to prebuild data directory
     work_id: Optional[str] = None  # Work ID for prebuild data remapping
-    fuzzer_sources: Dict[str, str] = field(
+    fuzzer_sources: Dict[str, Union[str, List[str]]] = field(
         default_factory=dict
-    )  # fuzzer_name -> source_path
+    )  # fuzzer_name -> source_path or list of source_paths
 
     def to_dict(self) -> dict:
         return {
