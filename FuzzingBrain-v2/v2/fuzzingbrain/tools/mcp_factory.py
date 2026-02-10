@@ -525,7 +525,9 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
         actual_pattern = pattern or query
         if not actual_pattern:
             return {"error": "pattern or query is required", "matches": [], "count": 0}
-        return search_code_impl(actual_pattern, file_pattern, max_results, context_lines)
+        return search_code_impl(
+            actual_pattern, file_pattern, max_results, context_lines
+        )
 
     @mcp.tool
     @async_tool
