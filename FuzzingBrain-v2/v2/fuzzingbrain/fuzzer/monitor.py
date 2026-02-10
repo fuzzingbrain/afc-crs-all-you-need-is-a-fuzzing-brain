@@ -470,7 +470,11 @@ class FuzzerMonitor:
                 )
                 # Only cache DB results; fallback may race with Worker record creation
                 if from_db:
-                    self._worker_cache[worker_dir_str] = (worker_id, fuzzer_name, sanitizer)
+                    self._worker_cache[worker_dir_str] = (
+                        worker_id,
+                        fuzzer_name,
+                        sanitizer,
+                    )
 
             fuzzer_worker_dir = worker_dir / "fuzzer_worker"
             if not fuzzer_worker_dir.exists():

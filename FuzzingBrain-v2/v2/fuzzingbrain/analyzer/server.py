@@ -960,7 +960,9 @@ class AnalysisServer:
         separator = "\n\n" + "=" * 72 + "\n\n"
         return {
             "fuzzer": fuzzer_info.name,
-            "source_path": resolved_paths if len(resolved_paths) > 1 else resolved_paths[0],
+            "source_path": resolved_paths
+            if len(resolved_paths) > 1
+            else resolved_paths[0],
             "source": separator.join(contents),
         }
 
