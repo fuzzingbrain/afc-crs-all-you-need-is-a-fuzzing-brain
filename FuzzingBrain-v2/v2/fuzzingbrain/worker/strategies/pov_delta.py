@@ -379,17 +379,9 @@ class POVDeltaStrategy(POVBaseStrategy):
         analysis_client = self.get_analysis_client()
         if analysis_client:
             try:
-                fuzzer_source = (
-                    analysis_client.get_file_content(f"{self.fuzzer}.cc") or ""
-                )
-                if not fuzzer_source:
-                    fuzzer_source = (
-                        analysis_client.get_file_content(f"{self.fuzzer}.cpp") or ""
-                    )
-                if not fuzzer_source:
-                    fuzzer_source = (
-                        analysis_client.get_file_content(f"{self.fuzzer}.c") or ""
-                    )
+                result = analysis_client.get_fuzzer_source(self.fuzzer)
+                if result and isinstance(result, dict):
+                    fuzzer_source = result.get("source", "")
             except Exception as e:
                 self.log_warning(f"Failed to get fuzzer source: {e}")
 

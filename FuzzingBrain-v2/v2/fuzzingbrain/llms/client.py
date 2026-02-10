@@ -292,13 +292,19 @@ class LLMClient:
 
         if cls._current_loop_id is not None and cls._current_loop_id != current_loop_id:
             # Event loop changed! Clear litellm's cached clients
-            if hasattr(litellm, "in_memory_llm_clients_cache"):
-                cache = litellm.in_memory_llm_clients_cache
-                if cache:
-                    cache.clear()
-                    logger.debug(
-                        "Cleared litellm client cache due to event loop change"
-                    )
+            try:
+                if hasattr(litellm, "in_memory_llm_clients_cache"):
+                    cache = litellm.in_memory_llm_clients_cache
+                    if cache:
+                        if hasattr(cache, "clear"):
+                            cache.clear()
+                        elif hasattr(cache, "cache"):
+                            cache.cache.clear()
+                        logger.debug(
+                            "Cleared litellm client cache due to event loop change"
+                        )
+            except Exception:
+                pass  # Best-effort: never block LLM calls
 
         cls._current_loop_id = current_loop_id
 
