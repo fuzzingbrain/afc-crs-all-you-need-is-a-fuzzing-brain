@@ -497,6 +497,91 @@ check_environment() {
 }
 
 # =============================================================================
+# Docker Mode
+# =============================================================================
+
+docker_setup() {
+    # Check .env file
+    if [ ! -f "$SCRIPT_DIR/.env" ]; then
+        if [ -f "$SCRIPT_DIR/.env.example" ]; then
+            cp "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env"
+            print_error ".env file created from .env.example"
+            print_error "Please edit $SCRIPT_DIR/.env and add your API keys, then re-run."
+            exit 1
+        else
+            print_error ".env file not found and no .env.example available"
+            exit 1
+        fi
+    fi
+
+    # Build image: force rebuild with --rebuild, or auto-build on first run
+    if [ "$DOCKER_REBUILD" = true ]; then
+        print_info "Rebuilding Docker image..."
+        docker compose -f "$SCRIPT_DIR/docker-compose.yml" build fb-task
+    elif ! docker image inspect v2-fb-task >/dev/null 2>&1; then
+        print_info "Building Docker image (first run, this may take a few minutes)..."
+        docker compose -f "$SCRIPT_DIR/docker-compose.yml" build fb-task
+    fi
+
+    # Start MongoDB and Redis via compose
+    print_info "Starting infrastructure (MongoDB + Redis)..."
+    if ! docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d fb-mongo fb-redis 2>/dev/null; then
+        # Fix Docker 28 + nftables compatibility: create missing isolation chains
+        print_warn "Docker network creation failed, attempting nftables fix..."
+        if command -v nft &>/dev/null; then
+            sudo nft add chain ip filter DOCKER-ISOLATION-STAGE-1 2>/dev/null || true
+            sudo nft add chain ip filter DOCKER-ISOLATION-STAGE-2 2>/dev/null || true
+        else
+            sudo iptables -t filter -N DOCKER-ISOLATION-STAGE-1 2>/dev/null || true
+            sudo iptables -t filter -N DOCKER-ISOLATION-STAGE-2 2>/dev/null || true
+        fi
+        docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d fb-mongo fb-redis
+    fi
+}
+
+# Run fuzzingbrain.main inside Docker container
+# Usage: docker_exec [args...]
+docker_exec() {
+    local EXTRA_ARGS=()
+
+    # SSH: prefer agent forwarding, fallback to key mount
+    if [ -n "$SSH_AUTH_SOCK" ] && [ -S "$SSH_AUTH_SOCK" ]; then
+        print_info "SSH agent detected, forwarding into container"
+        EXTRA_ARGS+=(-v "$SSH_AUTH_SOCK:/ssh-agent:ro" -e "SSH_AUTH_SOCK=/ssh-agent")
+    elif [ -d ~/.ssh ]; then
+        print_info "Mounting ~/.ssh into container (read-only)"
+        EXTRA_ARGS+=(-v "$HOME/.ssh:/root/.ssh:ro")
+    fi
+
+    # Mount config file directory if --config is in the args
+    local args=("$@")
+    for i in "${!args[@]}"; do
+        if [ "${args[$i]}" = "--config" ] && [ -n "${args[$((i+1))]}" ]; then
+            local config_path
+            config_path=$(realpath "${args[$((i+1))]}")
+            local config_dir
+            config_dir=$(dirname "$config_path")
+            EXTRA_ARGS+=(-v "$config_dir:$config_dir:ro")
+            # Replace with absolute path
+            args[$((i+1))]="$config_path"
+            break
+        fi
+    done
+
+    docker compose -f "$SCRIPT_DIR/docker-compose.yml" run --rm --no-deps \
+        "${EXTRA_ARGS[@]}" \
+        fb-task "${args[@]}"
+
+    # Fix workspace file ownership (container runs as root)
+    local ws_dir="${FUZZINGBRAIN_HOST_WORKSPACE:-$SCRIPT_DIR/workspace}"
+    if [ -d "$ws_dir" ]; then
+        sudo chown -R "$(id -u):$(id -g)" "$ws_dir" 2>/dev/null || true
+    fi
+
+    exit 0
+}
+
+# =============================================================================
 # Usage
 # =============================================================================
 
@@ -511,6 +596,8 @@ show_usage() {
     echo "  <project_name>      Continue processing workspace/<project_name>"
     echo ""
     echo "OPTIONS:"
+    echo "  --docker            Run inside Docker container (no local Python needed)"
+    echo "  --rebuild           Force rebuild Docker image (use with --docker)"
     echo "  --api               Start REST API server (default, port: 18080)"
     echo "  --mcp               Start MCP server (for AI agents)"
     echo "  --scan-mode <mode>  Scan mode: full (default), delta"
@@ -540,6 +627,10 @@ show_usage() {
     echo "  $0 ./task_config.json                                 # From JSON"
     echo "  $0 libpng                                             # Continue project"
     echo ""
+    echo "Docker mode (no local Python/venv needed):"
+    echo "  $0 --docker ./task_config.json                          # Run via Docker"
+    echo "  $0 --docker --rebuild ./task_config.json                # Rebuild image + run"
+    echo ""
     echo "With Evaluation (first run ./eval.sh to start eval server):"
     echo "  $0 --eval-port 18080 --budget 50.0 https://github.com/user/repo.git"
     exit 0
@@ -550,6 +641,8 @@ show_usage() {
 # =============================================================================
 
 IN_PLACE=false
+DOCKER_MODE=false
+DOCKER_REBUILD=false
 OSS_FUZZ_PROJECT=""
 TARGET_VERSION=""
 BASE_COMMIT=""
@@ -570,6 +663,14 @@ POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --docker)
+            DOCKER_MODE=true
+            shift
+            ;;
+        --rebuild)
+            DOCKER_REBUILD=true
+            shift
+            ;;
         --in-place)
             IN_PLACE=true
             shift
@@ -691,10 +792,14 @@ if [ "$MCP_MODE" = true ]; then
     print_info "Starting MCP Server mode..."
     echo ""
     print_step "Starting FuzzingBrain MCP Server..."
-    check_environment
-
-    cd "$SCRIPT_DIR"
-    exec $PYTHON -m fuzzingbrain.main --mcp
+    if [ "$DOCKER_MODE" = true ]; then
+        docker_setup
+        docker_exec --mcp
+    else
+        check_environment
+        cd "$SCRIPT_DIR"
+        exec $PYTHON -m fuzzingbrain.main --mcp
+    fi
 fi
 
 # =============================================================================
@@ -704,10 +809,14 @@ if [ $# -eq 0 ] || [ "$API_MODE" = true ]; then
     print_info "Starting REST API Server mode (default)..."
     echo ""
     print_step "Starting FuzzingBrain REST API Server..."
-    check_environment
-
-    cd "$SCRIPT_DIR"
-    exec $PYTHON -m fuzzingbrain.main --api
+    if [ "$DOCKER_MODE" = true ]; then
+        docker_setup
+        docker_exec --api
+    else
+        check_environment
+        cd "$SCRIPT_DIR"
+        exec $PYTHON -m fuzzingbrain.main --api
+    fi
 fi
 
 TARGET="$1"
@@ -717,10 +826,14 @@ TARGET="$1"
 # =============================================================================
 if is_json_file "$TARGET"; then
     print_step "Loading configuration from JSON: $TARGET"
-    check_environment
-
-    cd "$SCRIPT_DIR"
-    exec $PYTHON -m fuzzingbrain.main --config "$TARGET"
+    if [ "$DOCKER_MODE" = true ]; then
+        docker_setup
+        docker_exec --config "$TARGET"
+    else
+        check_environment
+        cd "$SCRIPT_DIR"
+        exec $PYTHON -m fuzzingbrain.main --config "$TARGET"
+    fi
 fi
 
 # =============================================================================
@@ -744,15 +857,24 @@ if is_project_name "$TARGET"; then
 
     print_step "Continuing project: $PROJECT_NAME"
     print_info "Workspace: $WORKSPACE"
-    check_environment
-
-    cd "$SCRIPT_DIR"
-    exec $PYTHON -m fuzzingbrain.main \
-        --workspace "$WORKSPACE" \
-        --task-type "$TASK_TYPE" \
-        --scan-mode "$SCAN_MODE" \
-        --sanitizers "$SANITIZERS" \
-        --timeout "$TIMEOUT_MINUTES"
+    if [ "$DOCKER_MODE" = true ]; then
+        docker_setup
+        docker_exec \
+            --workspace "$WORKSPACE" \
+            --task-type "$TASK_TYPE" \
+            --scan-mode "$SCAN_MODE" \
+            --sanitizers "$SANITIZERS" \
+            --timeout "$TIMEOUT_MINUTES"
+    else
+        check_environment
+        cd "$SCRIPT_DIR"
+        exec $PYTHON -m fuzzingbrain.main \
+            --workspace "$WORKSPACE" \
+            --task-type "$TASK_TYPE" \
+            --scan-mode "$SCAN_MODE" \
+            --sanitizers "$SANITIZERS" \
+            --timeout "$TIMEOUT_MINUTES"
+    fi
 fi
 
 # =============================================================================
@@ -928,21 +1050,36 @@ if is_git_url "$TARGET"; then
 
     print_info "Workspace ready: $WORKSPACE"
     echo ""
-    check_environment
-
-    cd "$SCRIPT_DIR"
-    exec $PYTHON -m fuzzingbrain.main \
-        --task-id "$TASK_ID" \
-        --workspace "$WORKSPACE" \
-        --project "$REPO_NAME" \
-        ${OSS_FUZZ_PROJECT:+--ossfuzz-project "$OSS_FUZZ_PROJECT"} \
-        --task-type "$TASK_TYPE" \
-        --scan-mode "$SCAN_MODE" \
-        --sanitizers "$SANITIZERS" \
-        --timeout "$TIMEOUT_MINUTES" \
-        --pov-count "$POV_COUNT" \
-        ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
-        ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"}
+    if [ "$DOCKER_MODE" = true ]; then
+        docker_setup
+        docker_exec \
+            --task-id "$TASK_ID" \
+            --workspace "$WORKSPACE" \
+            --project "$REPO_NAME" \
+            ${OSS_FUZZ_PROJECT:+--ossfuzz-project "$OSS_FUZZ_PROJECT"} \
+            --task-type "$TASK_TYPE" \
+            --scan-mode "$SCAN_MODE" \
+            --sanitizers "$SANITIZERS" \
+            --timeout "$TIMEOUT_MINUTES" \
+            --pov-count "$POV_COUNT" \
+            ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
+            ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"}
+    else
+        check_environment
+        cd "$SCRIPT_DIR"
+        exec $PYTHON -m fuzzingbrain.main \
+            --task-id "$TASK_ID" \
+            --workspace "$WORKSPACE" \
+            --project "$REPO_NAME" \
+            ${OSS_FUZZ_PROJECT:+--ossfuzz-project "$OSS_FUZZ_PROJECT"} \
+            --task-type "$TASK_TYPE" \
+            --scan-mode "$SCAN_MODE" \
+            --sanitizers "$SANITIZERS" \
+            --timeout "$TIMEOUT_MINUTES" \
+            --pov-count "$POV_COUNT" \
+            ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
+            ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"}
+    fi
 fi
 
 # =============================================================================
@@ -950,27 +1087,47 @@ fi
 # =============================================================================
 if [ -d "$TARGET" ]; then
     print_step "Using existing workspace: $TARGET"
-    check_environment
-
-    cd "$SCRIPT_DIR"
-
-    if [ "$IN_PLACE" = true ]; then
-        exec $PYTHON -m fuzzingbrain.main \
-            --workspace "$TARGET" \
-            --in-place \
-            --task-type "$TASK_TYPE" \
-            --scan-mode "$SCAN_MODE" \
-            --sanitizers "$SANITIZERS" \
-            --timeout "$TIMEOUT_MINUTES" \
-            --pov-count "$POV_COUNT"
+    if [ "$DOCKER_MODE" = true ]; then
+        docker_setup
+        if [ "$IN_PLACE" = true ]; then
+            docker_exec \
+                --workspace "$(realpath "$TARGET")" \
+                --in-place \
+                --task-type "$TASK_TYPE" \
+                --scan-mode "$SCAN_MODE" \
+                --sanitizers "$SANITIZERS" \
+                --timeout "$TIMEOUT_MINUTES" \
+                --pov-count "$POV_COUNT"
+        else
+            docker_exec \
+                --workspace "$(realpath "$TARGET")" \
+                --task-type "$TASK_TYPE" \
+                --scan-mode "$SCAN_MODE" \
+                --sanitizers "$SANITIZERS" \
+                --timeout "$TIMEOUT_MINUTES" \
+                --pov-count "$POV_COUNT"
+        fi
     else
-        exec $PYTHON -m fuzzingbrain.main \
-            --workspace "$TARGET" \
-            --task-type "$TASK_TYPE" \
-            --scan-mode "$SCAN_MODE" \
-            --sanitizers "$SANITIZERS" \
-            --timeout "$TIMEOUT_MINUTES" \
-            --pov-count "$POV_COUNT"
+        check_environment
+        cd "$SCRIPT_DIR"
+        if [ "$IN_PLACE" = true ]; then
+            exec $PYTHON -m fuzzingbrain.main \
+                --workspace "$TARGET" \
+                --in-place \
+                --task-type "$TASK_TYPE" \
+                --scan-mode "$SCAN_MODE" \
+                --sanitizers "$SANITIZERS" \
+                --timeout "$TIMEOUT_MINUTES" \
+                --pov-count "$POV_COUNT"
+        else
+            exec $PYTHON -m fuzzingbrain.main \
+                --workspace "$TARGET" \
+                --task-type "$TASK_TYPE" \
+                --scan-mode "$SCAN_MODE" \
+                --sanitizers "$SANITIZERS" \
+                --timeout "$TIMEOUT_MINUTES" \
+                --pov-count "$POV_COUNT"
+        fi
     fi
 fi
 

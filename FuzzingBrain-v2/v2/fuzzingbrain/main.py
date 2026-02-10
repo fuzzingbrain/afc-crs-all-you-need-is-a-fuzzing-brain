@@ -764,7 +764,9 @@ def setup_workspace(config: Config) -> Config:
     import tempfile
 
     script_dir = Path(__file__).parent.parent
-    workspace_base = script_dir / "workspace"
+    workspace_base = Path(
+        os.environ.get("FUZZINGBRAIN_WORKSPACE_BASE", str(script_dir / "workspace"))
+    )
 
     # Generate task ID if not provided
     task_id = config.task_id or str(ObjectId())
