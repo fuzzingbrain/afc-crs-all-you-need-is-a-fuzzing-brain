@@ -238,10 +238,19 @@ def generate(variant: int = 1) -> bytes:
                 # Update worker's pov_generated count
                 try:
                     worker_obj = self.repos.workers.find_by_id(crash_record.worker_id)
+                    if not worker_obj:
+                        # worker_id may be a directory name fallback (race condition)
+                        # Try looking up by workspace_path
+                        doc = self.repos.workers.collection.find_one(
+                            {"workspace_path": {"$regex": crash_record.worker_id + "$"}}
+                        )
+                        if doc:
+                            worker_obj = Worker.from_dict(doc)
+                            crash_record.worker_id = worker_obj.worker_id
                     if worker_obj:
                         current_count = worker_obj.pov_generated or 0
                         self.repos.workers.update(
-                            crash_record.worker_id,
+                            worker_obj.worker_id,
                             {"pov_generated": current_count + 1},
                         )
                 except Exception as e:

@@ -465,10 +465,12 @@ class FuzzerMonitor:
                 worker_id, fuzzer_name, sanitizer = self._worker_cache[worker_dir_str]
             else:
                 # Query database for worker with this workspace_path
-                worker_id, fuzzer_name, sanitizer = self._get_worker_info(
+                worker_id, fuzzer_name, sanitizer, from_db = self._get_worker_info(
                     worker_dir_str
                 )
-                self._worker_cache[worker_dir_str] = (worker_id, fuzzer_name, sanitizer)
+                # Only cache DB results; fallback may race with Worker record creation
+                if from_db:
+                    self._worker_cache[worker_dir_str] = (worker_id, fuzzer_name, sanitizer)
 
             fuzzer_worker_dir = worker_dir / "fuzzer_worker"
             if not fuzzer_worker_dir.exists():
@@ -544,7 +546,8 @@ class FuzzerMonitor:
             workspace_path: Worker workspace path
 
         Returns:
-            Tuple of (worker_id, fuzzer_name, sanitizer)
+            Tuple of (worker_id, fuzzer_name, sanitizer, from_db)
+            from_db is True if the result came from MongoDB, False if fallback.
         """
         if self.repos:
             try:
@@ -560,11 +563,13 @@ class FuzzerMonitor:
                         worker_id,
                         worker.get("fuzzer", "unknown"),
                         worker.get("sanitizer", "address"),
+                        True,
                     )
             except Exception as e:
                 logger.debug(f"[FuzzerMonitor] Failed to query worker: {e}")
 
         # Fallback: parse from directory name (best effort)
+        # NOT cached by caller — Worker record may not exist yet (race condition)
         dir_name = Path(workspace_path).name
         # Try to find sanitizer suffix
         for san in ["address", "memory", "undefined", "thread", "hwaddress"]:
@@ -573,10 +578,10 @@ class FuzzerMonitor:
                 prefix = dir_name[: -len(suffix)]
                 # The prefix is {project}_{fuzzer}, but we can't reliably split
                 # Just use the whole prefix as worker_id
-                return (dir_name, prefix, san)
+                return (dir_name, prefix, san, False)
 
         # Last resort
-        return (dir_name, dir_name, "address")
+        return (dir_name, dir_name, "address", False)
 
     def _check_fuzzer_started(
         self, fuzzer_key: str, entry: WatchEntry, crash_dir: Path
