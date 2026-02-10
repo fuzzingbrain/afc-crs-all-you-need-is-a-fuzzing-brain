@@ -18,3 +18,7 @@ htmlcov/
 # Eval server runtime
 .eval_pids/
 logs/eval/
+FBv2-Dashboard/
+
+# Environment secrets
+.env

@@ -54,6 +54,16 @@ class RedisManager:
             logger.info(f"Redis already running at {self.host}:{self.port}")
             return True
 
+        if os.environ.get("RUNNING_IN_DOCKER"):
+            logger.info("Running in Docker, waiting for external Redis...")
+            for _ in range(30):
+                time.sleep(0.5)
+                if self.is_running():
+                    logger.info(f"Redis ready at {self.host}:{self.port}")
+                    return True
+            logger.error("Redis not available after 15s")
+            return False
+
         logger.info("Redis not running, attempting to start...")
         return self._start_redis()
 
