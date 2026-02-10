@@ -506,7 +506,8 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
     @mcp.tool
     @async_tool
     def search_code(
-        pattern: str,
+        pattern: str = None,
+        query: str = None,
         file_pattern: str = None,
         max_results: int = 50,
         context_lines: int = 2,
@@ -516,11 +517,15 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
 
         Args:
             pattern: Search pattern (supports regex)
+            query: Alias for pattern
             file_pattern: Optional glob pattern to filter files
             max_results: Maximum number of matches to return
             context_lines: Number of context lines around matches
         """
-        return search_code_impl(pattern, file_pattern, max_results, context_lines)
+        actual_pattern = pattern or query
+        if not actual_pattern:
+            return {"error": "pattern or query is required", "matches": [], "count": 0}
+        return search_code_impl(actual_pattern, file_pattern, max_results, context_lines)
 
     @mcp.tool
     @async_tool

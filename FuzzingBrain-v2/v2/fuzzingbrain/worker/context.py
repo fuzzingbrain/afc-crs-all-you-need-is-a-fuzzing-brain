@@ -325,11 +325,9 @@ class WorkerContext:
                     "phase_verify": self.phase_verify,
                     "phase_pov": self.phase_pov,
                     "phase_save": self.phase_save,
-                    # LLM usage
-                    "llm_calls": self.llm_calls,
-                    "llm_cost": self.llm_cost,
-                    "llm_input_tokens": self.llm_input_tokens,
-                    "llm_output_tokens": self.llm_output_tokens,
+                    # NOTE: llm_calls/llm_cost/llm_input_tokens/llm_output_tokens
+                    # are managed exclusively by WorkerLLMBuffer via $inc.
+                    # Do NOT $set them here — it would overwrite the buffer's increments.
                     # Result
                     "result_summary": self.result_summary,
                 }

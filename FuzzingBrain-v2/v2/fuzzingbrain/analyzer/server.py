@@ -13,7 +13,7 @@ import os
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, TypeVar, Union
 
 from loguru import logger
 
@@ -117,7 +117,7 @@ class AnalysisServer:
         log_dir: Optional[str] = None,
         prebuild_dir: Optional[str] = None,
         work_id: Optional[str] = None,
-        fuzzer_sources: Optional[Dict[str, str]] = None,
+        fuzzer_sources: Optional[Dict[str, Union[str, List[str]]]] = None,
     ):
         # Store task_id as ObjectId for consistent MongoDB queries
         # String representation is used for socket paths and logging
@@ -847,6 +847,29 @@ class AnalysisServer:
 
         return content
 
+    def _resolve_source_file(self, source_path: str) -> Optional[Path]:
+        """Resolve a source path to an actual file on disk.
+
+        Tries absolute path, fuzz-tooling/, repo/, and task_path/.
+
+        Returns:
+            Path if found, None otherwise.
+        """
+        if source_path.startswith("/"):
+            abs_path = Path(source_path)
+            if abs_path.exists():
+                return abs_path
+        else:
+            for base in [
+                self.task_path / "fuzz-tooling",
+                self.task_path / "repo",
+                self.task_path,
+            ]:
+                candidate = base / source_path
+                if candidate.exists():
+                    return candidate
+        return None
+
     async def _get_fuzzer_source(self, fuzzer_name: str) -> dict:
         """Get fuzzer/harness source code.
 
@@ -879,89 +902,67 @@ class AnalysisServer:
                 "available_fuzzers": [f.name for f in self.fuzzers],
             }
 
-        source_path = fuzzer_info.source_path
+        # Collect source paths from all sources
+        source_paths = []
 
-        # Priority 1: Check fuzzer_sources config (fuzzer_name -> relative path in fuzz-tooling)
-        if not source_path and fuzzer_info.name in self.fuzzer_sources:
-            source_path = self.fuzzer_sources[fuzzer_info.name]
+        # Priority 1: fuzzer_info.source_path (from build discovery)
+        if fuzzer_info.source_path:
+            source_paths.append(fuzzer_info.source_path)
+
+        # Priority 2: fuzzer_sources config (str or list)
+        if fuzzer_info.name in self.fuzzer_sources:
+            configured = self.fuzzer_sources[fuzzer_info.name]
+            if isinstance(configured, list):
+                source_paths.extend(configured)
+            elif isinstance(configured, str):
+                source_paths.append(configured)
             self._log(
-                f"Using fuzzer source from config: {fuzzer_info.name} -> {source_path}",
+                f"Using fuzzer source from config: {fuzzer_info.name} -> {configured}",
                 "DEBUG",
             )
 
-        # Priority 2: Try to get from database
-        if not source_path and self.repos:
+        # Priority 3: database
+        if not source_paths and self.repos:
             try:
                 db_fuzzer = self.repos.fuzzers.find_by_name(
                     self.task_id, fuzzer_info.name
                 )
                 if db_fuzzer and db_fuzzer.source_path:
-                    source_path = db_fuzzer.source_path
+                    source_paths.append(db_fuzzer.source_path)
             except Exception as e:
                 self._log(f"Failed to query fuzzer from DB: {e}", "DEBUG")
 
-        if not source_path:
+        if not source_paths:
             return {
                 "fuzzer": fuzzer_info.name,
                 "error": "Fuzzer source path not available",
             }
 
-        # Read the source file
-        source_file = None
-        tried_paths = []
+        # Read source files
+        contents = []
+        resolved_paths = []
+        for sp in source_paths:
+            source_file = self._resolve_source_file(sp)
+            if source_file:
+                try:
+                    contents.append(source_file.read_text())
+                    resolved_paths.append(sp)
+                except Exception as e:
+                    self._log(f"Failed to read {sp}: {e}", "DEBUG")
 
-        # Check if source_path is absolute
-        if source_path.startswith("/"):
-            abs_path = Path(source_path)
-            tried_paths.append(str(abs_path))
-            if abs_path.exists():
-                source_file = abs_path
-        else:
-            # Try multiple locations for relative paths:
-            # 1. fuzz-tooling directory (for fuzzer_sources config)
-            # 2. task_path/repo (for source_path from DB)
-            # 3. task_path directly
-
-            # Try fuzz-tooling first (for config-based paths)
-            fuzz_tooling_path = self.task_path / "fuzz-tooling" / source_path
-            tried_paths.append(str(fuzz_tooling_path))
-            if fuzz_tooling_path.exists():
-                source_file = fuzz_tooling_path
-
-            # Try repo path
-            if not source_file:
-                repo_path = self.task_path / "repo" / source_path
-                tried_paths.append(str(repo_path))
-                if repo_path.exists():
-                    source_file = repo_path
-
-            # Try task_path directly
-            if not source_file:
-                direct_path = self.task_path / source_path
-                tried_paths.append(str(direct_path))
-                if direct_path.exists():
-                    source_file = direct_path
-
-        if not source_file:
+        if not contents:
             return {
                 "fuzzer": fuzzer_info.name,
-                "source_path": source_path,
-                "error": f"Source file not found. Tried: {tried_paths}",
+                "source_path": source_paths,
+                "error": f"No source files found for paths: {source_paths}",
             }
 
-        try:
-            content = source_file.read_text()
-            return {
-                "fuzzer": fuzzer_info.name,
-                "source_path": source_path,
-                "source": content,
-            }
-        except Exception as e:
-            return {
-                "fuzzer": fuzzer_info.name,
-                "source_path": source_path,
-                "error": f"Failed to read source: {e}",
-            }
+        separator = "\n\n" + "=" * 72 + "\n\n"
+        return {
+            "fuzzer": fuzzer_info.name,
+            "source_path": resolved_paths if len(resolved_paths) > 1 else resolved_paths[0],
+            "source": separator.join(contents),
+        }
 
     def _get_callers_sync(self, function: str) -> dict:
         """Sync implementation of _get_callers."""

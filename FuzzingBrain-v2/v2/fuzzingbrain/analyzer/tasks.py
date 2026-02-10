@@ -12,7 +12,7 @@ import sys
 import time
 import multiprocessing
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Union
 
 from loguru import logger
 
@@ -32,7 +32,7 @@ def _run_server_process(
     result_queue: multiprocessing.Queue,
     prebuild_dir: Optional[str] = None,
     work_id: Optional[str] = None,
-    fuzzer_sources: Optional[Dict[str, str]] = None,
+    fuzzer_sources: Optional[Dict[str, Union[str, List[str]]]] = None,
 ):
     """
     Run the Analysis Server in a subprocess.
