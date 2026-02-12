@@ -1,0 +1,54 @@
+services:
+  fb-mongo:
+    image: mongo:8.0
+    container_name: fb-mongo
+    restart: unless-stopped
+    volumes:
+      - fb-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  fb-redis:
+    image: redis:7-alpine
+    container_name: fb-redis
+    restart: unless-stopped
+    volumes:
+      - fb-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  fb-task:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${FUZZINGBRAIN_HOST_WORKSPACE:-${PWD}/workspace}:${FUZZINGBRAIN_HOST_WORKSPACE:-${PWD}/workspace}
+      - ${PWD}:${PWD}:ro
+      - ${PWD}/logs:/app/logs
+    environment:
+      MONGODB_URL: "mongodb://fb-mongo:27017"
+      MONGODB_DB: "fuzzingbrain"
+      REDIS_URL: "redis://fb-redis:6379/0"
+      RUNNING_IN_DOCKER: "true"
+      FUZZINGBRAIN_WORKSPACE_BASE: "${FUZZINGBRAIN_HOST_WORKSPACE:-${PWD}/workspace}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY}"
+    depends_on:
+      fb-mongo:
+        condition: service_healthy
+      fb-redis:
+        condition: service_healthy
+    profiles:
+      - task
+
+volumes:
+  fb-mongo-data:
+  fb-redis-data:

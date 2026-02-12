@@ -1,0 +1,548 @@
+# FuzzingBrain MCP Tools Registry
+#
+# This file documents all available MCP tools for AI agents.
+# Tools are registered via FastMCP and can be called via MCP protocol.
+#
+# Usage:
+#   from fastmcp import Client
+#   client = Client("fuzzingbrain/tools/__init__.py")
+#   async with client:
+#       result = await client.call_tool("tool_name", {"param": "value"})
+
+version: "2.1"
+last_updated: "2025-12-29"
+
+# =============================================================================
+# Coverage Tools (coverage.py)
+# =============================================================================
+coverage:
+  description: "Coverage analysis tools for verifying code path execution"
+  context_required: true
+  context_function: "set_coverage_context"
+
+  tools:
+    run_coverage:
+      description: "Run coverage analysis on an input to check code path execution"
+      params:
+        fuzzer_name:
+          type: string
+          required: true
+          description: "Name of the fuzzer binary"
+        input_data_base64:
+          type: string
+          required: true
+          description: "Base64 encoded input data to analyze"
+        target_functions:
+          type: list[string]
+          required: false
+          description: "Optional list of function names to check for coverage"
+        target_files:
+          type: list[string]
+          required: false
+          description: "Optional list of filenames to filter coverage display"
+      returns:
+        executed_functions: "List of functions that were executed"
+        executed_lines: "Dict mapping files to executed line numbers"
+        target_reached: "Dict mapping target functions to reached status"
+        coverage_summary: "Human-readable coverage summary"
+
+    check_pov_reaches_target:
+      description: "Check if a POV reaches a specific target function"
+      params:
+        fuzzer_name:
+          type: string
+          required: true
+          description: "Name of the fuzzer binary"
+        pov_data_base64:
+          type: string
+          required: true
+          description: "Base64 encoded POV input"
+        target_function:
+          type: string
+          required: true
+          description: "The function name to check"
+      returns:
+        reached: "Boolean indicating if target was reached"
+        distance: "Call depth to target if reached"
+
+    list_available_fuzzers:
+      description: "List all available coverage-instrumented fuzzers"
+      params: {}
+      returns:
+        fuzzers: "List of fuzzer names available for coverage analysis"
+
+    get_coverage_feedback:
+      description: "Get coverage feedback formatted for LLM prompt enhancement"
+      params:
+        fuzzer_name:
+          type: string
+          required: true
+          description: "Name of the fuzzer binary"
+        input_data_base64:
+          type: string
+          required: true
+          description: "Base64 encoded input data"
+        target_files:
+          type: list[string]
+          required: false
+          description: "Optional list of filenames to focus on"
+      returns:
+        feedback: "Formatted coverage feedback for LLM consumption"
+
+# =============================================================================
+# Analyzer Tools (analyzer.py)
+# =============================================================================
+analyzer:
+  description: "Code analysis tools for querying static analysis data"
+  context_required: true
+  context_function: "set_analyzer_context"
+
+  tools:
+    # -------------------------------------------------------------------------
+    # Server Control
+    # -------------------------------------------------------------------------
+    analyzer_status:
+      description: "Get Analysis Server status including query count and uptime"
+      category: "server_control"
+      params: {}
+      returns:
+        status: "Server status dict with query_count, uptime, function_count, etc."
+
+    # -------------------------------------------------------------------------
+    # Function Queries
+    # -------------------------------------------------------------------------
+    get_function:
+      description: "Get metadata about a function (file path, line numbers, complexity, parameters)"
+      category: "function_query"
+      params:
+        function_name:
+          type: string
+          required: true
+          description: "The exact name of the function to look up"
+      returns:
+        function: "Function metadata (name, file_path, start_line, end_line, complexity, args, return_type)"
+
+    get_functions_by_file:
+      description: "Get all functions defined in a specific file"
+      category: "function_query"
+      params:
+        file_path:
+          type: string
+          required: true
+          description: "File path (can be partial, e.g., 'png.c')"
+      returns:
+        functions: "List of functions in the file with metadata"
+        count: "Number of functions found"
+
+    search_functions:
+      description: "Search for functions by name pattern (regex)"
+      category: "function_query"
+      params:
+        pattern:
+          type: string
+          required: true
+          description: "Regex pattern to match function names"
+        limit:
+          type: int
+          required: false
+          default: 50
+          description: "Maximum number of results"
+      returns:
+        functions: "List of matching functions with metadata"
+        count: "Number of matches"
+
+    get_function_source:
+      description: "Get the full source code of a function"
+      category: "function_query"
+      params:
+        function_name:
+          type: string
+          required: true
+          description: "The exact name of the function"
+      returns:
+        source: "The complete source code of the function"
+
+    # -------------------------------------------------------------------------
+    # Call Graph
+    # -------------------------------------------------------------------------
+    get_callers:
+      description: "Get all functions that call the specified function (who calls this function?)"
+      category: "call_graph"
+      params:
+        function_name:
+          type: string
+          required: true
+          description: "The function to find callers for"
+      returns:
+        callers: "List of function names that call this function"
+        count: "Number of callers"
+
+    get_callees:
+      description: "Get all functions called by the specified function (what does this function call?)"
+      category: "call_graph"
+      params:
+        function_name:
+          type: string
+          required: true
+          description: "The function to find callees for"
+      returns:
+        callees: "List of function names called by this function"
+        count: "Number of callees"
+
+    get_call_graph:
+      description: "Get the call graph starting from a fuzzer entry point"
+      category: "call_graph"
+      params:
+        fuzzer_name:
+          type: string
+          required: true
+          description: "Name of the fuzzer"
+        depth:
+          type: int
+          required: false
+          default: 3
+          description: "Maximum call depth to traverse"
+      returns:
+        call_graph: "Dict mapping function names to their callees"
+        node_count: "Number of nodes in the graph"
+
+    # -------------------------------------------------------------------------
+    # Reachability Analysis
+    # -------------------------------------------------------------------------
+    check_reachability:
+      description: "Check if a function is reachable from a fuzzer entry point"
+      category: "reachability"
+      params:
+        fuzzer_name:
+          type: string
+          required: true
+          description: "Name of the fuzzer"
+        function_name:
+          type: string
+          required: true
+          description: "Target function to check"
+      returns:
+        reachable: "Boolean indicating if function is reachable"
+        distance: "Call depth to function if reachable"
+
+    get_reachable_functions:
+      description: "Get all functions reachable from a fuzzer entry point"
+      category: "reachability"
+      params:
+        fuzzer_name:
+          type: string
+          required: true
+          description: "Name of the fuzzer"
+      returns:
+        functions: "List of all reachable function names"
+        count: "Number of reachable functions"
+
+    get_unreached_functions:
+      description: "Get functions NOT reachable from a fuzzer (coverage gaps)"
+      category: "reachability"
+      params:
+        fuzzer_name:
+          type: string
+          required: true
+          description: "Name of the fuzzer"
+      returns:
+        functions: "List of unreachable function names"
+        count: "Number of unreachable functions"
+
+    # -------------------------------------------------------------------------
+    # Build Information
+    # -------------------------------------------------------------------------
+    get_fuzzers:
+      description: "Get list of all built fuzzers"
+      category: "build_info"
+      params: {}
+      returns:
+        fuzzers: "List of fuzzer info (name, sanitizer, binary_path)"
+        count: "Number of fuzzers"
+
+    get_build_paths:
+      description: "Get build output paths for each sanitizer"
+      category: "build_info"
+      params: {}
+      returns:
+        build_paths: "Dict mapping sanitizer names to build directories"
+
+# =============================================================================
+# Suspicious Points Tools (suspicious_points.py)
+# =============================================================================
+suspicious_points:
+  description: "Tools for managing suspicious points (potential vulnerabilities)"
+  context_required: true
+  context_function: "SuspiciousPointTools(client)"
+  note: "Requires AnalysisClient instance; tools are class methods"
+
+  tools:
+    create_suspicious_point:
+      description: "Create a new suspicious point when identifying a potential vulnerability"
+      category: "suspicious_point"
+      params:
+        function_name:
+          type: string
+          required: true
+          description: "The function containing the suspicious code"
+        description:
+          type: string
+          required: true
+          description: "Detailed description using control flow, not line numbers"
+        vuln_type:
+          type: string
+          required: true
+          enum:
+            - buffer-overflow
+            - use-after-free
+            - integer-overflow
+            - null-pointer-dereference
+            - format-string
+            - double-free
+            - uninitialized-memory
+            - out-of-bounds-read
+            - out-of-bounds-write
+          description: "Type of vulnerability"
+        score:
+          type: float
+          required: false
+          default: 0.5
+          description: "Confidence score (0.0-1.0)"
+        important_controlflow:
+          type: list[dict]
+          required: false
+          description: "List of related functions/variables affecting this bug"
+      returns:
+        id: "Created suspicious point ID"
+        created: "Boolean indicating success"
+
+    update_suspicious_point:
+      description: "Update a suspicious point after verification"
+      category: "suspicious_point"
+      params:
+        suspicious_point_id:
+          type: string
+          required: true
+          description: "ID of the suspicious point to update"
+        is_checked:
+          type: boolean
+          required: false
+          description: "Set to true when verification is complete"
+        is_real:
+          type: boolean
+          required: false
+          description: "True if confirmed as real vulnerability"
+        is_important:
+          type: boolean
+          required: false
+          description: "True if high-priority vulnerability"
+        score:
+          type: float
+          required: false
+          description: "Updated confidence score"
+        verification_notes:
+          type: string
+          required: false
+          description: "Notes explaining the verification result"
+      returns:
+        updated: "Boolean indicating success"
+
+    list_suspicious_points:
+      description: "List suspicious points for current task with optional filters"
+      category: "suspicious_point"
+      params:
+        filter_unchecked:
+          type: boolean
+          required: false
+          description: "Only return unchecked points"
+        filter_real:
+          type: boolean
+          required: false
+          description: "Only return confirmed real vulnerabilities"
+        filter_important:
+          type: boolean
+          required: false
+          description: "Only return high-priority points"
+      returns:
+        suspicious_points: "List of suspicious point objects"
+        count: "Number of points returned"
+        stats: "Statistics (total, checked, unchecked, real, false_positive, important)"
+
+# =============================================================================
+# Code Viewer Tools (code_viewer.py)
+# =============================================================================
+code_viewer:
+  description: "Tools for viewing source code, diffs, and searching code"
+  context_required: true
+  context_function: "set_code_viewer_context"
+
+  tools:
+    get_diff:
+      description: "Read the diff/patch file for the current task"
+      category: "code_viewing"
+      params: {}
+      returns:
+        content: "Diff file content"
+        path: "Path to diff file"
+        size: "Size of diff content"
+
+    get_file_content:
+      description: "Read the content of a file from the repository"
+      category: "code_viewing"
+      params:
+        file_path:
+          type: string
+          required: true
+          description: "Relative path to file within repo (e.g., 'src/png.c')"
+        start_line:
+          type: int
+          required: false
+          description: "Optional starting line number (1-indexed)"
+        end_line:
+          type: int
+          required: false
+          description: "Optional ending line number (1-indexed, inclusive)"
+      returns:
+        content: "File content"
+        path: "Relative path to file"
+        total_lines: "Total lines in file"
+        start_line: "Starting line if range specified"
+        end_line: "Ending line if range specified"
+
+    search_code:
+      description: "Search for a pattern in repository source code using grep/ripgrep"
+      category: "code_viewing"
+      params:
+        pattern:
+          type: string
+          required: true
+          description: "Search pattern (supports regex)"
+        file_pattern:
+          type: string
+          required: false
+          description: "Optional glob pattern to filter files (e.g., '*.c')"
+        max_results:
+          type: int
+          required: false
+          default: 50
+          description: "Maximum number of matches to return"
+        context_lines:
+          type: int
+          required: false
+          default: 2
+          description: "Number of context lines around matches"
+      returns:
+        matches: "List of match results with file, line, content, context"
+        count: "Number of matches"
+        truncated: "Boolean if results were truncated"
+
+    list_files:
+      description: "List files in the repository directory"
+      category: "code_viewing"
+      params:
+        directory:
+          type: string
+          required: false
+          default: ""
+          description: "Subdirectory to list (relative to repo root)"
+        pattern:
+          type: string
+          required: false
+          description: "Optional glob pattern to filter files"
+        recursive:
+          type: boolean
+          required: false
+          default: false
+          description: "If true, list files recursively"
+      returns:
+        files: "List of file paths"
+        directories: "List of directory paths"
+        file_count: "Number of files"
+        dir_count: "Number of directories"
+
+# =============================================================================
+# Tool Categories Summary
+# =============================================================================
+categories:
+  coverage:
+    description: "Tools for dynamic coverage analysis"
+    use_cases:
+      - "Verify if a POV reaches target vulnerable function"
+      - "Analyze code paths executed by an input"
+      - "Guide input generation based on coverage feedback"
+
+  function_query:
+    description: "Tools for querying function metadata"
+    use_cases:
+      - "Look up function details (file, lines, complexity)"
+      - "Find functions in a specific file"
+      - "Search for functions by name pattern"
+      - "Read function source code"
+
+  call_graph:
+    description: "Tools for analyzing function call relationships"
+    use_cases:
+      - "Find who calls a function (callers)"
+      - "Find what a function calls (callees)"
+      - "Visualize call hierarchy from fuzzer entry"
+
+  reachability:
+    description: "Tools for analyzing code reachability from fuzzers"
+    use_cases:
+      - "Check if target function is reachable"
+      - "Find all functions a fuzzer can reach"
+      - "Identify coverage gaps for fuzzing strategy"
+
+  build_info:
+    description: "Tools for querying build configuration"
+    use_cases:
+      - "List available fuzzers and their sanitizers"
+      - "Get paths to built binaries"
+
+  suspicious_point:
+    description: "Tools for managing suspicious points (potential vulnerabilities)"
+    use_cases:
+      - "Create suspicious points when identifying potential bugs"
+      - "Verify and update suspicious points after analysis"
+      - "List and filter suspicious points by status"
+      - "Track verification progress"
+
+  code_viewing:
+    description: "Tools for viewing and searching source code"
+    use_cases:
+      - "Read diff/patch files to understand code changes"
+      - "Read specific file contents with line ranges"
+      - "Search code for patterns (grep/ripgrep)"
+      - "List files in directories"
+
+# =============================================================================
+# Context Setup
+# =============================================================================
+context:
+  coverage:
+    function: "set_coverage_context"
+    params:
+      coverage_fuzzer_dir: "Path to coverage-instrumented fuzzer directory"
+      project_name: "OSS-Fuzz project name"
+      src_dir: "Source code directory"
+      docker_image: "Optional Docker image override"
+      work_dir: "Optional work directory for coverage output"
+
+  analyzer:
+    function: "set_analyzer_context"
+    params:
+      socket_path: "Path to Analysis Server Unix socket"
+      client_id: "Client identifier for query logging"
+
+  suspicious_points:
+    function: "SuspiciousPointTools(client)"
+    note: "Class-based tools, instantiate with AnalysisClient"
+    params:
+      client: "Connected AnalysisClient instance"
+
+  code_viewer:
+    function: "set_code_viewer_context"
+    params:
+      workspace_path: "Path to the workspace directory"
+      repo_subdir: "Subdirectory name for the repo (default: 'repo')"
+      diff_filename: "Name of the diff file (default: 'diff.patch')"
