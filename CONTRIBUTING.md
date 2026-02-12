@@ -24,7 +24,7 @@ Contributors who have earned the ability to modify ("commit") source code, docum
 | Ze Sheng | @OwenSanzas | Lead Maintainer |
 | Zhicheng Chen | @zchengchen | Maintainer |
 | Qingxiao Xu | @Qingxiao-X | Maintainer |
-
+| Matthew Woodcock | @matthewwoodc0 | Maintainer |
 
 ### Technical Steering Committee (TSC)
 
