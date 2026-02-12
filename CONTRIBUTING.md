@@ -22,6 +22,9 @@ Contributors who have earned the ability to modify ("commit") source code, docum
 |------|--------|------|
 | Jeff Huang | @jeffhuang | TSC Chair |
 | Ze Sheng | @OwenSanzas | Lead Maintainer |
+| Zhicheng Chen | @zchengchen | Maintainer |
+| Qingxiao Xu | @Qingxiao-X | Maintainer |
+
 
 ### Technical Steering Committee (TSC)
 
