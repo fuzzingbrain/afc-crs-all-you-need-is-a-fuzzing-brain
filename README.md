@@ -1,6 +1,6 @@
 <!-- markdownlint-disable MD001 MD041 -->
 <p align="center">
-  <img src="https://raw.githubusercontent.com/all-you-need-is-a-fuzzing-brain/all-you-need-is-a-fuzzing-brain.github.io/main/assets/images/fuzzbrain.jpg" alt="FuzzingBrain" width="200">
+  <img src="https://raw.githubusercontent.com/fuzzingbrain/fuzzingbrain.github.io/main/assets/images/fuzzbrain.jpg" alt="FuzzingBrain" width="200">
 </p>
 
 <h1 align="center">
@@ -15,7 +15,7 @@ Autonomous Cyber Reasoning System for Vulnerability Discovery
 <img src="https://img.shields.io/badge/Python-3.10+-blue?style=flat-square&logo=python&logoColor=white" alt="Python">
 <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat-square&logo=go&logoColor=white" alt="Go">
 <img src="https://img.shields.io/badge/Docker-Required-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker">
-<img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License">
+<img src="https://img.shields.io/badge/License-Apache%202.0-green?style=flat-square" alt="License">
 </p>
 
 <p align="center">
