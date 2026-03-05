@@ -28,6 +28,11 @@ from common.utils.git_utils import (
 # Code analysis utilities
 from common.utils.code_analysis import (
     extract_call_paths_from_analysis_service,
+    extract_reachable_functions_from_analysis_service,
+    extract_reachable_functions_from_analysis_service_for_c,
+    find_most_likely_vulnerable_functions,
+    extract_vulnerable_functions,
+    convert_target_functions_format,
 )
 
 # Crash parsing utilities
@@ -74,6 +79,11 @@ __all__ = [
     'parse_commit_diff',
     # Code analysis
     'extract_call_paths_from_analysis_service',
+    'extract_reachable_functions_from_analysis_service',
+    'extract_reachable_functions_from_analysis_service_for_c',
+    'find_most_likely_vulnerable_functions',
+    'extract_vulnerable_functions',
+    'convert_target_functions_format',
     # Crash parsing
     'extract_java_fallback_location',
     'extract_asan_fallback_location',

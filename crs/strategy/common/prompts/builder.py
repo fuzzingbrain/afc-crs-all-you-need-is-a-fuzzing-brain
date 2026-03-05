@@ -310,6 +310,150 @@ def create_call_path_prompt(
     return create_commit_based_prompt(fuzzer_code, enriched_diff, sanitizer, language)
 
 
+def create_full_scan_prompt(
+    fuzzer_code: str,
+    sanitizer: str,
+    language: str,
+    reachable_funcs: Optional[List[Dict[str, Any]]] = None,
+    vulnerable_funcs: Optional[List[Dict[str, Any]]] = None,
+    max_blob_mb: int = 2,
+    max_total_funcs: int = 20,
+    max_func_lines: int = 500,
+) -> str:
+    """
+    Build a rich prompt for full-scan mode with reachable function analysis.
+
+    Args:
+        fuzzer_code: Source code of the fuzzer harness
+        sanitizer: Sanitizer type (address/memory/undefined)
+        language: Programming language (c/java)
+        reachable_funcs: List of reachable function dicts with name/body
+        vulnerable_funcs: LLM-scored vulnerable functions with name/reason
+        max_blob_mb: Max blob size in MiB
+        max_total_funcs: Max functions to include in prompt
+        max_func_lines: Max lines per function body
+
+    Returns:
+        Complete full-scan prompt string
+    """
+    base_prompt = f"""
+You are an elite software-vulnerability researcher.
+The target binary is built with sanitizers; your goal is to craft **input(s)**
+that crash the program (ASan/MSan/UBSan/Jazzer, etc.). The harness that feeds
+data into the target looks like:
+
+```{language}
+{fuzzer_code}
+```
+(Study how the input is read!)
+"""
+
+    entrypoint = "fuzzerTestOneInput"
+    if language.startswith('c'):
+        entrypoint = "LLVMFuzzerTestOneInput"
+
+    if reachable_funcs:
+        func_snippets = []
+        included_funcs = 0
+        skipped_funcs = 0
+
+        for f in reachable_funcs:
+            if included_funcs >= max_total_funcs:
+                skipped_funcs += 1
+                continue
+
+            name = f.get("name") or f.get("Name") or "<unknown>"
+            body = (f.get("body") or f.get("Body") or
+                    f.get("sourceCode") or f.get("SourceCode") or "")
+
+            lines = body.splitlines()
+            if len(lines) > max_func_lines:
+                body = "\n".join(lines[:max_func_lines]) + f"\n... (truncated, total {len(lines)} lines)"
+
+            snippet = f"### Function: {name}\n```{language}\n{body}\n```"
+            func_snippets.append(snippet)
+            included_funcs += 1
+
+        funcs_block = "\n\n".join(func_snippets) if func_snippets else "<call-graph unavailable>"
+
+        base_prompt += f"""
+We have pre-analyzed the call-graph. The entry point is `{entrypoint}`.
+Below are {included_funcs} reachable functions that might be risky (limited to {max_func_lines} lines each):
+
+{funcs_block}
+"""
+
+        if skipped_funcs > 0:
+            base_prompt += f"\n(Note: {skipped_funcs} additional functions were skipped to limit prompt size.)\n"
+
+    if vulnerable_funcs:
+        vf_lines = []
+        for vf in vulnerable_funcs:
+            name = vf.get("name") or vf.get("Name") or "<unknown>"
+            reason = vf.get("reason", "").strip()
+            vf_lines.append(f"- **{name}**: {reason}")
+        vf_block = "\n".join(vf_lines)
+
+        base_prompt += f"""
+### Vulnerability Heuristics
+Static analysis identified these functions as particularly risky:
+
+{vf_block}
+"""
+
+    # Sanitizer guidance
+    if language.startswith('c'):
+        san_guide = {
+            "address": (
+                "AddressSanitizer reports buffer overflows, use-after-free, "
+                "double-free, etc. Classic triggers:\n"
+                "- Oversized length fields\n"
+                "- Negative indices casted to large unsigned values\n"
+                "- Strings without null-terminators\n"
+            ),
+            "memory": (
+                "MemorySanitizer flags reads of uninitialized memory. Classic triggers:\n"
+                "- Partially initialized structs\n"
+                "- Checksum fields that skip bytes\n"
+            ),
+            "undefined": (
+                "UndefinedBehaviorSanitizer catches UB: integer overflow, "
+                "division by zero, invalid shift, misaligned pointers, etc.\n"
+                "Classic triggers: 0-byte allocations, INT_MAX+1 lengths, "
+                "null dereferences, etc.\n"
+            ),
+        }.get(sanitizer.lower(), "")
+        language_block = f"""
+### Sanitizer Focus ({sanitizer})
+{san_guide}
+
+### Recommended Plan
+1. Map input bytes -> parser structure (see harness).
+2. Identify a vulnerable target function.
+3. Craft input to reach and exploit it.
+4. Clearly comment your reasoning before writing code.
+"""
+    else:
+        language_block = """
+### Jazzer Focus
+Aim to trigger vulnerabilities such as deserialization-based RCE, regex DoS, path traversal,
+reflection misuse, SQL/LDAP/XPath injection, or simply crash with an exception
+(NullPointerException, ArrayIndexOutOfBounds, etc.).
+"""
+
+    ending = f"""
+### Deliverable
+- Produce a **single Python 3 script** that writes **x.bin** (binary mode).
+- If multiple candidate payloads exist, emit them all (x1.bin, x2.bin, ..., x5.bin, at most five).
+- Max size per blob: **{max_blob_mb} MiB**.
+- Include a concise header comment explaining the vulnerability.
+
+Write nothing except the Python script (with embedded comments).
+"""
+
+    return base_prompt + language_block + ending
+
+
 def create_combined_call_paths_prompt(
     fuzzer_code: str,
     commit_diff: str,

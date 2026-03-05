@@ -29,6 +29,7 @@ from common.prompts.builder import (
     create_modified_functions_prompt,
     create_call_path_prompt,
     create_combined_call_paths_prompt,
+    create_full_scan_prompt,
 )
 
 __all__ = [
@@ -38,6 +39,7 @@ __all__ = [
     'create_modified_functions_prompt',
     'create_call_path_prompt',
     'create_combined_call_paths_prompt',
+    'create_full_scan_prompt',
 ]
 
 __version__ = '1.0.0'
