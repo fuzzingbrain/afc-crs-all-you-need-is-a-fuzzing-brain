@@ -1121,7 +1121,9 @@ Please respond with just the full path to the file you believe is the fuzzer sou
     
     # Call the model to identify the fuzzer source
     messages = [{"role": "user", "content": prompt}]
-    response, success = call_llm(log_file, messages, GEMINI_MODEL)
+    # Use main model in TAMU mode (gemini-2.5-flash returns garbage on long prompts via TAMU)
+    source_id_model = MODELS[0] if USE_TAMU_AI else GEMINI_MODEL
+    response, success = call_llm(log_file, messages, source_id_model)
     
     if not success:
         log_message(log_file, "Failed to get model response for fuzzer source identification")
@@ -1150,15 +1152,25 @@ Please respond with just the full path to the file you believe is the fuzzer sou
         if identified_path in source_files:
             return strip_license_text(source_files[identified_path]), identified_path
         
-        # If not, try to read the file directly
-        if os.path.exists(identified_path):
-            try:
-                with open(identified_path, 'r') as f:
-                    content = f.read()
-                    log_message(log_file, f"Successfully read identified fuzzer source")
-                    return strip_license_text(content), identified_path
-            except Exception as e:
-                log_message(log_file, f"Error reading identified source: {str(e)}")
+        # If not, try to read the file directly (also try alternate extensions)
+        candidates = [identified_path]
+        base_no_ext = os.path.splitext(identified_path)[0]
+        for ext in ['.c', '.cc', '.cpp', '.cxx', '.h', '.hpp']:
+            alt = base_no_ext + ext
+            if alt != identified_path:
+                candidates.append(alt)
+        for candidate in candidates:
+            if candidate in source_files:
+                log_message(log_file, f"Found fuzzer source via extension fallback: {candidate}")
+                return strip_license_text(source_files[candidate]), candidate
+            if os.path.exists(candidate):
+                try:
+                    with open(candidate, 'r') as f:
+                        file_content = f.read()
+                        log_message(log_file, f"Successfully read fuzzer source: {candidate}")
+                        return strip_license_text(file_content), candidate
+                except Exception as e:
+                    log_message(log_file, f"Error reading {candidate}: {str(e)}")
     
     # If the model couldn't identify the file or we couldn't read it, fall back to our original approach
     log_message(log_file, "Model couldn't identify the fuzzer source or the identified file couldn't be read")
