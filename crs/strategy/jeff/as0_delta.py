@@ -29,6 +29,14 @@ import uuid
 
 load_dotenv()
 
+# TAMU AI support
+try:
+    from tamu_ai import USE_TAMU_AI, setup_tamu_env, to_tamu_model, get_tamu_fallback, call_tamu_api
+    if USE_TAMU_AI:
+        setup_tamu_env()
+except ImportError:
+    USE_TAMU_AI = False
+
 import openlit
 from opentelemetry import trace
 # Initialize openlit
@@ -225,6 +233,30 @@ def call_litellm(log_file, messages, model_name) -> (str, bool):
     """Call LiteLLM API with the given messages and model with comprehensive retry logic"""    
     log_message(log_file, f"Calling {model_name}...")
     start_time = time.time()
+
+    # TAMU AI: bypass litellm, call TAMU API directly
+    if USE_TAMU_AI:
+        tamu_model = to_tamu_model(model_name)
+        log_message(log_file, f"TAMU AI mode: using {tamu_model} via direct HTTP")
+        max_retries = 5
+        tried = {tamu_model}
+        for attempt in range(max_retries):
+            try:
+                text, ok = call_tamu_api(messages, tamu_model)
+                end_time = time.time()
+                log_message(log_file, f"TAMU API call to {tamu_model} took {end_time - start_time:.1f}s")
+                return text, ok
+            except Exception as e:
+                log_message(log_file, f"TAMU API attempt {attempt+1}/{max_retries} failed: {e}")
+                fallback = get_tamu_fallback(tamu_model, tried)
+                if fallback and attempt < max_retries - 1:
+                    log_message(log_file, f"TAMU AI: switching to {fallback}")
+                    tamu_model = fallback
+                    tried.add(tamu_model)
+                elif attempt >= max_retries - 1:
+                    log_message(log_file, f"TAMU AI: all attempts failed")
+                    return f"TAMU API error: {e}", False
+        return "TAMU API error: all retries failed", False
     
     # Retry parameters
     max_retries = 5
@@ -283,7 +315,10 @@ def call_litellm(log_file, messages, model_name) -> (str, bool):
                         
             # For overloaded/rate limit errors, use exponential backoff
             if (is_auth_error or is_server_error or is_overloaded or is_rate_limited) and attempt < max_retries - 1:
-                fallback_model = get_fallback_model(current_model, tried_models_in_this_call)
+                if USE_TAMU_AI:
+                    fallback_model = get_tamu_fallback(current_model, tried_models_in_this_call)
+                else:
+                    fallback_model = get_fallback_model(current_model, tried_models_in_this_call)
                 log_message(log_file, f"{log_prefix}: Switching from {current_model} to fallback model {fallback_model} due to error.")
                 current_model = fallback_model
                 tried_models_in_this_call.add(current_model)
@@ -333,7 +368,9 @@ def call_llm(log_file, messages, model_name):
         span.set_attribute("genai.model.name", f"{model_name}")
 
         try:
-            if model_name.startswith("gemini"):
+            if USE_TAMU_AI:
+                response = call_litellm(log_file, messages, model_name)
+            elif model_name.startswith("gemini"):
                 response = call_gemini_api(log_file, messages, model_name)
             else:
                 response = call_litellm(log_file, messages, model_name)

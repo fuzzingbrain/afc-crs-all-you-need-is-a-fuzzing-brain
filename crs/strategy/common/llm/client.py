@@ -11,6 +11,19 @@ import google.generativeai as genai
 
 from common.llm.models import get_fallback_model, OPENAI_MODEL_O1_PRO
 
+# TAMU AI support
+try:
+    import sys
+    # Add jeff/ directory to path so tamu_ai can be imported
+    _strategy_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'jeff')
+    if _strategy_dir not in sys.path:
+        sys.path.insert(0, os.path.abspath(_strategy_dir))
+    from tamu_ai import USE_TAMU_AI, setup_tamu_env, to_tamu_model, get_tamu_fallback, call_tamu_api
+    if USE_TAMU_AI:
+        setup_tamu_env()
+except ImportError:
+    USE_TAMU_AI = False
+
 if TYPE_CHECKING:
     from common.config import StrategyConfig
     from common.logging.logger import StrategyLogger
@@ -45,6 +58,12 @@ class LLMClient:
             span.set_attribute("genai.model.name", model_name)
 
             try:
+                # TAMU AI: call TAMU API directly (bypass litellm)
+                if USE_TAMU_AI:
+                    tamu_model = to_tamu_model(model_name)
+                    self.logger.log(f"TAMU AI mode: using {tamu_model} via direct HTTP")
+                    return call_tamu_api(messages, tamu_model)
+
                 # Route to appropriate API based on model name
                 if model_name.startswith("gemini"):
                     return self._call_gemini(messages, model_name)
@@ -57,7 +76,10 @@ class LLMClient:
                 self.logger.error(f"LLM call failed: {str(e)}")
 
                 # Try fallback model
-                fallback_model = get_fallback_model(model_name, self.tried_models)
+                if USE_TAMU_AI:
+                    fallback_model = get_tamu_fallback(model_name, self.tried_models)
+                else:
+                    fallback_model = get_fallback_model(model_name, self.tried_models)
                 if fallback_model:
                     self.tried_models.add(model_name)
                     self.logger.log(f"Falling back to model: {fallback_model}")

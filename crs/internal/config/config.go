@@ -55,6 +55,8 @@ type AIConfig struct {
 	AnthropicAPIKey string `envconfig:"ANTHROPIC_API_KEY"`
 	GeminiAPIKey    string `envconfig:"GEMINI_API_KEY"`
 	OpenAIAPIKey    string `envconfig:"OPENAI_API_KEY"`
+	TAMUAIAPIKey    string `envconfig:"TAMU_AI_API_KEY"`
+	UseTAMU         bool   `envconfig:"USE_TAMU_AI" default:"false"`
 }
 
 // FuzzerConfig holds fuzzer build and selection configuration
@@ -267,15 +269,22 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("worker port is required")
 		}
 	case "local":
-		// Check if appropriate API key is set based on model
-		if strings.Contains(c.AI.Model, "claude") && c.AI.AnthropicAPIKey == "" {
-			return fmt.Errorf("ANTHROPIC_API_KEY is required for model %s", c.AI.Model)
-		}
-		if strings.Contains(c.AI.Model, "gemini") && c.AI.GeminiAPIKey == "" {
-			return fmt.Errorf("GEMINI_API_KEY is required for model %s", c.AI.Model)
-		}
-		if (strings.Contains(c.AI.Model, "gpt") || strings.HasPrefix(c.AI.Model, "o")) && c.AI.OpenAIAPIKey == "" {
-			return fmt.Errorf("OPENAI_API_KEY is required for model %s", c.AI.Model)
+		if c.AI.UseTAMU {
+			// TAMU AI mode: only need TAMU API key
+			if c.AI.TAMUAIAPIKey == "" {
+				return fmt.Errorf("TAMU_AI_API_KEY is required when using TAMU AI (--tamuai)")
+			}
+		} else {
+			// Check if appropriate API key is set based on model
+			if strings.Contains(c.AI.Model, "claude") && c.AI.AnthropicAPIKey == "" {
+				return fmt.Errorf("ANTHROPIC_API_KEY is required for model %s", c.AI.Model)
+			}
+			if strings.Contains(c.AI.Model, "gemini") && c.AI.GeminiAPIKey == "" {
+				return fmt.Errorf("GEMINI_API_KEY is required for model %s", c.AI.Model)
+			}
+			if (strings.Contains(c.AI.Model, "gpt") || strings.HasPrefix(c.AI.Model, "o")) && c.AI.OpenAIAPIKey == "" {
+				return fmt.Errorf("OPENAI_API_KEY is required for model %s", c.AI.Model)
+			}
 		}
 	default:
 		return fmt.Errorf("unknown mode: %s", c.Mode)

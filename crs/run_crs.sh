@@ -16,11 +16,23 @@ if [ -f "$SCRIPT_DIR/strategy/requirements.txt" ]; then
     pip install -q -r "$SCRIPT_DIR/strategy/requirements.txt" 2>/dev/null
 fi
 
+# Save TAMU AI settings before .env sourcing (so .env defaults don't override CLI flags)
+_SAVED_USE_TAMU_AI="${USE_TAMU_AI:-}"
+_SAVED_TAMU_AI_API_KEY="${TAMU_AI_API_KEY:-}"
+
 # Load and export .env variables for Python strategies
 if [ -f "$SCRIPT_DIR/.env" ]; then
     set -a
     source "$SCRIPT_DIR/.env"
     set +a
+fi
+
+# Restore TAMU AI settings if they were set before .env sourcing
+if [ -n "$_SAVED_USE_TAMU_AI" ]; then
+    export USE_TAMU_AI="$_SAVED_USE_TAMU_AI"
+fi
+if [ -n "$_SAVED_TAMU_AI_API_KEY" ]; then
+    export TAMU_AI_API_KEY="$_SAVED_TAMU_AI_API_KEY"
 fi
 
 DATE=$(date +"%Y%m%d_%H%M%S")
@@ -107,12 +119,19 @@ fi
 # Set strategy base directory for local runs
 export STRATEGY_BASE_DIR="$(pwd)/strategy"
 
+# Build Go command with optional flags
+GO_CMD_ARGS="$WORKSPACE"
+if [ "${USE_TAMU_AI,,}" = "true" ] || [ "$USE_TAMU_AI" = "1" ]; then
+    GO_CMD_ARGS="--tamuai $GO_CMD_ARGS"
+    echo "TAMU AI mode: enabled" | tee -a "$LOG_FILE"
+fi
+
 # use the workspace directory
-echo "Command: go run ./cmd/local/main.go $WORKSPACE" | tee -a "$LOG_FILE"
+echo "Command: go run ./cmd/local/main.go $GO_CMD_ARGS" | tee -a "$LOG_FILE"
 echo "Strategy directory: $STRATEGY_BASE_DIR" | tee -a "$LOG_FILE"
 echo "===========================================" | tee -a "$LOG_FILE"
 
-go run ./cmd/local/main.go "$WORKSPACE" 2>&1 | tee -a "$LOG_FILE"
+go run ./cmd/local/main.go $GO_CMD_ARGS 2>&1 | tee -a "$LOG_FILE"
 
 EXIT_CODE=${PIPESTATUS[0]}
 echo "===========================================" | tee -a "$LOG_FILE"

@@ -93,13 +93,14 @@ prompt_api_key() {
 
     # Prompt for each API key
     declare -A api_keys=(
+        ["TAMU_AI_API_KEY"]="TAMU AI (for TAMU students)"
         ["ANTHROPIC_API_KEY"]="Anthropic (Claude)"
         ["OPENAI_API_KEY"]="OpenAI (GPT)"
         ["GEMINI_API_KEY"]="Google (Gemini)"
         ["XAI_API_KEY"]="xAI (Grok)"
     )
 
-    for key_name in "ANTHROPIC_API_KEY" "OPENAI_API_KEY" "GEMINI_API_KEY" "XAI_API_KEY"; do
+    for key_name in "TAMU_AI_API_KEY" "ANTHROPIC_API_KEY" "OPENAI_API_KEY" "GEMINI_API_KEY" "XAI_API_KEY"; do
         local key_display="${api_keys[$key_name]}"
         echo ""
         read -p "Enter your $key_display API key (or press ENTER to skip): " key_value
@@ -306,6 +307,10 @@ check_environment() {
     # Check if at least one API key is set
     local has_api_key=false
 
+    if [ -n "$TAMU_AI_API_KEY" ] && [ "$TAMU_AI_API_KEY" != "sk-your-actual-tamu-ai-api-key-here" ]; then
+        has_api_key=true
+    fi
+
     if [ -n "$ANTHROPIC_API_KEY" ] && [ "$ANTHROPIC_API_KEY" != "your-anthropic-api-key" ]; then
         has_api_key=true
     fi
@@ -337,6 +342,7 @@ show_usage() {
     echo ""
     echo "Options:"
     echo "  --in-place      Run directly without copying workspace"
+    echo "  --tamuai        Use TAMU AI API for all LLM calls (requires TAMU_AI_API_KEY)"
     echo "  --project NAME  Specify OSS-Fuzz project name (if different from repo name)"
     echo "  -b COMMIT       Base commit ID (for delta scan)"
     echo "  -d COMMIT       Delta commit ID (for delta scan, requires -b)"
@@ -356,12 +362,17 @@ IN_PLACE=false
 OSS_FUZZ_PROJECT=""
 BASE_COMMIT=""
 DELTA_COMMIT=""
+USE_TAMU_AI=false
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case $1 in
         --in-place)
             IN_PLACE=true
+            shift
+            ;;
+        --tamuai)
+            USE_TAMU_AI=true
             shift
             ;;
         --project)
@@ -443,8 +454,12 @@ if is_project_name "$TARGET"; then
     # Check environment before running
     check_environment
 
-    # Continue fuzzing with existing workspace (always in-place)
-    cd "$CRS_DIR" && sudo ./run_crs.sh --in-place "$WORKSPACE"
+    # Run CRS - use sudo -E to preserve environment (especially TAMU AI settings)
+    if [ "$USE_TAMU_AI" = true ]; then
+        export USE_TAMU_AI=true
+        print_info "TAMU AI mode enabled - all LLM calls will use TAMU AI API"
+    fi
+    cd "$CRS_DIR" && sudo -E ./run_crs.sh --in-place "$WORKSPACE"
 
 # ============================================
 # CASE 2: Git URL - Create workspace from scratch
@@ -562,8 +577,12 @@ elif is_git_url "$TARGET"; then
     # Check environment before running
     check_environment
 
-    # Run CRS with the new workspace (always in-place since we just created it)
-    cd "$CRS_DIR" && sudo ./run_crs.sh --in-place "$WORKSPACE"
+    # Run CRS - use sudo -E to preserve environment (especially TAMU AI settings)
+    if [ "$USE_TAMU_AI" = true ]; then
+        export USE_TAMU_AI=true
+        print_info "TAMU AI mode enabled - all LLM calls will use TAMU AI API"
+    fi
+    cd "$CRS_DIR" && sudo -E ./run_crs.sh --in-place "$WORKSPACE"
 
 # ============================================
 # CASE 3: Local path - Use existing workspace
@@ -577,10 +596,14 @@ else
     # Check environment before running
     check_environment
 
-    # Pass through to original run_crs.sh
+    # Run CRS - use sudo -E to preserve environment (especially TAMU AI settings)
+    if [ "$USE_TAMU_AI" = true ]; then
+        export USE_TAMU_AI=true
+        print_info "TAMU AI mode enabled - all LLM calls will use TAMU AI API"
+    fi
     if [ "$IN_PLACE" = true ]; then
-        cd "$CRS_DIR" && sudo ./run_crs.sh --in-place "$TARGET"
+        cd "$CRS_DIR" && sudo -E ./run_crs.sh --in-place "$TARGET"
     else
-        cd "$CRS_DIR" && sudo ./run_crs.sh "$TARGET"
+        cd "$CRS_DIR" && sudo -E ./run_crs.sh "$TARGET"
     fi
 fi
