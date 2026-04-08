@@ -299,10 +299,22 @@ check_environment() {
         return
     fi
 
+    # Save CLI flags before .env sourcing (so .env defaults don't override them)
+    local _saved_use_tamu_ai="${USE_TAMU_AI:-}"
+    local _saved_tamu_ai_api_key="${TAMU_AI_API_KEY:-}"
+
     # Load .env file
     set -a
     source "$env_file"
     set +a
+
+    # Restore CLI flags if they were set before .env sourcing
+    if [ -n "$_saved_use_tamu_ai" ]; then
+        USE_TAMU_AI="$_saved_use_tamu_ai"
+    fi
+    if [ -n "$_saved_tamu_ai_api_key" ]; then
+        TAMU_AI_API_KEY="$_saved_tamu_ai_api_key"
+    fi
 
     # Check if at least one API key is set
     local has_api_key=false
