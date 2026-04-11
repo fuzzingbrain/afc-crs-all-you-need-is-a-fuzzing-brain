@@ -38,3 +38,7 @@ document/
 # POV and Patch outputs
 pov/
 patch/package-lock.json
+
+venv
+myenv
+.codex

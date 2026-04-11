@@ -29,6 +29,14 @@ import uuid
 
 load_dotenv()
 
+# TAMU AI support
+try:
+    from tamu_ai import USE_TAMU_AI, setup_tamu_env, to_tamu_model, get_tamu_fallback, call_tamu_api
+    if USE_TAMU_AI:
+        setup_tamu_env()
+except ImportError:
+    USE_TAMU_AI = False
+
 import openlit
 from opentelemetry import trace
 # Initialize openlit
@@ -226,6 +234,30 @@ def call_litellm(log_file, messages, model_name) -> (str, bool):
     """Call LiteLLM API with the given messages and model with comprehensive retry logic"""    
     log_message(log_file, f"Calling {model_name}...")
     start_time = time.time()
+
+    # TAMU AI: bypass litellm, call TAMU API directly
+    if USE_TAMU_AI:
+        tamu_model = to_tamu_model(model_name)
+        log_message(log_file, f"TAMU AI mode: using {tamu_model} via direct HTTP")
+        max_retries = 5
+        tried = {tamu_model}
+        for attempt in range(max_retries):
+            try:
+                text, ok = call_tamu_api(messages, tamu_model)
+                end_time = time.time()
+                log_message(log_file, f"TAMU API call to {tamu_model} took {end_time - start_time:.1f}s")
+                return text, ok
+            except Exception as e:
+                log_message(log_file, f"TAMU API attempt {attempt+1}/{max_retries} failed: {e}")
+                fallback = get_tamu_fallback(tamu_model, tried)
+                if fallback and attempt < max_retries - 1:
+                    log_message(log_file, f"TAMU AI: switching to {fallback}")
+                    tamu_model = fallback
+                    tried.add(tamu_model)
+                elif attempt >= max_retries - 1:
+                    log_message(log_file, f"TAMU AI: all attempts failed")
+                    return f"TAMU API error: {e}", False
+        return "TAMU API error: all retries failed", False
     
     # Retry parameters
     max_retries = 5
@@ -285,7 +317,10 @@ def call_litellm(log_file, messages, model_name) -> (str, bool):
                         
             # For overloaded/rate limit errors, use exponential backoff
             if (is_auth_error or is_server_error or is_overloaded or is_rate_limited) and attempt < max_retries - 1:
-                fallback_model = get_fallback_model(current_model, tried_models_in_this_call)
+                if USE_TAMU_AI:
+                    fallback_model = get_tamu_fallback(current_model, tried_models_in_this_call)
+                else:
+                    fallback_model = get_fallback_model(current_model, tried_models_in_this_call)
                 log_message(log_file, f"{log_prefix}: Switching from {current_model} to fallback model {fallback_model} due to error.")
                 current_model = fallback_model
                 tried_models_in_this_call.add(current_model)
@@ -323,7 +358,9 @@ def call_litellm(log_file, messages, model_name) -> (str, bool):
 
 def call_llm(log_file, messages, model_name):
     try:
-        if model_name.startswith("gemini"):
+        if USE_TAMU_AI:
+            response = call_litellm(log_file, messages, model_name)
+        elif model_name.startswith("gemini"):
             response = call_gemini_api(log_file, messages, model_name)
         else:
             response = call_litellm(log_file, messages, model_name)
@@ -342,7 +379,9 @@ def call_llm0(log_file, messages, model_name):
         span.set_attribute("genai.model.name", f"{model_name}")
 
         try:
-            if model_name.startswith("gemini"):
+            if USE_TAMU_AI:
+                response = call_litellm(log_file, messages, model_name)
+            elif model_name.startswith("gemini"):
                 response = call_gemini_api(log_file, messages, model_name)
             else:
                 response = call_litellm(log_file, messages, model_name)
@@ -1082,7 +1121,9 @@ Please respond with just the full path to the file you believe is the fuzzer sou
     
     # Call the model to identify the fuzzer source
     messages = [{"role": "user", "content": prompt}]
-    response, success = call_llm(log_file, messages, GEMINI_MODEL)
+    # Use main model in TAMU mode (gemini-2.5-flash returns garbage on long prompts via TAMU)
+    source_id_model = MODELS[0] if USE_TAMU_AI else GEMINI_MODEL
+    response, success = call_llm(log_file, messages, source_id_model)
     
     if not success:
         log_message(log_file, "Failed to get model response for fuzzer source identification")
@@ -1111,15 +1152,25 @@ Please respond with just the full path to the file you believe is the fuzzer sou
         if identified_path in source_files:
             return strip_license_text(source_files[identified_path]), identified_path
         
-        # If not, try to read the file directly
-        if os.path.exists(identified_path):
-            try:
-                with open(identified_path, 'r') as f:
-                    content = f.read()
-                    log_message(log_file, f"Successfully read identified fuzzer source")
-                    return strip_license_text(content), identified_path
-            except Exception as e:
-                log_message(log_file, f"Error reading identified source: {str(e)}")
+        # If not, try to read the file directly (also try alternate extensions)
+        candidates = [identified_path]
+        base_no_ext = os.path.splitext(identified_path)[0]
+        for ext in ['.c', '.cc', '.cpp', '.cxx', '.h', '.hpp']:
+            alt = base_no_ext + ext
+            if alt != identified_path:
+                candidates.append(alt)
+        for candidate in candidates:
+            if candidate in source_files:
+                log_message(log_file, f"Found fuzzer source via extension fallback: {candidate}")
+                return strip_license_text(source_files[candidate]), candidate
+            if os.path.exists(candidate):
+                try:
+                    with open(candidate, 'r') as f:
+                        file_content = f.read()
+                        log_message(log_file, f"Successfully read fuzzer source: {candidate}")
+                        return strip_license_text(file_content), candidate
+                except Exception as e:
+                    log_message(log_file, f"Error reading {candidate}: {str(e)}")
     
     # If the model couldn't identify the file or we couldn't read it, fall back to our original approach
     log_message(log_file, "Model couldn't identify the fuzzer source or the identified file couldn't be read")

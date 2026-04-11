@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"log"
+	"os"
 	"path/filepath"
 
 	"crs/internal/config"
@@ -14,6 +15,7 @@ func main() {
 	// Parse command line flags
 	modelFlag := flag.String("model", "", "Specify the model to use (e.g., claude-sonnet-4-20250514, gpt-4o, gemini-2.5-pro)")
 	mFlag := flag.String("m", "", "Specify the model to use (shorthand for --model)")
+	tamuFlag := flag.Bool("tamuai", false, "Use TAMU AI API for all LLM calls (requires TAMU_AI_API_KEY)")
 	flag.Parse()
 
 	// Check if task path is provided
@@ -37,11 +39,20 @@ func main() {
 	// Set mode to local
 	cfg.Mode = "local"
 
+	// Enable TAMU AI mode if flag is set
+	if *tamuFlag {
+		cfg.AI.UseTAMU = true
+		os.Setenv("USE_TAMU_AI", "true")
+	}
+
 	// Override model from command line if provided
 	if *modelFlag != "" {
 		cfg.AI.Model = *modelFlag
 	} else if *mFlag != "" {
 		cfg.AI.Model = *mFlag
+	} else if cfg.AI.UseTAMU {
+		// Default to TAMU protected model when no explicit model is given
+		cfg.AI.Model = "protected.gpt-4.1"
 	}
 
 	// Validate configuration (will check API keys)
