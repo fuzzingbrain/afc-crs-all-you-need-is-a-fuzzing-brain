@@ -37,3 +37,7 @@ document/
 # POV and Patch outputs
 pov/
 patch/
+# Source directories named pov/ or patch/ that should still be tracked
+!crs/strategy/common/pov/
+!crs/strategy/common/patch/
+!crs/strategy/strategies/patch/
