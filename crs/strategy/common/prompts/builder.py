@@ -6,6 +6,7 @@ All logic for variable substitution and conditional assembly is here.
 """
 import os
 from typing import Dict, List, Any, Optional
+
 from common.prompts import templates
 
 
@@ -353,3 +354,187 @@ def create_combined_call_paths_prompt(
 
     # Create final prompt
     return create_commit_based_prompt(fuzzer_code, enriched_diff, sanitizer, language)
+
+
+def create_fullscan_prompt(fuzzer_code: str, suspected_vuln: Dict[str, Any]) -> str:
+    """Create a full-scan prompt driven by a suspected-vulnerability record.
+
+    Used by the full-scan POV phase to feed LLM with a hand-picked
+    vulnerability candidate (file + snippet + description) rather
+    than a commit diff.
+
+    Args:
+        fuzzer_code: Source of the fuzzer harness.
+        suspected_vuln: Dictionary with ``filePath`` / ``snippet`` /
+            ``llmRawMessage`` (description). Missing fields default to
+            ``"Unknown"`` or empty string.
+
+    Returns:
+        A complete prompt ready to send to the LLM.
+    """
+    file_path = suspected_vuln.get("filePath", "Unknown")
+    snippet = suspected_vuln.get("snippet", "")
+    vuln_details = suspected_vuln.get("llmRawMessage", "")
+
+    return f"""
+You are a top software vulnerability detection expert, which helps to find vulnerabilities.
+The code snippet below may contain a security vulnerability. Your job is to analyze the code and create an input that triggers the suspected vulnerability.
+
+# Suspected Vulnerability Information
+File: {file_path}
+Potential vulnerability description: {vuln_details}
+
+# Code Snippet
+{snippet}
+
+
+Please output a Python script that creates a x.bin file. Your blob file will be run by this fuzzer code:
+{fuzzer_code}
+
+Think through these steps:
+1. Analyze the code for the vulnerability described
+2. Identify how to reach and trigger the vulnerable code path
+3. Understand the input processing in the harness
+4. Generate inputs that will trigger the vulnerability
+
+Limit the blob size to 2MiB max
+
+Your output must be a Python script that creates a file named exactly "x.bin" with a detailed description of:
+1. The vulnerability type
+2. The target function/location
+3. How your input triggers it
+"""
+
+
+def create_security_finding_prompt(
+    fuzzer_code: str,
+    finding: Dict[str, Any],
+    sanitizer: str,
+    language: str,
+) -> str:
+    """Create a POV prompt from a Claude-agent security-analyser finding.
+
+    ``finding`` is expected to be a dict with the keys produced by the
+    upstream security analyser: ``vulnerability_type``, ``location``,
+    ``function``, ``description``, ``root_cause``, ``trigger_condition``,
+    ``verification``, ``verified``, and optionally ``seed_input_path``.
+    Missing fields default to sensible placeholders.
+    """
+    del sanitizer  # reserved; not currently used in the template
+    vuln_type = finding.get("vulnerability_type", "unknown")
+    location = finding.get("location", "unknown")
+    function = finding.get("function", "")
+    description = finding.get("description", "")
+    root_cause = finding.get("root_cause", "")
+    trigger_condition = finding.get("trigger_condition", "")
+    verification = finding.get("verification", "")
+    verified = finding.get("verified", False)
+    seed_input_path = finding.get("seed_input_path", "")
+
+    status = "VERIFIED" if verified else "POTENTIAL (high confidence from code analysis)"
+
+    prompt = f"""You are a top software vulnerability expert. A security analysis has identified a {status} vulnerability.
+
+## Vulnerability Details
+- **Type**: {vuln_type}
+- **Location**: {location}
+- **Function**: {function}
+- **Status**: {status}
+
+## Description
+{description}
+
+## Root Cause Analysis
+{root_cause}
+
+## Trigger Condition
+{trigger_condition}
+
+## Previous Verification Attempt
+{verification}
+"""
+
+    if seed_input_path and os.path.exists(seed_input_path):
+        prompt += f"""
+## Existing Seed Input
+A seed input was created at: {seed_input_path}
+You can use this as a starting point and refine it to trigger the vulnerability.
+"""
+
+    prompt += f"""
+## Your Task
+Create a Python script that generates a binary input file named "x.bin" that will trigger this vulnerability.
+
+The input will be fed to this fuzzer harness:
+```
+{fuzzer_code}
+```
+
+## Strategy
+1. Analyze the vulnerability details above - the root cause tells you exactly what pattern causes the bug
+2. The trigger condition tells you what input characteristics are needed
+3. Craft an input that:
+   - Reaches the vulnerable function ({function})
+   - Satisfies the trigger condition: {trigger_condition}
+   - Causes the {vuln_type} to manifest
+
+## Requirements
+- Output ONLY a Python script that creates "x.bin"
+- Maximum blob size: 2MiB
+- Include comments explaining how your input triggers the vulnerability
+"""
+
+    if language.startswith("c"):
+        prompt += """
+## Language-Specific Notes (C/C++)
+- Consider byte-level crafting for buffer overflows
+- Use struct.pack for binary data
+- Pay attention to null terminators, length fields, and alignment
+"""
+    else:
+        prompt += """
+## Language-Specific Notes (Java)
+- Consider serialized objects if relevant
+- Pay attention to class structure and field values
+"""
+
+    return prompt
+
+
+def construct_get_target_functions_prompt(context_info: str, crash_log: str) -> str:
+    """Build the 'identify vulnerable functions' prompt.
+
+    Used by :func:`common.prompts.targets.get_target_functions` to ask
+    the LLM which functions in the codebase correspond to the crash
+    site. ``context_info`` is prior conversation with the detector
+    (may be empty); ``crash_log`` is the sanitiser output.
+    """
+    prompt = """
+Your task is to identify all potentially vulnerable functions from a code commit and a crash log.
+
+Background:
+- The commit introduces a vulnerability.
+- The vulnerability is found by an expert, with a crash log.
+"""
+
+    if context_info and context_info.strip():
+        prompt += f"""
+
+CONTEXT INFORMATION (the conversation history with the vulnerability detection expert)
+{context_info}"""
+
+    prompt += f"""
+
+CRASH LOG (this vulnerability has been found with a test):
+{crash_log}
+
+Based on the above information, please extract *all potentially* vulnerable functions in JSON format, e.g.,
+{{
+    "file_path1":"func_name1",
+    "file_path2":"func_name2",
+    ...
+}}
+
+ONLY return the JSON, no comments, and nothing else.
+"""
+    return prompt
