@@ -12,8 +12,9 @@ strategies, tried in order:
    plus the collected candidate source files.
 4. A purely name-based fallback (``fuzzer_name.c``, ``base_name.cc``, ...).
 
-Plus a small public helper, :func:`is_likely_source_for_fuzzer`, used
-both here and by legacy code for naming heuristics.
+Plus the naming heuristic :func:`is_likely_source_for_fuzzer` used
+throughout, and :func:`get_same_project_fuzzers` for enumerating
+sibling fuzzer binaries in the same out/ directory.
 """
 from __future__ import annotations
 
@@ -776,3 +777,81 @@ def find_fuzzer_source(
 
     logger.warning("Could not identify fuzzer source")
     return "// Could not find the source code for the fuzzer"
+
+
+# ---------------------------------------------------------------------------
+# Sibling fuzzer enumeration
+# ---------------------------------------------------------------------------
+
+
+_NON_FUZZER_EXTENSIONS = frozenset(
+    [
+        ".zip", ".tar", ".gz", ".bz2",
+        ".dict", ".options", ".corpus",
+        ".so", ".a", ".dylib", ".dll",
+        ".class", ".jar",
+        ".py", ".sh", ".txt", ".md",
+        ".json", ".xml", ".yaml",
+        "-coverage",
+    ]
+)
+
+_SKIP_EXECUTABLES = frozenset(
+    [
+        "llvm-symbolizer", "llvm-cov", "llvm-profdata",
+        "clang", "clang++", "gcc", "g++",
+        "sancov", "addr2line", "objdump",
+        "jazzer_agent_deploy.jar",
+        "jazzer_driver",
+        "jazzer_driver_with_sanitizer",
+        "jazzer_junit.jar",
+    ]
+)
+
+_FUZZER_NAME_PATTERNS = ("fuzzer", "fuzz", "test")
+
+
+def _is_likely_fuzzer_binary(filename: str) -> bool:
+    """Return True when ``filename`` looks like a compiled libFuzzer harness."""
+    if filename in _SKIP_EXECUTABLES:
+        return False
+    for ext in _NON_FUZZER_EXTENSIONS:
+        if filename.endswith(ext):
+            return False
+
+    name_lower = filename.lower()
+    if any(pattern in name_lower for pattern in _FUZZER_NAME_PATTERNS):
+        return True
+    # Many C/C++ fuzzers ship without an extension.
+    return "." not in filename
+
+
+def get_same_project_fuzzers(fuzzer_path: str) -> List[str]:
+    """Return absolute paths to fuzzer binaries in the same directory as ``fuzzer_path``.
+
+    Uses a mix of name-, extension-, and execute-bit heuristics to
+    reject non-fuzzer artefacts (``libFuzzer`` itself, ``jazzer_driver``,
+    LLVM tools, dictionaries, compressed corpora, etc.) while keeping
+    legitimate fuzzer binaries that may have unusual names.
+
+    Args:
+        fuzzer_path: Path to any fuzzer binary; its directory is the
+            enumeration root.
+
+    Returns:
+        Absolute paths of sibling fuzzer binaries, including
+        ``fuzzer_path`` itself when it passes the heuristics.
+    """
+    fuzzer_dir = os.path.dirname(fuzzer_path)
+    if not os.path.isdir(fuzzer_dir):
+        return []
+
+    siblings: List[str] = []
+    for entry in os.listdir(fuzzer_dir):
+        entry_path = os.path.join(fuzzer_dir, entry)
+        if not (os.path.isfile(entry_path) and os.access(entry_path, os.X_OK)):
+            continue
+        if _is_likely_fuzzer_binary(entry):
+            siblings.append(entry_path)
+
+    return siblings
