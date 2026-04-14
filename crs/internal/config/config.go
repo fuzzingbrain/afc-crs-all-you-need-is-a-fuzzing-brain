@@ -84,7 +84,7 @@ type StrategyConfig struct {
 	BaseDir string `envconfig:"STRATEGY_BASE_DIR" default:"/app/strategy"`
 
 	// Strategy subdirectory
-	NewStrategyDir string `envconfig:"STRATEGY_NEW_DIR" default:"jeff"`
+	NewStrategyDir string `envconfig:"STRATEGY_NEW_DIR" default:"legacy_strategy"`
 
 	// POV Strategy Configuration
 	POV POVStrategyConfig

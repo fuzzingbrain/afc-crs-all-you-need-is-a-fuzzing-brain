@@ -158,12 +158,12 @@ func runPatchingStrategies(
 	log.Printf("Original fuzzer path: %s", myFuzzer)
 	log.Printf("Patch workspace fuzzer path: %s", patchFuzzerPath)
 
-	// Find all strategy files under strategy/jeff/
+	// Find all strategy files under strategy/legacy_strategy/
 	strategyBaseDir := os.Getenv("STRATEGY_BASE_DIR")
 	if strategyBaseDir == "" {
 		strategyBaseDir = "/app/strategy"
 	}
-	strategyDir := filepath.Join(strategyBaseDir, "jeff")
+	strategyDir := filepath.Join(strategyBaseDir, "legacy_strategy")
 	strategyFilePattern := "patch0_delta.py"
 	if taskDetail.Type == "full" {
 		strategyFilePattern = "patch0_full.py"
@@ -643,12 +643,12 @@ func runXPatchingStrategiesWithoutPOV(
 	log.Printf("Original fuzzer path: %s", myFuzzer)
 	log.Printf("Patch workspace fuzzer path: %s", patchFuzzerPath)
 
-	// Find all strategy files under strategy/jeff/
+	// Find all strategy files under strategy/legacy_strategy/
 	strategyBaseDir := os.Getenv("STRATEGY_BASE_DIR")
 	if strategyBaseDir == "" {
 		strategyBaseDir = "/app/strategy"
 	}
-	strategyDir := filepath.Join(strategyBaseDir, "jeff")
+	strategyDir := filepath.Join(strategyBaseDir, "legacy_strategy")
 	strategyFilePattern := "xpatch_delta.py"
 	if taskDetail.Type == "full" {
 		strategyFilePattern = "xpatch_full.py"
@@ -903,7 +903,7 @@ func runXPatchSarifStrategies(
 	if strategyBaseDir == "" {
 		strategyBaseDir = "/app/strategy"
 	}
-	strategyDir := filepath.Join(strategyBaseDir, "jeff")
+	strategyDir := filepath.Join(strategyBaseDir, "legacy_strategy")
 	strategyFilePattern := "xpatch_sarif.py"
 	strategyFiles, err := filepath.Glob(filepath.Join(strategyDir, strategyFilePattern))
 	if err != nil {

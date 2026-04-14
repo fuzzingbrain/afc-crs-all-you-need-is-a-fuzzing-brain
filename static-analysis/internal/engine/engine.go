@@ -3368,7 +3368,7 @@ func extractPaths(results *models.AnalysisResults, mu *sync.Mutex, cps []models.
 	return all
 }
 func findAllReachableCFunctions(dotFile string) []string {
-	cmd := exec.Command("python3", "/app/strategyx/jeff/parse_callgraph_full.py", dotFile)
+	cmd := exec.Command("python3", "/app/strategyx/legacy_strategy/parse_callgraph_full.py", dotFile)
 	cmd.Dir = filepath.Dir(dotFile) // json will be written here
 	if err := cmd.Run(); err != nil {
 		log.Printf("[findAllReachableCFunctions failed] parse_callgraph_full.py %s %v", dotFile, err)
@@ -3398,7 +3398,7 @@ func findAllReachableCFunctions(dotFile string) []string {
 func CopyExtAPIFileIfNotExists() error {
 
 	dst := "/usr/local/lib/extapi.bc"
-	src := "/app/strategyx/jeff/extapi.bc"
+	src := "/app/strategyx/legacy_strategy/extapi.bc"
 
 	if _, err := os.Stat(dst); os.IsNotExist(err) {
 		// Open the source file
@@ -3447,7 +3447,7 @@ func BuildCallGraphFromBC(fuzzer string, workDir string) error {
 	//----------------------------------------------------------------------
 	// 1. run fundef-bc to generate <fuzzer>_function_metadata.json
 	//----------------------------------------------------------------------
-	fundefCmd := exec.Command("/app/strategyx/jeff/fundef-bc", fuzzerBc)
+	fundefCmd := exec.Command("/app/strategyx/legacy_strategy/fundef-bc", fuzzerBc)
 	fundefCmd.Dir = workDir
 
 	// fmt.Printf("[DEBUG] fundef-bc cwd: %s\n", fundefCmd.Dir)
@@ -3490,7 +3490,7 @@ func BuildCallGraphFromBC(fuzzer string, workDir string) error {
 
 	wpaSuccess := false
 	log.Printf("Running type-based pointer analysis for %s", fuzzerBc)
-	wpaTypeCmd := exec.Command("/app/strategyx/jeff/wpa", "-type", "-dump-callgraph", fuzzerBc)
+	wpaTypeCmd := exec.Command("/app/strategyx/legacy_strategy/wpa", "-type", "-dump-callgraph", fuzzerBc)
 	wpaTypeCmd.Dir = workDir
 	if err := runWithTimeout(wpaTypeCmd, 10*time.Minute); err != nil {
 		log.Printf("Warning: wpa analysis failed for %s: %v", fuzzerBc, err)
@@ -3531,7 +3531,7 @@ func BuildCallGraphFromBC(fuzzer string, workDir string) error {
 				continue
 			}
 
-			wpa := exec.Command("/app/strategyx/jeff/wpa", "-type", "-dump-callgraph", tmpBc)
+			wpa := exec.Command("/app/strategyx/legacy_strategy/wpa", "-type", "-dump-callgraph", tmpBc)
 			wpa.Dir = workDir
 			if err := runWithTimeout(wpa, 5*time.Minute); err != nil {
 				log.Printf("WPA timed-out/failed on %s: %v", bundle, err)
@@ -4834,13 +4834,13 @@ func EngineMainCodeql(request models.AnalysisRequest) ([]models.CallPath, error)
 	}
 
 	// Create temporary query directory under myqueries
-	queriesDir := filepath.Join("/app/strategyx/jeff/my-queries", "temp-call-"+taskID+"-"+fuzzerName)
+	queriesDir := filepath.Join("/app/strategyx/legacy_strategy/my-queries", "temp-call-"+taskID+"-"+fuzzerName)
 	if err := os.MkdirAll(queriesDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create temp queries directory: %v", err)
 	}
 
 	// Read query template
-	templatePath := filepath.Join("/app/strategyx/jeff/my-queries", "callpath-template.ql")
+	templatePath := filepath.Join("/app/strategyx/legacy_strategy/my-queries", "callpath-template.ql")
 	templateContent, err := os.ReadFile(templatePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read query template: %v", err)
@@ -5512,7 +5512,7 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 	// --- End Database Copying ---
 
 	// Read the template file
-	templatePath := filepath.Join("/app/strategyx/jeff/my-queries", "call-template.ql")
+	templatePath := filepath.Join("/app/strategyx/legacy_strategy/my-queries", "call-template.ql")
 	templateContent, err := os.ReadFile(templatePath)
 	if err != nil {
 		return results, fmt.Errorf("failed to read template file: %v", err)
@@ -5540,7 +5540,7 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 			log.Printf("Processing fuzzer: %s", fuzzerName)
 
 			// Create the query directory
-			queriesDir := filepath.Join("/app/strategyx/jeff/my-queries", "temp-call-"+taskID+"-"+fuzzerName)
+			queriesDir := filepath.Join("/app/strategyx/legacy_strategy/my-queries", "temp-call-"+taskID+"-"+fuzzerName)
 			if err := os.MkdirAll(queriesDir, 0755); err != nil {
 				log.Printf("failed to create queries directory: %v", err)
 				return
@@ -6823,7 +6823,7 @@ func GetCCallPathsParallel(projectDir, fuzzerPath, callGraph_dot string, entryPo
 			defer func() { <-semaphore }()
 
 			var stdout, stderr bytes.Buffer
-			testCmd := exec.Command("python3", "/app/strategyx/jeff/parse_callgraph.py", callGraph_dot, targetFuncName)
+			testCmd := exec.Command("python3", "/app/strategyx/legacy_strategy/parse_callgraph.py", callGraph_dot, targetFuncName)
 			testCmd.Stdout = &stdout
 			testCmd.Stderr = &stderr
 
@@ -6985,7 +6985,7 @@ func GetCCallPaths(projectDir, fuzzerPath string, callGraph_dot string, targetFu
 	for _, targetFuncName := range targetFunctionNames {
 		var stdout, stderr bytes.Buffer
 
-		testCmd := exec.Command("python3", "/app/strategyx/jeff/parse_callgraph.py", callGraph_dot, targetFuncName)
+		testCmd := exec.Command("python3", "/app/strategyx/legacy_strategy/parse_callgraph.py", callGraph_dot, targetFuncName)
 		testCmd.Stdout = &stdout
 		testCmd.Stderr = &stderr
 
