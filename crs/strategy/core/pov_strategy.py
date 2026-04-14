@@ -234,7 +234,6 @@ Please write a Python script that generates the blob file as 'x.bin'.
             self.llm_client,
             max_retries=2,
             timeout=30,
-            logger=self.logger
         )
 
         if not code:

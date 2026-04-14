@@ -392,7 +392,7 @@ def parse_commit_diff(project_src_dir: str, commit_diff: str) -> Dict[str, Any]:
             ...
         }
     """
-    from .code_extract import extract_function_body
+    from common.code.extract import extract_function_body
 
     # Initialize result dictionary
     modified_functions = {}
