@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -125,3 +125,130 @@ def extract_function_body(file_path: str, function_name: str) -> str:
     if file_path.endswith((".c", ".cpp", ".h")):
         return _extract_c_function(content, function_name)
     return ""
+
+
+def extract_java_method(file_path: str, method_name: str) -> Optional[Dict[str, Any]]:
+    """Extract a Java method by name, with line-accurate metadata.
+
+    Unlike :func:`extract_function_body` (which returns just the
+    method text), this helper returns a dict with ``start_line``,
+    ``end_line``, and ``content``. It uses a string-aware brace
+    matcher that tracks strings, char literals, and both kinds of
+    comments so ``{`` / ``}`` inside those lexical contexts don't
+    throw off the count.
+
+    Args:
+        file_path: Path to a ``.java`` source file.
+        method_name: The method name to locate.
+
+    Returns:
+        ``{"start_line": int, "end_line": int, "content": str}`` when
+        found, or ``None`` when the method is missing, the file cannot
+        be read, or the braces do not balance.
+    """
+    try:
+        with open(file_path, "r", encoding="utf-8", errors="replace") as fh:
+            content = fh.read()
+    except OSError as exc:
+        logger.debug("Error reading %s: %s", file_path, exc)
+        return None
+
+    method_pattern = (
+        r"(?:public|protected|private|static|final|native|synchronized|abstract|transient)?\s*"
+        r"(?:<.*?>)?\s*(?:[\w\<\>\[\]]+)\s+"
+        + re.escape(method_name)
+        + r"\s*\([^)]*\)\s*(?:throws\s+[\w\s,]+)?\s*\{"
+    )
+
+    for match in re.finditer(method_pattern, content):
+        start_pos = match.start()
+        end_pos = _find_matching_brace_end(content, start_pos)
+        if end_pos is None:
+            continue
+
+        method_code = content[start_pos : end_pos + 1]
+        start_line = content[:start_pos].count("\n") + 1
+        end_line = start_line + method_code.count("\n")
+        return {
+            "start_line": start_line,
+            "end_line": end_line,
+            "content": method_code,
+        }
+
+    return None
+
+
+def _find_matching_brace_end(content: str, start_pos: int) -> Optional[int]:
+    """Return the index of the ``}`` that balances the first ``{`` at/after ``start_pos``.
+
+    Tracks lexical context so brace characters inside strings,
+    character literals, ``//`` line comments, and ``/* */`` block
+    comments are ignored.
+    """
+    brace_count = 0
+    in_string = False
+    in_char = False
+    in_line_comment = False
+    in_block_comment = False
+
+    i = start_pos
+    length = len(content)
+    while i < length:
+        char = content[i]
+        next_char = content[i + 1] if i + 1 < length else ""
+
+        if in_line_comment:
+            if char == "\n":
+                in_line_comment = False
+            i += 1
+            continue
+        if in_block_comment:
+            if char == "*" and next_char == "/":
+                in_block_comment = False
+                i += 2
+                continue
+            i += 1
+            continue
+        if in_string:
+            if char == "\\" and next_char in ('"', "\\"):
+                i += 2
+                continue
+            if char == '"':
+                in_string = False
+            i += 1
+            continue
+        if in_char:
+            if char == "\\" and next_char in ("'", "\\"):
+                i += 2
+                continue
+            if char == "'":
+                in_char = False
+            i += 1
+            continue
+
+        if char == "/" and next_char == "/":
+            in_line_comment = True
+            i += 2
+            continue
+        if char == "/" and next_char == "*":
+            in_block_comment = True
+            i += 2
+            continue
+        if char == '"':
+            in_string = True
+            i += 1
+            continue
+        if char == "'":
+            in_char = True
+            i += 1
+            continue
+
+        if char == "{":
+            brace_count += 1
+        elif char == "}":
+            brace_count -= 1
+            if brace_count == 0:
+                return i
+        i += 1
+
+    return None
