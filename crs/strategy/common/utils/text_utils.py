@@ -3,9 +3,10 @@ Text processing utilities
 """
 from typing import Optional, TYPE_CHECKING
 
-# Backward-compatibility re-export; ``is_likely_source_for_fuzzer`` is a
-# fuzzer-discovery concern and now lives in common.fuzzing.discovery.
-from common.fuzzing.discovery import is_likely_source_for_fuzzer  # noqa: F401
+# Backward-compatibility re-exports. These functions have moved to domain
+# subpackages; new code should import from the canonical modules directly.
+from common.code.cleanup import strip_license_text  # noqa: F401  moved to common.code.cleanup
+from common.fuzzing.discovery import is_likely_source_for_fuzzer  # noqa: F401  moved to common.fuzzing.discovery
 
 if TYPE_CHECKING:
     from common.logging.logger import StrategyLogger
@@ -35,94 +36,6 @@ def truncate_output(output: str, max_lines: int = 200, logger: Optional['Strateg
         logger.debug(f"Truncated output from {len(lines)} lines to {max_lines} lines")
 
     return '\n'.join(first_part) + '\n\n[...truncated...]\n\n' + '\n'.join(last_part)
-
-
-def strip_license_text(source_code: str) -> str:
-    """
-    Strip copyright and license text from source code
-
-    Args:
-        source_code: Source code with potential license headers
-
-    Returns:
-        Source code with license text removed
-    """
-    # Common patterns that indicate license blocks
-    license_start_patterns = [
-        "/*",
-        "/**",
-        "// Copyright",
-        "/* Copyright",
-        "# Copyright",
-        "// Licensed",
-        "/* Licensed",
-        "# Licensed",
-        "// SPDX-License-Identifier",
-        "/* SPDX-License-Identifier"
-    ]
-
-    license_end_patterns = [
-        "*/",
-        "**/"
-    ]
-
-    # Check if the source starts with a license block
-    lines = source_code.split('\n')
-    in_license_block = False
-    license_end_line = -1
-
-    # First, try to find a license block with clear start and end markers
-    for i, line in enumerate(lines):
-        stripped_line = line.strip()
-
-        # Check for license block start
-        if not in_license_block:
-            for pattern in license_start_patterns:
-                if stripped_line.startswith(pattern) and ("copyright" in stripped_line.lower() or
-                                                         "license" in stripped_line.lower() or
-                                                         "permission" in stripped_line.lower() or
-                                                         "redistribution" in stripped_line.lower()):
-                    in_license_block = True
-                    break
-
-        # Check for license block end if we're in a block
-        elif in_license_block:
-            for pattern in license_end_patterns:
-                if stripped_line.endswith(pattern) and not any(p in stripped_line for p in license_start_patterns):
-                    license_end_line = i
-                    break
-
-            # If we found the end, stop looking
-            if license_end_line >= 0:
-                break
-
-    # If we found a license block with clear markers, remove it
-    if in_license_block and license_end_line >= 0:
-        return '\n'.join(lines[license_end_line+1:]).strip()
-
-    # If we didn't find a clear license block, try a heuristic approach
-    # Look for the first non-comment, non-empty line
-    first_code_line = 0
-    for i, line in enumerate(lines):
-        stripped_line = line.strip()
-        # Skip empty lines
-        if not stripped_line:
-            continue
-
-        # If it's not a comment line, this is likely the start of actual code
-        if not stripped_line.startswith('//') and not stripped_line.startswith('/*') and not stripped_line.startswith('*') and not stripped_line.startswith('#'):
-            first_code_line = i
-            break
-
-    # If the first several lines contain copyright/license keywords, skip them
-    if first_code_line > 0:
-        header_text = '\n'.join(lines[:first_code_line]).lower()
-        if ("copyright" in header_text or "license" in header_text or
-            "permission" in header_text or "redistribution" in header_text):
-            return '\n'.join(lines[first_code_line:]).strip()
-
-    # If we couldn't identify a license block, return the original code
-    return source_code
 
 
 def filter_instrumented_lines(text: str, max_line_length: int = 200) -> str:
