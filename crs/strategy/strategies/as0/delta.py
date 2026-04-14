@@ -18,8 +18,8 @@ import subprocess
 import random
 from typing import Dict, Any, Tuple, List, Optional
 
-# Add parent directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add parent directory to path for imports (strategies/as0/delta.py -> strategies -> strategy/)
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -30,13 +30,13 @@ from common.logging.logger import StrategyLogger
 from common.llm.client import LLMClient
 from common.llm.models import CLAUDE_MODEL_SONNET_45, OPENAI_MODEL_O3
 from common.prompts import create_commit_based_prompt
-from common.utils import (
-    filter_instrumented_lines,
-    truncate_output,
-    extract_crash_output,
-    generate_vulnerability_signature,
-    cleanup_seed_corpus,
-)
+from common.crash.location import generate_vulnerability_signature
+from common.crash.output import extract_crash_output, extract_crash_trace
+from common.diff.commit import get_commit_info, parse_commit_diff
+from common.fuzzing.output import filter_instrumented_lines
+from common.fuzzing.runner import run_fuzzer_with_coverage
+from common.pov.cleanup import cleanup_seed_corpus
+from common.utils.text_utils import truncate_output
 from code_analysis import CoverageAnalyzer
 
 
@@ -118,11 +118,9 @@ class AS0DeltaStrategy(PoVStrategy):
             return False
 
         # Get commit information
-        from common.utils import get_commit_info
         commit_msg, self.commit_diff = get_commit_info(
             self.config.project_dir,
             self.config.language,
-            logger=self.logger
         )
 
         # Create initial prompt (for Phase 0, Phase 1-3 will override)
@@ -277,7 +275,7 @@ class AS0DeltaStrategy(PoVStrategy):
                             f"{self.config.fuzzer_name}_seed_corpus"
                         )
                         os.makedirs(seed_corpus_dir, exist_ok=True)
-                        cleanup_seed_corpus(seed_corpus_dir, max_age_minutes=10, logger=self.logger)
+                        cleanup_seed_corpus(seed_corpus_dir, max_age_minutes=10)
 
                         unique_id = str(uuid.uuid4())[:8]
                         seed_file_path = os.path.join(
@@ -299,8 +297,6 @@ class AS0DeltaStrategy(PoVStrategy):
                     self.logger.log("Trying libfuzzer print_coverage running for 60s")
 
                     # Run fuzzer with coverage using seed corpus
-                    from common.utils import run_fuzzer_with_coverage
-
                     seed_corpus_dir = os.path.join(
                         self.config.project_dir,
                         f"{self.config.fuzzer_name}_seed_corpus"
@@ -314,7 +310,6 @@ class AS0DeltaStrategy(PoVStrategy):
                         project_name=self.config.project_name,
                         seed_corpus_dir=seed_corpus_dir,
                         pov_phase=self.config.pov_phase,
-                        logger=self.logger
                     )
 
                     # If coverage fuzzing found a crash with blob_data, save it
@@ -484,7 +479,6 @@ The test cases did not trigger the vulnerability. Please analyze the fuzzer outp
         self.logger.log("Phase 2: Modified functions-based approach")
 
         # Import utilities
-        from common.utils import parse_commit_diff
         from common.prompts import create_modified_functions_prompt
 
         # Get project source directory
@@ -520,7 +514,7 @@ The test cases did not trigger the vulnerability. Please analyze the fuzzer outp
         self.logger.log("Phase 3: Call path analysis-based approach")
 
         # Import utilities
-        from common.utils import parse_commit_diff, extract_call_paths_from_analysis_service
+        from common.analysis_client.client import extract_call_paths_from_analysis_service
         from common.prompts import create_call_path_prompt, create_combined_call_paths_prompt
 
         # Get project source directory
@@ -685,7 +679,6 @@ The test cases did not trigger the vulnerability. Please analyze the fuzzer outp
         import base64
         import re
         import requests
-        from common.utils import extract_crash_trace
 
         self.logger.log("Submitting POV to submission endpoint")
 
