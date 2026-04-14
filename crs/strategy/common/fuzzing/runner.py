@@ -5,14 +5,20 @@ collects its output with a watchdog timeout, strips libFuzzer progress noise,
 condenses the ``-print_coverage=1`` section, and on crash delegates to
 ``common.crash.extract.extract_and_save_crash_input`` to grab a reproducing
 input.
+
+It also exposes :func:`run_fuzzer_with_input` for the "run the fuzzer on
+one pre-generated blob" path used by POV iteration loops.
 """
 from __future__ import annotations
 
 import logging
 import os
 import select
+import shutil
 import subprocess
 import time
+import uuid
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 from common.crash.extract import extract_and_save_crash_input
@@ -378,3 +384,178 @@ def run_fuzzer_with_coverage(
     except Exception as exc:  # noqa: BLE001 — top-level runner barrier
         logger.exception("Error running fuzzer: %s", exc)
         return False, str(exc), "", None
+
+
+# ---------------------------------------------------------------------------
+# run_fuzzer_with_input: single-blob reproduction run
+# ---------------------------------------------------------------------------
+
+
+_INPUT_CRASH_INDICATORS: Tuple[str, ...] = _CRASH_INDICATORS + ("Assertion failed:",)
+_INPUT_FUZZER_WATCHDOG_SECONDS = 60
+_TIMEOUT_SENTINEL = "detect_timeout_crash"
+
+
+def _build_input_docker_command(
+    *,
+    docker_image: str,
+    fuzzer_name: str,
+    project_name: str,
+    sanitizer: str,
+    sanitizer_project_dir: str,
+    out_dir_x: str,
+    work_dir: str,
+    container_blob_path: str,
+) -> List[str]:
+    """Build the docker command that runs a single crash input."""
+    return [
+        "docker", "run", "--rm",
+        "--platform", "linux/amd64",
+        "-e", "FUZZING_ENGINE=libfuzzer",
+        "-e", f"SANITIZER={sanitizer}",
+        "-e", "ARCHITECTURE=x86_64",
+        "-e", f"PROJECT_NAME={project_name}",
+        "-v", f"{sanitizer_project_dir}:/src/{project_name}",
+        "-v", f"{out_dir_x}:/out",
+        "-v", f"{work_dir}:/work",
+        docker_image,
+        f"/out/{fuzzer_name}",
+        "-timeout=30",
+        "-timeout_exitcode=99",
+        container_blob_path,
+    ]
+
+
+def _timeout_crash_enabled(project_dir: str) -> bool:
+    """Return True if timeouts should count as crashes for this project."""
+    if os.environ.get("DETECT_TIMEOUT_CRASH") == "1":
+        return True
+    return (Path(project_dir) / _TIMEOUT_SENTINEL).exists()
+
+
+def run_fuzzer_with_input(
+    fuzzer_path: str,
+    project_dir: str,
+    focus: str,
+    sanitizer: str,
+    project_name: str,
+    blob_path: str,
+    pov_phase: int = 0,
+) -> Tuple[bool, str]:
+    """Run ``fuzzer_path`` against a single blob inside the project container.
+
+    The blob is copied into a unique per-run file under ``out_dir_x``
+    so that parallel invocations don't stomp on each other. Returns
+    ``(crash_detected, combined_output)``.
+
+    ``project_name`` / ``sanitizer`` must be supplied by the caller;
+    legacy code derived them from the ``fuzz-tooling/build/out/{project}-{san}``
+    path component, which is brittle when projects contain hyphens.
+    ``common.config.StrategyConfig`` already exposes both values so
+    strategies should pass them explicitly.
+
+    Args:
+        fuzzer_path: Path to the fuzzer binary on the host.
+        project_dir: Project workspace root on the host.
+        focus: Project focus directory (mounted as ``/src/{project_name}``).
+        sanitizer: Sanitiser label.
+        project_name: OSS-Fuzz project name (also used to locate the
+            docker image).
+        blob_path: Path to the candidate crash blob on the host.
+        pov_phase: Phase index used to namespace ``out_dir_x``.
+
+    Returns:
+        ``(crash_detected, combined_output)``. ``combined_output`` is
+        the stderr+stdout transcript on success, or an error message
+        when the runner itself failed.
+    """
+    try:
+        logger.debug("Running %s with %s", fuzzer_path, blob_path)
+
+        fuzzer_name = os.path.basename(fuzzer_path)
+        sanitizer_project_dir = os.path.join(project_dir, focus)
+        out_dir = os.path.dirname(fuzzer_path)
+        out_dir_x = os.path.join(out_dir, f"ap{pov_phase}")
+        work_dir = os.path.join(
+            project_dir, "fuzz-tooling", "build", "work", f"{project_name}-{sanitizer}"
+        )
+        os.makedirs(out_dir_x, exist_ok=True)
+
+        unique_blob_name = f"x_{uuid.uuid4().hex[:8]}.bin"
+        staged_blob_path = os.path.join(out_dir_x, unique_blob_name)
+        try:
+            shutil.copy(blob_path, staged_blob_path)
+            logger.debug("Copied blob to %s", staged_blob_path)
+        except OSError as exc:
+            logger.error("Failed to copy blob %s -> %s: %s", blob_path, staged_blob_path, exc)
+            return False, f"Blob staging failed: {exc}"
+
+        docker_image = resolve_project_image(project_name)
+        if not docker_image:
+            logger.error("Failed to find docker image for %s", project_name)
+            return False, f"Failed to find docker image for {project_name}"
+        logger.debug("Using docker image %s", docker_image)
+
+        docker_cmd = _build_input_docker_command(
+            docker_image=docker_image,
+            fuzzer_name=fuzzer_name,
+            project_name=project_name,
+            sanitizer=sanitizer,
+            sanitizer_project_dir=sanitizer_project_dir,
+            out_dir_x=out_dir_x,
+            work_dir=work_dir,
+            container_blob_path=f"/out/{unique_blob_name}",
+        )
+        logger.debug("Running docker command: %s", " ".join(docker_cmd))
+
+        try:
+            result = subprocess.run(
+                docker_cmd,
+                capture_output=True,
+                text=True,
+                timeout=_INPUT_FUZZER_WATCHDOG_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            logger.warning("Fuzzer execution timed out after %ds", _INPUT_FUZZER_WATCHDOG_SECONDS)
+            return False, "Execution timed out"
+
+        combined_output = (result.stderr or "") + "\n" + (result.stdout or "")
+
+        # Clean exit, no abort -> no crash.
+        if result.returncode == 0 and "ABORTING" not in combined_output:
+            logger.debug("Fuzzer ran successfully without crashing")
+            return False, combined_output
+
+        # Java NoClassDefFoundError is noisy but not a real crash.
+        if (
+            result.returncode == 77
+            and "Java Exception: java.lang.NoClassDefFoundError:" in combined_output
+        ):
+            logger.debug("Fuzzer exited 77 with NoClassDefFoundError; ignoring")
+            return False, combined_output
+
+        if result.stderr:
+            logger.debug("Fuzzer stderr: %s", result.stderr)
+
+        crash_indicators = list(_INPUT_CRASH_INDICATORS)
+        if _timeout_crash_enabled(project_dir):
+            logger.debug("Adding libFuzzer timeout indicators (DETECT_TIMEOUT_CRASH set)")
+            crash_indicators.extend(("ERROR: libFuzzer: timeout", "libfuzzer exit=99"))
+
+        if result.returncode != 0 or "ABORTING" in combined_output:
+            if any(ind in combined_output for ind in crash_indicators):
+                logger.info(
+                    "Fuzzer crashed with exit code %s — candidate vulnerability",
+                    result.returncode,
+                )
+                return True, combined_output
+            logger.debug(
+                "Fuzzer exited %s but no crash indicators", result.returncode
+            )
+            return False, combined_output
+
+        return False, combined_output
+
+    except Exception as exc:  # noqa: BLE001 — top-level runner barrier
+        logger.exception("Error running fuzzer with input: %s", exc)
+        return False, str(exc)
