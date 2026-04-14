@@ -101,7 +101,7 @@
     RUN chmod +x /app/entrypoint-local.sh
     COPY .env /app/.env
     
-    COPY ./integration-test /app/strategyx/jeff/integration-test
+    COPY ./integration-test /app/strategyx/legacy_strategy/integration-test
     RUN chmod -R 755 /app/strategyx
 
     # Set environment variables
@@ -121,15 +121,15 @@
     # ------------------------------------------------------
     # Build and copy SVF binaries
     # ------------------------------------------------------
-    COPY wpa /app/strategyx/jeff/wpa
-    COPY fundef-bc /app/strategyx/jeff/fundef-bc
+    COPY wpa /app/strategyx/legacy_strategy/wpa
+    COPY fundef-bc /app/strategyx/legacy_strategy/fundef-bc
     COPY extapi.bc /usr/local/lib/extapi.bc
-    COPY extapi.bc /app/strategyx/jeff/extapi.bc
+    COPY extapi.bc /app/strategyx/legacy_strategy/extapi.bc
 
-    COPY parse_callgraph.py /app/strategyx/jeff/parse_callgraph.py
-    COPY parse_callgraph_full.py /app/strategyx/jeff/parse_callgraph_full.py
+    COPY parse_callgraph.py /app/strategyx/legacy_strategy/parse_callgraph.py
+    COPY parse_callgraph_full.py /app/strategyx/legacy_strategy/parse_callgraph_full.py
 
-    COPY my-queries /app/strategyx/jeff/my-queries
+    COPY my-queries /app/strategyx/legacy_strategy/my-queries
     
     # 2) Add the Docker official GPG key & repository
 RUN apt-get update && apt-get install -y wget

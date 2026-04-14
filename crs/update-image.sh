@@ -1,8 +1,8 @@
 # Navigate to the CRS directory
 cd ../static-analysis
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ../crs/strategy/jeff/fundef ./cmd/funcdef/
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ../crs/strategy/jeff/funtarget ./cmd/functarget/
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ../crs/strategy/jeff/scan ./cmd/scan/
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ../crs/strategy/legacy_strategy/fundef ./cmd/funcdef/
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ../crs/strategy/legacy_strategy/funtarget ./cmd/functarget/
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ../crs/strategy/legacy_strategy/scan ./cmd/scan/
 
 cd ../crs
 # Get the Git reference and save it to VERSION file

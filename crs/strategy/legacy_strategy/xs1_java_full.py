@@ -4472,7 +4472,7 @@ reflection misuse, SQL/LDAP/XPath injection, etc.
 Write nothing except the Python script (with embedded comments)."""
 
     # IDEA (tested on zookeeper full, not very effective)
-    # try to load sample x.bin from /app/strategy/jeff/{project_name}/*.bin
+    # try to load sample x.bin from /app/strategy/legacy_strategy/{project_name}/*.bin
     # add the sample bins to prompt if available
     # here are some sample bin files for {project_name} 
     # project_name = "zookeeper"

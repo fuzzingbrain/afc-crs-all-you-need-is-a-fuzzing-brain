@@ -1,8 +1,8 @@
 cd ./static-analysis/
 
 # Build static analysis binaries
-go build -o ../crs/strategy/jeff/fundef ./cmd/funcdef/
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ../crs/strategy/jeff/scan ./cmd/scan/
+go build -o ../crs/strategy/legacy_strategy/fundef ./cmd/funcdef/
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o ../crs/strategy/legacy_strategy/scan ./cmd/scan/
 
 cd ../crs/
 

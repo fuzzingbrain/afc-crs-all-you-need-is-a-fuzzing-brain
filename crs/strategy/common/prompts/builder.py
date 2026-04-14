@@ -94,7 +94,7 @@ def create_category_based_prompt_c(
     )
 
     # Add sanitizer+category specific guidance
-    # (Simplified version - full version would include detailed mappings from jeff/as0_delta.py)
+    # (Simplified version - full version would include detailed mappings from legacy_strategy/as0_delta.py)
     guidance = f"""
 The target uses {sanitizer.capitalize()}Sanitizer to detect {category_desc}.
 

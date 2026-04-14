@@ -215,7 +215,7 @@ class CoverageAnalyzer:
 
         helper_script = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "jeff", "c_coverage.py"
+            "legacy_strategy", "c_coverage.py"
         )
         if not os.path.exists(helper_script):
             helper_script = "c_coverage.py"
@@ -338,7 +338,7 @@ class CoverageAnalyzer:
 
         helper_script = os.path.join(
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "jeff", "java_coverage.py"
+            "legacy_strategy", "java_coverage.py"
         )
         if not os.path.exists(helper_script):
             helper_script = "java_coverage.py"
