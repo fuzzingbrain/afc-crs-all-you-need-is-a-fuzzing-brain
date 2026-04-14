@@ -108,7 +108,6 @@ class PoVStrategy(BaseStrategy):
         commit_msg, commit_diff = get_commit_info(
             self.config.project_dir,
             self.config.language,
-            logger=self.logger
         )
 
         # Create initial prompt (strategy-specific)
