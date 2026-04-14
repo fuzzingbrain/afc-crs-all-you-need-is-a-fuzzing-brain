@@ -7,6 +7,7 @@ from typing import Optional, TYPE_CHECKING
 # subpackages; new code should import from the canonical modules directly.
 from common.code.cleanup import strip_license_text  # noqa: F401  moved to common.code.cleanup
 from common.fuzzing.discovery import is_likely_source_for_fuzzer  # noqa: F401  moved to common.fuzzing.discovery
+from common.fuzzing.output import filter_instrumented_lines  # noqa: F401  moved to common.fuzzing.output
 
 if TYPE_CHECKING:
     from common.logging.logger import StrategyLogger
@@ -38,33 +39,3 @@ def truncate_output(output: str, max_lines: int = 200, logger: Optional['Strateg
     return '\n'.join(first_part) + '\n\n[...truncated...]\n\n' + '\n'.join(last_part)
 
 
-def filter_instrumented_lines(text: str, max_line_length: int = 200) -> str:
-    """
-    Filter out instrumentation and warning lines from fuzzer output
-
-    Args:
-        text: The text to filter
-        max_line_length: Maximum length for any single line
-
-    Returns:
-        Filtered text with instrumentation lines removed and long lines truncated
-    """
-    if not text:
-        return text
-
-    filtered_lines = []
-    for line in text.splitlines():
-        # Skip lines containing "INFO: Instrumented"
-        if line.startswith("INFO: ") or "Server VM warning:" in line:
-            continue
-        # Drop noisy sanitizer/SQLite warnings
-        if line.lstrip().startswith("WARNING:"):
-            continue
-        # Truncate long lines
-        if len(line) > max_line_length:
-            truncated = line[:max_line_length] + f" ... (truncated, full length: {len(line)})"
-            filtered_lines.append(truncated)
-        else:
-            filtered_lines.append(line)
-
-    return '\n'.join(filtered_lines)
