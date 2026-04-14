@@ -13,6 +13,8 @@ import subprocess
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from common.fuzzing.image import resolve_project_image
+
 logger = logging.getLogger(__name__)
 
 # Sentinel file that opts a task into treating libFuzzer timeouts as crashes.
@@ -37,30 +39,6 @@ _CRASH_INDICATORS: Tuple[str, ...] = (
 )
 
 
-def _resolve_project_image(project_name: str) -> Optional[str]:
-    """Return the first available local docker image for ``project_name``.
-
-    Tries the AIXCC-built ``aixcc-afc/{project}`` tag first, then the public
-    ``gcr.io/oss-fuzz/{project}`` tag. Returns ``None`` when neither exists.
-    """
-    for repo in (f"aixcc-afc/{project_name}", f"gcr.io/oss-fuzz/{project_name}"):
-        try:
-            result = subprocess.run(
-                ["docker", "images", repo, "--format", "{{.Repository}}:{{.Tag}}"],
-                capture_output=True,
-                text=True,
-                timeout=60,
-            )
-        except (subprocess.SubprocessError, OSError) as exc:
-            logger.warning("docker images lookup failed for %s: %s", repo, exc)
-            continue
-
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip().split("\n", 1)[0]
-
-    return None
-
-
 def _reproduces_crash(
     crash_file: str,
     *,
@@ -79,7 +57,7 @@ def _reproduces_crash(
         else os.path.basename(crash_file)
     )
 
-    docker_image = _resolve_project_image(project_name)
+    docker_image = resolve_project_image(project_name)
     if not docker_image:
         logger.error("No docker image available for %s", project_name)
         return False
