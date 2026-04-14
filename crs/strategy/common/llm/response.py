@@ -4,14 +4,15 @@ Extracts code blocks from markdown-formatted LLM output, heuristically
 distinguishes Python from other languages, and drives an LLM-assisted
 re-extraction pass when the initial parse fails. Used by strategies
 that ask the LLM to emit a standalone Python script (e.g. POV
-generators).
+generators) or a JSON patch payload.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
-from typing import Optional, TYPE_CHECKING
+from typing import Any, List, Optional, Tuple, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from common.llm.client import LLMClient
@@ -210,3 +211,129 @@ def extract_python_code_from_response(
 
     logger.debug("Direct extraction failed; invoking LLM fallback")
     return _llm_reextract_python(text, llm_client, max_retries)
+
+
+# ---------------------------------------------------------------------------
+# JSON extraction (patch payloads)
+# ---------------------------------------------------------------------------
+
+_JSON_BLOCK_PATTERN = re.compile(r"```(?:json)?\s*([\s\S]*?)```")
+
+
+def extract_json_from_response_with_llm(
+    text: str,
+    llm_client: "LLMClient",
+    model_name: Optional[str] = None,
+) -> Optional[str]:
+    """Ask the LLM to re-emit just the JSON portion of a messy response.
+
+    Returns the content of the first ``\u0060\u0060\u0060json`` code block from the LLM's
+    answer, or ``None`` if the call failed or no block was found.
+
+    Args:
+        text: Raw response text that failed to parse as JSON directly.
+        llm_client: LLM client used for the re-extraction round-trip.
+        model_name: Optional explicit model name; when ``None`` the
+            client's default is used.
+    """
+    prompt = (
+        "Please extract the JSON data from the following text. "
+        "Return with markdown code blocks ```json ```. "
+        "No comment. No explanation.\n\n"
+        f"Here is the text:\n{text}"
+    )
+
+    kwargs = {} if model_name is None else {"model_name": model_name}
+    returned, success = llm_client.call(
+        [{"role": "user", "content": prompt}],
+        **kwargs,
+    )
+    if not success:
+        return None
+
+    match = _JSON_BLOCK_PATTERN.search(returned)
+    if match:
+        return match.group(1).strip()
+    return None
+
+
+def _unescape_function_key(key: str) -> str:
+    """Strip an ``OSS_FUZZ_`` prefix if present."""
+    if key.startswith("OSS_FUZZ_"):
+        return key[len("OSS_FUZZ_"):]
+    return key
+
+
+def extract_json_data_from_response(
+    response: str,
+    llm_client: Optional["LLMClient"] = None,
+) -> Optional[List[Tuple[str, Any]]]:
+    """Parse a patch-shaped JSON payload from an LLM response.
+
+    Two shapes are recognised:
+
+    1. A function-name -> code-block mapping::
+
+           {
+               "ngx_mail_smtp_noop": "static ngx_int_t\\nngx_mail_smtp_noop(...)",
+               "ngx_mail_smtp_auth_state": "static ngx_int_t\\nngx_mail_smtp_auth_state(...)"
+           }
+
+       Returned as ``[(function_name, code_block), ...]``. When a key
+       looks like a filename the function name is recovered from the
+       code block body via
+       :func:`common.code.extract.extract_function_name_from_code`.
+
+    2. A file/changes mapping (``{"file": ..., "changes": [...]}``),
+       returned verbatim as ``[(file_name, full_dict)]``.
+
+    When direct ``json.loads`` fails and ``llm_client`` is provided,
+    the response is run through
+    :func:`extract_json_from_response_with_llm` before the second
+    parse attempt.
+    """
+    from common.code.extract import extract_function_name_from_code
+
+    try:
+        parsed = json.loads(response)
+    except json.JSONDecodeError:
+        if llm_client is None:
+            logger.debug("JSON parse failed and no llm_client available to retry")
+            return None
+        refined = extract_json_from_response_with_llm(response, llm_client)
+        if refined is None:
+            return None
+        try:
+            parsed = json.loads(refined)
+        except json.JSONDecodeError as exc:
+            logger.warning("Failed to load JSON from refined response: %s", exc)
+            return None
+
+    results: List[Tuple[str, Any]] = []
+
+    if isinstance(parsed, dict) and not any(k in parsed for k in ("file", "changes")):
+        for key, code_block in parsed.items():
+            if not isinstance(code_block, str):
+                logger.warning(
+                    "Expected string for key %s, got %s", key, type(code_block).__name__
+                )
+                continue
+
+            if "." in key:
+                # Key looks like a filename; try to recover a function name
+                func_name = extract_function_name_from_code(code_block)
+                results.append((func_name or key, code_block))
+            else:
+                results.append((_unescape_function_key(key), code_block))
+        return results
+
+    if isinstance(parsed, dict) and "file" in parsed and "changes" in parsed:
+        return [(parsed.get("file", "unknown_file"), parsed)]
+
+    logger.warning(
+        "Unknown JSON format: %s",
+        list(parsed.keys()) if isinstance(parsed, dict) else type(parsed).__name__,
+    )
+    if isinstance(parsed, dict):
+        return [(k, v) for k, v in parsed.items()]
+    return None

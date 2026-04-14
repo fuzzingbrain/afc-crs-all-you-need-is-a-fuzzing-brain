@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Tuple
 
 logger = logging.getLogger(__name__)
@@ -99,3 +100,42 @@ def strip_license_text(source_code: str) -> str:
             return "\n".join(lines[first_code_line:]).strip()
 
     return source_code
+
+
+_LICENSE_HEADER_REGEX = re.compile(
+    r"^\s*/\*.*?(?:license|copyright|apache|mit|gpl|bsd|gnu).*?\*/\s*",
+    re.IGNORECASE | re.DOTALL,
+)
+_C_MULTILINE_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
+_C_LINE_COMMENT = re.compile(r"//.*?$", re.MULTILINE)
+_PY_DOUBLE_DOCSTRING = re.compile(r'^\s*""".*?"""\s*', re.DOTALL)
+_PY_SINGLE_DOCSTRING = re.compile(r"^\s*'''.*?'''\s*", re.DOTALL)
+_PY_LINE_COMMENT = re.compile(r"#.*?$", re.MULTILINE)
+_BLANK_LINE_COLLAPSE = re.compile(r"\n{3,}")
+
+
+def strip_comments_and_license(source_code: str, file_path: str) -> str:
+    """Remove license headers and code comments from ``source_code``.
+
+    The language is guessed from ``file_path``; supported families are
+    C/C++ (``.c``, ``.cpp``, ``.h``, ``.hpp``), Java (``.java``), and
+    Python (``.py``). Unknown extensions fall through with only the
+    trailing blank-line collapse applied.
+
+    Args:
+        source_code: File contents to clean.
+        file_path: Path used only for extension detection.
+
+    Returns:
+        The cleaned source.
+    """
+    if file_path.endswith((".java", ".c", ".cpp", ".h", ".hpp")):
+        source_code = _LICENSE_HEADER_REGEX.sub("", source_code)
+        source_code = _C_MULTILINE_COMMENT.sub("", source_code)
+        source_code = _C_LINE_COMMENT.sub("", source_code)
+    elif file_path.endswith(".py"):
+        source_code = _PY_DOUBLE_DOCSTRING.sub("", source_code)
+        source_code = _PY_SINGLE_DOCSTRING.sub("", source_code)
+        source_code = _PY_LINE_COMMENT.sub("", source_code)
+
+    return _BLANK_LINE_COLLAPSE.sub("\n\n", source_code)
