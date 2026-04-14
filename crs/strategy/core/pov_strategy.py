@@ -471,14 +471,13 @@ Please write a Python script that generates the blob file as 'x.bin'.
         Returns:
             Source code of the fuzzer as a string
         """
-        from common.utils import find_fuzzer_source
+        from common.fuzzing.discovery import find_fuzzer_source
 
         self.logger.log("Finding fuzzer source code...")
 
         # Determine project source directory
         project_src_dir = os.path.join(self.config.project_dir, self.config.focus)
 
-        # Call utility function
         fuzzer_code = find_fuzzer_source(
             fuzzer_path=self.config.fuzzer_path,
             project_name=self.config.project_name,
@@ -487,7 +486,6 @@ Please write a Python script that generates the blob file as 'x.bin'.
             language=self.config.language,
             test_nginx=self.config.test_nginx,
             llm_client=self.llm_client,
-            logger=self.logger
         )
 
         if fuzzer_code and "Could not find" not in fuzzer_code:
