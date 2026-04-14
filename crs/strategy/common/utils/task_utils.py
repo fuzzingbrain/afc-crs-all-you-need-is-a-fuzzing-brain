@@ -16,6 +16,10 @@ from typing import Optional, Tuple, List, TYPE_CHECKING
 if TYPE_CHECKING:
     from common.logging.logger import StrategyLogger
 
+# Backward-compatibility re-exports. The canonical homes are listed next to
+# each import; new code should import from the canonical modules directly.
+from common.pov.cleanup import cleanup_seed_corpus  # noqa: F401  moved to common.pov.cleanup
+
 # Constants
 DETECT_TIMEOUT_CRASH_SENTINEL = "detect_timeout_crash"
 
@@ -108,35 +112,6 @@ def load_task_detail(fuzz_dir: str, logger: Optional['StrategyLogger'] = None) -
         if logger:
             logger.error(f"Error loading task_detail.json: {str(e)}")
         return None
-
-
-def cleanup_seed_corpus(dir_path: str, max_age_minutes: int = 10, logger: Optional['StrategyLogger'] = None):
-    """
-    Clean up old files in the seed corpus directory
-
-    Args:
-        dir_path: Directory path to clean
-        max_age_minutes: Maximum age of files to keep in minutes
-        logger: Optional StrategyLogger for logging
-    """
-    if not os.path.exists(dir_path):
-        return
-
-    current_time = time.time()
-    max_age_seconds = max_age_minutes * 60
-
-    try:
-        for filename in os.listdir(dir_path):
-            file_path = os.path.join(dir_path, filename)
-            if os.path.isfile(file_path):
-                file_age = current_time - os.path.getmtime(file_path)
-                if file_age > max_age_seconds:
-                    os.remove(file_path)
-                    if logger:
-                        logger.debug(f"Removed old seed file: {filename}")
-    except Exception as e:
-        if logger:
-            logger.error(f"Error cleaning up seed corpus: {str(e)}")
 
 
 def extract_and_save_crash_input(
