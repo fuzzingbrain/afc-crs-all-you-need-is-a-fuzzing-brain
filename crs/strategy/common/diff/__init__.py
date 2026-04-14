@@ -1,0 +1,1 @@
+"""Diff and commit processing."""
