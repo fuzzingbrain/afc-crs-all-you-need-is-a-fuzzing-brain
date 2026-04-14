@@ -1,11 +1,15 @@
+"""Task metadata loading.
+
+Historically this module held fuzzer execution, crash extraction, corpus
+cleanup, and docker process-lifecycle management. All of that has been
+migrated to domain subpackages under ``common/``; only the task-detail
+loader remains here. Legacy import paths keep working via the re-exports
+below.
 """
-Task and file utilities
-"""
-import os
+from __future__ import annotations
+
 import json
-import subprocess
-import signal
-import atexit
+import os
 from typing import Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -17,64 +21,20 @@ from common.crash.extract import extract_and_save_crash_input  # noqa: F401  mov
 from common.fuzzing.runner import run_fuzzer_with_coverage  # noqa: F401  moved to common.fuzzing.runner
 from common.pov.cleanup import cleanup_seed_corpus  # noqa: F401  moved to common.pov.cleanup
 
-# Global cleanup flag to prevent recursive cleanup
-_cleanup_in_progress = False
-
-def _cleanup_docker_containers():
-    """Stop all running Docker containers on exit (skip if running inside Docker)"""
-    global _cleanup_in_progress
-    if _cleanup_in_progress:
-        return
-    _cleanup_in_progress = True
-
-    # Skip cleanup if running inside Docker to avoid stopping the parent container
-    if os.path.exists('/.dockerenv'):
-        return
-
-    try:
-        # Get all running containers
-        result = subprocess.run(
-            ["docker", "ps", "-q"],
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        container_ids = result.stdout.strip().split('\n')
-        container_ids = [cid for cid in container_ids if cid]
-
-        if container_ids:
-            print(f"\n⚠️  Stopping {len(container_ids)} Docker container(s)...")
-            # Stop all containers
-            subprocess.run(
-                ["docker", "stop"] + container_ids,
-                timeout=10,
-                capture_output=True
-            )
-    except Exception as e:
-        print(f"Warning: Could not clean up Docker containers: {e}")
-
-def _signal_handler(signum, frame):
-    """Handle interrupt signals"""
-    print(f"\n⚠️  Received signal {signum}, cleaning up...")
-    _cleanup_docker_containers()
-    os._exit(130)
-
-# Register cleanup handlers
-atexit.register(_cleanup_docker_containers)
-signal.signal(signal.SIGINT, _signal_handler)
-signal.signal(signal.SIGTERM, _signal_handler)
-
 
 def load_task_detail(fuzz_dir: str, logger: Optional['StrategyLogger'] = None) -> Optional[dict]:
-    """
-    Load TaskDetail from the task_detail.json file in the fuzzing directory
+    """Load ``task_detail.json`` from a fuzzing directory.
 
     Args:
-        fuzz_dir: Path to the fuzzing directory
-        logger: Optional StrategyLogger for logging
+        fuzz_dir: Path to the fuzzing directory that should contain
+            ``task_detail.json``.
+        logger: Optional StrategyLogger used for progress / error messages.
+            Absent logging is tolerated; this helper is frequently called
+            from non-strategy contexts.
 
     Returns:
-        The TaskDetail as a dictionary, or None if the file doesn't exist or can't be parsed
+        The parsed task detail mapping, or ``None`` when the file is
+        missing or unparseable.
     """
     task_detail_path = os.path.join(fuzz_dir, "task_detail.json")
 
@@ -86,23 +46,23 @@ def load_task_detail(fuzz_dir: str, logger: Optional['StrategyLogger'] = None) -
     try:
         with open(task_detail_path, 'r') as f:
             task_detail = json.load(f)
-
-        # Validate required fields
-        required_fields = ["task_id", "type", "metadata", "deadline", "focus", "project_name"]
-        for field in required_fields:
-            if field not in task_detail:
-                if logger:
-                    logger.warning(f"Required field '{field}' missing from task_detail.json")
-
-        if logger:
-            logger.log(f"Successfully loaded task detail for project: {task_detail.get('project_name', 'unknown')}")
-        return task_detail
-
     except json.JSONDecodeError as e:
         if logger:
             logger.error(f"Failed to parse task_detail.json: {str(e)}")
         return None
-    except Exception as e:
+    except OSError as e:
         if logger:
             logger.error(f"Error loading task_detail.json: {str(e)}")
         return None
+
+    required_fields = ("task_id", "type", "metadata", "deadline", "focus", "project_name")
+    for field in required_fields:
+        if field not in task_detail and logger:
+            logger.warning(f"Required field '{field}' missing from task_detail.json")
+
+    if logger:
+        logger.log(
+            f"Successfully loaded task detail for project: "
+            f"{task_detail.get('project_name', 'unknown')}"
+        )
+    return task_detail
