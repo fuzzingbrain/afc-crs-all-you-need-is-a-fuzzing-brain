@@ -3,6 +3,10 @@ Text processing utilities
 """
 from typing import Optional, TYPE_CHECKING
 
+# Backward-compatibility re-export; ``is_likely_source_for_fuzzer`` is a
+# fuzzer-discovery concern and now lives in common.fuzzing.discovery.
+from common.fuzzing.discovery import is_likely_source_for_fuzzer  # noqa: F401
+
 if TYPE_CHECKING:
     from common.logging.logger import StrategyLogger
 
@@ -31,58 +35,6 @@ def truncate_output(output: str, max_lines: int = 200, logger: Optional['Strateg
         logger.debug(f"Truncated output from {len(lines)} lines to {max_lines} lines")
 
     return '\n'.join(first_part) + '\n\n[...truncated...]\n\n' + '\n'.join(last_part)
-
-
-def is_likely_source_for_fuzzer(file_base: str, fuzzer_name: str, base_name: str) -> bool:
-    """
-    Check if a file is likely to be the source file for a fuzzer based on naming patterns
-
-    Args:
-        file_base: File basename without extension
-        fuzzer_name: Name of the fuzzer
-        base_name: Base name to compare
-
-    Returns:
-        True if the file is likely a source for the fuzzer
-    """
-    # Exact matches
-    if file_base == fuzzer_name or file_base == base_name:
-        return True
-
-    # Common patterns:
-    # 1. fuzzer_name = "xyz_fuzzer" and file_base = "xyz"
-    if fuzzer_name == f"{file_base}_fuzzer":
-        return True
-
-    # 2. fuzzer_name = "xyz_fuzzer" and file_base = "xyz_fuzz"
-    if base_name == f"{file_base}_fuzz":
-        return True
-
-    # 3. fuzzer_name = "xyz_fuzzer" and file_base = "fuzz_xyz"
-    if base_name == f"fuzz_{file_base}":
-        return True
-
-    # 4. fuzzer_name = "xyz_fuzzer" and file_base = "xyz_test"
-    if base_name == f"{file_base}_test":
-        return True
-
-    # 5. fuzzer_name = "xyz_fuzzer" and file_base = "test_xyz"
-    if base_name == f"test_{file_base}":
-        return True
-
-    # 6. fuzzer_name = "xyz_abc_fuzzer" and file_base = "xyz_abc"
-    if fuzzer_name.startswith(f"{file_base}_"):
-        return True
-
-    # 7. fuzzer_name = "xyz_fuzzer" and file_base = "libxyz"
-    if base_name == file_base.replace("lib", ""):
-        return True
-
-    # 8. fuzzer_name = "libxyz_fuzzer" and file_base = "xyz"
-    if file_base == base_name.replace("lib", ""):
-        return True
-
-    return False
 
 
 def strip_license_text(source_code: str) -> str:
