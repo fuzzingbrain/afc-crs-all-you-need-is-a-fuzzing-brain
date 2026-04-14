@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 # Backward-compatibility re-exports. The canonical homes are listed next to
 # each import; new code should import from the canonical modules directly.
+from common.crash.extract import extract_and_save_crash_input  # noqa: F401  moved to common.crash.extract
 from common.pov.cleanup import cleanup_seed_corpus  # noqa: F401  moved to common.pov.cleanup
 
 # Constants
@@ -112,188 +113,6 @@ def load_task_detail(fuzz_dir: str, logger: Optional['StrategyLogger'] = None) -
         if logger:
             logger.error(f"Error loading task_detail.json: {str(e)}")
         return None
-
-
-def extract_and_save_crash_input(
-    crash_dir: str,
-    fuzzer_name: str,
-    out_dir_x: str,
-    project_name: str,
-    sanitizer: str,
-    project_dir: str,
-    sanitizer_project_dir: str,
-    logger: Optional['StrategyLogger'] = None
-) -> Tuple[Optional[bytes], Optional[str]]:
-    """
-    Extract and save crash input from fuzzer output, finding the latest that actually triggers a crash
-
-    Args:
-        crash_dir: Directory containing crash files
-        fuzzer_name: Name of the fuzzer executable
-        out_dir_x: Output directory for this phase
-        project_name: Name of the project
-        sanitizer: Sanitizer type (address, memory, undefined)
-        project_dir: Project directory path
-        sanitizer_project_dir: Path to sanitizer-specific project directory
-        logger: Optional StrategyLogger for logging
-
-    Returns:
-        Tuple of (crash_data: bytes, crash_file_path: str) or (None, None) if no valid crash found
-    """
-
-    def get_crash_files(pattern: str) -> List[str]:
-        """Get all crash files matching the pattern, sorted by creation time (newest first)"""
-        crash_files = glob.glob(pattern)
-        crash_files.sort(key=os.path.getctime, reverse=True)
-        return crash_files
-
-    def test_crash_file(crash_file: str) -> Tuple[bool, str]:
-        """Test if a crash file actually triggers a crash when run with the fuzzer"""
-        if logger:
-            logger.log(f"Testing crash file: {crash_file}")
-
-        # Get just the "crashes/crash-xxx" part correctly
-        if "crashes/" in crash_file:
-            relative_path = "crashes/" + os.path.basename(crash_file)
-        else:
-            relative_path = os.path.basename(crash_file)
-
-        # Find docker image
-        docker_image = None
-
-        # Check aixcc-afc/{project_name}
-        try:
-            result = subprocess.run(
-                ["docker", "images", f"aixcc-afc/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"],
-                capture_output=True, text=True, timeout=60
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                docker_image = result.stdout.strip().split('\n')[0]
-        except Exception as e:
-            if logger:
-                logger.warning(f"Failed to find docker image for aixcc-afc/{project_name}: {str(e)}")
-
-        # If not found, check gcr.io/oss-fuzz/{project_name}
-        if not docker_image:
-            try:
-                result = subprocess.run(
-                    ["docker", "images", f"gcr.io/oss-fuzz/{project_name}", "--format", "{{.Repository}}:{{.Tag}}"],
-                    capture_output=True, text=True, timeout=60
-                )
-                if result.returncode == 0 and result.stdout.strip():
-                    docker_image = result.stdout.strip().split('\n')[0]
-            except Exception as e:
-                if logger:
-                    logger.warning(f"Failed to find docker image for gcr.io/oss-fuzz/{project_name}: {str(e)}")
-
-        if not docker_image:
-            if logger:
-                logger.error(f"Failed to find docker image for {project_name}")
-            return False, ""
-
-        if logger:
-            logger.log(f"Found docker image for {project_name}: {docker_image}")
-
-        docker_cmd = [
-            "docker", "run", "--rm",
-            "--platform", "linux/amd64",
-            "-e", "FUZZING_ENGINE=libfuzzer",
-            "-e", f"SANITIZER={sanitizer}",
-            "-e", "ARCHITECTURE=x86_64",
-            "-e", f"PROJECT_NAME={project_name}",
-            "-v", f"{sanitizer_project_dir}:/src/{project_name}",
-            "-v", f"{out_dir_x}:/out",
-            "-v", f"{os.path.dirname(crash_file)}:/crashes",
-            docker_image,
-            f"/out/{fuzzer_name}",
-            "-timeout=30",
-            "-timeout_exitcode=99",
-            f"/out/{relative_path}"
-        ]
-
-        try:
-            if logger:
-                logger.log(f"Running crash test: {' '.join(docker_cmd)}")
-            result = subprocess.run(docker_cmd, capture_output=True, text=True, timeout=60)
-
-            # Check if the output indicates a crash
-            crash_indicators = [
-                "==ERROR:",
-                "WARNING: MemorySanitizer:",
-                "SUMMARY: AddressSanitizer:",
-                "Segmentation fault",
-                "AddressSanitizer: heap-use-after-free",
-                "AddressSanitizer: heap-buffer-overflow",
-                "AddressSanitizer: SEGV",
-                "UndefinedBehaviorSanitizer: undefined-behavior",
-                "runtime error:",
-                "AddressSanitizer:DEADLYSIGNAL",
-                "Java Exception: com.code_intelligence.jazzer",
-                "ERROR: HWAddressSanitizer:",
-                "WARNING: ThreadSanitizer:",
-                "libfuzzer exit=1"
-            ]
-
-            for indicator in crash_indicators:
-                if indicator in result.stdout or indicator in result.stderr:
-                    if logger:
-                        logger.log(f"Crash confirmed for {crash_file}")
-                    return True, result.stdout + result.stderr
-
-            if logger:
-                logger.log(f"No crash detected for {crash_file}")
-            return False, ""
-
-        except subprocess.TimeoutExpired:
-            if logger:
-                logger.warning(f"Timeout while testing {crash_file}")
-            return False, ""
-        except Exception as e:
-            if logger:
-                logger.error(f"Error testing crash file: {str(e)}")
-            return False, ""
-
-    # Step 1: Find all potential crash files
-    crash_patterns = [os.path.join(crash_dir, "crash-*")]
-
-    # Add timeout pattern only if DETECT_TIMEOUT_CRASH=1
-    sentinel = Path(project_dir) / DETECT_TIMEOUT_CRASH_SENTINEL
-    if os.environ.get("DETECT_TIMEOUT_CRASH") == "1" or sentinel.exists():
-        crash_patterns.append(os.path.join(crash_dir, "timeout-*"))
-
-    all_crash_files = []
-    for pattern in crash_patterns:
-        all_crash_files.extend(get_crash_files(pattern))
-
-    if not all_crash_files:
-        if logger:
-            logger.log("No crash files found in any location")
-        return None, None
-
-    if logger:
-        logger.log(f"Found {len(all_crash_files)} potential crash files")
-
-    # Step 2: Test each crash file from newest to oldest
-    for crash_file in all_crash_files:
-        crashes, crash_output = test_crash_file(crash_file)
-
-        if crashes:
-            # Found a valid crash file
-            try:
-                with open(crash_file, 'rb') as f:
-                    crash_data = f.read()
-                    if crash_data:
-                        if logger:
-                            logger.log(f"Found valid crash data in: {crash_file}")
-                        return crash_data, crash_file
-            except Exception as e:
-                if logger:
-                    logger.error(f"Error reading crash file {crash_file}: {str(e)}")
-                continue
-
-    if logger:
-        logger.log("No valid crash files found that trigger crashes")
-    return None, None
 
 
 def run_fuzzer_with_coverage(
@@ -607,8 +426,8 @@ def run_fuzzer_with_coverage(
                 
                 # Extract and save the crash input
                 crash_input, crash_input_filepath = extract_and_save_crash_input(
-                    crash_dir, fuzzer_name, out_dir_x, project_name, 
-                    sanitizer, project_dir, sanitizer_project_dir, logger
+                    crash_dir, fuzzer_name, out_dir_x, project_name,
+                    sanitizer, project_dir, sanitizer_project_dir,
                 )
             else:
                 if logger:
