@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # Navigate to the CRS directory
 cd ../static-analysis
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ../crs/strategy/legacy_strategy/fundef ./cmd/funcdef/

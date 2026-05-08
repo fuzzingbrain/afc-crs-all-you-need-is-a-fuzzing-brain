@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Target-function identification via LLM.
 
 Wraps :func:`common.prompts.builder.construct_get_target_functions_prompt`,

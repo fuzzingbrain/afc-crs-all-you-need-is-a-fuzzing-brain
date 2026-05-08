@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Fuzzer execution, image resolution, discovery, output, and lifecycle.
 
 Note: ``runner`` is intentionally not re-exported at the package level

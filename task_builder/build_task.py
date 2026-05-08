@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 This script is used to build a task for the CRS.
 

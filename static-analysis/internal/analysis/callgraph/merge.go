@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package callgraph
 
 // Fix unused variable warning

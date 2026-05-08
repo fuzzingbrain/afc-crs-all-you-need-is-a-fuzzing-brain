@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """POV storage, submission, lifecycle, and LLM-driven generation."""
 from .cleanup import cleanup_seed_corpus
 from .generate import generate_pov

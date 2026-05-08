@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Process-scoped docker container cleanup.
 
 Registers an ``atexit`` hook plus ``SIGINT``/``SIGTERM`` handlers that stop

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Large-diff processor.
 
 When a commit diff is huge (>50 KB is typical), LLM context budgets

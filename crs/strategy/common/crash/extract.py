@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Crash input extraction and verification.
 
 Given a directory of candidate crash files produced by a fuzzer, walks them

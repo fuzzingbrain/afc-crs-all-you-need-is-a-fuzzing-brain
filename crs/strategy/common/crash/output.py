@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Crash-section extraction from fuzzer transcripts.
 
 Given the combined stdout/stderr of a libFuzzer run, pull out the most

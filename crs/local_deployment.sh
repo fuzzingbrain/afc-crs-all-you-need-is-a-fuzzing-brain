@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 
 # Load environment variables from .env file
 if [ -f ./.env ]; then

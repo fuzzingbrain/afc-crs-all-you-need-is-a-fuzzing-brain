@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 set -eu
 
 # ---------- Start Docker daemon (needed by some tasks) ----------

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Code extraction utilities (backward-compatibility shim).
 
 The canonical homes are:

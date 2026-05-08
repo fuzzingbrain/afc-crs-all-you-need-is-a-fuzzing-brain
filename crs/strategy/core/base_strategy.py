@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Base Strategy
 Abstract base class for all strategies

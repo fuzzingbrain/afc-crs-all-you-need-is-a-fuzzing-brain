@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Source-code cleanup helpers (license/comment stripping)."""
 from __future__ import annotations
 
@@ -32,6 +33,13 @@ _LICENSE_KEYWORDS: Tuple[str, ...] = (
 
 def strip_license_text(source_code: str) -> str:
     """Remove a leading copyright / license block from ``source_code``.
+
+    This is an in-memory preprocessing step used solely to reduce the token
+    count of prompts sent to a Large Language Model (LLM) for vulnerability
+    analysis and patch generation. The returned string is consumed by the
+    LLM client only; it is **never written back to disk, committed, or
+    redistributed**, and no third-party source code is published with its
+    license / copyright information removed.
 
     First tries a structured block scan (``/* ... */`` style) anchored on
     license keywords; if that does not find a clear block, falls back to

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Target-function metadata resolution for patch strategies.
 
 Three entry points, in priority order:

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # Get the Git reference and save it to VERSION file
 git_ref=$(git describe --tags --exact-match HEAD 2>/dev/null || git rev-parse --short HEAD)
 echo "$git_ref" > ./VERSION

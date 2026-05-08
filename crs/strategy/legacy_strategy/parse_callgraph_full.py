@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """
 Find call‑paths or reachable functions in a CG‑dot file produced by
 clang‑static‑analyzer/llvm‑opt, etc.

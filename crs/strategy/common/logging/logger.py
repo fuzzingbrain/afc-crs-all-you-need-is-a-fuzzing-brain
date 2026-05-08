@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Strategy Logger
 Unified logging for all strategies using loguru

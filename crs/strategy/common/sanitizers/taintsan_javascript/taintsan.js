@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 /**
  * TaintSan - Taint Tracking Sanitizer for JavaScript/Node.js
  *

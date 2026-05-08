@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 This script will run CRS on a project with a given number of tasks (a batch).
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 # strategy 0
 #!/usr/bin/env python3
 """
@@ -750,7 +751,14 @@ def is_likely_source_for_fuzzer(file_base, fuzzer_name, base_name):
     return False
 
 def strip_license_text(source_code):
-    """Strip copyright and license text from source code"""
+    """Strip a leading copyright / license block from ``source_code``.
+
+    NOTE: Used only as an in-memory preprocessing step to reduce token count
+    of prompts sent to an LLM for vulnerability analysis. The result is
+    consumed by the LLM client and is never written back to disk, committed,
+    or redistributed; no third-party source is published with its license /
+    copyright information removed.
+    """
     # Common patterns that indicate license blocks
     license_start_patterns = [
         "/*", 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Wrapper around the ``fundef`` binary.
 
 ``fundef`` is a small Go helper shipped alongside the strategy worker

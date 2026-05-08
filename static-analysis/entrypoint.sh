@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 
 # Start Docker daemon in background
 dockerd --log-level error > /var/log/docker.log 2>&1 &

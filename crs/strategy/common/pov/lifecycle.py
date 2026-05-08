@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Post-crash artefact persistence.
 
 When a POV generator triggers a crash, strategies want to save the

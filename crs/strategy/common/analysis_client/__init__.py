@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Static analysis service client, local runner, CPG helpers, and full-scan helpers."""
 from .client import (
     extract_call_paths_from_analysis_service,

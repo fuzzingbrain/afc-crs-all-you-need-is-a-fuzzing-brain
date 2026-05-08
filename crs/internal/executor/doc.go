@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // Package executor provides fuzzing task execution and distribution capabilities
 // for the CRS (Coverage-guided Fuzzing as a Service) system.
 //

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Full-scan analysis helpers.
 
 Full-scan POV strategies enumerate every function reachable from the

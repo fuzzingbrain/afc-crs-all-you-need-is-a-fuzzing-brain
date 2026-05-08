@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 // This example program analyses an LLVM IR module to produce a callgraph in
 // Graphviz DOT format.
 package main

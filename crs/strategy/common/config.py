@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Strategy Configuration
 Replaces global variables with a clean config object

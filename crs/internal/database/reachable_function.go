@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package database
 
 // ReachableFunction represents a function that can be reached from the fuzzer entry point

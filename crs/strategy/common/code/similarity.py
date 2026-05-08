@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Structural similarity metrics for source snippets.
 
 Used when an LLM proposes a patched function and we need to sanity-check

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Fuzzer source-file discovery.
 
 Given a fuzzer binary produced by an OSS-Fuzz build, figure out which

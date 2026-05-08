@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Static analysis integration.
 
 Entry points for the external analysis service, the local CodeQL /

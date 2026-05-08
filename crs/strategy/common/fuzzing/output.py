@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Fuzzer output post-processing (log filtering, line truncation).
 
 Helpers that operate on captured fuzzer stdout/stderr before it is logged

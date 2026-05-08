@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Unified CLI entry point for CRS strategies.
 
 Run a registered strategy by name:
