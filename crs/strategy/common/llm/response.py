@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Parsing helpers for LLM response text.
 
 Extracts code blocks from markdown-formatted LLM output, heuristically

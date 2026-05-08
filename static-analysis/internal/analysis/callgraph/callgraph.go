@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package callgraph
 
 // Function represents a function in the call graph

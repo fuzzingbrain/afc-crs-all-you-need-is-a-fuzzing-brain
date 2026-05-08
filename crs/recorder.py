@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Send http request to the server to render the task and save the result.
 """

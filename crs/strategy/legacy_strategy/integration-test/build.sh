@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: Apache-2.0
 
 $CC $CFLAGS $SANITIZER_FLAGS -c $SRC/fuzz_vuln.c -I.
 $CC $CFLAGS $SANITIZER_FLAGS -c $SRC/integration-test/vuln.c -I.

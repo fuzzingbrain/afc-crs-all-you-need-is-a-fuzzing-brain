@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 docker build -f Dockerfile.analysis -t crs-analysis:latest .
 docker tag crs-analysis:latest ghcr.io/parasol-aser/crs-analysis:latest
 docker push ghcr.io/parasol-aser/crs-analysis:latest

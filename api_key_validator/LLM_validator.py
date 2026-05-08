@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """
 LLM API Key Validator
 Supports validation of API keys for multiple large language models

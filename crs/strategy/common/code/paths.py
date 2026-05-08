@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Path fix-ups for source files inside a patched workspace.
 
 When the patch pipeline copies a project source tree into a sibling

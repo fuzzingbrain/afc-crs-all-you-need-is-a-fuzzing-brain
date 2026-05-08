@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Crash location extraction and vulnerability signature hashing.
 
 Given raw fuzzer/sanitiser output, produce a concise ``file:line`` style

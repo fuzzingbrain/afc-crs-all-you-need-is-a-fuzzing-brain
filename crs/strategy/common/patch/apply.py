@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Apply LLM-generated patches to a project source tree.
 
 Two entry points:

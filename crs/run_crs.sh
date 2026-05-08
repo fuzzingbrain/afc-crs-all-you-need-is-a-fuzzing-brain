@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 
 DATE=$(date +"%Y%m%d_%H%M%S")
 IN_PLACE=false

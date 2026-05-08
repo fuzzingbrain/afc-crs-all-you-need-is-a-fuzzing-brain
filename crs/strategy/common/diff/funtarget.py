@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Wrapper around the ``funtarget`` binary for diff-function extraction.
 
 ``funtarget`` is a small Go/C helper shipped alongside the strategy

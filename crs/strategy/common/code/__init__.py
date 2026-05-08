@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Source code extraction, replacement, metadata, cleanup, and sandbox execution."""
 from .cleanup import strip_comments_and_license, strip_license_text
 from .extract import extract_function_body, extract_function_name_from_code, extract_java_method

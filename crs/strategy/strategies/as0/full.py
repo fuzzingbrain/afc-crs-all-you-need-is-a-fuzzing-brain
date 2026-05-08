@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """AS0 Full Strategy - full-scan POV generation.
 
 Inherits the multi-phase POV loop from :class:`AS0DeltaStrategy` but

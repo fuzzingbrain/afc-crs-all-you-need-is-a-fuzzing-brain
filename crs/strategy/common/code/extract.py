@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Source-code inspection utilities.
 
 Helpers that read source files or source snippets to extract function

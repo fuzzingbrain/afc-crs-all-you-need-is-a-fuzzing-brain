@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """
 Clone OSS-Fuzz + main repo, apply a patch (diff) that represents the
 ‘target commit’, discover existing fuzzers, and create a brand-new one.

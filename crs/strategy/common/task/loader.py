@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Task-scoped input-file loaders.
 
 Small JSON readers for inputs that ride in the per-task working

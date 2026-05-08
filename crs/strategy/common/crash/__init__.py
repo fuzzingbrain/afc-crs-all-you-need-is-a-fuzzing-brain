@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Crash parsing, location extraction, reproduction, and signatures."""
 from .extract import extract_and_save_crash_input
 from .location import (

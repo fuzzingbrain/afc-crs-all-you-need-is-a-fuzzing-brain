@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """libFuzzer execution with streaming output, coverage parsing, and crash detection.
 
 This module runs a fuzzer binary inside the project's OSS-Fuzz docker image,

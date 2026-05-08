@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """LLM client, models, and response parsing."""
 from .response import (
     extract_code,

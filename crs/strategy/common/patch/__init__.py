@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Patch application, generation, metadata, validation, and workspace management."""
 from .apply import apply_patch, replace_function
 from .generate import INITIAL_PATCH_TEMPLATE, generate_patch

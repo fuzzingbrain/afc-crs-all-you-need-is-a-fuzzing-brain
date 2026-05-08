@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """POV metadata on-disk store.
 
 Strategies save a JSON ``pov_metadata_*.json`` alongside a Python
