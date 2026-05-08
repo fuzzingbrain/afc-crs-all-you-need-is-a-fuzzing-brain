@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Java-specific helpers (jar selection, etc.)."""
 from __future__ import annotations
 

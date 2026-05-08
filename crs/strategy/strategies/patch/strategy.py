@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Patch strategy: LLM-guided vulnerability fix generation.
 
 Loops until a generated patch:

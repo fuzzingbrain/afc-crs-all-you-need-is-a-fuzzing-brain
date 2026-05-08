@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """
 compact_branches.py cov.exec classes.jar src_root [--context N] [--no-snippet]
 """

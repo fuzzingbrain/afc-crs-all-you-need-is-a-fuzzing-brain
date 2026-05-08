@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Source-code cleanup helpers (license/comment stripping)."""
 from __future__ import annotations
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Run LLM-generated Python snippets.
 
 The CRS asks the LLM to emit a Python script that writes a reproducing

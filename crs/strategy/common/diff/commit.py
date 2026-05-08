@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Commit diff loading and per-function extraction.
 
 Two entry points:

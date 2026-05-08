@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Docker image resolution for OSS-Fuzz / AIXCC project containers."""
 from __future__ import annotations
 

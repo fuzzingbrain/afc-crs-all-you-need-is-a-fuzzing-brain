@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Patch workspace helpers (git init, reset, diff)."""
 from __future__ import annotations
 

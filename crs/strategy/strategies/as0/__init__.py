@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """as0: Advanced LLM-guided POV strategy (delta + full).
 
 :class:`AS0DeltaStrategy` handles delta-scan tasks (a commit diff is

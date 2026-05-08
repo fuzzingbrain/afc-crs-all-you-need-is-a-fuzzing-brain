@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 PoV Strategy
 Base class for all POV (Proof of Vulnerability) generation strategies

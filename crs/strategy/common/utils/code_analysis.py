@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Code analysis utilities (backward-compatibility shim).
 
 The canonical home is :mod:`common.analysis_client.client`. This module

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """POV seed-corpus cleanup utilities."""
 from __future__ import annotations
 

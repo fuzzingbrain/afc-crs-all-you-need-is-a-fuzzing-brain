@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Strategy registry.
 
 Every strategy exposed to the outside world is registered here so the

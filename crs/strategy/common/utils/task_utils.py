@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Task metadata loading.
 
 Historically this module held fuzzer execution, crash extraction, corpus

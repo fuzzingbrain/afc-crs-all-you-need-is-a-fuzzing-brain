@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Diff and commit processing."""
 from .commit import get_commit_info, parse_commit_diff
 from .funtarget import extract_diff_functions_using_funtarget

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # Shell wrapper to generate OSS-Fuzz integration using Claude Agent SDK
 # Called by FuzzingBrain.sh when no existing OSS-Fuzz project is found
 

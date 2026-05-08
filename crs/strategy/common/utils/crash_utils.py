@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Crash output parsing utilities (backward-compatibility shim).
 
 All implementations have moved to ``common.crash.location`` and
