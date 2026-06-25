@@ -30,6 +30,10 @@ class AnalyzeRequest:
     fuzzer_sources: Dict[str, Union[str, List[str]]] = field(
         default_factory=dict
     )  # fuzzer_name -> source_path or list of source_paths
+    # Optional introspector-based static analysis. Off by default: the core
+    # pipeline runs on code-navigation tools, and introspector is a decoupled,
+    # opt-in module (see fuzzingbrain/analyzer).
+    enable_static_analysis: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -43,6 +47,7 @@ class AnalyzeRequest:
             "prebuild_dir": self.prebuild_dir,
             "work_id": self.work_id,
             "fuzzer_sources": self.fuzzer_sources,
+            "enable_static_analysis": self.enable_static_analysis,
         }
 
     @classmethod
@@ -58,6 +63,7 @@ class AnalyzeRequest:
             prebuild_dir=data.get("prebuild_dir"),
             work_id=data.get("work_id"),
             fuzzer_sources=data.get("fuzzer_sources", {}),
+            enable_static_analysis=data.get("enable_static_analysis", False),
         )
 
 

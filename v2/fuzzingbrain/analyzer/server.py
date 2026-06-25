@@ -119,6 +119,7 @@ class AnalysisServer:
         prebuild_dir: Optional[str] = None,
         work_id: Optional[str] = None,
         fuzzer_sources: Optional[Dict[str, Union[str, List[str]]]] = None,
+        enable_static_analysis: bool = False,
     ):
         # Store task_id as ObjectId for consistent MongoDB queries
         # String representation is used for socket paths and logging
@@ -132,6 +133,8 @@ class AnalysisServer:
         self.prebuild_dir = Path(prebuild_dir) if prebuild_dir else None
         self.work_id = work_id
         self.fuzzer_sources = fuzzer_sources or {}
+        # Introspector static analysis is opt-in; off by default in production.
+        self.enable_static_analysis = enable_static_analysis
 
         # Socket path in /tmp to avoid path length limit (108 chars max for Unix sockets)
         # Use task_id to ensure uniqueness
@@ -293,9 +296,13 @@ class AnalysisServer:
         self._log("Phase 1: Building fuzzers")
         build_start = time.time()
 
-        # Skip introspector build if we have prebuild data
-        skip_introspector = False
-        if self.prebuild_dir and self.work_id:
+        # Introspector build is opt-in (off by default in production). Skip it
+        # unless static analysis is explicitly enabled; also skip when prebuild
+        # data is available.
+        skip_introspector = not self.enable_static_analysis
+        if skip_introspector:
+            self._log("Static analysis disabled, skipping introspector build")
+        elif self.prebuild_dir and self.work_id:
             mongodb_dir = self.prebuild_dir / "mongodb"
             if mongodb_dir.exists() and (mongodb_dir / "functions.json").exists():
                 skip_introspector = True
