@@ -37,9 +37,20 @@ from ..core.models.llm_call import LLMCall
 from .buffer import get_worker_buffer
 
 
-def _calculate_cost(model_id: str, input_tokens: int, output_tokens: int) -> tuple:
+def _calculate_cost(
+    model_id: str,
+    input_tokens: int,
+    output_tokens: int,
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
+) -> tuple:
     """
-    Calculate cost for an LLM call.
+    Calculate cost for an LLM call, accounting for prompt-cache discounts.
+
+    ``input_tokens`` already includes the cached portions (litellm folds
+    cache_read + cache_creation into prompt_tokens). The cached portions are
+    billed at a discount, so without this adjustment a cache hit is charged at
+    full price and the budget over-counts.
 
     Returns:
         tuple: (cost_input, cost_output, cost_total)
@@ -55,7 +66,23 @@ def _calculate_cost(model_id: str, input_tokens: int, output_tokens: int) -> tup
         price_input = 3.0  # $3 per million input
         price_output = 15.0  # $15 per million output
 
-    cost_input = (input_tokens / 1_000_000) * price_input
+    # Split input_tokens into regular / cache-read / cache-creation, clamped so
+    # the parts never exceed the total (defensive against odd usage reports).
+    cache_read = max(0, min(cache_read_tokens, input_tokens))
+    cache_creation = max(0, min(cache_creation_tokens, input_tokens - cache_read))
+    regular_input = max(0, input_tokens - cache_read - cache_creation)
+
+    # Discount rates relative to the full input price.
+    if "claude" in model_id.lower() or "anthropic" in model_id.lower():
+        read_rate, write_rate = 0.1, 1.25  # Anthropic prompt caching
+    else:
+        read_rate, write_rate = 0.5, 1.0  # OpenAI-style cached input
+
+    cost_input = (
+        regular_input * price_input
+        + cache_read * price_input * read_rate
+        + cache_creation * price_input * write_rate
+    ) / 1_000_000
     cost_output = (output_tokens / 1_000_000) * price_output
     cost_total = cost_input + cost_output
 
@@ -178,6 +205,9 @@ class LLMResponse:
     input_tokens: int = 0
     output_tokens: int = 0
     total_tokens: int = 0
+    # Cache portions of input_tokens (input_tokens already includes these).
+    cache_read_tokens: int = 0  # billed at a discount (Anthropic 0.1x, OpenAI 0.5x)
+    cache_creation_tokens: int = 0  # Anthropic cache writes, billed at 1.25x
 
     # Tool calls (if any)
     tool_calls: List[Dict[str, Any]] = field(default_factory=list)
@@ -264,7 +294,11 @@ class LLMClient:
 
         # Calculate cost
         _, _, cost = _calculate_cost(
-            response.model, response.input_tokens, response.output_tokens
+            response.model,
+            response.input_tokens,
+            response.output_tokens,
+            response.cache_read_tokens,
+            response.cache_creation_tokens,
         )
 
         call = LLMCall(
@@ -305,7 +339,11 @@ class LLMClient:
 
         # Calculate cost
         _, _, cost = _calculate_cost(
-            response.model, response.input_tokens, response.output_tokens
+            response.model,
+            response.input_tokens,
+            response.output_tokens,
+            response.cache_read_tokens,
+            response.cache_creation_tokens,
         )
 
         call = LLMCall(
@@ -678,6 +716,16 @@ class LLMClient:
         output_tokens = usage.completion_tokens if usage else 0
         latency_ms = (time.time() - start_time) * 1000
 
+        # Cache portions of input_tokens (litellm includes them in prompt_tokens
+        # and reports the read portion in prompt_tokens_details.cached_tokens; the
+        # write portion in cache_creation_tokens for Anthropic).
+        cache_read_tokens = 0
+        cache_creation_tokens = 0
+        details = getattr(usage, "prompt_tokens_details", None) if usage else None
+        if details is not None:
+            cache_read_tokens = getattr(details, "cached_tokens", 0) or 0
+            cache_creation_tokens = getattr(details, "cache_creation_tokens", 0) or 0
+
         result = LLMResponse(
             content=content,
             model=model_id,
@@ -686,6 +734,8 @@ class LLMClient:
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             total_tokens=usage.total_tokens if usage else 0,
+            cache_read_tokens=cache_read_tokens,
+            cache_creation_tokens=cache_creation_tokens,
             tool_calls=tool_calls,
             latency_ms=latency_ms,
             fallback_used=original_model is not None,
