@@ -106,9 +106,9 @@ get_repo_name() {
     basename "$url" .git
 }
 
-# Generate task ID (short UUID)
+# Generate task ID (24-char hex, valid MongoDB ObjectId form)
 generate_task_id() {
-    python3 -c "import uuid; print(str(uuid.uuid4())[:8])"
+    python3 -c "import uuid; print(uuid.uuid4().hex[:24])"
 }
 
 # Try to find matching oss-fuzz project
