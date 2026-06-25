@@ -334,6 +334,7 @@ class TestVerifiedByTracking:
         # Mock _run_sync to directly call the sync function (bypass executor)
         async def fake_run_sync(func, *args, **kwargs):
             return func(*args, **kwargs)
+
         server._run_sync = fake_run_sync
 
         sp_id = str(ObjectId())
@@ -375,6 +376,7 @@ class TestVerifiedByTracking:
 
         async def fake_run_sync(func, *args, **kwargs):
             return func(*args, **kwargs)
+
         server._run_sync = fake_run_sync
 
         sp_id = str(ObjectId())

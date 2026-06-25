@@ -27,11 +27,12 @@ def load_sp_config(sp_name: str) -> dict:
     sp_file = preset_dir / sp_name / "sp.json"
 
     if not sp_file.exists():
-        available = [d.name for d in preset_dir.iterdir() if d.is_dir() and (d / "sp.json").exists()]
-        raise FileNotFoundError(
-            f"SP file not found: {sp_file}\n"
-            f"Available: {available}"
-        )
+        available = [
+            d.name
+            for d in preset_dir.iterdir()
+            if d.is_dir() and (d / "sp.json").exists()
+        ]
+        raise FileNotFoundError(f"SP file not found: {sp_file}\nAvailable: {available}")
 
     with open(sp_file) as f:
         return json.load(f)
@@ -58,7 +59,7 @@ async def main(sp_name: str):
     else:
         prebuild_dir = workspace / "fuzz-tooling/build/out"
 
-    print(f"Starting Analysis Server...")
+    print("Starting Analysis Server...")
     print(f"SP: {sp_name}")
     print(f"Project: {project_name}")
     print(f"Task ID: {task_id}")
@@ -83,7 +84,7 @@ async def main(sp_name: str):
     result = await server.start()
 
     if result.success:
-        print(f"\nServer started successfully!")
+        print("\nServer started successfully!")
         print(f"Socket: {server.socket_path}")
         print(f"Fuzzers: {len(server.fuzzers)}")
         print("\nServer running. Press Ctrl+C to stop.")
@@ -103,7 +104,7 @@ if __name__ == "__main__":
         "sp_name",
         nargs="?",
         default="lcms-001",
-        help="SP名称 (对应 experiment/preset-sp/<name>/sp.json)"
+        help="SP名称 (对应 experiment/preset-sp/<name>/sp.json)",
     )
     args = parser.parse_args()
 

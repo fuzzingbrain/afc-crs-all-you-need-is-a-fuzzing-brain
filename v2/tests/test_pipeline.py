@@ -7,9 +7,8 @@ Run with: pytest tests/test_pipeline.py -v
 """
 
 import pytest
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import MagicMock
 from bson import ObjectId
-from pathlib import Path
 
 from fuzzingbrain.agents import SPVerifier, POVAgent
 from fuzzingbrain.agents.context import AgentContext

@@ -5,40 +5,43 @@
 import json
 import html
 import sys
-from pathlib import Path
 
 try:
     import tiktoken
-    enc = tiktoken.encoding_for_model('gpt-4')
+
+    enc = tiktoken.encoding_for_model("gpt-4")
+
     def count_tokens(text):
         return len(enc.encode(str(text)))
-except:
+except Exception:
+
     def count_tokens(text):
         return len(str(text)) // 4  # rough estimate
+
 
 def convert_to_html(json_path: str, output_path: str = None):
     with open(json_path) as f:
         data = json.load(f)
 
     if output_path is None:
-        output_path = json_path.replace('.json', '.html')
+        output_path = json_path.replace(".json", ".html")
 
-    messages = data.get('messages', [])
+    messages = data.get("messages", [])
     meta = {
-        'agent': data.get('agent', ''),
-        'task_id': data.get('task_id', ''),
-        'worker_id': data.get('worker_id', ''),
-        'fuzzer': data.get('fuzzer', ''),
-        'sanitizer': data.get('sanitizer', ''),
-        'total_iterations': data.get('total_iterations', 0),
-        'total_tool_calls': data.get('total_tool_calls', 0),
+        "agent": data.get("agent", ""),
+        "task_id": data.get("task_id", ""),
+        "worker_id": data.get("worker_id", ""),
+        "fuzzer": data.get("fuzzer", ""),
+        "sanitizer": data.get("sanitizer", ""),
+        "total_iterations": data.get("total_iterations", 0),
+        "total_tool_calls": data.get("total_tool_calls", 0),
     }
 
     html_content = f"""<!DOCTYPE html>
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>POV Conversation - {meta['worker_id']}</title>
+    <title>POV Conversation - {meta["worker_id"]}</title>
     <style>
         body {{
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
@@ -189,20 +192,20 @@ def convert_to_html(json_path: str, output_path: str = None):
 <body>
     <div class="nav">
         <span>Jump to #</span>
-        <input type="number" id="msgNum" min="0" max="{len(messages)-1}">
+        <input type="number" id="msgNum" min="0" max="{len(messages) - 1}">
         <button onclick="jumpTo()">Go</button>
     </div>
 
     <div class="meta">
         <h1>POV Generation Conversation</h1>
         <div class="meta-info">
-            <div class="meta-item"><strong>Agent:</strong> {meta['agent']}</div>
-            <div class="meta-item"><strong>Task:</strong> {meta['task_id']}</div>
-            <div class="meta-item"><strong>Worker:</strong> {meta['worker_id']}</div>
-            <div class="meta-item"><strong>Fuzzer:</strong> {meta['fuzzer']}</div>
-            <div class="meta-item"><strong>Sanitizer:</strong> {meta['sanitizer']}</div>
-            <div class="meta-item"><strong>Iterations:</strong> {meta['total_iterations']}</div>
-            <div class="meta-item"><strong>Tool Calls:</strong> {meta['total_tool_calls']}</div>
+            <div class="meta-item"><strong>Agent:</strong> {meta["agent"]}</div>
+            <div class="meta-item"><strong>Task:</strong> {meta["task_id"]}</div>
+            <div class="meta-item"><strong>Worker:</strong> {meta["worker_id"]}</div>
+            <div class="meta-item"><strong>Fuzzer:</strong> {meta["fuzzer"]}</div>
+            <div class="meta-item"><strong>Sanitizer:</strong> {meta["sanitizer"]}</div>
+            <div class="meta-item"><strong>Iterations:</strong> {meta["total_iterations"]}</div>
+            <div class="meta-item"><strong>Tool Calls:</strong> {meta["total_tool_calls"]}</div>
             <div class="meta-item"><strong>Messages:</strong> {len(messages)}</div>
         </div>
     </div>
@@ -212,10 +215,10 @@ def convert_to_html(json_path: str, output_path: str = None):
 
     total_tokens = 0
     for i, msg in enumerate(messages):
-        role = msg.get('role', 'unknown')
-        content = msg.get('content', '')
-        tool_calls = msg.get('tool_calls', [])
-        tool_call_id = msg.get('tool_call_id', '')
+        role = msg.get("role", "unknown")
+        content = msg.get("content", "")
+        tool_calls = msg.get("tool_calls", [])
+        tool_call_id = msg.get("tool_call_id", "")
 
         # Count tokens for this message
         msg_tokens = count_tokens(content)
@@ -239,12 +242,12 @@ def convert_to_html(json_path: str, output_path: str = None):
         # Tool calls (assistant calling tools)
         if tool_calls:
             for tc in tool_calls:
-                func = tc.get('function', {})
-                name = func.get('name', '')
-                args = func.get('arguments', '{}')
+                func = tc.get("function", {})
+                name = func.get("name", "")
+                args = func.get("arguments", "{}")
                 try:
                     args_formatted = json.dumps(json.loads(args), indent=2)
-                except:
+                except Exception:
                     args_formatted = args
                 args_formatted = html.escape(args_formatted)
 
@@ -259,7 +262,7 @@ def convert_to_html(json_path: str, output_path: str = None):
         if content:
             # Check if content is long
             is_long = len(content) > 1500
-            collapsed_class = 'collapsed' if is_long else ''
+            collapsed_class = "collapsed" if is_long else ""
 
             html_content += f"""
             <div class="content {collapsed_class}" id="content-{i}">
@@ -310,13 +313,14 @@ def convert_to_html(json_path: str, output_path: str = None):
 </html>
 """
 
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         f.write(html_content)
 
     print(f"Generated: {output_path}")
     print(f"Messages: {len(messages)}")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python view_conversation.py <conversation.json> [output.html]")
         sys.exit(1)

@@ -9,11 +9,8 @@ Run with: pytest tests/test_full_pipeline.py -v
 """
 
 import pytest
-import asyncio
-from unittest.mock import MagicMock, AsyncMock, patch
+from unittest.mock import MagicMock
 from bson import ObjectId
-from datetime import datetime
-from pathlib import Path
 
 # Models
 from fuzzingbrain.core.models import (
@@ -41,7 +38,6 @@ from fuzzingbrain.agents.context import AgentContext
 from fuzzingbrain.worker.pipeline import AgentPipeline, PipelineConfig
 
 # Worker context
-from fuzzingbrain.worker.context import WorkerContext
 
 
 class TestTaskToWorkerFlow:

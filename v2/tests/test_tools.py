@@ -16,7 +16,6 @@ from bson import ObjectId
 from fuzzingbrain.tools.suspicious_points import (
     create_suspicious_point_impl,
     update_suspicious_point_impl,
-    list_suspicious_points_impl,
     set_sp_context,
     get_sp_context,
 )
@@ -28,6 +27,7 @@ class TestUpdateSuspiciousPointParameters:
     def test_function_signature_has_reachability_params(self):
         """update_suspicious_point_impl must accept reachability_* parameters."""
         import inspect
+
         sig = inspect.signature(update_suspicious_point_impl)
         params = list(sig.parameters.keys())
 
@@ -41,7 +41,9 @@ class TestUpdateSuspiciousPointParameters:
         assert "pov_guidance" in params
         # NEW - these caused the validation error
         assert "reachability_status" in params, "Missing reachability_status parameter!"
-        assert "reachability_multiplier" in params, "Missing reachability_multiplier parameter!"
+        assert "reachability_multiplier" in params, (
+            "Missing reachability_multiplier parameter!"
+        )
         assert "reachability_reason" in params, "Missing reachability_reason parameter!"
 
     @patch("fuzzingbrain.tools.suspicious_points._get_client")
@@ -82,6 +84,7 @@ class TestCreateSuspiciousPointParameters:
     def test_function_signature(self):
         """create_suspicious_point_impl must have correct parameters."""
         import inspect
+
         sig = inspect.signature(create_suspicious_point_impl)
         params = list(sig.parameters.keys())
 
@@ -123,12 +126,12 @@ class TestMCPFactoryToolSignatures:
     def test_update_suspicious_point_mcp_signature(self):
         """MCP update_suspicious_point tool must have reachability params."""
         # Import the mcp_factory module
-        from fuzzingbrain.tools import mcp_factory
 
         # Check that the module can be imported without errors
         # The actual function is created dynamically, but we can check
         # that the impl function has the right signature
         import inspect
+
         sig = inspect.signature(update_suspicious_point_impl)
         params = list(sig.parameters.keys())
 
@@ -149,7 +152,9 @@ class TestAnalyzerClientSignatures:
         params = list(sig.parameters.keys())
 
         assert "reachability_status" in params, "Client missing reachability_status!"
-        assert "reachability_multiplier" in params, "Client missing reachability_multiplier!"
+        assert "reachability_multiplier" in params, (
+            "Client missing reachability_multiplier!"
+        )
         assert "reachability_reason" in params, "Client missing reachability_reason!"
 
 
@@ -166,9 +171,15 @@ class TestAnalyzerServerHandlers:
         source = inspect.getsource(AnalysisServer._update_suspicious_point)
 
         # Check that reachability params are handled
-        assert "reachability_status" in source, "Server doesn't handle reachability_status!"
-        assert "reachability_multiplier" in source, "Server doesn't handle reachability_multiplier!"
-        assert "reachability_reason" in source, "Server doesn't handle reachability_reason!"
+        assert "reachability_status" in source, (
+            "Server doesn't handle reachability_status!"
+        )
+        assert "reachability_multiplier" in source, (
+            "Server doesn't handle reachability_multiplier!"
+        )
+        assert "reachability_reason" in source, (
+            "Server doesn't handle reachability_reason!"
+        )
 
 
 class TestSPContextFunctions:
@@ -227,6 +238,7 @@ class TestDirectionTools:
             set_direction_context,
             get_direction_context,
         )
+
         # Just verify they're callable
         assert callable(create_direction_impl)
         assert callable(list_directions_impl)
@@ -244,6 +256,7 @@ class TestAnalyzerTools:
             _get_client,
             _ensure_client,
         )
+
         assert callable(set_analyzer_context)
         assert callable(_get_client)
         assert callable(_ensure_client)
@@ -281,6 +294,7 @@ class TestCodeViewerTools:
             get_file_content_impl,
             search_code_impl,
         )
+
         assert callable(set_code_viewer_context)
         assert callable(get_file_content_impl)
         assert callable(search_code_impl)
@@ -323,6 +337,7 @@ class TestSeedTools:
             clear_seed_context,
             create_seed_impl,
         )
+
         assert callable(set_seed_context)
         assert callable(get_seed_context)
         assert callable(clear_seed_context)
@@ -380,10 +395,10 @@ class TestSeedTools:
         )
 
         # Call impl with explicit worker_id (like MCP tool does)
-        generator_code = '''
+        generator_code = """
 def generate(seed_num: int) -> bytes:
     return b"test_" + str(seed_num).encode()
-'''
+"""
         result = create_seed_impl(
             generator_code=generator_code,
             num_seeds=3,

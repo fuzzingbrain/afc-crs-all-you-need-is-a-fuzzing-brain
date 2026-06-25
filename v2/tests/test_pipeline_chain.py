@@ -231,14 +231,17 @@ class TestWorkerGhostOnSaveFailure:
                     ctx.__exit__(None, None, None)
 
         # Retry succeeded → removed from registry
-        assert worker_id not in _worker_contexts, \
+        assert worker_id not in _worker_contexts, (
             "Worker should be removed after retry succeeds"
+        )
         # DB has correct final status
         doc = mock_db.workers.find_one({"_id": ObjectId(worker_id)})
         assert doc is not None
         assert doc["status"] == "completed"
 
-    def test_worker_removed_from_registry_when_save_succeeds(self, patch_worker_db, task_id):
+    def test_worker_removed_from_registry_when_save_succeeds(
+        self, patch_worker_db, task_id
+    ):
         """
         Normal case: save succeeds → worker is removed from registry
         and DB has the correct final status.
@@ -326,7 +329,9 @@ class TestCounterRaceConditions:
 
         ctx.__exit__(None, None, None)
 
-    def test_concurrent_increment_sp_found_with_force_save(self, patch_worker_db, task_id):
+    def test_concurrent_increment_sp_found_with_force_save(
+        self, patch_worker_db, task_id
+    ):
         """
         increment_sp_found calls _save_to_db(force=True) → heavier lock
         contention makes the unprotected counter race more likely.
@@ -382,54 +387,62 @@ class TestOrphanedClaims:
     def _insert_pending_verify_sp(self, mock_db, task_id: str) -> str:
         """Insert a pending_verify SP, return its ID."""
         sp_id = ObjectId()
-        mock_db.suspicious_points.insert_one({
-            "_id": sp_id,
-            "task_id": ObjectId(task_id),
-            "function_name": "vuln_func",
-            "status": SPStatus.PENDING_VERIFY.value,
-            "score": 0.8,
-            "is_important": False,
-            "is_checked": False,
-            "is_real": False,
-            "sources": [{"harness_name": "fuzz_x", "sanitizer": "address"}],
-            "created_at": datetime.now(),
-        })
+        mock_db.suspicious_points.insert_one(
+            {
+                "_id": sp_id,
+                "task_id": ObjectId(task_id),
+                "function_name": "vuln_func",
+                "status": SPStatus.PENDING_VERIFY.value,
+                "score": 0.8,
+                "is_important": False,
+                "is_checked": False,
+                "is_real": False,
+                "sources": [{"harness_name": "fuzz_x", "sanitizer": "address"}],
+                "created_at": datetime.now(),
+            }
+        )
         return str(sp_id)
 
     def _insert_pending_pov_sp(self, mock_db, task_id: str) -> str:
         """Insert a pending_pov SP, return its ID."""
         sp_id = ObjectId()
-        mock_db.suspicious_points.insert_one({
-            "_id": sp_id,
-            "task_id": ObjectId(task_id),
-            "function_name": "vuln_func",
-            "status": SPStatus.PENDING_POV.value,
-            "score": 0.9,
-            "is_important": True,
-            "is_checked": True,
-            "is_real": True,
-            "pov_success_by": None,
-            "pov_attempted_by": [],
-            "sources": [{"harness_name": "fuzz_x", "sanitizer": "address"}],
-            "created_at": datetime.now(),
-        })
+        mock_db.suspicious_points.insert_one(
+            {
+                "_id": sp_id,
+                "task_id": ObjectId(task_id),
+                "function_name": "vuln_func",
+                "status": SPStatus.PENDING_POV.value,
+                "score": 0.9,
+                "is_important": True,
+                "is_checked": True,
+                "is_real": True,
+                "pov_success_by": None,
+                "pov_attempted_by": [],
+                "sources": [{"harness_name": "fuzz_x", "sanitizer": "address"}],
+                "created_at": datetime.now(),
+            }
+        )
         return str(sp_id)
 
-    def _insert_pending_direction(self, mock_db, task_id: str, fuzzer: str = "fuzz_x") -> str:
+    def _insert_pending_direction(
+        self, mock_db, task_id: str, fuzzer: str = "fuzz_x"
+    ) -> str:
         """Insert a pending direction, return its ID."""
         dir_id = ObjectId()
-        mock_db.directions.insert_one({
-            "_id": dir_id,
-            "task_id": ObjectId(task_id),
-            "fuzzer": fuzzer,
-            "name": "test_direction",
-            "description": "test",
-            "status": DirectionStatus.PENDING.value,
-            "risk_level": "high",
-            "core_functions": ["func_a"],
-            "entry_functions": ["main"],
-            "created_at": datetime.now(),
-        })
+        mock_db.directions.insert_one(
+            {
+                "_id": dir_id,
+                "task_id": ObjectId(task_id),
+                "fuzzer": fuzzer,
+                "name": "test_direction",
+                "description": "test",
+                "status": DirectionStatus.PENDING.value,
+                "risk_level": "high",
+                "core_functions": ["func_a"],
+                "entry_functions": ["main"],
+                "created_at": datetime.now(),
+            }
+        )
         return str(dir_id)
 
     # ---- Verify claim tests ----
@@ -478,7 +491,9 @@ class TestOrphanedClaims:
 
     # ---- POV claim tests ----
 
-    def test_pov_orphaned_sp_reclaimable_by_different_worker(self, mock_db, task_id, sp_repo):
+    def test_pov_orphaned_sp_reclaimable_by_different_worker(
+        self, mock_db, task_id, sp_repo
+    ):
         """
         POV claim allows re-claiming by a DIFFERENT fuzzer/sanitizer combo
         because query matches both pending_pov and generating_pov.
@@ -490,8 +505,10 @@ class TestOrphanedClaims:
 
         # Worker A claims (with source filter)
         claimed1 = sp_repo.claim_for_pov(
-            task_id, processor_id="agent-001",
-            harness_name="fuzz_x", sanitizer="address",
+            task_id,
+            processor_id="agent-001",
+            harness_name="fuzz_x",
+            sanitizer="address",
         )
         assert claimed1 is not None
 
@@ -499,7 +516,8 @@ class TestOrphanedClaims:
 
         # Worker B (no filter — simulates a different worker that can handle any SP)
         claimed2 = sp_repo.claim_for_pov(
-            task_id, processor_id="agent-002",
+            task_id,
+            processor_id="agent-002",
         )
         assert claimed2 is not None, (
             "Orphaned POV SP must be reclaimable by a different worker"
@@ -518,8 +536,10 @@ class TestOrphanedClaims:
 
         # Worker A claims
         claimed1 = sp_repo.claim_for_pov(
-            task_id, processor_id="agent-001",
-            harness_name="fuzz_x", sanitizer="address",
+            task_id,
+            processor_id="agent-001",
+            harness_name="fuzz_x",
+            sanitizer="address",
         )
         assert claimed1 is not None
 
@@ -535,8 +555,10 @@ class TestOrphanedClaims:
 
         # Same worker combo can now retry
         claimed2 = sp_repo.claim_for_pov(
-            task_id, processor_id="agent-001",
-            harness_name="fuzz_x", sanitizer="address",
+            task_id,
+            processor_id="agent-001",
+            harness_name="fuzz_x",
+            sanitizer="address",
         )
         assert claimed2 is not None, (
             "Same worker should be able to retry after crash with pov_attempted_by cleanup"
@@ -564,11 +586,11 @@ class TestOrphanedClaims:
 
         # Another agent can now reclaim
         claimed2 = dir_repo.claim(task_id, fuzzer="fuzz_x", processor_id="agent-002")
-        assert claimed2 is not None, (
-            "Direction must be reclaimable after release_claim"
-        )
+        assert claimed2 is not None, "Direction must be reclaimable after release_claim"
 
-    def test_direction_release_claim_restores_to_pending(self, mock_db, task_id, dir_repo):
+    def test_direction_release_claim_restores_to_pending(
+        self, mock_db, task_id, dir_repo
+    ):
         """
         Explicit release_claim correctly restores the direction.
         Proves recovery path exists but requires manual invocation.
@@ -596,7 +618,9 @@ class TestObjectIdChainIntegrity:
     and query APIs must not produce duplicates regardless of argument type.
     """
 
-    def test_full_chain_task_worker_agent_trace(self, patch_worker_db, patch_agent_db, task_id):
+    def test_full_chain_task_worker_agent_trace(
+        self, patch_worker_db, patch_agent_db, task_id
+    ):
         """
         Create 1 Task → 2 Workers → 2 Agents each.
         Verify the full chain is traceable through DB queries.
@@ -611,7 +635,9 @@ class TestObjectIdChainIntegrity:
             worker_ids.append(w_ctx.worker_id)
 
             for j in range(2):
-                a_ctx = _make_agent(task_id, w_ctx.worker_id, agent_type=f"Agent_{i}_{j}")
+                a_ctx = _make_agent(
+                    task_id, w_ctx.worker_id, agent_type=f"Agent_{i}_{j}"
+                )
                 a_ctx.__enter__()
                 a_ctx.__exit__(None, None, None)
 
@@ -632,7 +658,9 @@ class TestObjectIdChainIntegrity:
         all_agents = list(db.agents.find({"task_id": ObjectId(task_id)}))
         assert len(all_agents) == 4, f"Expected 4 agents total, got {len(all_agents)}"
 
-    def test_get_workers_by_task_no_duplicates_with_objectid_arg(self, patch_worker_db, task_id):
+    def test_get_workers_by_task_no_duplicates_with_objectid_arg(
+        self, patch_worker_db, task_id
+    ):
         """
         Passing ObjectId(task_id) to get_workers_by_task must not
         produce duplicate entries for a running worker.
@@ -646,11 +674,11 @@ class TestObjectIdChainIntegrity:
 
         ctx.__exit__(None, None, None)
 
-        assert wids.count(worker_id) == 1, (
-            f"Duplicate workers returned: {wids}"
-        )
+        assert wids.count(worker_id) == 1, f"Duplicate workers returned: {wids}"
 
-    def test_get_workers_by_task_no_duplicates_with_str_arg(self, patch_worker_db, task_id):
+    def test_get_workers_by_task_no_duplicates_with_str_arg(
+        self, patch_worker_db, task_id
+    ):
         """Control: passing str(task_id) must also not produce duplicates."""
         ctx = _make_worker(task_id)
         ctx.__enter__()
@@ -661,9 +689,7 @@ class TestObjectIdChainIntegrity:
 
         ctx.__exit__(None, None, None)
 
-        assert wids.count(worker_id) == 1, (
-            f"Duplicate workers returned: {wids}"
-        )
+        assert wids.count(worker_id) == 1, f"Duplicate workers returned: {wids}"
 
 
 # =============================================================================
@@ -743,9 +769,7 @@ class TestContextReentrance:
         ctx.__enter__()
 
         # CORRECT invariant: started_at preserved
-        assert ctx.started_at == first_started, (
-            "started_at must not change on re-entry"
-        )
+        assert ctx.started_at == first_started, "started_at must not change on re-entry"
 
         ctx.__exit__(None, None, None)
 
@@ -761,9 +785,7 @@ class TestContextReentrance:
 
         ctx.__enter__()
 
-        assert ctx.started_at == first_started, (
-            "started_at must not change on re-entry"
-        )
+        assert ctx.started_at == first_started, "started_at must not change on re-entry"
 
         ctx.__exit__(None, None, None)
 

@@ -14,12 +14,9 @@ defaults:
     working-directory: v2
 
 jobs:
-  # Advisory only for now: the imported v2 code carries pre-existing ruff
-  # debt. Surfaced here but not blocking, to be cleaned up incrementally.
   lint:
-    name: Ruff Lint & Format (advisory)
+    name: Ruff Lint & Format
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -42,7 +39,7 @@ jobs:
   test:
     name: Tests
     runs-on: ubuntu-latest
-    needs: [syntax-check]
+    needs: [lint, syntax-check]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
