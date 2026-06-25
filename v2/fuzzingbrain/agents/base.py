@@ -39,6 +39,11 @@ class BaseAgent(ABC):
     # Enable context compression (can be disabled by subclasses that need full context)
     enable_context_compression: bool = True
 
+    # Model used for the mechanical compression/summarization step. Tiered down
+    # to a cheap model by default (summarization does not need the flagship);
+    # subclasses can override. Falls back to a mechanical summary on failure.
+    compression_model_id: str = "claude-haiku-4-5-20251001"
+
     def __init__(
         self,
         llm_client: Optional[LLMClient] = None,
@@ -385,19 +390,15 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         )
 
         try:
-            from ..llms.models import CLAUDE_SONNET_4
-
             response = await self.llm_client.acall(
                 messages=[{"role": "user", "content": compression_prompt}],
-                model=CLAUDE_SONNET_4,
+                model=self.compression_model_id,
                 max_tokens=2000,
             )
             summary = f"[CONTEXT COMPRESSED - {len(middle_messages)} messages]\n\n{response.content}"
         except Exception as e:
             # Fallback to simple summary
-            self._log(
-                f"Sonnet compression failed: {e}, using fallback", level="WARNING"
-            )
+            self._log(f"LLM compression failed: {e}, using fallback", level="WARNING")
             # Mechanical fallback: just keep tool names and truncate results
             fallback_lines = []
             for msg in middle_messages:
