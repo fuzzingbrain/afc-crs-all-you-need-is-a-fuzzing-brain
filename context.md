@@ -30,14 +30,14 @@
 │   │   ├── executor/            # 任务执行引擎
 │   │   └── telemetry/           # OpenTelemetry 集成
 │   ├── strategy/                # Python 漏洞发现策略
-│   │   ├── strategies/          # 各类策略实现
-│   │   ├── analysis/            # 静态分析
-│   │   ├── code_analysis/       # 代码检查工具
-│   │   └── common/              # 共享工具
-│   └── v1/                      # 重构中的 v1 版本
-│       ├── main.py             # 入口
-│       ├── strategy_main.py    # 策略编排
-│       └── static/             # 静态分析模块
+│       ├── strategies/          # 各类策略实现
+│       ├── analysis/            # 静态分析
+│       ├── code_analysis/       # 代码检查工具
+│       ├── core/                # 核心运行时
+│       ├── legacy_strategy/     # 旧策略(保留)
+│       └── common/              # 共享工具
+├── v1/                          # 重写规划文档 (refactor.md)
+├── FuzzingBrain.sh              # 主入口脚本
 ├── static-analysis/             # 独立静态分析服务
 │   ├── cmd/                     # 多种分析工具
 │   │   ├── scan/               # 扫描引擎
@@ -172,9 +172,9 @@ OTEL_EXPORTER_OTLP_ENDPOINT=...
 
 ## 快速参考
 
-- **主入口**: `crs/run_crs.sh`
+- **主入口**: `FuzzingBrain.sh` (本地: `crs/run_crs.sh`)
 - **配置模板**: `crs/.env.example`
 - **策略目录**: `crs/strategy/strategies/`
-- **v1 重构**: `crs/v1/`
+- **v1 重写规划**: `v1/refactor.md`
 - **静态分析**: `static-analysis/`
 - **部署配置**: `aks-cluster-deploy/`
