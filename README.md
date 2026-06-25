@@ -49,7 +49,6 @@ Results (patches, POVs, logs) will be saved to `/app/workspace/<project>/`.
 ```bash
 git clone https://github.com/o2lab/afc-crs-all-you-need-is-a-fuzzing-brain.git
 cd afc-crs-all-you-need-is-a-fuzzing-brain
-git checkout stable
 
 # Set up API keys
 cd crs && cp .env.example .env
