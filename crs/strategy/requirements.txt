@@ -10,7 +10,7 @@ typing-extensions>=4.8.0
 
 # LLM API
 litellm>=1.0.0
-google.generativeai
+google-generativeai
 
 # LLM Observability
 openlit>=1.0.0
@@ -24,5 +24,6 @@ requests>=2.31.0
 # Environment
 python-dotenv>=1.0.0
 
+# Anthropic SDK
 claude-agent-sdk
 anthropic
