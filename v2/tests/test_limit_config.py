@@ -61,3 +61,22 @@ class TestStaticAnalysisFlagPlumbing:
         )
         restored = AnalyzeRequest.from_dict(req.to_dict())
         assert restored.enable_static_analysis is True
+
+
+class TestPerCallTimeout:
+    """Every LLM call must carry a finite timeout so no single call hangs."""
+
+    def test_default_llm_timeout_is_finite(self):
+        from fuzzingbrain.llms.config import LLMConfig
+
+        cfg = LLMConfig()
+        assert 0 < cfg.timeout < float("inf")
+        assert 0 < cfg.connect_timeout < float("inf")
+
+    def test_prepared_params_always_set_timeout(self):
+        from fuzzingbrain.llms.config import LLMConfig
+        from fuzzingbrain.llms.client import LLMClient
+
+        client = LLMClient(LLMConfig())
+        params = client._prepare_call_params([{"role": "user", "content": "hi"}], None)
+        assert params["timeout"] == LLMConfig().timeout
