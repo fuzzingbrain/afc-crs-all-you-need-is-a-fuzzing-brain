@@ -1,0 +1,23 @@
+# Representative OSS-Fuzz C/C++ projects for build-compatibility sampling.
+# One project per line; lines starting with '#' are ignored.
+# Used by build_compat.py --projects-file.
+libyaml
+expat
+c-ares
+zlib
+brotli
+libjpeg-turbo
+libxml2
+json-c
+re2
+sqlite3
+harfbuzz
+freetype2
+pcre2
+lua
+jsoncpp
+cjson
+libssh2
+zstd
+lz4
+libpng
