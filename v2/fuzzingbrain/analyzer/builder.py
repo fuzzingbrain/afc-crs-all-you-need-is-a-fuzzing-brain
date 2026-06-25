@@ -25,6 +25,24 @@ from loguru import logger as loguru_logger
 from .models import FuzzerInfo
 
 
+def _build_error_hint(build_output: List[str]) -> str:
+    """Actionable hint for the common source-drift build failure.
+
+    When the target's HEAD has drifted from its OSS-Fuzz build script (e.g.
+    libpng relocated scripts/pnglibconf.dfa), the build fails with a missing
+    file. Surface that with a fix instead of a bare exit code. Returns "" when
+    the signature is absent.
+    """
+    text = "\n".join(build_output[-80:])
+    if "No such file or directory" in text:
+        return (
+            " — a source file the build script expected is missing; the target's"
+            " HEAD may have drifted from its OSS-Fuzz build setup. Pin a"
+            " build-ready commit with -v <commit>."
+        )
+    return ""
+
+
 class ResourceMonitor:
     """
     Monitor system resources and control parallel build execution.
@@ -727,7 +745,11 @@ class AnalyzerBuilder:
                         f.write("\n" + "=" * 80 + "\n")
                         f.write(f"[BUILD ERROR] Exit code {process.returncode}\n")
                         f.write("=" * 80 + "\n")
-                return False, f"Build failed with code {process.returncode}"
+                return (
+                    False,
+                    f"Build failed with code {process.returncode}"
+                    + _build_error_hint(build_output),
+                )
 
             self.log(f"Built {sanitizer} in {elapsed:.1f}s")
             return True, "Build successful"
@@ -877,7 +899,11 @@ class AnalyzerBuilder:
                         f.write("\n" + "=" * 80 + "\n")
                         f.write(f"[BUILD ERROR] Exit code {process.returncode}\n")
                         f.write("=" * 80 + "\n")
-                return False, f"Build failed with code {process.returncode}"
+                return (
+                    False,
+                    f"Build failed with code {process.returncode}"
+                    + _build_error_hint(build_output),
+                )
 
             self.log(f"Built {sanitizer} in {elapsed:.1f}s")
             return True, "Build successful"
