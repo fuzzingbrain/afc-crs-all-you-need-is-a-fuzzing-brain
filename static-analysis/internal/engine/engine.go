@@ -5440,7 +5440,7 @@ func EngineMainAnalysisCodeql(taskDetail models.TaskDetail, taskDir, projectDir,
 	if !dbExists {
 		log.Printf("Creating new CodeQL database for %s...", projectName)
 
-		// 构建CodeQL数据库创建命令
+		// Build the CodeQL database creation command
 		cmdArgs := []string{
 			"database", "create",
 			masterDbPath,
