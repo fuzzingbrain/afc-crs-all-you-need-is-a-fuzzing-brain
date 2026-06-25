@@ -6,6 +6,7 @@ Unified LLM client with multi-provider support and automatic fallback.
 """
 
 import asyncio
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Union
@@ -100,16 +101,33 @@ def _apply_prompt_caching(params: dict) -> None:
     - Gemini / DeepSeek / others via litellm: ``cache_control`` is dropped
       silently (litellm.drop_params=True), so this is a safe no-op.
 
+    Caching breakpoints (Anthropic allows up to 4):
+    1. system prompt — stable across an agent's whole run.
+    2. tool schemas — stable across an agent's whole run.
+    3. last message — moves forward each turn, so accumulated tool-result
+       history is a cache hit on the next turn (the big agent-loop win).
+
     Mutates ``params`` in place. Modifies copies of messages/tools so the
     caller's original lists are untouched (safe across fallback/retry).
+    Set ``FUZZINGBRAIN_DISABLE_PROMPT_CACHE=1`` to turn this off in production.
     """
+    if os.environ.get("FUZZINGBRAIN_DISABLE_PROMPT_CACHE", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    ):
+        return
+
     model_id = str(params.get("model", "")).lower()
     if "claude" not in model_id and "anthropic" not in model_id:
         return
 
     cache = {"type": "ephemeral"}
 
-    # Cache the system prompt (stable across an agent's turns).
+    def as_cached_block(text: str) -> list:
+        return [{"type": "text", "text": text, "cache_control": cache}]
+
+    # Cache the system prompt (breakpoint 1).
     messages = params.get("messages")
     if messages:
         new_messages = []
@@ -117,18 +135,29 @@ def _apply_prompt_caching(params: dict) -> None:
             content = msg.get("content")
             if msg.get("role") == "system" and isinstance(content, str) and content:
                 new_messages.append(
-                    {
-                        "role": "system",
-                        "content": [
-                            {"type": "text", "text": content, "cache_control": cache}
-                        ],
-                    }
+                    {"role": "system", "content": as_cached_block(content)}
                 )
             else:
                 new_messages.append(msg)
+
+        # Incremental conversation caching (breakpoint 3): cache the prefix up
+        # to the last message. Only plain-string content without tool_calls, to
+        # avoid disturbing tool-call/tool-result message shapes.
+        last = new_messages[-1]
+        last_content = last.get("content")
+        if (
+            last.get("role") != "system"
+            and isinstance(last_content, str)
+            and last_content
+            and not last.get("tool_calls")
+        ):
+            cached_last = dict(last)
+            cached_last["content"] = as_cached_block(last_content)
+            new_messages[-1] = cached_last
+
         params["messages"] = new_messages
 
-    # Cache the tool schemas (mark the last tool = cache the whole tool block).
+    # Cache the tool schemas (breakpoint 2: mark the last tool).
     tools = params.get("tools")
     if tools:
         tools = [dict(t) for t in tools]
