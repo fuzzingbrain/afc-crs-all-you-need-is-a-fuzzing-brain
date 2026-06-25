@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # AIxCC Test: libavif (av-delta-02)
 # Uses custom fuzz-tooling from aixcc-finals/oss-fuzz-aixcc
 

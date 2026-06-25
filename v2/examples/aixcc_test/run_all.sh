@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # AIxCC Test Suite: Run all test cases (using default google/oss-fuzz)
 #
 # Test cases:

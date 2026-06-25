@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # AIxCC Test: libxml2 (lx-delta-03) - html fuzzer
 # Uses custom fuzz-tooling from aixcc-finals/oss-fuzz-aixcc
 

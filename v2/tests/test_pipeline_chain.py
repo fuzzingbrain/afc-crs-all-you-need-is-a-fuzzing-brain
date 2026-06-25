@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Pipeline Chain Integration Tests — Bug-Hunting Probes
 

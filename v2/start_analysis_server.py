@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """
 启动 Analysis Server (用于测试)
 使用现有的预构建 workspace，跳过 build 步骤

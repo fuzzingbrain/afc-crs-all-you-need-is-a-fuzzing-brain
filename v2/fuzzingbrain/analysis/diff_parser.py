@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Diff Parser and Reachability Analysis
 

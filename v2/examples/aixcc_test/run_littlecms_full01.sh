@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # AIxCC Test: little-cms (cm-full-01) - FULL scan
 # Uses custom fuzz-tooling from aixcc-finals/oss-fuzz-aixcc
 

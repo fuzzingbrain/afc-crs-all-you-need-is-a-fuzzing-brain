@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # FuzzingBrain Docker runner
 # Usage: ./run-docker.sh <config.json> [extra args...]
 

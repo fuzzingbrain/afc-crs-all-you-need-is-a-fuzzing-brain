@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 CallGraphNode Model - Call graph relationships per fuzzer
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Allow running as: python -m fuzzingbrain.tools.test"""
 
 from .health_check import main

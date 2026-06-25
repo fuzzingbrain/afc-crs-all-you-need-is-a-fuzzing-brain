@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # FuzzingBrain v2 - Create Work Configuration
 # Generate a task configuration file from template
