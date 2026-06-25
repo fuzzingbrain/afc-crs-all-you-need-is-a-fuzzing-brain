@@ -523,6 +523,7 @@ class LLMClient:
         client = openai.OpenAI(
             api_key=api_key,
             base_url=XAI_API_BASE,
+            max_retries=self.config.max_retries,
         )
 
         params = {
@@ -553,7 +554,7 @@ class LLMClient:
         if not api_key:
             raise LLMAuthError("OPENAI_API_KEY not configured", model=model_id)
 
-        client = openai.OpenAI(api_key=api_key)
+        client = openai.OpenAI(api_key=api_key, max_retries=self.config.max_retries)
 
         params = {
             "model": model_id,
@@ -597,6 +598,13 @@ class LLMClient:
             else self.config.temperature,
             "timeout": self.config.timeout,
         }
+
+        # Retry transient errors (rate limit / 5xx / timeout) on the same model
+        # with exponential backoff before falling back to another model. litellm
+        # honors num_retries internally and respects Retry-After. Failed attempts
+        # produce no usage, so retries never double-charge the budget.
+        if self.config.max_retries > 0:
+            params["num_retries"] = self.config.max_retries
 
         # Max tokens
         if max_tokens is not None:
@@ -999,7 +1007,11 @@ class LLMClient:
                 clean_model_id = (
                     model_id[4:] if model_id.startswith("xai/") else model_id
                 )
-                client = openai.AsyncOpenAI(api_key=api_key, base_url=XAI_API_BASE)
+                client = openai.AsyncOpenAI(
+                    api_key=api_key,
+                    base_url=XAI_API_BASE,
+                    max_retries=self.config.max_retries,
+                )
 
                 params = {
                     "model": clean_model_id,
@@ -1019,7 +1031,9 @@ class LLMClient:
                 if not api_key:
                     raise LLMAuthError("OPENAI_API_KEY not configured", model=model_id)
 
-                client = openai.AsyncOpenAI(api_key=api_key)
+                client = openai.AsyncOpenAI(
+                    api_key=api_key, max_retries=self.config.max_retries
+                )
 
                 params = {"model": model_id, "messages": messages}
                 if temperature != 1.0:
