@@ -1,0 +1,18 @@
+{
+    "repo_url": "https://github.com/pnggroup/libpng.git",
+    "project_name": "libpng",
+    "job_type": "harness",
+    "scan_mode": "full",
+    "targets": [
+        {
+            "function": "png_read_image",
+            "description": "Main image reading function"
+        },
+        {
+            "function": "png_write_image",
+            "description": "Main image writing function"
+        }
+    ],
+    "sanitizers": ["address"],
+    "timeout_minutes": 60
+}

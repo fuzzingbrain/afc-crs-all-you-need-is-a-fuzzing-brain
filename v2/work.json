@@ -1,0 +1,15 @@
+{
+  "repo_url": "https://github.com/user/project",
+  "version": "v1.0",
+  "path": "./project-src",
+  "build_script": null,
+  "backend": "auto",
+  "language": null,
+  "fuzzer_sources": {
+    "fuzz_example": [
+      "fuzz/fuzz_example.c"
+    ]
+  },
+  "diff_files": null,
+  "ai_refine": false
+}

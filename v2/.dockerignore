@@ -1,0 +1,17 @@
+workspace/
+venv/
+__pycache__/
+*.pyc
+.git/
+.env
+configs/
+docs/
+tests/
+logs/
+work/
+experiment/
+FBv2-Dashboard/
+*.log
+.coverage
+htmlcov/
+.pytest_cache/
