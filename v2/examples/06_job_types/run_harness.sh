@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # Harness Mode - Generate fuzzing harnesses
 cd "$(dirname "$0")/../.."
 

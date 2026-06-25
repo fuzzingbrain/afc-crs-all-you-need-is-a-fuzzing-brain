@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 Prompts module for agent system prompts.
 

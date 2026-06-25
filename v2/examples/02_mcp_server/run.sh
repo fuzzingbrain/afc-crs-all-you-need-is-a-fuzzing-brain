@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # MCP Server Mode - Start MCP server
 cd "$(dirname "$0")/../.."
 

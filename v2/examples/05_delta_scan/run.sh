@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # Delta Scan Mode - Scan changes between commits
 cd "$(dirname "$0")/../.."
 

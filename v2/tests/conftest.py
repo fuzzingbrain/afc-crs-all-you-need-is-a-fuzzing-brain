@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """Shared fixtures for FuzzingBrain tests."""
 
 import pytest

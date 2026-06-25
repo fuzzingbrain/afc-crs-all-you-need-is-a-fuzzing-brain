@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # POV Mode - Find vulnerabilities only
 cd "$(dirname "$0")/../.."
 

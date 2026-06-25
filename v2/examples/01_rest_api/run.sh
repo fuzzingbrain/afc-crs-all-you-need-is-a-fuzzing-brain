@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # REST API Mode - Start server and test endpoints
 cd "$(dirname "$0")/../.."
 

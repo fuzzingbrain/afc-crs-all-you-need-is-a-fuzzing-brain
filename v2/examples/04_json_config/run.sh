@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # JSON Config Mode - Load from JSON file
 cd "$(dirname "$0")/../.."
 

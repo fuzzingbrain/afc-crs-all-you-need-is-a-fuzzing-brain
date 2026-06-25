@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 """
 FuzzingBrain v2 - Autonomous Cyber Reasoning System
 

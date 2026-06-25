@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 #
 # FuzzingBrain v2 - Autonomous Cyber Reasoning System
 # Entry point for both local and Docker execution

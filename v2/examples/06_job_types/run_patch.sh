@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
 # Patch Mode - Generate patches (requires existing workspace with POVs)
 cd "$(dirname "$0")/../.."
 
