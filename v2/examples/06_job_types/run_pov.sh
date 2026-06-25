@@ -3,4 +3,4 @@
 cd "$(dirname "$0")/../.."
 
 echo "=== POV Mode (find vulnerabilities only) ==="
-./FuzzingBrain.sh --job-type pov https://github.com/pnggroup/libpng.git
+./FuzzingBrain.sh --task-type pov https://github.com/OwenSanzas/libpng.git

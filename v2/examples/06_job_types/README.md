@@ -15,16 +15,16 @@ Different task types supported by FuzzingBrain.
 
 ```bash
 # POV only
-./FuzzingBrain.sh --job-type pov https://github.com/user/repo.git
+./FuzzingBrain.sh --task-type pov https://github.com/user/repo.git
 
 # Patch only (requires existing POV)
-./FuzzingBrain.sh --job-type patch workspace/project_abc123
+./FuzzingBrain.sh --task-type patch workspace/project_abc123
 
 # POV + Patch (default)
-./FuzzingBrain.sh --job-type pov-patch https://github.com/user/repo.git
+./FuzzingBrain.sh --task-type pov-patch https://github.com/user/repo.git
 
 # Harness generation
-./FuzzingBrain.sh --job-type harness https://github.com/user/repo.git
+./FuzzingBrain.sh --task-type harness https://github.com/user/repo.git
 ```
 
 ## Test

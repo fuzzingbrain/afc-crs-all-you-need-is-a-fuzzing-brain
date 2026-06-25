@@ -8,14 +8,14 @@ Run FuzzingBrain directly on a GitHub URL or local workspace.
 
 ```bash
 # Full scan
-./FuzzingBrain.sh https://github.com/pnggroup/libpng.git
+./FuzzingBrain.sh https://github.com/OwenSanzas/libpng.git
 
 # With options
 ./FuzzingBrain.sh \
-  --job-type pov-patch \
+  --task-type pov-patch \
   --sanitizers address,memory \
   --timeout 120 \
-  https://github.com/pnggroup/libpng.git
+  https://github.com/OwenSanzas/libpng.git
 ```
 
 ### From Local Workspace

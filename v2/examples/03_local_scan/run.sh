@@ -3,4 +3,4 @@
 cd "$(dirname "$0")/../.."
 
 echo "=== Full Scan from GitHub URL ==="
-./FuzzingBrain.sh https://github.com/pnggroup/libpng.git
+./FuzzingBrain.sh https://github.com/OwenSanzas/libpng.git
