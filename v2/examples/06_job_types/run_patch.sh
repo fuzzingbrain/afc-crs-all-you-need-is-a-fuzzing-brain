@@ -16,4 +16,4 @@ if [ -z "$WORKSPACE" ]; then
 fi
 
 echo "Using workspace: $WORKSPACE"
-./FuzzingBrain.sh --job-type patch "$WORKSPACE"
+./FuzzingBrain.sh --task-type patch "$WORKSPACE"

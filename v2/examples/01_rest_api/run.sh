@@ -20,12 +20,12 @@ curl -s http://localhost:18080/
 echo -e "\n\n3. Start POV scan:"
 curl -s -X POST http://localhost:18080/api/v1/pov \
   -H "Content-Type: application/json" \
-  -d '{"repo_url": "https://github.com/pnggroup/libpng.git"}'
+  -d '{"repo_url": "https://github.com/OwenSanzas/libpng.git"}'
 
 echo -e "\n\n4. Start POV+Patch:"
 curl -s -X POST http://localhost:18080/api/v1/pov-patch \
   -H "Content-Type: application/json" \
-  -d '{"repo_url": "https://github.com/pnggroup/libpng.git", "sanitizers": ["address"]}'
+  -d '{"repo_url": "https://github.com/OwenSanzas/libpng.git", "sanitizers": ["address"]}'
 
 echo -e "\n\n5. Query status:"
 curl -s http://localhost:18080/api/v1/status/test123

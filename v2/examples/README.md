@@ -25,7 +25,7 @@ Example usage for all entry modes and features.
 ./FuzzingBrain.sh
 
 # Scan a repository
-./FuzzingBrain.sh https://github.com/pnggroup/libpng.git
+./FuzzingBrain.sh https://github.com/OwenSanzas/libpng.git
 
 # Delta scan
 ./FuzzingBrain.sh -b <base> -d <target> <url>
