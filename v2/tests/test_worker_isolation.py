@@ -9,11 +9,9 @@ Simulates real Celery worker process behavior:
 - The real risk: state leaking between sequential tasks in the same process
 """
 
-import threading
 from unittest.mock import MagicMock, patch
 from bson import ObjectId
 
-import pytest
 
 from fuzzingbrain.llms.buffer import (
     WorkerLLMBuffer,
@@ -110,8 +108,9 @@ class TestCeleryProcessReuse:
         set_worker_buffer(None)
 
         # --- Between tasks: this is the state Celery process is in ---
-        assert get_worker_buffer() is None, \
+        assert get_worker_buffer() is None, (
             "Buffer must be None between tasks — Task B would write to Task A's buffer"
+        )
 
         # --- Task B lifecycle ---
         buffer_b = WorkerLLMBuffer(redis_url="", mongo_db=None)
@@ -181,8 +180,9 @@ class TestCeleryProcessReuse:
         total_flushed = 0
         for call_args in mock_db.llm_calls.insert_many.call_args_list:
             total_flushed += len(call_args[0][0])
-        assert total_flushed == 5, \
+        assert total_flushed == 5, (
             f"Expected 5 records flushed on stop(), got {total_flushed}"
+        )
 
 
 class TestWorkerContextExitFailure:
@@ -217,8 +217,9 @@ class TestWorkerContextExitFailure:
             set_worker_buffer(None)
 
         # The critical assertion: global buffer must be None
-        assert get_worker_buffer() is None, \
+        assert get_worker_buffer() is None, (
             "Buffer leaked after stop() failure — next task will write to broken buffer"
+        )
 
     def test_records_not_lost_on_flush_failure(self):
         """
@@ -240,8 +241,9 @@ class TestWorkerContextExitFailure:
         assert count == 0, "Flush should return 0 on failure"
 
         # Records must be put back (not lost)
-        assert len(buffer._records) == 2, \
+        assert len(buffer._records) == 2, (
             f"Records lost on flush failure: expected 2, got {len(buffer._records)}"
+        )
 
     def test_stop_retries_flush_on_transient_failure(self):
         """
@@ -269,8 +271,9 @@ class TestWorkerContextExitFailure:
         assert mock_db.llm_calls.insert_many.call_count == 2
         # All records flushed on second attempt
         second_call_batch = mock_db.llm_calls.insert_many.call_args_list[1][0][0]
-        assert len(second_call_batch) == 2, \
+        assert len(second_call_batch) == 2, (
             f"Expected 2 records flushed on retry, got {len(second_call_batch)}"
+        )
         # No records left in buffer
         assert len(buffer._records) == 0
 
@@ -295,8 +298,9 @@ class TestWorkerContextExitFailure:
         # All 3 retry attempts made
         assert mock_db.llm_calls.insert_many.call_count == 3
         # Records still in buffer (lost after buffer is discarded)
-        assert len(buffer._records) == 3, \
+        assert len(buffer._records) == 3, (
             f"Expected 3 records still in buffer, got {len(buffer._records)}"
+        )
 
 
 class TestWorkerContextRegistry:
@@ -319,16 +323,19 @@ class TestWorkerContextRegistry:
         )
 
         # Patch out DB and buffer to avoid real Redis/MongoDB
-        with patch("fuzzingbrain.db.get_database", return_value=MagicMock()), \
-             patch("fuzzingbrain.llms.buffer.WorkerLLMBuffer._connect_redis"):
-
+        with (
+            patch("fuzzingbrain.db.get_database", return_value=MagicMock()),
+            patch("fuzzingbrain.llms.buffer.WorkerLLMBuffer._connect_redis"),
+        ):
             ctx.__enter__()
-            assert ctx.worker_id in _worker_contexts, \
+            assert ctx.worker_id in _worker_contexts, (
                 "Worker not registered on __enter__"
+            )
 
             ctx.__exit__(None, None, None)
-            assert ctx.worker_id not in _worker_contexts, \
+            assert ctx.worker_id not in _worker_contexts, (
                 "Worker still in registry after __exit__ — ghost entry"
+            )
 
     def test_failed_worker_still_unregisters(self):
         """
@@ -350,7 +357,8 @@ class TestWorkerContextRegistry:
         with patch("fuzzingbrain.db.get_database", return_value=MagicMock()):
             ctx.__exit__(RuntimeError, RuntimeError("boom"), None)
 
-        assert ctx.worker_id not in _worker_contexts, \
+        assert ctx.worker_id not in _worker_contexts, (
             "Failed worker left ghost entry in registry"
+        )
         assert ctx.status == "failed"
         assert "boom" in ctx.error

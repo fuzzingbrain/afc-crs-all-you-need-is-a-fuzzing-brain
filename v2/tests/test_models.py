@@ -8,7 +8,6 @@ Run with: pytest tests/test_models.py -v
 
 import pytest
 from bson import ObjectId
-from datetime import datetime
 
 from fuzzingbrain.core.utils import safe_object_id
 from fuzzingbrain.core.models import (
@@ -17,9 +16,7 @@ from fuzzingbrain.core.models import (
     Task,
     Fuzzer,
     POV,
-    Patch,
     LLMCall,
-    Function,
     CallGraphNode,
 )
 from fuzzingbrain.core.models.worker import Worker

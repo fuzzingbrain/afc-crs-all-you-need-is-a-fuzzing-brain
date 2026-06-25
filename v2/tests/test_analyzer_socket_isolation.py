@@ -19,14 +19,11 @@ The mock server adds artificial delay to amplify race windows,
 making concurrency bugs deterministic instead of flaky.
 """
 
-import json
 import os
 import socket
-import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 
 import pytest
 
@@ -35,7 +32,6 @@ from fuzzingbrain.analyzer.protocol import (
     Request,
     Response,
     encode_message,
-    decode_message,
     MESSAGE_DELIMITER,
 )
 
@@ -109,7 +105,7 @@ class MockAnalysisServer:
                 while MESSAGE_DELIMITER in buf:
                     msg_end = buf.index(MESSAGE_DELIMITER)
                     raw_msg = buf[:msg_end].decode("utf-8")
-                    buf = buf[msg_end + len(MESSAGE_DELIMITER):]
+                    buf = buf[msg_end + len(MESSAGE_DELIMITER) :]
 
                     request = Request.from_json(raw_msg)
 
@@ -373,9 +369,7 @@ class TestSocketReconnection:
             assert resp2["params"]["name"] == "after_restart"
 
             # Server 2 must have received this request (no leftover from server 1)
-            params_received = [
-                r.params.get("name") for r in server2.requests_received
-            ]
+            params_received = [r.params.get("name") for r in server2.requests_received]
             assert "after_restart" in params_received
 
             client.close()

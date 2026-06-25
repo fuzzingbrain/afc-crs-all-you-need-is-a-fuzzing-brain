@@ -113,10 +113,16 @@ class TestTimeoutCondition:
         """Task should stop when elapsed time exceeds timeout_minutes."""
         dispatcher, repos = _make_dispatcher(timeout_minutes=1)
 
-        dispatcher.get_status = MagicMock(return_value={
-            "total": 1, "pending": 0, "building": 0,
-            "running": 1, "completed": 0, "failed": 0,
-        })
+        dispatcher.get_status = MagicMock(
+            return_value={
+                "total": 1,
+                "pending": 0,
+                "building": 0,
+                "running": 1,
+                "completed": 0,
+                "failed": 0,
+            }
+        )
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.shutdown_all_fuzzers = MagicMock()
         repos.povs.count.return_value = 0
@@ -126,7 +132,9 @@ class TestTimeoutCondition:
         after = base + timedelta(minutes=2)
 
         result = _run_wait(
-            dispatcher, repos, timeout_minutes=1,
+            dispatcher,
+            repos,
+            timeout_minutes=1,
             now_times=[base, after],
         )
 
@@ -137,10 +145,16 @@ class TestTimeoutCondition:
         """Task should not timeout if POV target reached first."""
         dispatcher, repos = _make_dispatcher(pov_count=1, timeout_minutes=60)
 
-        dispatcher.get_status = MagicMock(return_value={
-            "total": 1, "pending": 0, "building": 0,
-            "running": 1, "completed": 0, "failed": 0,
-        })
+        dispatcher.get_status = MagicMock(
+            return_value={
+                "total": 1,
+                "pending": 0,
+                "building": 0,
+                "running": 1,
+                "completed": 0,
+                "failed": 0,
+            }
+        )
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
@@ -150,7 +164,9 @@ class TestTimeoutCondition:
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
-            dispatcher, repos, timeout_minutes=60,
+            dispatcher,
+            repos,
+            timeout_minutes=60,
             now_times=[base, base + timedelta(seconds=5)],
         )
 
@@ -174,10 +190,16 @@ class TestBudgetCondition:
             timeout_minutes=60,
         )
 
-        dispatcher.get_status = MagicMock(return_value={
-            "total": 1, "pending": 0, "building": 0,
-            "running": 1, "completed": 0, "failed": 0,
-        })
+        dispatcher.get_status = MagicMock(
+            return_value={
+                "total": 1,
+                "pending": 0,
+                "building": 0,
+                "running": 1,
+                "completed": 0,
+                "failed": 0,
+            }
+        )
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
@@ -188,7 +210,9 @@ class TestBudgetCondition:
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
-            dispatcher, repos, timeout_minutes=60,
+            dispatcher,
+            repos,
+            timeout_minutes=60,
             now_times=[base, base + timedelta(seconds=5)],
         )
 
@@ -202,10 +226,16 @@ class TestBudgetCondition:
         """Task should stop when llm_cost == budget_limit."""
         dispatcher, repos = _make_dispatcher(budget_limit=30.0, timeout_minutes=60)
 
-        dispatcher.get_status = MagicMock(return_value={
-            "total": 1, "pending": 0, "building": 0,
-            "running": 1, "completed": 0, "failed": 0,
-        })
+        dispatcher.get_status = MagicMock(
+            return_value={
+                "total": 1,
+                "pending": 0,
+                "building": 0,
+                "running": 1,
+                "completed": 0,
+                "failed": 0,
+            }
+        )
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
@@ -215,7 +245,9 @@ class TestBudgetCondition:
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
-            dispatcher, repos, timeout_minutes=60,
+            dispatcher,
+            repos,
+            timeout_minutes=60,
             now_times=[base, base + timedelta(seconds=5)],
         )
 
@@ -229,10 +261,16 @@ class TestBudgetCondition:
             timeout_minutes=60,
         )
 
-        dispatcher.get_status = MagicMock(return_value={
-            "total": 1, "pending": 0, "building": 0,
-            "running": 0, "completed": 1, "failed": 0,
-        })
+        dispatcher.get_status = MagicMock(
+            return_value={
+                "total": 1,
+                "pending": 0,
+                "building": 0,
+                "running": 0,
+                "completed": 1,
+                "failed": 0,
+            }
+        )
         dispatcher.is_complete = MagicMock(return_value=True)
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
@@ -241,7 +279,9 @@ class TestBudgetCondition:
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
-            dispatcher, repos, timeout_minutes=60,
+            dispatcher,
+            repos,
+            timeout_minutes=60,
             now_times=[base, base + timedelta(seconds=5)],
         )
 
@@ -257,10 +297,16 @@ class TestBudgetCondition:
             timeout_minutes=60,
         )
 
-        dispatcher.get_status = MagicMock(return_value={
-            "total": 1, "pending": 0, "building": 0,
-            "running": 1, "completed": 0, "failed": 0,
-        })
+        dispatcher.get_status = MagicMock(
+            return_value={
+                "total": 1,
+                "pending": 0,
+                "building": 0,
+                "running": 1,
+                "completed": 0,
+                "failed": 0,
+            }
+        )
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
@@ -271,7 +317,9 @@ class TestBudgetCondition:
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
-            dispatcher, repos, timeout_minutes=60,
+            dispatcher,
+            repos,
+            timeout_minutes=60,
             now_times=[base, base + timedelta(seconds=5)],
         )
 
@@ -285,10 +333,16 @@ class TestBudgetCondition:
             timeout_minutes=60,
         )
 
-        dispatcher.get_status = MagicMock(return_value={
-            "total": 1, "pending": 0, "building": 0,
-            "running": 1, "completed": 0, "failed": 0,
-        })
+        dispatcher.get_status = MagicMock(
+            return_value={
+                "total": 1,
+                "pending": 0,
+                "building": 0,
+                "running": 1,
+                "completed": 0,
+                "failed": 0,
+            }
+        )
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
@@ -299,7 +353,9 @@ class TestBudgetCondition:
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
-            dispatcher, repos, timeout_minutes=60,
+            dispatcher,
+            repos,
+            timeout_minutes=60,
             now_times=[base, base + timedelta(seconds=5)],
         )
 
@@ -313,10 +369,16 @@ class TestBudgetCondition:
             timeout_minutes=60,
         )
 
-        dispatcher.get_status = MagicMock(return_value={
-            "total": 1, "pending": 0, "building": 0,
-            "running": 1, "completed": 0, "failed": 0,
-        })
+        dispatcher.get_status = MagicMock(
+            return_value={
+                "total": 1,
+                "pending": 0,
+                "building": 0,
+                "running": 1,
+                "completed": 0,
+                "failed": 0,
+            }
+        )
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
@@ -326,7 +388,9 @@ class TestBudgetCondition:
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
-            dispatcher, repos, timeout_minutes=60,
+            dispatcher,
+            repos,
+            timeout_minutes=60,
             now_times=[base, base + timedelta(seconds=5)],
         )
 
@@ -350,10 +414,16 @@ class TestPOVCountCondition:
             timeout_minutes=60,
         )
 
-        dispatcher.get_status = MagicMock(return_value={
-            "total": 1, "pending": 0, "building": 0,
-            "running": 1, "completed": 0, "failed": 0,
-        })
+        dispatcher.get_status = MagicMock(
+            return_value={
+                "total": 1,
+                "pending": 0,
+                "building": 0,
+                "running": 1,
+                "completed": 0,
+                "failed": 0,
+            }
+        )
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
@@ -363,7 +433,9 @@ class TestPOVCountCondition:
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
-            dispatcher, repos, timeout_minutes=60,
+            dispatcher,
+            repos,
+            timeout_minutes=60,
             now_times=[base, base + timedelta(seconds=5)],
         )
 
@@ -393,10 +465,16 @@ class TestPOVCountCondition:
 
         assert dispatcher.pov_count_target == 0
 
-        dispatcher.get_status = MagicMock(return_value={
-            "total": 1, "pending": 0, "building": 0,
-            "running": 1, "completed": 0, "failed": 0,
-        })
+        dispatcher.get_status = MagicMock(
+            return_value={
+                "total": 1,
+                "pending": 0,
+                "building": 0,
+                "running": 1,
+                "completed": 0,
+                "failed": 0,
+            }
+        )
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.shutdown_all_fuzzers = MagicMock()
         repos.povs.count.return_value = 10
@@ -407,7 +485,9 @@ class TestPOVCountCondition:
         after = base + timedelta(minutes=2)
 
         result = _run_wait(
-            dispatcher, repos, timeout_minutes=1,
+            dispatcher,
+            repos,
+            timeout_minutes=1,
             now_times=[base, after],
         )
 
@@ -475,6 +555,7 @@ class TestWorkerLLMBuffer:
     def test_get_database_import_exists(self):
         """get_database should be importable from fuzzingbrain.db."""
         from fuzzingbrain.db import get_database
+
         assert callable(get_database)
 
     def test_get_db_import_does_not_exist(self):
@@ -508,10 +589,15 @@ class TestWorkerLLMBuffer:
         buffer = WorkerLLMBuffer(redis_url=None, mongo_db=None)
 
         call = LLMCall(
-            agent_id="", worker_id="", task_id="",
-            model="test-model", provider="test",
-            input_tokens=100, output_tokens=50,
-            cost=0.01, latency_ms=500,
+            agent_id="",
+            worker_id="",
+            task_id="",
+            model="test-model",
+            provider="test",
+            input_tokens=100,
+            output_tokens=50,
+            cost=0.01,
+            latency_ms=500,
         )
         buffer.record(call)
 
@@ -527,10 +613,15 @@ class TestWorkerLLMBuffer:
         buffer = WorkerLLMBuffer(redis_url=None, mongo_db=mock_db)
 
         call = LLMCall(
-            agent_id="", worker_id="", task_id="",
-            model="test-model", provider="test",
-            input_tokens=100, output_tokens=50,
-            cost=0.01, latency_ms=500,
+            agent_id="",
+            worker_id="",
+            task_id="",
+            model="test-model",
+            provider="test",
+            input_tokens=100,
+            output_tokens=50,
+            cost=0.01,
+            latency_ms=500,
         )
         buffer.record(call)
         count = buffer._flush()
@@ -542,7 +633,9 @@ class TestWorkerLLMBuffer:
     def test_get_set_worker_buffer(self):
         """Module-level get/set should work correctly."""
         from fuzzingbrain.llms.buffer import (
-            WorkerLLMBuffer, get_worker_buffer, set_worker_buffer,
+            WorkerLLMBuffer,
+            get_worker_buffer,
+            set_worker_buffer,
         )
 
         # Initially None
@@ -571,10 +664,16 @@ class TestExitConditionPriority:
             timeout_minutes=1,
         )
 
-        dispatcher.get_status = MagicMock(return_value={
-            "total": 1, "pending": 0, "building": 0,
-            "running": 1, "completed": 0, "failed": 0,
-        })
+        dispatcher.get_status = MagicMock(
+            return_value={
+                "total": 1,
+                "pending": 0,
+                "building": 0,
+                "running": 1,
+                "completed": 0,
+                "failed": 0,
+            }
+        )
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
@@ -587,7 +686,9 @@ class TestExitConditionPriority:
         after = base + timedelta(minutes=2)
 
         result = _run_wait(
-            dispatcher, repos, timeout_minutes=1,
+            dispatcher,
+            repos,
+            timeout_minutes=1,
             now_times=[base, after],
         )
 
@@ -602,10 +703,16 @@ class TestExitConditionPriority:
             timeout_minutes=60,
         )
 
-        dispatcher.get_status = MagicMock(return_value={
-            "total": 1, "pending": 0, "building": 0,
-            "running": 1, "completed": 0, "failed": 0,
-        })
+        dispatcher.get_status = MagicMock(
+            return_value={
+                "total": 1,
+                "pending": 0,
+                "building": 0,
+                "running": 1,
+                "completed": 0,
+                "failed": 0,
+            }
+        )
         dispatcher.is_complete = MagicMock(return_value=False)
         dispatcher.graceful_shutdown = MagicMock()
         dispatcher.shutdown_all_fuzzers = MagicMock()
@@ -616,7 +723,9 @@ class TestExitConditionPriority:
 
         base = datetime(2026, 1, 1, 0, 0, 0)
         result = _run_wait(
-            dispatcher, repos, timeout_minutes=60,
+            dispatcher,
+            repos,
+            timeout_minutes=60,
             now_times=[base, base + timedelta(seconds=5)],
         )
 

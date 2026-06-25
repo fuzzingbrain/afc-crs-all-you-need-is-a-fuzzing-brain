@@ -26,7 +26,6 @@ from fuzzingbrain.tools.directions import (
     create_direction_impl,
     set_direction_context,
     set_direction_agent_id,
-    get_direction_context,
 )
 
 
@@ -367,9 +366,7 @@ class TestPlanningFailureHandling:
         strategy = POVFullscanStrategy(executor)
 
         # Mock planning to return empty
-        with patch.object(
-            strategy, "_run_direction_planning_async", return_value=[]
-        ):
+        with patch.object(strategy, "_run_direction_planning_async", return_value=[]):
             stats = asyncio.run(strategy._run_full_pipeline())
 
         # Should return empty stats, not crash
@@ -410,8 +407,7 @@ class TestSeedPriority:
     def test_only_top_5_get_seeds(self):
         """Strategy slices [:5] — 7 directions → only 5 get seed agents."""
         directions = [
-            _make_direction(str(ObjectId()), "f", name=f"dir_{i}")
-            for i in range(7)
+            _make_direction(str(ObjectId()), "f", name=f"dir_{i}") for i in range(7)
         ]
 
         # This is the exact slice from pov_fullscan.py line 741
