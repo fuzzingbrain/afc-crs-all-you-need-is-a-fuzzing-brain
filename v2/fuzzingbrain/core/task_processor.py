@@ -826,6 +826,7 @@ class TaskProcessor:
                 prebuild_dir=self.config.prebuild_dir,
                 work_id=self.config.work_id,
                 fuzzer_sources=self.config.fuzzer_sources,
+                enable_static_analysis=self.config.enable_static_analysis,
             )
 
             logger.info(f"Analyzer request: sanitizers={self.config.sanitizers}")

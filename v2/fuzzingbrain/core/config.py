@@ -113,6 +113,10 @@ class Config:
     prebuild_dir: Optional[str] = None  # Path to prebuild/{work_id}/ directory
     work_id: Optional[str] = None  # Work ID for prebuild data remapping
 
+    # Introspector static analysis is a decoupled, opt-in module. Off by
+    # default: production builds skip it and agents navigate via code tools.
+    enable_static_analysis: bool = False
+
     # Fuzzer source paths (fuzzer_name -> list of source file paths)
     fuzzer_sources: Dict[str, List[str]] = field(default_factory=dict)
 
@@ -205,6 +209,11 @@ class Config:
             budget_limit=float(os.environ.get("FUZZINGBRAIN_BUDGET_LIMIT", "50.0")),
             allow_expensive_fallback=os.environ.get(
                 "FUZZINGBRAIN_ALLOW_EXPENSIVE_FALLBACK", "false"
+            ).lower()
+            in ("true", "1", "yes"),
+            # Introspector static analysis (opt-in; off by default)
+            enable_static_analysis=os.environ.get(
+                "FUZZINGBRAIN_ENABLE_STATIC_ANALYSIS", "false"
             ).lower()
             in ("true", "1", "yes"),
             # Fuzzer filter (comma-separated list)
