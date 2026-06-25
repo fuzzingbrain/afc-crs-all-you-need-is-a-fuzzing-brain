@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+name: v2 CI
+
+on:
+  push:
+    branches: [main]
+    paths: ['v2/**', '.github/workflows/v2-ci.yml']
+  pull_request:
+    branches: [main]
+    paths: ['v2/**', '.github/workflows/v2-ci.yml']
+
+defaults:
+  run:
+    working-directory: v2
+
+jobs:
+  # Advisory only for now: the imported v2 code carries pre-existing ruff
+  # debt. Surfaced here but not blocking, to be cleaned up incrementally.
+  lint:
+    name: Ruff Lint & Format (advisory)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: pip install ruff
+      - run: ruff check .
+      - run: ruff format --check .
+
+  syntax-check:
+    name: Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: python -m compileall -q fuzzingbrain/ tests/
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    needs: [syntax-check]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: v2/requirements.txt
+      - run: |
+          pip install -r requirements.txt
+          pip install pytest mongomock
+      - run: pytest tests/ -v
