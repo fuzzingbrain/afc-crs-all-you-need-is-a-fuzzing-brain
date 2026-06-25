@@ -800,6 +800,7 @@ func DownloadAndVerifySource(taskDir string, source models.SourceDetail) error {
 
 	return fmt.Errorf("failed to download and verify %s after %d attempts", source.Type, maxRetries)
 }
+
 // ============================================================================
 // Directory and File Utilities (migrated from services/crs_services.go)
 // ============================================================================

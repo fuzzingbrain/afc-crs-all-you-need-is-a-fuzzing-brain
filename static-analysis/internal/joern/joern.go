@@ -530,7 +530,7 @@ func findFuzzerDirectories(projectDir string) []string {
 		"cpp/tests/fuzz",
 		"tests/fuzz",
 		"test/fuzz",
-		"tests/fuzzer",      // flatbuffers uses this
+		"tests/fuzzer", // flatbuffers uses this
 		"test/fuzzer",
 		"fuzz",
 		"fuzzing",
@@ -569,7 +569,7 @@ func findFuzzerDirectories(projectDir string) []string {
 			for _, existingDir := range fuzzerDirs {
 				// Check if existingDir is a subdirectory of candidatePath
 				// e.g., if we found "tests/fuzzer", skip adding "tests"
-				if strings.HasPrefix(existingDir, candidatePath + string(filepath.Separator)) {
+				if strings.HasPrefix(existingDir, candidatePath+string(filepath.Separator)) {
 					hasSubdirFuzzer = true
 					break
 				}
@@ -603,8 +603,8 @@ func hasSourceFiles(dir string) bool {
 		// Check for common source file extensions
 		ext := strings.ToLower(filepath.Ext(path))
 		if ext == ".c" || ext == ".cpp" || ext == ".cc" || ext == ".cxx" ||
-		   ext == ".h" || ext == ".hpp" || ext == ".hh" || ext == ".hxx" ||
-		   ext == ".java" {
+			ext == ".h" || ext == ".hpp" || ext == ".hh" || ext == ".hxx" ||
+			ext == ".java" {
 			hasSource = true
 			return filepath.SkipAll // Found a source file, stop walking
 		}

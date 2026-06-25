@@ -66,7 +66,7 @@ func InitTelemetry(applicationName string) (*TelemetryConfig, error) {
 
 	var err error
 	// Create a new tracer provider
-	tp, err = initTracerProvider(config,applicationName)
+	tp, err = initTracerProvider(config, applicationName)
 	if err != nil {
 		return config, fmt.Errorf("failed to initialize tracer provider: %w", err)
 	}

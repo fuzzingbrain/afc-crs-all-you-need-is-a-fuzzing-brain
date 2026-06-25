@@ -13,11 +13,11 @@ import (
 
 	"github.com/gin-gonic/gin"
 	// "github.com/google/uuid"
+	"crs/internal/config"
+	"crs/internal/models"
+	"crs/internal/services"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"crs/internal/services"
-	"crs/internal/models"
-	"crs/internal/config"
 )
 
 // MockCRSService implements all methods from services.CRSService.
@@ -89,7 +89,6 @@ func (m *MockCRSService) HandleSarifBroadcastWorker(broadcastWorker models.SARIF
 	return args.Error(0)
 }
 
-
 func TestSubmitSarif_BufferOverflow_RealService(t *testing.T) {
 	if testing.Short() {
 		t.Skip("Skipping integration test in short mode")
@@ -144,7 +143,7 @@ func TestSubmitSarif_BufferOverflow_RealService(t *testing.T) {
 	var broadcast models.SARIFBroadcast
 	err = json.Unmarshal(jsonData, &broadcast)
 	assert.NoError(t, err, "Failed to unmarshal SARIF JSON")
-	
+
 	// Verify we have the expected data
 	assert.NotEmpty(t, broadcast.MessageID, "MessageID should not be empty")
 	assert.NotEmpty(t, broadcast.Broadcasts, "Broadcasts array should not be empty")
@@ -160,7 +159,7 @@ func TestSubmitSarif_BufferOverflow_RealService(t *testing.T) {
 
 	// 7. Verify response is OK (200).
 	assert.Equal(t, http.StatusOK, w.Code)
-	
+
 	// 8. Optional: Add more assertions to verify the service processed the data correctly
 	// For example, check if files were created or data was stored as expected
 }

@@ -5,10 +5,10 @@ package database
 // This structure is used to parse the reachable_functions.jsonl file
 type ReachableFunction struct {
 	// Required fields
-	FunctionName string   `json:"function_name"` // Name of the function
-	FilePath     string   `json:"file_path"`     // Relative path from project root
-	StartLine    int      `json:"start_line"`    // Function start line number
-	EndLine      int      `json:"end_line"`      // Function end line number
+	FunctionName string `json:"function_name"` // Name of the function
+	FilePath     string `json:"file_path"`     // Relative path from project root
+	StartLine    int    `json:"start_line"`    // Function start line number
+	EndLine      int    `json:"end_line"`      // Function end line number
 
 	// Optional fields
 	CallPath     []string `json:"call_path,omitempty"`     // Call chain from entry point, e.g. ["main", "process", "parse"]

@@ -19,14 +19,14 @@ func FindFuzzers(fuzzerDir string) ([]string, error) {
 
 	// List of known non-fuzzer executables to skip
 	skipBinaries := map[string]bool{
-		"jazzer_agent_deploy.jar":         true,
-		"jazzer_driver":                   true,
-		"jazzer_driver_with_sanitizer":    true,
-		"jazzer_junit.jar":                true,
-		"llvm-symbolizer":                 true,
-		"sancov":                          true, // coverage tool
-		"clang":                           true,
-		"clang++":                         true,
+		"jazzer_agent_deploy.jar":      true,
+		"jazzer_driver":                true,
+		"jazzer_driver_with_sanitizer": true,
+		"jazzer_junit.jar":             true,
+		"llvm-symbolizer":              true,
+		"sancov":                       true, // coverage tool
+		"clang":                        true,
+		"clang++":                      true,
 	}
 
 	// File extensions to skip

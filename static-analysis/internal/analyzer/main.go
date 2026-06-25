@@ -64,7 +64,7 @@ func main() {
 	// Process each file
 	for _, filePath := range filesToAnalyze {
 		fmt.Printf("Analyzing %s...\n", filePath)
-		
+
 		// Read file content
 		content, err := ioutil.ReadFile(filePath)
 		if err != nil {
@@ -73,7 +73,7 @@ func main() {
 		}
 
 		ext := strings.ToLower(filepath.Ext(filePath))
-		
+
 		if ext == ".c" || ext == ".h" {
 			// Parse C file
 			tree, err := c.Parse(string(content))
@@ -81,15 +81,15 @@ func main() {
 				fmt.Printf("Error parsing C file %s: %v\n", filePath, err)
 				continue
 			}
-			
+
 			// Visit parse tree to build call graph
 			v := visitor.NewCCallGraphVisitor(filePath)
 			tree.Accept(v)
-			
+
 			// Add to collection of graphs
 			graphs = append(graphs, v.CallGraph)
 			fmt.Printf("Found %d functions in %s\n", len(v.CallGraph.Functions), filePath)
-			
+
 		} else if ext == ".java" {
 			// Parse Java file
 			tree, err := java.Parse(string(content))
@@ -97,11 +97,11 @@ func main() {
 				fmt.Printf("Error parsing Java file %s: %v\n", filePath, err)
 				continue
 			}
-			
+
 			// Visit parse tree to build call graph
 			v := visitor.NewJavaCallGraphVisitor(filePath)
 			tree.Accept(v)
-			
+
 			// Add to collection of graphs
 			graphs = append(graphs, v.CallGraph)
 			fmt.Printf("Found %d methods in %s\n", len(v.CallGraph.Functions), filePath)
@@ -110,16 +110,16 @@ func main() {
 
 	// Merge all call graphs
 	mergedGraph := callgraph.MergeCallGraphs(graphs...)
-	
+
 	// Generate DOT file
 	err = mergedGraph.GenerateDOTFile(*outputPath)
 	if err != nil {
 		fmt.Printf("Error generating DOT file: %v\n", err)
 		os.Exit(1)
 	}
-	
+
 	fmt.Printf("Call graph visualization written to %s\n", *outputPath)
 	fmt.Printf("To visualize the graph, run: dot -Tpng %s -o callgraph.png\n", *outputPath)
-	
+
 	fmt.Println("Analysis complete!")
 }

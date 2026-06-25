@@ -10,21 +10,21 @@ import (
 func Parse(input string) (antlr.Tree, error) {
 	// Create the input stream
 	inputStream := antlr.NewInputStream(input)
-	
+
 	// Create the lexer
 	lexer := c_parser.NewCLexer(inputStream)
-	
+
 	// Create the token stream
 	tokenStream := antlr.NewCommonTokenStream(lexer, antlr.TokenDefaultChannel)
-	
+
 	// Create the parser
 	parser := c_parser.NewCParser(tokenStream)
-	
+
 	// Set error handling
 	parser.RemoveErrorListeners()
 	errorListener := antlr.NewDiagnosticErrorListener(true)
 	parser.AddErrorListener(errorListener)
-	
+
 	// Parse the input
 	return parser.CompilationUnit(), nil
 }

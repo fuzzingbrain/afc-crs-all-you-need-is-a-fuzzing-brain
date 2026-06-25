@@ -6,13 +6,13 @@ import (
 	"io/ioutil"
 	"os"
 	"os/exec"
-	"strconv" 
+	"strconv"
 	"strings"
 
-		
-	"github.com/antlr4-go/antlr/v4" 
+	"github.com/antlr4-go/antlr/v4"
 	// c_parser "static-analysis/internal/parser/c/grammar"
 )
+
 // PreprocessFile runs the C preprocessor on a file and returns the preprocessed content
 // and a map of line numbers from preprocessed to original source
 func PreprocessFile(filePath string, includeDirs []string) (string, map[int]LineInfo, error) {
@@ -44,40 +44,40 @@ func PreprocessFile(filePath string, includeDirs []string) (string, map[int]Line
 
 	// Build the cpp command with line markers
 	args := []string{"-E", "-P", "-C"} // -E=preprocess only, -P=no line markers, -C=keep comments
-	
+
 	// Include our custom header first
 	args = append(args, "-include", headerFile.Name())
-	
+
 	// Add include directories
 	for _, dir := range includeDirs {
 		args = append(args, "-I"+dir)
 	}
-	
+
 	// Add the input file
 	args = append(args, filePath)
-	
+
 	// Add the output file
 	args = append(args, "-o", tmpFile.Name())
-	
+
 	// Run the preprocessor
 	cmd := exec.Command("gcc", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", nil, fmt.Errorf("preprocessor failed: %v\nOutput: %s", err, output)
 	}
-	
+
 	// Read the preprocessed content
 	preprocessed, err := os.ReadFile(tmpFile.Name())
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to read preprocessed file: %v", err)
 	}
-	
+
 	// Create a line map
 	lineMap, err := createLineMap(string(preprocessed), filePath)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to create line map: %v", err)
 	}
-	
+
 	return string(preprocessed), lineMap, nil
 }
 
@@ -85,17 +85,18 @@ func PreprocessFile(filePath string, includeDirs []string) (string, map[int]Line
 func createLineMap(preprocessed string, originalFile string) (map[int]LineInfo, error) {
 	lines := strings.Split(preprocessed, "\n")
 	lineMap := make(map[int]LineInfo)
-	
+
 	// By default, map all lines to the original file
 	for i := range lines {
 		lineMap[i+1] = LineInfo{
 			File: originalFile,
-			Line: i+1,
+			Line: i + 1,
 		}
 	}
-	
+
 	return lineMap, nil
 }
+
 // LineInfo represents information about a line in the original source
 type LineInfo struct {
 	File string
@@ -111,10 +112,10 @@ func buildLineMap(preprocessedFile string) (map[int]LineInfo, error) {
 
 	lines := strings.Split(string(content), "\n")
 	lineMap := make(map[int]LineInfo)
-	
+
 	currentFile := ""
 	currentLine := 0
-	
+
 	for i, line := range lines {
 		// Look for line markers: # linenum "filename" flags
 		if strings.HasPrefix(line, "# ") {
@@ -128,7 +129,7 @@ func buildLineMap(preprocessedFile string) (map[int]LineInfo, error) {
 				}
 			}
 		}
-		
+
 		// Map this preprocessed line to the current original source line
 		currentLine++
 		lineMap[i+1] = LineInfo{
@@ -136,7 +137,7 @@ func buildLineMap(preprocessedFile string) (map[int]LineInfo, error) {
 			Line: currentLine,
 		}
 	}
-	
+
 	return lineMap, nil
 }
 
@@ -147,7 +148,7 @@ func ParseFile(filePath string, includeDirs []string) (antlr.Tree, error) {
 	if err != nil {
 		return nil, fmt.Errorf("preprocessing failed: %v", err)
 	}
-	
+
 	// Parse the preprocessed content
 	return Parse(preprocessed)
 }

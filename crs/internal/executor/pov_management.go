@@ -290,7 +290,7 @@ func SaveAllCrashesAsPOVs(crashesDir, taskDir, fuzzerPath, fuzzDir, projectDir s
 		}
 	}
 	log.Printf("Processed %d/%d crash files, found %d confirmed crashes",
-	          len(processedFiles), len(allFiles), confirmedCount)
+		len(processedFiles), len(allFiles), confirmedCount)
 	// Delete all crash files after processing
 	// log.Printf("Cleaning up crash files...")
 	var deleteErrors int = 0
@@ -332,20 +332,20 @@ func SaveAllCrashesAsPOVs(crashesDir, taskDir, fuzzerPath, fuzzDir, projectDir s
 
 // POVSubmissionParams contains all parameters needed for POV submission
 type POVSubmissionParams struct {
-	CrashesDir            string
-	FuzzDir               string
-	TaskDir               string
-	ProjectDir            string
-	Sanitizer             string
-	TaskDetail            models.TaskDetail
-	Fuzzer                string
-	Output                string
-	VulnSignature         string
-	SubmissionEndpoint    string
-	WorkerIndex           string
-	CompetitionClient     *competition.Client
-	POVMetadataDir        string
-	UnharnessedFuzzerSrc  map[string]string
+	CrashesDir           string
+	FuzzDir              string
+	TaskDir              string
+	ProjectDir           string
+	Sanitizer            string
+	TaskDetail           models.TaskDetail
+	Fuzzer               string
+	Output               string
+	VulnSignature        string
+	SubmissionEndpoint   string
+	WorkerIndex          string
+	CompetitionClient    *competition.Client
+	POVMetadataDir       string
+	UnharnessedFuzzerSrc map[string]string
 }
 
 // GenerateCrashSignatureAndSubmit generates a crash signature and submits it
@@ -361,19 +361,18 @@ func GenerateCrashSignatureAndSubmit(params POVSubmissionParams) error {
 
 	encodedCrashData := base64.StdEncoding.EncodeToString(crashData)
 
-
 	// 2. Submit to either the submission service (if in worker mode) or directly to the Competition API
 	if params.SubmissionEndpoint != "" && params.WorkerIndex != "" {
 		// We're in worker mode, submit to the submission service
 		log.Printf("Libfuzzer Worker %s submitting POV for fuzzer %s with sanitizer %s to submission service",
-		            params.WorkerIndex, params.Fuzzer, params.Sanitizer)
+			params.WorkerIndex, params.Fuzzer, params.Sanitizer)
 
 		// Extract crash trace from the output
 		crashTrace := extractCrashTrace(params.Output)
 		if crashTrace != "" {
 			//check crash trace contains error in application code, not purely fuzzer
 			//code pattern not totally reliable
-			if strings.Contains(crashTrace, params.TaskDetail.ProjectName) || strings.Contains(crashTrace, "apache")  || strings.Contains(crashTrace, "org") {
+			if strings.Contains(crashTrace, params.TaskDetail.ProjectName) || strings.Contains(crashTrace, "apache") || strings.Contains(crashTrace, "org") {
 				log.Printf("Valid Crash Trace: %s", crashTrace)
 			} else {
 				//TODO ask AI to check
@@ -386,17 +385,16 @@ func GenerateCrashSignatureAndSubmit(params POVSubmissionParams) error {
 		}
 		// Create the submission payload
 		submission := map[string]interface{}{
-			"task_id": params.TaskDetail.TaskID.String(),
+			"task_id":      params.TaskDetail.TaskID.String(),
 			"architecture": "x86_64",
-			"engine": "libfuzzer",
-			"fuzzer_name": params.Fuzzer,
-			"sanitizer": params.Sanitizer,
-			"testcase": encodedCrashData,
-			"signature": params.Fuzzer+"-"+params.VulnSignature,
-			"strategy": "libfuzzer",
-			"crash_trace": crashTrace,
+			"engine":       "libfuzzer",
+			"fuzzer_name":  params.Fuzzer,
+			"sanitizer":    params.Sanitizer,
+			"testcase":     encodedCrashData,
+			"signature":    params.Fuzzer + "-" + params.VulnSignature,
+			"strategy":     "libfuzzer",
+			"crash_trace":  crashTrace,
 		}
-
 
 		var submissionURL string
 		if !params.TaskDetail.HarnessesIncluded {
@@ -411,16 +409,16 @@ func GenerateCrashSignatureAndSubmit(params POVSubmissionParams) error {
 					submission["fuzzer_source"] = ""
 				}
 			} else {
-				submission["fuzzer_file"]   = ""
+				submission["fuzzer_file"] = ""
 				submission["fuzzer_source"] = ""
 				log.Printf("No unharnessed fuzzer source recorded for task %s", params.TaskDetail.TaskID)
 			}
 
 			log.Printf("Submitting to freeform endpoint: %s", submissionURL)
-		} else{
+		} else {
 			submissionURL = fmt.Sprintf("%s/v1/task/%s/pov/", params.SubmissionEndpoint, params.TaskDetail.TaskID.String())
 			// Log the submission endpoint for debugging
-			log.Printf("Submitting to endpoint: %s",submissionURL)
+			log.Printf("Submitting to endpoint: %s", submissionURL)
 		}
 
 		// Marshal the submission
@@ -441,8 +439,7 @@ func GenerateCrashSignatureAndSubmit(params POVSubmissionParams) error {
 
 		for attempt := 1; attempt <= maxRetries; attempt++ {
 			log.Printf("Submission attempt %d of %d for fuzzer %s with sanitizer %s",
-			            attempt, maxRetries, params.Fuzzer, params.Sanitizer)
-
+				attempt, maxRetries, params.Fuzzer, params.Sanitizer)
 
 			// Create the request
 			req, err := http.NewRequest("POST", submissionURL, bytes.NewBuffer(submissionJSON))
@@ -488,7 +485,7 @@ func GenerateCrashSignatureAndSubmit(params POVSubmissionParams) error {
 		if lastErr != nil {
 			log.Printf("All %d submission attempts failed: %v", maxRetries, lastErr)
 			return fmt.Errorf("failed to submit to submission service after %d attempts: %v",
-			                    maxRetries, lastErr)
+				maxRetries, lastErr)
 		}
 
 		defer resp.Body.Close()
@@ -497,9 +494,9 @@ func GenerateCrashSignatureAndSubmit(params POVSubmissionParams) error {
 		if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 			body, _ := io.ReadAll(resp.Body)
 			log.Printf("submission service returned non-OK status: %d, body: %s",
-			resp.StatusCode, string(body))
+				resp.StatusCode, string(body))
 			return fmt.Errorf("submission service returned non-OK status: %d, body: %s",
-			                    resp.StatusCode, string(body))
+				resp.StatusCode, string(body))
 		}
 
 		log.Printf("Successfully submitted POV to submission service")
@@ -551,7 +548,7 @@ func GetPOVStatsFromSubmissionService(taskID string, submissionEndpoint string) 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		log.Printf("Error creating getPOVStats request for taskID %s: %v", taskID, err)
-		return 0,0, err
+		return 0, 0, err
 	}
 
 	{
@@ -565,50 +562,49 @@ func GetPOVStatsFromSubmissionService(taskID string, submissionEndpoint string) 
 			req.SetBasicAuth(apiKeyID, apiToken)
 		}
 
+		// Increase the timeout for the HTTP request
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // Increase to 3 minutes
+		defer cancel()
+		req = req.WithContext(ctx)
 
-// Increase the timeout for the HTTP request
-ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second) // Increase to 3 minutes
-defer cancel()
-req = req.WithContext(ctx)
+		// Create a client with custom timeout settings
+		client := &http.Client{
+			Timeout: 180 * time.Second, // Set client timeout to match context timeout
+			Transport: &http.Transport{
+				DialContext: (&net.Dialer{
+					Timeout:   30 * time.Second, // Connection timeout
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+				TLSHandshakeTimeout:   15 * time.Second,
+				ResponseHeaderTimeout: 30 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+				MaxIdleConns:          100,
+				IdleConnTimeout:       90 * time.Second,
+			},
+		}
 
-// Create a client with custom timeout settings
-client := &http.Client{
-	Timeout: 180 * time.Second, // Set client timeout to match context timeout
-	Transport: &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   30 * time.Second, // Connection timeout
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		TLSHandshakeTimeout:   15 * time.Second,
-		ResponseHeaderTimeout: 30 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
-		MaxIdleConns:          100,
-		IdleConnTimeout:       90 * time.Second,
-	},
-}
-
-// Send the request
-resp, err := client.Do(req)
-if err != nil {
-	log.Printf("Error getting POV statistics at submission service: %v", err)
-	// Consider implementing a retry mechanism here
-	if ctx.Err() == context.DeadlineExceeded {
-		log.Printf("Request timed out, may need to increase timeout or check server load")
-	}
-	return 0,0, err
-}
-defer resp.Body.Close()
+		// Send the request
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("Error getting POV statistics at submission service: %v", err)
+			// Consider implementing a retry mechanism here
+			if ctx.Err() == context.DeadlineExceeded {
+				log.Printf("Request timed out, may need to increase timeout or check server load")
+			}
+			return 0, 0, err
+		}
+		defer resp.Body.Close()
 
 		// Check response
 		if resp.StatusCode != http.StatusOK {
 			body, _ := io.ReadAll(resp.Body)
 			log.Printf("Submission service returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
-			return 0,0, fmt.Errorf("Submission service returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
+			return 0, 0, fmt.Errorf("Submission service returned non-200 status: %d, body: %s", resp.StatusCode, string(body))
 		} else {
 
 			var response models.POVStatsResponse
 			if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-				return 0,0, err
+				return 0, 0, err
 			}
 
 			return response.Count, response.PatchCount, nil

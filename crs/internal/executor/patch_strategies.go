@@ -94,8 +94,8 @@ func runPatchingStrategies(
 
 	if !taskDetail.HarnessesIncluded {
 		//for unharnessed copy all build-*.sh
-		sourceDirForBuildScripts := taskDir           // Source is the taskDir
-		targetDirForBuildScripts := patchWorkDir      // Target is the root of the patch workspace
+		sourceDirForBuildScripts := taskDir      // Source is the taskDir
+		targetDirForBuildScripts := patchWorkDir // Target is the root of the patch workspace
 		buildScripts, err := filepath.Glob(filepath.Join(sourceDirForBuildScripts, "build-*.sh"))
 		if err != nil {
 			log.Printf("Error finding build-*.sh files in %s: %v", sourceDirForBuildScripts, err)
@@ -193,8 +193,8 @@ func runPatchingStrategies(
 	log.Printf("Found %d strategy files: %v", len(strategyFiles), strategyFiles)
 
 	// --- Patching Loop ---
-	patchSuccess := false          // Overall success flag
-	var successMutex sync.Mutex    // Mutex to protect patchSuccess
+	patchSuccess := false       // Overall success flag
+	var successMutex sync.Mutex // Mutex to protect patchSuccess
 	roundNum := 0
 
 	for {
@@ -226,7 +226,7 @@ func runPatchingStrategies(
 		log.Printf("Patching round %d timeout: %v", roundNum, roundTimeoutDuration)
 
 		roundCtx, cancel := context.WithTimeout(context.Background(), roundTimeoutDuration) // Context per round
-		var wg sync.WaitGroup                                                                // WaitGroup per round
+		var wg sync.WaitGroup                                                               // WaitGroup per round
 
 		// install once, right after you create roundCtx
 		sigc := make(chan os.Signal, 1)
@@ -236,7 +236,7 @@ func runPatchingStrategies(
 			helpers.KillAllChildren(syscall.SIGTERM)
 			time.Sleep(2 * time.Second)
 			helpers.KillAllChildren(syscall.SIGKILL)
-			cancel() // cancel roundCtx
+			cancel()                   // cancel roundCtx
 			fmt.Fprintln(log.Writer()) // newline so shell prompt is clean
 			os.Exit(1)                 // exit the Go program itself
 		}()

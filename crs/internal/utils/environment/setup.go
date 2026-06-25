@@ -76,16 +76,16 @@ type FuzzerBuilder func(myFuzzer *string, taskDir, projectDir, sanitizerDir stri
 
 // PrepareEnvironmentParams contains parameters for PrepareEnvironment
 type PrepareEnvironmentParams struct {
-	MyFuzzer          *string
-	TaskDir           string
-	TaskDetail        models.TaskDetail
-	DockerfilePath    string
+	MyFuzzer           *string
+	TaskDir            string
+	TaskDetail         models.TaskDetail
+	DockerfilePath     string
 	DockerfileFullPath string
-	FuzzerDir         string
-	ProjectDir        string
-	FuzzerBuilder     FuzzerBuilder
-	FindFuzzers       func(string) ([]string, error)
-	SanitizerOverride []string // Optional: override sanitizers from config
+	FuzzerDir          string
+	ProjectDir         string
+	FuzzerBuilder      FuzzerBuilder
+	FindFuzzers        func(string) ([]string, error)
+	SanitizerOverride  []string // Optional: override sanitizers from config
 }
 
 // PrepareEnvironment prepares the task environment by loading config and building fuzzers

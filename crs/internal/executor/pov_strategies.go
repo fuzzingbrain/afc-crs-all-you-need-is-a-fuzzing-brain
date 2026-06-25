@@ -227,8 +227,8 @@ func runAdvancedPOVPhases(
 			} else if pov_count > 0 {
 				log.Printf("POVs exist but workflow only %v (<1h), continuing. (pov=%d, patch=%d)",
 					workflowDuration, pov_count, patch_count)
-			} 
-		}		
+			}
+		}
 		log.Printf("No POVs yet, continuing to next round (duration=%v)", workflowDuration)
 	}
 
@@ -288,7 +288,7 @@ func runPOVPhasesParallel(ctx context.Context, fuzzer string, params TaskExecuti
 	projectDir := params.TaskDir + "/" + params.TaskDetail.Focus
 
 	for phase := 0; phase < numPhases; phase++ {
-		//for testing only do phase 3 
+		//for testing only do phase 3
 		// if phase != numPhases-1 {
 		// 	continue
 		// }

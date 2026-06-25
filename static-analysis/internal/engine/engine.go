@@ -37,8 +37,8 @@ import (
 	// "static-analysis/internal/parser/java"
 	"static-analysis/internal/engine/models"
 	"static-analysis/internal/joern"
-	"static-analysis/internal/simple"
 	java_parser "static-analysis/internal/parser/java/grammar"
+	"static-analysis/internal/simple"
 )
 
 // ---------------------------------------------------------------------------
@@ -59,9 +59,9 @@ func hasSourceFiles(dir string) bool {
 		".c": true, ".cc": true, ".cpp": true, ".cxx": true, ".c++": true, // C/C++
 		".h": true, ".hh": true, ".hpp": true, ".hxx": true, ".h++": true, // C/C++ headers
 		".java": true, // Java
-		".rs": true,   // Rust
-		".go": true,   // Go
-		".py": true,   // Python
+		".rs":   true, // Rust
+		".go":   true, // Go
+		".py":   true, // Python
 	}
 
 	foundSourceFile := false

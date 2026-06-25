@@ -11,8 +11,8 @@ type Function struct {
 
 // Call represents a function call
 type Call struct {
-	Caller    *Function
-	Callee    *Function
+	Caller     *Function
+	Callee     *Function
 	LineNumber int
 }
 
@@ -33,14 +33,14 @@ func (cg *CallGraph) AddFunction(name string, filePath string, lineNumber int) *
 	if f, exists := cg.Functions[name]; exists {
 		return f
 	}
-	
+
 	f := &Function{
 		Name:       name,
 		FilePath:   filePath,
 		LineNumber: lineNumber,
 		Calls:      make([]*Call, 0),
 	}
-	
+
 	cg.Functions[name] = f
 	return f
 }
@@ -49,16 +49,16 @@ func (cg *CallGraph) AddFunction(name string, filePath string, lineNumber int) *
 func (cg *CallGraph) AddCall(callerName, calleeName string, lineNumber int) {
 	caller := cg.Functions[callerName]
 	callee := cg.Functions[calleeName]
-	
+
 	if caller == nil || callee == nil {
 		return
 	}
-	
+
 	call := &Call{
 		Caller:     caller,
 		Callee:     callee,
 		LineNumber: lineNumber,
 	}
-	
+
 	caller.Calls = append(caller.Calls, call)
 }

@@ -17,12 +17,11 @@ import (
 	"crs/internal/models"
 	"crs/internal/utils/environment"
 	"crs/internal/utils/helpers"
-
 )
 
 const (
 	SafetyBufferMinutes = 10
-	UNHARNESSED        = "UNHARNESSED"
+	UNHARNESSED         = "UNHARNESSED"
 )
 
 // TaskExecutionParams contains all parameters needed for executing a fuzzing task on a worker
@@ -351,13 +350,13 @@ func executeFuzzingWorkflow(fuzzer string, params TaskExecutionParams, projectDi
 
 			if os.Getenv("FUZZER_TEST") == "" {
 				fullScanConfig := FullScanStrategyConfig{
-					Model:                    params.Model,
-					POVMetadataDir:           params.POVMetadataDir,
-					SubmissionEndpoint:       params.SubmissionEndpoint,
-					WorkerIndex:              params.WorkerIndex,
-					AnalysisServiceUrl:       params.AnalysisServiceUrl,
-					StrategyConfig:           params.StrategyConfig,
-					Sanitizer:                sanitizer,
+					Model:              params.Model,
+					POVMetadataDir:     params.POVMetadataDir,
+					SubmissionEndpoint: params.SubmissionEndpoint,
+					WorkerIndex:        params.WorkerIndex,
+					AnalysisServiceUrl: params.AnalysisServiceUrl,
+					StrategyConfig:     params.StrategyConfig,
+					Sanitizer:          sanitizer,
 				}
 				povSuccess = runFullScanStrategy(fuzzer, params.TaskDir, projectDir, fuzzDir,
 					params.ProjectConfig.Language, params.TaskDetail, params.Task, fullScanConfig)
@@ -658,4 +657,3 @@ func printCompletionSummary(projectDir, taskDir string, povFound bool) {
 	log.Println("╚════════════════════════════════════════════════════════════════╝")
 	log.Println("")
 }
-

@@ -31,10 +31,10 @@ type baseService struct {
 	model              string
 
 	// POV metadata directories (used by Local and Worker services)
-	povMetadataDir         string
-	povMetadataDir0        string
+	povMetadataDir          string
+	povMetadataDir0         string
 	povAdvcancedMetadataDir string
-	patchWorkDir           string
+	patchWorkDir            string
 }
 
 // GetWorkDir returns the working directory path

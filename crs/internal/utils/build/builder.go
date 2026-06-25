@@ -16,8 +16,8 @@ import (
 // It creates unique out/work directories for each sanitizer build to avoid conflicts.
 func BuildAFCFuzzers(taskDir string, sanitizer, projectName, projectDir, sanitizerDir string) (string, error) {
 	// ***** NEW: give every build its own out/work dirs *****
-	buildRoot   := filepath.Join(taskDir, "fuzz-tooling", "build")
-	uniqOutDir  := filepath.Join(buildRoot, "out",  fmt.Sprintf("%s-%s", projectName, sanitizer))
+	buildRoot := filepath.Join(taskDir, "fuzz-tooling", "build")
+	uniqOutDir := filepath.Join(buildRoot, "out", fmt.Sprintf("%s-%s", projectName, sanitizer))
 	uniqWorkDir := filepath.Join(buildRoot, "work", fmt.Sprintf("%s-%s", projectName, sanitizer))
 
 	// Make sure they exist.
@@ -31,10 +31,10 @@ func BuildAFCFuzzers(taskDir string, sanitizer, projectName, projectDir, sanitiz
 	// The helper script mounts …/out/<project> → /out (and the same for work).
 	// Replace those locations with symlinks that point to our per-sanitizer dirs,
 	// *holding an exclusive lock while we do so* to avoid concurrent swaps.
-	linkOut  := filepath.Join(buildRoot, "out",  projectName)
+	linkOut := filepath.Join(buildRoot, "out", projectName)
 	linkWork := filepath.Join(buildRoot, "work", projectName)
 	lockFile := filepath.Join(buildRoot, fmt.Sprintf("%s.lock", projectName))
-	lk, err  := os.OpenFile(lockFile, os.O_CREATE|os.O_RDWR, 0o600)
+	lk, err := os.OpenFile(lockFile, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return "", fmt.Errorf("open lock: %w", err)
 	}
@@ -198,4 +198,3 @@ func PullAFCDockerImage(taskDir string, projectName string) (string, error) {
 
 	return cmdOutput.String(), nil
 }
-

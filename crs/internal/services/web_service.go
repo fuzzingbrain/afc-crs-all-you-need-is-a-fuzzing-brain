@@ -26,23 +26,23 @@ import (
 
 // WebCRSService implements CRSService for web service mode (task scheduling and distribution)
 type WebCRSService struct {
-	cfg                    *config.Config
-	tasks                  map[string]*models.TaskDetail
-	tasksMutex             sync.RWMutex
-	workDir                string
-	competitionClient      *competition.Client
-	statusMutex            sync.RWMutex
-	status                 models.StatusTasksState
-	povMetadataDir         string
-	povMetadataDir0        string
+	cfg                     *config.Config
+	tasks                   map[string]*models.TaskDetail
+	tasksMutex              sync.RWMutex
+	workDir                 string
+	competitionClient       *competition.Client
+	statusMutex             sync.RWMutex
+	status                  models.StatusTasksState
+	povMetadataDir          string
+	povMetadataDir0         string
 	povAdvcancedMetadataDir string
-	patchWorkDir           string
-	submissionEndpoint     string
-	workerIndex            string
-	analysisServiceUrl     string
-	workerNodes            int
-	workerBasePort         int
-	model                  string
+	patchWorkDir            string
+	submissionEndpoint      string
+	workerIndex             string
+	analysisServiceUrl      string
+	workerNodes             int
+	workerBasePort          int
+	model                   string
 
 	// Fields for tracking historical task distribution
 	totalTasksDistributed int

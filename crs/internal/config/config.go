@@ -117,10 +117,10 @@ type POVStrategyConfig struct {
 // PatchStrategyConfig holds Patch strategy patterns and selection
 type PatchStrategyConfig struct {
 	// Patch strategy patterns (patch* strategies)
-	DeltaPattern        string `envconfig:"STRATEGY_PATCH_DELTA_PATTERN" default:"patch*_delta.py"`
-	FullPattern         string `envconfig:"STRATEGY_PATCH_FULL_PATTERN" default:"patch*_full.py"`
-	SpecificDeltaName   string `envconfig:"STRATEGY_PATCH_SPECIFIC_DELTA" default:"patch_delta.py"`
-	SpecificFullName    string `envconfig:"STRATEGY_PATCH_SPECIFIC_FULL" default:"patch_full.py"`
+	DeltaPattern      string `envconfig:"STRATEGY_PATCH_DELTA_PATTERN" default:"patch*_delta.py"`
+	FullPattern       string `envconfig:"STRATEGY_PATCH_FULL_PATTERN" default:"patch*_full.py"`
+	SpecificDeltaName string `envconfig:"STRATEGY_PATCH_SPECIFIC_DELTA" default:"patch_delta.py"`
+	SpecificFullName  string `envconfig:"STRATEGY_PATCH_SPECIFIC_FULL" default:"patch_full.py"`
 
 	// XPatch strategy patterns (xpatch* strategies)
 	XPatchDeltaPattern string `envconfig:"STRATEGY_XPATCH_DELTA_PATTERN" default:"xpatch*_delta.py"`
@@ -242,8 +242,8 @@ func Load() (*Config, error) {
 
 	// Handle test mode overrides
 	if os.Getenv("LOCAL_TEST") != "" ||
-	   os.Getenv("ANALYSIS_SERVICE_TEST") != "" ||
-	   os.Getenv("SUBMISSION_SERVICE_TEST") != "" {
+		os.Getenv("ANALYSIS_SERVICE_TEST") != "" ||
+		os.Getenv("SUBMISSION_SERVICE_TEST") != "" {
 		cfg.Services.AnalysisURL = "http://localhost:7082"
 		cfg.Services.SubmissionURL = "http://localhost:7081"
 	}

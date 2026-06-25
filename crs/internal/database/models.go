@@ -55,35 +55,35 @@ type SuspiciousPoint struct {
 
 // POVResult represents a POV generation result
 type POVResult struct {
-	ID                  int               `db:"id"`
-	TaskID              uuid.UUID         `db:"task_id"`
-	SuspiciousPointID   *int              `db:"suspicious_point_id"`
-	POVID               string            `db:"pov_id"`
-	Signature           string            `db:"signature"`
-	BlobFilePath        string            `db:"blob_file_path"`
-	FuzzerOutputPath    string            `db:"fuzzer_output_path"`
-	PythonCode          string            `db:"python_code"`
-	StrategyName        string            `db:"strategy_name"`
-	ModelName           string            `db:"model_name"`
-	Iteration           int               `db:"iteration"`
-	CreatedAt           time.Time         `db:"created_at"`
-	Metadata            map[string]string `db:"metadata"`
+	ID                int               `db:"id"`
+	TaskID            uuid.UUID         `db:"task_id"`
+	SuspiciousPointID *int              `db:"suspicious_point_id"`
+	POVID             string            `db:"pov_id"`
+	Signature         string            `db:"signature"`
+	BlobFilePath      string            `db:"blob_file_path"`
+	FuzzerOutputPath  string            `db:"fuzzer_output_path"`
+	PythonCode        string            `db:"python_code"`
+	StrategyName      string            `db:"strategy_name"`
+	ModelName         string            `db:"model_name"`
+	Iteration         int               `db:"iteration"`
+	CreatedAt         time.Time         `db:"created_at"`
+	Metadata          map[string]string `db:"metadata"`
 }
 
 // AnalysisAttempt represents an attempt to analyze a suspicious point
 type AnalysisAttempt struct {
-	ID                     int               `db:"id"`
-	SuspiciousPointID      int               `db:"suspicious_point_id"`
-	TaskID                 uuid.UUID         `db:"task_id"`
-	AttemptNumber          int               `db:"attempt_number"`
-	StrategyName           string            `db:"strategy_name"`
-	ModelName              string            `db:"model_name"`
-	ReachabilityVerified   bool              `db:"reachability_verified"`
-	ExploitationAttempted  bool              `db:"exploitation_attempted"`
-	POVFound               bool              `db:"pov_found"`
-	StartedAt              time.Time         `db:"started_at"`
-	CompletedAt            *time.Time        `db:"completed_at"`
-	ErrorMessage           string            `db:"error_message"`
-	Notes                  string            `db:"notes"`
-	Metadata               map[string]string `db:"metadata"`
+	ID                    int               `db:"id"`
+	SuspiciousPointID     int               `db:"suspicious_point_id"`
+	TaskID                uuid.UUID         `db:"task_id"`
+	AttemptNumber         int               `db:"attempt_number"`
+	StrategyName          string            `db:"strategy_name"`
+	ModelName             string            `db:"model_name"`
+	ReachabilityVerified  bool              `db:"reachability_verified"`
+	ExploitationAttempted bool              `db:"exploitation_attempted"`
+	POVFound              bool              `db:"pov_found"`
+	StartedAt             time.Time         `db:"started_at"`
+	CompletedAt           *time.Time        `db:"completed_at"`
+	ErrorMessage          string            `db:"error_message"`
+	Notes                 string            `db:"notes"`
+	Metadata              map[string]string `db:"metadata"`
 }
