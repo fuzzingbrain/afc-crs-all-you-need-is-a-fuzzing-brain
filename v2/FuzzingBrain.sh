@@ -1068,6 +1068,7 @@ if is_git_url "$TARGET"; then
             --sanitizers "$SANITIZERS" \
             --timeout "$TIMEOUT_MINUTES" \
             --pov-count "$POV_COUNT" \
+            ${BUDGET_LIMIT:+--budget "$BUDGET_LIMIT"} \
             ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
             ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"}
     else
@@ -1083,6 +1084,7 @@ if is_git_url "$TARGET"; then
             --sanitizers "$SANITIZERS" \
             --timeout "$TIMEOUT_MINUTES" \
             --pov-count "$POV_COUNT" \
+            ${BUDGET_LIMIT:+--budget "$BUDGET_LIMIT"} \
             ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
             ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"}
     fi
