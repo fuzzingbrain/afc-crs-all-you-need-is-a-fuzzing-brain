@@ -1,6 +1,15 @@
 **/.env
 */.env
 
+# Python virtual environments
+**/venv/
+**/.venv/
+
+# Editor / OS noise
+.idea/
+.vscode/
+.DS_Store
+
 **/logs
 *.log
 
