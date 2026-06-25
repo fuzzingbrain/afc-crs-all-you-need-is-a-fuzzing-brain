@@ -226,6 +226,13 @@ class LLMConfig:
             except ValueError:
                 pass
 
+        retries_env = os.environ.get("LLM_MAX_RETRIES")
+        if retries_env:
+            try:
+                config.max_retries = max(0, int(retries_env))
+            except ValueError:
+                pass
+
         return config
 
     @classmethod
