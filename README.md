@@ -5,7 +5,7 @@
 <img src="https://img.shields.io/badge/Python-3.10+-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python">
 <img src="https://img.shields.io/badge/Go-1.21+-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go">
 <img src="https://img.shields.io/badge/Docker-Required-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
-<img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License">
+<img src="https://img.shields.io/badge/License-Apache_2.0-green?style=for-the-badge" alt="License">
 
 **Autonomous Cyber Reasoning System for Vulnerability Discovery and Patching**
 
