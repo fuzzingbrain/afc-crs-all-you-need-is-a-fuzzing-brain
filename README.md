@@ -13,6 +13,11 @@
 
 </div>
 
+> 🚧 **v2 is in active development under [`v2/`](v2/)** — a self-contained
+> rewrite unifying breadth fuzzer engineering with depth SP reasoning over a
+> shared seed pool. The stable v1 system documented below is unaffected and
+> remains the supported entry point. See [`v2/ARCHITECTURE.md`](v2/ARCHITECTURE.md).
+
 ---
 
 ## Quick Start (Docker)

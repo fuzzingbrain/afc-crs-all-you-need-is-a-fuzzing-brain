@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: Apache-2.0
+# Python build / editable-install artifacts for the self-contained v2 project
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+__pycache__/
+*.pyc
+.venv/
+venv/
