@@ -86,6 +86,56 @@ def _is_xai_model(model_id: str) -> bool:
     return "grok" in model_id.lower() or model_id.startswith("xai/")
 
 
+def _apply_prompt_caching(params: dict) -> None:
+    """Enable prompt (KV) caching on stable prefixes to cut input-token cost.
+
+    Marks the system prompt and the tool schemas — which are identical across
+    an agent's many turns — as cacheable. Anthropic charges ~10% for cache
+    reads vs full input tokens, so this is a large saving on agent loops.
+
+    Provider behavior:
+    - Anthropic: honors ``cache_control`` (this function targets it).
+    - OpenAI / xAI: those paths use the OpenAI SDK directly and cache
+      automatically; they never reach here.
+    - Gemini / DeepSeek / others via litellm: ``cache_control`` is dropped
+      silently (litellm.drop_params=True), so this is a safe no-op.
+
+    Mutates ``params`` in place. Modifies copies of messages/tools so the
+    caller's original lists are untouched (safe across fallback/retry).
+    """
+    model_id = str(params.get("model", "")).lower()
+    if "claude" not in model_id and "anthropic" not in model_id:
+        return
+
+    cache = {"type": "ephemeral"}
+
+    # Cache the system prompt (stable across an agent's turns).
+    messages = params.get("messages")
+    if messages:
+        new_messages = []
+        for msg in messages:
+            content = msg.get("content")
+            if msg.get("role") == "system" and isinstance(content, str) and content:
+                new_messages.append(
+                    {
+                        "role": "system",
+                        "content": [
+                            {"type": "text", "text": content, "cache_control": cache}
+                        ],
+                    }
+                )
+            else:
+                new_messages.append(msg)
+        params["messages"] = new_messages
+
+    # Cache the tool schemas (mark the last tool = cache the whole tool block).
+    tools = params.get("tools")
+    if tools:
+        tools = [dict(t) for t in tools]
+        tools[-1] = {**tools[-1], "cache_control": cache}
+        params["tools"] = tools
+
+
 @dataclass
 class LLMResponse:
     """Response from LLM call"""
@@ -537,6 +587,9 @@ class LLMClient:
 
         # Additional params
         params.update(kwargs)
+
+        # Prompt caching (KV cache) for stable prefixes — big input-token savings
+        _apply_prompt_caching(params)
 
         return params
 
