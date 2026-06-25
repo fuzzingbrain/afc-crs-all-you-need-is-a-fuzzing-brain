@@ -1,0 +1,10 @@
+{
+    "repo_url": "https://github.com/OwenSanzas/libpng.git",
+    "project_name": "libpng",
+    "job_type": "pov-patch",
+    "scan_mode": "delta",
+    "base_commit": "bc841a89aea42b2a2de752171588ce94402b3949",
+    "delta_commit": "2c894c66108f0724331a9e5b4826e351bf2d094b",
+    "sanitizers": ["address"],
+    "timeout_minutes": 60
+}

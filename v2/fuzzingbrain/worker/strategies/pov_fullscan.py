@@ -1,0 +1,837 @@
+"""
+POV Full-scan Strategy
+
+Strategy for full-scan mode: analyzes all reachable functions for vulnerabilities.
+
+Breadth-First Per-Direction Architecture:
+1. Direction Planning: Divides call graph into logical directions (HIGH/MEDIUM/LOW risk)
+2. SP Finding (breadth-first across directions):
+   - Phase 1: Small Pool (unanalyzed) — core+entry functions, HIGH→MEDIUM→LOW
+   - Phase 2: Small Pool (re-analyzed) — overlapping functions from other directions
+   - Phase 3: Big Pool (unanalyzed) — reachable via call graph BFS, minus small pool
+   - Phase 4: Big Pool (re-analyzed) — overlapping big pool functions
+3. Parallel Pipeline: Verify SPs and generate POVs concurrently
+"""
+
+import asyncio
+import time
+from typing import Dict, Any, List
+
+from .pov_base import POVBaseStrategy
+from ...agents import (
+    DirectionPlanningAgent,
+    FullSPGenerator,
+    LargeFullSPGenerator,
+)
+from ...llms.models import CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5
+from ...tools.directions import set_direction_context
+from ...tools.suspicious_points import set_sp_context
+from ...fuzzer import SeedAgent
+
+
+class POVFullscanStrategy(POVBaseStrategy):
+    """
+    POV Strategy for Full-scan mode with streaming pipeline.
+
+    All agent pools run concurrently:
+    1. Direction Planning Agent: Divides call graph into logical directions
+    2. SP Find Pool: Analyze directions, create SPs
+    3. Verify Pool: Verify SPs as they are created
+    4. POV Pool: Generate POVs for verified SPs
+    """
+
+    def __init__(
+        self,
+        executor,
+        use_pipeline: bool = True,
+        num_parallel_agents: int = 5,
+    ):
+        """
+        Initialize POV Full-scan Strategy.
+
+        Args:
+            executor: WorkerExecutor instance
+            use_pipeline: Whether to use parallel pipeline (default: True)
+            num_parallel_agents: Number of concurrent SP Find agents (default: 5)
+        """
+        super().__init__(executor, use_pipeline)
+        self.num_parallel_agents = num_parallel_agents
+        self._sp_finding_done = asyncio.Event()  # Signal when SP finding is complete
+
+    @property
+    def strategy_name(self) -> str:
+        return "POV Fullscan Strategy (Streaming)"
+
+    def _find_suspicious_points(self) -> List:
+        """
+        Not used in Full-scan strategy.
+
+        Full-scan uses a streaming pipeline with Direction Planning and
+        parallel SP finding, which bypasses this method entirely.
+        The execute() method is overridden to implement the full pipeline.
+        """
+        return []
+
+    def execute(self) -> Dict[str, Any]:
+        """
+        Execute streaming pipeline - all pools run concurrently.
+
+        Returns:
+            Result dictionary with findings
+        """
+        start_time = time.time()
+
+        self.log_info(f"========== {self.strategy_name} Start ==========")
+        self.log_info(f"Fuzzer: {self.fuzzer}, Mode: {self.scan_mode}")
+
+        result = {
+            "strategy": self.strategy_name,
+            "scan_mode": self.scan_mode,
+            "reachable": True,
+            "suspicious_points_found": 0,
+            "suspicious_points_verified": 0,
+            "high_confidence_bugs": 0,
+            "pov_generated": 0,
+        }
+
+        try:
+            # Run everything in a single event loop to avoid litellm client caching issues
+            set_direction_context(self.fuzzer)
+            pipeline_stats = asyncio.run(self._run_full_pipeline())
+
+            # Collect results
+            all_points = self.repos.suspicious_points.find_by_task(self.task_id)
+            result["suspicious_points_found"] = len(all_points)
+            result["suspicious_points_verified"] = pipeline_stats.sp_verified
+            result["pov_generated"] = pipeline_stats.pov_generated
+
+            # Count high-confidence bugs
+            high_conf = [p for p in all_points if p.is_important or p.score >= 0.9]
+            result["high_confidence_bugs"] = len(high_conf)
+
+            # Save results
+            sorted_points = self._sort_by_priority(all_points)
+            self._save_results(sorted_points)
+
+            total_time = time.time() - start_time
+            self.log_info(f"========== {self.strategy_name} Complete ==========")
+            self.log_info(f"Total time: {total_time:.1f}s")
+            self.log_info(
+                f"Results: {result['suspicious_points_found']} found, "
+                f"{result['suspicious_points_verified']} verified, "
+                f"{result['pov_generated']} POV generated"
+            )
+
+            return result
+
+        except Exception as e:
+            self.log_error(f"Strategy failed: {e}")
+            raise
+
+    def _run_direction_planning(self) -> List:
+        """Run direction planning phase."""
+        self.log_info("=== Phase 1: Direction Planning ===")
+        phase1_start = time.time()
+
+        fuzzer_code = self._get_fuzzer_source_code()
+        reachable_count = self._get_reachable_function_count()
+
+        self.log_info(f"Fuzzer: {self.fuzzer}, Reachable functions: {reachable_count}")
+
+        agent_log_dir = self.agent_log_dir
+        planning_agent = DirectionPlanningAgent(
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+            model=CLAUDE_OPUS_4_5,  # Force Opus for direction planning
+            task_id=self.task_id,
+            worker_id=self.worker_id,
+            log_dir=agent_log_dir,
+            max_iterations=100,
+        )
+
+        try:
+            result = planning_agent.plan_directions_sync(
+                fuzzer_code=fuzzer_code,
+                reachable_count=reachable_count,
+            )
+            self.log_info(
+                f"Direction planning completed: {result.get('directions_created', 0)} directions"
+            )
+        except Exception as e:
+            self.log_error(f"Direction planning failed: {e}")
+            return []
+
+        phase1_duration = time.time() - phase1_start
+        self.log_info(f"Phase 1 completed in {phase1_duration:.1f}s")
+
+        return self.repos.directions.find_pending(self.task_id, self.fuzzer)
+
+    async def _run_direction_planning_async(self) -> List:
+        """Run direction planning phase asynchronously."""
+        self.log_info("=== Phase 1: Direction Planning ===")
+        phase1_start = time.time()
+
+        fuzzer_code = self._get_fuzzer_source_code()
+        reachable_count = self._get_reachable_function_count()
+
+        self.log_info(f"Fuzzer: {self.fuzzer}, Reachable functions: {reachable_count}")
+
+        agent_log_dir = self.agent_log_dir
+        planning_agent = DirectionPlanningAgent(
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+            model=CLAUDE_OPUS_4_5,  # Force Opus for direction planning
+            task_id=self.task_id,
+            worker_id=self.worker_id,
+            log_dir=agent_log_dir,
+            max_iterations=100,
+        )
+
+        try:
+            result = await planning_agent.plan_directions_async(
+                fuzzer_code=fuzzer_code,
+                reachable_count=reachable_count,
+            )
+            self.log_info(
+                f"Direction planning completed: {result.get('directions_created', 0)} directions"
+            )
+        except Exception as e:
+            self.log_error(f"Direction planning failed: {e}")
+            return []
+
+        phase1_duration = time.time() - phase1_start
+        self.log_info(f"Phase 1 completed in {phase1_duration:.1f}s")
+
+        return self.repos.directions.find_pending(self.task_id, self.fuzzer)
+
+    async def _run_full_pipeline(self):
+        """
+        Run the full pipeline in a single event loop.
+
+        This includes:
+        1. Direction Planning (async)
+        2. Direction Seeds generation + Global Fuzzer startup
+        3. SP Finding (breadth-first per-direction architecture)
+
+        Running everything in one event loop avoids litellm client caching issues
+        where HTTP clients get bound to a closed event loop.
+        """
+        # Phase 1: Direction Planning
+        directions = await self._run_direction_planning_async()
+
+        if not directions:
+            self.log_warning("No directions created, cannot continue")
+            # Return empty stats
+            from ..pipeline import PipelineStats
+
+            return PipelineStats()
+
+        # Phase 2+: SP Finding with breadth-first per-direction architecture
+        self.log_info(
+            f"=== SP Find: Breadth-First Per-Direction ({len(directions)} directions) ==="
+        )
+        return await self._run_v2_pipeline_with_fuzzer_init(directions)
+
+        # Note: Buffer is NOT stopped here - it's shared across tasks
+        # Buffer shutdown happens when Celery worker exits
+
+    async def _run_v2_pipeline_with_fuzzer_init(self, directions: List):
+        """
+        Wrapper that initializes fuzzer (Direction Seeds + Global Fuzzer)
+        before running the v2 pipeline.
+
+        This ensures all async operations run in the same event loop.
+        """
+        # Generate Direction Seeds and start Global Fuzzer first
+        await self._generate_direction_seeds_and_start_global_fuzzer(directions)
+
+        # Then run the v2 pipeline
+        return await self._run_v2_pipeline(directions)
+
+    # =========================================================================
+    # Helper Methods
+    # =========================================================================
+
+    def _get_fuzzer_source_code(self) -> str:
+        """Get fuzzer source code for Full-scan context."""
+        try:
+            from ...analyzer import AnalysisClient
+
+            if not self.executor.analysis_socket_path:
+                return ""
+
+            client = AnalysisClient(
+                self.executor.analysis_socket_path,
+                client_id=f"fullscan_strategy_{self.worker_id}",
+            )
+
+            # Try to get fuzzer entry point source
+            source = client.get_function_source(self.fuzzer)
+            if source:
+                return source
+
+            # Try common entry point names
+            for entry in ["LLVMFuzzerTestOneInput", "main", "harness_main"]:
+                source = client.get_function_source(entry)
+                if source:
+                    return source
+
+            return ""
+        except Exception as e:
+            self.log_warning(f"Could not get fuzzer source code: {e}")
+            return ""
+
+    def _get_reachable_function_count(self) -> int:
+        """Get count of functions reachable from fuzzer."""
+        try:
+            from ...analyzer import AnalysisClient
+
+            if not self.executor.analysis_socket_path:
+                return 0
+
+            client = AnalysisClient(
+                self.executor.analysis_socket_path,
+                client_id=f"fullscan_strategy_{self.worker_id}",
+            )
+
+            functions = client.get_reachable_functions(self.fuzzer)
+            return len(functions) if functions else 0
+        except Exception as e:
+            self.log_warning(f"Could not get reachable function count: {e}")
+            return 0
+
+    # =========================================================================
+    # SP Find v2: Breadth-First Per-Direction Architecture
+    # =========================================================================
+
+    async def _run_v2_pipeline(self, directions: List):
+        """
+        Run SP Find v2 per-direction pipeline with streaming verification.
+
+        For each direction (sorted HIGH → MEDIUM → LOW):
+          1. Analyze small pool (core_functions + entry_functions) - unanalyzed first
+          2. Analyze big pool (reachable via call graph - small pool) - unanalyzed first
+          Overlapping functions are re-analyzed from each direction's perspective.
+
+        Priority within each direction:
+          1. Small pool, not yet analyzed by any direction (highest)
+          2. Small pool, already analyzed by another direction
+          3. Big pool, not yet analyzed by any direction
+          4. Big pool, already analyzed by another direction (lowest)
+
+        Returns:
+            PipelineStats with execution statistics
+        """
+        from ..pipeline import AgentPipeline, PipelineConfig
+        from ...tools.coverage import set_coverage_context, get_coverage_context
+
+        # Setup coverage context
+        coverage_fuzzer_dir, _, _ = get_coverage_context()
+        if coverage_fuzzer_dir:
+            set_coverage_context(
+                coverage_fuzzer_dir=coverage_fuzzer_dir,
+                project_name=self.project_name,
+                src_dir=self.executor.task_workspace_path / "repo",
+                docker_image=f"gcr.io/oss-fuzz/{self.project_name}",
+                work_dir=self.results_path / "coverage_work",
+            )
+
+        fuzzer_code = self._get_fuzzer_source_code()
+        agent_log_dir = self.agent_log_dir
+
+        # Configure pipeline for verification and POV
+        config = PipelineConfig(
+            num_verify_agents=5,
+            num_pov_agents=5,
+            pov_min_score=0.5,
+            poll_interval=2.0,
+            max_idle_cycles=30,
+            fuzzer_path=self.executor.fuzzer_binary_path,
+            docker_image=f"gcr.io/oss-fuzz/{self.project_name}",
+        )
+
+        pipeline = AgentPipeline(
+            task_id=self.task_id,
+            repos=self.repos,
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+            scan_mode="full",
+            config=config,
+            output_dir=self.results_path / "povs",
+            log_dir=self.agent_log_dir,
+            workspace_path=self.executor.task_workspace_path,
+            fuzzer_code=fuzzer_code,
+            mcp_socket_path=self.executor.analysis_socket_path,
+            worker_id=self.worker_id,
+        )
+
+        # Start pipeline in background
+        pipeline_task = asyncio.create_task(pipeline.run(), name="verify_pov_pipeline")
+
+        # Sort directions: HIGH → MEDIUM → LOW
+        risk_order = {"high": 0, "medium": 1, "low": 2}
+        sorted_directions = sorted(
+            directions, key=lambda d: risk_order.get(d.risk_level, 3)
+        )
+
+        self.log_info(
+            f"=== SP Find v2: Processing {len(sorted_directions)} directions ==="
+        )
+        for i, d in enumerate(sorted_directions):
+            self.log_info(
+                f"  Direction {i + 1}: {d.name} [{d.risk_level}] "
+                f"(core={len(d.core_functions or [])}, "
+                f"entry={len(d.entry_functions or [])})"
+            )
+
+        # Build per-direction pools
+        direction_pools = self._build_direction_pools(sorted_directions)
+
+        # Run breadth-first: pool type > risk level > new/re-analyzed
+        # Phase 1: All small pools (unanalyzed) - breadth across directions
+        # Phase 2: All small pools (re-analyzed) - breadth across directions
+        # Phase 3: All big pools (unanalyzed) - breadth across directions
+        # Phase 4: All big pools (re-analyzed) - breadth across directions
+        phase_labels = [
+            ("small/new", "Small Pool - Unanalyzed"),
+            ("small/re", "Small Pool - Re-analyzed"),
+            ("big/new", "Big Pool - Unanalyzed"),
+            ("big/re", "Big Pool - Re-analyzed"),
+        ]
+
+        # Pre-compute grand total for consistent log display
+        grand_total = 0
+        for _, pools in direction_pools:
+            for (
+                key,
+                _,
+            ) in phase_labels:
+                grand_total += len(pools.get(key, []))
+
+        global_index = 0
+        for phase_key, phase_label in phase_labels:
+            phase_start = time.time()
+            phase_work = []
+            for direction, pools in direction_pools:
+                funcs = pools.get(phase_key, [])
+                for func in funcs:
+                    phase_work.append((func, direction.direction_id))
+
+            if not phase_work:
+                self.log_info(f"=== {phase_label}: 0 functions, skipping ===")
+                continue
+
+            self.log_info(f"=== {phase_label}: {len(phase_work)} functions ===")
+            await self._run_function_batch(
+                work=phase_work,
+                agent_log_dir=agent_log_dir,
+                global_index_start=global_index,
+                grand_total=grand_total,
+            )
+            global_index += len(phase_work)
+            self.log_info(
+                f"  {phase_label} completed in {time.time() - phase_start:.1f}s"
+            )
+
+        # Log coverage report
+        self._log_coverage_report(sorted_directions)
+
+        # Signal pipeline that SP finding is complete
+        self._sp_finding_done.set()
+        pipeline._sp_finding_done = True
+        self.log_info("SP Find v2 completed, waiting for pipeline to drain...")
+
+        stats = await pipeline_task
+        return stats
+
+    def _find_reachable_from_entries(self, entry_functions: List[str]) -> set:
+        """
+        BFS from entry_functions through call graph to find all reachable functions.
+        """
+        reachable = set()
+        queue = list(entry_functions)
+        visited = set(entry_functions)
+
+        while queue:
+            func_name = queue.pop(0)
+            reachable.add(func_name)
+
+            callees = self.repos.callgraph_nodes.find_callees(
+                self.task_id, self.fuzzer, func_name
+            )
+            for callee in callees or []:
+                if callee not in visited:
+                    visited.add(callee)
+                    queue.append(callee)
+
+        return reachable
+
+    def _build_direction_pools(self, sorted_directions: List) -> List[tuple]:
+        """
+        Build per-direction pools partitioned into 4 priority categories.
+
+        For each direction:
+          - Small pool = core_functions + entry_functions
+          - Reachable = BFS from entry_functions through call graph
+          - Big pool = reachable - small pool
+
+        Each pool is partitioned by analyzed status:
+          - "small/new": small pool functions not yet analyzed by any direction
+          - "small/re": small pool functions already analyzed by another direction
+          - "big/new": big pool functions not yet analyzed by any direction
+          - "big/re": big pool functions already analyzed by another direction
+
+        Returns:
+            List of (direction, pools_dict) tuples, where pools_dict maps
+            phase keys to lists of resolved function objects.
+        """
+        result = []
+
+        for direction in sorted_directions:
+            # Build small pool names
+            small_pool_names = set(direction.core_functions or [])
+            small_pool_names.update(direction.entry_functions or [])
+
+            # Find reachable functions from this direction's entry points
+            reachable = self._find_reachable_from_entries(
+                direction.entry_functions or []
+            )
+
+            # Big pool = reachable - small pool
+            big_pool_names = reachable - small_pool_names
+
+            self.log_info(
+                f"  [{direction.name}] Small: {len(small_pool_names)}, "
+                f"Big: {len(big_pool_names)}, "
+                f"Total reachable: {len(reachable)}"
+            )
+
+            # Resolve function objects and partition by analyzed status
+            pools = {
+                "small/new": [],
+                "small/re": [],
+                "big/new": [],
+                "big/re": [],
+            }
+
+            for name in small_pool_names:
+                func = self.repos.functions.find_by_name(self.task_id, name)
+                if not func:
+                    continue
+                if not func.analyzed_by_directions:
+                    pools["small/new"].append(func)
+                else:
+                    pools["small/re"].append(func)
+
+            for name in big_pool_names:
+                func = self.repos.functions.find_by_name(self.task_id, name)
+                if not func:
+                    continue
+                if not func.analyzed_by_directions:
+                    pools["big/new"].append(func)
+                else:
+                    pools["big/re"].append(func)
+
+            self.log_info(
+                f"    small/new={len(pools['small/new'])}, "
+                f"small/re={len(pools['small/re'])}, "
+                f"big/new={len(pools['big/new'])}, "
+                f"big/re={len(pools['big/re'])}"
+            )
+
+            result.append((direction, pools))
+
+        return result
+
+    async def _run_function_batch(
+        self,
+        work: List[tuple],
+        agent_log_dir,
+        global_index_start: int = 0,
+        grand_total: int = 0,
+    ) -> None:
+        """
+        Run a batch of (function, direction_id) pairs with semaphore-limited concurrency.
+
+        Each function is analyzed by _analyze_single_function_v2 with the correct
+        direction_id set via set_sp_context (ContextVar, per-asyncio-task).
+
+        Args:
+            work: List of (func_object, direction_id) tuples
+            agent_log_dir: Directory for agent log files
+            global_index_start: Starting index for log numbering
+            grand_total: Total functions across all phases (for log display)
+        """
+        if not work:
+            return
+
+        semaphore = asyncio.Semaphore(self.num_parallel_agents)
+        total = grand_total if grand_total > 0 else len(work)
+
+        async def analyze_one(func, direction_id: str, index: int):
+            async with semaphore:
+                set_sp_context(self.fuzzer, self.sanitizer, direction_id)
+                return await self._analyze_single_function_v2(
+                    func=func,
+                    index=global_index_start + index,
+                    total=total,
+                    agent_log_dir=agent_log_dir,
+                    direction_id=direction_id,
+                )
+
+        tasks = [
+            analyze_one(func, direction_id, i)
+            for i, (func, direction_id) in enumerate(work)
+        ]
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _analyze_single_function_v2(
+        self,
+        func,
+        index: int,
+        total: int,
+        agent_log_dir,
+        direction_id: str,
+    ) -> dict:
+        """
+        Analyze a single function using FullSPGenerator (v2 small agent).
+        """
+        func_start = time.time()
+
+        self.log_debug(f"[{index + 1}/{total}] Analyzing: {func.name}")
+
+        # Get caller/callee info
+        callers = []
+        callees = []
+        try:
+            callers = (
+                self.repos.callgraph_nodes.find_callers(
+                    self.task_id, self.fuzzer, func.name
+                )
+                or []
+            )
+            callees = (
+                self.repos.callgraph_nodes.find_callees(
+                    self.task_id, self.fuzzer, func.name
+                )
+                or []
+            )
+        except Exception:
+            pass
+
+        # Get function source - use DB content or fetch via tree-sitter fallback
+        func_source = func.content or ""
+        if not func_source and self.executor.analysis_socket_path:
+            try:
+                from ...analyzer import AnalysisClient
+
+                client = AnalysisClient(
+                    self.executor.analysis_socket_path,
+                    client_id=f"fullscan_func_{self.worker_id}_{index}",
+                )
+                func_source = client.get_function_source(func.name) or ""
+            except Exception:
+                pass
+
+        # Determine function size based on actual source
+        func_lines = func_source.count("\n") + 1 if func_source else 0
+        is_large = func_lines > LargeFullSPGenerator.LARGE_FUNCTION_THRESHOLD
+
+        # Create appropriate generator
+        if is_large:
+            agent = LargeFullSPGenerator(
+                function_name=func.name,
+                function_source=func_source,  # Use fetched source
+                function_file=func.file_path or "",
+                function_lines=(func.start_line or 0, func.end_line or 0),
+                callers=callers,
+                callees=callees,
+                fuzzer=self.fuzzer,
+                sanitizer=self.sanitizer,
+                model=CLAUDE_OPUS_4_5,  # Force Opus for large function analysis
+                direction_id=direction_id,
+                task_id=self.task_id,
+                worker_id=self.worker_id,
+                log_dir=agent_log_dir,
+                index=index,  # For log file naming: SPG_{index}_{function_name}.log
+            )
+        else:
+            agent = FullSPGenerator(
+                function_name=func.name,
+                function_source=func_source,  # Use fetched source
+                function_file=func.file_path or "",
+                function_lines=(func.start_line or 0, func.end_line or 0),
+                callers=callers,
+                callees=callees,
+                fuzzer=self.fuzzer,
+                sanitizer=self.sanitizer,
+                model=CLAUDE_SONNET_4_5,  # Force Sonnet for function analysis
+                direction_id=direction_id,
+                task_id=self.task_id,
+                worker_id=self.worker_id,
+                log_dir=agent_log_dir,
+                index=index,  # For log file naming: SPG_{index}_{function_name}.log
+            )
+
+        try:
+            result = await agent.analyze_async()
+
+            # Mark function as analyzed by this direction
+            if hasattr(func, "function_id") and func.function_id:
+                self.repos.functions.mark_analyzed_by_direction(
+                    func.function_id, direction_id
+                )
+
+            func_duration = time.time() - func_start
+            sp_status = "SP!" if result.get("sp_created") else "OK"
+            self.log_debug(
+                f"[{index + 1}/{total}] Done: {func.name} in {func_duration:.1f}s - {sp_status}"
+            )
+
+            # Note: Agent logs are now written directly to SPG_{index}_{function_name}.log
+            # No need for separate combined log file
+
+            return result
+
+        except Exception as e:
+            self.log_error(f"[{index + 1}/{total}] Failed: {func.name} - {e}")
+            return {"success": False, "error": str(e)}
+
+    def _log_coverage_report(self, directions: List) -> None:
+        """
+        Log detailed coverage statistics.
+        """
+        self.log_info("=== SP Find v2 Coverage Report ===")
+
+        # Small pool stats
+        small_pool_total = 0
+        for direction in directions:
+            small_pool_total += len(direction.core_functions or [])
+            small_pool_total += len(direction.entry_functions or [])
+
+        # Big pool stats
+        all_functions = self.repos.functions.find_by_task(self.task_id)
+        big_pool_total = len(all_functions) if all_functions else 0
+
+        # Analyzed counts
+        analyzed_count = sum(
+            1
+            for f in (all_functions or [])
+            if f.analyzed_by_directions and len(f.analyzed_by_directions) > 0
+        )
+
+        self.log_info(f"  Small Pool: {small_pool_total} functions")
+        self.log_info(f"  Big Pool: {big_pool_total} total reachable functions")
+        self.log_info(f"  Analyzed: {analyzed_count} functions")
+        self.log_info(
+            f"  Coverage: {analyzed_count}/{big_pool_total} ({100 * analyzed_count / max(big_pool_total, 1):.1f}%)"
+        )
+
+    # =========================================================================
+    # Fuzzer Worker Integration
+    # =========================================================================
+
+    async def _generate_direction_seeds_and_start_global_fuzzer(
+        self,
+        directions: List,
+    ) -> None:
+        """
+        Generate Direction Seeds using SeedAgent and start Global Fuzzer.
+
+        Called after Direction Planning completes.
+        Flow: Direction Agent completes → SeedAgent generates initial seeds → Global Fuzzer starts
+
+        Args:
+            directions: List of Direction objects from Direction Planning
+        """
+        # Check if FuzzerManager is available
+        fuzzer_manager = getattr(self.executor, "fuzzer_manager", None)
+        if not fuzzer_manager:
+            self.log_debug(
+                "FuzzerManager not available, skipping Direction Seeds generation"
+            )
+            return
+
+        self.log_info("=== Generating Direction Seeds ===")
+
+        fuzzer_code = self._get_fuzzer_source_code()
+        agent_log_dir = self.agent_log_dir
+
+        # Generate seeds for each direction (high-risk first)
+        sorted_directions = sorted(
+            directions,
+            key=lambda d: {"high": 0, "medium": 1, "low": 2}.get(d.risk_level, 3),
+        )
+
+        # Create tasks for parallel execution (top 5 directions)
+        async def run_seed_agent(seed_index: int, direction) -> dict:
+            """Run a single SeedAgent and return result."""
+            try:
+                seed_agent = SeedAgent(
+                    task_id=self.task_id,
+                    worker_id=self.worker_id,  # ObjectId for MongoDB linking
+                    fuzzer=self.fuzzer,
+                    sanitizer=self.sanitizer,
+                    model=CLAUDE_OPUS_4_5,  # Force Opus for seed generation
+                    fuzzer_manager=fuzzer_manager,
+                    repos=self.repos,
+                    fuzzer_source=fuzzer_code,
+                    log_dir=agent_log_dir,
+                    max_iterations=20,
+                    index=seed_index,
+                    target_name=direction.name,
+                )
+
+                result = await seed_agent.generate_direction_seeds(
+                    direction_id=direction.direction_id,
+                    target_functions=direction.core_functions or [],
+                    risk_level=direction.risk_level,
+                    risk_reason=direction.risk_reason or "",
+                )
+                return {"direction": direction, "result": result}
+
+            except Exception as e:
+                self.log_warning(
+                    f"  Failed to generate seeds for {direction.name}: {e}"
+                )
+                return {"direction": direction, "result": None, "error": str(e)}
+
+        # Run all SeedAgents in parallel
+        tasks = [
+            run_seed_agent(idx, d)
+            for idx, d in enumerate(sorted_directions[:5], start=1)
+        ]
+        results = await asyncio.gather(*tasks)
+
+        # Collect results
+        seeds_generated = 0
+        for item in results:
+            direction = item["direction"]
+            result = item.get("result")
+            if result and result.get("success"):
+                count = result.get("seeds_generated", 0)
+                seeds_generated += count
+                self.log_info(
+                    f"  Generated {count} seeds "
+                    f"for direction: {direction.name} ({direction.risk_level})"
+                )
+
+        self.log_info(
+            f"Direction Seeds generation complete: {seeds_generated} total seeds"
+        )
+
+        # Start Global Fuzzer with generated seeds
+        if seeds_generated > 0:
+            self.log_info("┌─────────────────────────────────────────┐")
+            self.log_info("│  Starting Global Fuzzer...              │")
+            self.log_info("└─────────────────────────────────────────┘")
+            try:
+                success = await fuzzer_manager.start_global_fuzzer()
+                if not success:
+                    self.log_warning("Failed to start Global Fuzzer")
+            except Exception as e:
+                self.log_warning(f"Error starting Global Fuzzer: {e}")
+        else:
+            self.log_info(
+                "No Direction Seeds generated, skipping Global Fuzzer startup"
+            )

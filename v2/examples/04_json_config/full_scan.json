@@ -1,0 +1,8 @@
+{
+    "repo_url": "https://github.com/pnggroup/libpng.git",
+    "project_name": "libpng",
+    "job_type": "pov-patch",
+    "scan_mode": "full",
+    "sanitizers": ["address"],
+    "timeout_minutes": 60
+}

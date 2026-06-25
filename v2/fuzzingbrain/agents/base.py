@@ -1,0 +1,1150 @@
+"""
+Base Agent
+
+MCP-based AI agent with tool execution loop.
+"""
+
+import asyncio
+import json
+from abc import ABC, abstractmethod
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Union
+
+from fastmcp import Client
+from loguru import logger
+
+from ..llms import LLMClient, ModelInfo
+from ..tools.mcp_factory import create_isolated_mcp_server
+from ..core.logging import get_agent_banner_and_header, get_agent_log_path
+from .context import AgentContext
+
+
+class BaseAgent(ABC):
+    """
+    Base class for MCP-based AI agents.
+
+    Implements the core agent loop:
+    1. Connect to MCP server (tools_mcp)
+    2. Get available tools
+    3. Call LLM with tools
+    4. Execute tool calls via MCP
+    5. Repeat until LLM stops calling tools
+    """
+
+    # Default temperature for this agent type (can be overridden by subclasses)
+    default_temperature: float = 0.7
+
+    # Enable context compression (can be disabled by subclasses that need full context)
+    enable_context_compression: bool = True
+
+    def __init__(
+        self,
+        llm_client: Optional[LLMClient] = None,
+        model: Optional[Union[ModelInfo, str]] = None,
+        max_iterations: int = 20,
+        verbose: bool = True,
+        temperature: Optional[float] = None,
+        # Logging context
+        task_id: str = "",
+        worker_id: str = "",
+        log_dir: Optional[Path] = None,
+        # New: for numbered log files
+        index: int = 0,
+        target_name: str = "",
+        fuzzer: str = "",
+        sanitizer: str = "",
+    ):
+        """
+        Initialize agent.
+
+        Args:
+            llm_client: LLM client instance (creates new one if None)
+            model: Model to use for LLM calls
+            max_iterations: Maximum tool call iterations to prevent infinite loops
+            verbose: Whether to log detailed progress
+            temperature: LLM temperature (uses class default_temperature if None)
+            task_id: Task ID for logging context
+            worker_id: Worker ID for logging context
+            log_dir: Directory for log files
+            index: Agent index for numbered log files (1-based)
+            target_name: Target name (direction_name or function_name) for log filename
+            fuzzer: Fuzzer name for log path
+            sanitizer: Sanitizer name for log path
+        """
+        self.llm_client = llm_client or LLMClient(
+            task_id=task_id,
+            worker_id=worker_id,
+        )
+        self.model = model
+        self.max_iterations = max_iterations
+        self.verbose = verbose
+        self.temperature = (
+            temperature if temperature is not None else self.default_temperature
+        )
+
+        # Logging context
+        self.task_id = task_id
+        self.worker_id = worker_id
+        self.log_dir = log_dir
+        self.index = index
+        self.target_name = target_name
+        self.fuzzer = fuzzer
+        self.sanitizer = sanitizer
+
+        # Conversation history
+        self.messages: List[Dict[str, str]] = []
+
+        # Tool definitions (populated when connecting to MCP)
+        self._tools: List[Dict[str, Any]] = []
+
+        # Statistics
+        self.total_iterations = 0
+        self.total_tool_calls = 0
+        self.start_time: Optional[datetime] = None
+        self.end_time: Optional[datetime] = None
+
+        # Stop reason for graceful termination tracking
+        # None = normal completion, "budget" = budget exceeded, "timeout" = time limit
+        # "cancelled" = graceful shutdown
+        self.stop_reason: Optional[str] = None
+
+        # Cancellation flag (set by cancel() for graceful shutdown)
+        self._cancelled = False
+
+        # Agent-specific logger
+        self._agent_logger = None
+        self._log_file: Optional[Path] = None
+
+        # Agent context for isolation (set during run_async)
+        self._context: Optional[AgentContext] = None
+
+    def cancel(self) -> None:
+        """Request graceful cancellation of the agent loop."""
+        self._cancelled = True
+
+    @property
+    def agent_name(self) -> str:
+        """Get agent name for logging."""
+        return self.__class__.__name__
+
+    @property
+    def agent_type(self) -> str:
+        """
+        Get agent type for log path generation.
+
+        Override in subclasses. Valid values: "direction", "seed", "spg", "spv", "pov"
+        """
+        return "direction"  # Default, subclasses should override
+
+    @property
+    def is_delta(self) -> bool:
+        """Whether this is a delta scan agent (for SPG log naming)."""
+        return False
+
+    @property
+    def include_pov_tools(self) -> bool:
+        """Whether to include POV tools in MCP server.
+
+        Override to True in POVAgent. Other agents don't need POV tools.
+        """
+        return False
+
+    @property
+    def include_seed_tools(self) -> bool:
+        """Whether to include seed generation tools in MCP server.
+
+        Override to True in SeedAgent. Other agents don't need seed tools.
+        """
+        return False
+
+    @property
+    def include_sp_tools(self) -> bool:
+        """Whether to include suspicious point tools in MCP server.
+
+        Override to False in DirectionPlanningAgent (it only needs direction tools).
+        Default True for other agents.
+        """
+        return True
+
+    @property
+    def include_sp_create_tools(self) -> bool:
+        """Whether to include SP creation tool in MCP server.
+
+        Override to False in SPVerifier and POVAgent — they should only
+        read/update SPs, not create new ones. Only SP Finding agents create SPs.
+        """
+        return True
+
+    @property
+    def include_direction_tools(self) -> bool:
+        """Whether to include direction tools in MCP server.
+
+        Default True. Override to False if agent doesn't need direction tools.
+        """
+        return True
+
+    @property
+    def mcp_context_id(self) -> str:
+        """ID used for MCP tool context lookup.
+
+        Returns agent_id from AgentContext if available (unique per instance),
+        otherwise falls back to worker_id.
+
+        AgentContext provides ObjectId-based unique IDs that:
+        - Are globally unique (no collision between parallel agents)
+        - Are persistent (can be stored in MongoDB)
+        - Include timestamp for traceability
+        """
+        if self._context:
+            return self._context.agent_id
+        return self.worker_id
+
+    @property
+    @abstractmethod
+    def system_prompt(self) -> str:
+        """System prompt for the agent."""
+        pass
+
+    @abstractmethod
+    def get_initial_message(self, **kwargs) -> str:
+        """Generate the initial user message based on task context."""
+        pass
+
+    def _get_agent_metadata(self) -> dict:
+        """
+        Get metadata for agent banner. Subclasses should override to add specific info.
+
+        Returns:
+            Dict with keys like: Agent, Scan Mode, Phase, Fuzzer, Sanitizer,
+            Worker ID, Direction, Target Function, SP ID, Vulnerability Type, Goal
+        """
+        return {
+            "Agent": self.agent_name,
+            "Worker ID": self.worker_id,
+            "Task ID": self.task_id,
+        }
+
+    def _configure_context(self, ctx: AgentContext) -> None:
+        """
+        Configure agent context after creation. Subclasses should override to set
+        specific fields like sp_id, direction_id, delta_id.
+
+        Args:
+            ctx: The AgentContext instance to configure
+        """
+        # Default implementation does nothing
+        # Subclasses can override to set:
+        #   ctx.sp_id = self.suspicious_point_id
+        #   ctx.direction_id = self.direction_id
+        #   ctx.delta_id = self.delta_id
+        pass
+
+    def _get_urgency_message(self, iteration: int, remaining: int) -> Optional[str]:
+        """
+        Get urgency message when iterations are running low.
+
+        Subclasses can override this to provide agent-specific urgency prompts.
+
+        Args:
+            iteration: Current iteration number
+            remaining: Remaining iterations
+
+        Returns:
+            Urgency message to inject, or None if not needed
+        """
+        return None
+
+    def _get_compression_criteria(self) -> str:
+        """
+        Get task-specific compression criteria for context compression.
+
+        Subclasses should override this to provide agent-specific criteria.
+        This tells the compression LLM what to keep vs discard.
+
+        Returns:
+            Compression criteria string describing what's relevant for this agent
+        """
+        return "Keep information relevant to security analysis and vulnerability discovery."
+
+    def _get_compression_context(self) -> str:
+        """
+        Get task context for compression LLM.
+
+        By default, uses system prompt + initial user message as context.
+        These are preserved anyway, but help compression LLM understand what's relevant.
+
+        Returns:
+            Task context string to help compression LLM understand what's important
+        """
+        context_parts = []
+        if len(self.messages) > 0:
+            # System prompt (truncated if too long)
+            sys_content = self.messages[0].get("content", "")
+            if len(sys_content) > 1000:
+                sys_content = sys_content[:1000] + "..."
+            context_parts.append(f"[SYSTEM]: {sys_content}")
+        if len(self.messages) > 1:
+            # Initial user message (task description)
+            user_content = self.messages[1].get("content", "")
+            if len(user_content) > 1500:
+                user_content = user_content[:1500] + "..."
+            context_parts.append(f"[TASK]: {user_content}")
+        return "\n\n".join(context_parts)
+
+    def _load_compression_prompt(self) -> str:
+        """Load the context compression prompt template."""
+        prompt_path = (
+            Path(__file__).parent / "prompts" / "context_compression_prompt.md"
+        )
+        if prompt_path.exists():
+            return prompt_path.read_text(encoding="utf-8")
+        # Fallback
+        return """Compress tool results. Keep only what's relevant to: {compression_criteria}
+
+Messages:
+{messages_text}
+
+Output compressed version with format:
+Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
+
+    async def _compress_context(self) -> None:
+        """
+        Compress conversation context to reduce token usage.
+
+        Called every 5 iterations. Uses Sonnet for task-aware compression.
+        Preserves function signatures and relevant code lines, marks irrelevant results.
+        Must preserve tool_call -> tool_result pairs to maintain valid message structure.
+        """
+        self._log(f"Compression check: {len(self.messages)} messages", level="DEBUG")
+
+        # Only compress if we have enough messages (at least 10)
+        if len(self.messages) < 10:
+            self._log(
+                f"Skipping compression: not enough messages ({len(self.messages)} < 10)",
+                level="DEBUG",
+            )
+            return
+
+        # Keep first 2 messages (system + initial user)
+        keep_start = 2
+
+        # Find safe cut point for end - must not break tool_call/tool_result pairs
+        # Start with 3 messages from end, extend if needed
+        keep_end = 3
+        while keep_end < len(self.messages) - keep_start:
+            end_idx = len(self.messages) - keep_end
+            if end_idx >= 0 and self.messages[end_idx].get("role") == "tool":
+                # This would cut in the middle of a tool sequence, extend
+                keep_end += 1
+            else:
+                break
+
+        if len(self.messages) <= keep_start + keep_end:
+            self._log(
+                f"Skipping compression: not enough middle ({len(self.messages)} <= {keep_start}+{keep_end})",
+                level="DEBUG",
+            )
+            return
+
+        # Messages to compress
+        middle_messages = self.messages[keep_start:-keep_end]
+
+        # Build conversation text for compression
+        conv_text = []
+        for msg in middle_messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "assistant" and msg.get("tool_calls"):
+                tools_info = []
+                for tc in msg["tool_calls"]:
+                    func_name = tc.get("function", {}).get("name", "")
+                    func_args = tc.get("function", {}).get("arguments", "{}")
+                    tools_info.append(f"{func_name}({func_args[:100]})")
+                conv_text.append(f"[ASSISTANT CALLS: {', '.join(tools_info)}]")
+                if content:
+                    conv_text.append(f"[ASSISTANT REASONING: {content}]")
+            elif role == "tool":
+                tool_id = msg.get("tool_call_id", "")
+                # Keep full content for compression LLM to analyze
+                conv_text.append(f"[TOOL RESULT {tool_id}]:\n{content}")
+            elif content:
+                conv_text.append(f"[{role.upper()}]: {content}")
+
+        # Get task-specific compression criteria and context
+        compression_criteria = self._get_compression_criteria()
+        task_context = self._get_compression_context()
+
+        # Load and format compression prompt
+        prompt_template = self._load_compression_prompt()
+        compression_prompt = prompt_template.format(
+            task_context=task_context or "Security analysis task",
+            compression_criteria=compression_criteria,
+            messages_text="\n\n".join(conv_text),
+        )
+
+        try:
+            from ..llms.models import CLAUDE_SONNET_4
+
+            response = await self.llm_client.acall(
+                messages=[{"role": "user", "content": compression_prompt}],
+                model=CLAUDE_SONNET_4,
+                max_tokens=2000,
+            )
+            summary = f"[CONTEXT COMPRESSED - {len(middle_messages)} messages]\n\n{response.content}"
+        except Exception as e:
+            # Fallback to simple summary
+            self._log(
+                f"Sonnet compression failed: {e}, using fallback", level="WARNING"
+            )
+            # Mechanical fallback: just keep tool names and truncate results
+            fallback_lines = []
+            for msg in middle_messages:
+                if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                    tools = [
+                        tc.get("function", {}).get("name", "")
+                        for tc in msg["tool_calls"]
+                    ]
+                    fallback_lines.append(f"Called: {', '.join(tools)}")
+                elif msg.get("role") == "tool":
+                    content = msg.get("content", "")[:200]
+                    fallback_lines.append(f"Result: {content}...")
+            summary = (
+                f"[CONTEXT COMPRESSED - {len(middle_messages)} messages]\n"
+                + "\n".join(fallback_lines)
+            )
+
+        # Replace middle messages with compressed summary
+        self.messages = (
+            self.messages[:keep_start]
+            + [{"role": "user", "content": summary}]
+            + self.messages[-keep_end:]
+        )
+
+        self._log(
+            f"Context compressed: {len(middle_messages)} messages → 1 summary",
+            level="INFO",
+        )
+
+    def _setup_logging(self) -> None:
+        """Set up agent-specific logging."""
+        # Try new structured path first (if fuzzer/sanitizer available)
+        if self.fuzzer and self.sanitizer:
+            log_path = get_agent_log_path(
+                agent_type=self.agent_type,
+                fuzzer=self.fuzzer,
+                sanitizer=self.sanitizer,
+                index=self.index,
+                target_name=self.target_name,
+                is_delta=self.is_delta,
+            )
+            if log_path:
+                self._log_file = Path(str(log_path) + ".log")
+            else:
+                # Fallback to legacy path if get_agent_log_path returns None
+                self._setup_logging_legacy()
+                return
+        elif self.log_dir:
+            # Fallback to legacy path
+            self._setup_logging_legacy()
+            return
+        else:
+            return
+
+        # Create unique instance ID for this agent (for log filtering)
+        self._agent_instance_id = f"{self.agent_name}_{self.worker_id}_{id(self)}"
+
+        # Write banner to log file first
+        metadata = self._get_agent_metadata()
+        banner = get_agent_banner_and_header(metadata)
+        self._log_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(self._log_file, "w", encoding="utf-8") as f:
+            f.write(banner)
+            f.write("\n")
+
+        # Add file handler with agent-specific filter
+        self._agent_logger = logger.bind(
+            agent=self.agent_name,
+            agent_instance_id=self._agent_instance_id,
+            task_id=self.task_id,
+            worker_id=self.worker_id,
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+        )
+
+        # Build format string - simplified with agent prefix
+        # Format: timestamp | level | [Agent-N] | message
+        agent_prefix = self._get_log_prefix()
+        log_format = f"{{time:YYYY-MM-DD HH:mm:ss.SSS}} | {{level: <8}} | {agent_prefix} | {{message}}"
+
+        # Add file sink for this agent - use instance ID for filtering (append mode)
+        instance_id = self._agent_instance_id  # Capture for closure
+        logger.add(
+            self._log_file,
+            level="DEBUG",
+            format=log_format,
+            filter=lambda record: (
+                record["extra"].get("agent_instance_id") == instance_id
+            ),
+            encoding="utf-8",
+            rotation="50 MB",
+            mode="a",  # Append after banner
+        )
+
+        self._log("Logging initialized", level="INFO")
+        self._log(f"Log file: {self._log_file}", level="INFO")
+
+    def _get_log_prefix(self) -> str:
+        """Get the log prefix for this agent (e.g., [SPG-1], [Direction])."""
+        prefix_map = {
+            "direction": "Direction",
+            "seed": f"Seed-{self.index}",
+            "spg": "SPG-Delta" if self.is_delta else f"SPG-{self.index}",
+            "spv": f"SPV-{self.index}",
+            "pov": f"POV-{self.index}",
+        }
+        return f"[{prefix_map.get(self.agent_type, self.agent_name)}]"
+
+    def _setup_logging_legacy(self) -> None:
+        """Legacy logging setup for backward compatibility."""
+        if not self.log_dir:
+            return
+
+        log_dir = Path(self.log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create log file name: {agent_name}_{worker_id}_{timestamp}.log
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        agent_short_name = self.agent_name.replace("Agent", "").lower()
+        if self.worker_id:
+            log_name = f"{agent_short_name}_{self.worker_id}_{timestamp}.log"
+        else:
+            log_name = f"{agent_short_name}_{timestamp}.log"
+
+        self._log_file = log_dir / log_name
+
+        # Create unique instance ID for this agent (for log filtering)
+        self._agent_instance_id = f"{self.agent_name}_{self.worker_id}_{id(self)}"
+
+        # Write banner to log file first
+        metadata = self._get_agent_metadata()
+        banner = get_agent_banner_and_header(metadata)
+        with open(self._log_file, "w", encoding="utf-8") as f:
+            f.write(banner)
+            f.write("\n")
+
+        # Get fuzzer and sanitizer from subclass if available
+        fuzzer = getattr(self, "fuzzer", "") or ""
+        sanitizer = getattr(self, "sanitizer", "") or ""
+
+        # Add file handler with agent-specific filter
+        self._agent_logger = logger.bind(
+            agent=self.agent_name,
+            agent_instance_id=self._agent_instance_id,
+            task_id=self.task_id,
+            worker_id=self.worker_id,
+            fuzzer=fuzzer,
+            sanitizer=sanitizer,
+        )
+
+        # Build format string with context info
+        format_parts = [
+            "{time:YYYY-MM-DD HH:mm:ss.SSS}",
+            "{level: <8}",
+            "{extra[agent]}",
+        ]
+        if self.task_id:
+            format_parts.append("task:{extra[task_id]}")
+        if self.worker_id:
+            format_parts.append("worker:{extra[worker_id]}")
+        if fuzzer:
+            format_parts.append("fuzzer:{extra[fuzzer]}")
+        if sanitizer:
+            format_parts.append("san:{extra[sanitizer]}")
+        format_parts.append("{message}")
+        log_format = " | ".join(format_parts)
+
+        # Add file sink for this agent
+        instance_id = self._agent_instance_id
+        logger.add(
+            self._log_file,
+            level="DEBUG",
+            format=log_format,
+            filter=lambda record: (
+                record["extra"].get("agent_instance_id") == instance_id
+            ),
+            encoding="utf-8",
+            mode="a",
+        )
+
+        self._log("Logging initialized (legacy)", level="INFO")
+        self._log(f"Log file: {self._log_file}", level="INFO")
+
+    def _log(self, message: str, level: str = "DEBUG") -> None:
+        """Log a message with agent context."""
+        if self._agent_logger:
+            log_func = getattr(
+                self._agent_logger, level.lower(), self._agent_logger.debug
+            )
+            log_func(message)
+        elif self.verbose:
+            # Fallback to standard logger
+            prefix = f"[{self.agent_name}]"
+            if self.worker_id:
+                prefix = f"[{self.agent_name}:{self.worker_id}]"
+            log_func = getattr(logger, level.lower(), logger.debug)
+            log_func(f"{prefix} {message}")
+
+    def _get_summary_table(self) -> str:
+        """
+        Generate a summary table for the agent's work.
+
+        Subclasses should override this to provide specific summaries.
+
+        Returns:
+            Formatted summary string with box drawing characters
+        """
+        duration = (
+            (self.end_time - self.start_time).total_seconds()
+            if self.start_time and self.end_time
+            else 0
+        )
+
+        lines = []
+        lines.append("")
+        lines.append("┌" + "─" * 60 + "┐")
+        lines.append("│" + " AGENT SUMMARY ".center(60) + "│")
+        lines.append("├" + "─" * 60 + "┤")
+        lines.append("│" + f"  Agent: {self.agent_name}".ljust(60) + "│")
+        lines.append("│" + f"  Duration: {duration:.2f}s".ljust(60) + "│")
+        lines.append("│" + f"  Iterations: {self.total_iterations}".ljust(60) + "│")
+        lines.append("│" + f"  Tool Calls: {self.total_tool_calls}".ljust(60) + "│")
+        lines.append("└" + "─" * 60 + "┘")
+        lines.append("")
+
+        return "\n".join(lines)
+
+    def _write_summary_table(self) -> None:
+        """Write the summary table to the log file."""
+        if not self._log_file:
+            return
+
+        summary = self._get_summary_table()
+
+        try:
+            with open(self._log_file, "a", encoding="utf-8") as f:
+                f.write("\n")
+                f.write(summary)
+                f.write("\n")
+        except Exception as e:
+            self._log(f"Failed to write summary table: {e}", level="ERROR")
+
+    def _log_chat_message(
+        self,
+        role: str,
+        content: str,
+        iteration: int = 0,
+        tool_calls: Optional[List[Dict]] = None,
+        tool_call_id: Optional[str] = None,
+        tool_name: Optional[str] = None,
+        tool_success: Optional[bool] = None,
+    ) -> None:
+        """
+        Report chat message to eval system.
+
+        Args:
+            role: Message role (system, user, assistant, tool)
+            content: Message content
+            iteration: Current iteration number
+            tool_calls: List of tool calls (for assistant messages)
+            tool_call_id: Tool call ID (for tool response messages)
+            tool_name: Tool name (for tool response messages)
+            tool_success: Whether tool succeeded (for tool response messages)
+        """
+        pass
+
+    def _log_conversation(self) -> None:
+        """Log the full conversation history to file."""
+        if not self._log_file:
+            return
+
+        # Get fuzzer and sanitizer from subclass if available
+        fuzzer = getattr(self, "fuzzer", "") or ""
+        sanitizer = getattr(self, "sanitizer", "") or ""
+
+        conv_file = self._log_file.with_suffix(".conversation.json")
+        try:
+            with open(conv_file, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "agent": self.agent_name,
+                        "task_id": self.task_id,
+                        "worker_id": self.worker_id,
+                        "fuzzer": fuzzer,
+                        "sanitizer": sanitizer,
+                        "start_time": self.start_time.isoformat()
+                        if self.start_time
+                        else None,
+                        "end_time": self.end_time.isoformat()
+                        if self.end_time
+                        else None,
+                        "total_iterations": self.total_iterations,
+                        "total_tool_calls": self.total_tool_calls,
+                        "messages": self.messages,
+                    },
+                    f,
+                    indent=2,
+                    ensure_ascii=False,
+                )
+            self._log(f"Conversation saved to: {conv_file}", level="INFO")
+        except Exception as e:
+            self._log(f"Failed to save conversation: {e}", level="ERROR")
+
+    def _convert_mcp_tools_to_openai(
+        self, mcp_tools: List[Any]
+    ) -> List[Dict[str, Any]]:
+        """
+        Convert MCP tool definitions to OpenAI function calling format.
+
+        Args:
+            mcp_tools: List of MCP Tool objects
+
+        Returns:
+            List of OpenAI-format tool definitions
+        """
+        openai_tools = []
+
+        for tool in mcp_tools:
+            # MCP Tool has: name, description, inputSchema
+            tool_def = {
+                "type": "function",
+                "function": {
+                    "name": tool.name,
+                    "description": tool.description or "",
+                    "parameters": tool.inputSchema
+                    if hasattr(tool, "inputSchema")
+                    else {
+                        "type": "object",
+                        "properties": {},
+                    },
+                },
+            }
+            openai_tools.append(tool_def)
+
+        return openai_tools
+
+    async def _get_tools(self, client: Client) -> List[Dict[str, Any]]:
+        """
+        Get tools from MCP server and convert to OpenAI format.
+
+        Args:
+            client: Connected MCP Client
+
+        Returns:
+            List of OpenAI-format tool definitions
+        """
+        mcp_tools = await client.list_tools()
+        return self._convert_mcp_tools_to_openai(mcp_tools)
+
+    async def _execute_tool(
+        self,
+        client: Client,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+    ) -> str:
+        """
+        Execute a tool via MCP.
+
+        Args:
+            client: Connected MCP Client
+            tool_name: Name of tool to call
+            tool_args: Arguments for the tool
+
+        Returns:
+            Tool result as string
+        """
+        import time
+
+        t0 = time.time()
+        self._log(f"Executing tool: {tool_name}", level="DEBUG")
+        self._log(
+            f"  Args: {json.dumps(tool_args, ensure_ascii=False)[:500]}", level="DEBUG"
+        )
+
+        success = True
+        error_type = None
+        error_message = None
+        result_str = ""
+
+        try:
+            result = await client.call_tool(tool_name, tool_args)
+            t1 = time.time()
+            latency_ms = int((t1 - t0) * 1000)
+
+            if t1 - t0 > 0.5:  # Log if > 500ms
+                self._log(
+                    f"[TIMING] MCP call_tool({tool_name}): {t1 - t0:.3f}s", level="INFO"
+                )
+
+            # Extract text content from result
+            if hasattr(result, "content") and result.content:
+                # MCP returns content as list of content blocks
+                texts = []
+                for block in result.content:
+                    if hasattr(block, "text"):
+                        texts.append(block.text)
+                    elif isinstance(block, str):
+                        texts.append(block)
+                result_str = "\n".join(texts) if texts else str(result)
+            else:
+                result_str = str(result)
+
+            self._log(f"  Result: {result_str[:500]}...", level="DEBUG")
+
+            # Track tool call in AgentContext (persisted to MongoDB)
+            if self._context:
+                self._context.increment_tool_calls()
+
+            return result_str
+
+        except Exception as e:
+            self._log(f"Tool execution error: {e}", level="ERROR")
+
+            # Track tool call in AgentContext even on failure
+            if self._context:
+                self._context.increment_tool_calls()
+
+            return json.dumps({"success": False, "error": str(e)})
+
+    async def _run_agent_loop(
+        self,
+        client: Client,
+        initial_message: str,
+    ) -> str:
+        """
+        Run the agent loop.
+
+        Args:
+            client: Connected MCP Client
+            initial_message: Initial user message
+
+        Returns:
+            Final agent response
+        """
+        # Initialize conversation
+        self.messages = [
+            {"role": "system", "content": self.system_prompt},
+            {"role": "user", "content": initial_message},
+        ]
+
+        # Log initial messages to chat log
+        self._log_chat_message("system", self.system_prompt)
+        self._log_chat_message("user", initial_message, iteration=0)
+
+        # Get tools
+        self._tools = await self._get_tools(client)
+        self._log(f"Loaded {len(self._tools)} MCP tools", level="INFO")
+
+        # Log tool names
+        tool_names = [t["function"]["name"] for t in self._tools]
+        self._log(f"Available tools: {', '.join(tool_names)}", level="DEBUG")
+
+        # Log model info
+        model_name = (
+            self.model.id
+            if hasattr(self.model, "id")
+            else (self.model or self.llm_client.config.default_model.id)
+        )
+        self._log(f"Using model: {model_name}", level="INFO")
+
+        iteration = 0
+        final_response = ""
+        response = None
+
+        while iteration < self.max_iterations:
+            # Check for graceful cancellation
+            if self._cancelled:
+                self._log("Agent cancelled by shutdown", level="WARNING")
+                self.stop_reason = "cancelled"
+                break
+
+            iteration += 1
+            self.total_iterations += 1
+            remaining = self.max_iterations - iteration
+
+            # Update iteration in AgentContext (persisted to MongoDB)
+            if self._context:
+                self._context.increment_iteration()
+
+            self._log(
+                f"=== Iteration {iteration}/{self.max_iterations} ===", level="INFO"
+            )
+
+            # Compress context every 5 iterations to reduce token usage
+            if self.enable_context_compression and iteration > 0 and iteration % 5 == 0:
+                await self._compress_context()
+
+            # Check for urgency message (when running low on iterations)
+            urgency_message = self._get_urgency_message(iteration, remaining)
+            if urgency_message:
+                self._log(
+                    f"Injecting urgency message (remaining={remaining})", level="INFO"
+                )
+                self.messages.append(
+                    {
+                        "role": "user",
+                        "content": urgency_message,
+                    }
+                )
+                self._log_chat_message("user", urgency_message, iteration=iteration)
+
+            # Call LLM with tools (async to avoid blocking event loop)
+            self.llm_client.reset_tried_models()
+            try:
+                response = await self.llm_client.acall_with_tools(
+                    messages=self.messages,
+                    tools=self._tools,
+                    model=self.model,
+                    temperature=self.temperature,
+                )
+            except Exception as e:
+                import traceback
+
+                self._log(f"LLM call failed: {e}", level="ERROR")
+                self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
+                break
+
+            # Log LLM response
+            if response.content:
+                self._log(f"LLM response: {response.content[:300]}...", level="DEBUG")
+
+            # Check for tool calls
+            if response.tool_calls:
+                self._log(
+                    f"LLM requested {len(response.tool_calls)} tool call(s)",
+                    level="INFO",
+                )
+
+                # Add assistant message with tool calls
+                self.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": response.content or "",
+                        "tool_calls": response.tool_calls,
+                    }
+                )
+
+                # Log assistant message with tool calls
+                self._log_chat_message(
+                    "assistant",
+                    response.content or "",
+                    iteration=iteration,
+                    tool_calls=response.tool_calls,
+                )
+
+                # Execute each tool call
+                for tool_call in response.tool_calls:
+                    tool_name = tool_call["function"]["name"]
+                    tool_args_str = tool_call["function"]["arguments"]
+                    tool_id = tool_call["id"]
+
+                    # Parse arguments
+                    try:
+                        tool_args = json.loads(tool_args_str) if tool_args_str else {}
+                    except json.JSONDecodeError:
+                        tool_args = {}
+                        self._log(
+                            f"Failed to parse tool args: {tool_args_str}",
+                            level="WARNING",
+                        )
+
+                    self._log(f"Calling tool: {tool_name}", level="INFO")
+
+                    # Execute tool via MCP
+                    tool_result = await self._execute_tool(client, tool_name, tool_args)
+                    self.total_tool_calls += 1
+
+                    # Add tool result to messages
+                    self.messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tool_id,
+                            "content": tool_result,
+                        }
+                    )
+
+                    # Log tool result
+                    self._log_chat_message(
+                        "tool",
+                        tool_result,
+                        iteration=iteration,
+                        tool_call_id=tool_id,
+                    )
+
+            else:
+                # No tool calls - agent is done
+                final_response = response.content
+                self._log(f"Agent completed after {iteration} iterations", level="INFO")
+                self._log(f"Final response: {final_response[:500]}...", level="DEBUG")
+
+                # Log final assistant response
+                self._log_chat_message(
+                    "assistant",
+                    final_response or "",
+                    iteration=iteration,
+                )
+                break
+
+            # Incremental save: save conversation after each iteration
+            self._log_conversation()
+
+        if iteration >= self.max_iterations:
+            self._log(
+                f"Max iterations ({self.max_iterations}) reached", level="WARNING"
+            )
+            final_response = response.content if response else ""
+
+        return final_response
+
+    async def run_async(self, **kwargs) -> str:
+        """
+        Run the agent asynchronously.
+
+        Args:
+            **kwargs: Task-specific arguments passed to get_initial_message()
+
+        Returns:
+            Final agent response
+        """
+        # Setup logging
+        self._setup_logging()
+
+        self.start_time = datetime.now()
+        self._log("Starting agent run", level="INFO")
+        self._log(f"Task ID: {self.task_id}", level="INFO")
+        self._log(f"Worker ID: {self.worker_id}", level="INFO")
+
+        initial_message = self.get_initial_message(**kwargs)
+        self._log(f"Initial message: {initial_message[:500]}...", level="DEBUG")
+
+        # Create AgentContext for isolation and persistence
+        # This provides unique ObjectId and lifecycle management for each agent instance
+        # All state is persisted to MongoDB automatically
+        with AgentContext(
+            task_id=self.task_id,
+            worker_id=self.worker_id,
+            agent_type=self.agent_name,
+            target=self.target_name,
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+        ) as ctx:
+            self._context = ctx
+            ctx.agent = self  # Back-reference for cancellation
+            agent_id = ctx.agent_id  # Use ObjectId from context
+
+            # Allow subclasses to configure context (set sp_id, direction_id, etc.)
+            self._configure_context(ctx)
+
+            # Update LLMClient with agent_id for call tracking
+            self.llm_client.agent_id = agent_id
+
+            # Update SP context with agent_id for tracking SP creator/verifier
+            from ..tools.suspicious_points import set_sp_agent_id
+            from ..tools.directions import set_direction_agent_id
+
+            set_sp_agent_id(agent_id)
+            set_direction_agent_id(agent_id)
+
+            self._log(f"Agent context created: {agent_id}", level="DEBUG")
+
+            try:
+                # Create an isolated MCP server for this agent
+                # This prevents response mixing when multiple agents run concurrently
+                # Pass agent_id for unique context lookup
+                mcp_server = create_isolated_mcp_server(
+                    agent_id=agent_id,
+                    worker_id=agent_id,  # Use agent_id for context isolation
+                    include_pov_tools=self.include_pov_tools,
+                    include_seed_tools=self.include_seed_tools,
+                    include_sp_tools=self.include_sp_tools,
+                    include_sp_create_tools=self.include_sp_create_tools,
+                    include_direction_tools=self.include_direction_tools,
+                )
+                self._log(
+                    f"Created isolated MCP server: {agent_id} (pov_tools={self.include_pov_tools}, seed_tools={self.include_seed_tools}, sp_tools={self.include_sp_tools})",
+                    level="DEBUG",
+                )
+
+                # Connect to the isolated MCP server and run agent loop
+                async with Client(mcp_server) as client:
+                    result = await self._run_agent_loop(client, initial_message)
+
+                # Update context with final stats (auto-persisted on exit)
+                ctx.iterations = self.total_iterations
+                ctx.tool_calls = self.total_tool_calls
+                ctx.result_summary = {
+                    "iterations": self.total_iterations,
+                    "tool_calls": self.total_tool_calls,
+                }
+                if self._log_file:
+                    ctx.log_path = str(self._log_file)
+
+            except Exception as e:
+                self._log(f"Agent run failed: {e}", level="ERROR")
+                import traceback
+
+                self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
+                self.stop_reason = "error"  # Mark as actual failure
+                result = f"Agent failed: {e}"
+
+        # Context exits here, automatically persisting to MongoDB
+
+        self.end_time = datetime.now()
+        duration = (self.end_time - self.start_time).total_seconds()
+
+        self._log(f"Agent run completed in {duration:.2f}s", level="INFO")
+        self._log(f"Total iterations: {self.total_iterations}", level="INFO")
+        self._log(f"Total tool calls: {self.total_tool_calls}", level="INFO")
+
+        # Write summary table to log
+        self._write_summary_table()
+
+        # Note: conversation log (.json) is saved incrementally after each iteration
+        # No need to save again here
+
+        return result
+
+    def run(self, **kwargs) -> str:
+        """
+        Run the agent synchronously.
+
+        Args:
+            **kwargs: Task-specific arguments passed to get_initial_message()
+
+        Returns:
+            Final agent response
+        """
+        return asyncio.run(self.run_async(**kwargs))
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get agent statistics."""
+        stats = {
+            "agent": self.agent_name,
+            "task_id": self.task_id,
+            "worker_id": self.worker_id,
+            "total_iterations": self.total_iterations,
+            "total_tool_calls": self.total_tool_calls,
+            "message_count": len(self.messages),
+        }
+
+        if self.start_time and self.end_time:
+            stats["duration_seconds"] = (
+                self.end_time - self.start_time
+            ).total_seconds()
+
+        if self._log_file:
+            stats["log_file"] = str(self._log_file)
+            # JSON conversation file is same path with .json extension
+            stats["conversation_file"] = str(self._log_file.with_suffix(".json"))
+
+        return stats

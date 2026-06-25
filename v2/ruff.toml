@@ -1,0 +1,14 @@
+# Ruff configuration for FuzzingBrain v2
+
+[lint]
+# Rules to ignore globally
+ignore = [
+    "F403",  # undefined-local-with-import-star (used in __init__.py re-exports)
+    "F841",  # unused-variable (often intentional for future use or debugging)
+]
+
+[lint.per-file-ignores]
+# __init__.py files often have imports after __all__ definitions
+"__init__.py" = ["E402", "F401"]
+# celery_app.py loads .env before importing
+"celery_app.py" = ["E402"]

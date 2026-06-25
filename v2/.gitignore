@@ -1,10 +1,51 @@
-# SPDX-License-Identifier: Apache-2.0
-# Python build / editable-install artifacts for the self-contained v2 project
-*.egg-info/
-build/
-dist/
-.pytest_cache/
-__pycache__/
+# Python bytecode
+**/__pycache__/
 *.pyc
-.venv/
-venv/
+*.pyo
+*.egg-info/
+
+# Virtual environments
+**/venv/
+
+# Workspace / runtime data
+**/workspace/
+**/workspace/*
+work/
+
+# Logs
+**/logs/
+*.log
+
+# Temp / test output
+**/tmp_*
+**/test_*
+!tests/test_*
+test_trace_output/
+
+# User-specific config
+**/examples/llm_config.local.yaml
+fuzzingbrain/llm_config.local.yaml
+task_view_*/
+documentation/analysis/
+experiment/
+
+# Test / coverage artifacts
+**/coverage.xml
+**/coverage.json
+**/.coverage
+htmlcov/
+**/.pytest_cache/
+**/.benchmarks/
+**/.benchmark_results/
+
+# Eval server runtime
+.eval_pids/
+FBv2-Dashboard/
+
+# External repos (cloned locally, has its own .git)
+Z-Code-Analyzer-Station/
+
+# Environment secrets
+**/.env
+.env.*
+!.env.example
