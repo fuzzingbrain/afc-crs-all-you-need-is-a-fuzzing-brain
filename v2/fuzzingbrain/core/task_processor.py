@@ -897,6 +897,28 @@ class TaskProcessor:
                         fuzzer.error_msg = "Not found in build output"
                     self.repos.fuzzers.save(fuzzer)
 
+                # The build is authoritative for what actually exists. Add any
+                # fuzzer that built but discovery missed - e.g. a harness that
+                # lives outside repo/ (imported bring-your-own-harness targets),
+                # which repo pattern-matching cannot see. Without this, a target
+                # whose only built fuzzer was not pattern-discovered dispatches
+                # zero workers.
+                discovered_names = {f.fuzzer_name for f in fuzzers}
+                for fi in analyze_result.fuzzers:
+                    if fi.name in discovered_names:
+                        continue
+                    fuzzer = Fuzzer(
+                        task_id=task.task_id,
+                        fuzzer_name=fi.name,
+                        source_path="",
+                        repo_name=task.project_name,
+                        status=FuzzerStatus.SUCCESS,
+                        binary_path=fi.binary_path,
+                    )
+                    fuzzers.append(fuzzer)
+                    self.repos.fuzzers.save(fuzzer)
+                    logger.info(f"Added built-but-undiscovered fuzzer: {fi.name}")
+
             successful_fuzzers = [
                 f for f in fuzzers if f.status == FuzzerStatus.SUCCESS
             ]
