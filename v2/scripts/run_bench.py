@@ -34,7 +34,7 @@ from pathlib import Path
 V2_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(V2_DIR))
 
-from fuzzingbrain.importers.bench import spec_from_bench_bug  # noqa: E402
+from fuzzingbrain.importers.bench import spec_from_bench_bug, _LANG_MAP  # noqa: E402
 from fuzzingbrain.importers.external_harness import build_workspace  # noqa: E402
 
 DEFAULT_BENCH = "/data4/ze/FuzzingBrain-Bench"
@@ -50,7 +50,8 @@ def discover_bugs(bench_dir: Path, langs: set[str] | None) -> list[tuple[str, Pa
     out = []
     for yml in sorted((bench_dir / "bugs").glob("*/*/bench.yaml")):
         meta = yaml.safe_load(yml.read_text())
-        lang = str(meta.get("target", {}).get("language", "")).lower()
+        raw = str(meta.get("target", {}).get("language", "")).lower()
+        lang = _LANG_MAP.get(raw, raw)  # normalize cpp -> c++ to match --langs
         if langs and lang not in langs:
             continue
         out.append((meta.get("bug_id", yml.parent.name), yml.parent))
