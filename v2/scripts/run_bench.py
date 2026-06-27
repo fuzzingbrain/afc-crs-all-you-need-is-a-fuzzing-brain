@@ -170,6 +170,21 @@ def run_bug(bug_id: str, bug_dir: Path, opts) -> dict:
     rec["solved"] = bool(best["passed"])
     rec["capabilities"] = best["capabilities"]
     rec["graded"] = graded
+
+    # Disk hygiene: a workspace (repo clone + multi-sanitizer build) is large and
+    # there can be dozens. Preserve the produced blobs, then drop the workspace
+    # unless the caller asked to keep it.
+    if blobs:
+        keep = Path(opts.workdir) / "blobs" / bug_id
+        keep.mkdir(parents=True, exist_ok=True)
+        for b in blobs:
+            try:
+                (keep / b.name).write_bytes(b.read_bytes())
+            except Exception:
+                pass
+    if not opts.keep_workspace:
+        import shutil
+        shutil.rmtree(ws, ignore_errors=True)
     return rec
 
 
@@ -228,6 +243,8 @@ def main(argv=None) -> int:
     ap.set_defaults(hint=True)
     ap.add_argument("--resume", action="store_true", help="Skip bugs already in the report")
     ap.add_argument("--limit", type=int, default=0, help="Stop after N bugs (0=all)")
+    ap.add_argument("--keep-workspace", action="store_true",
+                    help="Keep each bug's workspace (default: delete after grading)")
     opts = ap.parse_args(argv)
 
     Path(opts.workdir).mkdir(parents=True, exist_ok=True)
