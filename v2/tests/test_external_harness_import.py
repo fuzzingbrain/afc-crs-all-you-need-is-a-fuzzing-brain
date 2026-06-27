@@ -125,6 +125,24 @@ def test_no_overwrite_without_flag(tmp_path):
     build_workspace(spec, tmp_path / "ws", oss, clone_repo=False, overwrite=True)
 
 
+def test_description_written_when_present(tmp_path):
+    spec = _spec(tmp_path, description="NULL deref in vacm_parse_config_group")
+    ws = build_workspace(
+        spec, tmp_path / "ws", _fake_oss_fuzz(tmp_path), clone_repo=False
+    )
+    desc = ws / "DESCRIPTION.txt"
+    assert desc.is_file()
+    assert "vacm_parse_config_group" in desc.read_text()
+
+
+def test_no_description_no_file(tmp_path):
+    spec = _spec(tmp_path)  # description defaults to ""
+    ws = build_workspace(
+        spec, tmp_path / "ws", _fake_oss_fuzz(tmp_path), clone_repo=False
+    )
+    assert not (ws / "DESCRIPTION.txt").exists()
+
+
 def test_from_json_roundtrip(tmp_path):
     spec = _spec(tmp_path)
     spec_path = tmp_path / "spec.json"

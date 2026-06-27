@@ -13,9 +13,12 @@ from fuzzingbrain.importers.bench import (
 )
 
 
-def _make_bug(tmp_path, *, language="c", sources=("vacm_fuzzer.c",), apt=None):
+def _make_bug(tmp_path, *, language="c", sources=("vacm_fuzzer.c",), apt=None,
+              description="NULL deref in vacm_parse_config_group at vacm.c:414"):
     bug = tmp_path / "netsnmp-vacm-parse-npd"
     (bug / "harness").mkdir(parents=True)
+    if description is not None:
+        (bug / "description.txt").write_text(description + "\n")
     (bug / "bench.yaml").write_text(
         "bug_id: netsnmp-vacm-parse-npd\n"
         "project: net-snmp\n"
@@ -87,6 +90,21 @@ def test_build_script_selects_by_sanitizer():
     bs = _build_script("foo_fuzzer")
     assert 'SANITIZER:-address' in bs
     assert "release-asan debug-asan debug" in bs
+
+
+def test_description_included_by_default(tmp_path):
+    spec = spec_from_bench_bug(_make_bug(tmp_path))
+    assert "vacm_parse_config_group" in spec.description
+
+
+def test_description_excluded_when_disabled(tmp_path):
+    spec = spec_from_bench_bug(_make_bug(tmp_path), with_description=False)
+    assert spec.description == ""
+
+
+def test_missing_description_file_is_empty(tmp_path):
+    spec = spec_from_bench_bug(_make_bug(tmp_path, description=None))
+    assert spec.description == ""
 
 
 def test_no_source_raises(tmp_path):

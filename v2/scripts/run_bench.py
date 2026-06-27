@@ -144,7 +144,8 @@ def run_bug(bug_id: str, bug_dir: Path, opts) -> dict:
     ws = Path(opts.workdir) / bug_id
     rec = {"bug_id": bug_id, "project": bug_dir.parent.name, "ts": int(time.time())}
     try:
-        spec = spec_from_bench_bug(bug_dir)
+        spec = spec_from_bench_bug(bug_dir, with_description=opts.hint)
+        rec["hint"] = bool(spec.description)
         rec["language"] = spec.language
         build_workspace(spec, ws, opts.oss_fuzz, overwrite=True)
     except Exception as e:  # importer / materialize failure
@@ -222,6 +223,9 @@ def main(argv=None) -> int:
     ap.add_argument("--budget", type=float, default=8.0, help="Per-bug USD budget")
     ap.add_argument("--timeout", type=int, default=25, help="Per-bug pipeline timeout (min)")
     ap.add_argument("--rounds", type=int, default=1, help="Grade rounds per blob")
+    ap.add_argument("--no-hint", dest="hint", action="store_false",
+                    help="Disable the bug-description hint (pure autonomous discovery)")
+    ap.set_defaults(hint=True)
     ap.add_argument("--resume", action="store_true", help="Skip bugs already in the report")
     ap.add_argument("--limit", type=int, default=0, help="Stop after N bugs (0=all)")
     opts = ap.parse_args(argv)

@@ -101,11 +101,17 @@ def _harness_source(harness_dir: Path) -> Path:
     return srcs[0]
 
 
-def spec_from_bench_bug(bug_dir: str | Path) -> HarnessSpec:
+def spec_from_bench_bug(
+    bug_dir: str | Path, with_description: bool = True
+) -> HarnessSpec:
     """Build a :class:`HarnessSpec` from a bench bug directory.
 
     Args:
         bug_dir: Path to a bench bug (contains bench.yaml, harness/, Dockerfile).
+        with_description: Include the bug's description.txt as a direction hint.
+            The bench's task is to reproduce *from a description*, so this is the
+            faithful (and far more effective) mode; set False to measure purely
+            autonomous discovery.
 
     Returns:
         A HarnessSpec whose build_script drives the bench's own harness build.
@@ -131,6 +137,11 @@ def spec_from_bench_bug(bug_dir: str | Path) -> HarnessSpec:
         if p.is_file() and p.suffix.lower() != ".md"
     ]
 
+    description = ""
+    desc_file = bug_dir / "description.txt"
+    if with_description and desc_file.is_file():
+        description = desc_file.read_text(errors="replace").strip()
+
     return HarnessSpec(
         project=project,
         language=language,
@@ -139,4 +150,5 @@ def spec_from_bench_bug(bug_dir: str | Path) -> HarnessSpec:
         harness_files=harness_files,
         apt_deps=_parse_apt_deps(bug_dir / "Dockerfile"),
         build_script=_build_script(fuzzer_name),
+        description=description,
     )

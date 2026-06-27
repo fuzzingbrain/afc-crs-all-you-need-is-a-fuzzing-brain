@@ -280,8 +280,28 @@ When assigning risk levels, prioritize directions that handle code patterns dete
         """Generate initial message for direction planning."""
         fuzzer_code = kwargs.get("fuzzer_code", "")
         reachable_count = kwargs.get("reachable_count", 0)
+        vuln_hint = kwargs.get("vuln_hint", "") or ""
+
+        # A caller-supplied vulnerability description (e.g. a bug report or
+        # benchmark prompt) is a strong prior: lead with it so the agent creates
+        # a focused direction quickly instead of exploring the whole codebase.
+        hint_block = ""
+        if vuln_hint.strip():
+            hint_block = f"""## Known Vulnerability Report (PRIORITIZE THIS)
+
+A vulnerability has been reported in this target. Use it to create a focused,
+high-risk direction toward the implicated code FIRST, then verify by reading the
+relevant functions. Do not exhaust your budget exploring unrelated code.
+
+\"\"\"
+{vuln_hint.strip()}
+\"\"\"
+
+"""
 
         message = f"""Plan the analysis directions for a Full-scan security audit.
+
+{hint_block}""" + f"""
 
 ## Your Target Configuration
 
@@ -320,6 +340,7 @@ Remember: Only reachable code matters. Only {self.sanitizer}-detectable bugs mat
         self,
         fuzzer_code: str = "",
         reachable_count: int = 0,
+        vuln_hint: str = "",
     ) -> Dict[str, Any]:
         """
         Run direction planning asynchronously.
@@ -327,6 +348,7 @@ Remember: Only reachable code matters. Only {self.sanitizer}-detectable bugs mat
         Args:
             fuzzer_code: Fuzzer source code
             reachable_count: Number of reachable functions
+            vuln_hint: Optional vulnerability description to focus planning
 
         Returns:
             Dictionary with planning results
@@ -334,6 +356,7 @@ Remember: Only reachable code matters. Only {self.sanitizer}-detectable bugs mat
         result = await self.run_async(
             fuzzer_code=fuzzer_code,
             reachable_count=reachable_count,
+            vuln_hint=vuln_hint,
         )
 
         return {
@@ -347,6 +370,7 @@ Remember: Only reachable code matters. Only {self.sanitizer}-detectable bugs mat
         self,
         fuzzer_code: str = "",
         reachable_count: int = 0,
+        vuln_hint: str = "",
     ) -> Dict[str, Any]:
         """
         Run direction planning synchronously.
@@ -354,6 +378,7 @@ Remember: Only reachable code matters. Only {self.sanitizer}-detectable bugs mat
         Args:
             fuzzer_code: Fuzzer source code
             reachable_count: Number of reachable functions
+            vuln_hint: Optional vulnerability description to focus planning
 
         Returns:
             Dictionary with planning results
@@ -361,6 +386,7 @@ Remember: Only reachable code matters. Only {self.sanitizer}-detectable bugs mat
         result = self.run(
             fuzzer_code=fuzzer_code,
             reachable_count=reachable_count,
+            vuln_hint=vuln_hint,
         )
 
         return {
