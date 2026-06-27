@@ -149,11 +149,13 @@ class POVFullscanStrategy(POVBaseStrategy):
             log_dir=agent_log_dir,
             max_iterations=100,
         )
+        vuln_hint = self._get_vuln_hint()
 
         try:
             result = planning_agent.plan_directions_sync(
                 fuzzer_code=fuzzer_code,
                 reachable_count=reachable_count,
+                vuln_hint=vuln_hint,
             )
             self.log_info(
                 f"Direction planning completed: {result.get('directions_created', 0)} directions"
@@ -187,11 +189,13 @@ class POVFullscanStrategy(POVBaseStrategy):
             log_dir=agent_log_dir,
             max_iterations=100,
         )
+        vuln_hint = self._get_vuln_hint()
 
         try:
             result = await planning_agent.plan_directions_async(
                 fuzzer_code=fuzzer_code,
                 reachable_count=reachable_count,
+                vuln_hint=vuln_hint,
             )
             self.log_info(
                 f"Direction planning completed: {result.get('directions_created', 0)} directions"
@@ -252,6 +256,29 @@ class POVFullscanStrategy(POVBaseStrategy):
     # =========================================================================
     # Helper Methods
     # =========================================================================
+
+    def _get_vuln_hint(self) -> str:
+        """Read an optional vulnerability description from the task workspace.
+
+        When a target is imported with a known bug report (e.g. a benchmark
+        prompt), the importer drops it at ``<task_workspace>/DESCRIPTION.txt``.
+        Feeding it to direction planning focuses the search instead of letting
+        the agent explore the whole codebase blind. Absent file -> "" (the agent
+        runs fully autonomously, unchanged).
+        """
+        try:
+            ws = getattr(self.executor, "task_workspace_path", None)
+            if not ws:
+                return ""
+            desc = ws / "DESCRIPTION.txt"
+            if desc.is_file():
+                text = desc.read_text(errors="replace").strip()
+                if text:
+                    self.log_info(f"Using vuln hint from DESCRIPTION.txt ({len(text)} chars)")
+                return text
+        except Exception as e:
+            self.log_warning(f"Could not read DESCRIPTION.txt: {e}")
+        return ""
 
     def _get_fuzzer_source_code(self) -> str:
         """Get fuzzer source code for Full-scan context."""

@@ -60,6 +60,9 @@ class HarnessSpec:
     sanitizers: List[str] = field(default_factory=lambda: ["address"])
     apt_deps: List[str] = field(default_factory=list)
     base_image: str = "gcr.io/oss-fuzz-base/base-builder"
+    # Optional known-vulnerability report. Written to <ws>/DESCRIPTION.txt and
+    # fed to direction planning to focus the search (see pov_fullscan).
+    description: str = ""
 
     @classmethod
     def from_dict(cls, data: dict) -> "HarnessSpec":
@@ -175,6 +178,9 @@ def build_workspace(
     build_sh = proj_dir / "build.sh"
     build_sh.write_text(_render_build_sh(spec))
     build_sh.chmod(0o755)
+    # Optional bug report for direction planning (see pov_fullscan._get_vuln_hint)
+    if spec.description.strip():
+        (dest / "DESCRIPTION.txt").write_text(spec.description.strip() + "\n")
     if spec.harness_files:
         hdir = proj_dir / "harness"
         hdir.mkdir()
