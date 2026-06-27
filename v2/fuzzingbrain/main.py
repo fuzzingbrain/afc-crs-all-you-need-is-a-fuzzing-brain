@@ -480,6 +480,22 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _detect_workspace_project(workspace: str) -> Optional[str]:
+    """Infer the project name from a self-describing workspace.
+
+    A workspace built ahead of time (e.g. by the external_harness importer, or
+    any hand-assembled ``--workspace``) carries its OSS-Fuzz project under
+    ``fuzz-tooling/projects/<name>/``. When ``--project`` is omitted we read the
+    name from there. Only an unambiguous single project is auto-selected; with
+    zero or several, the caller must pass ``--project`` explicitly.
+    """
+    projects_dir = Path(workspace) / "fuzz-tooling" / "projects"
+    if not projects_dir.is_dir():
+        return None
+    names = [p.name for p in projects_dir.iterdir() if p.is_dir()]
+    return names[0] if len(names) == 1 else None
+
+
 def create_config_from_args(args: argparse.Namespace) -> Config:
     """Create Config from parsed arguments"""
     # Start with environment config
@@ -517,6 +533,13 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
         config.workspace = args.workspace
     if args.in_place:
         config.in_place = args.in_place
+
+    # Self-describing workspace: derive the project from fuzz-tooling/projects/
+    # when not given explicitly (the importer/local-workspace path drops it).
+    if not config.project_name and config.workspace:
+        detected = _detect_workspace_project(config.workspace)
+        if detected:
+            config.project_name = detected
 
     # Task configuration
     if args.task_type:
