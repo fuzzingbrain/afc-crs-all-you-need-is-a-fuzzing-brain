@@ -84,37 +84,43 @@ def _normalize_repo(url: str) -> str:
     return url.rstrip("/").removesuffix(".git").lower()
 
 
-def _parse_clones(dockerfile: Path, main_repo: str) -> tuple[str, list[dict]]:
-    """Parse `git clone <url> /src/<dir>` (+ checkout) lines from the Dockerfile.
+def _parse_clones(dockerfile: Path, main_repo: str) -> tuple[str, bool, list[dict]]:
+    """Parse `git clone <url> /src[/<dir>]` (+ checkout) lines from the Dockerfile.
 
-    Returns (main_dir, extra_clones). main_dir is the /src directory the build.sh
-    expects the target source at (matched to main_repo); extra_clones are the
-    dependency repos the build needs at their own fixed /src paths.
+    Returns (main_dir, main_flatten, extra_clones). main_dir is the /src directory
+    the build.sh expects the target source at (matched to main_repo); main_flatten
+    is True when the main repo is cloned to /src itself (so its contents sit
+    directly under /src, e.g. mongoose/dtc); extra_clones are the dependency repos
+    the build needs at their own fixed /src paths.
     """
     if not dockerfile.is_file():
-        return "", []
+        return "", False, []
     text = dockerfile.read_text()
     args = _parse_dockerfile_args(text)
 
     clones = []
-    # `git clone [flags...] <url> /src/<dir>` — flags (e.g. --depth 1,
+    # `git clone [flags...] <url> /src[/<dir>]` — flags (e.g. --depth 1,
     # --filter=blob:none) sit between; the URL is the last token before the dir.
-    for m in re.finditer(r"git clone\s+(.+?)\s+((?:/src|\$SRC)/\S+)", text):
+    # The subdir is optional: some bugs clone straight into /src ("flatten").
+    for m in re.finditer(r"git clone\s+(.+?)\s+((?:/src|\$SRC)(?:/\S+)?)\b", text):
         url = _subst(m.group(1).split()[-1], args)
-        d = _subst(m.group(2), args).replace("$SRC", "/src").replace("${SRC}", "/src")
+        d = _subst(m.group(2), args).replace("${SRC}", "/src").replace("$SRC", "/src")
         # checkout ref for this dir, if any
         cm = re.search(rf"git -C\s+{re.escape(m.group(2))}\s+checkout\s+(\S+)", text)
         ref = _subst(cm.group(1), args) if cm else ""
-        clones.append({"url": url, "dir": d, "ref": ref})
+        clones.append({"url": url, "dir": d.rstrip("/"), "ref": ref})
 
-    main_dir, extra = "", []
+    main_dir, flatten, extra = "", False, []
     norm_main = _normalize_repo(main_repo)
     for c in clones:
-        if not main_dir and _normalize_repo(c["url"]) == norm_main:
-            main_dir = c["dir"].rsplit("/", 1)[-1]
+        if not main_dir and not flatten and _normalize_repo(c["url"]) == norm_main:
+            if c["dir"] == "/src":
+                flatten = True
+            else:
+                main_dir = c["dir"].rsplit("/", 1)[-1]
         else:
             extra.append(c)
-    return main_dir, extra
+    return main_dir, flatten, extra
 
 
 def _detect_libs_cmd(build_sh_text: str) -> str:
@@ -211,19 +217,29 @@ def spec_from_bench_bug(
     # Mount the target there (project = that dir) and replicate dependency clones,
     # otherwise build.sh fails ("/src/aom: No such file", missing libde265, ...).
     dockerfile = bug_dir / "Dockerfile"
-    main_dir, extra_clones = _parse_clones(dockerfile, main_repo)
+    main_dir, main_flatten, extra_clones = _parse_clones(dockerfile, main_repo)
     case_fix = ""
     if main_dir:
-        # OSS-Fuzz lower-cases the project name, so helper.py mounts the target
-        # at /src/<lower> while the build.sh hard-codes the original (possibly
-        # cased) /src/<dir>. Use the lower-cased name as the project and symlink
-        # the cased path to it so the build.sh finds its source.
+        # The build.sh hard-codes the cased /src/<dir>; use the lower-cased name
+        # as the project and symlink the cased path so the build.sh finds it.
         if main_dir != main_dir.lower():
             case_fix = (
                 f'[ -e "$SRC/{main_dir}" ] || '
                 f'ln -sfn "$SRC/{main_dir.lower()}" "$SRC/{main_dir}"\n'
             )
         project = main_dir.lower()
+    # OSS-Fuzz requires a lower-case project (it is the docker image tag and the
+    # /src mount dir); cased bench projects (Ghidra, FreeRDP) break the build.
+    project = project.lower()
+    if main_flatten:
+        # The build.sh expects the repo flattened at /src (it hard-codes SRC=/src
+        # and #includes files by bare name). helper.py mounts it at /src/<project>,
+        # so symlink the repo's contents up into /src before building.
+        case_fix += (
+            f'for f in "$SRC/{project}"/* "$SRC/{project}"/.[!.]*; do\n'
+            f'  [ -e "$f" ] && ln -sfn "$f" "$SRC/$(basename "$f")" || true\n'
+            'done\n'
+        )
 
     apt_deps = _parse_apt_deps(dockerfile)
     # base-builder's meson is too old for some projects (need >= 0.55) — pull a
