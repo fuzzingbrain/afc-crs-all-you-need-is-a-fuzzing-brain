@@ -117,13 +117,28 @@ def _parse_clones(dockerfile: Path, main_repo: str) -> tuple[str, list[dict]]:
     return main_dir, extra
 
 
-def _build_script(fuzzer_name: str) -> str:
+def _detect_libs_cmd(build_sh_text: str) -> str:
+    """Find the library-build subcommand name, which varies across bench bugs.
+
+    Most use ``build-libs``; some rename it (openldap: ``openldap-libs``). A few
+    have no separate libs step (mongoose: just ``build.sh <config>``) -> "".
+    """
+    m = re.search(r"usage:\s*build\.sh\s+([A-Za-z][\w-]*)\s*\|", build_sh_text)
+    if m and m.group(1) != "harness":
+        return m.group(1)
+    m = re.search(r'=\s*"([A-Za-z][\w-]*-libs)"', build_sh_text)
+    return m.group(1) if m else ""
+
+
+def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
     """OSS-Fuzz build.sh body that drives the bench harness build.
 
     Reuses ``$SRC/harness/build.sh`` (the bench's own recipe) and selects a
-    config that matches ``$SANITIZER``. Tries asan configs in priority order so
-    projects that only define a subset still build.
+    config that matches ``$SANITIZER``. Robust to interface variation across
+    bench projects: tries the detected libs step then ``build-libs``, and invokes
+    each config as both ``harness <cfg>`` and bare ``<cfg>``.
     """
+    libs_list = " ".join(dict.fromkeys(filter(None, [libs_cmd, "build-libs"])))
     return (
         'set -eu\n'
         # The repo is bind-mounted with host ownership; without this, git in the
@@ -131,7 +146,8 @@ def _build_script(fuzzer_name: str) -> str:
         # build.sh that runs submodule update / autoreconf (e.g. jq, oniguruma).
         "git config --global --add safe.directory '*' || true\n"
         'BS="$SRC/harness/build.sh"\n'
-        'bash "$BS" build-libs\n'
+        # Optional library-build step; name varies, some projects have none.
+        f'for L in {libs_list}; do bash "$BS" "$L" 2>/dev/null && break || true; done\n'
         'if [ "${SANITIZER:-address}" = "coverage" ]; then\n'
         '  CFGS="coverage"\n'
         'else\n'
@@ -139,7 +155,9 @@ def _build_script(fuzzer_name: str) -> str:
         'fi\n'
         'built=""\n'
         'for c in $CFGS; do\n'
-        '  if bash "$BS" harness "$c" && [ -f "/out/$c/harness" ]; then\n'
+        # Try "harness <cfg>" (most) then bare "<cfg>" (mongoose-style).
+        '  if { bash "$BS" harness "$c" || bash "$BS" "$c"; } 2>/dev/null '
+        '&& [ -f "/out/$c/harness" ]; then\n'
         f'    cp "/out/$c/harness" "$OUT/{fuzzer_name}"\n'
         '    built="$c"; break\n'
         '  fi\n'
@@ -208,6 +226,8 @@ def spec_from_bench_bug(
     harness_dir = bug_dir / "harness"
     source = _harness_source(harness_dir)
     fuzzer_name = source.stem
+    build_sh = harness_dir / "build.sh"
+    libs_cmd = _detect_libs_cmd(build_sh.read_text()) if build_sh.is_file() else "build-libs"
 
     # Copy the whole harness dir except docs; build.sh + sources must be present.
     harness_files = [
@@ -228,7 +248,7 @@ def spec_from_bench_bug(
         commit=commit,
         harness_files=harness_files,
         apt_deps=apt_deps,
-        build_script=case_fix + _build_script(fuzzer_name),
+        build_script=case_fix + _build_script(fuzzer_name, libs_cmd),
         description=description,
         extra_clones=extra_clones,
         pip_deps=pip_deps,
