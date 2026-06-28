@@ -41,11 +41,12 @@ def test_parse_clones_flatten_to_src(tmp_path):
 
 def test_jvm_build_script_shape():
     from fuzzingbrain.importers.bench import _jvm_build_script
-    bs = _jvm_build_script("JsonMLFuzzer", "JsonMLFuzzer", "json-java", "build-libs")
-    assert "$JAZZER_API_PATH" in bs and "javac" in bs
+    bs = _jvm_build_script("JsonMLFuzzer", "JsonMLFuzzer", "build-libs")
+    # Reuse the bench harness step's classpath assembly ($OUT/lib), then wrap it.
+    assert 'bash "$BS" harness "$c"' in bs
+    assert '$OUT/lib/classes' in bs
     assert "--target_class=JsonMLFuzzer" in bs
     assert "jazzer_driver" in bs
-    assert "grep -v PocRunner" in bs  # skip the bench reproducer driver
 
 
 def test_needs_rust_signals():

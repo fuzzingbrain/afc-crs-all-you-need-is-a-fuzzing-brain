@@ -222,53 +222,45 @@ def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
     )
 
 
-def _jvm_build_script(
-    target_class: str, out_name: str, project: str, libs_cmd: str
-) -> str:
+def _jvm_build_script(target_class: str, out_name: str, libs_cmd: str) -> str:
     """Build a Jazzer fuzz target from a bench JVM bug.
 
-    The bench's own ``harness`` step emits a plain ``java`` reproducer (for the
-    grader), not a fuzz target, so for V2 we instead compile the harness entry
-    class against the Jazzer API and emit a standard libFuzzer-compatible Jazzer
-    wrapper at ``$OUT/<target_class>``. We reuse the bench ``build-libs`` step
-    (mvn/gradle package) for the project jar, and bundle the project's runtime
-    dependencies so the target runs standalone.
+    The bench's own ``harness`` step emits a plain-``java`` reproducer (for the
+    grader), not a fuzz target — but it also assembles ``/out/lib`` (the compiled
+    harness ``classes`` plus the project and dependency jars) with the *correct*
+    classpath. We reuse that assembly verbatim (re-deriving the classpath
+    ourselves is brittle — avro/pdfbox need transitive deps), and just drop a
+    standard libFuzzer-compatible Jazzer wrapper at ``$OUT/<class>`` over it.
+    Jazzer is a libFuzzer driver, so V2's existing fuzz loop runs it unchanged.
     """
     libs_list = " ".join(dict.fromkeys(filter(None, [libs_cmd, "build-libs"])))
     return (
         'set -eu\n'
         "git config --global --add safe.directory '*' || true\n"
         'BS="$SRC/harness/build.sh"\n'
-        # Project jar(s): run the bench library build (mvn/gradle package).
+        # Build the project, then run the bench harness step which populates
+        # $OUT/lib (LIB=/out/lib in the bench recipe) with classes + jars.
         f'for L in {libs_list}; do bash "$BS" "$L" && break || true; done\n'
-        'mkdir -p "$OUT"\n'
-        f'PROJ="$SRC/{project}"\n'
-        # Collect the project jar plus any runtime dependency jars Maven resolved.
-        'mvn -q -f "$PROJ/pom.xml" dependency:copy-dependencies '
-        '-DoutputDirectory="$OUT/deps" -DincludeScope=runtime 2>/dev/null || true\n'
-        'for j in $(find "$PROJ" -name "*.jar" -not -name "*sources*" '
-        '-not -name "*javadoc*" -not -path "*/deps/*"); do cp -n "$j" "$OUT/"; done\n'
-        # Compile the harness entry class(es) against the Jazzer API (skip the
-        # bench's PocRunner reproducer driver).
-        'CLS=/tmp/hcls; rm -rf "$CLS"; mkdir -p "$CLS"\n'
-        'CP="$JAZZER_API_PATH"; '
-        'for j in "$OUT"/*.jar "$OUT"/deps/*.jar; do [ -f "$j" ] && CP="$CP:$j"; done\n'
-        'SRCS=$(ls "$SRC"/harness/*.java | grep -v PocRunner || true)\n'
-        'javac -cp "$CP" -d "$CLS" $SRCS\n'
-        f'jar cf "$OUT/{out_name}.jar" -C "$CLS" .\n'
-        # Jazzer runtime + a libFuzzer-compatible wrapper (OSS-Fuzz convention).
+        'built=""\n'
+        'for c in release-asan debug-asan debug; do\n'
+        '  if { bash "$BS" harness "$c" || bash "$BS" "$c"; } '
+        '&& [ -d "$OUT/lib/classes" ]; then built="$c"; break; fi\n'
+        'done\n'
+        '[ -n "$built" ] || { echo "bench harness did not populate \\$OUT/lib" >&2; exit 1; }\n'
+        # Jazzer runtime + a libFuzzer-compatible wrapper over the bench classpath.
         'cp /usr/local/bin/jazzer_driver /usr/local/bin/jazzer_agent_deploy.jar "$OUT/"\n'
         f'cat > "$OUT/{out_name}" <<\'EOF\'\n'
         '#!/bin/bash\n'
         'this_dir=$(dirname "$0")\n'
-        'cp=$(ls "$this_dir"/*.jar "$this_dir"/deps/*.jar 2>/dev/null | tr "\\n" ":")\n'
+        'cp="$this_dir/lib/classes"\n'
+        'for j in "$this_dir"/lib/*.jar "$this_dir"/lib/deps/*.jar; do '
+        '[ -f "$j" ] && cp="$cp:$j"; done\n'
         'exec "$this_dir/jazzer_driver" '
         '--agent_path="$this_dir/jazzer_agent_deploy.jar" \\\n'
         '  --cp="$cp" '
         f'--target_class={target_class} --jvm_args="-Xmx2048m" "$@"\n'
         'EOF\n'
         f'chmod +x "$OUT/{out_name}"\n'
-        f'test -f "$OUT/{out_name}.jar"\n'
     )
 
 
@@ -389,7 +381,7 @@ def spec_from_bench_bug(
         harness_files=harness_files,
         apt_deps=apt_deps,
         build_script=(
-            _jvm_build_script(target_class, fuzzer_name, project, libs_cmd)
+            _jvm_build_script(target_class, fuzzer_name, libs_cmd)
             if language == "jvm"
             else case_fix + _build_script(fuzzer_name, libs_cmd)
         ),
