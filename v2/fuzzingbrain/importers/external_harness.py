@@ -60,6 +60,11 @@ class HarnessSpec:
     sanitizers: List[str] = field(default_factory=lambda: ["address"])
     apt_deps: List[str] = field(default_factory=list)
     base_image: str = "gcr.io/oss-fuzz-base/base-builder"
+    # Dependency repos the build needs at fixed /src paths (each {url, dir, ref}).
+    # The build.sh often hard-codes these (e.g. libheif needs /src/libde265).
+    extra_clones: List[dict] = field(default_factory=list)
+    # pip packages to install (e.g. a newer meson/ninja than base-builder ships).
+    pip_deps: List[str] = field(default_factory=list)
     # Optional known-vulnerability report. Written to <ws>/DESCRIPTION.txt and
     # fed to direction planning to focus the search (see pov_fullscan).
     description: str = ""
@@ -100,6 +105,17 @@ def _render_dockerfile(spec: HarnessSpec) -> str:
             "RUN apt-get update && apt-get install -y --no-install-recommends "
             f"{deps} && rm -rf /var/lib/apt/lists/*"
         )
+    if spec.pip_deps:
+        pips = " ".join(spec.pip_deps)
+        lines.append(f"RUN pip3 install --no-cache-dir --upgrade {pips}")
+    # Dependency repos the build.sh expects at fixed /src paths.
+    for c in spec.extra_clones:
+        url, d = c["url"], c["dir"]
+        ref = c.get("ref", "")
+        line = f"RUN git clone {url} {d}"
+        if ref:
+            line += f" && git -C {d} checkout {ref}"
+        lines.append(line)
     # Baseline clone so the image is self-contained; helper.py --mount_path
     # bind-mounts the local repo/ over this at build time.
     clone = f"RUN git clone --depth 1 {spec.main_repo} $SRC/{spec.project}"

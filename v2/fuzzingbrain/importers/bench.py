@@ -65,6 +65,58 @@ def _parse_apt_deps(dockerfile: Path) -> list[str]:
     return out
 
 
+def _parse_dockerfile_args(text: str) -> dict:
+    """Collect `ARG NAME=default` defaults for ${NAME} substitution."""
+    args = {}
+    for m in re.finditer(r"^\s*ARG\s+([A-Za-z_]\w*)=(\S+)", text, re.M):
+        args[m.group(1)] = m.group(2)
+    return args
+
+
+def _subst(value: str, args: dict) -> str:
+    """Resolve ${NAME} / $NAME against ARG defaults."""
+    def repl(m):
+        return args.get(m.group(1) or m.group(2), m.group(0))
+    return re.sub(r"\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)", repl, value)
+
+
+def _normalize_repo(url: str) -> str:
+    return url.rstrip("/").removesuffix(".git").lower()
+
+
+def _parse_clones(dockerfile: Path, main_repo: str) -> tuple[str, list[dict]]:
+    """Parse `git clone <url> /src/<dir>` (+ checkout) lines from the Dockerfile.
+
+    Returns (main_dir, extra_clones). main_dir is the /src directory the build.sh
+    expects the target source at (matched to main_repo); extra_clones are the
+    dependency repos the build needs at their own fixed /src paths.
+    """
+    if not dockerfile.is_file():
+        return "", []
+    text = dockerfile.read_text()
+    args = _parse_dockerfile_args(text)
+
+    clones = []
+    for m in re.finditer(
+        r"git clone\s+((?:--\S+\s+)*)(\S+)\s+((?:/src|\$SRC)/\S+)", text
+    ):
+        url = _subst(m.group(2), args)
+        d = _subst(m.group(3), args).replace("$SRC", "/src").replace("${SRC}", "/src")
+        # checkout ref for this dir, if any
+        cm = re.search(rf"git -C\s+{re.escape(m.group(3))}\s+checkout\s+(\S+)", text)
+        ref = _subst(cm.group(1), args) if cm else ""
+        clones.append({"url": url, "dir": d, "ref": ref})
+
+    main_dir, extra = "", []
+    norm_main = _normalize_repo(main_repo)
+    for c in clones:
+        if not main_dir and _normalize_repo(c["url"]) == norm_main:
+            main_dir = c["dir"].rsplit("/", 1)[-1]
+        else:
+            extra.append(c)
+    return main_dir, extra
+
+
 def _build_script(fuzzer_name: str) -> str:
     """OSS-Fuzz build.sh body that drives the bench harness build.
 
@@ -130,6 +182,19 @@ def spec_from_bench_bug(
     main_repo = target["repo"]
     commit = str(target.get("vuln_commit", "") or "")
 
+    # The bench build.sh hard-codes /src/<dir> paths from the bench Dockerfile.
+    # Mount the target there (project = that dir) and replicate dependency clones,
+    # otherwise build.sh fails ("/src/aom: No such file", missing libde265, ...).
+    dockerfile = bug_dir / "Dockerfile"
+    main_dir, extra_clones = _parse_clones(dockerfile, main_repo)
+    if main_dir:
+        project = main_dir
+
+    apt_deps = _parse_apt_deps(dockerfile)
+    # base-builder's meson is too old for some projects (need >= 0.55) — pull a
+    # current meson/ninja from pip when the project builds with meson.
+    pip_deps = ["meson", "ninja"] if "meson" in apt_deps else []
+
     harness_dir = bug_dir / "harness"
     source = _harness_source(harness_dir)
     fuzzer_name = source.stem
@@ -152,7 +217,9 @@ def spec_from_bench_bug(
         main_repo=main_repo,
         commit=commit,
         harness_files=harness_files,
-        apt_deps=_parse_apt_deps(bug_dir / "Dockerfile"),
+        apt_deps=apt_deps,
         build_script=_build_script(fuzzer_name),
         description=description,
+        extra_clones=extra_clones,
+        pip_deps=pip_deps,
     )
