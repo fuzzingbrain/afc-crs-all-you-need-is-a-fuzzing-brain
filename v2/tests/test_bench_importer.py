@@ -29,7 +29,16 @@ def test_detect_libs_cmd_none():
 
 def test_build_script_tries_both_harness_forms():
     bs = _build_script("f", libs_cmd="")
-    assert 'bash "$BS" harness "$c" || bash "$BS" "$c"' in bs
+    assert 'bash "$BS" harness "$c"' in bs
+    assert 'bash "$BS" "$c"' in bs
+
+
+def test_build_script_surfaces_errors_on_failure():
+    # Diagnostics: capture build.sh output per config and dump it on failure
+    # instead of silently discarding it.
+    bs = _build_script("f")
+    assert '>"/tmp/fb_' in bs  # per-config capture, not /dev/null
+    assert "build.sh output follows" in bs
 
 
 def test_build_script_includes_renamed_libs():
