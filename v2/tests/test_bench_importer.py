@@ -39,6 +39,15 @@ def test_parse_clones_flatten_to_src(tmp_path):
     assert main_ref == "abc123"
 
 
+def test_jvm_build_script_shape():
+    from fuzzingbrain.importers.bench import _jvm_build_script
+    bs = _jvm_build_script("JsonMLFuzzer", "JsonMLFuzzer", "json-java", "build-libs")
+    assert "$JAZZER_API_PATH" in bs and "javac" in bs
+    assert "--target_class=JsonMLFuzzer" in bs
+    assert "jazzer_driver" in bs
+    assert "grep -v PocRunner" in bs  # skip the bench reproducer driver
+
+
 def test_needs_rust_signals():
     from fuzzingbrain.importers.bench import _needs_rust, _select_base_image
     assert _needs_rust(["cargo", "git"], "", "")           # apt
