@@ -39,6 +39,30 @@ def test_parse_clones_flatten_to_src(tmp_path):
     assert main_ref == "abc123"
 
 
+def test_parse_setup_steps_carries_toolchain_not_apt_or_clone():
+    from fuzzingbrain.importers.bench import _parse_setup_steps
+    df = (
+        "FROM debian\n"
+        "ARG V=1.2.3\n"
+        "RUN apt-get install -y git\n"
+        "RUN curl -fsSL https://x/jdk-${V}.tgz -o /tmp/j.tgz && tar -C /opt -xzf /tmp/j.tgz\n"
+        "ENV JAVA_HOME=/opt/jdk\n"
+        "ENV CC=gcc\n"  # must be dropped (base-builder owns CC)
+        "RUN git clone https://x/repo /src/repo\n"
+        "COPY harness/ /src/harness/\n"
+        "RUN /src/harness/build.sh build-libs\n"
+        "RUN ls -la /out\n"
+    )
+    steps = _parse_setup_steps(df, {"V": "1.2.3"})
+    assert any("curl" in s and "jdk-1.2.3.tgz" in s for s in steps)  # ARG resolved
+    assert "ENV JAVA_HOME=/opt/jdk" in steps
+    assert not any("CC=gcc" in s for s in steps)        # protected env dropped
+    assert not any("apt-get" in s for s in steps)       # handled separately
+    assert not any("git clone" in s for s in steps)     # handled separately
+    assert not any("build.sh" in s for s in steps)      # we run our own build
+    assert not any("/out" in s for s in steps)
+
+
 def test_jvm_build_script_shape():
     from fuzzingbrain.importers.bench import _jvm_build_script
     bs = _jvm_build_script("JsonMLFuzzer", "JsonMLFuzzer", "build-libs")

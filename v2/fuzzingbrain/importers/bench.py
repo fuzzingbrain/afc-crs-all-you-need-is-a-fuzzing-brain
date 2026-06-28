@@ -166,6 +166,45 @@ def _parse_clones(
     return main_dir, flatten, main_ref, extra
 
 
+# ENV keys base-builder owns — overriding them breaks its clang toolchain.
+_PROTECTED_ENV = re.compile(r"^(CC|CXX|CFLAGS|CXXFLAGS|SANITIZER|OUT|SRC|WORK)\b")
+
+
+def _parse_setup_steps(dockerfile_text: str, args: dict) -> list[str]:
+    """Carry over toolchain-setup ENV/RUN directives from the bench Dockerfile.
+
+    Bench bugs install non-apt toolchains (a pinned JDK+maven for avro, a rustup
+    nightly + bindgen for harfbuzz) via Dockerfile RUN/ENV steps. We replicate
+    those verbatim, skipping what the importer already handles (apt, the clones,
+    the harness COPY/build) and ENV that would clobber base-builder's compiler.
+    """
+    text = re.sub(r"\\\s*\n", " ", dockerfile_text)  # join line-continuations
+    steps: list[str] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = re.match(r"(\w+)\s+(.*)", line)
+        if not m:
+            continue
+        instr, rest = m.group(1).upper(), _subst(m.group(2), args)
+        if instr == "ENV":
+            if _PROTECTED_ENV.match(rest.lstrip()):
+                continue
+            steps.append(f"ENV {rest}")
+        elif instr == "RUN":
+            low = rest.lower()
+            if any(
+                s in low
+                for s in ("apt-get", "git clone", "harness/build.sh", "/out")
+            ):
+                continue
+            if "chmod" in low and "harness" in low:
+                continue
+            steps.append(f"RUN {rest}")
+    return steps
+
+
 def _detect_libs_cmd(build_sh_text: str) -> str:
     """Find the library-build subcommand name, which varies across bench bugs.
 
@@ -351,6 +390,7 @@ def spec_from_bench_bug(
 
     apt_deps = _parse_apt_deps(dockerfile)
     dockerfile_text = dockerfile.read_text() if dockerfile.is_file() else ""
+    setup_steps = _parse_setup_steps(dockerfile_text, _parse_dockerfile_args(dockerfile_text))
     base_image = _select_base_image(
         language, _needs_rust(apt_deps, dockerfile_text, build_sh_text)
     )
@@ -389,4 +429,5 @@ def spec_from_bench_bug(
         extra_clones=extra_clones,
         pip_deps=pip_deps,
         base_image=base_image,
+        setup_steps=setup_steps,
     )
