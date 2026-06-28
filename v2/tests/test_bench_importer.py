@@ -10,7 +10,31 @@ from fuzzingbrain.importers.bench import (
     spec_from_bench_bug,
     _parse_apt_deps,
     _build_script,
+    _detect_libs_cmd,
 )
+
+
+def test_detect_libs_cmd_default():
+    assert _detect_libs_cmd("usage: build.sh build-libs | harness <config>") == "build-libs"
+
+
+def test_detect_libs_cmd_renamed():
+    assert _detect_libs_cmd("usage: build.sh openldap-libs | harness <config>") == "openldap-libs"
+
+
+def test_detect_libs_cmd_none():
+    # mongoose-style: build.sh <config>, no libs step.
+    assert _detect_libs_cmd('cmd="${1:?usage: build.sh <config>}"') == ""
+
+
+def test_build_script_tries_both_harness_forms():
+    bs = _build_script("f", libs_cmd="")
+    assert 'bash "$BS" harness "$c" || bash "$BS" "$c"' in bs
+
+
+def test_build_script_includes_renamed_libs():
+    bs = _build_script("f", libs_cmd="openldap-libs")
+    assert "openldap-libs build-libs" in bs
 
 
 def _make_bug(tmp_path, *, language="c", sources=("vacm_fuzzer.c",), apt=None,
