@@ -65,6 +65,11 @@ class HarnessSpec:
     extra_clones: List[dict] = field(default_factory=list)
     # pip packages to install (e.g. a newer meson/ninja than base-builder ships).
     pip_deps: List[str] = field(default_factory=list)
+    # Toolchain setup directives carried over from the source Dockerfile, each a
+    # full Dockerfile instruction ("ENV JAVA_HOME=...", "RUN curl ... | tar ..."),
+    # emitted after apt/pip and before the clones. Replicates non-apt toolchain
+    # installs (a pinned JDK+maven, a rustup nightly bootstrap, ...).
+    setup_steps: List[str] = field(default_factory=list)
     # Optional known-vulnerability report. Written to <ws>/DESCRIPTION.txt and
     # fed to direction planning to focus the search (see pov_fullscan).
     description: str = ""
@@ -108,6 +113,10 @@ def _render_dockerfile(spec: HarnessSpec) -> str:
     if spec.pip_deps:
         pips = " ".join(spec.pip_deps)
         lines.append(f"RUN pip3 install --no-cache-dir --upgrade {pips}")
+    # Toolchain setup carried over from the source Dockerfile (pinned JDK/maven,
+    # rustup nightly, ...) — emitted before the clones so the build sees it.
+    for step in spec.setup_steps:
+        lines.append(step)
     # Dependency repos the build.sh expects at fixed /src paths.
     for c in spec.extra_clones:
         url, d = c["url"], c["dir"]
