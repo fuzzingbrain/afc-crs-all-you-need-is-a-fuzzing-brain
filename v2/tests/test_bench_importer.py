@@ -39,6 +39,17 @@ def test_parse_clones_flatten_to_src(tmp_path):
     assert main_ref == "abc123"
 
 
+def test_needs_rust_signals():
+    from fuzzingbrain.importers.bench import _needs_rust, _select_base_image
+    assert _needs_rust(["cargo", "git"], "", "")           # apt
+    assert _needs_rust([], "ENV RUSTUP_HOME=/x\nRUN rustup", "")  # dockerfile
+    assert _needs_rust([], "", "cargo build --release")    # build.sh
+    assert not _needs_rust(["git", "cmake"], "FROM x", "clang -o h h.c")
+    assert _select_base_image("c++", True).endswith("-rust")
+    assert _select_base_image("jvm", False).endswith("-jvm")
+    assert _select_base_image("c", False).endswith("base-builder")
+
+
 def test_detect_libs_cmd_default():
     assert _detect_libs_cmd("usage: build.sh build-libs | harness <config>") == "build-libs"
 

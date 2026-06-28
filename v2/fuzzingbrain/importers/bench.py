@@ -37,6 +37,35 @@ _TOOLCHAIN_PKG = re.compile(r"^(clang(-\d+)?|llvm(-\d+)?|libclang-rt-[\w.-]+)$")
 
 _LANG_MAP = {"c": "c", "c++": "c++", "cpp": "c++", "cxx": "c++", "jvm": "jvm"}
 
+# Rust toolchain packages: their presence means the build invokes cargo/rustc
+# (e.g. harfbuzz's fontations crate, fwupd) — base-builder lacks Rust, so switch
+# to base-builder-rust which ships clang *and* the Rust toolchain.
+_RUST_PKG = re.compile(r"^(cargo|rustc|rustup)$")
+
+_BASE = "gcr.io/oss-fuzz-base/base-builder"
+
+
+def _select_base_image(language: str, needs_rust: bool) -> str:
+    """Pick the OSS-Fuzz builder image that carries the needed toolchain."""
+    if language == "jvm":
+        return f"{_BASE}-jvm"  # Jazzer + JDK
+    if needs_rust:
+        return f"{_BASE}-rust"  # clang + cargo/rustc
+    return _BASE
+
+
+def _needs_rust(apt_deps: list[str], dockerfile_text: str, build_sh_text: str) -> bool:
+    """Detect a Rust toolchain dependency from any available signal.
+
+    Bench bugs declare Rust three ways: an apt cargo/rustc package, a rustup
+    bootstrap in the Dockerfile (harfbuzz), or a cargo invocation in build.sh.
+    """
+    if any(_RUST_PKG.match(p) for p in apt_deps):
+        return True
+    if re.search(r"rustup|RUSTUP_HOME|CARGO_HOME", dockerfile_text):
+        return True
+    return bool(re.search(r"\bcargo\b", build_sh_text))
+
 
 def _parse_apt_deps(dockerfile: Path) -> list[str]:
     """Best-effort extraction of apt packages from the bench Dockerfile."""
@@ -260,16 +289,24 @@ def spec_from_bench_bug(
             'done\n'
         )
 
-    apt_deps = _parse_apt_deps(dockerfile)
-    # base-builder's meson is too old for some projects (need >= 0.55) — pull a
-    # current meson/ninja from pip when the project builds with meson.
-    pip_deps = ["meson", "ninja"] if "meson" in apt_deps else []
-
     harness_dir = bug_dir / "harness"
     source = _harness_source(harness_dir)
     fuzzer_name = source.stem
     build_sh = harness_dir / "build.sh"
-    libs_cmd = _detect_libs_cmd(build_sh.read_text()) if build_sh.is_file() else "build-libs"
+    build_sh_text = build_sh.read_text() if build_sh.is_file() else ""
+    libs_cmd = _detect_libs_cmd(build_sh_text) if build_sh_text else "build-libs"
+
+    apt_deps = _parse_apt_deps(dockerfile)
+    dockerfile_text = dockerfile.read_text() if dockerfile.is_file() else ""
+    base_image = _select_base_image(
+        language, _needs_rust(apt_deps, dockerfile_text, build_sh_text)
+    )
+    if base_image.endswith("-rust"):
+        # cargo/rustc ship in base-builder-rust; Debian's would shadow them.
+        apt_deps = [p for p in apt_deps if not _RUST_PKG.match(p)]
+    # base-builder's meson is too old for some projects (need >= 0.55) — pull a
+    # current meson/ninja from pip when the project builds with meson.
+    pip_deps = ["meson", "ninja"] if "meson" in apt_deps else []
 
     # Copy the whole harness dir except docs; build.sh + sources must be present.
     harness_files = [
@@ -294,4 +331,5 @@ def spec_from_bench_bug(
         description=description,
         extra_clones=extra_clones,
         pip_deps=pip_deps,
+        base_image=base_image,
     )
