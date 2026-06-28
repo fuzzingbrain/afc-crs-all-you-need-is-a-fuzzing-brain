@@ -92,6 +92,12 @@ def test_build_script_selects_by_sanitizer():
     assert "release-asan debug-asan debug" in bs
 
 
+def test_build_script_sets_git_safe_directory():
+    # Without this, build.sh git commands (submodule/autoreconf) fail on the
+    # bind-mounted repo with "dubious ownership".
+    assert "safe.directory" in _build_script("foo_fuzzer")
+
+
 def test_description_included_by_default(tmp_path):
     spec = spec_from_bench_bug(_make_bug(tmp_path))
     assert "vacm_parse_config_group" in spec.description

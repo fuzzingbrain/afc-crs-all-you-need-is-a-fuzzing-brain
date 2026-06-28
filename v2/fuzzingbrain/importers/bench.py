@@ -74,6 +74,10 @@ def _build_script(fuzzer_name: str) -> str:
     """
     return (
         'set -eu\n'
+        # The repo is bind-mounted with host ownership; without this, git in the
+        # build container refuses to operate ("dubious ownership"), breaking any
+        # build.sh that runs submodule update / autoreconf (e.g. jq, oniguruma).
+        "git config --global --add safe.directory '*' || true\n"
         'BS="$SRC/harness/build.sh"\n'
         'bash "$BS" build-libs\n'
         'if [ "${SANITIZER:-address}" = "coverage" ]; then\n'
