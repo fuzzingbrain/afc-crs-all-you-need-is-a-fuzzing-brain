@@ -97,13 +97,13 @@ def _parse_clones(dockerfile: Path, main_repo: str) -> tuple[str, list[dict]]:
     args = _parse_dockerfile_args(text)
 
     clones = []
-    for m in re.finditer(
-        r"git clone\s+((?:--\S+\s+)*)(\S+)\s+((?:/src|\$SRC)/\S+)", text
-    ):
-        url = _subst(m.group(2), args)
-        d = _subst(m.group(3), args).replace("$SRC", "/src").replace("${SRC}", "/src")
+    # `git clone [flags...] <url> /src/<dir>` — flags (e.g. --depth 1,
+    # --filter=blob:none) sit between; the URL is the last token before the dir.
+    for m in re.finditer(r"git clone\s+(.+?)\s+((?:/src|\$SRC)/\S+)", text):
+        url = _subst(m.group(1).split()[-1], args)
+        d = _subst(m.group(2), args).replace("$SRC", "/src").replace("${SRC}", "/src")
         # checkout ref for this dir, if any
-        cm = re.search(rf"git -C\s+{re.escape(m.group(3))}\s+checkout\s+(\S+)", text)
+        cm = re.search(rf"git -C\s+{re.escape(m.group(2))}\s+checkout\s+(\S+)", text)
         ref = _subst(cm.group(1), args) if cm else ""
         clones.append({"url": url, "dir": d, "ref": ref})
 
@@ -187,8 +187,18 @@ def spec_from_bench_bug(
     # otherwise build.sh fails ("/src/aom: No such file", missing libde265, ...).
     dockerfile = bug_dir / "Dockerfile"
     main_dir, extra_clones = _parse_clones(dockerfile, main_repo)
+    case_fix = ""
     if main_dir:
-        project = main_dir
+        # OSS-Fuzz lower-cases the project name, so helper.py mounts the target
+        # at /src/<lower> while the build.sh hard-codes the original (possibly
+        # cased) /src/<dir>. Use the lower-cased name as the project and symlink
+        # the cased path to it so the build.sh finds its source.
+        if main_dir != main_dir.lower():
+            case_fix = (
+                f'[ -e "$SRC/{main_dir}" ] || '
+                f'ln -sfn "$SRC/{main_dir.lower()}" "$SRC/{main_dir}"\n'
+            )
+        project = main_dir.lower()
 
     apt_deps = _parse_apt_deps(dockerfile)
     # base-builder's meson is too old for some projects (need >= 0.55) — pull a
@@ -218,7 +228,7 @@ def spec_from_bench_bug(
         commit=commit,
         harness_files=harness_files,
         apt_deps=apt_deps,
-        build_script=_build_script(fuzzer_name),
+        build_script=case_fix + _build_script(fuzzer_name),
         description=description,
         extra_clones=extra_clones,
         pip_deps=pip_deps,
