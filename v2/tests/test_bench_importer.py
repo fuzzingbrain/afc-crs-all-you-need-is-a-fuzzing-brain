@@ -9,9 +9,34 @@ import pytest
 from fuzzingbrain.importers.bench import (
     spec_from_bench_bug,
     _parse_apt_deps,
+    _parse_clones,
     _build_script,
     _detect_libs_cmd,
 )
+
+
+def test_parse_clones_line_continuation_and_branch(tmp_path):
+    # A clone split across lines with `-b <tag>` must be parsed as one command.
+    df = tmp_path / "Dockerfile"
+    df.write_text(
+        "ARG TAG=1.9.4\n"
+        "RUN git clone --depth 1 -b ${TAG} \\\n"
+        "        https://github.com/x/jsoncpp /src/jsoncpp\n"
+    )
+    main_dir, flatten, main_ref, extra = _parse_clones(df, "https://github.com/x/jsoncpp")
+    assert main_dir == "jsoncpp" and not flatten
+    assert main_ref == "1.9.4"  # resolved from ARG via -b
+
+
+def test_parse_clones_flatten_to_src(tmp_path):
+    df = tmp_path / "Dockerfile"
+    df.write_text(
+        "RUN git clone https://github.com/x/mongoose /src \\\n"
+        " && git -C /src checkout abc123\n"
+    )
+    main_dir, flatten, main_ref, extra = _parse_clones(df, "https://github.com/x/mongoose")
+    assert flatten and main_dir == ""
+    assert main_ref == "abc123"
 
 
 def test_detect_libs_cmd_default():

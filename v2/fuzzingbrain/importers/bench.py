@@ -84,43 +84,57 @@ def _normalize_repo(url: str) -> str:
     return url.rstrip("/").removesuffix(".git").lower()
 
 
-def _parse_clones(dockerfile: Path, main_repo: str) -> tuple[str, bool, list[dict]]:
+def _parse_clones(
+    dockerfile: Path, main_repo: str
+) -> tuple[str, bool, str, list[dict]]:
     """Parse `git clone <url> /src[/<dir>]` (+ checkout) lines from the Dockerfile.
 
-    Returns (main_dir, main_flatten, extra_clones). main_dir is the /src directory
-    the build.sh expects the target source at (matched to main_repo); main_flatten
-    is True when the main repo is cloned to /src itself (so its contents sit
-    directly under /src, e.g. mongoose/dtc); extra_clones are the dependency repos
-    the build needs at their own fixed /src paths.
+    Returns (main_dir, main_flatten, main_ref, extra_clones). main_dir is the /src
+    directory the build.sh expects the target source at (matched to main_repo);
+    main_flatten is True when the main repo is cloned to /src itself (so its
+    contents sit directly under /src, e.g. mongoose/dtc); main_ref is the ref the
+    Dockerfile checks the target out at; extra_clones are the dependency repos the
+    build needs at their own fixed /src paths.
     """
     if not dockerfile.is_file():
-        return "", False, []
+        return "", False, "", []
     text = dockerfile.read_text()
+    # Join shell line-continuations so a clone split across lines (e.g. openscreen's
+    # `git clone -b $TAG \<newline> <url> /src/jsoncpp`) is seen as one command.
+    text = re.sub(r"\\\s*\n", " ", text)
     args = _parse_dockerfile_args(text)
 
     clones = []
     # `git clone [flags...] <url> /src[/<dir>]` — flags (e.g. --depth 1,
-    # --filter=blob:none) sit between; the URL is the last token before the dir.
-    # The subdir is optional: some bugs clone straight into /src ("flatten").
-    for m in re.finditer(r"git clone\s+(.+?)\s+((?:/src|\$SRC)(?:/\S+)?)\b", text):
-        url = _subst(m.group(1).split()[-1], args)
+    # --filter=blob:none, -b <tag>) sit between; the URL is the last token before
+    # the dir. The subdir is optional: some bugs clone straight into /src ("flatten").
+    for m in re.finditer(r"git clone\s+(.+?)\s+((?:/src|\$SRC)(?:/\S+)?)(?:\s|$)", text):
+        flags = m.group(1)
+        url = _subst(flags.split()[-1], args)
         d = _subst(m.group(2), args).replace("${SRC}", "/src").replace("$SRC", "/src")
-        # checkout ref for this dir, if any
+        # ref: prefer an explicit `git -C <dir> checkout <ref>`, else `-b <tag>`.
         cm = re.search(rf"git -C\s+{re.escape(m.group(2))}\s+checkout\s+(\S+)", text)
-        ref = _subst(cm.group(1), args) if cm else ""
+        if cm:
+            ref = _subst(cm.group(1), args)
+        else:
+            bm = re.search(r"(?:^|\s)(?:-b|--branch)[= ]+(\S+)", flags)
+            ref = _subst(bm.group(1), args) if bm else ""
         clones.append({"url": url, "dir": d.rstrip("/"), "ref": ref})
 
-    main_dir, flatten, extra = "", False, []
+    main_dir, flatten, main_ref, extra = "", False, "", []
     norm_main = _normalize_repo(main_repo)
+    matched = False
     for c in clones:
-        if not main_dir and not flatten and _normalize_repo(c["url"]) == norm_main:
+        if not matched and _normalize_repo(c["url"]) == norm_main:
+            matched = True
+            main_ref = c["ref"]
             if c["dir"] == "/src":
                 flatten = True
             else:
                 main_dir = c["dir"].rsplit("/", 1)[-1]
         else:
             extra.append(c)
-    return main_dir, flatten, extra
+    return main_dir, flatten, main_ref, extra
 
 
 def _detect_libs_cmd(build_sh_text: str) -> str:
@@ -217,7 +231,12 @@ def spec_from_bench_bug(
     # Mount the target there (project = that dir) and replicate dependency clones,
     # otherwise build.sh fails ("/src/aom: No such file", missing libde265, ...).
     dockerfile = bug_dir / "Dockerfile"
-    main_dir, main_flatten, extra_clones = _parse_clones(dockerfile, main_repo)
+    main_dir, main_flatten, main_ref, extra_clones = _parse_clones(dockerfile, main_repo)
+    # The Dockerfile's own checkout of the target is authoritative: when the bench
+    # target.repo is a dependency pinned by tag (openscreen builds jsoncpp@1.9.4),
+    # bench.yaml's vuln_commit names a *different* repo, so prefer the clone ref.
+    if main_ref:
+        commit = main_ref
     case_fix = ""
     if main_dir:
         # The build.sh hard-codes the cased /src/<dir>; use the lower-cased name
