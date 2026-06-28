@@ -146,8 +146,9 @@ def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
         # build.sh that runs submodule update / autoreconf (e.g. jq, oniguruma).
         "git config --global --add safe.directory '*' || true\n"
         'BS="$SRC/harness/build.sh"\n'
+        'L_LOG=/tmp/fb_libs.log\n'
         # Optional library-build step; name varies, some projects have none.
-        f'for L in {libs_list}; do bash "$BS" "$L" 2>/dev/null && break || true; done\n'
+        f'for L in {libs_list}; do bash "$BS" "$L" >"$L_LOG" 2>&1 && break || true; done\n'
         'if [ "${SANITIZER:-address}" = "coverage" ]; then\n'
         '  CFGS="coverage"\n'
         'else\n'
@@ -155,14 +156,20 @@ def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
         'fi\n'
         'built=""\n'
         'for c in $CFGS; do\n'
-        # Try "harness <cfg>" (most) then bare "<cfg>" (mongoose-style).
-        '  if { bash "$BS" harness "$c" || bash "$BS" "$c"; } 2>/dev/null '
-        '&& [ -f "/out/$c/harness" ]; then\n'
+        # Try "harness <cfg>" (most) then bare "<cfg>" (mongoose-style). Capture
+        # output per config so a real failure is visible (no silent /dev/null).
+        '  bash "$BS" harness "$c" >"/tmp/fb_$c.log" 2>&1 '
+        '|| bash "$BS" "$c" >"/tmp/fb_$c.log" 2>&1 || true\n'
+        '  if [ -f "/out/$c/harness" ]; then\n'
         f'    cp "/out/$c/harness" "$OUT/{fuzzer_name}"\n'
         '    built="$c"; break\n'
         '  fi\n'
         'done\n'
-        'if [ -z "$built" ]; then echo "no harness config built" >&2; exit 1; fi\n'
+        'if [ -z "$built" ]; then\n'
+        '  echo "no harness config built; build.sh output follows:" >&2\n'
+        '  tail -n 40 "$L_LOG" /tmp/fb_*.log 2>/dev/null >&2 || true\n'
+        '  exit 1\n'
+        'fi\n'
     )
 
 
