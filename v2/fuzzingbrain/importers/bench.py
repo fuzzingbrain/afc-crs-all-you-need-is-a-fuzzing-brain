@@ -238,6 +238,15 @@ def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
         # autoreconf. Fuzzing needs no translations, so skip autopoint — the m4
         # macros these projects ship are enough for configure.
         'export AUTOPOINT="${AUTOPOINT:-true}"\n'
+        # Some projects enable LTO/IPO (FreeRDP, open62541:
+        # CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON), so their static libs hold LLVM
+        # bitcode .o members. A bench harness that links with bare `clang` gets
+        # base-builder's default /usr/bin/ld (GNU BFD), which cannot read bitcode
+        # ("file format not recognized"). Point ld at lld, which links bitcode
+        # natively and is GNU-compatible — a safe drop-in for non-LTO builds too.
+        'if command -v ld.lld >/dev/null 2>&1; then '
+        'ln -sf "$(command -v ld.lld)" "${FB_LD_PATH:-/usr/bin/ld}" 2>/dev/null'
+        ' || true; fi\n'
         'BS="$SRC/harness/build.sh"\n'
         'L_LOG=/tmp/fb_libs.log\n'
         # Optional library-build step; name varies, some projects have none.
