@@ -148,7 +148,19 @@ def _render_build_sh(spec: HarnessSpec) -> str:
 def _git_clone(main_repo: str, commit: str, dest: Path) -> None:
     subprocess.run(["git", "clone", main_repo, str(dest)], check=True)
     if commit:
-        subprocess.run(["git", "-C", str(dest), "checkout", commit], check=True)
+        co = subprocess.run(["git", "-C", str(dest), "checkout", commit])
+        if co.returncode != 0:
+            # The exact revision may not be in the default fetch (skia's Gerrit
+            # commits, GraalVM release tags). Try fetching it explicitly; if it
+            # still cannot be resolved, warn and stay on the default branch —
+            # this mirrors what the bench Dockerfile itself does ("|| echo WARN").
+            subprocess.run(
+                ["git", "-C", str(dest), "fetch", "--depth", "1", "origin", commit],
+                check=False,
+            )
+            co2 = subprocess.run(["git", "-C", str(dest), "checkout", commit])
+            if co2.returncode != 0:
+                print(f"WARN: cannot check out {commit!r}; using default branch")
     # Fetch submodules at the checked-out commit's pinned revisions. Many targets
     # vendor libraries this way (upx's ucl/zlib, opcua's deps); without them the
     # build fails with "No SOURCES given to target". Harmless when there are none.
