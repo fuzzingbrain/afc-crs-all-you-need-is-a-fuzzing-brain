@@ -8,10 +8,59 @@ hermetic.
 
 import json
 import stat
+import subprocess
 
 import pytest
 
-from fuzzingbrain.importers.external_harness import HarnessSpec, build_workspace
+from fuzzingbrain.importers.external_harness import HarnessSpec, build_workspace, _git_clone
+
+
+def _git(*args, cwd):
+    env = {
+        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
+        "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
+    }
+    subprocess.run(["git", *args], cwd=str(cwd), check=True,
+                   capture_output=True, env={**env}, text=True)
+
+
+def _make_repo(path, files):
+    path.mkdir(parents=True)
+    _git("init", "-q", "-b", "main", cwd=path)
+    for name, content in files.items():
+        (path / name).write_text(content)
+    _git("add", "-A", cwd=path)
+    _git("commit", "-qm", "init", cwd=path)
+
+
+def test_git_clone_fetches_submodules(tmp_path):
+    # upx vendors ucl/zlib as submodules; without recursive init the build dies
+    # with "No SOURCES given to target". The clone must materialize them.
+    sub = tmp_path / "sub"
+    _make_repo(sub, {"vendored.txt": "from-submodule"})
+    main = tmp_path / "main"
+    _make_repo(main, {"top.txt": "x"})
+    _git("-c", "protocol.file.allow=always", "submodule", "add",
+         str(sub), "vendor/sub", cwd=main)
+    _git("commit", "-qm", "add sub", cwd=main)
+
+    dest = tmp_path / "clone"
+    # protocol.file.allow lets submodule update use a file:// URL in this test.
+    import os
+    os.environ["GIT_ALLOW_PROTOCOL"] = "file"
+    _git_clone(str(main), "", dest)
+    assert (dest / "vendor" / "sub" / "vendored.txt").read_text() == "from-submodule"
+
+
+def test_git_clone_tolerates_unresolvable_commit(tmp_path):
+    # skia/GraalVM pin revisions not in the default fetch; the bench Dockerfile
+    # itself falls back to the default branch. _git_clone must not raise.
+    repo = tmp_path / "repo"
+    _make_repo(repo, {"f.txt": "v1"})
+    dest = tmp_path / "clone"
+    _git_clone(str(repo), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", dest)  # bogus SHA
+    assert (dest / "f.txt").read_text() == "v1"  # cloned, left on default branch
 
 
 def _fake_oss_fuzz(tmp_path):
