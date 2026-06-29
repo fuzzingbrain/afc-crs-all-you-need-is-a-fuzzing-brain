@@ -498,6 +498,103 @@ def test_detect_libs_cmd_none():
     assert _detect_libs_cmd('cmd="${1:?usage: build.sh <config>}"') == ""
 
 
+def _make_skia_bug(tmp_path, *, vuln_commit="d3ea842cUNFETCHABLE",
+                   diffscan_commit="07acef99FETCHABLE"):
+    """A minimal skia bug dir: bench.yaml pins an (unfetchable) vuln_commit and
+    diffscan.yaml pins the fetchable equivalent tree."""
+    bug = tmp_path / "skia-raster8888-blur-oob"
+    (bug / "harness").mkdir(parents=True)
+    (bug / "bench.yaml").write_text(
+        "bug_id: skia-raster8888-blur-oob\nproject: skia\n"
+        "target:\n  repo: https://skia.googlesource.com/skia\n"
+        f"  vuln_commit: {vuln_commit}\n  language: c++\n"
+    )
+    if diffscan_commit is not None:
+        (bug / "diffscan.yaml").write_text(
+            "repo: https://skia.googlesource.com/skia\n"
+            f"commit: {diffscan_commit}\n"
+        )
+    (bug / "harness" / "skia_fuzzer.cc").write_text(
+        "int LLVMFuzzerTestOneInput(){return 0;}\n")
+    (bug / "harness" / "build.sh").write_text(
+        "#!/bin/bash\nusage: build.sh build-libs | harness <config>\n")
+    (bug / "Dockerfile").write_text(
+        "FROM debian:bookworm-slim\n"
+        "RUN apt-get update && apt-get install -y --no-install-recommends "
+        "git clang ninja-build\n"
+        f"RUN git clone https://skia.googlesource.com/skia /src/skia "
+        f"&& git -C /src/skia checkout {vuln_commit}\n"
+    )
+    return bug
+
+
+def test_skia_prefers_diffscan_commit_over_unfetchable_vuln_commit(tmp_path):
+    # The Dockerfile pins the chromium-roll vuln_commit (unfetchable); diffscan
+    # names the fetchable tree carrying the same bug. The importer must build the
+    # fetchable one, else the clone lands on post-fix HEAD with no bug.
+    spec = spec_from_bench_bug(_make_skia_bug(tmp_path), with_description=False)
+    assert spec.commit == "07acef99FETCHABLE"
+
+
+def test_skia_without_diffscan_keeps_dockerfile_commit(tmp_path):
+    spec = spec_from_bench_bug(
+        _make_skia_bug(tmp_path, diffscan_commit=None), with_description=False)
+    assert spec.commit == "d3ea842cUNFETCHABLE"   # no override source -> unchanged
+
+
+def test_skia_adds_freetype_and_fontconfig_apt(tmp_path):
+    # skia's harness links -lfreetype -lfontconfig but its Dockerfile omits the
+    # -dev packages; the importer must supply them or the link fails.
+    spec = spec_from_bench_bug(_make_skia_bug(tmp_path), with_description=False)
+    assert "libfreetype6-dev" in spec.apt_deps
+    assert "libfontconfig1-dev" in spec.apt_deps
+
+
+def _run_skia_prelude(tmp_path, sanitizer="address"):
+    """Execute _skia_prelude() against a fake skia tree and return the patched
+    gn/skia.gni and harness/build.sh."""
+    from fuzzingbrain.importers.bench import _skia_prelude
+    src = tmp_path / f"src_{sanitizer}"   # unique per call (helper may run twice)
+    (src / "skia" / "gn").mkdir(parents=True)
+    (src / "skia" / "gn" / "skia.gni").write_text("  skia_enable_ganesh = true\n")
+    (src / "skia" / "third_party" / "ninja").mkdir(parents=True)
+    (src / "harness").mkdir()
+    (src / "harness" / "build.sh").write_text(
+        '        release-asan) CFH="-O2 -g"; SAN="-fsanitize=fuzzer,address" ;;\n'
+        '        coverage)     SAN="-fsanitize=fuzzer" ;;\n'
+        '    for CONFIG_LIB in asan cov; do :; done\n'
+    )
+    env = {**os.environ, "SRC": str(src), "SANITIZER": sanitizer}
+    r = subprocess.run(["bash", "-c", _skia_prelude()], env=env,
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    return ((src / "skia" / "gn" / "skia.gni").read_text(),
+            (src / "harness" / "build.sh").read_text())
+
+
+def test_skia_prelude_disables_ganesh_and_adds_asan_libcxx(tmp_path):
+    gni, bsh = _run_skia_prelude(tmp_path)
+    assert "skia_enable_ganesh = false" in gni              # GPU backend off
+    # the asan link config gains -stdlib=libc++ (matches the libc++ asan libs) ...
+    assert '-fsanitize=fuzzer,address -stdlib=libc++"' in bsh
+    # ... but the coverage config (libstdc++) is left alone
+    assert '        coverage)     SAN="-fsanitize=fuzzer" ' in bsh
+
+
+def test_skia_prelude_trims_libs_loop_to_active_sanitizer(tmp_path):
+    _, bsh_asan = _run_skia_prelude(tmp_path, sanitizer="address")
+    assert "for CONFIG_LIB in asan;" in bsh_asan            # cov pass dropped
+    _, bsh_cov = _run_skia_prelude(tmp_path, sanitizer="coverage")
+    assert "for CONFIG_LIB in cov;" in bsh_cov              # asan pass dropped
+
+
+def test_non_skia_build_script_has_no_skia_prelude(tmp_path):
+    # The skia accommodations must be scoped to skia only.
+    spec = spec_from_bench_bug(_make_bug(tmp_path), with_description=False)
+    assert "skia_enable_ganesh" not in spec.build_script
+    assert "third_party/ninja" not in spec.build_script
+
+
 def _make_bug(tmp_path, *, language="c", sources=("vacm_fuzzer.c",), apt=None,
               project="net-snmp", entrypoint=None,
               description="NULL deref in vacm_parse_config_group at vacm.c:414"):

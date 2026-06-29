@@ -601,6 +601,64 @@ def _harness_source(harness_dir: Path) -> Path:
     return srcs[0]
 
 
+# skia builds through its own GN/Ninja graph, not a free-standing clang link, and
+# the bench's asan config was never validated (only cov was). These are the
+# focal-base-builder accommodations it needs; every one mirrors the validated cov
+# config and none touch the CPU-raster blur bug.
+_SKIA_APT = ("libfreetype6-dev", "libfontconfig1-dev")
+
+
+def _skia_prelude() -> str:
+    """Bash prelude prepended to skia's build script (see _SKIA_APT note).
+
+    * cc/c++ -> clang: GN's asan config leaves cc/cxx at the system default (gcc
+      9 on focal), which rejects clang-only sanitizer flags (-fsanitize=fuzzer,
+      -stdlib=libc++) and lacks -std=c++20. base-builder is clang-based.
+    * ninja on PATH: build.sh calls bare `ninja` but only fetches skia's pinned
+      ninja into third_party/ninja.
+    * Ganesh off: the GPU backend pulls GL headers absent on base-builder and is
+      irrelevant to CPU raster (the cov config disables it too).
+    * asan harness -stdlib=libc++: skia builds the asan libs with libc++, but the
+      harness link omits it -> undefined std::__1 symbols. Add it to the asan link
+      configs only (matched by their `-fsanitize=fuzzer,address` SAN string); the
+      coverage config stays on libstdc++.
+    * build only the needed lib config: build.sh's build-libs builds BOTH the asan
+      and cov GN graphs; we need only the one matching $SANITIZER. Trimming the
+      loop skips a full redundant GN/Ninja pass (and on focal the cov pass fails
+      anyway — its libstdc++ lacks C++20 <compare>), so build-libs stays green.
+    """
+    return (
+        'if command -v clang >/dev/null 2>&1; then '
+        'ln -sf "$(command -v clang)" /usr/local/bin/cc 2>/dev/null || true; '
+        'ln -sf "$(command -v clang++)" /usr/local/bin/c++ 2>/dev/null || true; fi\n'
+        'export PATH="$SRC/skia/third_party/ninja:$PATH"\n'
+        '[ -f "$SRC/skia/gn/skia.gni" ] && '
+        "sed -i 's/skia_enable_ganesh = true/skia_enable_ganesh = false/' "
+        '"$SRC/skia/gn/skia.gni" || true\n'
+        'if [ -f "$SRC/harness/build.sh" ]; then\n'
+        "  sed -i 's/-fsanitize=fuzzer,address\"/-fsanitize=fuzzer,address -stdlib=libc++\"/g' "
+        '"$SRC/harness/build.sh"\n'
+        '  if [ "${SANITIZER:-address}" = "coverage" ]; then _fb_keep=cov; '
+        'else _fb_keep=asan; fi\n'
+        '  sed -i "s/for CONFIG_LIB in asan cov/for CONFIG_LIB in ${_fb_keep}/" '
+        '"$SRC/harness/build.sh"\n'
+        'fi\n'
+    )
+
+
+def _skia_commit_override(bug_dir: Path, vuln_commit: str) -> str:
+    """skia's bench.yaml vuln_commit is an unfetchable chromium-DEPS roll point
+    (skia's public git 500s on it). diffscan.yaml pins the fetchable skia/main
+    tree the bench actually froze for its file/line hints — same bug at the same
+    grader site. Prefer it so the clone lands on a tree that carries the bug."""
+    ds = bug_dir / "diffscan.yaml"
+    if ds.is_file():
+        ds_commit = str((yaml.safe_load(ds.read_text()) or {}).get("commit", "") or "")
+        if ds_commit:
+            return ds_commit
+    return vuln_commit
+
+
 def spec_from_bench_bug(
     bug_dir: str | Path, with_description: bool = True
 ) -> HarnessSpec:
@@ -678,6 +736,9 @@ def spec_from_bench_bug(
         fuzzer_name = _harness_source(harness_dir).stem
 
     apt_deps = _parse_apt_deps(dockerfile)
+    if project == "skia":
+        commit = _skia_commit_override(bug_dir, commit)
+        apt_deps = list(apt_deps) + [p for p in _SKIA_APT if p not in apt_deps]
     dockerfile_text = dockerfile.read_text() if dockerfile.is_file() else ""
     df_args = _parse_dockerfile_args(dockerfile_text)
     setup_steps = _parse_setup_steps(dockerfile_text, df_args)
@@ -722,7 +783,9 @@ def spec_from_bench_bug(
             if language == "jvm"
             else _dockerfile_build_script(project, df_recipe, produced)
             if df_recipe
-            else case_fix + _build_script(fuzzer_name, libs_cmd)
+            else (_skia_prelude() if project == "skia" else "")
+            + case_fix
+            + _build_script(fuzzer_name, libs_cmd)
         ),
         description=description,
         extra_clones=extra_clones,
