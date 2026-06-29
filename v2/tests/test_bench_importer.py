@@ -226,6 +226,7 @@ def test_detect_libs_cmd_none():
 
 
 def _make_bug(tmp_path, *, language="c", sources=("vacm_fuzzer.c",), apt=None,
+              project="net-snmp",
               description="NULL deref in vacm_parse_config_group at vacm.c:414"):
     bug = tmp_path / "netsnmp-vacm-parse-npd"
     (bug / "harness").mkdir(parents=True)
@@ -233,7 +234,7 @@ def _make_bug(tmp_path, *, language="c", sources=("vacm_fuzzer.c",), apt=None,
         (bug / "description.txt").write_text(description + "\n")
     (bug / "bench.yaml").write_text(
         "bug_id: netsnmp-vacm-parse-npd\n"
-        "project: net-snmp\n"
+        f"project: {project}\n"
         "target:\n"
         "  repo: https://github.com/net-snmp/net-snmp\n"
         "  vuln_commit: fc28b88a64b7739d76c73058c3811d5387851c32\n"
@@ -286,6 +287,29 @@ def test_libclang_dev_is_kept(tmp_path):
 def test_cpp_language_mapped(tmp_path):
     spec = spec_from_bench_bug(_make_bug(tmp_path, language="cpp", sources=("h.cc",)))
     assert spec.language == "c++"
+
+
+def test_cased_project_name_is_lowercased(tmp_path):
+    # OSS-Fuzz rejects a cased project (docker tag must be lower-case). A bench
+    # project like "Ghidra"/"FreeRDP" with no matching clone must still come out
+    # lower-cased, or the docker build dies with "repository name must be lower".
+    spec = spec_from_bench_bug(_make_bug(tmp_path, project="Ghidra"))
+    assert spec.project == "ghidra"
+
+
+def test_cased_clone_dir_is_lowercased_with_symlink(tmp_path):
+    # OSS-Fuzz lower-cases the project (docker tag + /src mount); a cased bench
+    # dir (Ghidra, ImageMagick) must become lower-case and the build script must
+    # symlink the cased path the build.sh hard-codes back to the mounted lower one.
+    bug = _make_bug(tmp_path)
+    (bug / "Dockerfile").write_text(
+        "FROM debian:bookworm-slim\n"
+        "RUN git clone https://github.com/net-snmp/net-snmp /src/Net-SNMP \\\n"
+        " && git -C /src/Net-SNMP checkout fc28b88a\n"
+    )
+    spec = spec_from_bench_bug(bug)
+    assert spec.project == "net-snmp"                       # lower-cased
+    assert 'ln -sfn "$SRC/net-snmp" "$SRC/Net-SNMP"' in spec.build_script  # cased symlink
 
 
 def test_spec_build_script_wires_the_bug_fuzzer_name(tmp_path):
