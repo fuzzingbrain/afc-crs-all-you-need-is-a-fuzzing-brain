@@ -13,14 +13,20 @@ Reproduce:
 python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 ```
 
-## Result: 21/68 SOLVED, 68/68 build+run end-to-end
+## Result: 68/68 build+run end-to-end; 21 SOLVED (last graded sweep)
+
+Build coverage is complete: every one of the 68 targets builds and runs through
+the importer. The verdict table below is the **last graded sweep**, taken when 56
+targets built; the 12 targets fixed since (see below) build now but await a fresh
+sweep to grade, so SOLVED is a floor, not a ceiling.
 
 | verdict | count | meaning |
 |---|---|---|
+| build+run | 68 | builds + runs through the importer (helper.py `compile`) |
 | SOLVED | 21 | PoV passes the bench oracle (all capabilities) |
-| no-pov | 35 | built + fuzzed, no crash within budget |
-| graded-fail | 10 | found a crash, but not the target bug/site |
-| build-fail | 0 | every target builds + runs through the importer |
+| no-pov | 34 | built + fuzzed, no crash within budget (last sweep) |
+| graded-fail | 10 | found a crash, but not the target bug/site (last sweep) |
+| awaiting grade | 12 | newly built since the last sweep — not yet graded |
 
 > All 68 targets now build and run end-to-end through the importer (each
 > validated: helper.py `compile` produces a libFuzzer binary that runs inputs).
