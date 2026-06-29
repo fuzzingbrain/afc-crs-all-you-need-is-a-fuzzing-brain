@@ -13,18 +13,21 @@ Reproduce:
 python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 ```
 
-## Result: 21/68 SOLVED, 59/68 build+run end-to-end
+## Result: 21/68 SOLVED, 63/68 build+run end-to-end
 
 | verdict | count | meaning |
 |---|---|---|
 | SOLVED | 21 | PoV passes the bench oracle (all capabilities) |
-| no-pov | 28 | built + fuzzed, no crash within budget |
+| no-pov | 32 | built + fuzzed, no crash within budget |
 | graded-fail | 10 | found a crash, but not the target bug/site |
-| build-fail | 9 | target did not build (per-project porting) |
+| build-fail | 5 | target did not build (per-project porting) |
 
-> freerdp-ntlm-memleak, opcua-pubsub-json-assert (LTO/bitcode static libs via
-> `ld.lld`) and libheif-image-crop-overflow (GNU libstdc++ alignment) now build;
-> they move from build-fail to built and await a fresh sweep to grade.
+> Seven targets moved from build-fail to built since the last sweep and await a
+> fresh sweep to grade: freerdp-ntlm-memleak + opcua-pubsub-json-assert (LTO/
+> bitcode static libs via `ld.lld`), libheif-image-crop-overflow (GNU libstdc++
+> alignment), and all four fwupd bugs (cab/sbatlevel/logitech×2) via a new
+> Dockerfile-build strategy that replays the project's own oss-fuzz.py. Each was
+> validated end-to-end through the importer (fuzzer binary produced).
 
 ### SOLVED (21)
 - dtc-fdt32-misalign
@@ -49,11 +52,7 @@ python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 - simdutf-utf16-utf8-overflow
 - spirv-orderblocks-segv
 
-### build-fail (10)
-- fwupd-cab-mszip-bomb
-- fwupd-logitech-oob-read
-- fwupd-logitech-stack-overflow
-- fwupd-sbatlevel-underflow
+### build-fail (5)
 - graal-regexlexer-oob
 - graaljs-illformed-locale
 - skia-raster8888-blur-oob
@@ -77,11 +76,10 @@ python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 
 - **Rust toolchain**: binutils-rust-demangle, ghidra-rust-demangle,
   harfbuzz-fontations, fwupd-cab — base-builder needs `rustup`/cargo set up.
-- **meson syntax / version**: systemd.
-- **No `harness/build.sh`** (full build lives in the bench Dockerfile via
-  `oss-fuzz.py`): fwupd×4 — needs the meson+Rust build ported to base-builder,
-  not a harness-link fix.
-- **bespoke compile quirks**: mongoose, upx, hunspell, dtc, openscreen.
+- **meson static-pie**: systemd (the `-static-pie` link is wired deep in
+  systemd's own meson config, not a strippable build.sh flag).
+- **GN / Gerrit**: skia.
+- **GraalVM polyglot SDK jar**: graal, graaljs (JVM track).
 
 Fixed since the last sweep (both validated end-to-end; await a fresh sweep to
 confirm no regression across the 56 that already built):
@@ -95,6 +93,15 @@ confirm no regression across the 56 that already built):
   none use the libc++ `$LIB_FUZZING_ENGINE`). An env-inheriting sub-build
   (libde265) compiled against libc++ and failed to link ("undefined symbol:
   `std::__1::...`"). The build script strips `-stdlib=libc++` from C/CXXFLAGS.
+- **Dockerfile-built harness** (fwupd×4) — these have no usable `harness/build.sh`
+  (the one that exists wants system glib ≥ 2.68; focal has 2.64). The bench
+  Dockerfile builds via the project's own `contrib/ci/oss-fuzz.py`, which
+  source-builds glib/libxmlb at pinned commits. The importer was leaking that
+  build into the image (it ran pre-clone and would be wiped by the bind-mount)
+  and leaking a debian-only `LIB_FUZZING_ENGINE`. The importer now stops carrying
+  Dockerfile steps at the project clone, protects `LIB_FUZZING_ENGINE`, and
+  replays the post-clone build (oss-fuzz.py + sed patches) in build.sh, exposing
+  only the bug's target fuzzer in `$OUT`. All four validated end-to-end.
 
 ## JVM (9 bugs, separate track)
 
