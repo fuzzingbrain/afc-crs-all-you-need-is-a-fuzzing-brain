@@ -106,6 +106,35 @@ def test_build_script_uses_the_renamed_libs_step(tmp_path):
     assert (out / "f").is_file()
 
 
+def test_build_script_strips_libcxx_stdlib_for_bench_builds(tmp_path):
+    # base-builder forces -stdlib=libc++; bench harnesses are GNU libstdc++. The
+    # driver must hand build.sh a CXXFLAGS without -stdlib=libc++ so sub-builds
+    # (libde265) don't compile against the wrong stdlib. Capture what build.sh sees.
+    fake = (
+        "#!/bin/bash\n"
+        'echo "$CXXFLAGS" > "$OUT/seen_cxxflags"\n'
+        'case "$1" in\n'
+        '  build-libs) exit 0;;\n'
+        '  harness) mkdir -p "$OUT/$2"; echo bin > "$OUT/$2/harness"; exit 0;;\n'
+        '  *) exit 2;;\n'
+        'esac\n'
+    )
+    src = tmp_path / "src"
+    (src / "harness").mkdir(parents=True)
+    (src / "harness" / "build.sh").write_text(fake)
+    out = tmp_path / "out"
+    out.mkdir()
+    env = {**os.environ, "SRC": str(src), "OUT": str(out), "SANITIZER": "address",
+           "HOME": str(tmp_path),
+           "CXXFLAGS": "-O1 -stdlib=libc++ -DFOO", "CFLAGS": "-O1"}
+    r = subprocess.run(["bash", "-c", _build_script("f")], env=env,
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    seen = (out / "seen_cxxflags").read_text()
+    assert "-stdlib=libc++" not in seen  # stripped
+    assert "-DFOO" in seen and "-O1" in seen  # other flags preserved
+
+
 def test_build_script_repoints_ld_to_lld_when_available(tmp_path):
     # LTO/IPO projects (FreeRDP, open62541) ship bitcode static libs that GNU ld
     # (base-builder's default /usr/bin/ld) cannot link. The driver must repoint ld
