@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Tuple, List
 
 from ..core import logger
+from ..builder import BuildJob, run_build
+from ..builder.engine import DEFAULT_BUILD_TIMEOUT_S
 
 
 class WorkerBuilder:
@@ -92,80 +94,36 @@ class WorkerBuilder:
     def _build_with_sanitizer(
         self, helper_path: Path, sanitizer: str, log_path: Path
     ) -> Tuple[bool, str]:
+        """Build with one sanitizer (delegates to the shared build engine).
+
+        Streams to the console and writes the per-worker build.log; the helper.py
+        invocation, \\r normalization, timeout and exit-code handling all live in
+        :mod:`fuzzingbrain.builder` so workers and the controller behave alike.
         """
-        Build fuzzer with a specific sanitizer.
-
-        Args:
-            helper_path: Path to helper.py
-            sanitizer: Sanitizer type (address, memory, undefined, coverage)
-            log_path: Path to write build log
-
-        Returns:
-            (success, message)
-        """
-        cmd = [
-            "python3",
-            str(helper_path),
-            "build_fuzzers",
-            "--sanitizer",
-            sanitizer,
-            "--engine",
-            "libfuzzer",
-            self.project_name,
-            str(self.repo_path.absolute()),
-        ]
-
-        logger.info(f"Build command: {' '.join(cmd)}")
-
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        job = BuildJob(
+            fuzz_tooling_path=self.fuzz_tooling_path,
+            project=self.project_name,
+            src_path=self.repo_path,
+            sanitizer=sanitizer,
+            log_path=log_path,
+            timeout_s=DEFAULT_BUILD_TIMEOUT_S,
+            label=self.project_name,
+        )
+        from ..builder import helper_command
 
-        try:
-            with open(log_path, "w", encoding="utf-8") as log_file:
-                log_file.write(f"Build Command: {' '.join(cmd)}\n")
-                log_file.write(f"Sanitizer: {sanitizer}\n")
-                log_file.write("=" * 80 + "\n\n")
+        logger.info(f"Build command: {' '.join(helper_command(job))}")
 
-                process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    cwd=str(self.fuzz_tooling_path),
-                )
+        def _to_console(line: str) -> None:
+            sys.stdout.write(line)
+            sys.stdout.flush()
 
-                ended_with_newline = True
-                for raw_line in process.stdout:
-                    # Docker/oss-fuzz often emits carriage-return updates; normalize to newlines to avoid smashed console output
-                    line = raw_line.replace("\r", "\n")
-                    sys.stdout.write(line)
-                    sys.stdout.flush()
-                    log_file.write(line)
-                    ended_with_newline = line.endswith("\n")
-
-                # Ensure the next log line starts cleanly
-                if not ended_with_newline:
-                    sys.stdout.write("\n")
-                    log_file.write("\n")
-
-                process.wait(timeout=1800)  # 30 minutes
-
-                log_file.write("\n" + "=" * 80 + "\n")
-                log_file.write(f"Exit code: {process.returncode}\n")
-
-            if process.returncode != 0:
-                logger.error(f"Build failed with code {process.returncode}")
-                return False, f"Build failed (code {process.returncode})"
-
-            logger.info(f"Build with {sanitizer} completed successfully")
-            return True, "Build successful"
-
-        except subprocess.TimeoutExpired:
-            process.kill()
-            logger.error("Build timed out")
-            return False, "Build timed out (30 minutes)"
-        except Exception as e:
-            logger.exception(f"Build failed: {e}")
-            return False, str(e)
+        result = run_build(job, on_line=_to_console)
+        if not result.ok:
+            logger.error(result.message)
+            return False, result.message
+        logger.info(f"Build with {sanitizer} completed successfully")
+        return True, result.message
 
     def _copy_build_output(self, dest_path: Path) -> None:
         """
