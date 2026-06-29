@@ -233,6 +233,11 @@ def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
         # build container refuses to operate ("dubious ownership"), breaking any
         # build.sh that runs submodule update / autoreconf (e.g. jq, oniguruma).
         "git config --global --add safe.directory '*' || true\n"
+        # base-builder (Ubuntu 20.04) ships gettext 0.19; projects whose
+        # configure.ac requires 0.20+ (hunspell) abort in autopoint during
+        # autoreconf. Fuzzing needs no translations, so skip autopoint — the m4
+        # macros these projects ship are enough for configure.
+        'export AUTOPOINT="${AUTOPOINT:-true}"\n'
         'BS="$SRC/harness/build.sh"\n'
         'L_LOG=/tmp/fb_libs.log\n'
         # Optional library-build step; name varies, some projects have none.
