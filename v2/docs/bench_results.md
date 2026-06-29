@@ -74,9 +74,15 @@ python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 
 - **Rust toolchain**: binutils-rust-demangle, ghidra-rust-demangle,
   harfbuzz-fontations, fwupd-cab — base-builder needs `rustup`/cargo set up.
-- **meson static-pie**: systemd (the `-static-pie` link is wired deep in
-  systemd's own meson config, not a strippable build.sh flag).
-- **GN / Gerrit**: skia.
+- **glibc/UAPI too old**: systemd×2 — base-builder is Ubuntu focal (glibc 2.31,
+  Linux 5.4 UAPI), but modern systemd needs glibc 2.33+ (`struct mallinfo2`) and
+  6.x kernel headers (~30 newer syscall numbers, `SEGV_MTE*`, ...). The syscall/
+  constant gaps are shimmable via an `#ifndef` `-include` header, but `mallinfo2`
+  is a glibc-version gap that cannot be shimmed. (Verified by build — not the
+  `-static-pie` issue a stale note claimed.)
+- **GN / Gerrit, multi-GB**: skia — its own build.sh source-syncs multiple GB of
+  third_party + a bundled clang and does a full GN/Ninja build; infeasible in a
+  standard CI box (the build.sh says as much).
 
 Fixed since the last sweep (both validated end-to-end; await a fresh sweep to
 confirm no regression across the 56 that already built):
