@@ -13,14 +13,18 @@ Reproduce:
 python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 ```
 
-## Result: 21/68 SOLVED, 56/68 build+run end-to-end
+## Result: 21/68 SOLVED, 58/68 build+run end-to-end
 
 | verdict | count | meaning |
 |---|---|---|
 | SOLVED | 21 | PoV passes the bench oracle (all capabilities) |
-| no-pov | 25 | built + fuzzed, no crash within budget |
+| no-pov | 27 | built + fuzzed, no crash within budget |
 | graded-fail | 10 | found a crash, but not the target bug/site |
-| build-fail | 12 | target did not build (per-project porting) |
+| build-fail | 10 | target did not build (per-project porting) |
+
+> freerdp-ntlm-memleak and opcua-pubsub-json-assert now build (LTO/bitcode
+> static libs link via `ld.lld`); they move from build-fail to built and await a
+> fresh sweep to grade.
 
 ### SOLVED (21)
 - dtc-fdt32-misalign
@@ -45,8 +49,7 @@ python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 - simdutf-utf16-utf8-overflow
 - spirv-orderblocks-segv
 
-### build-fail (12)
-- freerdp-ntlm-memleak
+### build-fail (10)
 - fwupd-cab-mszip-bomb
 - fwupd-logitech-oob-read
 - fwupd-logitech-stack-overflow
@@ -54,7 +57,6 @@ python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 - graal-regexlexer-oob
 - graaljs-illformed-locale
 - libheif-image-crop-overflow
-- opcua-pubsub-json-assert
 - skia-raster8888-blur-oob
 - systemd-hwdb-trie-oob-read
 - systemd-pe-binary-dos
@@ -78,9 +80,16 @@ python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
   harfbuzz-fontations, fwupd-cab — base-builder needs `rustup`/cargo set up.
 - **libc++ ABI**: libheif (libde265 links against a different libc++).
 - **meson syntax / version**: systemd.
-- **bespoke compile quirks**: mongoose, upx, freerdp, hunspell, dtc, openscreen,
-  fwupd-logitech/sbatlevel. The generated build script silences trial
-  invocations (`2>/dev/null`); strip that to see the real compiler error.
+- **No `harness/build.sh`** (full build lives in the bench Dockerfile via
+  `oss-fuzz.py`): fwupd×4 — needs the meson+Rust build ported to base-builder,
+  not a harness-link fix.
+- **bespoke compile quirks**: mongoose, upx, hunspell, dtc, openscreen.
+
+Fixed since the last sweep: **LTO/bitcode static libs** (freerdp, opcua) — projects
+built with `CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON` ship LLVM-bitcode `.o` members
+in their `.a`; a bare-`clang` harness link hit base-builder's GNU `ld` ("file
+format not recognized"). The generated build script now repoints `/usr/bin/ld`
+at `ld.lld`, which links bitcode natively.
 
 ## JVM (9 bugs, separate track)
 
