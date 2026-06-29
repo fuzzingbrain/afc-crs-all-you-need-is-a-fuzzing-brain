@@ -206,7 +206,11 @@ def _parse_setup_steps(dockerfile_text: str, args: dict) -> list[str]:
             low = rest.lower()
             if re.search(r"git\s+clone\b.*(?:/src|\$src)", low):
                 break  # reached the project clone; the rest is the build
-            if any(s in low for s in ("apt-get", "git clone", "/out")):
+            # Skip what the importer handles itself: apt, clones, the /out
+            # bundling, and the bench build.sh (reused via build_script). The
+            # build.sh skip matters for bugs with no clone to break on (graal
+            # resolves deps from Maven Central instead of cloning source).
+            if any(s in low for s in ("apt-get", "git clone", "/out", "harness/build.sh")):
                 continue
             if "chmod" in low and "harness" in low:
                 continue
@@ -368,6 +372,24 @@ def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
     )
 
 
+# base-builder-jvm's default JDK is focal's openjdk-11 (class file v55), but the
+# bench targets debian bookworm's default-jdk (JDK 17) and ships JDK-17 bytecode
+# deps (GraalVM 24.x polyglot is v61). Point JAVA_HOME at the newest system JDK
+# >= 17 (base-builder-jvm bundles java-17-openjdk), unless the bench installed its
+# own JDK (avro's /opt/jdk21), which we keep. Used at build time and in the
+# runtime Jazzer wrapper so compile and run agree on the JDK.
+_JVM_JDK_SELECT = (
+    'case "${JAVA_HOME:-}" in\n'
+    '  /opt/*) : ;;\n'  # bench-installed JDK (avro /opt/jdk21) — keep
+    '  *) for _v in 17 21; do\n'
+    '       _d="${FB_JVM_DIR:-/usr/lib/jvm}/java-${_v}-openjdk-amd64"\n'
+    '       [ -x "$_d/bin/javac" ] && { export JAVA_HOME="$_d"; break; }\n'
+    '     done ;;\n'
+    'esac\n'
+    'export PATH="$JAVA_HOME/bin:$PATH"\n'
+)
+
+
 def _jvm_build_script(target_class: str, out_name: str, libs_cmd: str) -> str:
     """Build a Jazzer fuzz target from a bench JVM bug.
 
@@ -383,6 +405,7 @@ def _jvm_build_script(target_class: str, out_name: str, libs_cmd: str) -> str:
     return (
         'set -eu\n'
         "git config --global --add safe.directory '*' || true\n"
+        + _JVM_JDK_SELECT +
         'BS="$SRC/harness/build.sh"\n'
         # Build the project, then run the bench harness step which populates
         # $OUT/lib (LIB=/out/lib in the bench recipe) with classes + jars.
@@ -398,6 +421,9 @@ def _jvm_build_script(target_class: str, out_name: str, libs_cmd: str) -> str:
         f'cat > "$OUT/{out_name}" <<\'EOF\'\n'
         '#!/bin/bash\n'
         'this_dir=$(dirname "$0")\n'
+        # Run under the same JDK the harness was compiled with (>= 17), not
+        # base-builder-jvm's default openjdk-11, or JDK-17 deps fail to load.
+        + _JVM_JDK_SELECT +
         'cp="$this_dir/lib/classes"\n'
         'for j in "$this_dir"/lib/*.jar "$this_dir"/lib/deps/*.jar; do '
         '[ -f "$j" ] && cp="$cp:$j"; done\n'
