@@ -403,8 +403,10 @@ def spec_from_bench_bug(
         # cargo/rustc ship in base-builder-rust; Debian's would shadow them.
         apt_deps = [p for p in apt_deps if not _RUST_PKG.match(p)]
     # base-builder's meson is too old for some projects (need >= 0.55) — pull a
-    # current meson/ninja from pip when the project builds with meson.
-    pip_deps = ["meson", "ninja"] if "meson" in apt_deps else []
+    # current meson/ninja from pip when the project builds with meson. Include
+    # jinja2 under the same (pip) python: systemd's meson.build imports it, and
+    # the apt python3-jinja2 is invisible to the pip-installed meson's python.
+    pip_deps = ["meson", "ninja", "jinja2"] if "meson" in apt_deps else []
 
     # Copy the whole harness dir except docs; build.sh + sources must be present.
     harness_files = [
