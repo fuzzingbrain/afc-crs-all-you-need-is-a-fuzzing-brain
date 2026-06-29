@@ -167,7 +167,12 @@ def _parse_clones(
 
 
 # ENV keys base-builder owns — overriding them breaks its clang toolchain.
-_PROTECTED_ENV = re.compile(r"^(CC|CXX|CFLAGS|CXXFLAGS|SANITIZER|OUT|SRC|WORK)\b")
+# LIB_FUZZING_ENGINE is base-builder's libFuzzer archive; the bench Dockerfiles
+# point it at a debian-only clang path (/usr/lib/clang/14/...) that does not exist
+# on base-builder, so it must stay base-builder's.
+_PROTECTED_ENV = re.compile(
+    r"^(CC|CXX|CFLAGS|CXXFLAGS|SANITIZER|OUT|SRC|WORK|LIB_FUZZING_ENGINE)\b"
+)
 
 
 def _parse_setup_steps(dockerfile_text: str, args: dict) -> list[str]:
@@ -177,6 +182,11 @@ def _parse_setup_steps(dockerfile_text: str, args: dict) -> list[str]:
     nightly + bindgen for harfbuzz) via Dockerfile RUN/ENV steps. We replicate
     those verbatim, skipping what the importer already handles (apt, the clones,
     the harness COPY/build) and ENV that would clobber base-builder's compiler.
+
+    Toolchain setup always precedes the project clone (verified across avro,
+    harfbuzz, ...); anything after the clone is the project *build* (e.g. fwupd's
+    ``oss-fuzz.py``), which must run in build.sh after helper.py bind-mounts the
+    repo — not as an image step that the mount would discard. So stop at the clone.
     """
     text = re.sub(r"\\\s*\n", " ", dockerfile_text)  # join line-continuations
     steps: list[str] = []
@@ -194,15 +204,88 @@ def _parse_setup_steps(dockerfile_text: str, args: dict) -> list[str]:
             steps.append(f"ENV {rest}")
         elif instr == "RUN":
             low = rest.lower()
-            if any(
-                s in low
-                for s in ("apt-get", "git clone", "harness/build.sh", "/out")
-            ):
+            if re.search(r"git\s+clone\b.*(?:/src|\$src)", low):
+                break  # reached the project clone; the rest is the build
+            if any(s in low for s in ("apt-get", "git clone", "/out")):
                 continue
             if "chmod" in low and "harness" in low:
                 continue
             steps.append(f"RUN {rest}")
     return steps
+
+
+# A Dockerfile that copies a prebuilt `<name>_fuzzer` into /out/<cfg>/harness has
+# built the harness itself (fwupd's oss-fuzz.py), rather than via harness/build.sh.
+_DOCKERFILE_OUT_CP = re.compile(r"cp\s+(\S+)\s+/out/\S*harness")
+
+
+def _dockerfile_harness_output(dockerfile_text: str) -> str:
+    """Return the fuzzer basename the Dockerfile copies into /out, or ""."""
+    text = re.sub(r"\\\s*\n", " ", dockerfile_text)
+    m = _DOCKERFILE_OUT_CP.search(text)
+    return m.group(1).rsplit("/", 1)[-1] if m else ""
+
+
+def _dockerfile_build_recipe(dockerfile_text: str, args: dict) -> list[str]:
+    """Post-clone build commands the Dockerfile runs *instead of* harness/build.sh.
+
+    For most bugs this is empty (the Dockerfile just calls harness/build.sh, which
+    the importer reuses). fwupd builds via ``contrib/ci/oss-fuzz.py`` (plus sed
+    patches for the logitech targets) and copies the result into /out — those are
+    the commands to replay in build.sh.
+    """
+    text = re.sub(r"\\\s*\n", " ", dockerfile_text)
+    recipe: list[str] = []
+    seen_clone = False
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        m = re.match(r"(\w+)\s+(.*)", line)
+        if not m:
+            continue
+        instr, rest = m.group(1).upper(), _subst(m.group(2), args)
+        low = rest.lower()
+        if instr == "RUN" and re.search(r"git\s+clone\b.*(?:/src|\$src)", low):
+            seen_clone = True
+            continue
+        if not seen_clone or instr != "RUN":
+            continue
+        # Skip the importer-handled bits: harness/build.sh (reused separately) and
+        # the /out bundling (we copy the target fuzzer ourselves).
+        if "harness/build.sh" in low or "/out" in low:
+            continue
+        if "chmod" in low and "harness" in low:
+            continue
+        recipe.append(rest)
+    return recipe
+
+
+def _dockerfile_build_script(project: str, recipe: list[str], produced: str) -> str:
+    """build.sh body for a bug whose harness is built by the bench Dockerfile.
+
+    Runs the Dockerfile's own build (e.g. fwupd's oss-fuzz.py) at compile time —
+    after the bind-mount, so source patches stick — redirecting its many fuzzer
+    outputs to scratch and exposing only the target one in $OUT.
+    """
+    steps = "".join(f"{s}\n" for s in recipe)
+    return (
+        "set -eu\n"
+        "git config --global --add safe.directory '*' || true\n"
+        # oss-fuzz.py's rustgen.py runs `python` (base-builder's /usr/local/bin one);
+        # its jinja2 is separate from the apt python3-jinja2, so install it there.
+        "python -m pip install --quiet jinja2 >/dev/null 2>&1 || "
+        "pip3 install --quiet jinja2 >/dev/null 2>&1 || true\n"
+        f'cd "$SRC/{project}"\n'
+        '_FB_OUT="$OUT"\n'
+        # The Dockerfile build emits every project fuzzer into $OUT; redirect that
+        # to scratch so $OUT ends up holding only this bug's target.
+        'export OUT="${WORK:-/tmp}/fb_dockerbuild_out"; rm -rf "$OUT"; mkdir -p "$OUT"\n'
+        f"{steps}"
+        f'cp "$OUT/{produced}" "$_FB_OUT/{produced}"\n'
+        'export OUT="$_FB_OUT"\n'
+        f'echo "built $OUT/{produced} ($(stat -c %s "$OUT/{produced}") bytes)"\n'
+    )
 
 
 def _detect_libs_cmd(build_sh_text: str) -> str:
@@ -414,7 +497,13 @@ def spec_from_bench_bug(
 
     apt_deps = _parse_apt_deps(dockerfile)
     dockerfile_text = dockerfile.read_text() if dockerfile.is_file() else ""
-    setup_steps = _parse_setup_steps(dockerfile_text, _parse_dockerfile_args(dockerfile_text))
+    df_args = _parse_dockerfile_args(dockerfile_text)
+    setup_steps = _parse_setup_steps(dockerfile_text, df_args)
+    # Some bugs (fwupd) are not built by harness/build.sh at all — the bench
+    # Dockerfile builds the harness itself (oss-fuzz.py) and copies it into /out.
+    # Detect that and replay the Dockerfile's build in build.sh instead.
+    produced = _dockerfile_harness_output(dockerfile_text)
+    df_recipe = _dockerfile_build_recipe(dockerfile_text, df_args) if produced else []
     base_image = _select_base_image(
         language, _needs_rust(apt_deps, dockerfile_text, build_sh_text)
     )
@@ -449,6 +538,8 @@ def spec_from_bench_bug(
         build_script=(
             _jvm_build_script(target_class, fuzzer_name, libs_cmd)
             if language == "jvm"
+            else _dockerfile_build_script(project, df_recipe, produced)
+            if df_recipe
             else case_fix + _build_script(fuzzer_name, libs_cmd)
         ),
         description=description,
