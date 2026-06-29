@@ -13,14 +13,14 @@ Reproduce:
 python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 ```
 
-## Result: 21/68 SOLVED, 63/68 build+run end-to-end
+## Result: 21/68 SOLVED, 65/68 build+run end-to-end
 
 | verdict | count | meaning |
 |---|---|---|
 | SOLVED | 21 | PoV passes the bench oracle (all capabilities) |
-| no-pov | 32 | built + fuzzed, no crash within budget |
+| no-pov | 34 | built + fuzzed, no crash within budget |
 | graded-fail | 10 | found a crash, but not the target bug/site |
-| build-fail | 5 | target did not build (per-project porting) |
+| build-fail | 3 | target did not build (per-project porting) |
 
 > Seven targets moved from build-fail to built since the last sweep and await a
 > fresh sweep to grade: freerdp-ntlm-memleak + opcua-pubsub-json-assert (LTO/
@@ -52,9 +52,7 @@ python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 - simdutf-utf16-utf8-overflow
 - spirv-orderblocks-segv
 
-### build-fail (5)
-- graal-regexlexer-oob
-- graaljs-illformed-locale
+### build-fail (3)
 - skia-raster8888-blur-oob
 - systemd-hwdb-trie-oob-read
 - systemd-pe-binary-dos
@@ -79,7 +77,6 @@ python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 - **meson static-pie**: systemd (the `-static-pie` link is wired deep in
   systemd's own meson config, not a strippable build.sh flag).
 - **GN / Gerrit**: skia.
-- **GraalVM polyglot SDK jar**: graal, graaljs (JVM track).
 
 Fixed since the last sweep (both validated end-to-end; await a fresh sweep to
 confirm no regression across the 56 that already built):
@@ -102,8 +99,19 @@ confirm no regression across the 56 that already built):
   Dockerfile steps at the project clone, protects `LIB_FUZZING_ENGINE`, and
   replays the post-clone build (oss-fuzz.py + sed patches) in build.sh, exposing
   only the bug's target fuzzer in `$OUT`. All four validated end-to-end.
+- **JVM on the wrong JDK** (graal, graaljs) — GraalVM 24.x polyglot jars are
+  JDK-17 bytecode (class v61), but base-builder-jvm's default `JAVA_HOME` is
+  focal's openjdk-11 (v55), so `javac` rejects them ("wrong version 61.0, should
+  be 55.0"). The JVM build script and Jazzer wrapper now select the system JDK 17
+  (base-builder-jvm bundles it; the bench targets bookworm's JDK 17), keeping a
+  bench-installed JDK (avro's /opt/jdk21). Both build, run under JDK 17 + GraalVM
+  polyglot, and reproduce their target crash from the poc.
 
-## JVM (9 bugs, separate track)
+## JVM (9 bugs)
 
-Java/Jazzer bugs (avro, graal, graaljs, json-java, pdfbox) are not C/C++ and need
-a Jazzer-based harness path; not covered by this sweep.
+Java/Jazzer bugs (avro, graal, graaljs, json-java, pdfbox) build through a
+dedicated path: the importer compiles the bench harness's entry class against the
+bench step's `$OUT/lib` classpath and drops a libFuzzer-compatible Jazzer wrapper
+over it (Jazzer is a libFuzzer driver, so V2's fuzz loop runs it unchanged). They
+build under the system JDK 17 (GraalVM 24.x needs JDK-17 bytecode; see above).
+All now build+run; json-java is SOLVED, the rest await/repeat grading.
