@@ -18,12 +18,14 @@ from fuzzingbrain.importers.bench import (
 )
 
 
-def _run_build_script(tmp_path, script, fake_build_sh, sanitizer="address"):
+def _run_build_script(tmp_path, script, fake_build_sh, sanitizer="address",
+                      path_prepend=None):
     """Execute a generated build_script against a fake bench build.sh.
 
     The fake stands in for ``$SRC/harness/build.sh`` and decides which configs it
     can build; we then assert on what the generated driver actually does. HOME is
     sandboxed so the script's ``git config --global`` cannot touch the real one.
+    ``path_prepend`` puts a dir at the front of PATH (e.g. a stub ``ld.lld``).
     """
     src = tmp_path / "src"
     (src / "harness").mkdir(parents=True)
@@ -31,8 +33,11 @@ def _run_build_script(tmp_path, script, fake_build_sh, sanitizer="address"):
     bs.write_text(fake_build_sh)
     out = tmp_path / "out"
     out.mkdir()
+    path = os.environ["PATH"]
+    if path_prepend:
+        path = f"{path_prepend}:{path}"
     env = {**os.environ, "SRC": str(src), "OUT": str(out),
-           "SANITIZER": sanitizer, "HOME": str(tmp_path)}
+           "SANITIZER": sanitizer, "HOME": str(tmp_path), "PATH": path}
     r = subprocess.run(["bash", "-c", script], env=env,
                        capture_output=True, text=True)
     return r, out
@@ -97,6 +102,36 @@ def test_build_script_uses_the_renamed_libs_step(tmp_path):
         'esac\n'
     )
     r, out = _run_build_script(tmp_path, _build_script("f", "openldap-libs"), fake)
+    assert r.returncode == 0, r.stderr
+    assert (out / "f").is_file()
+
+
+def test_build_script_repoints_ld_to_lld_when_available(tmp_path):
+    # LTO/IPO projects (FreeRDP, open62541) ship bitcode static libs that GNU ld
+    # (base-builder's default /usr/bin/ld) cannot link. The driver must repoint ld
+    # at lld when present — observe the repoint via the FB_LD_PATH test seam.
+    stub_bin = tmp_path / "bin"
+    stub_bin.mkdir()
+    lld = stub_bin / "ld.lld"
+    lld.write_text("#!/bin/bash\nexit 0\n")
+    lld.chmod(0o755)
+    ld_target = tmp_path / "ld"  # stands in for /usr/bin/ld
+    script = f'export FB_LD_PATH="{ld_target}"\n' + _build_script("f")
+    r, out = _run_build_script(
+        tmp_path, script, _FAKE_STD, path_prepend=str(stub_bin)
+    )
+    assert r.returncode == 0, r.stderr
+    assert ld_target.is_symlink()
+    assert os.path.realpath(ld_target) == str(lld)  # ld now resolves to lld
+    assert (out / "f").is_file()  # and the build still completes
+
+
+def test_build_script_ld_repoint_is_non_fatal_without_lld(tmp_path):
+    # When lld is absent the repoint must be a guarded no-op, never aborting the
+    # build under `set -eu`. Point FB_LD_PATH at an unwritable location to prove a
+    # failed/absent repoint cannot break an otherwise fine build.
+    script = 'export FB_LD_PATH="/proc/nonexistent/ld"\n' + _build_script("f")
+    r, out = _run_build_script(tmp_path, script, _FAKE_STD)
     assert r.returncode == 0, r.stderr
     assert (out / "f").is_file()
 
