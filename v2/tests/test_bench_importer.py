@@ -175,6 +175,90 @@ def test_build_script_picks_coverage_config_under_coverage_sanitizer(tmp_path):
     assert not (out / "release-asan").exists()
 
 
+_FWUPD_DOCKERFILE = (
+    "FROM debian:bookworm-slim\n"
+    "RUN apt-get update && apt-get install -y meson cargo\n"
+    "ENV JAVA_HOME=/opt/jdk\n"  # pre-clone toolchain setup -> carried
+    "ENV LIB_FUZZING_ENGINE=/usr/lib/clang/14/lib/linux/libclang_rt.fuzzer.a\n"
+    "RUN curl -sSf https://x | sh\n"  # pre-clone -> carried
+    "RUN git clone https://github.com/fwupd/fwupd /src/fwupd \\\n"
+    " && git -C /src/fwupd checkout 2.0.18\n"
+    "RUN sed -i 's|a|b|' /src/fwupd/contrib/ci/oss-fuzz.py\n"  # post-clone build patch
+    "WORKDIR /src/fwupd\n"
+    "RUN python3 contrib/ci/oss-fuzz.py\n"
+    "RUN mkdir -p /out/release-asan && cp /src/.ossfuzz/out/cab_fuzzer /out/release-asan/harness\n"
+)
+
+
+def test_setup_steps_stop_at_project_clone():
+    from fuzzingbrain.importers.bench import _parse_setup_steps
+    steps = _parse_setup_steps(_FWUPD_DOCKERFILE, {})
+    assert "ENV JAVA_HOME=/opt/jdk" in steps          # pre-clone toolchain kept
+    assert any("curl" in s for s in steps)            # pre-clone RUN kept
+    assert not any("oss-fuzz.py" in s for s in steps)  # post-clone build NOT leaked
+    assert not any("sed" in s for s in steps)          # post-clone patch NOT leaked
+
+
+def test_setup_steps_drop_debian_fuzzing_engine_env():
+    # The bench points LIB_FUZZING_ENGINE at a debian clang path absent on
+    # base-builder; base-builder's own engine must win.
+    from fuzzingbrain.importers.bench import _parse_setup_steps
+    steps = _parse_setup_steps(_FWUPD_DOCKERFILE, {})
+    assert not any("LIB_FUZZING_ENGINE" in s for s in steps)
+
+
+def test_dockerfile_harness_output_and_recipe():
+    from fuzzingbrain.importers.bench import (
+        _dockerfile_harness_output, _dockerfile_build_recipe,
+    )
+    assert _dockerfile_harness_output(_FWUPD_DOCKERFILE) == "cab_fuzzer"
+    recipe = _dockerfile_build_recipe(_FWUPD_DOCKERFILE, {})
+    assert any("oss-fuzz.py" in r for r in recipe)   # the build command
+    assert any("sed -i" in r for r in recipe)        # source patch before it
+    assert not any("/out" in r for r in recipe)      # /out bundling excluded
+
+
+def test_dockerfile_harness_output_empty_for_buildsh_projects():
+    # A normal bug whose Dockerfile just runs harness/build.sh is NOT a
+    # Dockerfile-build target (recipe empty -> importer reuses build.sh).
+    from fuzzingbrain.importers.bench import (
+        _dockerfile_harness_output, _dockerfile_build_recipe,
+    )
+    df = (
+        "FROM debian\nRUN apt-get install -y autoconf\n"
+        "RUN git clone https://x/net-snmp /src/net-snmp\n"
+        "RUN /src/harness/build.sh build-libs\n"
+        "RUN mkdir -p /out && cp /out/release-asan/harness /out/harness\n"
+    )
+    assert _dockerfile_build_recipe(df, {}) == []  # only build.sh + /out -> nothing
+
+
+def test_dockerfile_build_script_exposes_only_target_fuzzer(tmp_path):
+    # The Dockerfile build (oss-fuzz.py) emits many fuzzers; build.sh must surface
+    # only this bug's target in $OUT. Drive it with a fake recipe + stubbed python.
+    from fuzzingbrain.importers.bench import _dockerfile_build_script
+    stub = tmp_path / "bin"
+    stub.mkdir()
+    for name in ("python", "pip3"):
+        (stub / name).write_text("#!/bin/bash\nexit 0\n")  # no-op pip install
+        (stub / name).chmod(0o755)
+    src = tmp_path / "src"
+    (src / "fwupd").mkdir(parents=True)
+    out = tmp_path / "out"
+    out.mkdir()
+    work = tmp_path / "work"
+    work.mkdir()
+    # recipe writes two fuzzers into the (redirected) $OUT scratch dir
+    recipe = ['touch "$OUT/cab_fuzzer"', 'touch "$OUT/wacom_fuzzer"']
+    script = _dockerfile_build_script("fwupd", recipe, "cab_fuzzer")
+    env = {**os.environ, "SRC": str(src), "OUT": str(out), "WORK": str(work),
+           "HOME": str(tmp_path), "PATH": f"{stub}:{os.environ['PATH']}"}
+    r = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert (out / "cab_fuzzer").is_file()       # target exposed
+    assert not (out / "wacom_fuzzer").exists()  # other fuzzers stay in scratch
+
+
 def test_parse_clones_line_continuation_and_branch(tmp_path):
     # A clone split across lines with `-b <tag>` must be parsed as one command.
     df = tmp_path / "Dockerfile"
