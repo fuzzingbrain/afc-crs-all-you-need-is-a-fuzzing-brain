@@ -74,9 +74,18 @@ python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 
 - **Rust toolchain**: binutils-rust-demangle, ghidra-rust-demangle,
   harfbuzz-fontations, fwupd-cab — base-builder needs `rustup`/cargo set up.
-- **GN / Gerrit, multi-GB**: skia — its own build.sh source-syncs multiple GB of
-  third_party + a bundled clang and does a full GN/Ninja build; infeasible in a
-  standard CI box (the build.sh says as much). The one genuine hard-tail.
+- **Unfetchable pinned commit**: skia — the only genuine hard-tail, and not a
+  toolchain gap a shim could close. The bench pins vuln_commit
+  `d3ea842c93e5...`, a chromium-DEPS roll point that skia's public git does not
+  serve: `git fetch` of that SHA (and of the fix commit) returns a persistent
+  `HTTP 500` / "reference is not a tree". The clone therefore lands on skia/main
+  HEAD (post-fix — the bug is gone). The bench's own Dockerfile documents this
+  ("the entry's binaries could not be validated"). A fallback pre-fix commit
+  would build *different source* than the bench specifies (the grader checks a
+  specific source line), so it is deliberately not used — a faithful 68th here is
+  blocked upstream, not by our environment. (Secondary walls if the commit were
+  fetchable: `git-sync-deps` pulls multi-GB incl. externals the bench notes flag
+  as unreachable, then a long GN/Ninja build.)
 
 Fixed since the last sweep (both validated end-to-end; await a fresh sweep to
 confirm no regression across the 56 that already built):
