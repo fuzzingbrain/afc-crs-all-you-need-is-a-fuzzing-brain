@@ -122,7 +122,7 @@ def build_bugs(
         except Exception as exc:  # noqa: BLE001 — workspace setup failure is a result
             return BuildResult(
                 bug_dir.name, sanitizer, False,
-                message=f"workspace setup failed: {exc}",
+                message=f"workspace setup failed: {exc}", label=bug_dir.name,
             )
         return run_build(job)
 

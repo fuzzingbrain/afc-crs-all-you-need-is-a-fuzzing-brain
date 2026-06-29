@@ -52,6 +52,7 @@ class BuildResult:
     duration_s: float = 0.0
     log_path: Optional[Path] = None
     output_tail: str = ""
+    label: str = ""  # echoes BuildJob.label (e.g. the bug id) for traceability
 
     @property
     def fuzzer_count(self) -> int:
@@ -121,6 +122,13 @@ def helper_command(job: BuildJob) -> List[str]:
 
 
 def run_build(job: BuildJob, on_line: Optional[LineSink] = None) -> BuildResult:
+    """Run a single build to completion; the result carries the job's label."""
+    result = _run_build_impl(job, on_line)
+    result.label = job.label
+    return result
+
+
+def _run_build_impl(job: BuildJob, on_line: Optional[LineSink] = None) -> BuildResult:
     """Run a single ``build_fuzzers`` invocation to completion.
 
     ``on_line`` (if given) receives every normalized output line as it arrives —
@@ -238,7 +246,7 @@ def build_many(
                 job = jobs[idx]
                 results[idx] = BuildResult(
                     job.project, job.sanitizer, False, message=str(exc),
-                    log_path=job.log_path,
+                    log_path=job.log_path, label=job.label,
                 )
             if on_result:
                 on_result(results[idx])  # type: ignore[arg-type]
