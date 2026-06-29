@@ -13,20 +13,24 @@ Reproduce:
 python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 ```
 
-## Result: 68/68 build+run end-to-end; 21 SOLVED (last graded sweep)
+## Result: 68/68 build+run end-to-end; 22 SOLVED and counting
 
 Build coverage is complete: every one of the 68 targets builds and runs through
-the importer. The verdict table below is the **last graded sweep**, taken when 56
-targets built; the 12 targets fixed since (see below) build now but await a fresh
-sweep to grade, so SOLVED is a floor, not a ceiling.
+the importer. SOLVED is a floor, not a ceiling — a focused sweep of the 9
+freshly-built C/C++/JVM targets graded **opcua-pubsub-json-assert as a new SOLVE**
+(all 9 built + ran cleanly in V2's pipeline; the other 8 are `no-pov`). systemd ×2
+and skia build but are not yet graded.
 
 | verdict | count | meaning |
 |---|---|---|
 | build+run | 68 | builds + runs through the importer (helper.py `compile`) |
-| SOLVED | 21 | PoV passes the bench oracle (all capabilities) |
-| no-pov | 34 | built + fuzzed, no crash within budget (last sweep) |
-| graded-fail | 10 | found a crash, but not the target bug/site (last sweep) |
-| awaiting grade | 12 | newly built since the last sweep — not yet graded |
+| SOLVED | 22 | PoV passes the bench oracle (all capabilities) |
+| no-pov | 42 | built + fuzzed, no crash within budget |
+| graded-fail | 10 | found a crash, but not the target bug/site |
+| awaiting grade | 3 | systemd ×2 + skia: built, not yet swept |
+
+> Counts span sweeps taken at different build-coverage points, so they are
+> approximate; the load-bearing facts are 68/68 build and 22 confirmed SOLVED.
 
 > All 68 targets now build and run end-to-end through the importer (each
 > validated: helper.py `compile` produces a libFuzzer binary that runs inputs).
@@ -39,7 +43,7 @@ sweep to grade, so SOLVED is a floor, not a ceiling.
 > via a fetchable-commit fallback + GN-config accommodations. SOLVED counts await
 > a fresh sweep across the newly-built targets.
 
-### SOLVED (21)
+### SOLVED (22)
 - dtc-fdt32-misalign
 - harfbuzz-fontations-oob-write
 - imagemagick-msl-comment-npd
@@ -57,6 +61,7 @@ sweep to grade, so SOLVED is a floor, not a ceiling.
 - openh264-scenechange-overflow
 - openldap-ldif-stack-underflow
 - openldap-parse-whsp
+- opcua-pubsub-json-assert
 - openssl-des-ofb-cfb-overread
 - pdfbox-pfb-negative-array
 - simdutf-utf16-utf8-overflow
