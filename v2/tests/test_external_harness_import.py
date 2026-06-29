@@ -128,6 +128,32 @@ def test_dockerfile_uses_base_builder_and_copies_harness(tmp_path):
     assert "checkout fc28b88a" in dockerfile  # vuln commit pinned
 
 
+def test_dockerfile_checkout_is_non_fatal(tmp_path):
+    # The baseline clone is a convenience (helper.py bind-mounts repo/ over it); a
+    # commit not in the default fetch must NOT fail `docker build`, mirroring the
+    # bench Dockerfiles. The pinned checkout has to be tolerated.
+    spec = _spec(tmp_path)
+    ws = build_workspace(
+        spec, tmp_path / "ws", _fake_oss_fuzz(tmp_path), clone_repo=False
+    )
+    df = (ws / "fuzz-tooling" / "projects" / "net-snmp" / "Dockerfile").read_text()
+    checkout_line = next(l for l in df.splitlines() if "checkout fc28b88a" in l)
+    assert checkout_line.rstrip().endswith("|| true")
+
+
+def test_no_harness_files_omits_copy(tmp_path):
+    # COPY harness against a non-existent harness/ dir aborts `docker build`; when
+    # the harness lives in the repo itself, the COPY must not be emitted.
+    spec = _spec(tmp_path, harness_files=[])
+    ws = build_workspace(
+        spec, tmp_path / "ws", _fake_oss_fuzz(tmp_path), clone_repo=False
+    )
+    proj = ws / "fuzz-tooling" / "projects" / "net-snmp"
+    df = (proj / "Dockerfile").read_text()
+    assert "COPY harness" not in df
+    assert not (proj / "harness").exists()
+
+
 def test_project_yaml_lists_language_and_sanitizer(tmp_path):
     spec = _spec(tmp_path, sanitizers=["address", "undefined"])
     ws = build_workspace(
