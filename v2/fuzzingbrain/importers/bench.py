@@ -238,6 +238,16 @@ def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
         # autoreconf. Fuzzing needs no translations, so skip autopoint — the m4
         # macros these projects ship are enough for configure.
         'export AUTOPOINT="${AUTOPOINT:-true}"\n'
+        # Bench harnesses target debian's default GNU libstdc++: they link
+        # -lstdc++ and none use base-builder's libc++ $LIB_FUZZING_ENGINE. But
+        # base-builder forces -stdlib=libc++ via CXXFLAGS, so sub-builds that
+        # inherit the env (libheif's libde265) compile against libc++ and then
+        # fail to link the GNU harness ("undefined symbol: std::__1::..."). Drop
+        # -stdlib=libc++ to keep the whole build on GNU libstdc++, as the bench
+        # intends. Defaults guard against unset vars under `set -u`.
+        'export CFLAGS="${CFLAGS:-}"; export CFLAGS="${CFLAGS//-stdlib=libc++/}"\n'
+        'export CXXFLAGS="${CXXFLAGS:-}"; '
+        'export CXXFLAGS="${CXXFLAGS//-stdlib=libc++/}"\n'
         # Some projects enable LTO/IPO (FreeRDP, open62541:
         # CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON), so their static libs hold LLVM
         # bitcode .o members. A bench harness that links with bare `clang` gets
