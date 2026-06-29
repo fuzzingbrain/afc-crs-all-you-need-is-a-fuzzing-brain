@@ -307,6 +307,45 @@ def test_parse_setup_steps_carries_toolchain_not_apt_or_clone():
     assert not any("/out" in s for s in steps)
 
 
+def _run_jdk_select(tmp_path, java_home, available=("17",)):
+    # Drive just the JDK-selection prelude of the JVM build script in isolation.
+    from fuzzingbrain.importers.bench import _JVM_JDK_SELECT
+    jvmdir = tmp_path / "jvm"
+    for v in available:
+        d = jvmdir / f"java-{v}-openjdk-amd64" / "bin"
+        d.mkdir(parents=True)
+        (d / "javac").write_text("#!/bin/bash\n:\n")
+        (d / "javac").chmod(0o755)
+    script = (
+        f'export FB_JVM_DIR="{jvmdir}"\n'
+        f'export JAVA_HOME="{java_home}"\n'
+        + _JVM_JDK_SELECT
+        + 'echo "$JAVA_HOME"\n'
+    )
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                       env={**os.environ})
+    return r.stdout.strip()
+
+
+def test_jvm_picks_jdk17_over_focal_default_jdk11(tmp_path):
+    # base-builder-jvm's default JAVA_HOME is openjdk-11 (too old for GraalVM 24.x
+    # JDK-17 bytecode); the build must switch to the system JDK 17.
+    out = _run_jdk_select(tmp_path, "/usr/lib/jvm/default-java", available=("17",))
+    assert out.endswith("java-17-openjdk-amd64")
+
+
+def test_jvm_prefers_17_when_both_17_and_21_present(tmp_path):
+    # The bench targets bookworm's default-jdk (17); prefer it for parity.
+    out = _run_jdk_select(tmp_path, "/usr/lib/jvm/default-java", available=("17", "21"))
+    assert out.endswith("java-17-openjdk-amd64")
+
+
+def test_jvm_keeps_bench_installed_jdk(tmp_path):
+    # A bench-installed JDK (avro's /opt/jdk21) must be respected, not overridden.
+    out = _run_jdk_select(tmp_path, "/opt/jdk21", available=("17",))
+    assert out == "/opt/jdk21"
+
+
 def test_jvm_wrapper_assembles_classpath_and_targets_entry_class(tmp_path):
     # The generated $OUT/<name> wrapper is what Jazzer actually runs. Execute it
     # against a fake jazzer_driver and verify it builds the classpath from the
