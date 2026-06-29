@@ -149,6 +149,13 @@ def _git_clone(main_repo: str, commit: str, dest: Path) -> None:
     subprocess.run(["git", "clone", main_repo, str(dest)], check=True)
     if commit:
         subprocess.run(["git", "-C", str(dest), "checkout", commit], check=True)
+    # Fetch submodules at the checked-out commit's pinned revisions. Many targets
+    # vendor libraries this way (upx's ucl/zlib, opcua's deps); without them the
+    # build fails with "No SOURCES given to target". Harmless when there are none.
+    subprocess.run(
+        ["git", "-C", str(dest), "submodule", "update", "--init", "--recursive"],
+        check=False,
+    )
 
 
 def build_workspace(
