@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -33,6 +34,27 @@ from pathlib import Path
 
 V2_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(V2_DIR))
+
+
+def _force_rmtree(path: Path) -> None:
+    """Remove a workspace, including root-owned files left by docker builds.
+
+    The OSS-Fuzz build runs as root and writes root-owned artifacts (build/out,
+    generated __pycache__, ...) into the bind-mounted workspace. A plain
+    shutil.rmtree as the unprivileged user then fails with PermissionError,
+    leaving a stale tree that breaks the next run's overwrite. Fall back to a
+    throwaway root container to delete what we cannot.
+    """
+    path = Path(path)
+    if not path.exists():
+        return
+    shutil.rmtree(path, ignore_errors=True)
+    if path.exists():
+        subprocess.run(
+            ["docker", "run", "--rm", "-v", f"{path.parent}:/w", "alpine",
+             "rm", "-rf", f"/w/{path.name}"],
+            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
 
 from fuzzingbrain.importers.bench import spec_from_bench_bug, _LANG_MAP  # noqa: E402
 from fuzzingbrain.importers.external_harness import build_workspace  # noqa: E402
@@ -148,6 +170,7 @@ def run_bug(bug_id: str, bug_dir: Path, opts) -> dict:
         spec = spec_from_bench_bug(bug_dir, with_description=opts.hint)
         rec["hint"] = bool(spec.description)
         rec["language"] = spec.language
+        _force_rmtree(ws)  # clear any root-owned leftovers a prior build left
         build_workspace(spec, ws, opts.oss_fuzz, overwrite=True)
     except Exception as e:  # importer / materialize failure
         rec.update(stage="import", error=str(e), solved=False)
@@ -184,8 +207,7 @@ def run_bug(bug_id: str, bug_dir: Path, opts) -> dict:
             except Exception:
                 pass
     if not opts.keep_workspace:
-        import shutil
-        shutil.rmtree(ws, ignore_errors=True)
+        _force_rmtree(ws)
     return rec
 
 
