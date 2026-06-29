@@ -13,84 +13,52 @@ Reproduce:
 python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 ```
 
-## Result: 15/59 SOLVED (C/C++ subset)
+## Result: 21/68 SOLVED, 56/68 build+run end-to-end
 
 | verdict | count | meaning |
 |---|---|---|
-| SOLVED | 15 | V2 produced a PoV the bench oracle PASSes (all capabilities) |
-| no-pov | 19 | built + dispatched, but no PoV within budget/timeout (capability/time) |
-| graded-fail | 5 | produced a crash, but not the target bug at the required site |
-| build-fail | 18 | the target failed to build (per-project porting needed) |
-| import-fail | 2 | could not derive a spec from the bench bug |
+| SOLVED | 21 | PoV passes the bench oracle (all capabilities) |
+| no-pov | 25 | built + fuzzed, no crash within budget |
+| graded-fail | 10 | found a crash, but not the target bug/site |
+| build-fail | 12 | target did not build (per-project porting) |
 
-### SOLVED (15)
+### SOLVED (21)
+- dtc-fdt32-misalign
+- harfbuzz-fontations-oob-write
 - imagemagick-msl-comment-npd
 - imagemagick-msl-stack-overflow
+- jsonjava-jsonml-classcast
+- jsonjava-unescape-numformat
 - libaom-av1-config-assert
 - libaom-svc-encoder-hang
 - libavif-jni-signext
 - libvpx-vpx-img-flip-ub
 - libwebp-sharpyuv-gamma-oob
 - libwebsockets-lhp-class-oob
+- mongoose-mg-match-overflow
 - netsnmp-vacm-parse-npd
 - openh264-scenechange-overflow
 - openldap-ldif-stack-underflow
 - openldap-parse-whsp
 - openssl-des-ofb-cfb-overread
+- pdfbox-pfb-negative-array
 - simdutf-utf16-utf8-overflow
 - spirv-orderblocks-segv
 
-### no-pov (19)
-- avro-neg-block-size
-- avro-neg-string-len
-- cups-utf8-charset-overflow
-- flatbuffers-flexbuffers-tostring-overflow
-- flatbuffers-reflection-verifier-overflow
-- freetype-ftbitmapcopy-uaf
-- icu-translit-rule-dtor-uaf
-- icu-translit-rule-uaf
-- imagemagick-kernelinfo-alloc
-- jq-dump-op-npd
-- libpng-zlib-inflate-uaf
-- libvpx-vp9-encoder-caq-assert
-- libvpx-vp9-svc-ratectrl-ub
-- libwebp-muxassemble-npd
-- ndpi-hex-decode-sscanf
-- netsnmp-smux-rreq-uaf
-- openscreen-jsoncpp-error-message-overflow
-- ots-processgeneric-npd
-- spirv-tools-friendlynamemapper-overflow
-
-### graded-fail (5)
-- flatbuffers-parser-deserialize-uaf
-- libaom-restore-layer-overflow
-- libvpx-vp9-reconfig-overflow
-- libwebp-sharpyuv-convert-stride-oob
-- opencv-yaml-parsekey
-
-### build-fail (18)
-- binutils-rust-demangle-oom
-- dtc-fdt32-misalign
+### build-fail (12)
 - freerdp-ntlm-memleak
 - fwupd-cab-mszip-bomb
 - fwupd-logitech-oob-read
 - fwupd-logitech-stack-overflow
 - fwupd-sbatlevel-underflow
-- ghidra-rust-demangle-oom
-- harfbuzz-fontations-oob-write
-- hunspell-hashmgr-tablesize-oom
+- graal-regexlexer-oob
+- graaljs-illformed-locale
 - libheif-image-crop-overflow
-- mongoose-mg-match-overflow
-- mongoose-mqtt-nextprop-oob
-- openscreen-jsoncpp-nonobject-oob
-- systemd-hwdb-trie-oob-read
-- systemd-pe-binary-dos
-- upx-elf32-pack2-memleak
-- upx-elf64-generate-overflow
-
-### import-fail (2)
 - opcua-pubsub-json-assert
 - skia-raster8888-blur-oob
+- systemd-hwdb-trie-oob-read
+- systemd-pe-binary-dos
+
 
 ## Methodology notes
 
