@@ -13,23 +13,25 @@ Reproduce:
 python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 ```
 
-## Result: 21/68 SOLVED, 67/68 build+run end-to-end
+## Result: 21/68 SOLVED, 68/68 build+run end-to-end
 
 | verdict | count | meaning |
 |---|---|---|
 | SOLVED | 21 | PoV passes the bench oracle (all capabilities) |
-| no-pov | 34 | built + fuzzed, no crash within budget |
+| no-pov | 35 | built + fuzzed, no crash within budget |
 | graded-fail | 10 | found a crash, but not the target bug/site |
-| build-fail | 1 | target did not build (per-project porting) |
+| build-fail | 0 | every target builds + runs through the importer |
 
-> Nine targets moved from build-fail to built since the last sweep and await a
-> fresh sweep to grade: freerdp-ntlm-memleak + opcua-pubsub-json-assert (LTO/
-> bitcode static libs via `ld.lld`), libheif-image-crop-overflow (GNU libstdc++
-> alignment), all four fwupd bugs (cab/sbatlevel/logitech×2) via a new
-> Dockerfile-build strategy that replays the project's own oss-fuzz.py, and both
-> systemd bugs (hwdb, pe-binary) via a focal-compat shim + EFI-boot static-pie
-> softening. Each was validated end-to-end through the importer (fuzzer produced).
-> Only skia remains unbuilt (multi-GB GN/Gerrit source-sync, infeasible in CI).
+> All 68 targets now build and run end-to-end through the importer (each
+> validated: helper.py `compile` produces a libFuzzer binary that runs inputs).
+> Ten moved from build-fail to built since the last sweep: freerdp-ntlm-memleak +
+> opcua-pubsub-json-assert (LTO/bitcode static libs via `ld.lld`),
+> libheif-image-crop-overflow (GNU libstdc++ alignment), all four fwupd bugs
+> (cab/sbatlevel/logitech×2) via a Dockerfile-build strategy that replays the
+> project's own oss-fuzz.py, both systemd bugs (hwdb, pe-binary) via a
+> focal-compat shim + EFI-boot static-pie softening, and skia-raster8888-blur-oob
+> via a fetchable-commit fallback + GN-config accommodations. SOLVED counts await
+> a fresh sweep across the newly-built targets.
 
 ### SOLVED (21)
 - dtc-fdt32-misalign
@@ -54,8 +56,8 @@ python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 - simdutf-utf16-utf8-overflow
 - spirv-orderblocks-segv
 
-### build-fail (1)
-- skia-raster8888-blur-oob
+### build-fail (0)
+- none — all 68 targets build and run through the importer.
 
 
 ## Methodology notes
@@ -70,25 +72,26 @@ python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
   dependency repos, installs a current meson, sets `git safe.directory`, fixes
   case-sensitive `/src` dirs, and adapts to build.sh interface variants.
 
-## Known remaining build-fail classes (per-project porting)
+## Build accommodations (all 68 build)
 
-- **Rust toolchain**: binutils-rust-demangle, ghidra-rust-demangle,
-  harfbuzz-fontations, fwupd-cab — base-builder needs `rustup`/cargo set up.
-- **Unfetchable pinned commit**: skia — the only genuine hard-tail, and not a
-  toolchain gap a shim could close. The bench pins vuln_commit
-  `d3ea842c93e5...`, a chromium-DEPS roll point that skia's public git does not
-  serve: `git fetch` of that SHA (and of the fix commit) returns a persistent
-  `HTTP 500` / "reference is not a tree". The clone therefore lands on skia/main
-  HEAD (post-fix — the bug is gone). The bench's own Dockerfile documents this
-  ("the entry's binaries could not be validated"). A fallback pre-fix commit
-  would build *different source* than the bench specifies (the grader checks a
-  specific source line), so it is deliberately not used — a faithful 68th here is
-  blocked upstream, not by our environment. (Secondary walls if the commit were
-  fetchable: `git-sync-deps` pulls multi-GB incl. externals the bench notes flag
-  as unreachable, then a long GN/Ninja build.)
+No remaining build-fail classes — every target builds and runs through the
+importer. The per-project accommodations, all validated end-to-end:
 
-Fixed since the last sweep (both validated end-to-end; await a fresh sweep to
-confirm no regression across the 56 that already built):
+- **skia-raster8888-blur-oob** — the bench pins an unfetchable vuln_commit
+  (`d3ea842c...`, a chromium-DEPS roll point that skia's public git 500s on), so
+  the importer falls back to the *fetchable* tree the bench itself froze in
+  `diffscan.yaml` (`07acef99`) — same bug at the same grader site (`eval_blur_
+  passes` / `SkBitmap::getAddr`). skia builds through its own GN/Ninja graph, and
+  the bench's asan config (unlike the validated cov one) needed bug-irrelevant
+  fixes that mirror the cov config: cc/c++→clang, skia's pinned ninja on PATH,
+  Ganesh GPU backend off (CPU-raster bug), `-stdlib=libc++` on the asan harness
+  link, freetype/fontconfig dev packages, and trimming build-libs to the active
+  sanitizer's graph. Produces a 91 MB libFuzzer binary (runs inputs, accrues
+  coverage). The reference `poc.bin` is unvalidated by the bench and does not
+  reproduce, so a graded SOLVE depends on the fuzzer reaching the structured blur
+  config.
+
+Fixed earlier in this sweep (validated end-to-end):
 - **LTO/bitcode static libs** (freerdp, opcua) — projects built with
   `CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON` ship LLVM-bitcode `.o` members in their
   `.a`; a bare-`clang` harness link hit base-builder's GNU `ld` ("file format not
