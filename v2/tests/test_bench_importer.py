@@ -175,6 +175,92 @@ def test_build_script_picks_coverage_config_under_coverage_sanitizer(tmp_path):
     assert not (out / "release-asan").exists()
 
 
+import shutil
+
+_CC = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
+
+
+@pytest.mark.skipif(not _CC, reason="needs a C compiler")
+def test_compat_shim_is_inert_on_a_modern_base_and_supplies_gnu_source(tmp_path):
+    # The focal-compat shim is force-included into EVERY bench compile, so on a
+    # base that already has these symbols (the host, glibc 2.35) it must be inert:
+    # compile clean under -Werror. This is a real behavioral guard, not a mirror —
+    #   * a missing `__GLIBC_PREREQ(2,33)` guard would redefine glibc's own
+    #     `struct mallinfo2`/`mallinfo2()` and the compile would ERROR;
+    #   * dropping the shim's `#define _GNU_SOURCE` would leave RTLD_DEFAULT (used
+    #     here WITHOUT the TU defining _GNU_SOURCE) undeclared and ERROR.
+    # Both are exactly the breakages hit while bringing systemd up on focal.
+    from fuzzingbrain.importers.bench import _FOCAL_COMPAT_SHIM
+    shim = tmp_path / "fb_compat.h"
+    shim.write_text(_FOCAL_COMPAT_SHIM)
+    tu = tmp_path / "probe.c"
+    tu.write_text(  # intentionally does NOT define _GNU_SOURCE; the shim must
+        "#include <dlfcn.h>\n"
+        "#include <malloc.h>\n"
+        "#include <sys/syscall.h>\n"
+        "#include <signal.h>\n"
+        "void *use(void) {\n"
+        "  struct mallinfo2 m = mallinfo2();\n"
+        "  (void)m; (void)SEGV_MTEAERR; (void)__NR_openat2; (void)__NR_close_range;\n"
+        "  return RTLD_DEFAULT;\n"
+        "}\n"
+    )
+    r = subprocess.run(
+        [_CC, "-c", "-Werror", "-include", str(shim), str(tu),
+         "-o", str(tmp_path / "probe.o")],
+        capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+
+
+def test_build_script_writes_compat_shim_and_force_includes_that_path(tmp_path):
+    # The driver must both WRITE the compat header and aim -include at the SAME
+    # path; a header written elsewhere (or not at all) makes every compile fail to
+    # open it. The fake build.sh records C/CXXFLAGS and confirms the -include'd
+    # file is actually present on disk when the bench recipe runs.
+    rec = tmp_path / "rec.txt"
+    fake = (
+        "#!/bin/bash\n"
+        'case "$1" in\n'
+        f'  build-libs) {{ echo "C=$CFLAGS"; echo "X=$CXXFLAGS"; }} > "{rec}"; '
+        'p=$(printf "%s" "$CFLAGS" | grep -oE "/[^ ]*fb_compat.h" | head -1); '
+        f'[ -f "$p" ] && echo "SHIM_PRESENT" >> "{rec}"; exit 0;;\n'
+        '  harness) mkdir -p "$OUT/$2"; echo bin > "$OUT/$2/harness"; exit 0;;\n'
+        '  *) exit 2;;\n'
+        'esac\n'
+    )
+    r, out = _run_build_script(tmp_path, _build_script("f"), fake)
+    assert r.returncode == 0, r.stderr
+    body = rec.read_text()
+    assert "-include" in body and "fb_compat.h" in body   # forced into CFLAGS
+    assert "X=" in body and "fb_compat.h" in body.split("X=", 1)[1]  # and CXXFLAGS
+    assert "SHIM_PRESENT" in body                          # written at that path
+
+
+def test_build_script_softens_systemd_static_pie_check_and_spares_others(tmp_path):
+    # systemd's src/boot/meson.build aborts configure when the linker can't do
+    # -static-pie, which base-builder's focal toolchain can't under ASAN. The
+    # driver rewrites that one hard error to a message so the (un-fuzzed) EFI boot
+    # stub no longer blocks the build. It must match systemd's exact string and
+    # leave every other meson.build alone.
+    src = tmp_path / "src"
+    boot = src / "systemd" / "src" / "boot"
+    boot.mkdir(parents=True)
+    boot_meson = boot / "meson.build"
+    boot_meson.write_text(
+        "subdir_done()\n"
+        "        error('Linker does not support -static-pie.')\n")
+    # same exact string but NOT under src/boot -> must be left alone (path-scoped)
+    decoy = src / "elsewhere" / "meson.build"
+    decoy.parent.mkdir(parents=True)
+    decoy.write_text("        error('Linker does not support -static-pie.')\n")
+    r, out = _run_build_script(tmp_path, _build_script("f"), _FAKE_STD)
+    assert r.returncode == 0, r.stderr
+    patched = boot_meson.read_text()
+    assert "error('Linker does not support -static-pie.')" not in patched
+    assert "(fb)" in patched                       # softened to message(...)
+    assert "error('Linker does not support -static-pie.')" in decoy.read_text()
+
+
 _FWUPD_DOCKERFILE = (
     "FROM debian:bookworm-slim\n"
     "RUN apt-get update && apt-get install -y meson cargo\n"

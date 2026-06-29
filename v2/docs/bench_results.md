@@ -13,21 +13,23 @@ Reproduce:
 python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 ```
 
-## Result: 21/68 SOLVED, 65/68 build+run end-to-end
+## Result: 21/68 SOLVED, 67/68 build+run end-to-end
 
 | verdict | count | meaning |
 |---|---|---|
 | SOLVED | 21 | PoV passes the bench oracle (all capabilities) |
 | no-pov | 34 | built + fuzzed, no crash within budget |
 | graded-fail | 10 | found a crash, but not the target bug/site |
-| build-fail | 3 | target did not build (per-project porting) |
+| build-fail | 1 | target did not build (per-project porting) |
 
-> Seven targets moved from build-fail to built since the last sweep and await a
+> Nine targets moved from build-fail to built since the last sweep and await a
 > fresh sweep to grade: freerdp-ntlm-memleak + opcua-pubsub-json-assert (LTO/
 > bitcode static libs via `ld.lld`), libheif-image-crop-overflow (GNU libstdc++
-> alignment), and all four fwupd bugs (cab/sbatlevel/logitech×2) via a new
-> Dockerfile-build strategy that replays the project's own oss-fuzz.py. Each was
-> validated end-to-end through the importer (fuzzer binary produced).
+> alignment), all four fwupd bugs (cab/sbatlevel/logitech×2) via a new
+> Dockerfile-build strategy that replays the project's own oss-fuzz.py, and both
+> systemd bugs (hwdb, pe-binary) via a focal-compat shim + EFI-boot static-pie
+> softening. Each was validated end-to-end through the importer (fuzzer produced).
+> Only skia remains unbuilt (multi-GB GN/Gerrit source-sync, infeasible in CI).
 
 ### SOLVED (21)
 - dtc-fdt32-misalign
@@ -52,10 +54,8 @@ python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 - simdutf-utf16-utf8-overflow
 - spirv-orderblocks-segv
 
-### build-fail (3)
+### build-fail (1)
 - skia-raster8888-blur-oob
-- systemd-hwdb-trie-oob-read
-- systemd-pe-binary-dos
 
 
 ## Methodology notes
@@ -74,15 +74,9 @@ python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 
 - **Rust toolchain**: binutils-rust-demangle, ghidra-rust-demangle,
   harfbuzz-fontations, fwupd-cab — base-builder needs `rustup`/cargo set up.
-- **glibc/UAPI too old**: systemd×2 — base-builder is Ubuntu focal (glibc 2.31,
-  Linux 5.4 UAPI), but modern systemd needs glibc 2.33+ (`struct mallinfo2`) and
-  6.x kernel headers (~30 newer syscall numbers, `SEGV_MTE*`, ...). The syscall/
-  constant gaps are shimmable via an `#ifndef` `-include` header, but `mallinfo2`
-  is a glibc-version gap that cannot be shimmed. (Verified by build — not the
-  `-static-pie` issue a stale note claimed.)
 - **GN / Gerrit, multi-GB**: skia — its own build.sh source-syncs multiple GB of
   third_party + a bundled clang and does a full GN/Ninja build; infeasible in a
-  standard CI box (the build.sh says as much).
+  standard CI box (the build.sh says as much). The one genuine hard-tail.
 
 Fixed since the last sweep (both validated end-to-end; await a fresh sweep to
 confirm no regression across the 56 that already built):
@@ -105,6 +99,19 @@ confirm no regression across the 56 that already built):
   Dockerfile steps at the project clone, protects `LIB_FUZZING_ENGINE`, and
   replays the post-clone build (oss-fuzz.py + sed patches) in build.sh, exposing
   only the bug's target fuzzer in `$OUT`. All four validated end-to-end.
+- **focal too old for modern systemd** (systemd-hwdb, systemd-pe-binary) —
+  base-builder is Ubuntu focal (glibc 2.31, Linux 5.4 UAPI); systemd HEAD wants
+  newer kernel/glibc symbols the bench's debian provides natively. The importer
+  force-includes a guarded compat header (`-include`) that backfills, on focal
+  only: ~30 post-5.4 x86_64 syscall numbers, the ARM-MTE `SEGV_MTE*` siginfo
+  codes, and a `mallinfo2` shim over glibc 2.31's `mallinfo()`. Every backfill is
+  `#ifndef`/`__GLIBC_PREREQ`-guarded (and `signal.h` is pulled in first so the
+  MTE codes don't clobber a newer base's enum), so the header is inert wherever
+  the symbols already exist. Separately, systemd's EFI boot stub aborts configure
+  unless the linker supports `-static-pie`, which focal's toolchain can't under
+  ASAN; since that stub is never built for the fuzzers, the build script softens
+  that one hard error to a message. Both build end-to-end and produce a 4.4 MB
+  fuzzer.
 - **JVM on the wrong JDK** (graal, graaljs) — GraalVM 24.x polyglot jars are
   JDK-17 bytecode (class v61), but base-builder-jvm's default `JAVA_HOME` is
   focal's openjdk-11 (v55), so `javac` rejects them ("wrong version 61.0, should

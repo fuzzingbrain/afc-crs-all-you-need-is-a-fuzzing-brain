@@ -305,6 +305,149 @@ def _detect_libs_cmd(build_sh_text: str) -> str:
     return m.group(1) if m else ""
 
 
+# base-builder is Ubuntu focal (glibc 2.31, Linux 5.4 UAPI). Modern projects
+# (systemd) reference kernel/glibc symbols newer than that. The bench targets
+# debian bookworm where they exist natively; backfill the gaps so the same source
+# compiles on focal. Every definition is guarded (#ifndef / __GLIBC_PREREQ), so
+# on a newer base where they exist this header is inert. x86_64.
+_FOCAL_COMPAT_SHIM = r"""#ifndef FB_COMPAT_H
+#define FB_COMPAT_H
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE 1
+#endif
+/* x86_64 syscall numbers added after Linux 5.4 */
+#ifndef __NR_pivot_root
+#define __NR_pivot_root 155
+#endif
+#ifndef __NR_set_mempolicy
+#define __NR_set_mempolicy 238
+#endif
+#ifndef __NR_get_mempolicy
+#define __NR_get_mempolicy 239
+#endif
+#ifndef __NR_add_key
+#define __NR_add_key 248
+#endif
+#ifndef __NR_request_key
+#define __NR_request_key 249
+#endif
+#ifndef __NR_keyctl
+#define __NR_keyctl 250
+#endif
+#ifndef __NR_ioprio_set
+#define __NR_ioprio_set 251
+#endif
+#ifndef __NR_ioprio_get
+#define __NR_ioprio_get 252
+#endif
+#ifndef __NR_rt_tgsigqueueinfo
+#define __NR_rt_tgsigqueueinfo 297
+#endif
+#ifndef __NR_kcmp
+#define __NR_kcmp 312
+#endif
+#ifndef __NR_sched_setattr
+#define __NR_sched_setattr 314
+#endif
+#ifndef __NR_kexec_file_load
+#define __NR_kexec_file_load 320
+#endif
+#ifndef __NR_bpf
+#define __NR_bpf 321
+#endif
+#ifndef __NR_execveat
+#define __NR_execveat 322
+#endif
+#ifndef __NR_pidfd_send_signal
+#define __NR_pidfd_send_signal 424
+#endif
+#ifndef __NR_open_tree
+#define __NR_open_tree 428
+#endif
+#ifndef __NR_move_mount
+#define __NR_move_mount 429
+#endif
+#ifndef __NR_fsopen
+#define __NR_fsopen 430
+#endif
+#ifndef __NR_fsconfig
+#define __NR_fsconfig 431
+#endif
+#ifndef __NR_fsmount
+#define __NR_fsmount 432
+#endif
+#ifndef __NR_pidfd_open
+#define __NR_pidfd_open 434
+#endif
+#ifndef __NR_close_range
+#define __NR_close_range 436
+#endif
+#ifndef __NR_openat2
+#define __NR_openat2 437
+#endif
+#ifndef __NR_faccessat2
+#define __NR_faccessat2 439
+#endif
+#ifndef __NR_mount_setattr
+#define __NR_mount_setattr 442
+#endif
+#ifndef __NR_quotactl_fd
+#define __NR_quotactl_fd 443
+#endif
+#ifndef __NR_fchmodat2
+#define __NR_fchmodat2 452
+#endif
+#ifndef __NR_setxattrat
+#define __NR_setxattrat 463
+#endif
+#ifndef __NR_removexattrat
+#define __NR_removexattrat 466
+#endif
+#ifndef __NR_open_tree_attr
+#define __NR_open_tree_attr 467
+#endif
+/* siginfo codes (ARM MTE), added ~5.10. Include signal.h first: on a newer base
+   these are enum constants (with a companion macro), so #ifndef then skips and we
+   avoid clobbering the enum; focal lacks them entirely, so we define the macro. */
+#include <signal.h>
+#ifndef SEGV_MTEAERR
+#define SEGV_MTEAERR 8
+#endif
+#ifndef SEGV_MTESERR
+#define SEGV_MTESERR 9
+#endif
+/* glibc 2.33+ mallinfo2 over focal 2.31's mallinfo() */
+#include <features.h>
+#if defined(__GLIBC__) && (!defined(__GLIBC_PREREQ) || !__GLIBC_PREREQ(2,33))
+#include <malloc.h>
+struct mallinfo2 {
+  __SIZE_TYPE__ arena, ordblks, smblks, hblks, hblkhd, usmblks,
+                fsmblks, uordblks, fordblks, keepcost;
+};
+__attribute__((unused)) static struct mallinfo2 mallinfo2(void) {
+  struct mallinfo _m = mallinfo();
+  struct mallinfo2 _r = { (__SIZE_TYPE__)_m.arena, (__SIZE_TYPE__)_m.ordblks,
+    (__SIZE_TYPE__)_m.smblks, (__SIZE_TYPE__)_m.hblks, (__SIZE_TYPE__)_m.hblkhd,
+    (__SIZE_TYPE__)_m.usmblks, (__SIZE_TYPE__)_m.fsmblks, (__SIZE_TYPE__)_m.uordblks,
+    (__SIZE_TYPE__)_m.fordblks, (__SIZE_TYPE__)_m.keepcost };
+  return _r;
+}
+#endif
+#endif
+"""
+
+
+def _compat_shim_lines() -> str:
+    """Write the focal-compat shim and force it into every compile via -include."""
+    return (
+        "cat > /tmp/fb_compat.h <<'FB_COMPAT_EOF'\n"
+        + _FOCAL_COMPAT_SHIM
+        + "FB_COMPAT_EOF\n"
+        'export CFLAGS="${CFLAGS:-} -include /tmp/fb_compat.h"\n'
+        'export CXXFLAGS="${CXXFLAGS:-} -include /tmp/fb_compat.h"\n'
+    )
+
+
 def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
     """OSS-Fuzz build.sh body that drives the bench harness build.
 
@@ -344,6 +487,19 @@ def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
         'if command -v ld.lld >/dev/null 2>&1; then '
         'ln -sf "$(command -v ld.lld)" "${FB_LD_PATH:-/usr/bin/ld}" 2>/dev/null'
         ' || true; fi\n'
+        # Backfill focal's old kernel/glibc gaps (newer syscalls, mallinfo2) so
+        # modern sources (systemd) compile; inert on a newer base (all guarded).
+        + _compat_shim_lines() +
+        # systemd's EFI boot stub (src/boot) raises a configure-time hard error if
+        # the linker can't do -static-pie. base-builder's focal toolchain can't
+        # under ASAN (the bench's debian can), but the boot stub is never built
+        # for the hwdb/PE fuzzers — soften the error so meson configures and then
+        # compiles only the fuzzer target. The sed matches systemd's exact string,
+        # so it is a no-op for every other project.
+        'find "$SRC" -path "*/src/boot/meson.build" -exec sed -i '
+        "\"s/error('Linker does not support -static-pie.')/"
+        "message('(fb) -static-pie unavailable on base-builder; EFI boot stub "
+        "skipped for fuzzing')/\" {} + 2>/dev/null || true\n"
         'BS="$SRC/harness/build.sh"\n'
         'L_LOG=/tmp/fb_libs.log\n'
         # Optional library-build step; name varies, some projects have none.
