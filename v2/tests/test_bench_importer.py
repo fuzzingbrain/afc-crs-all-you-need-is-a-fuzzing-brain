@@ -226,12 +226,13 @@ def test_detect_libs_cmd_none():
 
 
 def _make_bug(tmp_path, *, language="c", sources=("vacm_fuzzer.c",), apt=None,
-              project="net-snmp",
+              project="net-snmp", entrypoint=None,
               description="NULL deref in vacm_parse_config_group at vacm.c:414"):
     bug = tmp_path / "netsnmp-vacm-parse-npd"
     (bug / "harness").mkdir(parents=True)
     if description is not None:
         (bug / "description.txt").write_text(description + "\n")
+    harness_section = f"harness:\n  entrypoint: {entrypoint}\n" if entrypoint else ""
     (bug / "bench.yaml").write_text(
         "bug_id: netsnmp-vacm-parse-npd\n"
         f"project: {project}\n"
@@ -239,6 +240,7 @@ def _make_bug(tmp_path, *, language="c", sources=("vacm_fuzzer.c",), apt=None,
         "  repo: https://github.com/net-snmp/net-snmp\n"
         "  vuln_commit: fc28b88a64b7739d76c73058c3811d5387851c32\n"
         f"  language: {language}\n"
+        + harness_section
     )
     for s in sources:
         (bug / "harness" / s).write_text("int LLVMFuzzerTestOneInput(){return 0;}\n")
@@ -287,6 +289,96 @@ def test_libclang_dev_is_kept(tmp_path):
 def test_cpp_language_mapped(tmp_path):
     spec = spec_from_bench_bug(_make_bug(tmp_path, language="cpp", sources=("h.cc",)))
     assert spec.language == "c++"
+
+
+def test_jvm_fuzzer_uses_simple_class_for_out_file_and_fqn_for_target(tmp_path):
+    # The $OUT fuzzer file must be the simple class name (no dots — a dotted file
+    # name breaks discovery), while Jazzer's --target_class needs the FQN.
+    spec = spec_from_bench_bug(_make_bug(
+        tmp_path, language="jvm", sources=("IntlFuzzer.java",),
+        entrypoint="com.oracle.IntlFuzzer.fuzzerTestOneInput",
+    ))
+    assert 'cat > "$OUT/IntlFuzzer"' in spec.build_script        # simple name
+    assert "--target_class=com.oracle.IntlFuzzer" in spec.build_script  # FQN
+
+
+def test_harness_source_pick_is_deterministic(tmp_path):
+    # Multiple sources -> the fuzzer name is the lexicographically first stem, so
+    # the chosen entry point does not depend on filesystem iteration order.
+    spec = spec_from_bench_bug(
+        _make_bug(tmp_path, sources=("z_fuzzer.c", "a_fuzzer.c"))
+    )
+    assert 'cp "$OUT/$c/harness" "$OUT/a_fuzzer"' in spec.build_script
+
+
+def test_clone_matches_main_repo_case_and_dotgit_insensitively(tmp_path):
+    # The Dockerfile clone is matched to bench.yaml's repo to find the mount dir;
+    # the match must ignore case and a .git suffix, or the target mounts at the
+    # wrong /src path and the build.sh can't find its source.
+    bug = _make_bug(tmp_path)  # bench.yaml repo: .../net-snmp/net-snmp
+    (bug / "Dockerfile").write_text(
+        "FROM debian:bookworm-slim\n"
+        "RUN git clone https://github.com/Net-SNMP/NET-SNMP.git /src/snmpsrc\n"
+    )
+    spec = spec_from_bench_bug(bug)
+    assert spec.project == "snmpsrc"  # matched despite case + .git mismatch
+
+
+def test_commit_uses_dockerfile_checkout_ref(tmp_path):
+    # When target.repo is a dependency pinned by tag, bench.yaml's vuln_commit
+    # names a different repo; the Dockerfile's own checkout ref is authoritative
+    # (openscreen builds jsoncpp@1.9.4, not the openscreen SHA).
+    bug = _make_bug(tmp_path)  # vuln_commit fc28b88a...
+    (bug / "Dockerfile").write_text(
+        "FROM debian:bookworm-slim\n"
+        "RUN git clone https://github.com/net-snmp/net-snmp /src/x \\\n"
+        " && git -C /src/x checkout v9.9.9-pinned\n"
+    )
+    spec = spec_from_bench_bug(bug)
+    assert spec.commit == "v9.9.9-pinned"  # ref wins over bench.yaml vuln_commit
+
+
+def test_apt_deps_skip_paths_and_dedup(tmp_path):
+    # Path fragments (from a wrapped RUN) are not packages, and duplicates must
+    # collapse, or apt-get install gets junk / repeats.
+    spec = spec_from_bench_bug(
+        _make_bug(tmp_path, apt=["git", "/var/lib/apt", "make", "make", "perl"])
+    )
+    assert "/var/lib/apt" not in spec.apt_deps
+    assert spec.apt_deps.count("make") == 1
+
+
+def test_flatten_symlink_exposes_repo_at_src(tmp_path):
+    # mongoose/dtc clone the repo straight into /src and #include files by bare
+    # name; with the mount at /src/<project> the build script must symlink the
+    # repo contents up into /src. Drive it end to end.
+    bug = _make_bug(tmp_path, project="mongoose")
+    (bug / "Dockerfile").write_text(
+        "FROM debian:bookworm-slim\n"
+        "RUN git clone https://github.com/net-snmp/net-snmp /src \\\n"
+        " && git -C /src checkout fc28b88a\n"
+    )
+    script = spec_from_bench_bug(bug).build_script
+    # fake build.sh succeeds only if the flattened source is visible at $SRC/<file>
+    fake = (
+        "#!/bin/bash\n"
+        '[ "$1" = build-libs ] && exit 0\n'
+        '[ "$1" = harness ] && { [ -f "$SRC/amalgam.c" ] || exit 9; '
+        'mkdir -p "$OUT/$2"; echo bin > "$OUT/$2/harness"; exit 0; }\n'
+        "exit 2\n"
+    )
+    src = tmp_path / "run" / "src"
+    (src / "mongoose").mkdir(parents=True)
+    (src / "mongoose" / "amalgam.c").write_text("// the library\n")
+    (src / "harness").mkdir()
+    (src / "harness" / "build.sh").write_text(fake)
+    out = tmp_path / "run" / "out"
+    out.mkdir(parents=True)
+    env = {**os.environ, "SRC": str(src), "OUT": str(out),
+           "SANITIZER": "address", "HOME": str(tmp_path)}
+    r = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert (src / "amalgam.c").exists()  # symlinked up from $SRC/mongoose
 
 
 def test_cased_project_name_is_lowercased(tmp_path):
