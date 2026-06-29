@@ -19,6 +19,8 @@ from typing import List, Tuple, Optional
 from .logging import logger, get_log_dir
 from .config import Config
 from .models import Task
+from ..builder import BuildJob, collect_fuzzers, run_build, truncate_output
+from ..builder.engine import DEFAULT_BUILD_TIMEOUT_S
 
 
 class FuzzerBuilder:
@@ -148,179 +150,60 @@ class FuzzerBuilder:
         self, sanitizer: str = "address", log_suffix: str = ""
     ) -> Tuple[bool, str]:
         """
-        Call OSS-Fuzz helper.py to build fuzzers.
+        Call OSS-Fuzz helper.py to build fuzzers (delegates to the shared engine).
 
-        Output is:
-        - Streamed to console in real-time
-        - Written to build_fuzzer{log_suffix}.log in the log directory
-
-        Args:
-            sanitizer: Sanitizer type (address, memory, undefined, coverage)
-            log_suffix: Suffix for log file name (e.g., "_coverage")
-
-        Returns:
-            (success, message)
+        Output is streamed to the console in real time and written to
+        build_fuzzer{log_suffix}.log. The actual invocation, carriage-return
+        normalization, timeout and exit-code handling live in
+        :mod:`fuzzingbrain.builder` so every build path behaves identically.
         """
-        helper_path = Path(self.task.fuzz_tooling_path) / "infra" / "helper.py"
-
-        if not helper_path.exists():
-            return False, f"helper.py not found: {helper_path}"
-
-        # Build command
-        cmd = [
-            "python3",
-            str(helper_path),
-            "build_fuzzers",
-            "--sanitizer",
-            sanitizer,
-            "--engine",
-            "libfuzzer",
-            self.project_name,
-            str(Path(self.task.src_path).absolute()),
-        ]
-
-        logger.info(f"Running build command: {' '.join(cmd)}")
-
-        # Setup build log file
         log_dir = get_log_dir()
-        log_name = f"build_fuzzer{log_suffix}.log"
-        build_log_path = log_dir / log_name if log_dir else None
+        build_log_path = log_dir / f"build_fuzzer{log_suffix}.log" if log_dir else None
 
-        try:
-            # Open log file if available
-            build_log_file = (
-                open(build_log_path, "w", encoding="utf-8") if build_log_path else None
-            )
+        job = BuildJob(
+            fuzz_tooling_path=Path(self.task.fuzz_tooling_path),
+            project=self.project_name,
+            src_path=Path(self.task.src_path),
+            sanitizer=sanitizer,
+            log_path=build_log_path,
+            timeout_s=DEFAULT_BUILD_TIMEOUT_S,
+        )
+        logger.info(f"Running build command: {' '.join(self._helper_argv(job))}")
 
-            if build_log_file:
-                build_log_file.write(f"Build Command: {' '.join(cmd)}\n")
-                build_log_file.write("=" * 80 + "\n\n")
+        def _to_console(line: str) -> None:
+            sys.stdout.write(line)
+            sys.stdout.flush()
 
-            # Run with real-time output
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                cwd=str(Path(self.task.fuzz_tooling_path)),
-            )
+        result = run_build(job, on_line=_to_console)
 
-            # Stream output to console and log file, normalizing carriage returns
-            output_lines = []
-            ended_with_newline = True
-            for raw_line in process.stdout:
-                # Replace progress-carriage-returns (e.g., docker pull) with newlines
-                line = raw_line.replace("\r", "\n")
-
-                # Write to console
-                sys.stdout.write(line)
-                sys.stdout.flush()
-
-                # Write to log file
-                if build_log_file:
-                    build_log_file.write(line)
-
-                output_lines.append(line)
-                ended_with_newline = line.endswith("\n")
-
-            # Ensure the next log line starts on a fresh line
-            if not ended_with_newline:
-                sys.stdout.write("\n")
-                if build_log_file:
-                    build_log_file.write("\n")
-
-            process.wait(timeout=1800)  # 30 minutes
-
-            if build_log_file:
-                build_log_file.write("\n" + "=" * 80 + "\n")
-                build_log_file.write(f"Exit code: {process.returncode}\n")
-                build_log_file.close()
-
-            if process.returncode != 0:
-                error = self._truncate_output("".join(output_lines[-50:]))
-                logger.error(f"Build failed with code {process.returncode}")
-                if build_log_path:
-                    logger.error(f"See full log: {build_log_path}")
-                return False, f"Build failed (code {process.returncode})"
-
-            logger.info("Build completed successfully")
+        if not result.ok:
+            logger.error(result.message)
             if build_log_path:
-                logger.info(f"Build log: {build_log_path}")
-            return True, "Build successful"
+                logger.error(f"See full log: {build_log_path}")
+            return False, result.message
 
-        except subprocess.TimeoutExpired:
-            process.kill()
-            logger.error("Build timed out after 30 minutes")
-            return False, "Build timed out (30 minutes)"
-        except Exception as e:
-            logger.exception(f"Build failed with exception: {e}")
-            return False, str(e)
-        finally:
-            if build_log_file and not build_log_file.closed:
-                build_log_file.close()
+        logger.info("Build completed successfully")
+        if build_log_path:
+            logger.info(f"Build log: {build_log_path}")
+        return True, result.message
+
+    @staticmethod
+    def _helper_argv(job: BuildJob) -> List[str]:
+        from ..builder import helper_command
+
+        return helper_command(job)
 
     def _collect_fuzzers(self) -> List[str]:
-        """
-        Scan build/out directory and collect successfully built fuzzers.
-
-        Returns:
-            List of fuzzer names
-        """
-        out_dir = (
-            Path(self.task.fuzz_tooling_path) / "build" / "out" / self.project_name
+        """Scan build/out and collect built fuzzers (delegates to the engine)."""
+        fuzzers = collect_fuzzers(
+            Path(self.task.fuzz_tooling_path), self.project_name
         )
-
-        if not out_dir.exists():
-            logger.warning(f"Output directory not found: {out_dir}")
-            return []
-
-        fuzzers = []
-        for f in out_dir.iterdir():
-            # Skip known non-fuzzer files
-            if f.name in self.SKIP_FILES:
-                continue
-
-            # Skip by extension
-            if f.suffix.lower() in self.SKIP_EXTENSIONS:
-                continue
-
-            # Skip directories
-            if f.is_dir():
-                continue
-
-            # Must be executable
-            if not os.access(f, os.X_OK):
-                continue
-
-            fuzzers.append(f.name)
-            logger.debug(f"Found fuzzer: {f.name}")
-
-        logger.info(f"Collected {len(fuzzers)} fuzzers from {out_dir}")
+        logger.info(f"Collected {len(fuzzers)} fuzzers")
         return fuzzers
 
     def _truncate_output(self, text: str, max_lines: int = 30) -> str:
-        """
-        Truncate long output, keeping first 10 and last 20 lines.
-
-        Args:
-            text: Text to truncate
-            max_lines: Maximum lines to keep
-
-        Returns:
-            Truncated text
-        """
-        if not text:
-            return ""
-
-        lines = text.strip().split("\n")
-        if len(lines) <= max_lines:
-            return text
-
-        first = lines[:10]
-        last = lines[-20:]
-        truncated = len(lines) - 30
-
-        return "\n".join(first + [f"\n... [{truncated} lines truncated] ...\n"] + last)
+        """Truncate long output to its first 10 + last 20 lines (shared engine)."""
+        return truncate_output(text)
 
     def get_fuzzer_binary_path(self, fuzzer_name: str) -> str:
         """
