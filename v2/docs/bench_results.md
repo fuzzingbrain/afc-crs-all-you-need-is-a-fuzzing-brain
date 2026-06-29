@@ -13,18 +13,18 @@ Reproduce:
 python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 ```
 
-## Result: 21/68 SOLVED, 58/68 build+run end-to-end
+## Result: 21/68 SOLVED, 59/68 build+run end-to-end
 
 | verdict | count | meaning |
 |---|---|---|
 | SOLVED | 21 | PoV passes the bench oracle (all capabilities) |
-| no-pov | 27 | built + fuzzed, no crash within budget |
+| no-pov | 28 | built + fuzzed, no crash within budget |
 | graded-fail | 10 | found a crash, but not the target bug/site |
-| build-fail | 10 | target did not build (per-project porting) |
+| build-fail | 9 | target did not build (per-project porting) |
 
-> freerdp-ntlm-memleak and opcua-pubsub-json-assert now build (LTO/bitcode
-> static libs link via `ld.lld`); they move from build-fail to built and await a
-> fresh sweep to grade.
+> freerdp-ntlm-memleak, opcua-pubsub-json-assert (LTO/bitcode static libs via
+> `ld.lld`) and libheif-image-crop-overflow (GNU libstdc++ alignment) now build;
+> they move from build-fail to built and await a fresh sweep to grade.
 
 ### SOLVED (21)
 - dtc-fdt32-misalign
@@ -56,7 +56,6 @@ python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 - fwupd-sbatlevel-underflow
 - graal-regexlexer-oob
 - graaljs-illformed-locale
-- libheif-image-crop-overflow
 - skia-raster8888-blur-oob
 - systemd-hwdb-trie-oob-read
 - systemd-pe-binary-dos
@@ -78,18 +77,24 @@ python scripts/run_bench.py --langs c,c++ --budget 8 --timeout 20 --resume
 
 - **Rust toolchain**: binutils-rust-demangle, ghidra-rust-demangle,
   harfbuzz-fontations, fwupd-cab — base-builder needs `rustup`/cargo set up.
-- **libc++ ABI**: libheif (libde265 links against a different libc++).
 - **meson syntax / version**: systemd.
 - **No `harness/build.sh`** (full build lives in the bench Dockerfile via
   `oss-fuzz.py`): fwupd×4 — needs the meson+Rust build ported to base-builder,
   not a harness-link fix.
 - **bespoke compile quirks**: mongoose, upx, hunspell, dtc, openscreen.
 
-Fixed since the last sweep: **LTO/bitcode static libs** (freerdp, opcua) — projects
-built with `CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON` ship LLVM-bitcode `.o` members
-in their `.a`; a bare-`clang` harness link hit base-builder's GNU `ld` ("file
-format not recognized"). The generated build script now repoints `/usr/bin/ld`
-at `ld.lld`, which links bitcode natively.
+Fixed since the last sweep (both validated end-to-end; await a fresh sweep to
+confirm no regression across the 56 that already built):
+- **LTO/bitcode static libs** (freerdp, opcua) — projects built with
+  `CMAKE_INTERPROCEDURAL_OPTIMIZATION=ON` ship LLVM-bitcode `.o` members in their
+  `.a`; a bare-`clang` harness link hit base-builder's GNU `ld` ("file format not
+  recognized"). The build script repoints `/usr/bin/ld` at `ld.lld`, which links
+  bitcode natively.
+- **libc++/libstdc++ mismatch** (libheif) — base-builder forces `-stdlib=libc++`
+  via CXXFLAGS, but every bench harness targets GNU libstdc++ (links `-lstdc++`,
+  none use the libc++ `$LIB_FUZZING_ENGINE`). An env-inheriting sub-build
+  (libde265) compiled against libc++ and failed to link ("undefined symbol:
+  `std::__1::...`"). The build script strips `-stdlib=libc++` from C/CXXFLAGS.
 
 ## JVM (9 bugs, separate track)
 
