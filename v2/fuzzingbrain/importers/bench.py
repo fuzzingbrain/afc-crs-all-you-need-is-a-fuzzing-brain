@@ -253,8 +253,8 @@ def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
         # output per config so a real failure is visible (no silent /dev/null).
         '  bash "$BS" harness "$c" >"/tmp/fb_$c.log" 2>&1 '
         '|| bash "$BS" "$c" >"/tmp/fb_$c.log" 2>&1 || true\n'
-        '  if [ -f "/out/$c/harness" ]; then\n'
-        f'    cp "/out/$c/harness" "$OUT/{fuzzer_name}"\n'
+        '  if [ -f "$OUT/$c/harness" ]; then\n'
+        f'    cp "$OUT/$c/harness" "$OUT/{fuzzer_name}"\n'
         '    built="$c"; break\n'
         '  fi\n'
         'done\n'
