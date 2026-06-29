@@ -90,6 +90,31 @@ def test_project_yaml_lists_language_and_sanitizer(tmp_path):
     assert "libfuzzer" in yml
 
 
+def test_dockerfile_renders_setup_deps_and_extra_clones_before_target(tmp_path):
+    # rust/jvm/multi-repo targets need: pip deps, carried-over toolchain setup,
+    # and dependency clones — all in place before the target is cloned/built.
+    spec = _spec(
+        tmp_path,
+        pip_deps=["meson", "ninja"],
+        setup_steps=["ENV JAVA_HOME=/opt/jdk21", "RUN curl -sSf https://x | sh"],
+        extra_clones=[{"url": "https://github.com/strukturag/libde265",
+                       "dir": "/src/libde265", "ref": "v1.0.15"}],
+    )
+    ws = build_workspace(
+        spec, tmp_path / "ws", _fake_oss_fuzz(tmp_path), clone_repo=False
+    )
+    df = (ws / "fuzz-tooling" / "projects" / "net-snmp" / "Dockerfile").read_text()
+    assert "pip3 install" in df and "meson ninja" in df
+    assert "ENV JAVA_HOME=/opt/jdk21" in df
+    assert "RUN curl -sSf https://x | sh" in df
+    # dependency repo cloned at its pinned ref
+    assert "git clone https://github.com/strukturag/libde265 /src/libde265" in df
+    assert "checkout v1.0.15" in df
+    # ordering: toolchain setup + deps must precede cloning the target itself
+    assert df.index("JAVA_HOME") < df.index("$SRC/net-snmp")
+    assert df.index("libde265") < df.index("$SRC/net-snmp")
+
+
 def test_rejects_unknown_fields(tmp_path):
     with pytest.raises(ValueError, match="Unknown spec"):
         HarnessSpec.from_dict(

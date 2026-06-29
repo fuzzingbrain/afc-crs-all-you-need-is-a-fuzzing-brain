@@ -4,6 +4,9 @@
 Hermetic: a synthetic bench bug directory stands in for the real corpus.
 """
 
+import os
+import subprocess
+
 import pytest
 
 from fuzzingbrain.importers.bench import (
@@ -15,6 +18,99 @@ from fuzzingbrain.importers.bench import (
 )
 
 
+def _run_build_script(tmp_path, script, fake_build_sh, sanitizer="address"):
+    """Execute a generated build_script against a fake bench build.sh.
+
+    The fake stands in for ``$SRC/harness/build.sh`` and decides which configs it
+    can build; we then assert on what the generated driver actually does. HOME is
+    sandboxed so the script's ``git config --global`` cannot touch the real one.
+    """
+    src = tmp_path / "src"
+    (src / "harness").mkdir(parents=True)
+    bs = src / "harness" / "build.sh"
+    bs.write_text(fake_build_sh)
+    out = tmp_path / "out"
+    out.mkdir()
+    env = {**os.environ, "SRC": str(src), "OUT": str(out),
+           "SANITIZER": sanitizer, "HOME": str(tmp_path)}
+    r = subprocess.run(["bash", "-c", script], env=env,
+                       capture_output=True, text=True)
+    return r, out
+
+
+# A fake build.sh exposing the common contract: build-libs is a no-op, and
+# `harness <cfg>` emits $OUT/<cfg>/harness. Rejects the bare-config form.
+_FAKE_STD = (
+    "#!/bin/bash\n"
+    'case "$1" in\n'
+    '  build-libs) exit 0;;\n'
+    '  harness) mkdir -p "$OUT/$2"; echo bin > "$OUT/$2/harness"; exit 0;;\n'
+    '  *) exit 2;;\n'
+    'esac\n'
+)
+
+
+def test_build_script_drives_bench_recipe_and_copies_fuzzer(tmp_path):
+    # End-to-end: runs build-libs + harness, copies the built binary to the
+    # OSS-Fuzz fuzzer name. release-asan is preferred and should be the one taken.
+    r, out = _run_build_script(tmp_path, _build_script("vacm_fuzzer"), _FAKE_STD)
+    assert r.returncode == 0, r.stderr
+    assert (out / "vacm_fuzzer").is_file()              # copied to $OUT/<name>
+    assert (out / "release-asan" / "harness").is_file()  # highest-priority cfg used
+
+
+def test_build_script_falls_back_to_bare_config_form(tmp_path):
+    # mongoose-style build.sh has no `harness` subcommand and no build-libs; it
+    # takes the config directly. The driver must fall back to the bare form.
+    fake = (
+        "#!/bin/bash\n"
+        'case "$1" in\n'
+        '  release-asan|debug-asan|debug) mkdir -p "$OUT/$1"; echo bin > "$OUT/$1/harness";;\n'
+        '  *) exit 2;;\n'  # rejects build-libs and `harness <cfg>`
+        'esac\n'
+    )
+    r, out = _run_build_script(tmp_path, _build_script("f", libs_cmd=""), fake)
+    assert r.returncode == 0, r.stderr
+    assert (out / "f").is_file()
+
+
+def test_build_script_fails_loudly_when_nothing_builds(tmp_path):
+    # No config produces a harness -> non-zero exit and a diagnostic on stderr
+    # (not a silent success, which would strand the run with no fuzzer).
+    fake = "#!/bin/bash\necho boom >&2\nexit 1\n"
+    r, out = _run_build_script(tmp_path, _build_script("f"), fake)
+    assert r.returncode != 0
+    assert "no harness config built" in r.stderr
+    assert not (out / "f").exists()
+
+
+def test_build_script_uses_the_renamed_libs_step(tmp_path):
+    # openldap renames build-libs -> openldap-libs. Prove the driver actually
+    # invokes the renamed step: the harness only builds once libs have run.
+    fake = (
+        "#!/bin/bash\n"
+        'case "$1" in\n'
+        '  openldap-libs) touch "$OUT/.libs"; exit 0;;\n'
+        '  build-libs) exit 2;;\n'  # this project does NOT have build-libs
+        '  harness) [ -f "$OUT/.libs" ] || exit 3; mkdir -p "$OUT/$2"; echo bin > "$OUT/$2/harness";;\n'
+        '  *) exit 2;;\n'
+        'esac\n'
+    )
+    r, out = _run_build_script(tmp_path, _build_script("f", "openldap-libs"), fake)
+    assert r.returncode == 0, r.stderr
+    assert (out / "f").is_file()
+
+
+def test_build_script_picks_coverage_config_under_coverage_sanitizer(tmp_path):
+    # SANITIZER=coverage must select the coverage config, not an asan one.
+    r, out = _run_build_script(
+        tmp_path, _build_script("f"), _FAKE_STD, sanitizer="coverage"
+    )
+    assert r.returncode == 0, r.stderr
+    assert (out / "coverage" / "harness").is_file()
+    assert not (out / "release-asan").exists()
+
+
 def test_parse_clones_line_continuation_and_branch(tmp_path):
     # A clone split across lines with `-b <tag>` must be parsed as one command.
     df = tmp_path / "Dockerfile"
@@ -23,7 +119,7 @@ def test_parse_clones_line_continuation_and_branch(tmp_path):
         "RUN git clone --depth 1 -b ${TAG} \\\n"
         "        https://github.com/x/jsoncpp /src/jsoncpp\n"
     )
-    main_dir, flatten, main_ref, extra = _parse_clones(df, "https://github.com/x/jsoncpp")
+    main_dir, flatten, main_ref, _ = _parse_clones(df, "https://github.com/x/jsoncpp")
     assert main_dir == "jsoncpp" and not flatten
     assert main_ref == "1.9.4"  # resolved from ARG via -b
 
@@ -34,7 +130,7 @@ def test_parse_clones_flatten_to_src(tmp_path):
         "RUN git clone https://github.com/x/mongoose /src \\\n"
         " && git -C /src checkout abc123\n"
     )
-    main_dir, flatten, main_ref, extra = _parse_clones(df, "https://github.com/x/mongoose")
+    main_dir, flatten, main_ref, _ = _parse_clones(df, "https://github.com/x/mongoose")
     assert flatten and main_dir == ""
     assert main_ref == "abc123"
 
@@ -63,14 +159,46 @@ def test_parse_setup_steps_carries_toolchain_not_apt_or_clone():
     assert not any("/out" in s for s in steps)
 
 
-def test_jvm_build_script_shape():
+def test_jvm_wrapper_assembles_classpath_and_targets_entry_class(tmp_path):
+    # The generated $OUT/<name> wrapper is what Jazzer actually runs. Execute it
+    # against a fake jazzer_driver and verify it builds the classpath from the
+    # bench's $OUT/lib (classes + project/dep jars) and targets the entry class.
     from fuzzingbrain.importers.bench import _jvm_build_script
-    bs = _jvm_build_script("JsonMLFuzzer", "JsonMLFuzzer", "build-libs")
-    # Reuse the bench harness step's classpath assembly ($OUT/lib), then wrap it.
-    assert 'bash "$BS" harness "$c"' in bs
-    assert '$OUT/lib/classes' in bs
-    assert "--target_class=JsonMLFuzzer" in bs
-    assert "jazzer_driver" in bs
+    script = _jvm_build_script("com.x.IntlFuzzer", "IntlFuzzer", "build-libs")
+    wrapper = script.split("<<'EOF'\n", 1)[1].split("\nEOF\n", 1)[0]
+
+    d = tmp_path / "out"
+    (d / "lib" / "classes").mkdir(parents=True)
+    (d / "lib" / "proj.jar").write_text("")
+    (d / "lib" / "deps").mkdir()
+    (d / "lib" / "deps" / "dep.jar").write_text("")
+    (d / "jazzer_driver").write_text(
+        '#!/bin/bash\nprintf "%s\\n" "$@" > "$(dirname "$0")/argv"\n'
+    )
+    (d / "jazzer_driver").chmod(0o755)
+    target = d / "IntlFuzzer"
+    target.write_text(wrapper)
+    target.chmod(0o755)
+
+    r = subprocess.run([str(target), "corpus/"], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    argv = (d / "argv").read_text()
+    assert "--target_class=com.x.IntlFuzzer" in argv  # FQN entry class wired
+    assert "corpus/" in argv                          # libFuzzer args forwarded
+    cp_line = next(l for l in argv.splitlines() if l.startswith("--cp="))
+    assert "lib/classes" in cp_line                   # bench-compiled classes
+    assert "proj.jar" in cp_line and "dep.jar" in cp_line  # project + transitive deps
+
+
+def test_jvm_build_reuses_bench_harness_step(tmp_path):
+    # The JVM build must run the bench harness step (which assembles $OUT/lib) and
+    # fail if it does not populate it, rather than recompiling the harness itself.
+    from fuzzingbrain.importers.bench import _jvm_build_script
+    script = _jvm_build_script("C", "C", "build-libs")
+    fake = "#!/bin/bash\nexit 0\n"  # build-libs/harness succeed but make no $OUT/lib
+    r, _ = _run_build_script(tmp_path, script, fake)
+    assert r.returncode != 0
+    assert "did not populate" in r.stderr
 
 
 def test_needs_rust_signals():
@@ -95,25 +223,6 @@ def test_detect_libs_cmd_renamed():
 def test_detect_libs_cmd_none():
     # mongoose-style: build.sh <config>, no libs step.
     assert _detect_libs_cmd('cmd="${1:?usage: build.sh <config>}"') == ""
-
-
-def test_build_script_tries_both_harness_forms():
-    bs = _build_script("f", libs_cmd="")
-    assert 'bash "$BS" harness "$c"' in bs
-    assert 'bash "$BS" "$c"' in bs
-
-
-def test_build_script_surfaces_errors_on_failure():
-    # Diagnostics: capture build.sh output per config and dump it on failure
-    # instead of silently discarding it.
-    bs = _build_script("f")
-    assert '>"/tmp/fb_' in bs  # per-config capture, not /dev/null
-    assert "build.sh output follows" in bs
-
-
-def test_build_script_includes_renamed_libs():
-    bs = _build_script("f", libs_cmd="openldap-libs")
-    assert "openldap-libs build-libs" in bs
 
 
 def _make_bug(tmp_path, *, language="c", sources=("vacm_fuzzer.c",), apt=None,
@@ -179,26 +288,14 @@ def test_cpp_language_mapped(tmp_path):
     assert spec.language == "c++"
 
 
-def test_build_script_uses_bench_build_and_copies_to_out(tmp_path):
-    spec = spec_from_bench_bug(_make_bug(tmp_path))
-    bs = spec.build_script
-    assert "$SRC/harness/build.sh" in bs
-    assert "build-libs" in bs
-    assert 'harness "$c"' in bs
-    assert "$OUT/vacm_fuzzer" in bs
-    assert "coverage" in bs  # SANITIZER=coverage branch present
-
-
-def test_build_script_selects_by_sanitizer():
-    bs = _build_script("foo_fuzzer")
-    assert 'SANITIZER:-address' in bs
-    assert "release-asan debug-asan debug" in bs
-
-
-def test_build_script_sets_git_safe_directory():
-    # Without this, build.sh git commands (submodule/autoreconf) fail on the
-    # bind-mounted repo with "dubious ownership".
-    assert "safe.directory" in _build_script("foo_fuzzer")
+def test_spec_build_script_wires_the_bug_fuzzer_name(tmp_path):
+    # The end-to-end spec must drive the bench build.sh and target the harness
+    # source's stem as the fuzzer name (vacm_fuzzer.c -> vacm_fuzzer).
+    r, out = _run_build_script(
+        tmp_path / "run", spec_from_bench_bug(_make_bug(tmp_path)).build_script, _FAKE_STD
+    )
+    assert r.returncode == 0, r.stderr
+    assert (out / "vacm_fuzzer").is_file()
 
 
 def test_description_included_by_default(tmp_path):
