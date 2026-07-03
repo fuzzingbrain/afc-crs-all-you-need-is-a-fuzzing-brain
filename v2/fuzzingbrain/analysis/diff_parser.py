@@ -209,11 +209,15 @@ def _extract_hunk_content_for_function(
     changed_lines = []
 
     for hunk in hunks:
-        # Check if hunk overlaps with function
+        # Check if hunk overlaps with function. The hunk touches new-file lines
+        # [new_start, new_start + new_count - 1] (matching hunk.new_lines); a
+        # zero-count hunk (pure deletion) touches nothing. Use the last touched
+        # line, not new_start + new_count (which is one PAST the end) — otherwise
+        # a hunk ending exactly on func_start-1 would be pulled into the excerpt.
         hunk_start = hunk.new_start
-        hunk_end = hunk.new_start + hunk.new_count
+        hunk_last = hunk.new_start + hunk.new_count - 1
 
-        if hunk_end < func_start or hunk_start > func_end:
+        if hunk_last < func_start or hunk_start > func_end:
             continue  # No overlap
 
         # There is overlap

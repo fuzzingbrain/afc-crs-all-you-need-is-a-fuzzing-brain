@@ -316,6 +316,10 @@ if __name__ == "__main__":
         for i, msg in enumerate(conversation, 1):
             role = msg.get("role", "unknown")
             content = msg.get("content", "")
+            # content may be structured (dict / list of blocks), not a plain
+            # string — coerce so slicing and formatting never raise.
+            if not isinstance(content, str):
+                content = json.dumps(content, default=str)
 
             if role == "system":
                 lines.append(f"## System Prompt\n\n{content}\n")
