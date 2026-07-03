@@ -32,7 +32,10 @@ def is_valid_object_id(value: str) -> bool:
     """
     if not isinstance(value, str):
         return False
-    return bool(re.match(r"^[0-9a-fA-F]{24}$", value))
+    # fullmatch (not `$`) so a trailing newline does not sneak through:
+    # Python's `$` also matches just before a final "\n", which would make
+    # is_valid_object_id("<24 hex>\n") return True and then crash ObjectId().
+    return bool(re.fullmatch(r"[0-9a-fA-F]{24}", value))
 
 
 def safe_object_id(value: str) -> Union[ObjectId, str]:

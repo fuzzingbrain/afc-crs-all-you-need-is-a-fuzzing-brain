@@ -131,6 +131,12 @@ Respond with JSON only:
 - If uncertain or not duplicate: {{"duplicate": false, "duplicate_of": null}}"""
 
 
+def _sp_id_of(sp_dict: Dict[str, Any]) -> Optional[str]:
+    """Get an SP's ID as a string (handles ObjectId from MongoDB)."""
+    sp_id = sp_dict.get("suspicious_point_id") or sp_dict.get("_id")
+    return str(sp_id) if sp_id else None
+
+
 def _parse_sp_dedup_response(
     response: str,
     existing_sps: List[Dict[str, Any]],
@@ -146,6 +152,12 @@ def _parse_sp_dedup_response(
 
         result = json.loads(response)
 
+        # Valid JSON that isn't an object (e.g. bare "42", "true", a string, a
+        # list) has no "duplicate" field — .get would raise AttributeError,
+        # which is NOT a JSONDecodeError and would escape this handler.
+        if not isinstance(result, dict):
+            return None
+
         if not result.get("duplicate"):
             return None
 
@@ -153,17 +165,12 @@ def _parse_sp_dedup_response(
         if not duplicate_ref:
             return None
 
-        # Helper to get SP ID as string (handles ObjectId from MongoDB)
-        def get_sp_id(sp_dict):
-            sp_id = sp_dict.get("suspicious_point_id") or sp_dict.get("_id")
-            return str(sp_id) if sp_id else None
-
         # Parse "SP-N" format or plain number
         if duplicate_ref.startswith("SP-"):
             try:
                 idx = int(duplicate_ref[3:]) - 1  # 1-indexed to 0-indexed
                 if 0 <= idx < len(existing_sps):
-                    return get_sp_id(existing_sps[idx])
+                    return _sp_id_of(existing_sps[idx])
             except ValueError:
                 pass
         elif duplicate_ref.isdigit():
@@ -171,13 +178,13 @@ def _parse_sp_dedup_response(
             try:
                 idx = int(duplicate_ref) - 1  # 1-indexed to 0-indexed
                 if 0 <= idx < len(existing_sps):
-                    return get_sp_id(existing_sps[idx])
+                    return _sp_id_of(existing_sps[idx])
             except ValueError:
                 pass
 
         # Maybe it's a direct ID
         for sp in existing_sps:
-            sp_id = get_sp_id(sp)
+            sp_id = _sp_id_of(sp)
             if sp_id == duplicate_ref:
                 return sp_id
 
@@ -200,7 +207,7 @@ def _parse_sp_dedup_response(
             if match:
                 idx = int(match.group(1)) - 1
                 if 0 <= idx < len(existing_sps):
-                    return get_sp_id(existing_sps[idx])
+                    return _sp_id_of(existing_sps[idx])
 
         return None
 

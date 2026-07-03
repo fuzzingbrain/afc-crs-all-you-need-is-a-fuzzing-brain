@@ -165,28 +165,30 @@ def find_call_path(
         for callee in callees:
             reverse_edges[callee].add(caller)
 
-    # BFS from target back to entry
-    visited = {target: None}
+    # BFS from target back to entry.
+    # `came_from[node]` is the node it was discovered from during this backward
+    # walk — i.e. the neighbour one step CLOSER to the target. Following that
+    # chain from an entry point therefore yields entry -> ... -> target.
+    came_from: Dict[str, Optional[str]] = {target: None}
     queue = deque([target])
+
+    entry_set = set(callgraph.entry_points)
 
     while queue:
         func = queue.popleft()
-        if func in callgraph.entry_points:
-            # Found path, reconstruct it
+        if func in entry_set:
+            # Reconstruct entry -> target by following came_from (never mutate
+            # it here: came_from[target] is None and terminates the walk).
             path = []
             current = func
             while current is not None:
                 path.append(current)
-                # Find next in path (the one we came from)
-                for caller in reverse_edges.get(current, []):
-                    if caller in visited and visited[current] is None:
-                        visited[current] = caller
-                current = visited.get(current)
+                current = came_from.get(current)
             return path
 
         for caller in reverse_edges.get(func, []):
-            if caller not in visited:
-                visited[caller] = func
+            if caller not in came_from:
+                came_from[caller] = func
                 queue.append(caller)
 
     return None
