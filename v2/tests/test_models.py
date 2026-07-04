@@ -9,7 +9,7 @@ Run with: pytest tests/test_models.py -v
 import pytest
 from bson import ObjectId
 
-from fuzzingbrain.core.utils import safe_object_id
+from fuzzingbrain.core.utils import safe_object_id, is_valid_object_id
 from fuzzingbrain.core.models import (
     SuspiciousPoint,
     Direction,
@@ -56,6 +56,43 @@ class TestSafeObjectId:
         """Empty string should return None (falsy value)."""
         result = safe_object_id("")
         assert result is None  # safe_object_id returns None for falsy input
+
+    def test_trailing_newline_is_not_a_valid_object_id(self):
+        """Regression: `re.match(r'...$')` also matches just before a final
+        '\\n', so a 24-hex string with a trailing newline was wrongly accepted
+        by is_valid_object_id and then crashed ObjectId() inside safe_object_id.
+        It must now be rejected AND returned as-is (safe, never raises)."""
+        value = "a" * 24 + "\n"
+        assert is_valid_object_id(value) is False
+        # safe_object_id promises never to raise; it returns the string as-is
+        assert safe_object_id(value) == value
+
+    def test_leading_newline_rejected(self):
+        assert is_valid_object_id("\n" + "a" * 24) is False
+
+    def test_embedded_whitespace_rejected(self):
+        assert is_valid_object_id("a" * 12 + " " + "b" * 11) is False
+
+    def test_wrong_length_rejected(self):
+        assert is_valid_object_id("a" * 23) is False       # too short
+        assert is_valid_object_id("a" * 25) is False       # too long
+
+    def test_non_hex_characters_rejected(self):
+        assert is_valid_object_id("g" * 24) is False       # 'g' is not hex
+        assert is_valid_object_id("z0" * 12) is False
+
+    def test_non_string_input_rejected(self):
+        for junk in [None, 123, b"a" * 24, ["a" * 24]]:
+            assert is_valid_object_id(junk) is False
+
+    def test_uppercase_hex_accepted(self):
+        """ObjectId hex is case-insensitive; uppercase must be accepted and
+        round-trip (Mongo normalizes to lowercase)."""
+        value = "ABCDEF0123456789ABCDEF01"
+        assert is_valid_object_id(value) is True
+        result = safe_object_id(value)
+        assert isinstance(result, ObjectId)
+        assert str(result) == value.lower()
 
 
 class TestSuspiciousPointModel:
