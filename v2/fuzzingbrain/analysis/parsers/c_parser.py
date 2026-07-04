@@ -39,6 +39,49 @@ class FunctionInfo:
         return asdict(self)
 
 
+# Declarator node types we descend THROUGH while hunting for the declared name.
+_DECLARATOR_TYPES = frozenset(
+    {
+        "function_declarator",
+        "pointer_declarator",
+        "parenthesized_declarator",
+        "array_declarator",
+        "reference_declarator",  # C++ references
+    }
+)
+
+
+def _name_from_declarator(decl) -> Optional[str]:
+    """Recursively resolve the declared identifier inside a declarator subtree.
+
+    Descent prefers the tree-sitter ``declarator`` field, which points at the
+    thing being declared (the name or a nested declarator) and NOT the parameter
+    list — so parameter identifiers can never be mistaken for the function name.
+    This handles arbitrarily nested shapes, including a function that RETURNS a
+    function pointer (``void (*getcb(int x))(int)`` -> ``getcb``), which the old
+    fixed-depth walk missed entirely.
+    """
+    if decl is None:
+        return None
+    if decl.type == "identifier":
+        return decl.text.decode("utf-8", errors="replace")
+
+    if decl.type in _DECLARATOR_TYPES:
+        # Field-based descent first (skips the parameter_list sibling).
+        inner = decl.child_by_field_name("declarator")
+        if inner is not None:
+            name = _name_from_declarator(inner)
+            if name:
+                return name
+        # Fallback: scan declarator-ish children (some grammars omit the field).
+        for child in decl.children:
+            if child.type in _DECLARATOR_TYPES or child.type == "identifier":
+                name = _name_from_declarator(child)
+                if name:
+                    return name
+    return None
+
+
 def find_function_name(node) -> Optional[str]:
     """
     Find the function name from a function_definition node.
@@ -51,42 +94,7 @@ def find_function_name(node) -> Optional[str]:
       │     └── parameter_list
       └── compound_statement (body)
     """
-    # Find the declarator
-    declarator = node.child_by_field_name("declarator")
-    if declarator is None:
-        return None
-
-    # The declarator might be a function_declarator or wrapped in pointer_declarator
-    while declarator.type in ("pointer_declarator", "parenthesized_declarator"):
-        # Go deeper to find the actual function_declarator
-        for child in declarator.children:
-            if child.type in (
-                "function_declarator",
-                "pointer_declarator",
-                "parenthesized_declarator",
-                "identifier",
-            ):
-                declarator = child
-                break
-        else:
-            break
-
-    # Now find the identifier
-    if declarator.type == "function_declarator":
-        for child in declarator.children:
-            if child.type == "identifier":
-                return child.text.decode("utf-8")
-            elif child.type == "parenthesized_declarator":
-                # Handle function pointers like: void (*func)(int)
-                for subchild in child.children:
-                    if subchild.type == "pointer_declarator":
-                        for subsubchild in subchild.children:
-                            if subsubchild.type == "identifier":
-                                return subsubchild.text.decode("utf-8")
-    elif declarator.type == "identifier":
-        return declarator.text.decode("utf-8")
-
-    return None
+    return _name_from_declarator(node.child_by_field_name("declarator"))
 
 
 def extract_c_functions(source: bytes, file_path: str) -> List[FunctionInfo]:
