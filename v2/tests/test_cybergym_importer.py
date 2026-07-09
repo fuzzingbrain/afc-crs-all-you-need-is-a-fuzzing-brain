@@ -84,6 +84,8 @@ def test_render_project_files_builds_on_arvo_image_and_defers_recipe():
     assert dockerfile.startswith("FROM n132/arvo:10400-vul\n")
     # ... stashes the image's own recipe + workdir ...
     assert ".arvo_build.sh" in dockerfile and ".arvo_workdir" in dockerfile
+    # ... restores base-builder's `compile` CMD (ARVO overrides it to sleep) ...
+    assert 'CMD ["compile"]' in dockerfile
     # ... and build.sh re-runs that stashed recipe (no project-specific paths)
     assert 'exec bash "$SRC/.arvo_build.sh"' in build_sh
     assert "graphicsmagick" not in build_sh          # generic across tasks

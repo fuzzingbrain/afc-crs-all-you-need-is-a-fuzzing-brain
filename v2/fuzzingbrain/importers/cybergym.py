@@ -110,6 +110,10 @@ def _render_project_files(task: CyberGymTask) -> tuple[str, str]:
         # $SRC/build.sh with ours.
         "RUN cp -n \"$SRC/build.sh\" \"$SRC/.arvo_build.sh\" 2>/dev/null || true; "
         "pwd > \"$SRC/.arvo_workdir\"\n"
+        # ARVO images override CMD to `sleep infinity` (for interactive repro), so
+        # helper.py's `docker run <image>` would just sleep and never build.
+        # Restore base-builder's default so the build actually runs.
+        'CMD ["compile"]\n'
     )
     build_sh = (
         "#!/bin/bash -eu\n"
