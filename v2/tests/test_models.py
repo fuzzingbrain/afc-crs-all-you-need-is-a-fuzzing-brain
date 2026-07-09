@@ -74,11 +74,11 @@ class TestSafeObjectId:
         assert is_valid_object_id("a" * 12 + " " + "b" * 11) is False
 
     def test_wrong_length_rejected(self):
-        assert is_valid_object_id("a" * 23) is False       # too short
-        assert is_valid_object_id("a" * 25) is False       # too long
+        assert is_valid_object_id("a" * 23) is False  # too short
+        assert is_valid_object_id("a" * 25) is False  # too long
 
     def test_non_hex_characters_rejected(self):
-        assert is_valid_object_id("g" * 24) is False       # 'g' is not hex
+        assert is_valid_object_id("g" * 24) is False  # 'g' is not hex
         assert is_valid_object_id("z0" * 12) is False
 
     def test_non_string_input_rejected(self):

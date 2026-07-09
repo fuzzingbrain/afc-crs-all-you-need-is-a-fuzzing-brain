@@ -274,7 +274,9 @@ class POVFullscanStrategy(POVBaseStrategy):
             if desc.is_file():
                 text = desc.read_text(errors="replace").strip()
                 if text:
-                    self.log_info(f"Using vuln hint from DESCRIPTION.txt ({len(text)} chars)")
+                    self.log_info(
+                        f"Using vuln hint from DESCRIPTION.txt ({len(text)} chars)"
+                    )
                 return text
         except Exception as e:
             self.log_warning(f"Could not read DESCRIPTION.txt: {e}")

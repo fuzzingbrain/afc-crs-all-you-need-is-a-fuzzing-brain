@@ -30,6 +30,7 @@ def _run(coro):
 # _serialize_datetime
 # --------------------------------------------------------------------------
 
+
 def test_serialize_datetime_none_is_none(tmp_path):
     assert _packager(tmp_path)._serialize_datetime(None) is None
 
@@ -49,6 +50,7 @@ def test_serialize_datetime_non_datetime_stringified(tmp_path):
 # --------------------------------------------------------------------------
 # _conversation_to_markdown
 # --------------------------------------------------------------------------
+
 
 def test_markdown_empty_conversation_has_placeholder(tmp_path):
     md = _packager(tmp_path)._conversation_to_markdown([])
@@ -103,6 +105,7 @@ def test_markdown_unknown_role_is_ignored_not_fatal(tmp_path):
 # _write_pov_binary: decode / copy / placeholder fallbacks
 # --------------------------------------------------------------------------
 
+
 def test_write_binary_decodes_base64_blob(tmp_path):
     raw = b"\x00\x01CRASH\xff"
     pov = {"blob": base64.b64encode(raw).decode()}
@@ -132,8 +135,11 @@ def test_write_binary_missing_blob_path_falls_through_to_placeholder(tmp_path):
     """blob_path pointing at a nonexistent file must not raise; placeholder."""
     folder = tmp_path / "pov"
     folder.mkdir()
-    _run(_packager(tmp_path)._write_pov_binary(
-        folder, {"blob_path": str(tmp_path / "nope.bin")}))
+    _run(
+        _packager(tmp_path)._write_pov_binary(
+            folder, {"blob_path": str(tmp_path / "nope.bin")}
+        )
+    )
     assert (folder / "pov.bin").exists()
 
 
@@ -141,11 +147,15 @@ def test_write_binary_missing_blob_path_falls_through_to_placeholder(tmp_path):
 # _write_gen_blob
 # --------------------------------------------------------------------------
 
+
 def test_gen_blob_wraps_user_code_with_main(tmp_path):
     folder = tmp_path / "pov"
     folder.mkdir()
-    _run(_packager(tmp_path)._write_gen_blob(
-        folder, {"gen_blob": "def generate():\n    return b'x'"}))
+    _run(
+        _packager(tmp_path)._write_gen_blob(
+            folder, {"gen_blob": "def generate():\n    return b'x'"}
+        )
+    )
     text = (folder / "gen_blob.py").read_text()
     assert "def generate():" in text
     assert '__name__ == "__main__"' in text
@@ -163,10 +173,12 @@ def test_gen_blob_placeholder_when_absent(tmp_path):
 # _write_sp_details: None SP (fuzzer-discovered crash) path
 # --------------------------------------------------------------------------
 
+
 def test_sp_details_handles_none_sp(tmp_path):
     """A fuzzer-discovered crash has no SP; the writer must emit a valid record,
     not dereference None."""
     import json
+
     folder = tmp_path / "pov"
     folder.mkdir()
     _run(_packager(tmp_path)._write_sp_details(folder, None))
@@ -178,6 +190,7 @@ def test_sp_details_handles_none_sp(tmp_path):
 # --------------------------------------------------------------------------
 # _create_zip
 # --------------------------------------------------------------------------
+
 
 def test_create_zip_contains_top_level_files_by_name(tmp_path):
     folder = tmp_path / "pov_abc"

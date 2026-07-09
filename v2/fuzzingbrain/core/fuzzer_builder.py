@@ -195,9 +195,7 @@ class FuzzerBuilder:
 
     def _collect_fuzzers(self) -> List[str]:
         """Scan build/out and collect built fuzzers (delegates to the engine)."""
-        fuzzers = collect_fuzzers(
-            Path(self.task.fuzz_tooling_path), self.project_name
-        )
+        fuzzers = collect_fuzzers(Path(self.task.fuzz_tooling_path), self.project_name)
         logger.info(f"Collected {len(fuzzers)} fuzzers")
         return fuzzers
 
