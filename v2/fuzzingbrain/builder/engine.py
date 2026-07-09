@@ -76,6 +76,7 @@ class BuildJob:
     log_path: Optional[Path] = None
     timeout_s: int = DEFAULT_BUILD_TIMEOUT_S
     label: str = ""  # free-form tag (e.g. bug id) echoed back via the result
+    mount_src: bool = True  # bind-mount src_path over the image's source
 
     def __post_init__(self) -> None:
         self.fuzz_tooling_path = Path(self.fuzz_tooling_path)
@@ -109,16 +110,25 @@ def collect_fuzzers(fuzz_tooling_path: Path, project: str) -> List[str]:
 
 
 def helper_command(job: BuildJob) -> List[str]:
-    """The exact ``helper.py build_fuzzers`` argv for a job (also handy in tests)."""
-    return [
+    """The exact ``helper.py build_fuzzers`` argv for a job (also handy in tests).
+
+    With ``mount_src`` (the default) the source path is passed, so helper.py
+    bind-mounts the local repo over the image's source (FB-Bench style). With
+    ``mount_src=False`` the source arg is omitted, so the build uses the source
+    baked into the project image — needed for ARVO/CyberGym images that already
+    carry the exact vulnerable tree (mounting an empty repo would shadow it).
+    """
+    cmd = [
         "python3",
         str(job.fuzz_tooling_path / "infra" / "helper.py"),
         "build_fuzzers",
         "--sanitizer", job.sanitizer,
         "--engine", job.engine,
         job.project,
-        str(job.src_path.absolute()),
     ]
+    if job.mount_src:
+        cmd.append(str(job.src_path.absolute()))
+    return cmd
 
 
 def run_build(job: BuildJob, on_line: Optional[LineSink] = None) -> BuildResult:
