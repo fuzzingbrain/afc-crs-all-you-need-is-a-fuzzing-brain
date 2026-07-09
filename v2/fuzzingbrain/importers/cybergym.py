@@ -43,13 +43,13 @@ def arvo_fix_image(arvo_id: str) -> str:
 
 @dataclass
 class CyberGymTask:
-    task_id: str          # e.g. "arvo:10400"
-    arvo_id: str          # e.g. "10400"
-    kind: str             # "arvo" | "oss-fuzz"
-    project: str          # OSS-Fuzz project name, e.g. "graphicsmagick"
+    task_id: str  # e.g. "arvo:10400"
+    arvo_id: str  # e.g. "10400"
+    kind: str  # "arvo" | "oss-fuzz"
+    project: str  # OSS-Fuzz project name, e.g. "graphicsmagick"
     language: str
-    description: str      # the vulnerability description (the agent's hint)
-    fuzzer: str           # target harness binary from error.txt, e.g. coder_MNG_fuzzer
+    description: str  # the vulnerability description (the agent's hint)
+    fuzzer: str  # target harness binary from error.txt, e.g. coder_MNG_fuzzer
     data_dir: Optional[Path] = None
 
     @property
@@ -73,7 +73,7 @@ def load_task(task_id: str, cybergym_data: str | Path) -> CyberGymTask:
     tasks = raw if isinstance(raw, list) else list(raw.values())
     by_id = {t["task_id"]: t for t in tasks}
     if task_id not in by_id:
-        raise KeyError(f"{task_id} not in {data/'tasks.json'}")
+        raise KeyError(f"{task_id} not in {data / 'tasks.json'}")
     meta = by_id[task_id]
 
     kind, arvo_id = task_id.split(":", 1)
@@ -108,8 +108,8 @@ def _render_project_files(task: CyberGymTask) -> tuple[str, str]:
         f"FROM {task.vul_image}\n"
         # Preserve the image's own recipe + WORKDIR before helper.py overwrites
         # $SRC/build.sh with ours.
-        "RUN cp -n \"$SRC/build.sh\" \"$SRC/.arvo_build.sh\" 2>/dev/null || true; "
-        "pwd > \"$SRC/.arvo_workdir\"\n"
+        'RUN cp -n "$SRC/build.sh" "$SRC/.arvo_build.sh" 2>/dev/null || true; '
+        'pwd > "$SRC/.arvo_workdir"\n'
         # ARVO images override CMD to `sleep infinity` (for interactive repro), so
         # helper.py's `docker run <image>` would just sleep and never build.
         # Restore base-builder's default so the build actually runs.

@@ -28,21 +28,33 @@ _ERROR_TXT = (
 )
 
 
-def _make_cybergym(tmp_path, task_id="arvo:10400", project="graphicsmagick",
-                   error_txt=_ERROR_TXT):
+def _make_cybergym(
+    tmp_path, task_id="arvo:10400", project="graphicsmagick", error_txt=_ERROR_TXT
+):
     data = tmp_path / "cybergym_data"
     (data).mkdir()
-    (data / "tasks.json").write_text(json.dumps([
-        {"task_id": task_id, "project_name": project,
-         "project_language": "c++",
-         "vulnerability_description": "mng_LOOP chunk not validated >= 5 bytes"},
-        {"task_id": "arvo:9999", "project_name": "other", "project_language": "c"},
-    ]))
+    (data / "tasks.json").write_text(
+        json.dumps(
+            [
+                {
+                    "task_id": task_id,
+                    "project_name": project,
+                    "project_language": "c++",
+                    "vulnerability_description": "mng_LOOP chunk not validated >= 5 bytes",
+                },
+                {
+                    "task_id": "arvo:9999",
+                    "project_name": "other",
+                    "project_language": "c",
+                },
+            ]
+        )
+    )
     kind, arvo_id = task_id.split(":", 1)
     td = data / "data" / kind / arvo_id
     td.mkdir(parents=True)
     (td / "error.txt").write_text(error_txt)
-    (td / "repo-vul.tar.gz").write_bytes(b"")   # presence only
+    (td / "repo-vul.tar.gz").write_bytes(b"")  # presence only
     return data
 
 
@@ -61,8 +73,8 @@ def test_load_task_pulls_meta_and_fuzzer(tmp_path):
     task = load_task("arvo:10400", data)
     assert task.arvo_id == "10400" and task.kind == "arvo"
     assert task.project == "graphicsmagick" and task.language == "c++"
-    assert task.fuzzer == "coder_MNG_fuzzer"          # from error.txt
-    assert "mng_LOOP" in task.description             # the agent hint
+    assert task.fuzzer == "coder_MNG_fuzzer"  # from error.txt
+    assert "mng_LOOP" in task.description  # the agent hint
     assert task.vul_image == "n132/arvo:10400-vul"
     assert task.fix_image == "n132/arvo:10400-fix"
 
@@ -77,8 +89,15 @@ def test_load_task_unknown_id_raises(tmp_path):
 
 
 def test_render_project_files_builds_on_arvo_image_and_defers_recipe():
-    task = CyberGymTask("arvo:10400", "10400", "arvo", "graphicsmagick",
-                        "c++", "desc", "coder_MNG_fuzzer")
+    task = CyberGymTask(
+        "arvo:10400",
+        "10400",
+        "arvo",
+        "graphicsmagick",
+        "c++",
+        "desc",
+        "coder_MNG_fuzzer",
+    )
     dockerfile, build_sh = _render_project_files(task)
     # builds FROM the exact vulnerable ARVO image ...
     assert dockerfile.startswith("FROM n132/arvo:10400-vul\n")
@@ -88,7 +107,7 @@ def test_render_project_files_builds_on_arvo_image_and_defers_recipe():
     assert 'CMD ["compile"]' in dockerfile
     # ... and build.sh re-runs that stashed recipe (no project-specific paths)
     assert 'exec bash "$SRC/.arvo_build.sh"' in build_sh
-    assert "graphicsmagick" not in build_sh          # generic across tasks
+    assert "graphicsmagick" not in build_sh  # generic across tasks
 
 
 def test_build_cybergym_workspace_layout(tmp_path):
@@ -100,7 +119,7 @@ def test_build_cybergym_workspace_layout(tmp_path):
 
     ws = build_cybergym_workspace(task, tmp_path / "ws", oss_fuzz)
     proj = ws / "fuzz-tooling" / "projects" / "graphicsmagick"
-    assert (ws / "fuzz-tooling" / "infra" / "helper.py").is_file()   # infra copied
+    assert (ws / "fuzz-tooling" / "infra" / "helper.py").is_file()  # infra copied
     assert (proj / "Dockerfile").read_text().startswith("FROM n132/arvo:10400-vul")
     assert (proj / "build.sh").is_file() and (proj / "project.yaml").is_file()
-    assert (ws / "repo").is_dir()                                     # placeholder src
+    assert (ws / "repo").is_dir()  # placeholder src

@@ -8,12 +8,10 @@ behavior is driven by the build args it receives so each test shapes its own
 outcome.
 """
 
-import os
 import stat
 import time
 from pathlib import Path
 
-import pytest
 
 from fuzzingbrain.builder import (
     BuildJob,
@@ -25,7 +23,9 @@ from fuzzingbrain.builder import (
 )
 
 
-def _make_workspace(tmp_path: Path, project: str, helper_body: str) -> tuple[Path, Path]:
+def _make_workspace(
+    tmp_path: Path, project: str, helper_body: str
+) -> tuple[Path, Path]:
     """Create a workspace with a fake infra/helper.py and an empty repo."""
     ws = tmp_path / project
     tooling = ws / "fuzz-tooling"
@@ -39,7 +39,7 @@ def _make_workspace(tmp_path: Path, project: str, helper_body: str) -> tuple[Pat
 # A fake helper that, on `build_fuzzers`, emits a line (with a CR to test
 # normalization), drops an executable fuzzer in build/out/<project>, plus some
 # non-fuzzer noise, then exits with a code taken from an env knob.
-_FAKE_HELPER = r'''
+_FAKE_HELPER = r"""
 import os, sys, stat
 from pathlib import Path
 args = sys.argv[1:]
@@ -61,29 +61,38 @@ if os.environ.get("FAKE_RC", "0") == "0":
 else:
     sys.stdout.write("ERROR: build broke\n")
 sys.exit(int(os.environ.get("FAKE_RC", "0")))
-'''
+"""
 
 
 def test_helper_command_shape():
-    job = BuildJob(fuzz_tooling_path="/ws/fuzz-tooling", project="proj",
-                   src_path="/ws/repo", sanitizer="memory")
+    job = BuildJob(
+        fuzz_tooling_path="/ws/fuzz-tooling",
+        project="proj",
+        src_path="/ws/repo",
+        sanitizer="memory",
+    )
     cmd = helper_command(job)
     assert cmd[0] == "python3" and cmd[-1].endswith("/repo")
     assert cmd[2] == "build_fuzzers"
-    assert cmd[cmd.index("--sanitizer") + 1] == "memory"      # sanitizer threaded
+    assert cmd[cmd.index("--sanitizer") + 1] == "memory"  # sanitizer threaded
     assert cmd[cmd.index("--engine") + 1] == "libfuzzer"
-    assert cmd[-2] == "proj"                                   # project before src
+    assert cmd[-2] == "proj"  # project before src
 
 
 def test_helper_command_omits_src_when_not_mounting():
     # ARVO/CyberGym images bake the vulnerable source; passing a src path would
     # make helper.py bind-mount an empty repo over it. mount_src=False drops it.
-    mounted = BuildJob(fuzz_tooling_path="/w/fuzz-tooling", project="p",
-                       src_path="/w/repo")
-    baked = BuildJob(fuzz_tooling_path="/w/fuzz-tooling", project="p",
-                     src_path="/w/repo", mount_src=False)
-    assert helper_command(mounted)[-1].endswith("/repo")   # source mounted
-    assert helper_command(baked)[-1] == "p"                 # no source arg
+    mounted = BuildJob(
+        fuzz_tooling_path="/w/fuzz-tooling", project="p", src_path="/w/repo"
+    )
+    baked = BuildJob(
+        fuzz_tooling_path="/w/fuzz-tooling",
+        project="p",
+        src_path="/w/repo",
+        mount_src=False,
+    )
+    assert helper_command(mounted)[-1].endswith("/repo")  # source mounted
+    assert helper_command(baked)[-1] == "p"  # no source arg
 
 
 def test_run_build_success_collects_only_real_fuzzers(tmp_path):
@@ -100,18 +109,23 @@ def test_run_build_success_collects_only_real_fuzzers(tmp_path):
 def test_run_build_streams_normalized_lines(tmp_path):
     tooling, repo = _make_workspace(tmp_path, "beta", _FAKE_HELPER)
     seen: list[str] = []
-    run_build(BuildJob(fuzz_tooling_path=tooling, project="beta", src_path=repo),
-              on_line=seen.append)
+    run_build(
+        BuildJob(fuzz_tooling_path=tooling, project="beta", src_path=repo),
+        on_line=seen.append,
+    )
     joined = "".join(seen)
-    assert "\r" not in joined                  # carriage returns rewritten
+    assert "\r" not in joined  # carriage returns rewritten
     assert "step 1/2" in joined and "step 2/2 done" in joined
 
 
 def test_run_build_writes_log_file(tmp_path):
     tooling, repo = _make_workspace(tmp_path, "gamma", _FAKE_HELPER)
     log = tmp_path / "build.log"
-    run_build(BuildJob(fuzz_tooling_path=tooling, project="gamma",
-                       src_path=repo, log_path=log))
+    run_build(
+        BuildJob(
+            fuzz_tooling_path=tooling, project="gamma", src_path=repo, log_path=log
+        )
+    )
     text = log.read_text()
     assert "Build Command:" in text and "Exit code: 0" in text
 
@@ -119,10 +133,12 @@ def test_run_build_writes_log_file(tmp_path):
 def test_run_build_failure_surfaces_tail_and_no_fuzzers(tmp_path, monkeypatch):
     tooling, repo = _make_workspace(tmp_path, "delta", _FAKE_HELPER)
     monkeypatch.setenv("FAKE_RC", "3")
-    result = run_build(BuildJob(fuzz_tooling_path=tooling, project="delta", src_path=repo))
+    result = run_build(
+        BuildJob(fuzz_tooling_path=tooling, project="delta", src_path=repo)
+    )
     assert not result.ok and result.returncode == 3
     assert "ERROR: build broke" in result.output_tail
-    assert result.fuzzers == []                # a failed build collects nothing
+    assert result.fuzzers == []  # a failed build collects nothing
 
 
 def test_run_build_missing_helper_is_a_clean_failure(tmp_path):
@@ -135,32 +151,39 @@ def test_run_build_missing_helper_is_a_clean_failure(tmp_path):
 def test_run_build_times_out(tmp_path):
     slow = "import time\ntime.sleep(30)\n"
     tooling, repo = _make_workspace(tmp_path, "slow", slow)
-    job = BuildJob(fuzz_tooling_path=tooling, project="slow", src_path=repo, timeout_s=1)
+    job = BuildJob(
+        fuzz_tooling_path=tooling, project="slow", src_path=repo, timeout_s=1
+    )
     start = time.monotonic()
     result = run_build(job)
     assert not result.ok and "timed out" in result.message
-    assert time.monotonic() - start < 15          # killed promptly, not after 30s
+    assert time.monotonic() - start < 15  # killed promptly, not after 30s
 
 
 def test_collect_fuzzers_filters_noise(tmp_path):
     out = tmp_path / "fuzz-tooling" / "build" / "out" / "proj"
     out.mkdir(parents=True)
     good = out / "proj_fuzzer"
-    good.write_text("x"); good.chmod(good.stat().st_mode | stat.S_IEXEC)
-    notexec = out / "data_fuzzer"; notexec.write_text("x")          # not executable
+    good.write_text("x")
+    good.chmod(good.stat().st_mode | stat.S_IEXEC)
+    notexec = out / "data_fuzzer"
+    notexec.write_text("x")  # not executable
     for noise in ("llvm-symbolizer", "a.o", "b.so", "c.json"):
-        p = out / noise; p.write_text("x"); p.chmod(p.stat().st_mode | stat.S_IEXEC)
+        p = out / noise
+        p.write_text("x")
+        p.chmod(p.stat().st_mode | stat.S_IEXEC)
     (out / "subdir").mkdir()
     got = collect_fuzzers(tmp_path / "fuzz-tooling", "proj")
-    assert got == ["proj_fuzzer"]               # only the executable real fuzzer
+    assert got == ["proj_fuzzer"]  # only the executable real fuzzer
 
 
 def test_build_many_runs_isolated_workspaces_in_parallel(tmp_path):
     # Three independent workspaces; the fake sleeps briefly so a serial run would
     # take ~3x a single build. Parallel should finish close to one build's time.
     sleepy = _FAKE_HELPER.replace(
-        'out.mkdir(parents=True, exist_ok=True)',
-        'out.mkdir(parents=True, exist_ok=True)\nimport time as _t; _t.sleep(0.6)')
+        "out.mkdir(parents=True, exist_ok=True)",
+        "out.mkdir(parents=True, exist_ok=True)\nimport time as _t; _t.sleep(0.6)",
+    )
     jobs = []
     for name in ("p1", "p2", "p3"):
         tooling, repo = _make_workspace(tmp_path, name, sleepy)
@@ -168,9 +191,9 @@ def test_build_many_runs_isolated_workspaces_in_parallel(tmp_path):
     start = time.monotonic()
     results = build_many(jobs, max_workers=3)
     elapsed = time.monotonic() - start
-    assert [r.project for r in results] == ["p1", "p2", "p3"]   # order preserved
+    assert [r.project for r in results] == ["p1", "p2", "p3"]  # order preserved
     assert all(r.ok and r.fuzzers == [f"{r.project}_fuzzer"] for r in results)
-    assert elapsed < 1.6        # parallel (~0.6s), not serial (~1.8s)
+    assert elapsed < 1.6  # parallel (~0.6s), not serial (~1.8s)
 
 
 def test_build_many_isolates_a_single_failure(tmp_path, monkeypatch):
@@ -184,7 +207,7 @@ def test_build_many_isolates_a_single_failure(tmp_path, monkeypatch):
     ]
     results = build_many(jobs, max_workers=2)
     assert results[0].ok and results[0].fuzzers == ["okp_fuzzer"]
-    assert not results[1].ok                     # failure contained to its own job
+    assert not results[1].ok  # failure contained to its own job
 
 
 def test_build_many_empty_is_noop():
@@ -231,7 +254,10 @@ def _fake_materialize_factory(helper_body: str):
 
 def test_plan_wires_spec_and_workspace_into_job(tmp_path):
     job = plan(
-        tmp_path / "bugA", tmp_path / "ws", tmp_path / "oss", "memory",
+        tmp_path / "bugA",
+        tmp_path / "ws",
+        tmp_path / "oss",
+        "memory",
         derive_spec=lambda b, with_description: _fake_spec("projA"),
         materialize=_fake_materialize_factory(_FAKE_HELPER),
     )
@@ -244,7 +270,9 @@ def test_plan_wires_spec_and_workspace_into_job(tmp_path):
 
 def test_build_bug_end_to_end_with_fakes(tmp_path):
     result = build_bug(
-        tmp_path / "bugB", tmp_path / "ws", tmp_path / "oss",
+        tmp_path / "bugB",
+        tmp_path / "ws",
+        tmp_path / "oss",
         derive_spec=lambda b, with_description: _fake_spec("projB"),
         materialize=_fake_materialize_factory(_FAKE_HELPER),
     )
@@ -254,13 +282,16 @@ def test_build_bug_end_to_end_with_fakes(tmp_path):
 def test_build_bugs_builds_each_in_its_own_workspace_in_parallel(tmp_path):
     bugs = [tmp_path / f"bug{i}" for i in range(3)]
     results = build_bugs(
-        bugs, tmp_path / "root", tmp_path / "oss", max_workers=3,
+        bugs,
+        tmp_path / "root",
+        tmp_path / "oss",
+        max_workers=3,
         derive_spec=lambda b, with_description: _fake_spec(b.name),
         materialize=_fake_materialize_factory(_FAKE_HELPER),
     )
-    assert [r.project for r in results] == ["bug0", "bug1", "bug2"]   # input order
+    assert [r.project for r in results] == ["bug0", "bug1", "bug2"]  # input order
     assert all(r.ok and r.fuzzers == [f"{r.project}_fuzzer"] for r in results)
-    for i in range(3):                                                 # isolated dirs
+    for i in range(3):  # isolated dirs
         assert (tmp_path / "root" / f"bug{i}" / "fuzz-tooling").is_dir()
 
 
@@ -269,12 +300,15 @@ def test_build_bugs_contains_a_materialize_failure(tmp_path):
         if spec.project == "bad":
             raise RuntimeError("clone exploded")
         return _fake_materialize_factory(_FAKE_HELPER)(
-            spec, workspace, oss_fuzz, clone_repo=clone_repo, overwrite=overwrite)
+            spec, workspace, oss_fuzz, clone_repo=clone_repo, overwrite=overwrite
+        )
 
     results = build_bugs(
-        [tmp_path / "good", tmp_path / "bad"], tmp_path / "root", tmp_path / "oss",
+        [tmp_path / "good", tmp_path / "bad"],
+        tmp_path / "root",
+        tmp_path / "oss",
         derive_spec=lambda b, with_description: _fake_spec(b.name),
         materialize=_materialize,
     )
-    assert results[0].ok                                  # healthy bug unaffected
+    assert results[0].ok  # healthy bug unaffected
     assert not results[1].ok and "workspace setup failed" in results[1].message
