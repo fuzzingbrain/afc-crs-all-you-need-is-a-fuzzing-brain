@@ -104,8 +104,10 @@ def _parse_dockerfile_args(text: str) -> dict:
 
 def _subst(value: str, args: dict) -> str:
     """Resolve ${NAME} / $NAME against ARG defaults."""
+
     def repl(m):
         return args.get(m.group(1) or m.group(2), m.group(0))
+
     return re.sub(r"\$\{([A-Za-z_]\w*)\}|\$([A-Za-z_]\w*)", repl, value)
 
 
@@ -137,7 +139,9 @@ def _parse_clones(
     # `git clone [flags...] <url> /src[/<dir>]` — flags (e.g. --depth 1,
     # --filter=blob:none, -b <tag>) sit between; the URL is the last token before
     # the dir. The subdir is optional: some bugs clone straight into /src ("flatten").
-    for m in re.finditer(r"git clone\s+(.+?)\s+((?:/src|\$SRC)(?:/\S+)?)(?:\s|$)", text):
+    for m in re.finditer(
+        r"git clone\s+(.+?)\s+((?:/src|\$SRC)(?:/\S+)?)(?:\s|$)", text
+    ):
         flags = m.group(1)
         url = _subst(flags.split()[-1], args)
         d = _subst(m.group(2), args).replace("${SRC}", "/src").replace("$SRC", "/src")
@@ -210,7 +214,9 @@ def _parse_setup_steps(dockerfile_text: str, args: dict) -> list[str]:
             # bundling, and the bench build.sh (reused via build_script). The
             # build.sh skip matters for bugs with no clone to break on (graal
             # resolves deps from Maven Central instead of cloning source).
-            if any(s in low for s in ("apt-get", "git clone", "/out", "harness/build.sh")):
+            if any(
+                s in low for s in ("apt-get", "git clone", "/out", "harness/build.sh")
+            ):
                 continue
             if "chmod" in low and "harness" in low:
                 continue
@@ -458,7 +464,7 @@ def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
     """
     libs_list = " ".join(dict.fromkeys(filter(None, [libs_cmd, "build-libs"])))
     return (
-        'set -eu\n'
+        "set -eu\n"
         # The repo is bind-mounted with host ownership; without this, git in the
         # build container refuses to operate ("dubious ownership"), breaking any
         # build.sh that runs submodule update / autoreconf (e.g. jq, oniguruma).
@@ -484,12 +490,11 @@ def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
         # base-builder's default /usr/bin/ld (GNU BFD), which cannot read bitcode
         # ("file format not recognized"). Point ld at lld, which links bitcode
         # natively and is GNU-compatible — a safe drop-in for non-LTO builds too.
-        'if command -v ld.lld >/dev/null 2>&1; then '
+        "if command -v ld.lld >/dev/null 2>&1; then "
         'ln -sf "$(command -v ld.lld)" "${FB_LD_PATH:-/usr/bin/ld}" 2>/dev/null'
-        ' || true; fi\n'
+        " || true; fi\n" + _compat_shim_lines() +
         # Backfill focal's old kernel/glibc gaps (newer syscalls, mallinfo2) so
         # modern sources (systemd) compile; inert on a newer base (all guarded).
-        + _compat_shim_lines() +
         # systemd's EFI boot stub (src/boot) raises a configure-time hard error if
         # the linker can't do -static-pie. base-builder's focal toolchain can't
         # under ASAN (the bench's debian can), but the boot stub is never built
@@ -501,16 +506,16 @@ def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
         "message('(fb) -static-pie unavailable on base-builder; EFI boot stub "
         "skipped for fuzzing')/\" {} + 2>/dev/null || true\n"
         'BS="$SRC/harness/build.sh"\n'
-        'L_LOG=/tmp/fb_libs.log\n'
+        "L_LOG=/tmp/fb_libs.log\n"
         # Optional library-build step; name varies, some projects have none.
         f'for L in {libs_list}; do bash "$BS" "$L" >"$L_LOG" 2>&1 && break || true; done\n'
         'if [ "${SANITIZER:-address}" = "coverage" ]; then\n'
         '  CFGS="coverage"\n'
-        'else\n'
+        "else\n"
         '  CFGS="release-asan debug-asan debug"\n'
-        'fi\n'
+        "fi\n"
         'built=""\n'
-        'for c in $CFGS; do\n'
+        "for c in $CFGS; do\n"
         # Try "harness <cfg>" (most) then bare "<cfg>" (mongoose-style). Capture
         # output per config so a real failure is visible (no silent /dev/null).
         '  bash "$BS" harness "$c" >"/tmp/fb_$c.log" 2>&1 '
@@ -518,13 +523,13 @@ def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
         '  if [ -f "$OUT/$c/harness" ]; then\n'
         f'    cp "$OUT/$c/harness" "$OUT/{fuzzer_name}"\n'
         '    built="$c"; break\n'
-        '  fi\n'
-        'done\n'
+        "  fi\n"
+        "done\n"
         'if [ -z "$built" ]; then\n'
         '  echo "no harness config built; build.sh output follows:" >&2\n'
         '  tail -n 40 "$L_LOG" /tmp/fb_*.log 2>/dev/null >&2 || true\n'
-        '  exit 1\n'
-        'fi\n'
+        "  exit 1\n"
+        "fi\n"
     )
 
 
@@ -536,12 +541,12 @@ def _build_script(fuzzer_name: str, libs_cmd: str = "build-libs") -> str:
 # runtime Jazzer wrapper so compile and run agree on the JDK.
 _JVM_JDK_SELECT = (
     'case "${JAVA_HOME:-}" in\n'
-    '  /opt/*) : ;;\n'  # bench-installed JDK (avro /opt/jdk21) — keep
-    '  *) for _v in 17 21; do\n'
+    "  /opt/*) : ;;\n"  # bench-installed JDK (avro /opt/jdk21) — keep
+    "  *) for _v in 17 21; do\n"
     '       _d="${FB_JVM_DIR:-/usr/lib/jvm}/java-${_v}-openjdk-amd64"\n'
     '       [ -x "$_d/bin/javac" ] && { export JAVA_HOME="$_d"; break; }\n'
-    '     done ;;\n'
-    'esac\n'
+    "     done ;;\n"
+    "esac\n"
     'export PATH="$JAVA_HOME/bin:$PATH"\n'
 )
 
@@ -559,43 +564,40 @@ def _jvm_build_script(target_class: str, out_name: str, libs_cmd: str) -> str:
     """
     libs_list = " ".join(dict.fromkeys(filter(None, [libs_cmd, "build-libs"])))
     return (
-        'set -eu\n'
+        "set -eu\n"
         "git config --global --add safe.directory '*' || true\n"
-        + _JVM_JDK_SELECT +
-        'BS="$SRC/harness/build.sh"\n'
+        + _JVM_JDK_SELECT
+        + 'BS="$SRC/harness/build.sh"\n'
         # Build the project, then run the bench harness step which populates
         # $OUT/lib (LIB=/out/lib in the bench recipe) with classes + jars.
         f'for L in {libs_list}; do bash "$BS" "$L" && break || true; done\n'
         'built=""\n'
-        'for c in release-asan debug-asan debug; do\n'
+        "for c in release-asan debug-asan debug; do\n"
         '  if { bash "$BS" harness "$c" || bash "$BS" "$c"; } '
         '&& [ -d "$OUT/lib/classes" ]; then built="$c"; break; fi\n'
-        'done\n'
+        "done\n"
         '[ -n "$built" ] || { echo "bench harness did not populate \\$OUT/lib" >&2; exit 1; }\n'
         # Jazzer runtime + a libFuzzer-compatible wrapper over the bench classpath.
         'cp /usr/local/bin/jazzer_driver /usr/local/bin/jazzer_agent_deploy.jar "$OUT/"\n'
-        f'cat > "$OUT/{out_name}" <<\'EOF\'\n'
-        '#!/bin/bash\n'
+        f"cat > \"$OUT/{out_name}\" <<'EOF'\n"
+        "#!/bin/bash\n"
         'this_dir=$(dirname "$0")\n'
         # Run under the same JDK the harness was compiled with (>= 17), not
         # base-builder-jvm's default openjdk-11, or JDK-17 deps fail to load.
-        + _JVM_JDK_SELECT +
-        'cp="$this_dir/lib/classes"\n'
+         + _JVM_JDK_SELECT + 'cp="$this_dir/lib/classes"\n'
         'for j in "$this_dir"/lib/*.jar "$this_dir"/lib/deps/*.jar; do '
         '[ -f "$j" ] && cp="$cp:$j"; done\n'
         'exec "$this_dir/jazzer_driver" '
         '--agent_path="$this_dir/jazzer_agent_deploy.jar" \\\n'
         '  --cp="$cp" '
         f'--target_class={target_class} --jvm_args="-Xmx2048m" "$@"\n'
-        'EOF\n'
+        "EOF\n"
         f'chmod +x "$OUT/{out_name}"\n'
     )
 
 
 def _harness_source(harness_dir: Path) -> Path:
-    srcs = sorted(
-        p for p in harness_dir.iterdir() if p.suffix.lower() in _SRC_EXTS
-    )
+    srcs = sorted(p for p in harness_dir.iterdir() if p.suffix.lower() in _SRC_EXTS)
     if not srcs:
         raise ValueError(f"no harness source ({_SRC_EXTS}) in {harness_dir}")
     return srcs[0]
@@ -628,7 +630,7 @@ def _skia_prelude() -> str:
       anyway — its libstdc++ lacks C++20 <compare>), so build-libs stays green.
     """
     return (
-        'if command -v clang >/dev/null 2>&1; then '
+        "if command -v clang >/dev/null 2>&1; then "
         'ln -sf "$(command -v clang)" /usr/local/bin/cc 2>/dev/null || true; '
         'ln -sf "$(command -v clang++)" /usr/local/bin/c++ 2>/dev/null || true; fi\n'
         'export PATH="$SRC/skia/third_party/ninja:$PATH"\n'
@@ -639,10 +641,10 @@ def _skia_prelude() -> str:
         "  sed -i 's/-fsanitize=fuzzer,address\"/-fsanitize=fuzzer,address -stdlib=libc++\"/g' "
         '"$SRC/harness/build.sh"\n'
         '  if [ "${SANITIZER:-address}" = "coverage" ]; then _fb_keep=cov; '
-        'else _fb_keep=asan; fi\n'
+        "else _fb_keep=asan; fi\n"
         '  sed -i "s/for CONFIG_LIB in asan cov/for CONFIG_LIB in ${_fb_keep}/" '
         '"$SRC/harness/build.sh"\n'
-        'fi\n'
+        "fi\n"
     )
 
 
@@ -688,7 +690,9 @@ def spec_from_bench_bug(
     # Mount the target there (project = that dir) and replicate dependency clones,
     # otherwise build.sh fails ("/src/aom: No such file", missing libde265, ...).
     dockerfile = bug_dir / "Dockerfile"
-    main_dir, main_flatten, main_ref, extra_clones = _parse_clones(dockerfile, main_repo)
+    main_dir, main_flatten, main_ref, extra_clones = _parse_clones(
+        dockerfile, main_repo
+    )
     # The Dockerfile's own checkout of the target is authoritative: when the bench
     # target.repo is a dependency pinned by tag (openscreen builds jsoncpp@1.9.4),
     # bench.yaml's vuln_commit names a *different* repo, so prefer the clone ref.
@@ -714,7 +718,7 @@ def spec_from_bench_bug(
         case_fix += (
             f'for f in "$SRC/{project}"/* "$SRC/{project}"/.[!.]*; do\n'
             f'  [ -e "$f" ] && ln -sfn "$f" "$SRC/$(basename "$f")" || true\n'
-            'done\n'
+            "done\n"
         )
 
     harness_dir = bug_dir / "harness"

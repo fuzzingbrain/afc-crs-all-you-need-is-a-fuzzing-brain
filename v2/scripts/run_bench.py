@@ -51,10 +51,22 @@ def _force_rmtree(path: Path) -> None:
     shutil.rmtree(path, ignore_errors=True)
     if path.exists():
         subprocess.run(
-            ["docker", "run", "--rm", "-v", f"{path.parent}:/w", "alpine",
-             "rm", "-rf", f"/w/{path.name}"],
-            check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            [
+                "docker",
+                "run",
+                "--rm",
+                "-v",
+                f"{path.parent}:/w",
+                "alpine",
+                "rm",
+                "-rf",
+                f"/w/{path.name}",
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
+
 
 from fuzzingbrain.importers.bench import spec_from_bench_bug, _LANG_MAP  # noqa: E402
 from fuzzingbrain.importers.external_harness import build_workspace  # noqa: E402
@@ -95,9 +107,17 @@ def _scan_markers(log: str) -> dict:
 def run_v2(ws: Path, budget: float, timeout_min: int, log_path: Path) -> dict:
     """Drive FuzzingBrain.sh on the workspace; return run metadata."""
     cmd = [
-        "./FuzzingBrain.sh", str(ws), "--in-place",
-        "--task-type", "pov", "--pov-count", "1",
-        "--budget", str(budget), "--timeout", str(timeout_min),
+        "./FuzzingBrain.sh",
+        str(ws),
+        "--in-place",
+        "--task-type",
+        "pov",
+        "--pov-count",
+        "1",
+        "--budget",
+        str(budget),
+        "--timeout",
+        str(timeout_min),
     ]
     t0 = time.time()
     # Hard wall-clock ceiling above the in-pipeline --timeout so a wedged run
@@ -105,7 +125,10 @@ def run_v2(ws: Path, budget: float, timeout_min: int, log_path: Path) -> dict:
     wall = timeout_min * 60 + 600
     try:
         proc = subprocess.run(
-            cmd, cwd=str(V2_DIR), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            cmd,
+            cwd=str(V2_DIR),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             timeout=wall,
         )
         out = proc.stdout.decode("utf-8", "replace")
@@ -136,8 +159,17 @@ def grade(bench_dir: Path, bug_id: str, blob: Path, rounds: int) -> dict:
     """Grade one blob via the bench oracle. Returns {passed, capabilities, exit}."""
     try:
         proc = subprocess.run(
-            ["./fb-bench", "grade", bug_id, str(blob.resolve()), "--rounds", str(rounds)],
-            cwd=str(bench_dir), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            [
+                "./fb-bench",
+                "grade",
+                bug_id,
+                str(blob.resolve()),
+                "--rounds",
+                str(rounds),
+            ],
+            cwd=str(bench_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             timeout=600,
         )
     except subprocess.TimeoutExpired:
@@ -187,7 +219,9 @@ def run_bug(bug_id: str, bug_dir: Path, opts) -> dict:
     for blob in blobs:
         g = grade(Path(opts.bench), bug_id, blob, opts.rounds)
         graded.append(g)
-        if g["passed"] or _cap_rank(g["capabilities"]) > _cap_rank(best["capabilities"]):
+        if g["passed"] or _cap_rank(g["capabilities"]) > _cap_rank(
+            best["capabilities"]
+        ):
             best = g
         if g["passed"]:
             break
@@ -234,13 +268,21 @@ def scorecard(records: list[dict]) -> str:
         f"   built {built}/{total}   dispatched {disp}/{total}",
         "=" * 60,
         f" {'bug_id':<40s} {'built':<6} {'disp':<5} verdict",
-        f" {'-'*40} {'-'*6} {'-'*5} -------",
+        f" {'-' * 40} {'-' * 6} {'-' * 5} -------",
     ]
     for r in sorted(records, key=lambda x: (not x.get("solved"), x["bug_id"])):
-        verdict = "SOLVED" if r.get("solved") else (
-            "build-fail" if r.get("build_failed") else
-            "no-worker" if r.get("no_workers") else
-            "no-pov" if r.get("n_blobs", 0) == 0 else "graded-fail"
+        verdict = (
+            "SOLVED"
+            if r.get("solved")
+            else (
+                "build-fail"
+                if r.get("build_failed")
+                else "no-worker"
+                if r.get("no_workers")
+                else "no-pov"
+                if r.get("n_blobs", 0) == 0
+                else "graded-fail"
+            )
         )
         lines.append(
             f" {r['bug_id']:<40s} {str(bool(r.get('built'))):<6} "
@@ -250,24 +292,46 @@ def scorecard(records: list[dict]) -> str:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--bench", default=DEFAULT_BENCH, help="FuzzingBrain-Bench checkout")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    ap.add_argument(
+        "--bench", default=DEFAULT_BENCH, help="FuzzingBrain-Bench checkout"
+    )
     ap.add_argument("--oss-fuzz", default=DEFAULT_OSS_FUZZ, help="OSS-Fuzz checkout")
-    ap.add_argument("--workdir", default="/tmp/fbbench-runs", help="Where workspaces + logs go")
-    ap.add_argument("--report", default=None, help="JSONL report path (default: <workdir>/report.jsonl)")
-    ap.add_argument("--langs", default="c,c++", help="Comma languages to include (empty = all)")
+    ap.add_argument(
+        "--workdir", default="/tmp/fbbench-runs", help="Where workspaces + logs go"
+    )
+    ap.add_argument(
+        "--report",
+        default=None,
+        help="JSONL report path (default: <workdir>/report.jsonl)",
+    )
+    ap.add_argument(
+        "--langs", default="c,c++", help="Comma languages to include (empty = all)"
+    )
     ap.add_argument("--bugs", default="", help="Comma bug_ids (overrides discovery)")
     ap.add_argument("--budget", type=float, default=8.0, help="Per-bug USD budget")
-    ap.add_argument("--timeout", type=int, default=25, help="Per-bug pipeline timeout (min)")
+    ap.add_argument(
+        "--timeout", type=int, default=25, help="Per-bug pipeline timeout (min)"
+    )
     ap.add_argument("--rounds", type=int, default=1, help="Grade rounds per blob")
-    ap.add_argument("--no-hint", dest="hint", action="store_false",
-                    help="Disable the bug-description hint (pure autonomous discovery)")
+    ap.add_argument(
+        "--no-hint",
+        dest="hint",
+        action="store_false",
+        help="Disable the bug-description hint (pure autonomous discovery)",
+    )
     ap.set_defaults(hint=True)
-    ap.add_argument("--resume", action="store_true", help="Skip bugs already in the report")
+    ap.add_argument(
+        "--resume", action="store_true", help="Skip bugs already in the report"
+    )
     ap.add_argument("--limit", type=int, default=0, help="Stop after N bugs (0=all)")
-    ap.add_argument("--keep-workspace", action="store_true",
-                    help="Keep each bug's workspace (default: delete after grading)")
+    ap.add_argument(
+        "--keep-workspace",
+        action="store_true",
+        help="Keep each bug's workspace (default: delete after grading)",
+    )
     opts = ap.parse_args(argv)
 
     Path(opts.workdir).mkdir(parents=True, exist_ok=True)
@@ -296,8 +360,11 @@ def main(argv=None) -> int:
         with report.open("a") as f:
             f.write(json.dumps(rec) + "\n")
         verdict = "SOLVED" if rec.get("solved") else rec.get("stage", "?")
-        print(f"    -> {verdict}  built={rec.get('built')} "
-              f"blobs={rec.get('n_blobs')} {rec.get('duration_s', 0)}s", flush=True)
+        print(
+            f"    -> {verdict}  built={rec.get('built')} "
+            f"blobs={rec.get('n_blobs')} {rec.get('duration_s', 0)}s",
+            flush=True,
+        )
 
     print(scorecard(records))
     return 0

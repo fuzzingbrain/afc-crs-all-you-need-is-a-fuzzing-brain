@@ -27,6 +27,7 @@ from fuzzingbrain.analysis.function_extraction import (
 # _should_exclude: exact directory-name match, not substring
 # --------------------------------------------------------------------------
 
+
 def test_excludes_when_a_path_component_is_an_excluded_dir():
     assert _should_exclude(Path("proj/third_party/zlib/z.c"), DEFAULT_EXCLUDE_DIRS)
     assert _should_exclude(Path("proj/build/gen.c"), DEFAULT_EXCLUDE_DIRS)
@@ -59,6 +60,7 @@ def test_custom_exclude_set_overrides_default():
 # extract_functions_from_directory
 # --------------------------------------------------------------------------
 
+
 def test_directory_walk_finds_functions_and_skips_excluded(tmp_path):
     (tmp_path / "src").mkdir()
     (tmp_path / "third_party").mkdir()
@@ -86,13 +88,16 @@ def test_directory_walk_tolerates_unreadable_file(tmp_path):
 def test_directory_walk_respects_extension_filter(tmp_path):
     (tmp_path / "keep.c").write_text("int keep(void){ return 0; }")
     (tmp_path / "skip.cpp").write_text("int skip(void){ return 0; }")
-    names = {f.name for f in extract_functions_from_directory(tmp_path, extensions=[".c"])}
+    names = {
+        f.name for f in extract_functions_from_directory(tmp_path, extensions=[".c"])
+    }
     assert names == {"keep"}  # .cpp not in the filter
 
 
 # --------------------------------------------------------------------------
 # get_function_metadata / find_function_by_name: duplicates kept, filtering
 # --------------------------------------------------------------------------
+
 
 def test_metadata_keeps_duplicate_named_functions_across_files(tmp_path):
     """Two files each define 'init' — both must be retained under one key."""
@@ -121,6 +126,7 @@ def test_find_function_by_name_missing_returns_empty_list(tmp_path):
 # --------------------------------------------------------------------------
 # Language dispatch
 # --------------------------------------------------------------------------
+
 
 def test_java_not_implemented(tmp_path):
     f = tmp_path / "X.java"

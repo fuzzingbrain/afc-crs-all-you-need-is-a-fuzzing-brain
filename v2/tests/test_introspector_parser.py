@@ -68,6 +68,7 @@ def _run_with_timeout(fn, seconds=5.0):
 # parse_introspector_json: distances come from BFS, not from input ordering
 # --------------------------------------------------------------------------
 
+
 def _write_introspector(tmp_path, funcs):
     p = tmp_path / "all-fuzz-introspector-functions.json"
     p.write_text(json.dumps(funcs))
@@ -110,8 +111,12 @@ def test_bfs_distance_is_shortest_not_first_seen(tmp_path):
     report 3. BFS with 'first assignment wins' is the only correct answer.
     """
     funcs = [
-        {"Func name": "entry", "Reached by Fuzzers": ["f"], "Reached by functions": 0,
-         "callsites": {"a": [1], "target": [2]}},
+        {
+            "Func name": "entry",
+            "Reached by Fuzzers": ["f"],
+            "Reached by functions": 0,
+            "callsites": {"a": [1], "target": [2]},
+        },
         {"Func name": "a", "Reached by functions": 1, "callsites": {"b": [1]}},
         {"Func name": "b", "Reached by functions": 1, "callsites": {"target": [1]}},
         {"Func name": "target", "Reached by functions": 2, "callsites": {}},
@@ -123,8 +128,12 @@ def test_bfs_distance_is_shortest_not_first_seen(tmp_path):
 def test_unreachable_function_absent_from_distances(tmp_path):
     """A function no entry can reach must not appear in distances at all."""
     funcs = [
-        {"Func name": "entry", "Reached by Fuzzers": ["f"], "Reached by functions": 0,
-         "callsites": {"reached": [1]}},
+        {
+            "Func name": "entry",
+            "Reached by Fuzzers": ["f"],
+            "Reached by functions": 0,
+            "callsites": {"reached": [1]},
+        },
         {"Func name": "reached", "Reached by functions": 1, "callsites": {}},
         {"Func name": "island", "Reached by functions": 0, "callsites": {}},
     ]
@@ -138,8 +147,12 @@ def test_unreachable_function_absent_from_distances(tmp_path):
 def test_self_recursive_function_does_not_hang(tmp_path):
     """A function that calls itself must not cause the BFS to loop forever."""
     funcs = [
-        {"Func name": "entry", "Reached by Fuzzers": ["f"], "Reached by functions": 0,
-         "callsites": {"rec": [1]}},
+        {
+            "Func name": "entry",
+            "Reached by Fuzzers": ["f"],
+            "Reached by functions": 0,
+            "callsites": {"rec": [1]},
+        },
         {"Func name": "rec", "Reached by functions": 1, "callsites": {"rec": [2]}},
     ]
     cg = _run_with_timeout(
@@ -151,6 +164,7 @@ def test_self_recursive_function_does_not_hang(tmp_path):
 # --------------------------------------------------------------------------
 # get_reachable_functions / get_functions_at_distance
 # --------------------------------------------------------------------------
+
 
 def test_max_distance_filter_is_inclusive():
     """max_distance=1 must keep distance-1 functions and drop distance-2."""
@@ -190,10 +204,14 @@ def test_functions_at_distance_exact_match_only():
 # find_call_path: regression for the infinite-loop reconstruction bug
 # --------------------------------------------------------------------------
 
+
 def test_find_call_path_two_hop_terminates_and_is_ordered():
     """entry -> target. Must return [entry, target], not hang."""
-    cg = _graph(edges={"entry": {"target"}}, entry_points=["entry"],
-                distances={"entry": 0, "target": 1})
+    cg = _graph(
+        edges={"entry": {"target"}},
+        entry_points=["entry"],
+        distances={"entry": 0, "target": 1},
+    )
     path = _run_with_timeout(lambda: find_call_path(cg, "target"))
     assert path == ["entry", "target"]
 
@@ -210,8 +228,9 @@ def test_find_call_path_multi_hop_terminates_and_is_ordered():
 
 
 def test_find_call_path_target_is_entry_returns_singleton():
-    cg = _graph(edges={"entry": {"x"}}, entry_points=["entry"],
-                distances={"entry": 0, "x": 1})
+    cg = _graph(
+        edges={"entry": {"x"}}, entry_points=["entry"], distances={"entry": 0, "x": 1}
+    )
     path = _run_with_timeout(lambda: find_call_path(cg, "entry"))
     assert path == ["entry"]
 
@@ -244,8 +263,9 @@ def test_find_call_path_unreachable_target_returns_none():
 
 
 def test_find_call_path_missing_target_returns_none():
-    cg = _graph(edges={"entry": {"a"}}, entry_points=["entry"],
-                distances={"entry": 0, "a": 1})
+    cg = _graph(
+        edges={"entry": {"a"}}, entry_points=["entry"], distances={"entry": 0, "a": 1}
+    )
     assert find_call_path(cg, "does_not_exist_anywhere") is None
 
 

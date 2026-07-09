@@ -26,21 +26,28 @@ def _sps():
 # Clean JSON paths
 # --------------------------------------------------------------------------
 
+
 def test_not_duplicate_returns_none():
     out = _parse_sp_dedup_response('{"duplicate": false, "duplicate_of": null}', _sps())
     assert out is None
 
 
 def test_duplicate_sp_n_resolves_to_id():
-    out = _parse_sp_dedup_response('{"duplicate": true, "duplicate_of": "SP-2"}', _sps())
+    out = _parse_sp_dedup_response(
+        '{"duplicate": true, "duplicate_of": "SP-2"}', _sps()
+    )
     assert out == "id-two"
 
 
 def test_duplicate_first_and_last_index():
-    assert _parse_sp_dedup_response(
-        '{"duplicate": true, "duplicate_of": "SP-1"}', _sps()) == "id-one"
-    assert _parse_sp_dedup_response(
-        '{"duplicate": true, "duplicate_of": "SP-3"}', _sps()) == "id-three"
+    assert (
+        _parse_sp_dedup_response('{"duplicate": true, "duplicate_of": "SP-1"}', _sps())
+        == "id-one"
+    )
+    assert (
+        _parse_sp_dedup_response('{"duplicate": true, "duplicate_of": "SP-3"}', _sps())
+        == "id-three"
+    )
 
 
 def test_plain_number_reference_is_accepted():
@@ -63,31 +70,43 @@ def test_direct_id_reference_matches():
 # Out-of-range / malformed references must not resolve to a wrong SP
 # --------------------------------------------------------------------------
 
+
 def test_out_of_range_sp_index_returns_none():
     """SP-9 with only 3 SPs must be None, not an IndexError or a wraparound."""
-    assert _parse_sp_dedup_response(
-        '{"duplicate": true, "duplicate_of": "SP-9"}', _sps()) is None
+    assert (
+        _parse_sp_dedup_response('{"duplicate": true, "duplicate_of": "SP-9"}', _sps())
+        is None
+    )
 
 
 def test_zero_index_returns_none():
     """SP-0 -> idx -1; must not resolve to the LAST element via negative index."""
-    assert _parse_sp_dedup_response(
-        '{"duplicate": true, "duplicate_of": "SP-0"}', _sps()) is None
+    assert (
+        _parse_sp_dedup_response('{"duplicate": true, "duplicate_of": "SP-0"}', _sps())
+        is None
+    )
 
 
 def test_duplicate_true_but_ref_null_returns_none():
-    assert _parse_sp_dedup_response(
-        '{"duplicate": true, "duplicate_of": null}', _sps()) is None
+    assert (
+        _parse_sp_dedup_response('{"duplicate": true, "duplicate_of": null}', _sps())
+        is None
+    )
 
 
 def test_unknown_direct_id_returns_none():
-    assert _parse_sp_dedup_response(
-        '{"duplicate": true, "duplicate_of": "id-nonexistent"}', _sps()) is None
+    assert (
+        _parse_sp_dedup_response(
+            '{"duplicate": true, "duplicate_of": "id-nonexistent"}', _sps()
+        )
+        is None
+    )
 
 
 # --------------------------------------------------------------------------
 # Non-JSON prose fallback (the UnboundLocalError regression)
 # --------------------------------------------------------------------------
+
 
 def test_prose_affirmative_with_sp_ref_resolves_without_crashing():
     """Regression: 'this is a duplicate of SP-1' is not JSON; the fallback must
@@ -120,6 +139,7 @@ def test_garbage_returns_none():
 # --------------------------------------------------------------------------
 # ObjectId / _id fallbacks
 # --------------------------------------------------------------------------
+
 
 def test_resolves_via_mongo_underscore_id_when_no_sp_id():
     sps = [{"_id": "mongo-oid", "description": "x"}]

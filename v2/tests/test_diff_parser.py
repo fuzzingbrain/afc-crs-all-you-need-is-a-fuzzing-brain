@@ -23,6 +23,7 @@ from fuzzingbrain.analysis.diff_parser import (
 # DiffHunk.new_lines: the raw line-range math
 # --------------------------------------------------------------------------
 
+
 def test_new_lines_span_matches_count():
     h = DiffHunk(old_start=10, old_count=3, new_start=10, new_count=3, content="")
     assert list(h.new_lines) == [10, 11, 12]  # not [10..13]
@@ -67,14 +68,7 @@ def test_implicit_counts_default_to_one():
 
     A parser that treats a missing count as 0 would drop the changed line.
     """
-    diff = (
-        "diff --git a/x.c b/x.c\n"
-        "--- a/x.c\n"
-        "+++ b/x.c\n"
-        "@@ -5 +5 @@\n"
-        "-old\n"
-        "+new\n"
-    )
+    diff = "diff --git a/x.c b/x.c\n--- a/x.c\n+++ b/x.c\n@@ -5 +5 @@\n-old\n+new\n"
     d = parse_diff(diff)[0]
     h = d.hunks[0]
     assert (h.new_start, h.new_count) == (5, 1)
@@ -185,6 +179,7 @@ def test_rename_header_keeps_distinct_old_and_new_paths():
 # _is_source_file: extension gate
 # --------------------------------------------------------------------------
 
+
 def test_source_file_extensions():
     for p in ["a.c", "b.h", "c.cc", "d.cpp", "e.cxx", "f.hpp", "g.java", "DIR/A.C"]:
         assert _is_source_file(p), p
@@ -196,6 +191,7 @@ def test_source_file_extensions():
 # _extract_hunk_content_for_function: overlap boundary (regression)
 # --------------------------------------------------------------------------
 
+
 def test_excerpt_excludes_hunk_ending_just_before_function():
     """A hunk touching lines 7-9 must NOT be attributed to a function at 10-20.
 
@@ -204,14 +200,16 @@ def test_excerpt_excludes_hunk_ending_just_before_function():
     excerpt with zero real overlap.
     """
     func_start, func_end = 10, 20
-    adjacent = DiffHunk(old_start=7, old_count=3, new_start=7, new_count=3,
-                        content="+adjacent")   # touches 7,8,9
-    inside = DiffHunk(old_start=15, old_count=1, new_start=15, new_count=1,
-                      content="+inside")        # touches 15
+    adjacent = DiffHunk(
+        old_start=7, old_count=3, new_start=7, new_count=3, content="+adjacent"
+    )  # touches 7,8,9
+    inside = DiffHunk(
+        old_start=15, old_count=1, new_start=15, new_count=1, content="+inside"
+    )  # touches 15
     excerpt, changed = _extract_hunk_content_for_function(
         [adjacent, inside], func_start, func_end
     )
-    assert "adjacent" not in excerpt          # the adjacent hunk is excluded
+    assert "adjacent" not in excerpt  # the adjacent hunk is excluded
     assert "inside" in excerpt
     assert changed == [15]
 
@@ -219,8 +217,9 @@ def test_excerpt_excludes_hunk_ending_just_before_function():
 def test_excerpt_includes_hunk_touching_first_function_line():
     """A hunk that reaches func_start itself DOES overlap and stays in."""
     func_start, func_end = 10, 20
-    touching = DiffHunk(old_start=8, old_count=3, new_start=8, new_count=3,
-                        content="+touch")  # touches 8,9,10 -> line 10 is inside
+    touching = DiffHunk(
+        old_start=8, old_count=3, new_start=8, new_count=3, content="+touch"
+    )  # touches 8,9,10 -> line 10 is inside
     excerpt, changed = _extract_hunk_content_for_function(
         [touching], func_start, func_end
     )
@@ -232,8 +231,9 @@ def test_excerpt_zero_count_deletion_hunk_does_not_overlap():
     """A pure-deletion hunk (new_count=0) at the function start adds no new
     lines and must not be counted as overlapping."""
     func_start, func_end = 10, 20
-    deletion = DiffHunk(old_start=10, old_count=2, new_start=10, new_count=0,
-                        content="-removed")
+    deletion = DiffHunk(
+        old_start=10, old_count=2, new_start=10, new_count=0, content="-removed"
+    )
     excerpt, changed = _extract_hunk_content_for_function(
         [deletion], func_start, func_end
     )
@@ -244,6 +244,7 @@ def test_excerpt_zero_count_deletion_hunk_does_not_overlap():
 # --------------------------------------------------------------------------
 # get_all_changes: uses the analysis client + sorts, does not filter
 # --------------------------------------------------------------------------
+
 
 class _FakeClient:
     """Minimal analysis client double: files->functions, reachability map."""
@@ -287,27 +288,25 @@ def test_get_all_changes_keeps_unreachable_and_sorts_reachable_first():
     )
     changes = get_all_changes(diff, "fuzz", client)
     names = [c.function_name for c in changes]
-    assert set(names) == {"near", "far"}          # unreachable NOT dropped
-    assert names[0] == "near"                      # reachable sorts first
+    assert set(names) == {"near", "far"}  # unreachable NOT dropped
+    assert names[0] == "near"  # reachable sorts first
     assert changes[0].static_reachable is True
     assert changes[1].static_reachable is False
 
 
 def test_get_all_changes_skips_functions_without_overlap():
     """A function whose line range doesn't intersect any changed line is out."""
-    diff = (
-        "diff --git a/s.c b/s.c\n"
-        "--- a/s.c\n"
-        "+++ b/s.c\n"
-        "@@ -1,1 +1,1 @@\n"
-        "-x\n"
-        "+y\n"
-    )
+    diff = "diff --git a/s.c b/s.c\n--- a/s.c\n+++ b/s.c\n@@ -1,1 +1,1 @@\n-x\n+y\n"
     client = _FakeClient(
         functions_by_file={
             "s.c": [
                 {"name": "hit", "start_line": 1, "end_line": 3, "file_path": "s.c"},
-                {"name": "miss", "start_line": 100, "end_line": 200, "file_path": "s.c"},
+                {
+                    "name": "miss",
+                    "start_line": 100,
+                    "end_line": 200,
+                    "file_path": "s.c",
+                },
             ]
         },
         reachability={"hit": {"reachable": True, "distance": 0}},
@@ -319,14 +318,7 @@ def test_get_all_changes_skips_functions_without_overlap():
 def test_get_all_changes_survives_client_reachability_errors():
     """If reachability lookup throws, the change is still reported (unreachable),
     not dropped and not propagated as an exception."""
-    diff = (
-        "diff --git a/s.c b/s.c\n"
-        "--- a/s.c\n"
-        "+++ b/s.c\n"
-        "@@ -1,1 +1,1 @@\n"
-        "-x\n"
-        "+y\n"
-    )
+    diff = "diff --git a/s.c b/s.c\n--- a/s.c\n+++ b/s.c\n@@ -1,1 +1,1 @@\n-x\n+y\n"
 
     class Boom(_FakeClient):
         def get_reachability(self, fuzzer, func_name):

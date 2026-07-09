@@ -299,9 +299,11 @@ relevant functions. Do not exhaust your budget exploring unrelated code.
 
 """
 
-        message = f"""Plan the analysis directions for a Full-scan security audit.
+        message = (
+            f"""Plan the analysis directions for a Full-scan security audit.
 
-{hint_block}""" + f"""
+{hint_block}"""
+            + f"""
 
 ## Your Target Configuration
 
@@ -334,6 +336,7 @@ Understanding this is MANDATORY - it defines what code is exploitable.
 
 Remember: Only reachable code matters. Only {self.sanitizer}-detectable bugs matter.
 """
+        )
         return message
 
     async def plan_directions_async(

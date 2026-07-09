@@ -30,6 +30,7 @@ def _one(src: str):
 # Return-type / declarator shapes
 # --------------------------------------------------------------------------
 
+
 def test_plain_function():
     assert _names("int foo(int x){ return x; }") == ["foo"]
 
@@ -79,6 +80,7 @@ def test_kr_style_definition():
 # Line spans (1-indexed) and content
 # --------------------------------------------------------------------------
 
+
 def test_single_line_span():
     f = _one("int foo(void){ return 0; }")
     assert (f.start_line, f.end_line) == (1, 1)
@@ -88,8 +90,8 @@ def test_multiline_span_is_first_to_last_line():
     src = "int\nmulti(\n  int a,\n  int b\n)\n{\n  return a;\n}"
     f = _one(src)
     assert f.name == "multi"
-    assert f.start_line == 1        # starts at the return type line
-    assert f.end_line == 8          # closing brace line
+    assert f.start_line == 1  # starts at the return type line
+    assert f.end_line == 8  # closing brace line
 
 
 def test_leading_comment_not_counted_in_span():
@@ -108,6 +110,7 @@ def test_content_is_the_exact_definition_bytes():
 # --------------------------------------------------------------------------
 # Negatives: what must NOT be extracted
 # --------------------------------------------------------------------------
+
 
 def test_bare_prototype_is_not_a_definition():
     """A declaration with no body must not be reported as a function."""
@@ -131,6 +134,7 @@ def test_typedef_is_not_a_function():
 # Multiple functions / ordering
 # --------------------------------------------------------------------------
 
+
 def test_multiple_functions_in_order():
     src = "int a(void){return 1;}\nint b(void){return 2;}\nint c(void){return 3;}"
     fns = extract_c_functions(src.encode(), "x.c")
@@ -147,6 +151,7 @@ def test_nested_gnu_function_both_captured():
 # --------------------------------------------------------------------------
 # Robustness: bad bytes / bad UTF-8 must not crash
 # --------------------------------------------------------------------------
+
 
 def test_non_utf8_bytes_in_body_do_not_crash():
     """A stray invalid UTF-8 byte in the body must be replaced, not raise."""

@@ -63,7 +63,13 @@ def test_locate_blobs_caps_count(tmp_path):
 def test_scorecard_counts_solved():
     recs = [
         {"bug_id": "a", "solved": True, "built": True, "dispatched": True},
-        {"bug_id": "b", "solved": False, "built": True, "dispatched": True, "n_blobs": 0},
+        {
+            "bug_id": "b",
+            "solved": False,
+            "built": True,
+            "dispatched": True,
+            "n_blobs": 0,
+        },
         {"bug_id": "c", "solved": False, "build_failed": True},
     ]
     card = run_bench.scorecard(recs)
