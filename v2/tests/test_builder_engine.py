@@ -75,6 +75,17 @@ def test_helper_command_shape():
     assert cmd[-2] == "proj"                                   # project before src
 
 
+def test_helper_command_omits_src_when_not_mounting():
+    # ARVO/CyberGym images bake the vulnerable source; passing a src path would
+    # make helper.py bind-mount an empty repo over it. mount_src=False drops it.
+    mounted = BuildJob(fuzz_tooling_path="/w/fuzz-tooling", project="p",
+                       src_path="/w/repo")
+    baked = BuildJob(fuzz_tooling_path="/w/fuzz-tooling", project="p",
+                     src_path="/w/repo", mount_src=False)
+    assert helper_command(mounted)[-1].endswith("/repo")   # source mounted
+    assert helper_command(baked)[-1] == "p"                 # no source arg
+
+
 def test_run_build_success_collects_only_real_fuzzers(tmp_path):
     tooling, repo = _make_workspace(tmp_path, "alpha", _FAKE_HELPER)
     job = BuildJob(fuzz_tooling_path=tooling, project="alpha", src_path=repo)
