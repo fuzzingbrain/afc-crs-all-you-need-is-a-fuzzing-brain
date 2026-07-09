@@ -32,7 +32,9 @@ def _default_derive_spec(bug_dir, *, with_description: bool = True):
     return spec_from_bench_bug(bug_dir, with_description=with_description)
 
 
-def _default_materialize(spec, workspace, oss_fuzz, *, clone_repo: bool, overwrite: bool):
+def _default_materialize(
+    spec, workspace, oss_fuzz, *, clone_repo: bool, overwrite: bool
+):
     from ..importers.external_harness import build_workspace
 
     return build_workspace(
@@ -116,13 +118,20 @@ def build_bugs(
         workspace = root_dir / bug_dir.name
         try:
             job = plan(
-                bug_dir, workspace, oss_fuzz, sanitizer,
-                log_path=workspace / "build.log", **plan_kwargs,
+                bug_dir,
+                workspace,
+                oss_fuzz,
+                sanitizer,
+                log_path=workspace / "build.log",
+                **plan_kwargs,
             )
         except Exception as exc:  # noqa: BLE001 — workspace setup failure is a result
             return BuildResult(
-                bug_dir.name, sanitizer, False,
-                message=f"workspace setup failed: {exc}", label=bug_dir.name,
+                bug_dir.name,
+                sanitizer,
+                False,
+                message=f"workspace setup failed: {exc}",
+                label=bug_dir.name,
             )
         return run_build(job)
 

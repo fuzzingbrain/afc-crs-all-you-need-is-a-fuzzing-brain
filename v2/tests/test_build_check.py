@@ -25,40 +25,48 @@ def _make_bench(tmp_path, bugs):
         d = tmp_path / "bugs" / project / bug_id
         d.mkdir(parents=True)
         (d / "bench.yaml").write_text(
-            f"bug_id: {bug_id}\nproject: {project}\n"
-            f"target:\n  language: {lang}\n"
+            f"bug_id: {bug_id}\nproject: {project}\ntarget:\n  language: {lang}\n"
         )
     return tmp_path
 
 
 def test_discover_returns_all_bugs(tmp_path):
     bc = _load_build_check()
-    _make_bench(tmp_path, [
-        ("net-snmp", "netsnmp-a", "c"),
-        ("mongoose", "mongoose-b", "c"),
-        ("graal", "graal-c", "jvm"),
-    ])
+    _make_bench(
+        tmp_path,
+        [
+            ("net-snmp", "netsnmp-a", "c"),
+            ("mongoose", "mongoose-b", "c"),
+            ("graal", "graal-c", "jvm"),
+        ],
+    )
     found = {b for b, _ in bc.discover(tmp_path, None, None)}
     assert found == {"netsnmp-a", "mongoose-b", "graal-c"}
 
 
 def test_discover_filters_by_language_with_cpp_normalization(tmp_path):
     bc = _load_build_check()
-    _make_bench(tmp_path, [
-        ("p1", "c-bug", "c"),
-        ("p2", "cpp-bug", "cpp"),     # cpp must normalize to c++
-        ("p3", "jvm-bug", "jvm"),
-    ])
+    _make_bench(
+        tmp_path,
+        [
+            ("p1", "c-bug", "c"),
+            ("p2", "cpp-bug", "cpp"),  # cpp must normalize to c++
+            ("p3", "jvm-bug", "jvm"),
+        ],
+    )
     ids = {b for b, _ in bc.discover(tmp_path, {"c++"}, None)}
-    assert ids == {"cpp-bug"}         # only the c++ one, via cpp->c++ mapping
+    assert ids == {"cpp-bug"}  # only the c++ one, via cpp->c++ mapping
 
 
 def test_discover_filters_by_explicit_ids(tmp_path):
     bc = _load_build_check()
-    _make_bench(tmp_path, [
-        ("p1", "keep-me", "c"),
-        ("p2", "drop-me", "c"),
-    ])
+    _make_bench(
+        tmp_path,
+        [
+            ("p1", "keep-me", "c"),
+            ("p2", "drop-me", "c"),
+        ],
+    )
     ids = {b for b, _ in bc.discover(tmp_path, None, {"keep-me"})}
     assert ids == {"keep-me"}
 
@@ -66,11 +74,11 @@ def test_discover_filters_by_explicit_ids(tmp_path):
 def test_discover_returns_bug_dirs(tmp_path):
     bc = _load_build_check()
     _make_bench(tmp_path, [("net-snmp", "netsnmp-a", "c")])
-    (_id, bug_dir), = bc.discover(tmp_path, None, None)
+    ((_id, bug_dir),) = bc.discover(tmp_path, None, None)
     assert bug_dir == tmp_path / "bugs" / "net-snmp" / "netsnmp-a"
     assert (bug_dir / "bench.yaml").is_file()
 
 
 def test_force_rmtree_is_noop_on_missing(tmp_path):
     bc = _load_build_check()
-    bc._force_rmtree(tmp_path / "does-not-exist")   # must not raise
+    bc._force_rmtree(tmp_path / "does-not-exist")  # must not raise

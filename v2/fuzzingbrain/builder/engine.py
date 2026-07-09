@@ -27,12 +27,35 @@ DEFAULT_BUILD_TIMEOUT_S = 1800
 
 # Non-fuzzer artifacts helper.py leaves in build/out/<project>.
 _SKIP_FILES = {
-    "llvm-symbolizer", "sancov", "clang", "clang++",
-    "llvm-cov", "llvm-profdata", "llvm-ar",
+    "llvm-symbolizer",
+    "sancov",
+    "clang",
+    "clang++",
+    "llvm-cov",
+    "llvm-profdata",
+    "llvm-ar",
 }
 _SKIP_EXTS = {
-    ".bin", ".log", ".dict", ".options", ".bc", ".json", ".o", ".a", ".so",
-    ".h", ".c", ".cpp", ".cc", ".py", ".sh", ".txt", ".md", ".zip", ".tar", ".gz",
+    ".bin",
+    ".log",
+    ".dict",
+    ".options",
+    ".bc",
+    ".json",
+    ".o",
+    ".a",
+    ".so",
+    ".h",
+    ".c",
+    ".cpp",
+    ".cc",
+    ".py",
+    ".sh",
+    ".txt",
+    ".md",
+    ".zip",
+    ".tar",
+    ".gz",
 }
 
 # Callback fed each normalized output line (for live streaming). Optional.
@@ -91,7 +114,9 @@ def truncate_output(text: str, head: int = 10, tail: int = 20) -> str:
     if len(lines) <= head + tail:
         return text
     omitted = len(lines) - head - tail
-    return "\n".join(lines[:head] + [f"... ({omitted} lines omitted) ..."] + lines[-tail:])
+    return "\n".join(
+        lines[:head] + [f"... ({omitted} lines omitted) ..."] + lines[-tail:]
+    )
 
 
 def collect_fuzzers(fuzz_tooling_path: Path, project: str) -> List[str]:
@@ -122,8 +147,10 @@ def helper_command(job: BuildJob) -> List[str]:
         "python3",
         str(job.fuzz_tooling_path / "infra" / "helper.py"),
         "build_fuzzers",
-        "--sanitizer", job.sanitizer,
-        "--engine", job.engine,
+        "--sanitizer",
+        job.sanitizer,
+        "--engine",
+        job.engine,
         job.project,
     ]
     if job.mount_src:
@@ -151,8 +178,11 @@ def _run_build_impl(job: BuildJob, on_line: Optional[LineSink] = None) -> BuildR
     helper = job.fuzz_tooling_path / "infra" / "helper.py"
     if not helper.is_file():
         return BuildResult(
-            job.project, job.sanitizer, False,
-            message=f"helper.py not found: {helper}", log_path=job.log_path,
+            job.project,
+            job.sanitizer,
+            False,
+            message=f"helper.py not found: {helper}",
+            log_path=job.log_path,
         )
 
     cmd = helper_command(job)
@@ -163,7 +193,10 @@ def _run_build_impl(job: BuildJob, on_line: Optional[LineSink] = None) -> BuildR
         if log_f:
             log_f.write("Build Command: " + " ".join(cmd) + "\n" + "=" * 80 + "\n\n")
         proc = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
             cwd=str(job.fuzz_tooling_path),
         )
         proc_stdout = proc.stdout
@@ -189,9 +222,12 @@ def _run_build_impl(job: BuildJob, on_line: Optional[LineSink] = None) -> BuildR
             proc.kill()
             reader.join(timeout=10)
             return BuildResult(
-                job.project, job.sanitizer, False,
+                job.project,
+                job.sanitizer,
+                False,
                 message=f"Build timed out ({job.timeout_s}s)",
-                duration_s=time.monotonic() - started, log_path=job.log_path,
+                duration_s=time.monotonic() - started,
+                log_path=job.log_path,
                 output_tail=truncate_output("".join(output[-50:])),
             )
         proc.wait(timeout=10)  # reader hit EOF -> child has exited (or is exiting)
@@ -201,23 +237,35 @@ def _run_build_impl(job: BuildJob, on_line: Optional[LineSink] = None) -> BuildR
         duration = time.monotonic() - started
         if rc != 0:
             return BuildResult(
-                job.project, job.sanitizer, False,
-                message=f"Build failed (code {rc})", returncode=rc,
-                duration_s=duration, log_path=job.log_path,
+                job.project,
+                job.sanitizer,
+                False,
+                message=f"Build failed (code {rc})",
+                returncode=rc,
+                duration_s=duration,
+                log_path=job.log_path,
                 output_tail=truncate_output("".join(output[-50:])),
             )
         return BuildResult(
-            job.project, job.sanitizer, True,
+            job.project,
+            job.sanitizer,
+            True,
             fuzzers=collect_fuzzers(job.fuzz_tooling_path, job.project),
-            message="Build successful", returncode=0,
-            duration_s=duration, log_path=job.log_path,
+            message="Build successful",
+            returncode=0,
+            duration_s=duration,
+            log_path=job.log_path,
         )
     except Exception as exc:  # noqa: BLE001 — surface any failure as a result
         if proc is not None and proc.poll() is None:
             proc.kill()
         return BuildResult(
-            job.project, job.sanitizer, False, message=str(exc),
-            duration_s=time.monotonic() - started, log_path=job.log_path,
+            job.project,
+            job.sanitizer,
+            False,
+            message=str(exc),
+            duration_s=time.monotonic() - started,
+            log_path=job.log_path,
             output_tail=truncate_output("".join(output[-50:])),
         )
     finally:
@@ -255,8 +303,12 @@ def build_many(
             except Exception as exc:  # noqa: BLE001 — defensive; run_build catches its own
                 job = jobs[idx]
                 results[idx] = BuildResult(
-                    job.project, job.sanitizer, False, message=str(exc),
-                    log_path=job.log_path, label=job.label,
+                    job.project,
+                    job.sanitizer,
+                    False,
+                    message=str(exc),
+                    log_path=job.log_path,
+                    label=job.label,
                 )
             if on_result:
                 on_result(results[idx])  # type: ignore[arg-type]

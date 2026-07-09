@@ -12,17 +12,30 @@ import subprocess
 
 import pytest
 
-from fuzzingbrain.importers.external_harness import HarnessSpec, build_workspace, _git_clone
+from fuzzingbrain.importers.external_harness import (
+    HarnessSpec,
+    build_workspace,
+    _git_clone,
+)
 
 
 def _git(*args, cwd):
     env = {
-        "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
-        "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
-        "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null",
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_SYSTEM": "/dev/null",
     }
-    subprocess.run(["git", *args], cwd=str(cwd), check=True,
-                   capture_output=True, env={**env}, text=True)
+    subprocess.run(
+        ["git", *args],
+        cwd=str(cwd),
+        check=True,
+        capture_output=True,
+        env={**env},
+        text=True,
+    )
 
 
 def _make_repo(path, files):
@@ -41,13 +54,21 @@ def test_git_clone_fetches_submodules(tmp_path):
     _make_repo(sub, {"vendored.txt": "from-submodule"})
     main = tmp_path / "main"
     _make_repo(main, {"top.txt": "x"})
-    _git("-c", "protocol.file.allow=always", "submodule", "add",
-         str(sub), "vendor/sub", cwd=main)
+    _git(
+        "-c",
+        "protocol.file.allow=always",
+        "submodule",
+        "add",
+        str(sub),
+        "vendor/sub",
+        cwd=main,
+    )
     _git("commit", "-qm", "add sub", cwd=main)
 
     dest = tmp_path / "clone"
     # protocol.file.allow lets submodule update use a file:// URL in this test.
     import os
+
     os.environ["GIT_ALLOW_PROTOCOL"] = "file"
     _git_clone(str(main), "", dest)
     assert (dest / "vendor" / "sub" / "vendored.txt").read_text() == "from-submodule"
@@ -81,7 +102,7 @@ def _spec(tmp_path, **over):
         harness_files=[str(harness)],
         apt_deps=["autoconf", "libtool"],
         build_script=(
-            'cd $SRC/net-snmp\n./configure --enable-static\nmake -C snmplib\n'
+            "cd $SRC/net-snmp\n./configure --enable-static\nmake -C snmplib\n"
             "$CC $CFLAGS -I include $SRC/harness/vacm_fuzzer.c "
             "snmplib/.libs/libnetsnmp.a $LIB_FUZZING_ENGINE -o $OUT/vacm_fuzzer\n"
         ),
@@ -137,7 +158,7 @@ def test_dockerfile_checkout_is_non_fatal(tmp_path):
         spec, tmp_path / "ws", _fake_oss_fuzz(tmp_path), clone_repo=False
     )
     df = (ws / "fuzz-tooling" / "projects" / "net-snmp" / "Dockerfile").read_text()
-    checkout_line = next(l for l in df.splitlines() if "checkout fc28b88a" in l)
+    checkout_line = next(ln for ln in df.splitlines() if "checkout fc28b88a" in ln)
     assert checkout_line.rstrip().endswith("|| true")
 
 
@@ -172,8 +193,13 @@ def test_dockerfile_renders_setup_deps_and_extra_clones_before_target(tmp_path):
         tmp_path,
         pip_deps=["meson", "ninja"],
         setup_steps=["ENV JAVA_HOME=/opt/jdk21", "RUN curl -sSf https://x | sh"],
-        extra_clones=[{"url": "https://github.com/strukturag/libde265",
-                       "dir": "/src/libde265", "ref": "v1.0.15"}],
+        extra_clones=[
+            {
+                "url": "https://github.com/strukturag/libde265",
+                "dir": "/src/libde265",
+                "ref": "v1.0.15",
+            }
+        ],
     )
     ws = build_workspace(
         spec, tmp_path / "ws", _fake_oss_fuzz(tmp_path), clone_repo=False

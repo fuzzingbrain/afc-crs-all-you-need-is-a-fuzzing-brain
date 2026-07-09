@@ -5,6 +5,7 @@ Hermetic: a synthetic bench bug directory stands in for the real corpus.
 """
 
 import os
+import shutil
 import subprocess
 
 import pytest
@@ -18,8 +19,9 @@ from fuzzingbrain.importers.bench import (
 )
 
 
-def _run_build_script(tmp_path, script, fake_build_sh, sanitizer="address",
-                      path_prepend=None):
+def _run_build_script(
+    tmp_path, script, fake_build_sh, sanitizer="address", path_prepend=None
+):
     """Execute a generated build_script against a fake bench build.sh.
 
     The fake stands in for ``$SRC/harness/build.sh`` and decides which configs it
@@ -36,10 +38,15 @@ def _run_build_script(tmp_path, script, fake_build_sh, sanitizer="address",
     path = os.environ["PATH"]
     if path_prepend:
         path = f"{path_prepend}:{path}"
-    env = {**os.environ, "SRC": str(src), "OUT": str(out),
-           "SANITIZER": sanitizer, "HOME": str(tmp_path), "PATH": path}
-    r = subprocess.run(["bash", "-c", script], env=env,
-                       capture_output=True, text=True)
+    env = {
+        **os.environ,
+        "SRC": str(src),
+        "OUT": str(out),
+        "SANITIZER": sanitizer,
+        "HOME": str(tmp_path),
+        "PATH": path,
+    }
+    r = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
     return r, out
 
 
@@ -48,10 +55,10 @@ def _run_build_script(tmp_path, script, fake_build_sh, sanitizer="address",
 _FAKE_STD = (
     "#!/bin/bash\n"
     'case "$1" in\n'
-    '  build-libs) exit 0;;\n'
+    "  build-libs) exit 0;;\n"
     '  harness) mkdir -p "$OUT/$2"; echo bin > "$OUT/$2/harness"; exit 0;;\n'
-    '  *) exit 2;;\n'
-    'esac\n'
+    "  *) exit 2;;\n"
+    "esac\n"
 )
 
 
@@ -60,7 +67,7 @@ def test_build_script_drives_bench_recipe_and_copies_fuzzer(tmp_path):
     # OSS-Fuzz fuzzer name. release-asan is preferred and should be the one taken.
     r, out = _run_build_script(tmp_path, _build_script("vacm_fuzzer"), _FAKE_STD)
     assert r.returncode == 0, r.stderr
-    assert (out / "vacm_fuzzer").is_file()              # copied to $OUT/<name>
+    assert (out / "vacm_fuzzer").is_file()  # copied to $OUT/<name>
     assert (out / "release-asan" / "harness").is_file()  # highest-priority cfg used
 
 
@@ -71,8 +78,8 @@ def test_build_script_falls_back_to_bare_config_form(tmp_path):
         "#!/bin/bash\n"
         'case "$1" in\n'
         '  release-asan|debug-asan|debug) mkdir -p "$OUT/$1"; echo bin > "$OUT/$1/harness";;\n'
-        '  *) exit 2;;\n'  # rejects build-libs and `harness <cfg>`
-        'esac\n'
+        "  *) exit 2;;\n"  # rejects build-libs and `harness <cfg>`
+        "esac\n"
     )
     r, out = _run_build_script(tmp_path, _build_script("f", libs_cmd=""), fake)
     assert r.returncode == 0, r.stderr
@@ -96,10 +103,10 @@ def test_build_script_uses_the_renamed_libs_step(tmp_path):
         "#!/bin/bash\n"
         'case "$1" in\n'
         '  openldap-libs) touch "$OUT/.libs"; exit 0;;\n'
-        '  build-libs) exit 2;;\n'  # this project does NOT have build-libs
+        "  build-libs) exit 2;;\n"  # this project does NOT have build-libs
         '  harness) [ -f "$OUT/.libs" ] || exit 3; mkdir -p "$OUT/$2"; echo bin > "$OUT/$2/harness";;\n'
-        '  *) exit 2;;\n'
-        'esac\n'
+        "  *) exit 2;;\n"
+        "esac\n"
     )
     r, out = _run_build_script(tmp_path, _build_script("f", "openldap-libs"), fake)
     assert r.returncode == 0, r.stderr
@@ -114,21 +121,28 @@ def test_build_script_strips_libcxx_stdlib_for_bench_builds(tmp_path):
         "#!/bin/bash\n"
         'echo "$CXXFLAGS" > "$OUT/seen_cxxflags"\n'
         'case "$1" in\n'
-        '  build-libs) exit 0;;\n'
+        "  build-libs) exit 0;;\n"
         '  harness) mkdir -p "$OUT/$2"; echo bin > "$OUT/$2/harness"; exit 0;;\n'
-        '  *) exit 2;;\n'
-        'esac\n'
+        "  *) exit 2;;\n"
+        "esac\n"
     )
     src = tmp_path / "src"
     (src / "harness").mkdir(parents=True)
     (src / "harness" / "build.sh").write_text(fake)
     out = tmp_path / "out"
     out.mkdir()
-    env = {**os.environ, "SRC": str(src), "OUT": str(out), "SANITIZER": "address",
-           "HOME": str(tmp_path),
-           "CXXFLAGS": "-O1 -stdlib=libc++ -DFOO", "CFLAGS": "-O1"}
-    r = subprocess.run(["bash", "-c", _build_script("f")], env=env,
-                       capture_output=True, text=True)
+    env = {
+        **os.environ,
+        "SRC": str(src),
+        "OUT": str(out),
+        "SANITIZER": "address",
+        "HOME": str(tmp_path),
+        "CXXFLAGS": "-O1 -stdlib=libc++ -DFOO",
+        "CFLAGS": "-O1",
+    }
+    r = subprocess.run(
+        ["bash", "-c", _build_script("f")], env=env, capture_output=True, text=True
+    )
     assert r.returncode == 0, r.stderr
     seen = (out / "seen_cxxflags").read_text()
     assert "-stdlib=libc++" not in seen  # stripped
@@ -146,9 +160,7 @@ def test_build_script_repoints_ld_to_lld_when_available(tmp_path):
     lld.chmod(0o755)
     ld_target = tmp_path / "ld"  # stands in for /usr/bin/ld
     script = f'export FB_LD_PATH="{ld_target}"\n' + _build_script("f")
-    r, out = _run_build_script(
-        tmp_path, script, _FAKE_STD, path_prepend=str(stub_bin)
-    )
+    r, out = _run_build_script(tmp_path, script, _FAKE_STD, path_prepend=str(stub_bin))
     assert r.returncode == 0, r.stderr
     assert ld_target.is_symlink()
     assert os.path.realpath(ld_target) == str(lld)  # ld now resolves to lld
@@ -175,8 +187,6 @@ def test_build_script_picks_coverage_config_under_coverage_sanitizer(tmp_path):
     assert not (out / "release-asan").exists()
 
 
-import shutil
-
 _CC = shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
 
 
@@ -191,6 +201,7 @@ def test_compat_shim_is_inert_on_a_modern_base_and_supplies_gnu_source(tmp_path)
     #     here WITHOUT the TU defining _GNU_SOURCE) undeclared and ERROR.
     # Both are exactly the breakages hit while bringing systemd up on focal.
     from fuzzingbrain.importers.bench import _FOCAL_COMPAT_SHIM
+
     shim = tmp_path / "fb_compat.h"
     shim.write_text(_FOCAL_COMPAT_SHIM)
     tu = tmp_path / "probe.c"
@@ -206,9 +217,19 @@ def test_compat_shim_is_inert_on_a_modern_base_and_supplies_gnu_source(tmp_path)
         "}\n"
     )
     r = subprocess.run(
-        [_CC, "-c", "-Werror", "-include", str(shim), str(tu),
-         "-o", str(tmp_path / "probe.o")],
-        capture_output=True, text=True)
+        [
+            _CC,
+            "-c",
+            "-Werror",
+            "-include",
+            str(shim),
+            str(tu),
+            "-o",
+            str(tmp_path / "probe.o"),
+        ],
+        capture_output=True,
+        text=True,
+    )
     assert r.returncode == 0, r.stderr
 
 
@@ -225,15 +246,15 @@ def test_build_script_writes_compat_shim_and_force_includes_that_path(tmp_path):
         'p=$(printf "%s" "$CFLAGS" | grep -oE "/[^ ]*fb_compat.h" | head -1); '
         f'[ -f "$p" ] && echo "SHIM_PRESENT" >> "{rec}"; exit 0;;\n'
         '  harness) mkdir -p "$OUT/$2"; echo bin > "$OUT/$2/harness"; exit 0;;\n'
-        '  *) exit 2;;\n'
-        'esac\n'
+        "  *) exit 2;;\n"
+        "esac\n"
     )
     r, out = _run_build_script(tmp_path, _build_script("f"), fake)
     assert r.returncode == 0, r.stderr
     body = rec.read_text()
-    assert "-include" in body and "fb_compat.h" in body   # forced into CFLAGS
+    assert "-include" in body and "fb_compat.h" in body  # forced into CFLAGS
     assert "X=" in body and "fb_compat.h" in body.split("X=", 1)[1]  # and CXXFLAGS
-    assert "SHIM_PRESENT" in body                          # written at that path
+    assert "SHIM_PRESENT" in body  # written at that path
 
 
 def test_build_script_softens_systemd_static_pie_check_and_spares_others(tmp_path):
@@ -247,8 +268,8 @@ def test_build_script_softens_systemd_static_pie_check_and_spares_others(tmp_pat
     boot.mkdir(parents=True)
     boot_meson = boot / "meson.build"
     boot_meson.write_text(
-        "subdir_done()\n"
-        "        error('Linker does not support -static-pie.')\n")
+        "subdir_done()\n        error('Linker does not support -static-pie.')\n"
+    )
     # same exact string but NOT under src/boot -> must be left alone (path-scoped)
     decoy = src / "elsewhere" / "meson.build"
     decoy.parent.mkdir(parents=True)
@@ -257,7 +278,7 @@ def test_build_script_softens_systemd_static_pie_check_and_spares_others(tmp_pat
     assert r.returncode == 0, r.stderr
     patched = boot_meson.read_text()
     assert "error('Linker does not support -static-pie.')" not in patched
-    assert "(fb)" in patched                       # softened to message(...)
+    assert "(fb)" in patched  # softened to message(...)
     assert "error('Linker does not support -static-pie.')" in decoy.read_text()
 
 
@@ -278,38 +299,43 @@ _FWUPD_DOCKERFILE = (
 
 def test_setup_steps_stop_at_project_clone():
     from fuzzingbrain.importers.bench import _parse_setup_steps
+
     steps = _parse_setup_steps(_FWUPD_DOCKERFILE, {})
-    assert "ENV JAVA_HOME=/opt/jdk" in steps          # pre-clone toolchain kept
-    assert any("curl" in s for s in steps)            # pre-clone RUN kept
+    assert "ENV JAVA_HOME=/opt/jdk" in steps  # pre-clone toolchain kept
+    assert any("curl" in s for s in steps)  # pre-clone RUN kept
     assert not any("oss-fuzz.py" in s for s in steps)  # post-clone build NOT leaked
-    assert not any("sed" in s for s in steps)          # post-clone patch NOT leaked
+    assert not any("sed" in s for s in steps)  # post-clone patch NOT leaked
 
 
 def test_setup_steps_drop_debian_fuzzing_engine_env():
     # The bench points LIB_FUZZING_ENGINE at a debian clang path absent on
     # base-builder; base-builder's own engine must win.
     from fuzzingbrain.importers.bench import _parse_setup_steps
+
     steps = _parse_setup_steps(_FWUPD_DOCKERFILE, {})
     assert not any("LIB_FUZZING_ENGINE" in s for s in steps)
 
 
 def test_dockerfile_harness_output_and_recipe():
     from fuzzingbrain.importers.bench import (
-        _dockerfile_harness_output, _dockerfile_build_recipe,
+        _dockerfile_harness_output,
+        _dockerfile_build_recipe,
     )
+
     assert _dockerfile_harness_output(_FWUPD_DOCKERFILE) == "cab_fuzzer"
     recipe = _dockerfile_build_recipe(_FWUPD_DOCKERFILE, {})
-    assert any("oss-fuzz.py" in r for r in recipe)   # the build command
-    assert any("sed -i" in r for r in recipe)        # source patch before it
-    assert not any("/out" in r for r in recipe)      # /out bundling excluded
+    assert any("oss-fuzz.py" in r for r in recipe)  # the build command
+    assert any("sed -i" in r for r in recipe)  # source patch before it
+    assert not any("/out" in r for r in recipe)  # /out bundling excluded
 
 
 def test_dockerfile_harness_output_empty_for_buildsh_projects():
     # A normal bug whose Dockerfile just runs harness/build.sh is NOT a
     # Dockerfile-build target (recipe empty -> importer reuses build.sh).
     from fuzzingbrain.importers.bench import (
-        _dockerfile_harness_output, _dockerfile_build_recipe,
+        _dockerfile_build_recipe,
     )
+
     df = (
         "FROM debian\nRUN apt-get install -y autoconf\n"
         "RUN git clone https://x/net-snmp /src/net-snmp\n"
@@ -323,6 +349,7 @@ def test_dockerfile_build_script_exposes_only_target_fuzzer(tmp_path):
     # The Dockerfile build (oss-fuzz.py) emits many fuzzers; build.sh must surface
     # only this bug's target in $OUT. Drive it with a fake recipe + stubbed python.
     from fuzzingbrain.importers.bench import _dockerfile_build_script
+
     stub = tmp_path / "bin"
     stub.mkdir()
     for name in ("python", "pip3"):
@@ -337,11 +364,17 @@ def test_dockerfile_build_script_exposes_only_target_fuzzer(tmp_path):
     # recipe writes two fuzzers into the (redirected) $OUT scratch dir
     recipe = ['touch "$OUT/cab_fuzzer"', 'touch "$OUT/wacom_fuzzer"']
     script = _dockerfile_build_script("fwupd", recipe, "cab_fuzzer")
-    env = {**os.environ, "SRC": str(src), "OUT": str(out), "WORK": str(work),
-           "HOME": str(tmp_path), "PATH": f"{stub}:{os.environ['PATH']}"}
+    env = {
+        **os.environ,
+        "SRC": str(src),
+        "OUT": str(out),
+        "WORK": str(work),
+        "HOME": str(tmp_path),
+        "PATH": f"{stub}:{os.environ['PATH']}",
+    }
     r = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
-    assert (out / "cab_fuzzer").is_file()       # target exposed
+    assert (out / "cab_fuzzer").is_file()  # target exposed
     assert not (out / "wacom_fuzzer").exists()  # other fuzzers stay in scratch
 
 
@@ -371,6 +404,7 @@ def test_parse_clones_flatten_to_src(tmp_path):
 
 def test_parse_setup_steps_carries_toolchain_not_apt_or_clone():
     from fuzzingbrain.importers.bench import _parse_setup_steps
+
     df = (
         "FROM debian\n"
         "ARG V=1.2.3\n"
@@ -386,16 +420,17 @@ def test_parse_setup_steps_carries_toolchain_not_apt_or_clone():
     steps = _parse_setup_steps(df, {"V": "1.2.3"})
     assert any("curl" in s and "jdk-1.2.3.tgz" in s for s in steps)  # ARG resolved
     assert "ENV JAVA_HOME=/opt/jdk" in steps
-    assert not any("CC=gcc" in s for s in steps)        # protected env dropped
-    assert not any("apt-get" in s for s in steps)       # handled separately
-    assert not any("git clone" in s for s in steps)     # handled separately
-    assert not any("build.sh" in s for s in steps)      # we run our own build
+    assert not any("CC=gcc" in s for s in steps)  # protected env dropped
+    assert not any("apt-get" in s for s in steps)  # handled separately
+    assert not any("git clone" in s for s in steps)  # handled separately
+    assert not any("build.sh" in s for s in steps)  # we run our own build
     assert not any("/out" in s for s in steps)
 
 
 def _run_jdk_select(tmp_path, java_home, available=("17",)):
     # Drive just the JDK-selection prelude of the JVM build script in isolation.
     from fuzzingbrain.importers.bench import _JVM_JDK_SELECT
+
     jvmdir = tmp_path / "jvm"
     for v in available:
         d = jvmdir / f"java-{v}-openjdk-amd64" / "bin"
@@ -404,12 +439,11 @@ def _run_jdk_select(tmp_path, java_home, available=("17",)):
         (d / "javac").chmod(0o755)
     script = (
         f'export FB_JVM_DIR="{jvmdir}"\n'
-        f'export JAVA_HOME="{java_home}"\n'
-        + _JVM_JDK_SELECT
-        + 'echo "$JAVA_HOME"\n'
+        f'export JAVA_HOME="{java_home}"\n' + _JVM_JDK_SELECT + 'echo "$JAVA_HOME"\n'
     )
-    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
-                       env={**os.environ})
+    r = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, env={**os.environ}
+    )
     return r.stdout.strip()
 
 
@@ -437,6 +471,7 @@ def test_jvm_wrapper_assembles_classpath_and_targets_entry_class(tmp_path):
     # against a fake jazzer_driver and verify it builds the classpath from the
     # bench's $OUT/lib (classes + project/dep jars) and targets the entry class.
     from fuzzingbrain.importers.bench import _jvm_build_script
+
     script = _jvm_build_script("com.x.IntlFuzzer", "IntlFuzzer", "build-libs")
     wrapper = script.split("<<'EOF'\n", 1)[1].split("\nEOF\n", 1)[0]
 
@@ -457,9 +492,9 @@ def test_jvm_wrapper_assembles_classpath_and_targets_entry_class(tmp_path):
     assert r.returncode == 0, r.stderr
     argv = (d / "argv").read_text()
     assert "--target_class=com.x.IntlFuzzer" in argv  # FQN entry class wired
-    assert "corpus/" in argv                          # libFuzzer args forwarded
-    cp_line = next(l for l in argv.splitlines() if l.startswith("--cp="))
-    assert "lib/classes" in cp_line                   # bench-compiled classes
+    assert "corpus/" in argv  # libFuzzer args forwarded
+    cp_line = next(ln for ln in argv.splitlines() if ln.startswith("--cp="))
+    assert "lib/classes" in cp_line  # bench-compiled classes
     assert "proj.jar" in cp_line and "dep.jar" in cp_line  # project + transitive deps
 
 
@@ -467,6 +502,7 @@ def test_jvm_build_reuses_bench_harness_step(tmp_path):
     # The JVM build must run the bench harness step (which assembles $OUT/lib) and
     # fail if it does not populate it, rather than recompiling the harness itself.
     from fuzzingbrain.importers.bench import _jvm_build_script
+
     script = _jvm_build_script("C", "C", "build-libs")
     fake = "#!/bin/bash\nexit 0\n"  # build-libs/harness succeed but make no $OUT/lib
     r, _ = _run_build_script(tmp_path, script, fake)
@@ -476,9 +512,10 @@ def test_jvm_build_reuses_bench_harness_step(tmp_path):
 
 def test_needs_rust_signals():
     from fuzzingbrain.importers.bench import _needs_rust, _select_base_image
-    assert _needs_rust(["cargo", "git"], "", "")           # apt
+
+    assert _needs_rust(["cargo", "git"], "", "")  # apt
     assert _needs_rust([], "ENV RUSTUP_HOME=/x\nRUN rustup", "")  # dockerfile
-    assert _needs_rust([], "", "cargo build --release")    # build.sh
+    assert _needs_rust([], "", "cargo build --release")  # build.sh
     assert not _needs_rust(["git", "cmake"], "FROM x", "clang -o h h.c")
     assert _select_base_image("c++", True).endswith("-rust")
     assert _select_base_image("jvm", False).endswith("-jvm")
@@ -486,11 +523,17 @@ def test_needs_rust_signals():
 
 
 def test_detect_libs_cmd_default():
-    assert _detect_libs_cmd("usage: build.sh build-libs | harness <config>") == "build-libs"
+    assert (
+        _detect_libs_cmd("usage: build.sh build-libs | harness <config>")
+        == "build-libs"
+    )
 
 
 def test_detect_libs_cmd_renamed():
-    assert _detect_libs_cmd("usage: build.sh openldap-libs | harness <config>") == "openldap-libs"
+    assert (
+        _detect_libs_cmd("usage: build.sh openldap-libs | harness <config>")
+        == "openldap-libs"
+    )
 
 
 def test_detect_libs_cmd_none():
@@ -498,8 +541,9 @@ def test_detect_libs_cmd_none():
     assert _detect_libs_cmd('cmd="${1:?usage: build.sh <config>}"') == ""
 
 
-def _make_skia_bug(tmp_path, *, vuln_commit="d3ea842cUNFETCHABLE",
-                   diffscan_commit="07acef99FETCHABLE"):
+def _make_skia_bug(
+    tmp_path, *, vuln_commit="d3ea842cUNFETCHABLE", diffscan_commit="07acef99FETCHABLE"
+):
     """A minimal skia bug dir: bench.yaml pins an (unfetchable) vuln_commit and
     diffscan.yaml pins the fetchable equivalent tree."""
     bug = tmp_path / "skia-raster8888-blur-oob"
@@ -511,13 +555,14 @@ def _make_skia_bug(tmp_path, *, vuln_commit="d3ea842cUNFETCHABLE",
     )
     if diffscan_commit is not None:
         (bug / "diffscan.yaml").write_text(
-            "repo: https://skia.googlesource.com/skia\n"
-            f"commit: {diffscan_commit}\n"
+            f"repo: https://skia.googlesource.com/skia\ncommit: {diffscan_commit}\n"
         )
     (bug / "harness" / "skia_fuzzer.cc").write_text(
-        "int LLVMFuzzerTestOneInput(){return 0;}\n")
+        "int LLVMFuzzerTestOneInput(){return 0;}\n"
+    )
     (bug / "harness" / "build.sh").write_text(
-        "#!/bin/bash\nusage: build.sh build-libs | harness <config>\n")
+        "#!/bin/bash\nusage: build.sh build-libs | harness <config>\n"
+    )
     (bug / "Dockerfile").write_text(
         "FROM debian:bookworm-slim\n"
         "RUN apt-get update && apt-get install -y --no-install-recommends "
@@ -538,8 +583,9 @@ def test_skia_prefers_diffscan_commit_over_unfetchable_vuln_commit(tmp_path):
 
 def test_skia_without_diffscan_keeps_dockerfile_commit(tmp_path):
     spec = spec_from_bench_bug(
-        _make_skia_bug(tmp_path, diffscan_commit=None), with_description=False)
-    assert spec.commit == "d3ea842cUNFETCHABLE"   # no override source -> unchanged
+        _make_skia_bug(tmp_path, diffscan_commit=None), with_description=False
+    )
+    assert spec.commit == "d3ea842cUNFETCHABLE"  # no override source -> unchanged
 
 
 def test_skia_adds_freetype_and_fontconfig_apt(tmp_path):
@@ -554,7 +600,8 @@ def _run_skia_prelude(tmp_path, sanitizer="address"):
     """Execute _skia_prelude() against a fake skia tree and return the patched
     gn/skia.gni and harness/build.sh."""
     from fuzzingbrain.importers.bench import _skia_prelude
-    src = tmp_path / f"src_{sanitizer}"   # unique per call (helper may run twice)
+
+    src = tmp_path / f"src_{sanitizer}"  # unique per call (helper may run twice)
     (src / "skia" / "gn").mkdir(parents=True)
     (src / "skia" / "gn" / "skia.gni").write_text("  skia_enable_ganesh = true\n")
     (src / "skia" / "third_party" / "ninja").mkdir(parents=True)
@@ -562,19 +609,22 @@ def _run_skia_prelude(tmp_path, sanitizer="address"):
     (src / "harness" / "build.sh").write_text(
         '        release-asan) CFH="-O2 -g"; SAN="-fsanitize=fuzzer,address" ;;\n'
         '        coverage)     SAN="-fsanitize=fuzzer" ;;\n'
-        '    for CONFIG_LIB in asan cov; do :; done\n'
+        "    for CONFIG_LIB in asan cov; do :; done\n"
     )
     env = {**os.environ, "SRC": str(src), "SANITIZER": sanitizer}
-    r = subprocess.run(["bash", "-c", _skia_prelude()], env=env,
-                       capture_output=True, text=True)
+    r = subprocess.run(
+        ["bash", "-c", _skia_prelude()], env=env, capture_output=True, text=True
+    )
     assert r.returncode == 0, r.stderr
-    return ((src / "skia" / "gn" / "skia.gni").read_text(),
-            (src / "harness" / "build.sh").read_text())
+    return (
+        (src / "skia" / "gn" / "skia.gni").read_text(),
+        (src / "harness" / "build.sh").read_text(),
+    )
 
 
 def test_skia_prelude_disables_ganesh_and_adds_asan_libcxx(tmp_path):
     gni, bsh = _run_skia_prelude(tmp_path)
-    assert "skia_enable_ganesh = false" in gni              # GPU backend off
+    assert "skia_enable_ganesh = false" in gni  # GPU backend off
     # the asan link config gains -stdlib=libc++ (matches the libc++ asan libs) ...
     assert '-fsanitize=fuzzer,address -stdlib=libc++"' in bsh
     # ... but the coverage config (libstdc++) is left alone
@@ -583,9 +633,9 @@ def test_skia_prelude_disables_ganesh_and_adds_asan_libcxx(tmp_path):
 
 def test_skia_prelude_trims_libs_loop_to_active_sanitizer(tmp_path):
     _, bsh_asan = _run_skia_prelude(tmp_path, sanitizer="address")
-    assert "for CONFIG_LIB in asan;" in bsh_asan            # cov pass dropped
+    assert "for CONFIG_LIB in asan;" in bsh_asan  # cov pass dropped
     _, bsh_cov = _run_skia_prelude(tmp_path, sanitizer="coverage")
-    assert "for CONFIG_LIB in cov;" in bsh_cov              # asan pass dropped
+    assert "for CONFIG_LIB in cov;" in bsh_cov  # asan pass dropped
 
 
 def test_non_skia_build_script_has_no_skia_prelude(tmp_path):
@@ -595,9 +645,16 @@ def test_non_skia_build_script_has_no_skia_prelude(tmp_path):
     assert "third_party/ninja" not in spec.build_script
 
 
-def _make_bug(tmp_path, *, language="c", sources=("vacm_fuzzer.c",), apt=None,
-              project="net-snmp", entrypoint=None,
-              description="NULL deref in vacm_parse_config_group at vacm.c:414"):
+def _make_bug(
+    tmp_path,
+    *,
+    language="c",
+    sources=("vacm_fuzzer.c",),
+    apt=None,
+    project="net-snmp",
+    entrypoint=None,
+    description="NULL deref in vacm_parse_config_group at vacm.c:414",
+):
     bug = tmp_path / "netsnmp-vacm-parse-npd"
     (bug / "harness").mkdir(parents=True)
     if description is not None:
@@ -609,8 +666,7 @@ def _make_bug(tmp_path, *, language="c", sources=("vacm_fuzzer.c",), apt=None,
         "target:\n"
         "  repo: https://github.com/net-snmp/net-snmp\n"
         "  vuln_commit: fc28b88a64b7739d76c73058c3811d5387851c32\n"
-        f"  language: {language}\n"
-        + harness_section
+        f"  language: {language}\n" + harness_section
     )
     for s in sources:
         (bug / "harness" / s).write_text("int LLVMFuzzerTestOneInput(){return 0;}\n")
@@ -620,7 +676,9 @@ def _make_bug(tmp_path, *, language="c", sources=("vacm_fuzzer.c",), apt=None,
     (bug / "Dockerfile").write_text(
         "FROM debian:bookworm-slim\n"
         "RUN apt-get update && apt-get install -y --no-install-recommends \\\n"
-        + "    " + " ".join(apt) + " \\\n"
+        + "    "
+        + " ".join(apt)
+        + " \\\n"
         "    && rm -rf /var/lib/apt/lists/*\n"
     )
     return bug
@@ -652,7 +710,9 @@ def test_apt_filters_toolchain_packages(tmp_path):
 
 def test_libclang_dev_is_kept(tmp_path):
     # libclang-dev is a bindgen library, not the clang compiler — keep it.
-    spec = spec_from_bench_bug(_make_bug(tmp_path, apt=["git", "libclang-dev", "meson"]))
+    spec = spec_from_bench_bug(
+        _make_bug(tmp_path, apt=["git", "libclang-dev", "meson"])
+    )
     assert "libclang-dev" in spec.apt_deps
 
 
@@ -664,11 +724,15 @@ def test_cpp_language_mapped(tmp_path):
 def test_jvm_fuzzer_uses_simple_class_for_out_file_and_fqn_for_target(tmp_path):
     # The $OUT fuzzer file must be the simple class name (no dots — a dotted file
     # name breaks discovery), while Jazzer's --target_class needs the FQN.
-    spec = spec_from_bench_bug(_make_bug(
-        tmp_path, language="jvm", sources=("IntlFuzzer.java",),
-        entrypoint="com.oracle.IntlFuzzer.fuzzerTestOneInput",
-    ))
-    assert 'cat > "$OUT/IntlFuzzer"' in spec.build_script        # simple name
+    spec = spec_from_bench_bug(
+        _make_bug(
+            tmp_path,
+            language="jvm",
+            sources=("IntlFuzzer.java",),
+            entrypoint="com.oracle.IntlFuzzer.fuzzerTestOneInput",
+        )
+    )
+    assert 'cat > "$OUT/IntlFuzzer"' in spec.build_script  # simple name
     assert "--target_class=com.oracle.IntlFuzzer" in spec.build_script  # FQN
 
 
@@ -744,8 +808,13 @@ def test_flatten_symlink_exposes_repo_at_src(tmp_path):
     (src / "harness" / "build.sh").write_text(fake)
     out = tmp_path / "run" / "out"
     out.mkdir(parents=True)
-    env = {**os.environ, "SRC": str(src), "OUT": str(out),
-           "SANITIZER": "address", "HOME": str(tmp_path)}
+    env = {
+        **os.environ,
+        "SRC": str(src),
+        "OUT": str(out),
+        "SANITIZER": "address",
+        "HOME": str(tmp_path),
+    }
     r = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     assert (src / "amalgam.c").exists()  # symlinked up from $SRC/mongoose
@@ -770,15 +839,19 @@ def test_cased_clone_dir_is_lowercased_with_symlink(tmp_path):
         " && git -C /src/Net-SNMP checkout fc28b88a\n"
     )
     spec = spec_from_bench_bug(bug)
-    assert spec.project == "net-snmp"                       # lower-cased
-    assert 'ln -sfn "$SRC/net-snmp" "$SRC/Net-SNMP"' in spec.build_script  # cased symlink
+    assert spec.project == "net-snmp"  # lower-cased
+    assert (
+        'ln -sfn "$SRC/net-snmp" "$SRC/Net-SNMP"' in spec.build_script
+    )  # cased symlink
 
 
 def test_spec_build_script_wires_the_bug_fuzzer_name(tmp_path):
     # The end-to-end spec must drive the bench build.sh and target the harness
     # source's stem as the fuzzer name (vacm_fuzzer.c -> vacm_fuzzer).
     r, out = _run_build_script(
-        tmp_path / "run", spec_from_bench_bug(_make_bug(tmp_path)).build_script, _FAKE_STD
+        tmp_path / "run",
+        spec_from_bench_bug(_make_bug(tmp_path)).build_script,
+        _FAKE_STD,
     )
     assert r.returncode == 0, r.stderr
     assert (out / "vacm_fuzzer").is_file()
