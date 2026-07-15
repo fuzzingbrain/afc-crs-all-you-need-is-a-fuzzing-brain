@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Union
 from loguru import logger
 
 from .models import (
+    CRASH_ARTIFACT_PREFIXES,
     FuzzerStatus,
     FuzzerType,
     FuzzerStats,
@@ -72,6 +73,7 @@ class FuzzerInstance:
         # Process management
         self.process: Optional[asyncio.subprocess.Process] = None
         self.container_id: Optional[str] = None
+        self._output_task: Optional[asyncio.Task] = None
         self.status = FuzzerStatus.IDLE
 
         # Statistics
@@ -184,15 +186,22 @@ class FuzzerInstance:
                 f"[Fuzzer:{self.instance_id}] Starting: {' '.join(cmd[:10])}..."
             )
 
-            # Start process
+            # Start process. Merge stderr into stdout so a single reader drains
+            # both streams (libFuzzer writes to stderr, base-runner to stdout).
             self.process = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
             )
 
             self.status = FuzzerStatus.RUNNING
             self.stats.status = FuzzerStatus.RUNNING
+
+            # Continuously drain stdout/stderr. libFuzzer is very verbose and
+            # will block on write once the OS pipe buffer fills if nobody reads
+            # it, silently stalling the fuzzer. _parse_output also keeps the
+            # live coverage/exec-rate stats up to date.
+            self._output_task = asyncio.create_task(self._parse_output())
 
             logger.info(
                 f"[Fuzzer:{self.instance_id}] Started (PID: {self.process.pid})"
@@ -234,6 +243,12 @@ class FuzzerInstance:
             pass
         except Exception as e:
             logger.error(f"[Fuzzer:{self.instance_id}] Error stopping: {e}")
+
+        # Stop draining output; the process is gone so the reader would just
+        # see EOF, but cancel explicitly to avoid a dangling task.
+        if self._output_task is not None:
+            self._output_task.cancel()
+            self._output_task = None
 
         self.status = FuzzerStatus.STOPPED
         self.stats.status = FuzzerStatus.STOPPED
@@ -305,7 +320,7 @@ class FuzzerInstance:
         """
         crashes = []
         for f in self.crashes_dir.iterdir():
-            if f.is_file() and f.name.startswith("crash-"):
+            if f.is_file() and f.name.startswith(CRASH_ARTIFACT_PREFIXES):
                 crashes.append(f)
         return sorted(crashes, key=lambda p: p.stat().st_mtime, reverse=True)
 
@@ -345,11 +360,11 @@ class FuzzerInstance:
 
     async def _parse_output(self) -> None:
         """Parse fuzzer output for statistics (background task)."""
-        if self.process is None or self.process.stderr is None:
+        if self.process is None or self.process.stdout is None:
             return
 
         try:
-            async for line in self.process.stderr:
+            async for line in self.process.stdout:
                 line_str = line.decode("utf-8", errors="replace").strip()
 
                 # Parse coverage info

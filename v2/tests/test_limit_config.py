@@ -8,9 +8,11 @@ boundary, so a set limit is never silently dropped.
 """
 
 import json
+import sys
 
 from fuzzingbrain.core.config import Config
 from fuzzingbrain.analyzer.models import AnalyzeRequest
+from fuzzingbrain.main import create_config_from_args, parse_args
 
 
 class TestBudgetPlumbing:
@@ -18,6 +20,13 @@ class TestBudgetPlumbing:
         monkeypatch.setenv("FUZZINGBRAIN_BUDGET_LIMIT", "20")
         cfg = Config.from_env()
         assert cfg.budget_limit == 20.0
+
+    def test_budget_zero_from_cli_is_honored_as_unlimited(self, monkeypatch):
+        # --budget 0 means "unlimited" (dispatcher guards on budget_limit > 0).
+        # A falsy check would silently drop the 0 and keep the default ceiling.
+        monkeypatch.setattr(sys, "argv", ["fuzzingbrain", "--budget", "0"])
+        cfg = create_config_from_args(parse_args())
+        assert cfg.budget_limit == 0
 
     def test_budget_from_json(self, tmp_path):
         p = tmp_path / "task.json"
