@@ -15,6 +15,11 @@ from bson import ObjectId
 
 from ..core.utils import generate_id
 
+# Artifact filename prefixes libFuzzer writes under -artifact_prefix. Beyond
+# plain "crash-", these cover OOMs, hangs/timeouts, and leaks — each of which is
+# a reportable finding, not something to drop.
+CRASH_ARTIFACT_PREFIXES = ("crash-", "oom-", "timeout-", "leak-")
+
 
 class FuzzerStatus(str, Enum):
     """Fuzzer instance status."""
