@@ -810,6 +810,7 @@ def generate(variant: int = 1) -> bytes:
         """
         import asyncio
         from ..fuzzer import get_fuzzer_manager, unregister_fuzzer_manager
+        from ..fuzzer.reaper import reap_task_containers
 
         logger.info("Shutting down all Global Fuzzers...")
 
@@ -853,6 +854,14 @@ def generate(variant: int = 1) -> bytes:
                 f"Task-level FuzzerMonitor stopped: "
                 f"{crash_stats['total_crashes']} crashes found"
             )
+
+        # Guaranteed backstop: reap any fuzzer container for this task straight
+        # from the Docker daemon. The in-process managers above are registered in
+        # the Celery worker subprocess and are unreachable from here, so without
+        # this the Global Fuzzer containers would leak.
+        reaped = reap_task_containers(self.task.task_id)
+        if reaped:
+            logger.info(f"Reaped {reaped} fuzzer container(s) for task")
 
     def wait_for_completion(
         self,

@@ -1097,6 +1097,16 @@ class TaskProcessor:
                     logger.info("Stopping Analysis Server...")
                     stop_analysis_server(task.task_path)
 
+                # Reap any fuzzer container still running for this task. This is
+                # the final backstop for the leak where the dispatcher can't reach
+                # the subprocess-owned FuzzerManagers; safe to call unconditionally.
+                try:
+                    from ..fuzzer.reaper import reap_task_containers
+
+                    reap_task_containers(task.task_id)
+                except Exception as reap_err:
+                    logger.warning(f"Container reap failed: {reap_err}")
+
                 # Stop infrastructure (CLI mode only)
                 if infra:
                     infra.stop()

@@ -273,6 +273,15 @@ def signal_handler(signum, frame):
     except Exception:
         pass
 
+    # Reap leaked fuzzer containers for this task before exiting: the Celery
+    # workers that own them are about to be killed with no chance to clean up.
+    try:
+        from .fuzzer.reaper import reap_task_containers
+
+        reap_task_containers(_current_task_id)
+    except Exception:
+        pass
+
     # Stop infrastructure
     try:
         from .core.infrastructure import InfrastructureManager
