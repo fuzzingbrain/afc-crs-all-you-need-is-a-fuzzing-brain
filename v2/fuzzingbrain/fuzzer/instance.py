@@ -8,6 +8,7 @@ Encapsulates a single libFuzzer process.
 import asyncio
 import hashlib
 import re
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
@@ -22,6 +23,7 @@ from .models import (
     SPFuzzerConfig,
     SeedInfo,
 )
+from .reaper import container_labels
 
 
 class FuzzerInstance:
@@ -41,6 +43,8 @@ class FuzzerInstance:
         crashes_dir: Path,
         fuzzer_type: FuzzerType = FuzzerType.GLOBAL,
         config: Union[GlobalFuzzerConfig, SPFuzzerConfig] = None,
+        task_id: str = "",
+        worker_id: str = "",
     ):
         """
         Initialize FuzzerInstance.
@@ -53,6 +57,8 @@ class FuzzerInstance:
             crashes_dir: Directory for crash outputs
             fuzzer_type: GLOBAL or SP
             config: Fuzzer configuration
+            task_id: Parent task id (labels the container so it can be reaped)
+            worker_id: Owning worker id (labels the container)
         """
         self.instance_id = instance_id
         self.fuzzer_path = Path(fuzzer_path)
@@ -60,6 +66,8 @@ class FuzzerInstance:
         self.corpus_dir = Path(corpus_dir)
         self.crashes_dir = Path(crashes_dir)
         self.fuzzer_type = fuzzer_type
+        self.task_id = task_id
+        self.worker_id = worker_id
 
         # Configuration
         if config is None:
@@ -72,6 +80,9 @@ class FuzzerInstance:
         # Process management
         self.process: Optional[asyncio.subprocess.Process] = None
         self.container_id: Optional[str] = None
+        # Docker container name, assigned per run in start(). Lets stop() kill
+        # the container itself rather than only the `docker run` CLI client.
+        self.container_name: Optional[str] = None
         self.status = FuzzerStatus.IDLE
 
         # Statistics
@@ -112,6 +123,12 @@ class FuzzerInstance:
             "--entrypoint",
             "",  # Bypass base-runner's entrypoint
         ]
+
+        # Name the container so stop() can target it directly, and label it so
+        # the dispatcher can reap it by task even across the process boundary.
+        if self.container_name:
+            cmd.extend(["--name", self.container_name])
+        cmd.extend(container_labels(self.task_id, self.worker_id))
 
         # Environment variables
         cmd.extend(
@@ -178,6 +195,11 @@ class FuzzerInstance:
         self.stats.stop_time = None
 
         try:
+            # Assign a unique container name for this run (docker names allow
+            # only [a-zA-Z0-9_.-]).
+            safe_id = re.sub(r"[^A-Za-z0-9_.-]", "-", self.instance_id)[:24]
+            self.container_name = f"fb_{safe_id}_{uuid.uuid4().hex[:8]}"
+
             # Build command
             cmd = self._build_docker_command()
             logger.info(
@@ -235,12 +257,35 @@ class FuzzerInstance:
         except Exception as e:
             logger.error(f"[Fuzzer:{self.instance_id}] Error stopping: {e}")
 
+        # Guarantee the container is gone. terminate()/kill() act on the
+        # `docker run` CLI client, not the container itself; if the client was
+        # SIGKILLed (or had already died) the --rm container can outlive it.
+        # Removing it by name is idempotent.
+        await self._force_remove_container()
+
         self.status = FuzzerStatus.STOPPED
         self.stats.status = FuzzerStatus.STOPPED
         self.stats.stop_time = datetime.now()
         self.process = None
 
         logger.info(f"[Fuzzer:{self.instance_id}] Stopped")
+
+    async def _force_remove_container(self) -> None:
+        """Best-effort `docker rm -f` of this instance's container by name."""
+        if not self.container_name:
+            return
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker",
+                "rm",
+                "-f",
+                self.container_name,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(proc.wait(), timeout=15.0)
+        except (asyncio.TimeoutError, OSError) as e:
+            logger.debug(f"[Fuzzer:{self.instance_id}] container remove failed: {e}")
 
     def add_seed(self, seed: bytes, name: str = None) -> Path:
         """

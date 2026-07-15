@@ -151,6 +151,8 @@ class FuzzerManager:
             crashes_dir=self.global_crashes_dir,
             fuzzer_type=FuzzerType.GLOBAL,
             config=self.global_config,
+            task_id=self.task_id,
+            worker_id=self.worker_id,
         )
 
         # Add initial seeds
@@ -317,6 +319,8 @@ class FuzzerManager:
             crashes_dir=sp_crashes_dir,
             fuzzer_type=FuzzerType.SP,
             config=self.sp_config,
+            task_id=self.task_id,
+            worker_id=self.worker_id,
         )
 
         # Register crash directory (with worker_id)
