@@ -371,6 +371,57 @@ class TestSPClaimScheduling:
         assert final.pov_success_by["harness_name"] == "fuzzA"
         assert final.status == SPStatus.POV_GENERATED.value
 
+    def test_pov_failure_does_not_clobber_concurrent_winner(self, repos, monkeypatch):
+        """A late POV failure must not revert an SP another worker already won.
+
+        Reproduces the read-modify-write race in complete_pov's failure path:
+        the failing worker acts on a stale snapshot (pov_success_by=None, all
+        contributors "attempted") taken before the winner committed. The FAILED
+        write must be guarded so it cannot overwrite POV_GENERATED.
+        """
+        task_id = generate_id()
+        sp = self._make_sp(
+            task_id,
+            status=SPStatus.GENERATING_POV.value,
+            score=0.8,
+            sources=[
+                {"harness_name": "fuzzA", "sanitizer": "address"},
+                {"harness_name": "fuzzB", "sanitizer": "address"},
+            ],
+        )
+        repos.suspicious_points.save(sp)
+
+        # Worker B wins first: the SP is POV_GENERATED in the DB.
+        repos.suspicious_points.complete_pov(
+            sp.suspicious_point_id,
+            pov_id=generate_id(),
+            success=True,
+            harness_name="fuzzB",
+            sanitizer="address",
+        )
+
+        # Worker A still holds a pre-win snapshot: no winner yet, both attempted.
+        stale = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
+        stale.pov_success_by = None
+        stale.pov_attempted_by = [
+            {"harness_name": "fuzzA", "sanitizer": "address"},
+            {"harness_name": "fuzzB", "sanitizer": "address"},
+        ]
+        monkeypatch.setattr(repos.suspicious_points, "find_by_id", lambda _id: stale)
+
+        # A reports failure. Pre-fix this unconditionally wrote FAILED.
+        repos.suspicious_points.complete_pov(
+            sp.suspicious_point_id,
+            success=False,
+            harness_name="fuzzA",
+            sanitizer="address",
+        )
+
+        monkeypatch.undo()
+        final = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
+        assert final.status == SPStatus.POV_GENERATED.value
+        assert final.pov_success_by["harness_name"] == "fuzzB"
+
     def test_claim_pov_respects_min_score(self, repos):
         """SPs below min_score are not claimable for POV."""
         task_id = generate_id()

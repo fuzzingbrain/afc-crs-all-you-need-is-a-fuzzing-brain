@@ -554,7 +554,9 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
         config.pov_count = args.pov_count
     if args.fuzzers:
         config.fuzzer_filter = [f.strip() for f in args.fuzzers.split(",") if f.strip()]
-    if args.budget:
+    # Honor an explicit 0, which means "unlimited" (see --budget help and the
+    # `budget_limit > 0` guard in the dispatcher). A falsy check would drop it.
+    if args.budget is not None:
         config.budget_limit = args.budget
 
     # Commit configuration

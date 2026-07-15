@@ -23,7 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 from loguru import logger
 
-from .models import CrashRecord
+from .models import CRASH_ARTIFACT_PREFIXES, CrashRecord
 
 
 @dataclass
@@ -687,9 +687,11 @@ class FuzzerMonitor:
         if not crash_dir.exists():
             return
 
-        # Find crash files
-        for crash_file in crash_dir.glob("crash-*"):
+        # Find crash artifacts (crash-, oom-, timeout-, leak-)
+        for crash_file in crash_dir.iterdir():
             if not crash_file.is_file():
+                continue
+            if not crash_file.name.startswith(CRASH_ARTIFACT_PREFIXES):
                 continue
 
             try:

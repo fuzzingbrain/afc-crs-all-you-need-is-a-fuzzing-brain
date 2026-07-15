@@ -17,6 +17,7 @@ from loguru import logger
 
 from .config import LLMConfig, get_default_config
 from .exceptions import (
+    LLMAllModelsFailedError,
     LLMAuthError,
     LLMContentFilterError,
     LLMContextLengthError,
@@ -262,6 +263,11 @@ class LLMClient:
     ):
         self.config = config or get_default_config()
         self._tried_models: set = set()
+        # Number of times the whole fallback chain has been exhausted and
+        # retried for the current request. Bounds the exhausted-chain retry
+        # loop (see _try_fallback) so a persistent outage fails fast instead
+        # of looping forever.
+        self._fallback_rounds: int = 0
 
         # Context for LLM call tracking
         self.agent_id = agent_id
@@ -271,6 +277,7 @@ class LLMClient:
     def reset_tried_models(self) -> None:
         """Reset the set of tried models (call between independent requests)"""
         self._tried_models.clear()
+        self._fallback_rounds = 0
 
     def _record_llm_call(
         self,
@@ -514,8 +521,10 @@ class LLMClient:
         ):
             return LLMModelNotFoundError(str(error), model=model_id)
 
-        # Context length
-        if "context" in error_str or "token" in error_str and "limit" in error_str:
+        # Context length. Require "limit" so a transient error that merely
+        # mentions "context"/"token" isn't misclassified as non-retryable.
+        # (`and` binds tighter than `or`, so the parentheses are load-bearing.)
+        if ("context" in error_str or "token" in error_str) and "limit" in error_str:
             return LLMContextLengthError(str(error), model=model_id)
 
         # Content filter / policy violations
@@ -931,10 +940,20 @@ class LLMClient:
             ]
 
         if not fallback_chain:
-            # All models exhausted - sleep and retry instead of crashing
+            # Whole chain exhausted. Retry it a bounded number of times (with a
+            # cooldown) so a transient provider-wide outage can recover, then
+            # give up — never loop forever.
+            if self._fallback_rounds >= self.config.max_fallback_attempts:
+                raise LLMAllModelsFailedError(
+                    f"All fallback models failed after {self._fallback_rounds} "
+                    "retry rounds",
+                    tried_models=list(self._tried_models),
+                )
+            self._fallback_rounds += 1
             logger.warning(
                 f"All fallback models exhausted (tried: {list(self._tried_models)}). "
-                f"Sleeping 30s before retrying..."
+                f"Sleeping 30s before retry round "
+                f"{self._fallback_rounds}/{self.config.max_fallback_attempts}..."
             )
             time.sleep(30)
             # Reset tried models and retry
@@ -1207,10 +1226,20 @@ class LLMClient:
             ]
 
         if not fallback_chain:
-            # All models exhausted - sleep and retry instead of crashing
+            # Whole chain exhausted. Retry it a bounded number of times (with a
+            # cooldown) so a transient provider-wide outage can recover, then
+            # give up — never loop forever.
+            if self._fallback_rounds >= self.config.max_fallback_attempts:
+                raise LLMAllModelsFailedError(
+                    f"All fallback models failed after {self._fallback_rounds} "
+                    "retry rounds",
+                    tried_models=list(self._tried_models),
+                )
+            self._fallback_rounds += 1
             logger.warning(
                 f"All fallback models exhausted (tried: {list(self._tried_models)}). "
-                f"Sleeping 30s before retrying..."
+                f"Sleeping 30s before retry round "
+                f"{self._fallback_rounds}/{self.config.max_fallback_attempts}..."
             )
             await asyncio.sleep(30)
             # Reset tried models and retry

@@ -801,12 +801,27 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                     attempted_set = {
                         (a["harness_name"], a["sanitizer"]) for a in sp.pov_attempted_by
                     }
-                    if sources_set == attempted_set and sp.pov_success_by is None:
-                        # All contributors tried and failed
-                        self.update(sp_id, {"status": SPStatus.FAILED.value})
-                        logger.info(
-                            f"SP {sp_id}: All contributors failed, marking as FAILED"
+                    if sources_set == attempted_set:
+                        # All contributors tried and failed. Guard on
+                        # pov_success_by: None so a worker that raced to a
+                        # verified POV in the meantime is never reverted to
+                        # FAILED (the success path above is likewise guarded).
+                        result = self.collection.update_one(
+                            {
+                                "_id": ObjectId(sp_id),
+                                "pov_success_by": None,
+                            },
+                            {
+                                "$set": {
+                                    "status": SPStatus.FAILED.value,
+                                    "updated_at": datetime.now(),
+                                }
+                            },
                         )
+                        if result.modified_count > 0:
+                            logger.info(
+                                f"SP {sp_id}: All contributors failed, marking as FAILED"
+                            )
                 return True
 
         except Exception as e:
