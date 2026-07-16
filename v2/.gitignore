@@ -49,3 +49,6 @@ Z-Code-Analyzer-Station/
 **/.env
 .env.*
 !.env.example
+
+# Agent-model benchmarking venv (fuzzingbrain.agent_model)
+.agent_venv/
