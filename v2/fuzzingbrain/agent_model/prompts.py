@@ -125,6 +125,31 @@ Produce a PoC. Prefer building the harness locally and fuzzing it; call
 `run_input()` to confirm any crash.
 """
 
+JVM_METHODOLOGY = """\
+IMPORTANT — this is a JVM (Java/Kotlin) target fuzzed under Jazzer. There is NO
+local fuzzing here: the sandbox has no JVM, javac, Maven/Gradle, or Jazzer, so
+`run_input()` is your ONLY way to execute the harness. Do NOT spend turns trying
+to compile or build anything — it will fail. Adjust your method:
+
+- Read the harness and `./src` to learn the EXACT input format the harness
+  decodes (often a container/serialization format) and which library code path it
+  reaches from the raw bytes.
+- Construct candidates PROGRAMMATICALLY: write a small python3 generator with
+  `exec`, save the bytes under `/workspace` with `write_file`, get one running
+  through the harness within your first few turns, then iterate on the
+  `run_input()` output — the JVM stderr shows how far you got and any exception.
+- The fault you must trigger is what Jazzer reports: an UNCAUGHT exception
+  (NullPointerException, ClassCastException, IndexOutOfBoundsException,
+  NumberFormatException, an assertion, etc.), an OutOfMemoryError, or a
+  timeout/hang. Check the harness for which of these it lets escape.
+- For OutOfMemoryError / resource-exhaustion bugs: find a length / count / size
+  field in the input format that the parser uses to ALLOCATE a buffer or drive a
+  LOOP, and set it to a very large value so the parser tries a huge allocation or
+  unbounded work. A single crafted header field is often enough.
+- Keep candidates small and valid enough to REACH the target code — a malformed
+  header that's rejected immediately teaches you nothing. Build up from a
+  known-valid sample (search `./src` for test data files you can start from)."""
+
 FIRST_TEST_NUDGE = (
     "You have not run_input() a single candidate yet. Stop reading and TEST "
     "something now: build the harness locally and fuzz it (clang++ "

@@ -125,12 +125,20 @@ class AgentModel:
             self.t.initialize()
             setup = self._setup_context()
             harness = (setup.get("harness") or {}) if isinstance(setup, dict) else {}
+            lang = str(setup.get("language") or "").lower()
+            htype = str(harness.get("type") or "").lower()
+            is_jvm = lang in ("jvm", "java", "kotlin") or htype in ("java", "jvm")
             user = prompts.INITIAL_USER.format(
                 project=setup.get("project") or "the target",
                 language=setup.get("language") or "native",
                 entrypoint=harness.get("entrypoint") or "the entrypoint",
                 setup_json=json.dumps(setup, indent=2)[:4000],
             )
+            # JVM targets have no local toolchain — the build-and-fuzz strategy in
+            # the system prompt is a dead end there, so hand the agent the
+            # construct-and-test-via-run_input methodology up front.
+            if is_jvm:
+                user += "\n\n" + prompts.JVM_METHODOLOGY
             tools = self.t.openai_tools() + [prompts.PLAN_TOOL]
             messages = [
                 {"role": "system", "content": prompts.SYSTEM_PROMPT},
