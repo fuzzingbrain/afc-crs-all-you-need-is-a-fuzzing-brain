@@ -159,6 +159,33 @@ Tuning (env vars, all optional): `FUZZINGBRAIN_AGENT_MODEL`,
 `FUZZINGBRAIN_AGENT_TIME_S`, `FUZZINGBRAIN_AGENT_TEMP`. The implementation lives
 in [`fuzzingbrain/agent_mode/`](fuzzingbrain/agent_mode/).
 
+### Building on a small machine
+
+The fuzzer build step is memory-hungry: by default the Analyzer will not start a
+build unless **≥4 GB of RAM is free**, and it times out with
+`Build failed: Timeout waiting for resources` otherwise. On a constrained VM you
+can relax that gate with env vars (defaults apply when unset). Lowering the
+memory floor only makes sense alongside swap — otherwise the compiler gets
+OOM-killed instead of merely refusing to start:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `FUZZINGBRAIN_MIN_MEMORY_GB` | `4.0` | Min free RAM (GB) before a build may start |
+| `FUZZINGBRAIN_MIN_MEMORY_PERCENT` | `15.0` | Min free RAM (%) to keep in reserve |
+| `FUZZINGBRAIN_MAX_CPU_PERCENT` | `85.0` | Don't start a build above this CPU load |
+| `FUZZINGBRAIN_MAX_PARALLEL_BUILDS` | `cores/4` | Concurrent sanitizer builds (set `1` on 1-2 GB boxes) |
+| `FUZZINGBRAIN_BUILD_RESOURCE_TIMEOUT` | `600` | Seconds to wait for a build slot |
+
+```bash
+# e.g. a 2 GB droplet with 6 GB swap added
+export FUZZINGBRAIN_MIN_MEMORY_GB=0.5
+export FUZZINGBRAIN_MAX_PARALLEL_BUILDS=1
+export FUZZINGBRAIN_MAX_CPU_PERCENT=99
+```
+
+A machine with ≥4 GB RAM is still strongly recommended; these knobs trade build
+speed and OOM-safety for the ability to run at all.
+
 ## Modes
 
 | Mode | Command | Use case |
