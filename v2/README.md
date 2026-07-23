@@ -71,6 +71,8 @@ Common options:
 | Option | Description |
 |---|---|
 | `--budget <usd>` | **LLM spend cap in USD** (strongly recommended, e.g. `--budget 20`) |
+| `--agent` | **Agent mode**: one lean Codex-style agent loop instead of the multi-agent SP pipeline (far fewer tokens) |
+| `--agent-model <id>` | Model id/alias for agent mode (default: LLM client default) |
 | `--scan-mode <full\|delta>` | Full scan (default) or delta scan |
 | `-b <commit>` / `-d <commit>` | Base / delta commit (delta scan) |
 | `-v <commit>` | Target a specific commit for a full scan |
@@ -127,6 +129,62 @@ crash before it is reported. See [`documentation/`](documentation/) for the full
 architecture, agent design, and Suspicious-Point lifecycle, and
 [`docs/FUSION_DESIGN.md`](docs/FUSION_DESIGN.md) for the breadth/depth fusion
 roadmap.
+
+### Agent mode (`--agent`)
+
+Agent mode replaces that whole fan-out with a **single Codex-style agent**: one
+LLM in a tool-calling loop with a small set of general tools —
+`get_fuzzer_source`, `get_diff`, `read_file`, `search`, `list_dir`,
+`get_function_source`, `test_pov`, and (for patch tasks) `submit_patch`.
+
+```
+target ─▶ analyze ─▶ build fuzzers ─▶ [ single agent: read · hypothesize ·
+                                        test_pov · iterate on crash output ] ─▶ report
+```
+
+The agent reads the diff/harness, forms a hypothesis, builds a candidate input,
+runs it against the real fuzzer in Docker (`test_pov`), and iterates on the
+sanitizer output — all in one conversation. A verified crash is recorded through
+the same results pipeline as a normal scan. There are no per-agent MCP servers,
+no MongoDB `AgentContext`, and no context-compression model; the run is bounded
+by a running USD / iteration / time budget.
+
+```bash
+# Delta scan in agent mode with a $10 cap
+./FuzzingBrain.sh --agent --budget 10 -b <base> -d <delta> <git_url>
+```
+
+Tuning (env vars, all optional): `FUZZINGBRAIN_AGENT_MODEL`,
+`FUZZINGBRAIN_AGENT_MAX_ITER` (default 40), `FUZZINGBRAIN_AGENT_BUDGET_USD`,
+`FUZZINGBRAIN_AGENT_TIME_S`, `FUZZINGBRAIN_AGENT_TEMP`. The implementation lives
+in [`fuzzingbrain/agent_mode/`](fuzzingbrain/agent_mode/).
+
+### Building on a small machine
+
+The fuzzer build step is memory-hungry: by default the Analyzer will not start a
+build unless **≥4 GB of RAM is free**, and it times out with
+`Build failed: Timeout waiting for resources` otherwise. On a constrained VM you
+can relax that gate with env vars (defaults apply when unset). Lowering the
+memory floor only makes sense alongside swap — otherwise the compiler gets
+OOM-killed instead of merely refusing to start:
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `FUZZINGBRAIN_MIN_MEMORY_GB` | `4.0` | Min free RAM (GB) before a build may start |
+| `FUZZINGBRAIN_MIN_MEMORY_PERCENT` | `15.0` | Min free RAM (%) to keep in reserve |
+| `FUZZINGBRAIN_MAX_CPU_PERCENT` | `85.0` | Don't start a build above this CPU load |
+| `FUZZINGBRAIN_MAX_PARALLEL_BUILDS` | `cores/4` | Concurrent sanitizer builds (set `1` on 1-2 GB boxes) |
+| `FUZZINGBRAIN_BUILD_RESOURCE_TIMEOUT` | `600` | Seconds to wait for a build slot |
+
+```bash
+# e.g. a 2 GB droplet with 6 GB swap added
+export FUZZINGBRAIN_MIN_MEMORY_GB=0.5
+export FUZZINGBRAIN_MAX_PARALLEL_BUILDS=1
+export FUZZINGBRAIN_MAX_CPU_PERCENT=99
+```
+
+A machine with ≥4 GB RAM is still strongly recommended; these knobs trade build
+speed and OOM-safety for the ability to run at all.
 
 ## Modes
 

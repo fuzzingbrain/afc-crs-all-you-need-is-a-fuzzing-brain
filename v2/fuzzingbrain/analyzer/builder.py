@@ -25,6 +25,30 @@ from loguru import logger as loguru_logger
 from .models import FuzzerInfo
 
 
+def _env_float(name: str, default: float) -> float:
+    """Read a float from the environment, falling back to ``default``."""
+    val = os.environ.get(name)
+    if val in (None, ""):
+        return default
+    try:
+        return float(val)
+    except ValueError:
+        loguru_logger.warning(f"Invalid {name}={val!r}, using default {default}")
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    """Read an int from the environment, falling back to ``default``."""
+    val = os.environ.get(name)
+    if val in (None, ""):
+        return default
+    try:
+        return int(val)
+    except ValueError:
+        loguru_logger.warning(f"Invalid {name}={val!r}, using default {default}")
+        return default
+
+
 def _build_error_hint(build_output: List[str]) -> str:
     """Actionable hint for the common source-drift build failure.
 
@@ -50,7 +74,10 @@ class ResourceMonitor:
     Checks CPU and memory availability before starting new builds.
     """
 
-    # Resource thresholds
+    # Resource thresholds (defaults tuned for a normal build host). Each is
+    # overridable via an env var for constrained machines — see __init__.
+    # Lowering these lets builds start with less free RAM; pair with swap or
+    # the compiler may be OOM-killed. Defaults are unchanged when unset.
     MAX_CPU_PERCENT = 85.0  # Don't start new build if CPU > 85%
     MIN_MEMORY_GB = 4.0  # Need at least 4GB free memory per build
     MIN_MEMORY_PERCENT = 15.0  # Keep at least 15% memory free
@@ -58,15 +85,45 @@ class ResourceMonitor:
     # Estimated resource usage per Docker build
     MEMORY_PER_BUILD_GB = 4.0
 
+    # How long to wait for a build slot before giving up.
+    RESOURCE_WAIT_TIMEOUT = 600.0  # seconds
+
     def __init__(self, max_parallel: int = None):
         """
         Initialize ResourceMonitor.
 
         Args:
-            max_parallel: Maximum parallel builds (default: CPU cores / 4, min 2)
+            max_parallel: Maximum parallel builds (default: CPU cores / 4, min 2).
+                Overridable via FUZZINGBRAIN_MAX_PARALLEL_BUILDS.
+
+        Resource-gate env overrides (all optional; class defaults apply when
+        unset — useful on small VMs, e.g. FUZZINGBRAIN_MIN_MEMORY_GB=0.5):
+            FUZZINGBRAIN_MIN_MEMORY_GB
+            FUZZINGBRAIN_MIN_MEMORY_PERCENT
+            FUZZINGBRAIN_MEMORY_PER_BUILD_GB
+            FUZZINGBRAIN_MAX_CPU_PERCENT
+            FUZZINGBRAIN_BUILD_RESOURCE_TIMEOUT
         """
         cpu_count = psutil.cpu_count() or 4
-        self.max_parallel = max_parallel or max(2, cpu_count // 4)
+        env_parallel = _env_int("FUZZINGBRAIN_MAX_PARALLEL_BUILDS", 0)
+        self.max_parallel = max_parallel or env_parallel or max(2, cpu_count // 4)
+        # Instance-level thresholds shadow the class defaults when the env var
+        # is set, so behavior is unchanged unless explicitly overridden.
+        self.MIN_MEMORY_GB = _env_float(
+            "FUZZINGBRAIN_MIN_MEMORY_GB", self.MIN_MEMORY_GB
+        )
+        self.MIN_MEMORY_PERCENT = _env_float(
+            "FUZZINGBRAIN_MIN_MEMORY_PERCENT", self.MIN_MEMORY_PERCENT
+        )
+        self.MEMORY_PER_BUILD_GB = _env_float(
+            "FUZZINGBRAIN_MEMORY_PER_BUILD_GB", self.MEMORY_PER_BUILD_GB
+        )
+        self.MAX_CPU_PERCENT = _env_float(
+            "FUZZINGBRAIN_MAX_CPU_PERCENT", self.MAX_CPU_PERCENT
+        )
+        self.RESOURCE_WAIT_TIMEOUT = _env_float(
+            "FUZZINGBRAIN_BUILD_RESOURCE_TIMEOUT", self.RESOURCE_WAIT_TIMEOUT
+        )
         self.current_builds = 0
         self._state_lock = Lock()  # Lock for state changes
 
@@ -434,9 +491,10 @@ class AnalyzerBuilder:
 
             # Wait for resource availability
             wait_start = time.time()
+            wait_timeout = self.resource_monitor.RESOURCE_WAIT_TIMEOUT
             while not self.resource_monitor.acquire_build_slot():
                 time.sleep(2.0)
-                if time.time() - wait_start > 600:  # 10 min timeout
+                if time.time() - wait_start > wait_timeout:
                     return sanitizer, False, "Timeout waiting for resources"
 
             temp_fuzz_tooling = None
