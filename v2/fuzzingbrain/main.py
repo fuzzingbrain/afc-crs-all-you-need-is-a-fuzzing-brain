@@ -433,6 +433,17 @@ def parse_args() -> argparse.Namespace:
         default=50.0,
         help="Budget limit in dollars (0 = unlimited)",
     )
+    parser.add_argument(
+        "--agent",
+        action="store_true",
+        help="Use agent mode: a single lean Codex-style agent loop instead of "
+        "the multi-agent SP pipeline (fewer tokens).",
+    )
+    parser.add_argument(
+        "--agent-model",
+        type=str,
+        help="Model id/alias for agent mode (default: LLM client default)",
+    )
 
     # Commit configuration
     parser.add_argument("--target-commit", type=str, help="Target commit for full scan")
@@ -500,6 +511,18 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
     """Create Config from parsed arguments"""
     # Start with environment config
     config = Config.from_env()
+
+    # Agent mode is selected in the worker via an env var so it reaches the
+    # Celery worker subprocess (which inherits this process's environment).
+    # Set it before any early return so it works in both CLI and JSON modes.
+    if getattr(args, "agent", False):
+        os.environ["FUZZINGBRAIN_AGENT_MODE"] = "1"
+        if getattr(args, "agent_model", None):
+            os.environ["FUZZINGBRAIN_AGENT_MODEL"] = args.agent_model
+        if getattr(args, "budget", None) is not None:
+            os.environ["FUZZINGBRAIN_BUDGET_LIMIT"] = str(args.budget)
+        if getattr(args, "pov_count", None) is not None:
+            os.environ["FUZZINGBRAIN_POV_COUNT"] = str(args.pov_count)
 
     # MCP server mode
     if args.mcp:

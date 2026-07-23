@@ -6,6 +6,7 @@ Dispatches work to the appropriate strategy based on job type.
 This is the main entry point for worker logic.
 """
 
+import os
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -526,6 +527,19 @@ def generate(variant: int = 1) -> bytes:
             PatchStrategy,
             HarnessStrategy,
         )
+
+        # Agent mode: a single lean Codex-style loop replaces the multi-agent
+        # pipeline for PoV/patch tasks. Gated by an env var so it propagates to
+        # the Celery worker subprocess (which inherits the parent environment).
+        agent_mode = os.environ.get("FUZZINGBRAIN_AGENT_MODE", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        if agent_mode and self.task_type in ["pov", "pov-patch", "patch"]:
+            from ..agent_mode import AgentModeStrategy
+
+            return AgentModeStrategy(self)
 
         if self.task_type in ["pov", "pov-patch"]:
             # Select POV strategy based on scan mode

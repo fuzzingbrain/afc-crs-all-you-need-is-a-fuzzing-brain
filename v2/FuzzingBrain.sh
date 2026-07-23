@@ -616,6 +616,9 @@ show_usage() {
     echo "  --sanitizers <list> Comma-separated sanitizers (default: address)"
     echo "  --timeout <min>     Timeout in minutes (default: 60)"
     echo "  --pov-count <N>     Stop after N verified POVs (default: 0 = unlimited)"
+    echo "  --fuzzers <list>    Comma-separated fuzzers to build/scan (default: all)"
+    echo "  --agent             Agent mode: one lean Codex-style agent loop (fewer tokens)"
+    echo "  --agent-model <id>  Model id/alias for agent mode (implies --agent)"
     echo "  --in-place          Run directly without copying workspace"
     echo ""
     echo "EVALUATION OPTIONS:"
@@ -747,6 +750,21 @@ while [[ $# -gt 0 ]]; do
             ALLOW_EXPENSIVE="$2"
             shift 2
             ;;
+        --agent)
+            # Agent mode is gated by an env var so it reaches the Celery worker
+            # subprocess (which inherits this environment).
+            export FUZZINGBRAIN_AGENT_MODE=1
+            shift
+            ;;
+        --agent-model)
+            export FUZZINGBRAIN_AGENT_MODE=1
+            export FUZZINGBRAIN_AGENT_MODEL="$2"
+            shift 2
+            ;;
+        --fuzzers)
+            FUZZER_FILTER="$2"
+            shift 2
+            ;;
         -h|-help|--help)
             show_banner
             show_usage
@@ -779,6 +797,11 @@ fi
 # Set budget limit if specified
 if [ -n "$BUDGET_LIMIT" ]; then
     export FUZZINGBRAIN_BUDGET_LIMIT="$BUDGET_LIMIT"
+fi
+
+# Agent mode: surface the PoV target so the single agent stops on the same count.
+if [ "$FUZZINGBRAIN_AGENT_MODE" = "1" ] && [ -n "$POV_COUNT" ]; then
+    export FUZZINGBRAIN_POV_COUNT="$POV_COUNT"
 fi
 
 # Set allow expensive fallback if specified
@@ -1070,6 +1093,7 @@ if is_git_url "$TARGET"; then
             --timeout "$TIMEOUT_MINUTES" \
             --pov-count "$POV_COUNT" \
             ${BUDGET_LIMIT:+--budget "$BUDGET_LIMIT"} \
+            ${FUZZER_FILTER:+--fuzzers "$FUZZER_FILTER"} \
             ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
             ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"}
     else
@@ -1086,6 +1110,7 @@ if is_git_url "$TARGET"; then
             --timeout "$TIMEOUT_MINUTES" \
             --pov-count "$POV_COUNT" \
             ${BUDGET_LIMIT:+--budget "$BUDGET_LIMIT"} \
+            ${FUZZER_FILTER:+--fuzzers "$FUZZER_FILTER"} \
             ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
             ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"}
     fi
