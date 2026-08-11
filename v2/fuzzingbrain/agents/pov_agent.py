@@ -303,12 +303,20 @@ class POVAgent(BaseAgent):
         }
 
     def _configure_context(self, ctx) -> None:
-        """Configure agent context with SP ID."""
+        """Configure agent context with SP ID, then bind the POV tool context.
+
+        The POV tool context must be registered here and not earlier: it is keyed
+        by ``mcp_context_id``, which only resolves to ``ctx.agent_id`` once
+        ``self._context`` exists. The MCP server is built from ``ctx.agent_id``
+        immediately after this call, so both sides agree on the key.
+        """
         if self.suspicious_point:
             sp_id = self.suspicious_point.get(
                 "suspicious_point_id"
             ) or self.suspicious_point.get("_id")
             ctx.sp_id = str(sp_id) if sp_id else None
+
+        self._setup_pov_context()
 
     @property
     def system_prompt(self) -> str:
@@ -878,8 +886,8 @@ Call create_pov with a new generator code NOW.""",
         self.successful_pov_id = None
         self.pov_success = False
 
-        # Setup POV context
-        self._setup_pov_context()
+        # POV context is set from _configure_context, once the AgentContext (and
+        # therefore the id the MCP tools are bound to) exists.
 
         # Run agent
         try:
