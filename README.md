@@ -1,3 +1,4 @@
+<!-- SPDX-License-Identifier: Apache-2.0 -->
 <div align="center">
 
 # All You Need Is a Fuzzing Brain
@@ -14,32 +15,157 @@
 
 ---
 
-FuzzingBrain pairs coverage-guided fuzzing with an LLM **Suspicious-Point (SP)**
-reasoning brain: specialized agents partition a target, reason about where bugs
-live, build proofs-of-vulnerability, and propose patches — with every finding
-dynamically verified to eliminate hallucinations.
+FuzzingBrain is an LLM-powered autonomous system for vulnerability discovery and
+patching, built on the OSS-Fuzz toolchain. It pairs coverage-guided fuzzing with
+a **Suspicious-Point (SP)** reasoning brain: specialized agents partition the
+target, reason about where bugs live, build proofs-of-vulnerability, and propose
+patches — with every finding dynamically verified to eliminate hallucinations.
 
-The actively developed system is **[v2](v2/)**. Start there.
+## Prerequisites
+
+| Requirement | Notes |
+|---|---|
+| **Docker** | Running, with permission to pull images and run containers |
+| **Python 3.10+** | Used to create the local virtualenv |
+| **One LLM API key** | Anthropic, OpenAI, or Google Gemini |
+| **Linux** | Recommended (OSS-Fuzz builds are happiest on Linux) |
+
+You do **not** need to install Python dependencies or start MongoDB/Redis by
+hand — `FuzzingBrain.sh` bootstraps the virtualenv, installs requirements, and
+starts the infrastructure containers automatically.
 
 ## Quick Start
 
 ```bash
 git clone https://github.com/fuzzingbrain/afc-crs-all-you-need-is-a-fuzzing-brain.git
-cd afc-crs-all-you-need-is-a-fuzzing-brain/v2
+cd afc-crs-all-you-need-is-a-fuzzing-brain
 
-# Configure at least one LLM API key
+# 1. Configure API keys
 cp .env.example .env
-$EDITOR .env
+$EDITOR .env          # add at least one API key
 
-# Run a full scan ($20 spend cap). First run bootstraps the venv,
-# installs deps, and starts MongoDB/Redis automatically.
-./FuzzingBrain.sh --budget 20 https://github.com/OwenSanzas/libpng.git
+# 2. Run a full scan (first run also creates the venv + installs deps)
+./FuzzingBrain.sh https://github.com/OwenSanzas/libpng.git
 ```
 
-**Prerequisites:** Docker (running), Python 3.10+, and one LLM API key
-(Anthropic, OpenAI, or Gemini). Full instructions, options, and troubleshooting
-live in **[`v2/README.md`](v2/README.md)**; the design is documented in
-[`v2/documentation/`](v2/documentation/).
+On the first run the script will:
+
+1. create `venv/` and install `requirements.txt`,
+2. start the `fuzzingbrain-mongodb` and `fuzzingbrain-redis` containers,
+3. clone the target, build its fuzzers via OSS-Fuzz, and run the pipeline.
+
+If `.env` is missing, the script creates one from `.env.example` and asks you to
+fill in a key before re-running.
+
+> **Tip — pick a build-ready target.** The fuzzer must build before any bug
+> hunting can start. `https://github.com/OwenSanzas/libpng.git` is a known-good
+> example. Some upstream `HEAD`s have drifted from their OSS-Fuzz build scripts
+> (e.g. relocated source files) and will fail to build; prefer a pinned commit
+> with `-v <commit>` when in doubt.
+
+## Usage
+
+```
+./FuzzingBrain.sh [OPTIONS] [TARGET]
+```
+
+| TARGET | Behavior |
+|---|---|
+| `<git_url>` | Clone the repo and scan it |
+| `<json_file>` | Load a task configuration from JSON |
+| `<workspace_path>` | Reuse an existing workspace directory |
+| `<project_name>` | Continue an existing `workspace/<project_name>` |
+| _(none)_ | Start a server (REST API by default) |
+
+Common options:
+
+| Option | Description |
+|---|---|
+| `--budget <usd>` | **LLM spend cap in USD** (strongly recommended, e.g. `--budget 20`) |
+| `--scan-mode <full\|delta>` | Full scan (default) or delta scan |
+| `-b <commit>` / `-d <commit>` | Base / delta commit (delta scan) |
+| `-v <commit>` | Target a specific commit for a full scan |
+| `--task-type <pov-patch\|pov\|patch\|harness>` | What to produce (default `pov-patch`) |
+| `--project <name>` | OSS-Fuzz project name, if auto-detection misses |
+| `--sanitizers <list>` | Comma-separated, e.g. `address,undefined` (default `address`) |
+| `--timeout <min>` | Overall timeout (default 60) |
+| `--pov-count <N>` | Stop after N verified PoVs (`0` = unlimited) |
+| `--api` / `--mcp` | Start the REST API / MCP server instead of scanning |
+| `--docker` | Run everything inside a container (no local Python needed) |
+
+Run `./FuzzingBrain.sh --help` for the full list.
+
+### Examples
+
+```bash
+# Full scan with a $20 budget cap
+./FuzzingBrain.sh --budget 20 https://github.com/OwenSanzas/libpng.git
+
+# Delta scan between two commits
+./FuzzingBrain.sh -b <base> -d <delta> https://github.com/user/repo.git
+
+# PoV only, undefined-behavior sanitizer, 30-minute cap
+./FuzzingBrain.sh --task-type pov --sanitizers undefined --timeout 30 <git_url>
+
+# Start the REST API server (port 18080)
+./FuzzingBrain.sh --api
+```
+
+## Results
+
+Output is written under the task's workspace:
+
+```
+workspace/<project>_<task_id>/
+└── results/
+    ├── povs/        # verified proof-of-vulnerability inputs
+    ├── patches/     # proposed fixes
+    └── report.json  # run summary
+logs/<project>_<task_id>_<timestamp>/   # full run logs
+```
+
+## How it works
+
+```
+target ─▶ analyze ─▶ build fuzzers ─▶ direction planning ─▶ sp-generate
+                                                                  │
+   report ◀─ verify ◀─ triage ◀─ pov ◀─ sp-verify ◀──────────────┘
+```
+
+A scan partitions the codebase into directions, reasons about suspicious points
+(potential vulnerabilities), constructs candidate PoV inputs, and verifies every
+crash before it is reported. See [`documentation/`](documentation/) for the full
+architecture, agent design, and Suspicious-Point lifecycle, and
+[`docs/FUSION_DESIGN.md`](docs/FUSION_DESIGN.md) for the breadth/depth fusion
+roadmap.
+
+## Modes
+
+| Mode | Command | Use case |
+|---|---|---|
+| Local scan | `./FuzzingBrain.sh <target>` | One-off analysis from the CLI |
+| REST API | `./FuzzingBrain.sh --api` | Web / CI integration (port 18080) |
+| MCP server | `./FuzzingBrain.sh --mcp` | Drive from an MCP client (e.g. Claude Desktop) |
+| Docker | `./FuzzingBrain.sh --docker <target>` | No local Python; everything containerized |
+
+See [`examples/`](examples/) for runnable configurations of each mode.
+
+## Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `.env file created … add your API keys` | Edit `.env`, add a key, re-run |
+| Fuzzer build fails immediately | The target doesn't match its OSS-Fuzz build script; pin a commit with `-v`, or pick a build-ready target |
+| `docker: permission denied` | Add your user to the `docker` group, or run with sufficient privileges |
+| Dependencies re-install every run | Delete `venv/.deps_installed` to force a clean reinstall |
+| Want to reset infra | `docker rm -f fuzzingbrain-mongodb fuzzingbrain-redis` |
+
+## Development
+
+```bash
+python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
+./venv/bin/python -m pytest tests/
+```
 
 ## Datasets
 
@@ -48,10 +174,15 @@ live in **[`v2/README.md`](v2/README.md)**; the design is documented in
 
 ## Legacy (v1)
 
-The original competition system (Go services + Python strategy engine) lives at
-the repository root (`crs/`, `static-analysis/`, `competition-api/`). It is
-**frozen** — kept for reproducibility of the paper results but no longer
-developed. New work happens in [`v2/`](v2/).
+The original AIxCC competition system — Go services plus a Python strategy
+engine (`crs/`, `static-analysis/`, `competition-api/`, `task_builder/`) — was
+removed from the working tree once v2 superseded it. It remains available in
+full at the [`v1-final`](../../tree/v1-final) tag, kept for reproducibility of
+the paper results:
+
+```bash
+git checkout v1-final
+```
 
 ## Citation
 

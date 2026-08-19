@@ -1,33 +1,17 @@
-# Git
-.git
-.gitignore
-
-# Environment files with secrets
-.env
-crs/.env
-**/.env
-
-# Workspace and results
 workspace/
-pov/
-patch/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-
-# Python
+venv/
 __pycache__/
 *.pyc
-*.pyo
-.pytest_cache/
-.venv/
-venv/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
+.git/
+.env
+configs/
+docs/
+tests/
+logs/
+work/
+experiment/
+FBv2-Dashboard/
 *.log
+.coverage
+htmlcov/
+.pytest_cache/

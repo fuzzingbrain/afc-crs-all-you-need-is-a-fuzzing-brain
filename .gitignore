@@ -1,43 +1,51 @@
-**/.env
-*/.env
-
-**/logs
-*.log
-
-**/tmp_*
-**/test_*
-
+# Python bytecode
 **/__pycache__/
 *.pyc
 *.pyo
+*.egg-info/
 
+# Virtual environments
+**/venv/
+
+# Workspace / runtime data
+**/workspace/
+**/workspace/*
+work/
+
+# Logs
+**/logs/
+*.log
+
+# Temp / test output
+**/tmp_*
+**/test_*
+!tests/test_*
+test_trace_output/
+
+# User-specific config
+**/examples/llm_config.local.yaml
+fuzzingbrain/llm_config.local.yaml
+task_view_*/
+documentation/analysis/
+experiment/
+
+# Test / coverage artifacts
 **/coverage.xml
 **/coverage.json
 **/.coverage
+htmlcov/
+**/.pytest_cache/
+**/.benchmarks/
+**/.benchmark_results/
 
-**/.benchmarks
-**/.benchmark_results
-**/.pytest_cache
+# Eval server runtime
+.eval_pids/
+FBv2-Dashboard/
 
-# Go test coverage
-**/*.out
-**/*.test
+# External repos (cloned locally, has its own .git)
+Z-Code-Analyzer-Station/
 
-# Go compiled binaries
-crs/local
-crs/server
-crs/worker
-
-document/
-
-**/WORKFLOW/*
-
-**/workspace/*
-
-# POV and Patch outputs
-pov/
-patch/
-# Source directories named pov/ or patch/ that should still be tracked
-!crs/strategy/common/pov/
-!crs/strategy/common/patch/
-!crs/strategy/strategies/patch/
+# Environment secrets
+**/.env
+.env.*
+!.env.example

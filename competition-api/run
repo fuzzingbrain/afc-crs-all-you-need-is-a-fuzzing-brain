@@ -1,3 +1,0 @@
-curl http://localhost:6060/debug/pprof/goroutine?debug=2 > goroutines.txt
-
-cat goroutines.txt

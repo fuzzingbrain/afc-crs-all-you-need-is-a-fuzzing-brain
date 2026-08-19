@@ -1,64 +1,118 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0
+#
+# FuzzingBrain v2 - Autonomous Cyber Reasoning System
+# Entry point for both local and Docker execution
+#
+
+set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CRS_DIR="$SCRIPT_DIR/crs"
+WORKSPACE_DIR="$SCRIPT_DIR/workspace"
+VENV_DIR="$SCRIPT_DIR/venv"
+PYTHON="$VENV_DIR/bin/python3"
 
-# Python interpreter - use venv if available
-if [ -x "$SCRIPT_DIR/workspace/crs_venv/bin/python" ]; then
-    PYTHON="$SCRIPT_DIR/workspace/crs_venv/bin/python"
-else
-    PYTHON="python3"
-fi
+# Prepend venv/bin to PATH so any subprocess that does a bare PATH lookup
+# (e.g. subprocess.Popen(["celery", ...])) hits the venv's binary, not a
+# stale ~/.local/bin copy that may use the system Python with incompatible
+# site-packages.
+export PATH="$VENV_DIR/bin:$PATH"
 
-# Colors for output
+# =============================================================================
+# Colors
+# =============================================================================
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
 NC='\033[0m' # No Color
 
-print_info() { echo -e "${GREEN}[INFO]${NC} $1"; }
-print_warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
+# Claude orange/brown colors
+CLAUDE_ORANGE='\033[38;5;208m'
+CLAUDE_BROWN='\033[38;5;172m'
+CLAUDE_SAND='\033[38;5;180m'
+
+# =============================================================================
+# Banner
+# =============================================================================
+show_banner() {
+    echo -e "${CLAUDE_ORANGE}"
+    cat << 'EOF'
+    ███████╗██╗   ██╗███████╗███████╗██╗███╗   ██╗ ██████╗
+    ██╔════╝██║   ██║╚══███╔╝╚══███╔╝██║████╗  ██║██╔════╝
+    █████╗  ██║   ██║  ███╔╝   ███╔╝ ██║██╔██╗ ██║██║  ███╗
+    ██╔══╝  ██║   ██║ ███╔╝   ███╔╝  ██║██║╚██╗██║██║   ██║
+    ██║     ╚██████╔╝███████╗███████╗██║██║ ╚████║╚██████╔╝
+    ╚═╝      ╚═════╝ ╚══════╝╚══════╝╚═╝╚═╝  ╚═══╝ ╚═════╝
+EOF
+    echo -e "${CLAUDE_BROWN}"
+    cat << 'EOF'
+    ██████╗ ██████╗  █████╗ ██╗███╗   ██╗
+    ██╔══██╗██╔══██╗██╔══██╗██║████╗  ██║
+    ██████╔╝██████╔╝███████║██║██╔██╗ ██║
+    ██╔══██╗██╔══██╗██╔══██║██║██║╚██╗██║
+    ██████╔╝██║  ██║██║  ██║██║██║ ╚████║
+    ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚═╝  ╚═══╝
+EOF
+    echo -e "${NC}"
+    echo -e "${CLAUDE_SAND}    ══════════════════════════════════════════════════════════════${NC}"
+    echo -e "${CLAUDE_ORANGE}              🧠 Autonomous Cyber Reasoning System v2.0${NC}"
+    echo -e "${CLAUDE_SAND}    ══════════════════════════════════════════════════════════════${NC}"
+    echo ""
+    echo -e "${WHITE}    Developed by O2 Lab @ Texas A&M University,${NC}"
+    echo -e "${WHITE}                   City University of Hong Kong,${NC}"
+    echo -e "${WHITE}                   Imperial College London${NC}"
+    echo ""
+    echo -e "${CYAN}    Contact: zesheng@tamu.edu${NC}"
+    echo ""
+}
+
+# =============================================================================
+# Logging
+# =============================================================================
+print_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
+print_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+print_step()  { echo -e "${CYAN}[STEP]${NC} $1"; }
+
+# =============================================================================
+# Helper Functions
+# =============================================================================
 
 # Check if argument looks like a git URL
 is_git_url() {
-    local input="$1"
-    # Match git@, ssh://, or http(s):// URLs
-    # Also match any URL with common git hosting patterns or ending in .git
-    if [[ "$input" =~ ^git@ ]] || \
-       [[ "$input" =~ ^ssh:// ]] || \
-       [[ "$input" =~ ^https?://.*\.git$ ]] || \
-       [[ "$input" =~ ^https?://.+/.+/.+ ]] || \
-       [[ "$input" =~ ^https?://(github|gitlab|bitbucket|gitea|gitee|sourceforge|git\.)\..*/ ]]; then
-        return 0
-    fi
-    return 1
+    [[ "$1" =~ ^git@ ]] || [[ "$1" =~ ^https?://.*\.git$ ]] || [[ "$1" =~ ^https?://github\.com/ ]] || [[ "$1" =~ ^https?://gitlab\.com/ ]]
+}
+
+# Check if argument is a JSON file
+is_json_file() {
+    [[ "$1" =~ \.json$ ]] && [ -f "$1" ]
 }
 
 # Check if argument is a simple project name (no slashes, not a URL)
 is_project_name() {
     local input="$1"
-    # Not a URL and doesn't contain slashes
-    if ! is_git_url "$input" && [[ ! "$input" =~ / ]]; then
+    if ! is_git_url "$input" && [[ ! "$input" =~ / ]] && [[ ! "$input" =~ \.json$ ]]; then
         return 0
     fi
     return 1
 }
 
 # Extract repo name from git URL
-# git@github.com:libexpat/libexpat.git -> libexpat
-# https://github.com/libexpat/libexpat.git -> libexpat
 get_repo_name() {
     local url="$1"
-    local name
-    # Remove .git suffix and get basename
-    name=$(basename "$url" .git)
-    echo "$name"
+    basename "$url" .git
+}
+
+# Generate task ID (24-char hex, valid MongoDB ObjectId form)
+generate_task_id() {
+    python3 -c "import uuid; print(uuid.uuid4().hex[:24])"
 }
 
 # Try to find matching oss-fuzz project
-# Returns project name if found, empty string otherwise
 find_ossfuzz_project() {
     local repo_name="$1"
     local ossfuzz_dir="$2"
@@ -83,601 +137,547 @@ find_ossfuzz_project() {
         return
     fi
 
+    # Try removing afc- prefix (AIxCC competition repos)
+    local afc_stripped=$(echo "$repo_name" | sed -E 's/^afc-//i')
+    if [ -d "$ossfuzz_dir/projects/$afc_stripped" ]; then
+        echo "$afc_stripped"
+        return
+    fi
+
     echo ""
 }
 
-# Prompt user for API keys
-prompt_api_key() {
-    local env_file="$CRS_DIR/.env"
-    local env_example="$CRS_DIR/.env.example"
+# =============================================================================
+# Environment Checks
+# =============================================================================
 
-    echo ""
-    print_info "No API key configured. Let's set them up!"
-    echo ""
-    print_info "Press SPACE or ENTER to skip any key you don't have"
-    echo ""
-
-    # Create .env from example if it doesn't exist
-    if [ ! -f "$env_file" ]; then
-        if [ -f "$env_example" ]; then
-            cp "$env_example" "$env_file"
-            print_info "Created $env_file from example"
-        else
-            touch "$env_file"
-        fi
+check_python() {
+    if command -v python3 &> /dev/null; then
+        local py_version=$(python3 --version 2>&1 | awk '{print $2}')
+        print_info "Python $py_version found"
+        return 0
+    elif command -v python &> /dev/null; then
+        local py_version=$(python --version 2>&1 | awk '{print $2}')
+        print_info "Python $py_version found"
+        return 0
+    else
+        print_error "Python is not installed!"
+        print_error "Please install Python 3.10+: https://www.python.org/downloads/"
+        return 1
     fi
-
-    local keys_added=0
-
-    # Prompt for each API key
-    declare -A api_keys=(
-        ["ANTHROPIC_API_KEY"]="Anthropic (Claude)"
-        ["OPENAI_API_KEY"]="OpenAI (GPT)"
-        ["GEMINI_API_KEY"]="Google (Gemini)"
-        ["XAI_API_KEY"]="xAI (Grok)"
-    )
-
-    for key_name in "ANTHROPIC_API_KEY" "OPENAI_API_KEY" "GEMINI_API_KEY" "XAI_API_KEY"; do
-        local key_display="${api_keys[$key_name]}"
-        echo ""
-        read -p "Enter your $key_display API key (or press ENTER to skip): " key_value
-
-        # Skip if empty or just whitespace
-        if [ -z "$key_value" ] || [ "$key_value" = " " ]; then
-            print_warn "Skipped $key_display"
-            continue
-        fi
-
-        # Update or append the API key
-        if grep -q "^${key_name}=" "$env_file" 2>/dev/null; then
-            # Update existing key
-            sed -i "s|^${key_name}=.*|${key_name}=${key_value}|" "$env_file"
-        else
-            # Append new key
-            echo "${key_name}=${key_value}" >> "$env_file"
-        fi
-
-        print_info "$key_display API key saved"
-        export "$key_name=$key_value"
-        keys_added=$((keys_added + 1))
-    done
-
-    echo ""
-    if [ $keys_added -eq 0 ]; then
-        print_error "No API keys were added. At least one API key is required."
-        exit 1
-    fi
-
-    print_info "Successfully configured $keys_added API key(s)"
 }
 
-# Check if Docker is running
 check_docker() {
     if ! command -v docker &> /dev/null; then
         print_error "Docker is not installed!"
         print_error "Please install Docker: https://docs.docker.com/get-docker/"
-        exit 1
+        return 1
     fi
 
-    if ! docker info &> /dev/null; then
+    if ! docker info &> /dev/null 2>&1; then
         print_error "Docker is not running!"
         print_error "Please start Docker daemon and try again."
-        exit 1
+        return 1
     fi
 
     print_info "Docker is running"
+    return 0
 }
 
-# Function to compare version numbers
-version_ge() {
-    printf '%s\n%s\n' "$2" "$1" | sort -V -C
+# MongoDB container name
+MONGODB_CONTAINER="fuzzingbrain-mongodb"
+MONGODB_PORT=27017
+MONGODB_HOST="${MONGODB_HOST:-localhost}"
+
+# Redis container name
+REDIS_CONTAINER="fuzzingbrain-redis"
+REDIS_PORT=6379
+REDIS_HOST="${REDIS_HOST:-localhost}"
+
+# =============================================================================
+# Docker Environment Detection
+# =============================================================================
+
+is_in_docker() {
+    # Detect if running inside Docker container
+    # Method 1: Check /.dockerenv file
+    [ -f /.dockerenv ] && return 0
+
+    # Method 2: Check cgroup
+    grep -q docker /proc/1/cgroup 2>/dev/null && return 0
+
+    # Method 3: Check environment variable (set by docker-compose)
+    [ -n "$RUNNING_IN_DOCKER" ] && return 0
+
+    return 1
 }
 
-# Install Go
-install_go() {
-    local GO_VERSION="1.22.2"
-    local OS="$(uname -s)"
-    local ARCH="$(uname -m)"
-    local GO_ARCH=""
+check_mongodb() {
+    # Check if MongoDB is accessible
+    # Try multiple methods for compatibility
 
-    print_info "Installing Go ${GO_VERSION}..."
+    # Method 1: netcat
+    if command -v nc &> /dev/null; then
+        if nc -z "$MONGODB_HOST" $MONGODB_PORT 2>/dev/null; then
+            print_info "MongoDB is running on $MONGODB_HOST:$MONGODB_PORT"
+            return 0
+        fi
+    fi
 
-    # Determine architecture
-    case "$ARCH" in
-        x86_64)
-            GO_ARCH="amd64"
-            ;;
-        aarch64|arm64)
-            GO_ARCH="arm64"
-            ;;
-        *)
-            print_error "Unsupported architecture: $ARCH"
+    # Method 2: /dev/tcp (bash built-in)
+    if (echo > /dev/tcp/$MONGODB_HOST/$MONGODB_PORT) 2>/dev/null; then
+        print_info "MongoDB is running on $MONGODB_HOST:$MONGODB_PORT"
+        return 0
+    fi
+
+    # Method 3: Check if container is running (only for local mode)
+    if [ "$MONGODB_HOST" = "localhost" ] || [ "$MONGODB_HOST" = "127.0.0.1" ]; then
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${MONGODB_CONTAINER}$"; then
+            print_info "MongoDB container is running"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+start_mongodb() {
+    # Check if MongoDB container already exists
+    if docker ps -a --format '{{.Names}}' | grep -q "^${MONGODB_CONTAINER}$"; then
+        # Container exists, check if running
+        if docker ps --format '{{.Names}}' | grep -q "^${MONGODB_CONTAINER}$"; then
+            print_info "MongoDB container already running"
+            return 0
+        else
+            # Start existing container
+            print_info "Starting existing MongoDB container..."
+            docker start "$MONGODB_CONTAINER" > /dev/null
+            sleep 2
+            if check_mongodb; then
+                return 0
+            fi
+        fi
+    else
+        # Create new container
+        print_info "Starting MongoDB container..."
+        docker run -d \
+            --name "$MONGODB_CONTAINER" \
+            --restart=always \
+            -p 0.0.0.0:${MONGODB_PORT}:27017 \
+            -v fuzzingbrain-mongodb-data:/data/db \
+            mongo:8.0 > /dev/null
+
+        # Wait for MongoDB to start
+        print_info "Waiting for MongoDB to start..."
+        for i in {1..10}; do
+            sleep 1
+            if check_mongodb; then
+                print_info "MongoDB started successfully"
+                return 0
+            fi
+        done
+    fi
+
+    print_error "Failed to start MongoDB"
+    return 1
+}
+
+ensure_mongodb() {
+    # If running inside Docker container, assume MongoDB is managed externally (e.g., docker-compose)
+    if is_in_docker; then
+        print_info "Running in Docker container"
+        print_info "Assuming MongoDB is managed by docker-compose"
+
+        if check_mongodb; then
+            return 0
+        else
+            print_error "MongoDB not reachable at $MONGODB_HOST:$MONGODB_PORT"
+            print_error "Check docker-compose configuration"
             return 1
-            ;;
-    esac
+        fi
+    fi
 
-    case "$OS" in
-        Linux)
-            local GO_TARBALL="go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
-            local DOWNLOAD_URL="https://go.dev/dl/${GO_TARBALL}"
+    # Local mode: check and start MongoDB
+    if check_mongodb; then
+        return 0
+    fi
 
-            print_info "Downloading Go for Linux ${GO_ARCH}..."
-            if ! wget -q "$DOWNLOAD_URL" -O "/tmp/${GO_TARBALL}"; then
-                print_error "Failed to download Go"
-                return 1
+    print_info "MongoDB not running, starting via Docker..."
+
+    if ! command -v docker &> /dev/null; then
+        print_error "Docker required to start MongoDB"
+        print_error "Either install Docker or start MongoDB manually"
+        return 1
+    fi
+
+    if ! docker info &> /dev/null 2>&1; then
+        print_error "Docker daemon not running"
+        return 1
+    fi
+
+    start_mongodb
+}
+
+# =============================================================================
+# Redis Management
+# =============================================================================
+
+check_redis() {
+    # Check if Redis is accessible
+
+    # Method 1: netcat
+    if command -v nc &> /dev/null; then
+        if nc -z "$REDIS_HOST" $REDIS_PORT 2>/dev/null; then
+            print_info "Redis is running on $REDIS_HOST:$REDIS_PORT"
+            return 0
+        fi
+    fi
+
+    # Method 2: /dev/tcp (bash built-in)
+    if (echo > /dev/tcp/$REDIS_HOST/$REDIS_PORT) 2>/dev/null; then
+        print_info "Redis is running on $REDIS_HOST:$REDIS_PORT"
+        return 0
+    fi
+
+    # Method 3: Check if container is running (only for local mode)
+    if [ "$REDIS_HOST" = "localhost" ] || [ "$REDIS_HOST" = "127.0.0.1" ]; then
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${REDIS_CONTAINER}$"; then
+            print_info "Redis container is running"
+            return 0
+        fi
+    fi
+
+    return 1
+}
+
+start_redis() {
+    # Check if Redis container already exists
+    if docker ps -a --format '{{.Names}}' | grep -q "^${REDIS_CONTAINER}$"; then
+        # Container exists, check if running
+        if docker ps --format '{{.Names}}' | grep -q "^${REDIS_CONTAINER}$"; then
+            print_info "Redis container already running"
+            return 0
+        else
+            # Start existing container
+            print_info "Starting existing Redis container..."
+            docker start "$REDIS_CONTAINER" > /dev/null
+            sleep 2
+            if check_redis; then
+                return 0
             fi
+        fi
+    else
+        # Create new container
+        print_info "Starting Redis container..."
+        docker run -d \
+            --name "$REDIS_CONTAINER" \
+            --restart=always \
+            -p 0.0.0.0:${REDIS_PORT}:6379 \
+            -v fuzzingbrain-redis-data:/data \
+            redis:7-alpine > /dev/null
 
-            print_info "Installing Go to /usr/local/go (requires sudo)..."
-            sudo rm -rf /usr/local/go
-            sudo tar -C /usr/local -xzf "/tmp/${GO_TARBALL}"
-            rm "/tmp/${GO_TARBALL}"
-
-            # Add to PATH
-            if ! grep -q '/usr/local/go/bin' ~/.bashrc 2>/dev/null; then
-                echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+        # Wait for Redis to start
+        print_info "Waiting for Redis to start..."
+        for i in {1..10}; do
+            sleep 1
+            if check_redis; then
+                print_info "Redis started successfully"
+                return 0
             fi
-            if ! grep -q '/usr/local/go/bin' ~/.profile 2>/dev/null; then
-                echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.profile
-            fi
+        done
+    fi
 
-            export PATH=$PATH:/usr/local/go/bin
-            print_info "Go ${GO_VERSION} installed successfully"
-            ;;
+    print_error "Failed to start Redis"
+    return 1
+}
 
-        Darwin)
-            local GO_PKG="go${GO_VERSION}.darwin-${GO_ARCH}.pkg"
-            local DOWNLOAD_URL="https://go.dev/dl/${GO_PKG}"
+ensure_redis() {
+    # In Docker container, assume Redis is managed by docker-compose
+    if is_in_docker; then
+        print_info "Running in Docker container"
+        print_info "Assuming Redis is managed by docker-compose"
 
-            print_info "Downloading Go for macOS ${GO_ARCH}..."
-            if ! curl -L "$DOWNLOAD_URL" -o "/tmp/${GO_PKG}"; then
-                print_error "Failed to download Go"
-                return 1
-            fi
-
-            print_info "Installing Go (requires sudo)..."
-            sudo installer -pkg "/tmp/${GO_PKG}" -target /
-            rm "/tmp/${GO_PKG}"
-
-            # Add to PATH
-            if ! grep -q '/usr/local/go/bin' ~/.zshrc 2>/dev/null; then
-                echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.zshrc
-            fi
-            if ! grep -q '/usr/local/go/bin' ~/.bash_profile 2>/dev/null; then
-                echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bash_profile
-            fi
-
-            export PATH=$PATH:/usr/local/go/bin
-            print_info "Go ${GO_VERSION} installed successfully"
-            ;;
-
-        *)
-            print_error "Unsupported OS: $OS"
+        if check_redis; then
+            return 0
+        else
+            print_error "Redis not reachable at $REDIS_HOST:$REDIS_PORT"
+            print_error "Check docker-compose configuration"
             return 1
-            ;;
-    esac
+        fi
+    fi
+
+    # Local mode: check and start Redis
+    if check_redis; then
+        return 0
+    fi
+
+    print_info "Redis not running, starting via Docker..."
+
+    if ! command -v docker &> /dev/null; then
+        print_error "Docker required to start Redis"
+        print_error "Either install Docker or start Redis manually"
+        return 1
+    fi
+
+    if ! docker info &> /dev/null 2>&1; then
+        print_error "Docker daemon not running"
+        return 1
+    fi
+
+    start_redis
+}
+
+# =============================================================================
+# Python Dependencies Check
+# =============================================================================
+
+check_celery() {
+    if $PYTHON -c "import celery" 2>/dev/null; then
+        print_info "Celery is installed"
+        return 0
+    else
+        print_warn "Celery not installed, will be installed with dependencies"
+        return 0
+    fi
+}
+
+setup_venv() {
+    local REQUIREMENTS="$SCRIPT_DIR/requirements.txt"
+    local PIP="$VENV_DIR/bin/pip"
+
+    # Check if venv exists
+    if [ ! -d "$VENV_DIR" ]; then
+        print_info "Creating virtual environment..."
+        python3 -m venv "$VENV_DIR"
+        if [ $? -ne 0 ]; then
+            print_error "Failed to create virtual environment"
+            return 1
+        fi
+    fi
+
+    # Check if requirements need to be installed
+    # Use a marker file to track if dependencies are installed
+    local MARKER="$VENV_DIR/.deps_installed"
+    local REQUIREMENTS_HASH=$(md5sum "$REQUIREMENTS" 2>/dev/null | awk '{print $1}')
+
+    if [ ! -f "$MARKER" ] || [ "$(cat "$MARKER" 2>/dev/null)" != "$REQUIREMENTS_HASH" ]; then
+        print_info "Installing dependencies..."
+        $PIP install --upgrade pip -q
+        $PIP install -r "$REQUIREMENTS" -q
+        if [ $? -ne 0 ]; then
+            print_error "Failed to install dependencies"
+            return 1
+        fi
+        echo "$REQUIREMENTS_HASH" > "$MARKER"
+        print_info "Dependencies installed"
+    else
+        print_info "Dependencies up to date"
+    fi
 
     return 0
 }
 
-# Check and install Go
-check_go() {
-    local REQUIRED_GO_VERSION="1.21"
-    local need_install=false
+check_environment() {
+    print_step "Checking environment..."
 
-    if command -v go &> /dev/null; then
-        local CURRENT_GO_VERSION=$(go version | awk '{print $3}' | sed 's/go//')
-        print_info "Go $CURRENT_GO_VERSION is installed"
+    local checks_passed=true
 
-        if version_ge "$CURRENT_GO_VERSION" "$REQUIRED_GO_VERSION"; then
-            print_info "Go version is sufficient (>= $REQUIRED_GO_VERSION)"
-            return 0
-        else
-            print_warn "Go version $CURRENT_GO_VERSION is too old (required >= $REQUIRED_GO_VERSION)"
-            need_install=true
-        fi
-    else
-        print_error "Go is not installed (required >= $REQUIRED_GO_VERSION)"
-        need_install=true
+    check_python || checks_passed=false
+    check_docker || checks_passed=false
+
+    if [ "$checks_passed" = false ]; then
+        print_error "Environment check failed"
+        exit 1
     fi
 
-    if [ "$need_install" = true ]; then
-        echo ""
-        read -p "Would you like to install Go 1.22.2? (yes/no): " install_choice
+    # Setup virtual environment and dependencies
+    setup_venv || exit 1
 
-        if [ "$install_choice" = "yes" ]; then
-            if install_go; then
-                print_info "Go installation completed"
-                return 0
-            else
-                print_error "Go installation failed"
-                exit 1
-            fi
+    # Ensure MongoDB is running
+    ensure_mongodb || exit 1
+
+    # Ensure Redis is running (for Celery task queue)
+    ensure_redis || exit 1
+
+    print_info "Environment check passed"
+    echo ""
+}
+
+# =============================================================================
+# Docker Mode
+# =============================================================================
+
+docker_setup() {
+    # Check .env file
+    if [ ! -f "$SCRIPT_DIR/.env" ]; then
+        if [ -f "$SCRIPT_DIR/.env.example" ]; then
+            cp "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env"
+            print_error ".env file created from .env.example"
+            print_error "Please edit $SCRIPT_DIR/.env and add your API keys, then re-run."
+            exit 1
         else
-            print_error "Go >= $REQUIRED_GO_VERSION is required. Exiting."
-            print_error "Manual installation: https://go.dev/doc/install"
+            print_error ".env file not found and no .env.example available"
             exit 1
         fi
     fi
-}
 
-# Check environment configuration
-check_environment() {
-    local env_file="$CRS_DIR/.env"
-    local env_example="$CRS_DIR/.env.example"
-
-    # Check Docker and Go first
-    check_docker
-    check_go
-
-    # Check if .env exists
-    if [ ! -f "$env_file" ]; then
-        print_warn ".env file not found at $env_file"
-        prompt_api_key
-        return
+    # Build image: force rebuild with --rebuild, or auto-build on first run
+    if [ "$DOCKER_REBUILD" = true ]; then
+        print_info "Rebuilding Docker image..."
+        docker compose -f "$SCRIPT_DIR/docker-compose.yml" build fb-task
+    elif ! docker image inspect v2-fb-task >/dev/null 2>&1; then
+        print_info "Building Docker image (first run, this may take a few minutes)..."
+        docker compose -f "$SCRIPT_DIR/docker-compose.yml" build fb-task
     fi
 
-    # Load .env file
-    set -a
-    source "$env_file"
-    set +a
-
-    # Check if at least one API key is set
-    local has_api_key=false
-
-    if [ -n "$ANTHROPIC_API_KEY" ] && [ "$ANTHROPIC_API_KEY" != "your-anthropic-api-key" ]; then
-        has_api_key=true
-    fi
-
-    if [ -n "$OPENAI_API_KEY" ] && [ "$OPENAI_API_KEY" != "your-openai-api-key" ]; then
-        has_api_key=true
-    fi
-
-    if [ -n "$GEMINI_API_KEY" ] && [ "$GEMINI_API_KEY" != "your-gemini-api-key" ]; then
-        has_api_key=true
-    fi
-
-    if [ "$has_api_key" = false ]; then
-        print_warn "No valid API key found in $env_file"
-        prompt_api_key
-        return
-    fi
-
-    print_info "Environment check passed"
-}
-
-# Detect if a project is JavaScript/TypeScript based
-# Returns 0 if JavaScript, 1 otherwise
-is_javascript_project() {
-    local workspace="$1"
-    local project_name="$2"
-    local project_dir="$workspace/fuzz-tooling/projects/$project_name"
-
-    # Check project.yaml for language: javascript
-    if [ -f "$project_dir/project.yaml" ]; then
-        if grep -qi "^language:\s*javascript" "$project_dir/project.yaml" 2>/dev/null; then
-            return 0
-        fi
-    fi
-
-    # Check Dockerfile for base-builder-javascript
-    if [ -f "$project_dir/Dockerfile" ]; then
-        if grep -q "base-builder-javascript" "$project_dir/Dockerfile" 2>/dev/null; then
-            return 0
-        fi
-    fi
-
-    # Check for package.json in repo root (Node.js project)
-    if [ -f "$workspace/repo/package.json" ]; then
-        # Check if there's no C/C++ code (pure JS project)
-        local c_files=$(find "$workspace/repo" -name "*.c" -o -name "*.cpp" -o -name "*.cc" 2>/dev/null | head -5)
-        if [ -z "$c_files" ]; then
-            return 0
-        fi
-    fi
-
-    return 1
-}
-
-# Get the appropriate sanitizer for a project
-# JavaScript projects must use 'none', others default to 'address'
-get_project_sanitizer() {
-    local workspace="$1"
-    local project_name="$2"
-    local default_sanitizer="${3:-address}"
-
-    if is_javascript_project "$workspace" "$project_name"; then
-        echo "none"
-    else
-        echo "$default_sanitizer"
-    fi
-}
-
-# Copy TaintSan to workspace for JavaScript projects
-# This enables taint tracking for security fuzzing
-setup_taintsan_for_javascript() {
-    local workspace="$1"
-    local project_name="$2"
-
-    if ! is_javascript_project "$workspace" "$project_name"; then
-        return 0
-    fi
-
-    print_info "Setting up TaintSan for JavaScript project..."
-
-    # Source TaintSan directory
-    local taintsan_src="$SCRIPT_DIR/crs/strategy/common/sanitizers/taintsan_javascript"
-
-    if [ ! -d "$taintsan_src" ]; then
-        print_warn "TaintSan source not found at $taintsan_src"
-        return 1
-    fi
-
-    # Destination in the project's OSS-Fuzz structure
-    local project_dir="$workspace/fuzz-tooling/projects/$project_name"
-
-    if [ ! -d "$project_dir" ]; then
-        print_warn "Project directory not found: $project_dir"
-        return 1
-    fi
-
-    # Copy TaintSan files to project directory (for Dockerfile to copy)
-    local taintsan_dest="$project_dir/taintsan"
-    mkdir -p "$taintsan_dest"
-
-    cp "$taintsan_src/taintsan.js" "$taintsan_dest/" 2>/dev/null || true
-    cp "$taintsan_src/jazzer_integration.js" "$taintsan_dest/" 2>/dev/null || true
-    cp "$taintsan_src/package.json" "$taintsan_dest/" 2>/dev/null || true
-
-    if [ -f "$taintsan_dest/taintsan.js" ]; then
-        print_info "TaintSan copied to $taintsan_dest"
-
-        # Update Dockerfile to copy TaintSan (if not already present)
-        local dockerfile="$project_dir/Dockerfile"
-        if [ -f "$dockerfile" ]; then
-            if ! grep -q "COPY taintsan" "$dockerfile" 2>/dev/null; then
-                # Add COPY instruction for TaintSan before COPY build.sh
-                sed -i '/COPY build\.sh/i COPY taintsan $SRC/taintsan' "$dockerfile" 2>/dev/null || {
-                    # If sed fails, append to end
-                    echo "" >> "$dockerfile"
-                    echo "# Copy TaintSan for security fuzzing" >> "$dockerfile"
-                    echo "COPY taintsan \$SRC/taintsan" >> "$dockerfile"
-                }
-                print_info "Updated Dockerfile to include TaintSan"
-            fi
-        fi
-
-        return 0
-    else
-        print_warn "Failed to copy TaintSan files"
-        return 1
-    fi
-}
-
-# Build fuzzers and verify success
-# Returns 0 on success, 1 on failure
-# Sets BUILD_OUTPUT variable with build output (for error reporting)
-build_and_verify_fuzzers() {
-    local workspace="$1"
-    local project_name="$2"
-    local requested_sanitizer="${3:-address}"
-
-    # Auto-detect correct sanitizer for JavaScript projects
-    local sanitizer=$(get_project_sanitizer "$workspace" "$project_name" "$requested_sanitizer")
-    if [ "$sanitizer" != "$requested_sanitizer" ]; then
-        print_info "Detected JavaScript project - using sanitizer: $sanitizer (instead of $requested_sanitizer)"
-    fi
-
-    print_info "Building fuzzers for '$project_name' (sanitizer: $sanitizer)..."
-
-    local helper_py="$workspace/fuzz-tooling/infra/helper.py"
-    if [ ! -f "$helper_py" ]; then
-        BUILD_OUTPUT="Error: helper.py not found at $helper_py"
-        print_error "$BUILD_OUTPUT"
-        return 1
-    fi
-
-    # Build fuzzers using helper.py
-    local build_log=$(mktemp)
-
-    print_info "Running: python3 $helper_py build_fuzzers --clean --sanitizer $sanitizer --engine libfuzzer $project_name"
-    print_info "Build log: $build_log"
-
-    # Bitcoin and other large projects can take 60+ minutes to build with sanitizers
-    # Run the build directly and capture exit code
-    local build_exit_code=0
-
-    # Use 'script' to allocate a pseudo-TTY for Docker (helper.py uses docker -t)
-    # This prevents Docker from hanging when running in non-interactive mode
-    # Also set PYTHONUNBUFFERED to prevent Python output buffering
-    set +e  # Don't exit on error
-    PYTHONUNBUFFERED=1 script -q -e -c "timeout --foreground 5400 python3 \"$helper_py\" build_fuzzers \
-        --clean \
-        --sanitizer \"$sanitizer\" \
-        --engine libfuzzer \
-        \"$project_name\"" "$build_log"
-    build_exit_code=$?
-    set -e
-
-    # Show last part of build log
-    echo "--- Build output (last 50 lines) ---"
-    tail -50 "$build_log" 2>/dev/null || true
-    echo "--- End of build output ---"
-
-    if [ $build_exit_code -eq 0 ]; then
-        # Check if any fuzzer binaries were created
-        # OSS-Fuzz uses ${project_name}-${sanitizer} for C/C++ but ${project_name} for Python/PHP/JS
-        local out_dir="$workspace/fuzz-tooling/build/out/${project_name}-${sanitizer}"
-        local out_dir_alt="$workspace/fuzz-tooling/build/out/${project_name}"
-
-        # Check standard directory first, then fallback to alternative
-        local actual_out_dir=""
-        if [ -d "$out_dir" ] && [ "$(ls -A "$out_dir" 2>/dev/null)" ]; then
-            actual_out_dir="$out_dir"
-        elif [ -d "$out_dir_alt" ] && [ "$(ls -A "$out_dir_alt" 2>/dev/null)" ]; then
-            # Fuzzers are in $out_dir_alt (e.g., "go") but we need them in $out_dir (e.g., "go-address")
-            # Move/rename the directory so go-address is the REAL directory (needed for Docker volume mounts)
-            # Then create symlink: go -> go-address
-
-            print_info "Moving $out_dir_alt to $out_dir (real dir for Docker mounts)"
-
-            # Remove existing go-address if it's empty or a symlink
-            if [ -L "$out_dir" ]; then
-                rm -f "$out_dir"
-            elif [ -d "$out_dir" ] && [ -z "$(ls -A "$out_dir" 2>/dev/null)" ]; then
-                rmdir "$out_dir" 2>/dev/null || true
-            fi
-
-            # Move the alt dir to the standard dir (go -> go-address)
-            if [ ! -e "$out_dir" ]; then
-                mv "$out_dir_alt" "$out_dir"
-                # Create symlink: go -> go-address (for compatibility)
-                ln -sf "$(basename "$out_dir")" "$out_dir_alt"
-                print_info "Created symlink: $(basename "$out_dir_alt") -> $(basename "$out_dir")"
-                actual_out_dir="$out_dir"
-            else
-                print_warn "Could not move directory (target exists with content): $out_dir"
-                actual_out_dir="$out_dir_alt"
-            fi
-        fi
-
-        if [ -n "$actual_out_dir" ]; then
-            local fuzzer_count=$(find "$actual_out_dir" -maxdepth 1 -type f -executable | wc -l)
-            if [ "$fuzzer_count" -gt 0 ]; then
-                print_info "Successfully built $fuzzer_count fuzzer(s) in $actual_out_dir"
-
-                # Create parallel strategy directories (ap0, ap1, ap2, ap3, ap4)
-                # This mirrors CopyFuzzDirForParallelStrategies in Go
-                print_info "Creating parallel strategy directories..."
-                for apdir in ap0 ap1 ap2 ap3 ap4; do
-                    local dest_dir="$actual_out_dir/$apdir"
-                    mkdir -p "$dest_dir"
-
-                    # Copy all files (not directories) from the fuzz dir to the parallel dir
-                    for file in "$actual_out_dir"/*; do
-                        if [ -f "$file" ]; then
-                            cp "$file" "$dest_dir/" 2>/dev/null || true
-                        fi
-                    done
-
-                    # Also copy seed corpus directories
-                    for corpus_dir in "$actual_out_dir"/*_seed_corpus; do
-                        if [ -d "$corpus_dir" ]; then
-                            cp -r "$corpus_dir" "$dest_dir/" 2>/dev/null || true
-                        fi
-                    done
-                done
-                print_info "Created parallel strategy directories: ap0-ap4"
-
-                BUILD_OUTPUT="Success: Built $fuzzer_count fuzzers"
-                rm -f "$build_log"
-                return 0
-            fi
-        fi
-
-        BUILD_OUTPUT="Build completed but no fuzzer binaries found in $out_dir or $out_dir_alt"
-        print_warn "$BUILD_OUTPUT"
-    elif [ $build_exit_code -eq 124 ]; then
-        BUILD_OUTPUT="Build timed out after 90 minutes"
-        print_error "$BUILD_OUTPUT"
-    else
-        print_error "Build failed with exit code: $build_exit_code"
-    fi
-
-    # Capture last 100 lines of build output for error reporting
-    BUILD_OUTPUT=$(tail -100 "$build_log" 2>/dev/null || echo "No build output captured")
-    rm -f "$build_log"
-
-    print_error "Fuzzer build failed"
-    return 1
-}
-
-# Run static analysis on workspace
-run_static_analysis() {
-    local workspace="$1"
-
-    print_info "Running static analysis on workspace..."
-
-    # Path to static analysis binary
-    local analysis_binary="$SCRIPT_DIR/static-analysis/cmd/local/local"
-
-    # Check if binary exists, if not try to build it
-    if [ ! -f "$analysis_binary" ]; then
-        print_warn "Static analysis binary not found, building..."
-        local build_dir="$SCRIPT_DIR/static-analysis/cmd/local"
-
-        cd "$build_dir"
-        if go build -o local .; then
-            print_info "Successfully built static analysis binary"
+    # Start MongoDB and Redis via compose
+    print_info "Starting infrastructure (MongoDB + Redis)..."
+    if ! docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d fb-mongo fb-redis 2>/dev/null; then
+        # Fix Docker 28 + nftables compatibility: create missing isolation chains
+        print_warn "Docker network creation failed, attempting nftables fix..."
+        if command -v nft &>/dev/null; then
+            sudo nft add chain ip filter DOCKER-ISOLATION-STAGE-1 2>/dev/null || true
+            sudo nft add chain ip filter DOCKER-ISOLATION-STAGE-2 2>/dev/null || true
         else
-            print_error "Failed to build static analysis binary"
-            print_warn "Continuing without pre-analysis (strategies will run on-demand analysis)"
-            cd "$SCRIPT_DIR"
-            return 1
+            sudo iptables -t filter -N DOCKER-ISOLATION-STAGE-1 2>/dev/null || true
+            sudo iptables -t filter -N DOCKER-ISOLATION-STAGE-2 2>/dev/null || true
         fi
-        cd "$SCRIPT_DIR"
-    fi
-
-    # Check if analysis results already exist and are recent
-    local static_analysis_dir="$workspace/static_analysis"
-    if [ -d "$static_analysis_dir" ] && [ -f "$static_analysis_dir/index.json" ]; then
-        # Check if results are less than 1 hour old
-        local index_age=$(($(date +%s) - $(stat -c %Y "$static_analysis_dir/index.json" 2>/dev/null || stat -f %m "$static_analysis_dir/index.json" 2>/dev/null || echo 0)))
-        if [ $index_age -lt 3600 ]; then
-            print_info "Recent static analysis results found (age: ${index_age}s), skipping re-analysis"
-            return 0
-        else
-            print_info "Static analysis results are old (age: ${index_age}s), re-running analysis"
-        fi
-    fi
-
-    # Run the analysis
-    print_info "Analyzing workspace: $workspace"
-    if timeout 600 "$analysis_binary" "$workspace"; then
-        print_info "Static analysis completed successfully"
-        return 0
-    else
-        print_error "Static analysis failed or timed out"
-        print_warn "Continuing without pre-analysis (strategies will run on-demand analysis)"
-        return 1
+        docker compose -f "$SCRIPT_DIR/docker-compose.yml" up -d fb-mongo fb-redis
     fi
 }
+
+# Run fuzzingbrain.main inside Docker container
+# Usage: docker_exec [args...]
+docker_exec() {
+    local EXTRA_ARGS=()
+
+    # SSH: prefer agent forwarding, fallback to key mount
+    if [ -n "$SSH_AUTH_SOCK" ] && [ -S "$SSH_AUTH_SOCK" ]; then
+        print_info "SSH agent detected, forwarding into container"
+        EXTRA_ARGS+=(-v "$SSH_AUTH_SOCK:/ssh-agent:ro" -e "SSH_AUTH_SOCK=/ssh-agent")
+    elif [ -d ~/.ssh ]; then
+        print_info "Mounting ~/.ssh into container (read-only)"
+        EXTRA_ARGS+=(-v "$HOME/.ssh:/root/.ssh:ro")
+    fi
+
+    # Mount config file directory if --config is in the args
+    local args=("$@")
+    for i in "${!args[@]}"; do
+        if [ "${args[$i]}" = "--config" ] && [ -n "${args[$((i+1))]}" ]; then
+            local config_path
+            config_path=$(realpath "${args[$((i+1))]}")
+            local config_dir
+            config_dir=$(dirname "$config_path")
+            EXTRA_ARGS+=(-v "$config_dir:$config_dir:ro")
+            # Replace with absolute path
+            args[$((i+1))]="$config_path"
+            break
+        fi
+    done
+
+    docker compose -f "$SCRIPT_DIR/docker-compose.yml" run --rm --no-deps \
+        "${EXTRA_ARGS[@]}" \
+        fb-task "${args[@]}"
+
+    # Fix workspace file ownership (container runs as root)
+    local ws_dir="${FUZZINGBRAIN_HOST_WORKSPACE:-$SCRIPT_DIR/workspace}"
+    if [ -d "$ws_dir" ]; then
+        sudo chown -R "$(id -u):$(id -g)" "$ws_dir" 2>/dev/null || true
+    fi
+
+    exit 0
+}
+
+# =============================================================================
+# Usage
+# =============================================================================
 
 show_usage() {
-    echo "Usage: $0 [OPTIONS] <git_url|workspace_path|project_name>"
+    echo "Usage: $0 [OPTIONS] [TARGET]"
     echo ""
-    echo "Arguments:"
-    echo "  git_url         Git repository URL (e.g., https://github.com/libexpat/libexpat)"
-    echo "  workspace_path  Local workspace directory path"
-    echo "  project_name    Existing project name under workspace/ directory"
+    echo "TARGET:"
+    echo "  (none)              Start MCP server mode"
+    echo "  <git_url>           Clone repository and process"
+    echo "  <json_file>         Load configuration from JSON file"
+    echo "  <workspace_path>    Use existing workspace directory"
+    echo "  <project_name>      Continue processing workspace/<project_name>"
     echo ""
-    echo "Options:"
-    echo "  --in-place      Run directly without copying workspace"
-    echo "  --project NAME  Specify OSS-Fuzz project name (if different from repo name)"
-    echo "  --auto-generate Use Claude Agent to auto-generate OSS-Fuzz integration if not found"
-    echo "                  (requires ANTHROPIC_API_KEY environment variable)"
-    echo "  -b COMMIT       Base commit ID (for delta scan)"
-    echo "  -d COMMIT       Delta commit ID (for delta scan, requires -b)"
+    echo "OPTIONS:"
+    echo "  --docker            Run inside Docker container (no local Python needed)"
+    echo "  --rebuild           Force rebuild Docker image (use with --docker)"
+    echo "  --api               Start REST API server (default, port: 18080)"
+    echo "  --mcp               Start MCP server (for AI agents)"
+    echo "  --scan-mode <mode>  Scan mode: full (default), delta"
+    echo "  -v <commit>         Target version/commit for full-scan"
+    echo "  -b <commit>         Base commit (auto-sets scan-mode to delta)"
+    echo "  -d <commit>         Delta commit (requires -b, default: HEAD)"
+    echo "  --task-type <type>  Task type: pov-patch (default), pov, patch, harness"
+    echo "  --project <name>    Specify OSS-Fuzz project name"
+    echo "  --sanitizers <list> Comma-separated sanitizers (default: address)"
+    echo "  --timeout <min>     Timeout in minutes (default: 60)"
+    echo "  --pov-count <N>     Stop after N verified POVs (default: 0 = unlimited)"
+    echo "  --in-place          Run directly without copying workspace"
+    echo ""
+    echo "EVALUATION OPTIONS:"
+    echo "  --eval-port <port>  Connect to eval server on localhost:<port>"
+    echo "  --budget <amount>   LLM budget limit in USD (e.g., 50.0)"
+    echo "  --allow-expensive   Allow expensive model fallback (true/false)"
+    echo ""
+    echo "  -h, -help, --help   Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 https://github.com/libexpat/libexpat                                # Full scan from git"
-    echo "  $0 -b abc123 -d def456 https://github.com/libexpat/libexpat           # Delta scan with base and delta commits"
-    echo "  $0 --project expat https://github.com/libexpat/libexpat               # Specify oss-fuzz project"
-    echo "  $0 /path/to/workspace                                                  # Use existing workspace"
-    echo "  $0 --in-place /path/to/workspace                                       # Run in-place"
-    echo "  $0 libexpat                                                            # Continue fuzzing existing project"
-    exit 1
+    echo "  $0                                                    # REST API mode (default)"
+    echo "  $0 --mcp                                              # MCP Server mode"
+    echo "  $0 https://github.com/OwenSanzas/libpng.git           # Full scan (HEAD)"
+    echo "  $0 -v abc123 https://github.com/user/repo.git        # Full scan at commit"
+    echo "  $0 -b abc123 -d def456 https://github.com/user/repo   # Delta scan"
+    echo "  $0 ./task_config.json                                 # From JSON"
+    echo "  $0 libpng                                             # Continue project"
+    echo ""
+    echo "Docker mode (no local Python/venv needed):"
+    echo "  $0 --docker ./task_config.json                          # Run via Docker"
+    echo "  $0 --docker --rebuild ./task_config.json                # Rebuild image + run"
+    echo ""
+    echo "With Evaluation (first run ./eval.sh to start eval server):"
+    echo "  $0 --eval-port 18080 --budget 50.0 https://github.com/user/repo.git"
+    exit 0
 }
 
-# Parse arguments
+# =============================================================================
+# Parse Arguments
+# =============================================================================
+
 IN_PLACE=false
+DOCKER_MODE=false
+DOCKER_REBUILD=false
 OSS_FUZZ_PROJECT=""
+TARGET_VERSION=""
 BASE_COMMIT=""
 DELTA_COMMIT=""
-AUTO_GENERATE=true  # Default to true - use Claude Agent for OSS-Fuzz integration
+TASK_TYPE="pov-patch"
+SCAN_MODE="full"
+SANITIZERS="address"
+TIMEOUT_MINUTES=60
+POV_COUNT=0
+FUZZ_TOOLING_URL=""
+FUZZ_TOOLING_REF=""
+API_MODE=false
+MCP_MODE=false
+EVAL_PORT=""
+BUDGET_LIMIT=""
+ALLOW_EXPENSIVE=""
 POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --docker)
+            DOCKER_MODE=true
+            shift
+            ;;
+        --rebuild)
+            DOCKER_REBUILD=true
+            shift
+            ;;
         --in-place)
             IN_PLACE=true
             shift
@@ -686,19 +686,69 @@ while [[ $# -gt 0 ]]; do
             OSS_FUZZ_PROJECT="$2"
             shift 2
             ;;
-        --auto-generate)
-            AUTO_GENERATE=true
-            shift
+        --task-type)
+            TASK_TYPE="$2"
+            shift 2
+            ;;
+        --sanitizers)
+            SANITIZERS="$2"
+            shift 2
+            ;;
+        --timeout)
+            TIMEOUT_MINUTES="$2"
+            shift 2
+            ;;
+        --pov-count)
+            POV_COUNT="$2"
+            shift 2
+            ;;
+        --fuzz-tooling)
+            FUZZ_TOOLING_URL="$2"
+            shift 2
+            ;;
+        --fuzz-tooling-ref)
+            FUZZ_TOOLING_REF="$2"
+            shift 2
+            ;;
+        -v|--version)
+            TARGET_VERSION="$2"
+            shift 2
             ;;
         -b)
             BASE_COMMIT="$2"
+            SCAN_MODE="delta"
             shift 2
             ;;
         -d)
             DELTA_COMMIT="$2"
             shift 2
             ;;
-        -h|--help)
+        --scan-mode)
+            SCAN_MODE="$2"
+            shift 2
+            ;;
+        --api)
+            API_MODE=true
+            shift
+            ;;
+        --mcp)
+            MCP_MODE=true
+            shift
+            ;;
+        --eval-port)
+            EVAL_PORT="$2"
+            shift 2
+            ;;
+        --budget)
+            BUDGET_LIMIT="$2"
+            shift 2
+            ;;
+        --allow-expensive)
+            ALLOW_EXPENSIVE="$2"
+            shift 2
+            ;;
+        -h|-help|--help)
+            show_banner
             show_usage
             ;;
         -*)
@@ -715,291 +765,384 @@ done
 # Restore positional arguments
 set -- "${POSITIONAL_ARGS[@]}"
 
-if [ $# -lt 1 ]; then
-    show_usage
+# Validate delta scan arguments
+if [ -n "$DELTA_COMMIT" ] && [ -z "$BASE_COMMIT" ]; then
+    print_error "Delta commit (-d) requires base commit (-b)"
+    exit 1
+fi
+
+# Set eval server if --eval-port is specified
+if [ -n "$EVAL_PORT" ]; then
+    export FUZZINGBRAIN_EVAL_SERVER="http://localhost:$EVAL_PORT"
+fi
+
+# Set budget limit if specified
+if [ -n "$BUDGET_LIMIT" ]; then
+    export FUZZINGBRAIN_BUDGET_LIMIT="$BUDGET_LIMIT"
+fi
+
+# Set allow expensive fallback if specified
+if [ -n "$ALLOW_EXPENSIVE" ]; then
+    export FUZZINGBRAIN_ALLOW_EXPENSIVE_FALLBACK="$ALLOW_EXPENSIVE"
+fi
+
+# =============================================================================
+# Main Logic
+# =============================================================================
+
+show_banner
+
+# =============================================================================
+# CASE 0a: MCP Mode (explicit --mcp flag)
+# =============================================================================
+if [ "$MCP_MODE" = true ]; then
+    print_info "Starting MCP Server mode..."
+    echo ""
+    print_step "Starting FuzzingBrain MCP Server..."
+    if [ "$DOCKER_MODE" = true ]; then
+        docker_setup
+        docker_exec --mcp
+    else
+        check_environment
+        cd "$SCRIPT_DIR"
+        exec $PYTHON -m fuzzingbrain.main --mcp
+    fi
+fi
+
+# =============================================================================
+# CASE 0b: No arguments or --api - REST API Server Mode (default)
+# =============================================================================
+if [ $# -eq 0 ] || [ "$API_MODE" = true ]; then
+    print_info "Starting REST API Server mode (default)..."
+    echo ""
+    print_step "Starting FuzzingBrain REST API Server..."
+    if [ "$DOCKER_MODE" = true ]; then
+        docker_setup
+        docker_exec --api
+    else
+        check_environment
+        cd "$SCRIPT_DIR"
+        exec $PYTHON -m fuzzingbrain.main --api
+    fi
 fi
 
 TARGET="$1"
 
-# Validate delta scan arguments
-if [ -n "$DELTA_COMMIT" ] && [ -z "$BASE_COMMIT" ]; then
-    print_error "Delta commit (-d) requires base commit (-b)"
-    show_usage
+# =============================================================================
+# CASE 1: JSON File
+# =============================================================================
+if is_json_file "$TARGET"; then
+    print_step "Loading configuration from JSON: $TARGET"
+    if [ "$DOCKER_MODE" = true ]; then
+        docker_setup
+        docker_exec --config "$TARGET"
+    else
+        check_environment
+        cd "$SCRIPT_DIR"
+        exec $PYTHON -m fuzzingbrain.main --config "$TARGET"
+    fi
 fi
 
-
-# Check environment before running
-check_environment
-
-# ============================================
-# CASE 1: Project Name - Continue fuzzing existing project
-# ============================================
+# =============================================================================
+# CASE 2: Project Name - Continue existing project
+# =============================================================================
 if is_project_name "$TARGET"; then
     PROJECT_NAME="$TARGET"
-    WORKSPACE="$SCRIPT_DIR/workspace/${PROJECT_NAME}"
+    WORKSPACE="$WORKSPACE_DIR/${PROJECT_NAME}"
 
-    # Check if project exists under workspace
     if [ ! -d "$WORKSPACE" ]; then
         print_error "Project '$PROJECT_NAME' not found under workspace/"
-        print_error "Expected workspace at: $WORKSPACE"
         echo ""
         print_info "Available projects:"
-        if [ -d "$SCRIPT_DIR/workspace" ] && [ -n "$(ls -A "$SCRIPT_DIR/workspace" 2>/dev/null)" ]; then
-            ls -1 "$SCRIPT_DIR/workspace"
+        if [ -d "$WORKSPACE_DIR" ] && [ -n "$(ls -A "$WORKSPACE_DIR" 2>/dev/null)" ]; then
+            ls -1 "$WORKSPACE_DIR" | sed 's/^/  /'
         else
             echo "  (none)"
         fi
-        echo ""
-        print_info "To create a new project, use a git URL instead:"
-        print_info "  $0 git@github.com:user/repo.git"
         exit 1
     fi
 
-    # Verify workspace structure
-    if [ ! -d "$WORKSPACE/repo" ]; then
-        print_error "Invalid workspace structure: missing 'repo' directory"
-        print_error "Workspace at $WORKSPACE does not appear to be a valid fuzzing workspace"
-        exit 1
-    fi
-
-    print_info "Found existing project: $PROJECT_NAME"
+    print_step "Continuing project: $PROJECT_NAME"
     print_info "Workspace: $WORKSPACE"
-    echo ""
+    if [ "$DOCKER_MODE" = true ]; then
+        docker_setup
+        docker_exec \
+            --workspace "$WORKSPACE" \
+            --task-type "$TASK_TYPE" \
+            --scan-mode "$SCAN_MODE" \
+            --sanitizers "$SANITIZERS" \
+            --timeout "$TIMEOUT_MINUTES"
+    else
+        check_environment
+        cd "$SCRIPT_DIR"
+        exec $PYTHON -m fuzzingbrain.main \
+            --workspace "$WORKSPACE" \
+            --task-type "$TASK_TYPE" \
+            --scan-mode "$SCAN_MODE" \
+            --sanitizers "$SANITIZERS" \
+            --timeout "$TIMEOUT_MINUTES"
+    fi
+fi
 
-    # Run static analysis on workspace
-    run_static_analysis "$WORKSPACE"
-    echo ""
-
-    # Continue fuzzing with existing workspace (always in-place)
-    cd "$CRS_DIR" && sudo ./run_crs.sh --in-place "$WORKSPACE"
-
-# ============================================
-# CASE 2: Git URL - Create workspace from scratch
-# ============================================
-elif is_git_url "$TARGET"; then
+# =============================================================================
+# CASE 3: Git URL - Create workspace from scratch
+# =============================================================================
+if is_git_url "$TARGET"; then
     GIT_URL="$TARGET"
     REPO_NAME=$(get_repo_name "$GIT_URL")
+    TASK_ID=$(generate_task_id)
+    WORKSPACE_NAME="${REPO_NAME}_${TASK_ID}"
 
-    print_info "Detected git URL: $GIT_URL"
-    print_info "Repository name: $REPO_NAME"
+    print_step "Processing Git repository"
+    print_info "Task ID: $TASK_ID"
+    print_info "Scan Mode: $SCAN_MODE"
+    print_info "Task Type: $TASK_TYPE"
+    print_info "URL: $GIT_URL"
+    print_info "Repository: $REPO_NAME"
+    [ -n "$TARGET_VERSION" ] && print_info "Version: $TARGET_VERSION"
 
-    # Set workspace directory (without timestamp to allow reuse)
-    WORKSPACE="$SCRIPT_DIR/workspace/${REPO_NAME}"
+    WORKSPACE="$WORKSPACE_DIR/${WORKSPACE_NAME}"
+    mkdir -p "$WORKSPACE"
 
-    # Check if workspace already exists
-    if [ -d "$WORKSPACE/repo" ] && [ -d "$WORKSPACE/repo/.git" ]; then
-        print_info "Found existing workspace: $WORKSPACE"
-        print_info "Reusing existing repository (pulling latest changes)..."
-
-        cd "$WORKSPACE/repo"
-        if git pull; then
-            print_info "Repository updated successfully"
-        else
-            print_warn "Failed to pull updates, continuing with existing repository"
-        fi
-        cd "$SCRIPT_DIR"
-    else
-        print_info "Creating new workspace: $WORKSPACE"
-        mkdir -p "$WORKSPACE/repo"
-        mkdir -p "$WORKSPACE/fuzz-tooling"
-
-        # Clone target repository
-        print_info "Cloning target repository..."
-        if ! git clone --depth 1 "$GIT_URL" "$WORKSPACE/repo"; then
-            print_error "Failed to clone repository: $GIT_URL"
-            exit 1
-        fi
+    # Clone repository
+    print_info "Cloning repository..."
+    if ! git clone "$GIT_URL" "$WORKSPACE/repo"; then
+        print_error "Failed to clone repository"
+        exit 1
     fi
 
-    # Check if fuzz-tooling already exists
-    if [ -d "$WORKSPACE/fuzz-tooling/projects" ] && [ -n "$(ls -A "$WORKSPACE/fuzz-tooling/projects" 2>/dev/null)" ]; then
-        print_info "Reusing existing fuzz-tooling from workspace"
-    else
-        # Clone oss-fuzz to temp directory
-        OSSFUZZ_TMP="/tmp/oss-fuzz-$$"
-        print_info "Cloning oss-fuzz (this may take a moment)..."
-        if ! git clone --depth 1 https://github.com/google/oss-fuzz.git "$OSSFUZZ_TMP" 2>/dev/null; then
-            print_error "Failed to clone oss-fuzz"
-            rm -rf "$OSSFUZZ_TMP"
+    # Checkout target version if specified
+    if [ -n "$TARGET_VERSION" ]; then
+        print_info "Checking out version: $TARGET_VERSION"
+        cd "$WORKSPACE/repo"
+        if ! git checkout "$TARGET_VERSION"; then
+            print_error "Failed to checkout version: $TARGET_VERSION"
             exit 1
         fi
+        cd "$SCRIPT_DIR"
+    fi
 
-        # Find matching oss-fuzz project
-        if [ -z "$OSS_FUZZ_PROJECT" ]; then
-            OSS_FUZZ_PROJECT=$(find_ossfuzz_project "$REPO_NAME" "$OSSFUZZ_TMP")
-        fi
+    # Setup OSS-Fuzz tooling
+    if [ ! -d "$WORKSPACE/fuzz-tooling/projects" ] || [ -z "$(ls -A "$WORKSPACE/fuzz-tooling/projects" 2>/dev/null)" ]; then
+        OSSFUZZ_TMP="/tmp/oss-fuzz-$$"
 
-        if [ -z "$OSS_FUZZ_PROJECT" ]; then
-            print_warn "No matching OSS-Fuzz project found for '$REPO_NAME'"
-
-            # Try to generate OSS-Fuzz integration using Claude Agent SDK
-            if [ "$AUTO_GENERATE" = true ] || [ -n "$ANTHROPIC_API_KEY" ]; then
-                print_info "Attempting to auto-generate OSS-Fuzz integration using Claude Agent..."
-
-                OUTPUT_DIR="$WORKSPACE/fuzz-tooling/projects/$REPO_NAME"
-                mkdir -p "$OUTPUT_DIR"
-
-                # Copy oss-fuzz infrastructure first (needed for base images)
-                cp -r "$OSSFUZZ_TMP/infra" "$WORKSPACE/fuzz-tooling/" 2>/dev/null || true
-                rm -rf "$OSSFUZZ_TMP"
-
-                # Configuration for retry loop
-                MAX_BUILD_RETRIES=4
-                BUILD_RETRY=0
-                BUILD_SUCCESS=false
-
-                # First, generate the initial OSS-Fuzz integration
-                print_info "Step 1: Generating initial OSS-Fuzz integration..."
-                if ! $PYTHON -m crs.strategy.common.ossfuzz_generator.agent \
-                    "$WORKSPACE/repo" "$REPO_NAME" --output-dir "$OUTPUT_DIR" --verbose; then
-                    print_error "Failed to generate initial OSS-Fuzz integration"
-                    exit 1
-                fi
-
-                # Setup TaintSan for JavaScript projects (provides taint tracking sanitizer)
-                setup_taintsan_for_javascript "$WORKSPACE" "$REPO_NAME"
-
-                # Retry loop: build and fix until success or max retries
-                while [ $BUILD_RETRY -lt $MAX_BUILD_RETRIES ]; do
-                    BUILD_RETRY=$((BUILD_RETRY + 1))
-                    print_info "Step 2: Build attempt $BUILD_RETRY of $MAX_BUILD_RETRIES..."
-
-                    # Try to build the fuzzers
-                    if build_and_verify_fuzzers "$WORKSPACE" "$REPO_NAME" "address"; then
-                        BUILD_SUCCESS=true
-                        print_info "Fuzzer build verified successfully!"
-                        break
-                    fi
-
-                    # Build failed - try to fix with Claude Agent
-                    if [ $BUILD_RETRY -lt $MAX_BUILD_RETRIES ]; then
-                        print_warn "Build failed. Attempting to fix with Claude Agent (attempt $BUILD_RETRY)..."
-
-                        # Save build error to temp file
-                        BUILD_ERROR_FILE=$(mktemp)
-                        echo "$BUILD_OUTPUT" > "$BUILD_ERROR_FILE"
-
-                        # Run Claude Agent to fix the build error
-                        if $PYTHON -m crs.strategy.common.ossfuzz_generator.agent \
-                            "$WORKSPACE/repo" "$REPO_NAME" \
-                            --output-dir "$OUTPUT_DIR" \
-                            --fix-error "$BUILD_ERROR_FILE" \
-                            --verbose; then
-                            print_info "Claude Agent attempted to fix the build error"
+        if [ -n "$FUZZ_TOOLING_URL" ]; then
+            # Use custom fuzz-tooling repository
+            print_info "Setting up custom fuzz-tooling from: $FUZZ_TOOLING_URL"
+            # Clone with --no-single-branch to fetch all branches
+            if git clone --no-single-branch "$FUZZ_TOOLING_URL" "$OSSFUZZ_TMP" 2>/dev/null; then
+                # Checkout specific ref if provided
+                if [ -n "$FUZZ_TOOLING_REF" ]; then
+                    print_info "Checking out ref: $FUZZ_TOOLING_REF"
+                    cd "$OSSFUZZ_TMP"
+                    # Use --force to handle LFS pointer file issues
+                    if ! git checkout --force "$FUZZ_TOOLING_REF" 2>/dev/null; then
+                        # Try as remote tracking branch
+                        if git branch -r | grep -q "origin/$FUZZ_TOOLING_REF"; then
+                            git checkout --force -b "$FUZZ_TOOLING_REF" "origin/$FUZZ_TOOLING_REF" 2>/dev/null
                         else
-                            print_warn "Claude Agent fix attempt failed"
+                            # Fetch specific ref and checkout
+                            git fetch origin "$FUZZ_TOOLING_REF":"$FUZZ_TOOLING_REF" 2>/dev/null && \
+                            git checkout --force "$FUZZ_TOOLING_REF" 2>/dev/null
                         fi
-
-                        rm -f "$BUILD_ERROR_FILE"
                     fi
-                done
-
-                if [ "$BUILD_SUCCESS" = true ]; then
-                    print_info "Successfully generated and verified OSS-Fuzz integration for '$REPO_NAME'"
-                    OSS_FUZZ_PROJECT="$REPO_NAME"
-                else
-                    print_error "Failed to build fuzzers after $MAX_BUILD_RETRIES attempts"
-                    print_error "Last build error:"
-                    echo "$BUILD_OUTPUT" | tail -50
-                    echo ""
-                    print_info "You can manually fix the files in: $OUTPUT_DIR"
-                    print_info "Then re-run: $0 workspace/$REPO_NAME"
-                    exit 1
+                    print_info "Checked out: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')"
+                    cd "$SCRIPT_DIR"
                 fi
-            else
-                print_error "No matching OSS-Fuzz project found for '$REPO_NAME'"
-                print_error "Available projects can be found at: https://github.com/google/oss-fuzz/tree/master/projects"
-                echo ""
-                print_info "Please use --project NAME to specify the correct OSS-Fuzz project name:"
-                print_info "  $0 --project PROJECT_NAME $GIT_URL"
-                echo ""
-                print_info "Or set ANTHROPIC_API_KEY to enable auto-generation:"
-                print_info "  export ANTHROPIC_API_KEY=your_key_here"
+
+                # Auto-detect project name if not specified
+                if [ -z "$OSS_FUZZ_PROJECT" ]; then
+                    OSS_FUZZ_PROJECT=$(find_ossfuzz_project "$REPO_NAME" "$OSSFUZZ_TMP")
+                fi
+
+                if [ -n "$OSS_FUZZ_PROJECT" ]; then
+                    print_info "Found project: $OSS_FUZZ_PROJECT"
+                    mkdir -p "$WORKSPACE/fuzz-tooling/projects"
+                    cp -r "$OSSFUZZ_TMP/projects/$OSS_FUZZ_PROJECT" "$WORKSPACE/fuzz-tooling/projects/"
+                    cp -r "$OSSFUZZ_TMP/infra" "$WORKSPACE/fuzz-tooling/" 2>/dev/null || true
+                else
+                    print_warn "No matching project found in fuzz-tooling"
+                    print_warn "Use --project NAME to specify manually"
+                fi
                 rm -rf "$OSSFUZZ_TMP"
+            else
+                print_error "Failed to clone fuzz-tooling from: $FUZZ_TOOLING_URL"
                 exit 1
             fi
         else
-            print_info "Found OSS-Fuzz project: $OSS_FUZZ_PROJECT"
+            # Use default google/oss-fuzz
+            print_info "Setting up OSS-Fuzz tooling..."
+            if git clone --depth 1 https://github.com/google/oss-fuzz.git "$OSSFUZZ_TMP" 2>/dev/null; then
+                if [ -z "$OSS_FUZZ_PROJECT" ]; then
+                    OSS_FUZZ_PROJECT=$(find_ossfuzz_project "$REPO_NAME" "$OSSFUZZ_TMP")
+                fi
 
-            # Copy only the matching project
-            mkdir -p "$WORKSPACE/fuzz-tooling/projects"
-            cp -r "$OSSFUZZ_TMP/projects/$OSS_FUZZ_PROJECT" "$WORKSPACE/fuzz-tooling/projects/"
-
-            # Copy necessary oss-fuzz infrastructure
-            cp -r "$OSSFUZZ_TMP/infra" "$WORKSPACE/fuzz-tooling/" 2>/dev/null || true
-
-            # Cleanup
-            rm -rf "$OSSFUZZ_TMP"
-            print_info "OSS-Fuzz project copied to workspace"
-
-            # Setup TaintSan for JavaScript projects (existing OSS-Fuzz projects)
-            setup_taintsan_for_javascript "$WORKSPACE" "$OSS_FUZZ_PROJECT"
+                if [ -n "$OSS_FUZZ_PROJECT" ]; then
+                    print_info "Found OSS-Fuzz project: $OSS_FUZZ_PROJECT"
+                    mkdir -p "$WORKSPACE/fuzz-tooling/projects"
+                    cp -r "$OSSFUZZ_TMP/projects/$OSS_FUZZ_PROJECT" "$WORKSPACE/fuzz-tooling/projects/"
+                    cp -r "$OSSFUZZ_TMP/infra" "$WORKSPACE/fuzz-tooling/" 2>/dev/null || true
+                else
+                    print_warn "No matching OSS-Fuzz project found"
+                    print_warn "Use --project NAME to specify manually"
+                fi
+                rm -rf "$OSSFUZZ_TMP"
+            else
+                print_warn "Failed to clone oss-fuzz"
+            fi
         fi
+    else
+        print_info "Using existing fuzz-tooling"
     fi
 
-    # Handle delta scan (generate ref.diff from base and delta commits)
+    # Handle delta scan
     if [ -n "$BASE_COMMIT" ]; then
-        print_info "Delta scan mode: generating diff between base ($BASE_COMMIT) and delta ($DELTA_COMMIT)"
         mkdir -p "$WORKSPACE/diff"
-
         cd "$WORKSPACE/repo"
 
-        # Verify both commits exist
-        if ! git cat-file -t "$BASE_COMMIT" >/dev/null 2>&1; then
-            print_error "Base commit $BASE_COMMIT not found in repository"
-            print_warn "Continuing without diff (full scan mode)"
-            rm -rf "$WORKSPACE/diff"
-            cd "$SCRIPT_DIR"
-        elif [ -n "$DELTA_COMMIT" ] && ! git cat-file -t "$DELTA_COMMIT" >/dev/null 2>&1; then
-            print_error "Delta commit $DELTA_COMMIT not found in repository"
-            print_warn "Continuing without diff (full scan mode)"
-            rm -rf "$WORKSPACE/diff"
-            cd "$SCRIPT_DIR"
-        else
-            # Generate diff between base and delta (or HEAD if delta not specified)
-            local target_commit="${DELTA_COMMIT:-HEAD}"
-            git diff "$BASE_COMMIT..$target_commit" > "$WORKSPACE/diff/ref.diff"
-
-            if [ -s "$WORKSPACE/diff/ref.diff" ]; then
-                print_info "Generated ref.diff from $BASE_COMMIT to $target_commit"
-            else
-                print_warn "Diff between $BASE_COMMIT and $target_commit is empty"
+        # Resolve branch/tag names to commit hashes
+        resolve_ref() {
+            local ref="$1"
+            # Try direct resolution first (works for commits, tags, local branches)
+            local resolved=$(git rev-parse "$ref" 2>/dev/null)
+            if [ -n "$resolved" ] && [ ${#resolved} -eq 40 ]; then
+                echo "$resolved"
+                return
             fi
-            cd "$SCRIPT_DIR"
+            # Try as origin/ref (for remote tracking branches)
+            resolved=$(git rev-parse "origin/$ref" 2>/dev/null)
+            if [ -n "$resolved" ] && [ ${#resolved} -eq 40 ]; then
+                echo "$resolved"
+                return
+            fi
+            # Fetch remote branch and use FETCH_HEAD
+            if git fetch origin "$ref" 2>/dev/null; then
+                resolved=$(git rev-parse FETCH_HEAD 2>/dev/null)
+                if [ -n "$resolved" ] && [ ${#resolved} -eq 40 ]; then
+                    echo "$resolved"
+                    return
+                fi
+            fi
+            # Return original if can't resolve
+            echo "$ref"
+        }
+
+        RESOLVED_BASE=$(resolve_ref "$BASE_COMMIT")
+        TARGET_COMMIT="${DELTA_COMMIT:-HEAD}"
+        if [ "$TARGET_COMMIT" != "HEAD" ]; then
+            RESOLVED_TARGET=$(resolve_ref "$TARGET_COMMIT")
+        else
+            RESOLVED_TARGET="HEAD"
         fi
+
+        print_info "Delta scan: $BASE_COMMIT → ${DELTA_COMMIT:-HEAD}"
+        print_info "Resolved: $RESOLVED_BASE → $RESOLVED_TARGET"
+
+        if git cat-file -t "$RESOLVED_BASE" >/dev/null 2>&1; then
+            # Generate diff excluding .aixcc directory (prevents cheating with vulnerability answers)
+            git diff "$RESOLVED_BASE..$RESOLVED_TARGET" -- . ':!.aixcc' ':!*/.aixcc' > "$WORKSPACE/diff/ref.diff"
+            print_info "Generated diff file (filtered .aixcc)"
+
+            # Update variables for python script (use resolved hashes)
+            BASE_COMMIT="$RESOLVED_BASE"
+            if [ "$TARGET_COMMIT" != "HEAD" ]; then
+                DELTA_COMMIT="$RESOLVED_TARGET"
+            fi
+        else
+            print_warn "Base commit not found, running full scan"
+            rm -rf "$WORKSPACE/diff"
+        fi
+        cd "$SCRIPT_DIR"
     fi
 
-    print_info "Workspace created successfully: $WORKSPACE"
+    print_info "Workspace ready: $WORKSPACE"
     echo ""
-
-    # Run static analysis on workspace
-    run_static_analysis "$WORKSPACE"
-    echo ""
-
-    # Run CRS with the new workspace (always in-place since we just created it)
-    cd "$CRS_DIR" && sudo ./run_crs.sh --in-place "$WORKSPACE"
-
-# ============================================
-# CASE 3: Local path - Use existing workspace
-# ============================================
-else
-    if [ ! -d "$TARGET" ]; then
-        print_error "Directory does not exist: $TARGET"
-        exit 1
-    fi
-
-    # Check environment before running
-    check_environment
-
-    # Run static analysis on workspace
-    run_static_analysis "$TARGET"
-    echo ""
-
-    # Pass through to original run_crs.sh (suppress bash "Killed" message)
-    set +m  # Disable job control to suppress "Killed" messages
-    if [ "$IN_PLACE" = true ]; then
-        cd "$CRS_DIR" && sudo ./run_crs.sh --in-place "$TARGET" || true
+    if [ "$DOCKER_MODE" = true ]; then
+        docker_setup
+        docker_exec \
+            --task-id "$TASK_ID" \
+            --workspace "$WORKSPACE" \
+            --project "$REPO_NAME" \
+            ${OSS_FUZZ_PROJECT:+--ossfuzz-project "$OSS_FUZZ_PROJECT"} \
+            --task-type "$TASK_TYPE" \
+            --scan-mode "$SCAN_MODE" \
+            --sanitizers "$SANITIZERS" \
+            --timeout "$TIMEOUT_MINUTES" \
+            --pov-count "$POV_COUNT" \
+            ${BUDGET_LIMIT:+--budget "$BUDGET_LIMIT"} \
+            ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
+            ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"}
     else
-        cd "$CRS_DIR" && sudo ./run_crs.sh "$TARGET" || true
+        check_environment
+        cd "$SCRIPT_DIR"
+        exec $PYTHON -m fuzzingbrain.main \
+            --task-id "$TASK_ID" \
+            --workspace "$WORKSPACE" \
+            --project "$REPO_NAME" \
+            ${OSS_FUZZ_PROJECT:+--ossfuzz-project "$OSS_FUZZ_PROJECT"} \
+            --task-type "$TASK_TYPE" \
+            --scan-mode "$SCAN_MODE" \
+            --sanitizers "$SANITIZERS" \
+            --timeout "$TIMEOUT_MINUTES" \
+            --pov-count "$POV_COUNT" \
+            ${BUDGET_LIMIT:+--budget "$BUDGET_LIMIT"} \
+            ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
+            ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"}
     fi
 fi
+
+# =============================================================================
+# CASE 4: Local Path - Use existing workspace
+# =============================================================================
+if [ -d "$TARGET" ]; then
+    print_step "Using existing workspace: $TARGET"
+    if [ "$DOCKER_MODE" = true ]; then
+        docker_setup
+        if [ "$IN_PLACE" = true ]; then
+            docker_exec \
+                --workspace "$(realpath "$TARGET")" \
+                --in-place \
+                --task-type "$TASK_TYPE" \
+                --scan-mode "$SCAN_MODE" \
+                --sanitizers "$SANITIZERS" \
+                --timeout "$TIMEOUT_MINUTES" \
+                --pov-count "$POV_COUNT"
+        else
+            docker_exec \
+                --workspace "$(realpath "$TARGET")" \
+                --task-type "$TASK_TYPE" \
+                --scan-mode "$SCAN_MODE" \
+                --sanitizers "$SANITIZERS" \
+                --timeout "$TIMEOUT_MINUTES" \
+                --pov-count "$POV_COUNT"
+        fi
+    else
+        check_environment
+        cd "$SCRIPT_DIR"
+        if [ "$IN_PLACE" = true ]; then
+            exec $PYTHON -m fuzzingbrain.main \
+                --workspace "$TARGET" \
+                --in-place \
+                --task-type "$TASK_TYPE" \
+                --scan-mode "$SCAN_MODE" \
+                --sanitizers "$SANITIZERS" \
+                --timeout "$TIMEOUT_MINUTES" \
+                --pov-count "$POV_COUNT"
+        else
+            exec $PYTHON -m fuzzingbrain.main \
+                --workspace "$TARGET" \
+                --task-type "$TASK_TYPE" \
+                --scan-mode "$SCAN_MODE" \
+                --sanitizers "$SANITIZERS" \
+                --timeout "$TIMEOUT_MINUTES" \
+                --pov-count "$POV_COUNT"
+        fi
+    fi
+fi
+
+# =============================================================================
+# Unknown input
+# =============================================================================
+print_error "Unknown input: $TARGET"
+print_error "Expected: git URL, JSON file, workspace path, or project name"
+exit 1

@@ -1,7 +1,0 @@
-name: aixcc-static-analysis/my-queries
-version: 0.0.1
-dependencies:
-  codeql/java-queries: "*"
-  codeql/java-all: "*"
-extractor: java
-
