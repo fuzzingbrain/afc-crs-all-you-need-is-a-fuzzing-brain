@@ -1,6 +1,12 @@
-# Ruff configuration for FuzzingBrain v2
+# Ruff configuration for FuzzingBrain
 
 [lint]
+# Pin the rule set explicitly. Ruff's *default* selection has grown over
+# time (0.16 added UP/BLE/RUF/DTZ/S/SIM/... to it), so relying on the
+# default made CI red on unchanged code every time ruff was upgraded —
+# CI installs ruff unpinned. These four are what this project enforces.
+select = ["E4", "E7", "E9", "F"]
+
 # Rules to ignore globally
 ignore = [
     "F403",  # undefined-local-with-import-star (used in __init__.py re-exports)
@@ -12,3 +18,9 @@ ignore = [
 "__init__.py" = ["E402", "F401"]
 # celery_app.py loads .env before importing
 "celery_app.py" = ["E402"]
+
+[format]
+# Ruff 0.16 started formatting Python code blocks inside Markdown. Docs are
+# prose, and fuzzingbrain/agents/prompts/*.md are prompts sent verbatim to the
+# model — reformatting their code blocks would silently edit prompt text.
+exclude = ["*.md"]
