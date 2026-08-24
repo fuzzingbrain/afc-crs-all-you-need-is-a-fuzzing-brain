@@ -212,6 +212,13 @@ is_in_docker() {
     return 1
 }
 
+container_running() {
+    # True only if the container is actually up.
+    # `docker ps` also lists containers in the "restarting" state, so a
+    # crash-looping container would otherwise read as healthy.
+    [ "$(docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null)" = "running" ]
+}
+
 check_mongodb() {
     # Check if MongoDB is accessible
     # Try multiple methods for compatibility
@@ -232,7 +239,7 @@ check_mongodb() {
 
     # Method 3: Check if container is running (only for local mode)
     if [ "$MONGODB_HOST" = "localhost" ] || [ "$MONGODB_HOST" = "127.0.0.1" ]; then
-        if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${MONGODB_CONTAINER}$"; then
+        if container_running "$MONGODB_CONTAINER"; then
             print_info "MongoDB container is running"
             return 0
         fi
@@ -245,7 +252,7 @@ start_mongodb() {
     # Check if MongoDB container already exists
     if docker ps -a --format '{{.Names}}' | grep -q "^${MONGODB_CONTAINER}$"; then
         # Container exists, check if running
-        if docker ps --format '{{.Names}}' | grep -q "^${MONGODB_CONTAINER}$"; then
+        if container_running "$MONGODB_CONTAINER"; then
             print_info "MongoDB container already running"
             return 0
         else
@@ -265,7 +272,7 @@ start_mongodb() {
             --restart=always \
             -p 0.0.0.0:${MONGODB_PORT}:27017 \
             -v fuzzingbrain-mongodb-data:/data/db \
-            mongo:8.0 > /dev/null
+            mongo:8.2 > /dev/null
 
         # Wait for MongoDB to start
         print_info "Waiting for MongoDB to start..."
@@ -341,7 +348,7 @@ check_redis() {
 
     # Method 3: Check if container is running (only for local mode)
     if [ "$REDIS_HOST" = "localhost" ] || [ "$REDIS_HOST" = "127.0.0.1" ]; then
-        if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${REDIS_CONTAINER}$"; then
+        if container_running "$REDIS_CONTAINER"; then
             print_info "Redis container is running"
             return 0
         fi
@@ -354,7 +361,7 @@ start_redis() {
     # Check if Redis container already exists
     if docker ps -a --format '{{.Names}}' | grep -q "^${REDIS_CONTAINER}$"; then
         # Container exists, check if running
-        if docker ps --format '{{.Names}}' | grep -q "^${REDIS_CONTAINER}$"; then
+        if container_running "$REDIS_CONTAINER"; then
             print_info "Redis container already running"
             return 0
         else
