@@ -1,0 +1,22 @@
+{
+  "challenge": "da-full-01",
+  "round": "final-competition",
+  "scan_mode": "full",
+  "language": {
+    "dav1d": "c"
+  },
+  "oss_fuzz_projects": [
+    "dav1d"
+  ],
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/da-full-01"
+  },
+  "source_refs": [
+    "aixcc-challenges/dav1d@caef968117eb2d6d7224e8d29ec67ff79b0025f8",
+    "curl --silent -O https://storage.googleapis.com/aom-test-data/fuzzer/dec_fuzzer_seed_corpus.zip",
+    "curl --silent -O https://download.videolan.org/contrib/dav1d/dav1d_fuzzer_seed_corpus.zip"
+  ],
+  "source_repo_status": "unresolved: aixcc-challenges org returns 404 from this account",
+  "graph": null
+}

@@ -1,0 +1,21 @@
+{
+  "challenge": "lp-delta-01",
+  "round": "pre-competition",
+  "scan_mode": "delta",
+  "language": {
+    "libpng": "c"
+  },
+  "oss_fuzz_projects": [
+    "libpng"
+  ],
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/lp-delta-01"
+  },
+  "source_refs": [
+    "aixcc-challenges/libpng@0cc367aaeaac3f888f255cee5d394968996f736e",
+    "madler/zlib@5a82f71ed1dfc0bec044d9702463dbdf84ea3b71"
+  ],
+  "source_repo_status": "unresolved: aixcc-challenges org returns 404 from this account",
+  "graph": null
+}

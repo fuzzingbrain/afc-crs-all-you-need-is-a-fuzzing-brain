@@ -1,0 +1,20 @@
+{
+  "challenge": "xz-full-01",
+  "round": "final-competition",
+  "scan_mode": "full",
+  "language": {
+    "xz": "c"
+  },
+  "oss_fuzz_projects": [
+    "xz"
+  ],
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/xz-full-01"
+  },
+  "source_refs": [
+    "aixcc-challenges/xz@dd4a1b259936880e04669b43e778828b60619860"
+  ],
+  "source_repo_status": "unresolved: aixcc-challenges org returns 404 from this account",
+  "graph": null
+}

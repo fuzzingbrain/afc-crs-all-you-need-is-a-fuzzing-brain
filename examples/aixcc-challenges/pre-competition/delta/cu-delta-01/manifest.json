@@ -1,0 +1,21 @@
+{
+  "challenge": "cu-delta-01",
+  "round": "pre-competition",
+  "scan_mode": "delta",
+  "language": {
+    "curl": "c"
+  },
+  "oss_fuzz_projects": [
+    "curl"
+  ],
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/cu-delta-01"
+  },
+  "source_refs": [
+    "aixcc-challenges/curl@2d4852af83c9e8c4db979a9f0d328f253ad64c0b",
+    "aixcc-challenges/curl-fuzzer@e2a900d659dce199691be52071426a146f96400f"
+  ],
+  "source_repo_status": "unresolved: aixcc-challenges org returns 404 from this account",
+  "graph": null
+}

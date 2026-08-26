@@ -1,0 +1,20 @@
+{
+  "challenge": "ex-delta-03",
+  "round": "final-competition",
+  "scan_mode": "delta",
+  "language": {
+    "libexif": "c"
+  },
+  "oss_fuzz_projects": [
+    "libexif"
+  ],
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/ex-delta-03"
+  },
+  "source_refs": [
+    "aixcc-challenges/libexif@82cbbd98f2ec30e12a76ac4a5cd0289f3cdac196"
+  ],
+  "source_repo_status": "unresolved: aixcc-challenges org returns 404 from this account",
+  "graph": null
+}

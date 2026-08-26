@@ -1,0 +1,20 @@
+{
+  "challenge": "sq-delta-01",
+  "round": "pre-competition",
+  "scan_mode": "delta",
+  "language": {
+    "sqlite3": "c"
+  },
+  "oss_fuzz_projects": [
+    "sqlite3"
+  ],
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/sq-delta-01"
+  },
+  "source_refs": [
+    "aixcc-challenges/sqlite@92e9fa6fe887fc5cad73b4251ce06e295d7a0d2c"
+  ],
+  "source_repo_status": "unresolved: aixcc-challenges org returns 404 from this account",
+  "graph": null
+}

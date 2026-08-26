@@ -1,0 +1,20 @@
+{
+  "challenge": "db-full-01",
+  "round": "pre-competition",
+  "scan_mode": "full",
+  "language": {
+    "dropbear": "c"
+  },
+  "oss_fuzz_projects": [
+    "dropbear"
+  ],
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/db-full-01"
+  },
+  "source_refs": [
+    "aixcc-challenges/dropbear@bd12a8611b3c838f1ed1d1c2cbaff2da1072a315"
+  ],
+  "source_repo_status": "unresolved: aixcc-challenges org returns 404 from this account",
+  "graph": null
+}
