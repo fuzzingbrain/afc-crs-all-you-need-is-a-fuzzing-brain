@@ -1,20 +1,46 @@
 {
   "challenge": "mg-delta-03",
+  "challenge_name": "Paragraph Dimension",
   "round": "pre-competition",
   "scan_mode": "delta",
+  "challenge_type": "delta",
   "language": {
     "mongoose": "c"
   },
   "oss_fuzz_projects": [
     "mongoose"
   ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-mongoose.git",
+    "branch": "challenges/mg-delta-03",
+    "public": true,
+    "resolved": true
+  },
   "fuzz_tooling": {
     "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/mg-delta-03"
+    "ref": "challenge-state/mg-delta-03",
+    "project": "mongoose"
   },
-  "source_refs": [
-    "aixcc-challenges/mongoose@ef8e7419fa704838f8513fd1c6e99363e5dcc182"
+  "base_ref": "59c451b725b8d6bffe21847863e40d2ddbcc5374",
+  "delta_ref": "challenges/mg-delta-03",
+  "harnesses": [
+    "fuzz",
+    "None"
   ],
-  "source_repo_status": "unresolved: aixcc-challenges org returns 404 from this account",
-  "graph": null
+  "harness_count": 2,
+  "vulnerabilities": [
+    "fuzz",
+    "None"
+  ],
+  "answers": {
+    "vuln_dirs": 0,
+    "pov_blobs": 0,
+    "reference_patches": 0,
+    "has_answers": false
+  },
+  "graph": null,
+  "vuln_details": [],
+  "target_harnesses": [],
+  "target_harness_count": 0,
+  "target_harnesses_not_in_challenge_yaml": []
 }

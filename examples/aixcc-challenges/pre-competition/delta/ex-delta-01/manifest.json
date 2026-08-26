@@ -1,20 +1,87 @@
 {
   "challenge": "ex-delta-01",
+  "challenge_name": "mnotably buggy",
   "round": "pre-competition",
   "scan_mode": "delta",
+  "challenge_type": "delta     # full | delta",
   "language": {
     "libexif": "c++"
   },
   "oss_fuzz_projects": [
     "libexif"
   ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-libexif.git",
+    "branch": "challenges/ex-delta-01",
+    "public": true,
+    "resolved": true
+  },
   "fuzz_tooling": {
     "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/ex-delta-01"
+    "ref": "challenge-state/ex-delta-01",
+    "project": "libexif"
   },
-  "source_refs": [
-    "aixcc-challenges/libexif@82cbbd98f2ec30e12a76ac4a5cd0289f3cdac196"
+  "base_ref": "ffcdfbeb5539c25b1630ba59abf8a22587657adc",
+  "delta_ref": "challenges/ex-delta-01",
+  "harnesses": [
+    "exif_loader_fuzzer",
+    "exif_from_data_fuzzer"
   ],
-  "source_repo_status": "unresolved: aixcc-challenges org returns 404 from this account",
-  "graph": null
+  "harness_count": 2,
+  "vulnerabilities": [
+    "exif-003",
+    "exif-004",
+    "exif-005"
+  ],
+  "answers": {
+    "vuln_dirs": 3,
+    "pov_blobs": 3,
+    "reference_patches": 3,
+    "has_answers": true
+  },
+  "graph": null,
+  "vuln_details": [
+    {
+      "vuln": "exif-003",
+      "name": "exif-003, apple mnote bug 1",
+      "cwes": [
+        "CWE-122"
+      ],
+      "pov_harness": "exif_loader_fuzzer",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "data.bin",
+      "reference_patch": "good_patch.diff"
+    },
+    {
+      "vuln": "exif-004",
+      "name": "exif-004, apple mnote bug 2",
+      "cwes": [
+        "CWE-122"
+      ],
+      "pov_harness": "exif_loader_fuzzer",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "data.bin",
+      "reference_patch": "good_patch.diff"
+    },
+    {
+      "vuln": "exif-005",
+      "name": "exif-005, apple mnote bug 3",
+      "cwes": [
+        "CWE-122"
+      ],
+      "pov_harness": "exif_from_data_fuzzer",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "data.bin",
+      "reference_patch": "good_patch.diff"
+    }
+  ],
+  "target_harnesses": [
+    "exif_from_data_fuzzer",
+    "exif_loader_fuzzer"
+  ],
+  "target_harness_count": 2,
+  "target_harnesses_not_in_challenge_yaml": []
 }

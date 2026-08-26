@@ -1,20 +1,40 @@
 {
   "challenge": "av-delta-03",
+  "challenge_name": "Popular Cucumber",
   "round": "pre-competition",
   "scan_mode": "delta",
+  "challenge_type": "delta     # full | delta",
   "language": {
     "libavif": "c"
   },
   "oss_fuzz_projects": [
     "libavif"
   ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-libavif.git",
+    "branch": "challenges/av-delta-03",
+    "public": true,
+    "resolved": true
+  },
   "fuzz_tooling": {
     "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/av-delta-03"
+    "ref": "challenge-state/av-delta-03",
+    "project": "libavif"
   },
-  "source_refs": [
-    "aixcc-challenges/libavif@fa089a0c3f8ed6e202034589cf98394e0226d66c"
-  ],
-  "source_repo_status": "unresolved: aixcc-challenges org returns 404 from this account",
-  "graph": null
+  "base_ref": "5d8d196f115e5f33f7e300ec95c29bfeb50a0187",
+  "delta_ref": "challenges/av-delta-03",
+  "harnesses": [],
+  "harness_count": 0,
+  "vulnerabilities": [],
+  "answers": {
+    "vuln_dirs": 0,
+    "pov_blobs": 0,
+    "reference_patches": 0,
+    "has_answers": false
+  },
+  "graph": null,
+  "vuln_details": [],
+  "target_harnesses": [],
+  "target_harness_count": 0,
+  "target_harnesses_not_in_challenge_yaml": []
 }

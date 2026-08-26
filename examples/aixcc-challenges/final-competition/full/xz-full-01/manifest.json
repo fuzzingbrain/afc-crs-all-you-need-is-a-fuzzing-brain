@@ -1,20 +1,68 @@
 {
   "challenge": "xz-full-01",
+  "challenge_name": "decoration contrast",
   "round": "final-competition",
   "scan_mode": "full",
+  "challenge_type": "full     # full | delta",
   "language": {
     "xz": "c"
   },
   "oss_fuzz_projects": [
     "xz"
   ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-xz.git",
+    "branch": "challenges/xz-full-01",
+    "public": true,
+    "resolved": true
+  },
   "fuzz_tooling": {
     "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/xz-full-01"
+    "ref": "challenge-state/xz-full-01",
+    "project": "xz"
   },
-  "source_refs": [
-    "aixcc-challenges/xz@dd4a1b259936880e04669b43e778828b60619860"
+  "base_ref": "challenges/xz-full-01",
+  "delta_ref": "~",
+  "harnesses": [
+    "fuzz_decode_stream",
+    "fuzz_encode_stream",
+    "fuzz_decode_stream_mt",
+    "fuzz_decode_alone",
+    "None"
   ],
-  "source_repo_status": "unresolved: aixcc-challenges org returns 404 from this account",
-  "graph": null
+  "harness_count": 5,
+  "vulnerabilities": [
+    "xz-001",
+    "fuzz_decode_stream",
+    "fuzz_encode_stream",
+    "fuzz_decode_stream_mt",
+    "fuzz_decode_alone",
+    "None"
+  ],
+  "answers": {
+    "vuln_dirs": 1,
+    "pov_blobs": 1,
+    "reference_patches": 1,
+    "has_answers": true
+  },
+  "graph": null,
+  "vuln_details": [
+    {
+      "vuln": "xz-001",
+      "name": "Tree-based Checksum",
+      "cwes": [
+        "CWE-416"
+      ],
+      "pov_harness": "fuzz_encode_stream",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "data.bin",
+      "reference_patch": "good_patch.diff"
+    }
+  ],
+  "target_harnesses": [
+    "fuzz_encode_stream"
+  ],
+  "target_harness_count": 1,
+  "target_harnesses_not_in_challenge_yaml": []
 }

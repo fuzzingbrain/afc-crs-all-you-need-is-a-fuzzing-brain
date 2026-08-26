@@ -1,20 +1,69 @@
 {
   "challenge": "lx-delta-01",
+  "challenge_name": "Commentastrophe",
   "round": "pre-competition",
   "scan_mode": "delta",
+  "challenge_type": "delta     # full | delta",
   "language": {
     "libxml2": "c"
   },
   "oss_fuzz_projects": [
     "libxml2"
   ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-libxml2.git",
+    "branch": "challenges/lx-delta-01",
+    "public": true,
+    "resolved": true
+  },
   "fuzz_tooling": {
     "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/lx-delta-01"
+    "ref": "challenge-state/lx-delta-01",
+    "project": "libxml2"
   },
-  "source_refs": [
-    "aixcc-challenges/libxml2@71c37a565d3726440aa96d648db0426deb90157b"
+  "base_ref": "39ce264d546f93a0ddb7a1d7987670b8b905c165",
+  "delta_ref": "challenges/lx-delta-01",
+  "harnesses": [
+    "api",
+    "html",
+    "lint",
+    "reader",
+    "regexp",
+    "schema",
+    "uri",
+    "valid",
+    "xinclude",
+    "xml",
+    "xpath"
   ],
-  "source_repo_status": "unresolved: aixcc-challenges org returns 404 from this account",
-  "graph": null
+  "harness_count": 11,
+  "vulnerabilities": [
+    "vuln_001"
+  ],
+  "answers": {
+    "vuln_dirs": 1,
+    "pov_blobs": 1,
+    "reference_patches": 1,
+    "has_answers": true
+  },
+  "graph": null,
+  "vuln_details": [
+    {
+      "vuln": "vuln_001",
+      "name": "libxml2 HTML parsing bug",
+      "cwes": [
+        "CWE-122"
+      ],
+      "pov_harness": "html",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "blob.bin",
+      "reference_patch": "good_patch.diff"
+    }
+  ],
+  "target_harnesses": [
+    "html"
+  ],
+  "target_harness_count": 1,
+  "target_harnesses_not_in_challenge_yaml": []
 }

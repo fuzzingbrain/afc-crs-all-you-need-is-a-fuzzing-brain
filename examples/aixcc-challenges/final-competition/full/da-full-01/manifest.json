@@ -1,22 +1,57 @@
 {
   "challenge": "da-full-01",
+  "challenge_name": "CVE-2024-1580",
   "round": "final-competition",
   "scan_mode": "full",
+  "challenge_type": "full     # full | delta",
   "language": {
     "dav1d": "c"
   },
   "oss_fuzz_projects": [
     "dav1d"
   ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-dav1d.git",
+    "branch": "challenges/da-full-01",
+    "public": true,
+    "resolved": true
+  },
   "fuzz_tooling": {
     "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/da-full-01"
+    "ref": "challenge-state/da-full-01",
+    "project": "dav1d"
   },
-  "source_refs": [
-    "aixcc-challenges/dav1d@caef968117eb2d6d7224e8d29ec67ff79b0025f8",
-    "curl --silent -O https://storage.googleapis.com/aom-test-data/fuzzer/dec_fuzzer_seed_corpus.zip",
-    "curl --silent -O https://download.videolan.org/contrib/dav1d/dav1d_fuzzer_seed_corpus.zip"
+  "base_ref": "challenges/da-full-01",
+  "delta_ref": "~",
+  "harnesses": [],
+  "harness_count": 0,
+  "vulnerabilities": [
+    "dav1d-001"
   ],
-  "source_repo_status": "unresolved: aixcc-challenges org returns 404 from this account",
-  "graph": null
+  "answers": {
+    "vuln_dirs": 1,
+    "pov_blobs": 1,
+    "reference_patches": 1,
+    "has_answers": true
+  },
+  "graph": null,
+  "vuln_details": [
+    {
+      "vuln": "dav1d-001",
+      "name": "dav1d-001, CVE-2024-1580",
+      "cwes": [
+        "CWE-190"
+      ],
+      "pov_harness": "dav1d_fuzzer_mt@NO_OOM",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "poc1.obu",
+      "reference_patch": "good_patch.diff"
+    }
+  ],
+  "target_harnesses": [
+    "dav1d_fuzzer_mt@NO_OOM"
+  ],
+  "target_harness_count": 1,
+  "target_harnesses_not_in_challenge_yaml": []
 }

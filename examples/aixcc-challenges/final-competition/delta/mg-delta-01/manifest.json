@@ -1,20 +1,62 @@
 {
   "challenge": "mg-delta-01",
+  "challenge_name": "beard variant",
   "round": "final-competition",
   "scan_mode": "delta",
+  "challenge_type": "delta",
   "language": {
     "mongoose": "c"
   },
   "oss_fuzz_projects": [
     "mongoose"
   ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-mongoose.git",
+    "branch": "challenges/mg-delta-01",
+    "public": true,
+    "resolved": true
+  },
   "fuzz_tooling": {
     "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/mg-delta-01"
+    "ref": "challenge-state/mg-delta-01",
+    "project": "mongoose"
   },
-  "source_refs": [
-    "aixcc-challenges/mongoose@ef8e7419fa704838f8513fd1c6e99363e5dcc182"
+  "base_ref": "49affc54d8c03450fd33f6c052459a0168c0975a",
+  "delta_ref": "challenges/mg-delta-01",
+  "harnesses": [
+    "fuzz",
+    "None"
   ],
-  "source_repo_status": "unresolved: aixcc-challenges org returns 404 from this account",
-  "graph": null
+  "harness_count": 2,
+  "vulnerabilities": [
+    "mongoose_1",
+    "fuzz",
+    "None"
+  ],
+  "answers": {
+    "vuln_dirs": 1,
+    "pov_blobs": 1,
+    "reference_patches": 1,
+    "has_answers": true
+  },
+  "graph": null,
+  "vuln_details": [
+    {
+      "vuln": "mongoose_1",
+      "name": "mg_vxprintf with a new %e stack-based buffer overflow",
+      "cwes": [
+        "CWE-121"
+      ],
+      "pov_harness": "fuzz",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "data.bin",
+      "reference_patch": "good_patch.diff"
+    }
+  ],
+  "target_harnesses": [
+    "fuzz"
+  ],
+  "target_harness_count": 1,
+  "target_harnesses_not_in_challenge_yaml": []
 }

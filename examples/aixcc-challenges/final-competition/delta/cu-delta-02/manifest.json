@@ -1,21 +1,75 @@
 {
   "challenge": "cu-delta-02",
+  "challenge_name": "Very Normal, Everything Is Fine V2",
   "round": "final-competition",
   "scan_mode": "delta",
+  "challenge_type": "delta     # full | delta",
   "language": {
     "curl": "c"
   },
   "oss_fuzz_projects": [
     "curl"
   ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-curl.git",
+    "branch": "challenges/cu-delta-02",
+    "public": true,
+    "resolved": true
+  },
   "fuzz_tooling": {
     "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/cu-delta-02"
+    "ref": "challenge-state/cu-delta-02",
+    "project": "curl"
   },
-  "source_refs": [
-    "aixcc-challenges/curl@2d4852af83c9e8c4db979a9f0d328f253ad64c0b",
-    "aixcc-challenges/curl-fuzzer@e2a900d659dce199691be52071426a146f96400f"
+  "base_ref": "332850107d906154ec53c0b3dfc16a46fea692a4",
+  "delta_ref": "challenges/cu-delta-02",
+  "harnesses": [
+    "curl_fuzzer_https",
+    "curl_fuzzer_ftp",
+    "curl_fuzzer_tftp",
+    "curl_fuzzer_rtsp",
+    "curl_fuzzer",
+    "curl_fuzzer_pop3",
+    "curl_fuzzer_ws",
+    "curl_fuzzer_gopher",
+    "curl_fuzzer_dict",
+    "curl_fuzzer_bufq",
+    "curl_fuzzer_smb",
+    "curl_fuzzer_mqtt",
+    "curl_fuzzer_smtp",
+    "curl_fuzzer_file",
+    "curl_fuzzer_imap",
+    "curl_fuzzer_http",
+    "fuzz_url"
   ],
-  "source_repo_status": "unresolved: aixcc-challenges org returns 404 from this account",
-  "graph": null
+  "harness_count": 17,
+  "vulnerabilities": [
+    "curl-006"
+  ],
+  "answers": {
+    "vuln_dirs": 1,
+    "pov_blobs": 1,
+    "reference_patches": 1,
+    "has_answers": true
+  },
+  "graph": null,
+  "vuln_details": [
+    {
+      "vuln": "curl-006",
+      "name": "curl-006, medium difficulty crash",
+      "cwes": [
+        "CWE-476"
+      ],
+      "pov_harness": "curl_fuzzer_ws",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "data.bin",
+      "reference_patch": "good_patch.diff"
+    }
+  ],
+  "target_harnesses": [
+    "curl_fuzzer_ws"
+  ],
+  "target_harness_count": 1,
+  "target_harnesses_not_in_challenge_yaml": []
 }
