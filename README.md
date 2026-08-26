@@ -75,6 +75,7 @@ fill in a key before re-running.
 | `<json_file>` | Load a task configuration from JSON |
 | `<workspace_path>` | Reuse an existing workspace directory |
 | `<project_name>` | Continue an existing `workspace/<project_name>` |
+| `check` | Check the environment (Docker, disk, containers, API key) and exit |
 | _(none)_ | Start a server (REST API by default) |
 
 Common options:

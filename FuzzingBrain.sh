@@ -477,6 +477,160 @@ setup_venv() {
     return 0
 }
 
+# =============================================================================
+# Environment Check
+# =============================================================================
+
+check_row() {
+    case "$1" in
+        ok)   printf "  ${GREEN}PASS${NC}  %-32s %s\n" "$2" "$3" ;;
+        warn) printf "  ${YELLOW}WARN${NC}  %-32s %s\n" "$2" "$3" ;;
+        *)    printf "  ${RED}FAIL${NC}  %-32s %s\n" "$2" "$3" ;;
+    esac
+}
+
+check_free_gb() {
+    df -Pk "$1" 2>/dev/null | awk 'NR==2{print int($4/1048576)}'
+}
+
+check_fs_id() {
+    df -P "$1" 2>/dev/null | awk 'NR==2{print $1}'
+}
+
+# Container state, not just presence: `docker ps` also lists a crash-looping
+# container as running.
+check_container_state() {
+    docker inspect -f '{{.State.Status}}' "$1" 2>/dev/null || echo "absent"
+}
+
+# Every precondition a scan needs, in one place. Exits non-zero if any FAIL.
+run_env_check() {
+    local fails=0
+    echo ""
+    echo "  Environment check"
+    echo ""
+
+    if command -v python3 &>/dev/null; then
+        check_row ok "python3" "$(python3 --version 2>&1 | awk '{print $2}')"
+    else
+        check_row fail "python3" "not installed (need 3.10+)"; fails=$((fails+1))
+    fi
+
+    if [ -x "$PYTHON" ]; then
+        check_row ok "venv" "$VENV_DIR"
+    else
+        check_row warn "venv" "missing; created on first run"
+    fi
+
+    if ! command -v docker &>/dev/null; then
+        check_row fail "docker" "not installed"; fails=$((fails+1))
+    elif ! docker info &>/dev/null; then
+        check_row fail "docker daemon" "not reachable (running? user in docker group?)"; fails=$((fails+1))
+    else
+        check_row ok "docker daemon" "reachable"
+    fi
+
+    # Images and workspaces can live on different filesystems, so measure both.
+    local docker_dir free_gb
+    docker_dir=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || echo /var/lib/docker)
+    free_gb=$(check_free_gb "$docker_dir")
+    if [ -z "$free_gb" ]; then
+        check_row warn "free disk (docker images)" "could not determine"
+    elif [ "$free_gb" -lt 10 ]; then
+        check_row fail "free disk (docker images)" "${free_gb} GB free on $docker_dir, need ~10 GB"; fails=$((fails+1))
+    else
+        check_row ok "free disk (docker images)" "${free_gb} GB on $docker_dir"
+    fi
+
+    free_gb=$(check_free_gb "$WORKSPACE_DIR")
+    if [ -n "$free_gb" ] && [ "$(check_fs_id "$WORKSPACE_DIR")" != "$(check_fs_id "$docker_dir")" ]; then
+        if [ "$free_gb" -lt 10 ]; then
+            check_row fail "free disk (workspace)" "${free_gb} GB, need ~10 GB per task"; fails=$((fails+1))
+        else
+            check_row ok "free disk (workspace)" "${free_gb} GB"
+        fi
+    fi
+
+    if command -v docker &>/dev/null && docker info &>/dev/null; then
+        local imgs
+        imgs=$(docker images --format '{{.Repository}}' 2>/dev/null | grep -c '^gcr.io/oss-fuzz-base/')
+        if [ "$imgs" -gt 0 ]; then
+            check_row ok "oss-fuzz base images" "$imgs present"
+        else
+            check_row warn "oss-fuzz base images" "none; ~9 GB will be pulled on first scan"
+        fi
+
+        local st
+        for pair in "MongoDB:$MONGODB_CONTAINER" "Redis:$REDIS_CONTAINER"; do
+            st=$(check_container_state "${pair#*:}")
+            case "$st" in
+                running) check_row ok   "${pair%%:*} container" "running" ;;
+                absent)  check_row warn "${pair%%:*} container" "not created; started on first run" ;;
+                *)       check_row fail "${pair%%:*} container" "$st"; fails=$((fails+1)) ;;
+            esac
+        done
+    fi
+
+    if [ -d "$WORKSPACE_DIR" ] && [ -w "$WORKSPACE_DIR" ]; then
+        check_row ok "workspace" "$(readlink -f "$WORKSPACE_DIR")"
+    elif [ -e "$WORKSPACE_DIR" ]; then
+        check_row fail "workspace" "exists but is not writable"; fails=$((fails+1))
+    else
+        check_row warn "workspace" "missing; created on first run"
+    fi
+
+    check_llm_key || fails=$((fails+1))
+
+    echo ""
+    if [ "$fails" -eq 0 ]; then
+        print_info "Environment looks good"
+        return 0
+    fi
+    print_error "$fails check(s) failed"
+    return 1
+}
+
+# One model-list request per configured provider: no tokens, no billing.
+check_llm_key() {
+    local names=("ANTHROPIC_API_KEY" "OPENAI_API_KEY" "GEMINI_API_KEY")
+    local name key status found=0
+
+    for name in "${names[@]}"; do
+        key="${!name}"
+        if [ -z "$key" ] && [ -f "$SCRIPT_DIR/.env" ]; then
+            key=$(sed -n "s/^[[:space:]]*${name}[[:space:]]*=[[:space:]]*//p" "$SCRIPT_DIR/.env" \
+                  | tail -n 1 | tr -d '"'"'"' \t\r')
+        fi
+        [ -n "$key" ] || continue
+        found=1
+
+        if ! command -v curl &>/dev/null; then
+            check_row warn "$name" "set; cannot verify (no curl)"
+            continue
+        fi
+        case "$name" in
+            ANTHROPIC_API_KEY) status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                https://api.anthropic.com/v1/models \
+                -H "x-api-key: $key" -H "anthropic-version: 2023-06-01") ;;
+            OPENAI_API_KEY)    status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                https://api.openai.com/v1/models -H "Authorization: Bearer $key") ;;
+            GEMINI_API_KEY)    status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                "https://generativelanguage.googleapis.com/v1beta/models?key=$key") ;;
+        esac
+        case "$status" in
+            2*)      check_row ok   "$name" "valid" ;;
+            401|403) check_row fail "$name" "rejected (HTTP $status)"; return 1 ;;
+            *)       check_row warn "$name" "unverified (HTTP $status)" ;;
+        esac
+    done
+
+    if [ "$found" -eq 0 ]; then
+        check_row fail "LLM API key" "none set in $SCRIPT_DIR/.env"
+        return 1
+    fi
+    return 0
+}
+
 check_environment() {
     print_step "Checking environment..."
 
@@ -596,13 +750,15 @@ show_usage() {
     echo "Usage: $0 [OPTIONS] [TARGET]"
     echo ""
     echo "TARGET:"
-    echo "  (none)              Start MCP server mode"
+    echo "  (none)              Start REST API server (default, port: 18080)"
+    echo "  check               Check the environment and exit"
     echo "  <git_url>           Clone repository and process"
     echo "  <json_file>         Load configuration from JSON file"
     echo "  <workspace_path>    Use existing workspace directory"
     echo "  <project_name>      Continue processing workspace/<project_name>"
     echo ""
     echo "OPTIONS:"
+    echo "  --check             Check the environment and exit"
     echo "  --docker            Run inside Docker container (no local Python needed)"
     echo "  --rebuild           Force rebuild Docker image (use with --docker)"
     echo "  --api               Start REST API server (default, port: 18080)"
@@ -648,6 +804,7 @@ show_usage() {
 # =============================================================================
 
 IN_PLACE=false
+CHECK_MODE=false
 DOCKER_MODE=false
 DOCKER_REBUILD=false
 OSS_FUZZ_PROJECT=""
@@ -670,6 +827,10 @@ POSITIONAL_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case $1 in
+        --check)
+            CHECK_MODE=true
+            shift
+            ;;
         --docker)
             DOCKER_MODE=true
             shift
@@ -791,6 +952,14 @@ fi
 # =============================================================================
 
 show_banner
+
+# =============================================================================
+# CASE 0: Environment check (`check` or --check)
+# =============================================================================
+if [ "$CHECK_MODE" = true ] || [ "${1:-}" = "check" ]; then
+    run_env_check
+    exit $?
+fi
 
 # =============================================================================
 # CASE 0a: MCP Mode (explicit --mcp flag)
