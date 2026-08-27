@@ -130,24 +130,32 @@ class SPGeneratorBase(BaseAgent):
         """
         Filter tools for SP generation mode.
 
-        Allow:
-        - create_suspicious_point: main output
-        - get_function_source: read code
-        - get_callers/get_callees: call graph exploration
-        - get_diff: for delta mode
+        Exclude, rather than list what is allowed:
+        - update_suspicious_point: verification writes verdicts, generation does not
+        - find_all_paths, check_reachability: too slow for a first pass
+        - the POV and coverage tools: nothing here runs a binary
 
-        Exclude:
-        - update_suspicious_point: verification only
-        - find_all_paths, check_reachability: too slow
+        This used to be an allow-list of five names, which broke as soon as tool
+        availability became conditional. Three of the five read the function
+        index, so a run without one left this agent holding get_diff and
+        create_suspicious_point -- two tools, no way to read code, and it still
+        had to name a vulnerable function. It also silently withheld Read, Grep
+        and Glob, because an allow-list cannot know about a tool added after it
+        was written.
         """
-        allowed = {
-            "create_suspicious_point",
-            "get_function_source",
-            "get_callers",
-            "get_callees",
-            "get_diff",
+        excluded = {
+            "update_suspicious_point",
+            "find_all_paths",
+            "check_reachability",
+            "create_pov",
+            "verify_pov",
+            "trace_pov",
+            "run_coverage",
+            "get_coverage_feedback",
+            "check_pov_reaches_target",
+            "list_available_fuzzers",
         }
-        return [t for t in tools if t.get("function", {}).get("name") in allowed]
+        return [t for t in tools if t.get("function", {}).get("name") not in excluded]
 
     async def _get_tools(self, client) -> List[Dict[str, Any]]:
         """Get tools from MCP server, filtered for generation mode."""
@@ -570,6 +578,7 @@ class LargeFullSPGenerator(FullSPGenerator):
 
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message with sliding window support."""
+        source_hint = self.read_function_hint(self.fuzzer)
         func_lines = self.function_source.count("\n") + 1
 
         if self.use_sliding_window and func_lines > self.LARGE_FUNCTION_THRESHOLD:
@@ -596,7 +605,7 @@ class LargeFullSPGenerator(FullSPGenerator):
 
 This function is large ({func_lines} lines). I'll show you sections in windows.
 - Analyze each window for vulnerabilities
-- Use get_function_source to see more context if needed
+- Use {source_hint} to see more context if needed
 - Create SPs as you find issues
 - Request next window when ready
 
@@ -862,6 +871,7 @@ Only find vulnerabilities that are:
         message += self._format_fuzzer_code_section(fuzzer_code)
         message += self._format_changed_functions_section(reachable_changes)
 
+        source_hint = self.read_function_hint(self.fuzzer)
         message += f"""## Your Task
 
 Follow these steps IN ORDER:
@@ -869,7 +879,7 @@ Follow these steps IN ORDER:
 1. **READ THE DIFF**: Call get_diff to see what code was changed
 
 2. **ANALYZE ALL CHANGED FUNCTIONS** (including static-unreachable!):
-   - Read each function's source code with get_function_source
+   - Read each function's source code: {source_hint}
    - Look for {self.sanitizer}-detectable vulnerabilities:
      - {self._get_sanitizer_vuln_types()}
 """

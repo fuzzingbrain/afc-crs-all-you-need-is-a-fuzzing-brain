@@ -394,9 +394,23 @@ class POVDeltaStrategy(POVBaseStrategy):
             for c in self._all_changes
         ]
 
-        if not changed_functions:
-            self.log_warning("No changed functions, skipping delta seeds generation")
+        # An empty changed-functions list does not mean there is nothing to seed
+        # from. It also happens when the mapping had no function index to read,
+        # and by this point the find phase has already produced suspicious
+        # points from the raw diff -- each naming a function, a vulnerability
+        # type and a description, which is richer seeding context than the list
+        # this used to require. Only give up when there is no lead at all.
+        if not changed_functions and not suspicious_points:
+            self.log_warning(
+                "No changed functions and no suspicious points, skipping delta "
+                "seeds generation"
+            )
             return 0
+        if not changed_functions:
+            self.log_info(
+                f"No changed functions mapped; seeding from "
+                f"{len(suspicious_points)} suspicious point(s) instead"
+            )
 
         # Prepare suspicious points context
         sp_context = [

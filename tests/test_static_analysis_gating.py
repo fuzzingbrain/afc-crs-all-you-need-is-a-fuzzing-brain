@@ -149,3 +149,85 @@ def test_coverage_error_says_the_build_is_missing_not_the_context():
     assert ok is False
     assert "No coverage build for this run" in msg
     assert "context" not in msg.lower()
+
+
+# ------------------------------------------------------------------ per-agent filters
+
+
+def _filtered(cls, names):
+    """What one agent class keeps out of a given tool list."""
+    fake = [{"function": {"name": n}} for n in names]
+    return {t["function"]["name"] for t in cls._filter_tools_for_mode(None, fake)}
+
+
+WITH_INDEX = [
+    "Read",
+    "Grep",
+    "Glob",
+    "get_diff",
+    "get_function_source",
+    "get_callers",
+    "get_callees",
+    "create_suspicious_point",
+    "analyzer_status",
+]
+WITHOUT_INDEX = [
+    n
+    for n in WITH_INDEX
+    if n not in {"get_function_source", "get_callers", "get_callees"}
+]
+
+
+def test_sp_generator_can_read_code_without_an_index():
+    """The generator filtered tools through an allow-list of five names, three
+    of which read the function index. A run without one left it holding
+    get_diff and create_suspicious_point -- two tools, no way to read code, and
+    it still had to name a vulnerable function. Observed in a real run:
+    'Available tools: get_diff, create_suspicious_point'."""
+    from fuzzingbrain.agents.sp_generators import SPGeneratorBase
+
+    kept = _filtered(SPGeneratorBase, WITHOUT_INDEX)
+    assert {"Read", "Grep", "Glob"} <= kept
+    assert "create_suspicious_point" in kept
+
+
+def test_sp_generator_keeps_the_index_tools_when_they_exist():
+    from fuzzingbrain.agents.sp_generators import SPGeneratorBase
+
+    kept = _filtered(SPGeneratorBase, WITH_INDEX)
+    assert {"get_function_source", "get_callers", "get_callees"} <= kept
+
+
+def test_sp_generator_still_excludes_what_it_should():
+    """Generation writes suspicious points; it does not verify them or run
+    binaries."""
+    from fuzzingbrain.agents.sp_generators import SPGeneratorBase
+
+    kept = _filtered(
+        SPGeneratorBase,
+        WITH_INDEX
+        + ["update_suspicious_point", "create_pov", "verify_pov", "run_coverage"],
+    )
+    assert (
+        kept & {"update_suspicious_point", "create_pov", "verify_pov", "run_coverage"}
+        == set()
+    )
+
+
+def test_verifier_can_read_code_without_an_index():
+    from fuzzingbrain.agents.sp_verifier import SPVerifier
+
+    assert {"Read", "Grep", "Glob"} <= _filtered(SPVerifier, WITHOUT_INDEX)
+
+
+def test_agent_filters_do_not_use_allow_lists():
+    """An allow-list cannot know about a tool added after it was written, which
+    is how Read, Grep and Glob stayed invisible to the generator."""
+    import inspect
+
+    from fuzzingbrain.agents.sp_generators import SPGeneratorBase
+    from fuzzingbrain.agents.sp_verifier import SPVerifier
+
+    for cls in (SPGeneratorBase, SPVerifier):
+        src = inspect.getsource(cls._filter_tools_for_mode)
+        assert "not in" in src, f"{cls.__name__} filters by exclusion, not inclusion"

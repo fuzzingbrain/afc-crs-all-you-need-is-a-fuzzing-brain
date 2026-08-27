@@ -278,6 +278,7 @@ When assigning risk levels, prioritize directions that handle code patterns dete
 
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message for direction planning."""
+        source_hint = self.read_function_hint(self.fuzzer)
         fuzzer_code = kwargs.get("fuzzer_code", "")
         reachable_count = kwargs.get("reachable_count", 0)
         vuln_hint = kwargs.get("vuln_hint", "") or ""
@@ -320,7 +321,7 @@ This code shows EXACTLY how fuzzer input enters the target library.
 Understanding this is MANDATORY - it defines what code is exploitable.
 
 ```c
-{fuzzer_code if fuzzer_code else "// Fuzzer source not provided - use get_function_source to read it"}
+{fuzzer_code if fuzzer_code else f"// Fuzzer source not provided - read it with {source_hint}"}
 ```
 
 ## Codebase Information
@@ -328,7 +329,7 @@ Understanding this is MANDATORY - it defines what code is exploitable.
 
 ## Your Task
 
-1. **FIRST**: If fuzzer code is not shown above, read it with get_function_source("{self.fuzzer}")
+1. **FIRST**: If fuzzer code is not shown above, read it: {source_hint}
 2. Understand how input flows from the fuzzer into the library
 3. Use get_call_graph to understand the call structure
 4. Group reachable functions into logical directions
