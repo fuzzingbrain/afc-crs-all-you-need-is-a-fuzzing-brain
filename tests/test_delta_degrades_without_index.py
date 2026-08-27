@@ -105,3 +105,43 @@ def test_seed_agent_tolerates_an_empty_change_list():
 
     src = inspect.getsource(seed_agent)
     assert "if changed_functions:" in src
+
+
+# --------------------------------------------- the budget follows the work
+#
+# Degrading to the raw diff made the scan possible; it did not make it
+# affordable. On curl-delta-02 the agent made 51 tool calls mapping a 17-file
+# diff by hand, hit the cap of 50 iterations still exploring, and recorded no
+# suspicious point -- while 97% of the run's dollar budget went unspent. The
+# binding constraint was the iteration count, not the money.
+
+
+def test_an_unmapped_diff_gets_the_larger_budget():
+    from fuzzingbrain.worker.strategies.pov_delta import POVDeltaStrategy
+
+    assert (
+        POVDeltaStrategy.SP_ITERATIONS_NO_INDEX
+        > POVDeltaStrategy.SP_ITERATIONS_WITH_INDEX
+    )
+
+
+def test_the_generator_starts_on_the_mapped_budget():
+    """Raising it is a decision made when the diff turns out to be unmapped,
+    not the default for every delta scan."""
+    import inspect
+
+    from fuzzingbrain.worker.strategies import pov_delta
+
+    src = inspect.getsource(pov_delta.POVDeltaStrategy)
+    assert "max_iterations=self.SP_ITERATIONS_WITH_INDEX" in src
+    assert "max_iterations = self.SP_ITERATIONS_NO_INDEX" in src
+
+
+def test_the_raise_is_conditioned_on_having_no_function_list():
+    import inspect
+
+    from fuzzingbrain.worker.strategies import pov_delta
+
+    src = inspect.getsource(pov_delta.POVDeltaStrategy)
+    i = src.index("max_iterations = self.SP_ITERATIONS_NO_INDEX")
+    assert "if not all_changes:" in src[max(0, i - 400) : i]
