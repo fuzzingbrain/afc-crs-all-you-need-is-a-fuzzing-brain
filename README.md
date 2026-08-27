@@ -3,7 +3,7 @@
 
 # All You Need Is a Fuzzing Brain
 
-<img src="https://img.shields.io/badge/Python-3.10+-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+<img src="https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python">
 <img src="https://img.shields.io/badge/Docker-Required-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
 <img src="https://img.shields.io/badge/License-Apache_2.0-green?style=for-the-badge" alt="License">
 
@@ -25,43 +25,136 @@ patches — with every finding dynamically verified to eliminate hallucinations.
 
 | Requirement | Notes |
 |---|---|
-| **Docker** | Running, with permission to pull images and run containers |
-| **Python** | Not required up front — `uv` fetches the version in `.python-version` (3.11) so every machine runs the same interpreter |
+| **Docker** | Running, and your user able to run containers (`docker ps` without `sudo`) |
+| **Python** | Not required up front — `uv` fetches the version in `.python-version` (3.11), so the run does not depend on whatever `python3` happens to be first on `PATH` |
 | **One LLM API key** | Anthropic, OpenAI, or Google Gemini |
-| **Linux** | Recommended (OSS-Fuzz builds are happiest on Linux) |
+| **Linux** | Recommended; OSS-Fuzz builds are happiest there |
+| **Disk** | Tens of GB. An OSS-Fuzz build tree is several GB per target and large projects (wireshark, freerdp) transiently need far more |
 
-You do **not** need to install Python dependencies or start MongoDB/Redis by
-hand — `FuzzingBrain.sh` bootstraps the virtualenv, installs requirements, and
-starts the infrastructure containers automatically.
+## Setting up
 
-## Quick Start
+There is no separate install step. `FuzzingBrain.sh` bootstraps everything the
+first time it runs:
 
 ```bash
 git clone https://github.com/fuzzingbrain/afc-crs-all-you-need-is-a-fuzzing-brain.git
 cd afc-crs-all-you-need-is-a-fuzzing-brain
 
-# 1. Configure API keys
 cp .env.example .env
 $EDITOR .env          # add at least one API key
-
-# 2. Run a full scan (first run also creates the venv + installs deps)
-./FuzzingBrain.sh https://github.com/OwenSanzas/libpng.git
 ```
 
-On the first run the script will:
+On that first run the script:
 
-1. create `venv/` and install `requirements.txt`,
-2. start the `fuzzingbrain-mongodb` and `fuzzingbrain-redis` containers,
-3. clone the target, build its fuzzers via OSS-Fuzz, and run the pipeline.
+1. installs `uv` into `.uv/` if it is not already on `PATH` (a single static
+   binary; nothing is installed system-wide),
+2. creates `venv/` on **Python 3.11** — the version pinned in `.python-version`,
+   rebuilding the venv if an existing one is on a different version,
+3. installs `requirements.txt` into it, and records the file's hash in
+   `venv/.deps_installed` so later runs skip the install unless requirements
+   change,
+4. starts the `fuzzingbrain-mongodb` and `fuzzingbrain-redis` containers.
 
-If `.env` is missing, the script creates one from `.env.example` and asks you to
-fill in a key before re-running.
+If `.env` is missing it is created from `.env.example` and the run stops so you
+can fill in a key.
 
-> **Tip — pick a build-ready target.** The fuzzer must build before any bug
-> hunting can start. `https://github.com/OwenSanzas/libpng.git` is a known-good
-> example. Some upstream `HEAD`s have drifted from their OSS-Fuzz build scripts
-> (e.g. relocated source files) and will fail to build; prefer a pinned commit
-> with `-v <commit>` when in doubt.
+To set the environment up without starting a scan:
+
+```bash
+./FuzzingBrain.sh --help      # bootstraps, prints options, exits
+```
+
+If you would rather manage the virtualenv yourself:
+
+```bash
+python3.11 -m venv venv
+./venv/bin/pip install -r requirements.txt
+```
+
+Only `requirements.txt` matters here — there is no `pyproject.toml` and no lock
+file, so `uv` is a convenience for pinning the interpreter, not a hard
+dependency.
+
+## Running an example
+
+Each entry under [`examples/`](examples/) is a task file or a short script,
+short enough to read before running it.
+
+**Start here** — a delta scan of an AIxCC Final Competition challenge, driven by
+a task file:
+
+```bash
+./FuzzingBrain.sh examples/07_aixcc_challenge/cu-delta-02.json
+```
+
+Every reference in it is pinned to a commit, so it builds the same way today as
+it will next month. It has a known defect to find and a reference PoV to compare
+against, which is what makes it worth running first: a scan that reports nothing
+is only informative if you know there was something to report. That directory's
+README says what the defect is and how to tell whether a run found it.
+
+Measured on a first run: about four minutes to build the Docker image, three and
+a half more for the seventeen fuzzers, then the agents. It finished in fourteen
+and a half minutes having spent $2.14 of the $20 `budget_limit` its task file
+sets. That cap is a hard stop rather than a hint — set one on every run until
+you know what a scan costs on your targets. Both builds are cached, so a second
+run on the same target starts at the agents.
+
+| Example | What it does |
+|---|---|
+| [`examples/07_aixcc_challenge`](examples/07_aixcc_challenge) | The task file above, and what its result should look like |
+| [`examples/04_json_config`](examples/04_json_config) | Runs driven by a JSON task file instead of flags |
+| [`examples/03_local_scan`](examples/03_local_scan) | Full scan from a GitHub URL |
+| [`examples/05_delta_scan`](examples/05_delta_scan) | Scan only what changed between two commits |
+| [`examples/06_job_types`](examples/06_job_types) | `pov`, `patch` and `harness` task types |
+| [`examples/01_rest_api`](examples/01_rest_api) | REST server on port 18080 |
+| [`examples/02_mcp_server`](examples/02_mcp_server) | MCP server, to drive from an MCP client |
+
+> **Pin what you scan against.** Examples 03, 05 and 06 target a `libpng` fork
+> and do not currently build: OSS-Fuzz's `libpng` recipe copies `build.sh` out
+> of `pnggroup/libpng@master` rather than shipping its own, so upstream tooling
+> compiles a harness the pinned commit does not contain and the build fails with
+> `no such file or directory: libpng_colormap_fuzzer.cc`. Most OSS-Fuzz projects
+> keep `build.sh` in OSS-Fuzz and do not have this problem; a challenge, which
+> pins its tooling ref as well, cannot have it at all.
+
+A delta scan does not need a call graph. Without one the worker hands the raw
+diff to the agent, which reads it with the same file tools it uses everywhere
+else, and says so in the log:
+
+```
+Diff has content but no changed functions were identified -- most likely no
+function index for this run. Continuing with the raw diff
+```
+
+A call graph makes the scan sharper rather than possible: it maps the diff onto
+named functions and tells the worker which of them the harness can actually
+reach, so the agent starts from a short list instead of a patch. Building one
+needs `enable_static_analysis` in the task file, which runs fuzz-introspector
+during the build; a graph built earlier can be handed to a later run with
+`--prebuild-dir`. [`examples/aixcc-challenges/`](examples/aixcc-challenges/)
+holds a manifest per public AIxCC challenge — the refs and harnesses each one
+pins. The graphs themselves are not in the repository; they are build output,
+and each is hundreds of megabytes.
+
+### What a run leaves behind
+
+```
+workspace/<project>_<task_id>/results/
+├── povs/        # verified proof-of-vulnerability inputs
+├── patches/     # proposed fixes
+└── report.json  # run summary
+logs/<project>_<task_id>_<timestamp>/
+```
+
+Nothing is reported that has not crashed a real build: every candidate input is
+executed against the built fuzzer and kept only if the sanitizer fires.
+
+> **Pick a build-ready target.** The fuzzer has to build before any bug hunting
+> starts, and a target that built last month may not build today: an OSS-Fuzz
+> recipe that clones a dependency at `master` picks up whatever is there now.
+> Check `logs/<run>/build/*.log` first when a run reports nothing — a failed
+> build and a clean scan do not look alike there, but they can in a summary.
 
 ## Usage
 
@@ -99,7 +192,7 @@ Run `./FuzzingBrain.sh --help` for the full list.
 
 ```bash
 # Full scan with a $20 budget cap
-./FuzzingBrain.sh --budget 20 https://github.com/OwenSanzas/libpng.git
+./FuzzingBrain.sh --budget 20 <git_url>
 
 # Delta scan between two commits
 ./FuzzingBrain.sh -b <base> -d <delta> https://github.com/user/repo.git
@@ -109,19 +202,6 @@ Run `./FuzzingBrain.sh --help` for the full list.
 
 # Start the REST API server (port 18080)
 ./FuzzingBrain.sh --api
-```
-
-## Results
-
-Output is written under the task's workspace:
-
-```
-workspace/<project>_<task_id>/
-└── results/
-    ├── povs/        # verified proof-of-vulnerability inputs
-    ├── patches/     # proposed fixes
-    └── report.json  # run summary
-logs/<project>_<task_id>_<timestamp>/   # full run logs
 ```
 
 ## How it works
@@ -157,13 +237,16 @@ See [`examples/`](examples/) for runnable configurations of each mode.
 | `.env file created … add your API keys` | Edit `.env`, add a key, re-run |
 | Fuzzer build fails immediately | The target doesn't match its OSS-Fuzz build script; pin a commit with `-v`, or pick a build-ready target |
 | `docker: permission denied` | Add your user to the `docker` group, or run with sufficient privileges |
-| Dependencies re-install every run | Delete `venv/.deps_installed` to force a clean reinstall |
+| Dependencies re-install on every run | The hash in `venv/.deps_installed` no longer matches `requirements.txt` — expected after editing it. Delete that file to force a reinstall on purpose |
+| Wrong Python in `venv/` | The venv is rebuilt automatically when it is not on the version in `.python-version`; `rm -rf venv` if it is wedged |
+| Delta scan finds nothing in under a second | No call graph, so the diff maps to no functions. Pass `--prebuild-dir` (see [`examples/aixcc-challenges/`](examples/aixcc-challenges/)) |
 | Want to reset infra | `docker rm -f fuzzingbrain-mongodb fuzzingbrain-redis` |
 
 ## Development
 
 ```bash
-python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
+# the pinned interpreter; `./FuzzingBrain.sh --help` does this for you
+python3.11 -m venv venv && ./venv/bin/pip install -r requirements.txt
 ./venv/bin/python -m pytest tests/
 ```
 
