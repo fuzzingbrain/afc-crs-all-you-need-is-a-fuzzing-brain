@@ -32,7 +32,6 @@ __all__ = [
     "read_file_impl",
     "grep_impl",
     "glob_impl",
-    "FILE_TOOLS",
 ]
 
 
@@ -364,8 +363,17 @@ def grep_impl(
 # =============================================================================
 
 
-def glob_impl(pattern: str, head_limit: int = _GLOB_DEFAULT_HEAD) -> Dict[str, Any]:
-    """Find files by name pattern."""
+def glob_impl(
+    pattern: str,
+    include_dirs: bool = False,
+    head_limit: int = _GLOB_DEFAULT_HEAD,
+) -> Dict[str, Any]:
+    """Find files by name pattern, optionally directories too.
+
+    Directories are opt-in because most searches want files, but without them an
+    agent globbing ``*`` on an unfamiliar tree cannot see that ``src/`` exists,
+    and ``**/*`` is expensive on a large repository.
+    """
     err = _ensure_context()
     if err:
         return err
@@ -385,135 +393,32 @@ def glob_impl(pattern: str, head_limit: int = _GLOB_DEFAULT_HEAD) -> Dict[str, A
         head_limit = _GLOB_DEFAULT_HEAD
 
     try:
-        found = [p for p in root.glob(pattern) if p.is_file()]
+        found = list(root.glob(pattern))
     except (ValueError, OSError) as exc:
         return _err(f"Invalid pattern {pattern!r}: {exc}")
 
     files: List[str] = []
+    dirs: List[str] = []
     for path in found:
         rel = _rel(path)
         if set(Path(rel).parts) & _DENIED_PARTS:
             continue
-        files.append(rel)
+        if path.is_dir():
+            if include_dirs:
+                dirs.append(rel + "/")
+        elif path.is_file():
+            files.append(rel)
     files.sort()
+    dirs.sort()
 
-    return {
+    result = {
         "success": True,
         "pattern": pattern,
         "files": files[:head_limit],
         "count": len(files),
         "truncated": len(files) > head_limit,
     }
-
-
-# Kept for callers that build the LLM tool list directly rather than over MCP.
-FILE_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "Read",
-            "description": (
-                "Read a file from the task workspace. Returns numbered lines, so "
-                "you can cite an exact location. Use offset and limit to page "
-                "through a long file rather than pulling all of it."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "file_path": {
-                        "type": "string",
-                        "description": "Path relative to the repository root, e.g. 'pngrutil.c'",
-                    },
-                    "offset": {
-                        "type": "integer",
-                        "description": "First line to return, 1-indexed (default 1)",
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": f"How many lines to return (default {_READ_DEFAULT_LIMIT})",
-                    },
-                },
-                "required": ["file_path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "Grep",
-            "description": (
-                "Search file contents by regular expression. output_mode "
-                "'files_with_matches' returns paths only and is the cheapest way "
-                "to narrow down; 'content' returns matching lines with numbers; "
-                "'count' returns per-file totals."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "pattern": {
-                        "type": "string",
-                        "description": "Regular expression to search for",
-                    },
-                    "glob": {
-                        "type": "string",
-                        "description": "Restrict to files matching this pattern, e.g. '*.c'",
-                    },
-                    "output_mode": {
-                        "type": "string",
-                        "enum": ["content", "files_with_matches", "count"],
-                        "description": "What to return (default 'content')",
-                    },
-                    "context_lines": {
-                        "type": "integer",
-                        "description": "Lines of context on both sides of a match",
-                    },
-                    "before_context": {
-                        "type": "integer",
-                        "description": "Lines of context before a match",
-                    },
-                    "after_context": {
-                        "type": "integer",
-                        "description": "Lines of context after a match",
-                    },
-                    "head_limit": {
-                        "type": "integer",
-                        "description": f"Cap on returned entries (default {_GREP_DEFAULT_HEAD})",
-                    },
-                    "case_insensitive": {
-                        "type": "boolean",
-                        "description": "Match case-insensitively",
-                    },
-                    "multiline": {
-                        "type": "boolean",
-                        "description": "Let the pattern span line breaks",
-                    },
-                },
-                "required": ["pattern"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "Glob",
-            "description": (
-                "Find files by name pattern, for example '**/*.c' or "
-                "'contrib/oss-fuzz/*'. Returns workspace-relative paths sorted by path."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "pattern": {
-                        "type": "string",
-                        "description": "Glob pattern relative to the repository root",
-                    },
-                    "head_limit": {
-                        "type": "integer",
-                        "description": f"Cap on returned paths (default {_GLOB_DEFAULT_HEAD})",
-                    },
-                },
-                "required": ["pattern"],
-            },
-        },
-    },
-]
+    if include_dirs:
+        result["directories"] = dirs[:head_limit]
+        result["dir_count"] = len(dirs)
+    return result

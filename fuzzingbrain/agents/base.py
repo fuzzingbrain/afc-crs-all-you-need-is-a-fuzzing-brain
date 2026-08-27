@@ -21,6 +21,29 @@ from ..core.logging import get_agent_banner_and_header, get_agent_log_path
 from .context import AgentContext
 
 
+def format_tool_args(args: dict, limit: int = 160) -> str:
+    """Render tool arguments for a log line.
+
+    Every MCP call is logged with its arguments so a run can be audited from the
+    log alone -- which files an agent read, what it searched for -- without
+    opening the conversation JSON. Long values are clipped: a POV blob or a file
+    body has no business in a log line.
+    """
+    if not args:
+        return ""
+    parts = []
+    for key, value in args.items():
+        if isinstance(value, str):
+            shown = value if len(value) <= 60 else value[:57] + "..."
+            parts.append(f"{key}={shown!r}")
+        elif isinstance(value, (int, float, bool)) or value is None:
+            parts.append(f"{key}={value}")
+        else:
+            parts.append(f"{key}=<{type(value).__name__}>")
+    rendered = ", ".join(parts)
+    return rendered if len(rendered) <= limit else rendered[: limit - 3] + "..."
+
+
 class BaseAgent(ABC):
     """
     Base class for MCP-based AI agents.
@@ -960,7 +983,10 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                             level="WARNING",
                         )
 
-                    self._log(f"Calling tool: {tool_name}", level="INFO")
+                    self._log(
+                        f"Calling tool: {tool_name}({format_tool_args(tool_args)})",
+                        level="INFO",
+                    )
 
                     # Execute tool via MCP
                     tool_result = await self._execute_tool(client, tool_name, tool_args)

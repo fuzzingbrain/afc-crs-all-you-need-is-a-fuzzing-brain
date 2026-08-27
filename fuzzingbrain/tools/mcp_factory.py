@@ -471,15 +471,18 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
 
 
 def _register_code_viewer_tools(mcp: FastMCP) -> None:
-    """Register code viewer tools (file system operations)."""
+    """Register get_diff.
 
-    # Import the _impl functions that bypass MCP wrapper
-    from .code_viewer import (
-        get_diff_impl,
-        get_file_content_impl,
-        search_code_impl,
-        list_files_impl,
-    )
+    The diff lives at workspace/diff/, outside the repo root that Read is
+    anchored to, and the delta prompts name this tool directly, so it stays as
+    its own tool rather than becoming a path an agent has to know.
+
+    get_file_content, search_code and list_files used to live here and are now
+    served by Read, Grep and Glob in _register_file_tools. Their _impl functions
+    remain in code_viewer for callers that import them directly.
+    """
+
+    from .code_viewer import get_diff_impl
 
     @mcp.tool
     @async_tool
@@ -489,62 +492,6 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
         Essential for delta-scan mode to understand what code changes were made.
         """
         return get_diff_impl()
-
-    @mcp.tool
-    @async_tool
-    def get_file_content(
-        file_path: str, start_line: int = None, end_line: int = None
-    ) -> Dict[str, Any]:
-        """
-        Read the content of a file from the repository.
-
-        Args:
-            file_path: Relative path to the file within the repo
-            start_line: Optional starting line number (1-indexed)
-            end_line: Optional ending line number (1-indexed, inclusive)
-        """
-        return get_file_content_impl(file_path, start_line, end_line)
-
-    @mcp.tool
-    @async_tool
-    def search_code(
-        pattern: str = None,
-        query: str = None,
-        file_pattern: str = None,
-        max_results: int = 50,
-        context_lines: int = 2,
-    ) -> Dict[str, Any]:
-        """
-        Search for a pattern in the repository source code.
-
-        Args:
-            pattern: Search pattern (supports regex)
-            query: Alias for pattern
-            file_pattern: Optional glob pattern to filter files
-            max_results: Maximum number of matches to return
-            context_lines: Number of context lines around matches
-        """
-        actual_pattern = pattern or query
-        if not actual_pattern:
-            return {"error": "pattern or query is required", "matches": [], "count": 0}
-        return search_code_impl(
-            actual_pattern, file_pattern, max_results, context_lines
-        )
-
-    @mcp.tool
-    @async_tool
-    def list_files(
-        directory: str = "", pattern: str = None, recursive: bool = False
-    ) -> Dict[str, Any]:
-        """
-        List files in the repository.
-
-        Args:
-            directory: Subdirectory to list (relative to repo root)
-            pattern: Optional glob pattern to filter files
-            recursive: If True, list files recursively
-        """
-        return list_files_impl(directory, pattern, recursive)
 
 
 def _register_file_tools(mcp: FastMCP) -> None:
@@ -622,16 +569,20 @@ def _register_file_tools(mcp: FastMCP) -> None:
 
     @mcp.tool
     @async_tool
-    def Glob(pattern: str, head_limit: int = 1000) -> Dict[str, Any]:
+    def Glob(
+        pattern: str, include_dirs: bool = False, head_limit: int = 1000
+    ) -> Dict[str, Any]:
         """
         Find files by name pattern, for example '**/*.c' or
         'contrib/oss-fuzz/*'. Returns workspace-relative paths sorted by path.
 
         Args:
             pattern: Glob pattern relative to the repository root
+            include_dirs: Also return matching directories, which is how you
+                explore an unfamiliar tree without globbing '**/*'
             head_limit: Cap on returned paths
         """
-        return glob_impl(pattern, head_limit)
+        return glob_impl(pattern, include_dirs, head_limit)
 
 
 def _register_sp_create_tools(mcp: FastMCP) -> None:

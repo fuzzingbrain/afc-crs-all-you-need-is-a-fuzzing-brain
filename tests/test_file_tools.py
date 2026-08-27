@@ -207,6 +207,25 @@ def test_glob_head_limit_flags_truncation(workspace):
     assert r["count"] > 1
 
 
+def test_glob_omits_directories_by_default(workspace):
+    r = F.glob_impl("*")
+    assert "src" not in r["files"]
+    assert "directories" not in r
+
+
+def test_glob_include_dirs_exposes_the_tree(workspace):
+    r = F.glob_impl("*", include_dirs=True)
+    assert "src/" in r["directories"]
+    assert r["dir_count"] >= 1
+    assert "png.c" in r["files"], "files still come back alongside directories"
+
+
+def test_glob_include_dirs_still_hides_denied_directories(workspace):
+    r = F.glob_impl("*", include_dirs=True)
+    assert ".aixcc/" not in r["directories"]
+    assert ".git/" not in r["directories"]
+
+
 def test_glob_refuses_absolute_pattern(workspace):
     r = F.glob_impl("/etc/*")
     assert r["success"] is False
@@ -231,3 +250,34 @@ def test_tools_fail_clearly_without_context():
 
     for err in copy_context().run(run):
         assert "context" in err.lower()
+
+
+# ---------------------------------------------------------------- audit trail
+
+
+def test_tool_args_are_rendered_for_the_log():
+    """Every MCP call is logged with its arguments, so a run is auditable
+    from the log alone -- including an attempt to read the answers."""
+    from fuzzingbrain.agents.base import format_tool_args
+
+    assert format_tool_args({}) == ""
+    assert (
+        format_tool_args({"file_path": "png.c", "offset": 10, "limit": 2})
+        == "file_path='png.c', offset=10, limit=2"
+    )
+    assert ".aixcc" in format_tool_args({"file_path": ".aixcc/vulns/v/vuln.yaml"})
+
+
+def test_long_tool_args_are_clipped_not_dumped():
+    from fuzzingbrain.agents.base import format_tool_args
+
+    rendered = format_tool_args({"content": "A" * 5000, "fuzzer": "html"})
+    assert len(rendered) < 250, "a POV blob must not end up in a log line"
+    assert "fuzzer='html'" in rendered
+
+
+def test_non_scalar_tool_args_are_summarised_by_type():
+    from fuzzingbrain.agents.base import format_tool_args
+
+    assert format_tool_args({"data": {"a": 1}}) == "data=<dict>"
+    assert format_tool_args({"flag": True, "none": None}) == "flag=True, none=None"

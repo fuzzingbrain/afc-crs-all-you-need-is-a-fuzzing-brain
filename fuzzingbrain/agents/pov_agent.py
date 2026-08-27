@@ -17,7 +17,7 @@ from typing import Any, Dict, Optional, Union
 from fastmcp import Client
 from loguru import logger
 
-from .base import BaseAgent
+from .base import BaseAgent, format_tool_args
 from .prompts import POV_AGENT_SYSTEM_PROMPT
 from ..llms import LLMClient, ModelInfo
 from ..tools.pov import set_pov_context, update_pov_iteration
@@ -703,7 +703,10 @@ Start by reading the vulnerable function source with get_function_source("{funct
                             level="WARNING",
                         )
 
-                    self._log(f"Calling tool: {tool_name}", level="INFO")
+                    self._log(
+                        f"Calling tool: {tool_name}({format_tool_args(tool_args)})",
+                        level="INFO",
+                    )
 
                     # Execute tool via MCP
                     tool_result = await self._execute_tool(client, tool_name, tool_args)
