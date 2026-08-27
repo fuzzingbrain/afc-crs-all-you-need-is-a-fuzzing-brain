@@ -15,7 +15,7 @@ Usage:
 """
 
 from fastmcp import FastMCP
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from .utils import async_tool
 
@@ -60,6 +60,7 @@ def create_isolated_mcp_server(
     # Register code analysis tools (always needed)
     _register_analyzer_tools(mcp)
     _register_code_viewer_tools(mcp)
+    _register_file_tools(mcp)
 
     if include_seed_tools:
         # SeedAgent: only code analysis + create_seed
@@ -544,6 +545,93 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
             recursive: If True, list files recursively
         """
         return list_files_impl(directory, pattern, recursive)
+
+
+def _register_file_tools(mcp: FastMCP) -> None:
+    """Register the filesystem primitives: Read, Grep, Glob.
+
+    These need nothing but a checked-out tree, so they stay available when the
+    introspector build fails or a run is scoped to analysis only. Names match
+    the Claude Code tools so a model does not learn a second convention; the
+    parameters that are flags there (-A, -B, -C) become before_context,
+    after_context and context_lines here, because the MCP schema is generated
+    from this signature and those are not valid identifiers.
+    """
+
+    from .files import glob_impl, grep_impl, read_file_impl
+
+    @mcp.tool
+    @async_tool
+    def Read(
+        file_path: str,
+        offset: int = 1,
+        limit: int = 2000,
+    ) -> Dict[str, Any]:
+        """
+        Read a file from the task workspace. Returns numbered lines, so you can
+        cite an exact location. Use offset and limit to page through a long file
+        rather than pulling all of it.
+
+        Args:
+            file_path: Path relative to the repository root, e.g. 'pngrutil.c'
+            offset: First line to return, 1-indexed
+            limit: How many lines to return
+        """
+        return read_file_impl(file_path, offset, limit)
+
+    @mcp.tool
+    @async_tool
+    def Grep(
+        pattern: str,
+        glob: Optional[str] = None,
+        output_mode: str = "content",
+        context_lines: int = 0,
+        before_context: int = 0,
+        after_context: int = 0,
+        head_limit: int = 50,
+        case_insensitive: bool = False,
+        multiline: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Search file contents by regular expression.
+
+        Args:
+            pattern: Regular expression to search for
+            glob: Restrict to files matching this pattern, e.g. '*.c'
+            output_mode: 'content' for matching lines with numbers,
+                'files_with_matches' for paths only (cheapest way to narrow
+                down), or 'count' for per-file totals
+            context_lines: Lines of context on both sides of a match
+            before_context: Lines of context before a match
+            after_context: Lines of context after a match
+            head_limit: Cap on returned entries
+            case_insensitive: Match case-insensitively
+            multiline: Let the pattern span line breaks
+        """
+        return grep_impl(
+            pattern,
+            glob,
+            output_mode,
+            context_lines,
+            before_context,
+            after_context,
+            head_limit,
+            case_insensitive,
+            multiline,
+        )
+
+    @mcp.tool
+    @async_tool
+    def Glob(pattern: str, head_limit: int = 1000) -> Dict[str, Any]:
+        """
+        Find files by name pattern, for example '**/*.c' or
+        'contrib/oss-fuzz/*'. Returns workspace-relative paths sorted by path.
+
+        Args:
+            pattern: Glob pattern relative to the repository root
+            head_limit: Cap on returned paths
+        """
+        return glob_impl(pattern, head_limit)
 
 
 def _register_sp_create_tools(mcp: FastMCP) -> None:
