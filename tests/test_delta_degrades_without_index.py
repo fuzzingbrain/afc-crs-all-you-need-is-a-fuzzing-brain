@@ -76,3 +76,32 @@ def test_generator_prompt_survives_an_empty_change_list():
 
     section = DeltaSPGenerator._format_changed_functions_section(SimpleNamespace(), [])
     assert section == ""
+
+
+# ------------------------------------------------------------------ seeding
+
+
+def test_seeding_falls_back_to_suspicious_points(diff_file):
+    """Seed generation used to require the mapped function list, so a run
+    without an index produced no diff-guided seeds even after the find phase
+    had produced suspicious points -- which name a function, a vulnerability
+    type and a description, and are richer seeding context than that list."""
+    import inspect
+
+    from fuzzingbrain.worker.strategies import pov_delta
+
+    src = inspect.getsource(pov_delta.POVDeltaStrategy._generate_delta_seeds)
+    assert "not changed_functions and not suspicious_points" in src, (
+        "seeding must give up only when there is no lead at all"
+    )
+
+
+def test_seed_agent_tolerates_an_empty_change_list():
+    """The prompt section renders only when there are changes, so handing it an
+    empty list degrades the prompt rather than breaking the agent."""
+    import inspect
+
+    from fuzzingbrain.fuzzer import seed_agent
+
+    src = inspect.getsource(seed_agent)
+    assert "if changed_functions:" in src
