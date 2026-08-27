@@ -31,74 +31,28 @@ patches — with every finding dynamically verified to eliminate hallucinations.
 | **Linux** | Recommended; OSS-Fuzz builds are happiest there |
 | **Disk** | Tens of GB. An OSS-Fuzz build tree is several GB per target and large projects (wireshark, freerdp) transiently need far more |
 
-## Setting up
-
-There is no separate install step. `FuzzingBrain.sh` bootstraps everything the
-first time it runs:
+## Setup
 
 ```bash
 git clone https://github.com/fuzzingbrain/afc-crs-all-you-need-is-a-fuzzing-brain.git
 cd afc-crs-all-you-need-is-a-fuzzing-brain
 
 cp .env.example .env
-$EDITOR .env          # add at least one API key
+$EDITOR .env                  # add at least one API key
+
+./FuzzingBrain.sh --help      # bootstraps uv, venv, deps, MongoDB, Redis
 ```
 
-On that first run the script:
-
-1. installs `uv` into `.uv/` if it is not already on `PATH` (a single static
-   binary; nothing is installed system-wide),
-2. creates `venv/` on **Python 3.11** — the version pinned in `.python-version`,
-   rebuilding the venv if an existing one is on a different version,
-3. installs `requirements.txt` into it, and records the file's hash in
-   `venv/.deps_installed` so later runs skip the install unless requirements
-   change,
-4. starts the `fuzzingbrain-mongodb` and `fuzzingbrain-redis` containers.
-
-If `.env` is missing it is created from `.env.example` and the run stops so you
-can fill in a key.
-
-To set the environment up without starting a scan:
-
-```bash
-./FuzzingBrain.sh --help      # bootstraps, prints options, exits
-```
-
-If you would rather manage the virtualenv yourself:
-
-```bash
-python3.11 -m venv venv
-./venv/bin/pip install -r requirements.txt
-```
-
-Only `requirements.txt` matters here — there is no `pyproject.toml` and no lock
-file, so `uv` is a convenience for pinning the interpreter, not a hard
-dependency.
-
-## Running an example
-
-Each entry under [`examples/`](examples/) is a task file or a short script,
-short enough to read before running it.
-
-**Start here** — a delta scan of an AIxCC Final Competition challenge, driven by
-a task file:
+## Run an example
 
 ```bash
 ./FuzzingBrain.sh examples/07_aixcc_challenge/cu-delta-02.json
 ```
 
-Every reference in it is pinned to a commit, so it builds the same way today as
-it will next month. It has a known defect to find and a reference PoV to compare
-against, which is what makes it worth running first: a scan that reports nothing
-is only informative if you know there was something to report. That directory's
-README says what the defect is and how to tell whether a run found it.
-
-Measured on a first run: about four minutes to build the Docker image, three and
-a half more for the seventeen fuzzers, then the agents. It finished in fourteen
-and a half minutes having spent $2.14 of the $20 `budget_limit` its task file
-sets. That cap is a hard stop rather than a hint — set one on every run until
-you know what a scan costs on your targets. Both builds are cached, so a second
-run on the same target starts at the agents.
+A delta scan of an AIxCC Final Competition challenge, every reference pinned to
+a commit. It has a known defect and a reference PoV, so you can tell whether the
+run worked — [`examples/07_aixcc_challenge`](examples/07_aixcc_challenge) says
+what to expect. Measured at 14.6 minutes and $2.14 against its $20 cap.
 
 | Example | What it does |
 |---|---|
@@ -110,32 +64,9 @@ run on the same target starts at the agents.
 | [`examples/01_rest_api`](examples/01_rest_api) | REST server on port 18080 |
 | [`examples/02_mcp_server`](examples/02_mcp_server) | MCP server, to drive from an MCP client |
 
-> **Pin what you scan against.** Examples 03, 05 and 06 target a `libpng` fork
-> and do not currently build: OSS-Fuzz's `libpng` recipe copies `build.sh` out
-> of `pnggroup/libpng@master` rather than shipping its own, so upstream tooling
-> compiles a harness the pinned commit does not contain and the build fails with
-> `no such file or directory: libpng_colormap_fuzzer.cc`. Most OSS-Fuzz projects
-> keep `build.sh` in OSS-Fuzz and do not have this problem; a challenge, which
-> pins its tooling ref as well, cannot have it at all.
-
-A delta scan does not need a call graph. Without one the worker hands the raw
-diff to the agent, which reads it with the same file tools it uses everywhere
-else, and says so in the log:
-
-```
-Diff has content but no changed functions were identified -- most likely no
-function index for this run. Continuing with the raw diff
-```
-
-A call graph makes the scan sharper rather than possible: it maps the diff onto
-named functions and tells the worker which of them the harness can actually
-reach, so the agent starts from a short list instead of a patch. Building one
-needs `enable_static_analysis` in the task file, which runs fuzz-introspector
-during the build; a graph built earlier can be handed to a later run with
-`--prebuild-dir`. [`examples/aixcc-challenges/`](examples/aixcc-challenges/)
-holds a manifest per public AIxCC challenge — the refs and harnesses each one
-pins. The graphs themselves are not in the repository; they are build output,
-and each is hundreds of megabytes.
+> Examples 03, 05 and 06 target a `libpng` fork that does not currently build:
+> OSS-Fuzz's `libpng` recipe copies `build.sh` out of `pnggroup/libpng@master`,
+> so upstream tooling compiles a harness the pinned commit does not contain.
 
 ### What a run leaves behind
 
