@@ -899,6 +899,89 @@ class AnalysisServer:
                     return candidate
         return None
 
+    # Suffixes a harness source actually uses. `.h` is deliberately absent: a
+    # header match would return a declaration where the agent asked for the
+    # entry point.
+    _SOURCE_SUFFIXES = (".cc", ".cpp", ".c", ".cxx", ".c++")
+
+    def _harness_name_candidates(self, fuzzer_name: str) -> List[str]:
+        """The names a harness source might carry, most specific first.
+
+        OSS-Fuzz projects routinely build many named binaries from one source:
+        curl's seventeen harnesses are all ``curl_fuzzer.cc``, picked apart by
+        corpus rather than by source file, so a name-exact search finds none of
+        them. Trailing ``_<segment>`` parts are therefore dropped one at a time
+        -- but only while the remainder still reads as a harness name, or
+        ``curl_fuzzer_ws`` would decay to ``curl`` and match some unrelated
+        ``curl.c``.
+        """
+        candidates = [fuzzer_name]
+        parts = fuzzer_name.split("_")[:-1]
+        while parts:
+            stem = "_".join(parts)
+            if "fuzz" not in stem and "harness" not in stem:
+                break
+            candidates.append(stem)
+            parts = parts[:-1]
+        return candidates
+
+    def _search_fuzzer_source(self, fuzzer_name: str) -> Optional[Path]:
+        """Find a harness source on disk when the build reported none.
+
+        Searched in order of how specific the location is: the scanned repo,
+        the OSS-Fuzz project directory, then the sources a coverage build copies
+        into its output tree -- which is where a harness kept outside the
+        project's own repository ends up.
+        """
+        roots = [self.task_path / "repo"]
+        if self.project_name:
+            roots.append(
+                self.task_path / "fuzz-tooling" / "projects" / self.project_name
+            )
+        if self.coverage_path:
+            roots.append(Path(self.coverage_path))
+
+        for root in roots:
+            if not root.is_dir():
+                continue
+            for stem in self._harness_name_candidates(fuzzer_name):
+                for suffix in self._SOURCE_SUFFIXES:
+                    for hit in sorted(root.rglob(f"{stem}{suffix}")):
+                        if hit.is_file():
+                            # Absolute: the caller hands this back to
+                            # _resolve_source_file as a string, and that only
+                            # understands an absolute path or one relative to
+                            # the workspace -- a path relative to the process's
+                            # cwd resolves to None and the harness reads as
+                            # missing again.
+                            return hit.resolve()
+        return None
+
+    _HEADER_SUFFIXES = (".h", ".hpp", ".hh")
+
+    def _harness_companion_headers(self, sources: List[Path]) -> List[Path]:
+        """Same-stem headers sitting beside a harness source.
+
+        A harness's input format is often declared rather than defined:
+        ``curl_fuzzer.cc`` walks a TLV stream whose type numbers are every one
+        of them a ``#define`` in ``curl_fuzzer.h``. Handed only the ``.cc``, an
+        agent has to infer that table, and on curl-delta-02 it inferred the
+        response slots were consecutive -- 2, 3, 4, 5 -- where they are 2, 17,
+        18, 19. It had the protocol scheme right, the handshake token right and
+        the trigger string right, byte-for-byte; the trigger simply went into
+        the field that means POSTFIELDS, so the connection never reached the
+        state holding the defect, across all eighteen candidates it built.
+        """
+        seen = set()
+        found: List[Path] = []
+        for src in sources:
+            for suffix in self._HEADER_SUFFIXES:
+                header = src.with_suffix(suffix)
+                if header.is_file() and header not in seen:
+                    seen.add(header)
+                    found.append(header)
+        return found
+
     async def _get_fuzzer_source(self, fuzzer_name: str) -> dict:
         """Get fuzzer/harness source code.
 
@@ -961,23 +1044,53 @@ class AnalysisServer:
             except Exception as e:
                 self._log(f"Failed to query fuzzer from DB: {e}", "DEBUG")
 
+        # Priority 4: the filesystem. All three lookups above need the build to
+        # have reported a source path, and none of them fires when a run names
+        # its fuzzers explicitly (`--fuzzers`, or `fuzzers` in a task file):
+        # task_processor creates those records without one. On curl that made
+        # this tool -- the one its own description tells the agent to call
+        # first -- fail on every call, and the agent burned four of its fifty
+        # iterations retrying it.
+        if not source_paths:
+            found = self._search_fuzzer_source(fuzzer_info.name)
+            if found:
+                source_paths.append(str(found))
+                self._log(f"Found harness source on disk: {found}", "DEBUG")
+
         if not source_paths:
             return {
                 "fuzzer": fuzzer_info.name,
-                "error": "Fuzzer source path not available",
+                "error": (
+                    f"No source for harness '{fuzzer_info.name}' is present in "
+                    "this workspace, and no argument will change that -- do not "
+                    "retry. Look for it directly instead: "
+                    'Glob("**/*fuzz*.c*") lists the candidates, Read opens one.'
+                ),
             }
 
         # Read source files
         contents = []
         resolved_paths = []
+        resolved_files: List[Path] = []
         for sp in source_paths:
             source_file = self._resolve_source_file(sp)
             if source_file:
                 try:
                     contents.append(source_file.read_text())
                     resolved_paths.append(sp)
+                    resolved_files.append(source_file)
                 except Exception as e:
                     self._log(f"Failed to read {sp}: {e}", "DEBUG")
+
+        # The header comes with it: see _harness_companion_headers for what
+        # withholding it cost on curl-delta-02.
+        for header in self._harness_companion_headers(resolved_files):
+            try:
+                contents.append(header.read_text())
+                resolved_paths.append(str(header))
+                self._log(f"Including harness header: {header.name}", "DEBUG")
+            except Exception as e:
+                self._log(f"Failed to read header {header}: {e}", "DEBUG")
 
         if not contents:
             return {
