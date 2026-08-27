@@ -1,0 +1,25 @@
+{
+  "repo_url": "https://github.com/aixcc-finals/afc-curl.git",
+  "project_name": "curl",
+  "task_type": "pov",
+  "scan_mode": "delta",
+  "base_commit": "332850107d906154ec53c0b3dfc16a46fea692a4",
+  "delta_commit": "b98c8446f9d99431852155187a572e10ddfd8e7e",
+  "fuzz_tooling_url": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "fuzz_tooling_ref": "challenge-state/cu-delta-02",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "curl_fuzzer_ws"
+  ],
+  "remove_git": true,
+  "fuzzer_sources": {
+    "curl_fuzzer_ws": [
+      "fuzz-tooling/build/out/curl_coverage/src/curl_fuzzer/curl_fuzzer.cc",
+      "fuzz-tooling/build/out/curl_coverage/src/curl_fuzzer/curl_fuzzer.h"
+    ]
+  },
+  "timeout_minutes": 45,
+  "budget_limit": 20.0
+}

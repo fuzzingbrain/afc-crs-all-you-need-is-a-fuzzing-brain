@@ -29,7 +29,6 @@ from .core import (
     setup_celery_logging,
     setup_console_only,
 )
-from .core.workspace_guard import format_banner, sanitize_workspace
 from .db import MongoDB, RepositoryManager, init_repos
 
 
@@ -1032,24 +1031,10 @@ def setup_workspace(config: Config) -> Config:
             except Exception as e:
                 print_warn(f"Failed to generate diff: {e}")
 
-    # Sanitise the workspace here, after the checkout and after the diff: every
-    # entry point funnels through this function -- the shell wrapper, the API
-    # server and a direct module invocation alike -- so one call covers them all.
-    diff_ready = (workspace / "diff" / "ref.diff").exists()
-    report = sanitize_workspace(
-        workspace,
-        remove_git=config.remove_git,
-        diff_ready=diff_ready if config.scan_mode == "delta" else True,
-    )
-    print_step("Workspace posture")
-    for line in format_banner(
-        report,
-        remove_git=config.remove_git,
-        network_blocked=config.no_network,
-        confined_to=f"{workspace.name}/repo",
-    ):
-        print_info(line)
-
+    # Sanitisation is deliberately not done here. This function serves the JSON
+    # entry point only, and cleaning the workspace from an entry point is what
+    # left the other entry points uncleaned. It happens in
+    # core.task_processor.process, which every entry point reaches.
     return config
 
 

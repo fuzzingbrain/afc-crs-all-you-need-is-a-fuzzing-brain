@@ -66,8 +66,16 @@ class POVDeltaStrategy(POVBaseStrategy):
             task_id=self.task_id,
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
-            max_iterations=50,  # Need more iterations for finding SPs in delta mode
+            max_iterations=self.SP_ITERATIONS_WITH_INDEX,
         )
+
+    # Iteration budgets for the delta SP generator. The first is enough when the
+    # diff arrives already mapped to named functions -- the agent starts from a
+    # short worklist. The second covers reading an unmapped diff before any
+    # judgement can begin, which is a different job: 17 files and 933 lines on
+    # curl-delta-02.
+    SP_ITERATIONS_WITH_INDEX = 50
+    SP_ITERATIONS_NO_INDEX = 150
 
     @property
     def strategy_name(self) -> str:
@@ -211,6 +219,21 @@ class POVDeltaStrategy(POVBaseStrategy):
         self.log_info(
             f"Passing {len(all_changes)} functions to agent ({reachable_count} reachable, {len(all_changes) - reachable_count} static-unreachable)"
         )
+
+        # An agent given a list of changed functions starts from a short, named
+        # worklist. An agent given only the raw diff has to build that list
+        # itself with Glob, Grep and Read before it can judge anything, and the
+        # budget that covers the first is spent on navigation in the second: on
+        # curl-delta-02 the agent made 51 tool calls, hit the cap of 50
+        # iterations still exploring, and recorded no suspicious point at all.
+        # The budget follows the work rather than the scan mode.
+        if not all_changes:
+            self._sp_generator.max_iterations = self.SP_ITERATIONS_NO_INDEX
+            self.log_info(
+                "No function list for this diff, so the agent has to map it "
+                f"itself -- raising its iteration budget to "
+                f"{self.SP_ITERATIONS_NO_INDEX}"
+            )
 
         # Run the generator to find suspicious points
         try:

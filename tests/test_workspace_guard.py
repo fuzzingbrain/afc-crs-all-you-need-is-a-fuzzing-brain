@@ -177,3 +177,42 @@ def test_builder_copies_exclude_answers_and_history(workspace, tmp_path):
     assert (dest / "pngrutil.c").exists()
     assert not (dest / ".aixcc").exists()
     assert not (dest / ".git").exists()
+
+
+# ------------------------------------------------------- where it is called
+#
+# The tests above prove sanitisation works when it runs. They said nothing
+# about whether it runs, and it did not: the call lived in
+# main.setup_workspace, which serves the JSON entry point alone, so
+# `./FuzzingBrain.sh <git_url>` -- the first example in the README -- reached
+# the build with .aixcc still in the tree. assert_workspace_clean caught it and
+# aborted the run, which is the design working, but the example was dead.
+
+
+def _source(module_path):
+    import pathlib
+
+    return pathlib.Path(module_path).read_text()
+
+
+def test_sanitisation_runs_from_the_shared_pipeline():
+    """Not from an entry point: the pipeline is what every entry point reaches
+    (plain URL, flags, JSON file, REST API, MCP server)."""
+    src = _source("fuzzingbrain/core/task_processor.py")
+    assert "sanitize_workspace(" in src
+
+
+def test_sanitisation_precedes_the_assertion():
+    """Cleaning after the check would make the check meaningless."""
+    src = _source("fuzzingbrain/core/task_processor.py")
+    assert src.index("sanitize_workspace(") < src.index("assert_workspace_clean(")
+
+
+def test_no_entry_point_sanitises_on_its_own():
+    """One call site, or the next entry point added quietly skips it."""
+    assert "sanitize_workspace(" not in _source("fuzzingbrain/main.py")
+
+
+def test_the_posture_is_reported_where_it_is_enforced():
+    """A run has to be able to prove from its log what was enforced."""
+    assert "format_banner(" in _source("fuzzingbrain/core/task_processor.py")

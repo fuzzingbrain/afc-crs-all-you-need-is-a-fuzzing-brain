@@ -231,3 +231,119 @@ def test_agent_filters_do_not_use_allow_lists():
     for cls in (SPGeneratorBase, SPVerifier):
         src = inspect.getsource(cls._filter_tools_for_mode)
         assert "not in" in src, f"{cls.__name__} filters by exclusion, not inclusion"
+
+
+# ------------------------------------------------------- deciding the gates
+#
+# Everything above passes the gate booleans in directly, so it tests the gate
+# and never the code that decides it. That is where a wrong import name sat
+# unnoticed: _analysis_status asked for AnalyzerClient, the class is called
+# AnalysisClient, and the except branch quietly reported every tool group as
+# available. The gates shipped as a no-op and the suite stayed green.
+
+
+class _StatusProbe:
+    """Exercises _analysis_status without constructing a real agent."""
+
+    from fuzzingbrain.agents.base import BaseAgent
+
+    _analysis_status = BaseAgent._analysis_status
+    include_static_analysis_tools = BaseAgent.include_static_analysis_tools
+    include_coverage_tools = BaseAgent.include_coverage_tools
+
+    def __init__(self):
+        self.logged = []
+
+    def _log(self, message, level="INFO"):
+        self.logged.append(message)
+
+
+def _probe_with(monkeypatch, reply):
+    from fuzzingbrain.tools import analyzer as A
+
+    monkeypatch.setattr(A, "analyzer_status", lambda: reply)
+    return _StatusProbe()
+
+
+def test_the_status_call_resolves_against_the_real_client():
+    """The regression: the name the agent imports has to exist."""
+    from fuzzingbrain.tools.analyzer import analyzer_status
+
+    assert callable(analyzer_status)
+
+
+def test_an_unreachable_server_reports_the_server_not_a_typo(monkeypatch):
+    """With no analyzer socket set the read fails -- and the reason logged must
+    be the server being absent, not a wrong name inside this module."""
+    probe = _StatusProbe()
+    assert probe._analysis_status() == {}
+    reason = " ".join(probe.logged)
+    assert "cannot import name" not in reason
+    assert "AnalyzerClient" not in reason
+
+
+def test_a_failed_read_closes_the_index_gate_and_leaves_coverage_open():
+    """The two gates read an empty status in opposite directions on purpose:
+    the index tools use the socket that just failed, the coverage tools do
+    not."""
+    probe = _StatusProbe()
+    assert probe.include_static_analysis_tools is False
+    assert probe.include_coverage_tools is True
+
+
+def test_an_index_and_a_coverage_build_open_both_gates(monkeypatch):
+    probe = _probe_with(
+        monkeypatch,
+        {
+            "success": True,
+            "status": {"function_count": 399, "coverage_available": True},
+        },
+    )
+    assert probe.include_static_analysis_tools is True
+    assert probe.include_coverage_tools is True
+
+
+def test_an_empty_index_closes_the_index_gate(monkeypatch):
+    probe = _probe_with(
+        monkeypatch,
+        {"success": True, "status": {"function_count": 0, "coverage_available": True}},
+    )
+    assert probe.include_static_analysis_tools is False
+    assert probe.include_coverage_tools is True
+
+
+def test_a_missing_coverage_build_closes_only_the_coverage_gate(monkeypatch):
+    probe = _probe_with(
+        monkeypatch,
+        {
+            "success": True,
+            "status": {"function_count": 399, "coverage_available": False},
+        },
+    )
+    assert probe.include_static_analysis_tools is True
+    assert probe.include_coverage_tools is False
+
+
+def test_a_failed_reply_is_logged_with_the_servers_own_reason(monkeypatch):
+    probe = _probe_with(monkeypatch, {"success": False, "error": "socket not set"})
+    assert probe._analysis_status() == {}
+    assert probe.include_static_analysis_tools is False
+    assert probe.include_coverage_tools is True
+    assert "socket not set" in " ".join(probe.logged)
+
+
+def test_the_status_is_fetched_once_per_agent(monkeypatch):
+    from fuzzingbrain.tools import analyzer as A
+
+    calls = []
+
+    def counting():
+        calls.append(1)
+        return {"success": True, "status": {"function_count": 1}}
+
+    monkeypatch.setattr(A, "analyzer_status", counting)
+    probe = _StatusProbe()
+    probe.include_static_analysis_tools
+    probe.include_coverage_tools
+    probe._analysis_status()
+    assert len(calls) == 1

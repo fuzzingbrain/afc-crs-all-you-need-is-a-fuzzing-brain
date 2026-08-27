@@ -252,22 +252,32 @@ class BaseAgent(ABC):
 
         Asked of the server rather than threaded down from the task, because
         what a run produced is a fact about its data, not about the kind of
-        agent reading it. On failure every capability reads as available, so a
-        server that cannot be reached degrades to today's behaviour rather than
-        silently stripping an agent's tools.
+        agent reading it.
+
+        A failed read returns ``{}``, and the two gates then read that empty
+        dict in opposite directions -- deliberately. The index tools speak to
+        this same socket, so a server that cannot be reached is a server whose
+        index tools could not have answered anyway, and their gate closes. The
+        coverage tools read the coverage build directly and never touch this
+        socket, so an unread status says nothing about them and their gate
+        stays open.
         """
         cached = getattr(self, "_analysis_status_cache", None)
         if cached is not None:
             return cached
 
         try:
-            from ..analyzer.client import AnalyzerClient
+            from ..tools.analyzer import analyzer_status
 
-            status = AnalyzerClient().get_status() or {}
+            reply = analyzer_status() or {}
+            if not reply.get("success"):
+                raise RuntimeError(reply.get("error") or "no reply from the server")
+            status = reply.get("status") or {}
         except Exception as exc:  # server down, socket missing, malformed reply
             self._log(
-                f"Could not read the analysis server status, so every tool group "
-                f"stays enabled: {exc}",
+                f"Could not read the analysis server status ({exc}), so the "
+                f"index tools stay off -- they use this same socket -- while "
+                f"the coverage tools, which do not, stay on",
                 level="DEBUG",
             )
             status = {}

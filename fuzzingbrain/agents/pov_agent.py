@@ -303,12 +303,16 @@ class POVAgent(BaseAgent):
         }
 
     def _configure_context(self, ctx) -> None:
-        """Configure agent context with SP ID."""
+        """Configure agent context with SP ID, and register the POV tool context."""
         if self.suspicious_point:
             sp_id = self.suspicious_point.get(
                 "suspicious_point_id"
             ) or self.suspicious_point.get("_id")
             ctx.sp_id = str(sp_id) if sp_id else None
+
+        # After the context exists and before the MCP server starts: this is the
+        # only point where the id the tools will query is knowable.
+        self._setup_pov_context(ctx.agent_id)
 
     @property
     def system_prompt(self) -> str:
@@ -497,8 +501,18 @@ Start by reading the vulnerable function source: {source_hint}.
 
         return message
 
-    def _setup_pov_context(self) -> None:
-        """Set up POV tools context."""
+    def _setup_pov_context(self, agent_id: str) -> None:
+        """Register the POV tool context under the id the tools look it up by.
+
+        ``agent_id`` must be the ``AgentContext.agent_id`` that
+        :meth:`BaseAgent.run_async` binds the isolated MCP server to. The POV
+        tools resolve their context by that exact key and have no fallback, so
+        registering under anything else makes every one of them answer "POV
+        context not set" for the entire run -- which is why this cannot be
+        called before ``run_async`` creates the context. The seed agent hit the
+        same thing and fixed it the same way; see
+        ``fuzzer/seed_agent.py::_configure_context``.
+        """
         if not self.suspicious_point:
             return
 
@@ -511,7 +525,7 @@ Start by reading the vulnerable function source: {source_hint}.
 
         set_pov_context(
             task_id=self.task_id,
-            worker_id=self.mcp_context_id,  # Use unique ObjectId from AgentContext
+            worker_id=agent_id,  # The id run_async bound the MCP server to
             output_dir=self.output_dir,
             repos=self.repos,
             fuzzer=self.fuzzer,
@@ -522,7 +536,7 @@ Start by reading the vulnerable function source: {source_hint}.
             workspace_path=self.workspace_path,
             fuzzer_source=fuzzer_source,
             fuzzer_manager=self.fuzzer_manager,  # For SP Fuzzer integration
-            agent_id=self.mcp_context_id,  # Track which agent created POVs
+            agent_id=agent_id,  # Track which agent created POVs
         )
 
     def _check_tool_result_for_success(self, tool_name: str, result_str: str) -> bool:
@@ -886,8 +900,8 @@ Call create_pov with a new generator code NOW.""",
         self.successful_pov_id = None
         self.pov_success = False
 
-        # Setup POV context
-        self._setup_pov_context()
+        # The POV context is registered in _configure_context, which run_async
+        # calls once it has minted the agent_id the MCP tools query by.
 
         # Run agent
         try:

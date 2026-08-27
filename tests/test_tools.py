@@ -432,9 +432,11 @@ def generate(seed_num: int) -> bytes:
             worker_id=nonexistent_worker_id,
         )
 
-        # Should fail with "context not set" error
+        # The message must say the setup is at fault and retrying is pointless,
+        # without naming set_seed_context -- not a tool the agent has.
         assert result["success"] is False
-        assert "context not set" in result["error"].lower()
+        assert "not initialised" in result["error"]
+        assert "set_seed_context" not in result["error"]
 
     def test_mcp_factory_registers_seed_tools_with_worker_id(self):
         """MCP factory should register seed tools with worker_id bound in closure."""

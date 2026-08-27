@@ -22,7 +22,11 @@ from bson import ObjectId
 
 from .logging import logger, create_final_summary, WorkerColors, get_log_dir
 from .config import Config
-from .workspace_guard import assert_workspace_clean
+from .workspace_guard import (
+    assert_workspace_clean,
+    format_banner,
+    sanitize_workspace,
+)
 from .models import Task, TaskStatus, Fuzzer, FuzzerStatus
 from ..db import RepositoryManager
 
@@ -805,13 +809,37 @@ class TaskProcessor:
                     logger.info(f"Found {len(fuzzers)} fuzzers")
                     fuzzer_discovery.save_fuzzers(fuzzers)
 
-            # Before building anything, refuse to proceed if the workspace still
-            # holds the answer. Sanitisation happens in setup_workspace; this is
-            # the assertion that a future change cannot silently skip. It raises
-            # rather than warns on purpose -- a run that looks successful while
-            # its findings are worthless is the exact failure being prevented.
+            # Sanitisation belongs here rather than at any one entry point,
+            # because this pipeline is what every entry point funnels through:
+            # the shell wrapper's plain-URL and flag forms, a JSON task file,
+            # the REST API, the MCP server. Wiring it into a single entry point
+            # covered the JSON form and silently left the plain-URL form -- the
+            # first example in the README -- running against a workspace that
+            # still held its own answer. It sits after Step 3.5 so a delta run's
+            # diff already exists, and before the build so nothing is compiled
+            # from a tree that has not been cleaned.
+            task_path = Path(task.task_path)
+            diff_ready = (task_path / "diff" / "ref.diff").exists()
+            report = sanitize_workspace(
+                task_path,
+                remove_git=self.config.remove_git,
+                diff_ready=diff_ready if self.config.scan_mode == "delta" else True,
+            )
+            logger.info("Workspace posture")
+            for line in format_banner(
+                report,
+                remove_git=self.config.remove_git,
+                network_blocked=self.config.no_network,
+                confined_to=f"{task_path.name}/repo",
+            ):
+                logger.info(line)
+
+            # Then refuse to proceed if anything survived. This raises rather
+            # than warns on purpose -- a run that looks successful while its
+            # findings are worthless is the exact failure being prevented, and
+            # it is what caught the gap described above.
             assert_workspace_clean(
-                Path(task.task_path),
+                task_path,
                 require_no_git=self.config.remove_git,
             )
 
