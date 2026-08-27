@@ -1,0 +1,41 @@
+{
+  "challenge": "lp-delta-01",
+  "challenge_name": null,
+  "round": "pre-competition",
+  "scan_mode": "delta",
+  "challenge_type": null,
+  "language": {
+    "libpng": "c"
+  },
+  "oss_fuzz_projects": [
+    "libpng"
+  ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-libpng.git",
+    "branch": "challenges/lp-delta-01",
+    "public": true,
+    "resolved": false,
+    "note": "AIxCyberChallenge/afc-libpng does not exist; the only source carrying the injected vulnerability, the reference POV blob and the reference patch is the fork at https://github.com/OwenSanzas/libpng (branch challenges/delta-scan)"
+  },
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/lp-delta-01",
+    "project": null
+  },
+  "base_ref": null,
+  "delta_ref": null,
+  "harnesses": [],
+  "harness_count": 0,
+  "vulnerabilities": [],
+  "answers": {
+    "vuln_dirs": 0,
+    "pov_blobs": 0,
+    "reference_patches": 0,
+    "has_answers": false
+  },
+  "graph": null,
+  "vuln_details": [],
+  "target_harnesses": [],
+  "target_harness_count": 0,
+  "target_harnesses_not_in_challenge_yaml": []
+}

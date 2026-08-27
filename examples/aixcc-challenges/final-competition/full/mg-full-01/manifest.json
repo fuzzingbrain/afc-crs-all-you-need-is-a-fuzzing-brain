@@ -1,0 +1,63 @@
+{
+  "challenge": "mg-full-01",
+  "challenge_name": "lawyer depend",
+  "round": "final-competition",
+  "scan_mode": "full",
+  "challenge_type": "full",
+  "language": {
+    "mongoose": "c"
+  },
+  "oss_fuzz_projects": [
+    "mongoose"
+  ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-mongoose.git",
+    "branch": "challenges/mg-full-01",
+    "public": true,
+    "resolved": true
+  },
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/mg-full-01",
+    "project": "mongoose"
+  },
+  "base_ref": "challenges/mg-full-01",
+  "delta_ref": "~",
+  "harnesses": [
+    "fuzz",
+    "None"
+  ],
+  "harness_count": 2,
+  "vulnerabilities": [
+    "mongoose_0",
+    "fuzz",
+    "None"
+  ],
+  "answers": {
+    "vuln_dirs": 1,
+    "pov_blobs": 1,
+    "reference_patches": 1,
+    "has_answers": true
+  },
+  "graph": null,
+  "vuln_details": [
+    {
+      "vuln": "mongoose_0",
+      "name": "Double trouble stack-based buffer overflow",
+      "cwes": [
+        "CWE-121",
+        "CWE-193"
+      ],
+      "pov_harness": "fuzz",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "data.bin",
+      "reference_patch": "good_patch.diff"
+    }
+  ],
+  "target_harnesses": [
+    "fuzz"
+  ],
+  "target_harness_count": 1,
+  "target_harnesses_not_in_challenge_yaml": []
+}

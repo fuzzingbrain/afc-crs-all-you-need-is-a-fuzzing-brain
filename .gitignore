@@ -49,3 +49,9 @@ Z-Code-Analyzer-Station/
 **/.env
 .env.*
 !.env.example
+
+# Internal working notes, not shipped
+internal/
+
+# uv, when the bootstrap installs it locally
+.uv/

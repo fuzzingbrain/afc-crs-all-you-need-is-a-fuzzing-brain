@@ -1,0 +1,60 @@
+{
+  "challenge": "sq-delta-01",
+  "challenge_name": "Dapper Mouthpiece",
+  "round": "pre-competition",
+  "scan_mode": "delta",
+  "challenge_type": "delta     # full | delta",
+  "language": {
+    "sqlite3": "c"
+  },
+  "oss_fuzz_projects": [
+    "sqlite3"
+  ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-sqlite3.git",
+    "branch": "challenges/sq-delta-01",
+    "public": true,
+    "resolved": true
+  },
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/sq-delta-01",
+    "project": "sqlite3"
+  },
+  "base_ref": "6a3e7f57f00f0a2b6b89b0db7990e3df47175372",
+  "delta_ref": "challenges/sq-delta-01",
+  "harnesses": [
+    "ossfuzz",
+    "customfuzz3"
+  ],
+  "harness_count": 2,
+  "vulnerabilities": [
+    "SQL-006"
+  ],
+  "answers": {
+    "vuln_dirs": 1,
+    "pov_blobs": 1,
+    "reference_patches": 1,
+    "has_answers": true
+  },
+  "graph": null,
+  "vuln_details": [
+    {
+      "vuln": "SQL-006",
+      "name": "base85 buffer overflow",
+      "cwes": [
+        "CWE-787"
+      ],
+      "pov_harness": "customfuzz3",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "data.bin",
+      "reference_patch": "good_patch.diff"
+    }
+  ],
+  "target_harnesses": [
+    "customfuzz3"
+  ],
+  "target_harness_count": 1,
+  "target_harnesses_not_in_challenge_yaml": []
+}

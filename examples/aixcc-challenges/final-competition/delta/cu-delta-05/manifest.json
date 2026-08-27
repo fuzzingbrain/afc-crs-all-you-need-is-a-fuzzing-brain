@@ -1,0 +1,89 @@
+{
+  "challenge": "cu-delta-05",
+  "challenge_name": "Dictionaries and leap seconds",
+  "round": "final-competition",
+  "scan_mode": "delta",
+  "challenge_type": "delta     # full | delta",
+  "language": {
+    "curl": "c"
+  },
+  "oss_fuzz_projects": [
+    "curl"
+  ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-curl.git",
+    "branch": "challenges/cu-delta-05",
+    "public": true,
+    "resolved": true
+  },
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/cu-delta-05",
+    "project": "curl"
+  },
+  "base_ref": "150028193bf61131c2436e3f4f76631e5d0a21d7",
+  "delta_ref": "challenges/cu-delta-05",
+  "harnesses": [
+    "curl_fuzzer_https",
+    "curl_fuzzer_ftp",
+    "curl_fuzzer_tftp",
+    "curl_fuzzer_rtsp",
+    "curl_fuzzer",
+    "curl_fuzzer_pop3",
+    "curl_fuzzer_ws",
+    "curl_fuzzer_gopher",
+    "curl_fuzzer_dict",
+    "curl_fuzzer_bufq",
+    "curl_fuzzer_smb",
+    "curl_fuzzer_mqtt",
+    "curl_fuzzer_smtp",
+    "curl_fuzzer_file",
+    "curl_fuzzer_imap",
+    "curl_fuzzer_http",
+    "fuzz_url"
+  ],
+  "harness_count": 17,
+  "vulnerabilities": [
+    "curl-001",
+    "curl-002"
+  ],
+  "answers": {
+    "vuln_dirs": 2,
+    "pov_blobs": 2,
+    "reference_patches": 2,
+    "has_answers": true
+  },
+  "graph": null,
+  "vuln_details": [
+    {
+      "vuln": "curl-001",
+      "name": "DICT Authentication bug",
+      "cwes": [
+        "CWE-134"
+      ],
+      "pov_harness": "curl_fuzzer_dict",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "data.bin",
+      "reference_patch": "good_patch.diff"
+    },
+    {
+      "vuln": "curl-002",
+      "name": "Leap Second Bug in FTP",
+      "cwes": [
+        "CWE-787"
+      ],
+      "pov_harness": "curl_fuzzer_ftp",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "data.bin",
+      "reference_patch": "good_patch.diff"
+    }
+  ],
+  "target_harnesses": [
+    "curl_fuzzer_dict",
+    "curl_fuzzer_ftp"
+  ],
+  "target_harness_count": 2,
+  "target_harnesses_not_in_challenge_yaml": []
+}

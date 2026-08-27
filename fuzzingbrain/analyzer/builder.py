@@ -658,8 +658,16 @@ class AnalyzerBuilder:
             if temp_dir.exists():
                 shutil.rmtree(temp_dir)
 
-            # Copy repo (symlinks=True to avoid following self-referencing symlinks)
-            shutil.copytree(self.repo_path, temp_dir, symlinks=True)
+            # Copy repo (symlinks=True to avoid following self-referencing symlinks).
+            # .aixcc and .git are never copied: the checkout is sanitised before
+            # the build, and a per-sanitizer copy must not be the one path that
+            # reintroduces the answer or the history that recovers it.
+            shutil.copytree(
+                self.repo_path,
+                temp_dir,
+                symlinks=True,
+                ignore=shutil.ignore_patterns(".aixcc", ".git"),
+            )
             return temp_dir
 
         except Exception as e:

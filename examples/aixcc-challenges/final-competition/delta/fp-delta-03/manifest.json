@@ -1,0 +1,65 @@
+{
+  "challenge": "fp-delta-03",
+  "challenge_name": "spill incident",
+  "round": "final-competition",
+  "scan_mode": "delta",
+  "challenge_type": "delta     # full | delta",
+  "language": {
+    "freerdp": "c"
+  },
+  "oss_fuzz_projects": [
+    "freerdp"
+  ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-freerdp.git",
+    "branch": "challenges/fp-delta-03",
+    "public": true,
+    "resolved": true
+  },
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/fp-delta-03",
+    "project": "freerdp"
+  },
+  "base_ref": "c2b6631d6389bcc977eccdfadeb99fe8d62c4e26",
+  "delta_ref": "challenges/fp-delta-03",
+  "harnesses": [
+    "TestFuzzCodecs",
+    "TestFuzzCommonAssistanceBinToHexString",
+    "TestFuzzCommonAssistanceHexStringToBin",
+    "TestFuzzCommonAssistanceParseFileBuffer",
+    "TestFuzzCoreClient",
+    "TestFuzzCoreServer",
+    "TestFuzzCryptoCertificateDataSetPEM"
+  ],
+  "harness_count": 7,
+  "vulnerabilities": [
+    "vuln_003"
+  ],
+  "answers": {
+    "vuln_dirs": 1,
+    "pov_blobs": 1,
+    "reference_patches": 1,
+    "has_answers": true
+  },
+  "graph": null,
+  "vuln_details": [
+    {
+      "vuln": "vuln_003",
+      "name": "Arbitrary memory writing within rfx_process metadata",
+      "cwes": [
+        "CWE-123"
+      ],
+      "pov_harness": "TestFuzzCodecs",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "data.bin",
+      "reference_patch": "good_patch.diff"
+    }
+  ],
+  "target_harnesses": [
+    "TestFuzzCodecs"
+  ],
+  "target_harness_count": 1,
+  "target_harnesses_not_in_challenge_yaml": []
+}

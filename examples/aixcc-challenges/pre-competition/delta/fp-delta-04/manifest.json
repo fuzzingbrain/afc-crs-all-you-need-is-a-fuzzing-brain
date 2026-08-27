@@ -1,0 +1,48 @@
+{
+  "challenge": "fp-delta-04",
+  "challenge_name": "Theorist Invasion",
+  "round": "pre-competition",
+  "scan_mode": "delta",
+  "challenge_type": "delta     # full | delta",
+  "language": {
+    "freerdp": "c"
+  },
+  "oss_fuzz_projects": [
+    "freerdp"
+  ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-freerdp.git",
+    "branch": "challenges/fp-delta-04",
+    "public": true,
+    "resolved": true
+  },
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/fp-delta-04",
+    "project": "freerdp"
+  },
+  "base_ref": "e67afe02ae4621560afdb434796f7a7481a76d4e",
+  "delta_ref": "challenges/fp-delta-04",
+  "harnesses": [
+    "TestFuzzCodecs",
+    "TestFuzzCommonAssistanceBinToHexString",
+    "TestFuzzCommonAssistanceHexStringToBin",
+    "TestFuzzCommonAssistanceParseFileBuffer",
+    "TestFuzzCoreClient",
+    "TestFuzzCoreServer",
+    "TestFuzzCryptoCertificateDataSetPEM"
+  ],
+  "harness_count": 7,
+  "vulnerabilities": [],
+  "answers": {
+    "vuln_dirs": 0,
+    "pov_blobs": 0,
+    "reference_patches": 0,
+    "has_answers": false
+  },
+  "graph": null,
+  "vuln_details": [],
+  "target_harnesses": [],
+  "target_harness_count": 0,
+  "target_harnesses_not_in_challenge_yaml": []
+}

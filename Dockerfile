@@ -1,4 +1,7 @@
-FROM python:3.12-slim
+# Kept in step with .python-version, which the local bootstrap and CI both
+# read. Three environments on three interpreter versions is how a run
+# passes locally and fails everywhere else.
+FROM python:3.11-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git git-lfs curl build-essential openssh-client ca-certificates gnupg \

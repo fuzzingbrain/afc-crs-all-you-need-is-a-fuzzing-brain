@@ -1,0 +1,56 @@
+{
+  "challenge": "db-full-01",
+  "challenge_name": "Curious Underdog",
+  "round": "pre-competition",
+  "scan_mode": "full",
+  "challenge_type": "full     # full | delta",
+  "language": {
+    "dropbear": "c"
+  },
+  "oss_fuzz_projects": [
+    "dropbear"
+  ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-dropbear.git",
+    "branch": "challenges/db-full-01",
+    "public": true,
+    "resolved": true
+  },
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/db-full-01",
+    "project": "dropbear"
+  },
+  "base_ref": "challenges/db-full-01",
+  "delta_ref": "null # this is null for full scans, a hash for delta scans",
+  "harnesses": [
+    "fuzzer-cliconf",
+    "fuzzer-client",
+    "fuzzer-client_nomaths",
+    "fuzzer-kexcurve25519",
+    "fuzzer-kexdh",
+    "fuzzer-kexecdh",
+    "fuzzer-kexmlkem-cli",
+    "fuzzer-kexmlkem-srv",
+    "fuzzer-kexsntrup-cli",
+    "fuzzer-kexsntrup-srv",
+    "fuzzer-postauth_nomaths",
+    "fuzzer-preauth",
+    "fuzzer-preauth_nomaths",
+    "fuzzer-pubkey",
+    "fuzzer-verify"
+  ],
+  "harness_count": 15,
+  "vulnerabilities": [],
+  "answers": {
+    "vuln_dirs": 0,
+    "pov_blobs": 0,
+    "reference_patches": 0,
+    "has_answers": false
+  },
+  "graph": null,
+  "vuln_details": [],
+  "target_harnesses": [],
+  "target_harness_count": 0,
+  "target_harnesses_not_in_challenge_yaml": []
+}

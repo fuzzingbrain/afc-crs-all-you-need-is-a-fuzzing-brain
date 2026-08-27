@@ -7,28 +7,32 @@ on:
   pull_request:
     branches: [main]
 
+# uv resolves the interpreter from .python-version, the same file the local
+# bootstrap reads, so CI runs the version contributors actually run rather than
+# whatever the runner image ships.
 jobs:
   lint:
     name: Ruff Lint & Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.10"
-      - run: pip install ruff
-      - run: ruff check .
-      - run: ruff format --check .
+          enable-cache: true
+      - run: uv python install
+      - run: uvx ruff check .
+      - run: uvx ruff format --check .
 
   syntax-check:
     name: Syntax Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.10"
-      - run: python -m compileall -q fuzzingbrain/ tests/
+          enable-cache: true
+      - run: uv python install
+      - run: uv run python -m compileall -q fuzzingbrain/ tests/
 
   test:
     name: Tests
@@ -36,12 +40,11 @@ jobs:
     needs: [lint, syntax-check]
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.10"
-          cache: pip
-          cache-dependency-path: requirements.txt
-      - run: |
-          pip install -r requirements.txt
-          pip install pytest mongomock
-      - run: pytest tests/ -v
+          enable-cache: true
+          cache-dependency-glob: requirements.txt
+      - run: uv python install
+      - run: uv venv
+      - run: uv pip install -r requirements.txt pytest mongomock
+      - run: uv run pytest tests/ -v

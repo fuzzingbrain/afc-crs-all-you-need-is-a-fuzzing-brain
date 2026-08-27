@@ -1,0 +1,69 @@
+{
+  "challenge": "lx-delta-02",
+  "challenge_name": "Feigned Prototype",
+  "round": "pre-competition",
+  "scan_mode": "delta",
+  "challenge_type": "delta     # full | delta",
+  "language": {
+    "libxml2": "c"
+  },
+  "oss_fuzz_projects": [
+    "libxml2"
+  ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-libxml2.git",
+    "branch": "challenges/lx-delta-02",
+    "public": true,
+    "resolved": true
+  },
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/lx-delta-02",
+    "project": "libxml2"
+  },
+  "base_ref": "0f876b983249cd3fb32b53d405f5985e83d8c3bd",
+  "delta_ref": "challenges/lx-delta-02",
+  "harnesses": [
+    "api",
+    "html",
+    "lint",
+    "reader",
+    "regexp",
+    "schema",
+    "uri",
+    "valid",
+    "xinclude",
+    "xml",
+    "xpath"
+  ],
+  "harness_count": 11,
+  "vulnerabilities": [
+    "vuln_002"
+  ],
+  "answers": {
+    "vuln_dirs": 1,
+    "pov_blobs": 1,
+    "reference_patches": 1,
+    "has_answers": true
+  },
+  "graph": null,
+  "vuln_details": [
+    {
+      "vuln": "vuln_002",
+      "name": "libxml2 xml:tab handling double free",
+      "cwes": [
+        "CWE-415"
+      ],
+      "pov_harness": "xml",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "blob.bin",
+      "reference_patch": "patch_good.diff"
+    }
+  ],
+  "target_harnesses": [
+    "xml"
+  ],
+  "target_harness_count": 1,
+  "target_harnesses_not_in_challenge_yaml": []
+}

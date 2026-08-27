@@ -21,6 +21,29 @@ from ..core.logging import get_agent_banner_and_header, get_agent_log_path
 from .context import AgentContext
 
 
+def format_tool_args(args: dict, limit: int = 160) -> str:
+    """Render tool arguments for a log line.
+
+    Every MCP call is logged with its arguments so a run can be audited from the
+    log alone -- which files an agent read, what it searched for -- without
+    opening the conversation JSON. Long values are clipped: a POV blob or a file
+    body has no business in a log line.
+    """
+    if not args:
+        return ""
+    parts = []
+    for key, value in args.items():
+        if isinstance(value, str):
+            shown = value if len(value) <= 60 else value[:57] + "..."
+            parts.append(f"{key}={shown!r}")
+        elif isinstance(value, (int, float, bool)) or value is None:
+            parts.append(f"{key}={value}")
+        else:
+            parts.append(f"{key}=<{type(value).__name__}>")
+    rendered = ", ".join(parts)
+    return rendered if len(rendered) <= limit else rendered[: limit - 3] + "..."
+
+
 class BaseAgent(ABC):
     """
     Base class for MCP-based AI agents.
@@ -189,6 +212,62 @@ class BaseAgent(ABC):
         Default True. Override to False if agent doesn't need direction tools.
         """
         return True
+
+    @property
+    def include_static_analysis_tools(self) -> bool:
+        """Whether the function index and call graph tools are worth offering.
+
+        Asked of the analysis server at connect time rather than threaded down
+        from the task, because it is a fact about this run's data, not about
+        what kind of agent this is. The two collections are filled by one
+        import from one introspector output, and the prebuild path refuses to
+        load unless both files are present, so a single count decides all of
+        them.
+
+        An empty index with the tools still advertised is the failure this
+        prevents: get_function_source returns nothing, and the model reads that
+        as "the function does not exist" rather than "there is no index". It
+        then has no way to read code at all, while the run reports success.
+        Read, Grep and Glob remain either way.
+        """
+        cached = getattr(self, "_static_analysis_available", None)
+        if cached is not None:
+            return cached
+
+        try:
+            from ..analyzer.client import AnalyzerClient
+
+            status = AnalyzerClient().get_status()
+            available = int(status.get("function_count", 0)) > 0
+        except Exception as exc:  # server down, socket missing, malformed reply
+            self._log(
+                f"Could not ask the analysis server for its index size, so the "
+                f"index tools stay enabled: {exc}",
+                level="DEBUG",
+            )
+            available = True
+
+        self._static_analysis_available = available
+        return available
+
+    def read_function_hint(self, function_name: str) -> str:
+        """How to tell this agent to read a function, given the tools it has.
+
+        Naming a tool the agent was not given costs a whole iteration: the call
+        fails, and the model has to work out why before it does anything useful.
+        """
+        if self.include_static_analysis_tools:
+            return f'get_function_source("{function_name}")'
+        return (
+            f'Grep(pattern="{function_name}", output_mode="content") to find it, '
+            f"then Read that file around the match"
+        )
+
+    def find_callers_hint(self, function_name: str) -> str:
+        """How to tell this agent to find callers, given the tools it has."""
+        if self.include_static_analysis_tools:
+            return f'get_callers("{function_name}")'
+        return f'Grep(pattern="{function_name}\\s*\\(", output_mode="content")'
 
     @property
     def mcp_context_id(self) -> str:
@@ -960,7 +1039,10 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                             level="WARNING",
                         )
 
-                    self._log(f"Calling tool: {tool_name}", level="INFO")
+                    self._log(
+                        f"Calling tool: {tool_name}({format_tool_args(tool_args)})",
+                        level="INFO",
+                    )
 
                     # Execute tool via MCP
                     tool_result = await self._execute_tool(client, tool_name, tool_args)
@@ -1063,6 +1145,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                 # Create an isolated MCP server for this agent
                 # This prevents response mixing when multiple agents run concurrently
                 # Pass agent_id for unique context lookup
+                static_analysis_tools = self.include_static_analysis_tools
                 mcp_server = create_isolated_mcp_server(
                     agent_id=agent_id,
                     worker_id=agent_id,  # Use agent_id for context isolation
@@ -1071,9 +1154,14 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                     include_sp_tools=self.include_sp_tools,
                     include_sp_create_tools=self.include_sp_create_tools,
                     include_direction_tools=self.include_direction_tools,
+                    include_static_analysis_tools=static_analysis_tools,
                 )
                 self._log(
-                    f"Created isolated MCP server: {agent_id} (pov_tools={self.include_pov_tools}, seed_tools={self.include_seed_tools}, sp_tools={self.include_sp_tools})",
+                    f"Created isolated MCP server: {agent_id} "
+                    f"(pov_tools={self.include_pov_tools}, "
+                    f"seed_tools={self.include_seed_tools}, "
+                    f"sp_tools={self.include_sp_tools}, "
+                    f"static_analysis_tools={static_analysis_tools})",
                     level="DEBUG",
                 )
 

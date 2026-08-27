@@ -151,20 +151,47 @@ find_ossfuzz_project() {
 # Environment Checks
 # =============================================================================
 
-check_python() {
-    if command -v python3 &> /dev/null; then
-        local py_version=$(python3 --version 2>&1 | awk '{print $2}')
-        print_info "Python $py_version found"
+# The interpreter version every run uses, regardless of what the host has.
+# 3.11 is the floor because litellm imports typing.NotRequired, which arrived in
+# 3.11; on 3.10 the install succeeds and every run then dies at import time.
+# uv fetches this exact version, so two machines with different system Pythons
+# still end up running the same interpreter.
+PYTHON_VERSION="$(cat "$SCRIPT_DIR/.python-version" 2>/dev/null || echo 3.11)"
+UV_BIN=""
+
+# Find uv, or install it into the workspace. A single static binary, so this
+# does not touch the system Python or need a package manager.
+ensure_uv() {
+    if command -v uv &> /dev/null; then
+        UV_BIN="$(command -v uv)"
+        print_info "uv $("$UV_BIN" --version | awk '{print $2}') found"
         return 0
-    elif command -v python &> /dev/null; then
-        local py_version=$(python --version 2>&1 | awk '{print $2}')
-        print_info "Python $py_version found"
+    fi
+    if [ -x "$SCRIPT_DIR/.uv/uv" ]; then
+        UV_BIN="$SCRIPT_DIR/.uv/uv"
+        print_info "uv $("$UV_BIN" --version | awk '{print $2}') found (local)"
         return 0
-    else
-        print_error "Python is not installed!"
-        print_error "Please install Python 3.10+: https://www.python.org/downloads/"
+    fi
+
+    print_info "Installing uv (single static binary, into .uv/)..."
+    mkdir -p "$SCRIPT_DIR/.uv"
+    if ! curl -LsSf https://astral.sh/uv/install.sh |
+        env UV_INSTALL_DIR="$SCRIPT_DIR/.uv" UV_NO_MODIFY_PATH=1 sh > /dev/null 2>&1; then
+        print_error "Could not install uv."
+        print_error "Install it yourself (https://docs.astral.sh/uv/), or create the"
+        print_error "virtualenv by hand with Python $PYTHON_VERSION or newer:"
+        print_error "  python3 -m venv venv && venv/bin/pip install -r requirements.txt"
         return 1
     fi
+    UV_BIN="$SCRIPT_DIR/.uv/uv"
+    print_info "uv installed"
+    return 0
+}
+
+check_python() {
+    ensure_uv || return 1
+    print_info "Python $PYTHON_VERSION will be used (pinned by .python-version)"
+    return 0
 }
 
 check_docker() {
@@ -443,28 +470,36 @@ check_celery() {
 
 setup_venv() {
     local REQUIREMENTS="$SCRIPT_DIR/requirements.txt"
-    local PIP="$VENV_DIR/bin/pip"
 
-    # Check if venv exists
-    if [ ! -d "$VENV_DIR" ]; then
-        print_info "Creating virtual environment..."
-        python3 -m venv "$VENV_DIR"
-        if [ $? -ne 0 ]; then
+    ensure_uv || return 1
+
+    # uv downloads the pinned interpreter if the host does not have it, so the
+    # venv version does not depend on whatever python3 happens to be first on
+    # PATH -- which is what a plain `python3 -m venv` inherits.
+    local existing=""
+    if [ -x "$PYTHON" ]; then
+        existing=$("$PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null)
+    fi
+
+    if [ ! -d "$VENV_DIR" ] || [ "$existing" != "$PYTHON_VERSION" ]; then
+        if [ -n "$existing" ]; then
+            print_warn "Existing venv is Python $existing, rebuilding on $PYTHON_VERSION"
+            rm -rf "$VENV_DIR"
+        fi
+        print_info "Creating virtual environment (Python $PYTHON_VERSION)..."
+        if ! "$UV_BIN" venv --python "$PYTHON_VERSION" "$VENV_DIR"; then
             print_error "Failed to create virtual environment"
             return 1
         fi
     fi
 
-    # Check if requirements need to be installed
-    # Use a marker file to track if dependencies are installed
+    # Reinstall only when requirements.txt changes.
     local MARKER="$VENV_DIR/.deps_installed"
     local REQUIREMENTS_HASH=$(md5sum "$REQUIREMENTS" 2>/dev/null | awk '{print $1}')
 
     if [ ! -f "$MARKER" ] || [ "$(cat "$MARKER" 2>/dev/null)" != "$REQUIREMENTS_HASH" ]; then
         print_info "Installing dependencies..."
-        $PIP install --upgrade pip -q
-        $PIP install -r "$REQUIREMENTS" -q
-        if [ $? -ne 0 ]; then
+        if ! VIRTUAL_ENV="$VENV_DIR" "$UV_BIN" pip install -q -r "$REQUIREMENTS"; then
             print_error "Failed to install dependencies"
             return 1
         fi
@@ -623,6 +658,12 @@ show_usage() {
     echo "  --budget <amount>   LLM budget limit in USD (e.g., 50.0)"
     echo "  --allow-expensive   Allow expensive model fallback (true/false)"
     echo ""
+    echo "WORKSPACE POSTURE (.aixcc is always removed; it is not a switch):"
+    echo "  --remove-git        Delete .git after the diff, so history cannot"
+    echo "                      recover the answer with git show"
+    echo "  --no-network        Deny network egress to agent-executed commands"
+
+    echo ""
     echo "  -h, -help, --help   Show this help message"
     echo ""
     echo "Examples:"
@@ -665,6 +706,8 @@ API_MODE=false
 MCP_MODE=false
 EVAL_PORT=""
 BUDGET_LIMIT=""
+REMOVE_GIT=""
+NO_NETWORK=""
 ALLOW_EXPENSIVE=""
 POSITIONAL_ARGS=()
 
@@ -746,6 +789,14 @@ while [[ $# -gt 0 ]]; do
         --allow-expensive)
             ALLOW_EXPENSIVE="$2"
             shift 2
+            ;;
+        --remove-git)
+            REMOVE_GIT=1
+            shift
+            ;;
+        --no-network)
+            NO_NETWORK=1
+            shift
             ;;
         -h|-help|--help)
             show_banner
@@ -1071,7 +1122,9 @@ if is_git_url "$TARGET"; then
             --pov-count "$POV_COUNT" \
             ${BUDGET_LIMIT:+--budget "$BUDGET_LIMIT"} \
             ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
-            ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"}
+            ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"} \
+            ${REMOVE_GIT:+--remove-git} \
+            ${NO_NETWORK:+--no-network}
     else
         check_environment
         cd "$SCRIPT_DIR"
@@ -1087,7 +1140,9 @@ if is_git_url "$TARGET"; then
             --pov-count "$POV_COUNT" \
             ${BUDGET_LIMIT:+--budget "$BUDGET_LIMIT"} \
             ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
-            ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"}
+            ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"} \
+            ${REMOVE_GIT:+--remove-git} \
+            ${NO_NETWORK:+--no-network}
     fi
 fi
 

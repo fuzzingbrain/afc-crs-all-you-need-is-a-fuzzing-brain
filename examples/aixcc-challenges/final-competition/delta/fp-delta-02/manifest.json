@@ -1,0 +1,65 @@
+{
+  "challenge": "fp-delta-02",
+  "challenge_name": "reflect hospitalities",
+  "round": "final-competition",
+  "scan_mode": "delta",
+  "challenge_type": "delta     # full | delta",
+  "language": {
+    "freerdp": "c"
+  },
+  "oss_fuzz_projects": [
+    "freerdp"
+  ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-freerdp.git",
+    "branch": "challenges/fp-delta-02",
+    "public": true,
+    "resolved": true
+  },
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/fp-delta-02",
+    "project": "freerdp"
+  },
+  "base_ref": "8cab992c83a0f1f7a6834b40988cae977c545202",
+  "delta_ref": "challenges/fp-delta-02",
+  "harnesses": [
+    "TestFuzzCodecs",
+    "TestFuzzCommonAssistanceBinToHexString",
+    "TestFuzzCommonAssistanceHexStringToBin",
+    "TestFuzzCommonAssistanceParseFileBuffer",
+    "TestFuzzCoreClient",
+    "TestFuzzCoreServer",
+    "TestFuzzCryptoCertificateDataSetPEM"
+  ],
+  "harness_count": 7,
+  "vulnerabilities": [
+    "vuln_002"
+  ],
+  "answers": {
+    "vuln_dirs": 1,
+    "pov_blobs": 1,
+    "reference_patches": 1,
+    "has_answers": true
+  },
+  "graph": null,
+  "vuln_details": [
+    {
+      "vuln": "vuln_002",
+      "name": "FreeRDP SAN heap overflow",
+      "cwes": [
+        "CWE-122"
+      ],
+      "pov_harness": "TestFuzzCryptoCertificateDataSetPEM",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "cert.pem",
+      "reference_patch": "patch_good.diff"
+    }
+  ],
+  "target_harnesses": [
+    "TestFuzzCryptoCertificateDataSetPEM"
+  ],
+  "target_harness_count": 1,
+  "target_harnesses_not_in_challenge_yaml": []
+}

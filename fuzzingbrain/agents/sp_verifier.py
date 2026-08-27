@@ -508,12 +508,14 @@ Before marking as FP, you MUST check for function pointer patterns:
         """Format verification steps section."""
         fp_check = self._format_fp_check_section(static_reachable, function_name)
 
+        callers_hint = self.find_callers_hint(function_name)
+        source_hint = self.read_function_hint(function_name)
         return f"""
 
 ## Verification Steps (Complete ALL)
 {fp_check}
 1. **CHECK REACHABILITY**:
-   - If static_reachable=True: Use get_callers to verify direct path exists
+   - If static_reachable=True: Use {callers_hint} to verify a direct path exists
    - If static_reachable=False: Search for function pointer assignment patterns first!
    - If function pointer pattern found -> set reachability_status="pointer_call", reachability_multiplier=0.95
    - If truly unreachable -> mark as FALSE POSITIVE with reachability_multiplier=0.3
@@ -521,13 +523,13 @@ Before marking as FP, you MUST check for function pointer patterns:
 2. **VERIFY SANITIZER COMPATIBILITY**: Is {vuln_type} detectable by {self.sanitizer}?
    - {self._get_sanitizer_vuln_types()}
 
-3. **READ SOURCE CODE**: Call get_function_source for {function_name} and its callers
+3. **READ SOURCE CODE**: Use {source_hint} for {function_name}, and read its callers too
 
 4. **CHECK SECURITY BOUNDARIES**: Look for input validation, bounds checks in the path
 
 5. **UPDATE SP**: Call update_suspicious_point with your verdict
 
-Start by verifying reachability with get_callers("{function_name}").
+Start by verifying reachability with {callers_hint}.
 """
 
     def get_initial_message(self, **kwargs) -> str:

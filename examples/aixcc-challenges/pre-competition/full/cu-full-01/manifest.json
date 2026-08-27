@@ -1,0 +1,74 @@
+{
+  "challenge": "cu-full-01",
+  "challenge_name": "pour",
+  "round": "pre-competition",
+  "scan_mode": "full",
+  "challenge_type": "full     # full | delta",
+  "language": {
+    "curl": "c"
+  },
+  "oss_fuzz_projects": [
+    "curl"
+  ],
+  "source": {
+    "repo": "https://github.com/AIxCyberChallenge/afc-curl.git",
+    "branch": "challenges/cu-full-01",
+    "public": true,
+    "resolved": true
+  },
+  "fuzz_tooling": {
+    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+    "ref": "challenge-state/cu-full-01",
+    "project": "curl"
+  },
+  "base_ref": "challenges/cu-full-01",
+  "delta_ref": "~",
+  "harnesses": [
+    "curl_fuzzer_https",
+    "curl_fuzzer_ftp",
+    "curl_fuzzer_tftp",
+    "curl_fuzzer_rtsp",
+    "curl_fuzzer",
+    "curl_fuzzer_pop3",
+    "curl_fuzzer_ws",
+    "curl_fuzzer_gopher",
+    "curl_fuzzer_dict",
+    "curl_fuzzer_bufq",
+    "curl_fuzzer_smb",
+    "curl_fuzzer_mqtt",
+    "curl_fuzzer_smtp",
+    "curl_fuzzer_file",
+    "curl_fuzzer_imap",
+    "curl_fuzzer_http"
+  ],
+  "harness_count": 16,
+  "vulnerabilities": [
+    "curl-004"
+  ],
+  "answers": {
+    "vuln_dirs": 1,
+    "pov_blobs": 1,
+    "reference_patches": 1,
+    "has_answers": true
+  },
+  "graph": null,
+  "vuln_details": [
+    {
+      "vuln": "curl-004",
+      "name": "FILE out-of-bounds write",
+      "cwes": [
+        "CWE-787"
+      ],
+      "pov_harness": "curl_fuzzer",
+      "pov_sanitizer": null,
+      "pov_engine": null,
+      "pov_blob": "test_file_nobody",
+      "reference_patch": "good_patch.diff"
+    }
+  ],
+  "target_harnesses": [
+    "curl_fuzzer"
+  ],
+  "target_harness_count": 1,
+  "target_harnesses_not_in_challenge_yaml": []
+}

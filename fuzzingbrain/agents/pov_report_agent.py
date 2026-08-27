@@ -8,7 +8,8 @@ source code of functions in the crash stack trace.
 
 Tools available:
 - get_function_source: Read source code of a function
-- get_file_content: Read file content
+- Read: Read a file, with line numbers
+- Grep: Search file contents by regex
 - get_callers: Find functions that call a given function
 - get_callees: Find functions called by a given function
 - update_pov_info: Update POV metadata after analysis

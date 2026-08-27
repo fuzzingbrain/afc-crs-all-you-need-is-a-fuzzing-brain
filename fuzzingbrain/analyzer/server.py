@@ -254,8 +254,13 @@ class AnalysisServer:
             fuzzers=self.fuzzers,
             build_paths=self.build_paths,
             coverage_fuzzer_path=self.coverage_path,
-            static_analysis_ready=self.introspector_path is not None,
+            # Whether the index actually holds data, not whether a build path
+            # exists: a prebuilt graph populates both collections without ever
+            # producing an introspector directory, and a successful introspector
+            # build can still import nothing.
+            static_analysis_ready=self._get_function_count() > 0,
             reachable_functions_count=self._get_function_count(),
+            callgraph_nodes_count=self._get_callgraph_count(),
             build_duration_seconds=self.build_duration,
             analysis_duration_seconds=self.analysis_duration,
         )
@@ -665,6 +670,17 @@ class AnalysisServer:
             "build_duration": self.build_duration,
             "analysis_duration": self.analysis_duration,
         }
+
+    def _get_callgraph_count(self) -> int:
+        """Count call graph nodes in the database."""
+        if not self.repos:
+            return 0
+        try:
+            return self.repos.callgraph_nodes.collection.count_documents(
+                {"task_id": self.task_id}
+            )
+        except Exception:
+            return 0
 
     def _get_function_count(self) -> int:
         """Get count of functions in database."""

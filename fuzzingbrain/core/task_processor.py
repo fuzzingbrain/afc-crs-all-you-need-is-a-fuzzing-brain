@@ -22,6 +22,7 @@ from bson import ObjectId
 
 from .logging import logger, create_final_summary, WorkerColors, get_log_dir
 from .config import Config
+from .workspace_guard import assert_workspace_clean
 from .models import Task, TaskStatus, Fuzzer, FuzzerStatus
 from ..db import RepositoryManager
 
@@ -803,6 +804,16 @@ class TaskProcessor:
                 else:
                     logger.info(f"Found {len(fuzzers)} fuzzers")
                     fuzzer_discovery.save_fuzzers(fuzzers)
+
+            # Before building anything, refuse to proceed if the workspace still
+            # holds the answer. Sanitisation happens in setup_workspace; this is
+            # the assertion that a future change cannot silently skip. It raises
+            # rather than warns on purpose -- a run that looks successful while
+            # its findings are worthless is the exact failure being prevented.
+            assert_workspace_clean(
+                Path(task.task_path),
+                require_no_git=self.config.remove_git,
+            )
 
             # Step 5: Run Code Analyzer (build + static analysis)
             from ..analyzer import AnalyzeRequest, AnalyzeResult

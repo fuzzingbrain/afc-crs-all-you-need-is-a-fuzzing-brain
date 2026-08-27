@@ -15,7 +15,7 @@ Usage:
 """
 
 from fastmcp import FastMCP
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from .utils import async_tool
 
@@ -28,6 +28,7 @@ def create_isolated_mcp_server(
     include_sp_tools: bool = True,
     include_sp_create_tools: bool = True,
     include_direction_tools: bool = True,
+    include_static_analysis_tools: bool = True,
 ) -> FastMCP:
     """
     Create an isolated FastMCP server instance with all tools registered.
@@ -50,6 +51,15 @@ def create_isolated_mcp_server(
                                read/update SPs, not create new ones.
         include_direction_tools: Whether to include direction tools (default True).
                                 Set to False for agents that don't need directions.
+        include_static_analysis_tools: Whether to include the tools that read the
+                                function index and call graph (default True). Set
+                                to False when those collections are empty: the
+                                ten tools would otherwise be advertised and
+                                return nothing, which reads to the model as
+                                "this function does not exist" rather than "the
+                                index is missing". Read, Grep and Glob stay
+                                available either way, so the agent can still
+                                read code.
 
     Returns:
         A new FastMCP instance with all tools registered
@@ -57,9 +67,20 @@ def create_isolated_mcp_server(
     # Create a new FastMCP instance (NOT the singleton)
     mcp = FastMCP(f"FuzzingBrain-Tools-{agent_id}")
 
-    # Register code analysis tools (always needed)
-    _register_analyzer_tools(mcp)
+    # Filesystem tools first: they need nothing but a checked-out tree, so they
+    # are what remains when the index is unavailable.
     _register_code_viewer_tools(mcp)
+    _register_file_tools(mcp)
+
+    # Index and call graph tools, only when there is an index to read. Both
+    # collections are filled by the same import, from the same introspector
+    # output, and the prebuild path refuses to load unless both files are
+    # present -- so one switch covers all ten.
+    # Build artefacts, unaffected by whether the index has data.
+    _register_build_info_tools(mcp)
+
+    if include_static_analysis_tools:
+        _register_analyzer_tools(mcp)
 
     if include_seed_tools:
         # SeedAgent: only code analysis + create_seed
@@ -97,6 +118,39 @@ def _is_connection_error(e: Exception) -> bool:
     return any(err in error_str for err in connection_errors)
 
 
+def _client_helpers():
+    """The analysis-server client helpers, shared by the groups that need them.
+
+    Returned rather than imported at module scope because the analyzer module
+    imports from here in turn; resolving them on call keeps that cycle from
+    biting at import time.
+    """
+    from loguru import logger
+
+    from .analyzer import (
+        _analysis_socket_path,
+        _client_id,
+        _ensure_client,
+        _get_client,
+        _invalidate_client,
+    )
+
+    def get_cache_key():
+        socket_path = _analysis_socket_path.get()
+        client_id = _client_id.get()
+        return (socket_path, client_id) if socket_path else None
+
+    def handle_client_error(e: Exception) -> Dict[str, Any]:
+        if _is_connection_error(e):
+            cache_key = get_cache_key()
+            if cache_key:
+                _invalidate_client(cache_key)
+                logger.warning(f"Connection error, invalidated client cache: {e}")
+        return {"success": False, "error": str(e)}
+
+    return _get_client, _ensure_client, handle_client_error
+
+
 def _register_analyzer_tools(mcp: FastMCP) -> None:
     """Register analyzer tools (code analysis via Analysis Server)."""
     from loguru import logger
@@ -124,20 +178,6 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
                 _invalidate_client(cache_key)
                 logger.warning(f"Connection error, invalidated client cache: {e}")
         return {"success": False, "error": str(e)}
-
-    @mcp.tool
-    @async_tool
-    def analyzer_status() -> Dict[str, Any]:
-        """Get Analysis Server status."""
-        err = _ensure_client()
-        if err:
-            return err
-        try:
-            client = _get_client()
-            status = client.get_status()
-            return {"success": True, "status": status}
-        except Exception as e:
-            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -411,6 +451,30 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
     # they return multi-MB responses that blow up the LLM context.
     # The underlying AnalysisClient methods remain available for internal use.
 
+
+def _register_build_info_tools(mcp: FastMCP) -> None:
+    """Register tools that read build artefacts, not the function index.
+
+    These come from a successful build, so they are unaffected by whether
+    the introspector import produced anything, and must not disappear with
+    the index tools they used to be registered alongside.
+    """
+    _get_client, _ensure_client, _handle_client_error = _client_helpers()
+
+    @mcp.tool
+    @async_tool
+    def analyzer_status() -> Dict[str, Any]:
+        """Get Analysis Server status."""
+        err = _ensure_client()
+        if err:
+            return err
+        try:
+            client = _get_client()
+            status = client.get_status()
+            return {"success": True, "status": status}
+        except Exception as e:
+            return _handle_client_error(e)
+
     @mcp.tool
     @async_tool
     def get_fuzzers() -> Dict[str, Any]:
@@ -470,15 +534,18 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
 
 
 def _register_code_viewer_tools(mcp: FastMCP) -> None:
-    """Register code viewer tools (file system operations)."""
+    """Register get_diff.
 
-    # Import the _impl functions that bypass MCP wrapper
-    from .code_viewer import (
-        get_diff_impl,
-        get_file_content_impl,
-        search_code_impl,
-        list_files_impl,
-    )
+    The diff lives at workspace/diff/, outside the repo root that Read is
+    anchored to, and the delta prompts name this tool directly, so it stays as
+    its own tool rather than becoming a path an agent has to know.
+
+    get_file_content, search_code and list_files used to live here and are now
+    served by Read, Grep and Glob in _register_file_tools. Their _impl functions
+    remain in code_viewer for callers that import them directly.
+    """
+
+    from .code_viewer import get_diff_impl
 
     @mcp.tool
     @async_tool
@@ -489,61 +556,96 @@ def _register_code_viewer_tools(mcp: FastMCP) -> None:
         """
         return get_diff_impl()
 
+
+def _register_file_tools(mcp: FastMCP) -> None:
+    """Register the filesystem primitives: Read, Grep, Glob.
+
+    These need nothing but a checked-out tree, so they stay available when the
+    introspector build fails or a run is scoped to analysis only. Names match
+    the Claude Code tools so a model does not learn a second convention; the
+    parameters that are flags there (-A, -B, -C) become before_context,
+    after_context and context_lines here, because the MCP schema is generated
+    from this signature and those are not valid identifiers.
+    """
+
+    from .files import glob_impl, grep_impl, read_file_impl
+
     @mcp.tool
     @async_tool
-    def get_file_content(
-        file_path: str, start_line: int = None, end_line: int = None
+    def Read(
+        file_path: str,
+        offset: int = 1,
+        limit: int = 2000,
     ) -> Dict[str, Any]:
         """
-        Read the content of a file from the repository.
+        Read a file from the task workspace. Returns numbered lines, so you can
+        cite an exact location. Use offset and limit to page through a long file
+        rather than pulling all of it.
 
         Args:
-            file_path: Relative path to the file within the repo
-            start_line: Optional starting line number (1-indexed)
-            end_line: Optional ending line number (1-indexed, inclusive)
+            file_path: Path relative to the repository root, e.g. 'pngrutil.c'
+            offset: First line to return, 1-indexed
+            limit: How many lines to return
         """
-        return get_file_content_impl(file_path, start_line, end_line)
+        return read_file_impl(file_path, offset, limit)
 
     @mcp.tool
     @async_tool
-    def search_code(
-        pattern: str = None,
-        query: str = None,
-        file_pattern: str = None,
-        max_results: int = 50,
-        context_lines: int = 2,
+    def Grep(
+        pattern: str,
+        glob: Optional[str] = None,
+        output_mode: str = "content",
+        context_lines: int = 0,
+        before_context: int = 0,
+        after_context: int = 0,
+        head_limit: int = 50,
+        case_insensitive: bool = False,
+        multiline: bool = False,
     ) -> Dict[str, Any]:
         """
-        Search for a pattern in the repository source code.
+        Search file contents by regular expression.
 
         Args:
-            pattern: Search pattern (supports regex)
-            query: Alias for pattern
-            file_pattern: Optional glob pattern to filter files
-            max_results: Maximum number of matches to return
-            context_lines: Number of context lines around matches
+            pattern: Regular expression to search for
+            glob: Restrict to files matching this pattern, e.g. '*.c'
+            output_mode: 'content' for matching lines with numbers,
+                'files_with_matches' for paths only (cheapest way to narrow
+                down), or 'count' for per-file totals
+            context_lines: Lines of context on both sides of a match
+            before_context: Lines of context before a match
+            after_context: Lines of context after a match
+            head_limit: Cap on returned entries
+            case_insensitive: Match case-insensitively
+            multiline: Let the pattern span line breaks
         """
-        actual_pattern = pattern or query
-        if not actual_pattern:
-            return {"error": "pattern or query is required", "matches": [], "count": 0}
-        return search_code_impl(
-            actual_pattern, file_pattern, max_results, context_lines
+        return grep_impl(
+            pattern,
+            glob,
+            output_mode,
+            context_lines,
+            before_context,
+            after_context,
+            head_limit,
+            case_insensitive,
+            multiline,
         )
 
     @mcp.tool
     @async_tool
-    def list_files(
-        directory: str = "", pattern: str = None, recursive: bool = False
+    def Glob(
+        pattern: str, include_dirs: bool = False, head_limit: int = 1000
     ) -> Dict[str, Any]:
         """
-        List files in the repository.
+        Find files by name pattern, for example '**/*.c' or
+        'contrib/oss-fuzz/*'. Returns workspace-relative paths sorted by path.
 
         Args:
-            directory: Subdirectory to list (relative to repo root)
-            pattern: Optional glob pattern to filter files
-            recursive: If True, list files recursively
+            pattern: Glob pattern relative to the repository root
+            include_dirs: Also return matching directories, which is how you
+                explore an unfamiliar tree without globbing '**/*'
+            head_limit: Cap on returned paths
         """
-        return list_files_impl(directory, pattern, recursive)
+        return glob_impl(pattern, include_dirs, head_limit)
 
 
 def _register_sp_create_tools(mcp: FastMCP) -> None:
