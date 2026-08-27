@@ -38,10 +38,12 @@ git clone https://github.com/fuzzingbrain/afc-crs-all-you-need-is-a-fuzzing-brai
 cd afc-crs-all-you-need-is-a-fuzzing-brain
 
 cp .env.example .env
-$EDITOR .env                  # add at least one API key
-
-./FuzzingBrain.sh --help      # bootstraps uv, venv, deps, MongoDB, Redis
+$EDITOR .env          # add at least one API key
 ```
+
+The first run installs `uv`, builds `venv/` on Python 3.11, installs
+`requirements.txt` and starts the MongoDB and Redis containers. `--help` prints
+options without doing any of that.
 
 ## Run an example
 
