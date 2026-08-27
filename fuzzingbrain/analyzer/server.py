@@ -666,6 +666,11 @@ class AnalysisServer:
             else 0,
             "fuzzer_count": len(self.fuzzers),
             "function_count": self._get_function_count(),
+            # Whether the coverage build produced anything. Agents ask this to
+            # decide if the coverage tools are worth offering: advertising them
+            # over a missing build makes them fail in a way that reads as "this
+            # target has no coverage" rather than "coverage was never built".
+            "coverage_available": self.coverage_path is not None,
             "query_count": self.query_count,
             "build_duration": self.build_duration,
             "analysis_duration": self.analysis_duration,

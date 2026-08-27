@@ -95,3 +95,57 @@ def test_prompts_name_only_tools_the_agent_has(available):
         assert "get_function_source" not in hints and "get_callers" not in hints
         assert "Grep" in hints and "Read" in hints
     assert "png_handle_iCCP" in hints
+
+
+# ------------------------------------------------------------------ coverage
+
+
+COVERAGE = {
+    "run_coverage",
+    "get_coverage_feedback",
+    "check_pov_reaches_target",
+    "list_available_fuzzers",
+}
+
+
+def test_coverage_tools_are_offered_when_the_build_exists():
+    assert COVERAGE <= _names(include_coverage_tools=True)
+
+
+def test_coverage_tools_are_withheld_without_a_coverage_build():
+    """All four read the coverage build output. Offered over a missing build
+    they fail in a way that reads as 'this target has no coverage'."""
+    assert COVERAGE & _names(include_coverage_tools=False) == set()
+
+
+def test_trace_pov_survives_a_missing_coverage_build():
+    """trace_pov traces with gdb against the ASAN binary and only falls back to
+    coverage, so it loses detail rather than breaking. Gating it with the
+    coverage tools would be the mistake this test exists to catch."""
+    assert "trace_pov" in _names(include_coverage_tools=False)
+
+
+def test_coverage_gate_removes_only_the_coverage_tools():
+    on = _names(include_coverage_tools=True)
+    off = _names(include_coverage_tools=False)
+    assert on - off == COVERAGE
+    assert off - on == set()
+
+
+def test_the_two_gates_are_independent():
+    both_off = _names(include_static_analysis_tools=False, include_coverage_tools=False)
+    assert GATED & both_off == set()
+    assert COVERAGE & both_off == set()
+    assert ALWAYS <= both_off, "reading source must survive both gates"
+    assert "trace_pov" in both_off
+
+
+def test_coverage_error_says_the_build_is_missing_not_the_context():
+    """'Coverage context not set' reads as a configuration slip. What actually
+    happened is that the coverage build produced nothing, which is allowed."""
+    from fuzzingbrain.tools import coverage
+
+    ok, _, msg = coverage.run_coverage_fuzzer("some_fuzzer", b"x", None)
+    assert ok is False
+    assert "No coverage build for this run" in msg
+    assert "context" not in msg.lower()

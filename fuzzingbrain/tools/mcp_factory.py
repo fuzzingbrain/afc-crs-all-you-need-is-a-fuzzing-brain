@@ -29,6 +29,7 @@ def create_isolated_mcp_server(
     include_sp_create_tools: bool = True,
     include_direction_tools: bool = True,
     include_static_analysis_tools: bool = True,
+    include_coverage_tools: bool = True,
 ) -> FastMCP:
     """
     Create an isolated FastMCP server instance with all tools registered.
@@ -60,6 +61,14 @@ def create_isolated_mcp_server(
                                 index is missing". Read, Grep and Glob stay
                                 available either way, so the agent can still
                                 read code.
+        include_coverage_tools: Whether to include the coverage tools (default
+                                True). Set to False when the coverage build
+                                produced nothing: all four read the coverage
+                                build output, and would otherwise fail in a way
+                                that reads as "this target has no coverage".
+                                trace_pov is unaffected -- it traces with gdb
+                                against the ASAN binary and only falls back to
+                                coverage, so it degrades rather than breaking.
 
     Returns:
         A new FastMCP instance with all tools registered
@@ -97,7 +106,8 @@ def create_isolated_mcp_server(
             _register_direction_tools(mcp)
         if include_pov_tools:
             _register_pov_tools(mcp, worker_id=worker_id)
-            _register_coverage_tools(mcp)
+            if include_coverage_tools:
+                _register_coverage_tools(mcp)
 
     return mcp
 
