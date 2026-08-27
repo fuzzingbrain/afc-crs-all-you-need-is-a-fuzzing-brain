@@ -9,6 +9,10 @@ Both share the same business logic.
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional, List
+import base64
+from datetime import datetime
+from enum import Enum
+
 from bson import ObjectId
 
 from .core import Task, JobType, ScanMode
@@ -183,6 +187,31 @@ async def start_harness_task(task: Task, targets: List[dict]):
 # =============================================================================
 # API Endpoints
 # =============================================================================
+
+
+def _api_safe(value):
+    """Make a document from ``Model.to_dict()`` serialisable as a response.
+
+    ``to_dict`` exists to be written to MongoDB: it puts a real ``ObjectId`` in
+    ``_id`` and every reference field, and a ``datetime`` in the timestamps.
+    FastAPI can encode neither, so returning one straight from an endpoint is a
+    500 on any non-empty result -- which is what /api/v1/tasks, /api/v1/pov,
+    /api/v1/patch and the status route each did, with the traceback ending in
+    ``TypeError("'ObjectId' object is not iterable")``.
+    """
+    if isinstance(value, ObjectId):
+        return str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, bytes):
+        return base64.b64encode(value).decode("ascii")
+    if isinstance(value, dict):
+        return {k: _api_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_api_safe(v) for v in value]
+    return value
 
 
 @app.get("/")
@@ -422,8 +451,8 @@ async def get_status(task_id: str):
             "pov_generated": len(povs),
             "patch_generated": len(patches),
         },
-        povs=[p.to_dict() for p in povs[:10]],  # Return max 10
-        patches=[p.to_dict() for p in patches[:10]],
+        povs=[_api_safe(p.to_dict()) for p in povs[:10]],  # Return max 10
+        patches=[_api_safe(p.to_dict()) for p in patches[:10]],
         error=task.error_msg,
     )
 
@@ -449,7 +478,7 @@ async def list_tasks(
     tasks = repos.tasks.find_all(query, limit=limit)
 
     return {
-        "tasks": [t.to_dict() for t in tasks],
+        "tasks": [_api_safe(t.to_dict()) for t in tasks],
         "total": len(tasks),
     }
 
@@ -476,7 +505,7 @@ async def get_povs(task_id: str, active_only: bool = True):
 
     return {
         "task_id": task_id,
-        "povs": [p.to_dict() for p in povs],
+        "povs": [_api_safe(p.to_dict()) for p in povs],
         "total": len(povs),
     }
 
@@ -498,7 +527,7 @@ async def get_patches(task_id: str, valid_only: bool = False):
 
     return {
         "task_id": task_id,
-        "patches": [p.to_dict() for p in patches],
+        "patches": [_api_safe(p.to_dict()) for p in patches],
         "total": len(patches),
     }
 

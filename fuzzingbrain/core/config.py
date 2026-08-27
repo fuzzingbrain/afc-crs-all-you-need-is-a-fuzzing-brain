@@ -148,6 +148,18 @@ class Config:
 
         return cls(
             workspace=data.get("workspace"),
+            task_id=data.get("task_id"),
+            in_place=bool(data.get("in_place", False)),
+            # Evaluation posture. These were reachable only from the command
+            # line and the environment, so a task file -- the form a challenge
+            # run is actually written in -- could not express them, and a
+            # `"remove_git": true` in one was read by nothing and reported by
+            # nothing. A flag or environment variable can still turn them on
+            # over a task file that leaves them off; neither can turn them off.
+            remove_git=bool(data.get("remove_git", False)),
+            no_network=bool(data.get("no_network", False)),
+            enable_static_analysis=bool(data.get("enable_static_analysis", False)),
+            allow_expensive_fallback=bool(data.get("allow_expensive_fallback", False)),
             task_type=data.get("task_type", "pov"),
             scan_mode=data.get("scan_mode", "full"),
             sanitizers=data.get("sanitizers", ["address"]),
