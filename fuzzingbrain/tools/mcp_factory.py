@@ -28,6 +28,7 @@ def create_isolated_mcp_server(
     include_sp_tools: bool = True,
     include_sp_create_tools: bool = True,
     include_direction_tools: bool = True,
+    include_static_analysis_tools: bool = True,
 ) -> FastMCP:
     """
     Create an isolated FastMCP server instance with all tools registered.
@@ -50,6 +51,15 @@ def create_isolated_mcp_server(
                                read/update SPs, not create new ones.
         include_direction_tools: Whether to include direction tools (default True).
                                 Set to False for agents that don't need directions.
+        include_static_analysis_tools: Whether to include the tools that read the
+                                function index and call graph (default True). Set
+                                to False when those collections are empty: the
+                                ten tools would otherwise be advertised and
+                                return nothing, which reads to the model as
+                                "this function does not exist" rather than "the
+                                index is missing". Read, Grep and Glob stay
+                                available either way, so the agent can still
+                                read code.
 
     Returns:
         A new FastMCP instance with all tools registered
@@ -57,10 +67,20 @@ def create_isolated_mcp_server(
     # Create a new FastMCP instance (NOT the singleton)
     mcp = FastMCP(f"FuzzingBrain-Tools-{agent_id}")
 
-    # Register code analysis tools (always needed)
-    _register_analyzer_tools(mcp)
+    # Filesystem tools first: they need nothing but a checked-out tree, so they
+    # are what remains when the index is unavailable.
     _register_code_viewer_tools(mcp)
     _register_file_tools(mcp)
+
+    # Index and call graph tools, only when there is an index to read. Both
+    # collections are filled by the same import, from the same introspector
+    # output, and the prebuild path refuses to load unless both files are
+    # present -- so one switch covers all ten.
+    # Build artefacts, unaffected by whether the index has data.
+    _register_build_info_tools(mcp)
+
+    if include_static_analysis_tools:
+        _register_analyzer_tools(mcp)
 
     if include_seed_tools:
         # SeedAgent: only code analysis + create_seed
@@ -98,6 +118,39 @@ def _is_connection_error(e: Exception) -> bool:
     return any(err in error_str for err in connection_errors)
 
 
+def _client_helpers():
+    """The analysis-server client helpers, shared by the groups that need them.
+
+    Returned rather than imported at module scope because the analyzer module
+    imports from here in turn; resolving them on call keeps that cycle from
+    biting at import time.
+    """
+    from loguru import logger
+
+    from .analyzer import (
+        _analysis_socket_path,
+        _client_id,
+        _ensure_client,
+        _get_client,
+        _invalidate_client,
+    )
+
+    def get_cache_key():
+        socket_path = _analysis_socket_path.get()
+        client_id = _client_id.get()
+        return (socket_path, client_id) if socket_path else None
+
+    def handle_client_error(e: Exception) -> Dict[str, Any]:
+        if _is_connection_error(e):
+            cache_key = get_cache_key()
+            if cache_key:
+                _invalidate_client(cache_key)
+                logger.warning(f"Connection error, invalidated client cache: {e}")
+        return {"success": False, "error": str(e)}
+
+    return _get_client, _ensure_client, handle_client_error
+
+
 def _register_analyzer_tools(mcp: FastMCP) -> None:
     """Register analyzer tools (code analysis via Analysis Server)."""
     from loguru import logger
@@ -125,20 +178,6 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
                 _invalidate_client(cache_key)
                 logger.warning(f"Connection error, invalidated client cache: {e}")
         return {"success": False, "error": str(e)}
-
-    @mcp.tool
-    @async_tool
-    def analyzer_status() -> Dict[str, Any]:
-        """Get Analysis Server status."""
-        err = _ensure_client()
-        if err:
-            return err
-        try:
-            client = _get_client()
-            status = client.get_status()
-            return {"success": True, "status": status}
-        except Exception as e:
-            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool
@@ -411,6 +450,30 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
     # as MCP tools. On large projects (e.g. Wireshark with 123k functions),
     # they return multi-MB responses that blow up the LLM context.
     # The underlying AnalysisClient methods remain available for internal use.
+
+
+def _register_build_info_tools(mcp: FastMCP) -> None:
+    """Register tools that read build artefacts, not the function index.
+
+    These come from a successful build, so they are unaffected by whether
+    the introspector import produced anything, and must not disappear with
+    the index tools they used to be registered alongside.
+    """
+    _get_client, _ensure_client, _handle_client_error = _client_helpers()
+
+    @mcp.tool
+    @async_tool
+    def analyzer_status() -> Dict[str, Any]:
+        """Get Analysis Server status."""
+        err = _ensure_client()
+        if err:
+            return err
+        try:
+            client = _get_client()
+            status = client.get_status()
+            return {"success": True, "status": status}
+        except Exception as e:
+            return _handle_client_error(e)
 
     @mcp.tool
     @async_tool

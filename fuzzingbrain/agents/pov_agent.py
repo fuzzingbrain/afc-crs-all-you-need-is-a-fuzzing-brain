@@ -479,6 +479,7 @@ This is CRITICAL - you need to understand how your input enters the library!
 
 """
 
+        source_hint = self.read_function_hint(function_name)
         message += f"""## Your Task
 
 1. Read the source code of `{function_name}` to understand the vulnerability
@@ -491,7 +492,7 @@ This is CRITICAL - you need to understand how your input enters the library!
 **GREEDY MODE**: For your first 3 POV attempts, trace_pov is disabled.
 Focus on understanding the code and making educated guesses about triggering inputs.
 
-Start by reading the vulnerable function source with get_function_source("{function_name}").
+Start by reading the vulnerable function source: {source_hint}.
 """
 
         return message
@@ -745,6 +746,10 @@ Start by reading the vulnerable function source with get_function_source("{funct
                             if result.get("success") and not result.get("crashed"):
                                 # POV didn't crash - inject analysis prompt
                                 output_hint = result.get("output_hint", "")
+                                sp_function = (self.suspicious_point or {}).get(
+                                    "function_name", "the vulnerable function"
+                                )
+                                source_hint = self.read_function_hint(sp_function)
                                 self.messages.append(
                                     {
                                         "role": "user",
@@ -756,7 +761,7 @@ Start by reading the vulnerable function source with get_function_source("{funct
 2. What conditions are needed to trigger the vulnerability?
 3. What's different between your input and what the vulnerability needs?
 
-Use get_function_source or trace_pov (if available) to understand better, then create a NEW POV with adjusted approach.""",
+Use {source_hint} or trace_pov (if available) to understand better, then create a NEW POV with adjusted approach.""",
                                         "iteration": f"{iteration}/{self.max_iterations}",
                                         "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
                                     }

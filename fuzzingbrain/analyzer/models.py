@@ -118,8 +118,12 @@ class AnalyzeResult:
     coverage_fuzzer_path: Optional[str] = None
 
     # Static analysis status
+    # static_analysis_ready means the index holds data, so the tools that read
+    # it are worth offering. It is not "an introspector build happened": a
+    # prebuilt graph fills the collections without one.
     static_analysis_ready: bool = False
     reachable_functions_count: int = 0
+    callgraph_nodes_count: int = 0
 
     # Timing
     build_duration_seconds: float = 0.0
@@ -144,6 +148,7 @@ class AnalyzeResult:
             "coverage_fuzzer_path": self.coverage_fuzzer_path,
             "static_analysis_ready": self.static_analysis_ready,
             "reachable_functions_count": self.reachable_functions_count,
+            "callgraph_nodes_count": self.callgraph_nodes_count,
             "build_duration_seconds": self.build_duration_seconds,
             "analysis_duration_seconds": self.analysis_duration_seconds,
             "error_msg": self.error_msg,
@@ -164,6 +169,7 @@ class AnalyzeResult:
             coverage_fuzzer_path=data.get("coverage_fuzzer_path"),
             static_analysis_ready=data.get("static_analysis_ready", False),
             reachable_functions_count=data.get("reachable_functions_count", 0),
+            callgraph_nodes_count=data.get("callgraph_nodes_count", 0),
             build_duration_seconds=data.get("build_duration_seconds", 0.0),
             analysis_duration_seconds=data.get("analysis_duration_seconds", 0.0),
             error_msg=data.get("error_msg"),
