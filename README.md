@@ -26,7 +26,7 @@ patches — with every finding dynamically verified to eliminate hallucinations.
 | Requirement | Notes |
 |---|---|
 | **Docker** | Running, with permission to pull images and run containers |
-| **Python 3.10+** | Used to create the local virtualenv |
+| **Python** | Not required up front — `uv` fetches the version in `.python-version` (3.11) so every machine runs the same interpreter |
 | **One LLM API key** | Anthropic, OpenAI, or Google Gemini |
 | **Linux** | Recommended (OSS-Fuzz builds are happiest on Linux) |
 

@@ -52,3 +52,6 @@ Z-Code-Analyzer-Station/
 
 # Internal working notes, not shipped
 internal/
+
+# uv, when the bootstrap installs it locally
+.uv/
