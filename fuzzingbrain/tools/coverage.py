@@ -212,7 +212,13 @@ def run_coverage_fuzzer(
     docker_image = _docker_image.get()
 
     if coverage_fuzzer_dir is None or project_name is None:
-        return False, "", "Coverage context not set. Call set_coverage_context() first."
+        return (
+            False,
+            "",
+            (
+                "No coverage build for this run, so coverage cannot be measured. The coverage build is allowed to fail without stopping a task; trace_pov still traces with gdb against the ASAN binary."
+            ),
+        )
 
     # Check if coverage fuzzer exists
     coverage_fuzzer = coverage_fuzzer_dir / fuzzer_name
@@ -901,7 +907,9 @@ def _run_coverage_impl(
     if coverage_fuzzer_dir is None:
         return CoverageResult(
             success=False,
-            error="Coverage context not set. Call set_coverage_context() first.",
+            error=(
+                "No coverage build for this run, so coverage cannot be measured. The coverage build is allowed to fail without stopping a task; trace_pov still traces with gdb against the ASAN binary."
+            ),
         )
 
     # Decode input
@@ -1014,7 +1022,9 @@ def list_available_fuzzers() -> Dict[str, Any]:
         return {
             "success": False,
             "fuzzers": [],
-            "error": "Coverage context not set",
+            "error": (
+                "No coverage build for this run, so coverage cannot be measured. The coverage build is allowed to fail without stopping a task; trace_pov still traces with gdb against the ASAN binary."
+            ),
         }
 
     if not coverage_fuzzer_dir.exists():
@@ -1151,7 +1161,9 @@ def list_fuzzers_impl() -> Dict[str, Any]:
         return {
             "success": False,
             "fuzzers": [],
-            "error": "Coverage context not set",
+            "error": (
+                "No coverage build for this run, so coverage cannot be measured. The coverage build is allowed to fail without stopping a task; trace_pov still traces with gdb against the ASAN binary."
+            ),
         }
 
     if not coverage_fuzzer_dir.exists():

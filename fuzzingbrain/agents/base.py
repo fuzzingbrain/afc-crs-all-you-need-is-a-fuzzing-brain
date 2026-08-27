@@ -230,25 +230,50 @@ class BaseAgent(ABC):
         then has no way to read code at all, while the run reports success.
         Read, Grep and Glob remain either way.
         """
-        cached = getattr(self, "_static_analysis_available", None)
+        return int(self._analysis_status().get("function_count", 0)) > 0
+
+    @property
+    def include_coverage_tools(self) -> bool:
+        """Whether the coverage tools are worth offering.
+
+        All four read the coverage build output. Offering them when that build
+        produced nothing makes them fail in a way that reads as "this target
+        has no coverage" rather than "coverage was never built" -- the same
+        shape of silent misdirection as an empty function index.
+
+        trace_pov is deliberately not gated with them: it traces with gdb
+        against the ASAN binary and only falls back to coverage, so losing
+        coverage costs it detail rather than breaking it.
+        """
+        return bool(self._analysis_status().get("coverage_available", True))
+
+    def _analysis_status(self) -> dict:
+        """The analysis server's status, fetched once per agent.
+
+        Asked of the server rather than threaded down from the task, because
+        what a run produced is a fact about its data, not about the kind of
+        agent reading it. On failure every capability reads as available, so a
+        server that cannot be reached degrades to today's behaviour rather than
+        silently stripping an agent's tools.
+        """
+        cached = getattr(self, "_analysis_status_cache", None)
         if cached is not None:
             return cached
 
         try:
             from ..analyzer.client import AnalyzerClient
 
-            status = AnalyzerClient().get_status()
-            available = int(status.get("function_count", 0)) > 0
+            status = AnalyzerClient().get_status() or {}
         except Exception as exc:  # server down, socket missing, malformed reply
             self._log(
-                f"Could not ask the analysis server for its index size, so the "
-                f"index tools stay enabled: {exc}",
+                f"Could not read the analysis server status, so every tool group "
+                f"stays enabled: {exc}",
                 level="DEBUG",
             )
-            available = True
+            status = {}
 
-        self._static_analysis_available = available
-        return available
+        self._analysis_status_cache = status
+        return status
 
     def read_function_hint(self, function_name: str) -> str:
         """How to tell this agent to read a function, given the tools it has.
@@ -1146,6 +1171,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                 # This prevents response mixing when multiple agents run concurrently
                 # Pass agent_id for unique context lookup
                 static_analysis_tools = self.include_static_analysis_tools
+                coverage_tools = self.include_coverage_tools
                 mcp_server = create_isolated_mcp_server(
                     agent_id=agent_id,
                     worker_id=agent_id,  # Use agent_id for context isolation
@@ -1155,13 +1181,15 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                     include_sp_create_tools=self.include_sp_create_tools,
                     include_direction_tools=self.include_direction_tools,
                     include_static_analysis_tools=static_analysis_tools,
+                    include_coverage_tools=coverage_tools,
                 )
                 self._log(
                     f"Created isolated MCP server: {agent_id} "
                     f"(pov_tools={self.include_pov_tools}, "
                     f"seed_tools={self.include_seed_tools}, "
                     f"sp_tools={self.include_sp_tools}, "
-                    f"static_analysis_tools={static_analysis_tools})",
+                    f"static_analysis_tools={static_analysis_tools}, "
+                    f"coverage_tools={coverage_tools})",
                     level="DEBUG",
                 )
 
