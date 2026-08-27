@@ -282,12 +282,22 @@ def _ensure_context(worker_id: str = None) -> Optional[Dict[str, Any]]:
     if ctx is None or ctx.get("task_id") is None:
         return {
             "success": False,
-            "error": "POV context not set. Call set_pov_context first.",
+            "error": (
+                "The POV tools are not initialised for this agent. This is a "
+                "fault in the run's setup, not in your arguments, and no "
+                "argument you pass will change it -- retrying wastes the "
+                "budget. Stop calling the POV tools and report your analysis "
+                "of the suspicious point instead."
+            ),
         }
     if ctx.get("repos") is None:
         return {
             "success": False,
-            "error": "Database repos not available in POV context.",
+            "error": (
+                "The POV tools have no database connection. This is a fault in "
+                "the run's setup, not in your arguments -- retrying will not "
+                "help. Report your analysis instead."
+            ),
         }
     return None
 

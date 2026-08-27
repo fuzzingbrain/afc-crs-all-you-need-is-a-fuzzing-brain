@@ -198,7 +198,11 @@ def _ensure_context(worker_id: str = None) -> Optional[Dict[str, Any]]:
     if ctx is None or ctx.get("task_id") is None:
         return {
             "success": False,
-            "error": "Seed context not set. Call set_seed_context first.",
+            "error": (
+                "The seed tools are not initialised for this agent. This is a "
+                "fault in the run's setup, not in your arguments -- retrying "
+                "will not help. Report your analysis instead."
+            ),
         }
     return None
 
