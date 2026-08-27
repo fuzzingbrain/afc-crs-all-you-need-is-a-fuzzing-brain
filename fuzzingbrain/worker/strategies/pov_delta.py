@@ -135,11 +135,28 @@ class POVDeltaStrategy(POVBaseStrategy):
             f"[Step 1/5] Done in {step_duration:.1f}s - {len(all_changes)} changes ({reachable_count} reachable, {unreachable_count} static-unreachable)"
         )
 
-        # Only skip if NO changes at all (not based on reachability!)
+        # Skip only when the diff itself is empty. An empty change list can also
+        # mean the mapping failed -- get_functions_by_file reads the function
+        # index, so a run without one identifies no changed functions from a
+        # perfectly good diff. Treating those two as the same thing is what made
+        # a worker exit in 0.03s reporting nothing, on a diff that named the
+        # vulnerable function in its own hunk header.
+        #
+        # The mapping is a filter, not a prerequisite: it lets the agent skip
+        # unreachable changes. Without it the agent reads the diff itself, which
+        # is what the delta prompt asks for first anyway.
         if not all_changes:
-            self.log_info("No changes in diff, skipping")
-            result["skip_reason"] = "no_changes"
-            return {"skip": True}
+            if self._diff_has_content():
+                self.log_warning(
+                    "Diff has content but no changed functions were identified "
+                    "-- most likely no function index for this run. Continuing "
+                    "with the raw diff; the agent reads it directly."
+                )
+                result["degraded"] = "no_function_index"
+            else:
+                self.log_info("No changes in diff, skipping")
+                result["skip_reason"] = "no_changes"
+                return {"skip": True}
 
         # Log the unreachable functions that will now be analyzed
         if unreachable_count > 0:
@@ -170,7 +187,12 @@ class POVDeltaStrategy(POVBaseStrategy):
             "Finding suspicious points in ALL changes (ignoring reachability filter)..."
         )
 
-        if not self._all_changes:
+        # An empty list here means the mapping produced nothing, not that there
+        # is nothing to analyse -- Step 1 already refused to skip when the diff
+        # has content. The generator handles it: the changed-functions section
+        # of its prompt renders empty, and the first instruction is to call
+        # get_diff, so the agent works from the diff itself.
+        if not self._all_changes and not self._diff_has_content():
             self.log_warning("No changes found, cannot find suspicious points")
             return []
 
@@ -247,6 +269,17 @@ class POVDeltaStrategy(POVBaseStrategy):
         self._save_reachability_report(result)
 
         return result
+
+    def _diff_has_content(self) -> bool:
+        """Whether there is a diff to hand the agent, mapping aside."""
+        if not self.diff_path or not self.diff_path.exists():
+            return False
+        try:
+            return bool(
+                self.diff_path.read_text(encoding="utf-8", errors="replace").strip()
+            )
+        except OSError:
+            return False
 
     def _get_all_diff_changes(self) -> List[FunctionChange]:
         """
