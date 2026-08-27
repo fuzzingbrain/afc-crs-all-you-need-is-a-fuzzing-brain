@@ -42,7 +42,10 @@ ANSWER_DIR = ".aixcc"
 GIT_DIR = ".git"
 
 # Source trees inside a task workspace: the checkout plus the per-sanitizer
-# copies the analyzer builder makes from it.
+# copies the analyzer builder makes from it. Every path that creates a
+# workspace uses this layout -- main.setup_workspace, the cybergym and
+# external-harness importers -- so a tree outside these names would be missed
+# here and has to be added.
 _TREE_GLOBS = ("repo", "repo-*")
 
 
@@ -57,10 +60,6 @@ class SanitizeReport:
     answer_paths: List[str] = field(default_factory=list)
     git_paths: List[str] = field(default_factory=list)
     git_skipped_reason: Optional[str] = None
-
-    @property
-    def removed_anything(self) -> bool:
-        return bool(self.answer_paths or self.git_paths)
 
 
 def _trees(workspace: Path) -> List[Path]:

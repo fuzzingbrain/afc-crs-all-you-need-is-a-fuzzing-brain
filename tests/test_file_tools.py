@@ -281,3 +281,54 @@ def test_non_scalar_tool_args_are_summarised_by_type():
 
     assert format_tool_args({"data": {"a": 1}}) == "data=<dict>"
     assert format_tool_args({"flag": True, "none": None}) == "flag=True, none=None"
+
+
+# ---------------------------------------------------------------- portability
+
+
+@needs_rg
+def test_grep_falls_back_to_grep_without_ripgrep(workspace):
+    """A host without ripgrep still gets search, with the same answers."""
+    from unittest.mock import patch
+
+    with patch.object(F, "_rg_available", lambda: False):
+        r = F.grep_impl("helper", output_mode="files_with_matches")
+    assert r["success"] is True
+    assert sorted(r["files"]) == ["src/util.c", "src/util.h"]
+
+
+@needs_rg
+def test_both_search_backends_agree(workspace):
+    from unittest.mock import patch
+
+    with patch.object(F, "_rg_available", lambda: True):
+        rg = F.grep_impl("keyword_length", output_mode="count")
+    with patch.object(F, "_rg_available", lambda: False):
+        posix = F.grep_impl("keyword_length", output_mode="count")
+    assert rg["counts"] == posix["counts"]
+    assert rg["total_matches"] == posix["total_matches"]
+
+
+@needs_rg
+def test_grep_fallback_still_refuses_denied_directories(workspace):
+    from unittest.mock import patch
+
+    with patch.object(F, "_rg_available", lambda: False):
+        r = F.grep_impl("metadata_spec_version", output_mode="files_with_matches")
+    assert r["files"] == []
+
+
+def test_grep_finds_dotfiles(workspace):
+    """ripgrep skips hidden files by default; a source tree keeps content in
+    them, and a dotfile's name must survive the path cleanup."""
+    (workspace / "repo" / ".clang-format").write_text("BasedOnStyle: LLVM\nhelper\n")
+    r = F.grep_impl("helper", output_mode="files_with_matches")
+    assert ".clang-format" in r["files"], "leading dot must not be stripped"
+
+
+def test_rg_detection_does_not_shell_out():
+    """shutil.which, not a `which` subprocess: `which` is not a command
+    everywhere, and it costs a process either way."""
+    import inspect
+
+    assert "shutil.which" in inspect.getsource(F._rg_available)

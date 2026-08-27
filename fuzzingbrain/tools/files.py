@@ -22,6 +22,7 @@ viewer tools, so callers set it once.
 """
 
 import re
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -202,14 +203,22 @@ def read_file_impl(
 # =============================================================================
 
 
+def _clean_path(raw: str) -> str:
+    """Strip ripgrep's leading './' without touching a dotfile's own name.
+
+    str.lstrip("./") removes *characters*, so it turns '.clang-format' into
+    'clang-format' -- a path the agent then cannot read back.
+    """
+    return raw[2:] if raw.startswith("./") else raw
+
+
 def _rg_available() -> bool:
-    try:
-        return (
-            subprocess.run(["which", "rg"], capture_output=True, timeout=10).returncode
-            == 0
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
+    """Whether ripgrep is on PATH.
+
+    shutil.which rather than shelling out to `which`, which is not a command on
+    every platform and costs a process either way.
+    """
+    return shutil.which("rg") is not None
 
 
 def grep_impl(
@@ -239,38 +248,75 @@ def grep_impl(
     if root is None or not root.exists():
         return _err("Workspace context is not set")
 
-    if not _rg_available():
-        return _err("ripgrep (rg) is not installed, so content search is unavailable")
-
     try:
         head_limit = max(1, int(head_limit))
     except (TypeError, ValueError):
         head_limit = _GREP_DEFAULT_HEAD
 
-    cmd: List[str] = ["rg", "--color=never", "--no-messages"]
-    for part in sorted(_DENIED_PARTS):
-        cmd += ["--glob", f"!{part}", "--glob", f"!{part}/**"]
-    if glob:
-        cmd += ["--glob", glob]
-    if case_insensitive:
-        cmd.append("-i")
-    if multiline:
-        cmd += ["--multiline", "--multiline-dotall"]
+    use_rg = _rg_available()
+    if use_rg:
+        # --hidden because ripgrep skips dotfiles by default, and a source tree
+        # keeps real content in them (.clang-format, .github/, .editorconfig).
+        # --no-ignore-vcs so a repository's own .gitignore cannot hide code from
+        # analysis; the deny-list below is what decides what stays unreadable.
+        cmd: List[str] = [
+            "rg",
+            "--color=never",
+            "--no-messages",
+            "--hidden",
+            "--no-ignore-vcs",
+        ]
+        for part in sorted(_DENIED_PARTS):
+            cmd += ["--glob", f"!{part}", "--glob", f"!{part}/**"]
+        if glob:
+            cmd += ["--glob", glob]
+        if case_insensitive:
+            cmd.append("-i")
+        if multiline:
+            cmd += ["--multiline", "--multiline-dotall"]
 
-    if output_mode == "files_with_matches":
-        cmd.append("--files-with-matches")
-    elif output_mode == "count":
-        cmd.append("--count-matches")
+        if output_mode == "files_with_matches":
+            cmd.append("--files-with-matches")
+        elif output_mode == "count":
+            cmd.append("--count-matches")
+        else:
+            cmd += ["--line-number", "--no-heading", "--with-filename"]
+            before = before_context or context_lines
+            after = after_context or context_lines
+            if before:
+                cmd += ["--before-context", str(int(before))]
+            if after:
+                cmd += ["--after-context", str(int(after))]
     else:
-        cmd += ["--line-number", "--no-heading", "--with-filename"]
-        before = before_context or context_lines
-        after = after_context or context_lines
-        if before:
-            cmd += ["--before-context", str(int(before))]
-        if after:
-            cmd += ["--after-context", str(int(after))]
+        # POSIX grep fallback, so a host without ripgrep still gets search.
+        # It has no glob-exclude, so denied directories are pruned afterwards
+        # and multiline is simply unavailable.
+        if multiline:
+            return _err("multiline search needs ripgrep (rg), which is not installed")
+        cmd = ["grep", "-r", "-E", "--binary-files=without-match"]
+        for part in sorted(_DENIED_PARTS):
+            cmd += [f"--exclude-dir={part}"]
+        if glob:
+            cmd += [f"--include={glob}"]
+        if case_insensitive:
+            cmd.append("-i")
+        if output_mode == "files_with_matches":
+            cmd.append("-l")
+        elif output_mode == "count":
+            cmd.append("-c")
+        else:
+            cmd.append("-n")
+            before = before_context or context_lines
+            after = after_context or context_lines
+            if before:
+                cmd += ["-B", str(int(before))]
+            if after:
+                cmd += ["-A", str(int(after))]
 
-    cmd += ["--regexp", pattern, "."]
+    if use_rg:
+        cmd += ["--regexp", pattern, "."]
+    else:
+        cmd += ["-e", pattern, "."]
 
     try:
         proc = subprocess.run(
@@ -297,7 +343,7 @@ def grep_impl(
     raw = [line for line in proc.stdout.split("\n") if line.strip()]
 
     if output_mode == "files_with_matches":
-        files = [line.lstrip("./") for line in raw]
+        files = [_clean_path(line) for line in raw]
         return {
             "success": True,
             "pattern": pattern,
@@ -311,8 +357,8 @@ def grep_impl(
         counts = []
         for line in raw:
             path, _, num = line.rpartition(":")
-            if path and num.isdigit():
-                counts.append({"file": path.lstrip("./"), "count": int(num)})
+            if path and num.isdigit() and int(num) > 0:
+                counts.append({"file": _clean_path(path), "count": int(num)})
         counts.sort(key=lambda c: (-c["count"], c["file"]))
         total = sum(c["count"] for c in counts)
         return {
@@ -340,7 +386,7 @@ def grep_impl(
             continue
         matches.append(
             {
-                "file": m.group("file").lstrip("./"),
+                "file": _clean_path(m.group("file")),
                 "line": int(m.group("line")),
                 "text": m.group("text")[:_LINE_CLIP],
                 "is_match": m.group("sep") == ":",

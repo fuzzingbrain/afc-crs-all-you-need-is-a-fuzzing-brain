@@ -48,7 +48,6 @@ def test_answers_are_removed_from_every_tree(workspace):
     for name in ("repo", "repo-address", "repo-coverage"):
         assert not (workspace / name / ".aixcc").exists()
     assert len(report.answer_paths) == 3
-    assert report.removed_anything is True
 
 
 def test_source_survives_sanitisation(workspace):
@@ -77,7 +76,7 @@ def test_sanitising_a_clean_workspace_is_a_no_op(tmp_path):
     (ws / "repo").mkdir(parents=True)
     (ws / "repo" / "main.c").write_text("int main(void){return 0;}\n")
     report = sanitize_workspace(ws, remove_git=True)
-    assert report.removed_anything is False
+    assert report.answer_paths == [] and report.git_paths == []
     assert (ws / "repo" / "main.c").exists()
 
 
