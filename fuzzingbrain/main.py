@@ -29,6 +29,7 @@ from .core import (
     setup_celery_logging,
     setup_console_only,
 )
+from .core.workspace_guard import format_banner, sanitize_workspace
 from .db import MongoDB, RepositoryManager, init_repos
 
 
@@ -384,6 +385,24 @@ def parse_args() -> argparse.Namespace:
     )
 
     # Project info (required for CLI mode)
+    parser.add_argument(
+        "--remove-git",
+        action="store_true",
+        help=(
+            "Delete .git from the workspace after the diff is generated. "
+            "History can otherwise recover the answer with git show. Costs the "
+            "ability to regenerate a delta diff in the same workspace."
+        ),
+    )
+    parser.add_argument(
+        "--no-network",
+        action="store_true",
+        help=(
+            "Deny network egress to agent-executed commands. No agent tool "
+            "performs network I/O today, so this records the posture and is "
+            "enforced when one does."
+        ),
+    )
     parser.add_argument("--repo-url", type=str, help="Git repository URL")
     parser.add_argument("--project", type=str, help="Project name (e.g., libpng)")
     parser.add_argument(
@@ -572,6 +591,18 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
         config.fuzz_tooling_url = args.fuzz_tooling_url
     if args.fuzz_tooling_ref:
         config.fuzz_tooling_ref = args.fuzz_tooling_ref
+
+    # Evaluation posture. .aixcc removal is unconditional and has no switch;
+    # these two are opt-in, and can also come from the environment so a
+    # container run can set them without touching the command line.
+    if args.remove_git:
+        config.remove_git = True
+    if args.no_network:
+        config.no_network = True
+    if os.getenv("FUZZINGBRAIN_REMOVE_GIT", "").lower() in ("1", "true", "yes"):
+        config.remove_git = True
+    if os.getenv("FUZZINGBRAIN_NO_NETWORK", "").lower() in ("1", "true", "yes"):
+        config.no_network = True
 
     # Prebuild
     if args.work_id:
@@ -1000,6 +1031,24 @@ def setup_workspace(config: Config) -> Config:
                     )
             except Exception as e:
                 print_warn(f"Failed to generate diff: {e}")
+
+    # Sanitise the workspace here, after the checkout and after the diff: every
+    # entry point funnels through this function -- the shell wrapper, the API
+    # server and a direct module invocation alike -- so one call covers them all.
+    diff_ready = (workspace / "diff" / "ref.diff").exists()
+    report = sanitize_workspace(
+        workspace,
+        remove_git=config.remove_git,
+        diff_ready=diff_ready if config.scan_mode == "delta" else True,
+    )
+    print_step("Workspace posture")
+    for line in format_banner(
+        report,
+        remove_git=config.remove_git,
+        network_blocked=config.no_network,
+        confined_to=f"{workspace.name}/repo",
+    ):
+        print_info(line)
 
     return config
 

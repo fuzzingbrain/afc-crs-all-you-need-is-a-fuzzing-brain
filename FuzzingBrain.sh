@@ -623,6 +623,12 @@ show_usage() {
     echo "  --budget <amount>   LLM budget limit in USD (e.g., 50.0)"
     echo "  --allow-expensive   Allow expensive model fallback (true/false)"
     echo ""
+    echo "WORKSPACE POSTURE (.aixcc is always removed; it is not a switch):"
+    echo "  --remove-git        Delete .git after the diff, so history cannot"
+    echo "                      recover the answer with git show"
+    echo "  --no-network        Deny network egress to agent-executed commands"
+
+    echo ""
     echo "  -h, -help, --help   Show this help message"
     echo ""
     echo "Examples:"
@@ -665,6 +671,8 @@ API_MODE=false
 MCP_MODE=false
 EVAL_PORT=""
 BUDGET_LIMIT=""
+REMOVE_GIT=""
+NO_NETWORK=""
 ALLOW_EXPENSIVE=""
 POSITIONAL_ARGS=()
 
@@ -746,6 +754,14 @@ while [[ $# -gt 0 ]]; do
         --allow-expensive)
             ALLOW_EXPENSIVE="$2"
             shift 2
+            ;;
+        --remove-git)
+            REMOVE_GIT=1
+            shift
+            ;;
+        --no-network)
+            NO_NETWORK=1
+            shift
             ;;
         -h|-help|--help)
             show_banner
@@ -1071,7 +1087,9 @@ if is_git_url "$TARGET"; then
             --pov-count "$POV_COUNT" \
             ${BUDGET_LIMIT:+--budget "$BUDGET_LIMIT"} \
             ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
-            ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"}
+            ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"} \
+            ${REMOVE_GIT:+--remove-git} \
+            ${NO_NETWORK:+--no-network}
     else
         check_environment
         cd "$SCRIPT_DIR"
@@ -1087,7 +1105,9 @@ if is_git_url "$TARGET"; then
             --pov-count "$POV_COUNT" \
             ${BUDGET_LIMIT:+--budget "$BUDGET_LIMIT"} \
             ${BASE_COMMIT:+--base-commit "$BASE_COMMIT"} \
-            ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"}
+            ${DELTA_COMMIT:+--delta-commit "$DELTA_COMMIT"} \
+            ${REMOVE_GIT:+--remove-git} \
+            ${NO_NETWORK:+--no-network}
     fi
 fi
 

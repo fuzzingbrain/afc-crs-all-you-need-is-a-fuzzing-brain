@@ -68,6 +68,12 @@ class Config:
         default_factory=list
     )  # Only dispatch workers for these fuzzers (empty = all)
 
+    # Evaluation posture (env: FUZZINGBRAIN_REMOVE_GIT, FUZZINGBRAIN_NO_NETWORK)
+    # .aixcc is always removed from the workspace and is not a switch: it holds
+    # the vulnerability location, a reference POV and the reference patch.
+    remove_git: bool = False  # Also delete .git, so history cannot recover it
+    no_network: bool = False  # Deny network egress to agent-executed commands
+
     # Repository
     repo_url: Optional[str] = None
     repo_path: Optional[str] = None
