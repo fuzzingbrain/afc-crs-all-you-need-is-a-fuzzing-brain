@@ -1,0 +1,21 @@
+{
+  "challenge": "avro-03",
+  "image": "docker.io/osanzas/fbbench-challenge-avro-03",
+  "spec": {
+    "bug_id": "avro-03",
+    "project": "avro",
+    "language": "c",
+    "sanitizer": "asan",
+    "engine": "libfuzzer"
+  },
+  "network": "blocked",
+  "tools": [
+    "read",
+    "glob",
+    "grep",
+    "bash"
+  ],
+  "attempts": 1,
+  "crashes": 1,
+  "solved": true
+}
