@@ -7,10 +7,52 @@ index, no MCP server. It is given the challenge source and a way to run a
 candidate input — the same thing a person sitting down to the task would have —
 and the question it answers is how far that gets you.
 
+## How to run it
+
+There are two ways, and they differ only in who is in charge.
+
+### Through FuzzingBrain-Bench (the standard way)
+
+The bench drives the agent as one of its arms. Register the agent once — the
+bench holds none of its code, only a pointer to the manifest that lives here:
+
+```bash
+mkdir -p ~/.config/fbbench/agents
+ln -s "$PWD/fbagent.agent.yaml" ~/.config/fbbench/agents/fbagent.agent.yaml
+```
+
+Then, from a FuzzingBrain-Bench checkout:
+
+```bash
+./fb-bench run avro-03 --agent fbagent                 # one challenge
+./fb-bench run avro-03,jq-01,curl-02 --agent fbagent   # several
+./fb-bench run all --agent fbagent --jobs 4            # the whole suite, 4 at a time
+```
+
+`--agent fbagent` is the registered name; `--agent /path/to/fbagent.agent.yaml`
+also works. The bench stages the challenge, provides `./submit`, runs the agent
+sandboxed, and grades what it produced with its own in-image grader — so the
+number is comparable to every other arm. Results land under the bench's
+`output/<run>/<bug>/<model>/seed-0/` (`score.json`, `best_blob`, `agent.log`,
+`pocs/`).
+
+Without registering, point the bench at the manifest directly:
+
+```bash
+FBBENCH_AGENTS="$PWD" ./fb-bench run avro-03 --agent fbagent
+```
+
+### Standalone (the agent drives the bench)
+
+Run one challenge without the bench harness. Same agent, same sealed image; this
+path pulls the image and judges candidates itself, and writes to `runs/` here.
+
 ```bash
 ./run_challenge.py avro-03
 ./run_challenge.py avro-03 --allow-network --max-time 900 --model opus
 ```
+
+Use this to iterate on the agent; use `fb-bench` to score it.
 
 ## The tools
 
