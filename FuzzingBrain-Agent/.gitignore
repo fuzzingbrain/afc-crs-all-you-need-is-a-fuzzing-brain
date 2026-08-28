@@ -1,7 +1,3 @@
-# Run outputs: each run stages the full challenge source (thousands of files).
-# The artefact is the summary, not the workspace.
 runs/
 __pycache__/
-**/.omp/
-results/tmp*
-results/*.tmp
+*.pyc

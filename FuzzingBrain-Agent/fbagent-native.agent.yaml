@@ -1,0 +1,18 @@
+# FuzzingBrain-Agent (native), as a bench manifest.
+#
+# The agent's brain is our own loop (fbagent/agent.py over the Anthropic API),
+# not a third-party CLI. The bench stages the challenge, provides ./submit, and
+# sandboxes the run; this says how to start the loop in the staged directory.
+#
+#   fb-bench run <bugs> --agent /path/to/FuzzingBrain-Agent/fbagent-native.agent.yaml
+
+name: fbagent-native
+
+# Run our loop in the staged workspace. {timeout} is the wall clock in seconds.
+command: "python3 -m fbagent.run --timeout {timeout}"
+
+# The bench points this at the sandbox shell; tools.bash runs commands through
+# it, so the agent's shell inherits the masked Docker socket and blocked network.
+shell_env: FBAGENT_SHELL
+
+network: blocked
