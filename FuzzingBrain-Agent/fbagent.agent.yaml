@@ -1,0 +1,31 @@
+# FuzzingBrain-Agent, as a bench agent manifest.
+#
+# This is the entire coupling between the agent and FuzzingBrain-Bench: five
+# lines that say how to invoke it. The agent's implementation stays in this
+# repo; the bench contains none of it. To evaluate this agent:
+#
+#   fb-bench run <bugs> --agent /path/to/FuzzingBrain-Agent/fbagent.agent.yaml
+#
+# The bench stages the challenge source into {workspace}, drops a `./submit`
+# there, and runs this command in it. The agent reads code with its four tools
+# and calls ./submit to test a candidate. It never touches Docker or the image.
+
+name: fbagent
+
+# One omp session: one loop, four tools, the fuzzing prompt beside this file.
+# @fuzzing-brain.md is inlined by the bench from next to this manifest.
+command: >
+  omp -p "{opening}"
+  --tools read,glob,grep,bash
+  --system-prompt @agent/fuzzing-brain.md
+  --no-lsp --no-skills --no-extensions --no-session --auto-approve
+  --max-time {timeout}
+
+# The env var omp reads its shell from. The bench points it at a sandbox that
+# masks the Docker socket and (below) blocks the network, so the agent's bash
+# cannot reach the sealed answer in the image or fetch a published PoC.
+shell_env: OMP_SHELL_PATH
+
+# The fault is in the source in front of the agent, so nothing legitimate needs
+# the network. Set to `allowed` only to measure the difference.
+network: blocked
