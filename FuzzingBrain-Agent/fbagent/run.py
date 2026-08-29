@@ -14,18 +14,10 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from pathlib import Path
 
 from fbagent.agent import Agent
 from fbagent.llm import LLM
-
-PROMPT = Path(__file__).resolve().parent.parent / "prompt.md"
-
-OPENING = (
-    "Read harness/ first to learn the input format, then follow it into src/ to "
-    "find a fault it can reach. Build a candidate input and test it with "
-    "./submit, and keep going until one crashes."
-)
+from fbagent.prompts import OPENING, SYSTEM
 
 
 def main() -> int:
@@ -35,9 +27,8 @@ def main() -> int:
     ap.add_argument("--model", default=None)
     args = ap.parse_args()
 
-    system = PROMPT.read_text()
     llm = LLM(model=args.model) if args.model else LLM()
-    agent = Agent(system, llm=llm, max_steps=args.max_steps, deadline_s=args.timeout)
+    agent = Agent(SYSTEM, llm=llm, max_steps=args.max_steps, deadline_s=args.timeout)
 
     result = agent.run(OPENING)
 

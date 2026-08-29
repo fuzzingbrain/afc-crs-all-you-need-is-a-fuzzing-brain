@@ -129,52 +129,38 @@ def run_tool(name: str, args: dict) -> tuple[str, bool]:
     return out, out.startswith("error:")
 
 
+# The schema *shape* (parameters, types, what's required) is logic and stays
+# here; the model-facing *text* (each description) comes from prompts/tools.yaml
+# via prompts.py, so every word the model reads lives under prompts/.
+from .prompts import tool_description, tool_param  # noqa: E402
+
+
+def _param(tool: str, name: str, spec: dict) -> dict:
+    line = tool_param(tool, name)
+    return {**spec, "description": line} if line else dict(spec)
+
+
+def _schema(name: str, properties: dict, required: list[str]) -> dict:
+    return {
+        "name": name,
+        "description": tool_description(name),
+        "input_schema": {
+            "type": "object",
+            "properties": {p: _param(name, p, s) for p, s in properties.items()},
+            "required": required,
+        },
+    }
+
+
 SCHEMAS = [
-    {
-        "name": "read",
-        "description": "Read a file (or a slice), returned with line numbers. "
-                       "Paths are relative to the challenge directory.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string"},
-                "offset": {"type": "integer", "description": "first line, 1-based"},
-                "limit": {"type": "integer", "description": "how many lines"},
-            },
-            "required": ["path"],
-        },
-    },
-    {
-        "name": "glob",
-        "description": "List files matching a glob pattern, e.g. '**/*.c' or 'src/*.h'.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"pattern": {"type": "string"}},
-            "required": ["pattern"],
-        },
-    },
-    {
-        "name": "grep",
-        "description": "Search file contents for a pattern (ripgrep). Optionally "
-                       "restrict to a glob.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "pattern": {"type": "string"},
-                "glob": {"type": "string"},
-            },
-            "required": ["pattern"],
-        },
-    },
-    {
-        "name": "bash",
-        "description": "Run a shell command in the challenge directory. Use it to "
-                       "write a candidate input (e.g. with python3) and to test it "
-                       "with ./submit <file>. No network.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"command": {"type": "string"}},
-            "required": ["command"],
-        },
-    },
+    _schema("read",
+            {"path": {"type": "string"},
+             "offset": {"type": "integer"},
+             "limit": {"type": "integer"}},
+            ["path"]),
+    _schema("glob", {"pattern": {"type": "string"}}, ["pattern"]),
+    _schema("grep",
+            {"pattern": {"type": "string"}, "glob": {"type": "string"}},
+            ["pattern"]),
+    _schema("bash", {"command": {"type": "string"}}, ["command"]),
 ]

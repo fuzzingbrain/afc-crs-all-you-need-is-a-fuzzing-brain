@@ -1,0 +1,28 @@
+# Tool descriptions — model-facing text, separated from the tool code.
+#
+# A tool's description is prompt: the model decides how and when to call a tool
+# from what this says. Keeping it here rather than inline in tools.py means every
+# word the model reads about the tools lives in prompts/, with the rest.
+#
+# Each entry is one tool. `description` is the tool's own text; `params` gives a
+# per-argument line where one helps the model.
+
+read:
+  description: >
+    Read a file (or a slice), returned with line numbers. Paths are relative to
+    the challenge directory.
+  params:
+    offset: "first line, 1-based"
+    limit: "how many lines"
+
+glob:
+  description: "List files matching a glob pattern, e.g. '**/*.c' or 'src/*.h'."
+
+grep:
+  description: >
+    Search file contents for a pattern (ripgrep). Optionally restrict to a glob.
+
+bash:
+  description: >
+    Run a shell command in the challenge directory. Use it to write a candidate
+    input (e.g. with python3) and to test it with ./submit <file>. No network.

@@ -25,9 +25,13 @@ in this folder.
 fbagent/
 ├── agent.py   the loop — linear message-append, the shape mini-swe-agent proved
 ├── llm.py     the model call + the prompt-cache policy (the reason we wrote our own)
-├── tools.py   read / glob / grep / bash, and their schemas
+├── tools.py   read / glob / grep / bash — schema shape here, text from prompts/
+├── prompts.py the one door to every word the model reads
 └── run.py     entry point: run once in the challenge directory
-prompt.md      the system prompt
+prompts/       all model-facing text, kept out of the code
+├── system.md    the system prompt
+├── opening.md   the first user message
+└── tools.yaml   the tool descriptions
 fbagent-native.agent.yaml   the bench manifest — five lines that plug it into fb-bench
 ```
 
