@@ -1,0 +1,73 @@
+{
+ "challenge": "systemd-full-001",
+ "bug": "systemd-004",
+ "harness": "fuzz-link-parser",
+ "consistency": {
+  "verdict": "site_match_cwe_label_differs",
+  "cwes": [
+   "CWE-415"
+  ],
+  "crash_type": "heap-use-after-free",
+  "expected_types": [
+   "attempting-double-free",
+   "double-free"
+  ],
+  "cwe_consistent": false,
+  "vuln_yaml_files": [
+   "src/shared/condition.c"
+  ],
+  "patch_files": [
+   "src/shared/condition.c"
+  ],
+  "patch_functions": [
+   "condition_free"
+  ],
+  "matched_by": null,
+  "crash_file": "/work/build/../../src/systemd/src/shared/condition.c:100",
+  "crash_line": "9",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/work/build/../../src/systemd/src/basic/alloc-util.h",
+   "/work/build/../../src/systemd/src/shared/condition.c",
+   "/work/build/../../src/systemd/src/shared/condition.h",
+   "/work/build/../../src/systemd/src/shared/conf-parser.c",
+   "/work/build/../../src/systemd/src/shared/net-condition.c",
+   "/work/build/../../src/systemd/src/udev/net/fuzz-link-parser.c",
+   "/work/build/../../src/systemd/src/udev/net/link-config.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-415"
+ ],
+ "name": "double-free-list-type",
+ "blob": "data.bin",
+ "blob_bytes": 56,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/fuzz-link-parser",
+  "coverage": "bin/coverage/fuzz-link-parser"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "heap-use-after-free",
+  "top_frames": [
+   "condition_free_list_type",
+   "condition_free_list",
+   "link_config_free",
+   "link_config_freep",
+   "link_load_one",
+   "LLVMFuzzerTestOneInput"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/systemd:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

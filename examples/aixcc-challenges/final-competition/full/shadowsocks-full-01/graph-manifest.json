@@ -1,0 +1,273 @@
+{
+ "challenge": "shadowsocks-full-01",
+ "round": "final-competition",
+ "scan_mode": "full",
+ "project": "shadowsocks",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-shadowsocks-libev.git",
+  "checkout_ref": "challenges/shadowsocks-full-01",
+  "resolved_commit": "752f84600ce8ab3620ac0ae284dc5f6ec689ee94"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/shadowsocks-full-01",
+  "project": "shadowsocks"
+ },
+ "image": "aixcc-afc/shadowsocks:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "json_fuzz"
+ ],
+ "target_harnesses": [
+  "json_fuzz"
+ ],
+ "graphs": {
+  "json_fuzz": "mongodb"
+ },
+ "counts": {
+  "json_fuzz": {
+   "functions": 890,
+   "nodes": 211
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "shadowsocks-full-01",
+  "ok": true,
+  "harnesses": {
+   "json_fuzz": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "shadowsocks-libev_0": {
+      "patched_files": [
+       "src/json.c"
+      ],
+      "vuln_functions": [
+       "json_parse_ex"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "json_parse_ex"
+      ],
+      "V1_has_node_with_body": [
+       "json_parse_ex"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "json_parse",
+       "json_parse_ex"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "src/json.c"
+      ],
+      "V3_body_has_patched_text": [
+       "json_parse_ex"
+      ]
+     },
+     "shadowsocks-libev_1": {
+      "patched_files": [
+       "src/json.c"
+      ],
+      "vuln_functions": [
+       "json_parse_ex"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "json_parse_ex"
+      ],
+      "V1_has_node_with_body": [
+       "json_parse_ex"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "json_parse",
+       "json_parse_ex"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "src/json.c"
+      ],
+      "V3_body_has_patched_text": [
+       "json_parse_ex"
+      ]
+     },
+     "shadowsocks-libev_2": {
+      "patched_files": [
+       "src/json.c"
+      ],
+      "vuln_functions": [
+       "json_parse_ex"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "json_parse_ex"
+      ],
+      "V1_has_node_with_body": [
+       "json_parse_ex"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "json_parse",
+       "json_parse_ex"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "src/json.c"
+      ],
+      "V3_body_has_patched_text": [
+       "json_parse_ex"
+      ]
+     },
+     "shadowsocks-libev_3": {
+      "patched_files": [
+       "src/json.c"
+      ],
+      "vuln_functions": [
+       "json_parse_ex"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "json_parse_ex"
+      ],
+      "V1_has_node_with_body": [
+       "json_parse_ex"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "json_parse",
+       "json_parse_ex"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "src/json.c"
+      ],
+      "V3_body_has_patched_text": [
+       "json_parse_ex"
+      ]
+     },
+     "shadowsocks-libev_4": {
+      "patched_files": [
+       "src/json.c"
+      ],
+      "vuln_functions": [
+       "json_parse_ex"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "json_parse_ex"
+      ],
+      "V1_has_node_with_body": [
+       "json_parse_ex"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "json_parse",
+       "json_parse_ex"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "src/json.c"
+      ],
+      "V3_body_has_patched_text": [
+       "json_parse_ex"
+      ]
+     }
+    },
+    "nodes": 211,
+    "functions": 890,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "shadowsocks-libev_0": {
+   "harness": "json_fuzz",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "shadowsocks-libev_1": {
+   "harness": "json_fuzz",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "shadowsocks-libev_2": {
+   "harness": "json_fuzz",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "shadowsocks-libev_3": {
+   "harness": "json_fuzz",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "shadowsocks-libev_4": {
+   "harness": "json_fuzz",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "json_fuzz"
+  ],
+  "coverage": [
+   "json_fuzz"
+  ]
+ },
+ "timings": [
+  {
+   "step": "build_image",
+   "seconds": 6,
+   "rc": 0,
+   "command": "python3 /home/ze/fb-graphs/build/shadowsocks-full-01/fuzz-tooling/infra/helper.py build_image --no-pull shadowsocks"
+  },
+  {
+   "step": "build_bitcode",
+   "seconds": 32,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -e SANITIZER_FLAGS=-flto -g -fno-inline-functions -Wno-unused-command-line-argument -Qunused-arguments -e LDFLAGS=-fuse-ld=gold -e AR=llvm-ar -e NM=llvm-nm -e RANLIB=llvm-ranlib -v /home/ze/fb-graphs/build/shadowsocks-full-01/repo-bitcode:/src/shadowsocks -v /home/ze/fb-graphs/build/shadowsocks-full-01/out:/out -v /home/ze/fb-graphs/build/shadowsocks-full-01/work:/work aixcc-afc/shadowsocks:latest bash -c compile 2>&1 | tail -40; mkdir -p /out/bc"
+  },
+  {
+   "step": "to_ll",
+   "seconds": 3,
+   "rc": 0,
+   "command": "docker run --rm -v /home/ze/fb-graphs/build/shadowsocks-full-01/out:/out -v /home/ze/fb-graphs/build/shadowsocks-full-01/repo-bitcode:/src/shadowsocks -v /home/ze/fb-graphs/build/shadowsocks-full-01/work:/work -v /home/ze/fb-graphs/build/shadowsocks-full-01/ll:/ll aixcc-afc/shadowsocks:latest bash -c "
+  },
+  {
+   "step": "extract_json_fuzz",
+   "seconds": 0,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  }
+ ]
+}

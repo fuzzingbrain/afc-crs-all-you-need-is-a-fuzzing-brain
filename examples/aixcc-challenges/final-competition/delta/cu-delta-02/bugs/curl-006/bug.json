@@ -1,0 +1,67 @@
+{
+ "challenge": "cu-delta-02",
+ "bug": "curl-006",
+ "harness": "curl_fuzzer_ws",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-476"
+  ],
+  "crash_type": "SEGV",
+  "expected_types": [
+   "SEGV",
+   "null-deref"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "lib/totallyfineprotocl.c"
+  ],
+  "patch_files": [
+   "lib/totallyfineprotocl.c"
+  ],
+  "patch_functions": null,
+  "matched_by": null,
+  "crash_file": "/src/curl/lib/totallyfineprotocl.c:232",
+  "crash_line": "33",
+  "stack_files": [
+   "/src/curl/lib/multi.c",
+   "/src/curl/lib/pingpong.c",
+   "/src/curl/lib/totallyfineprotocl.c",
+   "/src/curl_fuzzer/curl_fuzzer.cc",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-476"
+ ],
+ "name": "curl-006, medium difficulty crash",
+ "blob": "data.bin",
+ "blob_bytes": 155,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/curl_fuzzer_ws",
+  "coverage": "bin/coverage/curl_fuzzer_ws"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "SEGV",
+  "top_frames": [
+   "totallyfineprotocl_sm",
+   "Curl_pp_statemach",
+   "totallyfineprotocl_doing",
+   "protocol_connecting",
+   "multi_runsingle",
+   "curl_multi_perform"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/curl:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

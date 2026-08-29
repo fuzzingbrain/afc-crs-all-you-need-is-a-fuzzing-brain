@@ -1,0 +1,67 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2267682386
+INFO: Loaded 1 modules   (5018 inline 8-bit counters): 5018 [0x55f7076cd708, 0x55f7076ceaa2), 
+INFO: Loaded 1 PC tables (5018 PCs): 5018 [0x55f7076ceaa8,0x55f7076e2448), 
+/b/bin/address/fuzz: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x504000000172 at pc 0x55f707653c02 bp 0x7ffc7ecdb060 sp 0x7ffc7ecdb058
+READ of size 1 at 0x504000000172 thread T0
+SCARINESS: 12 (1-byte-read-heap-buffer-overflow)
+    #0 0x55f707653c01 in rx_icmp(mg_tcpip_if*, pkt*) /src/mongoose/src/net_builtin.c:385:18
+    #1 0x55f70763bd1a in mg_tcpip_rx /src/mongoose/src/net_builtin.c:897:5
+    #2 0x55f7076508b7 in LLVMFuzzerTestOneInput /src/mongoose/test/fuzz.c:106:5
+    #3 0x55f7074bc350 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #4 0x55f7074a75c5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #5 0x55f7074ad05f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #6 0x55f7074d8302 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #7 0x7f514d2d5082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #8 0x55f70749f7ad in _start (/b/bin/address/fuzz+0x617ad)
+
+DEDUP_TOKEN: rx_icmp(mg_tcpip_if*, pkt*)--mg_tcpip_rx--LLVMFuzzerTestOneInput
+0x504000000172 is located 0 bytes after 34-byte region [0x504000000150,0x504000000172)
+allocated by thread T0 here:
+    #0 0x55f7075c811f in malloc /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:68:3
+    #1 0x55f70765079d in LLVMFuzzerTestOneInput /src/mongoose/test/fuzz.c:95:17
+    #2 0x55f7074bc350 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #3 0x55f7074a75c5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #4 0x55f7074ad05f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #5 0x55f7074d8302 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #6 0x7f514d2d5082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: __interceptor_malloc--LLVMFuzzerTestOneInput--fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long)
+SUMMARY: AddressSanitizer: heap-buffer-overflow /src/mongoose/src/net_builtin.c:385:18 in rx_icmp(mg_tcpip_if*, pkt*)
+Shadow bytes around the buggy address:
+  0x503ffffffe80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x503fffffff00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x503fffffff80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x504000000000: fa fa 00 00 00 00 00 00 fa fa 00 00 00 00 00 00
+  0x504000000080: fa fa 00 00 00 00 00 00 fa fa 00 00 00 00 02 fa
+=>0x504000000100: fa fa 00 00 00 00 02 fa fa fa 00 00 00 00[02]fa
+  0x504000000180: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x504000000200: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x504000000280: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x504000000300: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x504000000380: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING
+
+OK: mongoose_2 reproduced (heap-buffer-overflow)

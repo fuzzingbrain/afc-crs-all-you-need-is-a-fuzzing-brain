@@ -1,0 +1,96 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2248043212
+INFO: Loaded 2 modules   (96981 inline 8-bit counters): 94611 [0x7fb5a35dd920, 0x7fb5a35f4ab3), 2370 [0x55a06063d078, 0x55a06063d9ba), 
+INFO: Loaded 2 PC tables (96981 PCs): 94611 [0x7fb5a35f4ab8,0x7fb5a37663e8), 2370 [0x55a06063d9c0,0x55a060646de0), 
+/b/bin/address/fuzz-link-parser: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: heap-use-after-free on address 0x503000000290 at pc 0x7fb5a2ecc23f bp 0x7ffdd68127c0 sp 0x7ffdd68127b8
+READ of size 8 at 0x503000000290 thread T0
+SCARINESS: 51 (8-byte-read-heap-use-after-free)
+    #0 0x7fb5a2ecc23e in condition_free_list_type /work/build/../../src/systemd/src/shared/condition.c:100:9
+    #1 0x55a0604e4918 in condition_free_list /work/build/../../src/systemd/src/shared/condition.h:80:16
+    #2 0x55a0604e4918 in link_config_free /work/build/../../src/systemd/src/udev/net/link-config.c:64:9
+    #3 0x55a0604d97c9 in link_config_freep /work/build/../../src/systemd/src/udev/net/link-config.c:84:1
+    #4 0x55a0604d97c9 in link_load_one /work/build/../../src/systemd/src/udev/net/link-config.c:324:1
+    #5 0x55a0604d8b15 in LLVMFuzzerTestOneInput /work/build/../../src/systemd/src/udev/net/fuzz-link-parser.c:25:16
+    #6 0x55a0605203f0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #7 0x55a06050b665 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #8 0x55a0605110ff in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #9 0x55a06053c3a2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #10 0x7fb5a26e3082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #11 0x55a06040021d in _start (/b/bin/address/fuzz-link-parser+0x7b21d)
+
+DEDUP_TOKEN: condition_free_list_type--condition_free_list--link_config_free
+0x503000000290 is located 16 bytes inside of 32-byte region [0x503000000280,0x5030000002a0)
+freed by thread T0 here:
+    #0 0x55a060498f96 in free /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:52:3
+    #1 0x7fb5a2ecc1ae in condition_free /work/build/../../src/systemd/src/shared/condition.c:96:16
+    #2 0x7fb5a2ecc1ae in condition_free_list_type /work/build/../../src/systemd/src/shared/condition.c:102:25
+    #3 0x7fb5a2fe4696 in config_parse_net_condition /work/build/../../src/systemd/src/shared/net-condition.c:205:25
+    #4 0x7fb5a2ed91b9 in next_assignment /work/build/../../src/systemd/src/shared/conf-parser.c:159:24
+    #5 0x7fb5a2ed91b9 in parse_line /work/build/../../src/systemd/src/shared/conf-parser.c:269:16
+    #6 0x7fb5a2ed8414 in config_parse /work/build/../../src/systemd/src/shared/conf-parser.c:412:21
+    #7 0x7fb5a2eda74a in config_parse_many_files /work/build/../../src/systemd/src/shared/conf-parser.c:564:21
+    #8 0x7fb5a2eda74a in config_parse_many /work/build/../../src/systemd/src/shared/conf-parser.c:627:13
+    #9 0x55a0604d9a5d in link_load_one /work/build/../../src/systemd/src/udev/net/link-config.c:273:13
+    #10 0x55a0604d8b15 in LLVMFuzzerTestOneInput /work/build/../../src/systemd/src/udev/net/fuzz-link-parser.c:25:16
+    #11 0x55a0605203f0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #12 0x55a06050b665 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #13 0x55a0605110ff in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #14 0x55a06053c3a2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #15 0x7fb5a26e3082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: __interceptor_free--condition_free--condition_free_list_type
+previously allocated by thread T0 here:
+    #0 0x55a06049922f in malloc /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:68:3
+    #1 0x7fb5a2ecbedd in malloc_multiply /work/build/../../src/systemd/src/basic/alloc-util.h:119:16
+    #2 0x7fb5a2ecbedd in condition_new /work/build/../../src/systemd/src/shared/condition.c:73:13
+    #3 0x7fb5a2fe46c8 in config_parse_net_condition /work/build/../../src/systemd/src/shared/net-condition.c:213:13
+    #4 0x7fb5a2ed91b9 in next_assignment /work/build/../../src/systemd/src/shared/conf-parser.c:159:24
+    #5 0x7fb5a2ed91b9 in parse_line /work/build/../../src/systemd/src/shared/conf-parser.c:269:16
+    #6 0x7fb5a2ed8414 in config_parse /work/build/../../src/systemd/src/shared/conf-parser.c:412:21
+    #7 0x7fb5a2eda74a in config_parse_many_files /work/build/../../src/systemd/src/shared/conf-parser.c:564:21
+    #8 0x7fb5a2eda74a in config_parse_many /work/build/../../src/systemd/src/shared/conf-parser.c:627:13
+    #9 0x55a0604d9a5d in link_load_one /work/build/../../src/systemd/src/udev/net/link-config.c:273:13
+    #10 0x55a0604d8b15 in LLVMFuzzerTestOneInput /work/build/../../src/systemd/src/udev/net/fuzz-link-parser.c:25:16
+    #11 0x55a0605203f0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #12 0x55a06050b665 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #13 0x55a0605110ff in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #14 0x55a06053c3a2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #15 0x7fb5a26e3082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: __interceptor_malloc--malloc_multiply--condition_new
+SUMMARY: AddressSanitizer: heap-use-after-free /work/build/../../src/systemd/src/shared/condition.c:100:9 in condition_free_list_type
+Shadow bytes around the buggy address:
+  0x503000000000: fa fa 00 00 00 fa fa fa 00 00 00 00 fa fa 00 00
+  0x503000000080: 00 00 fa fa 00 00 00 fa fa fa 00 00 00 00 fa fa
+  0x503000000100: 00 00 00 fa fa fa 00 00 00 fa fa fa 00 00 00 00
+  0x503000000180: fa fa 00 00 00 fa fa fa fd fd fd fd fa fa fd fd
+  0x503000000200: fd fd fa fa fd fd fd fd fa fa fd fd fd fd fa fa
+=>0x503000000280: fd fd[fd]fd fa fa fd fd fd fd fa fa 00 00 00 05
+  0x503000000300: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x503000000380: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x503000000400: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x503000000480: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x503000000500: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING

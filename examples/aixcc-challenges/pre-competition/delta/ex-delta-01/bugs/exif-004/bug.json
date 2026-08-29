@@ -1,0 +1,66 @@
+{
+ "challenge": "ex-delta-01",
+ "bug": "exif-004",
+ "harness": "exif_loader_fuzzer",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-122"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "heap-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "libexif/apple/exif-mnote-data-apple.c"
+  ],
+  "patch_files": [
+   "libexif/apple/exif-mnote-data-apple.c"
+  ],
+  "crash_file": "/src/libexif/libexif/apple/exif-mnote-data-apple.c:131",
+  "crash_line": "9",
+  "stack_files": [
+   "/src/exif_loader_fuzzer.cc",
+   "/src/libexif/libexif/apple/exif-mnote-data-apple.c",
+   "/src/libexif/libexif/exif-data.c",
+   "/src/libexif/libexif/exif-loader.c",
+   "/src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp",
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-122"
+ ],
+ "name": "exif-004, apple mnote bug 2",
+ "blob": "data.bin",
+ "blob_bytes": 55,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/exif_loader_fuzzer",
+  "coverage": "bin/coverage/exif_loader_fuzzer"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "exif_mnote_data_apple_load",
+   "exif_data_load_data",
+   "exif_loader_get_data",
+   "LLVMFuzzerTestOneInput",
+   "_start",
+   "calloc"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/libexif:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

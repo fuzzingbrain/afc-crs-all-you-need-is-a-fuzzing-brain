@@ -1,0 +1,85 @@
+Note: Google Test filter = YuvRgbFuzzTest.Convert
+[==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from YuvRgbFuzzTest
+[ RUN      ] YuvRgbFuzzTest.Convert
+FUZZTEST_PRNG_SEED=-juNEqBede5HH9oF7J-LJn8iBGExPT91qzEVGxhQXBg
+INFO: found LLVMFuzzerCustomMutator (0x560a73131e90). Disabling -len_control by default.
+INFO: libFuzzer ignores flags that start with '--'
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2942923314
+INFO: Loaded 1 modules   (197594 inline 8-bit counters): 197594 [0x560a737fe030, 0x560a7382e40a), 
+INFO: Loaded 1 PC tables (197594 PCs): 197594 [0x560a7382e410,0x560a73b321b0), 
+/b/bin/address/avif_fuzztest_yuvrgb: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==10==ERROR: AddressSanitizer: dynamic-stack-buffer-overflow on address 0x7ffd8d1d071c at pc 0x560a713a657c bp 0x7ffd8d1c5090 sp 0x7ffd8d1c5088
+READ of size 4 at 0x7ffd8d1d071c thread T0
+SCARINESS: 32 (4-byte-read-dynamic-stack-buffer-overflow)
+    #0 0x560a713a657b in avifImageYUVAnyToRGBAnySlow /src/libavif/src/reformat.c:812:46
+    #1 0x560a71397128 in avifImageYUVToRGBImpl /src/libavif/src/reformat.c:1713:29
+    #2 0x560a71395f88 in avifImageYUVToRGB /src/libavif/src/reformat.c:1844:16
+    #3 0x560a70f3e62d in avif::testutil::(anonymous namespace)::Convert(std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int) /src/libavif/tests/gtest/avif_fuzztest_yuvrgb.cc:48:3
+    #4 0x560a71012907 in auto fuzztest::internal::FixtureDriver<fuzztest::Domain<std::__1::tuple<std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int>>, fuzztest::internal::NoFixture, void (*)(std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int), void*>::Test(fuzztest::internal::MoveOnlyAny&&) const::'lambda'(auto&&...)::operator()<std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>&, int&, int&, avifChromaUpsampling&, avifChromaDownsampling&, bool&, bool&, bool&, bool&, int&>(auto&&...) const /src/libavif/ext/fuzztest/./fuzztest/internal/fixture_driver.h:294:11
+    #5 0x560a71012907 in decltype(std::declval<fuzztest::internal::FixtureDriver<fuzztest::Domain<std::__1::tuple<std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int>>, fuzztest::internal::NoFixture, void (*)(std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int), void*>::Test(fuzztest::internal::MoveOnlyAny&&) const::'lambda'(auto&&...)>()(std::declval<std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>&>(), std::declval<int&>(), std::declval<int&>(), std::declval<avifChromaUpsampling&>(), std::declval<avifChromaDownsampling&>(), std::declval<bool&>(), std::declval<bool&>(), std::declval<bool&>(), std::declval<bool&>(), std::declval<int&>())) std::__1::__invoke[abi:ne180100]<fuzztest::internal::FixtureDriver<fuzztest::Domain<std::__1::tuple<std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int>>, fuzztest::internal::NoFixture, void (*)(std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int), void*>::Test(fuzztest::internal::MoveOnlyAny&&) const::'lambda'(auto&&...), std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>&, int&, int&, avifChromaUpsampling&, avifChromaDownsampling&, bool&, bool&, bool&, bool&, int&>(fuzztest::internal::FixtureDriver<fuzztest::Domain<std::__1::tuple<std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int>>, fuzztest::internal::NoFixture, void (*)(std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int), void*>::Test(fuzztest::internal::MoveOnlyAny&&) const::'lambda'(auto&&...)&&, std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>&, int&, int&, avifChromaUpsampling&, avifChromaDownsampling&, bool&, bool&, bool&, bool&, int&) /usr/local/bin/../include/c++/v1/__type_traits/invoke.h:344:25
+    #6 0x560a71012907 in decltype(auto) std::__1::__apply_tuple_impl[abi:ne180100]<fuzztest::internal::FixtureDriver<fuzztest::Domain<std::__1::tuple<std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int>>, fuzztest::internal::NoFixture, void (*)(std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int), void*>::Test(fuzztest::internal::MoveOnlyAny&&) const::'lambda'(auto&&...), std::__1::tuple<std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int>&, 0ul, 1ul, 2ul, 3ul, 4ul, 5ul, 6ul, 7ul, 8ul, 9ul>(fuzztest::internal::FixtureDriver<fuzztest::Domain<std::__1::tuple<std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int>>, fuzztest::internal::NoFixture, void (*)(std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int), void*>::Test(fuzztest::internal::MoveOnlyAny&&) const::'lambda'(auto&&...)&&, std::__1::tuple<std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int>&, std::__1::__tuple_indices<0ul, 1ul, 2ul, 3ul, 4ul, 5ul, 6ul, 7ul, 8ul, 9ul>) /usr/local/bin/../include/c++/v1/tuple:1424:5
+    #7 0x560a71012907 in decltype(auto) std::__1::apply[abi:ne180100]<fuzztest::internal::FixtureDriver<fuzztest::Domain<std::__1::tuple<std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int>>, fuzztest::internal::NoFixture, void (*)(std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int), void*>::Test(fuzztest::internal::MoveOnlyAny&&) const::'lambda'(auto&&...), std::__1::tuple<std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int>&>(fuzztest::internal::FixtureDriver<fuzztest::Domain<std::__1::tuple<std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int>>, fuzztest::internal::NoFixture, void (*)(std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int), void*>::Test(fuzztest::internal::MoveOnlyAny&&) const::'lambda'(auto&&...)&&, std::__1::tuple<std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int>&) /usr/local/bin/../include/c++/v1/tuple:1428:5
+    #8 0x560a71012907 in fuzztest::internal::FixtureDriver<fuzztest::Domain<std::__1::tuple<std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int>>, fuzztest::internal::NoFixture, void (*)(std::__1::unique_ptr<avifImage, avif::UniquePtrDeleter>, int, int, avifChromaUpsampling, avifChromaDownsampling, bool, bool, bool, bool, int), void*>::Test(fuzztest::internal::MoveOnlyAny&&) const /src/libavif/ext/fuzztest/./fuzztest/internal/fixture_driver.h:292:5
+    #9 0x560a731ce8d5 in fuzztest::internal::FuzzTestFuzzerImpl::RunOneInput(fuzztest::internal::FuzzTestFuzzerImpl::Input const&) /src/libavif/ext/fuzztest/fuzztest/internal/runtime.cc:1044:22
+    #10 0x560a731335ef in fuzztest::internal::FuzzTestExternalEngineAdaptor::RunOneInputData(std::__1::basic_string_view<char, std::__1::char_traits<char>>) /src/libavif/ext/fuzztest/fuzztest/internal/compatibility_mode.cc:131:8
+    #11 0x560a73135619 in fuzztest::internal::FuzzTestExternalEngineAdaptor::RunInFuzzingMode(int*, char***, fuzztest::internal::Configuration const&)::$_1::operator()(unsigned char const*, unsigned long) const /src/libavif/ext/fuzztest/fuzztest/internal/compatibility_mode.cc:93:34
+    #12 0x560a73135619 in fuzztest::internal::FuzzTestExternalEngineAdaptor::RunInFuzzingMode(int*, char***, fuzztest::internal::Configuration const&)::$_1::__invoke(unsigned char const*, unsigned long) /src/libavif/ext/fuzztest/fuzztest/internal/compatibility_mode.cc:92:35
+    #13 0x560a73153890 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #14 0x560a7313eb05 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #15 0x560a7314459f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #16 0x560a73132ce3 in fuzztest::internal::FuzzTestExternalEngineAdaptor::RunInFuzzingMode(int*, char***, fuzztest::internal::Configuration const&) /src/libavif/ext/fuzztest/fuzztest/internal/compatibility_mode.cc:92:3
+    #17 0x560a73127c4b in fuzztest::internal::GTest_TestAdaptor::TestBody() /src/libavif/ext/fuzztest/./fuzztest/internal/googletest_adaptor.h:86:7
+    #18 0x560a733d729e in void testing::internal::HandleSehExceptionsInMethodIfSupported<testing::Test, void>(testing::Test*, void (testing::Test::*)(), char const*) /src/libavif/build/_deps/googletest-src/googletest/src/gtest.cc:2612:10
+    #19 0x560a733d729e in void testing::internal::HandleExceptionsInMethodIfSupported<testing::Test, void>(testing::Test*, void (testing::Test::*)(), char const*) /src/libavif/build/_deps/googletest-src/googletest/src/gtest.cc:2648:14
+    #20 0x560a733d6eac in testing::Test::Run() /src/libavif/build/_deps/googletest-src/googletest/src/gtest.cc:2687:5
+    #21 0x560a733db152 in testing::TestInfo::Run() /src/libavif/build/_deps/googletest-src/googletest/src/gtest.cc:2836:11
+    #22 0x560a733de255 in testing::TestSuite::Run() /src/libavif/build/_deps/googletest-src/googletest/src/gtest.cc:3015:30
+    #23 0x560a734151cb in testing::internal::UnitTestImpl::RunAllTests() /src/libavif/build/_deps/googletest-src/googletest/src/gtest.cc:5920:44
+    #24 0x560a73413eae in bool testing::internal::HandleSehExceptionsInMethodIfSupported<testing::internal::UnitTestImpl, bool>(testing::internal::UnitTestImpl*, bool (testing::internal::UnitTestImpl::*)(), char const*) /src/libavif/build/_deps/googletest-src/googletest/src/gtest.cc:2612:10
+    #25 0x560a73413eae in bool testing::internal::HandleExceptionsInMethodIfSupported<testing::internal::UnitTestImpl, bool>(testing::internal::UnitTestImpl*, bool (testing::internal::UnitTestImpl::*)(), char const*) /src/libavif/build/_deps/googletest-src/googletest/src/gtest.cc:2648:14
+    #26 0x560a734138bf in testing::UnitTest::Run() /src/libavif/build/_deps/googletest-src/googletest/src/gtest.cc:5484:10
+    #27 0x560a71015b62 in RUN_ALL_TESTS() /src/libavif/build/_deps/googletest-src/googletest/include/gtest/gtest.h:2317:73
+    #28 0x560a71015b62 in main /src/libavif/ext/fuzztest/fuzztest/fuzztest_gtest_main.cc:28:10
+    #29 0x7ff01031f082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #30 0x560a70e52d5d in _start (/b/bin/address/avif_fuzztest_yuvrgb+0x5b5d5d)
+
+DEDUP_TOKEN: avifImageYUVAnyToRGBAnySlow--avifImageYUVToRGBImpl--avifImageYUVToRGB
+Address 0x7ffd8d1d071c is located in stack of thread T0
+SUMMARY: AddressSanitizer: dynamic-stack-buffer-overflow /src/libavif/src/reformat.c:812:46 in avifImageYUVAnyToRGBAnySlow
+Shadow bytes around the buggy address:
+  0x7ffd8d1d0480: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7ffd8d1d0500: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7ffd8d1d0580: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7ffd8d1d0600: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7ffd8d1d0680: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 cb cb
+=>0x7ffd8d1d0700: cb cb cb[cb]00 00 00 00 00 00 00 00 00 00 00 00
+  0x7ffd8d1d0780: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7ffd8d1d0800: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7ffd8d1d0880: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7ffd8d1d0900: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7ffd8d1d0980: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==10==ABORTING

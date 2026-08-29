@@ -1,0 +1,52 @@
+{
+ "challenge": "shadowsocks-full-01",
+ "bug": "shadowsocks-libev_3",
+ "harness": "json_fuzz",
+ "consistency": {
+  "cwes": [
+   "CWE-126"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "global-buffer-overflow",
+   "heap-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "src/json.c"
+  ],
+  "crash_file": "/src/shadowsocks/src/json.c",
+  "crash_line": "634",
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-126"
+ ],
+ "name": "Heap Buffer Over-read #3",
+ "blob": "data.blob",
+ "blob_bytes": 8,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/json_fuzz",
+  "coverage": "bin/coverage/json_fuzz"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "json_parse_ex",
+   "json_parse",
+   "LLVMFuzzerTestOneInput",
+   "_start"
+  ],
+  "site": "/src/shadowsocks/src/json.c:634"
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/shadowsocks:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

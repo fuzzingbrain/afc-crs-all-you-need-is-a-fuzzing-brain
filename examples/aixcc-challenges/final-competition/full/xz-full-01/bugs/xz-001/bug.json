@@ -1,0 +1,68 @@
+{
+ "challenge": "xz-full-01",
+ "bug": "xz-001",
+ "harness": "fuzz_encode_stream",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-416"
+  ],
+  "crash_type": "heap-use-after-free",
+  "expected_types": [
+   "heap-use-after-free"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "src/liblzma/check/treeck.c"
+  ],
+  "patch_files": [
+   "src/liblzma/check/treeck.c"
+  ],
+  "crash_file": "/src/xz/src/liblzma/check/treeck.c:79",
+  "crash_line": "34",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/xz/src/liblzma/check/check.c",
+   "/src/xz/src/liblzma/check/treeck.c",
+   "/src/xz/src/liblzma/common/block_encoder.c",
+   "/src/xz/src/liblzma/common/common.c",
+   "/src/xz/src/liblzma/common/stream_encoder.c",
+   "/src/xz/tests/ossfuzz/./fuzz_common.h",
+   "/src/xz/tests/ossfuzz/fuzz_encode_stream.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-416"
+ ],
+ "name": "Tree-based Checksum",
+ "blob": "data.bin",
+ "blob_bytes": 801,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/fuzz_encode_stream",
+  "coverage": "bin/coverage/fuzz_encode_stream"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "heap-use-after-free",
+  "top_frames": [
+   "compute_tree_checksum",
+   "lzma_tree",
+   "lzma_check_update",
+   "block_encode",
+   "stream_encode",
+   "lzma_code"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/xz:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

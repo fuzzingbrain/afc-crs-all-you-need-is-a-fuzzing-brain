@@ -2,3 +2,8 @@
 
 *.sh    text eol=lf
 *.py    text eol=lf
+# The PoV inputs are binary and must never be line-ending mangled. They are
+# 880 KB across all 57 bugs, so they go straight into git -- LFS would add a
+# setup step for every clone and buy nothing at this size. The fuzzer binaries
+# they pair with are gitignored, not stored here.
+examples/aixcc-challenges/**/bugs/**/blob -text

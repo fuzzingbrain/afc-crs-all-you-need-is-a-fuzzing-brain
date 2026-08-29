@@ -1,0 +1,73 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 1712335384
+INFO: Loaded 1 modules   (49539 inline 8-bit counters): 49539 [0x563555ab08f8, 0x563555abca7b), 
+INFO: Loaded 1 PC tables (49539 PCs): 49539 [0x563555abca80,0x563555b7e2b0), 
+/b/bin/address/html: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x5150000004f5 at pc 0x56355568a164 bp 0x7ffcb4d7f970 sp 0x7ffcb4d7f130
+WRITE of size 105 at 0x5150000004f5 thread T0
+SCARINESS: 45 (multi-byte-write-heap-buffer-overflow)
+    #0 0x56355568a163 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:63:3
+    #1 0x5635557d757f in htmlSecureComment /src/libxml2/HTMLparser.c:3591:13
+    #2 0x5635557d757f in htmlTopParseComment /src/libxml2/HTMLparser.c:3700:19
+    #3 0x5635557d4876 in htmlParseDocument /src/libxml2/HTMLparser.c:4718:13
+    #4 0x5635557df3bf in htmlCtxtParseDocument /src/libxml2/HTMLparser.c:6272:5
+    #5 0x5635556cba28 in LLVMFuzzerTestOneInput /src/libxml2/fuzz/html.c:49:15
+    #6 0x563555580410 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #7 0x56355556b685 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #8 0x56355557111f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #9 0x56355559c3c2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #10 0x7ff9deb0a082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #11 0x56355556386d in _start (/b/bin/address/html+0x1a986d)
+
+DEDUP_TOKEN: __asan_memcpy--htmlSecureComment--htmlTopParseComment
+0x5150000004f5 is located 0 bytes after 501-byte region [0x515000000300,0x5150000004f5)
+allocated by thread T0 here:
+    #0 0x56355568c1df in malloc /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:68:3
+    #1 0x5635556cbf38 in xmlFuzzMalloc /src/libxml2/fuzz/fuzz.c:127:11
+    #2 0x5635557d68b4 in htmlSecureComment /src/libxml2/HTMLparser.c:3335:18
+    #3 0x5635557d68b4 in htmlTopParseComment /src/libxml2/HTMLparser.c:3700:19
+    #4 0x5635557d4876 in htmlParseDocument /src/libxml2/HTMLparser.c:4718:13
+    #5 0x5635557df3bf in htmlCtxtParseDocument /src/libxml2/HTMLparser.c:6272:5
+    #6 0x5635556cba28 in LLVMFuzzerTestOneInput /src/libxml2/fuzz/html.c:49:15
+    #7 0x563555580410 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #8 0x56355556b685 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #9 0x56355557111f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #10 0x56355559c3c2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #11 0x7ff9deb0a082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: __interceptor_malloc--xmlFuzzMalloc--htmlSecureComment
+SUMMARY: AddressSanitizer: heap-buffer-overflow /src/libxml2/HTMLparser.c:3591:13 in htmlSecureComment
+Shadow bytes around the buggy address:
+  0x515000000200: fd fd fd fd fd fd fd fd fd fd fd fa fa fa fa fa
+  0x515000000280: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x515000000300: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x515000000380: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x515000000400: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x515000000480: 00 00 00 00 00 00 00 00 00 00 00 00 00 00[05]fa
+  0x515000000500: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x515000000580: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x515000000600: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x515000000680: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x515000000700: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING

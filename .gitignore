@@ -57,3 +57,10 @@ internal/
 .uv/
 fuzzingbrain/eval_server
 fuzzingbrain/dashboard
+
+# AIxCC challenge data: keep the metadata, leave the bulk on disk.
+# The graphs (5.1 GB) and fuzzer binaries (10.3 GB) are both rebuildable from
+# source, and experiments read them from the working tree anyway. The PoV blobs
+# are NOT ignored -- 880 KB total, and nothing can regenerate them.
+examples/aixcc-challenges/**/mongodb/
+examples/aixcc-challenges/**/bugs/*/bin/

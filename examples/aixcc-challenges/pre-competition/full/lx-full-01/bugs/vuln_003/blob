@@ -1,0 +1,47 @@
+zzzz.xml\
+<?xml version="1.0"?>
+<!DOCTYPE catalog [
+<!ELEMENT catalog (book+)>
+<!ELEMENT book (title, author, genre, price, publish_date, description)>
+<!ELEMENT title (#PCDATA)>
+<!ENTITY % parte1 "parteaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa">
+<!ENTITY % parte2 "%parte1;">
+<!ENTITY % parte3 "%parte2;">
+<!ENTITY total "%parte3;">
+<!ENTITY test "*%parte3;">
+
+<!ELEMENT author (first_name, last_name)>
+<!ELEMENT first_name (#PCDATA)>
+<!ELEMENT last_name (#PCDATA)>
+<!ELEMENT genre (#PCDATA)>
+<!ELEMENT price (#PCDATA)>
+<!ELEMENT publish_date (#PCDATA)>
+<!ELEMENT description (#PCDATA)>
+<!ATTLIST book id ID #REQUIRED>
+<!ATTLIST book available (yes|no) "yes">
+]>
+<catalog>
+    <book id="b001" available="yes">
+        <title>Advanced XML Solutions</title>
+        <author>
+            <first_name>&total;</first_name>
+            <last_name>Doe</last_name>
+        </author>
+        <genre>Non-Fiction</genre>
+        <price>29.99</price>
+        <publish_date>2021-05-20</publish_date>
+        <description>An in-depth look at creating applications with XML.</description>
+    </book>
+    <book id="b002" available="no">
+        <title>Learning XML</title>
+        <author>
+            <first_name>Jane</first_name>
+            <last_name>Smith</last_name>
+        </author>
+        <genre>Educational</genre>
+        <price>42.50</price>
+        <publish_date>2022-01-15</publish_date>
+        <description>A comprehensive guide to XML basics and best practices.</description>
+    </book>
+</catalog>
+\

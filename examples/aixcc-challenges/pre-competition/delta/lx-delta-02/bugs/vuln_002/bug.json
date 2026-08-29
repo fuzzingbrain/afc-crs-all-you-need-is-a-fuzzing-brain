@@ -1,0 +1,55 @@
+{
+ "challenge": "lx-delta-02",
+ "bug": "vuln_002",
+ "harness": "xml",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-415"
+  ],
+  "crash_type": "double-free",
+  "expected_types": [
+   "attempting-double-free",
+   "double-free"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "parser.c"
+  ],
+  "crash_file": "/src/libxml2/parser.c",
+  "crash_line": "9028",
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-415"
+ ],
+ "name": "libxml2 xml:tab handling double free",
+ "blob": "blob.bin",
+ "blob_bytes": 109,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/xml",
+  "coverage": "bin/coverage/xml"
+ },
+ "reference_patch": "patch_good.diff",
+ "expected_crash": {
+  "type": "double-free",
+  "top_frames": [
+   "xmlParseAttribute2",
+   "xmlParseStartTag2",
+   "xmlParseElementStart",
+   "xmlParseElement",
+   "xmlParseDocument",
+   "xmlCtxtParseDocument"
+  ],
+  "site": "/src/libxml2/parser.c:9028"
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/libxml2:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

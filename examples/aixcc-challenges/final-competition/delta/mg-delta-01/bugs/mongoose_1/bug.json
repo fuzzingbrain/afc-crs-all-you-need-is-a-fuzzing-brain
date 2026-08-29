@@ -1,0 +1,67 @@
+{
+ "challenge": "mg-delta-01",
+ "bug": "mongoose_1",
+ "harness": "fuzz",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-121"
+  ],
+  "crash_type": "stack-buffer-overflow",
+  "expected_types": [
+   "dynamic-stack-buffer-overflow",
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "src/fmt.c"
+  ],
+  "patch_files": [
+   "mongoose.c",
+   "src/fmt.c"
+  ],
+  "crash_file": "/src/mongoose/src/printf.c",
+  "crash_line": null,
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/mongoose/src/fmt.c",
+   "/src/mongoose/src/http.c",
+   "/src/mongoose/src/log.c",
+   "/src/mongoose/src/printf.c",
+   "/src/mongoose/test/fuzz.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-121"
+ ],
+ "name": "mg_vxprintf with a new %e stack-based buffer overflow",
+ "blob": "data.bin",
+ "blob_bytes": 227,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/fuzz",
+  "coverage": "bin/coverage/fuzz"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "stack-buffer-overflow",
+  "top_frames": [
+   "mg_pfn_iobuf_private",
+   "mg_putchar_iobuf_static",
+   "scpy",
+   "mg_vxprintf",
+   "mg_vsnprintf",
+   "mg_snprintf"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/mongoose:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

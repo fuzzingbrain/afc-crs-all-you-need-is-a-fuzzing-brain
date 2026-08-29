@@ -1,0 +1,63 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2296063327
+INFO: Loaded 1 modules   (5017 inline 8-bit counters): 5017 [0x5611b318b708, 0x5611b318caa1), 
+INFO: Loaded 1 PC tables (5017 PCs): 5017 [0x5611b318caa8,0x5611b31a0438), 
+/b/bin/address/fuzz: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7fc28f45f83e at pc 0x5611b30ecfd4 bp 0x7fff8a25a4b0 sp 0x7fff8a25a4a8
+WRITE of size 1 at 0x7fc28f45f83e thread T0
+SCARINESS: 46 (1-byte-write-stack-buffer-overflow)
+    #0 0x5611b30ecfd3 in mg_json_get /src/mongoose/src/json.c:186:28
+    #1 0x5611b310bd31 in LLVMFuzzerTestOneInput /src/mongoose/test/fuzz.c:81:3
+    #2 0x5611b2f7a350 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #3 0x5611b2f655c5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #4 0x5611b2f6b05f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #5 0x5611b2f96302 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #6 0x7fc28fc48082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #7 0x5611b2f5d7ad in _start (/b/bin/address/fuzz+0x617ad)
+
+DEDUP_TOKEN: mg_json_get--LLVMFuzzerTestOneInput--fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long)
+Address 0x7fc28f45f83e is located in stack of thread T0 at offset 62 in frame
+    #0 0x5611b30eb5ff in mg_json_get /src/mongoose/src/json.c:127
+
+DEDUP_TOKEN: mg_json_get
+  This frame has 1 object(s):
+    [32, 62) 'nesting' (line 131) <== Memory access at offset 62 overflows this variable
+HINT: this may be a false positive if your program uses some custom stack unwind mechanism, swapcontext or vfork
+      (longjmp and C++ exceptions *are* supported)
+SUMMARY: AddressSanitizer: stack-buffer-overflow /src/mongoose/src/json.c:186:28 in mg_json_get
+Shadow bytes around the buggy address:
+  0x7fc28f45f580: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fc28f45f600: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fc28f45f680: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fc28f45f700: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fc28f45f780: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x7fc28f45f800: f1 f1 f1 f1 00 00 00[06]f3 f3 f3 f3 00 00 00 00
+  0x7fc28f45f880: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fc28f45f900: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fc28f45f980: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fc28f45fa00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fc28f45fa80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING
+
+OK: mongoose_0 reproduced (stack-buffer-overflow)

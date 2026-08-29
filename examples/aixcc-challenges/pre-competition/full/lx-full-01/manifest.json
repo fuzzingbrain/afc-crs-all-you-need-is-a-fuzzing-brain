@@ -1,83 +1,111 @@
 {
-  "challenge": "lx-full-01",
-  "challenge_name": "Flickering Cyclone",
-  "round": "pre-competition",
-  "scan_mode": "full",
-  "challenge_type": "full     # full | delta",
-  "language": {
-    "libxml2": "c"
-  },
-  "oss_fuzz_projects": [
-    "libxml2"
-  ],
-  "source": {
-    "repo": "https://github.com/AIxCyberChallenge/afc-libxml2.git",
-    "branch": "challenges/lx-full-01",
-    "public": true,
-    "resolved": true
-  },
-  "fuzz_tooling": {
-    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/lx-full-01",
-    "project": "libxml2"
-  },
-  "base_ref": "challenges/lx-full-01",
-  "delta_ref": "null # this is null for full scans, a hash for delta scans",
+ "challenge": "lx-full-01",
+ "challenge_name": "Flickering Cyclone",
+ "round": "pre-competition",
+ "scan_mode": "full",
+ "challenge_type": "full     # full | delta",
+ "language": {
+  "libxml2": "c"
+ },
+ "oss_fuzz_projects": [
+  "libxml2"
+ ],
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-libxml2.git",
+  "branch": "challenges/lx-full-01",
+  "public": true,
+  "resolved": true
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/lx-full-01",
+  "project": "libxml2"
+ },
+ "base_ref": "challenges/lx-full-01",
+ "delta_ref": "null # this is null for full scans, a hash for delta scans",
+ "harnesses": [
+  "api",
+  "html",
+  "lint",
+  "reader",
+  "regexp",
+  "schema",
+  "uri",
+  "valid",
+  "xinclude",
+  "xml",
+  "xpath"
+ ],
+ "harness_count": 11,
+ "vulnerabilities": [
+  "vuln_003",
+  "vuln_005"
+ ],
+ "answers": {
+  "vuln_dirs": 2,
+  "pov_blobs": 2,
+  "reference_patches": 2,
+  "has_answers": true
+ },
+ "graph": {
+  "path": "mongodb",
+  "producer": "llvm-ir",
   "harnesses": [
-    "api",
-    "html",
-    "lint",
-    "reader",
-    "regexp",
-    "schema",
-    "uri",
-    "valid",
-    "xinclude",
-    "xml",
-    "xpath"
+   "api",
+   "xml"
   ],
-  "harness_count": 11,
-  "vulnerabilities": [
-    "vuln_003",
-    "vuln_005"
-  ],
-  "answers": {
-    "vuln_dirs": 2,
-    "pov_blobs": 2,
-    "reference_patches": 2,
-    "has_answers": true
+  "verified": true
+ },
+ "vuln_details": [
+  {
+   "vuln": "vuln_003",
+   "name": "libxml2 DTD embedded entity overflow",
+   "cwes": [
+    "CWE-122"
+   ],
+   "pov_harness": "xml",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "blob.bin",
+   "reference_patch": "patch_good.diff"
   },
-  "graph": null,
-  "vuln_details": [
-    {
-      "vuln": "vuln_003",
-      "name": "libxml2 DTD embedded entity overflow",
-      "cwes": [
-        "CWE-122"
-      ],
-      "pov_harness": "xml",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "blob.bin",
-      "reference_patch": "patch_good.diff"
-    },
-    {
-      "vuln": "vuln_005",
-      "name": "Dangling pointer leading to Use After Free",
-      "cwes": [
-        "CWE-416"
-      ],
-      "pov_harness": "api",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "triggering_blob",
-      "reference_patch": "good_patch.diff"
-    }
-  ],
-  "target_harnesses": [
-    "api",
-    "xml"
-  ],
-  "target_harness_count": 2,
-  "target_harnesses_not_in_challenge_yaml": []
+  {
+   "vuln": "vuln_005",
+   "name": "Dangling pointer leading to Use After Free",
+   "cwes": [
+    "CWE-416"
+   ],
+   "pov_harness": "api",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "triggering_blob",
+   "reference_patch": "good_patch.diff"
+  }
+ ],
+ "target_harnesses": [
+  "api",
+  "xml"
+ ],
+ "target_harness_count": 2,
+ "target_harnesses_not_in_challenge_yaml": [],
+ "bugs": {
+  "vuln_003": {
+   "path": "bugs/vuln_003",
+   "harness": "xml",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "vuln_005": {
+   "path": "bugs/vuln_005",
+   "harness": "api",
+   "crash": "double-free",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ }
 }

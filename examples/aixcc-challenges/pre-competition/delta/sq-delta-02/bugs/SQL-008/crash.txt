@@ -1,0 +1,35 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 3226688272
+INFO: Loaded 1 modules   (73305 inline 8-bit counters): 73305 [0x55a2d2b261f0, 0x55a2d2b38049), 
+INFO: Loaded 1 PC tables (73305 PCs): 73305 [0x55a2d2b38050,0x55a2d2c565e0), 
+/b/bin/address/customfuzz3: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==7==ERROR: AddressSanitizer: SEGV on unknown address (pc 0x55a2d261dbfa bp 0x7ffddf690850 sp 0x7ffddf690800 T0)
+==7==The signal is caused by a READ memory access.
+==7==Hint: this fault was caused by a dereference of a high value address (see register values below).  Disassemble the provided pc to learn which register was used.
+SCARINESS: 20 (wild-addr-read)
+    #0 0x55a2d261dbfa in valueToText /src/sqlite3/bld/sqlite3.c:84220:3
+    #1 0x55a2d261db3b in valueBytes /src/sqlite3/bld/sqlite3.c:84928:10
+    #2 0x55a2d291c893 in sqlite3ValueBytes /src/sqlite3/bld/sqlite3.c:84947:10
+    #3 0x55a2d291c893 in sqlite3_value_bytes /src/sqlite3/bld/sqlite3.c:90699:10
+    #4 0x55a2d291c893 in lsm1Filter /src/sqlite3/bld/sqlite3.c:279951:23
+    #5 0x55a2d2639e22 in sqlite3VdbeExec /src/sqlite3/bld/sqlite3.c:101738:8
+    #6 0x55a2d24c68e3 in sqlite3Step /src/sqlite3/bld/sqlite3.c:91348:10
+    #7 0x55a2d24c68e3 in sqlite3_step /src/sqlite3/bld/sqlite3.c:91409:16
+    #8 0x55a2d29a9ccf in exec_prepared_stmt /src/sqlite3/test/shell.c:24180:8
+    #9 0x55a2d295898d in shell_exec /src/sqlite3/test/shell.c:24496:7
+    #10 0x55a2d293d3b4 in shell_main /src/sqlite3/test/shell.c:33186:14
+    #11 0x55a2d24adab5 in LLVMFuzzerTestOneInput /src/sqlite3/test/customfuzz3.c:27:3
+    #12 0x55a2d2362530 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #13 0x55a2d234d7a5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #14 0x55a2d235323f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #15 0x55a2d237e4e2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #16 0x7f1114ae5082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #17 0x55a2d234598d in _start (/b/bin/address/customfuzz3+0x2ad98d)
+
+DEDUP_TOKEN: valueToText--valueBytes--sqlite3ValueBytes
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /src/sqlite3/bld/sqlite3.c:84220:3 in valueToText
+==7==ABORTING

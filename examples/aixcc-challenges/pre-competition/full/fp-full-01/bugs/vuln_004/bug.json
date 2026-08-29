@@ -1,0 +1,74 @@
+{
+ "challenge": "fp-full-01",
+ "bug": "vuln_004",
+ "harness": "TestFuzzCoreServer",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-190",
+   "CWE-122"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "heap-buffer-overflow",
+   "signed-integer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "libfreerdp/core/mcs.h"
+  ],
+  "patch_files": [
+   "libfreerdp/core/gcc.c",
+   "libfreerdp/core/mcs.h"
+  ],
+  "patch_functions": [
+   "gcc_read_client_network_data"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/FreeRDP/winpr/include/winpr/stream.h:703",
+  "crash_line": "3",
+  "stack_files": [
+   "/src/FreeRDP/libfreerdp/core/freerdp.c",
+   "/src/FreeRDP/libfreerdp/core/gcc.c",
+   "/src/FreeRDP/libfreerdp/core/mcs.c",
+   "/src/FreeRDP/libfreerdp/core/test/TestFuzzCoreServer.c",
+   "/src/FreeRDP/winpr/include/winpr/stream.h",
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-190",
+  "CWE-122"
+ ],
+ "name": "FreeRDP Integer Overflow",
+ "blob": "data.bin",
+ "blob_bytes": 1719,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/TestFuzzCoreServer",
+  "coverage": "bin/coverage/TestFuzzCoreServer"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "Stream_Read",
+   "gcc_read_client_network_data",
+   "gcc_read_client_data_blocks",
+   "gcc_read_conference_create_request",
+   "mcs_recv_connect_initial",
+   "test_server"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/freerdp:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

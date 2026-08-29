@@ -1,105 +1,123 @@
 {
-  "challenge": "ws-delta-01",
-  "challenge_name": "confine civilian",
-  "round": "final-competition",
-  "scan_mode": "delta",
-  "challenge_type": "delta     # full | delta",
-  "language": {
-    "wireshark": "c"
-  },
-  "oss_fuzz_projects": [
-    "wireshark"
-  ],
-  "source": {
-    "repo": "https://github.com/AIxCyberChallenge/afc-wireshark.git",
-    "branch": "challenges/ws-delta-01",
-    "public": true,
-    "resolved": true
-  },
-  "fuzz_tooling": {
-    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/ws-delta-01",
-    "project": "wireshark"
-  },
-  "base_ref": "d75385d38529b3f3154eb16fe2bcc78187904c69",
-  "delta_ref": "challenges/ws-delta-01",
+ "challenge": "ws-delta-01",
+ "challenge_name": "confine civilian",
+ "round": "final-competition",
+ "scan_mode": "delta",
+ "challenge_type": "delta     # full | delta",
+ "language": {
+  "wireshark": "c"
+ },
+ "oss_fuzz_projects": [
+  "wireshark"
+ ],
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-wireshark.git",
+  "branch": "challenges/ws-delta-01",
+  "public": true,
+  "resolved": true
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/ws-delta-01",
+  "project": "wireshark"
+ },
+ "base_ref": "d75385d38529b3f3154eb16fe2bcc78187904c69",
+ "delta_ref": "challenges/ws-delta-01",
+ "harnesses": [
+  "handler_lpp",
+  "handler_wlan_noqos",
+  "handler_cflow",
+  "handler_ber",
+  "handler_dis",
+  "handler_rnsap",
+  "handler_netbios",
+  "handler_its",
+  "handler_wlan_withfcs",
+  "handler_zbee_aps",
+  "handler_x2ap",
+  "handler_wlan",
+  "handler_wlan_withoutfcs",
+  "handler_ngap",
+  "handler_bat.vis",
+  "handler_xiri",
+  "handler_woww",
+  "handler_asterix",
+  "handler_e1ap",
+  "handler_f1ap",
+  "handler_ngap_media_type",
+  "handler_telnet",
+  "handler_json",
+  "handler_zbee_zdp",
+  "handler_icmp",
+  "handler_rrc",
+  "handler_json_file",
+  "handler_netflow_tcp",
+  "handler_wlan_centrino",
+  "handler_bat.gw",
+  "handler_s1ap",
+  "handler_xnap",
+  "handler_lppe",
+  "handler_irc",
+  "handler_nbap",
+  "handler_gvcp",
+  "handler_bat",
+  "handler_e1ap_tcp",
+  "handler_openvpn.udp",
+  "handler_netflow",
+  "handler_hcrt",
+  "handler_aim",
+  "handler_lte_rrc.dl_ccch",
+  "handler_wlan_bsfc",
+  "handler_icmp_extension",
+  "handler_openvpn.tcp",
+  "handler_ansi_map"
+ ],
+ "harness_count": 47,
+ "vulnerabilities": [
+  "vuln_003"
+ ],
+ "answers": {
+  "vuln_dirs": 1,
+  "pov_blobs": 1,
+  "reference_patches": 1,
+  "has_answers": true
+ },
+ "graph": {
+  "path": "mongodb",
+  "producer": "llvm-ir",
   "harnesses": [
-    "handler_lpp",
-    "handler_wlan_noqos",
-    "handler_cflow",
-    "handler_ber",
-    "handler_dis",
-    "handler_rnsap",
-    "handler_netbios",
-    "handler_its",
-    "handler_wlan_withfcs",
-    "handler_zbee_aps",
-    "handler_x2ap",
-    "handler_wlan",
-    "handler_wlan_withoutfcs",
-    "handler_ngap",
-    "handler_bat.vis",
-    "handler_xiri",
-    "handler_woww",
-    "handler_asterix",
-    "handler_e1ap",
-    "handler_f1ap",
-    "handler_ngap_media_type",
-    "handler_telnet",
-    "handler_json",
-    "handler_zbee_zdp",
-    "handler_icmp",
-    "handler_rrc",
-    "handler_json_file",
-    "handler_netflow_tcp",
-    "handler_wlan_centrino",
-    "handler_bat.gw",
-    "handler_s1ap",
-    "handler_xnap",
-    "handler_lppe",
-    "handler_irc",
-    "handler_nbap",
-    "handler_gvcp",
-    "handler_bat",
-    "handler_e1ap_tcp",
-    "handler_openvpn.udp",
-    "handler_netflow",
-    "handler_hcrt",
-    "handler_aim",
-    "handler_lte_rrc.dl_ccch",
-    "handler_wlan_bsfc",
-    "handler_icmp_extension",
-    "handler_openvpn.tcp",
-    "handler_ansi_map"
+   "handler_ber"
   ],
-  "harness_count": 47,
-  "vulnerabilities": [
-    "vuln_003"
-  ],
-  "answers": {
-    "vuln_dirs": 1,
-    "pov_blobs": 1,
-    "reference_patches": 1,
-    "has_answers": true
-  },
-  "graph": null,
-  "vuln_details": [
-    {
-      "vuln": "vuln_003",
-      "name": "BERRRRR",
-      "cwes": [
-        "CWE-787"
-      ],
-      "pov_harness": "handler_ber",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "blob",
-      "reference_patch": "good_patch.diff"
-    }
-  ],
-  "target_harnesses": [
-    "handler_ber"
-  ],
-  "target_harness_count": 1,
-  "target_harnesses_not_in_challenge_yaml": []
+  "verified": true
+ },
+ "vuln_details": [
+  {
+   "vuln": "vuln_003",
+   "name": "BERRRRR",
+   "cwes": [
+    "CWE-787"
+   ],
+   "pov_harness": "handler_ber",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "blob",
+   "reference_patch": "good_patch.diff"
+  }
+ ],
+ "target_harnesses": [
+  "handler_ber"
+ ],
+ "target_harness_count": 1,
+ "target_harnesses_not_in_challenge_yaml": [],
+ "bugs": {
+  "vuln_003": {
+   "path": "bugs/vuln_003",
+   "harness": "handler_ber",
+   "crash": "stack-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ }
 }

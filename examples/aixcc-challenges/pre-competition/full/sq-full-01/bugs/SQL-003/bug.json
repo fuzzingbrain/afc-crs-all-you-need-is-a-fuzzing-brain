@@ -1,0 +1,74 @@
+{
+ "challenge": "sq-full-01",
+ "bug": "SQL-003",
+ "harness": "customfuzz3",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-787",
+   "CWE-121"
+  ],
+  "crash_type": "stack-buffer-overflow",
+  "expected_types": [
+   "dynamic-stack-buffer-overflow",
+   "global-buffer-overflow",
+   "heap-buffer-overflow",
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "ext/misc/rot13.c"
+  ],
+  "patch_files": [
+   "ext/misc/rot13.c"
+  ],
+  "patch_functions": [
+   "rot13func"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/sqlite3/test/shell.c:12599",
+  "crash_line": "11",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/sqlite3/bld/sqlite3.c",
+   "/src/sqlite3/test/customfuzz3.c",
+   "/src/sqlite3/test/shell.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-787",
+  "CWE-121"
+ ],
+ "name": "rot13 off-by-one optimization results in oob write",
+ "blob": "data.bin",
+ "blob_bytes": 118,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/customfuzz3",
+  "coverage": "bin/coverage/customfuzz3"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "stack-buffer-overflow",
+  "top_frames": [
+   "rot13func",
+   "sqlite3VdbeExec",
+   "sqlite3Step",
+   "sqlite3_step",
+   "exec_prepared_stmt",
+   "shell_exec"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/sqlite3:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain",
+ "patch_verified": true,
+ "patch_verify_note": "clean after patch"
+}

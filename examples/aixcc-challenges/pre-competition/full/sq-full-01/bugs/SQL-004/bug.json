@@ -1,0 +1,75 @@
+{
+ "challenge": "sq-full-01",
+ "bug": "SQL-004",
+ "harness": "customfuzz3",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-125"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "dynamic-stack-buffer-overflow",
+   "global-buffer-overflow",
+   "heap-buffer-overflow",
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "src/shell.c.in"
+  ],
+  "patch_files": [
+   "src/expr.c",
+   "src/shell.c.in"
+  ],
+  "patch_functions": [
+   "shell_error_context",
+   "sqlite3ExprCodeGeneratedColumn"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/sqlite3/test/shell.c:23149",
+  "crash_line": "13",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/sqlite3/bld/sqlite3.c",
+   "/src/sqlite3/test/customfuzz3.c",
+   "/src/sqlite3/test/shell.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-125"
+ ],
+ "name": "Heap OOB Read on SQLite shell error context",
+ "blob": "data.bin",
+ "blob_bytes": 145,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/customfuzz3",
+  "coverage": "bin/coverage/customfuzz3"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "shell_error_context",
+   "save_err_msg",
+   "shell_exec",
+   "shell_main",
+   "LLVMFuzzerTestOneInput",
+   "_start"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/sqlite3:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain",
+ "patch_verified": true,
+ "patch_verify_note": "clean after patch"
+}

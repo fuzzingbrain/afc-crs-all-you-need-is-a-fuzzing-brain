@@ -1,0 +1,145 @@
+{
+ "challenge": "fp-delta-03",
+ "round": "final-competition",
+ "scan_mode": "delta",
+ "project": "freerdp",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-freerdp.git",
+  "checkout_ref": "challenges/fp-delta-03",
+  "resolved_commit": "bae0d571dedf0c95d8e8039995dfa5952441d081"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/fp-delta-03",
+  "project": "freerdp"
+ },
+ "image": "aixcc-afc/freerdp:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "TestFuzzCodecs"
+ ],
+ "target_harnesses": [
+  "TestFuzzCodecs"
+ ],
+ "graphs": {
+  "TestFuzzCodecs": "mongodb"
+ },
+ "counts": {
+  "TestFuzzCodecs": {
+   "functions": 8217,
+   "nodes": 6180
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "fp-delta-03",
+  "ok": true,
+  "harnesses": {
+   "TestFuzzCodecs": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "vuln_003": {
+      "patched_files": [
+       "libfreerdp/codec/rfx.c"
+      ],
+      "vuln_functions": [
+       "rfx_process_message"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "rfx_process_message"
+      ],
+      "V1_has_node_with_body": [
+       "rfx_process_message"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "TestFreeRDPCodecRemoteFX",
+       "rfx_process_message"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "libfreerdp/codec/rfx.c"
+      ],
+      "V3_body_has_patched_text": [
+       "rfx_process_message"
+      ]
+     }
+    },
+    "nodes": 6180,
+    "functions": 8217,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "vuln_003": {
+   "harness": "TestFuzzCodecs",
+   "crash": "SEGV",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "TestFuzzCodecs",
+   "TestFuzzCommonAssistanceBinToHexString",
+   "TestFuzzCommonAssistanceHexStringToBin",
+   "TestFuzzCommonAssistanceParseFileBuffer",
+   "TestFuzzCoreClient",
+   "TestFuzzCoreServer",
+   "TestFuzzCryptoCertificateDataSetPEM"
+  ],
+  "coverage": [
+   "TestFuzzCodecs",
+   "TestFuzzCommonAssistanceBinToHexString",
+   "TestFuzzCommonAssistanceHexStringToBin",
+   "TestFuzzCommonAssistanceParseFileBuffer",
+   "TestFuzzCoreClient",
+   "TestFuzzCoreServer",
+   "TestFuzzCryptoCertificateDataSetPEM"
+  ]
+ },
+ "timings": [
+  {
+   "step": "build_image",
+   "seconds": 61,
+   "rc": 0,
+   "command": "python3 /home/ze/fb-graphs/build/fp-delta-03/fuzz-tooling/infra/helper.py build_image --no-pull freerdp"
+  },
+  {
+   "step": "build_bitcode",
+   "seconds": 34,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -e SANITIZER_FLAGS=-flto -g -fno-inline-functions -fuse-ld=gold -Wno-unused-command-line-argument -e AR=llvm-ar -e NM=llvm-nm -e RANLIB=llvm-ranlib -v /home/ze/fb-graphs/build/fp-delta-03/repo-bitcode:/src/FreeRDP -v /home/ze/fb-graphs/build/fp-delta-03/out:/out -v /home/ze/fb-graphs/build/fp-delta-03/work:/work aixcc-afc/freerdp:latest bash -c compile 2>&1 | tail -40; mkdir -p /out/bc"
+  },
+  {
+   "step": "to_ll",
+   "seconds": 25,
+   "rc": 0,
+   "command": "docker run --rm -v /home/ze/fb-graphs/build/fp-delta-03/out:/out -v /home/ze/fb-graphs/build/fp-delta-03/repo-bitcode:/src/FreeRDP -v /home/ze/fb-graphs/build/fp-delta-03/work:/work -v /home/ze/fb-graphs/build/fp-delta-03/ll:/ll aixcc-afc/freerdp:latest bash -c "
+  },
+  {
+   "step": "extract_TestFuzzCodecs",
+   "seconds": 5,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  }
+ ]
+}

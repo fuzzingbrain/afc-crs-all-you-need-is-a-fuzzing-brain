@@ -1,0 +1,69 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2332696831
+INFO: Loaded 1 modules   (65628 inline 8-bit counters): 65628 [0x55a35dde8ab0, 0x55a35ddf8b0c), 
+INFO: Loaded 1 PC tables (65628 PCs): 65628 [0x55a35ddf8b10,0x55a35def90d0), 
+/b/bin/address/customfuzz3: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7f1bd6b73484 at pc 0x55a35dc042e9 bp 0x7ffdf10cfcf0 sp 0x7ffdf10cfce8
+WRITE of size 1 at 0x7f1bd6b73484 thread T0
+SCARINESS: 46 (1-byte-write-stack-buffer-overflow)
+    #0 0x55a35dc042e8 in rot13func /src/sqlite3/test/shell.c:12599:11
+    #1 0x55a35d92bf22 in sqlite3VdbeExec /src/sqlite3/bld/sqlite3.c:102090:3
+    #2 0x55a35d836893 in sqlite3Step /src/sqlite3/bld/sqlite3.c:91350:10
+    #3 0x55a35d836893 in sqlite3_step /src/sqlite3/bld/sqlite3.c:91411:16
+    #4 0x55a35dc81e3f in exec_prepared_stmt /src/sqlite3/test/shell.c:24297:8
+    #5 0x55a35dc30b1d in shell_exec /src/sqlite3/test/shell.c:24613:7
+    #6 0x55a35dc154b4 in shell_main /src/sqlite3/test/shell.c:33304:14
+    #7 0x55a35d81da65 in LLVMFuzzerTestOneInput /src/sqlite3/test/customfuzz3.c:27:3
+    #8 0x55a35d6d24e0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #9 0x55a35d6bd755 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #10 0x55a35d6c31ef in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #11 0x55a35d6ee492 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #12 0x7f1bd7351082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #13 0x55a35d6b593d in _start (/b/bin/address/customfuzz3+0x27493d)
+
+DEDUP_TOKEN: rot13func--sqlite3VdbeExec--sqlite3Step
+Address 0x7f1bd6b73484 is located in stack of thread T0 at offset 132 in frame
+    #0 0x55a35dc03eaf in rot13func /src/sqlite3/test/shell.c:12578
+
+DEDUP_TOKEN: rot13func
+  This frame has 1 object(s):
+    [32, 132) 'zTemp' (line 12584) <== Memory access at offset 132 overflows this variable
+HINT: this may be a false positive if your program uses some custom stack unwind mechanism, swapcontext or vfork
+      (longjmp and C++ exceptions *are* supported)
+SUMMARY: AddressSanitizer: stack-buffer-overflow /src/sqlite3/test/shell.c:12599:11 in rot13func
+Shadow bytes around the buggy address:
+  0x7f1bd6b73200: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7f1bd6b73280: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7f1bd6b73300: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7f1bd6b73380: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7f1bd6b73400: f1 f1 f1 f1 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x7f1bd6b73480:[04]f3 f3 f3 f3 f3 f3 f3 00 00 00 00 00 00 00 00
+  0x7f1bd6b73500: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7f1bd6b73580: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7f1bd6b73600: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7f1bd6b73680: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7f1bd6b73700: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING
+
+OK: SQL-003 reproduced (stack-buffer-overflow)

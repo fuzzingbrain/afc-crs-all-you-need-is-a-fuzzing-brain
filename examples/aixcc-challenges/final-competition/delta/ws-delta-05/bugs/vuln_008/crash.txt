@@ -1,0 +1,74 @@
+oss-fuzzshark: disabling: ip
+oss-fuzzshark: disabling: udp
+oss-fuzzshark: disabling: udplite
+oss-fuzzshark: disabling: ospf
+oss-fuzzshark: disabling: bgp
+oss-fuzzshark: disabling: dhcp
+oss-fuzzshark: disabling: json
+oss-fuzzshark: disabling: snort
+oss-fuzzshark: configured for dissector: netbios
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 3105876003
+INFO: Loaded 1 modules   (420437 inline 8-bit counters): 420437 [0xa9f3f00, 0xaa5a955), 
+INFO: Loaded 1 PC tables (420437 PCs): 420437 [0xaa5a958,0xb0c4ea8), 
+/b/bin/address/handler_netbios: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: global-buffer-overflow on address 0x00000885eea8 at pc 0x0000063c163e bp 0x7ffdbdd9f2f0 sp 0x7ffdbdd9f2e8
+READ of size 8 at 0x00000885eea8 thread T0
+SCARINESS: 23 (8-byte-read-global-buffer-overflow)
+    #0 0x63c163d in dissect_netbios /src/wireshark/epan/dissectors/packet-netbios.c:1144:16
+    #1 0x5b84ebd in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #2 0x5b84ebd in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #3 0x5b8fb14 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #4 0x5b8fb14 in call_all_postdissectors /src/wireshark/epan/packet.c:4166:3
+    #5 0x544aac7 in dissect_frame /src/wireshark/epan/dissectors/packet-frame.c:1438:5
+    #6 0x5b84ebd in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #7 0x5b84ebd in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #8 0x5b809b7 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #9 0x5b809b7 in call_dissector_with_data /src/wireshark/epan/packet.c:3634:8
+    #10 0x5b809b7 in dissect_record /src/wireshark/epan/packet.c:687:3
+    #11 0x52bd530 in epan_dissect_run /src/wireshark/epan/epan.c:666:2
+    #12 0x50b3f48 in LLVMFuzzerTestOneInput /src/wireshark/fuzz/fuzzshark.c:359:2
+    #13 0x4f66c20 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #14 0x4f51245 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #15 0x4f56cdf in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #16 0x4f82bd2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #17 0x7f27c893b082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #18 0x4f4942d in _start (/b/bin/address/handler_netbios+0x4f4942d)
+
+DEDUP_TOKEN: dissect_netbios--call_dissector_through_handle--call_dissector_work
+0x00000885eea8 is located 0 bytes after global variable 'dissect_netb' defined in '/src/wireshark/epan/dissectors/packet-netbios.c:1016' (0x885eda0) of size 264
+SUMMARY: AddressSanitizer: global-buffer-overflow /src/wireshark/epan/dissectors/packet-netbios.c:1144:16 in dissect_netbios
+Shadow bytes around the buggy address:
+  0x00000885ec00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x00000885ec80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x00000885ed00: 00 00 00 00 00 00 00 00 00 00 f9 f9 f9 f9 f9 f9
+  0x00000885ed80: f9 f9 f9 f9 00 00 00 00 00 00 00 00 00 00 00 00
+  0x00000885ee00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x00000885ee80: 00 00 00 00 00[f9]f9 f9 f9 f9 f9 f9 f9 f9 f9 f9
+  0x00000885ef00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 f9 f9
+  0x00000885ef80: f9 f9 f9 f9 00 00 00 00 00 00 00 00 00 00 00 00
+  0x00000885f000: 00 00 00 00 f9 f9 f9 f9 00 00 00 00 00 00 f9 f9
+  0x00000885f080: f9 f9 f9 f9 00 00 00 00 00 00 00 00 00 00 00 00
+  0x00000885f100: 00 00 00 f9 f9 f9 f9 f9 00 00 00 00 00 00 00 00
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING

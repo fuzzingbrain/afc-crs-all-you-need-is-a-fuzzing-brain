@@ -1,0 +1,71 @@
+{
+ "challenge": "ws-delta-03",
+ "bug": "vuln_006",
+ "harness": "handler_irc",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-122"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "heap-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "epan/dissectors/packet-irc.c"
+  ],
+  "patch_files": [
+   "epan/dissectors/packet-irc.c"
+  ],
+  "patch_functions": null,
+  "matched_by": null,
+  "crash_file": "/usr/include/x86_64-linux-gnu/bits/string_fortified.h:34",
+  "crash_line": "10",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp",
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/wireshark/epan/dissectors/packet-frame.c",
+   "/src/wireshark/epan/dissectors/packet-irc.c",
+   "/src/wireshark/epan/epan.c",
+   "/src/wireshark/epan/packet.c",
+   "/src/wireshark/epan/tvbuff.c",
+   "/src/wireshark/fuzz/fuzzshark.c",
+   "/usr/include/x86_64-linux-gnu/bits/string_fortified.h"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-122"
+ ],
+ "name": "wireshark irc NAMES heap overflow",
+ "blob": "blob.bin",
+ "blob_bytes": 138,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/handler_irc",
+  "coverage": "bin/coverage/handler_irc"
+ },
+ "reference_patch": "patch_good.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "memcpy",
+   "tvb_memcpy",
+   "dissect_irc_names",
+   "dissect_irc_request_command",
+   "dissect_irc_request",
+   "dissect_irc"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/wireshark:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

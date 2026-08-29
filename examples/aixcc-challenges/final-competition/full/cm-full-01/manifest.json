@@ -1,87 +1,115 @@
 {
-  "challenge": "cm-full-01",
-  "challenge_name": "Active N-Day and past bug",
-  "round": "final-competition",
-  "scan_mode": "full",
-  "challenge_type": "full     # full | delta",
-  "language": {
-    "lcms": "c"
-  },
-  "oss_fuzz_projects": [
-    "lcms"
-  ],
-  "source": {
-    "repo": "https://github.com/AIxCyberChallenge/afc-little-cms.git",
-    "branch": "challenges/cm-full-01",
-    "public": true,
-    "resolved": true
-  },
-  "fuzz_tooling": {
-    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/cm-full-01",
-    "project": "lcms"
-  },
-  "base_ref": "challenges/cm-full-01",
-  "delta_ref": "~",
+ "challenge": "cm-full-01",
+ "challenge_name": "Active N-Day and past bug",
+ "round": "final-competition",
+ "scan_mode": "full",
+ "challenge_type": "full     # full | delta",
+ "language": {
+  "lcms": "c"
+ },
+ "oss_fuzz_projects": [
+  "lcms"
+ ],
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-little-cms.git",
+  "branch": "challenges/cm-full-01",
+  "public": true,
+  "resolved": true
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/cm-full-01",
+  "project": "lcms"
+ },
+ "base_ref": "challenges/cm-full-01",
+ "delta_ref": "~",
+ "harnesses": [
+  "cmsIT8_load_fuzzer",
+  "cms_cgats_fuzzer",
+  "cms_cie_cam02_fuzzer",
+  "cms_devicelink_fuzzer",
+  "cms_dict_fuzzer",
+  "cms_gdb_fuzzer",
+  "cms_md5_fuzzer",
+  "cms_overwrite_transform_fuzzer",
+  "cms_postscript_fuzzer",
+  "cms_profile_fuzzer",
+  "cms_transform_all_fuzzer",
+  "cms_transform_extended_fuzzer",
+  "cms_transform_fuzzer",
+  "cms_universal_transform_fuzzer",
+  "cms_virtual_profile_fuzzer"
+ ],
+ "harness_count": 15,
+ "vulnerabilities": [
+  "lcms-001",
+  "lcms-002"
+ ],
+ "answers": {
+  "vuln_dirs": 2,
+  "pov_blobs": 2,
+  "reference_patches": 2,
+  "has_answers": true
+ },
+ "graph": {
+  "path": "mongodb",
+  "producer": "llvm-ir",
   "harnesses": [
-    "cmsIT8_load_fuzzer",
-    "cms_cgats_fuzzer",
-    "cms_cie_cam02_fuzzer",
-    "cms_devicelink_fuzzer",
-    "cms_dict_fuzzer",
-    "cms_gdb_fuzzer",
-    "cms_md5_fuzzer",
-    "cms_overwrite_transform_fuzzer",
-    "cms_postscript_fuzzer",
-    "cms_profile_fuzzer",
-    "cms_transform_all_fuzzer",
-    "cms_transform_extended_fuzzer",
-    "cms_transform_fuzzer",
-    "cms_universal_transform_fuzzer",
-    "cms_virtual_profile_fuzzer"
+   "cms_postscript_fuzzer",
+   "cms_virtual_profile_fuzzer"
   ],
-  "harness_count": 15,
-  "vulnerabilities": [
-    "lcms-001",
-    "lcms-002"
-  ],
-  "answers": {
-    "vuln_dirs": 2,
-    "pov_blobs": 2,
-    "reference_patches": 2,
-    "has_answers": true
+  "verified": true
+ },
+ "vuln_details": [
+  {
+   "vuln": "lcms-001",
+   "name": "lcms-001, active N-Day",
+   "cwes": [
+    "CWE-476"
+   ],
+   "pov_harness": "cms_postscript_fuzzer",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "data.bin",
+   "reference_patch": "good_patch.diff"
   },
-  "graph": null,
-  "vuln_details": [
-    {
-      "vuln": "lcms-001",
-      "name": "lcms-001, active N-Day",
-      "cwes": [
-        "CWE-476"
-      ],
-      "pov_harness": "cms_postscript_fuzzer",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "data.bin",
-      "reference_patch": "good_patch.diff"
-    },
-    {
-      "vuln": "lcms-002",
-      "name": "lcms-002, buffer over-read",
-      "cwes": [
-        "CWE-126"
-      ],
-      "pov_harness": "cms_virtual_profile_fuzzer",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "data.bin",
-      "reference_patch": "good_patch.diff"
-    }
-  ],
-  "target_harnesses": [
-    "cms_postscript_fuzzer",
-    "cms_virtual_profile_fuzzer"
-  ],
-  "target_harness_count": 2,
-  "target_harnesses_not_in_challenge_yaml": []
+  {
+   "vuln": "lcms-002",
+   "name": "lcms-002, buffer over-read",
+   "cwes": [
+    "CWE-126"
+   ],
+   "pov_harness": "cms_virtual_profile_fuzzer",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "data.bin",
+   "reference_patch": "good_patch.diff"
+  }
+ ],
+ "target_harnesses": [
+  "cms_postscript_fuzzer",
+  "cms_virtual_profile_fuzzer"
+ ],
+ "target_harness_count": 2,
+ "target_harnesses_not_in_challenge_yaml": [],
+ "bugs": {
+  "lcms-001": {
+   "path": "bugs/lcms-001",
+   "harness": "cms_postscript_fuzzer",
+   "crash": "SEGV",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "lcms-002": {
+   "path": "bugs/lcms-002",
+   "harness": "cms_virtual_profile_fuzzer",
+   "crash": "stack-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ }
 }

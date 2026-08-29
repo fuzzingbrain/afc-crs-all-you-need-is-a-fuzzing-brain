@@ -1,0 +1,73 @@
+{
+ "challenge": "ws-delta-02",
+ "bug": "vuln_004",
+ "harness": "handler_icmp",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-121"
+  ],
+  "crash_type": "stack-buffer-overflow",
+  "expected_types": [
+   "dynamic-stack-buffer-overflow",
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "epan/dissectors/packet-icmp.c"
+  ],
+  "patch_files": [
+   "epan/dissectors/packet-icmp.c"
+  ],
+  "patch_functions": [
+   "dissect_interface_identification_object"
+  ],
+  "matched_by": null,
+  "crash_file": "/usr/include/x86_64-linux-gnu/bits/string_fortified.h:34",
+  "crash_line": "10",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/wireshark/epan/dissectors/packet-frame.c",
+   "/src/wireshark/epan/dissectors/packet-icmp.c",
+   "/src/wireshark/epan/epan.c",
+   "/src/wireshark/epan/packet.c",
+   "/src/wireshark/epan/tvbuff.c",
+   "/src/wireshark/fuzz/fuzzshark.c",
+   "/usr/include/x86_64-linux-gnu/bits/string_fortified.h"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-121"
+ ],
+ "name": "wireshark icmp extended echo identification name overflow",
+ "blob": "blob.bin",
+ "blob_bytes": 280,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/handler_icmp",
+  "coverage": "bin/coverage/handler_icmp"
+ },
+ "reference_patch": "patch_good.diff",
+ "expected_crash": {
+  "type": "stack-buffer-overflow",
+  "top_frames": [
+   "memcpy",
+   "tvb_memcpy",
+   "dissect_interface_identification_object",
+   "dissect_icmp_extension",
+   "dissect_icmp",
+   "call_dissector_through_handle"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/wireshark:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

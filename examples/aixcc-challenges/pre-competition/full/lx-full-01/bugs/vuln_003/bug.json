@@ -1,0 +1,68 @@
+{
+ "challenge": "lx-full-01",
+ "bug": "vuln_003",
+ "harness": "xml",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-122"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "heap-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "parser.c"
+  ],
+  "patch_files": [
+   "parser.c"
+  ],
+  "crash_file": "/src/libxml2/parser.c:777",
+  "crash_line": "9",
+  "stack_files": [
+   "/src/libxml2/SAX2.c",
+   "/src/libxml2/entities.c",
+   "/src/libxml2/fuzz/fuzz.c",
+   "/src/libxml2/fuzz/xml.c",
+   "/src/libxml2/parser.c",
+   "/src/libxml2/xmlstring.c",
+   "/src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp",
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-122"
+ ],
+ "name": "libxml2 DTD embedded entity overflow",
+ "blob": "blob.bin",
+ "blob_bytes": 1507,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/xml",
+  "coverage": "bin/coverage/xml"
+ },
+ "reference_patch": "patch_good.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "xmlSBufAddEntitySecure",
+   "xmlExpandPEsInEntityValue",
+   "xmlParseEntityValue",
+   "xmlParseEntityDecl",
+   "xmlParseInternalSubset",
+   "xmlParseDocument"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/libxml2:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

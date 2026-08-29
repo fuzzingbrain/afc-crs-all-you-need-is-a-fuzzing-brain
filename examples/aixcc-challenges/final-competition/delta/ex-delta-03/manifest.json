@@ -1,60 +1,78 @@
 {
-  "challenge": "ex-delta-03",
-  "challenge_name": "Parserama",
-  "round": "final-competition",
-  "scan_mode": "delta",
-  "challenge_type": "delta     # full | delta",
-  "language": {
-    "libexif": "c"
-  },
-  "oss_fuzz_projects": [
-    "libexif"
-  ],
-  "source": {
-    "repo": "https://github.com/AIxCyberChallenge/afc-libexif.git",
-    "branch": "challenges/ex-delta-03",
-    "public": true,
-    "resolved": true
-  },
-  "fuzz_tooling": {
-    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/ex-delta-03",
-    "project": "libexif"
-  },
-  "base_ref": "33e52cd19e4df56fdb363d6ea40245e21d870c7b",
-  "delta_ref": "challenges/ex-delta-03",
+ "challenge": "ex-delta-03",
+ "challenge_name": "Parserama",
+ "round": "final-competition",
+ "scan_mode": "delta",
+ "challenge_type": "delta     # full | delta",
+ "language": {
+  "libexif": "c"
+ },
+ "oss_fuzz_projects": [
+  "libexif"
+ ],
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-libexif.git",
+  "branch": "challenges/ex-delta-03",
+  "public": true,
+  "resolved": true
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/ex-delta-03",
+  "project": "libexif"
+ },
+ "base_ref": "33e52cd19e4df56fdb363d6ea40245e21d870c7b",
+ "delta_ref": "challenges/ex-delta-03",
+ "harnesses": [
+  "exif_loader_fuzzer",
+  "exif_from_data_fuzzer"
+ ],
+ "harness_count": 2,
+ "vulnerabilities": [
+  "exif-002"
+ ],
+ "answers": {
+  "vuln_dirs": 1,
+  "pov_blobs": 1,
+  "reference_patches": 1,
+  "has_answers": true
+ },
+ "graph": {
+  "path": "mongodb",
+  "producer": "llvm-ir",
   "harnesses": [
-    "exif_loader_fuzzer",
-    "exif_from_data_fuzzer"
+   "exif_from_data_fuzzer"
   ],
-  "harness_count": 2,
-  "vulnerabilities": [
-    "exif-002"
-  ],
-  "answers": {
-    "vuln_dirs": 1,
-    "pov_blobs": 1,
-    "reference_patches": 1,
-    "has_answers": true
-  },
-  "graph": null,
-  "vuln_details": [
-    {
-      "vuln": "exif-002",
-      "name": "exif-002, Replay 2",
-      "cwes": [
-        "CWE-121"
-      ],
-      "pov_harness": "exif_from_data_fuzzer",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "data.bin",
-      "reference_patch": "good_patch.diff"
-    }
-  ],
-  "target_harnesses": [
-    "exif_from_data_fuzzer"
-  ],
-  "target_harness_count": 1,
-  "target_harnesses_not_in_challenge_yaml": []
+  "verified": true
+ },
+ "vuln_details": [
+  {
+   "vuln": "exif-002",
+   "name": "exif-002, Replay 2",
+   "cwes": [
+    "CWE-121"
+   ],
+   "pov_harness": "exif_from_data_fuzzer",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "data.bin",
+   "reference_patch": "good_patch.diff"
+  }
+ ],
+ "target_harnesses": [
+  "exif_from_data_fuzzer"
+ ],
+ "target_harness_count": 1,
+ "target_harnesses_not_in_challenge_yaml": [],
+ "bugs": {
+  "exif-002": {
+   "path": "bugs/exif-002",
+   "harness": "exif_from_data_fuzzer",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ }
 }

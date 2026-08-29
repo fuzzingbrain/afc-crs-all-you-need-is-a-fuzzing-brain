@@ -1,0 +1,93 @@
+oss-fuzzshark: disabling: ip
+oss-fuzzshark: disabling: udp
+oss-fuzzshark: disabling: udplite
+oss-fuzzshark: disabling: ospf
+oss-fuzzshark: disabling: bgp
+oss-fuzzshark: disabling: dhcp
+oss-fuzzshark: disabling: json
+oss-fuzzshark: disabling: snort
+oss-fuzzshark: configured for dissector: ber
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 30628126
+INFO: Loaded 1 modules   (420438 inline 8-bit counters): 420438 [0xa9f3f00, 0xaa5a956), 
+INFO: Loaded 1 PC tables (420438 PCs): 420438 [0xaa5a958,0xb0c4eb8), 
+/b/bin/address/handler_ber: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7ffce38521df at pc 0x000005431adb bp 0x7ffce3852050 sp 0x7ffce3852048
+WRITE of size 1 at 0x7ffce38521df thread T0
+SCARINESS: 46 (1-byte-write-stack-buffer-overflow)
+    #0 0x5431ada in dissect_ber_GeneralString /src/wireshark/epan/dissectors/packet-ber.c:3194:34
+    #1 0x542899b in try_dissect_unknown_ber /src/wireshark/epan/dissectors/packet-ber.c:935:26
+    #2 0x5b84ecd in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #3 0x5b84ecd in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #4 0x5b8fb24 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #5 0x5b8fb24 in call_all_postdissectors /src/wireshark/epan/packet.c:4166:3
+    #6 0x544aad7 in dissect_frame /src/wireshark/epan/dissectors/packet-frame.c:1438:5
+    #7 0x5b84ecd in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #8 0x5b84ecd in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #9 0x5b809c7 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #10 0x5b809c7 in call_dissector_with_data /src/wireshark/epan/packet.c:3634:8
+    #11 0x5b809c7 in dissect_record /src/wireshark/epan/packet.c:687:3
+    #12 0x52bd530 in epan_dissect_run /src/wireshark/epan/epan.c:666:2
+    #13 0x50b3f48 in LLVMFuzzerTestOneInput /src/wireshark/fuzz/fuzzshark.c:359:2
+    #14 0x4f66c20 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #15 0x4f51245 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #16 0x4f56cdf in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #17 0x4f82bd2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #18 0x7f2b4906f082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #19 0x4f4942d in _start (/b/bin/address/handler_ber+0x4f4942d)
+
+DEDUP_TOKEN: dissect_ber_GeneralString--try_dissect_unknown_ber--call_dissector_through_handle
+Address 0x7ffce38521df is located in stack of thread T0 at offset 159 in frame
+    #0 0x5427a1f in try_dissect_unknown_ber /src/wireshark/epan/dissectors/packet-ber.c:814
+
+DEDUP_TOKEN: try_dissect_unknown_ber
+  This frame has 12 object(s):
+    [32, 40) 'val.i510' (line 2021)
+    [64, 72) 'val.i' (line 2021)
+    [96, 97) 'ber_class' (line 816)
+    [112, 113) 'pc' (line 817)
+    [128, 132) 'tag' (line 818)
+    [144, 148) 'len' (line 821)
+    [160, 240) 'name_string' (line 825) <== Memory access at offset 159 underflows this variable
+    [272, 480) 'asn1_ctx' (line 833)
+    [544, 568) 'except_sn' (line 892)
+    [608, 856) 'except_ch' (line 892)
+    [928, 952) 'except_sn149' (line 992)
+    [992, 1240) 'except_ch150' (line 992)
+HINT: this may be a false positive if your program uses some custom stack unwind mechanism, swapcontext or vfork
+      (longjmp and C++ exceptions *are* supported)
+SUMMARY: AddressSanitizer: stack-buffer-overflow /src/wireshark/epan/dissectors/packet-ber.c:3194:34 in dissect_ber_GeneralString
+Shadow bytes around the buggy address:
+  0x7ffce3851f00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7ffce3851f80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7ffce3852000: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7ffce3852080: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7ffce3852100: 00 00 00 00 00 00 00 00 f1 f1 f1 f1 f8 f2 f2 f2
+=>0x7ffce3852180: f8 f2 f2 f2 01 f2 01 f2 04 f2 04[f2]00 00 00 00
+  0x7ffce3852200: 00 00 00 00 00 00 f2 f2 f2 f2 00 00 00 00 00 00
+  0x7ffce3852280: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7ffce3852300: 00 00 00 00 f2 f2 f2 f2 f2 f2 f2 f2 f8 f8 f8 f2
+  0x7ffce3852380: f2 f2 f2 f2 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8
+  0x7ffce3852400: f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8 f8
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING

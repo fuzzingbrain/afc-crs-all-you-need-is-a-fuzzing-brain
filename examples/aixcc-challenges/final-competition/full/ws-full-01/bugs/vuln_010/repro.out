@@ -1,0 +1,100 @@
+oss-fuzzshark: disabling: ip
+oss-fuzzshark: disabling: udp
+oss-fuzzshark: disabling: udplite
+oss-fuzzshark: disabling: ospf
+oss-fuzzshark: disabling: bgp
+oss-fuzzshark: disabling: dhcp
+oss-fuzzshark: disabling: json
+oss-fuzzshark: disabling: snort
+oss-fuzzshark: configured for dissector: netbios
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2313334550
+INFO: Loaded 1 modules   (420518 inline 8-bit counters): 420518 [0xa9f6a00, 0xaa5d4a6), 
+INFO: Loaded 1 PC tables (420518 PCs): 420518 [0xaa5d4a8,0xb0c7f08), 
+/b/bin/address/handler_netbios: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x50300012ce61 at pc 0x0000063c2fe9 bp 0x7fffbbfa0600 sp 0x7fffbbfa05f8
+WRITE of size 1 at 0x50300012ce61 thread T0
+SCARINESS: 31 (1-byte-write-heap-buffer-overflow)
+    #0 0x63c2fe8 in dissect_netb_terminate_trace /src/wireshark/epan/dissectors/packet-netbios.c:726:22
+    #1 0x63c23e2 in dissect_netbios /src/wireshark/epan/dissectors/packet-netbios.c:1213:16
+    #2 0x5b8573d in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #3 0x5b8573d in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #4 0x5b90394 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #5 0x5b90394 in call_all_postdissectors /src/wireshark/epan/packet.c:4166:3
+    #6 0x544b347 in dissect_frame /src/wireshark/epan/dissectors/packet-frame.c:1438:5
+    #7 0x5b8573d in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #8 0x5b8573d in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #9 0x5b81237 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #10 0x5b81237 in call_dissector_with_data /src/wireshark/epan/packet.c:3634:8
+    #11 0x5b81237 in dissect_record /src/wireshark/epan/packet.c:687:3
+    #12 0x52bddb0 in epan_dissect_run /src/wireshark/epan/epan.c:666:2
+    #13 0x50b47c8 in LLVMFuzzerTestOneInput /src/wireshark/fuzz/fuzzshark.c:359:2
+    #14 0x4f674a0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #15 0x4f51ac5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #16 0x4f5755f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #17 0x4f83452 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #18 0x7f18585e6082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #19 0x4f49cad in _start (/b/bin/address/handler_netbios+0x4f49cad)
+
+DEDUP_TOKEN: dissect_netb_terminate_trace--dissect_netbios--call_dissector_through_handle
+0x50300012ce61 is located 0 bytes after 17-byte region [0x50300012ce50,0x50300012ce61)
+allocated by thread T0 here:
+    #0 0x507345f in malloc /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:68:3
+    #1 0x7b083d8 in g_malloc (/b/bin/address/handler_netbios+0x7b083d8)
+    #2 0x63c23e2 in dissect_netbios /src/wireshark/epan/dissectors/packet-netbios.c:1213:16
+    #3 0x5b8573d in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #4 0x5b8573d in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #5 0x5b90394 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #6 0x5b90394 in call_all_postdissectors /src/wireshark/epan/packet.c:4166:3
+    #7 0x544b347 in dissect_frame /src/wireshark/epan/dissectors/packet-frame.c:1438:5
+    #8 0x5b8573d in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #9 0x5b8573d in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #10 0x5b81237 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #11 0x5b81237 in call_dissector_with_data /src/wireshark/epan/packet.c:3634:8
+    #12 0x5b81237 in dissect_record /src/wireshark/epan/packet.c:687:3
+    #13 0x52bddb0 in epan_dissect_run /src/wireshark/epan/epan.c:666:2
+    #14 0x50b47c8 in LLVMFuzzerTestOneInput /src/wireshark/fuzz/fuzzshark.c:359:2
+    #15 0x4f674a0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #16 0x4f51ac5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #17 0x4f5755f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #18 0x4f83452 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #19 0x7f18585e6082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: __interceptor_malloc--g_malloc--dissect_netbios
+SUMMARY: AddressSanitizer: heap-buffer-overflow /src/wireshark/epan/dissectors/packet-netbios.c:726:22 in dissect_netb_terminate_trace
+Shadow bytes around the buggy address:
+  0x50300012cb80: 00 00 00 00 fa fa 00 00 00 00 fa fa 00 00 00 00
+  0x50300012cc00: fa fa 00 00 00 fa fa fa 00 00 00 00 fa fa 00 00
+  0x50300012cc80: 00 fa fa fa 00 00 00 fa fa fa 00 00 00 00 fa fa
+  0x50300012cd00: 00 00 00 00 fa fa 00 00 00 fa fa fa 00 00 00 fa
+  0x50300012cd80: fa fa 00 00 00 fa fa fa 00 00 00 fa fa fa 00 00
+=>0x50300012ce00: 00 fa fa fa 00 00 00 fa fa fa 00 00[01]fa fa fa
+  0x50300012ce80: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x50300012cf00: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x50300012cf80: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x50300012d000: fd fd fd fd fa fa fa fa fa fa fa fa fa fa fa fa
+  0x50300012d080: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING
+
+OK: vuln_010 reproduced (heap-buffer-overflow)

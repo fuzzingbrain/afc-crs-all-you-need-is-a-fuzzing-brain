@@ -1,0 +1,155 @@
+{
+ "challenge": "lx-delta-02",
+ "round": "pre-competition",
+ "scan_mode": "delta",
+ "project": "libxml2",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-libxml2.git",
+  "checkout_ref": "challenges/lx-delta-02",
+  "resolved_commit": "574c2873262ed08f0af2675327ef66de1f6a21c5"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/lx-delta-02",
+  "project": "libxml2"
+ },
+ "image": "aixcc-afc/libxml2:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "xml"
+ ],
+ "target_harnesses": [
+  "xml"
+ ],
+ "graphs": {
+  "xml": "mongodb"
+ },
+ "counts": {
+  "xml": {
+   "functions": 3220,
+   "nodes": 2056
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "lx-delta-02",
+  "ok": true,
+  "harnesses": {
+   "xml": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "vuln_002": {
+      "patched_files": [
+       "parser.c"
+      ],
+      "vuln_functions": [
+       "xmlParseAttribute2"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "xmlParseAttribute2"
+      ],
+      "V1_has_node_with_body": [
+       "xmlParseAttribute2"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "xmlParseChunk",
+       "xmlParseTryOrFinish",
+       "xmlParseStartTag2",
+       "xmlParseAttribute2"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "parser.c"
+      ],
+      "V3_body_has_patched_text": [
+       "xmlParseAttribute2"
+      ]
+     }
+    },
+    "nodes": 2056,
+    "functions": 3220,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "vuln_002": {
+   "harness": "xml",
+   "crash": "double-free",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "api",
+   "html",
+   "lint",
+   "reader",
+   "regexp",
+   "schema",
+   "uri",
+   "valid",
+   "xinclude",
+   "xml",
+   "xpath"
+  ],
+  "coverage": [
+   "api",
+   "html",
+   "lint",
+   "reader",
+   "regexp",
+   "schema",
+   "uri",
+   "valid",
+   "xinclude",
+   "xml",
+   "xpath"
+  ]
+ },
+ "timings": [
+  {
+   "step": "build_image",
+   "seconds": 14,
+   "rc": 0,
+   "command": "python3 /home/ze/fb-graphs/build/lx-delta-02/fuzz-tooling/infra/helper.py build_image --no-pull libxml2"
+  },
+  {
+   "step": "build_bitcode",
+   "seconds": 124,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -e SANITIZER_FLAGS=-flto -g -fno-inline-functions -fuse-ld=gold -Wno-unused-command-line-argument -e AR=llvm-ar -e NM=llvm-nm -e RANLIB=llvm-ranlib -v /home/ze/fb-graphs/build/lx-delta-02/repo-bitcode:/src/libxml2 -v /home/ze/fb-graphs/build/lx-delta-02/out:/out -v /home/ze/fb-graphs/build/lx-delta-02/work:/work aixcc-afc/libxml2:latest bash -c compile 2>&1 | tail -40; mkdir -p /out/bc"
+  },
+  {
+   "step": "to_ll",
+   "seconds": 10,
+   "rc": 0,
+   "command": "docker run --rm -v /home/ze/fb-graphs/build/lx-delta-02/out:/out -v /home/ze/fb-graphs/build/lx-delta-02/repo-bitcode:/src/libxml2 -v /home/ze/fb-graphs/build/lx-delta-02/work:/work -v /home/ze/fb-graphs/build/lx-delta-02/ll:/ll aixcc-afc/libxml2:latest bash -c "
+  },
+  {
+   "step": "extract_xml",
+   "seconds": 3,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  }
+ ]
+}

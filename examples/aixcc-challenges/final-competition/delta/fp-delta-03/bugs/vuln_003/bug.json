@@ -1,0 +1,59 @@
+{
+ "challenge": "fp-delta-03",
+ "bug": "vuln_003",
+ "harness": "TestFuzzCodecs",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-123"
+  ],
+  "crash_type": "SEGV",
+  "expected_types": null,
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "libfreerdp/codec/rfx.c"
+  ],
+  "patch_files": [
+   "libfreerdp/codec/rfx.c"
+  ],
+  "crash_file": "/src/FreeRDP/libfreerdp/codec/rfx.c:734",
+  "crash_line": "26",
+  "stack_files": [
+   "/src/FreeRDP/libfreerdp/codec/rfx.c",
+   "/src/FreeRDP/libfreerdp/codec/test/TestFuzzCodecs.c",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-123"
+ ],
+ "name": "Arbitrary memory writing within rfx_process metadata",
+ "blob": "data.bin",
+ "blob_bytes": 137,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/TestFuzzCodecs",
+  "coverage": "bin/coverage/TestFuzzCodecs"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "SEGV",
+  "top_frames": [
+   "rfx_process_message_metadata",
+   "rfx_process_message",
+   "TestFreeRDPCodecRemoteFX",
+   "LLVMFuzzerTestOneInput",
+   "_start"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/freerdp:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

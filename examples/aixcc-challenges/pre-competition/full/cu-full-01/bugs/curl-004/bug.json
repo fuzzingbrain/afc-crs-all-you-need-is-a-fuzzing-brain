@@ -1,0 +1,71 @@
+{
+ "challenge": "cu-full-01",
+ "bug": "curl-004",
+ "harness": "curl_fuzzer",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-787"
+  ],
+  "crash_type": "stack-buffer-overflow",
+  "expected_types": [
+   "dynamic-stack-buffer-overflow",
+   "global-buffer-overflow",
+   "heap-buffer-overflow",
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "lib/file.c"
+  ],
+  "patch_files": [
+   "lib/file.c"
+  ],
+  "patch_functions": [
+   "file_do"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/curl/lib/mprintf.c:1058",
+  "crash_line": "22",
+  "stack_files": [
+   "/src/curl/lib/file.c",
+   "/src/curl/lib/mprintf.c",
+   "/src/curl/lib/multi.c",
+   "/src/curl_fuzzer/curl_fuzzer.cc",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-787"
+ ],
+ "name": "FILE out-of-bounds write",
+ "blob": "test_file_nobody",
+ "blob_bytes": 40,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/curl_fuzzer",
+  "coverage": "bin/coverage/curl_fuzzer"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "stack-buffer-overflow",
+  "top_frames": [
+   "addbyter",
+   "formatf",
+   "curl_mvsnprintf",
+   "curl_msnprintf",
+   "file_do",
+   "multi_do"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/curl:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

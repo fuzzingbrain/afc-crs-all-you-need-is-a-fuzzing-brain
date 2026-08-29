@@ -1,0 +1,165 @@
+{
+ "challenge": "cu-delta-03",
+ "round": "final-competition",
+ "scan_mode": "delta",
+ "project": "curl",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-curl.git",
+  "checkout_ref": "challenges/cu-delta-03",
+  "resolved_commit": "4ed36be578ba5e66d2a4479cc63b6c71f53a537c"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/cu-delta-03",
+  "project": "curl"
+ },
+ "image": "aixcc-afc/curl:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "curl_fuzzer_ws"
+ ],
+ "target_harnesses": [
+  "curl_fuzzer_ws"
+ ],
+ "graphs": {
+  "curl_fuzzer_ws": "mongodb"
+ },
+ "counts": {
+  "curl_fuzzer_ws": {
+   "functions": 2803,
+   "nodes": 2416
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "cu-delta-03",
+  "ok": true,
+  "harnesses": {
+   "curl_fuzzer_ws": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "curl-007": {
+      "patched_files": [
+       "lib/alliswellprotocoll.c"
+      ],
+      "vuln_functions": [
+       "alliswellprotocoll_sm"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [],
+      "V1_has_node_with_body": [
+       "alliswellprotocoll_sm"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "curl_multi_perform",
+       "multi_runsingle",
+       "multi_do_more",
+       "alliswellprotocoll_sm"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "lib/alliswellprotocoll.c"
+      ],
+      "V3_body_has_patched_text": [
+       "alliswellprotocoll_sm"
+      ]
+     }
+    },
+    "nodes": 2416,
+    "functions": 2803,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "curl-007": {
+   "harness": "curl_fuzzer_ws",
+   "crash": "SEGV",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "curl_fuzzer",
+   "curl_fuzzer_bufq",
+   "curl_fuzzer_dict",
+   "curl_fuzzer_file",
+   "curl_fuzzer_ftp",
+   "curl_fuzzer_gopher",
+   "curl_fuzzer_http",
+   "curl_fuzzer_https",
+   "curl_fuzzer_imap",
+   "curl_fuzzer_mqtt",
+   "curl_fuzzer_pop3",
+   "curl_fuzzer_rtsp",
+   "curl_fuzzer_smb",
+   "curl_fuzzer_smtp",
+   "curl_fuzzer_tftp",
+   "curl_fuzzer_ws",
+   "fuzz_url"
+  ],
+  "coverage": [
+   "curl_fuzzer",
+   "curl_fuzzer_bufq",
+   "curl_fuzzer_dict",
+   "curl_fuzzer_file",
+   "curl_fuzzer_ftp",
+   "curl_fuzzer_gopher",
+   "curl_fuzzer_http",
+   "curl_fuzzer_https",
+   "curl_fuzzer_imap",
+   "curl_fuzzer_mqtt",
+   "curl_fuzzer_pop3",
+   "curl_fuzzer_rtsp",
+   "curl_fuzzer_smb",
+   "curl_fuzzer_smtp",
+   "curl_fuzzer_tftp",
+   "curl_fuzzer_ws",
+   "fuzz_url"
+  ]
+ },
+ "timings": [
+  {
+   "step": "build_image",
+   "seconds": 171,
+   "rc": 0,
+   "command": "python3 /home/ze/fb-graphs/build/cu-delta-03/fuzz-tooling/infra/helper.py build_image --no-pull curl"
+  },
+  {
+   "step": "build_bitcode",
+   "seconds": 49,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -e SANITIZER_FLAGS=-flto -g -fno-inline-functions -fuse-ld=gold -Wno-unused-command-line-argument -e AR=llvm-ar -e NM=llvm-nm -e RANLIB=llvm-ranlib -v /home/ze/fb-graphs/build/cu-delta-03/repo-bitcode:/src/curl -v /home/ze/fb-graphs/build/cu-delta-03/out:/out -v /home/ze/fb-graphs/build/cu-delta-03/work:/work aixcc-afc/curl:latest bash -c compile 2>&1 | tail -40; mkdir -p /out/bc"
+  },
+  {
+   "step": "to_ll",
+   "seconds": 20,
+   "rc": 0,
+   "command": "docker run --rm -v /home/ze/fb-graphs/build/cu-delta-03/out:/out -v /home/ze/fb-graphs/build/cu-delta-03/repo-bitcode:/src/curl -v /home/ze/fb-graphs/build/cu-delta-03/work:/work -v /home/ze/fb-graphs/build/cu-delta-03/ll:/ll aixcc-afc/curl:latest bash -c "
+  },
+  {
+   "step": "extract_curl_fuzzer_ws",
+   "seconds": 5,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  }
+ ]
+}

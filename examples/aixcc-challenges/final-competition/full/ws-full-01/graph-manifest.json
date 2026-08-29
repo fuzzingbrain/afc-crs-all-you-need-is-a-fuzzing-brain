@@ -1,0 +1,507 @@
+{
+ "challenge": "ws-full-01",
+ "round": "final-competition",
+ "scan_mode": "full",
+ "project": "wireshark",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-wireshark.git",
+  "checkout_ref": "challenges/ws-full-01",
+  "resolved_commit": "75ffccb4609488bcafe91d5652e31c27ad68d934"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/ws-full-01",
+  "project": "wireshark"
+ },
+ "image": "aixcc-afc/wireshark:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "handler_aim",
+  "handler_bat.vis",
+  "handler_netbios",
+  "handler_openvpn.udp",
+  "handler_telnet",
+  "handler_zbee_zdp"
+ ],
+ "target_harnesses": [
+  "handler_aim",
+  "handler_bat.vis",
+  "handler_netbios",
+  "handler_openvpn.udp",
+  "handler_telnet",
+  "handler_zbee_zdp"
+ ],
+ "graphs": {
+  "handler_aim": "mongodb",
+  "handler_bat.vis": "mongodb/handler_bat.vis",
+  "handler_netbios": "mongodb/handler_netbios",
+  "handler_openvpn.udp": "mongodb/handler_openvpn.udp",
+  "handler_telnet": "mongodb/handler_telnet",
+  "handler_zbee_zdp": "mongodb/handler_zbee_zdp"
+ },
+ "counts": {
+  "handler_aim": {
+   "functions": 95386,
+   "nodes": 93303
+  },
+  "handler_bat.vis": {
+   "functions": 95385,
+   "nodes": 93302
+  },
+  "handler_netbios": {
+   "functions": 95384,
+   "nodes": 93301
+  },
+  "handler_openvpn.udp": {
+   "functions": 95384,
+   "nodes": 93301
+  },
+  "handler_telnet": {
+   "functions": 95386,
+   "nodes": 93303
+  },
+  "handler_zbee_zdp": {
+   "functions": 95384,
+   "nodes": 93301
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "ws-full-01",
+  "ok": true,
+  "harnesses": {
+   "handler_aim": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "vuln_011": {
+      "patched_files": [
+       "epan/dissectors/packet-aim.c"
+      ],
+      "vuln_functions": [
+       "aim_get_buddyname",
+       "aim_get_message"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "aim_get_buddyname"
+      ],
+      "V1_has_node_with_body": [
+       "aim_get_buddyname",
+       "aim_get_message"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "epan_dissect_run",
+       "dissect_record",
+       "call_dissector_work",
+       "call_dissector_through_handle",
+       "dissect_aim",
+       "tcp_dissect_pdus",
+       "dissect_aim_pdu",
+       "dissect_aim_snac",
+       "dissect_aim_chat_outgoing_msg",
+       "aim_get_buddyname"
+      ],
+      "V2_path_quality": "verified",
+      "V3_shape": "adds-only",
+      "V3_per_file": [
+       "epan/dissectors/packet-aim.c"
+      ],
+      "V3_body_has_patched_text": [
+       "aim_get_buddyname",
+       "aim_get_message"
+      ]
+     }
+    },
+    "nodes": 93303,
+    "functions": 95386,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   },
+   "handler_bat.vis": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "vuln_005": {
+      "patched_files": [
+       "epan/dissectors/packet-bat.c"
+      ],
+      "vuln_functions": [
+       "dissect_bat_vis_v24"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "dissect_bat_vis_v24"
+      ],
+      "V1_has_node_with_body": [
+       "dissect_bat_vis_v24"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "epan_dissect_run",
+       "dissect_record",
+       "call_dissector_work",
+       "call_dissector_through_handle",
+       "dissect_bat_vis",
+       "dissect_bat_vis_v24"
+      ],
+      "V2_path_quality": "verified",
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "epan/dissectors/packet-bat.c"
+      ],
+      "V3_body_has_patched_text": [
+       "dissect_bat_vis_v24"
+      ]
+     }
+    },
+    "nodes": 93302,
+    "functions": 95385,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   },
+   "handler_netbios": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "vuln_010": {
+      "patched_files": [
+       "epan/dissectors/packet-netbios.c"
+      ],
+      "vuln_functions": [
+       "dissect_netb_terminate_trace"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "dissect_netb_terminate_trace"
+      ],
+      "V1_has_node_with_body": [
+       "dissect_netb_terminate_trace"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "epan_dissect_run",
+       "dissect_record",
+       "call_dissector_work",
+       "call_dissector_through_handle",
+       "dissect_netbios",
+       "dissect_netb_terminate_trace"
+      ],
+      "V2_path_quality": "verified",
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "epan/dissectors/packet-netbios.c"
+      ],
+      "V3_body_has_patched_text": [
+       "dissect_netb_terminate_trace"
+      ]
+     }
+    },
+    "nodes": 93301,
+    "functions": 95384,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   },
+   "handler_openvpn.udp": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "vuln_001": {
+      "patched_files": [
+       "epan/dissectors/packet-openvpn.c"
+      ],
+      "vuln_functions": [
+       "dissect_openvpn_msg_common"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "dissect_openvpn_msg_common"
+      ],
+      "V1_has_node_with_body": [
+       "dissect_openvpn_msg_common"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "epan_dissect_run",
+       "dissect_record",
+       "call_dissector_work",
+       "call_dissector_through_handle",
+       "dissect_openvpn_msg_common"
+      ],
+      "V2_path_quality": "verified",
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "epan/dissectors/packet-openvpn.c"
+      ],
+      "V3_body_has_patched_text": [
+       "dissect_openvpn_msg_common"
+      ]
+     }
+    },
+    "nodes": 93301,
+    "functions": 95384,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   },
+   "handler_telnet": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "vuln_002": {
+      "patched_files": [
+       "epan/dissectors/packet-telnet.c"
+      ],
+      "vuln_functions": [
+       "dissect_linemode_subopt"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [],
+      "V1_has_node_with_body": [
+       "dissect_linemode_subopt"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "epan_dissect_run",
+       "dissect_record",
+       "call_dissector_work",
+       "dissect_telnet",
+       "dissect_linemode_subopt"
+      ],
+      "V2_path_quality": "verified",
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "epan/dissectors/packet-telnet.c"
+      ],
+      "V3_body_has_patched_text": [
+       "dissect_linemode_subopt"
+      ]
+     }
+    },
+    "nodes": 93303,
+    "functions": 95386,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   },
+   "handler_zbee_zdp": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "vuln_012": {
+      "patched_files": [
+       "epan/dissectors/packet-zbee-zdp-management.c"
+      ],
+      "vuln_functions": [
+       "dissect_zbee_zdp_req_mgmt_nwk_disc"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "dissect_zbee_zdp_req_mgmt_nwk_disc"
+      ],
+      "V1_has_node_with_body": [
+       "dissect_zbee_zdp_req_mgmt_nwk_disc"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "epan_dissect_run",
+       "dissect_record",
+       "call_dissector_work",
+       "call_dissector_through_handle",
+       "dissect_zbee_zdp",
+       "dissect_zbee_zdp_req_mgmt_nwk_disc"
+      ],
+      "V2_path_quality": "verified",
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "epan/dissectors/packet-zbee-zdp-management.c"
+      ],
+      "V3_body_has_patched_text": [
+       "dissect_zbee_zdp_req_mgmt_nwk_disc"
+      ]
+     }
+    },
+    "nodes": 93301,
+    "functions": 95384,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "vuln_001": {
+   "harness": "handler_openvpn.udp",
+   "crash": "stack-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "vuln_002": {
+   "harness": "handler_telnet",
+   "crash": "heap-use-after-free",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "vuln_005": {
+   "harness": "handler_bat.vis",
+   "crash": "SEGV",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "vuln_010": {
+   "harness": "handler_netbios",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "vuln_011": {
+   "harness": "handler_aim",
+   "crash": "ABRT",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "vuln_012": {
+   "harness": "handler_zbee_zdp",
+   "crash": "SEGV",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "handler_aim",
+   "handler_bat.vis",
+   "handler_netbios",
+   "handler_openvpn.udp",
+   "handler_telnet",
+   "handler_zbee_zdp"
+  ],
+  "coverage": [
+   "handler_aim",
+   "handler_bat.vis",
+   "handler_netbios",
+   "handler_openvpn.udp",
+   "handler_telnet",
+   "handler_zbee_zdp"
+  ]
+ },
+ "timings": [
+  {
+   "step": "clone_repo",
+   "seconds": 41,
+   "rc": 0,
+   "command": "git clone --quiet --branch challenges/ws-full-01 https://github.com/AIxCyberChallenge/afc-wireshark.git /home/ze/fb-graphs/build/ws-full-01/repo"
+  },
+  {
+   "step": "clone_tooling",
+   "seconds": 13,
+   "rc": 0,
+   "command": "git clone --quiet --depth 1 --branch challenge-state/ws-full-01 https://github.com/aixcc-finals/oss-fuzz-aixcc.git /home/ze/fb-graphs/build/ws-full-01/fuzz-tooling"
+  },
+  {
+   "step": "build_address",
+   "seconds": 322,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -v /home/ze/fb-graphs/build/ws-full-01/repo-address:/src/wireshark -v /home/ze/fb-graphs/build/ws-full-01/out-address:/out -v /home/ze/fb-graphs/build/ws-full-01/work-address:/work aixcc-afc/wireshark:latest bash -c compile 2>&1 | tail -30"
+  },
+  {
+   "step": "build_coverage",
+   "seconds": 153,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=coverage -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -v /home/ze/fb-graphs/build/ws-full-01/repo-coverage:/src/wireshark -v /home/ze/fb-graphs/build/ws-full-01/out-coverage:/out -v /home/ze/fb-graphs/build/ws-full-01/work-coverage:/work aixcc-afc/wireshark:latest bash -c compile 2>&1 | tail -30"
+  },
+  {
+   "step": "build_address",
+   "seconds": 331,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -v /home/ze/fb-graphs/build/ws-full-01/repo-address:/src/wireshark -v /home/ze/fb-graphs/build/ws-full-01/out-address:/out -v /home/ze/fb-graphs/build/ws-full-01/work-address:/work aixcc-afc/wireshark:latest bash -c compile 2>&1 | tail -30"
+  },
+  {
+   "step": "build_coverage",
+   "seconds": 152,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=coverage -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -v /home/ze/fb-graphs/build/ws-full-01/repo-coverage:/src/wireshark -v /home/ze/fb-graphs/build/ws-full-01/out-coverage:/out -v /home/ze/fb-graphs/build/ws-full-01/work-coverage:/work aixcc-afc/wireshark:latest bash -c compile 2>&1 | tail -30"
+  },
+  {
+   "step": "patch_rebuild_vuln_011",
+   "seconds": 331,
+   "rc": 0,
+   "command": "compile with patch_good.diff applied"
+  },
+  {
+   "step": "patch_rebuild_vuln_012",
+   "seconds": 326,
+   "rc": 0,
+   "command": "compile with good_patch.diff applied"
+  },
+  {
+   "step": "build_bc_wrapper",
+   "seconds": 438,
+   "rc": 1,
+   "command": "bcwrap CC/CXX"
+  },
+  {
+   "step": "build_bc_wrapper",
+   "seconds": 420,
+   "rc": 1,
+   "command": "bcwrap CC/CXX"
+  }
+ ]
+}

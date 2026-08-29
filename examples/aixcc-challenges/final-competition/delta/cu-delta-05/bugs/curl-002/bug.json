@@ -1,0 +1,70 @@
+{
+ "challenge": "cu-delta-05",
+ "bug": "curl-002",
+ "harness": "curl_fuzzer_ftp",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-787"
+  ],
+  "crash_type": "global-buffer-overflow",
+  "expected_types": [
+   "dynamic-stack-buffer-overflow",
+   "global-buffer-overflow",
+   "heap-buffer-overflow",
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "lib/ftp.c"
+  ],
+  "patch_files": [
+   "lib/parsedate.c",
+   "lib/parsedate.h"
+  ],
+  "patch_functions": null,
+  "matched_by": null,
+  "crash_file": "/src/curl/lib/ftp.c:2107",
+  "crash_line": "21",
+  "stack_files": [
+   "/src/curl/lib/ftp.c",
+   "/src/curl/lib/multi.c",
+   "/src/curl/lib/pingpong.c",
+   "/src/curl_fuzzer/curl_fuzzer.cc",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-787"
+ ],
+ "name": "Leap Second Bug in FTP",
+ "blob": "data.bin",
+ "blob_bytes": 126,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/curl_fuzzer_ftp",
+  "coverage": "bin/coverage/curl_fuzzer_ftp"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "global-buffer-overflow",
+  "top_frames": [
+   "ftp_state_mdtm_resp",
+   "ftp_statemachine",
+   "Curl_pp_statemach",
+   "ftp_multi_statemach",
+   "ftp_doing",
+   "protocol_doing"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/curl:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

@@ -1,0 +1,72 @@
+{
+ "challenge": "cu-delta-04",
+ "bug": "curl-003",
+ "harness": "curl_fuzzer_http",
+ "consistency": {
+  "verdict": "inconsistent",
+  "cwes": [
+   "CWE-121"
+  ],
+  "crash_type": "SEGV",
+  "expected_types": [
+   "dynamic-stack-buffer-overflow",
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": false,
+  "vuln_yaml_files": [
+   "lib/http.c",
+   "lib/request.h"
+  ],
+  "patch_files": [
+   "lib/http.c"
+  ],
+  "patch_functions": [
+   "Curl_http_header"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/curl/lib/doh.c:1410",
+  "crash_line": "30",
+  "stack_files": [
+   "/src/curl/lib/doh.c",
+   "/src/curl/lib/multi.c",
+   "/src/curl/lib/request.c",
+   "/src/curl_fuzzer/curl_fuzzer.cc",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": false
+ },
+ "cwes": [
+  "CWE-121"
+ ],
+ "name": "HTTP Header-Parsing Stack Buffer Overflow",
+ "blob": "data.bin",
+ "blob_bytes": 371,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/curl_fuzzer_http",
+  "coverage": "bin/coverage/curl_fuzzer_http"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "SEGV",
+  "top_frames": [
+   "Curl_doh_close",
+   "Curl_req_done",
+   "multi_done",
+   "multi_runsingle",
+   "curl_multi_perform",
+   "fuzz_handle_transfer"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/curl:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain",
+ "patch_verified": true,
+ "patch_verify_note": "clean after patch"
+}

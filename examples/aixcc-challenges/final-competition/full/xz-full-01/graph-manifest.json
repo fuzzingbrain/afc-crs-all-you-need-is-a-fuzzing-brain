@@ -1,0 +1,143 @@
+{
+ "challenge": "xz-full-01",
+ "round": "final-competition",
+ "scan_mode": "full",
+ "project": "xz",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-xz.git",
+  "checkout_ref": "challenges/xz-full-01",
+  "resolved_commit": "8701b13098b9799808f2be1dc1c428e242186bb4"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/xz-full-01",
+  "project": "xz"
+ },
+ "image": "aixcc-afc/xz:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "fuzz_encode_stream"
+ ],
+ "target_harnesses": [
+  "fuzz_encode_stream"
+ ],
+ "graphs": {
+  "fuzz_encode_stream": "mongodb"
+ },
+ "counts": {
+  "fuzz_encode_stream": {
+   "functions": 625,
+   "nodes": 467
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "xz-full-01",
+  "ok": true,
+  "harnesses": {
+   "fuzz_encode_stream": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "xz-001": {
+      "patched_files": [
+       "src/liblzma/check/treeck.c"
+      ],
+      "vuln_functions": [
+       "compute_tree_checksum"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "compute_tree_checksum"
+      ],
+      "V1_has_node_with_body": [
+       "compute_tree_checksum"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "fuzz_code",
+       "lzma_code",
+       "block_decode",
+       "lzma_check_update",
+       "lzma_tree",
+       "compute_tree_checksum"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "src/liblzma/check/treeck.c"
+      ],
+      "V3_body_has_patched_text": [
+       "compute_tree_checksum"
+      ]
+     }
+    },
+    "nodes": 467,
+    "functions": 625,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "xz-001": {
+   "harness": "fuzz_encode_stream",
+   "crash": "heap-use-after-free",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "fuzz_decode_alone",
+   "fuzz_decode_stream",
+   "fuzz_decode_stream_mt",
+   "fuzz_encode_stream"
+  ],
+  "coverage": [
+   "fuzz_decode_alone",
+   "fuzz_decode_stream",
+   "fuzz_decode_stream_mt",
+   "fuzz_encode_stream"
+  ]
+ },
+ "timings": [
+  {
+   "step": "build_image",
+   "seconds": 6,
+   "rc": 0,
+   "command": "python3 /home/ze/fb-graphs/build/xz-full-01/fuzz-tooling/infra/helper.py build_image --no-pull xz"
+  },
+  {
+   "step": "build_bitcode",
+   "seconds": 11,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -e SANITIZER_FLAGS=-flto -g -fno-inline-functions -fuse-ld=gold -Wno-unused-command-line-argument -e AR=llvm-ar -e NM=llvm-nm -e RANLIB=llvm-ranlib -v /home/ze/fb-graphs/build/xz-full-01/repo-bitcode:/src/xz -v /home/ze/fb-graphs/build/xz-full-01/out:/out -v /home/ze/fb-graphs/build/xz-full-01/work:/work aixcc-afc/xz:latest bash -c compile 2>&1 | tail -40; mkdir -p /out/bc"
+  },
+  {
+   "step": "to_ll",
+   "seconds": 2,
+   "rc": 0,
+   "command": "docker run --rm -v /home/ze/fb-graphs/build/xz-full-01/out:/out -v /home/ze/fb-graphs/build/xz-full-01/repo-bitcode:/src/xz -v /home/ze/fb-graphs/build/xz-full-01/work:/work -v /home/ze/fb-graphs/build/xz-full-01/ll:/ll aixcc-afc/xz:latest bash -c "
+  },
+  {
+   "step": "extract_fuzz_encode_stream",
+   "seconds": 0,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  }
+ ]
+}

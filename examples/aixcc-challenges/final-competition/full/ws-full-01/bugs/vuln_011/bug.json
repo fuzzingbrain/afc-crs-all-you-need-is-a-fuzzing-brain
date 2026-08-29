@@ -1,0 +1,79 @@
+{
+ "challenge": "ws-full-01",
+ "bug": "vuln_011",
+ "harness": "handler_aim",
+ "consistency": {
+  "verdict": "site_match_cwe_label_differs",
+  "cwes": [
+   "CWE-121",
+   "CWE-122",
+   "CWE-680"
+  ],
+  "crash_type": "ABRT",
+  "expected_types": [
+   "dynamic-stack-buffer-overflow",
+   "heap-buffer-overflow",
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": false,
+  "vuln_yaml_files": [
+   "epan/dissectors/packet-aim.c"
+  ],
+  "patch_files": [
+   "epan/dissectors/packet-aim.c"
+  ],
+  "patch_functions": [
+   "aim_get_buddyname"
+  ],
+  "matched_by": null,
+  "crash_file": null,
+  "crash_line": null,
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/wireshark/epan/dissectors/packet-aim.c",
+   "/src/wireshark/epan/dissectors/packet-frame.c",
+   "/src/wireshark/epan/dissectors/packet-tcp.c",
+   "/src/wireshark/epan/epan.c",
+   "/src/wireshark/epan/packet.c",
+   "/src/wireshark/fuzz/fuzzshark.c",
+   "/usr/include/x86_64-linux-gnu/bits/string_fortified.h"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-121",
+  "CWE-122",
+  "CWE-680"
+ ],
+ "name": "Can I be your AIM buddy?",
+ "blob": "blob",
+ "blob_bytes": 225,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/handler_aim",
+  "coverage": "bin/coverage/handler_aim"
+ },
+ "reference_patch": "patch_good.diff",
+ "expected_crash": {
+  "type": "ABRT",
+  "top_frames": [
+   "raise",
+   "abort",
+   "memcpy",
+   "aim_get_buddyname",
+   "dissect_aim_chat_outgoing_msg",
+   "dissect_aim_snac"
+  ],
+  "site": null
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/wireshark:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain",
+ "patch_verified": true,
+ "patch_verify_note": "clean after patch"
+}

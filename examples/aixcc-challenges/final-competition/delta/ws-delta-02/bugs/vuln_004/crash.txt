@@ -1,0 +1,90 @@
+oss-fuzzshark: disabling: ip
+oss-fuzzshark: disabling: udp
+oss-fuzzshark: disabling: udplite
+oss-fuzzshark: disabling: ospf
+oss-fuzzshark: disabling: bgp
+oss-fuzzshark: disabling: dhcp
+oss-fuzzshark: disabling: json
+oss-fuzzshark: disabling: snort
+oss-fuzzshark: configured for dissector: icmp
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2123567120
+INFO: Loaded 1 modules   (420438 inline 8-bit counters): 420438 [0xa9f3f00, 0xaa5a956), 
+INFO: Loaded 1 PC tables (420438 PCs): 420438 [0xaa5a958,0xb0c4eb8), 
+/b/bin/address/handler_icmp: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7f6f31081aa0 at pc 0x000005070b64 bp 0x7ffdfaefa890 sp 0x7ffdfaefa050
+WRITE of size 256 at 0x7f6f31081aa0 thread T0
+SCARINESS: 60 (multi-byte-write-stack-buffer-overflow)
+    #0 0x5070b63 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:63:3
+    #1 0x7980fda in memcpy /usr/include/x86_64-linux-gnu/bits/string_fortified.h:34:10
+    #2 0x7980fda in tvb_memcpy /src/wireshark/epan/tvbuff.c:945:10
+    #3 0x6c1eba9 in dissect_interface_identification_object /src/wireshark/epan/dissectors/packet-icmp.c:927:4
+    #4 0x6c1eba9 in dissect_icmp_extension /src/wireshark/epan/dissectors/packet-icmp.c:1092:8
+    #5 0x6c1b989 in dissect_icmp /src/wireshark/epan/dissectors/packet-icmp.c
+    #6 0x5b84ebd in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #7 0x5b84ebd in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #8 0x5b8fb14 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #9 0x5b8fb14 in call_all_postdissectors /src/wireshark/epan/packet.c:4166:3
+    #10 0x544aac7 in dissect_frame /src/wireshark/epan/dissectors/packet-frame.c:1438:5
+    #11 0x5b84ebd in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #12 0x5b84ebd in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #13 0x5b809b7 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #14 0x5b809b7 in call_dissector_with_data /src/wireshark/epan/packet.c:3634:8
+    #15 0x5b809b7 in dissect_record /src/wireshark/epan/packet.c:687:3
+    #16 0x52bd530 in epan_dissect_run /src/wireshark/epan/epan.c:666:2
+    #17 0x50b3f48 in LLVMFuzzerTestOneInput /src/wireshark/fuzz/fuzzshark.c:359:2
+    #18 0x4f66c20 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #19 0x4f51245 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #20 0x4f56cdf in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #21 0x4f82bd2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #22 0x7f6f31848082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #23 0x4f4942d in _start (/b/bin/address/handler_icmp+0x4f4942d)
+
+DEDUP_TOKEN: __asan_memcpy--memcpy--tvb_memcpy
+Address 0x7f6f31081aa0 is located in stack of thread T0 at offset 160 in frame
+    #0 0x6c1dbaf in dissect_icmp_extension /src/wireshark/epan/dissectors/packet-icmp.c:971
+
+DEDUP_TOKEN: dissect_icmp_extension
+  This frame has 5 object(s):
+    [32, 160) 'ident_name.i' (line 902)
+    [192, 196) 'afi.i' (line 904) <== Memory access at offset 160 partially underflows this variable
+    [208, 212) 'addr_length.i' (line 905) <== Memory access at offset 160 partially underflows this variable
+    [224, 232) 'tf_entry.i' (line 671) <== Memory access at offset 160 partially underflows this variable
+    [256, 264) 'tf_object' (line 977) <== Memory access at offset 160 partially underflows this variable
+HINT: this may be a false positive if your program uses some custom stack unwind mechanism, swapcontext or vfork
+      (longjmp and C++ exceptions *are* supported)
+SUMMARY: AddressSanitizer: stack-buffer-overflow /usr/include/x86_64-linux-gnu/bits/string_fortified.h:34:10 in memcpy
+Shadow bytes around the buggy address:
+  0x7f6f31081800: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7f6f31081880: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7f6f31081900: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7f6f31081980: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7f6f31081a00: f1 f1 f1 f1 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x7f6f31081a80: 00 00 00 00[f2]f2 f2 f2 04 f2 04 f2 f8 f2 f2 f2
+  0x7f6f31081b00: 00 f3 f3 f3 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7f6f31081b80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7f6f31081c00: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7f6f31081c80: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7f6f31081d00: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING

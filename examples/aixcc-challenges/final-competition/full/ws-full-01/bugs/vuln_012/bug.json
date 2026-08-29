@@ -1,0 +1,72 @@
+{
+ "challenge": "ws-full-01",
+ "bug": "vuln_012",
+ "harness": "handler_zbee_zdp",
+ "consistency": {
+  "verdict": "site_match_cwe_label_differs",
+  "cwes": [
+   "CWE-457"
+  ],
+  "crash_type": "SEGV",
+  "expected_types": [
+   "use-of-uninitialized-value"
+  ],
+  "cwe_consistent": false,
+  "vuln_yaml_files": [
+   "epan/dissectors/packet-zbee-zdp-management.c"
+  ],
+  "patch_files": [
+   "epan/dissectors/packet-zbee-zdp-management.c"
+  ],
+  "patch_functions": [
+   "dissect_zbee_zdp_req_mgmt_nwk_disc"
+  ],
+  "matched_by": null,
+  "crash_file": null,
+  "crash_line": null,
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/wireshark/epan/dissectors/packet-frame.c",
+   "/src/wireshark/epan/dissectors/packet-zbee-zdp-management.c",
+   "/src/wireshark/epan/dissectors/packet-zbee-zdp.c",
+   "/src/wireshark/epan/epan.c",
+   "/src/wireshark/epan/packet.c",
+   "/src/wireshark/fuzz/fuzzshark.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-457"
+ ],
+ "name": "Zigg before Free",
+ "blob": "blob.bin",
+ "blob_bytes": 1029,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/handler_zbee_zdp",
+  "coverage": "bin/coverage/handler_zbee_zdp"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "SEGV",
+  "top_frames": [
+   "dissect_zbee_zdp_req_mgmt_nwk_disc",
+   "dissect_zbee_zdp",
+   "call_dissector_through_handle",
+   "call_dissector_work",
+   "call_dissector_only",
+   "call_all_postdissectors"
+  ],
+  "site": null
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/wireshark:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain",
+ "patch_verified": true,
+ "patch_verify_note": "clean after patch"
+}

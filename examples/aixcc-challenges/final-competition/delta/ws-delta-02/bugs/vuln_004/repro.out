@@ -1,0 +1,3 @@
+==7==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7ff5eca81aa0 at pc 0x000005070b64 bp 0x7ffcde7817d0 sp 0x7ffcde780f90
+SUMMARY: AddressSanitizer: stack-buffer-overflow /usr/include/x86_64-linux-gnu/bits/string_fortified.h:34:10 in memcpy
+OK: vuln_004 reproduced (stack-buffer-overflow)

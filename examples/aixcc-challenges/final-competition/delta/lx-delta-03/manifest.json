@@ -1,69 +1,87 @@
 {
-  "challenge": "lx-delta-03",
-  "challenge_name": "registration rotate",
-  "round": "final-competition",
-  "scan_mode": "delta",
-  "challenge_type": "delta     # full | delta",
-  "language": {
-    "libxml2": "c"
-  },
-  "oss_fuzz_projects": [
-    "libxml2"
-  ],
-  "source": {
-    "repo": "https://github.com/AIxCyberChallenge/afc-libxml2.git",
-    "branch": "challenges/lx-delta-03",
-    "public": true,
-    "resolved": true
-  },
-  "fuzz_tooling": {
-    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/lx-delta-03",
-    "project": "libxml2"
-  },
-  "base_ref": "40bcc1944c83b15f8647ec0b6ff1d7c440d53a40",
-  "delta_ref": "challenges/lx-delta-03",
+ "challenge": "lx-delta-03",
+ "challenge_name": "registration rotate",
+ "round": "final-competition",
+ "scan_mode": "delta",
+ "challenge_type": "delta     # full | delta",
+ "language": {
+  "libxml2": "c"
+ },
+ "oss_fuzz_projects": [
+  "libxml2"
+ ],
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-libxml2.git",
+  "branch": "challenges/lx-delta-03",
+  "public": true,
+  "resolved": true
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/lx-delta-03",
+  "project": "libxml2"
+ },
+ "base_ref": "40bcc1944c83b15f8647ec0b6ff1d7c440d53a40",
+ "delta_ref": "challenges/lx-delta-03",
+ "harnesses": [
+  "api",
+  "html",
+  "lint",
+  "reader",
+  "regexp",
+  "schema",
+  "uri",
+  "valid",
+  "xinclude",
+  "xml",
+  "xpath"
+ ],
+ "harness_count": 11,
+ "vulnerabilities": [
+  "vuln_004"
+ ],
+ "answers": {
+  "vuln_dirs": 1,
+  "pov_blobs": 1,
+  "reference_patches": 1,
+  "has_answers": true
+ },
+ "graph": {
+  "path": "mongodb",
+  "producer": "llvm-ir",
   "harnesses": [
-    "api",
-    "html",
-    "lint",
-    "reader",
-    "regexp",
-    "schema",
-    "uri",
-    "valid",
-    "xinclude",
-    "xml",
-    "xpath"
+   "html"
   ],
-  "harness_count": 11,
-  "vulnerabilities": [
-    "vuln_004"
-  ],
-  "answers": {
-    "vuln_dirs": 1,
-    "pov_blobs": 1,
-    "reference_patches": 1,
-    "has_answers": true
-  },
-  "graph": null,
-  "vuln_details": [
-    {
-      "vuln": "vuln_004",
-      "name": "Heap Based Buffer Overflow in UTF-32 implementation.",
-      "cwes": [
-        "CWE-122"
-      ],
-      "pov_harness": "html",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "trigger.xml",
-      "reference_patch": "good_patch.diff"
-    }
-  ],
-  "target_harnesses": [
-    "html"
-  ],
-  "target_harness_count": 1,
-  "target_harnesses_not_in_challenge_yaml": []
+  "verified": true
+ },
+ "vuln_details": [
+  {
+   "vuln": "vuln_004",
+   "name": "Heap Based Buffer Overflow in UTF-32 implementation.",
+   "cwes": [
+    "CWE-122"
+   ],
+   "pov_harness": "html",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "trigger.xml",
+   "reference_patch": "good_patch.diff"
+  }
+ ],
+ "target_harnesses": [
+  "html"
+ ],
+ "target_harness_count": 1,
+ "target_harnesses_not_in_challenge_yaml": [],
+ "bugs": {
+  "vuln_004": {
+   "path": "bugs/vuln_004",
+   "harness": "html",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ }
 }

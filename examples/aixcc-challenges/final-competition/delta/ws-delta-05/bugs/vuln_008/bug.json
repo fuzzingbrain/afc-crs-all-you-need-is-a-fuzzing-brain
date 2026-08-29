@@ -1,0 +1,67 @@
+{
+ "challenge": "ws-delta-05",
+ "bug": "vuln_008",
+ "harness": "handler_netbios",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-129"
+  ],
+  "crash_type": "global-buffer-overflow",
+  "expected_types": null,
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "epan/dissectors/packet-netbios.c"
+  ],
+  "patch_files": [
+   "epan/dissectors/packet-netbios.c"
+  ],
+  "patch_functions": [
+   "dissect_netbios"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/wireshark/epan/dissectors/packet-netbios.c:1144",
+  "crash_line": "16",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/wireshark/epan/dissectors/packet-frame.c",
+   "/src/wireshark/epan/dissectors/packet-netbios.c",
+   "/src/wireshark/epan/epan.c",
+   "/src/wireshark/epan/packet.c",
+   "/src/wireshark/fuzz/fuzzshark.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-129"
+ ],
+ "name": "wireshark netbios command array out of bounds access",
+ "blob": "blob.bin",
+ "blob_bytes": 6,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/handler_netbios",
+  "coverage": "bin/coverage/handler_netbios"
+ },
+ "reference_patch": "patch_good.diff",
+ "expected_crash": {
+  "type": "global-buffer-overflow",
+  "top_frames": [
+   "dissect_netbios",
+   "call_dissector_through_handle",
+   "call_dissector_work",
+   "call_dissector_only",
+   "call_all_postdissectors",
+   "dissect_frame"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/wireshark:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

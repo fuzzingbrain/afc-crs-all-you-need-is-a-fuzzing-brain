@@ -1,0 +1,149 @@
+{
+ "challenge": "ws-delta-07",
+ "round": "final-competition",
+ "scan_mode": "delta",
+ "project": "wireshark",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-wireshark.git",
+  "checkout_ref": "challenges/ws-delta-07",
+  "resolved_commit": "47b2e0e599f9bdfe22aa47ed2001782634704cee"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/ws-delta-07",
+  "project": "wireshark"
+ },
+ "image": "aixcc-afc/wireshark:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "handler_gvcp"
+ ],
+ "target_harnesses": [
+  "handler_gvcp"
+ ],
+ "graphs": {
+  "handler_gvcp": "mongodb"
+ },
+ "counts": {
+  "handler_gvcp": {
+   "functions": 95379,
+   "nodes": 93296
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "ws-delta-07",
+  "ok": true,
+  "harnesses": {
+   "handler_gvcp": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "vuln_013": {
+      "patched_files": [
+       "epan/dissectors/packet-gvcp.c"
+      ],
+      "vuln_functions": [
+       "dissect_register"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "dissect_extended_bootstrap_register",
+       "dissect_register"
+      ],
+      "V1_has_node_with_body": [
+       "dissect_register"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "epan_dissect_run",
+       "dissect_record",
+       "call_dissector_work",
+       "dissect_gvcp",
+       "dissect_register"
+      ],
+      "V3_shape": "adds-only",
+      "V3_per_file": [
+       "epan/dissectors/packet-gvcp.c"
+      ],
+      "V3_body_has_patched_text": [
+       "dissect_register"
+      ]
+     }
+    },
+    "nodes": 93296,
+    "functions": 95379,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "vuln_013": {
+   "harness": "handler_gvcp",
+   "crash": "global-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "handler_gvcp"
+  ],
+  "coverage": [
+   "handler_gvcp"
+  ]
+ },
+ "timings": [
+  {
+   "step": "clone_repo",
+   "seconds": 50,
+   "rc": 0,
+   "command": "git clone --quiet --branch challenges/ws-delta-07 https://github.com/AIxCyberChallenge/afc-wireshark.git /home/ze/fb-graphs/build/ws-delta-07/repo"
+  },
+  {
+   "step": "clone_tooling",
+   "seconds": 13,
+   "rc": 0,
+   "command": "git clone --quiet --depth 1 --branch challenge-state/ws-delta-07 https://github.com/aixcc-finals/oss-fuzz-aixcc.git /home/ze/fb-graphs/build/ws-delta-07/fuzz-tooling"
+  },
+  {
+   "step": "build_address",
+   "seconds": 323,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -v /home/ze/fb-graphs/build/ws-delta-07/repo-address:/src/wireshark -v /home/ze/fb-graphs/build/ws-delta-07/out-address:/out -v /home/ze/fb-graphs/build/ws-delta-07/work-address:/work aixcc-afc/wireshark:latest bash -c compile 2>&1 | tail -30"
+  },
+  {
+   "step": "build_coverage",
+   "seconds": 153,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=coverage -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -v /home/ze/fb-graphs/build/ws-delta-07/repo-coverage:/src/wireshark -v /home/ze/fb-graphs/build/ws-delta-07/out-coverage:/out -v /home/ze/fb-graphs/build/ws-delta-07/work-coverage:/work aixcc-afc/wireshark:latest bash -c compile 2>&1 | tail -30"
+  },
+  {
+   "step": "build_bc_wrapper",
+   "seconds": 379,
+   "rc": 1,
+   "command": "bcwrap CC/CXX"
+  },
+  {
+   "step": "build_bc_wrapper",
+   "seconds": 103,
+   "rc": 0,
+   "command": "bcwrap CC/CXX"
+  }
+ ]
+}

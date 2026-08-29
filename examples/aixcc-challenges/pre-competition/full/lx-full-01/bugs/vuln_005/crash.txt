@@ -1,0 +1,46 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2013334504
+INFO: Loaded 1 modules   (51267 inline 8-bit counters): 51267 [0x564d41934078, 0x564d419408bb), 
+INFO: Loaded 1 PC tables (51267 PCs): 51267 [0x564d419408c0,0x564d41a08cf0), 
+/b/bin/address/api: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: attempting double-free on 0x5020000000b0 in thread T0:
+SCARINESS: 42 (double-free)
+    #0 0x564d414f4f46 in free /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:52:3
+    #1 0x564d4154a1ef in LLVMFuzzerTestOneInput /src/libxml2/fuzz/api.c:3580:9
+    #2 0x564d413e9410 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #3 0x564d413d4685 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #4 0x564d413da11f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #5 0x564d414053c2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #6 0x7fd698103082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #7 0x564d413cc86d in _start (/b/bin/address/api+0x1b686d)
+
+DEDUP_TOKEN: __interceptor_free--LLVMFuzzerTestOneInput--fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long)
+0x5020000000b0 is located 0 bytes inside of 11-byte region [0x5020000000b0,0x5020000000bb)
+freed by thread T0 here:
+    #0 0x564d414f4f46 in free /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:52:3
+    #1 0x564d4154a1ef in LLVMFuzzerTestOneInput /src/libxml2/fuzz/api.c:3580:9
+    #2 0x564d413e9410 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #3 0x564d413d4685 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #4 0x564d413da11f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #5 0x564d414053c2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #6 0x7fd698103082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: __interceptor_free--LLVMFuzzerTestOneInput--fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long)
+previously allocated by thread T0 here:
+    #0 0x564d414f51df in malloc /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:68:3
+    #1 0x564d4154d0a8 in xmlFuzzMalloc /src/libxml2/fuzz/fuzz.c:127:11
+    #2 0x564d416485a4 in xmlStrndup /src/libxml2/xmlstring.c:57:11
+    #3 0x564d416485a4 in xmlStrdup /src/libxml2/xmlstring.c:82:12
+    #4 0x564d415f3058 in xmlNewComment /src/libxml2/tree.c:2583:17
+    #5 0x564d4153c54c in LLVMFuzzerTestOneInput /src/libxml2/fuzz/api.c:1339:24
+    #6 0x564d413e9410 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #7 0x564d413d4685 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #8 0x564d413da11f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #9 0x564d414053c2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #10 0x7fd698103082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: __interceptor_malloc--xmlFuzzMalloc--xmlStrndup
+SUMMARY: AddressSanitizer: double-free /src/libxml2/fuzz/api.c:3580:9 in LLVMFuzzerTestOneInput
+==7==ABORTING

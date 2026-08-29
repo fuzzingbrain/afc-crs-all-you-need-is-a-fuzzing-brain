@@ -1,0 +1,86 @@
+oss-fuzzshark: disabling: ip
+oss-fuzzshark: disabling: udp
+oss-fuzzshark: disabling: udplite
+oss-fuzzshark: disabling: ospf
+oss-fuzzshark: disabling: bgp
+oss-fuzzshark: disabling: dhcp
+oss-fuzzshark: disabling: json
+oss-fuzzshark: disabling: snort
+oss-fuzzshark: configured for dissector: openvpn.udp
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2304401499
+INFO: Loaded 1 modules   (420518 inline 8-bit counters): 420518 [0xa9f6a00, 0xaa5d4a6), 
+INFO: Loaded 1 PC tables (420518 PCs): 420518 [0xaa5d4a8,0xb0c7f08), 
+/b/bin/address/handler_openvpn.udp: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7fa653251528 at pc 0x0000050713e4 bp 0x7ffdcba55470 sp 0x7ffdcba54c30
+WRITE of size 11 at 0x7fa653251528 thread T0
+SCARINESS: 60 (multi-byte-write-stack-buffer-overflow)
+    #0 0x50713e3 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:63:3
+    #1 0x79837ca in memcpy /usr/include/x86_64-linux-gnu/bits/string_fortified.h:34:10
+    #2 0x79837ca in tvb_memcpy /src/wireshark/epan/tvbuff.c:945:10
+    #3 0x719d3d0 in dissect_openvpn_msg_common /src/wireshark/epan/dissectors/packet-openvpn.c:312:5
+    #4 0x5b8573d in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #5 0x5b8573d in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #6 0x5b90394 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #7 0x5b90394 in call_all_postdissectors /src/wireshark/epan/packet.c:4166:3
+    #8 0x544b347 in dissect_frame /src/wireshark/epan/dissectors/packet-frame.c:1438:5
+    #9 0x5b8573d in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #10 0x5b8573d in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #11 0x5b81237 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #12 0x5b81237 in call_dissector_with_data /src/wireshark/epan/packet.c:3634:8
+    #13 0x5b81237 in dissect_record /src/wireshark/epan/packet.c:687:3
+    #14 0x52bddb0 in epan_dissect_run /src/wireshark/epan/epan.c:666:2
+    #15 0x50b47c8 in LLVMFuzzerTestOneInput /src/wireshark/fuzz/fuzzshark.c:359:2
+    #16 0x4f674a0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #17 0x4f51ac5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #18 0x4f5755f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #19 0x4f83452 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #20 0x7fa653a88082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #21 0x4f49cad in _start (/b/bin/address/handler_openvpn.udp+0x4f49cad)
+
+DEDUP_TOKEN: __asan_memcpy--memcpy--tvb_memcpy
+Address 0x7fa653251528 is located in stack of thread T0 at offset 40 in frame
+    #0 0x719ccaf in dissect_openvpn_msg_common /src/wireshark/epan/dissectors/packet-openvpn.c:174
+
+DEDUP_TOKEN: dissect_openvpn_msg_common
+  This frame has 1 object(s):
+    [32, 40) 'buf' (line 185) <== Memory access at offset 40 overflows this variable
+HINT: this may be a false positive if your program uses some custom stack unwind mechanism, swapcontext or vfork
+      (longjmp and C++ exceptions *are* supported)
+SUMMARY: AddressSanitizer: stack-buffer-overflow /usr/include/x86_64-linux-gnu/bits/string_fortified.h:34:10 in memcpy
+Shadow bytes around the buggy address:
+  0x7fa653251280: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7fa653251300: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7fa653251380: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7fa653251400: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7fa653251480: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+=>0x7fa653251500: f1 f1 f1 f1 00[f3]f3 f3 00 00 00 00 00 00 00 00
+  0x7fa653251580: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fa653251600: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fa653251680: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fa653251700: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fa653251780: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING
+
+OK: vuln_001 reproduced (stack-buffer-overflow)

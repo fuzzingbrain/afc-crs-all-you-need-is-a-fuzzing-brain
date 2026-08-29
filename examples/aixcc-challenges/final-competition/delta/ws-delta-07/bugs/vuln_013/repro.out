@@ -1,0 +1,79 @@
+oss-fuzzshark: disabling: ip
+oss-fuzzshark: disabling: udp
+oss-fuzzshark: disabling: udplite
+oss-fuzzshark: disabling: ospf
+oss-fuzzshark: disabling: bgp
+oss-fuzzshark: disabling: dhcp
+oss-fuzzshark: disabling: json
+oss-fuzzshark: disabling: snort
+oss-fuzzshark: configured for dissector: gvcp
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2283191948
+INFO: Loaded 1 modules   (420446 inline 8-bit counters): 420446 [0xa9f4a80, 0xaa5b4de), 
+INFO: Loaded 1 PC tables (420446 PCs): 420446 [0xaa5b4e0,0xb0c5ac0), 
+/b/bin/address/handler_gvcp: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: global-buffer-overflow on address 0x00001187a5a0 at pc 0x000006b96b4a bp 0x7ffca8e88330 sp 0x7ffca8e88328
+WRITE of size 4 at 0x00001187a5a0 thread T0
+SCARINESS: 36 (4-byte-write-global-buffer-overflow)
+    #0 0x6b96b49 in dissect_register /src/wireshark/epan/dissectors/packet-gvcp.c:984:44
+    #1 0x6b926df in dissect_writereg_cmd /src/wireshark/epan/dissectors/packet-gvcp.c:1844:5
+    #2 0x6b926df in dissect_gvcp /src/wireshark/epan/dissectors/packet-gvcp.c:2766:4
+    #3 0x5b850fd in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #4 0x5b850fd in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #5 0x5b8fd54 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #6 0x5b8fd54 in call_all_postdissectors /src/wireshark/epan/packet.c:4166:3
+    #7 0x544ad07 in dissect_frame /src/wireshark/epan/dissectors/packet-frame.c:1438:5
+    #8 0x5b850fd in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #9 0x5b850fd in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #10 0x5b80bf7 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #11 0x5b80bf7 in call_dissector_with_data /src/wireshark/epan/packet.c:3634:8
+    #12 0x5b80bf7 in dissect_record /src/wireshark/epan/packet.c:687:3
+    #13 0x52bd770 in epan_dissect_run /src/wireshark/epan/epan.c:666:2
+    #14 0x50b4188 in LLVMFuzzerTestOneInput /src/wireshark/fuzz/fuzzshark.c:359:2
+    #15 0x4f66e60 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #16 0x4f51485 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #17 0x4f56f1f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #18 0x4f82e12 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #19 0x7f5ef6239082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #20 0x4f4966d in _start (/b/bin/address/handler_gvcp+0x4f4966d)
+
+DEDUP_TOKEN: dissect_register--dissect_writereg_cmd--dissect_gvcp
+0x00001187a5a0 is located 32 bytes before global variable 'gvcp_register_value' defined in '/src/wireshark/epan/dissectors/packet-gvcp.c:282' (0x1187a5c0) of size 64
+0x00001187a5a0 is located 0 bytes after global variable 'gvcp_register_number' defined in '/src/wireshark/epan/dissectors/packet-gvcp.c:281' (0x1187a560) of size 64
+SUMMARY: AddressSanitizer: global-buffer-overflow /src/wireshark/epan/dissectors/packet-gvcp.c:984:44 in dissect_register
+Shadow bytes around the buggy address:
+  0x00001187a300: 04 f9 f9 f9 04 f9 f9 f9 04 f9 f9 f9 04 f9 f9 f9
+  0x00001187a380: 04 f9 f9 f9 04 f9 f9 f9 04 f9 f9 f9 00 f9 f9 f9
+  0x00001187a400: 00 f9 f9 f9 00 f9 f9 f9 04 f9 f9 f9 00 f9 f9 f9
+  0x00001187a480: 00 f9 f9 f9 00 f9 f9 f9 00 f9 f9 f9 00 f9 f9 f9
+  0x00001187a500: 00 f9 f9 f9 04 f9 f9 f9 04 f9 f9 f9 00 00 00 00
+=>0x00001187a580: 00 00 00 00[f9]f9 f9 f9 00 00 00 00 00 00 00 00
+  0x00001187a600: f9 f9 f9 f9 00 f9 f9 f9 04 f9 f9 f9 04 f9 f9 f9
+  0x00001187a680: 04 f9 f9 f9 04 f9 f9 f9 04 f9 f9 f9 04 f9 f9 f9
+  0x00001187a700: 04 f9 f9 f9 04 f9 f9 f9 04 f9 f9 f9 04 f9 f9 f9
+  0x00001187a780: 04 f9 f9 f9 04 f9 f9 f9 04 f9 f9 f9 04 f9 f9 f9
+  0x00001187a800: 04 f9 f9 f9 04 f9 f9 f9 04 f9 f9 f9 04 f9 f9 f9
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING
+
+OK: vuln_013 reproduced (global-buffer-overflow)

@@ -1,0 +1,71 @@
+{
+ "challenge": "av-delta-02",
+ "bug": "avif-002",
+ "harness": "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-126"
+  ],
+  "crash_type": "dynamic-stack-buffer-overflow",
+  "expected_types": [
+   "dynamic-stack-buffer-overflow",
+   "global-buffer-overflow",
+   "heap-buffer-overflow",
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "src/reformat.c"
+  ],
+  "patch_files": [
+   "src/reformat.c"
+  ],
+  "patch_functions": [
+   "avifImageYUVAnyToRGBAnySlow"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/libavif/src/reformat.c:812",
+  "crash_line": "46",
+  "stack_files": [
+   "/src/libavif/build/_deps/googletest-src/googletest/include/gtest/gtest.h",
+   "/src/libavif/build/_deps/googletest-src/googletest/src/gtest.cc",
+   "/src/libavif/ext/fuzztest/./fuzztest/internal/googletest_adaptor.h",
+   "/src/libavif/ext/fuzztest/fuzztest/fuzztest_gtest_main.cc",
+   "/src/libavif/src/reformat.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-126"
+ ],
+ "name": "chroma_spill",
+ "blob": "data.bin",
+ "blob_bytes": 14774,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+  "coverage": "bin/coverage/avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "dynamic-stack-buffer-overflow",
+  "top_frames": [
+   "avifImageYUVAnyToRGBAnySlow",
+   "avifImageYUVToRGBImpl",
+   "avifImageYUVToRGB",
+   "avif::testutil::",
+   "auto",
+   "decltype"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/libavif:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

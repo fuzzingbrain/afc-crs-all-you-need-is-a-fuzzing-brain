@@ -1,0 +1,62 @@
+{
+ "challenge": "fp-full-01",
+ "bug": "vuln_005",
+ "harness": "TestFuzzCoreServer",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-94"
+  ],
+  "crash_type": "SEGV",
+  "expected_types": null,
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "libfreerdp/core/mcs.c"
+  ],
+  "patch_files": [
+   "libfreerdp/core/mcs.c"
+  ],
+  "patch_functions": [
+   "mcs_recv_connect_response"
+  ],
+  "matched_by": null,
+  "crash_file": null,
+  "crash_line": null,
+  "stack_files": [
+   "/src/FreeRDP/libfreerdp/core/freerdp.c",
+   "/src/FreeRDP/libfreerdp/core/test/TestFuzzCoreServer.c",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": null
+ },
+ "cwes": [
+  "CWE-94"
+ ],
+ "name": "FreeRDP Obfuscated Arbitrary Code Execution",
+ "blob": "data.bin",
+ "blob_bytes": 52,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/TestFuzzCoreServer",
+  "coverage": "bin/coverage/TestFuzzCoreServer"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "SEGV",
+  "top_frames": [
+   "test_server",
+   "LLVMFuzzerTestOneInput"
+  ],
+  "site": null
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/freerdp:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain",
+ "patch_verified": true,
+ "patch_verify_note": "clean after patch"
+}

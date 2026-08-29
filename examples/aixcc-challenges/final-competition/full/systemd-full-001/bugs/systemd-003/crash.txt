@@ -1,0 +1,81 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2247257383
+INFO: Loaded 2 modules   (94616 inline 8-bit counters): 94611 [0x7fd3b65dd920, 0x7fd3b65f4ab3), 5 [0x55f319581be8, 0x55f319581bed), 
+INFO: Loaded 2 PC tables (94616 PCs): 94611 [0x7fd3b65f4ab8,0x7fd3b67663e8), 5 [0x55f319581bf0,0x55f319581c40), 
+/b/bin/address/fuzz-catalog: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x5060000007dc at pc 0x7fd3b61cbea1 bp 0x7ffeb21dd590 sp 0x7ffeb21dd588
+WRITE of size 1 at 0x5060000007dc thread T0
+SCARINESS: 41 (1-byte-write-heap-buffer-overflow-far-from-bounds)
+    #0 0x7fd3b61cbea0 in finish_item /work/build/../../src/systemd/src/libsystemd/sd-journal/catalog.c:163:48
+    #1 0x7fd3b61cb598 in catalog_import_file /work/build/../../src/systemd/src/libsystemd/sd-journal/catalog.c:373:21
+    #2 0x55f31948b040 in LLVMFuzzerTestOneInput /work/build/../../src/systemd/src/fuzz/fuzz-catalog.c:22:16
+    #3 0x55f3194a7cc0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #4 0x55f319492f35 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #5 0x55f3194989cf in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #6 0x55f3194c3c72 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #7 0x7fd3b56e3082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #8 0x55f3193b27ed in _start (/b/bin/address/fuzz-catalog+0x3d7ed)
+
+DEDUP_TOKEN: finish_item--catalog_import_file--LLVMFuzzerTestOneInput
+0x5060000007dc is located 1244 bytes after 64-byte region [0x5060000002c0,0x506000000300)
+freed by thread T0 here:
+    #0 0x55f31944b566 in free /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:52:3
+    #1 0x7fd3b61cadba in freep /work/build/../../src/systemd/src/basic/alloc-util.h:106:9
+    #2 0x7fd3b61cadba in catalog_import_file /work/build/../../src/systemd/src/libsystemd/sd-journal/catalog.c:365:9
+    #3 0x55f31948b040 in LLVMFuzzerTestOneInput /work/build/../../src/systemd/src/fuzz/fuzz-catalog.c:22:16
+    #4 0x55f3194a7cc0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #5 0x55f319492f35 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #6 0x55f3194989cf in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #7 0x55f3194c3c72 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #8 0x7fd3b56e3082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: __interceptor_free--freep--catalog_import_file
+previously allocated by thread T0 here:
+    #0 0x55f31944bbec in realloc /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:82:3
+    #1 0x7fd3b606fea8 in greedy_realloc /work/build/../../src/systemd/src/basic/alloc-util.c:69:13
+    #2 0x7fd3b60c32ef in read_line_full /work/build/../../src/systemd/src/basic/fileio.c:1519:22
+    #3 0x7fd3b61cabfc in read_line /work/build/../../src/systemd/src/basic/fileio.h:152:16
+    #4 0x7fd3b61cabfc in catalog_import_file /work/build/../../src/systemd/src/libsystemd/sd-journal/catalog.c:282:21
+    #5 0x55f31948b040 in LLVMFuzzerTestOneInput /work/build/../../src/systemd/src/fuzz/fuzz-catalog.c:22:16
+    #6 0x55f3194a7cc0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #7 0x55f319492f35 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #8 0x55f3194989cf in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #9 0x55f3194c3c72 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #10 0x7fd3b56e3082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: __interceptor_realloc--greedy_realloc--read_line_full
+SUMMARY: AddressSanitizer: heap-buffer-overflow /work/build/../../src/systemd/src/libsystemd/sd-journal/catalog.c:163:48 in finish_item
+Shadow bytes around the buggy address:
+  0x506000000500: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x506000000580: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x506000000600: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x506000000680: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x506000000700: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+=>0x506000000780: fa fa fa fa fa fa fa fa fa fa fa[fa]fa fa fa fa
+  0x506000000800: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x506000000880: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x506000000900: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x506000000980: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x506000000a00: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING

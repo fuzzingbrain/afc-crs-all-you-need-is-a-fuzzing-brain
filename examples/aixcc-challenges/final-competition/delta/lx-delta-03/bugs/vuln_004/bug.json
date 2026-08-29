@@ -1,0 +1,68 @@
+{
+ "challenge": "lx-delta-03",
+ "bug": "vuln_004",
+ "harness": "html",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-122"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "heap-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "xmlIO.c"
+  ],
+  "patch_files": [
+   "encoding.c"
+  ],
+  "crash_file": "/src/libxml2/encoding.c:2868",
+  "crash_line": "20",
+  "stack_files": [
+   "/src/libxml2/HTMLparser.c",
+   "/src/libxml2/buf.c",
+   "/src/libxml2/encoding.c",
+   "/src/libxml2/fuzz/fuzz.c",
+   "/src/libxml2/fuzz/html.c",
+   "/src/libxml2/parserInternals.c",
+   "/src/libxml2/xmlIO.c",
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-122"
+ ],
+ "name": "Heap Based Buffer Overflow in UTF-32 implementation.",
+ "blob": "trigger.xml",
+ "blob_bytes": 524598,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/html",
+  "coverage": "bin/coverage/html"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "UTF32ToUTF8",
+   "xmlEncInputChunk",
+   "xmlCharEncInput",
+   "xmlParserInputBufferGrow",
+   "xmlParserGrow",
+   "htmlParseCharData"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/libxml2:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

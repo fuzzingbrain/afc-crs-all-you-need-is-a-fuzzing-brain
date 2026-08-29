@@ -1,0 +1,187 @@
+{
+ "challenge": "fp-full-01",
+ "round": "pre-competition",
+ "scan_mode": "full",
+ "project": "freerdp",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-freerdp.git",
+  "checkout_ref": "challenges/fp-full-01",
+  "resolved_commit": "ba2dc83e4485a0e0de8a7e01765c7567035a53ff"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/fp-full-01",
+  "project": "freerdp"
+ },
+ "image": "aixcc-afc/freerdp:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "TestFuzzCoreServer"
+ ],
+ "target_harnesses": [
+  "TestFuzzCoreServer"
+ ],
+ "graphs": {
+  "TestFuzzCoreServer": "mongodb"
+ },
+ "counts": {
+  "TestFuzzCoreServer": {
+   "functions": 8200,
+   "nodes": 6196
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "fp-full-01",
+  "ok": true,
+  "harnesses": {
+   "TestFuzzCoreServer": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "vuln_004": {
+      "patched_files": [
+       "libfreerdp/core/gcc.c",
+       "libfreerdp/core/mcs.h"
+      ],
+      "vuln_functions": [
+       "gcc_read_client_network_data"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "gcc_read_client_network_data"
+      ],
+      "V1_has_node_with_body": [
+       "gcc_read_client_network_data"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "test_server",
+       "freerdp_is_valid_mcs_create_request",
+       "mcs_recv_connect_initial",
+       "gcc_read_conference_create_request",
+       "gcc_read_client_data_blocks",
+       "gcc_read_client_network_data"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "libfreerdp/core/gcc.c",
+       "libfreerdp/core/mcs.h"
+      ],
+      "V3_body_has_patched_text": [
+       "gcc_read_client_network_data"
+      ]
+     },
+     "vuln_005": {
+      "patched_files": [
+       "libfreerdp/core/mcs.c"
+      ],
+      "vuln_functions": [
+       "mcs_recv_connect_response"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "mcs_recv_connect_response"
+      ],
+      "V1_has_node_with_body": [
+       "mcs_recv_connect_response"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "test_server",
+       "freerdp_is_valid_mcs_create_response",
+       "mcs_recv_connect_response"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "libfreerdp/core/mcs.c"
+      ],
+      "V3_body_has_patched_text": [
+       "mcs_recv_connect_response"
+      ]
+     }
+    },
+    "nodes": 6196,
+    "functions": 8200,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "vuln_004": {
+   "harness": "TestFuzzCoreServer",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "vuln_005": {
+   "harness": "TestFuzzCoreServer",
+   "crash": "SEGV",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "TestFuzzCodecs",
+   "TestFuzzCommonAssistanceBinToHexString",
+   "TestFuzzCommonAssistanceHexStringToBin",
+   "TestFuzzCommonAssistanceParseFileBuffer",
+   "TestFuzzCoreClient",
+   "TestFuzzCoreServer",
+   "TestFuzzCryptoCertificateDataSetPEM"
+  ],
+  "coverage": [
+   "TestFuzzCodecs",
+   "TestFuzzCommonAssistanceBinToHexString",
+   "TestFuzzCommonAssistanceHexStringToBin",
+   "TestFuzzCommonAssistanceParseFileBuffer",
+   "TestFuzzCoreClient",
+   "TestFuzzCoreServer",
+   "TestFuzzCryptoCertificateDataSetPEM"
+  ]
+ },
+ "timings": [
+  {
+   "step": "build_image",
+   "seconds": 63,
+   "rc": 0,
+   "command": "python3 /home/ze/fb-graphs/build/fp-full-01/fuzz-tooling/infra/helper.py build_image --no-pull freerdp"
+  },
+  {
+   "step": "build_bitcode",
+   "seconds": 33,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -e SANITIZER_FLAGS=-flto -g -fno-inline-functions -fuse-ld=gold -Wno-unused-command-line-argument -e AR=llvm-ar -e NM=llvm-nm -e RANLIB=llvm-ranlib -v /home/ze/fb-graphs/build/fp-full-01/repo-bitcode:/src/FreeRDP -v /home/ze/fb-graphs/build/fp-full-01/out:/out -v /home/ze/fb-graphs/build/fp-full-01/work:/work aixcc-afc/freerdp:latest bash -c compile 2>&1 | tail -40; mkdir -p /out/bc"
+  },
+  {
+   "step": "to_ll",
+   "seconds": 24,
+   "rc": 0,
+   "command": "docker run --rm -v /home/ze/fb-graphs/build/fp-full-01/out:/out -v /home/ze/fb-graphs/build/fp-full-01/repo-bitcode:/src/FreeRDP -v /home/ze/fb-graphs/build/fp-full-01/work:/work -v /home/ze/fb-graphs/build/fp-full-01/ll:/ll aixcc-afc/freerdp:latest bash -c "
+  },
+  {
+   "step": "extract_TestFuzzCoreServer",
+   "seconds": 6,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  }
+ ]
+}

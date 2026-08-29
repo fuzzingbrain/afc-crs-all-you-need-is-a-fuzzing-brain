@@ -1,0 +1,64 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2262674092
+INFO: Loaded 1 modules   (28114 inline 8-bit counters): 28114 [0x5643881991d8, 0x56438819ffaa), 
+INFO: Loaded 1 PC tables (28114 PCs): 28114 [0x56438819ffb0,0x56438820dcd0), 
+/b/bin/address/curl_fuzzer_ftp: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: global-buffer-overflow on address 0x564388187240 at pc 0x564387f39409 bp 0x7ffe7eed73f0 sp 0x7ffe7eed73e8
+READ of size 8 at 0x564388187240 thread T0
+SCARINESS: 23 (8-byte-read-global-buffer-overflow)
+    #0 0x564387f39408 in ftp_state_mdtm_resp /src/curl/lib/ftp.c:2107:21
+    #1 0x564387f363e6 in ftp_statemachine /src/curl/lib/ftp.c:3044:16
+    #2 0x5643880026ec in Curl_pp_statemach /src/curl/lib/pingpong.c:137:14
+    #3 0x564387f2e187 in ftp_multi_statemach /src/curl/lib/ftp.c:3109:21
+    #4 0x564387f2e2a7 in ftp_doing /src/curl/lib/ftp.c:4292:21
+    #5 0x564387dc8d75 in protocol_doing /src/curl/lib/multi.c:1755:14
+    #6 0x564387db6124 in multi_runsingle /src/curl/lib/multi.c:2774:16
+    #7 0x564387db3fd5 in curl_multi_perform /src/curl/lib/multi.c:3016:16
+    #8 0x564387d62a6e in fuzz_handle_transfer(fuzz_data*) /src/curl_fuzzer/curl_fuzzer.cc:419:5
+    #9 0x564387d6008d in LLVMFuzzerTestOneInput /src/curl_fuzzer/curl_fuzzer.cc:97:3
+    #10 0x564387c14640 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #11 0x564387bff8b5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #12 0x564387c0534f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #13 0x564387c305f2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #14 0x7fc033335082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #15 0x564387bf7a9d in _start (/b/bin/address/curl_fuzzer_ftp+0x137a9d)
+
+DEDUP_TOKEN: ftp_state_mdtm_resp--ftp_statemachine--Curl_pp_statemach
+0x564388187240 is located 0 bytes after global variable 'Curl_seconds' defined in '/src/curl/lib/parsedate.c:113' (0x564388187060) of size 480
+SUMMARY: AddressSanitizer: global-buffer-overflow /src/curl/lib/ftp.c:2107:21 in ftp_state_mdtm_resp
+Shadow bytes around the buggy address:
+  0x564388186f80: 00 00 00 00 00 00 00 f9 f9 f9 f9 f9 00 00 00 00
+  0x564388187000: 00 00 00 00 00 00 00 00 f9 f9 f9 f9 00 00 00 00
+  0x564388187080: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x564388187100: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x564388187180: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x564388187200: 00 00 00 00 00 00 00 00[f9]f9 f9 f9 f9 f9 f9 f9
+  0x564388187280: f9 f9 f9 f9 00 00 00 00 00 00 00 f9 f9 f9 f9 f9
+  0x564388187300: 00 00 00 00 00 00 00 00 00 00 00 00 f9 f9 f9 f9
+  0x564388187380: 00 00 00 00 00 00 00 00 00 00 00 00 f9 f9 f9 f9
+  0x564388187400: 00 00 00 00 00 00 00 00 00 00 00 00 f9 f9 f9 f9
+  0x564388187480: 00 00 00 00 00 00 f9 f9 f9 f9 f9 f9 00 00 00 00
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING
+
+OK: curl-002 reproduced (global-buffer-overflow)

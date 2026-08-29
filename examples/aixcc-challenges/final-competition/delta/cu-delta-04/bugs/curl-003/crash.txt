@@ -1,0 +1,30 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2508960685
+INFO: Loaded 1 modules   (28140 inline 8-bit counters): 28140 [0x55678ef3a218, 0x55678ef41004), 
+INFO: Loaded 1 PC tables (28140 PCs): 28140 [0x55678ef41008,0x55678efaeec8), 
+/b/bin/address/curl_fuzzer_http: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==7==ERROR: AddressSanitizer: SEGV on unknown address (pc 0x55678ecb96fe bp 0x7ffd333a2e00 sp 0x7ffd333a2ca0 T0)
+==7==The signal is caused by a READ memory access.
+==7==Hint: this fault was caused by a dereference of a high value address (see register values below).  Disassemble the provided pc to learn which register was used.
+SCARINESS: 20 (wild-addr-read)
+    #0 0x55678ecb96fe in Curl_doh_close /src/curl/lib/doh.c:1410:30
+    #1 0x55678eb7c91a in Curl_req_done /src/curl/lib/request.c:108:3
+    #2 0x55678eb4edf4 in multi_done /src/curl/lib/multi.c:754:14
+    #3 0x55678eb56a81 in multi_runsingle /src/curl/lib/multi.c:2856:15
+    #4 0x55678eb54035 in curl_multi_perform /src/curl/lib/multi.c:3016:16
+    #5 0x55678eb02ace in fuzz_handle_transfer(fuzz_data*) /src/curl_fuzzer/curl_fuzzer.cc:419:5
+    #6 0x55678eb000ed in LLVMFuzzerTestOneInput /src/curl_fuzzer/curl_fuzzer.cc:97:3
+    #7 0x55678e9b46a0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #8 0x55678e99f915 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #9 0x55678e9a53af in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #10 0x55678e9d0652 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #11 0x7fa97bd8e082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #12 0x55678e997afd in _start (/b/bin/address/curl_fuzzer_http+0x136afd)
+
+DEDUP_TOKEN: Curl_doh_close--Curl_req_done--multi_done
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /src/curl/lib/doh.c:1410:30 in Curl_doh_close
+==7==ABORTING

@@ -1,0 +1,176 @@
+{
+ "challenge": "av-delta-02",
+ "round": "final-competition",
+ "scan_mode": "delta",
+ "project": "libavif",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-libavif.git",
+  "checkout_ref": "challenges/av-delta-02",
+  "resolved_commit": "59138c8c05c6699a50789aee54055b5451db4349"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/av-delta-02",
+  "project": "libavif"
+ },
+ "image": "aixcc-afc/libavif:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert"
+ ],
+ "target_harnesses": [
+  "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert"
+ ],
+ "graphs": {
+  "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert": "mongodb"
+ },
+ "counts": {
+  "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert": {
+   "functions": 12351,
+   "nodes": 10136
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "av-delta-02",
+  "ok": true,
+  "harnesses": {
+   "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "avif-002": {
+      "patched_files": [
+       "src/reformat.c"
+      ],
+      "vuln_functions": [
+       "avifImageYUVAnyToRGBAnySlow"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "avifImageYUVAnyToRGBAnySlow"
+      ],
+      "V1_has_node_with_body": [
+       "avifImageYUVAnyToRGBAnySlow"
+      ],
+      "V2_path_from_entry": [
+       "Convert",
+       "avifImageYUVToRGB",
+       "avifImageYUVToRGBImpl",
+       "avifImageYUVAnyToRGBAnySlow"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "src/reformat.c"
+      ],
+      "V3_body_has_patched_text": [
+       "avifImageYUVAnyToRGBAnySlow"
+      ]
+     }
+    },
+    "nodes": 10136,
+    "functions": 12351,
+    "entry": "Convert",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "avif-002": {
+   "harness": "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+   "crash": "dynamic-stack-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "avif_fuzztest_dec",
+   "avif_fuzztest_dec@DecodeAvifTest.Decode",
+   "avif_fuzztest_dec_incr",
+   "avif_fuzztest_dec_incr@DecodeAvifFuzzTest.DecodeIncr",
+   "avif_fuzztest_enc_dec",
+   "avif_fuzztest_enc_dec@EncodeDecodeAvifFuzzTest.EncodeDecodeValid",
+   "avif_fuzztest_enc_dec_anim",
+   "avif_fuzztest_enc_dec_anim@EncodeDecodeAvifFuzzTest.EncodeDecodeAnimation",
+   "avif_fuzztest_enc_dec_incr",
+   "avif_fuzztest_enc_dec_incr@EncodeDecodeAvifFuzzTest.EncodeDecodeGridValid",
+   "avif_fuzztest_properties",
+   "avif_fuzztest_properties@PropertiesAvifFuzzTest.EncodeDecode",
+   "avif_fuzztest_read_image",
+   "avif_fuzztest_read_image@ReadImageFuzzTest.ReadImageFile",
+   "avif_fuzztest_yuvrgb",
+   "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+   "corpus"
+  ],
+  "coverage": [
+   "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+   "corpus",
+   "src"
+  ]
+ },
+ "timings": [
+  {
+   "step": "build_image",
+   "seconds": 17,
+   "rc": 0,
+   "command": "python3 /home/ze/fb-graphs/build/av-delta-02/fuzz-tooling/infra/helper.py build_image --no-pull libavif"
+  },
+  {
+   "step": "build_bitcode",
+   "seconds": 71,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -e SANITIZER_FLAGS=-flto -g -fno-inline-functions -fuse-ld=gold -Wno-unused-command-line-argument -e AR=llvm-ar -e NM=llvm-nm -e RANLIB=llvm-ranlib -v /home/ze/fb-graphs/build/av-delta-02/repo-bitcode:/src/libavif -v /home/ze/fb-graphs/build/av-delta-02/out:/out -v /home/ze/fb-graphs/build/av-delta-02/work:/work aixcc-afc/libavif:latest bash -c compile 2>&1 | tail -40; mkdir -p /out/bc"
+  },
+  {
+   "step": "to_ll",
+   "seconds": 3,
+   "rc": 0,
+   "command": "docker run --rm -v /home/ze/fb-graphs/build/av-delta-02/out:/out -v /home/ze/fb-graphs/build/av-delta-02/repo-bitcode:/src/libavif -v /home/ze/fb-graphs/build/av-delta-02/work:/work -v /home/ze/fb-graphs/build/av-delta-02/ll:/ll aixcc-afc/libavif:latest bash -c "
+  },
+  {
+   "step": "extract_avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+   "seconds": 0,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  },
+  {
+   "step": "build_bc_wrapper",
+   "seconds": 215,
+   "rc": 0,
+   "command": "bcwrap CC/CXX"
+  },
+  {
+   "step": "build_bc_wrapper",
+   "seconds": 181,
+   "rc": 0,
+   "command": "bcwrap CC/CXX"
+  },
+  {
+   "step": "build_address",
+   "seconds": 138,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -v /home/ze/fb-graphs/build/av-delta-02/repo-address:/src/libavif -v /home/ze/fb-graphs/build/av-delta-02/out-address:/out -v /home/ze/fb-graphs/build/av-delta-02/work-address:/work aixcc-afc/libavif:latest bash -c compile 2>&1 | tail -30"
+  },
+  {
+   "step": "build_coverage",
+   "seconds": 109,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=coverage -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -v /home/ze/fb-graphs/build/av-delta-02/repo-coverage:/src/libavif -v /home/ze/fb-graphs/build/av-delta-02/out-coverage:/out -v /home/ze/fb-graphs/build/av-delta-02/work-coverage:/work aixcc-afc/libavif:latest bash -c compile 2>&1 | tail -30"
+  }
+ ]
+}

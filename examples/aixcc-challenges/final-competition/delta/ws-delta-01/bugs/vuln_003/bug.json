@@ -1,0 +1,72 @@
+{
+ "challenge": "ws-delta-01",
+ "bug": "vuln_003",
+ "harness": "handler_ber",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-787"
+  ],
+  "crash_type": "stack-buffer-overflow",
+  "expected_types": [
+   "dynamic-stack-buffer-overflow",
+   "global-buffer-overflow",
+   "heap-buffer-overflow",
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "epan/dissectors/packet-ber.c"
+  ],
+  "patch_files": [
+   "epan/dissectors/packet-ber.c"
+  ],
+  "patch_functions": [
+   "dissect_ber_GeneralString"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/wireshark/epan/dissectors/packet-ber.c:3194",
+  "crash_line": "34",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/wireshark/epan/dissectors/packet-ber.c",
+   "/src/wireshark/epan/dissectors/packet-frame.c",
+   "/src/wireshark/epan/epan.c",
+   "/src/wireshark/epan/packet.c",
+   "/src/wireshark/fuzz/fuzzshark.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-787"
+ ],
+ "name": "BERRRRR",
+ "blob": "blob",
+ "blob_bytes": 209,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/handler_ber",
+  "coverage": "bin/coverage/handler_ber"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "stack-buffer-overflow",
+  "top_frames": [
+   "dissect_ber_GeneralString",
+   "try_dissect_unknown_ber",
+   "call_dissector_through_handle",
+   "call_dissector_work",
+   "call_dissector_only",
+   "call_all_postdissectors"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/wireshark:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

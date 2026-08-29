@@ -1,0 +1,76 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2328871512
+INFO: Loaded 1 modules   (28090 inline 8-bit counters): 28090 [0x5650a203c1b8, 0x5650a2042f72), 
+INFO: Loaded 1 PC tables (28090 PCs): 28090 [0x5650a2042f78,0x5650a20b0b18), 
+/b/bin/address/curl_fuzzer: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7fabdd682be0 at pc 0x5650a1c48b71 bp 0x7fff8bdce8a0 sp 0x7fff8bdce898
+WRITE of size 1 at 0x7fabdd682be0 thread T0
+SCARINESS: 46 (1-byte-write-stack-buffer-overflow)
+    #0 0x5650a1c48b70 in addbyter /src/curl/lib/mprintf.c:1058:22
+    #1 0x5650a1c46fab in formatf /src/curl/lib/mprintf.c:909:9
+    #2 0x5650a1c4434d in curl_mvsnprintf /src/curl/lib/mprintf.c:1075:13
+    #3 0x5650a1c48db8 in curl_msnprintf /src/curl/lib/mprintf.c:1095:13
+    #4 0x5650a1dc8b78 in file_do /src/curl/lib/file.c:495:7
+    #5 0x5650a1c70430 in multi_do /src/curl/lib/multi.c:1643:14
+    #6 0x5650a1c6d192 in state_do /src/curl/lib/multi.c:2314:14
+    #7 0x5650a1c5b08f in multi_runsingle /src/curl/lib/multi.c:2768:12
+    #8 0x5650a1c58fd5 in curl_multi_perform /src/curl/lib/multi.c:3016:16
+    #9 0x5650a1c06d40 in fuzz_handle_transfer(fuzz_data*) /src/curl_fuzzer/curl_fuzzer.cc:341:3
+    #10 0x5650a1c0508d in LLVMFuzzerTestOneInput /src/curl_fuzzer/curl_fuzzer.cc:97:3
+    #11 0x5650a1ab9640 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #12 0x5650a1aa48b5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #13 0x5650a1aaa34f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #14 0x5650a1ad55f2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #15 0x7fabdde82082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #16 0x5650a1a9ca9d in _start (/b/bin/address/curl_fuzzer+0x135a9d)
+
+DEDUP_TOKEN: addbyter--formatf--curl_mvsnprintf
+Address 0x7fabdd682be0 is located in stack of thread T0 at offset 480 in frame
+    #0 0x5650a1dc819f in file_do /src/curl/lib/file.c:421
+
+DEDUP_TOKEN: file_do
+  This frame has 5 object(s):
+    [32, 176) 'statbuf' (line 428)
+    [240, 248) 'xfer_buf' (line 436)
+    [272, 280) 'xfer_blen' (line 437)
+    [304, 360) 'buffer' (line 464)
+    [400, 480) 'header' (line 466) <== Memory access at offset 480 overflows this variable
+HINT: this may be a false positive if your program uses some custom stack unwind mechanism, swapcontext or vfork
+      (longjmp and C++ exceptions *are* supported)
+SUMMARY: AddressSanitizer: stack-buffer-overflow /src/curl/lib/mprintf.c:1058:22 in addbyter
+Shadow bytes around the buggy address:
+  0x7fabdd682900: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7fabdd682980: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7fabdd682a00: f1 f1 f1 f1 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fabdd682a80: 00 00 00 00 00 00 f2 f2 f2 f2 f2 f2 f2 f2 00 f2
+  0x7fabdd682b00: f2 f2 00 f2 f2 f2 00 00 00 00 00 00 00 f2 f2 f2
+=>0x7fabdd682b80: f2 f2 00 00 00 00 00 00 00 00 00 00[f3]f3 f3 f3
+  0x7fabdd682c00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fabdd682c80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fabdd682d00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fabdd682d80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fabdd682e00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING
+
+OK: curl-004 reproduced (stack-buffer-overflow)

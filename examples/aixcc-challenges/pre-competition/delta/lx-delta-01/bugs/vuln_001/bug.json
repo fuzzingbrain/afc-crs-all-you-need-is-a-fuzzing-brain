@@ -1,0 +1,54 @@
+{
+ "challenge": "lx-delta-01",
+ "bug": "vuln_001",
+ "harness": "html",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-122"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "heap-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "HTMLParser.c"
+  ],
+  "crash_file": "/src/libxml2/HTMLparser.c",
+  "crash_line": "3591",
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-122"
+ ],
+ "name": "libxml2 HTML parsing bug",
+ "blob": "blob.bin",
+ "blob_bytes": 730,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/html",
+  "coverage": "bin/coverage/html"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "htmlSecureComment",
+   "htmlTopParseComment",
+   "htmlParseDocument",
+   "htmlCtxtParseDocument",
+   "LLVMFuzzerTestOneInput",
+   "_start"
+  ],
+  "site": "/src/libxml2/HTMLparser.c:3591"
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/libxml2:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

@@ -1,57 +1,75 @@
 {
-  "challenge": "av-delta-02",
-  "challenge_name": "Redwood Fog",
-  "round": "final-competition",
-  "scan_mode": "delta",
-  "challenge_type": "delta     # full | delta",
-  "language": {
-    "libavif": "c"
-  },
-  "oss_fuzz_projects": [
-    "libavif"
+ "challenge": "av-delta-02",
+ "challenge_name": "Redwood Fog",
+ "round": "final-competition",
+ "scan_mode": "delta",
+ "challenge_type": "delta     # full | delta",
+ "language": {
+  "libavif": "c"
+ },
+ "oss_fuzz_projects": [
+  "libavif"
+ ],
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-libavif.git",
+  "branch": "challenges/av-delta-02",
+  "public": true,
+  "resolved": true
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/av-delta-02",
+  "project": "libavif"
+ },
+ "base_ref": "1a98b640c5322dfeb69a05c832b0a1ba2f277872",
+ "delta_ref": "challenges/av-delta-02",
+ "harnesses": [],
+ "harness_count": 0,
+ "vulnerabilities": [
+  "avif-002"
+ ],
+ "answers": {
+  "vuln_dirs": 1,
+  "pov_blobs": 1,
+  "reference_patches": 1,
+  "has_answers": true
+ },
+ "graph": {
+  "path": "mongodb",
+  "producer": "llvm-ir",
+  "harnesses": [
+   "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert"
   ],
-  "source": {
-    "repo": "https://github.com/AIxCyberChallenge/afc-libavif.git",
-    "branch": "challenges/av-delta-02",
-    "public": true,
-    "resolved": true
-  },
-  "fuzz_tooling": {
-    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/av-delta-02",
-    "project": "libavif"
-  },
-  "base_ref": "1a98b640c5322dfeb69a05c832b0a1ba2f277872",
-  "delta_ref": "challenges/av-delta-02",
-  "harnesses": [],
-  "harness_count": 0,
-  "vulnerabilities": [
-    "avif-002"
-  ],
-  "answers": {
-    "vuln_dirs": 1,
-    "pov_blobs": 1,
-    "reference_patches": 1,
-    "has_answers": true
-  },
-  "graph": null,
-  "vuln_details": [
-    {
-      "vuln": "avif-002",
-      "name": "chroma_spill",
-      "cwes": [
-        "CWE-126"
-      ],
-      "pov_harness": "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "data.bin",
-      "reference_patch": "good_patch.diff"
-    }
-  ],
-  "target_harnesses": [
-    "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert"
-  ],
-  "target_harness_count": 1,
-  "target_harnesses_not_in_challenge_yaml": []
+  "verified": true
+ },
+ "vuln_details": [
+  {
+   "vuln": "avif-002",
+   "name": "chroma_spill",
+   "cwes": [
+    "CWE-126"
+   ],
+   "pov_harness": "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "data.bin",
+   "reference_patch": "good_patch.diff"
+  }
+ ],
+ "target_harnesses": [
+  "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert"
+ ],
+ "target_harness_count": 1,
+ "target_harnesses_not_in_challenge_yaml": [],
+ "bugs": {
+  "avif-002": {
+   "path": "bugs/avif-002",
+   "harness": "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+   "crash": "dynamic-stack-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ }
 }

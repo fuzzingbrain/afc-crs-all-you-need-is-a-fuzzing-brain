@@ -1,0 +1,141 @@
+{
+ "challenge": "mg-delta-01",
+ "round": "final-competition",
+ "scan_mode": "delta",
+ "project": "mongoose",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-mongoose.git",
+  "checkout_ref": "challenges/mg-delta-01",
+  "resolved_commit": "5b8827a75313860055d555b1479056176018da97"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/mg-delta-01",
+  "project": "mongoose"
+ },
+ "image": "aixcc-afc/mongoose:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "fuzz"
+ ],
+ "target_harnesses": [
+  "fuzz"
+ ],
+ "graphs": {
+  "fuzz": "mongodb"
+ },
+ "counts": {
+  "fuzz": {
+   "functions": 294,
+   "nodes": 173
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "mg-delta-01",
+  "ok": true,
+  "harnesses": {
+   "fuzz": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "mongoose_1": {
+      "patched_files": [
+       "mongoose.c",
+       "src/fmt.c"
+      ],
+      "vuln_functions": [
+       "mg_vxprintf"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "mg_vxprintf"
+      ],
+      "V1_has_node_with_body": [
+       "mg_vxprintf"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "mg_log",
+       "mg_vxprintf"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "mongoose.c",
+       "src/fmt.c"
+      ],
+      "V3_body_has_patched_text": [
+       "mg_vxprintf"
+      ]
+     }
+    },
+    "nodes": 173,
+    "functions": 294,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "mongoose_1": {
+   "harness": "fuzz",
+   "crash": "stack-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "fuzz"
+  ],
+  "coverage": [
+   "fuzz"
+  ]
+ },
+ "timings": [
+  {
+   "step": "build_image",
+   "seconds": 35,
+   "rc": 0,
+   "command": "python3 /home/ze/fb-graphs/build/mg-delta-01/fuzz-tooling/infra/helper.py build_image --no-pull mongoose"
+  },
+  {
+   "step": "build_bitcode",
+   "seconds": 2,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -e SANITIZER_FLAGS=-flto -g -fno-inline-functions -fuse-ld=gold -Wno-unused-command-line-argument -e AR=llvm-ar -e NM=llvm-nm -e RANLIB=llvm-ranlib -v /home/ze/fb-graphs/build/mg-delta-01/repo-bitcode:/src/mongoose -v /home/ze/fb-graphs/build/mg-delta-01/out:/out -v /home/ze/fb-graphs/build/mg-delta-01/work:/work aixcc-afc/mongoose:latest bash -c compile 2>&1 | tail -40; mkdir -p /out/bc"
+  },
+  {
+   "step": "to_ll",
+   "seconds": 1,
+   "rc": 0,
+   "command": "docker run --rm -v /home/ze/fb-graphs/build/mg-delta-01/out:/out -v /home/ze/fb-graphs/build/mg-delta-01/repo-bitcode:/src/mongoose -v /home/ze/fb-graphs/build/mg-delta-01/work:/work -v /home/ze/fb-graphs/build/mg-delta-01/ll:/ll aixcc-afc/mongoose:latest bash -c "
+  },
+  {
+   "step": "extract_fuzz",
+   "seconds": 0,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  },
+  {
+   "step": "build_bc_wrapper",
+   "seconds": 8,
+   "rc": 0,
+   "command": "bcwrap CC/CXX"
+  }
+ ]
+}

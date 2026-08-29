@@ -1,0 +1,32 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2015227869
+INFO: Loaded 1 modules   (20557 inline 8-bit counters): 20557 [0x5649cca6dbe8, 0x5649cca72c35), 
+INFO: Loaded 1 PC tables (20557 PCs): 20557 [0x5649cca72c38,0x5649ccac3108), 
+/b/bin/address/TestFuzzCodecs: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+[01:43:57:452] [7:00000007] [ERROR][com.freerdp.codec.clear] - [clear_decompress_residual_data]: pixelIndex 257 != pixelCount 1326
+[01:43:57:453] [7:00000007] [ERROR][com.freerdp.codec.clear] - [clear_decompress]: clear_decompress_residual_data failed!
+[01:43:57:454] [7:00000007] [ERROR][com.freerdp.codec.clear] - [clear_decompress_residual_data]: pixelIndex 257 != pixelCount 1536
+[01:43:57:454] [7:00000007] [ERROR][com.freerdp.codec.clear] - [clear_decompress]: clear_decompress_residual_data failed!
+[01:43:57:455] [7:00000007] [ERROR][com.freerdp.codec.clear] - [clear_decompress_residual_data]: pixelIndex 64 + runLengthFactor 193 > pixelCount 105
+[01:43:57:455] [7:00000007] [ERROR][com.freerdp.codec.clear] - [clear_decompress]: clear_decompress_residual_data failed!
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==7==ERROR: AddressSanitizer: SEGV on unknown address 0x7f71389f8e20 (pc 0x5649cc650fc5 bp 0x7ffd817935f0 sp 0x7ffd817933c0 T0)
+==7==The signal is caused by a WRITE memory access.
+SCARINESS: 30 (wild-addr-write)
+    #0 0x5649cc650fc5 in rfx_process_message_metadata /src/FreeRDP/libfreerdp/codec/rfx.c:734:26
+    #1 0x5649cc650fc5 in rfx_process_message /src/FreeRDP/libfreerdp/codec/rfx.c:1320:10
+    #2 0x5649cc61e73d in TestFreeRDPCodecRemoteFX /src/FreeRDP/libfreerdp/codec/test/TestFuzzCodecs.c:184:7
+    #3 0x5649cc61e73d in LLVMFuzzerTestOneInput /src/FreeRDP/libfreerdp/codec/test/TestFuzzCodecs.c:460:2
+    #4 0x5649cc4d50f0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #5 0x5649cc4c0365 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #6 0x5649cc4c5dff in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #7 0x5649cc4f10a2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #8 0x7f7138974082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #9 0x5649cc4b854d in _start (/b/bin/address/TestFuzzCodecs+0x12a54d)
+
+DEDUP_TOKEN: rfx_process_message_metadata--rfx_process_message--TestFreeRDPCodecRemoteFX
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /src/FreeRDP/libfreerdp/codec/rfx.c:734:26 in rfx_process_message_metadata
+==7==ABORTING

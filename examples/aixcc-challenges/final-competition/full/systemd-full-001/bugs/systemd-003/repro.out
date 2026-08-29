@@ -1,0 +1,3 @@
+==7==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x5060000007dc at pc 0x7f70f95cbea1 bp 0x7ffdfd571890 sp 0x7ffdfd571888
+SUMMARY: AddressSanitizer: heap-buffer-overflow /work/build/../../src/systemd/src/libsystemd/sd-journal/catalog.c:163:48 in finish_item
+OK: systemd-003 reproduced (heap-buffer-overflow)

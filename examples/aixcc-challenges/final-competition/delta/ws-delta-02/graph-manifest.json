@@ -1,0 +1,128 @@
+{
+ "challenge": "ws-delta-02",
+ "round": "final-competition",
+ "scan_mode": "delta",
+ "project": "wireshark",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-wireshark.git",
+  "checkout_ref": "challenges/ws-delta-02",
+  "resolved_commit": "3df935abf162f2fdced881edb35ce0118637ca17"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/ws-delta-02",
+  "project": "wireshark"
+ },
+ "image": "aixcc-afc/wireshark:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "handler_icmp"
+ ],
+ "target_harnesses": [
+  "handler_icmp"
+ ],
+ "graphs": {
+  "handler_icmp": "mongodb"
+ },
+ "counts": {
+  "handler_icmp": {
+   "functions": 95378,
+   "nodes": 93296
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "ws-delta-02",
+  "ok": true,
+  "harnesses": {
+   "handler_icmp": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "vuln_004": {
+      "patched_files": [
+       "epan/dissectors/packet-icmp.c"
+      ],
+      "vuln_functions": [
+       "dissect_interface_identification_object"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "dissect_interface_identification_object"
+      ],
+      "V1_has_node_with_body": [
+       "dissect_interface_identification_object"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "epan_dissect_run",
+       "dissect_record",
+       "call_dissector_work",
+       "call_dissector_through_handle",
+       "dissect_icmp",
+       "dissect_icmp_extension",
+       "dissect_interface_identification_object"
+      ],
+      "V2_path_quality": "verified",
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "epan/dissectors/packet-icmp.c"
+      ],
+      "V3_body_has_patched_text": [
+       "dissect_interface_identification_object"
+      ]
+     }
+    },
+    "nodes": 93296,
+    "functions": 95378,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "vuln_004": {
+   "harness": "handler_icmp",
+   "crash": "stack-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "handler_icmp"
+  ],
+  "coverage": [
+   "handler_icmp",
+   "src"
+  ]
+ },
+ "timings": [
+  {
+   "step": "build_address",
+   "seconds": 369,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -v /home/ze/fb-graphs/build/ws-delta-02/repo-address:/src/wireshark -v /home/ze/fb-graphs/build/ws-delta-02/out-address:/out -v /home/ze/fb-graphs/build/ws-delta-02/work-address:/work aixcc-afc/wireshark:latest bash -c compile 2>&1 | tail -30"
+  },
+  {
+   "step": "build_coverage",
+   "seconds": 160,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=coverage -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -v /home/ze/fb-graphs/build/ws-delta-02/repo-coverage:/src/wireshark -v /home/ze/fb-graphs/build/ws-delta-02/out-coverage:/out -v /home/ze/fb-graphs/build/ws-delta-02/work-coverage:/work aixcc-afc/wireshark:latest bash -c compile 2>&1 | tail -30"
+  }
+ ]
+}

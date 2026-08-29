@@ -1,0 +1,71 @@
+{
+ "challenge": "systemd-full-001",
+ "bug": "systemd-003",
+ "harness": "fuzz-catalog",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-122"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "heap-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "src/libsystemd/sd-journal/catalog.c"
+  ],
+  "patch_files": [
+   "src/libsystemd/sd-journal/catalog.c"
+  ],
+  "patch_functions": [
+   "finish_item"
+  ],
+  "matched_by": null,
+  "crash_file": "/work/build/../../src/systemd/src/libsystemd/sd-journal/catalog.c:163",
+  "crash_line": "48",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/work/build/../../src/systemd/src/basic/alloc-util.c",
+   "/work/build/../../src/systemd/src/basic/alloc-util.h",
+   "/work/build/../../src/systemd/src/basic/fileio.c",
+   "/work/build/../../src/systemd/src/basic/fileio.h",
+   "/work/build/../../src/systemd/src/fuzz/fuzz-catalog.c",
+   "/work/build/../../src/systemd/src/libsystemd/sd-journal/catalog.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-122"
+ ],
+ "name": "macro_confusion",
+ "blob": "data.bin",
+ "blob_bytes": 61,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/fuzz-catalog",
+  "coverage": "bin/coverage/fuzz-catalog"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "finish_item",
+   "catalog_import_file",
+   "LLVMFuzzerTestOneInput",
+   "_start",
+   "catalog_import_file",
+   "LLVMFuzzerTestOneInput"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/systemd:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

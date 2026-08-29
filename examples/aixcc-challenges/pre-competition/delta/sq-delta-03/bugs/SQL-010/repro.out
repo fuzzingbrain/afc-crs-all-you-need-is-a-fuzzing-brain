@@ -1,0 +1,77 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2328084281
+INFO: Loaded 1 modules   (73409 inline 8-bit counters): 73409 [0x558a15e451f0, 0x558a15e570b1), 
+INFO: Loaded 1 PC tables (73409 PCs): 73409 [0x558a15e570b8,0x558a15f75cc8), 
+/b/bin/address/customfuzz3: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7f6cd6ebac40 at pc 0x558a158a14d5 bp 0x7ffc850b2c70 sp 0x7ffc850b2c68
+WRITE of size 1 at 0x7f6cd6ebac40 thread T0
+SCARINESS: 46 (1-byte-write-stack-buffer-overflow)
+    #0 0x558a158a14d4 in fileToString /src/sqlite3/bld/sqlite3.c:274945:16
+    #1 0x558a158a14d4 in lsmSortedDumpStructure /src/sqlite3/bld/sqlite3.c:275342:11
+    #2 0x558a158a0786 in lsm1ViewInternal /src/sqlite3/bld/sqlite3.c:274874:11
+    #3 0x558a158b6912 in lsm1FunctionView /src/sqlite3/bld/sqlite3.c:279425:20
+    #4 0x558a15954c72 in sqlite3VdbeExec /src/sqlite3/bld/sqlite3.c:102091:3
+    #5 0x558a157e38e3 in sqlite3Step /src/sqlite3/bld/sqlite3.c:91351:10
+    #6 0x558a157e38e3 in sqlite3_step /src/sqlite3/bld/sqlite3.c:91412:16
+    #7 0x558a15cc8ddf in exec_prepared_stmt /src/sqlite3/test/shell.c:24180:8
+    #8 0x558a15c77a9d in shell_exec /src/sqlite3/test/shell.c:24496:7
+    #9 0x558a15c5c4c4 in shell_main /src/sqlite3/test/shell.c:33186:14
+    #10 0x558a157caab5 in LLVMFuzzerTestOneInput /src/sqlite3/test/customfuzz3.c:27:3
+    #11 0x558a1567f530 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #12 0x558a1566a7a5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #13 0x558a1567023f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #14 0x558a1569b4e2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #15 0x7f6cd7639082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #16 0x558a1566298d in _start (/b/bin/address/customfuzz3+0x2ad98d)
+
+DEDUP_TOKEN: fileToString--lsmSortedDumpStructure--lsm1ViewInternal
+Address 0x7f6cd6ebac40 is located in stack of thread T0 at offset 1088 in frame
+    #0 0x558a158a07ff in lsmSortedDumpStructure /src/sqlite3/bld/sqlite3.c:275287
+
+DEDUP_TOKEN: lsmSortedDumpStructure
+  This frame has 6 object(s):
+    [32, 40) 'zFree' (line 275290)
+    [64, 1088) 'zLeft' (line 275310) <== Memory access at offset 1088 overflows this variable
+    [1216, 2240) 'zRight' (line 275311)
+    [2368, 2560) 'aLeft' (line 275314)
+    [2624, 2816) 'aRight' (line 275315)
+    [2880, 2912) 'zLevel' (line 275337)
+HINT: this may be a false positive if your program uses some custom stack unwind mechanism, swapcontext or vfork
+      (longjmp and C++ exceptions *are* supported)
+SUMMARY: AddressSanitizer: stack-buffer-overflow /src/sqlite3/bld/sqlite3.c:274945:16 in fileToString
+Shadow bytes around the buggy address:
+  0x7f6cd6eba980: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7f6cd6ebaa00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7f6cd6ebaa80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7f6cd6ebab00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7f6cd6ebab80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x7f6cd6ebac00: 00 00 00 00 00 00 00 00[f2]f2 f2 f2 f2 f2 f2 f2
+  0x7f6cd6ebac80: f2 f2 f2 f2 f2 f2 f2 f2 00 00 00 00 00 00 00 00
+  0x7f6cd6ebad00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7f6cd6ebad80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7f6cd6ebae00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7f6cd6ebae80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING
+
+OK: SQL-010 reproduced (stack-buffer-overflow)

@@ -1,0 +1,68 @@
+{
+ "challenge": "ws-full-01",
+ "bug": "vuln_005",
+ "harness": "handler_bat.vis",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-134"
+  ],
+  "crash_type": "SEGV",
+  "expected_types": null,
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "epan/dissectors/packet-bat.c"
+  ],
+  "patch_files": [
+   "epan/dissectors/packet-bat.c"
+  ],
+  "patch_functions": [
+   "dissect_bat_vis_v24"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/wireshark/epan/dissectors/packet-bat.c:705",
+  "crash_line": "3",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.h",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/wireshark/epan/dissectors/packet-bat.c",
+   "/src/wireshark/epan/dissectors/packet-frame.c",
+   "/src/wireshark/epan/epan.c",
+   "/src/wireshark/epan/packet.c",
+   "/src/wireshark/fuzz/fuzzshark.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-134"
+ ],
+ "name": "<batman pun>",
+ "blob": "data.bin",
+ "blob_bytes": 161,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/handler_bat.vis",
+  "coverage": "bin/coverage/handler_bat.vis"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "SEGV",
+  "top_frames": [
+   "QuickCheckForUnpoisonedRegion",
+   "printf_common",
+   "vfprintf",
+   "dissect_bat_vis_v24",
+   "dissect_bat_vis",
+   "call_dissector_through_handle"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/wireshark:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

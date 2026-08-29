@@ -1,0 +1,67 @@
+{
+ "challenge": "lx-full-01",
+ "bug": "vuln_005",
+ "harness": "api",
+ "consistency": {
+  "verdict": "site_match_cwe_label_differs",
+  "cwes": [
+   "CWE-416"
+  ],
+  "crash_type": "double-free",
+  "expected_types": [
+   "heap-use-after-free"
+  ],
+  "cwe_consistent": false,
+  "vuln_yaml_files": [
+   "tree.c"
+  ],
+  "patch_files": [
+   "tree.c"
+  ],
+  "crash_file": "/src/libxml2/fuzz/api.c:3580",
+  "crash_line": "9",
+  "stack_files": [
+   "/src/libxml2/fuzz/api.c",
+   "/src/libxml2/fuzz/fuzz.c",
+   "/src/libxml2/tree.c",
+   "/src/libxml2/xmlstring.c",
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-416"
+ ],
+ "name": "Dangling pointer leading to Use After Free",
+ "blob": "triggering_blob",
+ "blob_bytes": 20,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/api",
+  "coverage": "bin/coverage/api"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "double-free",
+  "top_frames": [
+   "LLVMFuzzerTestOneInput",
+   "_start",
+   "LLVMFuzzerTestOneInput",
+   "xmlFuzzMalloc",
+   "xmlStrndup",
+   "xmlStrdup"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/libxml2:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain",
+ "patch_verified": true,
+ "patch_verify_note": "clean after patch"
+}

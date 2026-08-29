@@ -1,0 +1,137 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2161782939
+INFO: Loaded 1 modules   (70193 inline 8-bit counters): 70193 [0x55e6d65de594, 0x55e6d65ef7c5), 
+INFO: Loaded 1 PC tables (70193 PCs): 70193 [0x55e6d65ef7c8,0x55e6d6701ad8), 
+/b/bin/address/TestFuzzCoreServer: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+[01:46:23:013] [7:00000007] [WARN][com.freerdp.core.rdp] - [log_build_warn][0x519000000080]: *************************************************
+[01:46:23:013] [7:00000007] [WARN][com.freerdp.core.rdp] - [log_build_warn][0x519000000080]: This build is using [runtime-check] build options:
+[01:46:23:013] [7:00000007] [WARN][com.freerdp.core.rdp] - [log_build_warn][0x519000000080]: * 'WITH_VERBOSE_WINPR_ASSERT=ON'
+[01:46:23:013] [7:00000007] [WARN][com.freerdp.core.rdp] - [log_build_warn][0x519000000080]: 
+[01:46:23:013] [7:00000007] [WARN][com.freerdp.core.rdp] - [log_build_warn][0x519000000080]: [runtime-check] build options might slow down the application
+[01:46:23:013] [7:00000007] [WARN][com.freerdp.core.rdp] - [log_build_warn][0x519000000080]: *************************************************
+[01:46:23:013] [7:00000007] [WARN][com.freerdp.core] - [freerdp_tcp_set_keep_alive_mode]: setsockopt() SOL_SOCKET, SO_KEEPALIVE
+[01:46:23:013] [7:00000007] [WARN][com.freerdp.core] - [freerdp_tcp_set_keep_alive_mode]: setsockopt() IPPROTO_TCP, TCP_KEEPIDLE
+[01:46:23:013] [7:00000007] [WARN][com.freerdp.core] - [freerdp_tcp_set_keep_alive_mode]: setsockopt() SOL_TCP, TCP_KEEPCNT
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core] - [freerdp_tcp_set_keep_alive_mode]: setsockopt() SOL_TCP, TCP_KEEPINTVL
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core] - [freerdp_tcp_set_keep_alive_mode]: setsockopt() SOL_TCP, TCP_USER_TIMEOUT
+[01:46:23:014] [7:00000007] [ERROR][com.freerdp.core.fastpath] - [fastpath_send_update_pdu]: fast path update size (2) exceeds the client's maximum request size (0)
+[01:46:23:014] [7:00000007] [ERROR][com.freerdp.core.fastpath] - [fastpath_recv_update]: Fastpath update Synchronize [3] failed, status 0
+[01:46:23:014] [7:00000007] [ERROR][com.freerdp.core.fastpath] - [fastpath_recv_update_data]: fastpath_recv_update() - -1
+[01:46:23:014] [7:00000007] [ERROR][com.freerdp.core.fastpath] - [fastpath_recv_updates]: fastpath_recv_update_data() fail
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core.rdp] - [rdp_read_security_header][0x519000000080]: invalid security header length, have 0, must be >= 4
+[01:46:23:014] [7:00000007] [ERROR][com.freerdp.core] - [tpdu_read_header]: tpdu length 88 > tpkt header length 0
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core.rdp] - [Stream_CheckAndLogRequiredLengthWLogExVa][0x519000000080]: [rdp_read_share_control_header(/src/FreeRDP/libfreerdp/core/rdp.c:314)] invalid length, got 169, require at least 16699 [element size=1]
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core.rdp] - [winpr_log_backtrace_ex][0x519000000080]: 0: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core.rdp] - [winpr_log_backtrace_ex][0x519000000080]: 1: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core.rdp] - [winpr_log_backtrace_ex][0x519000000080]: 2: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core.rdp] - [winpr_log_backtrace_ex][0x519000000080]: 3: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core.rdp] - [winpr_log_backtrace_ex][0x519000000080]: 4: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core.rdp] - [winpr_log_backtrace_ex][0x519000000080]: 5: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core.rdp] - [winpr_log_backtrace_ex][0x519000000080]: 6: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core.rdp] - [winpr_log_backtrace_ex][0x519000000080]: 7: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core.rdp] - [winpr_log_backtrace_ex][0x519000000080]: 8: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core.rdp] - [winpr_log_backtrace_ex][0x519000000080]: 9: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core.rdp] - [winpr_log_backtrace_ex][0x519000000080]: 10: dli_fname=/lib/x86_64-linux-gnu/libc.so.6 [0x7f10bbf0f000], dli_sname=__libc_start_main [0x7f10bbf32f90]
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core.rdp] - [winpr_log_backtrace_ex][0x519000000080]: 11: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:014] [7:00000007] [WARN][com.freerdp.core.rdp] - [winpr_log_backtrace_ex][0x519000000080]: 12: unresolvable, address=(nil)
+[01:46:23:014] [7:00000007] [ERROR][com.freerdp.core.update] - [update_recv_altsec_window_order]: Stream short orderSize
+[01:46:23:014] [7:00000007] [ERROR][com.freerdp.core.surface] - [update_recv_surfcmds]: unknown cmdType 0x4141
+[01:46:23:014] [7:00000007] [ERROR][com.freerdp.core] - [tpdu_read_header]: tpdu length 65 > tpkt header length 0
+[01:46:23:014] [7:00000007] [WARN][com.winpr.wStream] - [Stream_CheckAndLogRequiredLengthWLogExVa]: [rdp_recv_demand_active(/src/FreeRDP/libfreerdp/core/capabilities.c:4528)] invalid length, got 126, require at least 22616 [element size=1]
+[01:46:23:015] [7:00000007] [WARN][com.winpr.wStream] - [winpr_log_backtrace_ex]: 0: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.winpr.wStream] - [winpr_log_backtrace_ex]: 1: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.winpr.wStream] - [winpr_log_backtrace_ex]: 2: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.winpr.wStream] - [winpr_log_backtrace_ex]: 3: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.winpr.wStream] - [winpr_log_backtrace_ex]: 4: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.winpr.wStream] - [winpr_log_backtrace_ex]: 5: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.winpr.wStream] - [winpr_log_backtrace_ex]: 6: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.winpr.wStream] - [winpr_log_backtrace_ex]: 7: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.winpr.wStream] - [winpr_log_backtrace_ex]: 8: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.winpr.wStream] - [winpr_log_backtrace_ex]: 9: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.winpr.wStream] - [winpr_log_backtrace_ex]: 10: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.winpr.wStream] - [winpr_log_backtrace_ex]: 11: dli_fname=/lib/x86_64-linux-gnu/libc.so.6 [0x7f10bbf0f000], dli_sname=__libc_start_main [0x7f10bbf32f90]
+[01:46:23:015] [7:00000007] [WARN][com.winpr.wStream] - [winpr_log_backtrace_ex]: 12: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.winpr.wStream] - [winpr_log_backtrace_ex]: 13: unresolvable, address=(nil)
+[01:46:23:015] [7:00000007] [WARN][com.freerdp.core.capabilities] - [Stream_CheckAndLogRequiredLengthWLogExVa]: [rdp_recv_confirm_active(/src/FreeRDP/libfreerdp/core/capabilities.c:4660)] invalid length, got 116, require at least 22532 [element size=1]
+[01:46:23:015] [7:00000007] [WARN][com.freerdp.core.capabilities] - [winpr_log_backtrace_ex]: 0: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.freerdp.core.capabilities] - [winpr_log_backtrace_ex]: 1: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.freerdp.core.capabilities] - [winpr_log_backtrace_ex]: 2: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.freerdp.core.capabilities] - [winpr_log_backtrace_ex]: 3: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.freerdp.core.capabilities] - [winpr_log_backtrace_ex]: 4: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.freerdp.core.capabilities] - [winpr_log_backtrace_ex]: 5: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.freerdp.core.capabilities] - [winpr_log_backtrace_ex]: 6: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.freerdp.core.capabilities] - [winpr_log_backtrace_ex]: 7: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.freerdp.core.capabilities] - [winpr_log_backtrace_ex]: 8: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.freerdp.core.capabilities] - [winpr_log_backtrace_ex]: 9: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.freerdp.core.capabilities] - [winpr_log_backtrace_ex]: 10: dli_fname=/lib/x86_64-linux-gnu/libc.so.6 [0x7f10bbf0f000], dli_sname=__libc_start_main [0x7f10bbf32f90]
+[01:46:23:015] [7:00000007] [WARN][com.freerdp.core.capabilities] - [winpr_log_backtrace_ex]: 11: dli_fname=/b/bin/address/TestFuzzCoreServer [0x55e6d5706000], dli_sname=(null) [(nil)]
+[01:46:23:015] [7:00000007] [WARN][com.freerdp.core.capabilities] - [winpr_log_backtrace_ex]: 12: unresolvable, address=(nil)
+[01:46:23:015] [7:00000007] [ERROR][com.freerdp.core] - [tpdu_read_header]: tpdu length 65 > tpkt header length 0
+=================================================================
+==7==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x519000001d60 at pc 0x55e6d5fa0d91 bp 0x7ffd707a9870 sp 0x7ffd707a9868
+WRITE of size 8 at 0x519000001d60 thread T0
+SCARINESS: 42 (8-byte-write-heap-buffer-overflow)
+    #0 0x55e6d5fa0d90 in Stream_Read /src/FreeRDP/winpr/include/winpr/stream.h:703:3
+    #1 0x55e6d5fa0d90 in gcc_read_client_network_data /src/FreeRDP/libfreerdp/core/gcc.c:1875:3
+    #2 0x55e6d5fa0d90 in gcc_read_client_data_blocks /src/FreeRDP/libfreerdp/core/gcc.c:617:10
+    #3 0x55e6d5f9b00b in gcc_read_conference_create_request /src/FreeRDP/libfreerdp/core/gcc.c:414:7
+    #4 0x55e6d5ee32ff in mcs_recv_connect_initial /src/FreeRDP/libfreerdp/core/mcs.c:700:7
+    #5 0x55e6d5cbaefb in freerdp_is_valid_mcs_create_request /src/FreeRDP/libfreerdp/core/freerdp.c:1441:16
+    #6 0x55e6d5c42785 in test_server /src/FreeRDP/libfreerdp/core/test/TestFuzzCoreServer.c:82:3
+    #7 0x55e6d5c42785 in LLVMFuzzerTestOneInput /src/FreeRDP/libfreerdp/core/test/TestFuzzCoreServer.c:106:2
+    #8 0x55e6d5af9100 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #9 0x55e6d5ae4375 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #10 0x55e6d5ae9e0f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #11 0x55e6d5b150b2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #12 0x7f10bbf33082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #13 0x55e6d5adc55d in _start (/b/bin/address/TestFuzzCoreServer+0x3d655d)
+
+DEDUP_TOKEN: Stream_Read--gcc_read_client_network_data--gcc_read_client_data_blocks
+0x519000001d60 is located 0 bytes after 992-byte region [0x519000001980,0x519000001d60)
+allocated by thread T0 here:
+    #0 0x55e6d5c05099 in calloc /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:75:3
+    #1 0x55e6d5ee89b6 in mcs_new /src/FreeRDP/libfreerdp/core/mcs.c:1446:34
+    #2 0x55e6d5cbaee4 in freerdp_is_valid_mcs_create_request /src/FreeRDP/libfreerdp/core/freerdp.c:1438:16
+    #3 0x55e6d5c42785 in test_server /src/FreeRDP/libfreerdp/core/test/TestFuzzCoreServer.c:82:3
+    #4 0x55e6d5c42785 in LLVMFuzzerTestOneInput /src/FreeRDP/libfreerdp/core/test/TestFuzzCoreServer.c:106:2
+    #5 0x55e6d5af9100 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #6 0x55e6d5ae4375 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #7 0x55e6d5ae9e0f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #8 0x55e6d5b150b2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #9 0x7f10bbf33082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: __interceptor_calloc--mcs_new--freerdp_is_valid_mcs_create_request
+SUMMARY: AddressSanitizer: heap-buffer-overflow /src/FreeRDP/winpr/include/winpr/stream.h:703:3 in Stream_Read
+Shadow bytes around the buggy address:
+  0x519000001a80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x519000001b00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x519000001b80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x519000001c00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x519000001c80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x519000001d00: 00 00 00 00 00 00 00 00 00 00 00 00[fa]fa fa fa
+  0x519000001d80: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x519000001e00: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x519000001e80: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x519000001f00: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x519000001f80: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING

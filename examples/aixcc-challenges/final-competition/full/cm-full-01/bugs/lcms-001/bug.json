@@ -1,0 +1,68 @@
+{
+ "challenge": "cm-full-01",
+ "bug": "lcms-001",
+ "harness": "cms_postscript_fuzzer",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-476"
+  ],
+  "crash_type": "SEGV",
+  "expected_types": [
+   "SEGV",
+   "null-deref"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "src/cmsps2.c"
+  ],
+  "patch_files": [
+   "src/cmsps2.c"
+  ],
+  "patch_functions": [
+   "EmitCIEBasedDEF"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/lcms/src/cmslut.c:1230",
+  "crash_line": "19",
+  "stack_files": [
+   "/src/cms_postscript_fuzzer.c",
+   "/src/lcms/src/cmslut.c",
+   "/src/lcms/src/cmsps2.c",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-476"
+ ],
+ "name": "lcms-001, active N-Day",
+ "blob": "data.bin",
+ "blob_bytes": 144,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/cms_postscript_fuzzer",
+  "coverage": "bin/coverage/cms_postscript_fuzzer"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "SEGV",
+  "top_frames": [
+   "cmsStageType",
+   "EmitCIEBasedDEF",
+   "WriteInputLUT",
+   "GenerateCSA",
+   "cmsGetPostScriptColorResource",
+   "cmsGetPostScriptCSA"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/lcms:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

@@ -1,0 +1,66 @@
+{
+ "challenge": "ex-delta-02",
+ "bug": "exif-001",
+ "harness": "exif_from_data_fuzzer",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-122"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "heap-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "libexif/exif-utils.c",
+   "src/ui/user_input.c"
+  ],
+  "patch_files": [
+   "libexif/fuji/exif-mnote-data-fuji.c"
+  ],
+  "crash_file": "/src/libexif/libexif/exif-utils.c:137",
+  "crash_line": "36",
+  "stack_files": [
+   "/src/exif_from_data_fuzzer.cc",
+   "/src/libexif/libexif/exif-data.c",
+   "/src/libexif/libexif/exif-utils.c",
+   "/src/libexif/libexif/fuji/exif-mnote-data-fuji.c",
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-122"
+ ],
+ "name": "exif-001, Replay 1",
+ "blob": "data.bin",
+ "blob_bytes": 56,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/exif_from_data_fuzzer",
+  "coverage": "bin/coverage/exif_from_data_fuzzer"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "exif_get_slong",
+   "exif_get_long",
+   "exif_mnote_data_fuji_load",
+   "exif_data_load_data",
+   "exif_data_new_from_data",
+   "LLVMFuzzerTestOneInput"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/libexif:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

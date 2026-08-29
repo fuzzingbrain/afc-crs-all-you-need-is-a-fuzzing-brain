@@ -1,0 +1,131 @@
+{
+ "challenge": "ws-delta-01",
+ "round": "final-competition",
+ "scan_mode": "delta",
+ "project": "wireshark",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-wireshark.git",
+  "checkout_ref": "challenges/ws-delta-01",
+  "resolved_commit": "42b197b46702180a4273005575e8b1a6ff7bac1f"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/ws-delta-01",
+  "project": "wireshark"
+ },
+ "image": "aixcc-afc/wireshark:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "handler_ber"
+ ],
+ "target_harnesses": [
+  "handler_ber"
+ ],
+ "graphs": {
+  "handler_ber": "mongodb"
+ },
+ "counts": {
+  "handler_ber": {
+   "functions": 95377,
+   "nodes": 93295
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "ws-delta-01",
+  "ok": true,
+  "harnesses": {
+   "handler_ber": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "vuln_003": {
+      "patched_files": [
+       "epan/dissectors/packet-ber.c"
+      ],
+      "vuln_functions": [
+       "dissect_ber_GeneralString"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "dissect_ber_GeneralString"
+      ],
+      "V1_has_node_with_body": [
+       "dissect_ber_GeneralString"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "epan_dissect_run",
+       "dissect_record",
+       "call_dissector_work",
+       "dissect_ber_syntax",
+       "try_dissect_unknown_ber",
+       "dissect_ber_GeneralString"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "epan/dissectors/packet-ber.c"
+      ],
+      "V3_body_has_patched_text": [
+       "dissect_ber_GeneralString"
+      ]
+     }
+    },
+    "nodes": 93295,
+    "functions": 95377,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "vuln_003": {
+   "harness": "handler_ber",
+   "crash": "stack-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "handler_ber"
+  ],
+  "coverage": [
+   "handler_ber"
+  ]
+ },
+ "timings": [
+  {
+   "step": "build_image",
+   "seconds": 96,
+   "rc": 0,
+   "command": "python3 /home/ze/fb-graphs/build/ws-delta-01/fuzz-tooling/infra/helper.py build_image --no-pull wireshark"
+  },
+  {
+   "step": "build_bc_wrapper",
+   "seconds": 487,
+   "rc": 1,
+   "command": "bcwrap CC/CXX"
+  },
+  {
+   "step": "build_bc_wrapper",
+   "seconds": 426,
+   "rc": 1,
+   "command": "bcwrap CC/CXX"
+  }
+ ]
+}

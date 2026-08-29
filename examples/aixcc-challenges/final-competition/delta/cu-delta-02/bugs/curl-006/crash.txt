@@ -1,0 +1,31 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2332202289
+INFO: Loaded 1 modules   (28128 inline 8-bit counters): 28128 [0x55f16a19b1f8, 0x55f16a1a1fd8), 
+INFO: Loaded 1 PC tables (28128 PCs): 28128 [0x55f16a1a1fd8,0x55f16a20fdd8), 
+/b/bin/address/curl_fuzzer_ws: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==7==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000000 (pc 0x55f169e6016c bp 0x7ffe59091030 sp 0x7ffe59090e80 T0)
+==7==The signal is caused by a WRITE memory access.
+==7==Hint: address points to the zero page.
+SCARINESS: 10 (null-deref)
+    #0 0x55f169e6016c in totallyfineprotocl_sm /src/curl/lib/totallyfineprotocl.c:232:33
+    #1 0x55f16a00516c in Curl_pp_statemach /src/curl/lib/pingpong.c:137:14
+    #2 0x55f169e5f48b in totallyfineprotocl_doing /src/curl/lib/totallyfineprotocl.c:254:21
+    #3 0x55f169dc9ac5 in protocol_connecting /src/curl/lib/multi.c:1735:14
+    #4 0x55f169db7f55 in multi_runsingle /src/curl/lib/multi.c:2753:16
+    #5 0x55f169db5fd5 in curl_multi_perform /src/curl/lib/multi.c:3016:16
+    #6 0x55f169d64a6e in fuzz_handle_transfer(fuzz_data*) /src/curl_fuzzer/curl_fuzzer.cc:419:5
+    #7 0x55f169d6208d in LLVMFuzzerTestOneInput /src/curl_fuzzer/curl_fuzzer.cc:97:3
+    #8 0x55f169c16640 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #9 0x55f169c018b5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #10 0x55f169c0734f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #11 0x55f169c325f2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #12 0x7f2937f82082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #13 0x55f169bf9a9d in _start (/b/bin/address/curl_fuzzer_ws+0x136a9d)
+
+DEDUP_TOKEN: totallyfineprotocl_sm--Curl_pp_statemach--totallyfineprotocl_doing
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /src/curl/lib/totallyfineprotocl.c:232:33 in totallyfineprotocl_sm
+==7==ABORTING

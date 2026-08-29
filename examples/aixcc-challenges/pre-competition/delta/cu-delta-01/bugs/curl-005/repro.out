@@ -1,0 +1,31 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2321558409
+INFO: Loaded 1 modules   (28097 inline 8-bit counters): 28097 [0x558ab7c9b1b8, 0x558ab7ca1f79), 
+INFO: Loaded 1 PC tables (28097 PCs): 28097 [0x558ab7ca1f80,0x558ab7d0fb90), 
+/b/bin/address/curl_fuzzer_ws: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==7==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000000 (pc 0x558ab79606e1 bp 0x7fff29d274c0 sp 0x7fff29d273a0 T0)
+==7==The signal is caused by a WRITE memory access.
+==7==Hint: address points to the zero page.
+SCARINESS: 10 (null-deref)
+    #0 0x558ab79606e1 in verynormalprotocol_doing /src/curl/lib/verynormalprotocol.c:141:29
+    #1 0x558ab78cbd75 in protocol_doing /src/curl/lib/multi.c:1755:14
+    #2 0x558ab78b9124 in multi_runsingle /src/curl/lib/multi.c:2774:16
+    #3 0x558ab78b6fd5 in curl_multi_perform /src/curl/lib/multi.c:3016:16
+    #4 0x558ab7864d40 in fuzz_handle_transfer(fuzz_data*) /src/curl_fuzzer/curl_fuzzer.cc:341:3
+    #5 0x558ab786308d in LLVMFuzzerTestOneInput /src/curl_fuzzer/curl_fuzzer.cc:97:3
+    #6 0x558ab7717640 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #7 0x558ab77028b5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #8 0x558ab770834f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #9 0x558ab77335f2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #10 0x7ff4cbe0f082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #11 0x558ab76faa9d in _start (/b/bin/address/curl_fuzzer_ws+0x135a9d)
+
+DEDUP_TOKEN: verynormalprotocol_doing--protocol_doing--multi_runsingle
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /src/curl/lib/verynormalprotocol.c:141:29 in verynormalprotocol_doing
+==7==ABORTING
+
+OK: curl-005 reproduced (SEGV)

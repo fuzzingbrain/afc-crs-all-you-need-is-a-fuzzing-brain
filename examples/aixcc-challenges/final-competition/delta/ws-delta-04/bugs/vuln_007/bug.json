@@ -1,0 +1,75 @@
+{
+ "challenge": "ws-delta-04",
+ "bug": "vuln_007",
+ "harness": "handler_json",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-126"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "dynamic-stack-buffer-overflow",
+   "global-buffer-overflow",
+   "heap-buffer-overflow",
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "epan/dissectors/packet-json.c"
+  ],
+  "patch_files": [
+   "epan/dissectors/packet-json.c"
+  ],
+  "patch_functions": [
+   "json_string_unescape"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/wireshark/epan/dissectors/packet-json.c:361",
+  "crash_line": "29",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/wireshark/epan/dissectors/packet-frame.c",
+   "/src/wireshark/epan/dissectors/packet-json.c",
+   "/src/wireshark/epan/epan.c",
+   "/src/wireshark/epan/packet.c",
+   "/src/wireshark/epan/tvbparse.c",
+   "/src/wireshark/fuzz/fuzzshark.c",
+   "/src/wireshark/wsutil/wmem/wmem_strbuf.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-126"
+ ],
+ "name": "wireshark json 32-bit unicode over-read",
+ "blob": "blob.bin",
+ "blob_bytes": 40,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/handler_json",
+  "coverage": "bin/coverage/handler_json"
+ },
+ "reference_patch": "patch_good.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "json_string_unescape",
+   "get_json_string",
+   "after_value",
+   "execute_callbacks",
+   "tvbparse_get",
+   "dissect_json"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/wireshark:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

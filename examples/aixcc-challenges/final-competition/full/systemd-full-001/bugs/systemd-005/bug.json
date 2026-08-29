@@ -1,0 +1,71 @@
+{
+ "challenge": "systemd-full-001",
+ "bug": "systemd-005",
+ "harness": "fuzz-systemctl-parse-argv",
+ "consistency": {
+  "verdict": "inconsistent",
+  "cwes": [
+   "CWE-415"
+  ],
+  "crash_type": "double-free",
+  "expected_types": [
+   "attempting-double-free",
+   "double-free"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "src/basic/alloc-util.h"
+  ],
+  "patch_files": [
+   "src/basic/alloc-util.h"
+  ],
+  "patch_functions": [
+   "unsetp"
+  ],
+  "matched_by": null,
+  "crash_file": "/work/build/../../src/systemd/src/shared/parse-argument.c:68",
+  "crash_line": "24",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/work/build/../../src/systemd/src/basic/path-util.c",
+   "/work/build/../../src/systemd/src/basic/static-destruct.h",
+   "/work/build/../../src/systemd/src/shared/parse-argument.c",
+   "/work/build/../../src/systemd/src/systemctl/fuzz-systemctl-parse-argv.c",
+   "/work/build/../../src/systemd/src/systemctl/systemctl.c"
+  ],
+  "site_consistent": false
+ },
+ "cwes": [
+  "CWE-415"
+ ],
+ "name": "double-free",
+ "blob": "data.bin",
+ "blob_bytes": 3707,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/fuzz-systemctl-parse-argv",
+  "coverage": "bin/coverage/fuzz-systemctl-parse-argv"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "double-free",
+  "top_frames": [
+   "parse_path_argument",
+   "systemctl_parse_argv",
+   "LLVMFuzzerTestOneInput",
+   "_start",
+   "static_destruct",
+   "LLVMFuzzerTestOneInput"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/systemd:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "repeat"
+}

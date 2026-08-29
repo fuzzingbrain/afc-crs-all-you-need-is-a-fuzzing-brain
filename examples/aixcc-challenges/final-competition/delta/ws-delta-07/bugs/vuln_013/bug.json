@@ -1,0 +1,68 @@
+{
+ "challenge": "ws-delta-07",
+ "bug": "vuln_013",
+ "harness": "handler_gvcp",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-120"
+  ],
+  "crash_type": "global-buffer-overflow",
+  "expected_types": null,
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "epan/dissectors/packet-gvcp.c"
+  ],
+  "patch_files": [
+   "epan/dissectors/packet-gvcp.c"
+  ],
+  "patch_functions": [
+   "dissect_extended_bootstrap_register",
+   "dissect_register"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/wireshark/epan/dissectors/packet-gvcp.c:984",
+  "crash_line": "44",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/wireshark/epan/dissectors/packet-frame.c",
+   "/src/wireshark/epan/dissectors/packet-gvcp.c",
+   "/src/wireshark/epan/epan.c",
+   "/src/wireshark/epan/packet.c",
+   "/src/wireshark/fuzz/fuzzshark.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-120"
+ ],
+ "name": "wireshark telnet subcommand use-after-free",
+ "blob": "blob.bin",
+ "blob_bytes": 1616,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/handler_gvcp",
+  "coverage": "bin/coverage/handler_gvcp"
+ },
+ "reference_patch": "patch_good.diff",
+ "expected_crash": {
+  "type": "global-buffer-overflow",
+  "top_frames": [
+   "dissect_register",
+   "dissect_writereg_cmd",
+   "dissect_gvcp",
+   "call_dissector_through_handle",
+   "call_dissector_work",
+   "call_dissector_only"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/wireshark:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

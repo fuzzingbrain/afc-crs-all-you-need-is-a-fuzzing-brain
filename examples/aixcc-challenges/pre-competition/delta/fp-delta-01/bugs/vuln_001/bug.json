@@ -1,0 +1,63 @@
+{
+ "challenge": "fp-delta-01",
+ "bug": "vuln_001",
+ "harness": "TestFuzzCryptoCertificateDataSetPEM",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-122"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "heap-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "libfreerdp/crypto/certificate.c"
+  ],
+  "patch_files": [
+   "libfreerdp/crypto/certificate.c"
+  ],
+  "patch_functions": [
+   "freerdp_bio_read_pem_with_policy"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/FreeRDP/libfreerdp/crypto/certificate.c:1570",
+  "crash_line": "14",
+  "stack_files": [
+   "/src/FreeRDP/libfreerdp/core/test/TestFuzzCryptoCertificateDataSetPEM.c",
+   "/src/FreeRDP/libfreerdp/crypto/certificate.c",
+   "/src/FreeRDP/libfreerdp/crypto/certificate_data.c",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-122"
+ ],
+ "name": "FreeRDP certificate policy heap overflow",
+ "blob": "cert.pem",
+ "blob_bytes": 85883,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/TestFuzzCryptoCertificateDataSetPEM",
+  "coverage": "bin/coverage/TestFuzzCryptoCertificateDataSetPEM"
+ },
+ "reference_patch": "patch_good.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "LLVMFuzzerTestOneInput",
+   "_start"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/freerdp:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

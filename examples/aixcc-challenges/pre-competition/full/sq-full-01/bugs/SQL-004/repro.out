@@ -1,0 +1,77 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2333473903
+INFO: Loaded 1 modules   (65628 inline 8-bit counters): 65628 [0x5570872b4ab0, 0x5570872c4b0c), 
+INFO: Loaded 1 PC tables (65628 PCs): 65628 [0x5570872c4b10,0x5570873c50d0), 
+/b/bin/address/customfuzz3: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x50e000000378 at pc 0x5570871432c3 bp 0x7ffd66314720 sp 0x7ffd66314718
+READ of size 1 at 0x50e000000378 thread T0
+SCARINESS: 12 (1-byte-read-heap-buffer-overflow)
+    #0 0x5570871432c2 in shell_error_context /src/sqlite3/test/shell.c:23149:13
+    #1 0x55708714b779 in save_err_msg /src/sqlite3/test/shell.c:23238:14
+    #2 0x5570870fc311 in shell_exec /src/sqlite3/test/shell.c:24529:21
+    #3 0x5570870e14b4 in shell_main /src/sqlite3/test/shell.c:33304:14
+    #4 0x557086ce9a65 in LLVMFuzzerTestOneInput /src/sqlite3/test/customfuzz3.c:27:3
+    #5 0x557086b9e4e0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #6 0x557086b89755 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #7 0x557086b8f1ef in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #8 0x557086bba492 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #9 0x7f2e052ea082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #10 0x557086b8193d in _start (/b/bin/address/customfuzz3+0x27493d)
+
+DEDUP_TOKEN: shell_error_context--save_err_msg--shell_exec
+0x50e000000378 is located 0 bytes after 152-byte region [0x50e0000002e0,0x50e000000378)
+allocated by thread T0 here:
+    #0 0x557086caa2af in malloc /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:68:3
+    #1 0x5570870b6f86 in sqlite3MemMalloc /src/sqlite3/bld/sqlite3.c:26963:7
+    #2 0x557086cef25e in mallocWithAlarm /src/sqlite3/bld/sqlite3.c:30697:7
+    #3 0x557086cef25e in sqlite3Malloc /src/sqlite3/bld/sqlite3.c:30743:5
+    #4 0x557086cf93f5 in sqlite3StrAccumEnlarge /src/sqlite3/bld/sqlite3.c:32323:14
+    #5 0x557086cfa200 in enlargeAndAppend /src/sqlite3/bld/sqlite3.c:32361:7
+    #6 0x557086cf5992 in sqlite3_str_vappendf /src/sqlite3/bld/sqlite3.c:32239:7
+    #7 0x557086cfb10d in sqlite3_vmprintf /src/sqlite3/bld/sqlite3.c:32579:3
+    #8 0x557086cfb10d in sqlite3_mprintf /src/sqlite3/bld/sqlite3.c:32595:7
+    #9 0x557086ce9a3a in LLVMFuzzerTestOneInput /src/sqlite3/test/customfuzz3.c:20:19
+    #10 0x557086b9e4e0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #11 0x557086b89755 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #12 0x557086b8f1ef in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #13 0x557086bba492 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #14 0x7f2e052ea082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: __interceptor_malloc--sqlite3MemMalloc--mallocWithAlarm
+SUMMARY: AddressSanitizer: heap-buffer-overflow /src/sqlite3/test/shell.c:23149:13 in shell_error_context
+Shadow bytes around the buggy address:
+  0x50e000000080: 00 00 00 00 00 00 00 00 00 00 00 00 fa fa fa fa
+  0x50e000000100: fa fa fa fa 00 00 00 00 00 00 00 00 00 00 00 00
+  0x50e000000180: 00 00 00 00 00 00 01 fa fa fa fa fa fa fa fa fa
+  0x50e000000200: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x50e000000280: 00 00 01 fa fa fa fa fa fa fa fa fa 00 00 00 00
+=>0x50e000000300: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00[fa]
+  0x50e000000380: fa fa fa fa fa fa fa fa 00 00 00 00 00 00 00 00
+  0x50e000000400: 00 00 00 00 00 00 00 00 00 00 00 fa fa fa fa fa
+  0x50e000000480: fa fa fa fa fd fd fd fd fd fd fd fd fd fd fd fd
+  0x50e000000500: fd fd fd fd fd fd fd fd fa fa fa fa fa fa fa fa
+  0x50e000000580: fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd fd
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING
+
+OK: SQL-004 reproduced (heap-buffer-overflow)

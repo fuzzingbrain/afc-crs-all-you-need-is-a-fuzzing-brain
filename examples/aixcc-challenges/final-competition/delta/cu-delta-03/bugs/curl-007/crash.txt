@@ -1,0 +1,31 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2416365626
+INFO: Loaded 1 modules   (28133 inline 8-bit counters): 28133 [0x55752f23d1f8, 0x55752f243fdd), 
+INFO: Loaded 1 PC tables (28133 PCs): 28133 [0x55752f243fe0,0x55752f2b1e30), 
+/b/bin/address/curl_fuzzer_ws: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==7==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000000 (pc 0x55752ef019dc bp 0x7ffdf09fde50 sp 0x7ffdf09fdb80 T0)
+==7==The signal is caused by a WRITE memory access.
+==7==Hint: address points to the zero page.
+SCARINESS: 10 (null-deref)
+    #0 0x55752ef019dc in alliswellprotocoll_sm /src/curl/lib/alliswellprotocoll.c:253:33
+    #1 0x55752f0a6a5c in Curl_pp_statemach /src/curl/lib/pingpong.c:137:14
+    #2 0x55752ef0054b in alliswellprotocoll_doing /src/curl/lib/alliswellprotocoll.c:280:21
+    #3 0x55752ee6aac5 in protocol_connecting /src/curl/lib/multi.c:1735:14
+    #4 0x55752ee58f55 in multi_runsingle /src/curl/lib/multi.c:2753:16
+    #5 0x55752ee56fd5 in curl_multi_perform /src/curl/lib/multi.c:3016:16
+    #6 0x55752ee05a6e in fuzz_handle_transfer(fuzz_data*) /src/curl_fuzzer/curl_fuzzer.cc:419:5
+    #7 0x55752ee0308d in LLVMFuzzerTestOneInput /src/curl_fuzzer/curl_fuzzer.cc:97:3
+    #8 0x55752ecb7640 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #9 0x55752eca28b5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #10 0x55752eca834f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #11 0x55752ecd35f2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #12 0x7f50bec6c082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #13 0x55752ec9aa9d in _start (/b/bin/address/curl_fuzzer_ws+0x136a9d)
+
+DEDUP_TOKEN: alliswellprotocoll_sm--Curl_pp_statemach--alliswellprotocoll_doing
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /src/curl/lib/alliswellprotocoll.c:253:33 in alliswellprotocoll_sm
+==7==ABORTING

@@ -1,0 +1,449 @@
+{
+ "challenge": "systemd-full-001",
+ "round": "final-competition",
+ "scan_mode": "full",
+ "project": "systemd",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-systemd.git",
+  "checkout_ref": "challenges/systemd-full-001",
+  "resolved_commit": "9a0853cc6e5bf507286f759f9d21b04bbec06fdc"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/systemd-full-001",
+  "project": "systemd"
+ },
+ "image": "aixcc-afc/systemd:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "fuzz-catalog",
+  "fuzz-link-parser",
+  "fuzz-systemctl-parse-argv",
+  "fuzz-udev-rule-parse-value"
+ ],
+ "target_harnesses": [
+  "fuzz-catalog",
+  "fuzz-link-parser",
+  "fuzz-systemctl-parse-argv",
+  "fuzz-udev-rule-parse-value"
+ ],
+ "graphs": {
+  "fuzz-catalog": "mongodb",
+  "fuzz-link-parser": "mongodb/fuzz-link-parser",
+  "fuzz-systemctl-parse-argv": "mongodb/fuzz-systemctl-parse-argv",
+  "fuzz-udev-rule-parse-value": "mongodb/fuzz-udev-rule-parse-value"
+ },
+ "counts": {
+  "fuzz-catalog": {
+   "functions": 12767,
+   "nodes": 9516
+  },
+  "fuzz-link-parser": {
+   "functions": 12770,
+   "nodes": 9512
+  },
+  "fuzz-systemctl-parse-argv": {
+   "functions": 12771,
+   "nodes": 9631
+  },
+  "fuzz-udev-rule-parse-value": {
+   "functions": 12767,
+   "nodes": 9507
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "systemd-full-001",
+  "ok": true,
+  "harnesses": {
+   "fuzz-catalog": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "systemd-003": {
+      "patched_files": [
+       "src/libsystemd/sd-journal/catalog.c"
+      ],
+      "vuln_functions": [
+       "finish_item"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "finish_item"
+      ],
+      "V1_has_node_with_body": [
+       "finish_item"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "catalog_import_file",
+       "finish_item"
+      ],
+      "V2_path_quality": "verified",
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "src/libsystemd/sd-journal/catalog.c"
+      ],
+      "V3_body_has_patched_text": [
+       "finish_item"
+      ]
+     }
+    },
+    "nodes": 9516,
+    "functions": 12767,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   },
+   "fuzz-link-parser": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "systemd-004": {
+      "patched_files": [
+       "src/shared/condition.c"
+      ],
+      "vuln_functions": [
+       "condition_free",
+       "condition_free_list_type"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "condition_free"
+      ],
+      "V1_has_node_with_body": [
+       "condition_free",
+       "condition_free_list_type"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "link_load_one",
+       "link_config_freep",
+       "link_config_free",
+       "condition_free_list",
+       "condition_free_list_type",
+       "condition_free"
+      ],
+      "V2_path_quality": "verified",
+      "V3_shape": "adds-only",
+      "V3_per_file": [
+       "src/shared/condition.c"
+      ],
+      "V3_body_has_patched_text": [
+       "condition_free_list_type"
+      ]
+     }
+    },
+    "nodes": 9512,
+    "functions": 12770,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   },
+   "fuzz-systemctl-parse-argv": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "systemd-005": {
+      "patched_files": [
+       "src/basic/alloc-util.h"
+      ],
+      "vuln_functions": [
+       "freep",
+       "unsetp"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "unsetp"
+      ],
+      "V1_has_node_with_body": [
+       "freep",
+       "unsetp"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "systemctl_parse_argv",
+       "freep"
+      ],
+      "V2_path_quality": "verified",
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "src/basic/alloc-util.h"
+      ],
+      "V3_body_has_patched_text": [
+       "freep"
+      ]
+     }
+    },
+    "nodes": 9631,
+    "functions": 12771,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   },
+   "fuzz-udev-rule-parse-value": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "systemd-001": {
+      "patched_files": [
+       "src/udev/udev-rules.c"
+      ],
+      "vuln_functions": [
+       "check_token_delimiters",
+       "udev_rule_parse_value"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "check_token_delimiters",
+       "udev_rule_parse_value"
+      ],
+      "V1_has_node_with_body": [
+       "check_token_delimiters",
+       "udev_rule_parse_value"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "udev_rule_parse_value"
+      ],
+      "V2_path_quality": "verified",
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "src/udev/udev-rules.c"
+      ],
+      "V3_body_has_patched_text": [
+       "udev_rule_parse_value"
+      ]
+     }
+    },
+    "nodes": 9507,
+    "functions": 12767,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "systemd-001": {
+   "harness": "fuzz-udev-rule-parse-value",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "systemd-003": {
+   "harness": "fuzz-catalog",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "systemd-004": {
+   "harness": "fuzz-link-parser",
+   "crash": "heap-use-after-free",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "systemd-005": {
+   "harness": "fuzz-systemctl-parse-argv",
+   "crash": "double-free",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "fuzz-bcd",
+   "fuzz-bootspec",
+   "fuzz-bus-label",
+   "fuzz-bus-match",
+   "fuzz-bus-message",
+   "fuzz-calendarspec",
+   "fuzz-catalog",
+   "fuzz-compress",
+   "fuzz-dhcp-client",
+   "fuzz-dhcp-server",
+   "fuzz-dhcp-server-relay",
+   "fuzz-dhcp6-client",
+   "fuzz-dns-packet",
+   "fuzz-efi-osrel",
+   "fuzz-efi-printf",
+   "fuzz-efi-string",
+   "fuzz-env-file",
+   "fuzz-etc-hosts",
+   "fuzz-execute-serialize",
+   "fuzz-fido-id-desc",
+   "fuzz-hostname-setup",
+   "fuzz-journal-remote",
+   "fuzz-journald-audit",
+   "fuzz-journald-kmsg",
+   "fuzz-journald-native",
+   "fuzz-journald-native-fd",
+   "fuzz-journald-stream",
+   "fuzz-journald-syslog",
+   "fuzz-json",
+   "fuzz-link-parser",
+   "fuzz-lldp-rx",
+   "fuzz-manager-serialize",
+   "fuzz-ndisc-rs",
+   "fuzz-netdev-parser",
+   "fuzz-network-parser",
+   "fuzz-nspawn-oci",
+   "fuzz-nspawn-settings",
+   "fuzz-resource-record",
+   "fuzz-systemctl-parse-argv",
+   "fuzz-time-util",
+   "fuzz-udev-database",
+   "fuzz-udev-rule-parse-value",
+   "fuzz-udev-rules",
+   "fuzz-unit-file",
+   "fuzz-varlink",
+   "fuzz-varlink-idl",
+   "fuzz-xdg-desktop",
+   "src"
+  ],
+  "coverage": [
+   "fuzz-bcd",
+   "fuzz-bootspec",
+   "fuzz-bus-label",
+   "fuzz-bus-match",
+   "fuzz-bus-message",
+   "fuzz-calendarspec",
+   "fuzz-catalog",
+   "fuzz-compress",
+   "fuzz-dhcp-client",
+   "fuzz-dhcp-server",
+   "fuzz-dhcp-server-relay",
+   "fuzz-dhcp6-client",
+   "fuzz-dns-packet",
+   "fuzz-efi-osrel",
+   "fuzz-efi-printf",
+   "fuzz-efi-string",
+   "fuzz-env-file",
+   "fuzz-etc-hosts",
+   "fuzz-execute-serialize",
+   "fuzz-fido-id-desc",
+   "fuzz-hostname-setup",
+   "fuzz-journal-remote",
+   "fuzz-journald-audit",
+   "fuzz-journald-kmsg",
+   "fuzz-journald-native",
+   "fuzz-journald-native-fd",
+   "fuzz-journald-stream",
+   "fuzz-journald-syslog",
+   "fuzz-json",
+   "fuzz-link-parser",
+   "fuzz-lldp-rx",
+   "fuzz-manager-serialize",
+   "fuzz-ndisc-rs",
+   "fuzz-netdev-parser",
+   "fuzz-network-parser",
+   "fuzz-nspawn-oci",
+   "fuzz-nspawn-settings",
+   "fuzz-resource-record",
+   "fuzz-systemctl-parse-argv",
+   "fuzz-time-util",
+   "fuzz-udev-database",
+   "fuzz-udev-rule-parse-value",
+   "fuzz-udev-rules",
+   "fuzz-unit-file",
+   "fuzz-varlink",
+   "fuzz-varlink-idl",
+   "fuzz-xdg-desktop",
+   "src",
+   "work"
+  ]
+ },
+ "timings": [
+  {
+   "step": "build_image",
+   "seconds": 4,
+   "rc": 0,
+   "command": "python3 /home/ze/fb-graphs/build/systemd-full-001/fuzz-tooling/infra/helper.py build_image --no-pull systemd"
+  },
+  {
+   "step": "build_bitcode",
+   "seconds": 67,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -e SANITIZER_FLAGS=-flto -g -fno-inline-functions -Wno-unused-command-line-argument -Qunused-arguments -e LDFLAGS=-fuse-ld=gold -e AR=llvm-ar -e NM=llvm-nm -e RANLIB=llvm-ranlib -v /home/ze/fb-graphs/build/systemd-full-001/repo-bitcode:/src/systemd -v /home/ze/fb-graphs/build/systemd-full-001/out:/out -v /home/ze/fb-graphs/build/systemd-full-001/work:/work aixcc-afc/systemd:latest bash -c compile 2>&1 | tail -40; mkdir -p /out/bc"
+  },
+  {
+   "step": "to_ll",
+   "seconds": 24,
+   "rc": 0,
+   "command": "docker run --rm -v /home/ze/fb-graphs/build/systemd-full-001/out:/out -v /home/ze/fb-graphs/build/systemd-full-001/repo-bitcode:/src/systemd -v /home/ze/fb-graphs/build/systemd-full-001/work:/work -v /home/ze/fb-graphs/build/systemd-full-001/ll:/ll aixcc-afc/systemd:latest bash -c "
+  },
+  {
+   "step": "extract_fuzz-catalog",
+   "seconds": 7,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  },
+  {
+   "step": "extract_fuzz-link-parser",
+   "seconds": 7,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  },
+  {
+   "step": "extract_fuzz-systemctl-parse-argv",
+   "seconds": 7,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  },
+  {
+   "step": "extract_fuzz-udev-rule-parse-value",
+   "seconds": 7,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  },
+  {
+   "step": "build_address",
+   "seconds": 36,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -v /home/ze/fb-graphs/build/systemd-full-001/repo-address:/src/systemd -v /home/ze/fb-graphs/build/systemd-full-001/out-address:/out -v /home/ze/fb-graphs/build/systemd-full-001/work-address:/work aixcc-afc/systemd:latest bash -c compile 2>&1 | tail -30"
+  },
+  {
+   "step": "build_coverage",
+   "seconds": 32,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=coverage -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -v /home/ze/fb-graphs/build/systemd-full-001/repo-coverage:/src/systemd -v /home/ze/fb-graphs/build/systemd-full-001/out-coverage:/out -v /home/ze/fb-graphs/build/systemd-full-001/work-coverage:/work aixcc-afc/systemd:latest bash -c compile 2>&1 | tail -30"
+  }
+ ]
+}

@@ -1,0 +1,56 @@
+{
+ "challenge": "ex-delta-03",
+ "bug": "exif-002",
+ "harness": "exif_from_data_fuzzer",
+ "consistency": {
+  "verdict": "site_match_cwe_label_differs",
+  "cwes": [
+   "CWE-121"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": false,
+  "vuln_yaml_files": [
+   "libexif/exif-data.c"
+  ],
+  "crash_file": "/src/libexif/libexif/exif-data.c",
+  "crash_line": "213",
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-121"
+ ],
+ "name": "exif-002, Replay 2",
+ "blob": "data.bin",
+ "blob_bytes": 207,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/exif_from_data_fuzzer",
+  "coverage": "bin/coverage/exif_from_data_fuzzer"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "exif_data_load_data_entry",
+   "exif_data_load_data_content",
+   "exif_data_load_data",
+   "exif_data_new_from_data",
+   "LLVMFuzzerTestOneInput",
+   "_start"
+  ],
+  "site": "/src/libexif/libexif/exif-data.c:213"
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/libexif:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain",
+ "patch_verified": true,
+ "patch_verify_note": "clean after patch"
+}

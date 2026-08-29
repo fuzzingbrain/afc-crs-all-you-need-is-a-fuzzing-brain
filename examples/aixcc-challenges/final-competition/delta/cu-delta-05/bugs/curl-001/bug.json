@@ -1,0 +1,66 @@
+{
+ "challenge": "cu-delta-05",
+ "bug": "curl-001",
+ "harness": "curl_fuzzer_dict",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-134"
+  ],
+  "crash_type": "SEGV",
+  "expected_types": null,
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "lib/dict.c"
+  ],
+  "patch_files": [
+   "lib/dict.c"
+  ],
+  "patch_functions": [
+   "dict_do"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/curl/lib/mprintf.c:894",
+  "crash_line": "15",
+  "stack_files": [
+   "/src/curl/lib/dict.c",
+   "/src/curl/lib/mprintf.c",
+   "/src/curl/lib/multi.c",
+   "/src/curl_fuzzer/curl_fuzzer.cc",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-134"
+ ],
+ "name": "DICT Authentication bug",
+ "blob": "data.bin",
+ "blob_bytes": 66,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/curl_fuzzer_dict",
+  "coverage": "bin/coverage/curl_fuzzer_dict"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "SEGV",
+  "top_frames": [
+   "formatf",
+   "curl_mvaprintf",
+   "sendf",
+   "dict_do",
+   "multi_do",
+   "state_do"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/curl:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

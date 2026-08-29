@@ -1,0 +1,71 @@
+{
+ "challenge": "cm-full-01",
+ "bug": "lcms-002",
+ "harness": "cms_virtual_profile_fuzzer",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-126"
+  ],
+  "crash_type": "stack-buffer-overflow",
+  "expected_types": [
+   "dynamic-stack-buffer-overflow",
+   "global-buffer-overflow",
+   "heap-buffer-overflow",
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "src/cmsxform.c"
+  ],
+  "patch_files": [
+   "src/cmsxform.c"
+  ],
+  "patch_functions": [
+   "IsProperColorSpace"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/lcms/src/cmspack.c:130",
+  "crash_line": "13",
+  "stack_files": [
+   "/src/cms_virtual_profile_fuzzer.c",
+   "/src/lcms/src/cmspack.c",
+   "/src/lcms/src/cmsvirt.c",
+   "/src/lcms/src/cmsxform.c",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-126"
+ ],
+ "name": "lcms-002, buffer over-read",
+ "blob": "data.bin",
+ "blob_bytes": 386,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/cms_virtual_profile_fuzzer",
+  "coverage": "bin/coverage/cms_virtual_profile_fuzzer"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "stack-buffer-overflow",
+  "top_frames": [
+   "UnrollChunkyBytes",
+   "CachedXFORM",
+   "cmsDoTransform",
+   "CreateNamedColorDevicelink",
+   "cmsTransform2DeviceLink",
+   "LLVMFuzzerTestOneInput"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/lcms:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

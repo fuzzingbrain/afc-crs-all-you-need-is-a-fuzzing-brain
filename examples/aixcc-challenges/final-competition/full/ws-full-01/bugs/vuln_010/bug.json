@@ -1,0 +1,70 @@
+{
+ "challenge": "ws-full-01",
+ "bug": "vuln_010",
+ "harness": "handler_netbios",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-122"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "heap-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "epan/dissectors/packet-netbios.c"
+  ],
+  "patch_files": [
+   "epan/dissectors/packet-netbios.c"
+  ],
+  "patch_functions": [
+   "dissect_netb_terminate_trace"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/wireshark/epan/dissectors/packet-netbios.c:726",
+  "crash_line": "22",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/wireshark/epan/dissectors/packet-frame.c",
+   "/src/wireshark/epan/dissectors/packet-netbios.c",
+   "/src/wireshark/epan/epan.c",
+   "/src/wireshark/epan/packet.c",
+   "/src/wireshark/fuzz/fuzzshark.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-122"
+ ],
+ "name": "wireshark netbios terminate trace signature overflow",
+ "blob": "blob.bin",
+ "blob_bytes": 46,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/handler_netbios",
+  "coverage": "bin/coverage/handler_netbios"
+ },
+ "reference_patch": "patch_good.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "dissect_netb_terminate_trace",
+   "dissect_netbios",
+   "call_dissector_through_handle",
+   "call_dissector_work",
+   "call_dissector_only",
+   "call_all_postdissectors"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/wireshark:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

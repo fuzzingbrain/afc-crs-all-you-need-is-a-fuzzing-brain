@@ -1,79 +1,106 @@
 {
-  "challenge": "fp-full-01",
-  "challenge_name": "Sharp Complexity",
-  "round": "pre-competition",
-  "scan_mode": "full",
-  "challenge_type": "full     # full | delta",
-  "language": {
-    "freerdp": "c"
-  },
-  "oss_fuzz_projects": [
-    "freerdp"
-  ],
-  "source": {
-    "repo": "https://github.com/AIxCyberChallenge/afc-freerdp.git",
-    "branch": "challenges/fp-full-01",
-    "public": true,
-    "resolved": true
-  },
-  "fuzz_tooling": {
-    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/fp-full-01",
-    "project": "freerdp"
-  },
-  "base_ref": "challenges/fp-full-01",
-  "delta_ref": "null # this is null for full scans, a hash for delta scans",
+ "challenge": "fp-full-01",
+ "challenge_name": "Sharp Complexity",
+ "round": "pre-competition",
+ "scan_mode": "full",
+ "challenge_type": "full     # full | delta",
+ "language": {
+  "freerdp": "c"
+ },
+ "oss_fuzz_projects": [
+  "freerdp"
+ ],
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-freerdp.git",
+  "branch": "challenges/fp-full-01",
+  "public": true,
+  "resolved": true
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/fp-full-01",
+  "project": "freerdp"
+ },
+ "base_ref": "challenges/fp-full-01",
+ "delta_ref": "null # this is null for full scans, a hash for delta scans",
+ "harnesses": [
+  "TestFuzzCodecs",
+  "TestFuzzCommonAssistanceBinToHexString",
+  "TestFuzzCommonAssistanceHexStringToBin",
+  "TestFuzzCommonAssistanceParseFileBuffer",
+  "TestFuzzCoreClient",
+  "TestFuzzCoreServer",
+  "TestFuzzCryptoCertificateDataSetPEM"
+ ],
+ "harness_count": 7,
+ "vulnerabilities": [
+  "vuln_004",
+  "vuln_005"
+ ],
+ "answers": {
+  "vuln_dirs": 2,
+  "pov_blobs": 2,
+  "reference_patches": 2,
+  "has_answers": true
+ },
+ "graph": {
+  "path": "mongodb",
+  "producer": "llvm-ir",
   "harnesses": [
-    "TestFuzzCodecs",
-    "TestFuzzCommonAssistanceBinToHexString",
-    "TestFuzzCommonAssistanceHexStringToBin",
-    "TestFuzzCommonAssistanceParseFileBuffer",
-    "TestFuzzCoreClient",
-    "TestFuzzCoreServer",
-    "TestFuzzCryptoCertificateDataSetPEM"
+   "TestFuzzCoreServer"
   ],
-  "harness_count": 7,
-  "vulnerabilities": [
-    "vuln_004",
-    "vuln_005"
-  ],
-  "answers": {
-    "vuln_dirs": 2,
-    "pov_blobs": 2,
-    "reference_patches": 2,
-    "has_answers": true
+  "verified": true
+ },
+ "vuln_details": [
+  {
+   "vuln": "vuln_004",
+   "name": "FreeRDP Integer Overflow",
+   "cwes": [
+    "CWE-190",
+    "CWE-122"
+   ],
+   "pov_harness": "TestFuzzCoreServer",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "data.bin",
+   "reference_patch": "good_patch.diff"
   },
-  "graph": null,
-  "vuln_details": [
-    {
-      "vuln": "vuln_004",
-      "name": "FreeRDP Integer Overflow",
-      "cwes": [
-        "CWE-190",
-        "CWE-122"
-      ],
-      "pov_harness": "TestFuzzCoreServer",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "data.bin",
-      "reference_patch": "good_patch.diff"
-    },
-    {
-      "vuln": "vuln_005",
-      "name": "FreeRDP Obfuscated Arbitrary Code Execution",
-      "cwes": [
-        "CWE-94"
-      ],
-      "pov_harness": "TestFuzzCoreServer",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "data.bin",
-      "reference_patch": "good_patch.diff"
-    }
-  ],
-  "target_harnesses": [
-    "TestFuzzCoreServer"
-  ],
-  "target_harness_count": 1,
-  "target_harnesses_not_in_challenge_yaml": []
+  {
+   "vuln": "vuln_005",
+   "name": "FreeRDP Obfuscated Arbitrary Code Execution",
+   "cwes": [
+    "CWE-94"
+   ],
+   "pov_harness": "TestFuzzCoreServer",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "data.bin",
+   "reference_patch": "good_patch.diff"
+  }
+ ],
+ "target_harnesses": [
+  "TestFuzzCoreServer"
+ ],
+ "target_harness_count": 1,
+ "target_harnesses_not_in_challenge_yaml": [],
+ "bugs": {
+  "vuln_004": {
+   "path": "bugs/vuln_004",
+   "harness": "TestFuzzCoreServer",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "vuln_005": {
+   "path": "bugs/vuln_005",
+   "harness": "TestFuzzCoreServer",
+   "crash": "SEGV",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ }
 }

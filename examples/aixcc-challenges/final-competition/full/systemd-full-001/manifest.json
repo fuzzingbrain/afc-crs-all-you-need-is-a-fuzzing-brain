@@ -1,147 +1,195 @@
 {
-  "challenge": "systemd-full-001",
-  "challenge_name": "Littoral Bonsai",
-  "round": "final-competition",
-  "scan_mode": "full",
-  "challenge_type": "full     # full | delta",
-  "language": {
-    "systemd": "c"
-  },
-  "oss_fuzz_projects": [
-    "systemd"
-  ],
-  "source": {
-    "repo": "https://github.com/AIxCyberChallenge/afc-systemd.git",
-    "branch": "challenges/systemd-full-001",
-    "public": true,
-    "resolved": true
-  },
-  "fuzz_tooling": {
-    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/systemd-full-001",
-    "project": "systemd"
-  },
-  "base_ref": "challenges/systemd-full-001",
-  "delta_ref": "~",
+ "challenge": "systemd-full-001",
+ "challenge_name": "Littoral Bonsai",
+ "round": "final-competition",
+ "scan_mode": "full",
+ "challenge_type": "full     # full | delta",
+ "language": {
+  "systemd": "c"
+ },
+ "oss_fuzz_projects": [
+  "systemd"
+ ],
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-systemd.git",
+  "branch": "challenges/systemd-full-001",
+  "public": true,
+  "resolved": true
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/systemd-full-001",
+  "project": "systemd"
+ },
+ "base_ref": "challenges/systemd-full-001",
+ "delta_ref": "~",
+ "harnesses": [
+  "fuzz-bcd",
+  "fuzz-bootspec",
+  "fuzz-bus-label",
+  "fuzz-bus-match",
+  "fuzz-bus-message",
+  "fuzz-calendarspec",
+  "fuzz-catalog",
+  "fuzz-compress",
+  "fuzz-dhcp6-client",
+  "fuzz-dhcp-client",
+  "fuzz-dhcp-server",
+  "fuzz-dhcp-server-relay",
+  "fuzz-dns-packet",
+  "fuzz-efi-osrel",
+  "fuzz-efi-printf",
+  "fuzz-efi-string",
+  "fuzz-env-file",
+  "fuzz-etc-hosts",
+  "fuzz-execute-serialize",
+  "fuzz-fido-id-desc",
+  "fuzz-hostname-setup",
+  "fuzz-journald-audit",
+  "fuzz-journald-kmsg",
+  "fuzz-journald-native",
+  "fuzz-journald-native-fd",
+  "fuzz-journald-stream",
+  "fuzz-journald-syslog",
+  "fuzz-journal-remote",
+  "fuzz-json",
+  "fuzz-link-parser",
+  "fuzz-lldp-rx",
+  "fuzz-manager-serialize",
+  "fuzz-ndisc-rs",
+  "fuzz-netdev-parser",
+  "fuzz-network-parser",
+  "fuzz-nspawn-oci",
+  "fuzz-nspawn-settings",
+  "fuzz-resource-record",
+  "fuzz-systemctl-parse-argv",
+  "fuzz-time-util",
+  "fuzz-udev-database",
+  "fuzz-udev-rule-parse-value",
+  "fuzz-udev-rules",
+  "fuzz-unit-file",
+  "fuzz-varlink",
+  "fuzz-varlink-idl",
+  "fuzz-xdg-desktop"
+ ],
+ "harness_count": 47,
+ "vulnerabilities": [
+  "systemd-001",
+  "systemd-003",
+  "systemd-004",
+  "systemd-005"
+ ],
+ "answers": {
+  "vuln_dirs": 4,
+  "pov_blobs": 4,
+  "reference_patches": 4,
+  "has_answers": true
+ },
+ "graph": {
+  "path": "mongodb",
+  "producer": "llvm-ir",
   "harnesses": [
-    "fuzz-bcd",
-    "fuzz-bootspec",
-    "fuzz-bus-label",
-    "fuzz-bus-match",
-    "fuzz-bus-message",
-    "fuzz-calendarspec",
-    "fuzz-catalog",
-    "fuzz-compress",
-    "fuzz-dhcp6-client",
-    "fuzz-dhcp-client",
-    "fuzz-dhcp-server",
-    "fuzz-dhcp-server-relay",
-    "fuzz-dns-packet",
-    "fuzz-efi-osrel",
-    "fuzz-efi-printf",
-    "fuzz-efi-string",
-    "fuzz-env-file",
-    "fuzz-etc-hosts",
-    "fuzz-execute-serialize",
-    "fuzz-fido-id-desc",
-    "fuzz-hostname-setup",
-    "fuzz-journald-audit",
-    "fuzz-journald-kmsg",
-    "fuzz-journald-native",
-    "fuzz-journald-native-fd",
-    "fuzz-journald-stream",
-    "fuzz-journald-syslog",
-    "fuzz-journal-remote",
-    "fuzz-json",
-    "fuzz-link-parser",
-    "fuzz-lldp-rx",
-    "fuzz-manager-serialize",
-    "fuzz-ndisc-rs",
-    "fuzz-netdev-parser",
-    "fuzz-network-parser",
-    "fuzz-nspawn-oci",
-    "fuzz-nspawn-settings",
-    "fuzz-resource-record",
-    "fuzz-systemctl-parse-argv",
-    "fuzz-time-util",
-    "fuzz-udev-database",
-    "fuzz-udev-rule-parse-value",
-    "fuzz-udev-rules",
-    "fuzz-unit-file",
-    "fuzz-varlink",
-    "fuzz-varlink-idl",
-    "fuzz-xdg-desktop"
+   "fuzz-catalog",
+   "fuzz-link-parser",
+   "fuzz-systemctl-parse-argv",
+   "fuzz-udev-rule-parse-value"
   ],
-  "harness_count": 47,
-  "vulnerabilities": [
-    "systemd-001",
-    "systemd-003",
-    "systemd-004",
-    "systemd-005"
-  ],
-  "answers": {
-    "vuln_dirs": 4,
-    "pov_blobs": 4,
-    "reference_patches": 4,
-    "has_answers": true
+  "verified": true
+ },
+ "vuln_details": [
+  {
+   "vuln": "systemd-001",
+   "name": "udev-rule-prefix-matching",
+   "cwes": [
+    "CWE-787"
+   ],
+   "pov_harness": "fuzz-udev-rule-parse-value",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "data.bin",
+   "reference_patch": "good_patch.diff"
   },
-  "graph": null,
-  "vuln_details": [
-    {
-      "vuln": "systemd-001",
-      "name": "udev-rule-prefix-matching",
-      "cwes": [
-        "CWE-787"
-      ],
-      "pov_harness": "fuzz-udev-rule-parse-value",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "data.bin",
-      "reference_patch": "good_patch.diff"
-    },
-    {
-      "vuln": "systemd-003",
-      "name": "macro_confusion",
-      "cwes": [
-        "CWE-122"
-      ],
-      "pov_harness": "fuzz-catalog",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "data.bin",
-      "reference_patch": "good_patch.diff"
-    },
-    {
-      "vuln": "systemd-004",
-      "name": "double-free-list-type",
-      "cwes": [
-        "CWE-415"
-      ],
-      "pov_harness": "fuzz-link-parser",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "data.bin",
-      "reference_patch": "good_patch.diff"
-    },
-    {
-      "vuln": "systemd-005",
-      "name": "double-free",
-      "cwes": [
-        "CWE-415"
-      ],
-      "pov_harness": "fuzz-systemctl-parse-argv",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "data.bin",
-      "reference_patch": "good_patch.diff"
-    }
-  ],
-  "target_harnesses": [
-    "fuzz-catalog",
-    "fuzz-link-parser",
-    "fuzz-systemctl-parse-argv",
-    "fuzz-udev-rule-parse-value"
-  ],
-  "target_harness_count": 4,
-  "target_harnesses_not_in_challenge_yaml": []
+  {
+   "vuln": "systemd-003",
+   "name": "macro_confusion",
+   "cwes": [
+    "CWE-122"
+   ],
+   "pov_harness": "fuzz-catalog",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "data.bin",
+   "reference_patch": "good_patch.diff"
+  },
+  {
+   "vuln": "systemd-004",
+   "name": "double-free-list-type",
+   "cwes": [
+    "CWE-415"
+   ],
+   "pov_harness": "fuzz-link-parser",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "data.bin",
+   "reference_patch": "good_patch.diff"
+  },
+  {
+   "vuln": "systemd-005",
+   "name": "double-free",
+   "cwes": [
+    "CWE-415"
+   ],
+   "pov_harness": "fuzz-systemctl-parse-argv",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "data.bin",
+   "reference_patch": "good_patch.diff"
+  }
+ ],
+ "target_harnesses": [
+  "fuzz-catalog",
+  "fuzz-link-parser",
+  "fuzz-systemctl-parse-argv",
+  "fuzz-udev-rule-parse-value"
+ ],
+ "target_harness_count": 4,
+ "target_harnesses_not_in_challenge_yaml": [],
+ "bugs": {
+  "systemd-001": {
+   "path": "bugs/systemd-001",
+   "harness": "fuzz-udev-rule-parse-value",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "systemd-003": {
+   "path": "bugs/systemd-003",
+   "harness": "fuzz-catalog",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "systemd-004": {
+   "path": "bugs/systemd-004",
+   "harness": "fuzz-link-parser",
+   "crash": "heap-use-after-free",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "systemd-005": {
+   "path": "bugs/systemd-005",
+   "harness": "fuzz-systemctl-parse-argv",
+   "crash": "double-free",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ }
 }

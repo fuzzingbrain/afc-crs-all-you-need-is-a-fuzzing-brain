@@ -1,0 +1,52 @@
+oss-fuzzshark: disabling: ip
+oss-fuzzshark: disabling: udp
+oss-fuzzshark: disabling: udplite
+oss-fuzzshark: disabling: ospf
+oss-fuzzshark: disabling: bgp
+oss-fuzzshark: disabling: dhcp
+oss-fuzzshark: disabling: json
+oss-fuzzshark: disabling: snort
+oss-fuzzshark: configured for dissector: bat.vis
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2310410162
+INFO: Loaded 1 modules   (420518 inline 8-bit counters): 420518 [0xa9f6a00, 0xaa5d4a6), 
+INFO: Loaded 1 PC tables (420518 PCs): 420518 [0xaa5d4a8,0xb0c7f08), 
+/b/bin/address/handler_bat.vis: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==7==ERROR: AddressSanitizer: SEGV on unknown address (pc 0x000004ffee72 bp 0x7fff44dd37a0 sp 0x7fff44dd2f30 T0)
+==7==The signal is caused by a READ memory access.
+==7==Hint: this fault was caused by a dereference of a high value address (see register values below).  Disassemble the provided pc to learn which register was used.
+SCARINESS: 20 (wild-addr-read)
+    #0 0x4ffee72 in QuickCheckForUnpoisonedRegion /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.h:37:7
+    #1 0x4ffee72 in printf_common(void*, char const*, __va_list_tag*) /src/llvm-project/compiler-rt/lib/asan/../sanitizer_common/sanitizer_common_interceptors_format.inc:546:7
+    #2 0x5000d94 in vfprintf /src/llvm-project/compiler-rt/lib/asan/../sanitizer_common/sanitizer_common_interceptors.inc:1648:1
+    #3 0x5000d94 in __fprintf_chk /src/llvm-project/compiler-rt/lib/asan/../sanitizer_common/sanitizer_common_interceptors.inc:1710:1
+    #4 0x5ffd29f in dissect_bat_vis_v24 /src/wireshark/epan/dissectors/packet-bat.c:705:3
+    #5 0x5ffd29f in dissect_bat_vis /src/wireshark/epan/dissectors/packet-bat.c:429:3
+    #6 0x5b8573d in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #7 0x5b8573d in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #8 0x5b90394 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #9 0x5b90394 in call_all_postdissectors /src/wireshark/epan/packet.c:4166:3
+    #10 0x544b347 in dissect_frame /src/wireshark/epan/dissectors/packet-frame.c:1438:5
+    #11 0x5b8573d in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #12 0x5b8573d in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #13 0x5b81237 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #14 0x5b81237 in call_dissector_with_data /src/wireshark/epan/packet.c:3634:8
+    #15 0x5b81237 in dissect_record /src/wireshark/epan/packet.c:687:3
+    #16 0x52bddb0 in epan_dissect_run /src/wireshark/epan/epan.c:666:2
+    #17 0x50b47c8 in LLVMFuzzerTestOneInput /src/wireshark/fuzz/fuzzshark.c:359:2
+    #18 0x4f674a0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #19 0x4f51ac5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #20 0x4f5755f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #21 0x4f83452 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #22 0x7f40f8e05082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #23 0x4f49cad in _start (/b/bin/address/handler_bat.vis+0x4f49cad)
+
+DEDUP_TOKEN: QuickCheckForUnpoisonedRegion--printf_common(void*, char const*, __va_list_tag*)--___interceptor_vfprintf
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /src/wireshark/epan/dissectors/packet-bat.c:705:3 in dissect_bat_vis_v24
+==7==ABORTING
+
+OK: vuln_005 reproduced (SEGV)

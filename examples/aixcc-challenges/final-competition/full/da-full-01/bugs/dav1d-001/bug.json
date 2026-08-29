@@ -1,0 +1,70 @@
+{
+ "challenge": "da-full-01",
+ "bug": "dav1d-001",
+ "harness": "dav1d_fuzzer_mt@NO_OOM",
+ "consistency": {
+  "verdict": "site_match_cwe_label_differs",
+  "cwes": [
+   "CWE-190"
+  ],
+  "crash_type": "SEGV",
+  "expected_types": [
+   "heap-buffer-overflow",
+   "signed-integer-overflow"
+  ],
+  "cwe_consistent": false,
+  "vuln_yaml_files": [
+   "src/decode.c"
+  ],
+  "patch_files": [
+   "src/decode.c",
+   "src/internal.h"
+  ],
+  "crash_file": "/work/build/../../src/dav1d/src/recon_tmpl.c:681",
+  "crash_line": "15",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/asan/asan_interceptors.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/work/build/../../src/dav1d/src/decode.c",
+   "/work/build/../../src/dav1d/src/lib.c",
+   "/work/build/../../src/dav1d/src/recon_tmpl.c",
+   "/work/build/../../src/dav1d/src/thread_task.c",
+   "/work/build/../../src/dav1d/tests/libfuzzer/dav1d_fuzzer.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-190"
+ ],
+ "name": "dav1d-001, CVE-2024-1580",
+ "blob": "poc1.obu",
+ "blob_bytes": 51760,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/dav1d_fuzzer_mt@NO_OOM",
+  "coverage": "bin/coverage/dav1d_fuzzer_mt@NO_OOM"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "SEGV",
+  "top_frames": [
+   "decode_coefs",
+   "dav1d_read_coef_blocks_8bpc",
+   "decode_b",
+   "decode_sb",
+   "dav1d_decode_tile_sbrow",
+   "dav1d_worker_task"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/dav1d:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "no-oom",
+ "patch_verified": true,
+ "patch_verify_note": "clean after patch"
+}

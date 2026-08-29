@@ -1,0 +1,12 @@
+CREATE VIRTUAL TABLE contacts USING lsm1 ('/tmp/contacts2.lsm', name, TEXT, address, phone);
+
+INSERT INTO contacts (name, address, phone) VALUES
+  ('charlie', '3000 Main St, Topeka KS', '785-555-1234'),
+	('c', '867 Jenny Avenue, Lawrence KS', '785-867-5309'),
+  ('huey', '1300 Walnut St, Topeka KS', '785-555-9999'),
+  ('zaizee', '900 Maple Dr, Topeka KS', '913-555-1800'),
+  ('mickey', '123 Chestnut Dr, Lawrence KS', '785-555-1000');
+  
+select lsm_flush(name) from contacts;
+  
+select lsm_view(name) from contacts;

@@ -1,0 +1,148 @@
+{
+ "challenge": "fp-delta-01",
+ "round": "pre-competition",
+ "scan_mode": "delta",
+ "project": "freerdp",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-freerdp.git",
+  "checkout_ref": "challenges/fp-delta-01",
+  "resolved_commit": "292582ce4a733cde36334df9848bdee86f85acc4"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/fp-delta-01",
+  "project": "freerdp"
+ },
+ "image": "aixcc-afc/freerdp:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "TestFuzzCryptoCertificateDataSetPEM"
+ ],
+ "target_harnesses": [
+  "TestFuzzCryptoCertificateDataSetPEM"
+ ],
+ "graphs": {
+  "TestFuzzCryptoCertificateDataSetPEM": "mongodb"
+ },
+ "counts": {
+  "TestFuzzCryptoCertificateDataSetPEM": {
+   "functions": 8201,
+   "nodes": 6153
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "fp-delta-01",
+  "ok": true,
+  "harnesses": {
+   "TestFuzzCryptoCertificateDataSetPEM": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "vuln_001": {
+      "patched_files": [
+       "libfreerdp/crypto/certificate.c"
+      ],
+      "vuln_functions": [
+       "freerdp_bio_read_pem_with_policy"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "freerdp_bio_read_pem_with_policy"
+      ],
+      "V1_has_node_with_body": [
+       "freerdp_bio_read_pem_with_policy"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "freerdp_certificate_data_new_from_pem",
+       "freerdp_certificate_data_new_nocopy",
+       "freerdp_certificate_data_load_cache",
+       "freerdp_certificate_get_pem_ex",
+       "freerdp_bio_read_pem_with_policy"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "libfreerdp/crypto/certificate.c"
+      ],
+      "V3_body_has_patched_text": [
+       "freerdp_bio_read_pem_with_policy"
+      ]
+     }
+    },
+    "nodes": 6153,
+    "functions": 8201,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "vuln_001": {
+   "harness": "TestFuzzCryptoCertificateDataSetPEM",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "TestFuzzCodecs",
+   "TestFuzzCommonAssistanceBinToHexString",
+   "TestFuzzCommonAssistanceHexStringToBin",
+   "TestFuzzCommonAssistanceParseFileBuffer",
+   "TestFuzzCoreClient",
+   "TestFuzzCoreServer",
+   "TestFuzzCryptoCertificateDataSetPEM"
+  ],
+  "coverage": [
+   "TestFuzzCodecs",
+   "TestFuzzCommonAssistanceBinToHexString",
+   "TestFuzzCommonAssistanceHexStringToBin",
+   "TestFuzzCommonAssistanceParseFileBuffer",
+   "TestFuzzCoreClient",
+   "TestFuzzCoreServer",
+   "TestFuzzCryptoCertificateDataSetPEM"
+  ]
+ },
+ "timings": [
+  {
+   "step": "build_image",
+   "seconds": 63,
+   "rc": 0,
+   "command": "python3 /home/ze/fb-graphs/build/fp-delta-01/fuzz-tooling/infra/helper.py build_image --no-pull freerdp"
+  },
+  {
+   "step": "build_bitcode",
+   "seconds": 32,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -e SANITIZER_FLAGS=-flto -g -fno-inline-functions -fuse-ld=gold -Wno-unused-command-line-argument -e AR=llvm-ar -e NM=llvm-nm -e RANLIB=llvm-ranlib -v /home/ze/fb-graphs/build/fp-delta-01/repo-bitcode:/src/FreeRDP -v /home/ze/fb-graphs/build/fp-delta-01/out:/out -v /home/ze/fb-graphs/build/fp-delta-01/work:/work aixcc-afc/freerdp:latest bash -c compile 2>&1 | tail -40; mkdir -p /out/bc"
+  },
+  {
+   "step": "to_ll",
+   "seconds": 24,
+   "rc": 0,
+   "command": "docker run --rm -v /home/ze/fb-graphs/build/fp-delta-01/out:/out -v /home/ze/fb-graphs/build/fp-delta-01/repo-bitcode:/src/FreeRDP -v /home/ze/fb-graphs/build/fp-delta-01/work:/work -v /home/ze/fb-graphs/build/fp-delta-01/ll:/ll aixcc-afc/freerdp:latest bash -c "
+  },
+  {
+   "step": "extract_TestFuzzCryptoCertificateDataSetPEM",
+   "seconds": 6,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  }
+ ]
+}

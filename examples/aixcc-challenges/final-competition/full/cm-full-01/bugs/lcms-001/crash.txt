@@ -1,0 +1,30 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2892288543
+INFO: Loaded 1 modules   (8177 inline 8-bit counters): 8177 [0x55abdc6bf0f0, 0x55abdc6c10e1), 
+INFO: Loaded 1 PC tables (8177 PCs): 8177 [0x55abdc6c10e8,0x55abdc6e0ff8), 
+/b/bin/address/cms_postscript_fuzzer: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==7==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000008 (pc 0x55abdc629b20 bp 0x7ffe54877490 sp 0x7ffe54877490 T0)
+==7==The signal is caused by a READ memory access.
+==7==Hint: address points to the zero page.
+SCARINESS: 10 (null-deref)
+    #0 0x55abdc629b20 in cmsStageType /src/lcms/src/cmslut.c:1230:19
+    #1 0x55abdc5ec12f in EmitCIEBasedDEF /src/lcms/src/cmsps2.c:795:9
+    #2 0x55abdc5ec12f in WriteInputLUT /src/lcms/src/cmsps2.c:906:18
+    #3 0x55abdc5ec12f in GenerateCSA /src/lcms/src/cmsps2.c:1078:17
+    #4 0x55abdc5ec12f in cmsGetPostScriptColorResource /src/lcms/src/cmsps2.c:1538:18
+    #5 0x55abdc5ec7d0 in cmsGetPostScriptCSA /src/lcms/src/cmsps2.c:1596:20
+    #6 0x55abdc5938fc in LLVMFuzzerTestOneInput /src/cms_postscript_fuzzer.c:36:31
+    #7 0x55abdc4483a0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #8 0x55abdc433615 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #9 0x55abdc4390af in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #10 0x55abdc464352 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #11 0x7f823e290082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #12 0x55abdc42b7fd in _start (/b/bin/address/cms_postscript_fuzzer+0x797fd)
+
+DEDUP_TOKEN: cmsStageType--EmitCIEBasedDEF--WriteInputLUT
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /src/lcms/src/cmslut.c:1230:19 in cmsStageType
+==7==ABORTING

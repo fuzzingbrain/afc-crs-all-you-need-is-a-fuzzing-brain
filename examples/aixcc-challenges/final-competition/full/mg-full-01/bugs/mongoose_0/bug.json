@@ -1,0 +1,64 @@
+{
+ "challenge": "mg-full-01",
+ "bug": "mongoose_0",
+ "harness": "fuzz",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-121",
+   "CWE-193"
+  ],
+  "crash_type": "stack-buffer-overflow",
+  "expected_types": [
+   "dynamic-stack-buffer-overflow",
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "src/json.c"
+  ],
+  "patch_files": [
+   "mongoose.c",
+   "src/json.c"
+  ],
+  "crash_file": "/src/mongoose/src/json.c:186",
+  "crash_line": "28",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/mongoose/src/json.c",
+   "/src/mongoose/test/fuzz.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-121",
+  "CWE-193"
+ ],
+ "name": "Double trouble stack-based buffer overflow",
+ "blob": "data.bin",
+ "blob_bytes": 121,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/fuzz",
+  "coverage": "bin/coverage/fuzz"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "stack-buffer-overflow",
+  "top_frames": [
+   "mg_json_get",
+   "LLVMFuzzerTestOneInput",
+   "_start",
+   "mg_json_get"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/mongoose:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

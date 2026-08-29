@@ -1,114 +1,168 @@
 {
-  "challenge": "shadowsocks-full-01",
-  "challenge_name": "rabbit fix",
-  "round": "final-competition",
-  "scan_mode": "full",
-  "challenge_type": "full     # full | delta",
-  "language": {
-    "shadowsocks": "c"
-  },
-  "oss_fuzz_projects": [
-    "shadowsocks"
-  ],
-  "source": {
-    "repo": "https://github.com/AIxCyberChallenge/afc-shadowsocks-libev.git",
-    "branch": "challenges/shadowsocks-full-01",
-    "public": true,
-    "resolved": true
-  },
-  "fuzz_tooling": {
-    "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
-    "ref": "challenge-state/shadowsocks-full-01",
-    "project": "shadowsocks"
-  },
-  "base_ref": "challenges/shadowsocks-full-01",
-  "delta_ref": "~",
+ "challenge": "shadowsocks-full-01",
+ "challenge_name": "rabbit fix",
+ "round": "final-competition",
+ "scan_mode": "full",
+ "challenge_type": "full     # full | delta",
+ "language": {
+  "shadowsocks": "c"
+ },
+ "oss_fuzz_projects": [
+  "shadowsocks"
+ ],
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-shadowsocks-libev.git",
+  "branch": "challenges/shadowsocks-full-01",
+  "public": true,
+  "resolved": true
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/shadowsocks-full-01",
+  "project": "shadowsocks"
+ },
+ "base_ref": "challenges/shadowsocks-full-01",
+ "delta_ref": "~",
+ "harnesses": [
+  "json_fuzz",
+  "None"
+ ],
+ "harness_count": 2,
+ "vulnerabilities": [
+  "shadowsocks-libev_0",
+  "shadowsocks-libev_1",
+  "shadowsocks-libev_2",
+  "shadowsocks-libev_3",
+  "shadowsocks-libev_4",
+  "json_fuzz",
+  "None"
+ ],
+ "answers": {
+  "vuln_dirs": 5,
+  "pov_blobs": 5,
+  "reference_patches": 5,
+  "has_answers": true
+ },
+ "graph": {
+  "path": "mongodb",
+  "producer": "llvm-ir",
   "harnesses": [
-    "json_fuzz",
-    "None"
+   "json_fuzz"
   ],
-  "harness_count": 2,
-  "vulnerabilities": [
-    "shadowsocks-libev_0",
-    "shadowsocks-libev_1",
-    "shadowsocks-libev_2",
-    "shadowsocks-libev_3",
-    "shadowsocks-libev_4",
-    "json_fuzz",
-    "None"
-  ],
-  "answers": {
-    "vuln_dirs": 5,
-    "pov_blobs": 5,
-    "reference_patches": 5,
-    "has_answers": true
+  "verified": true
+ },
+ "vuln_details": [
+  {
+   "vuln": "shadowsocks-libev_0",
+   "name": "Heap Buffer Over-read #0",
+   "cwes": [
+    "CWE-126"
+   ],
+   "pov_harness": "json_fuzz",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "data.blob",
+   "reference_patch": "good_patch.diff"
   },
-  "graph": null,
-  "vuln_details": [
-    {
-      "vuln": "shadowsocks-libev_0",
-      "name": "Heap Buffer Over-read #0",
-      "cwes": [
-        "CWE-126"
-      ],
-      "pov_harness": "json_fuzz",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "data.blob",
-      "reference_patch": "good_patch.diff"
-    },
-    {
-      "vuln": "shadowsocks-libev_1",
-      "name": "Heap Buffer Over-read #1",
-      "cwes": [
-        "CWE-126"
-      ],
-      "pov_harness": "json_fuzz",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "data.blob",
-      "reference_patch": "good_patch.diff"
-    },
-    {
-      "vuln": "shadowsocks-libev_2",
-      "name": "Heap Buffer Over-read #2",
-      "cwes": [
-        "CWE-126"
-      ],
-      "pov_harness": "json_fuzz",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "data.blob",
-      "reference_patch": "good_patch.diff"
-    },
-    {
-      "vuln": "shadowsocks-libev_3",
-      "name": "Heap Buffer Over-read #3",
-      "cwes": [
-        "CWE-126"
-      ],
-      "pov_harness": "json_fuzz",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "data.blob",
-      "reference_patch": "good_patch.diff"
-    },
-    {
-      "vuln": "shadowsocks-libev_4",
-      "name": "Heap Buffer Over-read #4",
-      "cwes": [
-        "CWE-126"
-      ],
-      "pov_harness": "json_fuzz",
-      "pov_sanitizer": null,
-      "pov_engine": null,
-      "pov_blob": "data.blob",
-      "reference_patch": "good_patch.diff"
-    }
-  ],
-  "target_harnesses": [
-    "json_fuzz"
-  ],
-  "target_harness_count": 1,
-  "target_harnesses_not_in_challenge_yaml": []
+  {
+   "vuln": "shadowsocks-libev_1",
+   "name": "Heap Buffer Over-read #1",
+   "cwes": [
+    "CWE-126"
+   ],
+   "pov_harness": "json_fuzz",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "data.blob",
+   "reference_patch": "good_patch.diff"
+  },
+  {
+   "vuln": "shadowsocks-libev_2",
+   "name": "Heap Buffer Over-read #2",
+   "cwes": [
+    "CWE-126"
+   ],
+   "pov_harness": "json_fuzz",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "data.blob",
+   "reference_patch": "good_patch.diff"
+  },
+  {
+   "vuln": "shadowsocks-libev_3",
+   "name": "Heap Buffer Over-read #3",
+   "cwes": [
+    "CWE-126"
+   ],
+   "pov_harness": "json_fuzz",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "data.blob",
+   "reference_patch": "good_patch.diff"
+  },
+  {
+   "vuln": "shadowsocks-libev_4",
+   "name": "Heap Buffer Over-read #4",
+   "cwes": [
+    "CWE-126"
+   ],
+   "pov_harness": "json_fuzz",
+   "pov_sanitizer": null,
+   "pov_engine": null,
+   "pov_blob": "data.blob",
+   "reference_patch": "good_patch.diff"
+  }
+ ],
+ "target_harnesses": [
+  "json_fuzz"
+ ],
+ "target_harness_count": 1,
+ "target_harnesses_not_in_challenge_yaml": [],
+ "bugs": {
+  "shadowsocks-libev_0": {
+   "path": "bugs/shadowsocks-libev_0",
+   "harness": "json_fuzz",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "shadowsocks-libev_1": {
+   "path": "bugs/shadowsocks-libev_1",
+   "harness": "json_fuzz",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "shadowsocks-libev_2": {
+   "path": "bugs/shadowsocks-libev_2",
+   "harness": "json_fuzz",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "shadowsocks-libev_3": {
+   "path": "bugs/shadowsocks-libev_3",
+   "harness": "json_fuzz",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "shadowsocks-libev_4": {
+   "path": "bugs/shadowsocks-libev_4",
+   "harness": "json_fuzz",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ }
 }

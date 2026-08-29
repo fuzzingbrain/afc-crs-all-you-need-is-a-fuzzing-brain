@@ -1,0 +1,70 @@
+{
+ "challenge": "sq-delta-02",
+ "bug": "SQL-008",
+ "harness": "customfuzz3",
+ "consistency": {
+  "verdict": "inconsistent",
+  "cwes": [
+   "CWE-476"
+  ],
+  "crash_type": "SEGV",
+  "expected_types": [
+   "SEGV",
+   "null-deref"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "ext/lsm1/lsm_vtab.c"
+  ],
+  "patch_files": [
+   "ext/lsm1/lsm_vtab.c"
+  ],
+  "patch_functions": [
+   "lsm1BestIndex"
+  ],
+  "matched_by": null,
+  "crash_file": "/src/sqlite3/bld/sqlite3.c:84220",
+  "crash_line": "3",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/sqlite3/bld/sqlite3.c",
+   "/src/sqlite3/test/customfuzz3.c",
+   "/src/sqlite3/test/shell.c"
+  ],
+  "site_consistent": false
+ },
+ "cwes": [
+  "CWE-476"
+ ],
+ "name": "LSM zero-day null pointer dereference",
+ "blob": "data.bin",
+ "blob_bytes": 151,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/customfuzz3",
+  "coverage": "bin/coverage/customfuzz3"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "SEGV",
+  "top_frames": [
+   "valueToText",
+   "valueBytes",
+   "sqlite3ValueBytes",
+   "sqlite3_value_bytes",
+   "lsm1Filter",
+   "sqlite3VdbeExec"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/sqlite3:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain",
+ "patch_verified": true,
+ "patch_verify_note": "clean after patch"
+}

@@ -1,0 +1,64 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2325778680
+INFO: Loaded 1 modules   (49711 inline 8-bit counters): 49711 [0x55d2d443c7f8, 0x55d2d4448a27), 
+INFO: Loaded 1 PC tables (49711 PCs): 49711 [0x55d2d4448a28,0x55d2d450ad18), 
+/b/bin/address/xml: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: attempting double-free on 0x502000000250 in thread T0:
+SCARINESS: 42 (double-free)
+    #0 0x55d2d4017f46 in free /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:52:3
+    #1 0x55d2d40bea1f in xmlParseAttribute2 /src/libxml2/parser.c:9028:13
+    #2 0x55d2d40bea1f in xmlParseStartTag2 /src/libxml2/parser.c:9233:13
+    #3 0x55d2d40a18bc in xmlParseElementStart /src/libxml2/parser.c:10136:16
+    #4 0x55d2d40a0b3c in xmlParseElement /src/libxml2/parser.c:10071:9
+    #5 0x55d2d40a862a in xmlParseDocument /src/libxml2/parser.c:10902:2
+    #6 0x55d2d40b89f0 in xmlCtxtParseDocument /src/libxml2/parser.c:13988:5
+    #7 0x55d2d4057a4f in LLVMFuzzerTestOneInput /src/libxml2/fuzz/xml.c:68:15
+    #8 0x55d2d3f0c410 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #9 0x55d2d3ef7685 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #10 0x55d2d3efd11f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #11 0x55d2d3f283c2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #12 0x7f228e60c082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #13 0x55d2d3eef86d in _start (/b/bin/address/xml+0x1aa86d)
+
+DEDUP_TOKEN: __interceptor_free--xmlParseAttribute2--xmlParseStartTag2
+0x502000000250 is located 0 bytes inside of 9-byte region [0x502000000250,0x502000000259)
+freed by thread T0 here:
+    #0 0x55d2d4017f46 in free /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:52:3
+    #1 0x55d2d40c01c4 in xmlParseAttribute2 /src/libxml2/parser.c:9024:17
+    #2 0x55d2d40c01c4 in xmlParseStartTag2 /src/libxml2/parser.c:9233:13
+    #3 0x55d2d40a18bc in xmlParseElementStart /src/libxml2/parser.c:10136:16
+    #4 0x55d2d40a0b3c in xmlParseElement /src/libxml2/parser.c:10071:9
+    #5 0x55d2d40a862a in xmlParseDocument /src/libxml2/parser.c:10902:2
+    #6 0x55d2d40b89f0 in xmlCtxtParseDocument /src/libxml2/parser.c:13988:5
+    #7 0x55d2d4057a4f in LLVMFuzzerTestOneInput /src/libxml2/fuzz/xml.c:68:15
+    #8 0x55d2d3f0c410 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #9 0x55d2d3ef7685 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #10 0x55d2d3efd11f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #11 0x55d2d3f283c2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #12 0x7f228e60c082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: __interceptor_free--xmlParseAttribute2--xmlParseStartTag2
+previously allocated by thread T0 here:
+    #0 0x55d2d40181df in malloc /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:68:3
+    #1 0x55d2d4058018 in xmlFuzzMalloc /src/libxml2/fuzz/fuzz.c:127:11
+    #2 0x55d2d41491ce in xmlStrndup /src/libxml2/xmlstring.c:57:11
+    #3 0x55d2d40be970 in xmlParseAttribute2 /src/libxml2/parser.c:9009:28
+    #4 0x55d2d40be970 in xmlParseStartTag2 /src/libxml2/parser.c:9233:13
+    #5 0x55d2d40a18bc in xmlParseElementStart /src/libxml2/parser.c:10136:16
+    #6 0x55d2d40a0b3c in xmlParseElement /src/libxml2/parser.c:10071:9
+    #7 0x55d2d40a862a in xmlParseDocument /src/libxml2/parser.c:10902:2
+    #8 0x55d2d40b89f0 in xmlCtxtParseDocument /src/libxml2/parser.c:13988:5
+    #9 0x55d2d4057a4f in LLVMFuzzerTestOneInput /src/libxml2/fuzz/xml.c:68:15
+    #10 0x55d2d3f0c410 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #11 0x55d2d3ef7685 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #12 0x55d2d3efd11f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #13 0x55d2d3f283c2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #14 0x7f228e60c082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: __interceptor_malloc--xmlFuzzMalloc--xmlStrndup
+SUMMARY: AddressSanitizer: double-free /src/libxml2/parser.c:9028:13 in xmlParseAttribute2
+==7==ABORTING
+
+OK: vuln_002 reproduced (double-free)

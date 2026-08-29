@@ -1,0 +1,71 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2007948089
+INFO: Loaded 1 modules   (5232 inline 8-bit counters): 5232 [0x5568d3c7b768, 0x5568d3c7cbd8), 
+INFO: Loaded 1 PC tables (5232 PCs): 5232 [0x5568d3c7cbd8,0x5568d3c912d8), 
+/b/bin/address/fuzz: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7fb889f29b78 at pc 0x5568d3c08802 bp 0x7ffc87fe45b0 sp 0x7ffc87fe45a8
+WRITE of size 1 at 0x7fb889f29b78 thread T0
+SCARINESS: 46 (1-byte-write-stack-buffer-overflow)
+    #0 0x5568d3c08801 in mg_pfn_iobuf_private /src/mongoose/src/printf.c
+    #1 0x5568d3c08801 in mg_putchar_iobuf_static /src/mongoose/src/printf.c:39:3
+    #2 0x5568d3c08801 in scpy /src/mongoose/src/fmt.c:233:37
+    #3 0x5568d3c08801 in mg_vxprintf.specialized.2 /src/mongoose/src/fmt.c:315:14
+    #4 0x5568d3bb8b81 in mg_vsnprintf /src/mongoose/src/printf.c:48:14
+    #5 0x5568d3bb8b81 in mg_snprintf /src/mongoose/src/printf.c:57:7
+    #6 0x5568d3bb73ce in mg_dtoa(char*, unsigned long, double, int, bool) /src/mongoose/src/fmt.c
+    #7 0x5568d3bb6bc5 in mg_vxprintf /src/mongoose/src/fmt.c:323:15
+    #8 0x5568d3baff94 in mg_log /src/mongoose/src/log.c:43:3
+    #9 0x5568d3bc0e11 in mg_http_parse /src/mongoose/src/http.c:317:9
+    #10 0x5568d3bf30fa in LLVMFuzzerTestOneInput /src/mongoose/test/fuzz.c:32:7
+    #11 0x5568d3a62350 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #12 0x5568d3a4d5c5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #13 0x5568d3a5305f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #14 0x5568d3a7e302 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #15 0x7fb88a39a082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #16 0x5568d3a457ad in _start (/b/bin/address/fuzz+0x647ad)
+
+DEDUP_TOKEN: mg_pfn_iobuf_private--mg_putchar_iobuf_static--scpy
+Address 0x7fb889f29b78 is located in stack of thread T0 at offset 120 in frame
+    #0 0x5568d3bb49ff in mg_vxprintf /src/mongoose/src/fmt.c:247
+
+DEDUP_TOKEN: mg_vxprintf
+  This frame has 2 object(s):
+    [32, 72) 'tmp' (line 276)
+    [112, 120) 'tmp371' (line 319) <== Memory access at offset 120 overflows this variable
+HINT: this may be a false positive if your program uses some custom stack unwind mechanism, swapcontext or vfork
+      (longjmp and C++ exceptions *are* supported)
+SUMMARY: AddressSanitizer: stack-buffer-overflow /src/mongoose/src/printf.c in mg_pfn_iobuf_private
+Shadow bytes around the buggy address:
+  0x7fb889f29880: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7fb889f29900: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7fb889f29980: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7fb889f29a00: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+  0x7fb889f29a80: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
+=>0x7fb889f29b00: f1 f1 f1 f1 f8 f8 f8 f8 f8 f2 f2 f2 f2 f2 00[f3]
+  0x7fb889f29b80: f3 f3 f3 f3 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fb889f29c00: f1 f1 f1 f1 00 00 00 00 f2 f2 f2 f2 00 00 00 f3
+  0x7fb889f29c80: f3 f3 f3 f3 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7fb889f29d00: f1 f1 f1 f1 f8 f8 f8 f8 f8 f2 f2 f2 f2 f2 f8 f3
+  0x7fb889f29d80: f3 f3 f3 f3 00 00 00 00 00 00 00 00 00 00 00 00
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING

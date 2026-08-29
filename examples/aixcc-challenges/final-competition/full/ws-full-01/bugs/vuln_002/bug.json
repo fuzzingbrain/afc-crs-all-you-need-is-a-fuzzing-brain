@@ -1,0 +1,72 @@
+{
+ "challenge": "ws-full-01",
+ "bug": "vuln_002",
+ "harness": "handler_telnet",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-416"
+  ],
+  "crash_type": "heap-use-after-free",
+  "expected_types": [
+   "heap-use-after-free"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "epan/dissectors/packet-telnet.c"
+  ],
+  "patch_files": [
+   "epan/dissectors/packet-telnet.c"
+  ],
+  "patch_functions": null,
+  "matched_by": null,
+  "crash_file": "/usr/include/x86_64-linux-gnu/bits/string_fortified.h:34",
+  "crash_line": "10",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp",
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/wireshark/epan/dissectors/packet-frame.c",
+   "/src/wireshark/epan/dissectors/packet-telnet.c",
+   "/src/wireshark/epan/epan.c",
+   "/src/wireshark/epan/packet.c",
+   "/src/wireshark/epan/tvbuff.c",
+   "/src/wireshark/fuzz/fuzzshark.c",
+   "/src/wireshark/wsutil/wmem/wmem_allocator_simple.c",
+   "/usr/include/x86_64-linux-gnu/bits/string_fortified.h"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-416"
+ ],
+ "name": "wireshark telnet subcommand use-after-free",
+ "blob": "blob.bin",
+ "blob_bytes": 20,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/handler_telnet",
+  "coverage": "bin/coverage/handler_telnet"
+ },
+ "reference_patch": "patch_good.diff",
+ "expected_crash": {
+  "type": "heap-use-after-free",
+  "top_frames": [
+   "memcpy",
+   "tvb_memcpy",
+   "_tvb_get_raw_bytes_as_stringz",
+   "tvb_get_raw_bytes_as_stringz",
+   "telnet_add_text",
+   "dissect_telnet"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/wireshark:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

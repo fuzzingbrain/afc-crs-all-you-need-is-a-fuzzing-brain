@@ -1,0 +1,69 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2263402642
+INFO: Loaded 1 modules   (2731 inline 8-bit counters): 2731 [0x55d2dd0716b8, 0x55d2dd072163), 
+INFO: Loaded 1 PC tables (2731 PCs): 2731 [0x55d2dd072168,0x55d2dd07cc18), 
+/b/bin/address/exif_from_data_fuzzer: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x5060000000bf at pc 0x55d2dcfae72b bp 0x7ffc5231ab50 sp 0x7ffc5231ab48
+READ of size 1 at 0x5060000000bf thread T0
+SCARINESS: 12 (1-byte-read-heap-buffer-overflow)
+    #0 0x55d2dcfae72a in exif_get_slong /src/libexif/libexif/exif-utils.c:137:36
+    #1 0x55d2dcfae72a in exif_get_long /src/libexif/libexif/exif-utils.c:167:17
+    #2 0x55d2dcfb7237 in exif_mnote_data_fuji_load /src/libexif/libexif/fuji/exif-mnote-data-fuji.c:175:11
+    #3 0x55d2dcf93f56 in exif_data_load_data /src/libexif/libexif/exif-data.c:1025:2
+    #4 0x55d2dcf9336e in exif_data_new_from_data /src/libexif/libexif/exif-data.c:159:2
+    #5 0x55d2dcf908af in LLVMFuzzerTestOneInput /src/exif_from_data_fuzzer.cc:51:16
+    #6 0x55d2dce45330 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #7 0x55d2dce305a5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #8 0x55d2dce3603f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #9 0x55d2dce612e2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #10 0x7f12a0426082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #11 0x55d2dce2878d in _start (/b/bin/address/exif_from_data_fuzzer+0x8578d)
+
+DEDUP_TOKEN: exif_get_slong--exif_get_long--exif_mnote_data_fuji_load
+0x5060000000bf is located 7 bytes after 56-byte region [0x506000000080,0x5060000000b8)
+allocated by thread T0 here:
+    #0 0x55d2dcf510ff in malloc /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:68:3
+    #1 0x55d2dcfcb283 in operator new(unsigned long) cxa_noexception.cpp
+    #2 0x55d2dce305a5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #3 0x55d2dce3603f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #4 0x55d2dce612e2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #5 0x7f12a0426082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: __interceptor_malloc--operator new(unsigned long)--fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long)
+SUMMARY: AddressSanitizer: heap-buffer-overflow /src/libexif/libexif/exif-utils.c:137:36 in exif_get_slong
+Shadow bytes around the buggy address:
+  0x505ffffffe00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x505ffffffe80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x505fffffff00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x505fffffff80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x506000000000: fa fa fa fa 00 00 00 00 00 00 00 fa fa fa fa fa
+=>0x506000000080: 00 00 00 00 00 00 00[fa]fa fa fa fa 00 00 00 00
+  0x506000000100: 00 00 00 00 fa fa fa fa fa fa fa fa fa fa fa fa
+  0x506000000180: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x506000000200: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x506000000280: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x506000000300: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING
+
+OK: exif-001 reproduced (heap-buffer-overflow)

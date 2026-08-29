@@ -1,0 +1,60 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2324399283
+INFO: Loaded 1 modules   (9103 inline 8-bit counters): 9103 [0x564c2628baf0, 0x564c2628de7f), 
+INFO: Loaded 1 PC tables (9103 PCs): 9103 [0x564c2628de80,0x564c262b1770), 
+/b/bin/address/TestFuzzCryptoCertificateDataSetPEM: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x502000010230 at pc 0x564c25f4cf4f bp 0x7fff84ef51c0 sp 0x7fff84ef51b8
+WRITE of size 1 at 0x502000010230 thread T0
+SCARINESS: 41 (1-byte-write-heap-buffer-overflow-far-from-bounds)
+    #0 0x564c25f4cf4e in freerdp_bio_read_pem_with_policy /src/FreeRDP/libfreerdp/crypto/certificate.c:1570:14
+    #1 0x564c25f4cf4e in freerdp_certificate_get_pem_ex /src/FreeRDP/libfreerdp/crypto/certificate.c:1634:9
+    #2 0x564c25f44861 in freerdp_certificate_data_load_cache /src/FreeRDP/libfreerdp/crypto/certificate_data.c:84:21
+    #3 0x564c25f44861 in freerdp_certificate_data_new_nocopy /src/FreeRDP/libfreerdp/crypto/certificate_data.c:126:7
+    #4 0x564c25f44bb9 in freerdp_certificate_data_new_from_pem /src/FreeRDP/libfreerdp/crypto/certificate_data.c:155:29
+    #5 0x564c25f44277 in LLVMFuzzerTestOneInput /src/FreeRDP/libfreerdp/core/test/TestFuzzCryptoCertificateDataSetPEM.c:13:9
+    #6 0x564c25dfb0f0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #7 0x564c25de6365 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #8 0x564c25debdff in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #9 0x564c25e170a2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #10 0x7f4ffe45a082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #11 0x564c25dde54d in _start (/b/bin/address/TestFuzzCryptoCertificateDataSetPEM+0xcb54d)
+
+DEDUP_TOKEN: freerdp_bio_read_pem_with_policy--freerdp_certificate_get_pem_ex--freerdp_certificate_data_load_cache
+Address 0x502000010230 is a wild pointer inside of access range of size 0x000000000001.
+SUMMARY: AddressSanitizer: heap-buffer-overflow /src/FreeRDP/libfreerdp/crypto/certificate.c:1570:14 in freerdp_bio_read_pem_with_policy
+Shadow bytes around the buggy address:
+  0x50200000ff80: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x502000010000: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x502000010080: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x502000010100: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x502000010180: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+=>0x502000010200: fa fa fa fa fa fa[fa]fa fa fa fa fa fa fa fa fa
+  0x502000010280: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x502000010300: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x502000010380: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x502000010400: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x502000010480: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING
+
+OK: vuln_001 reproduced (heap-buffer-overflow)

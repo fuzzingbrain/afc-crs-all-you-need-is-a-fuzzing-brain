@@ -1,0 +1,35 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2261876519
+INFO: Loaded 1 modules   (28114 inline 8-bit counters): 28114 [0x565018d831d8, 0x565018d89faa), 
+INFO: Loaded 1 PC tables (28114 PCs): 28114 [0x565018d89fb0,0x565018df7cd0), 
+/b/bin/address/curl_fuzzer_dict: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==7==ERROR: AddressSanitizer: SEGV on unknown address (pc 0x56501898baf0 bp 0x7fff203906b0 sp 0x7fff2038fe20 T0)
+==7==The signal is caused by a READ memory access.
+==7==Hint: this fault was caused by a dereference of a high value address (see register values below).  Disassemble the provided pc to learn which register was used.
+SCARINESS: 20 (wild-addr-read)
+    #0 0x56501898baf0 in formatf /src/curl/lib/mprintf.c:894:15
+    #1 0x56501898e4aa in curl_mvaprintf /src/curl/lib/mprintf.c:1135:9
+    #2 0x565018afc528 in sendf /src/curl/lib/dict.c:139:7
+    #3 0x565018afaa55 in dict_do /src/curl/lib/dict.c:230:18
+    #4 0x5650189b5430 in multi_do /src/curl/lib/multi.c:1643:14
+    #5 0x5650189b2192 in state_do /src/curl/lib/multi.c:2314:14
+    #6 0x5650189a008f in multi_runsingle /src/curl/lib/multi.c:2768:12
+    #7 0x56501899dfd5 in curl_multi_perform /src/curl/lib/multi.c:3016:16
+    #8 0x56501894bd40 in fuzz_handle_transfer(fuzz_data*) /src/curl_fuzzer/curl_fuzzer.cc:341:3
+    #9 0x56501894a08d in LLVMFuzzerTestOneInput /src/curl_fuzzer/curl_fuzzer.cc:97:3
+    #10 0x5650187fe640 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #11 0x5650187e98b5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #12 0x5650187ef34f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #13 0x56501881a5f2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #14 0x7f6240586082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #15 0x5650187e1a9d in _start (/b/bin/address/curl_fuzzer_dict+0x137a9d)
+
+DEDUP_TOKEN: formatf--curl_mvaprintf--sendf
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /src/curl/lib/mprintf.c:894:15 in formatf
+==7==ABORTING
+
+OK: curl-001 reproduced (SEGV)

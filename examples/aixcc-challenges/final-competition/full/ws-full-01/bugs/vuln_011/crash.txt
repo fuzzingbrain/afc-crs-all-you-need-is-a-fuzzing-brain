@@ -1,0 +1,55 @@
+oss-fuzzshark: disabling: ip
+oss-fuzzshark: disabling: udp
+oss-fuzzshark: disabling: udplite
+oss-fuzzshark: disabling: ospf
+oss-fuzzshark: disabling: bgp
+oss-fuzzshark: disabling: dhcp
+oss-fuzzshark: disabling: json
+oss-fuzzshark: disabling: snort
+oss-fuzzshark: configured for dissector: aim
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 745849403
+INFO: Loaded 1 modules   (420518 inline 8-bit counters): 420518 [0xa9f6a00, 0xaa5d4a6), 
+INFO: Loaded 1 PC tables (420518 PCs): 420518 [0xaa5d4a8,0xb0c7f08), 
+/b/bin/address/handler_aim: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+*** buffer overflow detected ***: terminated
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==7==ERROR: AddressSanitizer: ABRT on unknown address 0x000000000007 (pc 0x7fecd40f700b bp 0x7fff27667a20 sp 0x7fff276676a0 T0)
+SCARINESS: 10 (signal)
+    #0 0x7fecd40f700b in raise (/lib/x86_64-linux-gnu/libc.so.6+0x4300b) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #1 0x7fecd40d6858 in abort (/lib/x86_64-linux-gnu/libc.so.6+0x22858) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #2 0x7fecd4141265  (/lib/x86_64-linux-gnu/libc.so.6+0x8d265) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #3 0x7fecd41e3cd9 in __fortify_fail (/lib/x86_64-linux-gnu/libc.so.6+0x12fcd9) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #4 0x7fecd41e2575 in __chk_fail (/lib/x86_64-linux-gnu/libc.so.6+0x12e575) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #5 0x5dbcb23 in memcpy /usr/include/x86_64-linux-gnu/bits/string_fortified.h:34:10
+    #6 0x5dbcb23 in aim_get_buddyname /src/wireshark/epan/dissectors/packet-aim.c:591:3
+    #7 0x5dbcb23 in dissect_aim_chat_outgoing_msg /src/wireshark/epan/dissectors/packet-aim.c:1976:21
+    #8 0x5dbaa2f in dissect_aim_snac /src/wireshark/epan/dissectors/packet-aim.c:809:3
+    #9 0x5dbaa2f in dissect_aim_pdu /src/wireshark/epan/dissectors/packet-aim.c:1618:3
+    #10 0x52ff8af in tcp_dissect_pdus /src/wireshark/epan/dissectors/packet-tcp.c:5569:13
+    #11 0x5db7f4d in dissect_aim /src/wireshark/epan/dissectors/packet-aim.c:1655:2
+    #12 0x5b8573d in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #13 0x5b8573d in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #14 0x5b90394 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #15 0x5b90394 in call_all_postdissectors /src/wireshark/epan/packet.c:4166:3
+    #16 0x544b347 in dissect_frame /src/wireshark/epan/dissectors/packet-frame.c:1438:5
+    #17 0x5b8573d in call_dissector_through_handle /src/wireshark/epan/packet.c:887:9
+    #18 0x5b8573d in call_dissector_work /src/wireshark/epan/packet.c:975:9
+    #19 0x5b81237 in call_dissector_only /src/wireshark/epan/packet.c:3621:8
+    #20 0x5b81237 in call_dissector_with_data /src/wireshark/epan/packet.c:3634:8
+    #21 0x5b81237 in dissect_record /src/wireshark/epan/packet.c:687:3
+    #22 0x52bddb0 in epan_dissect_run /src/wireshark/epan/epan.c:666:2
+    #23 0x50b47c8 in LLVMFuzzerTestOneInput /src/wireshark/fuzz/fuzzshark.c:359:2
+    #24 0x4f674a0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #25 0x4f51ac5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #26 0x4f5755f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #27 0x4f83452 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #28 0x7fecd40d8082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #29 0x4f49cad in _start (/b/bin/address/handler_aim+0x4f49cad)
+
+DEDUP_TOKEN: raise--abort--
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: ABRT (/lib/x86_64-linux-gnu/libc.so.6+0x4300b) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d) in raise
+==7==ABORTING

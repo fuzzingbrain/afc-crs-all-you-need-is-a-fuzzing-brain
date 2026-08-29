@@ -1,0 +1,8 @@
+test2.xml\
+<?xml version="1.0" encoding="UTF-8"?>
+<test xml:tab="asdfasdf">
+ <poem>
+	hello
+</poem>
+</test>
+\

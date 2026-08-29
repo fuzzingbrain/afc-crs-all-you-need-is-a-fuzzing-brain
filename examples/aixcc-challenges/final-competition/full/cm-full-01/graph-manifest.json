@@ -1,0 +1,232 @@
+{
+ "challenge": "cm-full-01",
+ "round": "final-competition",
+ "scan_mode": "full",
+ "project": "lcms",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-little-cms.git",
+  "checkout_ref": "challenges/cm-full-01",
+  "resolved_commit": "cf5b21c614c3e9da26bba12eed76ae2bd73cfeed"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/cm-full-01",
+  "project": "lcms"
+ },
+ "image": "aixcc-afc/lcms:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "cms_postscript_fuzzer",
+  "cms_virtual_profile_fuzzer"
+ ],
+ "target_harnesses": [
+  "cms_postscript_fuzzer",
+  "cms_virtual_profile_fuzzer"
+ ],
+ "graphs": {
+  "cms_postscript_fuzzer": "mongodb",
+  "cms_virtual_profile_fuzzer": "mongodb/cms_virtual_profile_fuzzer"
+ },
+ "counts": {
+  "cms_postscript_fuzzer": {
+   "functions": 1322,
+   "nodes": 984
+  },
+  "cms_virtual_profile_fuzzer": {
+   "functions": 1315,
+   "nodes": 905
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "cm-full-01",
+  "ok": true,
+  "harnesses": {
+   "cms_postscript_fuzzer": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "lcms-001": {
+      "patched_files": [
+       "src/cmsps2.c"
+      ],
+      "vuln_functions": [
+       "EmitCIEBasedDEF"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "EmitCIEBasedDEF"
+      ],
+      "V1_has_node_with_body": [
+       "EmitCIEBasedDEF"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "cmsGetPostScriptCRD",
+       "cmsGetPostScriptColorResource",
+       "GenerateCSA",
+       "WriteInputLUT",
+       "EmitCIEBasedDEF"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "src/cmsps2.c"
+      ],
+      "V3_body_has_patched_text": [
+       "EmitCIEBasedDEF"
+      ]
+     }
+    },
+    "nodes": 984,
+    "functions": 1322,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   },
+   "cms_virtual_profile_fuzzer": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "lcms-002": {
+      "patched_files": [
+       "src/cmsxform.c"
+      ],
+      "vuln_functions": [
+       "IsProperColorSpace"
+      ],
+      "located_by": "line_range",
+      "hunk_functions": [
+       "IsProperColorSpace"
+      ],
+      "V1_has_node_with_body": [
+       "IsProperColorSpace"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "cmsCreateTransform",
+       "cmsCreateTransformTHR",
+       "cmsCreateMultiprofileTransformTHR",
+       "cmsCreateExtendedTransform",
+       "IsProperColorSpace"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "src/cmsxform.c"
+      ],
+      "V3_body_has_patched_text": [
+       "IsProperColorSpace"
+      ]
+     }
+    },
+    "nodes": 905,
+    "functions": 1315,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "lcms-001": {
+   "harness": "cms_postscript_fuzzer",
+   "crash": "SEGV",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  },
+  "lcms-002": {
+   "harness": "cms_virtual_profile_fuzzer",
+   "crash": "stack-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "cmsIT8_load_fuzzer",
+   "cms_cgats_fuzzer",
+   "cms_cie_cam02_fuzzer",
+   "cms_devicelink_fuzzer",
+   "cms_dict_fuzzer",
+   "cms_gdb_fuzzer",
+   "cms_md5_fuzzer",
+   "cms_overwrite_transform_fuzzer",
+   "cms_postscript_fuzzer",
+   "cms_profile_fuzzer",
+   "cms_transform_all_fuzzer",
+   "cms_transform_extended_fuzzer",
+   "cms_transform_fuzzer",
+   "cms_universal_transform_fuzzer",
+   "cms_virtual_profile_fuzzer"
+  ],
+  "coverage": [
+   "cmsIT8_load_fuzzer",
+   "cms_cgats_fuzzer",
+   "cms_cie_cam02_fuzzer",
+   "cms_devicelink_fuzzer",
+   "cms_dict_fuzzer",
+   "cms_gdb_fuzzer",
+   "cms_md5_fuzzer",
+   "cms_overwrite_transform_fuzzer",
+   "cms_postscript_fuzzer",
+   "cms_profile_fuzzer",
+   "cms_transform_all_fuzzer",
+   "cms_transform_extended_fuzzer",
+   "cms_transform_fuzzer",
+   "cms_universal_transform_fuzzer",
+   "cms_virtual_profile_fuzzer"
+  ]
+ },
+ "timings": [
+  {
+   "step": "build_image",
+   "seconds": 12,
+   "rc": 0,
+   "command": "python3 /home/ze/fb-graphs/build/cm-full-01/fuzz-tooling/infra/helper.py build_image --no-pull lcms"
+  },
+  {
+   "step": "build_bitcode",
+   "seconds": 44,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -e SANITIZER_FLAGS=-flto -g -fno-inline-functions -fuse-ld=gold -Wno-unused-command-line-argument -e AR=llvm-ar -e NM=llvm-nm -e RANLIB=llvm-ranlib -v /home/ze/fb-graphs/build/cm-full-01/repo-bitcode:/src/lcms -v /home/ze/fb-graphs/build/cm-full-01/out:/out -v /home/ze/fb-graphs/build/cm-full-01/work:/work aixcc-afc/lcms:latest bash -c compile 2>&1 | tail -40; mkdir -p /out/bc"
+  },
+  {
+   "step": "to_ll",
+   "seconds": 3,
+   "rc": 0,
+   "command": "docker run --rm -v /home/ze/fb-graphs/build/cm-full-01/out:/out -v /home/ze/fb-graphs/build/cm-full-01/repo-bitcode:/src/lcms -v /home/ze/fb-graphs/build/cm-full-01/work:/work -v /home/ze/fb-graphs/build/cm-full-01/ll:/ll aixcc-afc/lcms:latest bash -c "
+  },
+  {
+   "step": "extract_cms_postscript_fuzzer",
+   "seconds": 1,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  },
+  {
+   "step": "extract_cms_virtual_profile_fuzzer",
+   "seconds": 0,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  }
+ ]
+}

@@ -1,0 +1,143 @@
+{
+ "challenge": "ex-delta-02",
+ "round": "final-competition",
+ "scan_mode": "delta",
+ "project": "libexif",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-libexif.git",
+  "checkout_ref": "challenges/ex-delta-02",
+  "resolved_commit": "69dc7e5fbe4e52090138ccb06b23fb6d90334e7e"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/ex-delta-02",
+  "project": "libexif"
+ },
+ "image": "aixcc-afc/libexif:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "exif_from_data_fuzzer"
+ ],
+ "target_harnesses": [
+  "exif_from_data_fuzzer"
+ ],
+ "graphs": {
+  "exif_from_data_fuzzer": "mongodb"
+ },
+ "counts": {
+  "exif_from_data_fuzzer": {
+   "functions": 342,
+   "nodes": 244
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "ex-delta-02",
+  "ok": true,
+  "harnesses": {
+   "exif_from_data_fuzzer": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "exif-001": {
+      "patched_files": [
+       "libexif/fuji/exif-mnote-data-fuji.c"
+      ],
+      "vuln_functions": [
+       "exif_mnote_data_fuji_load",
+       "exif_mnote_data_fuji_new",
+       "exif_mnote_data_fuji_save",
+       "exif_mnote_data_fuji_set_offset"
+      ],
+      "located_by": "identifier",
+      "hunk_functions": [],
+      "V1_has_node_with_body": [
+       "exif_mnote_data_fuji_load",
+       "exif_mnote_data_fuji_new",
+       "exif_mnote_data_fuji_save",
+       "exif_mnote_data_fuji_set_offset"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "exif_data_new_from_data",
+       "exif_data_load_data",
+       "exif_mnote_data_fuji_load"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "libexif/fuji/exif-mnote-data-fuji.c"
+      ],
+      "V3_body_has_patched_text": [
+       "exif_mnote_data_fuji_load",
+       "exif_mnote_data_fuji_new",
+       "exif_mnote_data_fuji_save",
+       "exif_mnote_data_fuji_set_offset"
+      ]
+     }
+    },
+    "nodes": 244,
+    "functions": 342,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "exif-001": {
+   "harness": "exif_from_data_fuzzer",
+   "crash": "heap-buffer-overflow",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "exif_from_data_fuzzer",
+   "exif_loader_fuzzer"
+  ],
+  "coverage": [
+   "exif_from_data_fuzzer",
+   "exif_loader_fuzzer"
+  ]
+ },
+ "timings": [
+  {
+   "step": "build_image",
+   "seconds": 11,
+   "rc": 0,
+   "command": "python3 /home/ze/fb-graphs/build/ex-delta-02/fuzz-tooling/infra/helper.py build_image --no-pull libexif"
+  },
+  {
+   "step": "build_bitcode",
+   "seconds": 12,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -e SANITIZER_FLAGS=-flto -g -fno-inline-functions -fuse-ld=gold -Wno-unused-command-line-argument -e AR=llvm-ar -e NM=llvm-nm -e RANLIB=llvm-ranlib -v /home/ze/fb-graphs/build/ex-delta-02/repo-bitcode:/src/libexif -v /home/ze/fb-graphs/build/ex-delta-02/out:/out -v /home/ze/fb-graphs/build/ex-delta-02/work:/work aixcc-afc/libexif:latest bash -c compile 2>&1 | tail -40; mkdir -p /out/bc"
+  },
+  {
+   "step": "to_ll",
+   "seconds": 2,
+   "rc": 0,
+   "command": "docker run --rm -v /home/ze/fb-graphs/build/ex-delta-02/out:/out -v /home/ze/fb-graphs/build/ex-delta-02/repo-bitcode:/src/libexif -v /home/ze/fb-graphs/build/ex-delta-02/work:/work -v /home/ze/fb-graphs/build/ex-delta-02/ll:/ll aixcc-afc/libexif:latest bash -c "
+  },
+  {
+   "step": "extract_exif_from_data_fuzzer",
+   "seconds": 0,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  }
+ ]
+}

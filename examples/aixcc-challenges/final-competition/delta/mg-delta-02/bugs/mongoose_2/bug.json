@@ -1,0 +1,66 @@
+{
+ "challenge": "mg-delta-02",
+ "bug": "mongoose_2",
+ "harness": "fuzz",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-125"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "dynamic-stack-buffer-overflow",
+   "global-buffer-overflow",
+   "heap-buffer-overflow",
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "src/net_builtin.c"
+  ],
+  "patch_files": [
+   "mongoose.c",
+   "src/net_builtin.c"
+  ],
+  "crash_file": "/src/mongoose/src/net_builtin.c:385",
+  "crash_line": "18",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/src/mongoose/src/net_builtin.c",
+   "/src/mongoose/test/fuzz.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-125"
+ ],
+ "name": "IPv4 Internet Protocol Options initial code",
+ "blob": "data.bin",
+ "blob_bytes": 34,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/fuzz",
+  "coverage": "bin/coverage/fuzz"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "rx_icmp",
+   "mg_tcpip_rx",
+   "LLVMFuzzerTestOneInput",
+   "_start",
+   "LLVMFuzzerTestOneInput"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/mongoose:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

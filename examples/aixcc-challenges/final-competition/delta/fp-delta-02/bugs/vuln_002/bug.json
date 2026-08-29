@@ -1,0 +1,65 @@
+{
+ "challenge": "fp-delta-02",
+ "bug": "vuln_002",
+ "harness": "TestFuzzCryptoCertificateDataSetPEM",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-122"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "heap-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "libfreerdp/crypto/x509_utils.c"
+  ],
+  "patch_files": [
+   "libfreerdp/crypto/x509_utils.c"
+  ],
+  "crash_file": "/src/FreeRDP/libfreerdp/crypto/x509_utils.c:457",
+  "crash_line": "4",
+  "stack_files": [
+   "/src/FreeRDP/libfreerdp/core/test/TestFuzzCryptoCertificateDataSetPEM.c",
+   "/src/FreeRDP/libfreerdp/crypto/certificate.c",
+   "/src/FreeRDP/libfreerdp/crypto/certificate_data.c",
+   "/src/FreeRDP/libfreerdp/crypto/x509_utils.c",
+   "/src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp",
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-122"
+ ],
+ "name": "FreeRDP SAN heap overflow",
+ "blob": "cert.pem",
+ "blob_bytes": 1862,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/TestFuzzCryptoCertificateDataSetPEM",
+  "coverage": "bin/coverage/TestFuzzCryptoCertificateDataSetPEM"
+ },
+ "reference_patch": "patch_good.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "x509_validate_subject_aternative_names",
+   "LLVMFuzzerTestOneInput",
+   "_start",
+   "x509_validate_subject_aternative_names",
+   "LLVMFuzzerTestOneInput"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/freerdp:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

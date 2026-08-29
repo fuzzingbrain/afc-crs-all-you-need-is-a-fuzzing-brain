@@ -1,0 +1,72 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2323008649
+INFO: Loaded 1 modules   (2854 inline 8-bit counters): 2854 [0x55d9a69e8738, 0x55d9a69e925e), 
+INFO: Loaded 1 PC tables (2854 PCs): 2854 [0x55d9a69e9260,0x55d9a69f44c0), 
+/b/bin/address/exif_loader_fuzzer: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+=================================================================
+==7==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x51100000013f at pc 0x55d9a68c6ff2 bp 0x7fffa60b2b20 sp 0x7fffa60b22e0
+READ of size 256 at 0x51100000013f thread T0
+SCARINESS: 26 (multi-byte-read-heap-buffer-overflow)
+    #0 0x55d9a68c6ff1 in __asan_memcpy /src/llvm-project/compiler-rt/lib/asan/asan_interceptors_memintrinsics.cpp:63:3
+    #1 0x55d9a6928b87 in exif_mnote_data_apple_load /src/libexif/libexif/apple/exif-mnote-data-apple.c:131:9
+    #2 0x55d9a690bf4e in exif_data_load_data /src/libexif/libexif/exif-data.c:1010:2
+    #3 0x55d9a6920ba0 in exif_loader_get_data /src/libexif/libexif/exif-loader.c:435:2
+    #4 0x55d9a6908a4a in LLVMFuzzerTestOneInput /src/exif_loader_fuzzer.cc:63:15
+    #5 0x55d9a67bd330 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #6 0x55d9a67a85a5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #7 0x55d9a67ae03f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #8 0x55d9a67d92e2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #9 0x7f6ed9484082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #10 0x55d9a67a078d in _start (/b/bin/address/exif_loader_fuzzer+0x8078d)
+
+DEDUP_TOKEN: __asan_memcpy--exif_mnote_data_apple_load--exif_data_load_data
+0x51100000013f is located 0 bytes after 255-byte region [0x511000000040,0x51100000013f)
+allocated by thread T0 here:
+    #0 0x55d9a68c92c9 in calloc /src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp:75:3
+    #1 0x55d9a6920334 in exif_loader_alloc /src/libexif/libexif/exif-loader.c:108:6
+    #2 0x55d9a6920334 in exif_loader_copy /src/libexif/libexif/exif-loader.c:150:14
+    #3 0x55d9a691fc33 in exif_loader_write /src/libexif/libexif/exif-loader.c:241:9
+    #4 0x55d9a6908a42 in LLVMFuzzerTestOneInput /src/exif_loader_fuzzer.cc:62:3
+    #5 0x55d9a67bd330 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #6 0x55d9a67a85a5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #7 0x55d9a67ae03f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #8 0x55d9a67d92e2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #9 0x7f6ed9484082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: __interceptor_calloc--exif_loader_alloc--exif_loader_copy
+SUMMARY: AddressSanitizer: heap-buffer-overflow /src/libexif/libexif/apple/exif-mnote-data-apple.c:131:9 in exif_mnote_data_apple_load
+Shadow bytes around the buggy address:
+  0x510ffffffe80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x510fffffff00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x510fffffff80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x511000000000: fa fa fa fa fa fa fa fa 00 00 00 00 00 00 00 00
+  0x511000000080: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x511000000100: 00 00 00 00 00 00 00[07]fa fa fa fa fa fa fa fa
+  0x511000000180: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x511000000200: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x511000000280: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x511000000300: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x511000000380: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==7==ABORTING
+
+OK: exif-004 reproduced (heap-buffer-overflow)

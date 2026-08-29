@@ -1,0 +1,2 @@
+CREATE VIRTUAL TABLE contacts USING lsm1 ('/tmp/contacts.lsm', name, TEXT, address, phone);
+select name from contacts where name < 'i' and name > 'c';

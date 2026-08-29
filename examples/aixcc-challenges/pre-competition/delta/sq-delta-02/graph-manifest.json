@@ -1,0 +1,188 @@
+{
+ "challenge": "sq-delta-02",
+ "round": "pre-competition",
+ "scan_mode": "delta",
+ "project": "sqlite3",
+ "producer": "llvm-ir (clang -flto -g, per-module opt -S, no llvm-link)",
+ "producer_notes": "Call graph read from the compiler's own IR. Direct edges are the callee operand and are correct by construction. Indirect call sites (callee in a register) are resolved by matching the site's type signature against address-taken functions -- a candidate set, not an answer, so those edges are labelled and excluded from call_depth.",
+ "source": {
+  "repo": "https://github.com/AIxCyberChallenge/afc-sqlite3.git",
+  "checkout_ref": "challenges/sq-delta-02",
+  "resolved_commit": "4c3b982f5a75d086679a08c4c2c2ad9eb626eb2c"
+ },
+ "fuzz_tooling": {
+  "repo": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "ref": "challenge-state/sq-delta-02",
+  "project": "sqlite3"
+ },
+ "image": "aixcc-afc/sqlite3:latest",
+ "docker": "Docker version 20.10.24+dfsg1, build 297e128",
+ "harnesses_covered": [
+  "customfuzz3"
+ ],
+ "target_harnesses": [
+  "customfuzz3"
+ ],
+ "graphs": {
+  "customfuzz3": "mongodb"
+ },
+ "counts": {
+  "customfuzz3": {
+   "functions": 4171,
+   "nodes": 4012
+  }
+ },
+ "checks_passed": true,
+ "graph_shipped": true,
+ "validation": {
+  "challenge": "sq-delta-02",
+  "ok": true,
+  "harnesses": {
+   "customfuzz3": {
+    "built": true,
+    "structural": {
+     "S1_no_dangling": [],
+     "S2_no_mangled": [],
+     "S3_node_has_record": [],
+     "S4_call_depth_matches_bfs": [],
+     "S5_reached_by_matches_graph": [],
+     "S6_content_present": []
+    },
+    "semantic": {
+     "SQL-008": {
+      "patched_files": [
+       "ext/lsm1/lsm_vtab.c"
+      ],
+      "vuln_functions": [
+       "completionBestIndex",
+       "completionFilter",
+       "expertFilter",
+       "fsdirBestIndex",
+       "fsdirFilter",
+       "jsonEachBestIndex",
+       "jsonEachFilter",
+       "lsm1BestIndex",
+       "lsm1Filter",
+       "pragmaVtabFilter",
+       "re_subcompile_string",
+       "seriesBestIndex",
+       "seriesFilter",
+       "sqlite3WhereAddExplainText",
+       "sqlite3WhereCodeOneLoopStart",
+       "whereLoopAddVirtualOne",
+       "zipfileBestIndex",
+       "zipfileFilter"
+      ],
+      "located_by": "identifier",
+      "hunk_functions": [
+       "lsm1BestIndex"
+      ],
+      "V1_has_node_with_body": [
+       "completionBestIndex",
+       "completionFilter",
+       "expertFilter",
+       "fsdirBestIndex",
+       "fsdirFilter",
+       "jsonEachBestIndex",
+       "jsonEachFilter",
+       "lsm1BestIndex",
+       "lsm1Filter",
+       "pragmaVtabFilter",
+       "re_subcompile_string",
+       "seriesBestIndex",
+       "seriesFilter",
+       "sqlite3WhereAddExplainText",
+       "sqlite3WhereCodeOneLoopStart",
+       "whereLoopAddVirtualOne",
+       "zipfileBestIndex",
+       "zipfileFilter"
+      ],
+      "V2_path_from_entry": [
+       "LLVMFuzzerTestOneInput",
+       "shell_main",
+       "vfstrace_register",
+       "vfstrace_printf",
+       "completionBestIndex"
+      ],
+      "V3_shape": "removes",
+      "V3_per_file": [
+       "ext/lsm1/lsm_vtab.c"
+      ],
+      "V3_body_has_patched_text": [
+       "completionBestIndex",
+       "completionFilter",
+       "expertFilter",
+       "fsdirBestIndex",
+       "fsdirFilter",
+       "jsonEachBestIndex",
+       "jsonEachFilter",
+       "lsm1BestIndex",
+       "lsm1Filter",
+       "pragmaVtabFilter",
+       "re_subcompile_string",
+       "seriesBestIndex",
+       "seriesFilter",
+       "sqlite3WhereAddExplainText",
+       "sqlite3WhereCodeOneLoopStart",
+       "whereLoopAddVirtualOne",
+       "zipfileBestIndex",
+       "zipfileFilter"
+      ]
+     }
+    },
+    "nodes": 4012,
+    "functions": 4171,
+    "entry": "LLVMFuzzerTestOneInput",
+    "entry_present": true
+   }
+  },
+  "notes": []
+ },
+ "bugs_shipped": {
+  "SQL-008": {
+   "harness": "customfuzz3",
+   "crash": "SEGV",
+   "sanitizers": [
+    "address",
+    "coverage"
+   ]
+  }
+ },
+ "bugs_skipped": {},
+ "fuzzers_built": {
+  "address": [
+   "customfuzz3",
+   "ossfuzz"
+  ],
+  "coverage": [
+   "customfuzz3",
+   "ossfuzz"
+  ]
+ },
+ "timings": [
+  {
+   "step": "build_image",
+   "seconds": 8,
+   "rc": 0,
+   "command": "python3 /home/ze/fb-graphs/build/sq-delta-02/fuzz-tooling/infra/helper.py build_image --no-pull sqlite3"
+  },
+  {
+   "step": "build_bitcode",
+   "seconds": 55,
+   "rc": 0,
+   "command": "docker run --rm -e FUZZING_ENGINE=libfuzzer -e SANITIZER=address -e ARCHITECTURE=x86_64 -e FUZZING_LANGUAGE=c -e HELPER=True -e SANITIZER_FLAGS=-flto -g -fno-inline-functions -fuse-ld=gold -Wno-unused-command-line-argument -e AR=llvm-ar -e NM=llvm-nm -e RANLIB=llvm-ranlib -v /home/ze/fb-graphs/build/sq-delta-02/repo-bitcode:/src/sqlite3 -v /home/ze/fb-graphs/build/sq-delta-02/out:/out -v /home/ze/fb-graphs/build/sq-delta-02/work:/work aixcc-afc/sqlite3:latest bash -c compile 2>&1 | tail -40; mkdir -p /out/bc"
+  },
+  {
+   "step": "to_ll",
+   "seconds": 118,
+   "rc": 0,
+   "command": "docker run --rm -v /home/ze/fb-graphs/build/sq-delta-02/out:/out -v /home/ze/fb-graphs/build/sq-delta-02/repo-bitcode:/src/sqlite3 -v /home/ze/fb-graphs/build/sq-delta-02/work:/work -v /home/ze/fb-graphs/build/sq-delta-02/ll:/ll aixcc-afc/sqlite3:latest bash -c "
+  },
+  {
+   "step": "extract_customfuzz3",
+   "seconds": 3,
+   "rc": 0,
+   "command": "ir_callgraph.py"
+  }
+ ]
+}

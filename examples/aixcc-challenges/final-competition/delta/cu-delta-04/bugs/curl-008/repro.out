@@ -1,0 +1,33 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2261101658
+INFO: Loaded 1 modules   (28140 inline 8-bit counters): 28140 [0x55c6285fb218, 0x55c628602004), 
+INFO: Loaded 1 PC tables (28140 PCs): 28140 [0x55c628602008,0x55c62866fec8), 
+/b/bin/address/curl_fuzzer_ws: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+==7==ERROR: AddressSanitizer: SEGV on unknown address 0x000000000000 (pc 0x55c6282bf7ba bp 0x7ffc381618f0 sp 0x7ffc381616c0 T0)
+==7==The signal is caused by a WRITE memory access.
+==7==Hint: address points to the zero page.
+SCARINESS: 10 (null-deref)
+    #0 0x55c6282bf7ba in extremelygoodprtcl_sm /src/curl/lib/extremelygoodprtcl.c:306:33
+    #1 0x55c6284649bc in Curl_pp_statemach /src/curl/lib/pingpong.c:137:14
+    #2 0x55c6282be8ab in extremelygoodprtcl_doing /src/curl/lib/extremelygoodprtcl.c:328:21
+    #3 0x55c628228b25 in protocol_connecting /src/curl/lib/multi.c:1735:14
+    #4 0x55c628216fb5 in multi_runsingle /src/curl/lib/multi.c:2753:16
+    #5 0x55c628215035 in curl_multi_perform /src/curl/lib/multi.c:3016:16
+    #6 0x55c6281c3ace in fuzz_handle_transfer(fuzz_data*) /src/curl_fuzzer/curl_fuzzer.cc:419:5
+    #7 0x55c6281c10ed in LLVMFuzzerTestOneInput /src/curl_fuzzer/curl_fuzzer.cc:97:3
+    #8 0x55c6280756a0 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #9 0x55c628060915 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #10 0x55c6280663af in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #11 0x55c628091652 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #12 0x7f7023660082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+    #13 0x55c628058afd in _start (/b/bin/address/curl_fuzzer_ws+0x136afd)
+
+DEDUP_TOKEN: extremelygoodprtcl_sm--Curl_pp_statemach--extremelygoodprtcl_doing
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /src/curl/lib/extremelygoodprtcl.c:306:33 in extremelygoodprtcl_sm
+==7==ABORTING
+
+OK: curl-008 reproduced (SEGV)

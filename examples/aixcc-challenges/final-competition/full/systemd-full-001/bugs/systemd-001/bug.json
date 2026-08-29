@@ -1,0 +1,69 @@
+{
+ "challenge": "systemd-full-001",
+ "bug": "systemd-001",
+ "harness": "fuzz-udev-rule-parse-value",
+ "consistency": {
+  "verdict": "consistent",
+  "cwes": [
+   "CWE-787"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "expected_types": [
+   "dynamic-stack-buffer-overflow",
+   "global-buffer-overflow",
+   "heap-buffer-overflow",
+   "stack-buffer-overflow"
+  ],
+  "cwe_consistent": true,
+  "vuln_yaml_files": [
+   "src/udev/udev-rules.c"
+  ],
+  "patch_files": [
+   "src/udev/udev-rules.c"
+  ],
+  "patch_functions": [
+   "check_token_delimiters",
+   "udev_rule_parse_value"
+  ],
+  "matched_by": null,
+  "crash_file": "/work/build/../../src/systemd/src/udev/udev-rules.c:1223",
+  "crash_line": "42",
+  "stack_files": [
+   "/src/llvm-project/compiler-rt/lib/asan/asan_malloc_linux.cpp",
+   "/src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp",
+   "/work/build/../../src/systemd/src/udev/fuzz-udev-rule-parse-value.c",
+   "/work/build/../../src/systemd/src/udev/udev-rules.c"
+  ],
+  "site_consistent": true
+ },
+ "cwes": [
+  "CWE-787"
+ ],
+ "name": "udev-rule-prefix-matching",
+ "blob": "data.bin",
+ "blob_bytes": 6,
+ "sanitizer_declared": null,
+ "sanitizers_built": [
+  "address",
+  "coverage"
+ ],
+ "binaries": {
+  "address": "bin/address/fuzz-udev-rule-parse-value",
+  "coverage": "bin/coverage/fuzz-udev-rule-parse-value"
+ },
+ "reference_patch": "good_patch.diff",
+ "expected_crash": {
+  "type": "heap-buffer-overflow",
+  "top_frames": [
+   "udev_rule_parse_value",
+   "LLVMFuzzerTestOneInput",
+   "_start",
+   "LLVMFuzzerTestOneInput"
+  ],
+  "site": ""
+ },
+ "reproduced": true,
+ "image": "aixcc-afc/systemd:latest",
+ "runner": "ghcr.io/aixcc-finals/base-runner:v1.3.0",
+ "run_mode": "plain"
+}

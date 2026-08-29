@@ -1,0 +1,39 @@
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2287162249
+INFO: Loaded 1 modules   (12602 inline 8-bit counters): 12602 [0x55d8ffb5d160, 0x55d8ffb6029a), 
+INFO: Loaded 1 PC tables (12602 PCs): 12602 [0x55d8ffb602a0,0x55d8ffb91640), 
+/b/bin/address/dav1d_fuzzer_mt: Running 1 inputs 1 time(s) each.
+Running: /b/blob
+AddressSanitizer:DEADLYSIGNAL
+=================================================================
+AddressSanitizer==10==ERROR: AddressSanitizer: SEGV on unknown address (pc 0x55d8ff93625b bp 0x7f93f75b3440 sp 0x7f93f75b3320 T2)
+:DEADLYSIGNAL
+==10==The signal is caused by a READ memory access.
+==10==Hint: this fault was caused by a dereference of a high value address (see register values below).  Disassemble the provided pc to learn which register was used.
+    #0 0x55d8ff93625b in decode_coefs /work/build/../../src/dav1d/src/recon_tmpl.c:681:15
+    #1 0x55d8ff92d1d8 in dav1d_read_coef_blocks_8bpc /work/build/../../src/dav1d/src/recon_tmpl.c:885:29
+    #2 0x55d8ff8d21b2 in decode_b /work/build/../../src/dav1d/src/decode.c:1249:13
+    #3 0x55d8ff8b4995 in decode_sb /work/build/../../src/dav1d/src/decode.c:2210:17
+    #4 0x55d8ff8b29ec in dav1d_decode_tile_sbrow /work/build/../../src/dav1d/src/decode.c:2758:13
+    #5 0x55d8ff89ea91 in dav1d_worker_task /work/build/../../src/dav1d/src/thread_task.c:761:33
+    #6 0x55d8ff836748 in asan_thread_start(void*) /src/llvm-project/compiler-rt/lib/asan/asan_interceptors.cpp:239:28
+    #7 0x7f93fbefc608 in start_thread (/lib/x86_64-linux-gnu/libpthread.so.0+0x8608) (BuildId: 9753720502573b97dbac595b61fd72c2df18e078)
+    #8 0x7f93fbdde352 in __clone (/lib/x86_64-linux-gnu/libc.so.6+0x11f352) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: decode_coefs--dav1d_read_coef_blocks_8bpc--decode_b
+AddressSanitizer can not provide additional info.
+SUMMARY: AddressSanitizer: SEGV /work/build/../../src/dav1d/src/recon_tmpl.c:681:15 in decode_coefs
+Thread T2 (dav1d-worker) created by T0 here:
+    #0 0x55d8ff81e791 in pthread_create /src/llvm-project/compiler-rt/lib/asan/asan_interceptors.cpp:250:3
+    #1 0x55d8ff6ef70e in dav1d_open /work/build/../../src/dav1d/src/lib.c:281:17
+    #2 0x55d8ff8788ff in LLVMFuzzerTestOneInput /work/build/../../src/dav1d/tests/libfuzzer/dav1d_fuzzer.c:107:11
+    #3 0x55d8ff72ce40 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerLoop.cpp:614:13
+    #4 0x55d8ff7180b5 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:327:6
+    #5 0x55d8ff71db4f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerDriver.cpp:862:9
+    #6 0x55d8ff748df2 in main /src/llvm-project/compiler-rt/lib/fuzzer/FuzzerMain.cpp:20:10
+    #7 0x7f93fbce3082 in __libc_start_main (/lib/x86_64-linux-gnu/libc.so.6+0x24082) (BuildId: 5792732f783158c66fb4f3756458ca24e46e827d)
+
+DEDUP_TOKEN: ___interceptor_pthread_create--dav1d_open--LLVMFuzzerTestOneInput
+==10==ABORTING
+
+OK: dav1d-001 reproduced (SEGV)
