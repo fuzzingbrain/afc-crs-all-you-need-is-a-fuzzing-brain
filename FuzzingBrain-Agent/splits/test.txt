@@ -1,0 +1,42 @@
+# test split — 37 challenges, stratified by difficulty (1-5).
+# Tuning happens on dev; test is held out and read only at the end.
+# Split: within each difficulty level bugs alternate dev/test by name,
+# as close to half and half as an odd count allows.
+
+avro-03
+dtc-01
+fwupd-02
+harfbuzz-01
+imagemagick-02
+json-java-01
+json-java-03
+libaom-02
+libvpx-03
+libwebp-02
+mongoose-01
+net-snmp-02
+openldap-01
+openscreen-02
+ots-01
+pdfbox-02
+avro-01
+flatbuffers-02
+icu-02
+spirv-tools-01
+flatbuffers-03
+fwupd-03
+libaom-03
+opencv-01
+systemd-02
+icu-01
+libvpx-02
+libxml2-03
+php-01
+spirv-tools-02
+arrow-01
+fwupd-04
+jq-01
+libvpx-01
+libxml2-01
+libxml2-04
+skia-01

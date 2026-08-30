@@ -1,0 +1,45 @@
+# dev split — 40 challenges, stratified by difficulty (1-5).
+# Tuning happens on dev; test is held out and read only at the end.
+# Split: within each difficulty level bugs alternate dev/test by name,
+# as close to half and half as an odd count allows.
+
+avro-02
+cups-01
+freerdp-01
+graaljs-01
+imagemagick-01
+imagemagick-03
+json-java-02
+libaom-01
+libavif-01
+libvpx-04
+libwebp-03
+mongoose-02
+openh264-01
+openscreen-01
+openssl-01
+pdfbox-01
+pdfbox-03
+assimp-01
+binutils-01
+ghidra-01
+icu-03
+systemd-01
+flatbuffers-01
+freetype-01
+harfbuzz-02
+net-snmp-03
+openldap-02
+upx-01
+hunspell-01
+libheif-01
+libwebsockets-01
+net-snmp-01
+simdutf-01
+upx-02
+fwupd-01
+graal-01
+libpng-01
+libwebp-01
+libxml2-02
+opc-ua-01
