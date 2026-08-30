@@ -144,3 +144,21 @@ class LLM:
         caching is not working — the number to watch."""
         seen = self.usage["input"] + self.usage["cache_read"] + self.usage["cache_write"]
         return self.usage["cache_read"] / seen if seen else 0.0
+
+    @property
+    def cost_usd(self) -> float:
+        """Dollars spent so far, from the model's per-token rates.
+
+        Opus 5 list price: $5 / Mtok input, $25 / Mtok output. A cache read is
+        ~0.1x an input token and a cache write ~1.25x, which on a heavily-cached
+        loop is most of why the bill stays small — so they are priced, not
+        lumped in with fresh input. Only used to enforce a spend cap; the
+        authoritative bill is Anthropic's.
+        """
+        u = self.usage
+        return (
+            u["input"] * 5.0
+            + u["output"] * 25.0
+            + u["cache_read"] * 0.5
+            + u["cache_write"] * 6.25
+        ) / 1_000_000
