@@ -731,3 +731,112 @@ class TestExitConditionPriority:
 
         # Budget checked before POV
         assert result["status"] == "budget_exceeded"
+
+
+class TestThePollLoopCannotRunAway:
+    """The loop must fail as a hung task, never as a dead machine.
+
+    Its only pause is one time.sleep at the bottom. When that sleep does not
+    pause -- patched out in a test, or cut short -- every pass becomes a
+    database read and a fresh status dict with nothing between them. That is
+    what happened: sixty-two gigabytes in roughly four minutes, MongoDB stopped
+    answering, the kernel stopped writing its own log, and the host had to be
+    power-cycled.
+
+    The count of passes is bounded by the same timeout the clock is compared
+    against, so both have to fail before the loop can spin.
+    """
+
+    def test_it_stops_even_with_a_frozen_clock_and_no_sleep(self):
+        # Neither stopping rule can fire on its own terms: the clock never
+        # advances, so elapsed stays at zero, and sleep does nothing. Before
+        # the bound, this call did not return.
+        dispatcher, repos = _make_dispatcher(pov_count=0, timeout_minutes=1)
+
+        dispatcher.get_status = MagicMock(
+            return_value={
+                "total": 1,
+                "pending": 0,
+                "building": 0,
+                "running": 1,
+                "completed": 0,
+                "failed": 0,
+            }
+        )
+        dispatcher.is_complete = MagicMock(return_value=False)
+        dispatcher.graceful_shutdown = MagicMock()
+        dispatcher.shutdown_all_fuzzers = MagicMock()
+        dispatcher.get_verified_pov_count = MagicMock(return_value=0)
+
+        frozen = datetime(2026, 1, 1, 0, 0, 0)
+        result = _run_wait(
+            dispatcher, repos, timeout_minutes=1, now_times=[frozen, frozen]
+        )
+
+        assert result["status"] == "timeout"
+
+    def test_the_bound_is_the_timeout_divided_by_the_interval(self):
+        # A one-minute timeout polled every five seconds is twelve passes; the
+        # margin is there so the clock, not the counter, is what normally
+        # stops the loop.
+        import inspect
+
+        from fuzzingbrain.core.dispatcher import WorkerDispatcher
+
+        src = inspect.getsource(WorkerDispatcher.wait_for_completion)
+        assert "max_polls" in src
+        assert "polls > max_polls" in src
+
+
+class TestShutdownHasADeadline:
+    """A task that is over must stop being anything the machine pays for.
+
+    Every step of the shutdown talks to MongoDB, Redis or Docker, and those
+    stop answering exactly when a run is ending badly. One shutdown ran for a
+    hundred minutes because a single find_by_task took eight to time out and
+    there were several of them.
+    """
+
+    def test_a_wedged_step_does_not_hold_the_process(self):
+        import threading
+        import time as real_time
+
+        dispatcher, _ = _make_dispatcher()
+        entered = threading.Event()
+
+        def _never_returns():
+            entered.set()
+            real_time.sleep(30)
+
+        dispatcher.graceful_shutdown = _never_returns
+        dispatcher.shutdown_all_fuzzers = MagicMock()
+        dispatcher._close_redis = MagicMock()
+
+        started = real_time.monotonic()
+        finished = dispatcher._stop_everything(deadline=0.5)
+        took = real_time.monotonic() - started
+
+        assert entered.is_set(), "the shutdown never started"
+        assert finished is False, "a wedged shutdown reported success"
+        assert took < 5, f"gave up after {took:.1f}s, not at the deadline"
+
+    def test_a_healthy_shutdown_still_runs_every_step(self):
+        dispatcher, _ = _make_dispatcher()
+        dispatcher.graceful_shutdown = MagicMock()
+        dispatcher.shutdown_all_fuzzers = MagicMock()
+        dispatcher._close_redis = MagicMock()
+
+        assert dispatcher._stop_everything(deadline=10) is True
+        dispatcher.graceful_shutdown.assert_called_once()
+        dispatcher.shutdown_all_fuzzers.assert_called_once()
+        dispatcher._close_redis.assert_called_once()
+
+    def test_one_failing_step_does_not_stop_the_others(self):
+        dispatcher, _ = _make_dispatcher()
+        dispatcher.graceful_shutdown = MagicMock(side_effect=RuntimeError("mongo"))
+        dispatcher.shutdown_all_fuzzers = MagicMock()
+        dispatcher._close_redis = MagicMock()
+
+        assert dispatcher._stop_everything(deadline=10) is True
+        dispatcher.shutdown_all_fuzzers.assert_called_once()
+        dispatcher._close_redis.assert_called_once()

@@ -205,6 +205,11 @@ def generate(variant: int = 1) -> bytes:
                 sanitizer=crash_record.sanitizer,
                 sanitizer_output=sanitizer_output[:10000] if sanitizer_output else "",
                 description=f"Fuzzer-discovered crash ({source})",
+                # The monitor has already deduplicated this crash and knows its
+                # identity; carrying it onto the POV is what lets the POV count
+                # be a count of bugs. Without it every fuzzer-found crash
+                # reached the database unsigned and was counted on its own.
+                signature=crash_record.signature,
                 is_successful=False,  # Will be set True after packaging
                 is_active=True,
             )
@@ -628,6 +633,17 @@ def generate(variant: int = 1) -> bytes:
             else None,
             "budget_limit": self.config.budget_limit,
             "pov_count": self.config.pov_count,
+            # Task-wide, not per-worker: each worker enforces it against the
+            # same Redis ledger, so the sum across workers is what is capped.
+            "max_parallel_fuzzers": self.config.max_parallel_fuzzers,
+            # Per-worker, unlike the ceiling above. Configured since the
+            # beginning and read by nothing until now.
+            "sp_max_count": self.config.fuzzer_worker.sp_max_count,
+            # A worker is its own process and reads none of the main process's
+            # configuration, so the agent counts and the score thresholds have
+            # to travel with the assignment.
+            "concurrency": self.config.concurrency.to_dict(),
+            "scoring": self.config.scoring.to_dict(),
         }
 
         # Dispatch Celery task with dynamic time limit based on config
@@ -739,13 +755,47 @@ def generate(variant: int = 1) -> bytes:
         return finished == status["total"] and status["total"] > 0
 
     def get_verified_pov_count(self) -> int:
-        """Get count of verified (successful) POVs for this task."""
-        return self.repos.povs.count(
-            {
-                "task_id": self._task_oid,
-                "is_successful": True,
-            }
-        )
+        """How many distinct bugs have been proved, not how many inputs prove them.
+
+        One overflow reachable three ways is one finding. Counting rows made the
+        stopping rule fire on the third input to a bug already reported, and
+        made the summary claim three where the answer was one.
+
+        POVs written before signatures existed, or whose signature could not be
+        computed, fall back to counting individually -- an unsigned row is not
+        evidence that it repeats another.
+        """
+        try:
+            rows = list(self.repos.povs.find_by_task(str(self.task.task_id)) or [])
+        except Exception as e:
+            logger.warning(f"Could not read POVs to count distinct bugs: {e}")
+            rows = []
+
+        signatures = set()
+        unsigned = 0
+        for p in rows:
+            if not getattr(p, "is_successful", False):
+                continue
+            sig = getattr(p, "signature", "")
+            if sig:
+                signatures.add(sig)
+            else:
+                unsigned += 1
+        if signatures or unsigned:
+            return len(signatures) + unsigned
+
+        # Nothing came back row by row. That is usually the truth -- no POV has
+        # been verified yet -- but it is also what a failed read looks like,
+        # and answering zero to the stopping rule means a run that has proved
+        # its bug keeps going until the clock runs out, then reports a timeout.
+        # The plain count is the safety net: it can overcount a bug found twice,
+        # never hide one that was found.
+        try:
+            return self.repos.povs.count(
+                {"task_id": self._task_oid, "is_successful": True}
+            )
+        except Exception:
+            return 0
 
     def graceful_shutdown(self) -> None:
         """
@@ -845,6 +895,18 @@ def generate(variant: int = 1) -> bytes:
 
         logger.info(f"Shutdown {shutdown_count} FuzzerManager(s)")
 
+        # The slot ledger outlives the processes that held slots in it, so
+        # whatever is still listed belongs to a worker that is already gone.
+        try:
+            from ..fuzzer.budget import FuzzerBudget
+
+            FuzzerBudget(
+                task_id=str(self.task.task_id),
+                limit=self.config.max_parallel_fuzzers,
+            ).clear()
+        except Exception as e:
+            logger.debug(f"Could not clear the fuzzer slot ledger: {e}")
+
         # Stop Task-level FuzzerMonitor (includes final sweep)
         if self.crash_monitor:
             self.crash_monitor.stop_monitoring()
@@ -853,6 +915,56 @@ def generate(variant: int = 1) -> bytes:
                 f"Task-level FuzzerMonitor stopped: "
                 f"{crash_stats['total_crashes']} crashes found"
             )
+
+    # How long the whole shutdown path gets. Every step in it talks to
+    # MongoDB, Redis or Docker, and each of those can stop answering exactly
+    # when a task is ending badly -- which is when this runs. A run once spent
+    # a hundred minutes here, on a machine deep in swap, because one
+    # find_by_task took eight minutes to time out and there were several of
+    # them. The task was already over; the only thing still happening was the
+    # shutdown refusing to end.
+    SHUTDOWN_DEADLINE_SECONDS = 120.0
+
+    def _stop_everything(self, deadline: Optional[float] = None) -> bool:
+        """Stop the workers, the fuzzers and Redis, or stop trying.
+
+        Runs on a daemon thread so that a call wedged inside a database driver
+        cannot hold the process open past the deadline: when the time is up
+        this returns, the thread is abandoned, and the caller reports the
+        result the task actually had.
+
+        Returns True if the shutdown finished, False if it was abandoned.
+        """
+        import threading
+
+        seconds = self.SHUTDOWN_DEADLINE_SECONDS if deadline is None else deadline
+        finished = threading.Event()
+
+        def _run():
+            for step in (
+                self.graceful_shutdown,
+                self.shutdown_all_fuzzers,
+                self._close_redis,
+            ):
+                try:
+                    step()
+                except Exception as e:
+                    logger.warning(f"Shutdown step {step.__name__} failed: {e}")
+            finished.set()
+
+        thread = threading.Thread(
+            target=_run, name="fuzzingbrain-shutdown", daemon=True
+        )
+        thread.start()
+        if finished.wait(timeout=seconds):
+            return True
+
+        logger.error(
+            f"Shutdown did not finish within {seconds:.0f}s and is being "
+            f"abandoned; containers or database handles may outlive this "
+            f"process. Reporting the task's result now."
+        )
+        return False
 
     def wait_for_completion(
         self,
@@ -889,6 +1001,22 @@ def generate(variant: int = 1) -> bytes:
         last_pov_count = 0
         global_fuzzer_only_logged = False  # Only log once
 
+        # How many times this loop can possibly need to poll, from its own
+        # timeout and its own interval. The elapsed-time check below is the
+        # real stopping rule; this is the check that holds when the clock or
+        # the sleep cannot be trusted, and the two would have to fail together
+        # for the loop to run away.
+        #
+        # It is not a theoretical failure. Every pass allocates -- a status
+        # dict, a database read -- and a pass costs nothing without the sleep
+        # at the bottom, so a loop that stops sleeping stops being a poll loop
+        # and becomes an allocation loop. One did: sixty-two gigabytes in about
+        # four minutes, then a machine that had to be power-cycled. A poll loop
+        # should fail as a hung task, not as a dead host.
+        poll_seconds = max(int(poll_interval), 1)
+        max_polls = int(timeout_delta.total_seconds() // poll_seconds) + 10
+        polls = 0
+
         if self.pov_count_target > 0:
             logger.info(
                 f"Waiting for task to complete (timeout: {timeout_minutes}min, pov_target: {self.pov_count_target})"
@@ -899,18 +1027,32 @@ def generate(variant: int = 1) -> bytes:
         try:
             while True:
                 elapsed = datetime.now() - start_time
+                polls += 1
 
                 # ================================================================
-                # Exit condition 1: Timeout
+                # Exit condition 1: Timeout, by the clock or by the count
                 # ================================================================
-                if elapsed > timeout_delta:
-                    logger.warning(f"Timeout reached after {timeout_minutes} minutes")
-                    self.graceful_shutdown()
-                    self.shutdown_all_fuzzers()
-                    self._close_redis()
+                if elapsed > timeout_delta or polls > max_polls:
+                    if polls > max_polls:
+                        logger.error(
+                            f"Polled {polls} times in {elapsed.total_seconds():.0f}s, "
+                            f"past the {max_polls} this task's {timeout_minutes}min "
+                            f"timeout allows. The loop is not waiting between "
+                            f"passes; stopping it before it costs the machine."
+                        )
+                    else:
+                        logger.warning(
+                            f"Timeout reached after {timeout_minutes} minutes"
+                        )
+                    self._stop_everything()
                     return {
                         "status": "timeout",
                         "elapsed_minutes": elapsed.total_seconds() / 60,
+                        # Carried on every exit path, not just the one that
+                        # stops on it: the summary otherwise falls back to the
+                        # generated count and reports more povs than were ever
+                        # verified.
+                        "pov_count": self.get_verified_pov_count(),
                         **self.get_status(),
                     }
 
@@ -923,11 +1065,10 @@ def generate(variant: int = 1) -> bytes:
                         logger.warning(
                             f"Budget limit exceeded: ${current_cost:.2f} >= ${self.config.budget_limit:.2f}"
                         )
-                        self.graceful_shutdown()
-                        self.shutdown_all_fuzzers()
-                        self._close_redis()
+                        self._stop_everything()
                         return {
                             "status": "budget_exceeded",
+                            "pov_count": self.get_verified_pov_count(),
                             "elapsed_minutes": elapsed.total_seconds() / 60,
                             "error": f"Budget exceeded: ${current_cost:.2f} >= ${self.config.budget_limit:.2f}",
                             **self.get_status(),
@@ -956,9 +1097,7 @@ def generate(variant: int = 1) -> bytes:
                         f"POV target reached! ({current_pov_count}/{self.pov_count_target})"
                     )
                     logger.info("Initiating graceful shutdown...")
-                    self.graceful_shutdown()
-                    self.shutdown_all_fuzzers()
-                    self._close_redis()
+                    self._stop_everything()
                     return {
                         "status": "pov_target_reached",
                         "elapsed_minutes": elapsed.total_seconds() / 60,
@@ -1004,9 +1143,7 @@ def generate(variant: int = 1) -> bytes:
             logger.warning(
                 "KeyboardInterrupt received — shutting down fuzzers and cleaning up"
             )
-            self.graceful_shutdown()
-            self.shutdown_all_fuzzers()
-            self._close_redis()
+            self._stop_everything()
             raise
 
     def get_results(self) -> List[Dict[str, Any]]:
