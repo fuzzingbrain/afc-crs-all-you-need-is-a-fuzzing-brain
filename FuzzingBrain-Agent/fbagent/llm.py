@@ -56,6 +56,17 @@ DEFAULT_EFFORT = os.environ.get("FBAGENT_EFFORT", "xhigh")
 _EPHEMERAL = {"type": "ephemeral"}
 
 
+def _supports_reasoning(model: str) -> bool:
+    """Whether the model takes adaptive `thinking` and the `effort` control.
+
+    The frontier models (Opus 5, Opus 4.8, Sonnet) do; Haiku 4.5 does not --
+    it rejects both with a 400. So the request is built to fit the model rather
+    than assuming the frontier shape and crashing the run on turn one, which is
+    exactly what a Haiku sweep hit."""
+    m = model.lower()
+    return "haiku" not in m
+
+
 class LLM:
     """One Claude endpoint, configured once, with our cache policy baked in."""
 
@@ -65,6 +76,7 @@ class LLM:
         self.model = model
         self.effort = effort
         self.max_tokens = max_tokens
+        self.reasoning = _supports_reasoning(model)
         # Rolling totals so a run can report what it spent and, more usefully,
         # how much of the input was served from cache.
         self.usage = {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
@@ -120,15 +132,19 @@ class LLM:
         SDK auto-retries 429/5xx/connection errors underneath; a failure that
         survives that propagates, and the agent loop decides what to do with it.
         """
-        with self.client.messages.stream(
+        kw: dict[str, Any] = dict(
             model=self.model,
             max_tokens=self.max_tokens,
             system=self._cached_system(system),
             tools=self._cached_tools(tools),
             messages=self._mark_history(messages),
-            thinking={"type": "adaptive"},
-            output_config={"effort": self.effort},
-        ) as stream:
+        )
+        # Adaptive thinking and the effort control exist only on the reasoning
+        # models; Haiku 4.5 rejects both, so they are sent only where supported.
+        if self.reasoning:
+            kw["thinking"] = {"type": "adaptive"}
+            kw["output_config"] = {"effort": self.effort}
+        with self.client.messages.stream(**kw) as stream:
             resp = stream.get_final_message()
         u = resp.usage
         self.usage["input"] += getattr(u, "input_tokens", 0) or 0
@@ -149,16 +165,24 @@ class LLM:
     def cost_usd(self) -> float:
         """Dollars spent so far, from the model's per-token rates.
 
-        Opus 5 list price: $5 / Mtok input, $25 / Mtok output. A cache read is
-        ~0.1x an input token and a cache write ~1.25x, which on a heavily-cached
-        loop is most of why the bill stays small — so they are priced, not
-        lumped in with fresh input. Only used to enforce a spend cap; the
-        authoritative bill is Anthropic's.
+        Opus 5 list price: $5 / Mtok input, $25 / Mtok output; Haiku 4.5 is
+        $1 / $5. A cache read is ~0.1x an input token and a cache write ~1.25x,
+        which on a heavily-cached loop is most of why the bill stays small — so
+        they are priced, not lumped in with fresh input. Rates follow the model
+        so a Haiku sweep's spend cap is not enforced at 5x the real cost. Only
+        used to enforce a spend cap; the authoritative bill is Anthropic's.
         """
+        m = self.model.lower()
+        if "haiku" in m:
+            i, o = 1.0, 5.0
+        elif "sonnet" in m:
+            i, o = 3.0, 15.0
+        else:                       # opus family
+            i, o = 5.0, 25.0
         u = self.usage
         return (
-            u["input"] * 5.0
-            + u["output"] * 25.0
-            + u["cache_read"] * 0.5
-            + u["cache_write"] * 6.25
+            u["input"] * i
+            + u["output"] * o
+            + u["cache_read"] * i * 0.1
+            + u["cache_write"] * i * 1.25
         ) / 1_000_000

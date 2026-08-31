@@ -21,6 +21,37 @@ from fbagent.llm import LLM
 from fbagent.prompts import OPENING, SYSTEM
 
 
+def _opening_with_recon() -> str:
+    """The opening message, with the deterministic recon prepended.
+
+    Before the model reads a line, the static substrate (analysis.py) has already
+    built a call graph from the harness entry, pre-screened the source for sink
+    patterns, and ranked the sinks the entry can actually reach by call-graph
+    distance. That worklist is handed to the model up front so it starts from a
+    computed set of targets instead of an unguided read. A failure here never
+    stops the run -- the model just gets the plain opening and reads for itself.
+    """
+    from pathlib import Path
+    try:
+        from fbagent import analysis
+        out = analysis.analyze(Path.cwd())
+        if out.get("entry") and out.get("reachable_sinks"):
+            return (
+                "Before you start, a deterministic static analysis of this "
+                "challenge has already been run for you. Treat it as a computed "
+                "worklist of where to look -- not as confirmed bugs.\n\n"
+                + out["summary"]
+                + "\n\nTwo deterministic tools back this up: `gates <func>` gives "
+                "the literal input constraints (magic bytes, lengths) on the path "
+                "to a function, so you can build a seed that reaches it; `reached "
+                "<stack>` maps a crash stack back onto this graph so you know "
+                "where your input actually went. Use them.\n\n"
+                "--- your task ---\n" + OPENING)
+    except Exception:
+        pass
+    return OPENING
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     # The budgets: time, steps, tokens, dollars. Any one that trips ends the
@@ -43,7 +74,7 @@ def main() -> int:
                   max_tokens=args.max_tokens, max_usd=args.max_usd,
                   deadline_s=args.timeout)
 
-    result = agent.run(OPENING)
+    result = agent.run(_opening_with_recon())
 
     # The full step-by-step trace, written beside the challenge in the working
     # directory. The bench copies it out to the cell as trace.jsonl; stdout

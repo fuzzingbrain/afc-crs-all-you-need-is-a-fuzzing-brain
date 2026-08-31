@@ -101,9 +101,33 @@ def bash(command: str, timeout: int = 120) -> str:
     return body[-8000:] or "(no output)"
 
 
+def gates(func: str) -> str:
+    """Deterministic P7: the literal input constraints on the static path from
+    the harness entry to `func` -- magic bytes, minimum lengths, byte-equality
+    gates -- so a seed for that target can be built to satisfy them."""
+    from . import analysis
+    try:
+        return analysis.gates_to(WORKSPACE, func)
+    except Exception as e:  # noqa: BLE001
+        return f"error: gates failed: {e}"
+
+
+def reached(stack: str) -> str:
+    """Deterministic P4: given the sanitizer/JVM crash report you just saw, name
+    the frame in the challenge's own code and its call-graph distance from the
+    entry -- where the input actually went, mapped onto the static graph."""
+    from . import analysis
+    try:
+        r = analysis.reached_report(stack, WORKSPACE)
+        return r or "no stack frames found in that text."
+    except Exception as e:  # noqa: BLE001
+        return f"error: reached failed: {e}"
+
+
 # ------------------------------------------------------------------ dispatch + schemas
 
-_IMPL = {"read": read_file, "glob": glob_files, "grep": grep, "bash": bash}
+_IMPL = {"read": read_file, "glob": glob_files, "grep": grep, "bash": bash,
+         "gates": gates, "reached": reached}
 
 
 def run_tool(name: str, args: dict) -> tuple[str, bool]:
@@ -163,4 +187,6 @@ SCHEMAS = [
             {"pattern": {"type": "string"}, "glob": {"type": "string"}},
             ["pattern"]),
     _schema("bash", {"command": {"type": "string"}}, ["command"]),
+    _schema("gates", {"func": {"type": "string"}}, ["func"]),
+    _schema("reached", {"stack": {"type": "string"}}, ["stack"]),
 ]

@@ -26,3 +26,26 @@ bash:
   description: >
     Run a shell command in the challenge directory. Use it to write a candidate
     input (e.g. with python3) and to test it with ./submit <file>. No network.
+
+gates:
+  description: >
+    Deterministic constraint precompute. Given a function name, returns the
+    literal input gates on the static call-path from the harness entry to it --
+    magic byte sequences (memcmp/strncmp against a constant), minimum/maximum
+    length checks, and byte-equality tests -- that an input must satisfy to
+    reach it. Call this before you build a seed for a target: it tells you the
+    concrete bytes and lengths the path requires, so you are not guessing which
+    bytes matter. Computed from the source, not a model's opinion.
+  params:
+    func: "the target function name, e.g. cupsUTF8ToCharset"
+
+reached:
+  description: >
+    Deterministic reach report. Paste the sanitizer / JVM crash stack that
+    ./submit showed you, and this names the crashing frame, the nearest frame
+    inside the challenge's own source, and that function's call-graph distance
+    from the entry -- i.e. where your input actually went, mapped onto the
+    static graph. Use it after a crash to know exactly what you reached, and to
+    pick a next target that is somewhere different.
+  params:
+    stack: "the sanitizer/JVM stack text from the crash"
