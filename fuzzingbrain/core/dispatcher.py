@@ -949,7 +949,8 @@ def generate(variant: int = 1) -> bytes:
                 try:
                     step()
                 except Exception as e:
-                    logger.warning(f"Shutdown step {step.__name__} failed: {e}")
+                    name = getattr(step, "__name__", repr(step))
+                    logger.warning(f"Shutdown step {name} failed: {e}")
             finished.set()
 
         thread = threading.Thread(
