@@ -49,6 +49,14 @@ class POV:
 
     # Vulnerability info (parsed from sanitizer output after verification)
     vuln_type: Optional[str] = None  # heap-buffer-overflow, stack-use-after-free, etc.
+    # The crash's identity: sanitizer class plus the innermost project frames.
+    # Two POVs sharing it are two inputs into one bug, and only the first is a
+    # finding.
+    signature: str = ""
+    # The pov this one repeats, when it repeats one. Kept rather than dropped:
+    # the dashboard needs to show both how many inputs were produced and how
+    # many bugs they prove, and a row that vanished can answer neither.
+    duplicate_of: Optional[str] = None
 
     # Detection info
     harness_name: Optional[str] = None  # Which fuzzer/harness detected this
@@ -93,6 +101,8 @@ class POV:
             "blob_path": self.blob_path,
             "gen_blob": self.gen_blob,
             "vuln_type": self.vuln_type,
+            "signature": self.signature,
+            "duplicate_of": self.duplicate_of,
             "harness_name": self.harness_name,
             "sanitizer": self.sanitizer,
             "sanitizer_output": self.sanitizer_output,
@@ -145,6 +155,8 @@ class POV:
             blob_path=data.get("blob_path"),
             gen_blob=data.get("gen_blob"),
             vuln_type=data.get("vuln_type"),
+            signature=data.get("signature", ""),
+            duplicate_of=data.get("duplicate_of"),
             harness_name=data.get("harness_name"),
             sanitizer=data.get("sanitizer", "address"),
             sanitizer_output=data.get("sanitizer_output"),

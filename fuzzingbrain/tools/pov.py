@@ -331,6 +331,45 @@ def get_fuzzer_info_impl(worker_id: str = None) -> Dict[str, Any]:
     }
 
 
+
+
+def _duplicate_signature(ctx, output: str, fuzzer: str):
+    """The already-reported crash this one repeats, or None if it is new.
+
+    The registry is the povs collection, because the agents are separate
+    processes and the question spans all of them: two agents working two
+    suspicious points can walk into one overflow, and whichever arrives second
+    should be told so rather than filing it again.
+
+    A failure to read the registry returns None -- a missed duplicate costs a
+    redundant report, while a false duplicate would throw away a real finding.
+    """
+    try:
+        from ..fuzzer.signature import compute_signature
+
+        sig = compute_signature(output, harness_names=[fuzzer] if fuzzer else [])
+        if not sig:
+            return None
+        repos = ctx.get("repos")
+        task_id = ctx.get("task_id", "")
+        if repos is None or not task_id:
+            return None
+        for prior in repos.povs.find_by_task(task_id) or []:
+            if not getattr(prior, "is_successful", False):
+                continue
+            if getattr(prior, "duplicate_of", None):
+                continue  # already a repeat of something; point at the original
+            if getattr(prior, "signature", "") == sig.short:
+                return {
+                    "signature": sig.short,
+                    "describe": sig.describe(),
+                    "first_pov_id": str(getattr(prior, "pov_id", "")),
+                }
+        return None
+    except Exception as e:
+        logger.debug(f"[POV] Could not check for duplicate signature: {e}")
+        return None
+
 def create_pov_impl(generator_code: str, worker_id: str = None) -> Dict[str, Any]:
     """
     Implementation of create_pov (without MCP decorator).
@@ -1532,7 +1571,55 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
         vuln_type = _parse_vuln_type(output)
         logger.info(f"[POV] CRASH DETECTED! vuln_type={vuln_type}")
 
+        # Is this a bug nobody has reported yet? Asked before the report is
+        # packaged, because a second POV for a crash already filed is not a
+        # finding -- and telling the agent so is more useful than accepting it,
+        # since the agent is otherwise free to keep rediscovering the same
+        # overflow until its iterations run out.
+        dup = _duplicate_signature(ctx, output, fuzzer)
+        if dup:
+            logger.info(f"[POV] Duplicate crash signature {dup['signature']}")
+            # Recorded, not discarded. The run produced this input and the
+            # dashboard should be able to say so; what it must not do is count
+            # it as a second bug.
+            try:
+                repos.povs.update(
+                    str(pov.pov_id),
+                    {
+                        "signature": dup["signature"],
+                        "duplicate_of": dup.get("first_pov_id") or "",
+                        "vuln_type": vuln_type,
+                        "is_successful": False,
+                    },
+                )
+            except Exception as e:
+                logger.debug(f"[POV] Could not record duplicate: {e}")
+            return {
+                "success": False,
+                "crashed": True,
+                "duplicate": True,
+                "signature": dup["signature"],
+                "vuln_type": vuln_type,
+                "message": (
+                    "DUPLICATE FOUND. This crash has already been found -- by "
+                    f"you or by another agent. It is {dup['describe']} "
+                    f"(signature {dup['signature']}), and a report for it "
+                    "already exists.\n\n"
+                    "Do not submit this input again. To find something new, "
+                    "produce a PoC that crashes with a DIFFERENT signature: a "
+                    "different sanitizer class, or a fault in a different "
+                    "function. Look at another suspicious point, another code "
+                    "path, or another part of the input format."
+                ),
+                "sanitizer_output": output[:3000],
+            }
+
         # Prepare POV data for packaging (BEFORE saving is_successful=True)
+        # Recorded here so the next agent's duplicate check can see it.
+        from ..fuzzer.signature import compute_signature
+
+        _sig = compute_signature(output, harness_names=[fuzzer] if fuzzer else [])
+        pov.signature = _sig.short if _sig else ""
         pov.vuln_type = vuln_type
         pov.sanitizer_output = output[:10000]  # Truncate for DB
         pov.verified_at = datetime.now()

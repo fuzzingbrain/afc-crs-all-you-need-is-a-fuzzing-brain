@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from loguru import logger
 
 from .models import CRASH_ARTIFACT_PREFIXES, CrashRecord
+from .signature import compute_signature
 
 
 @dataclass
@@ -110,6 +111,7 @@ class FuzzerMonitor:
         workspace_path: Optional[Path] = None,
         check_interval: float = 5.0,
         dedupe_enabled: bool = True,
+        signature_frame_depth: int = 3,
         on_crash: Optional[Callable[[CrashRecord], None]] = None,
         auto_discover: bool = False,
         docker_image: Optional[str] = None,
@@ -124,6 +126,7 @@ class FuzzerMonitor:
             workspace_path: Task workspace path (required for auto-discovery)
             check_interval: Seconds between directory checks
             dedupe_enabled: Whether to deduplicate crashes
+            signature_frame_depth: Project frames that make up a crash signature
             on_crash: Callback when new crash is found (must be thread-safe)
             auto_discover: If True, automatically discover crash directories
             docker_image: Docker image for crash verification
@@ -134,6 +137,10 @@ class FuzzerMonitor:
         self.workspace_path = Path(workspace_path) if workspace_path else None
         self.check_interval = check_interval
         self.dedupe_enabled = dedupe_enabled
+        # How many project frames make up a crash's identity. Three separates
+        # every bug in the corpus without splitting any; deeper starts to split
+        # one bug in two wherever -O1 inlining moves a frame boundary.
+        self.signature_frame_depth = signature_frame_depth
         self.on_crash = on_crash
         self.auto_discover = auto_discover
         self.docker_image = docker_image
@@ -146,7 +153,11 @@ class FuzzerMonitor:
         self._lock = threading.Lock()
 
         # Known crashes for deduplication
-        self.known_crashes: Set[str] = set()
+        # Artifacts already run, so a sweep does not redo them. Distinct from
+        # known_signatures, which is what "have we seen this crash before?"
+        # actually means.
+        self._processed_artifacts: Set[str] = set()
+        self.known_signatures: Set[str] = set()
 
         # Watched directories (protected by _lock)
         # For auto-discover mode, this is rebuilt each scan
@@ -365,7 +376,7 @@ class FuzzerMonitor:
         self._log("=" * 70)
         self._log("CRASH MONITOR STOPPED")
         self._log(f"Total crashes found: {len(self.crash_records)}")
-        self._log(f"Unique crash hashes: {len(self.known_crashes)}")
+        self._log(f"Unique crash signatures: {len(self.known_signatures)}")
 
         # Log per-worker stats
         stats = self.get_stats()
@@ -695,17 +706,19 @@ class FuzzerMonitor:
                 continue
 
             try:
-                # Compute hash for deduplication
                 crash_data = crash_file.read_bytes()
                 crash_hash = CrashRecord.compute_hash(crash_data)
 
-                # Skip if already known (thread-safe check)
+                # Not deduplication -- just not re-running the same artifact on
+                # every five-second sweep. Whether this is a NEW crash is
+                # decided in _handle_crash, on the signature, once the stack is
+                # in hand. Two different inputs hitting one overflow are one
+                # bug, and the bytes cannot tell you that.
                 with self._lock:
-                    if self.dedupe_enabled and crash_hash in self.known_crashes:
+                    if crash_hash in self._processed_artifacts:
                         continue
-                    self.known_crashes.add(crash_hash)
+                    self._processed_artifacts.add(crash_hash)
 
-                # Handle new crash
                 self._handle_crash(crash_file, watch_entry, crash_data, crash_hash)
 
             except Exception as e:
@@ -757,6 +770,39 @@ class FuzzerMonitor:
             vuln_type = verify_result.get("vuln_type")
             sanitizer_output = verify_result.get("output", "")
 
+        # The identity of this crash, and the only thing that decides whether it
+        # is new. Every crash passes here -- global fuzzer, SP fuzzer, agent --
+        # so one bug found three ways is reported once.
+        signature = compute_signature(
+            sanitizer_output,
+            harness_names=[watch_entry.fuzzer_name],
+            frame_depth=self.signature_frame_depth,
+        )
+        # libFuzzer files a crash- artifact for anything that ends the process,
+        # including the target calling exit() itself. sqlite3's shell harness
+        # does exactly that -- shell.c's usage() runs exit(), libFuzzer reports
+        # "fuzz target exited", and the artifact is indistinguishable by name
+        # from a heap overflow. Without a sanitizer class it is not a
+        # memory-safety finding, and reporting it as one costs a submission on
+        # a harness that merely printed its usage text.
+        if sanitizer_output and not signature.crash_class:
+            if not self._check_crash(sanitizer_output):
+                self._log(
+                    f"[NOT A CRASH] {crash_path.name}: the target stopped without "
+                    f"a sanitizer report, so there is nothing to report"
+                )
+                return None
+
+        sig_key = signature.short if signature else f"unsigned:{crash_hash}"
+        with self._lock:
+            if sig_key in self.known_signatures:
+                self._log(
+                    f"[DUPLICATE] {crash_path.name} -> {signature.describe()} "
+                    f"(sig {sig_key}), already reported"
+                )
+                return None
+            self.known_signatures.add(sig_key)
+
         # Create crash record
         record = CrashRecord(
             task_id=self.task_id,
@@ -770,6 +816,8 @@ class FuzzerMonitor:
             sp_id=watch_entry.source if watch_entry.source != "global" else None,
             fuzzer_name=watch_entry.fuzzer_name,
             sanitizer=watch_entry.sanitizer,
+            signature=sig_key,
+            signature_desc=signature.describe(),
         )
 
         # Store record (thread-safe)
@@ -786,7 +834,7 @@ class FuzzerMonitor:
             f"[CRASH FOUND] {fuzzer_type} | "
             f"worker={watch_entry.worker_id} | "
             f"fuzzer={watch_entry.fuzzer_name} | "
-            f"hash={crash_hash[:12]} | "
+            f"sig={sig_key} | "
             f"vuln={vuln_type or 'unknown'} | "
             f"file={crash_path.name}"
         )

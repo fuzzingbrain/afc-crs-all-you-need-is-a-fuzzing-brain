@@ -15,10 +15,18 @@ from bson import ObjectId
 
 from ..core.utils import generate_id
 
-# Artifact filename prefixes libFuzzer writes under -artifact_prefix. Beyond
-# plain "crash-", these cover OOMs, hangs/timeouts, and leaks — each of which is
-# a reportable finding, not something to drop.
-CRASH_ARTIFACT_PREFIXES = ("crash-", "oom-", "timeout-", "leak-")
+# Artifact filename prefixes libFuzzer writes under -artifact_prefix.
+#
+# "timeout-" is deliberately absent. A hang is a statement about how long the
+# harness took, not about memory safety, and the threshold that produced it is
+# ours -- a slow start, a loaded machine or a large input all trip it. Counting
+# them cost a whole scan once: fp-full-01 took a timeout on the empty input as
+# its POV, hit "POV target reached" two minutes in, and stopped before it had
+# produced a single suspicious point.
+#
+# OOM and leak stay: both are sanitizer findings about the program's own
+# behaviour, and both are reportable.
+CRASH_ARTIFACT_PREFIXES = ("crash-", "oom-", "leak-")
 
 
 class FuzzerStatus(str, Enum):
@@ -56,6 +64,10 @@ class SPFuzzerConfig:
     fork_level: int = 1  # Single process (lightweight)
     rss_limit_mb: int = 1024  # Memory limit
     timeout_per_input: int = 30  # Timeout per input in seconds
+    # How many SP fuzzers one worker may run at once. FuzzerWorkerConfig has
+    # carried an sp_max_count since the beginning and nothing ever read it: a
+    # worker started one per POV agent, however many that was.
+    max_count: int = 5
     # No max_time - follows POV Agent lifecycle
 
 
@@ -78,6 +90,10 @@ class CrashRecord:
     source: str = ""  # "global_fuzzer" | "sp_fuzzer"
     sp_id: Optional[str] = None  # If from SP Fuzzer
     fuzzer_name: str = ""  # Fuzzer binary name
+    # What makes this crash distinct: sanitizer class plus the innermost project
+    # frames. Two inputs sharing it are two ways into one bug.
+    signature: str = ""
+    signature_desc: str = ""
     sanitizer: str = "address"  # Sanitizer type
     seed_origin: Optional[str] = None  # Seed source (if trackable)
 
@@ -100,6 +116,8 @@ class CrashRecord:
             "source": self.source,
             "sp_id": self.sp_id,
             "fuzzer_name": self.fuzzer_name,
+            "signature": self.signature,
+            "signature_desc": self.signature_desc,
             "sanitizer": self.sanitizer,
             "seed_origin": self.seed_origin,
             "created_at": self.created_at,
@@ -134,6 +152,8 @@ class CrashRecord:
             source=data.get("source", ""),
             sp_id=data.get("sp_id"),
             fuzzer_name=data.get("fuzzer_name", ""),
+            signature=data.get("signature", ""),
+            signature_desc=data.get("signature_desc", ""),
             sanitizer=data.get("sanitizer", "address"),
             seed_origin=data.get("seed_origin"),
             created_at=data.get("created_at", datetime.now()),
