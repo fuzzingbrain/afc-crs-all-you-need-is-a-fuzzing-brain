@@ -21,16 +21,33 @@ from pathlib import Path
 AGENT_DIR = Path(__file__).resolve().parents[1]
 DIFF = Path("/home/ze/FB-Bench/FuzzingBrain-Bench/fbbench/report/difficulty.json")
 
-# Opus 4.8 per-challenge distinct-crash counts on the dev split, transcribed from
-# the tech report's Table 2 (arXiv 2608.25158). Used only to print the baseline.
+# Per-challenge distinct-crash counts on the dev split, from the tech report's
+# Table 2 (arXiv 2608.25158), uncapped. The paper evaluates the three Claude
+# models inside the bench's OWN agentic harness (its api-arm tool loop) -- there
+# is no separate "Claude Code" row; the agentic Opus 4.8 number IS the "Claude
+# Code + Opus 4.8" target. We print two baselines: Opus 4.8 (the target to beat)
+# and Haiku 4.5 (our exact model, so the same-model gain is the harness alone).
 OPUS48_DEV = {
-    'avro-02': 7, 'cups-01': 1, 'freerdp-01': 1, 'graaljs-01': 1, 'imagemagick-01': 1,
+    'avro-02': 7, 'cups-01': 1, 'freerdp-01': 2, 'graaljs-01': 1, 'imagemagick-01': 1,
     'imagemagick-03': 1, 'json-java-02': 3, 'libaom-01': 1, 'libavif-01': 5, 'libvpx-04': 1,
     'libwebp-03': 1, 'mongoose-02': 2, 'openh264-01': 2, 'openscreen-01': 2, 'openssl-01': 1,
     'pdfbox-01': 4, 'pdfbox-03': 1, 'assimp-01': 4, 'binutils-01': 2, 'ghidra-01': 1,
     'icu-03': 4, 'systemd-01': 5, 'flatbuffers-01': 0, 'freetype-01': 1, 'harfbuzz-02': 0,
-    'net-snmp-03': 1, 'openldap-02': 1, 'upx-01': 0, 'hunspell-01': 1, 'libheif-01': 1,
+    'net-snmp-03': 1, 'openldap-02': 1, 'upx-01': 1, 'hunspell-01': 1, 'libheif-01': 1,
     'libwebsockets-01': 1, 'net-snmp-01': 1, 'simdutf-01': 1, 'upx-02': 0, 'fwupd-01': 0,
+    'graal-01': 0, 'libpng-01': 0, 'libwebp-01': 0, 'libxml2-02': 0, 'opc-ua-01': 0,
+}
+
+# Claude Haiku 4.5 (our model), same Table 2. The same-model comparison isolates
+# the harness: any dev-40 gain over this is the deterministic substrate alone.
+HAIKU45_DEV = {
+    'avro-02': 2, 'cups-01': 1, 'freerdp-01': 1, 'graaljs-01': 1, 'imagemagick-01': 1,
+    'imagemagick-03': 1, 'json-java-02': 4, 'libaom-01': 1, 'libavif-01': 4, 'libvpx-04': 2,
+    'libwebp-03': 1, 'mongoose-02': 2, 'openh264-01': 2, 'openscreen-01': 2, 'openssl-01': 1,
+    'pdfbox-01': 8, 'pdfbox-03': 1, 'assimp-01': 0, 'binutils-01': 0, 'ghidra-01': 0,
+    'icu-03': 0, 'systemd-01': 0, 'flatbuffers-01': 0, 'freetype-01': 0, 'harfbuzz-02': 0,
+    'net-snmp-03': 0, 'openldap-02': 0, 'upx-01': 1, 'hunspell-01': 0, 'libheif-01': 0,
+    'libwebsockets-01': 0, 'net-snmp-01': 1, 'simdutf-01': 0, 'upx-02': 0, 'fwupd-01': 2,
     'graal-01': 0, 'libpng-01': 0, 'libwebp-01': 0, 'libxml2-02': 0, 'opc-ua-01': 0,
 }
 
@@ -62,7 +79,8 @@ def main() -> int:
              if l.strip() and not l.startswith("#")]
     scores = load_scores(Path(args.run_dir))
 
-    ours = opus = 0
+    ours = opus = haiku = 0        # full-split baselines
+    opus_ran = haiku_ran = 0       # baselines summed only over challenges we ran
     ran = missing = 0
     rows = []
     tiers: dict[int, list[int]] = {}
@@ -70,41 +88,48 @@ def main() -> int:
         d = D[bug]
         uc = int(scores.get(bug, {}).get("unique_crashes", 0) or 0) if bug in scores else None
         o = min(3, OPUS48_DEV.get(bug, 0)) * d
+        h = min(3, HAIKU45_DEV.get(bug, 0)) * d
         opus += o
-        tiers.setdefault(d, [0, 0, 0])
+        haiku += h
+        tiers.setdefault(d, [0, 0, 0, 0])
         tiers[d][2] += o
+        tiers[d][3] += h
         if uc is None:
             missing += 1
-            rows.append((bug, d, None, None, o))
+            rows.append((bug, d, None, None, o, h))
             continue
         ran += 1
         s = min(3, uc) * d
         ours += s
+        opus_ran += o
+        haiku_ran += h
         tiers[d][0] += s
         tiers[d][1] += (uc > 0)
-        rows.append((bug, d, uc, s, o))
+        rows.append((bug, d, uc, s, o, h))
 
     print(f"=== {args.split} run: {Path(args.run_dir).name} ===")
-    print(f"{'challenge':16} D  uc  ours  opus4.8")
-    for bug, d, uc, s, o in rows:
+    print(f"{'challenge':16} D  uc  ours  opus  haiku   (baselines: agentic Opus 4.8 = target, Haiku 4.5 = same model)")
+    for bug, d, uc, s, o, h in rows:
         uc_s = "  -" if uc is None else f"{uc:3}"
         s_s = "   -" if uc is None else f"{s:4}"
-        flag = "" if uc is None else ("  ◄win" if s > o else ("  ▼lose" if s < o else ""))
-        print(f"{bug:16} {d}  {uc_s} {s_s}  {o:4}{flag}")
-    print("-" * 44)
+        flag = "" if uc is None else ("  ◄beats-opus" if s > o else ("  ▼below-opus" if s < o else "  =opus"))
+        print(f"{bug:16} {d}  {uc_s} {s_s}  {o:4}  {h:4}{flag}")
+    print("-" * 60)
     print(f"ran {ran}/{len(split)}  (missing {missing})")
     for d in sorted(tiers):
-        s, c, o = tiers[d]
-        print(f"  D{d}: ours {s:3} ({c} crashed)   opus4.8 {o:3}")
-    print(f"\n  OURS   dev = {ours}   {'(PARTIAL)' if missing else ''}")
-    print(f"  OPUS4.8 dev = {opus}   (full-split baseline; target to beat)")
+        s, c, o, h = tiers[d]
+        print(f"  D{d}: ours {s:3} ({c} crashed)   opus {o:3}   haiku {h:3}")
+    tag = "(PARTIAL)" if missing else "(FULL)"
+    print(f"\n  OURS    dev = {ours}   {tag}")
+    print(f"  OPUS4.8 dev = {opus}   (agentic Opus 4.8 = \"Claude Code + Opus 4.8\"; the target)")
+    print(f"  HAIKU45 dev = {haiku}   (our exact model; gain over this = the harness alone)")
     if not missing:
-        verdict = "BEATS" if ours > opus else ("TIES" if ours == opus else "below")
-        print(f"  ► {verdict} the Opus 4.8 baseline ({ours} vs {opus})")
+        v_o = "BEATS" if ours > opus else ("TIES" if ours == opus else "below")
+        v_h = "BEATS" if ours > haiku else ("TIES" if ours == haiku else "below")
+        print(f"  ► vs Opus 4.8 (target): {v_o} ({ours} vs {opus})")
+        print(f"  ► vs Haiku 4.5 (same model): {v_h} ({ours} vs {haiku})")
     else:
-        opus_ran = sum(min(3, OPUS48_DEV.get(b, 0)) * D[b]
-                       for b, *_ , in [(r[0], r[1]) for r in rows if r[2] is not None])
-        print(f"  (on the {ran} run so far: ours {ours} vs opus {opus_ran})")
+        print(f"  (on the {ran} run so far: ours {ours}  vs opus {opus_ran}  vs haiku {haiku_ran})")
     return 0
 
 
