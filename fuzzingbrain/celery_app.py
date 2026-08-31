@@ -150,7 +150,9 @@ app.conf.update(
     task_soft_time_limit=86100,  # 23h55m default soft limit (overridden per-task by dispatcher)
     # Worker settings
     worker_prefetch_multiplier=1,  # Fetch one task at a time
-    worker_concurrency=8,  # Default concurrency
+    # A fallback only: InfrastructureManager starts the worker with
+    # --concurrency from the task's configuration, which wins over this.
+    worker_concurrency=8,
     # Result settings
     result_expires=86400,  # 24 hours
     # Task routing (optional, for future use)

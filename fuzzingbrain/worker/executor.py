@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional
 from ..core import logger
 from ..db import RepositoryManager
 from ..analyzer import AnalysisClient
+from ..core.config import DEFAULT_MAX_PARALLEL_FUZZERS
 from ..fuzzer import (
     FuzzerManager,
     register_fuzzer_manager,
@@ -48,6 +49,8 @@ class WorkerExecutor:
         enable_fuzzer_worker: bool = True,
         celery_job_id: str = None,
         task_workspace_path: str = None,
+        max_parallel_fuzzers: int = DEFAULT_MAX_PARALLEL_FUZZERS,
+        sp_max_count: Optional[int] = None,
     ):
         """
         Initialize WorkerExecutor.
@@ -69,6 +72,8 @@ class WorkerExecutor:
             enable_fuzzer_worker: Whether to enable FuzzerManager (default True)
             celery_job_id: Celery task ID (for WorkerContext tracking)
             task_workspace_path: Path to main task workspace (shared repo/fuzz-tooling/diff)
+            max_parallel_fuzzers: task-wide ceiling on running fuzzers
+            sp_max_count: per-worker ceiling on running SP fuzzers
         """
         self.workspace_path = Path(workspace_path)
         self.task_workspace_path = (
@@ -84,6 +89,8 @@ class WorkerExecutor:
         self.log_dir = Path(log_dir) if log_dir else None
         self.docker_image = docker_image
         self.enable_fuzzer_worker = enable_fuzzer_worker
+        self.max_parallel_fuzzers = max_parallel_fuzzers
+        self.sp_max_count = sp_max_count
         self.celery_job_id = celery_job_id
 
         # Fuzzer binary path (from Analyzer or built locally)
@@ -152,6 +159,11 @@ class WorkerExecutor:
         if self._fuzzer_manager is None and self.enable_fuzzer_worker:
             if self.fuzzer_binary_path and self.fuzzer_binary_path.exists():
                 try:
+                    sp_config = None
+                    if self.sp_max_count:
+                        from ..fuzzer.models import SPFuzzerConfig
+
+                        sp_config = SPFuzzerConfig(max_count=int(self.sp_max_count))
                     self._fuzzer_manager = FuzzerManager(
                         task_id=self.task_id,
                         worker_id=self.worker_id,
@@ -160,6 +172,8 @@ class WorkerExecutor:
                         workspace_path=self.workspace_path,
                         fuzzer_name=self.fuzzer,
                         sanitizer=self.sanitizer,
+                        sp_config=sp_config,
+                        max_parallel_fuzzers=self.max_parallel_fuzzers,
                         # Note: crash_monitor is Task-level (in Dispatcher), not Worker-level
                     )
                     # Register for cross-module access using ObjectId
@@ -540,6 +554,38 @@ def generate(variant: int = 1) -> bytes:
         else:
             raise ValueError(f"Unknown job type: {self.task_type}")
 
+    def _start_global_fuzzer_early(self) -> None:
+        """Start the global fuzzer as soon as the worker has a binary.
+
+        Best-effort: a failure here costs the background fuzzing, not the run,
+        so it is logged and stepped over. Strategies still call
+        ``start_global_fuzzer`` themselves and it returns False when one is
+        already running, so nothing double-starts.
+        """
+        import asyncio
+
+        manager = self.fuzzer_manager
+        if not manager:
+            return
+        if manager.global_fuzzer:
+            return
+        try:
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            if loop.run_until_complete(manager.start_global_fuzzer()):
+                logger.info(
+                    f"[{self.worker_display_name}] Global fuzzer started at "
+                    f"worker start; seeds will join its corpus as they arrive"
+                )
+        except Exception as e:
+            logger.warning(
+                f"[{self.worker_display_name}] Could not start global fuzzer "
+                f"early, leaving it to the strategy: {e}"
+            )
+
     def run(self) -> Dict[str, Any]:
         """
         Run the worker execution pipeline.
@@ -576,6 +622,18 @@ def generate(variant: int = 1) -> bytes:
             logger.info(
                 f"[{self.worker_display_name}] Worker context created: {ctx.worker_id}"
             )
+
+            # The global fuzzer needs the binary and nothing else -- not seeds,
+            # not suspicious points, not a diff. Starting it here rather than
+            # from inside a strategy means it is fuzzing while the agents are
+            # still reading code, and the strategies' seeds land in its corpus
+            # as they are produced (add_seed writes into the live corpus dir and
+            # libFuzzer picks new files up within seconds).
+            #
+            # It used to start from the delta strategy's seed step, which gave
+            # up early when there was no function index -- so a run without one
+            # fuzzed for eight minutes out of thirty.
+            self._start_global_fuzzer_early()
 
             try:
                 # Get strategy for this job type

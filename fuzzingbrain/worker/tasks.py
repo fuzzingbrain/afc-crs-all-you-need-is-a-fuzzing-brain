@@ -16,6 +16,7 @@ from typing import Dict, Any
 from loguru import logger
 
 from ..celery_app import app
+from ..core.config import DEFAULT_MAX_PARALLEL_FUZZERS
 from ..core.logging import (
     set_log_dir,
     setup_worker_logging,
@@ -75,6 +76,23 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     # Scan mode and diff path (for delta mode)
     scan_mode = assignment.get("scan_mode", "full")
     diff_path = assignment.get("diff_path")
+
+    # The task's ceiling on concurrently running fuzzers, enforced by every
+    # worker against a shared ledger.
+    max_parallel_fuzzers = assignment.get(
+        "max_parallel_fuzzers", DEFAULT_MAX_PARALLEL_FUZZERS
+    )
+    sp_max_count = assignment.get("sp_max_count")
+
+    # Install this run's concurrency and thresholds before anything reads them.
+    from ..core.concurrency import set_concurrency
+    from ..core.config import ConcurrencyConfig, ScoringConfig
+    from ..core.scoring import set_scoring
+
+    if assignment.get("concurrency"):
+        set_concurrency(ConcurrencyConfig.from_value(assignment["concurrency"]))
+    if assignment.get("scoring"):
+        set_scoring(ScoringConfig.from_dict(assignment["scoring"]))
 
     # Display name for logging (not ObjectId)
     display_name = f"{fuzzer}_{sanitizer}"
@@ -150,6 +168,8 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             analysis_socket_path=analysis_socket_path,
             diff_path=diff_path,
             log_dir=log_dir,
+            max_parallel_fuzzers=max_parallel_fuzzers,
+            sp_max_count=sp_max_count,
             # Pass celery_job_id for WorkerContext
             celery_job_id=self.request.id,
         )

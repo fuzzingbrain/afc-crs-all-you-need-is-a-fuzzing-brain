@@ -31,12 +31,12 @@ called via function pointers. This is a COMMON pattern in C libraries!
 2. **If function pointer pattern detected**:
    - The function IS reachable at runtime
    - Set `reachability_status` to "pointer_call"
-   - Set `reachability_multiplier` to 0.9-0.95 (slight penalty for indirect call complexity)
+   - Set `reachability_multiplier` to <<reach_pointer_low>>-<<reach_pointer_call>> (slight penalty for indirect call complexity)
    - DO NOT mark as false positive!
 
 3. **If truly unreachable** (no direct call, no function pointer pattern):
    - Set `reachability_status` to "unreachable"
-   - Set `reachability_multiplier` to 0.3
+   - Set `reachability_multiplier` to <<reach_unreachable>>
    - Mark as false positive
 
 ## CRITICAL: Your Constraints (FUZZER + SANITIZER)
@@ -70,7 +70,7 @@ for common ways that protections can fail.
 
 ### When Uncertain:
 - Let it pass to POV agent
-- Set is_important=True with a moderate score (0.5-0.6)
+- Set is_important=True with a moderate score (<<worth_testing>>-<<moderate>>)
 - POV agent will do actual testing
 
 ## VERIFICATION STEPS
@@ -85,9 +85,9 @@ for common ways that protections can fail.
 - Look for patterns like: `methods.load = function_name` or `handler->callback = function_name`
 - Check if the struct/handler is used polymorphically from reachable code
 - If function pointer pattern found:
-  - Set `reachability_status="pointer_call"`, `reachability_multiplier=0.95`
+  - Set `reachability_status="pointer_call"`, `reachability_multiplier=<<reach_pointer_call>>`
   - Continue to Step 2 (the function IS reachable!)
-- If no pattern found → mark FP with `reachability_status="unreachable"`, `reachability_multiplier=0.3`
+- If no pattern found → mark FP with `reachability_status="unreachable"`, `reachability_multiplier=<<reach_unreachable>>`
 
 ### Step 2: VERIFY VULNERABILITY POINT REACHABILITY (CRITICAL!)
 **Function reachability ≠ Vulnerability point reachability!**
@@ -127,12 +127,12 @@ If the vulnerable code path is unreachable even though the function is reachable
 ## SCORING GUIDE
 
 ### PASS TO POV (is_important=True):
-- score >= 0.7: Clear vulnerability, reachable
-- score 0.5-0.7: Suspicious, worth testing
-- score 0.4-0.5: Uncertain but possible
+- score >= <<clear>>: Clear vulnerability, reachable
+- score <<worth_testing>>-<<clear>>: Suspicious, worth testing
+- score <<uncertain>>-<<worth_testing>>: Uncertain but possible
 
 ### FALSE POSITIVE (is_important=False):
-- score < 0.4: Only when 100% certain it's wrong
+- score < <<uncertain>>: Only when 100% certain it's wrong
 - MUST have concrete proof (unreachable, wrong type, proven-correct protection)
 
 ## CRITICAL: Read the Sanitizer Patterns Below!
@@ -154,10 +154,10 @@ If the SP matches ANY of these patterns, DO NOT mark as FP without 100% proof.
 ### Required Fields:
 - Always set is_checked=True after analysis
 - Always set is_real=False (updated after actual exploitation)
-- Set is_important=True ONLY if score >= 0.5 AND reachable (directly or via pointer)
+- Set is_important=True ONLY if score >= <<important_full>> AND reachable (directly or via pointer)
 - **pov_guidance**: REQUIRED when is_important=True (see below)
 - **reachability_status**: "direct" | "indirect" | "pointer_call" | "unreachable"
-- **reachability_multiplier**: 0.3-1.0 (used to adjust final score)
+- **reachability_multiplier**: <<reach_unreachable>>-<<reach_delta>> (used to adjust final score)
 - **reachability_reason**: Brief explanation of reachability judgment
 
 ## POV GUIDANCE (MANDATORY when is_important=True)

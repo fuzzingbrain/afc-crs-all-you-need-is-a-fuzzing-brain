@@ -61,12 +61,12 @@ You can ONLY mark as FALSE POSITIVE when:
 ## SCORING GUIDE
 
 ### PASS TO POV (is_important=True):
-- score >= 0.7: Clear vulnerability in the code
-- score 0.5-0.7: Likely vulnerability, worth testing
-- score 0.4-0.5: Uncertain but possible
+- score >= <<clear>>: Clear vulnerability in the code
+- score <<worth_testing>>-<<clear>>: Likely vulnerability, worth testing
+- score <<uncertain>>-<<worth_testing>>: Uncertain but possible
 
 ### FALSE POSITIVE (is_important=False):
-- score < 0.4: Only when bug clearly doesn't exist
+- score < <<uncertain>>: Only when bug clearly doesn't exist
 - MUST have proof that the described bug is wrong
 
 ## Available Tools
@@ -80,10 +80,10 @@ You can ONLY mark as FALSE POSITIVE when:
 ### Required Fields:
 - Always set is_checked=True after analysis
 - Always set is_real=False (updated after actual exploitation)
-- Set is_important=True if score >= 0.4 (lower threshold for delta mode!)
+- Set is_important=True if score >= <<important_delta>> (lower threshold for delta mode!)
 - **pov_guidance**: REQUIRED when is_important=True
 - **reachability_status**: Always set to "assumed_reachable" for delta mode
-- **reachability_multiplier**: Always set to 1.0 for delta mode
+- **reachability_multiplier**: Always set to <<reach_delta>> for delta mode
 - **reachability_reason**: "Delta mode: reachability not analyzed, letting POV test"
 
 ## POV GUIDANCE (MANDATORY when is_important=True)

@@ -22,7 +22,9 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 from .base import BaseStrategy
+from ...core.scoring import get_scoring
 from ...analysis.diff_parser import get_reachable_changes, DiffReachabilityResult
+from ...core.concurrency import get_concurrency
 from ...core.models import SuspiciousPoint
 from ...agents import (
     DirectionPlanningAgent,
@@ -233,8 +235,9 @@ class POVStrategy(BaseStrategy):
             all_points = self.repos.suspicious_points.find_by_task(self.task_id)
             sorted_points = self._sort_by_priority(all_points)
 
-            # Count high-confidence bugs (is_important == True or score >= 0.9)
-            high_conf = [p for p in sorted_points if p.is_important or p.score >= 0.9]
+            # Count high-confidence bugs against the configured bar.
+            bar = get_scoring().high_confidence
+            high_conf = [p for p in sorted_points if p.is_important or p.score >= bar]
             result["high_confidence_bugs"] = len(high_conf)
 
             # Count POVs generated
@@ -1009,7 +1012,8 @@ class POVStrategy(BaseStrategy):
                     elapsed = time.time() - point_start
                     status = (
                         "HIGH"
-                        if updated_point.is_important or updated_point.score >= 0.9
+                        if updated_point.is_important
+                        or updated_point.score >= get_scoring().high_confidence
                         else "verified"
                     )
                     self.log_info(
@@ -1212,9 +1216,10 @@ class POVStrategy(BaseStrategy):
             )
 
         # Configure pipeline
+        concurrency = get_concurrency()
         config = PipelineConfig(
-            num_verify_agents=2,  # 2 verification agents
-            num_pov_agents=1,  # 1 POV generation agent
+            num_verify_agents=concurrency.delta_verify_agents,
+            num_pov_agents=min(concurrency.pov_agents, 1),
             pov_min_score=0.5,  # Minimum score to proceed to POV
             poll_interval=1.0,  # Poll every 1 second
             max_idle_cycles=10,  # Exit after 10 idle cycles

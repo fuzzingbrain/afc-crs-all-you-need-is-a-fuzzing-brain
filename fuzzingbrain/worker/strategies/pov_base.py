@@ -12,7 +12,9 @@ from datetime import datetime
 from typing import Dict, Any, List, Optional
 
 from .base import BaseStrategy
+from ...core.concurrency import get_concurrency
 from ...core.models import SuspiciousPoint
+from ...core.scoring import get_scoring
 from ...tools.code_viewer import set_code_viewer_context
 from ...tools.analyzer import set_analyzer_context
 from ...tools.suspicious_points import set_sp_context
@@ -232,8 +234,11 @@ class POVBaseStrategy(BaseStrategy):
             all_points = self.repos.suspicious_points.find_by_task(self.task_id)
             sorted_points = self._sort_by_priority(all_points)
 
-            # Count high-confidence bugs (is_important == True or score >= 0.9)
-            high_conf = [p for p in sorted_points if p.is_important or p.score >= 0.9]
+            # Count high-confidence bugs. The bar is configured, not
+            # written here: the prompt states it to the model too, and the
+            # two have to be the same number.
+            bar = get_scoring().high_confidence
+            high_conf = [p for p in sorted_points if p.is_important or p.score >= bar]
             result["high_confidence_bugs"] = len(high_conf)
 
             # Count POVs generated
@@ -338,13 +343,20 @@ class POVBaseStrategy(BaseStrategy):
                     verified.append(updated_point)
                     elapsed = time.time() - point_start
 
-                    # Check if this is FP (not important and score < 0.5)
-                    is_fp = not updated_point.is_important and updated_point.score < 0.5
+                    # Not important and below the bar the prompt calls
+                    # "worth testing": a false positive.
+                    is_fp = (
+                        not updated_point.is_important
+                        and updated_point.score < get_scoring().worth_testing
+                    )
 
                     if is_fp:
                         status = "FP"
                         fp_points.append(updated_point)
-                    elif updated_point.is_important or updated_point.score >= 0.9:
+                    elif (
+                        updated_point.is_important
+                        or updated_point.score >= get_scoring().high_confidence
+                    ):
                         status = "HIGH"
                     else:
                         status = "verified"
@@ -617,9 +629,10 @@ class POVBaseStrategy(BaseStrategy):
             )
 
         # Configure pipeline
+        concurrency = get_concurrency()
         config = PipelineConfig(
-            num_verify_agents=2,  # 2 verification agents
-            num_pov_agents=5,  # 5 POV generation agents (parallel)
+            num_verify_agents=concurrency.delta_verify_agents,
+            num_pov_agents=concurrency.delta_pov_agents,
             pov_min_score=0.5,  # Minimum score to proceed to POV
             poll_interval=1.0,  # Poll every 1 second
             max_idle_cycles=10,  # Exit after 10 idle cycles

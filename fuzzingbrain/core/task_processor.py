@@ -866,6 +866,7 @@ class TaskProcessor:
                 work_id=self.config.work_id,
                 fuzzer_sources=self.config.fuzzer_sources,
                 enable_static_analysis=self.config.enable_static_analysis,
+                build_coverage=self.config.build_coverage,
             )
 
             logger.info(f"Analyzer request: sanitizers={self.config.sanitizers}")
@@ -976,9 +977,12 @@ class TaskProcessor:
             if not self.config.api_mode:
                 log_dir = get_log_dir()
 
+                # This is the number that decides how many workers run at
+                # once -- it overrides the one in celery_app's settings, so
+                # that one is not the answer to "what is our concurrency".
                 infra = InfrastructureManager(
                     redis_url=self.config.redis_url,
-                    concurrency=15,
+                    concurrency=self.config.concurrency.celery_workers,
                     task_id=task.task_id,
                 )
                 if not infra.start(log_dir=str(log_dir) if log_dir else None):
@@ -1080,6 +1084,7 @@ class TaskProcessor:
                         total_cost=total_cost,
                         budget_limit=self.config.budget_limit,
                         exit_reason=result.get("status", "completed"),
+                        verified_povs=result.get("pov_count"),
                     )
                     # Reset terminal settings before output (subprocess may have changed them)
                     os.system("stty sane 2>/dev/null")

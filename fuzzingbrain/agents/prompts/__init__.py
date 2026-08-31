@@ -11,6 +11,49 @@ from loguru import logger
 # Get the directory where this __init__.py file is located
 _PROMPTS_DIR = Path(__file__).parent
 
+# Thresholds the prompts state are written as <<name>> and filled from the
+# configuration, so the number the model is asked to aim at and the number the
+# code measures against come from one place. The angle-bracket form is used
+# rather than str.format because the prompts contain JSON examples, and a lone
+# brace in one of those would break formatting for the whole file.
+_PLACEHOLDER_OPEN = "<<"
+_PLACEHOLDER_CLOSE = ">>"
+
+
+def _fill_thresholds(text: str, scoring=None) -> str:
+    """Replace <<name>> with the configured value of `name`."""
+    if _PLACEHOLDER_OPEN not in text:
+        return text
+    if scoring is None:
+        from ...core.config import ScoringConfig
+
+        scoring = ScoringConfig()
+    for name, value in scoring.to_dict().items():
+        text = text.replace(
+            f"{_PLACEHOLDER_OPEN}{name}{_PLACEHOLDER_CLOSE}", _pretty(value)
+        )
+    return text
+
+
+def _pretty(value: float) -> str:
+    """0.7 rather than 0.7000000000000001, and 1.0 rather than 1.
+
+    These land next to other scores in a range like "0.3-1.0"; an integer in
+    that position reads as a different kind of number than its neighbours.
+    """
+    text = f"{value:g}"
+    return text if "." in text else f"{text}.0"
+
+
+def render_prompt(text: str, scoring=None) -> str:
+    """A prompt with this run's thresholds in it.
+
+    Call this when a run's configuration may differ from the defaults; the
+    module-level constants below are already filled with the defaults, which is
+    what every caller that does not configure scoring wants.
+    """
+    return _fill_thresholds(text, scoring)
+
 
 def _load_prompt_from_markdown(filename: str) -> str:
     """
@@ -28,7 +71,7 @@ def _load_prompt_from_markdown(filename: str) -> str:
     """
     prompt_file = _PROMPTS_DIR / filename
     try:
-        return prompt_file.read_text(encoding="utf-8")
+        return _fill_thresholds(prompt_file.read_text(encoding="utf-8"))
     except FileNotFoundError:
         logger.error(f"Prompt file not found: {prompt_file}")
         raise

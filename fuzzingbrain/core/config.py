@@ -10,6 +10,11 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+# How many fuzzer containers one task may run at once. Lives here, with the
+# other defaults, so the fuzzer package can read it without the configuration
+# having to import the fuzzer package back.
+DEFAULT_MAX_PARALLEL_FUZZERS = 10
+
 
 @dataclass
 class FuzzerWorkerConfig:
@@ -34,6 +39,135 @@ class FuzzerWorkerConfig:
 
 
 @dataclass
+class ConcurrencyConfig:
+    """How many of everything a task may run at once.
+
+    These numbers lived as literals in four strategy files and the Celery
+    settings, which meant "run this serially" was not a thing anyone could ask
+    for -- the only way to halve the load was to edit the source. On a shared
+    host that is the wrong default: a full scan of an eight-harness challenge
+    asks for eight Celery workers, fifteen agents each, and until recently an
+    unbounded number of libFuzzer containers, which together want more memory
+    than the machine has.
+
+    A task file may set `"concurrency": 1` to make everything serial, or give a
+    dict to set one field at a time.
+    """
+
+    celery_workers: int = 8  # Workers running at once
+    sp_find_agents: int = 5  # Concurrent SP-find agents inside a worker
+    verify_agents: int = 5  # Concurrent SP verification agents
+    pov_agents: int = 5  # Concurrent POV generation agents
+
+    # Delta and the older full strategy were tuned differently; keeping them
+    # separate preserves that rather than flattening three call sites into one.
+    delta_verify_agents: int = 2
+    delta_pov_agents: int = 5
+
+    @classmethod
+    def serial(cls) -> "ConcurrencyConfig":
+        """One of everything. What a shared or small machine should use."""
+        return cls(**{f: 1 for f in cls.__dataclass_fields__})
+
+    @classmethod
+    def from_value(cls, value) -> "ConcurrencyConfig":
+        """Accept `1`, `{"pov_agents": 2}`, or nothing.
+
+        A bare integer sets every field, so a task file can say
+        `"concurrency": 1` and mean it.
+        """
+        if value is None:
+            return cls()
+        if isinstance(value, (int, float)):
+            n = max(1, int(value))
+            return cls(**{f: n for f in cls.__dataclass_fields__})
+        known = {f: getattr(cls, f) for f in cls.__dataclass_fields__}
+        return cls(**{k: max(1, int(value.get(k, v))) for k, v in known.items()})
+
+    @classmethod
+    def from_env(cls) -> "ConcurrencyConfig":
+        """FUZZINGBRAIN_CONCURRENCY=1 sets everything; per-field names also work."""
+        whole = os.environ.get("FUZZINGBRAIN_CONCURRENCY")
+        base = cls.from_value(int(whole)) if whole else cls()
+        for name in cls.__dataclass_fields__:
+            raw = os.environ.get(f"FUZZINGBRAIN_CONCURRENCY_{name.upper()}")
+            if raw:
+                try:
+                    setattr(base, name, max(1, int(raw)))
+                except ValueError:
+                    pass
+        return base
+
+    def to_dict(self) -> Dict[str, int]:
+        return {f: getattr(self, f) for f in self.__dataclass_fields__}
+
+
+@dataclass
+class ScoringConfig:
+    """The numbers the agents judge suspicious points by.
+
+    These were written into the prompt markdown and into four strategy files as
+    literals, which had two costs. Tuning one meant editing English text in
+    several places and hoping every copy agreed -- the delta prompt and the full
+    prompt had already drifted apart on where "worth testing" starts. And the
+    thresholds the code enforces (score >= 0.9 counts as high confidence) were
+    never the thresholds the prompt asked the model for (score >= 0.7 is a clear
+    vulnerability), so the model was aiming at one bar and being measured
+    against another with nothing in the codebase saying so.
+
+    Everything here has a default, and every field is settable from a task file
+    (`"scoring": {...}`) or from the environment.
+    """
+
+    # What a score means. The bands are read top down: at or above `clear` is a
+    # vulnerability the model is sure of, below `uncertain` is the only range in
+    # which it may call something a false positive.
+    clear: float = 0.7
+    worth_testing: float = 0.5
+    moderate: float = 0.6
+    uncertain: float = 0.4
+
+    # The bar for is_important, which decides whether a POV is attempted at all.
+    # Delta scans sit lower on purpose: the diff is already evidence.
+    important_full: float = 0.5
+    important_delta: float = 0.4
+
+    # What the code treats as high confidence when it orders the work. Separate
+    # from `clear` because it answers a different question -- not "is this a
+    # bug" but "do this one first".
+    high_confidence: float = 0.9
+
+    # How reachability adjusts a score. A function reached only through a
+    # function pointer is still reached; one that nothing calls is not.
+    reach_pointer_call: float = 0.95
+    reach_pointer_low: float = 0.9
+    reach_unreachable: float = 0.3
+    reach_delta: float = 1.0
+
+    @classmethod
+    def from_dict(cls, data: Optional[dict]) -> "ScoringConfig":
+        data = data or {}
+        known = {f: getattr(cls, f) for f in cls.__dataclass_fields__}
+        return cls(**{k: float(data.get(k, v)) for k, v in known.items()})
+
+    @classmethod
+    def from_env(cls) -> "ScoringConfig":
+        """Read overrides from FUZZINGBRAIN_SCORE_<FIELD>."""
+        values = {}
+        for name in cls.__dataclass_fields__:
+            raw = os.environ.get(f"FUZZINGBRAIN_SCORE_{name.upper()}")
+            if raw:
+                try:
+                    values[name] = float(raw)
+                except ValueError:
+                    pass
+        return cls(**values)
+
+    def to_dict(self) -> Dict[str, float]:
+        return {f: getattr(self, f) for f in self.__dataclass_fields__}
+
+
+@dataclass
 class Config:
     """FuzzingBrain configuration"""
 
@@ -51,8 +185,25 @@ class Config:
     task_type: str = "pov"  # pov | patch | pov-patch | harness
     scan_mode: str = "full"  # full | delta
     sanitizers: List[str] = field(default_factory=lambda: ["address"])
+    # Coverage is a separate build from the sanitizers and is usually worth the
+    # ~5s it costs: four agent tools read it, and trace_pov uses it to add
+    # detail. It is optional because a run can be deliberately restricted to
+    # what one ASAN build gives -- and because "not asked for" must not be
+    # reported as "the coverage build failed".
+    build_coverage: bool = True
     timeout_minutes: int = 30
     pov_count: int = 1  # Stop after N verified POVs (0 = unlimited)
+    # How many fuzzer containers the whole task may run at once. Every worker
+    # runs a global fuzzer and every POV agent starts one for its suspicious
+    # point, so without a ceiling the count is workers x (1 + agents) and the
+    # machine spends its cores on context switches instead of on executions.
+    max_parallel_fuzzers: int = DEFAULT_MAX_PARALLEL_FUZZERS
+
+    # The thresholds the agents judge by. See ScoringConfig.
+    scoring: ScoringConfig = field(default_factory=ScoringConfig)
+
+    # How many of everything runs at once. See ConcurrencyConfig.
+    concurrency: ConcurrencyConfig = field(default_factory=ConcurrencyConfig)
 
     # Fuzzer Worker configuration
     fuzzer_worker: FuzzerWorkerConfig = field(default_factory=FuzzerWorkerConfig)
@@ -163,8 +314,14 @@ class Config:
             task_type=data.get("task_type", "pov"),
             scan_mode=data.get("scan_mode", "full"),
             sanitizers=data.get("sanitizers", ["address"]),
+            build_coverage=bool(data.get("build_coverage", True)),
             timeout_minutes=data.get("timeout_minutes", 30),
             pov_count=data.get("pov_count", 1),
+            max_parallel_fuzzers=int(
+                data.get("max_parallel_fuzzers", DEFAULT_MAX_PARALLEL_FUZZERS)
+            ),
+            scoring=ScoringConfig.from_dict(data.get("scoring")),
+            concurrency=ConcurrencyConfig.from_value(data.get("concurrency")),
             budget_limit=float(data.get("budget_limit") or 0)
             if data.get("budget_limit") is not None
             else 50.0,
@@ -249,6 +406,14 @@ class Config:
             api_mode=os.environ.get("FUZZINGBRAIN_API", "").lower() == "true",
             api_host=os.environ.get("API_HOST", "0.0.0.0"),
             api_port=int(os.environ.get("API_PORT", "18080")),
+            max_parallel_fuzzers=int(
+                os.environ.get(
+                    "FUZZINGBRAIN_MAX_PARALLEL_FUZZERS",
+                    str(DEFAULT_MAX_PARALLEL_FUZZERS),
+                )
+            ),
+            scoring=ScoringConfig.from_env(),
+            concurrency=ConcurrencyConfig.from_env(),
         )
 
     def merge(self, other: "Config") -> "Config":
@@ -335,6 +500,9 @@ class Config:
             "commit_id": self.commit_id,
             "fuzzer_name": self.fuzzer_name,
             "targets": self.targets,
+            "max_parallel_fuzzers": self.max_parallel_fuzzers,
+            "scoring": self.scoring.to_dict(),
+            "concurrency": self.concurrency.to_dict(),
             "redis_url": self.redis_url,
             "mongodb_url": self.mongodb_url,
             "mongodb_db": self.mongodb_db,
