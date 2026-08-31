@@ -920,6 +920,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             # Track tool call in AgentContext (persisted to MongoDB)
             if self._context:
                 self._context.increment_tool_calls()
+            self._record_tool_call(tool_name, True, latency_ms)
 
             return result_str
 
@@ -929,8 +930,40 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             # Track tool call in AgentContext even on failure
             if self._context:
                 self._context.increment_tool_calls()
+            self._record_tool_call(
+                tool_name, False, int((time.time() - t0) * 1000), error=str(e)
+            )
 
             return json.dumps({"success": False, "error": str(e)})
+
+    def _record_tool_call(
+        self, tool_name: str, success: bool, latency_ms: int, error: str = ""
+    ) -> None:
+        """File one tool call with the buffer that persists them.
+
+        The agent's own counter says how many tools it called; this says which,
+        how long each took and whether it worked -- the difference between a
+        number on a page and something that can be acted on. Best-effort: a
+        failure to record must not turn into a failed tool call.
+        """
+        try:
+            from ..llms.buffer import get_llm_call_buffer
+
+            buffer = get_llm_call_buffer()
+            if buffer is None:
+                return
+            ctx = self._context
+            buffer.record_tool_call(
+                tool_name=tool_name,
+                success=success,
+                latency_ms=latency_ms,
+                task_id=getattr(ctx, "task_id", "") if ctx else "",
+                worker_id=getattr(ctx, "worker_id", "") if ctx else "",
+                agent_id=getattr(ctx, "agent_id", "") if ctx else "",
+                error=error,
+            )
+        except Exception:
+            pass
 
     async def _run_agent_loop(
         self,

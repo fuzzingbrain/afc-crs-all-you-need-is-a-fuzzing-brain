@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 
 from loguru import logger
 
+from ..core.docker_limits import docker_resource_args
 from .models import CRASH_ARTIFACT_PREFIXES, CrashRecord
 from .signature import compute_signature
 
@@ -892,6 +893,7 @@ class FuzzerMonitor:
                 "linux/amd64",
                 "--entrypoint",
                 "",
+                *docker_resource_args(memory_mb=4096, cpus=1),
                 "-e",
                 "FUZZING_ENGINE=libfuzzer",
                 "-e",

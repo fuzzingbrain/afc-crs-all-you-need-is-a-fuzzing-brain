@@ -57,6 +57,11 @@ class WorkerLLMBuffer:
 
         # In-memory record accumulation
         self._records: List[dict] = []
+        # Tool calls ride the same thread and the same interval. They were
+        # counted per agent and nowhere else, so the question "which tools does
+        # a run actually spend its time in" had no answer, and the dashboard's
+        # tools panel was empty on every run.
+        self._tool_records: List[dict] = []
         self._lock = threading.Lock()
 
         # Flush thread
@@ -183,6 +188,40 @@ class WorkerLLMBuffer:
         with self._lock:
             self._records.append(call.to_dict())
 
+    def record_tool_call(
+        self,
+        tool_name: str,
+        success: bool,
+        latency_ms: int,
+        task_id: str = "",
+        worker_id: str = "",
+        agent_id: str = "",
+        error: str = "",
+    ) -> None:
+        """Record one tool call. Thread-safe, same as `record`."""
+        from datetime import datetime
+
+        doc = {
+            "tool_name": tool_name,
+            "success": bool(success),
+            "latency_ms": int(latency_ms),
+            "created_at": datetime.now(),
+        }
+        for name, value in (
+            ("task_id", task_id),
+            ("worker_id", worker_id),
+            ("agent_id", agent_id),
+        ):
+            if value:
+                try:
+                    doc[name] = ObjectId(str(value))
+                except Exception:
+                    doc[name] = str(value)
+        if error:
+            doc["error"] = error[:500]
+        with self._lock:
+            self._tool_records.append(doc)
+
     def _connect_redis(self) -> None:
         """Connect sync Redis client."""
         try:
@@ -224,13 +263,25 @@ class WorkerLLMBuffer:
         """
         # Grab current batch under lock
         with self._lock:
-            if not self._records:
-                return 0
             batch = self._records[:]
             self._records.clear()
+            tool_batch = self._tool_records[:]
+            self._tool_records.clear()
 
-        if self.mongo_db is None:
+        if self.mongo_db is None or (not batch and not tool_batch):
             return 0
+
+        # Tool calls are their own collection and their own failure: losing
+        # them must not cost the LLM records, which are what the budget is
+        # computed from.
+        if tool_batch:
+            try:
+                self.mongo_db.tool_calls.insert_many(tool_batch)
+            except Exception as e:
+                logger.error(f"Failed to flush tool calls to MongoDB: {e}")
+
+        if not batch:
+            return len(tool_batch)
 
         try:
             # Bulk insert to llm_calls collection
@@ -239,13 +290,13 @@ class WorkerLLMBuffer:
             # Update aggregated fields
             _update_aggregates(self.mongo_db, batch)
 
-            return len(batch)
+            return len(batch) + len(tool_batch)
         except Exception as e:
             logger.error(f"Failed to flush LLM calls to MongoDB: {e}")
             # Put records back so they're not lost
             with self._lock:
                 self._records = batch + self._records
-            return 0
+            return len(tool_batch)
 
     def cleanup_redis_keys(self, task_id: str = "", worker_id: str = "") -> None:
         """Clean up Redis counter keys for completed task/worker."""

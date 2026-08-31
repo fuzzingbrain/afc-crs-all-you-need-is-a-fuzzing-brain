@@ -968,6 +968,7 @@ def create_final_summary(
     total_cost: float = 0.0,
     budget_limit: float = 0.0,
     exit_reason: str = "completed",
+    verified_povs: Optional[int] = None,
 ) -> str:
     """
     Create final task summary with all workers results.
@@ -992,7 +993,12 @@ def create_final_summary(
     interrupted = sum(1 for w in workers if w.get("status") == "interrupted")
     failed = sum(1 for w in workers if w.get("status") == "failed")
     total_sps = sum(w.get("sps_found", 0) for w in workers)
-    total_povs = sum(w.get("pov_generated", 0) for w in workers)
+    # What the workers generated, which is not what survived verification: the
+    # run stops on povs where is_successful is true, so a summary counting
+    # generated ones reports a number the stopping rule never saw. Prefer the
+    # verified count when the caller has it.
+    generated_povs = sum(w.get("pov_generated", 0) for w in workers)
+    total_povs = generated_povs if verified_povs is None else verified_povs
     total_patches = sum(w.get("patch_generated", 0) for w in workers)
 
     # Column widths for worker table
@@ -1052,7 +1058,10 @@ def create_final_summary(
             + f"  SPs Merged:    {dedup_count} (duplicates)".ljust(table_width)
             + "│"
         )
-    lines.append("│" + f"  POVs Found:    {total_povs}".ljust(table_width) + "│")
+    pov_line = f"  POVs Found:    {total_povs}"
+    if verified_povs is not None and generated_povs != verified_povs:
+        pov_line += f" verified ({generated_povs} generated)"
+    lines.append("│" + pov_line.ljust(table_width) + "│")
     lines.append("│" + f"  Patches:       {total_patches}".ljust(table_width) + "│")
 
     # Cost and budget info

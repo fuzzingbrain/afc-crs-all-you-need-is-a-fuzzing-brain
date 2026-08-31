@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from loguru import logger
 
+from ..core.docker_limits import docker_resource_args
 from .models import (
     CRASH_ARTIFACT_PREFIXES,
     FuzzerStatus,
@@ -114,6 +115,16 @@ class FuzzerInstance:
             "--entrypoint",
             "",  # Bypass base-runner's entrypoint
         ]
+
+        # Cap the container itself: fork mode runs fork_level children, each
+        # allowed rss_limit_mb, plus ASAN/runtime headroom.
+        fork = max(self.config.fork_level, 1)
+        cmd.extend(
+            docker_resource_args(
+                memory_mb=self.config.rss_limit_mb * fork + 1024,
+                cpus=fork,
+            )
+        )
 
         # Environment variables
         cmd.extend(

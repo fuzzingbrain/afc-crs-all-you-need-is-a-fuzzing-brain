@@ -16,7 +16,8 @@ Breadth-First Per-Direction Architecture:
 
 import asyncio
 import time
-from typing import Dict, Any, List
+from datetime import datetime
+from typing import Dict, Any, List, Optional
 
 from .pov_base import POVBaseStrategy
 from ...agents import (
@@ -25,6 +26,9 @@ from ...agents import (
     LargeFullSPGenerator,
 )
 from ...llms.models import CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5
+from ...core.concurrency import get_concurrency
+from ...core.models.direction import DirectionStatus
+from ...core.scoring import get_scoring
 from ...tools.directions import set_direction_context
 from ...tools.suspicious_points import set_sp_context
 from ...fuzzer import SeedAgent
@@ -45,7 +49,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         self,
         executor,
         use_pipeline: bool = True,
-        num_parallel_agents: int = 5,
+        num_parallel_agents: Optional[int] = None,
     ):
         """
         Initialize POV Full-scan Strategy.
@@ -53,10 +57,16 @@ class POVFullscanStrategy(POVBaseStrategy):
         Args:
             executor: WorkerExecutor instance
             use_pipeline: Whether to use parallel pipeline (default: True)
-            num_parallel_agents: Number of concurrent SP Find agents (default: 5)
+            num_parallel_agents: Concurrent SP Find agents; the configured
+                value when not given, so a task file that asks for serial
+                execution gets it here too.
         """
         super().__init__(executor, use_pipeline)
-        self.num_parallel_agents = num_parallel_agents
+        self.num_parallel_agents = (
+            num_parallel_agents
+            if num_parallel_agents is not None
+            else get_concurrency().sp_find_agents
+        )
         self._sp_finding_done = asyncio.Event()  # Signal when SP finding is complete
 
     @property
@@ -107,7 +117,8 @@ class POVFullscanStrategy(POVBaseStrategy):
             result["pov_generated"] = pipeline_stats.pov_generated
 
             # Count high-confidence bugs
-            high_conf = [p for p in all_points if p.is_important or p.score >= 0.9]
+            bar = get_scoring().high_confidence
+            high_conf = [p for p in all_points if p.is_important or p.score >= bar]
             result["high_confidence_bugs"] = len(high_conf)
 
             # Save results
@@ -370,9 +381,10 @@ class POVFullscanStrategy(POVBaseStrategy):
         agent_log_dir = self.agent_log_dir
 
         # Configure pipeline for verification and POV
+        concurrency = get_concurrency()
         config = PipelineConfig(
-            num_verify_agents=5,
-            num_pov_agents=5,
+            num_verify_agents=concurrency.verify_agents,
+            num_pov_agents=concurrency.pov_agents,
             pov_min_score=0.5,
             poll_interval=2.0,
             max_idle_cycles=30,
@@ -438,6 +450,24 @@ class POVFullscanStrategy(POVBaseStrategy):
             ) in phase_labels:
                 grand_total += len(pools.get(key, []))
 
+        # A direction's own lifecycle. Its functions are spread across the four
+        # phases, so it is finished only when the last phase holding one of them
+        # is done -- hence the countdown rather than a mark at the end of a
+        # phase. Without this, claim() and complete() existed and nothing ever
+        # called them: every direction of every run that ever ran stayed
+        # "pending" in the database, and the dashboard reported a scan that had
+        # analysed hundreds of functions as not having started.
+        planned = {}
+        remaining = {}
+        for direction, pools in direction_pools:
+            n = sum(len(pools.get(key, [])) for key, _ in phase_labels)
+            if n:
+                planned[direction.direction_id] = n
+                remaining[direction.direction_id] = n
+                self._mark_direction_started(direction)
+            else:
+                self._mark_direction_skipped(direction, "no functions in its pools")
+
         global_index = 0
         for phase_key, phase_label in phase_labels:
             phase_start = time.time()
@@ -459,6 +489,14 @@ class POVFullscanStrategy(POVBaseStrategy):
                 grand_total=grand_total,
             )
             global_index += len(phase_work)
+            for _, direction_id in phase_work:
+                if direction_id in remaining:
+                    remaining[direction_id] -= 1
+                    if remaining[direction_id] <= 0:
+                        del remaining[direction_id]
+                        self._mark_direction_completed(
+                            direction_id, planned.get(direction_id, 0)
+                        )
             self.log_info(
                 f"  {phase_label} completed in {time.time() - phase_start:.1f}s"
             )
@@ -473,6 +511,55 @@ class POVFullscanStrategy(POVBaseStrategy):
 
         stats = await pipeline_task
         return stats
+
+    # =========================================================================
+    # Direction lifecycle
+    #
+    # Best-effort throughout: the status is what the dashboard reads, not what
+    # the scan steers by, so a database hiccup here must not take down a run
+    # that is finding bugs.
+    # =========================================================================
+
+    def _mark_direction_started(self, direction) -> None:
+        try:
+            self.repos.directions.update(
+                str(direction.direction_id),
+                {
+                    "status": DirectionStatus.IN_PROGRESS.value,
+                    "processor_id": str(self.worker_id),
+                    "started_at": datetime.now(),
+                },
+            )
+        except Exception as e:
+            self.log_debug(f"Could not mark direction in progress: {e}")
+
+    def _mark_direction_completed(
+        self, direction_id: str, functions_analyzed: int
+    ) -> None:
+        try:
+            sps = self.repos.suspicious_points.find_by_task(self.task_id) or []
+            sp_count = sum(
+                1
+                for sp in sps
+                if str(getattr(sp, "direction_id", "")) == str(direction_id)
+            )
+            self.repos.directions.complete(
+                str(direction_id),
+                sp_count=sp_count,
+                functions_analyzed=functions_analyzed,
+            )
+        except Exception as e:
+            self.log_debug(f"Could not mark direction complete: {e}")
+
+    def _mark_direction_skipped(self, direction, reason: str) -> None:
+        # The reason goes to the log, not to the repository: skip() writes it
+        # over risk_reason, which holds the planner's account of why this
+        # direction was worth looking at and is what the dashboard shows.
+        self.log_info(f"Direction '{direction.name}' skipped: {reason}")
+        try:
+            self.repos.directions.skip(str(direction.direction_id))
+        except Exception as e:
+            self.log_debug(f"Could not mark direction skipped: {e}")
 
     def _find_reachable_from_entries(self, entry_functions: List[str]) -> set:
         """
@@ -495,6 +582,30 @@ class POVFullscanStrategy(POVBaseStrategy):
                     queue.append(callee)
 
         return reachable
+
+    def _resolve_function(self, name: str):
+        """A Function for `name`, from the index when there is one.
+
+        The index is an accelerator here, not a precondition. Direction planning
+        names its functions by reading the source, so the names are real whether
+        or not an introspector run ever indexed them -- and the SP agent that
+        receives one has Read and Grep and can find it the same way.
+
+        Dropping unresolvable names is what made a run without an index report
+        "0 functions, skipping" for every phase and finish with zero suspicious
+        points, having looked at nothing. The log read like there was nothing to
+        examine rather than like the pool had been emptied.
+        """
+        func = self.repos.functions.find_by_name(self.task_id, name)
+        if func:
+            return func
+        from ...core.models.function import Function
+
+        return Function(
+            function_id=f"{self.task_id}_{name}",
+            task_id=self.task_id,
+            name=name,
+        )
 
     def _build_direction_pools(self, sorted_directions: List) -> List[tuple]:
         """
@@ -545,7 +656,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             }
 
             for name in small_pool_names:
-                func = self.repos.functions.find_by_name(self.task_id, name)
+                func = self._resolve_function(name)
                 if not func:
                     continue
                 if not func.analyzed_by_directions:
@@ -554,7 +665,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                     pools["small/re"].append(func)
 
             for name in big_pool_names:
-                func = self.repos.functions.find_by_name(self.task_id, name)
+                func = self._resolve_function(name)
                 if not func:
                     continue
                 if not func.analyzed_by_directions:

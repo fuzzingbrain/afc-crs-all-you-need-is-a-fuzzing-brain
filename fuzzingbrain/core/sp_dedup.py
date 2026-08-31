@@ -15,6 +15,26 @@ from loguru import logger
 SP_DEDUP_MAX_COMPARE = 20
 
 
+def _dedup_model() -> Optional[str]:
+    """The configured model for a fast yes/no judgement.
+
+    Returns None when the config cannot be read, which leaves the client on its
+    own default rather than on a name picked here -- the point of the change is
+    that this module stops choosing.
+    """
+    try:
+        from ..llms.config import get_default_config
+        from ..llms.models import TaskType
+
+        info = get_default_config().get_model_for_task(TaskType.FAST_JUDGMENT)
+        # ModelInfo.id is the API model id; .name is the human-readable label
+        # and would not resolve as a model.
+        return getattr(info, "id", None)
+    except Exception as e:  # config missing, import cycle, unknown task type
+        logger.debug(f"[SPDedup] Falling back to client default model: {e}")
+        return None
+
+
 def check_sp_duplicate(
     new_description: str,
     existing_sps: List[Dict[str, Any]],
@@ -73,10 +93,13 @@ def check_sp_duplicate(
             {"role": "user", "content": prompt},
         ]
 
-        # Use a smaller/faster model for dedup checks to save cost
+        # A small model is the right shape for "are these the same point?", but
+        # naming one provider's here overrode the config's model choice for the
+        # whole run: every dedup call went to gpt-4o-mini, failed, and fell back
+        # to Opus after a wasted round trip. Ask the config instead.
         response = client.call(
             messages,
-            model=model or "gpt-4o-mini",  # Fast and cheap for simple comparison
+            model=model or _dedup_model(),
             temperature=0.0,  # Deterministic
             max_tokens=200,
         )
@@ -263,7 +286,7 @@ async def check_sp_duplicate_async(
 
         response = await client.acall(
             messages,
-            model=model or "gpt-4o-mini",
+            model=model or _dedup_model(),
             temperature=0.0,
             max_tokens=200,
         )

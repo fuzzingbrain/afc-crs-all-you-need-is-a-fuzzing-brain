@@ -131,6 +131,10 @@ Call the create_seed tool to generate the seeds.
 """
 
 
+# A delta diff is usually a few hundred lines; the cap is for the occasional
+# sweeping commit, so one does not crowd out the fuzzer source in the prompt.
+MAX_DIFF_CHARS = 24000
+
 DELTA_SEED_PROMPT = """## Delta-scan Seed Generation Context
 
 You are generating initial fuzzing seeds for a **delta-scan** analysis.
@@ -147,6 +151,10 @@ The commit/diff has changed specific functions, and we've identified potential v
 ## Changed Functions in This Commit
 
 {changed_functions}
+
+## The Commit Diff
+
+{diff_content}
 
 ## Suspicious Points Identified (Potential Vulnerabilities)
 
@@ -439,6 +447,7 @@ Generate seeds NOW or this run will produce nothing useful."""
         delta_id = kwargs.get("delta_id", "")
         changed_functions = kwargs.get("changed_functions", [])
         suspicious_points = kwargs.get("suspicious_points", [])
+        diff_content = kwargs.get("diff_content", "")
 
         self.delta_id = delta_id
 
@@ -469,11 +478,25 @@ Generate seeds NOW or this run will produce nothing useful."""
         else:
             sp_text = "(No suspicious points identified yet - generate seeds to help find them)"
 
+        # The diff itself, not only the names mapped out of it. Mapping needs a
+        # function index; the diff needs nothing, and it carries what the names
+        # cannot -- the actual added lines, the constants, the buffer sizes. A
+        # run without an index has no changed-function list at all, and this is
+        # then the only thing describing what the commit did.
+        if diff_content:
+            body = diff_content
+            if len(body) > MAX_DIFF_CHARS:
+                body = body[:MAX_DIFF_CHARS] + "\n... (diff truncated)"
+            diff_text = f"```diff\n{body}\n```"
+        else:
+            diff_text = "(No diff available)"
+
         return DELTA_SEED_PROMPT.format(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             fuzzer_source=self.fuzzer_source or "(Fuzzer source not available)",
             changed_functions=changes_text,
+            diff_content=diff_text,
             suspicious_points=sp_text,
         )
 
@@ -637,6 +660,7 @@ Generate seeds NOW or this run will produce nothing useful."""
         delta_id: str,
         changed_functions: List[Dict[str, Any]] = None,
         suspicious_points: List[Dict[str, Any]] = None,
+        diff_content: str = "",
     ) -> Dict[str, Any]:
         """
         Generate seeds for delta-scan mode.
@@ -676,6 +700,7 @@ Generate seeds NOW or this run will produce nothing useful."""
             delta_id=delta_id,
             changed_functions=changed_functions or [],
             suspicious_points=suspicious_points or [],
+            diff_content=diff_content or "",
         )
 
         # seeds_generated is updated in run_async() before context cleanup

@@ -120,6 +120,7 @@ class AnalysisServer:
         work_id: Optional[str] = None,
         fuzzer_sources: Optional[Dict[str, Union[str, List[str]]]] = None,
         enable_static_analysis: bool = False,
+        build_coverage: bool = True,
     ):
         # Store task_id as ObjectId for consistent MongoDB queries
         # String representation is used for socket paths and logging
@@ -135,6 +136,7 @@ class AnalysisServer:
         self.fuzzer_sources = fuzzer_sources or {}
         # Introspector static analysis is opt-in; off by default in production.
         self.enable_static_analysis = enable_static_analysis
+        self.build_coverage = build_coverage
 
         # Socket path in /tmp to avoid path length limit (108 chars max for Unix sockets)
         # Use task_id to ensure uniqueness
@@ -317,6 +319,7 @@ class AnalysisServer:
             task_path=str(self.task_path),
             project_name=self.project_name,
             sanitizers=self.sanitizers,
+            build_coverage=self.build_coverage,
             ossfuzz_project_name=self.ossfuzz_project_name,
             log_callback=self._log,
             log_dir=self.log_dir,

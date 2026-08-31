@@ -22,15 +22,19 @@ def _instance(tmp_path):
 
 
 def test_prefixes_cover_libfuzzer_artifact_kinds():
-    assert set(CRASH_ARTIFACT_PREFIXES) == {"crash-", "oom-", "timeout-", "leak-"}
+    # "timeout-" is not among them on purpose: a hang is about how long the
+    # harness took, against a threshold we chose, and one on the empty input
+    # once ended a scan two minutes in as a "POV".
+    assert set(CRASH_ARTIFACT_PREFIXES) == {"crash-", "oom-", "leak-"}
 
 
 def test_get_crashes_detects_all_artifact_kinds(tmp_path):
     inst = _instance(tmp_path)
-    artifacts = {"crash-aaa", "oom-bbb", "timeout-ccc", "leak-ddd"}
+    artifacts = {"crash-aaa", "oom-bbb", "leak-ddd"}
     for name in artifacts:
         (inst.crashes_dir / name).write_bytes(b"x")
-    # Non-artifact files (e.g. a stray README) must be ignored.
+    # A hang, and a non-artifact file (e.g. a stray README): neither is a crash.
+    (inst.crashes_dir / "timeout-ccc").write_bytes(b"x")
     (inst.crashes_dir / "README").write_bytes(b"x")
 
     assert {p.name for p in inst.get_crashes()} == artifacts

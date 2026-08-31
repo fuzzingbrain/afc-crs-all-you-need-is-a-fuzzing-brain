@@ -34,6 +34,7 @@ class AnalyzeRequest:
     # pipeline runs on code-navigation tools, and introspector is a decoupled,
     # opt-in module (see fuzzingbrain/analyzer).
     enable_static_analysis: bool = False
+    build_coverage: bool = True
 
     def to_dict(self) -> dict:
         return {
@@ -48,6 +49,7 @@ class AnalyzeRequest:
             "work_id": self.work_id,
             "fuzzer_sources": self.fuzzer_sources,
             "enable_static_analysis": self.enable_static_analysis,
+            "build_coverage": self.build_coverage,
         }
 
     @classmethod
@@ -64,6 +66,7 @@ class AnalyzeRequest:
             work_id=data.get("work_id"),
             fuzzer_sources=data.get("fuzzer_sources", {}),
             enable_static_analysis=data.get("enable_static_analysis", False),
+            build_coverage=data.get("build_coverage", True),
         )
 
 

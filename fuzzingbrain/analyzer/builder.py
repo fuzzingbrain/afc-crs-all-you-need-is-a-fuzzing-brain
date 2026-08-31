@@ -220,6 +220,7 @@ class AnalyzerBuilder:
         task_path: str,
         project_name: str,
         sanitizers: List[str],
+        build_coverage: bool = True,
         ossfuzz_project_name: Optional[str] = None,
         log_callback=None,
         log_dir: Optional[str] = None,
@@ -246,6 +247,7 @@ class AnalyzerBuilder:
         self.task_path = Path(task_path)
         self.project_name = ossfuzz_project_name or project_name
         self.sanitizers = sanitizers
+        self.build_coverage = build_coverage
         self.skip_introspector = skip_introspector
         self.log_callback = log_callback or self._default_log
         self.analyzer_only_log_callback = analyzer_only_log_callback
@@ -319,7 +321,9 @@ class AnalyzerBuilder:
             return False, f"helper.py not found: {helper_path}"
 
         total_steps = (
-            len(self.sanitizers) + 1 + (0 if self.skip_introspector else 1)
+            len(self.sanitizers)
+            + (1 if self.build_coverage else 0)
+            + (0 if self.skip_introspector else 1)
         )  # sanitizers + coverage + introspector
         current_step = 0
 
@@ -344,16 +348,21 @@ class AnalyzerBuilder:
             return False, "All sanitizer builds failed, no fuzzers available"
 
         # Step N+1: Build coverage
-        current_step += 1
-        self.log(f"[{current_step}/{total_steps}] Building with coverage sanitizer")
-        coverage_success, _ = self._build_sanitizer("coverage")
-        if coverage_success:
-            self._move_build_output("coverage")
-            self.coverage_path = str(
-                self.build_out_base / f"{self.project_name}_coverage"
+        if self.build_coverage:
+            current_step += 1
+            self.log(
+                f"[{current_step}/{total_steps}] Building with coverage sanitizer"
             )
+            coverage_success, _ = self._build_sanitizer("coverage")
+            if coverage_success:
+                self._move_build_output("coverage")
+                self.coverage_path = str(
+                    self.build_out_base / f"{self.project_name}_coverage"
+                )
+            else:
+                self.log("Coverage build failed, continuing without it", "WARN")
         else:
-            self.log("Coverage build failed, continuing without it", "WARN")
+            self.log("Coverage build not requested, skipping")
 
         # Step N+2: Build introspector (unless skipped)
         if not self.skip_introspector:
@@ -409,7 +418,11 @@ class AnalyzerBuilder:
             return False, "Docker image pre-build failed"
 
         # All builds: sanitizers + coverage + introspector (unless skipped)
-        all_builds = self.sanitizers + ["coverage"]
+        all_builds = list(self.sanitizers)
+        if self.build_coverage:
+            all_builds.append("coverage")
+        else:
+            self.log("Coverage build not requested, skipping")
         if not self.skip_introspector:
             all_builds.append("introspector")
         else:
@@ -511,14 +524,16 @@ class AnalyzerBuilder:
         if not self.fuzzers:
             return False, "All sanitizer builds failed, no fuzzers available"
 
-        # Handle coverage result
-        cov_success, _ = build_results.get("coverage", (False, "Not built"))
-        if cov_success:
-            self.coverage_path = str(
-                self.build_out_base / f"{self.project_name}_coverage"
-            )
-        else:
-            self.log("Coverage build failed, continuing without it", "WARN")
+        # Handle coverage result. "Not requested" is not a failure -- saying so
+        # sends whoever reads the log looking for a broken build.
+        if self.build_coverage:
+            cov_success, _ = build_results.get("coverage", (False, "Not built"))
+            if cov_success:
+                self.coverage_path = str(
+                    self.build_out_base / f"{self.project_name}_coverage"
+                )
+            else:
+                self.log("Coverage build failed, continuing without it", "WARN")
 
         # Handle introspector result
         if "introspector" in build_results:

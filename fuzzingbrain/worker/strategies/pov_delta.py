@@ -293,16 +293,21 @@ class POVDeltaStrategy(POVBaseStrategy):
 
         return result
 
+    def _read_diff(self) -> str:
+        """The diff's text, or "" when there is none to read."""
+        if not self.diff_path or not self.diff_path.exists():
+            return ""
+        try:
+            return self.diff_path.read_text(
+                encoding="utf-8", errors="replace"
+            ).strip()
+        except OSError as e:
+            self.log_warning(f"Could not read diff at {self.diff_path}: {e}")
+            return ""
+
     def _diff_has_content(self) -> bool:
         """Whether there is a diff to hand the agent, mapping aside."""
-        if not self.diff_path or not self.diff_path.exists():
-            return False
-        try:
-            return bool(
-                self.diff_path.read_text(encoding="utf-8", errors="replace").strip()
-            )
-        except OSError:
-            return False
+        return bool(self._read_diff())
 
     def _get_all_diff_changes(self) -> List[FunctionChange]:
         """
@@ -417,22 +422,28 @@ class POVDeltaStrategy(POVBaseStrategy):
             for c in self._all_changes
         ]
 
-        # An empty changed-functions list does not mean there is nothing to seed
-        # from. It also happens when the mapping had no function index to read,
-        # and by this point the find phase has already produced suspicious
-        # points from the raw diff -- each naming a function, a vulnerability
-        # type and a description, which is richer seeding context than the list
-        # this used to require. Only give up when there is no lead at all.
-        if not changed_functions and not suspicious_points:
+        # The diff is the lead of last resort, and it is always there in delta
+        # mode. Mapping it to function names needs an index; reading it needs
+        # nothing, and it says more than the names do -- the added lines, the
+        # constants, the sizes. Giving up here because the mapping produced
+        # nothing also skipped the end of this method, which is where the
+        # global fuzzer starts, so a run without an index sat idle for twenty
+        # minutes before a fallback elsewhere finally started it.
+        diff_content = self._read_diff()
+        if not changed_functions and not suspicious_points and not diff_content:
             self.log_warning(
-                "No changed functions and no suspicious points, skipping delta "
-                "seeds generation"
+                "No changed functions, no suspicious points and no diff, "
+                "skipping delta seeds generation"
             )
             return 0
         if not changed_functions:
+            leads = []
+            if suspicious_points:
+                leads.append(f"{len(suspicious_points)} suspicious point(s)")
+            if diff_content:
+                leads.append(f"the raw diff ({len(diff_content)} chars)")
             self.log_info(
-                f"No changed functions mapped; seeding from "
-                f"{len(suspicious_points)} suspicious point(s) instead"
+                "No changed functions mapped; seeding from " + " and ".join(leads)
             )
 
         # Prepare suspicious points context
@@ -484,7 +495,9 @@ class POVDeltaStrategy(POVBaseStrategy):
 
         try:
             self.log_info(
-                f"Generating delta seeds for {len(changed_functions)} changed functions..."
+                f"Generating delta seeds for {len(changed_functions)} changed "
+                f"functions, {len(sp_context)} suspicious point(s), "
+                f"{len(diff_content)} chars of diff..."
             )
 
             result = loop.run_until_complete(
@@ -492,6 +505,7 @@ class POVDeltaStrategy(POVBaseStrategy):
                     delta_id=self.task_id,
                     changed_functions=changed_functions,
                     suspicious_points=sp_context,
+                    diff_content=diff_content,
                 )
             )
 
