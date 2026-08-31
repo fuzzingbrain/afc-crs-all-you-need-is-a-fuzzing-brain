@@ -21,6 +21,7 @@ from .models import (
     SPFuzzerConfig,
     SeedInfo,
 )
+from .budget import DEFAULT_MAX_PARALLEL_FUZZERS, FuzzerBudget
 from .instance import FuzzerInstance
 from .monitor import FuzzerMonitor
 
@@ -48,6 +49,7 @@ class FuzzerManager:
         global_config: Optional[GlobalFuzzerConfig] = None,
         sp_config: Optional[SPFuzzerConfig] = None,
         crash_monitor: Optional[FuzzerMonitor] = None,
+        max_parallel_fuzzers: int = DEFAULT_MAX_PARALLEL_FUZZERS,
     ):
         """
         Initialize FuzzerManager.
@@ -63,6 +65,7 @@ class FuzzerManager:
             global_config: Configuration for Global Fuzzer
             sp_config: Configuration for SP Fuzzers
             crash_monitor: Task-level FuzzerMonitor (shared across workers)
+            max_parallel_fuzzers: task-wide ceiling on running fuzzers
         """
         self.task_id = task_id
         self.worker_id = worker_id
@@ -107,6 +110,11 @@ class FuzzerManager:
         self.direction_seeds: List[SeedInfo] = []
         self.fp_seeds: List[SeedInfo] = []
 
+        # The task's allowance of concurrent fuzzers, shared with every other
+        # worker through Redis. Slot names carry the worker id because every
+        # worker calls its own global fuzzer "global".
+        self.budget = FuzzerBudget(task_id=task_id, limit=max_parallel_fuzzers)
+
         logger.info(
             f"[{worker_id}] ╔══════════════════════════════════════════════════════════════╗"
         )
@@ -121,6 +129,14 @@ class FuzzerManager:
         logger.info(
             f"[{worker_id}] ╚══════════════════════════════════════════════════════════════╝"
         )
+
+    def _slot(self, instance_id: str) -> str:
+        """This fuzzer's name in the task-wide ledger.
+
+        The worker id is part of it because every worker names its own global
+        fuzzer "global", and two workers must not share one slot.
+        """
+        return f"{self.worker_id}:{instance_id}"
 
     # =========================================================================
     # Global Fuzzer Management
@@ -139,6 +155,16 @@ class FuzzerManager:
         if self.global_fuzzer and self.global_fuzzer.is_running():
             logger.warning(
                 f"[FuzzerManager:{self.worker_id}] Global fuzzer already running"
+            )
+            return False
+
+        # Take a slot before spending anything on setup. The global fuzzer is
+        # started first, before this worker's POV agents ask for theirs, so it
+        # is the one that gets a slot when the task is near its ceiling.
+        if not self.budget.acquire(self._slot("global"), kind="global fuzzer"):
+            logger.warning(
+                f"[{self.worker_id}] Global fuzzer not started: the task is at "
+                f"its limit of {self.budget.limit} concurrent fuzzers"
             )
             return False
 
@@ -190,6 +216,7 @@ class FuzzerManager:
                 f"[{self.worker_id}] └─────────────────────────────────────────┘"
             )
         else:
+            self.budget.release(self._slot("global"))
             logger.error(f"[{self.worker_id}] ❌ GLOBAL FUZZER FAILED TO START")
 
         return success
@@ -198,6 +225,7 @@ class FuzzerManager:
         """Stop the Global Fuzzer."""
         if self.global_fuzzer:
             await self.global_fuzzer.stop()
+            self.budget.release(self._slot("global"))
             self.crash_monitor.remove_watch_dir(self.worker_id, "global")
 
             # Remove .active marker
@@ -302,6 +330,24 @@ class FuzzerManager:
             )
             return False
 
+        running = sum(1 for f in self.sp_fuzzers.values() if f.is_running())
+        if running >= self.sp_config.max_count:
+            logger.info(
+                f"[{self.worker_id}] SP fuzzer for {sp_id[:8]} skipped: this "
+                f"worker already runs {running} of them"
+            )
+            return False
+
+        # An SP fuzzer is a bonus alongside the POV agent, not a requirement:
+        # when the task is at its ceiling the agent runs without one, which is
+        # why the caller treats False as "carry on" rather than as an error.
+        if not self.budget.acquire(self._slot(sp_id), kind="SP fuzzer"):
+            logger.info(
+                f"[{self.worker_id}] SP fuzzer for {sp_id[:8]} skipped: the task "
+                f"is at its limit of {self.budget.limit} concurrent fuzzers"
+            )
+            return False
+
         # Create directories for this SP
         sp_corpus_dir = self.sp_base_dir / sp_id / "corpus"
         sp_crashes_dir = self.sp_base_dir / sp_id / "crashes"
@@ -347,6 +393,7 @@ class FuzzerManager:
                 f"[{self.worker_id}] ▶ SP FUZZER STARTED: {sp_id[:8]} (total: {len(self.sp_fuzzers)})"
             )
         else:
+            self.budget.release(self._slot(sp_id))
             logger.error(f"[{self.worker_id}] ❌ SP FUZZER FAILED: {sp_id[:8]}")
 
         return success
@@ -362,6 +409,7 @@ class FuzzerManager:
             return
 
         await self.sp_fuzzers[sp_id].stop()
+        self.budget.release(self._slot(sp_id))
         self.crash_monitor.remove_watch_dir(self.worker_id, sp_id)
 
         # Remove .active marker
