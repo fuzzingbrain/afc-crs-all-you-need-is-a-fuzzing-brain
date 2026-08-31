@@ -27,6 +27,7 @@ from typing import List, Optional, Dict, Any, Tuple, Set
 from loguru import logger
 
 from . import tools_mcp
+from ..core.docker_limits import docker_resource_args
 
 
 @dataclass
@@ -259,6 +260,7 @@ def run_coverage_fuzzer(
                 "linux/amd64",
                 "--entrypoint",
                 "",
+                *docker_resource_args(memory_mb=4096, cpus=1),
                 "-e",
                 "FUZZING_ENGINE=libfuzzer",
                 "-e",
@@ -284,6 +286,7 @@ def run_coverage_fuzzer(
                 "--rm",
                 "--platform",
                 "linux/amd64",
+                *docker_resource_args(memory_mb=4096, cpus=1),
                 "-e",
                 "FUZZING_ENGINE=libfuzzer",
                 "-e",
@@ -346,6 +349,7 @@ def run_coverage_fuzzer(
                 "--rm",
                 "--platform",
                 "linux/amd64",
+                *docker_resource_args(memory_mb=4096, cpus=1),
                 "-v",
                 f"{out_dir.absolute()}:/out",
                 "-v",
@@ -571,6 +575,7 @@ def run_gdb_trace(
             "--rm",
             "--platform",
             "linux/amd64",
+            *docker_resource_args(memory_mb=4096, cpus=1),
             "--cap-add=SYS_PTRACE",
             "--security-opt",
             "seccomp=unconfined",

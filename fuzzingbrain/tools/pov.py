@@ -31,6 +31,7 @@ from .coverage import (
     parse_lcov,
     get_coverage_context,
 )
+from ..core.docker_limits import docker_resource_args
 from ..core.models import POV
 from ..core.pov_packager import POVPackager
 from ..core.utils import generate_id
@@ -1315,6 +1316,7 @@ def _run_fuzzer_docker(
             "linux/amd64",
             "--entrypoint",
             "",  # Bypass base-runner's entrypoint script
+            *docker_resource_args(memory_mb=4096, cpus=1),
             "-e",
             "FUZZING_ENGINE=libfuzzer",
             "-e",
