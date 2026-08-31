@@ -29,8 +29,8 @@ class Agent:
     turned off by a zero. Which one binds is the operator's choice: leave steps
     and tokens off and the wall clock is the real limit; set a step or token
     ceiling and it caps a run that would otherwise read forever on a large
-    target. A step cap that fires before the wall clock is what cut the first
-    libpng run off mid-exploration — so none of them defaults to a value that
+    target. A step cap that fires before the wall clock is what cut an early
+    run off mid-exploration — so none of them defaults to a value that
     guillotines a run the time budget would still allow.
     """
 

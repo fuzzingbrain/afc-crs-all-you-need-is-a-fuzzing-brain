@@ -37,7 +37,7 @@ gates:
     concrete bytes and lengths the path requires, so you are not guessing which
     bytes matter. Computed from the source, not a model's opinion.
   params:
-    func: "the target function name, e.g. cupsUTF8ToCharset"
+    func: "the target function name (one from the worklist above)"
 
 reached:
   description: >
@@ -49,3 +49,14 @@ reached:
     pick a next target that is somewhere different.
   params:
     stack: "the sanitizer/JVM stack text from the crash"
+
+diversify:
+  description: >
+    Deterministic Furthest-Point-First target picker. Give it the functions
+    where you have already found distinct crashes (comma-separated) and it
+    returns the reachable sinks that are FURTHEST from them in the call
+    structure -- the targets most likely to be a genuinely different fault, so
+    your next crash lands somewhere new. Call it after each crash to choose where
+    to go next; with no argument it returns the nearest-first worklist.
+  params:
+    cracked: "comma-separated function names where you already found crashes"

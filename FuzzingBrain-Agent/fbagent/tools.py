@@ -124,10 +124,36 @@ def reached(stack: str) -> str:
         return f"error: reached failed: {e}"
 
 
+def diversify(cracked: str = "") -> str:
+    """Deterministic Furthest-Point-First: given the functions where you already
+    found distinct crashes (comma-separated), return the reachable sinks that are
+    *furthest* from them in the call structure -- the next targets most likely to
+    be a different fault. With none given, returns the nearest-first worklist."""
+    from . import analysis, frontier
+    try:
+        ctx = analysis.build(WORKSPACE)
+        if not ctx.entry:
+            return "no entry point; cannot rank targets."
+        names = [x.strip() for x in cracked.replace(";", ",").split(",") if x.strip()]
+        far = frontier.furthest_first(ctx, names)
+        if not far:
+            return "no reachable sinks to suggest."
+        head = ("Furthest reachable sinks from what you already cracked "
+                f"({', '.join(names)}), most-different first:" if names
+                else "Reachable sinks, nearest-first (no crashes recorded yet):")
+        lines = [head]
+        for i, s in enumerate(far, 1):
+            lines.append(f"{i:2}. [{s.klass}] {s.func}  ({s.file}:{s.line}, dist {s.distance})")
+            lines.append(f"      {s.why}")
+        return "\n".join(lines)
+    except Exception as e:  # noqa: BLE001
+        return f"error: diversify failed: {e}"
+
+
 # ------------------------------------------------------------------ dispatch + schemas
 
 _IMPL = {"read": read_file, "glob": glob_files, "grep": grep, "bash": bash,
-         "gates": gates, "reached": reached}
+         "gates": gates, "reached": reached, "diversify": diversify}
 
 
 def run_tool(name: str, args: dict) -> tuple[str, bool]:
@@ -189,4 +215,5 @@ SCHEMAS = [
     _schema("bash", {"command": {"type": "string"}}, ["command"]),
     _schema("gates", {"func": {"type": "string"}}, ["func"]),
     _schema("reached", {"stack": {"type": "string"}}, ["stack"]),
+    _schema("diversify", {"cracked": {"type": "string"}}, []),
 ]

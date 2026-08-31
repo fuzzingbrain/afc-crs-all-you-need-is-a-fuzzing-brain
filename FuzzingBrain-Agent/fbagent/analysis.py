@@ -75,9 +75,37 @@ def discover(root: Path) -> tuple[list[Path], str]:
             java.append(p)
         if len(c) + len(java) > _MAX_FILES:
             break
-    lang = "java" if len(java) > len(c) else "c"
+    # Language is decided by which harness entry symbol actually appears, not by
+    # file count: a project that ships both C++ and Java  is classified
+    # by the harness it is fuzzed through, so the sink patterns match the code the
+    # entry reaches. Fall back to the file-count majority when no entry is found.
+    lang = _lang_from_entry(c, java)
+    if lang is None:
+        lang = "java" if len(java) > len(c) else "c"
     files = (java if lang == "java" else c) + (c if lang == "java" else java)
     return files[:_MAX_FILES], lang
+
+
+_C_ENTRY = re.compile(r"\bLLVMFuzzerTestOneInput\b")
+_JAVA_ENTRY = re.compile(r"\bfuzzerTestOneInput\b|com\.code_intelligence\.jazzer")
+
+
+def _lang_from_entry(c: list[Path], java: list[Path]) -> str | None:
+    """'c' or 'java' from whichever fuzz entry symbol appears in a harness file,
+    or None if neither is found. Harness-looking files are scanned first, cheaply."""
+    def rank(p: Path) -> int:
+        s = str(p).lower()
+        return 0 if ("harness" in s or "fuzz" in s) else 1
+    for p in sorted(c + java, key=rank)[:60]:
+        try:
+            text = p.read_text(errors="replace")
+        except Exception:
+            continue
+        if _C_ENTRY.search(text):
+            return "c"
+        if _JAVA_ENTRY.search(text):
+            return "java"
+    return None
 
 
 # --------------------------------------------------------------- function segmentation
@@ -513,6 +541,17 @@ def build(root: Path, use_clang: bool = False) -> Context:
 
     entry = cg.entry()
     dist = cg.distances(entry) if entry else {}
+    # Recursion/call-cycle sinks: a stack overflow the token pre-screen cannot see,
+    # read straight off the reachable graph (P-recursion). Folded into the sink
+    # list so it flows through the same reachability filter and ranking below.
+    if entry:
+        for cyc in cg.cycles(set(dist)):
+            rep = cyc[0]
+            file_rel, line = cg.where.get(rep, ("?", 0))
+            kind = "self-recursion" if len(cyc) == 1 else f"recursion cycle of {len(cyc)}"
+            ring = " -> ".join(cyc + [cyc[0]]) if len(cyc) > 1 else f"{rep} -> {rep}"
+            sinks.append(Sink(func=rep, file=file_rel, line=line, klass="stack-overflow",
+                              why=f"{kind}: {ring[:80]}"))
     reach: list[Sink] = []
     seen = set()
     for s in sinks:

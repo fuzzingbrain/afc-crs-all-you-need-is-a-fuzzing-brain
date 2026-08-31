@@ -41,11 +41,13 @@ def _opening_with_recon() -> str:
                 "challenge has already been run for you. Treat it as a computed "
                 "worklist of where to look -- not as confirmed bugs.\n\n"
                 + out["summary"]
-                + "\n\nTwo deterministic tools back this up: `gates <func>` gives "
+                + "\n\nThree deterministic tools back this up: `gates <func>` gives "
                 "the literal input constraints (magic bytes, lengths) on the path "
                 "to a function, so you can build a seed that reaches it; `reached "
                 "<stack>` maps a crash stack back onto this graph so you know "
-                "where your input actually went. Use them.\n\n"
+                "where your input actually went; `diversify <crashed funcs>` names "
+                "the reachable sinks furthest from what you already cracked, so your "
+                "next crash is a different one. Use them.\n\n"
                 "--- your task ---\n" + OPENING)
     except Exception:
         pass

@@ -12,10 +12,12 @@ Your working directory is the challenge:
 - `bench.yaml` — language, sanitizer, harness invocation.
 - `./submit <file>` — runs the harness on a file and tells you what happened.
   This is the only judge that matters; a theory you have not run is a guess.
-  On a crash it tells you whether the fault is **NEW** (a distinct fault, newly
-  recorded) or a **DUPLICATE** of one you already found, and the running count of
-  distinct faults. Only NEW faults score. Read that tag every time: a DUPLICATE
-  means stop refining this input and go find a different fault.
+  On a crash it reports the sanitizer's fault class and the top of the stack —
+  where your input landed. It does **not** tell you whether a crash is new or a
+  repeat; that is yours to judge, by comparing this stack to the ones you have
+  already produced. Two crashes with different fault classes or different
+  crashing functions are distinct; the same class in the same place is the same
+  fault, and refining it further scores nothing — move somewhere else.
 
 Tools: `read`, `glob`, `grep`, `bash`, and two deterministic helpers built on a
 static analysis that has already been run for you:
@@ -29,6 +31,10 @@ static analysis that has already been run for you:
   in this project's own code and its call-graph distance from the entry: where
   your input actually went, mapped onto the graph. Use it after a crash to know
   what you hit and to aim the next attempt somewhere different.
+- `diversify <cracked funcs>` — after a crash, pass the functions you have already
+  crashed and it returns the reachable sinks *furthest* from them in the call
+  structure: the next targets most likely to be a genuinely different fault, so
+  you spend the budget on distinct crashes rather than re-finding one.
 
 Your first message already carries a deterministic worklist: the sinks the
 harness can reach, ranked by call-graph distance from the entry. Start from it —
@@ -62,18 +68,19 @@ Finding a bug does not mean you are done. A harness usually reaches more than on
 fault — different bugs at different places, of different kinds. A crash is a
 finding to record and move past, not a reason to stop.
 
-So when `./submit` reports a **NEW** crash: note the input that caused it, what
-the fault is, and where in the source it happens — then keep going. Look for a
+So when `./submit` reports a crash: note the input that caused it, the fault
+class, and the crashing function from the stack — then keep going. Look for a
 *different* crash: another location, another kind of fault, a different path
-through the code. When `./submit` reports a **DUPLICATE**, you have re-found a
-fault you already have — it scores nothing, so do not keep tuning that input;
-move to a different region of the code. A crash at a new place is what counts.
-Read on, form the next hypothesis, build the next input.
+through the code. If your next crash has the same fault class in the same
+function as one you already have, it is the same fault — it scores nothing, so
+stop tuning that input and move to a different region of the code. A crash at a
+new place, or of a new kind, is what counts. Read on, form the next hypothesis,
+build the next input.
 
-A good habit after each new fault: name the two or three *other* places in the
-code the harness reaches that could fault for a different reason, and go at the
-one furthest from what you have already cracked. That is how you reach several
-distinct faults instead of circling one.
+A good habit after each crash: call `diversify` with the functions you have
+already crashed — it names the reachable sinks furthest from them in the call
+structure — and go at the one furthest from what you have already cracked. That
+is how you reach several distinct faults instead of circling one.
 
 Stop only when you have genuinely run out of distinct faults to reach — when you
 have read the code the harness touches and can no longer name a plausible next
