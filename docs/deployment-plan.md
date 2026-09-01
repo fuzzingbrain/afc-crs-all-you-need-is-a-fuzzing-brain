@@ -19,7 +19,7 @@ Host Machine (bare metal / Azure VM)
 │   ├── Eval Server (FastAPI, port 18080)         ← FBv2-Dashboard
 │   └── Eval Dashboard (FastAPI + static, port 18081) ← FBv2-Dashboard
 ├── Docker daemon
-│   ├── mongo:8.0 container        (auto-started, port 27017)
+│   ├── mongo:8.2 container        (auto-started, port 27017)
 │   ├── redis:7-alpine container   (auto-started, port 6379)
 │   └── gcr.io/oss-fuzz/* containers (fuzzer 构建 & 执行)
 └── Local filesystem
