@@ -975,7 +975,7 @@ class FuzzerMonitor:
     def _is_duplicate(self, crash_hash: str) -> bool:
         """Check if crash hash is already known."""
         with self._lock:
-            return crash_hash in self.known_crashes
+            return crash_hash in self.known_signatures
 
     def get_crash_count(self) -> int:
         """Get total number of unique crashes found."""
@@ -1038,7 +1038,7 @@ class FuzzerMonitor:
 
             return {
                 "total_crashes": len(self.crash_records),
-                "unique_hashes": len(self.known_crashes),
+                "unique_hashes": len(self.known_signatures),
                 "watched_directories": len(self.watch_dirs),
                 "by_worker": by_worker,
                 "by_source": by_source,
