@@ -21,7 +21,7 @@ from fbagent.llm import LLM
 from fbagent.prompts import OPENING, SYSTEM
 
 
-def _opening_with_recon() -> str:
+def _opening_with_recon(recon: list | None = None) -> str:
     """The opening message, with the deterministic recon prepended.
 
     Before the model reads a line, the static substrate (analysis.py) has already
@@ -30,11 +30,15 @@ def _opening_with_recon() -> str:
     distance. That worklist is handed to the model up front so it starts from a
     computed set of targets instead of an unguided read. A failure here never
     stops the run -- the model just gets the plain opening and reads for itself.
+
+    `recon`, if given, is filled with the generation trace (how the worklist was
+    computed — files scanned, entry found or not, graph size, reachability) so a
+    reader can audit not just the worklist but how it was produced.
     """
     from pathlib import Path
     try:
         from fbagent import analysis
-        out = analysis.analyze(Path.cwd())
+        out = analysis.analyze(Path.cwd(), recon=recon)
         if out.get("entry") and out.get("reachable_sinks"):
             return (
                 "Before you start, a deterministic static analysis of this "
@@ -49,8 +53,9 @@ def _opening_with_recon() -> str:
                 "the reachable sinks furthest from what you already cracked, so your "
                 "next crash is a different one. Use them.\n\n"
                 "--- your task ---\n" + OPENING)
-    except Exception:
-        pass
+    except Exception as e:
+        if recon is not None:
+            recon.append({"kind": "recon", "phase": "error", "note": repr(e)})
     return OPENING
 
 
@@ -124,14 +129,18 @@ def main() -> int:
                   max_tokens=args.max_tokens, max_usd=args.max_usd,
                   deadline_s=args.timeout)
 
-    opening = _opening_with_recon()
+    recon: list = []
+    opening = _opening_with_recon(recon)
     result = agent.run(opening)
 
-    # The complete trajectory: the system prompt, the opening with its injected
-    # recon worklist, and every step un-truncated. Leads with the two things a
-    # compact trace drops but a reader needs to stand where the agent stood.
-    records = [{"step": 0, "kind": "system", "text": SYSTEM},
-               {"step": 0, "kind": "opening", "text": opening}]
+    # The complete trajectory: the system prompt, then the recon generation trace
+    # (how the worklist was computed — files, entry, graph, reachability), then
+    # the opening the model actually saw, then every step un-truncated. Leading
+    # with system + recon + opening is what lets a reader audit not just what the
+    # agent did but the ground it was handed and how that ground was produced.
+    records = [{"step": 0, "kind": "system", "text": SYSTEM}]
+    records += recon
+    records += [{"step": 0, "kind": "opening", "text": opening}]
     records += agent.trace(max_chars=20000)
 
     # The agent's own archive — like Claude Code's session store, it is the

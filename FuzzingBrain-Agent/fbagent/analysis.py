@@ -498,19 +498,38 @@ class Context:
 _CTX_CACHE: dict[tuple[str, bool], Context] = {}
 
 
-def build(root: Path, use_clang: bool = False) -> Context:
+def build(root: Path, use_clang: bool = False, recon: list | None = None) -> Context:
     """Discover source, segment functions, build the call graph and sink list,
     compute reachability from the entry. Cached per (root, use_clang) so the
     recon pass and the reached/gates tools share one graph. clang refinement is
-    off by default: the lexical graph is ~20x faster and enough for ranking."""
+    off by default: the lexical graph is ~20x faster and enough for ranking.
+
+    If `recon` is a list, the generation is *traced* into it — one record per
+    phase (discover, entry, graph, sinks, reachability) — so how the worklist was
+    computed is auditable, not just its result. This is what exposes a dead
+    substrate: a harness whose entry was never found, or a project with several
+    LLVMFuzzerTestOneInput definitions that get conflated."""
+    import time as _time
     key = (str(Path(root).resolve()), use_clang)
     if key in _CTX_CACHE:
         return _CTX_CACHE[key]
     root = Path(root)
+    t0 = _time.time()
     files, lang = discover(root)
+
+    def _rec(phase, **kw):
+        if recon is not None:
+            recon.append({"kind": "recon", "phase": phase,
+                          "t_ms": round((_time.time() - t0) * 1000), **kw})
+
+    harnessish = [str(p.relative_to(root)) for p in files
+                  if "harness" in str(p).lower() or "fuzz" in str(p).lower()][:8]
+    _rec("discover", files=len(files), lang=lang, harness_files=harnessish)
+
     cg = CallGraph()
     sinks: list[Sink] = []
     span: dict[str, tuple[str, int, int]] = {}
+    entry_defs: list[str] = []           # every file that defines a fuzz entry
     patterns = _JAVA_SINKS if lang == "java" else _C_SINKS
     include_dirs = _guess_includes(root, files) if lang == "c" else []
 
@@ -525,21 +544,42 @@ def build(root: Path, use_clang: bool = False) -> Context:
         for name, hline, bstart, bend in _segment_functions(text):
             cg.add_def(name, rel, hline)
             span.setdefault(name, (rel, bstart, bend))
+            if name in _ENTRIES:
+                entry_defs.append(f"{rel}:{hline}")
             body = text[bstart:bend]
             for callee in _calls_in(body):
                 cg.add_edge(name, callee)
             base_line = text.count("\n", 0, bstart) + 1
             sinks += _sinks_in(name, rel, hline, body, base_line, patterns)
 
+    clang_used = 0
     if use_clang and lang == "c":
         for p in _clang_targets(files, root):
             edges = _clang_calls(p, include_dirs)
             if edges:
+                clang_used += 1
                 for a, bs in edges.items():
                     for b in bs:
                         cg.add_edge(a, b)
+    _rec("graph", functions=len(cg.edges),
+         edges=sum(len(v) for v in cg.edges.values()), clang_files=clang_used)
+    _rec("sinks", candidates=len(sinks))
 
     entry = cg.entry()
+    if not entry:
+        _rec("entry", found=None, definitions=entry_defs,
+             note=("no fuzz entry point found — searched for "
+                   + "/".join(_ENTRIES)
+                   + (". Harness files were seen but none defined it "
+                      "(a .c.in template or an unusual entry macro is the usual cause)."
+                      if harnessish else ". No harness-looking file was even discovered.")))
+    else:
+        _rec("entry", found=entry, definitions=entry_defs,
+             callees=sorted(cg.edges.get(entry, ()))[:16],
+             note=(f"{len(entry_defs)} definition(s) of a fuzz entry in the tree"
+                   + ("  ⚠ several harnesses — the graph may conflate them, and the "
+                      "entry's callees can belong to the wrong harness."
+                      if len(entry_defs) > 1 else ".")))
     dist = cg.distances(entry) if entry else {}
     # Recursion/call-cycle sinks: a stack overflow the token pre-screen cannot see,
     # read straight off the reachable graph (P-recursion). Folded into the sink
@@ -567,6 +607,10 @@ def build(root: Path, use_clang: bool = False) -> Context:
     reach.sort(key=lambda s: (s.distance, s.file, s.line))
     for s in reach:
         s.path = cg.path_to(entry, s.func, dist) if entry else []
+    _rec("reachability", reachable_from_entry=len(dist), worklist_sinks=len(reach),
+         note=("empty worklist — the substrate produced no guidance; the agent "
+               "reads unaided." if not reach else
+               f"top target: {reach[0].func} ({reach[0].klass}, dist {reach[0].distance})"))
 
     ctx = Context(root=root, lang=lang, entry=entry, files=len(files),
                   cg=cg, dist=dist, reach=reach, span=span)
@@ -576,10 +620,12 @@ def build(root: Path, use_clang: bool = False) -> Context:
     return ctx
 
 
-def analyze(root: Path, use_clang: bool = False, max_sinks: int = 40) -> dict:
+def analyze(root: Path, use_clang: bool = False, max_sinks: int = 40,
+            recon: list | None = None) -> dict:
     """Build the worklist. Returns a dict with the ranked reachable sinks and a
-    human summary the agent reads at recon time."""
-    ctx = build(Path(root), use_clang=use_clang)
+    human summary the agent reads at recon time. If `recon` is a list, the
+    generation trace is appended to it (see build())."""
+    ctx = build(Path(root), use_clang=use_clang, recon=recon)
     if not ctx.entry:
         return {"lang": ctx.lang, "entry": None, "files": ctx.files,
                 "reachable_sinks": [], "summary":
