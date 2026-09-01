@@ -168,6 +168,8 @@ See [`examples/`](examples/) for runnable configurations of each mode.
 | Symptom | Fix |
 |---|---|
 | `.env file created … add your API keys` | Edit `.env`, add a key, re-run |
+| `API key was rejected by its provider` | The key is revoked/rotated/wrong account. Replace it in `.env`. A scan refuses to start rather than build for 10 minutes and report 0 PoVs |
+| Need to run without a working key | `FUZZINGBRAIN_SKIP_KEY_CHECK=1` skips the preflight; `--api` / `--mcp` already start without one |
 | Fuzzer build fails immediately | The target doesn't match its OSS-Fuzz build script; pin a commit with `-v`, or pick a build-ready target |
 | `docker: permission denied` | Add your user to the `docker` group, or run with sufficient privileges |
 | Dependencies re-install on every run | The hash in `venv/.deps_installed` no longer matches `requirements.txt` — expected after editing it. Delete that file to force a reinstall on purpose |

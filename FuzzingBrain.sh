@@ -512,6 +512,122 @@ setup_venv() {
     return 0
 }
 
+# =============================================================================
+# API Key Preflight
+# =============================================================================
+
+# Read one variable out of .env without sourcing it.
+read_env_var() {
+    local name="$1"
+    local file="$SCRIPT_DIR/.env"
+    [ -f "$file" ] || return 0
+    sed -n "s/^[[:space:]]*${name}[[:space:]]*=[[:space:]]*//p" "$file" \
+        | tail -n 1 \
+        | sed -e 's/^"\(.*\)"$/\1/' -e "s/^'\(.*\)'\$/\1/" -e 's/[[:space:]]*$//'
+}
+
+# HTTP status from the provider's model-list endpoint. 000 = request could not
+# be made (offline, no curl); that is not a bad key.
+probe_key_status() {
+    local provider="$1" key="$2"
+    command -v curl >/dev/null 2>&1 || { echo "000"; return 0; }
+    case "$provider" in
+        anthropic)
+            curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                 https://api.anthropic.com/v1/models \
+                 -H "x-api-key: $key" -H "anthropic-version: 2023-06-01" 2>/dev/null
+            ;;
+        openai)
+            curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                 https://api.openai.com/v1/models \
+                 -H "Authorization: Bearer $key" 2>/dev/null
+            ;;
+        gemini)
+            curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+                 "https://generativelanguage.googleapis.com/v1beta/models?key=$key" 2>/dev/null
+            ;;
+        *)  echo "000" ;;
+    esac
+}
+
+# Fatal only on 401/403 for every configured key; unreachable providers,
+# KEY_CHECK_MODE=lenient and FUZZINGBRAIN_SKIP_KEY_CHECK=1 all continue.
+check_api_keys() {
+    if [ "${FUZZINGBRAIN_SKIP_KEY_CHECK:-0}" = "1" ]; then
+        print_warn "Skipping API key check (FUZZINGBRAIN_SKIP_KEY_CHECK=1)"
+        return 0
+    fi
+
+    local strict="${KEY_CHECK_MODE:-strict}"
+
+    if [ ! -f "$SCRIPT_DIR/.env" ]; then
+        if [ -f "$SCRIPT_DIR/.env.example" ]; then
+            cp "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env"
+            print_error ".env file created from .env.example"
+            print_error "Please edit $SCRIPT_DIR/.env and add an API key, then re-run."
+        else
+            print_error ".env file not found and no .env.example available"
+        fi
+        if [ "$strict" = "strict" ]; then
+            return 1
+        fi
+        return 0
+    fi
+
+    local names=("ANTHROPIC_API_KEY" "OPENAI_API_KEY" "GEMINI_API_KEY")
+    local providers=("anthropic" "openai" "gemini")
+    local configured=0 valid=0 unverified=0
+    local i name provider key status
+
+    for i in 0 1 2; do
+        name="${names[$i]}"
+        provider="${providers[$i]}"
+        key="${!name}"
+        [ -n "$key" ] || key="$(read_env_var "$name")"
+        [ -n "$key" ] || continue
+        configured=$((configured + 1))
+        status="$(probe_key_status "$provider" "$key")"
+        case "$status" in
+            2*)
+                valid=$((valid + 1))
+                print_info "$name: valid"
+                ;;
+            401|403)
+                if [ "$strict" = "strict" ]; then
+                    print_error "$name: rejected by $provider (HTTP $status) - revoked, rotated, or wrong account"
+                else
+                    print_warn "$name: rejected by $provider (HTTP $status) - tasks using it will fail"
+                fi
+                ;;
+            *)
+                unverified=$((unverified + 1))
+                print_warn "$name: could not be verified (HTTP $status) - continuing"
+                ;;
+        esac
+    done
+
+    if [ "$configured" -eq 0 ]; then
+        print_error "No LLM API key configured"
+        print_error "Set ANTHROPIC_API_KEY, OPENAI_API_KEY or GEMINI_API_KEY in $SCRIPT_DIR/.env"
+        if [ "$strict" = "strict" ]; then
+            return 1
+        fi
+        print_warn "Starting anyway, but every task will fail until a key is set"
+        return 0
+    fi
+
+    if [ "$valid" -eq 0 ] && [ "$unverified" -eq 0 ]; then
+        if [ "$strict" = "strict" ]; then
+            print_error "Every configured API key was rejected by its provider - nothing would run"
+            print_error "Fix the key in $SCRIPT_DIR/.env, or set FUZZINGBRAIN_SKIP_KEY_CHECK=1 to bypass"
+            return 1
+        fi
+        print_warn "Every configured API key was rejected - starting anyway, but every task will fail"
+    fi
+
+    return 0
+}
+
 check_environment() {
     print_step "Checking environment..."
 
@@ -519,6 +635,7 @@ check_environment() {
 
     check_python || checks_passed=false
     check_docker || checks_passed=false
+    check_api_keys || checks_passed=false
 
     if [ "$checks_passed" = false ]; then
         print_error "Environment check failed"
@@ -543,18 +660,8 @@ check_environment() {
 # =============================================================================
 
 docker_setup() {
-    # Check .env file
-    if [ ! -f "$SCRIPT_DIR/.env" ]; then
-        if [ -f "$SCRIPT_DIR/.env.example" ]; then
-            cp "$SCRIPT_DIR/.env.example" "$SCRIPT_DIR/.env"
-            print_error ".env file created from .env.example"
-            print_error "Please edit $SCRIPT_DIR/.env and add your API keys, then re-run."
-            exit 1
-        else
-            print_error ".env file not found and no .env.example available"
-            exit 1
-        fi
-    fi
+    # Same preflight as the local path.
+    check_api_keys || exit 1
 
     # Build image: force rebuild with --rebuild, or auto-build on first run
     if [ "$DOCKER_REBUILD" = true ]; then
@@ -689,6 +796,8 @@ show_usage() {
 # =============================================================================
 
 IN_PLACE=false
+# strict = scan (needs a key); lenient = server (may start without one).
+KEY_CHECK_MODE="strict"
 DOCKER_MODE=false
 DOCKER_REBUILD=false
 OSS_FUZZ_PROJECT=""
@@ -847,6 +956,7 @@ show_banner
 # CASE 0a: MCP Mode (explicit --mcp flag)
 # =============================================================================
 if [ "$MCP_MODE" = true ]; then
+    KEY_CHECK_MODE="lenient"
     print_info "Starting MCP Server mode..."
     echo ""
     print_step "Starting FuzzingBrain MCP Server..."
@@ -864,6 +974,7 @@ fi
 # CASE 0b: No arguments or --api - REST API Server Mode (default)
 # =============================================================================
 if [ $# -eq 0 ] || [ "$API_MODE" = true ]; then
+    KEY_CHECK_MODE="lenient"
     print_info "Starting REST API Server mode (default)..."
     echo ""
     print_step "Starting FuzzingBrain REST API Server..."
