@@ -26,7 +26,7 @@ def test_language_from_entry_c(tmp_path: Path):
     jd = tmp_path / "j"; jd.mkdir()
     for i in range(5):
         (jd / f"K{i}.java").write_text("class K{ int x; }\n")
-    _, lang = analysis.discover(tmp_path)
+    _, lang, _ = analysis.discover(tmp_path)
     assert lang == "c", "C harness entry must win over java file count"
 
 
@@ -34,7 +34,7 @@ def test_language_from_entry_java(tmp_path: Path):
     (tmp_path / "H.java").write_text(
         "public class H { public static void fuzzerTestOneInput(byte[] d){ parse(d); } }\n")
     (tmp_path / "P.java").write_text("class P { static void parse(byte[] d){} }\n")
-    _, lang = analysis.discover(tmp_path)
+    _, lang, _ = analysis.discover(tmp_path)
     assert lang == "java"
 
 

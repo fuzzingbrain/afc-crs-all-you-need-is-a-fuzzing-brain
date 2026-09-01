@@ -59,11 +59,33 @@ class Sink:
 
 # --------------------------------------------------------------- source discovery
 
-def discover(root: Path) -> tuple[list[Path], str]:
-    """Source files under root, and the dominant language ('c' or 'java')."""
+# Source suffixes, plus the OSS-Fuzz template harnesses (`.c.in`, `.cc.in`, ...)
+# that a build step fills in — the given harness is sometimes one of these.
+_TEMPLATE_SUFFIX = tuple(e + ".in" for e in (".c", ".cc", ".cpp", ".cxx", ".h", ".hpp"))
+
+
+def _is_source(p: Path) -> bool:
+    n = p.name.lower()
+    return p.suffix.lower() in (_C_EXT | _JAVA_EXT) or n.endswith(_TEMPLATE_SUFFIX)
+
+
+def discover(root: Path) -> tuple[list[Path], str, set[str]]:
+    """Source files under root, the language, and the set of *given harness*
+    files. The challenge hands us ONE harness in `harness/` (bench.yaml names it);
+    the goal is a bug on that harness, not on the dozens of other fuzzers a big
+    project ships in `src/`. So the harness files come first and whole -- never
+    dropped by the file cap, and templates (`.c.in`) included -- and the caller
+    roots the graph on them, ignoring every other LLVMFuzzerTestOneInput in the
+    tree. Without this, a project like systemd (51 fuzzers) conflates them all."""
+    hdir = root / "harness"
+    harness_paths = [p for p in sorted(hdir.rglob("*"))
+                     if p.is_file() and _is_source(p)] if hdir.is_dir() else []
+    hset = set(harness_paths)
+    harness_rels = {str(p.relative_to(root)) for p in harness_paths}
+
     c, java = [], []
     for p in root.rglob("*"):
-        if not p.is_file():
+        if not p.is_file() or p in hset:
             continue
         rel = str(p.relative_to(root))
         if _SKIP_DIR.search("/" + rel):
@@ -75,15 +97,14 @@ def discover(root: Path) -> tuple[list[Path], str]:
             java.append(p)
         if len(c) + len(java) > _MAX_FILES:
             break
-    # Language is decided by which harness entry symbol actually appears, not by
-    # file count: a project that ships both C++ and Java  is classified
-    # by the harness it is fuzzed through, so the sink patterns match the code the
-    # entry reaches. Fall back to the file-count majority when no entry is found.
-    lang = _lang_from_entry(c, java)
+    # Language: the harness's own entry symbol decides it (mixed C++/Java trees),
+    # falling back to the file-count majority when no entry is found.
+    lang = _lang_from_entry(harness_paths + c, harness_paths + java)
     if lang is None:
         lang = "java" if len(java) > len(c) else "c"
-    files = (java if lang == "java" else c) + (c if lang == "java" else java)
-    return files[:_MAX_FILES], lang
+    body = (java if lang == "java" else c) + (c if lang == "java" else java)
+    files = harness_paths + body[:_MAX_FILES]   # harness first, always kept
+    return files, lang, harness_rels
 
 
 _C_ENTRY = re.compile(r"\bLLVMFuzzerTestOneInput\b")
@@ -515,21 +536,23 @@ def build(root: Path, use_clang: bool = False, recon: list | None = None) -> Con
         return _CTX_CACHE[key]
     root = Path(root)
     t0 = _time.time()
-    files, lang = discover(root)
+    files, lang, harness_rels = discover(root)
 
     def _rec(phase, **kw):
         if recon is not None:
             recon.append({"kind": "recon", "phase": phase,
                           "t_ms": round((_time.time() - t0) * 1000), **kw})
 
-    harnessish = [str(p.relative_to(root)) for p in files
-                  if "harness" in str(p).lower() or "fuzz" in str(p).lower()][:8]
-    _rec("discover", files=len(files), lang=lang, harness_files=harnessish)
+    _rec("discover", files=len(files), lang=lang,
+         given_harness=sorted(harness_rels) or None,
+         note=("no harness/ directory was staged — falling back to the whole tree"
+               if not harness_rels else None))
 
     cg = CallGraph()
     sinks: list[Sink] = []
     span: dict[str, tuple[str, int, int]] = {}
-    entry_defs: list[str] = []           # every file that defines a fuzz entry
+    entry_defs: list[str] = []           # entry defs IN the given harness
+    foreign_entries = 0                  # other fuzzers' entries, ignored
     patterns = _JAVA_SINKS if lang == "java" else _C_SINKS
     include_dirs = _guess_includes(root, files) if lang == "c" else []
 
@@ -541,7 +564,14 @@ def build(root: Path, use_clang: bool = False, recon: list | None = None) -> Con
         except Exception:
             continue
         rel = str(p.relative_to(root))
+        is_harness = rel in harness_rels
         for name, hline, bstart, bend in _segment_functions(text):
+            # A fuzz entry defined OUTSIDE the given harness is a different
+            # fuzzer's harness (a big project ships dozens); it must not pollute
+            # our entry node or its reachable set. Skip its definition entirely.
+            if name in _ENTRIES and not is_harness:
+                foreign_entries += 1
+                continue
             cg.add_def(name, rel, hline)
             span.setdefault(name, (rel, bstart, bend))
             if name in _ENTRIES:
@@ -567,19 +597,19 @@ def build(root: Path, use_clang: bool = False, recon: list | None = None) -> Con
 
     entry = cg.entry()
     if not entry:
-        _rec("entry", found=None, definitions=entry_defs,
-             note=("no fuzz entry point found — searched for "
+        _rec("entry", found=None, definitions=entry_defs, foreign_ignored=foreign_entries,
+             note=("no fuzz entry point found in the given harness — searched for "
                    + "/".join(_ENTRIES)
-                   + (". Harness files were seen but none defined it "
-                      "(a .c.in template or an unusual entry macro is the usual cause)."
-                      if harnessish else ". No harness-looking file was even discovered.")))
+                   + (". The harness files were read but none defined it "
+                      "(an unusual entry macro?)." if harness_rels else
+                      ". No harness/ directory was staged.")))
     else:
-        _rec("entry", found=entry, definitions=entry_defs,
+        _rec("entry", found=entry, definitions=entry_defs, foreign_ignored=foreign_entries,
              callees=sorted(cg.edges.get(entry, ()))[:16],
-             note=(f"{len(entry_defs)} definition(s) of a fuzz entry in the tree"
-                   + ("  ⚠ several harnesses — the graph may conflate them, and the "
-                      "entry's callees can belong to the wrong harness."
-                      if len(entry_defs) > 1 else ".")))
+             note=(f"rooted at the given harness ({len(entry_defs)} entry def), "
+                   + (f"ignoring {foreign_entries} other fuzzer entr"
+                      f"{'y' if foreign_entries == 1 else 'ies'} in the tree."
+                      if foreign_entries else "no other fuzzers in the tree.")))
     dist = cg.distances(entry) if entry else {}
     # Recursion/call-cycle sinks: a stack overflow the token pre-screen cannot see,
     # read straight off the reachable graph (P-recursion). Folded into the sink
