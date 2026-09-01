@@ -134,17 +134,21 @@ class Agent:
         return "\n\n".join(out)
 
 
-    def trace(self, max_chars: int = 2000) -> list[dict]:
+    def trace(self, max_chars: int = 0) -> list[dict]:
         """Every step, flat, from the raw message list — the honest record.
 
         `transcript_text` above is the model's visible prose only; this is what
-        the run actually did: each tool call with its arguments, each result
-        (truncated so a big file read does not bloat the trace — the model saw
-        the whole thing, the auditor needs to see what was asked and how it came
-        back). This is what makes a run auditable, and the ground the "deepest
-        reached point" report will be built from. A tool result names its tool
-        by matching the id the call was issued under.
+        the run actually did: each tool call with its arguments and each tool
+        result in full. `max_chars <= 0` (the default) keeps every output whole —
+        the complete log, exactly what the model saw; a positive value caps each
+        field for a compact view. A tool result names its tool by matching the id
+        the call was issued under.
         """
+        def _cap(s: str) -> tuple[str, bool]:
+            if max_chars and len(s) > max_chars:
+                return s[:max_chars], True
+            return s, False
+
         records: list[dict] = []
         names: dict[str, str] = {}   # tool_use_id -> tool name
         step = 0
@@ -159,8 +163,8 @@ class Agent:
                     if kind == "text" and (b.text or "").strip():
                         records.append({"step": step, "kind": "text", "text": b.text})
                     elif kind == "thinking" and (getattr(b, "thinking", "") or "").strip():
-                        records.append({"step": step, "kind": "thinking",
-                                        "text": b.thinking[:max_chars]})
+                        txt, _ = _cap(b.thinking)
+                        records.append({"step": step, "kind": "thinking", "text": txt})
                     elif kind == "tool_use":
                         names[b.id] = b.name
                         records.append({"step": step, "kind": "tool_call",
@@ -168,12 +172,12 @@ class Agent:
             elif m["role"] == "user" and isinstance(content, list):
                 for b in content:
                     if isinstance(b, dict) and b.get("type") == "tool_result":
-                        out = str(b.get("content", ""))
+                        out, truncated = _cap(str(b.get("content", "")))
                         records.append({
                             "step": step, "kind": "tool_result",
                             "tool": names.get(b.get("tool_use_id"), "?"),
                             "is_error": bool(b.get("is_error", False)),
-                            "output": out[:max_chars],
-                            "truncated": len(out) > max_chars,
+                            "output": out,
+                            "truncated": truncated,
                         })
         return records

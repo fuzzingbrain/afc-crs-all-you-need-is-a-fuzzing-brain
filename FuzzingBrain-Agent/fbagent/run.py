@@ -141,7 +141,7 @@ def main() -> int:
     records = [{"step": 0, "kind": "system", "text": SYSTEM}]
     records += recon
     records += [{"step": 0, "kind": "opening", "text": opening}]
-    records += agent.trace(max_chars=20000)
+    records += agent.trace()          # max_chars=0 -> every tool output in full
 
     # The agent's own archive — like Claude Code's session store, it is the
     # agent's, not the harness's, and it happens for every run whatever the task:
