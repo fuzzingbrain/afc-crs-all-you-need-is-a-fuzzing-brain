@@ -54,6 +54,54 @@ def _opening_with_recon() -> str:
     return OPENING
 
 
+def _project_slug(cwd) -> str:
+    """The working directory as a flat folder name, the way Claude Code slugs a
+    project: the absolute path with every separator turned to '-'. Runs from the
+    same directory land in the same project folder, whatever the task."""
+    from pathlib import Path
+    return str(Path(cwd).resolve()).replace("/", "-").replace("\\", "-")
+
+
+def _archive(records: list, result: dict, llm, agent) -> str | None:
+    """Persist this run the way Claude Code persists a session — the agent's own
+    store, not the harness's, written for *every* run whatever the task:
+
+        ~/.fbagent/projects/<project-slug>/<session-uuid>.jsonl
+
+    one JSONL file per session, keyed by a fresh UUID, under a folder named for
+    the working directory. The first line is a meta record (model, budgets,
+    cost, outcome); the rest are the full transcript — system, opening, every
+    step. Best-effort: a failure here never fails the run, and the root is
+    overridable with FBAGENT_HOME. Returns the file path, or None on failure."""
+    import os
+    import uuid
+    from datetime import datetime, timezone
+    from pathlib import Path
+    try:
+        home = Path(os.environ.get("FBAGENT_HOME") or (Path.home() / ".fbagent"))
+        proj = home / "projects" / _project_slug(Path.cwd())
+        proj.mkdir(parents=True, exist_ok=True)
+        sid = str(uuid.uuid4())
+        meta = {"kind": "meta", "session": sid, "cwd": str(Path.cwd().resolve()),
+                "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+                "model": llm.model, "effort": getattr(llm, "effort", None),
+                "reasoning": getattr(llm, "reasoning", None),
+                "stop_reason": result.get("stop_reason"), "steps": result.get("steps"),
+                "cost_usd": round(llm.cost_usd, 4),
+                "cache_hit_rate": result.get("cache_hit_rate"), "usage": result.get("usage"),
+                "budgets": {"max_steps": agent.max_steps, "max_tokens": agent.max_tokens,
+                            "max_usd": agent.max_usd}}
+        path = proj / f"{sid}.jsonl"
+        with path.open("w") as f:
+            f.write(json.dumps(meta) + "\n")
+            for rec in records:
+                f.write(json.dumps(rec) + "\n")
+        return str(path)
+    except Exception as e:  # noqa: BLE001 — archiving must never take the run down
+        print(f"[archive] skipped: {e}", file=sys.stderr)
+        return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     # The budgets: time, steps, tokens, dollars. Any one that trips ends the
@@ -76,15 +124,27 @@ def main() -> int:
                   max_tokens=args.max_tokens, max_usd=args.max_usd,
                   deadline_s=args.timeout)
 
-    result = agent.run(_opening_with_recon())
+    opening = _opening_with_recon()
+    result = agent.run(opening)
 
-    # The full step-by-step trace, written beside the challenge in the working
-    # directory. The bench copies it out to the cell as trace.jsonl; stdout
-    # (below) stays the short human log.
+    # The complete trajectory: the system prompt, the opening with its injected
+    # recon worklist, and every step un-truncated. Leads with the two things a
+    # compact trace drops but a reader needs to stand where the agent stood.
+    records = [{"step": 0, "kind": "system", "text": SYSTEM},
+               {"step": 0, "kind": "opening", "text": opening}]
+    records += agent.trace(max_chars=20000)
+
+    # The agent's own archive — like Claude Code's session store, it is the
+    # agent's, not the harness's, and it happens for every run whatever the task:
+    # ~/.fbagent/projects/<project-slug>/<session-uuid>.jsonl.
+    session_path = _archive(records, result, llm, agent)
+
+    # The bench copies whatever the agent leaves at `.fbagent-trace.jsonl` out to
+    # the cell as trace.jsonl, so the same complete record also goes there — no
+    # bench change needed, it just preserves the file the agent already writes.
     from pathlib import Path
-    trace_path = Path.cwd() / ".fbagent-trace.jsonl"
-    with trace_path.open("w") as tf:
-        for rec in agent.trace():
+    with (Path.cwd() / ".fbagent-trace.jsonl").open("w") as tf:
+        for rec in records:
             tf.write(json.dumps(rec) + "\n")
 
     # A compact record to stdout; the bench keeps this as the agent log.
@@ -96,6 +156,7 @@ def main() -> int:
         "cost_usd": round(llm.cost_usd, 4),
         "cache_hit_rate": result["cache_hit_rate"],
         "usage": result["usage"],
+        "archived_to": session_path,
     }, indent=2))
     return 0
 

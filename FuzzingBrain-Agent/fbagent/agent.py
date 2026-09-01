@@ -133,6 +133,7 @@ class Agent:
                         out.append(b.text)
         return "\n\n".join(out)
 
+
     def trace(self, max_chars: int = 2000) -> list[dict]:
         """Every step, flat, from the raw message list — the honest record.
 
