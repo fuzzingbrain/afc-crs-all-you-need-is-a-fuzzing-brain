@@ -116,3 +116,16 @@ def test_analyze_tiny_tree(tmp_path: Path):
     assert "unreachable" not in funcs             # and the dead one is not
     g = analysis.gates_to(tmp_path, "parse")
     assert "MZ" in g                              # the magic gate is recovered
+
+
+def test_crash_frames_submit_stripped_format():
+    """The bug reached hit in the wild: ./submit prints frames as `#N func file:line`
+    (the `0x.. in` stripped). reached must parse that, not only raw ASan frames."""
+    log = ("crash: the harness faulted under the sanitizer (segv).\n"
+           "stack (where it crashed):\n"
+           "  #0 hwdb_add_property  /src/systemd/src/libsystemd/sd-hwdb/sd-hwdb.c:121\n"
+           "  #1 trie_search_f  /src/systemd/src/libsystemd/sd-hwdb/sd-hwdb.c:273\n"
+           "  #2 LLVMFuzzerTestOneInput  /src/systemd/src/libsystemd/sd-hwdb/fuzz-hwdb.c:47")
+    fr = analysis.crash_frames(log)
+    assert [f.func for f in fr] == ["hwdb_add_property", "trie_search_f", "LLVMFuzzerTestOneInput"]
+    assert fr[0].line == 121

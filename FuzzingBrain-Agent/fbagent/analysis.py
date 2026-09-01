@@ -723,7 +723,12 @@ def _summary(entry, lang, cg: CallGraph, dist, reach: list[Sink]) -> str:
 # A stack frame the sanitizer/JVM printed. Deterministic: parsed from the crash
 # report the grader already produces, so "where did my input reach" is a fact the
 # agent reads off the real execution, not a guess it makes from the source.
-_FRAME_C = re.compile(r"#(?P<n>\d+)\s+0x[0-9a-fA-F]+\s+in\s+(?P<func>[\w:~<>]+)"
+# Two forms are accepted: the raw sanitizer frame `#N 0x.. in func file:line`,
+# AND the trimmed form `#N func file:line` that ./submit itself prints (the
+# `0x.. in` is stripped there) -- so the agent can paste back what submit showed
+# it and `reached` still resolves the frames. The `0x.. in` part is optional.
+_FRAME_C = re.compile(r"#(?P<n>\d+)\s+(?:0x[0-9a-fA-F]+\s+in\s+)?"
+                      r"(?P<func>[A-Za-z_][\w:~<>.$]*)"
                       r"(?:\([^)]*\))?\s+(?P<file>[^\s:]+):(?P<line>\d+)")
 _FRAME_JAVA = re.compile(r"\bat\s+(?P<func>[\w.$<>]+)\((?P<file>[\w.$]+\.java):(?P<line>\d+)\)")
 _ERR_LINE = re.compile(r"(?P<klass>ERROR:\s*\w+Sanitizer|runtime error|"
