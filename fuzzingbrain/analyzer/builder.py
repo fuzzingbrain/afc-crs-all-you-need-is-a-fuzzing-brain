@@ -23,6 +23,7 @@ import psutil
 from loguru import logger as loguru_logger
 
 from .models import FuzzerInfo
+from ..core.docker_limits import docker_resource_args
 
 
 def _build_error_hint(build_output: List[str]) -> str:
@@ -834,6 +835,7 @@ class AnalyzerBuilder:
                     "docker",
                     "run",
                     "--rm",
+                    *docker_resource_args(memory_mb=512, cpus=1),
                     "-v",
                     f"{dir_path.absolute()}:/fix_perms",
                     "alpine:latest",
@@ -1040,6 +1042,7 @@ class AnalyzerBuilder:
                             "docker",
                             "run",
                             "--rm",
+                            *docker_resource_args(memory_mb=512, cpus=1),
                             "-v",
                             f"{dir_path.absolute()}:/fix_perms",
                             "alpine:latest",

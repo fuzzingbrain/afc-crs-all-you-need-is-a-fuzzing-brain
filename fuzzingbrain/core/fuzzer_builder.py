@@ -18,6 +18,7 @@ from typing import List, Tuple, Optional
 
 from .logging import logger, get_log_dir
 from .config import Config
+from .docker_limits import docker_resource_args
 from .models import Task
 from ..builder import BuildJob, collect_fuzzers, run_build, truncate_output
 from ..builder.engine import DEFAULT_BUILD_TIMEOUT_S
@@ -322,6 +323,7 @@ class FuzzerBuilder:
                     "docker",
                     "run",
                     "--rm",
+                    *docker_resource_args(memory_mb=512, cpus=1),
                     "-v",
                     f"{path.absolute()}:/fix_perms",
                     "alpine:latest",

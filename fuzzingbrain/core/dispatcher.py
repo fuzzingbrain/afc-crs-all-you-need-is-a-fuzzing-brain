@@ -18,6 +18,7 @@ from bson import ObjectId
 
 from .logging import logger
 from .config import Config
+from .docker_limits import docker_resource_args
 from .models import Task, Fuzzer, FuzzerStatus, Worker, WorkerStatus
 from ..db import RepositoryManager
 from ..analyzer import AnalyzeResult
@@ -310,6 +311,7 @@ def generate(variant: int = 1) -> bytes:
                 "docker",
                 "run",
                 "--rm",
+                *docker_resource_args(memory_mb=4096, cpus=1),
                 "--platform",
                 "linux/amd64",
                 "--entrypoint",
