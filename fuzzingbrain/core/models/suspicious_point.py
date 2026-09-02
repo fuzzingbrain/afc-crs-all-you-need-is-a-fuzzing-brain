@@ -84,7 +84,9 @@ class SuspiciousPoint:
 
     # Verification status
     is_checked: bool = False  # Whether verified by LLM
-    is_real: bool = False  # True if Agent confirms it's a real bug
+    is_crash_found: bool = (
+        False  # True once a PoV actually crashes (set by complete_pov, not the LLM)
+    )
 
     # Priority
     score: float = 0.0  # Score (0.0-1.0), used for queue ordering
@@ -159,7 +161,7 @@ class SuspiciousPoint:
             if self.processor_id
             else None,
             "is_checked": self.is_checked,
-            "is_real": self.is_real,
+            "is_crash_found": self.is_crash_found,
             "score": self.score,
             "is_important": self.is_important,
             "static_reachable": self.static_reachable,
@@ -248,7 +250,8 @@ class SuspiciousPoint:
             status=data.get("status", SPStatus.PENDING_VERIFY.value),
             processor_id=processor_id,
             is_checked=data.get("is_checked", False),
-            is_real=data.get("is_real", False),
+            # backward-compat: legacy docs stored this under "is_real"
+            is_crash_found=data.get("is_crash_found", data.get("is_real", False)),
             score=data.get("score", 0.0),
             is_important=data.get("is_important", False),
             static_reachable=data.get("static_reachable", True),
@@ -267,10 +270,10 @@ class SuspiciousPoint:
             pov_generated_at=parse_datetime(data.get("pov_generated_at")),
         )
 
-    def mark_checked(self, is_real: bool, notes: str = None):
+    def mark_checked(self, is_crash_found: bool, notes: str = None):
         """Mark as verified"""
         self.is_checked = True
-        self.is_real = is_real
+        self.is_crash_found = is_crash_found
         self.checked_at = datetime.now()
         if notes:
             self.verification_notes = notes

@@ -396,7 +396,7 @@ class TestOrphanedClaims:
                 "score": 0.8,
                 "is_important": False,
                 "is_checked": False,
-                "is_real": False,
+                "is_crash_found": False,
                 "sources": [{"harness_name": "fuzz_x", "sanitizer": "address"}],
                 "created_at": datetime.now(),
             }
@@ -415,7 +415,7 @@ class TestOrphanedClaims:
                 "score": 0.9,
                 "is_important": True,
                 "is_checked": True,
-                "is_real": True,
+                "is_crash_found": True,
                 "pov_success_by": None,
                 "pov_attempted_by": [],
                 "sources": [{"harness_name": "fuzz_x", "sanitizer": "address"}],

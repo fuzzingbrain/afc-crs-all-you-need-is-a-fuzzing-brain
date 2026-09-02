@@ -332,12 +332,12 @@ class AgentPipeline:
                         )
                         # Default to pass-through when agent fails
                         is_important = True
-                        is_real = False
+                        is_crash_found = False
                         score = updated_sp.score
                         notes = "Agent terminated without verdict - defaulting to pass-through"
                     else:
                         is_important = updated_sp.is_important
-                        is_real = updated_sp.is_real
+                        is_crash_found = updated_sp.is_crash_found
                         score = updated_sp.score
                         notes = updated_sp.verification_notes
 
@@ -347,7 +347,7 @@ class AgentPipeline:
                     # Complete verification
                     self.repos.suspicious_points.complete_verify(
                         sp.suspicious_point_id,
-                        is_real=is_real,
+                        is_crash_found=is_crash_found,
                         score=score,
                         notes=notes,
                         is_important=is_important,
@@ -357,14 +357,14 @@ class AgentPipeline:
 
                     # Update stats
                     self.stats.sp_verified += 1
-                    if is_real:
+                    if is_crash_found:
                         self.stats.sp_verified_real += 1
                     else:
                         self.stats.sp_verified_fp += 1
 
                     logger.info(
                         f"[Pipeline:{agent_id}] Verified SP {sp.suspicious_point_id}: "
-                        f"score={score:.2f}, real={is_real}, "
+                        f"score={score:.2f}, real={is_crash_found}, "
                         f"proceed_to_pov={proceed_to_pov}"
                     )
                 else:

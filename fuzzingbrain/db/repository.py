@@ -352,7 +352,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
     def find_real(self, task_id: str) -> List[SuspiciousPoint]:
         """Find verified real vulnerabilities for a task"""
         return self.find_all(
-            {"task_id": ObjectId(task_id), "is_checked": True, "is_real": True}
+            {"task_id": ObjectId(task_id), "is_checked": True, "is_crash_found": True}
         )
 
     def find_important(self, task_id: str) -> List[SuspiciousPoint]:
@@ -372,9 +372,9 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             logger.error(f"Failed to find suspicious points by score: {e}")
             return []
 
-    def mark_checked(self, sp_id: str, is_real: bool, notes: str = None) -> bool:
+    def mark_checked(self, sp_id: str, is_crash_found: bool, notes: str = None) -> bool:
         """Mark a suspicious point as checked"""
-        updates = {"is_checked": True, "is_real": is_real, "checked_at": datetime.now()}
+        updates = {"is_checked": True, "is_crash_found": is_crash_found, "checked_at": datetime.now()}
         if notes:
             updates["verification_notes"] = notes
         return self.update(sp_id, updates)
@@ -510,7 +510,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 {"task_id": ObjectId(task_id), "is_checked": True}
             )
             real = self.collection.count_documents(
-                {"task_id": ObjectId(task_id), "is_checked": True, "is_real": True}
+                {"task_id": ObjectId(task_id), "is_checked": True, "is_crash_found": True}
             )
             important = self.collection.count_documents(
                 {"task_id": ObjectId(task_id), "is_important": True}
@@ -683,7 +683,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
     def complete_verify(
         self,
         sp_id: str,
-        is_real: bool,
+        is_crash_found: bool,
         score: float,
         notes: str = None,
         is_important: bool = False,
@@ -694,7 +694,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
 
         Args:
             sp_id: Suspicious point ID
-            is_real: Whether it's a real vulnerability
+            is_crash_found: Whether it's a real vulnerability
             score: Updated score
             notes: Verification notes
             is_important: Whether to mark as important
@@ -716,7 +716,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 "status": next_status,
                 "processor_id": None,  # Release the lock
                 "is_checked": True,
-                "is_real": is_real,
+                "is_crash_found": is_crash_found,
                 "score": score,
                 "is_important": is_important,
                 "checked_at": datetime.now(),
@@ -772,7 +772,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                             "pov_id": pov_id,
                             "pov_success_by": success_record,
                             "pov_generated_at": datetime.now(),
-                            "is_real": True,
+                            "is_crash_found": True,
                         },
                     },
                 )

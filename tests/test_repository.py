@@ -134,7 +134,7 @@ class TestSPPipelineLifecycle:
         # Step 2: Verifier confirms real, sends to POV stage
         repos.suspicious_points.complete_verify(
             sp.suspicious_point_id,
-            is_real=True,
+            is_crash_found=True,
             score=0.95,
             notes="confirmed via manual analysis",
             proceed_to_pov=True,
@@ -142,7 +142,7 @@ class TestSPPipelineLifecycle:
         found = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
         assert found.status == SPStatus.PENDING_POV.value
         assert found.is_checked is True
-        assert found.is_real is True
+        assert found.is_crash_found is True
         assert found.score == 0.95
 
         # Step 3: POV worker claims
@@ -181,14 +181,14 @@ class TestSPPipelineLifecycle:
         repos.suspicious_points.claim_for_verify(task_id, "verifier_1")
         repos.suspicious_points.complete_verify(
             sp.suspicious_point_id,
-            is_real=False,
+            is_crash_found=False,
             score=0.1,
             proceed_to_pov=False,
         )
 
         found = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
         assert found.status == SPStatus.VERIFIED.value
-        assert found.is_real is False
+        assert found.is_crash_found is False
 
         # Pipeline should consider this SP done
         assert repos.suspicious_points.is_pipeline_complete(task_id) is True
@@ -639,10 +639,10 @@ class TestSPPipelineCompletion:
         """Status counts drive the dashboard and scheduling decisions."""
         task_id = generate_id()
         repos.suspicious_points.save(
-            self._make_sp(task_id, is_checked=True, is_real=True, is_important=True)
+            self._make_sp(task_id, is_checked=True, is_crash_found=True, is_important=True)
         )
         repos.suspicious_points.save(
-            self._make_sp(task_id, is_checked=True, is_real=False)
+            self._make_sp(task_id, is_checked=True, is_crash_found=False)
         )
         repos.suspicious_points.save(self._make_sp(task_id, is_checked=False))
 

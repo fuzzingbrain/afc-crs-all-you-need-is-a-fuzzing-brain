@@ -161,7 +161,7 @@ def update_suspicious_point_impl(
     suspicious_point_id: str,
     score: float = None,
     is_checked: bool = None,
-    is_real: bool = None,
+    is_crash_found: bool = None,
     is_important: bool = None,
     verification_notes: str = None,
     pov_guidance: str = None,
@@ -187,7 +187,7 @@ def update_suspicious_point_impl(
         result = client.update_suspicious_point(
             sp_id=suspicious_point_id,
             is_checked=is_checked,
-            is_real=is_real,
+            is_crash_found=is_crash_found,
             is_important=is_important,
             score=score,
             verification_notes=verification_notes,
@@ -202,7 +202,7 @@ def update_suspicious_point_impl(
             {
                 "id": suspicious_point_id,
                 "is_checked": is_checked,
-                "is_real": is_real,
+                "is_crash_found": is_crash_found,
                 "is_important": is_important,
                 "score": score,
                 "verification_notes": verification_notes,
@@ -362,7 +362,7 @@ def create_suspicious_point(
 def update_suspicious_point(
     suspicious_point_id: str,
     is_checked: bool = None,
-    is_real: bool = None,
+    is_crash_found: bool = None,
     is_important: bool = None,
     score: float = None,
     verification_notes: str = None,
@@ -376,7 +376,7 @@ def update_suspicious_point(
     Args:
         suspicious_point_id: The ID of the suspicious point to update
         is_checked: Set to True when verification is complete
-        is_real: Set to True if confirmed as real vulnerability, False if false positive
+        is_crash_found: Set to True if confirmed as real vulnerability, False if false positive
         is_important: Set to True if this is a high-priority vulnerability (will proceed to POV)
         score: Updated confidence score based on analysis
         verification_notes: Notes explaining the verification result.
@@ -410,7 +410,7 @@ def update_suspicious_point(
         result = client.update_suspicious_point(
             sp_id=suspicious_point_id,
             is_checked=is_checked,
-            is_real=is_real,
+            is_crash_found=is_crash_found,
             is_important=is_important,
             score=score,
             verification_notes=verification_notes,
@@ -423,7 +423,7 @@ def update_suspicious_point(
             {
                 "id": suspicious_point_id,
                 "is_checked": is_checked,
-                "is_real": is_real,
+                "is_crash_found": is_crash_found,
                 "is_important": is_important,
                 "score": score,
                 "verification_notes": verification_notes,

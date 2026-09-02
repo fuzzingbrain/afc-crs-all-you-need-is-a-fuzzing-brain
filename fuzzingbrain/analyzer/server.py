@@ -1586,8 +1586,8 @@ class AnalysisServer:
         updates = {}
         if "is_checked" in params:
             updates["is_checked"] = params["is_checked"]
-        if "is_real" in params:
-            updates["is_real"] = params["is_real"]
+        if "is_crash_found" in params:
+            updates["is_crash_found"] = params["is_crash_found"]
         if "is_important" in params:
             updates["is_important"] = params["is_important"]
         if "score" in params:

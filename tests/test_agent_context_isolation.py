@@ -208,7 +208,7 @@ class TestSPUpdateContextFlow:
         result = update_suspicious_point_impl(
             suspicious_point_id="sp_abc12345",
             is_checked=True,
-            is_real=True,
+            is_crash_found=True,
             is_important=True,
             verification_notes="Confirmed: no bounds check before memcpy",
             pov_guidance="Send chunk with length > 4096",
@@ -219,7 +219,7 @@ class TestSPUpdateContextFlow:
         assert kw["agent_id"] == "agent_spv_001"
         assert kw["sp_id"] == "sp_abc12345"
         assert kw["is_checked"] is True
-        assert kw["is_real"] is True
+        assert kw["is_crash_found"] is True
 
     @patch("fuzzingbrain.tools.suspicious_points._get_client")
     @patch("fuzzingbrain.tools.suspicious_points._ensure_client", return_value=None)
@@ -259,7 +259,7 @@ class TestSPUpdateContextFlow:
         update_suspicious_point_impl(
             suspicious_point_id="sp_abc12345",
             is_checked=True,
-            is_real=False,
+            is_crash_found=False,
             verification_notes="False positive: length validated in caller",
         )
 
@@ -494,7 +494,7 @@ class TestParallelAgentToolCalls:
                     update_suspicious_point_impl(
                         suspicious_point_id="sp_earlier_001",
                         is_checked=True,
-                        is_real=True,
+                        is_crash_found=True,
                         is_important=True,
                         verification_notes="Confirmed from earlier SP",
                         pov_guidance="Craft ICC profile",
@@ -641,7 +641,7 @@ class TestContextLeakBetweenPipelinePhases:
                     update_suspicious_point_impl(
                         suspicious_point_id="sp_001",
                         is_checked=True,
-                        is_real=True,
+                        is_crash_found=True,
                         is_important=True,
                         verification_notes="Confirmed buffer overflow",
                         pov_guidance="Oversize chunk length",
@@ -674,7 +674,7 @@ class TestContextLeakBetweenPipelinePhases:
                     update_suspicious_point_impl(
                         suspicious_point_id="sp_002",
                         is_checked=True,
-                        is_real=True,
+                        is_crash_found=True,
                         is_important=True,
                         verification_notes="Also confirmed",
                         pov_guidance="Crafted ICC profile",

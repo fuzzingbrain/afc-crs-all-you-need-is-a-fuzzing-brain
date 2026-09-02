@@ -1111,7 +1111,7 @@ class POVStrategy(BaseStrategy):
             "sanitizer": self.sanitizer,
             "scan_mode": self.scan_mode,
             "total_points": len(fresh_points),
-            "confirmed_bugs": len([p for p in fresh_points if p.is_real]),
+            "confirmed_bugs": len([p for p in fresh_points if p.is_crash_found]),
             "suspicious_points": [
                 {
                     "id": p.suspicious_point_id,
@@ -1120,7 +1120,7 @@ class POVStrategy(BaseStrategy):
                     "description": p.description,
                     "score": p.score,
                     "is_important": p.is_important,
-                    "is_real": p.is_real,
+                    "is_crash_found": p.is_crash_found,
                     "verification_notes": p.verification_notes,
                 }
                 for p in fresh_points

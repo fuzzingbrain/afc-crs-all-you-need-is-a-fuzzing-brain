@@ -35,7 +35,7 @@ class TestUpdateSuspiciousPointParameters:
         assert "suspicious_point_id" in params
         assert "score" in params
         assert "is_checked" in params
-        assert "is_real" in params
+        assert "is_crash_found" in params
         assert "is_important" in params
         assert "verification_notes" in params
         assert "pov_guidance" in params

@@ -232,10 +232,10 @@ class TestSPInitialState:
         assert sp.status == "pending_verify"
 
     def test_sp_model_defaults_unchecked(self):
-        """New SP must be is_checked=False, is_real=False, is_important=False."""
+        """New SP must be is_checked=False, is_crash_found=False, is_important=False."""
         sp = SuspiciousPoint()
         assert sp.is_checked is False
-        assert sp.is_real is False
+        assert sp.is_crash_found is False
         assert sp.is_important is False
 
     def test_sp_saved_with_pending_verify_found_by_claim(self, sp_repo):

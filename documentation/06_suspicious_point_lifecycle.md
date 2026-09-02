@@ -21,7 +21,7 @@ A Suspicious Point represents a potential vulnerability with structured metadata
 | trigger_condition | str | Input constraints to trigger |
 | score | float | Confidence score (0.0-1.0) |
 | is_important | bool | Priority flag |
-| is_real | bool | Verified as real vulnerability |
+| is_crash_found | bool | Verified as real vulnerability |
 | status | str | Current lifecycle status |
 | processor | str | Agent currently processing |
 | analyzed_by_directions | List[str] | Directions that analyzed this SP |
@@ -90,7 +90,7 @@ SP location uses control flow description rather than line numbers:
 │  │ generating  │────────▶│    pov_     │          │
 │  │   _pov      │         │  generated  │          │
 │  │             │         │             │          │
-│  │ (POV Agent  │         │ (is_real=   │          │
+│  │ (POV Agent  │         │ (is_crash_found=   │          │
 │  │  working)   │         │   true)     │          │
 │  └─────────────┘         └─────────────┘          │
 │         │                                          │
@@ -151,7 +151,7 @@ MongoDB Insert
     ├── status: "pending_verify"
     ├── processor: null
     ├── is_important: false (default)
-    ├── is_real: false (default)
+    ├── is_crash_found: false (default)
     │
     ▼
 SP ready for verification queue
@@ -421,7 +421,7 @@ Crash Detected
     │
     ▼
 Update SP
-    ├── is_real = true
+    ├── is_crash_found = true
     ├── status = "pov_generated"
     │
     ▼

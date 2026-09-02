@@ -150,7 +150,7 @@ class TestCompleteVerifyRouting:
 
         sp_repo.complete_verify(
             sp.suspicious_point_id,
-            is_real=True,
+            is_crash_found=True,
             score=0.9,
             is_important=True,
             proceed_to_pov=True,
@@ -167,7 +167,7 @@ class TestCompleteVerifyRouting:
 
         sp_repo.complete_verify(
             sp.suspicious_point_id,
-            is_real=False,
+            is_crash_found=False,
             score=0.2,
             is_important=False,
             proceed_to_pov=False,
@@ -185,7 +185,7 @@ class TestCompleteVerifyRouting:
 
         sp_repo.complete_verify(
             sp.suspicious_point_id,
-            is_real=True,
+            is_crash_found=True,
             score=0.8,
             proceed_to_pov=True,
             is_important=True,
@@ -202,7 +202,7 @@ class TestCompleteVerifyRouting:
 
         sp_repo.complete_verify(
             sp.suspicious_point_id,
-            is_real=True,
+            is_crash_found=True,
             score=0.8,
         )
 
@@ -243,7 +243,7 @@ class TestPovGuidanceValidation:
         result = update_suspicious_point_impl(
             suspicious_point_id=str(ObjectId()),
             is_checked=True,
-            is_real=True,
+            is_crash_found=True,
             is_important=True,
             score=0.95,
             verification_notes="Confirmed buffer overflow",
@@ -269,7 +269,7 @@ class TestPovGuidanceValidation:
         result = update_suspicious_point_impl(
             suspicious_point_id=str(ObjectId()),
             is_checked=True,
-            is_real=True,
+            is_crash_found=True,
             is_important=True,
             score=0.95,
             verification_notes="Confirmed buffer overflow",
@@ -291,7 +291,7 @@ class TestPovGuidanceValidation:
         result = update_suspicious_point_impl(
             suspicious_point_id=str(ObjectId()),
             is_checked=True,
-            is_real=False,
+            is_crash_found=False,
             is_important=False,
             score=0.2,
             verification_notes="False positive",
@@ -345,7 +345,7 @@ class TestVerifiedByTracking:
                 {
                     "id": sp_id,
                     "is_checked": True,
-                    "is_real": True,
+                    "is_crash_found": True,
                     "score": 0.9,
                     "agent_id": agent_id,
                 }

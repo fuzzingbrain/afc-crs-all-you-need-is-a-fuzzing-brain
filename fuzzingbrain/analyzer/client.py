@@ -442,7 +442,7 @@ class AnalysisClient:
         self,
         sp_id: str,
         is_checked: bool = None,
-        is_real: bool = None,
+        is_crash_found: bool = None,
         is_important: bool = None,
         score: float = None,
         verification_notes: str = None,
@@ -458,7 +458,7 @@ class AnalysisClient:
         Args:
             sp_id: Suspicious point ID
             is_checked: Whether verification is complete
-            is_real: Whether it's a real vulnerability
+            is_crash_found: Whether it's a real vulnerability
             is_important: Whether it's high priority
             score: Updated score
             verification_notes: Notes from verification
@@ -474,8 +474,8 @@ class AnalysisClient:
         params = {"id": sp_id}
         if is_checked is not None:
             params["is_checked"] = is_checked
-        if is_real is not None:
-            params["is_real"] = is_real
+        if is_crash_found is not None:
+            params["is_crash_found"] = is_crash_found
         if is_important is not None:
             params["is_important"] = is_important
         if score is not None:

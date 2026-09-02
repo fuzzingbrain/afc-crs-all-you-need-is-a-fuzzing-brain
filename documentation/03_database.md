@@ -294,7 +294,7 @@ Potential vulnerability with structured description.
 | vuln_type | str | Vulnerability type |
 | status | SPStatus | pending_verify / verifying / verified / pending_pov / generating_pov / pov_generated |
 | is_checked | bool | Verification completed |
-| is_real | bool | Confirmed real vulnerability |
+| is_crash_found | bool | Confirmed real vulnerability |
 | score | float | Confidence score (0.0-1.0) |
 | is_important | bool | High priority flag |
 | important_controlflow | List[Dict] | Related functions/variables |
@@ -410,7 +410,7 @@ Crash discovered by fuzzer.
 | find_pending_pov(task_id, min_score) | Find awaiting POV generation |
 | claim_for_verify(sp_id, agent_id) | Atomic claim for verification |
 | claim_for_pov(sp_id, agent_id) | Atomic claim for POV generation |
-| mark_checked(sp_id, is_real, notes) | Mark as verified |
+| mark_checked(sp_id, is_crash_found, notes) | Mark as verified |
 | mark_important(sp_id) | Mark as high priority |
 | update_score(sp_id, score) | Update confidence score |
 | update_status(sp_id, status) | Update status |
