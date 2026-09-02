@@ -39,16 +39,20 @@ gates:
   params:
     func: "the target function name (one from the worklist above)"
 
-reached:
+trace:
   description: >
-    Deterministic reach report. Paste the sanitizer / JVM crash stack that
-    ./submit showed you, and this names the crashing frame, the nearest frame
-    inside the challenge's own source, and that function's call-graph distance
-    from the entry -- i.e. where your input actually went, mapped onto the
-    static graph. Use it after a crash to know exactly what you reached, and to
-    pick a next target that is somewhere different.
+    Dynamic reach + crash report from a real run. Give it an input file you
+    wrote and a target function; it runs that input under a debugger and tells
+    you whether it reached the target (with the live argument values there),
+    and, if it faulted, the signal and the crash backtrace with the runtime
+    values at the fault. Unlike reading a crash stack, this works on a CLEAN run
+    too -- so use it to check "did my input actually reach this sink?" and, once
+    it crashes, to see the concrete pointer/index/size that went wrong and build
+    the next variant. Note: leak detection is off under the debugger, so a
+    memory-leak fault will not show here -- confirm those through ./submit.
   params:
-    stack: "the sanitizer/JVM stack text from the crash"
+    input: "path to the candidate input file you wrote (e.g. /tmp/x.bin)"
+    target: "the function to break on (a sink from the worklist you are aiming for)"
 
 diversify:
   description: >

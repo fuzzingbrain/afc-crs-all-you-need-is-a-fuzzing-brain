@@ -16,8 +16,11 @@ the bench deliberately kept out of the workspace.
 from __future__ import annotations
 
 import os
+import re
+import shlex
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 WORKSPACE = Path.cwd()
@@ -112,16 +115,122 @@ def gates(func: str) -> str:
         return f"error: gates failed: {e}"
 
 
-def reached(stack: str) -> str:
-    """Deterministic P4: given the sanitizer/JVM crash report you just saw, name
-    the frame in the challenge's own code and its call-graph distance from the
-    entry -- where the input actually went, mapped onto the static graph."""
-    from . import analysis
+_ORACLE_DIR = Path("/opt/fbbench/oracle/binaries/vuln")
+_FRAME_RE = re.compile(
+    r"#\d+\s+(?:0x[0-9a-fA-F]+\s+in\s+)?(?P<func>[A-Za-z_][\w:~<>]*)\s*"
+    r"\([^)]*\)(?:\s+at\s+(?P<loc>[^\s:]+:\d+))?")
+_SIG_RE = re.compile(r"received signal (?P<sig>SIG[A-Z]+)")
+
+
+def _graded_binary() -> Path | None:
+    """The instrumented graded binary, when this image exposes it (the
+    gdb / oracle-open challenge build). None on a sealed image, where `trace`
+    degrades to a clear message instead of a traceback."""
     try:
-        r = analysis.reached_report(stack, WORKSPACE)
-        return r or "no stack frames found in that text."
-    except Exception as e:  # noqa: BLE001
-        return f"error: reached failed: {e}"
+        asan = _ORACLE_DIR / "asan"
+        if not asan.is_dir():          # sealed image: the oracle dir is 0700 root,
+            return None                # so stat under it raises — caught below.
+        named = asan / "harness"
+        if named.is_file() and os.access(named, os.R_OK):
+            return named
+        for p in sorted(asan.iterdir()):
+            if p.is_file() and os.access(p, os.R_OK) and os.access(p, os.X_OK):
+                return p
+    except OSError:
+        return None
+    return None
+
+
+def _parse_trace(raw: str, target: str) -> str:
+    """Turn the raw gdb batch output into a compact 'where it went / what it hit'
+    report: whether the input reached `target` (with the live args there), and,
+    if it faulted, the signal and the crash backtrace."""
+    reached = f"@@REACHED {target}@@" in raw
+    lines = raw.splitlines()
+    out = []
+    if reached:
+        # `info args` sits between the marker and the first backtrace frame.
+        try:
+            i = next(k for k, l in enumerate(lines) if l.startswith(f"@@REACHED {target}@@"))
+        except StopIteration:
+            i = -1
+        args = []
+        for l in lines[i + 1:]:
+            if l.startswith("#") or l.startswith("@@") or "received signal" in l or "Thread" in l:
+                break
+            if "=" in l and l.strip():
+                args.append(l.strip())
+        out.append(f"reached {target}: YES"
+                   + (f"   args: {'; '.join(args)}" if args else ""))
+    else:
+        out.append(f"reached {target}: no — this input did not hit it")
+
+    sig = _SIG_RE.search(raw)
+    if sig:
+        # The crash backtrace is everything after the fault signal (the reach
+        # frames printed at the breakpoint come before it), so the top frame here
+        # is the real fault site, not a frame the input merely passed through.
+        crash_bt = raw[sig.end():]
+        frames = []
+        for l in crash_bt.splitlines():
+            m = _FRAME_RE.search(l)
+            if m:
+                loc = m.group("loc") or ""
+                frames.append(f"  {m.group('func')}" + (f"  ({loc})" if loc else ""))
+        frames = frames[:8]
+        top = frames[0].strip() if frames else "?"
+        out.append(f"crashed: YES — {sig.group('sig')} in {top}")
+        out += frames
+    else:
+        out.append("crashed: no — ran to completion without a fault")
+    out.append("(LeakSanitizer is off under gdb; score memory-leak faults through ./submit.)")
+    return "\n".join(out)
+
+
+def trace(input: str, target: str) -> str:
+    """Run one candidate input under gdb against the graded binary and report,
+    from the real run, where it reached and -- if it faulted -- the crash site
+    with the live values there. Unlike a static crash-stack parse it works on a
+    clean run too (did the input reach `target`?). LeakSanitizer is off under the
+    debugger, so a memory-leak fault will not surface here -- score those through
+    ./submit, which keeps the sanitizer on."""
+    binp = _graded_binary()
+    if binp is None:
+        return ("error: trace unavailable — the graded binary is not readable in "
+                "this image (needs the gdb / oracle-open build).")
+    inp = Path(input)
+    if not inp.is_file():
+        return f"error: no input file at {input!r}; write your candidate bytes there first."
+    tgt = (target or "").strip().split("::")[-1]
+    if not tgt:
+        return "error: give a target function to break on (the sink you are aiming for)."
+    script = (
+        "set pagination off\nset confirm off\nset breakpoint pending on\n"
+        f"break {tgt}\ncommands\n"
+        f'  printf "@@REACHED {tgt}@@\\n"\n  info args\n  bt 4\n  continue\nend\n'
+        f"run {shlex.quote(str(inp))}\n"
+        'printf "@@ENDED@@\\n"\nbt 8\n'
+    )
+    env = dict(os.environ)
+    env["LD_LIBRARY_PATH"] = f"{_ORACLE_DIR / 'sharedlibs'}:{env.get('LD_LIBRARY_PATH', '')}"
+    env["ASAN_OPTIONS"] = "detect_leaks=0:abort_on_error=1:handle_segv=1:print_stats=0"
+    with tempfile.NamedTemporaryFile("w", suffix=".gdb", delete=False) as f:
+        f.write(script)
+        gpath = f.name
+    try:
+        out = subprocess.run(["gdb", "-q", "-batch", "-x", gpath, "--args", str(binp), str(inp)],
+                             capture_output=True, text=True, timeout=180, env=env)
+        raw = (out.stdout or "") + (out.stderr or "")
+    except FileNotFoundError:
+        return "error: trace unavailable — gdb is not installed in this image."
+    except subprocess.TimeoutExpired:
+        return "error: trace timed out (180s) under the debugger."
+    finally:
+        try:
+            os.unlink(gpath)
+        except OSError:
+            pass
+    return _parse_trace(raw, tgt)
 
 
 def diversify(cracked: str = "") -> str:
@@ -153,7 +262,7 @@ def diversify(cracked: str = "") -> str:
 # ------------------------------------------------------------------ dispatch + schemas
 
 _IMPL = {"read": read_file, "glob": glob_files, "grep": grep, "bash": bash,
-         "gates": gates, "reached": reached, "diversify": diversify}
+         "gates": gates, "trace": trace, "diversify": diversify}
 
 
 def run_tool(name: str, args: dict) -> tuple[str, bool]:
@@ -214,6 +323,7 @@ SCHEMAS = [
             ["pattern"]),
     _schema("bash", {"command": {"type": "string"}}, ["command"]),
     _schema("gates", {"func": {"type": "string"}}, ["func"]),
-    _schema("reached", {"stack": {"type": "string"}}, ["stack"]),
+    _schema("trace", {"input": {"type": "string"}, "target": {"type": "string"}},
+            ["input", "target"]),
     _schema("diversify", {"cracked": {"type": "string"}}, []),
 ]

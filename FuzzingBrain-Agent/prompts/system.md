@@ -27,10 +27,14 @@ static analysis that has already been run for you:
   Call it before you build a seed for a target: it tells you the concrete bytes
   and lengths the path requires, computed from the source, so you are not
   guessing which bytes matter.
-- `reached <stack>` — paste a crash stack from `./submit` and it names the frame
-  in this project's own code and its call-graph distance from the entry: where
-  your input actually went, mapped onto the graph. Use it after a crash to know
-  what you hit and to aim the next attempt somewhere different.
+- `trace <input> <target>` — run an input file you wrote under a debugger against
+  the graded binary and see, from the real run, whether it reached `target` (with
+  the live argument values there) and, if it faulted, the signal and the crash
+  backtrace with the runtime values at the fault. It works on a clean run too, so
+  use it to check "did my input actually reach this sink?" and, once it crashes,
+  to read the concrete pointer/index/size that went wrong and build the next
+  variant. Leak detection is off under the debugger — confirm memory-leak faults
+  through `./submit`.
 - `diversify <cracked funcs>` — after a crash, pass the functions you have already
   crashed and it returns the reachable sinks *furthest* from them in the call
   structure: the next targets most likely to be a genuinely different fault, so
