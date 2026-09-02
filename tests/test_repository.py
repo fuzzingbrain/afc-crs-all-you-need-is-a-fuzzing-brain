@@ -140,7 +140,7 @@ class TestSPPipelineLifecycle:
         )
         found = repos.suspicious_points.find_by_id(sp.suspicious_point_id)
         assert found.status == SPStatus.PENDING_POV.value
-        assert found.is_checked is True
+        assert found.is_checked_by_verifier is True
         assert found.is_crash_found is True
         assert found.score == 0.95
 
@@ -633,12 +633,12 @@ class TestSPPipelineCompletion:
         """Status counts drive the dashboard and scheduling decisions."""
         task_id = generate_id()
         repos.suspicious_points.save(
-            self._make_sp(task_id, is_checked=True, is_crash_found=True, is_important=True)
+            self._make_sp(task_id, is_checked_by_verifier=True, is_crash_found=True, is_important=True)
         )
         repos.suspicious_points.save(
-            self._make_sp(task_id, is_checked=True, is_crash_found=False)
+            self._make_sp(task_id, is_checked_by_verifier=True, is_crash_found=False)
         )
-        repos.suspicious_points.save(self._make_sp(task_id, is_checked=False))
+        repos.suspicious_points.save(self._make_sp(task_id, is_checked_by_verifier=False))
 
         counts = repos.suspicious_points.count_by_status(task_id)
         assert counts["total"] == 3

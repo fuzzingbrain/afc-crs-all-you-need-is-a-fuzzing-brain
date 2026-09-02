@@ -34,7 +34,7 @@ class TestUpdateSuspiciousPointParameters:
         # Must have these parameters
         assert "suspicious_point_id" in params
         assert "score" in params
-        assert "is_checked" in params
+        assert "is_checked_by_verifier" in params
         assert "is_crash_found" in params
         assert "is_important" in params
         assert "verification_notes" in params
@@ -62,7 +62,7 @@ class TestUpdateSuspiciousPointParameters:
         result = update_suspicious_point_impl(
             suspicious_point_id="sp123",
             score=0.8,
-            is_checked=True,
+            is_checked_by_verifier=True,
             is_important=True,
             pov_guidance="Trigger via oversized input to function pointer path",
             reachability_status="pointer_call",

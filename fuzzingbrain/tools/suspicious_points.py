@@ -158,7 +158,7 @@ def create_suspicious_point_impl(
 def update_suspicious_point_impl(
     suspicious_point_id: str,
     score: float = None,
-    is_checked: bool = None,
+    is_checked_by_verifier: bool = None,
     is_crash_found: bool = None,
     is_important: bool = None,
     verification_notes: str = None,
@@ -184,7 +184,7 @@ def update_suspicious_point_impl(
         _, _, _, agent_id = get_sp_context()
         result = client.update_suspicious_point(
             sp_id=suspicious_point_id,
-            is_checked=is_checked,
+            is_checked_by_verifier=is_checked_by_verifier,
             is_crash_found=is_crash_found,
             is_important=is_important,
             score=score,
@@ -199,7 +199,7 @@ def update_suspicious_point_impl(
         update_json = json.dumps(
             {
                 "id": suspicious_point_id,
-                "is_checked": is_checked,
+                "is_checked_by_verifier": is_checked_by_verifier,
                 "is_crash_found": is_crash_found,
                 "is_important": is_important,
                 "score": score,
@@ -349,7 +349,7 @@ def create_suspicious_point(
 @tools_mcp.tool
 def update_suspicious_point(
     suspicious_point_id: str,
-    is_checked: bool = None,
+    is_checked_by_verifier: bool = None,
     is_crash_found: bool = None,
     is_important: bool = None,
     score: float = None,
@@ -363,7 +363,7 @@ def update_suspicious_point(
 
     Args:
         suspicious_point_id: The ID of the suspicious point to update
-        is_checked: Set to True when verification is complete
+        is_checked_by_verifier: Set to True when verification is complete
         is_crash_found: Set to True if confirmed as real vulnerability, False if false positive
         is_important: Set to True if this is a high-priority vulnerability (will proceed to POV)
         score: Updated confidence score based on analysis
@@ -397,7 +397,7 @@ def update_suspicious_point(
         _, _, _, agent_id = get_sp_context()
         result = client.update_suspicious_point(
             sp_id=suspicious_point_id,
-            is_checked=is_checked,
+            is_checked_by_verifier=is_checked_by_verifier,
             is_crash_found=is_crash_found,
             is_important=is_important,
             score=score,
@@ -410,7 +410,7 @@ def update_suspicious_point(
         update_json = json.dumps(
             {
                 "id": suspicious_point_id,
-                "is_checked": is_checked,
+                "is_checked_by_verifier": is_checked_by_verifier,
                 "is_crash_found": is_crash_found,
                 "is_important": is_important,
                 "score": score,

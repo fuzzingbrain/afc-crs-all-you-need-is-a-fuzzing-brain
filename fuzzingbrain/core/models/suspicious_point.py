@@ -81,7 +81,7 @@ class SuspiciousPoint:
     processor_id: Optional[str] = None  # ID of agent currently processing this SP
 
     # Verification status
-    is_checked: bool = False  # Whether verified by LLM
+    is_checked_by_verifier: bool = False  # Whether verified by LLM
     is_crash_found: bool = (
         False  # True once a PoV actually crashes (set by complete_pov, not the LLM)
     )
@@ -157,7 +157,7 @@ class SuspiciousPoint:
             "processor_id": safe_object_id(self.processor_id)
             if self.processor_id
             else None,
-            "is_checked": self.is_checked,
+            "is_checked_by_verifier": self.is_checked_by_verifier,
             "is_crash_found": self.is_crash_found,
             "score": self.score,
             "is_important": self.is_important,
@@ -245,7 +245,10 @@ class SuspiciousPoint:
             description=data.get("description", ""),
             status=data.get("status", SPStatus.PENDING_VERIFY.value),
             processor_id=processor_id,
-            is_checked=data.get("is_checked", False),
+            # backward-compat: legacy docs stored this under "is_checked"
+            is_checked_by_verifier=data.get(
+                "is_checked_by_verifier", data.get("is_checked", False)
+            ),
             # backward-compat: legacy docs stored this under "is_real"
             is_crash_found=data.get("is_crash_found", data.get("is_real", False)),
             score=data.get("score", 0.0),
@@ -268,7 +271,7 @@ class SuspiciousPoint:
 
     def mark_checked(self, is_crash_found: bool, notes: str = None):
         """Mark as verified"""
-        self.is_checked = True
+        self.is_checked_by_verifier = True
         self.is_crash_found = is_crash_found
         self.checked_at = datetime.now()
         if notes:

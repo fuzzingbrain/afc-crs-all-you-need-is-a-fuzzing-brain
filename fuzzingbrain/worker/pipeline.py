@@ -323,9 +323,9 @@ class AgentPipeline:
 
                 if updated_sp:
                     # Check if agent actually updated the SP
-                    # If is_checked is still False, agent terminated abnormally
+                    # If is_checked_by_verifier is still False, agent terminated abnormally
                     # In that case, default to letting it pass (is_important=True)
-                    if not updated_sp.is_checked:
+                    if not updated_sp.is_checked_by_verifier:
                         logger.warning(
                             f"[Pipeline:{agent_id}] Agent did not update SP {sp.suspicious_point_id}, "
                             f"defaulting to pass-through (is_important=True)"

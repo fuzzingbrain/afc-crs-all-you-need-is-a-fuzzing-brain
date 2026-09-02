@@ -694,7 +694,7 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
     def update_suspicious_point(
         suspicious_point_id: str,
         score: float = None,
-        is_checked: bool = None,
+        is_checked_by_verifier: bool = None,
         is_crash_found: bool = None,
         is_important: bool = None,
         verification_notes: str = None,
@@ -709,7 +709,7 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
         Args:
             suspicious_point_id: ID of the suspicious point to update
             score: Updated confidence score
-            is_checked: Whether the point has been verified
+            is_checked_by_verifier: Whether the point has been verified
             is_crash_found: Whether it's confirmed as a real vulnerability
             is_important: Whether it's high priority
             verification_notes: Notes from verification analysis
@@ -723,7 +723,7 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
         return update_suspicious_point_impl(
             suspicious_point_id,
             score,
-            is_checked,
+            is_checked_by_verifier,
             is_crash_found,
             is_important,
             verification_notes,

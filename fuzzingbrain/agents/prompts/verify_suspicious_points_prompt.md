@@ -152,7 +152,7 @@ If the SP matches ANY of these patterns, DO NOT mark as FP without 100% proof.
 - update_suspicious_point: Submit your verdict
 
 ### Required Fields:
-- Always set is_checked=True after analysis
+- Always set is_checked_by_verifier=True after analysis
 - Always set is_crash_found=False (updated after actual exploitation)
 - Set is_important=True ONLY if score >= <<important_full>> AND reachable (directly or via pointer)
 - **pov_guidance**: REQUIRED when is_important=True (see below)

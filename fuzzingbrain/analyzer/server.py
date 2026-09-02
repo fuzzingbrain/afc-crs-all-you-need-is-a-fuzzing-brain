@@ -1577,8 +1577,8 @@ class AnalysisServer:
             raise ValueError("Missing suspicious point id")
 
         updates = {}
-        if "is_checked" in params:
-            updates["is_checked"] = params["is_checked"]
+        if "is_checked_by_verifier" in params:
+            updates["is_checked_by_verifier"] = params["is_checked_by_verifier"]
         if "is_crash_found" in params:
             updates["is_crash_found"] = params["is_crash_found"]
         if "is_important" in params:
@@ -1595,16 +1595,16 @@ class AnalysisServer:
             updates["reachability_multiplier"] = params["reachability_multiplier"]
         if "reachability_reason" in params:
             updates["reachability_reason"] = params["reachability_reason"]
-        if params.get("is_checked"):
+        if params.get("is_checked_by_verifier"):
             updates["checked_at"] = datetime.now()
         # Track which agent verified this SP
-        if params.get("agent_id") and params.get("is_checked"):
+        if params.get("agent_id") and params.get("is_checked_by_verifier"):
             from bson import ObjectId
 
             updates["verified_by_agent_id"] = ObjectId(params["agent_id"])
 
         self._log(
-            f"Updating suspicious point {suspicious_point_id[:8]}... with: is_checked={updates.get('is_checked')}, score={updates.get('score')}"
+            f"Updating suspicious point {suspicious_point_id[:8]}... with: is_checked_by_verifier={updates.get('is_checked_by_verifier')}, score={updates.get('score')}"
         )
         success = await self._run_sync(
             self._update_suspicious_point_sync, suspicious_point_id, updates

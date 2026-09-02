@@ -319,7 +319,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             self.collection.create_index([("task_id", 1), ("status", 1)])
             self.collection.create_index([("task_id", 1), ("function_name", 1)])
             self.collection.create_index([("task_id", 1), ("score", -1)])
-            self.collection.create_index([("task_id", 1), ("is_checked", 1)])
+            self.collection.create_index([("task_id", 1), ("is_checked_by_verifier", 1)])
             # Compound index for claim_for_verify priority sorting
             self.collection.create_index(
                 [
@@ -347,12 +347,12 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
 
     def find_unchecked(self, task_id: str) -> List[SuspiciousPoint]:
         """Find unchecked suspicious points for a task"""
-        return self.find_all({"task_id": ObjectId(task_id), "is_checked": False})
+        return self.find_all({"task_id": ObjectId(task_id), "is_checked_by_verifier": False})
 
     def find_real(self, task_id: str) -> List[SuspiciousPoint]:
         """Find verified real vulnerabilities for a task"""
         return self.find_all(
-            {"task_id": ObjectId(task_id), "is_checked": True, "is_crash_found": True}
+            {"task_id": ObjectId(task_id), "is_checked_by_verifier": True, "is_crash_found": True}
         )
 
     def find_important(self, task_id: str) -> List[SuspiciousPoint]:
@@ -374,7 +374,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
 
     def mark_checked(self, sp_id: str, is_crash_found: bool, notes: str = None) -> bool:
         """Mark a suspicious point as checked"""
-        updates = {"is_checked": True, "is_crash_found": is_crash_found, "checked_at": datetime.now()}
+        updates = {"is_checked_by_verifier": True, "is_crash_found": is_crash_found, "checked_at": datetime.now()}
         if notes:
             updates["verification_notes"] = notes
         return self.update(sp_id, updates)
@@ -504,10 +504,10 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             # Otherwise return all counts (original behavior)
             total = self.collection.count_documents({"task_id": ObjectId(task_id)})
             checked = self.collection.count_documents(
-                {"task_id": ObjectId(task_id), "is_checked": True}
+                {"task_id": ObjectId(task_id), "is_checked_by_verifier": True}
             )
             real = self.collection.count_documents(
-                {"task_id": ObjectId(task_id), "is_checked": True, "is_crash_found": True}
+                {"task_id": ObjectId(task_id), "is_checked_by_verifier": True, "is_crash_found": True}
             )
             important = self.collection.count_documents(
                 {"task_id": ObjectId(task_id), "is_important": True}
@@ -712,7 +712,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             updates = {
                 "status": next_status,
                 "processor_id": None,  # Release the lock
-                "is_checked": True,
+                "is_checked_by_verifier": True,
                 "is_crash_found": is_crash_found,
                 "score": score,
                 "is_important": is_important,

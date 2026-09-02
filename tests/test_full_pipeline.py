@@ -340,7 +340,7 @@ class TestSuspiciousPointFlow:
 
         # Simulate verification complete
         sp.status = SPStatus.PENDING_POV.value
-        sp.is_checked = True
+        sp.is_checked_by_verifier = True
 
         assert sp.status == "pending_pov"
         assert sp.is_important is True
@@ -358,7 +358,7 @@ class TestSuspiciousPointFlow:
 
         # Simulate verification complete
         sp.status = SPStatus.VERIFIED.value
-        sp.is_checked = True
+        sp.is_checked_by_verifier = True
 
         assert sp.status == "verified"
         assert sp.is_important is False
@@ -481,7 +481,7 @@ class TestFullPipelineIntegration:
 
         # 6. Simulate verification complete, create POV
         sp.status = SPStatus.PENDING_POV.value
-        sp.is_checked = True
+        sp.is_checked_by_verifier = True
         sp.is_important = True
         sp.score = 0.85
 

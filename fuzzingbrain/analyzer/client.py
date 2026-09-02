@@ -439,7 +439,7 @@ class AnalysisClient:
     def update_suspicious_point(
         self,
         sp_id: str,
-        is_checked: bool = None,
+        is_checked_by_verifier: bool = None,
         is_crash_found: bool = None,
         is_important: bool = None,
         score: float = None,
@@ -455,7 +455,7 @@ class AnalysisClient:
 
         Args:
             sp_id: Suspicious point ID
-            is_checked: Whether verification is complete
+            is_checked_by_verifier: Whether verification is complete
             is_crash_found: Whether it's a real vulnerability
             is_important: Whether it's high priority
             score: Updated score
@@ -470,8 +470,8 @@ class AnalysisClient:
             Dict with 'updated' status
         """
         params = {"id": sp_id}
-        if is_checked is not None:
-            params["is_checked"] = is_checked
+        if is_checked_by_verifier is not None:
+            params["is_checked_by_verifier"] = is_checked_by_verifier
         if is_crash_found is not None:
             params["is_crash_found"] = is_crash_found
         if is_important is not None:

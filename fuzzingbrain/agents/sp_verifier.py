@@ -368,7 +368,7 @@ Start wrapping up your analysis. You should be ready to call `{self.TOOL_UPDATE_
         return f"""WARNING: Only {remaining} iteration(s) left! You MUST decide NOW.
 
 Call `{self.TOOL_UPDATE_SUSPICIOUS_POINT}` immediately with your best judgment:
-- Set is_checked=True
+- Set is_checked_by_verifier=True
 - Set is_important based on whether this looks real
 - Set score based on your confidence
 - Include verification_notes explaining your reasoning

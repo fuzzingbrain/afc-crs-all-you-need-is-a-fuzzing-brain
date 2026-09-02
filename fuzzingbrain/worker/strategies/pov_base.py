@@ -374,7 +374,7 @@ class POVBaseStrategy(BaseStrategy):
             except Exception as e:
                 self.log_error(f"  [{i + 1}/{total}] Failed to verify: {e}")
                 # Mark as checked but not verified due to error
-                point.is_checked = True
+                point.is_checked_by_verifier = True
                 point.verification_notes = f"Verification failed: {e}"
                 verified.append(point)
 
