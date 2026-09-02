@@ -1441,7 +1441,6 @@ class AnalysisServer:
         harness_name: str,
         sanitizer: str,
         description: str,
-        vuln_type: str,
         score: float,
     ) -> bool:
         """Sync: Merge source into existing SP."""
@@ -1451,7 +1450,6 @@ class AnalysisServer:
         self.repos.suspicious_points.add_merged_duplicate(
             sp_id=duplicate_id,
             description=description,
-            vuln_type=vuln_type,
             harness_name=harness_name,
             sanitizer=sanitizer,
             score=score,
@@ -1464,7 +1462,6 @@ class AnalysisServer:
         harness_name: str,
         sanitizer: str,
         description: str,
-        vuln_type: str,
         score: float,
         important_controlflow: list,
         direction_id: str = "",
@@ -1480,7 +1477,6 @@ class AnalysisServer:
             created_by_agent_id=agent_id if agent_id else None,
             sources=[{"harness_name": harness_name, "sanitizer": sanitizer}],
             description=description,
-            vuln_type=vuln_type,
             score=score,
             important_controlflow=important_controlflow,
         )
@@ -1503,7 +1499,6 @@ class AnalysisServer:
         harness_name = params.get("harness_name", "")
         sanitizer = params.get("sanitizer", "")
         description = params.get("description", "")
-        vuln_type = params.get("vuln_type", "")
         score = params.get("score", 0.0)
         important_controlflow = params.get("important_controlflow", [])
         direction_id = params.get("direction_id", "")
@@ -1528,7 +1523,6 @@ class AnalysisServer:
                     harness_name,
                     sanitizer,
                     description,
-                    vuln_type,
                     score,
                 )
 
@@ -1550,7 +1544,6 @@ class AnalysisServer:
             harness_name,
             sanitizer,
             description,
-            vuln_type,
             score,
             important_controlflow,
             direction_id,

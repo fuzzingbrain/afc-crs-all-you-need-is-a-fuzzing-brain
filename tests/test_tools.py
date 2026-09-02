@@ -89,7 +89,6 @@ class TestCreateSuspiciousPointParameters:
         params = list(sig.parameters.keys())
 
         assert "function_name" in params
-        assert "vuln_type" in params
         assert "description" in params
         assert "score" in params
         assert "important_controlflow" in params
@@ -111,7 +110,6 @@ class TestCreateSuspiciousPointParameters:
 
         result = create_suspicious_point_impl(
             function_name="png_read_row",
-            vuln_type="heap-buffer-overflow",
             description="Buffer overflow in row processing",
             score=0.7,
         )
@@ -221,7 +219,6 @@ class TestToolErrorHandling:
             mock.return_value = {"success": False, "error": "No client"}
             result = create_suspicious_point_impl(
                 function_name="test",
-                vuln_type="overflow",
                 description="test",
             )
             assert result["success"] is False

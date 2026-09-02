@@ -414,7 +414,6 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         self,
         sp_id: str,
         description: str,
-        vuln_type: str,
         harness_name: str,
         sanitizer: str,
         score: float = 0.0,
@@ -428,7 +427,6 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         Args:
             sp_id: Suspicious point ID that the duplicate was merged into
             description: Description of the duplicate SP
-            vuln_type: Vulnerability type of the duplicate
             harness_name: Harness that discovered the duplicate
             sanitizer: Sanitizer used
             score: Score of the duplicate
@@ -439,7 +437,6 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         try:
             merged_record = {
                 "description": description,
-                "vuln_type": vuln_type,
                 "harness_name": harness_name,
                 "sanitizer": sanitizer,
                 "score": score,

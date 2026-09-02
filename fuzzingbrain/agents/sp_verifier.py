@@ -215,7 +215,6 @@ class SPVerifier(BaseAgent):
 
         sp_id = ""
         func_name = ""
-        vuln_type = ""
         original_score = self.SCORE_DEFAULT
         if self.suspicious_point:
             sp_id = self.suspicious_point.get("suspicious_point_id", "")[
@@ -224,7 +223,6 @@ class SPVerifier(BaseAgent):
             func_name = self.suspicious_point.get(
                 "function_name", self.DEFAULT_FUNCTION_NAME
             )
-            vuln_type = self.suspicious_point.get("vuln_type", self.DEFAULT_VULN_TYPE)
             original_score = self.suspicious_point.get("score", self.SCORE_DEFAULT)
 
         verdict = self.VERDICT_UNKNOWN
@@ -247,7 +245,6 @@ class SPVerifier(BaseAgent):
         lines.extend(self._build_table_header("SP VERIFIER SUMMARY"))
         lines.append(self._build_table_row(f"SP ID: {sp_id}"))
         lines.append(self._build_table_row(f"Function: {func_name}"))
-        lines.append(self._build_table_row(f"Vuln Type: {vuln_type}"))
         lines.append(self._build_table_row(f"Fuzzer: {self.fuzzer}"))
         lines.append(self._build_table_row(f"Sanitizer: {self.sanitizer}"))
         lines.append(self._build_table_row(f"Duration: {duration:.2f}s"))
@@ -273,13 +270,11 @@ class SPVerifier(BaseAgent):
         """Get metadata for agent banner."""
         sp_id = ""
         func_name = ""
-        vuln_type = ""
         if self.suspicious_point:
             sp_id = self.suspicious_point.get("suspicious_point_id", "")[
                 : self.SP_ID_TRUNCATE_LENGTH
             ]
             func_name = self.suspicious_point.get("function_name", "")
-            vuln_type = self.suspicious_point.get("vuln_type", "")
         return {
             "Agent": "SP Verifier",
             "Mode": "verification",
@@ -289,7 +284,6 @@ class SPVerifier(BaseAgent):
             "Worker ID": self.worker_id,
             "SP ID": sp_id,
             "Target Function": func_name,
-            "Vulnerability Type": vuln_type,
             "Goal": "Verify if SP is a real vulnerability",
         }
 
@@ -421,9 +415,8 @@ Discard:
         function_name = suspicious_point.get(
             "function_name", self.DEFAULT_FUNCTION_NAME
         )
-        vuln_type = suspicious_point.get("vuln_type", self.DEFAULT_VULN_TYPE)
         static_reachable = suspicious_point.get("static_reachable", True)
-        return sp_id, function_name, vuln_type, static_reachable
+        return sp_id, function_name, static_reachable
 
     def _format_fuzzer_code_section(self, fuzzer_code: str) -> str:
         """Format fuzzer source code section for initial message."""
@@ -450,7 +443,6 @@ This shows how input enters the library - only reachable code matters!
         self,
         sp_id: str,
         function_name: str,
-        vuln_type: str,
         suspicious_point: Dict[str, Any],
         static_reachable: bool,
     ) -> str:
@@ -463,7 +455,6 @@ This shows how input enters the library - only reachable code matters!
 
 - ID: {sp_id}
 - Function: {function_name}
-- Type: {vuln_type}
 - Description: {suspicious_point.get("description", "No description")}
 - Initial Score: {suspicious_point.get("score", self.SCORE_DEFAULT)}
 - Static Reachable: {static_reachable}{reachability_note}
@@ -503,7 +494,6 @@ Before marking as FP, you MUST check for function pointer patterns:
         self,
         static_reachable: bool,
         function_name: str,
-        vuln_type: str,
     ) -> str:
         """Format verification steps section."""
         fp_check = self._format_fp_check_section(static_reachable, function_name)
@@ -520,7 +510,7 @@ Before marking as FP, you MUST check for function pointer patterns:
    - If function pointer pattern found -> set reachability_status="pointer_call", reachability_multiplier=0.95
    - If truly unreachable -> mark as FALSE POSITIVE with reachability_multiplier=0.3
 
-2. **VERIFY SANITIZER COMPATIBILITY**: Is {vuln_type} detectable by {self.sanitizer}?
+2. **VERIFY SANITIZER COMPATIBILITY**: Is the bug type described in the SP detectable by {self.sanitizer}?
    - {self._get_sanitizer_vuln_types()}
 
 3. **READ SOURCE CODE**: Use {source_hint} for {function_name}, and read its callers too
@@ -540,7 +530,7 @@ Start by verifying reachability with {callers_hint}.
         if not suspicious_point:
             return "No suspicious point provided for verification."
 
-        sp_id, function_name, vuln_type, static_reachable = self._extract_sp_info(
+        sp_id, function_name, static_reachable = self._extract_sp_info(
             suspicious_point
         )
 
@@ -561,7 +551,7 @@ If either is NO -> mark as FALSE POSITIVE immediately.
         message += self._format_fuzzer_code_section(fuzzer_code)
 
         message += self._format_sp_details_section(
-            sp_id, function_name, vuln_type, suspicious_point, static_reachable
+            sp_id, function_name, suspicious_point, static_reachable
         )
 
         control_flow = suspicious_point.get("important_controlflow")
@@ -569,7 +559,7 @@ If either is NO -> mark as FALSE POSITIVE immediately.
             message += self._format_control_flow_section(control_flow)
 
         message += self._format_verification_steps_section(
-            static_reachable, function_name, vuln_type
+            static_reachable, function_name
         )
 
         return message

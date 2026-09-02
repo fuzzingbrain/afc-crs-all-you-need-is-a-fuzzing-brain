@@ -178,7 +178,6 @@ class SPGeneratorBase(BaseAgent):
                     self.sp_created = True
                     self.sp_details = {
                         "function_name": tool_args.get("function_name", ""),
-                        "vuln_type": tool_args.get("vuln_type", "unknown"),
                         "score": tool_args.get("score", 0.5),
                         "description": tool_args.get("description", ""),
                         "sp_id": data.get("suspicious_point_id"),
@@ -323,7 +322,6 @@ class FullSPGenerator(SPGeneratorBase):
         if self.sp_created:
             lines.append("Result: SP CREATED")
             if self.sp_details:
-                lines.append(f"  Type: {self.sp_details.get('vuln_type', 'unknown')}")
                 lines.append(f"  Score: {self.sp_details.get('score', 0)}")
         else:
             lines.append("Result: NO ISSUE")
@@ -390,9 +388,7 @@ class FullSPGenerator(SPGeneratorBase):
 
         if self.sp_details:
             lines.append("+" + "-" * width + "+")
-            vuln_type = self.sp_details.get("vuln_type", "unknown")
             score = self.sp_details.get("score", 0)
-            lines.append("|" + f"  Type: {vuln_type}".ljust(width) + "|")
             lines.append("|" + f"  Score: {score}".ljust(width) + "|")
 
         lines.append("+" + "-" * width + "+")
@@ -678,7 +674,7 @@ class DeltaSPGenerator(SPGeneratorBase):
 
         # Context for delta analysis
         self.reachable_changes: List[Dict[str, Any]] = []
-        self.sp_list: List[tuple] = []  # (func_name, vuln_type, score)
+        self.sp_list: List[tuple] = []  # (func_name, score)
 
     @property
     def agent_name(self) -> str:
@@ -757,13 +753,13 @@ class DeltaSPGenerator(SPGeneratorBase):
         lines.append("+" + "-" * self.TABLE_WIDTH + "+")
 
         if self.sp_list:
-            for func_name, vuln_type, score in self.sp_list:
+            for func_name, score in self.sp_list:
                 score_icon = (
                     "H"
                     if score >= self.SCORE_HIGH_CONFIDENCE
                     else ("M" if score >= self.SCORE_MEDIUM_CONFIDENCE else "L")
                 )
-                content = f"[{score_icon}:{score:.1f}] {func_name}: {vuln_type}"
+                content = f"[{score_icon}:{score:.1f}] {func_name}"
                 lines.append(self._build_table_row(content))
         else:
             lines.append(self._build_table_row("(No SPs created)"))
@@ -788,10 +784,9 @@ class DeltaSPGenerator(SPGeneratorBase):
                     func_name = tool_args.get(
                         "function_name", self.DEFAULT_FUNCTION_NAME
                     )
-                    vuln_type = tool_args.get("vuln_type", self.DEFAULT_VULN_TYPE)
                     score = tool_args.get("score", self.SCORE_DEFAULT)
-                    self.sp_list.append((func_name, vuln_type, score))
-                    self._log(f"Tracked SP: {func_name} ({vuln_type})", level="INFO")
+                    self.sp_list.append((func_name, score))
+                    self._log(f"Tracked SP: {func_name}", level="INFO")
             except (json.JSONDecodeError, TypeError):
                 pass
 

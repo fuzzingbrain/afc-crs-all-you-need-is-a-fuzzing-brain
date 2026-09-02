@@ -665,7 +665,6 @@ def _register_sp_create_tools(mcp: FastMCP) -> None:
     @async_tool
     def create_suspicious_point(
         function_name: str,
-        vuln_type: str,
         description: str,
         score: float = 0.5,
         important_controlflow: list = None,
@@ -675,15 +674,15 @@ def _register_sp_create_tools(mcp: FastMCP) -> None:
 
         Args:
             function_name: Name of the suspicious function
-            vuln_type: Type of vulnerability (e.g., "buffer-overflow", "use-after-free")
-            description: Detailed description of the potential vulnerability
+            description: Detailed description of the potential vulnerability;
+                name the bug type in the description (there is no separate type field)
             score: Confidence score (0.0-1.0)
             important_controlflow: List of related control flow elements
         """
         from .suspicious_points import create_suspicious_point_impl
 
         return create_suspicious_point_impl(
-            function_name, vuln_type, description, score, important_controlflow
+            function_name, description, score, important_controlflow
         )
 
 

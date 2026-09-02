@@ -450,7 +450,6 @@ class POVDeltaStrategy(POVBaseStrategy):
         sp_context = [
             {
                 "function": sp.function_name,
-                "vuln_type": sp.vuln_type,
                 "description": sp.description,
             }
             for sp in suspicious_points

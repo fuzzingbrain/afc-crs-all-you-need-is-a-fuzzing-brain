@@ -38,7 +38,6 @@ def _make_sp(task_id, function_name="parse_chunk", score=0.7, status=None):
         task_id=task_id,
         function_name=function_name,
         description=f"potential overflow in {function_name}",
-        vuln_type="buffer-overflow",
         score=score,
         sources=[{"harness_name": "fuzz_png", "sanitizer": "address"}],
     )

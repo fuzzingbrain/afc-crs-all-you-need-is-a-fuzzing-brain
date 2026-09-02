@@ -96,7 +96,6 @@ class TestSPCreateContextFlow:
 
         result = create_suspicious_point_impl(
             function_name="png_read_chunk",
-            vuln_type="buffer-overflow",
             description="Unbounded memcpy from chunk data",
             score=0.8,
         )
@@ -108,7 +107,6 @@ class TestSPCreateContextFlow:
         assert kw["direction_id"] == "dir_chunk_handlers"
         assert kw["agent_id"] == "agent_spg_001"
         assert kw["function_name"] == "png_read_chunk"
-        assert kw["vuln_type"] == "buffer-overflow"
 
     def test_phase1_parallel_spg_agents_share_direction_context(self):
         """
@@ -153,7 +151,6 @@ class TestSPCreateContextFlow:
                 ):
                     create_suspicious_point_impl(
                         function_name=func_name,
-                        vuln_type="buffer-overflow",
                         description=f"Bug in {func_name}",
                     )
                     captured[func_name] = mock_client.create_suspicious_point.call_args[
@@ -245,7 +242,6 @@ class TestSPUpdateContextFlow:
         )
         create_suspicious_point_impl(
             function_name="parse_chunk",
-            vuln_type="buffer-overflow",
             description="memcpy without bounds check",
         )
 
@@ -396,7 +392,6 @@ class TestParallelAgentToolCalls:
                 ):
                     create_suspicious_point_impl(
                         function_name=f"func_{name}",
-                        vuln_type="buffer-overflow",
                         description="test",
                     )
                     captured[name] = mock_client.create_suspicious_point.call_args[1]
@@ -462,7 +457,6 @@ class TestParallelAgentToolCalls:
                 ):
                     create_suspicious_point_impl(
                         function_name="png_read_chunk",
-                        vuln_type="buffer-overflow",
                         description="New SP from Phase 1",
                     )
                     captured["sp_find"] = mock_client.create_suspicious_point.call_args[
@@ -548,7 +542,6 @@ class TestContextLeakBetweenPipelinePhases:
         )
         result1 = create_suspicious_point_impl(
             function_name="parse_chunk",
-            vuln_type="buffer-overflow",
             description="test",
         )
         assert result1["success"] is True
@@ -584,7 +577,6 @@ class TestContextLeakBetweenPipelinePhases:
         )
         create_suspicious_point_impl(
             function_name="parse_chunk",
-            vuln_type="buffer-overflow",
             description="test",
         )
 
@@ -597,7 +589,6 @@ class TestContextLeakBetweenPipelinePhases:
         )
         create_suspicious_point_impl(
             function_name="parse_icc",
-            vuln_type="out-of-bounds-read",
             description="test",
         )
         kw_fixed = client.create_suspicious_point.call_args[1]

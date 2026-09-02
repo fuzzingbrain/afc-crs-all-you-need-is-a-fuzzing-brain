@@ -398,7 +398,6 @@ class AnalysisClient:
         self,
         function_name: str,
         description: str,
-        vuln_type: str,
         score: float = 0.0,
         important_controlflow: List[dict] = None,
         harness_name: str = "",
@@ -411,8 +410,8 @@ class AnalysisClient:
 
         Args:
             function_name: Name of the function containing the suspicious code
-            description: Description of the potential vulnerability (use control flow, not line numbers)
-            vuln_type: Type of vulnerability (buffer-overflow, use-after-free, etc.)
+            description: Description of the potential vulnerability (use control flow,
+                not line numbers; name the bug type in the description)
             score: Initial score (0.0-1.0)
             important_controlflow: List of related functions/variables
             harness_name: Fuzzer harness name that created this SP
@@ -428,7 +427,6 @@ class AnalysisClient:
             {
                 "function_name": function_name,
                 "description": description,
-                "vuln_type": vuln_type,
                 "score": score,
                 "important_controlflow": important_controlflow or [],
                 "harness_name": harness_name,

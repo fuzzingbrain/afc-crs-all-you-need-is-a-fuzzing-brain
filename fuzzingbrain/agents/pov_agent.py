@@ -220,11 +220,9 @@ class POVAgent(BaseAgent):
 
         sp_id = ""
         func_name = ""
-        vuln_type = ""
         if self.suspicious_point:
             sp_id = self.suspicious_point.get("suspicious_point_id", "")[:16]
             func_name = self.suspicious_point.get("function_name", "unknown")
-            vuln_type = self.suspicious_point.get("vuln_type", "unknown")
 
         # Determine result
         if self.pov_success:
@@ -251,7 +249,6 @@ class POVAgent(BaseAgent):
         lines.append("├" + "─" * width + "┤")
         lines.append("│" + f"  SP ID: {sp_id}".ljust(width) + "│")
         lines.append("│" + f"  Target Function: {func_name}".ljust(width) + "│")
-        lines.append("│" + f"  Vulnerability: {vuln_type}".ljust(width) + "│")
         lines.append("│" + f"  Fuzzer: {self.fuzzer}".ljust(width) + "│")
         lines.append("│" + f"  Sanitizer: {self.sanitizer}".ljust(width) + "│")
         lines.append("├" + "─" * width + "┤")
@@ -284,11 +281,9 @@ class POVAgent(BaseAgent):
         """Get metadata for agent banner."""
         sp_id = ""
         func_name = ""
-        vuln_type = ""
         if self.suspicious_point:
             sp_id = self.suspicious_point.get("suspicious_point_id", "")[:16]
             func_name = self.suspicious_point.get("function_name", "")
-            vuln_type = self.suspicious_point.get("vuln_type", "")
         return {
             "Agent": "POV Generation Agent",
             "Scan Mode": "POV generation",
@@ -298,7 +293,6 @@ class POVAgent(BaseAgent):
             "Worker ID": self.worker_id,
             "SP ID": sp_id,
             "Target Function": func_name,
-            "Vulnerability Type": vuln_type,
             "Goal": "Generate crashing input (POV)",
         }
 
@@ -395,7 +389,6 @@ Discard:
             "suspicious_point_id", suspicious_point.get("_id", "unknown")
         )
         function_name = suspicious_point.get("function_name", "unknown")
-        vuln_type = suspicious_point.get("vuln_type", "unknown")
         description = suspicious_point.get("description", "No description")
         score = suspicious_point.get("score", 0.5)
 
@@ -415,7 +408,6 @@ Your POV must:
 
 - ID: {sp_id}
 - Function: {function_name}
-- Vulnerability Type: {vuln_type}
 - Confidence Score: {score}
 
 ## Vulnerability Description
@@ -488,7 +480,7 @@ This is CRITICAL - you need to understand how your input enters the library!
 
 1. Read the source code of `{function_name}` to understand the vulnerability
 2. Analyze how the fuzzer input flows to the vulnerable function
-3. Design a test input that triggers the {vuln_type} vulnerability
+3. Design a test input that triggers the vulnerability described above
 4. Use create_pov to generate the test input
 5. Use verify_pov to check if it causes a crash
 6. Iterate with different approaches (trace_pov available after 3 failed attempts)

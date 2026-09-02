@@ -130,13 +130,11 @@ class TestSuspiciousPointModel:
             suspicious_point_id=str(ObjectId()),
             task_id=str(ObjectId()),
             function_name="test_func",
-            vuln_type="buffer_overflow",
             score=0.8,
         )
         dict_form = original.to_dict()
         restored = SuspiciousPoint.from_dict(dict_form)
         assert restored.function_name == original.function_name
-        assert restored.vuln_type == original.vuln_type
         assert restored.score == original.score
 
 

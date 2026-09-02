@@ -205,7 +205,6 @@ class TestSPVerifier:
         sp_dict = {
             "suspicious_point_id": str(ObjectId()),
             "function_name": "png_read_row",
-            "vuln_type": "heap-buffer-overflow",
             "score": 0.7,
             "static_reachable": True,
         }
@@ -226,7 +225,6 @@ class TestSPVerifier:
             suspicious_point_id=str(ObjectId()),
             task_id=str(ObjectId()),
             function_name="png_read_row",
-            vuln_type="heap-buffer-overflow",
             processor_id="verify_1",  # Non-ObjectId string
         )
 
@@ -301,7 +299,6 @@ class TestSuspiciousPointFlow:
             task_id=str(ObjectId()),
             direction_id=str(ObjectId()),
             function_name="png_read_row",
-            vuln_type="heap-buffer-overflow",
             status=SPStatus.PENDING_VERIFY.value,
             score=0.7,
         )
@@ -466,7 +463,6 @@ class TestFullPipelineIntegration:
             task_id=task_id,
             direction_id=direction_id,
             function_name="png_read_row",
-            vuln_type="heap-buffer-overflow",
             status=SPStatus.PENDING_VERIFY.value,
             processor_id="verify_1",  # Non-ObjectId - should still work
         )

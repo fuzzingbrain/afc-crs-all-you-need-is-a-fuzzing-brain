@@ -6,7 +6,7 @@ Tests the SP creation flow: LLM tool call → create_suspicious_point_impl → c
 
 Business invariants under test:
 1. No direction_id in context → create SP blocked (Layer A guard)
-2. LLM params (function_name, vuln_type, description, score) forwarded correctly to client
+2. LLM params (function_name, description, score) forwarded correctly to client
 3. harness_name/sanitizer/direction_id/agent_id come from ContextVar, not LLM
 4. New SP defaults to PENDING_VERIFY status so claim_for_verify() can pick it up
 5. created_by_agent_id is set from context (not LLM)
@@ -76,7 +76,6 @@ class TestDirectionGuard:
 
         result = create_suspicious_point_impl(
             function_name="parse_chunk",
-            vuln_type="buffer-overflow",
             description="heap overflow in chunk parser",
         )
 
@@ -95,7 +94,6 @@ class TestDirectionGuard:
 
         result = create_suspicious_point_impl(
             function_name="parse_chunk",
-            vuln_type="buffer-overflow",
             description="heap overflow",
         )
 
@@ -127,7 +125,6 @@ class TestSPFieldFlow:
 
         create_suspicious_point_impl(
             function_name="decompress_data",
-            vuln_type="use-after-free",
             description="UAF after realloc in decompression loop",
             score=0.85,
             important_controlflow=[
@@ -137,7 +134,6 @@ class TestSPFieldFlow:
 
         kw = client.create_suspicious_point.call_args[1]
         assert kw["function_name"] == "decompress_data"
-        assert kw["vuln_type"] == "use-after-free"
         assert kw["description"] == "UAF after realloc in decompression loop"
         assert kw["score"] == 0.85
         assert kw["important_controlflow"] == [
@@ -159,7 +155,6 @@ class TestSPFieldFlow:
 
         create_suspicious_point_impl(
             function_name="f",
-            vuln_type="buffer-overflow",
             description="d",
         )
 
@@ -179,14 +174,14 @@ class TestSPFieldFlow:
         d1 = str(ObjectId())
         set_sp_context("fuzz_png", "address", direction_id=d1)
         create_suspicious_point_impl(
-            function_name="f1", vuln_type="bof", description="d1"
+            function_name="f1", description="d1"
         )
         first = client.create_suspicious_point.call_args[1]
 
         d2 = str(ObjectId())
         set_sp_context("fuzz_icc", "memory", direction_id=d2)
         create_suspicious_point_impl(
-            function_name="f2", vuln_type="uaf", description="d2"
+            function_name="f2", description="d2"
         )
         second = client.create_suspicious_point.call_args[1]
 
@@ -206,7 +201,6 @@ class TestSPFieldFlow:
 
         create_suspicious_point_impl(
             function_name="f",
-            vuln_type="bof",
             description="d",
             # score not provided
         )
@@ -245,7 +239,6 @@ class TestSPInitialState:
             task_id=task_id,
             function_name="parse_chunk",
             description="heap overflow",
-            vuln_type="buffer-overflow",
             score=0.8,
             sources=[{"harness_name": "fuzz_png", "sanitizer": "address"}],
         )

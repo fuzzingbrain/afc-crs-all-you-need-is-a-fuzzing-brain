@@ -114,7 +114,6 @@ class TestSPPipelineLifecycle:
             function_name="vuln_func",
             direction_id=generate_id(),
             description="heap-buffer-overflow in vuln_func",
-            vuln_type="heap-buffer-overflow",
             sources=[{"harness_name": "fuzz1", "sanitizer": "address"}],
         )
         defaults.update(kwargs)
@@ -270,7 +269,6 @@ class TestSPClaimScheduling:
             function_name="vuln_func",
             direction_id=generate_id(),
             description="overflow",
-            vuln_type="heap-buffer-overflow",
             sources=[{"harness_name": "fuzz1", "sanitizer": "address"}],
         )
         defaults.update(kwargs)
@@ -463,7 +461,6 @@ class TestSPSourceMerging:
             function_name="f",
             direction_id=generate_id(),
             description="d",
-            vuln_type="v",
             sources=[],
         )
         repos.suspicious_points.save(sp)
@@ -483,7 +480,6 @@ class TestSPSourceMerging:
             function_name="f",
             direction_id=generate_id(),
             description="primary desc",
-            vuln_type="heap-overflow",
             sources=[{"harness_name": "fuzz1", "sanitizer": "address"}],
         )
         repos.suspicious_points.save(primary)
@@ -492,7 +488,6 @@ class TestSPSourceMerging:
         repos.suspicious_points.add_merged_duplicate(
             primary.suspicious_point_id,
             description="duplicate desc from fuzz2",
-            vuln_type="heap-buffer-overflow",
             harness_name="fuzz2",
             sanitizer="address",
             score=0.7,
@@ -513,7 +508,6 @@ class TestSPPipelineCompletion:
             function_name="f",
             direction_id=generate_id(),
             description="d",
-            vuln_type="v",
             sources=[{"harness_name": "fuzz1", "sanitizer": "address"}],
         )
         defaults.update(kwargs)
@@ -1260,7 +1254,6 @@ class TestObjectIdRoundtrip:
             function_name="f",
             direction_id=generate_id(),
             description="d",
-            vuln_type="v",
         )
         repos.suspicious_points.save(sp)
         found = repos.suspicious_points.find_by_id(sp.suspicious_point_id)

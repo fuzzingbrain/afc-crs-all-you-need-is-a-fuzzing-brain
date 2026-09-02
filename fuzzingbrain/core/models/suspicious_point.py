@@ -70,13 +70,11 @@ class SuspiciousPoint:
     # Format: [{"harness_name": "fuzz_png", "sanitizer": "address"}, ...]
     sources: List[Dict] = field(default_factory=list)
 
-    # Description (uses control flow instead of line numbers, as LLMs are not good at generating line numbers)
+    # Description (uses control flow instead of line numbers, as LLMs are not good
+    # at generating line numbers). The bug type is described here in prose too —
+    # there is no separate vuln_type field (the only trustworthy type is the ASan
+    # crash type, which lives on the POV, not the SP).
     description: str = ""
-
-    # Vulnerability type
-    vuln_type: str = (
-        ""  # buffer-overflow, use-after-free, integer-overflow, null-pointer, etc.
-    )
 
     # Pipeline status (for parallel processing)
     status: str = SPStatus.PENDING_VERIFY.value  # Current pipeline status
@@ -155,7 +153,6 @@ class SuspiciousPoint:
             else None,
             "sources": self.sources,
             "description": self.description,
-            "vuln_type": self.vuln_type,
             "status": self.status,
             "processor_id": safe_object_id(self.processor_id)
             if self.processor_id
@@ -246,7 +243,6 @@ class SuspiciousPoint:
             verified_by_agent_id=verified_by_agent_id,
             sources=sources,
             description=data.get("description", ""),
-            vuln_type=data.get("vuln_type", ""),
             status=data.get("status", SPStatus.PENDING_VERIFY.value),
             processor_id=processor_id,
             is_checked=data.get("is_checked", False),

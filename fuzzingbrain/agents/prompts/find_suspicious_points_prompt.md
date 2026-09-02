@@ -88,8 +88,8 @@ These are DIFFERENT vulnerabilities with different root causes - create separate
 
 - Use control flow descriptions, NOT line numbers
 - Describe the ROOT CAUSE of the vulnerability
+- Name the bug type IN the description (e.g. "stack buffer overflow because...") — there is no separate type field
 - Assign a confidence score (0.0-1.0)
-- Specify the vulnerability type (buffer-overflow, use-after-free, integer-overflow, etc.)
 - List related functions/variables that affect the bug
 
 Be thorough but precise. Quality over quantity - fewer accurate points are better than many redundant ones.

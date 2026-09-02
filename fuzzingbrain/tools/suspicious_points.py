@@ -111,7 +111,6 @@ def _ensure_sp_context() -> Optional[Dict[str, Any]]:
 
 def create_suspicious_point_impl(
     function_name: str,
-    vuln_type: str,
     description: str,
     score: float = 0.5,
     important_controlflow: List[Dict[str, str]] = None,
@@ -127,7 +126,6 @@ def create_suspicious_point_impl(
         result = client.create_suspicious_point(
             function_name=function_name,
             description=description,
-            vuln_type=vuln_type,
             score=score,
             important_controlflow=important_controlflow or [],
             harness_name=harness_name or "",
@@ -140,11 +138,11 @@ def create_suspicious_point_impl(
         sp_id = result.get("id")
 
         if merged:
-            logger.info(f"[MERGED SP] {sp_id[:8]} <- {function_name} ({vuln_type})")
+            logger.info(f"[MERGED SP] {sp_id[:8]} <- {function_name}")
             return {"success": True, "merged": True, "id": sp_id[:8]}
         else:
             logger.info(
-                f"[NEW SP] {sp_id[:8]} -> {function_name} ({vuln_type}, score={score})"
+                f"[NEW SP] {sp_id[:8]} -> {function_name} (score={score})"
             )
             return {"success": True, "created": True, "id": sp_id[:8]}
     except (BrokenPipeError, ConnectionError, OSError) as e:
@@ -281,7 +279,6 @@ def get_suspicious_point_impl(suspicious_point_id: str) -> Dict[str, Any]:
 def create_suspicious_point(
     function_name: str,
     description: str,
-    vuln_type: str,
     score: float = 0.5,
     important_controlflow: List[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
@@ -293,19 +290,11 @@ def create_suspicious_point(
     Args:
         function_name: The function containing the suspicious code
         description: Detailed description of the potential vulnerability.
-                    Describe using control flow, not line numbers.
+                    Describe using control flow, not line numbers, and NAME THE BUG
+                    TYPE in the description (e.g. "stack buffer overflow because...").
                     Example: "The length parameter from user input flows into
-                    memcpy without bounds checking after the if-else branch"
-        vuln_type: Type of vulnerability. One of:
-            - buffer-overflow
-            - use-after-free
-            - integer-overflow
-            - null-pointer-dereference
-            - format-string
-            - double-free
-            - uninitialized-memory
-            - out-of-bounds-read
-            - out-of-bounds-write
+                    memcpy without bounds checking after the if-else branch —
+                    an out-of-bounds write"
         score: Confidence score (0.0-1.0). Higher means more likely to be real.
             - 0.8-1.0: Very confident, clear vulnerability pattern
             - 0.5-0.8: Moderate confidence, needs verification
@@ -328,7 +317,6 @@ def create_suspicious_point(
         result = client.create_suspicious_point(
             function_name=function_name,
             description=description,
-            vuln_type=vuln_type,
             score=score,
             important_controlflow=important_controlflow or [],
             harness_name=harness_name or "",
@@ -341,11 +329,11 @@ def create_suspicious_point(
         sp_id = result.get("id")
 
         if merged:
-            logger.info(f"[MERGED SP] {sp_id[:8]} <- {function_name} ({vuln_type})")
+            logger.info(f"[MERGED SP] {sp_id[:8]} <- {function_name}")
             return {"success": True, "merged": True, "id": sp_id[:8]}
         else:
             logger.info(
-                f"[NEW SP] {sp_id[:8]} -> {function_name} ({vuln_type}, score={score})"
+                f"[NEW SP] {sp_id[:8]} -> {function_name} (score={score})"
             )
             return {"success": True, "created": True, "id": sp_id[:8]}
     except (BrokenPipeError, ConnectionError, OSError) as e:

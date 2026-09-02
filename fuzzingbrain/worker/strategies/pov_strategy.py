@@ -993,7 +993,7 @@ class POVStrategy(BaseStrategy):
         for i, point in enumerate(suspicious_points):
             point_start = time.time()
             self.log_info(
-                f"  [{i + 1}/{total}] Verifying: {point.function_name} ({point.vuln_type}, score={point.score:.2f})"
+                f"  [{i + 1}/{total}] Verifying: {point.function_name} (score={point.score:.2f})"
             )
 
             # Convert SuspiciousPoint to dict for agent
@@ -1116,7 +1116,6 @@ class POVStrategy(BaseStrategy):
                 {
                     "id": p.suspicious_point_id,
                     "function": p.function_name,
-                    "vuln_type": p.vuln_type,
                     "description": p.description,
                     "score": p.score,
                     "is_important": p.is_important,
