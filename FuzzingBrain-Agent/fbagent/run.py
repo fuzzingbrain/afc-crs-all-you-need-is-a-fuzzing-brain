@@ -130,11 +130,28 @@ def main() -> int:
                     default=float(os.environ.get("FBAGENT_MIN_SPEND_FRAC", "0.5") or 0.5),
                     help="don't stop voluntarily until this fraction of --max-usd "
                          "is spent, 0 = off (env: FBAGENT_MIN_SPEND_FRAC)")
+    # Fuzzing is a general capability, on by default; a benchmark that wants the
+    # result to come from reasoning + the analysis tools turns it off. tools.bash
+    # reads FBAGENT_NO_FUZZING, so setting it here (from the flag) is what the guard
+    # sees; we also tell the model up front so it doesn't waste a turn trying.
+    ap.add_argument("--no-fuzzing", action="store_true",
+                    default=os.environ.get("FBAGENT_NO_FUZZING", "").strip().lower()
+                    in ("1", "true", "yes", "on"),
+                    help="disable building/running a coverage-guided fuzzer "
+                         "(env: FBAGENT_NO_FUZZING)")
     ap.add_argument("--model", default=None)
     args = ap.parse_args()
 
+    system = SYSTEM
+    if args.no_fuzzing:
+        os.environ["FBAGENT_NO_FUZZING"] = "1"     # what tools.bash's guard reads
+        system += ("\n\n## Constraint\n\nCoverage-guided fuzzing is disabled here. "
+                   "Do not build or run a fuzzer (libFuzzer, AFL, honggfuzz). Find "
+                   "the fault by reading the code and constructing targeted inputs, "
+                   "using the worklist, `gates`, and `trace`.")
+
     llm = LLM(model=args.model) if args.model else LLM()
-    agent = Agent(SYSTEM, llm=llm, max_steps=args.max_steps,
+    agent = Agent(system, llm=llm, max_steps=args.max_steps,
                   max_tokens=args.max_tokens, max_usd=args.max_usd,
                   deadline_s=args.timeout, min_spend_fraction=args.min_spend_frac)
 
@@ -147,7 +164,7 @@ def main() -> int:
     # the opening the model actually saw, then every step un-truncated. Leading
     # with system + recon + opening is what lets a reader audit not just what the
     # agent did but the ground it was handed and how that ground was produced.
-    records = [{"step": 0, "kind": "system", "text": SYSTEM}]
+    records = [{"step": 0, "kind": "system", "text": system}]
     records += recon
     records += [{"step": 0, "kind": "opening", "text": opening}]
     records += agent.trace()          # max_chars=0 -> every tool output in full
