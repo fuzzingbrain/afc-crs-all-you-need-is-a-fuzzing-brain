@@ -36,13 +36,23 @@ class Agent:
 
     def __init__(self, system: str, llm: LLM | None = None,
                  max_steps: int = 0, max_tokens: int = 0, max_usd: float = 0.0,
-                 deadline_s: float | None = None):
+                 deadline_s: float | None = None, min_spend_fraction: float = 0.5):
         self.system = system
         self.llm = llm or LLM()
         self.max_steps = max_steps          # 0 = no step cap
         self.max_tokens = max_tokens        # 0 = no token cap
         self.max_usd = max_usd              # 0 = no spend cap
         self.deadline = (time.time() + deadline_s) if deadline_s else None
+        # Keep-hunting guard: the model may not volunteer to stop until it has
+        # spent this fraction of the spend cap. The metric rewards *distinct*
+        # crashes, and a weak model tends to quit with most of its budget unused;
+        # below the line a voluntary end_turn becomes a "find a different bug"
+        # nudge instead of a stop. Needs a spend cap to measure against; a zero
+        # fraction (or no cap) disables it. It is self-bounding: each nudge is a
+        # real model call that costs money, so spend climbs to the line and the
+        # next stop is allowed — the deadline is the outer backstop.
+        self.min_spend_fraction = max(0.0, min(1.0, min_spend_fraction))
+        self.forced_continuations = 0      # how many stops the guard overrode
         self.messages: list[dict] = []
         self.steps = 0
         self.stop_reason = "unstarted"
@@ -52,6 +62,41 @@ class Agent:
         cached alike. The honest measure of work done, and what a token budget
         is spent against."""
         return sum(self.llm.usage.values())
+
+    def _keep_hunting(self, reason: str) -> bool:
+        """Whether to override a voluntary stop and push the model to keep going.
+
+        Only a real end_turn is overridden — never an api_error, a token-capped
+        response, or any budget stop, which are not the model choosing to quit.
+        Gated on the spend cap: below `min_spend_fraction` of it the run has
+        budget left the metric wants spent on more distinct crashes."""
+        if reason != "end_turn":
+            return False
+        if not self.max_usd or self.min_spend_fraction <= 0:
+            return False
+        return self.llm.cost_usd < self.min_spend_fraction * self.max_usd
+
+    def _nudge(self) -> str:
+        """The keep-hunting message. It withholds every scorer signal the api-arm
+        baseline is denied — no new-vs-duplicate verdict, no running count — and
+        only tells the model to go after a *different* bug with the budget it has
+        left, so the guard buys persistence without leaking the score."""
+        pct = int(self.llm.cost_usd / self.max_usd * 100) if self.max_usd else 0
+        half = int(self.min_spend_fraction * 100)
+        return (
+            f"You ended your turn, but you have spent only about {pct}% of your "
+            f"budget — below the {half}% mark, so you may NOT stop yet. The goal is "
+            "to find as MANY DISTINCT crashes as you can; every crash with a "
+            "different signature scores on its own.\n\n"
+            f"Once you are past {half}% you MAY stop — but only if you genuinely "
+            "cannot find another distinct crash. If you believe you can still find "
+            "one more, do not stop, no matter how far along you are.\n\n"
+            "Right now: go after something you have NOT already crashed. Use "
+            "`diversify` on the function(s) you have crashed to get the reachable "
+            "sink furthest from them, pick one, and build a fresh input for it. No "
+            "crash yet? Take a different worklist sink than the ones you have "
+            "tried, or push deeper past a gate you have not satisfied. Keep going."
+        )
 
     def _out_of_budget(self) -> str | None:
         if self.max_steps and self.steps >= self.max_steps:
@@ -90,7 +135,14 @@ class Agent:
             self.messages.append({"role": "assistant", "content": resp.content})
 
             if resp.stop_reason != "tool_use":
-                self.stop_reason = resp.stop_reason or "end_turn"
+                reason = resp.stop_reason or "end_turn"
+                # Below the spend line, a voluntary stop becomes a nudge to hunt a
+                # different bug rather than an end — the budget is there to spend.
+                if self._keep_hunting(reason):
+                    self.forced_continuations += 1
+                    self.messages.append({"role": "user", "content": self._nudge()})
+                    continue
+                self.stop_reason = reason
                 break
 
             # Run every tool the model asked for and return all results in one
@@ -118,6 +170,7 @@ class Agent:
             "steps": self.steps,
             "usage": dict(self.llm.usage),
             "cache_hit_rate": round(self.llm.cache_hit_rate, 3),
+            "forced_continuations": self.forced_continuations,
         }
 
     def transcript_text(self) -> str:

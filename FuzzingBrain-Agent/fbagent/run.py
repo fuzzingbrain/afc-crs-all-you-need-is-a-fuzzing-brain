@@ -94,8 +94,10 @@ def _archive(records: list, result: dict, llm, agent) -> str | None:
                 "stop_reason": result.get("stop_reason"), "steps": result.get("steps"),
                 "cost_usd": round(llm.cost_usd, 4),
                 "cache_hit_rate": result.get("cache_hit_rate"), "usage": result.get("usage"),
+                "forced_continuations": result.get("forced_continuations"),
                 "budgets": {"max_steps": agent.max_steps, "max_tokens": agent.max_tokens,
-                            "max_usd": agent.max_usd}}
+                            "max_usd": agent.max_usd,
+                            "min_spend_frac": agent.min_spend_fraction}}
         path = proj / f"{sid}.jsonl"
         with path.open("w") as f:
             f.write(json.dumps(meta) + "\n")
@@ -121,13 +123,20 @@ def main() -> int:
     ap.add_argument("--max-usd", type=float,
                     default=float(os.environ.get("FBAGENT_MAX_USD", "0") or 0),
                     help="spend cap in USD, 0 = no cap (env: FBAGENT_MAX_USD)")
+    # Keep-hunting: refuse a voluntary stop until this fraction of --max-usd is
+    # spent, so the model keeps hunting distinct crashes instead of quitting with
+    # the budget unused. Needs --max-usd; 0 turns it off.
+    ap.add_argument("--min-spend-frac", type=float,
+                    default=float(os.environ.get("FBAGENT_MIN_SPEND_FRAC", "0.5") or 0.5),
+                    help="don't stop voluntarily until this fraction of --max-usd "
+                         "is spent, 0 = off (env: FBAGENT_MIN_SPEND_FRAC)")
     ap.add_argument("--model", default=None)
     args = ap.parse_args()
 
     llm = LLM(model=args.model) if args.model else LLM()
     agent = Agent(SYSTEM, llm=llm, max_steps=args.max_steps,
                   max_tokens=args.max_tokens, max_usd=args.max_usd,
-                  deadline_s=args.timeout)
+                  deadline_s=args.timeout, min_spend_fraction=args.min_spend_frac)
 
     recon: list = []
     opening = _opening_with_recon(recon)
