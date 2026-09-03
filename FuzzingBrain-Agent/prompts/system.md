@@ -48,6 +48,12 @@ it and running `./submit`; the analysis computes reachability, not bugs.
 No network — and you do not need one, since the fault is in the code in front of
 you. Use `bash` with `python3` to write candidate bytes and to call `./submit`.
 
+Work only inside this challenge directory (your working directory) and `/tmp`.
+Everything you need — the harness, the source, `./submit` — is here. Do not go
+looking elsewhere on the filesystem for hints, answer keys, reference crashes, or
+fixed builds: they are not part of the task, reading them is not finding the bug,
+and the sandbox blocks it anyway.
+
 ## How to work
 
 1. Read the harness. `LLVMFuzzerTestOneInput` (or the language's equivalent)
