@@ -53,6 +53,7 @@ class Agent:
         # next stop is allowed — the deadline is the outer backstop.
         self.min_spend_fraction = max(0.0, min(1.0, min_spend_fraction))
         self.forced_continuations = 0      # how many stops the guard overrode
+        self.step_cost: dict[int, float] = {}   # cumulative $ after each step's call
         self.messages: list[dict] = []
         self.steps = 0
         self.stop_reason = "unstarted"
@@ -129,6 +130,10 @@ class Agent:
             except anthropic.APIError as e:
                 self.stop_reason = f"api_error: {type(e).__name__}"
                 break
+
+            # Cumulative spend after this step's call, so a crash seen in this
+            # step's tool results can be read back as "found at $X" (trace()).
+            self.step_cost[self.steps] = round(self.llm.cost_usd, 4)
 
             # Append the assistant turn verbatim: the content blocks (text,
             # thinking, tool_use) have to go back unchanged for the next turn.
@@ -232,5 +237,8 @@ class Agent:
                             "is_error": bool(b.get("is_error", False)),
                             "output": out,
                             "truncated": truncated,
+                            # cumulative $ when this result came back, so a crash
+                            # here reads as "found at $X".
+                            "cost_usd": self.step_cost.get(step),
                         })
         return records
