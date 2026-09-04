@@ -15,11 +15,32 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 AGENT_DIR = Path(__file__).resolve().parents[1]
-DIFF = Path("/home/ze/FB-Bench/FuzzingBrain-Bench/fbbench/report/difficulty.json")
+
+# The bench's frozen difficulty table. This was pinned to one developer's
+# checkout, so the scorer only ran on that machine; look it up instead.
+# FBBENCH_DIFFICULTY overrides when the bench lives somewhere unusual.
+_DIFF_REL = "fbbench/report/difficulty.json"
+
+
+def _find_difficulty() -> Path:
+    env = os.environ.get("FBBENCH_DIFFICULTY")
+    if env:
+        return Path(env).expanduser()
+    # The bench is normally a sibling of the CRS repo that holds this agent.
+    for root in (AGENT_DIR.parents[1] / "FuzzingBrain-Bench",
+                 Path.home() / "Desktop/FuzzingBrain/FuzzingBrain-Bench"):
+        cand = root / _DIFF_REL
+        if cand.is_file():
+            return cand
+    sys.exit(f"score_run: cannot find {_DIFF_REL}; set FBBENCH_DIFFICULTY to it")
+
+
+DIFF = _find_difficulty()
 
 # Per-challenge distinct-crash counts on the dev split, from the tech report's
 # Table 2 (arXiv 2608.25158), uncapped. The paper evaluates the three Claude
