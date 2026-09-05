@@ -18,7 +18,7 @@ from ...core.scoring import get_scoring
 from ...tools.code_viewer import set_code_viewer_context
 from ...tools.analyzer import set_analyzer_context
 from ...tools.suspicious_points import set_sp_context
-from ...llms import CLAUDE_SONNET_4_5
+from ...llms import forced_model, stage_model, CLAUDE_SONNET_4_5
 
 
 class POVBaseStrategy(BaseStrategy):
@@ -310,7 +310,7 @@ class POVBaseStrategy(BaseStrategy):
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             scan_mode=self.scan_mode,  # Use strategy's scan_mode for verify prompt
-            model=CLAUDE_SONNET_4_5,
+            model=stage_model("verifier") or CLAUDE_SONNET_4_5,
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,
@@ -622,7 +622,7 @@ class POVBaseStrategy(BaseStrategy):
                 coverage_fuzzer_dir=coverage_fuzzer_dir,
                 project_name=self.project_name,
                 src_dir=self.executor.task_workspace_path / "repo",
-                docker_image=f"gcr.io/oss-fuzz/{self.project_name}",
+                docker_image=self.executor.docker_image,
                 work_dir=self.results_path / "coverage_work",
             )
 
@@ -635,9 +635,9 @@ class POVBaseStrategy(BaseStrategy):
             poll_interval=1.0,  # Poll every 1 second
             max_idle_cycles=10,  # Exit after 10 idle cycles
             max_iterations=100,  # Max POV agent iterations
-            max_pov_attempts=20,  # Max POV generation attempts
+            max_pov_attempts=100,  # Max POV generation attempts
             fuzzer_path=self.executor.fuzzer_binary_path,
-            docker_image=f"gcr.io/oss-fuzz/{self.project_name}",
+            docker_image=self.executor.docker_image,
         )
 
         # Get fuzzer source code for agent context

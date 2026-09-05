@@ -30,7 +30,7 @@ from ..core.models import SPStatus
 from ..db import RepositoryManager
 from ..tools.analyzer import set_analyzer_context
 from ..fuzzer import FuzzerManager, get_fuzzer_manager
-from ..llms import CLAUDE_SONNET_4_5
+from ..llms import forced_model, stage_model, CLAUDE_SONNET_4_5
 
 
 @dataclass
@@ -50,7 +50,7 @@ class PipelineConfig:
 
     # POV Agent settings
     max_iterations: int = 100  # Max agent loop iterations
-    max_pov_attempts: int = 20  # Max POV generation attempts
+    max_pov_attempts: int = 100  # Max POV generation attempts
 
     # Fuzzer settings (for POV verification)
     fuzzer_path: Optional[Path] = None  # Path to fuzzer binary
@@ -301,7 +301,7 @@ class AgentPipeline:
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
                     scan_mode=self.scan_mode,  # Use pipeline's scan_mode
-                    model=CLAUDE_SONNET_4_5,  # Force Sonnet for SP analysis
+                    model=stage_model("verifier") or CLAUDE_SONNET_4_5,  # Force Sonnet for SP analysis
                     task_id=self.task_id,
                     worker_id=self.worker_id,  # Use actual worker_id, not agent_id
                     log_dir=self.log_dir,
@@ -521,7 +521,7 @@ class AgentPipeline:
                 pov_agent = POVAgent(
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
-                    model=CLAUDE_SONNET_4_5,  # Force Sonnet for POV generation
+                    model=stage_model("poc") or CLAUDE_SONNET_4_5,  # Force Sonnet for POV generation
                     task_id=self.task_id,
                     worker_id=self.worker_id,  # Use actual worker_id, not agent_id
                     output_dir=self.output_dir,
@@ -619,7 +619,7 @@ async def run_pipeline(
     fuzzer_path: Path = None,
     docker_image: str = None,
     max_iterations: int = 200,
-    max_pov_attempts: int = 40,
+    max_pov_attempts: int = 100,
     workspace_path: Path = None,
     fuzzer_code: str = "",
     sp_finding_done: bool = True,  # Default True for delta mode

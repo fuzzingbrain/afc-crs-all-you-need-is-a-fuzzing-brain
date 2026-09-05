@@ -37,7 +37,7 @@ from ...tools.code_viewer import set_code_viewer_context
 from ...tools.directions import set_direction_context
 from ...tools.analyzer import set_analyzer_context
 from ...tools.suspicious_points import set_sp_context
-from ...llms import CLAUDE_SONNET_4_5
+from ...llms import forced_model, stage_model, CLAUDE_SONNET_4_5
 
 
 class POVStrategy(BaseStrategy):
@@ -76,7 +76,7 @@ class POVStrategy(BaseStrategy):
         self._sp_generator = DeltaSPGenerator(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
-            model=CLAUDE_SONNET_4_5,
+            model=stage_model("finder") or CLAUDE_SONNET_4_5,
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,
@@ -88,7 +88,7 @@ class POVStrategy(BaseStrategy):
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             scan_mode="delta",
-            model=CLAUDE_SONNET_4_5,
+            model=stage_model("verifier") or CLAUDE_SONNET_4_5,
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,
@@ -1210,7 +1210,7 @@ class POVStrategy(BaseStrategy):
                 coverage_fuzzer_dir=coverage_fuzzer_dir,
                 project_name=self.project_name,
                 src_dir=self.executor.task_workspace_path / "repo",
-                docker_image=f"gcr.io/oss-fuzz/{self.project_name}",
+                docker_image=self.executor.docker_image,
                 work_dir=self.results_path / "coverage_work",
             )
 
@@ -1223,9 +1223,9 @@ class POVStrategy(BaseStrategy):
             poll_interval=1.0,  # Poll every 1 second
             max_idle_cycles=10,  # Exit after 10 idle cycles
             max_iterations=200,  # Max POV agent iterations
-            max_pov_attempts=40,  # Max POV generation attempts
+            max_pov_attempts=100,  # Max POV generation attempts
             fuzzer_path=self.executor.fuzzer_binary_path,
-            docker_image=f"gcr.io/oss-fuzz/{self.project_name}",
+            docker_image=self.executor.docker_image,
         )
 
         # Get fuzzer source code for agent context

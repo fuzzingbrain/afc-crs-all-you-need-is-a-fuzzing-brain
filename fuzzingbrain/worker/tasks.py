@@ -67,6 +67,10 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     task_type = assignment["task_type"]
     project_name = assignment["project_name"]
     log_dir = assignment.get("log_dir")
+    # Image the fuzzer binary runs in for PoV verify. From the task JSON when set
+    # (a prebuilt/imported binary must run in the image it was built in), else the
+    # OSS-Fuzz convention.
+    pov_docker_image = assignment.get("docker_image") or f"gcr.io/oss-fuzz/{project_name}"
 
     # Pre-built fuzzer info from Analyzer (new architecture)
     fuzzer_binary_path = assignment.get("fuzzer_binary_path")
@@ -168,6 +172,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             analysis_socket_path=analysis_socket_path,
             diff_path=diff_path,
             log_dir=log_dir,
+            docker_image=pov_docker_image,
             max_parallel_fuzzers=max_parallel_fuzzers,
             sp_max_count=sp_max_count,
             # Pass celery_job_id for WorkerContext

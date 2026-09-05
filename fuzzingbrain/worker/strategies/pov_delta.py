@@ -25,7 +25,7 @@ from ...analysis.diff_parser import (
 )
 from ...core.models import SuspiciousPoint
 from ...agents import DeltaSPGenerator
-from ...llms import CLAUDE_SONNET_4_5
+from ...llms import forced_model, stage_model, CLAUDE_SONNET_4_5
 
 
 class POVDeltaStrategy(POVBaseStrategy):
@@ -61,7 +61,7 @@ class POVDeltaStrategy(POVBaseStrategy):
         self._sp_generator = DeltaSPGenerator(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
-            model=CLAUDE_SONNET_4_5,
+            model=stage_model("finder") or CLAUDE_SONNET_4_5,
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,

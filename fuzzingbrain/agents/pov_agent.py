@@ -659,6 +659,12 @@ Start by reading the vulnerable function source: {source_hint}.
                     messages=self.messages,
                     tools=available_tools,
                     model=self.model,
+                    # Force a tool call every turn. Reasoning models (gpt-5) tend to
+                    # emit their analysis as plain text without calling a tool, which
+                    # tripped the "refused to call tools 5 times, giving up" guard and
+                    # ended PoV generation early -- the whole loop exists to iterate
+                    # through create_pov / trace_pov, so a bare-text turn is never wanted.
+                    tool_choice="required",
                 )
             except Exception as e:
                 import traceback

@@ -229,6 +229,7 @@ class AnalyzerBuilder:
         max_parallel: int = None,
         skip_introspector: bool = False,
         analyzer_only_log_callback=None,
+        prebuilt_fuzzers: Optional[Dict[str, str]] = None,
     ):
         """
         Initialize AnalyzerBuilder.
@@ -250,6 +251,7 @@ class AnalyzerBuilder:
         self.sanitizers = sanitizers
         self.build_coverage = build_coverage
         self.skip_introspector = skip_introspector
+        self.prebuilt_fuzzers = prebuilt_fuzzers or {}
         self.log_callback = log_callback or self._default_log
         self.analyzer_only_log_callback = analyzer_only_log_callback
         self.log_dir = Path(log_dir) if log_dir else None
@@ -304,10 +306,63 @@ class AnalyzerBuilder:
         Returns:
             (success, message)
         """
+        # Bring-your-own prebuilt fuzzers: copy them into build/out and skip the
+        # OSS-Fuzz compile entirely. Pair with --prebuild-dir to also skip the
+        # graph build -> the worker starts with no build step at all.
+        if self.prebuilt_fuzzers:
+            return self._place_prebuilt()
         if self.parallel:
             return self._build_all_parallel()
         else:
             return self._build_all_sequential()
+
+    def _place_prebuilt(self) -> Tuple[bool, str]:
+        """Copy user-supplied prebuilt fuzzer binaries into
+        ``build/out/<project>_<sanitizer>/`` and skip all compilation.
+
+        The map is ``{fuzzer_name: path_to_built_binary}``. Sibling artifacts next
+        to the binary (``<name>.options``, ``<name>_seed_corpus.zip``) are carried
+        over when present. Coverage and introspector builds are skipped; the call
+        graph is expected to come from ``--prebuild-dir`` instead.
+        """
+        start = time.time()
+        placed = 0
+        for sanitizer in self.sanitizers:
+            out_dir = self.build_out_base / f"{self.project_name}_{sanitizer}"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            for name, src in self.prebuilt_fuzzers.items():
+                src_path = Path(src)
+                if not src_path.exists():
+                    return False, f"prebuilt fuzzer not found: {name} -> {src}"
+                dest = out_dir / name
+                shutil.copy2(src_path, dest)
+                os.chmod(dest, 0o755)
+                for sib in (
+                    src_path.with_name(name + ".options"),
+                    src_path.with_name(name + "_seed_corpus.zip"),
+                ):
+                    if sib.exists():
+                        shutil.copy2(sib, out_dir / sib.name)
+                placed += 1
+                self.log(
+                    f"Placed prebuilt fuzzer {name} -> {dest} [{sanitizer}], skipping compile"
+                )
+            self.build_paths[sanitizer] = str(out_dir)
+            self._collect_fuzzers(sanitizer)
+        if not self.fuzzers:
+            return False, "prebuilt_fuzzers set but no fuzzers were placed/collected"
+        if self.build_coverage:
+            self.log("Coverage build skipped (prebuilt_fuzzers set)", "WARN")
+        self.log(
+            "Introspector build skipped (prebuilt_fuzzers set); "
+            "graph is expected from --prebuild-dir"
+        )
+        elapsed = time.time() - start
+        self.log(
+            f"Prebuilt import complete in {elapsed:.1f}s. "
+            f"{len(self.fuzzers)} fuzzers available."
+        )
+        return True, f"Imported {placed} prebuilt fuzzer binaries in {elapsed:.1f}s"
 
     def _build_all_sequential(self) -> Tuple[bool, str]:
         """Sequential build (original implementation)."""

@@ -37,6 +37,9 @@ from .models import (
     TaskType,
     # Model dataclass
     ModelInfo,
+    # Model resolvers (env-forced single model / per-stage override, else None)
+    forced_model,
+    stage_model,
     # OpenAI models
     GPT_5_2,
     GPT_5_2_INSTANT,
@@ -149,6 +152,8 @@ __all__ = [
     "GPT_5_MINI",
     "GPT_5",
     # Claude
+    "forced_model",
+    "stage_model",
     "CLAUDE_SONNET_4_5",
     "CLAUDE_HAIKU_4_5",
     "CLAUDE_OPUS_4_5",

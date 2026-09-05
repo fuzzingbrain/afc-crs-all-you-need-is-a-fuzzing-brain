@@ -36,6 +36,7 @@ def _run_server_process(
     fuzzer_sources: Optional[Dict[str, Union[str, List[str]]]] = None,
     enable_static_analysis: bool = False,
     build_coverage: bool = True,
+    prebuilt_fuzzers: Optional[Dict[str, str]] = None,
 ):
     """
     Run the Analysis Server in a subprocess.
@@ -71,6 +72,7 @@ def _run_server_process(
             fuzzer_sources=fuzzer_sources,
             enable_static_analysis=enable_static_analysis,
             build_coverage=build_coverage,
+            prebuilt_fuzzers=prebuilt_fuzzers,
         )
 
         # Start server (builds, imports, starts listening)
@@ -153,6 +155,7 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
             request.fuzzer_sources,
             request.enable_static_analysis,
             request.build_coverage,
+            request.prebuilt_fuzzers,
         ),
         daemon=False,  # Server should survive parent
     )

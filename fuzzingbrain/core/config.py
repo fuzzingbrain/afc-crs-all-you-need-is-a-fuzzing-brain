@@ -277,6 +277,19 @@ class Config:
     # Fuzzer source paths (fuzzer_name -> list of source file paths)
     fuzzer_sources: Dict[str, List[str]] = field(default_factory=dict)
 
+    # Prebuilt fuzzer binaries (fuzzer_name -> path to an already-built binary).
+    # When set, the analyzer copies each into build/out/<project>_<sanitizer>/ and
+    # SKIPS the OSS-Fuzz compile entirely -- "bring your own built fuzzer". Pair
+    # with --prebuild-dir/--enable-static-analysis to also skip the graph build.
+    prebuilt_fuzzers: Dict[str, str] = field(default_factory=dict)
+
+    # Docker image the fuzzer binary actually runs in (has its runtime libs). PoV
+    # verification and the fuzzer monitor run the binary here. Defaults to
+    # gcr.io/oss-fuzz/<project> when unset; a prebuilt/imported binary must set
+    # this to the image it was BUILT in (e.g. aixcc-afc/<project>:latest), or the
+    # verify container is missing its shared libs and every real crash is missed.
+    docker_image: Optional[str] = None
+
     @classmethod
     def from_json(cls, json_path: str) -> "Config":
         """Load configuration from JSON file"""
@@ -349,6 +362,8 @@ class Config:
             prebuild_dir=data.get("prebuild_dir"),
             work_id=data.get("work_id"),
             fuzzer_sources=data.get("fuzzer_sources", {}),
+            prebuilt_fuzzers=data.get("prebuilt_fuzzers", {}),
+            docker_image=data.get("docker_image"),
         )
 
     @classmethod

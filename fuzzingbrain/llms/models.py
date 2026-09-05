@@ -133,8 +133,8 @@ O3 = ModelInfo(
     provider=Provider.OPENAI,
     name="O3",
     description="Strong reasoning",
-    price_input=10.0,  # Estimated
-    price_output=40.0,  # Estimated
+    price_input=2.0,  # 2026 pricing (80% cut from launch); cached $0.50
+    price_output=8.0,
     context_window=200_000,
     max_output=100_000,
 )
@@ -199,17 +199,57 @@ GPT_5_1_CODEX_MAX = ModelInfo(
     max_output=100_000,
 )
 
+def _openai(id, price_input, price_output, name, desc, ctx=400_000, out=128_000):
+    return ModelInfo(id=id, alias=id, provider=Provider.OPENAI, name=name,
+                     description=desc, price_input=price_input, price_output=price_output,
+                     context_window=ctx, max_output=out)
+
+
+# GPT-5.6 series (2026-09 pricing)
+GPT_5_6_SOL = _openai("gpt-5.6-sol", 4.0, 20.0, "GPT-5.6 Sol", "Frontier reasoning")
+GPT_5_6_TERRA = _openai("gpt-5.6-terra", 2.0, 12.0, "GPT-5.6 Terra", "Balanced frontier")
+GPT_5_6_LUNA = _openai("gpt-5.6-luna", 0.20, 1.20, "GPT-5.6 Luna", "Fast, cheap frontier")
+# GPT-5.5 series
+GPT_5_5 = _openai("gpt-5.5", 5.0, 30.0, "GPT-5.5", "High-accuracy reasoning")
+GPT_5_5_PRO = _openai("gpt-5.5-pro", 30.0, 180.0, "GPT-5.5 Pro", "Most accurate, hardest problems")
+# GPT-5.4 series
+GPT_5_4 = _openai("gpt-5.4", 2.50, 15.0, "GPT-5.4", "Structured work, coding, planning")
+GPT_5_4_MINI = _openai("gpt-5.4-mini", 0.75, 4.50, "GPT-5.4 Mini", "Faster, affordable 5.4")
+GPT_5_4_NANO = _openai("gpt-5.4-nano", 0.20, 1.25, "GPT-5.4 Nano", "Cheapest 5.4")
+GPT_5_4_PRO = _openai("gpt-5.4-pro", 30.0, 180.0, "GPT-5.4 Pro", "Most accurate 5.4")
+# GPT-5 nano (completes the gpt-5 base family)
+GPT_5_NANO = _openai("gpt-5-nano", 0.05, 0.40, "GPT-5 Nano", "Cheapest GPT-5", 200_000, 100_000)
+
+# GPT-4.1 family (2025-04) -- the period-correct fast/non-reasoning model at the
+# AIxCC finals code-freeze. Cached input is 25% of standard.
+GPT_4_1 = _openai("gpt-4.1", 2.0, 8.0, "GPT-4.1", "Fast non-reasoning flagship (2025-04)", 1_000_000, 32_000)
+GPT_4_1_MINI = _openai("gpt-4.1-mini", 0.40, 1.60, "GPT-4.1 Mini", "Fast, cheap", 1_000_000, 32_000)
+GPT_4_1_NANO = _openai("gpt-4.1-nano", 0.10, 0.40, "GPT-4.1 Nano", "Cheapest 4.1", 1_000_000, 32_000)
+
 OPENAI_MODELS = [
+    GPT_5_6_SOL,
+    GPT_5_6_TERRA,
+    GPT_5_6_LUNA,
+    GPT_5_5,
+    GPT_5_5_PRO,
+    GPT_5_4,
+    GPT_5_4_MINI,
+    GPT_5_4_NANO,
+    GPT_5_4_PRO,
     GPT_5_2,
     GPT_5_2_INSTANT,
     GPT_5_2_PRO,
     GPT_5_2_CODEX,
     O3,
     O3_MINI,
-    GPT_5_MINI,
-    GPT_5,
     GPT_5_1,
     GPT_5_1_CODEX_MAX,
+    GPT_5,
+    GPT_5_MINI,
+    GPT_5_NANO,
+    GPT_4_1,
+    GPT_4_1_MINI,
+    GPT_4_1_NANO,
 ]
 
 
@@ -414,6 +454,39 @@ def get_model_by_id(model_id: str) -> Optional[ModelInfo]:
     return _MODEL_BY_ID.get(model_id)
 
 
+def forced_model() -> Optional[ModelInfo]:
+    """Model to force across every agent stage, or None.
+
+    When the ``LLM_DEFAULT_MODEL`` env var is set, single-model runs/sweeps want
+    it to override the per-stage hardcoded picks (Force Sonnet / Force Opus). Call
+    sites use ``model=forced_model() or CLAUDE_X`` so default behavior is unchanged
+    when the env var is absent.
+    """
+    import os
+
+    mid = os.environ.get("LLM_DEFAULT_MODEL")
+    return get_model_by_id(mid) if mid else None
+
+
+def stage_model(stage: str) -> Optional["ModelInfo"]:
+    """Per-stage model override for experiments, or None.
+
+    Reads ``FINDER_MODEL`` / ``VERIFIER_MODEL`` / ``POC_MODEL`` so a run can put a
+    fast model on the finder and a reasoning model on verify+PoV. Falls back to
+    ``forced_model()`` (``LLM_DEFAULT_MODEL``), then the call site's own default.
+    Call sites use ``model=stage_model("<stage>") or CLAUDE_X``.
+    """
+    import os
+
+    env = {"finder": "FINDER_MODEL", "verifier": "VERIFIER_MODEL", "poc": "POC_MODEL"}
+    mid = os.environ.get(env.get(stage, ""))
+    if mid:
+        m = get_model_by_id(mid)
+        if m:
+            return m
+    return forced_model()
+
+
 # =============================================================================
 # Fallback Chains
 # =============================================================================
@@ -423,10 +496,19 @@ FALLBACK_CHAINS: Dict[str, List[ModelInfo]] = {
     CLAUDE_OPUS_4_5.id: [CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
     CLAUDE_SONNET_4_5.id: [CLAUDE_OPUS_4_5, CLAUDE_HAIKU_4_5],
     CLAUDE_HAIKU_4_5.id: [CLAUDE_SONNET_4_5, CLAUDE_OPUS_4_5],
-    # OpenAI fallbacks -> Claude
-    GPT_5_2.id: [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
-    GPT_5_2_PRO.id: [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
-    O3.id: [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
+    # OpenAI fallbacks -> stay within OpenAI (Anthropic is rate-limited; a GPT run
+    # must never cross over to Claude).
+    GPT_5.id: [GPT_5_2, GPT_5_MINI],
+    GPT_5_2.id: [GPT_5, GPT_5_MINI],
+    GPT_5_6_SOL.id: [GPT_5_6_TERRA, GPT_5, GPT_5_MINI],
+    GPT_5_6_TERRA.id: [GPT_5, GPT_5_2, GPT_5_MINI],
+    GPT_5_6_LUNA.id: [GPT_5_MINI, GPT_5],
+    GPT_5_5.id: [GPT_5, GPT_5_2, GPT_5_MINI],
+    GPT_5_4.id: [GPT_5, GPT_5_2, GPT_5_MINI],
+    GPT_5_4_MINI.id: [GPT_5_MINI, GPT_5_2],
+    GPT_5_1.id: [GPT_5, GPT_5_2, GPT_5_MINI],
+    GPT_5_2_PRO.id: [GPT_5_2, GPT_5, GPT_5_MINI],
+    O3.id: [O3_MINI, GPT_5_MINI],  # stay OpenAI (Anthropic rate-limited)
     # Gemini fallbacks -> Claude
     GEMINI_3_PRO.id: [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5],
     GEMINI_3_FLASH.id: [CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5, CLAUDE_OPUS_4_5],
@@ -440,7 +522,9 @@ DEFAULT_FALLBACK = [CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, CLAUDE_HAIKU_4_5]
 EXPENSIVE_MODELS = {
     CLAUDE_OPUS_4_5.id,  # $5 input, $25 output
     GPT_5_2_PRO.id,  # $5 input, $40 output
-    O3.id,  # $10 input, $40 output
+    GPT_5_5.id,  # $5 input, $30 output
+    GPT_5_5_PRO.id,  # $30 input, $180 output
+    GPT_5_4_PRO.id,  # $30 input, $180 output
 }
 
 

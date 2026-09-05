@@ -73,11 +73,16 @@ def _calculate_cost(
     cache_creation = max(0, min(cache_creation_tokens, input_tokens - cache_read))
     regular_input = max(0, input_tokens - cache_read - cache_creation)
 
-    # Discount rates relative to the full input price.
-    if "claude" in model_id.lower() or "anthropic" in model_id.lower():
-        read_rate, write_rate = 0.1, 1.25  # Anthropic prompt caching
+    # Discount rates relative to the full input price. Cached-input pricing is
+    # provider- and family-specific: Anthropic 90% off; OpenAI gpt-5 family 90%
+    # off ($0.175 vs $1.75 etc.); OpenAI o3/o4/gpt-4.1 75% off ($0.50 vs $2.00).
+    ml = model_id.lower()
+    if "claude" in ml or "anthropic" in ml:
+        read_rate, write_rate = 0.1, 1.25
+    elif ml.startswith("gpt-5"):
+        read_rate, write_rate = 0.1, 1.0   # gpt-5 family: cached = 10% of input
     else:
-        read_rate, write_rate = 0.5, 1.0  # OpenAI-style cached input
+        read_rate, write_rate = 0.25, 1.0  # o3 / o4-mini / gpt-4.1: cached = 25%
 
     cost_input = (
         regular_input * price_input
@@ -611,14 +616,23 @@ class LLMClient:
             "model": model_id,
             "messages": messages,
         }
+        ml = model_id.lower()
 
-        # These models may not support temperature
-        if temperature != 1.0:
+        # Reasoning models (o1/o3/o4) reject any temperature other than the
+        # default 1.0 (400 BadRequest) -> the call fails and silently falls back
+        # to another model. Only pass a custom temperature to models that accept
+        # it (gpt-5 family); never to the o-series.
+        if temperature != 1.0 and ml.startswith("gpt-5"):
             params["temperature"] = temperature
 
-        # Use max_completion_tokens instead of max_tokens
-        if max_tokens:
-            params["max_completion_tokens"] = max_tokens
+        # Reasoning models (o1/o3/gpt-5 family) spend the completion budget on
+        # hidden reasoning tokens FIRST. Agents pass max_tokens~2000, which the
+        # reasoning eats entirely -> empty content -> spurious LLMError -> silent
+        # fallback to another model. Floor max_completion_tokens so there is room
+        # for the actual answer after reasoning. It is a cap, not a target, so the
+        # model still emits only what it needs.
+        REASONING_FLOOR = 32000
+        params["max_completion_tokens"] = max(max_tokens or 0, REASONING_FLOOR)
 
         if tools:
             params["tools"] = tools
@@ -1109,10 +1123,12 @@ class LLMClient:
                 )
 
                 params = {"model": model_id, "messages": messages}
-                if temperature != 1.0:
+                # o-series reject any non-default temperature (400) -> only gpt-5
+                # family takes a custom one. Reasoning models eat the completion
+                # budget on hidden reasoning, so floor max_completion_tokens.
+                if temperature != 1.0 and model_id.lower().startswith("gpt-5"):
                     params["temperature"] = temperature
-                if max_tokens:
-                    params["max_completion_tokens"] = max_tokens
+                params["max_completion_tokens"] = max(max_tokens or 0, 32000)
                 if tools:
                     params["tools"] = tools
 

@@ -66,7 +66,7 @@ class WorkerDispatcher:
         self._redis = self._connect_redis(config.redis_url)
 
         # Task-level FuzzerMonitor (auto-discovers crash directories)
-        docker_image = f"gcr.io/oss-fuzz/{self.project_name}"
+        docker_image = self.config.docker_image or f"gcr.io/oss-fuzz/{self.project_name}"
 
         # Get log directory for FuzzerMonitor log file
         from .logging import get_log_dir
@@ -299,7 +299,7 @@ def generate(variant: int = 1) -> bytes:
 
         FALLBACK_IMAGE = "gcr.io/oss-fuzz-base/base-runner"
 
-        docker_image = f"gcr.io/oss-fuzz/{self.project_name}"
+        docker_image = self.config.docker_image or f"gcr.io/oss-fuzz/{self.project_name}"
         fuzzer_path = Path(fuzzer_path)
         crash_path = Path(crash_path)
         fuzzer_dir = fuzzer_path.parent
@@ -618,6 +618,8 @@ def generate(variant: int = 1) -> bytes:
             "task_workspace_path": str(task_workspace),
             "project_name": self.project_name,
             "log_dir": str(log_dir) if log_dir else None,
+            # Image the fuzzer binary runs in (has its libs); PoV verify uses it.
+            "docker_image": self.config.docker_image,
             # Pre-built fuzzer info from Analyzer
             "fuzzer_binary_path": fuzzer_binary_path,
             "build_dir": build_dir,
