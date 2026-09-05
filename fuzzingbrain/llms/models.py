@@ -454,37 +454,8 @@ def get_model_by_id(model_id: str) -> Optional[ModelInfo]:
     return _MODEL_BY_ID.get(model_id)
 
 
-def forced_model() -> Optional[ModelInfo]:
-    """Model to force across every agent stage, or None.
-
-    When the ``LLM_DEFAULT_MODEL`` env var is set, single-model runs/sweeps want
-    it to override the per-stage hardcoded picks (Force Sonnet / Force Opus). Call
-    sites use ``model=forced_model() or CLAUDE_X`` so default behavior is unchanged
-    when the env var is absent.
-    """
-    import os
-
-    mid = os.environ.get("LLM_DEFAULT_MODEL")
-    return get_model_by_id(mid) if mid else None
-
-
-def stage_model(stage: str) -> Optional["ModelInfo"]:
-    """Per-stage model override for experiments, or None.
-
-    Reads ``FINDER_MODEL`` / ``VERIFIER_MODEL`` / ``POC_MODEL`` so a run can put a
-    fast model on the finder and a reasoning model on verify+PoV. Falls back to
-    ``forced_model()`` (``LLM_DEFAULT_MODEL``), then the call site's own default.
-    Call sites use ``model=stage_model("<stage>") or CLAUDE_X``.
-    """
-    import os
-
-    env = {"finder": "FINDER_MODEL", "verifier": "VERIFIER_MODEL", "poc": "POC_MODEL"}
-    mid = os.environ.get(env.get(stage, ""))
-    if mid:
-        m = get_model_by_id(mid)
-        if m:
-            return m
-    return forced_model()
+# Per-stage / forced model selection moved to fuzzingbrain/llms/routing.py
+# (Role + Profile + ModelRouter). Call sites use routing.model_for(Role.X).
 
 
 # =============================================================================

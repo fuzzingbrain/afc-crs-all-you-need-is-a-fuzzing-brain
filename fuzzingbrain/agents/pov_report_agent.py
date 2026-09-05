@@ -87,7 +87,7 @@ class POVReportAgent(BaseAgent):
         """
         super().__init__(
             llm_client=llm_client,
-            model=model or "claude-haiku-4-5-20251001",
+            model=model,  # supplied by the caller via routing (Role.UTILITY)
             max_iterations=max_iterations,
             verbose=verbose,
             task_id=task_id,

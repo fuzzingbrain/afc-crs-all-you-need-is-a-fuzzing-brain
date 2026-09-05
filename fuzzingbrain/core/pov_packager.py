@@ -80,7 +80,10 @@ class POVPackager:
         if self._report_agent is None:
             from ..agents.pov_report_agent import POVReportAgent
 
+            from ..llms.routing import Role, model_for
+
             self._report_agent = POVReportAgent(
+                model=model_for(Role.UTILITY),
                 task_id=self.task_id,
                 worker_id=self.worker_id,
                 repos=self.repos,

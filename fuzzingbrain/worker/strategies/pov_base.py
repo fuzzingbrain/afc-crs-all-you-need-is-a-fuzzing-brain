@@ -18,7 +18,7 @@ from ...core.scoring import get_scoring
 from ...tools.code_viewer import set_code_viewer_context
 from ...tools.analyzer import set_analyzer_context
 from ...tools.suspicious_points import set_sp_context
-from ...llms import forced_model, stage_model, CLAUDE_SONNET_4_5
+from ...llms.routing import Role, model_for
 
 
 class POVBaseStrategy(BaseStrategy):
@@ -310,7 +310,7 @@ class POVBaseStrategy(BaseStrategy):
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             scan_mode=self.scan_mode,  # Use strategy's scan_mode for verify prompt
-            model=stage_model("verifier") or CLAUDE_SONNET_4_5,
+            model=model_for(Role.VERIFIER),
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,
@@ -417,6 +417,7 @@ class POVBaseStrategy(BaseStrategy):
             try:
                 # Create SeedAgent for this FP
                 seed_agent = SeedAgent(
+                    model=model_for(Role.SEED),
                     task_id=self.task_id,
                     worker_id=self.worker_id,  # ObjectId for MongoDB linking
                     fuzzer=self.fuzzer,

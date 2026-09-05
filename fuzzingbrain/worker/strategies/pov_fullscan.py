@@ -25,7 +25,7 @@ from ...agents import (
     FullSPGenerator,
     LargeFullSPGenerator,
 )
-from ...llms.models import CLAUDE_OPUS_4_5, CLAUDE_SONNET_4_5, forced_model, stage_model
+from ...llms.routing import Role, model_for
 from ...core.concurrency import get_concurrency
 from ...core.models.direction import DirectionStatus
 from ...core.scoring import get_scoring
@@ -154,7 +154,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         planning_agent = DirectionPlanningAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
-            model=stage_model("verifier") or CLAUDE_OPUS_4_5,  # Force Opus for direction planning
+            model=model_for(Role.VERIFIER),
             task_id=self.task_id,
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
@@ -194,7 +194,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         planning_agent = DirectionPlanningAgent(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
-            model=stage_model("verifier") or CLAUDE_OPUS_4_5,  # Force Opus for direction planning
+            model=model_for(Role.VERIFIER),
             task_id=self.task_id,
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
@@ -789,7 +789,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                 callees=callees,
                 fuzzer=self.fuzzer,
                 sanitizer=self.sanitizer,
-                model=stage_model("finder") or CLAUDE_OPUS_4_5,  # Force Opus for large function analysis
+                model=model_for(Role.FINDER),
                 direction_id=direction_id,
                 task_id=self.task_id,
                 worker_id=self.worker_id,
@@ -806,7 +806,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                 callees=callees,
                 fuzzer=self.fuzzer,
                 sanitizer=self.sanitizer,
-                model=stage_model("finder") or CLAUDE_SONNET_4_5,  # Force Sonnet for function analysis
+                model=model_for(Role.FINDER),
                 direction_id=direction_id,
                 task_id=self.task_id,
                 worker_id=self.worker_id,
@@ -913,7 +913,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                     worker_id=self.worker_id,  # ObjectId for MongoDB linking
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
-                    model=stage_model("finder") or CLAUDE_OPUS_4_5,  # Force Opus for seed generation
+                    model=model_for(Role.SEED),
                     fuzzer_manager=fuzzer_manager,
                     repos=self.repos,
                     fuzzer_source=fuzzer_code,

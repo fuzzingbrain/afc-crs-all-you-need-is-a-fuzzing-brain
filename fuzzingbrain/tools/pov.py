@@ -1445,7 +1445,8 @@ def _extract_output_summary(output: str) -> str:
         return output or "No output"
 
     try:
-        from ..llms import quick_call, CLAUDE_HAIKU_4_5
+        from ..llms import quick_call
+        from ..llms.routing import Role, model_for
 
         # Truncate to avoid token explosion
         truncated = output[:8000] if len(output) > 8000 else output
@@ -1464,7 +1465,7 @@ Fuzzer output:
 
 Key info (brief, 2-5 lines):"""
 
-        summary = quick_call(prompt, model=CLAUDE_HAIKU_4_5)
+        summary = quick_call(prompt, model=model_for(Role.UTILITY))
         return summary[:500] if summary else "Failed to extract summary"
     except Exception as e:
         logger.warning(f"[POV] Failed to extract output summary: {e}")
@@ -1936,7 +1937,8 @@ def _analyze_trace(
     Use LLM to analyze trace results and provide actionable feedback.
     """
     try:
-        from ..llms import quick_call, CLAUDE_HAIKU_4_5
+        from ..llms import quick_call
+        from ..llms.routing import Role, model_for
 
         fuzzer_name = ctx.get("fuzzer", "unknown")
 
@@ -1960,7 +1962,7 @@ def _analyze_trace(
             agent_msg=agent_msg or "Why did execution stop before reaching target?",
         )
 
-        analysis = quick_call(prompt, model=CLAUDE_HAIKU_4_5)
+        analysis = quick_call(prompt, model=model_for(Role.UTILITY))
         return analysis[:800] if analysis else "Analysis failed"
     except Exception as e:
         logger.warning(f"[POV] Trace analysis failed: {e}")

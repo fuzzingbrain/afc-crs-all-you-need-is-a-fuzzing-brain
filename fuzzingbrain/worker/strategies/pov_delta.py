@@ -25,7 +25,7 @@ from ...analysis.diff_parser import (
 )
 from ...core.models import SuspiciousPoint
 from ...agents import DeltaSPGenerator
-from ...llms import forced_model, stage_model, CLAUDE_SONNET_4_5
+from ...llms.routing import Role, model_for
 
 
 class POVDeltaStrategy(POVBaseStrategy):
@@ -61,7 +61,7 @@ class POVDeltaStrategy(POVBaseStrategy):
         self._sp_generator = DeltaSPGenerator(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
-            model=stage_model("finder") or CLAUDE_SONNET_4_5,
+            model=model_for(Role.FINDER),
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,
@@ -471,6 +471,7 @@ class POVDeltaStrategy(POVBaseStrategy):
 
         agent_log_dir = self.agent_log_dir
         seed_agent = SeedAgent(
+            model=model_for(Role.SEED),
             task_id=self.task_id,
             worker_id=self.worker_id,  # ObjectId for MongoDB linking
             fuzzer=self.fuzzer,

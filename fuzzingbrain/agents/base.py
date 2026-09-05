@@ -65,7 +65,9 @@ class BaseAgent(ABC):
     # Model used for the mechanical compression/summarization step. Tiered down
     # to a cheap model by default (summarization does not need the flagship);
     # subclasses can override. Falls back to a mechanical summary on failure.
-    compression_model_id: str = "claude-haiku-4-5-20251001"
+    # None -> resolved from the router (Role.COMPRESSION) at use time; set a
+    # concrete id to override for one agent.
+    compression_model_id: Optional[str] = None
 
     def __init__(
         self,
@@ -504,9 +506,11 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         )
 
         try:
+            from ..llms.routing import Role, model_for
+
             response = await self.llm_client.acall(
                 messages=[{"role": "user", "content": compression_prompt}],
-                model=self.compression_model_id,
+                model=self.compression_model_id or model_for(Role.COMPRESSION),
                 max_tokens=2000,
             )
             summary = f"[CONTEXT COMPRESSED - {len(middle_messages)} messages]\n\n{response.content}"

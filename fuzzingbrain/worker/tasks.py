@@ -98,6 +98,22 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     if assignment.get("scoring"):
         set_scoring(ScoringConfig.from_dict(assignment["scoring"]))
 
+    # Install this run's model router (single source of truth for role -> model).
+    # task fields win over env; from_sources validates and set_active_router logs
+    # the resolved map. Every agent call site reads it via routing.model_for().
+    from ..llms.routing import ModelRouter, set_active_router
+
+    set_active_router(
+        ModelRouter.from_sources(
+            task={
+                "model_profile": assignment.get("model_profile"),
+                "models": assignment.get("models"),
+                "force_model": assignment.get("force_model"),
+                "strict_models": assignment.get("strict_models"),
+            }
+        )
+    )
+
     # Display name for logging (not ObjectId)
     display_name = f"{fuzzer}_{sanitizer}"
 
