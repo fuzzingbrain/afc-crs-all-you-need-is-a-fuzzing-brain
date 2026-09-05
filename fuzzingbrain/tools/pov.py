@@ -1164,7 +1164,6 @@ CRASH_INDICATORS = [
     "UndefinedBehaviorSanitizer: undefined-behavior",
     "AddressSanitizer:DEADLYSIGNAL",
     "assertion failed",
-    "libfuzzer exit=1",
 ]
 
 # Patterns to extract vulnerability type
@@ -1532,6 +1531,10 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
     # Get fuzzer path from context or POV
     fuzzer_path = ctx.get("fuzzer_path")
     docker_image = ctx.get("docker_image")
+    # Harness name -- used by the duplicate check and signature computation below.
+    # It was referenced there but never defined, so every crash raised
+    # NameError('fuzzer') and no PoV was ever registered as successful.
+    fuzzer = ctx.get("fuzzer", "") or (fuzzer_path.name if fuzzer_path else "")
 
     # TEST_ONLY
     with open("/tmp/pov_debug.log", "a") as f:

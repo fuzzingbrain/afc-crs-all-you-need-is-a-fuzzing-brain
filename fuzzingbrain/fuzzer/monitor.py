@@ -786,11 +786,37 @@ class FuzzerMonitor:
         # from a heap overflow. Without a sanitizer class it is not a
         # memory-safety finding, and reporting it as one costs a submission on
         # a harness that merely printed its usage text.
-        if sanitizer_output and not signature.crash_class:
-            if not self._check_crash(sanitizer_output):
+        # A finding requires a real fault class -- a sanitizer report or a fatal
+        # signal (extract_class covers ASan/MSan/UBSan/LeakSan and libFuzzer's
+        # "deadly signal"). It returns "" for a target that merely called exit()
+        # -- libFuzzer prints "ERROR: libFuzzer: fuzz target exited" and files a
+        # crash- artifact indistinguishable by name, and sqlite3's shell harness
+        # does exactly that on a malformed option like "-vfs". Counting that as a
+        # PoV is a false positive (it costs a submission). An empty class with an
+        # empty sanitizer_output is instead a capture race, so re-verify once
+        # before deciding, then require a real class.
+        if not signature.crash_class:
+            if verify_ctx and not sanitizer_output:
+                fuzzer_path, docker_image = verify_ctx
+                rv = self._verify_crash(
+                    crash_path,
+                    fuzzer_path,
+                    docker_image,
+                    watch_entry.fuzzer_name,
+                    watch_entry.sanitizer,
+                )
+                sanitizer_output = rv.get("output", "") or sanitizer_output
+                vuln_type = rv.get("vuln_type") or vuln_type
+                signature = compute_signature(
+                    sanitizer_output,
+                    harness_names=[watch_entry.fuzzer_name],
+                    frame_depth=self.signature_frame_depth,
+                )
+            if not signature.crash_class:
                 self._log(
-                    f"[NOT A CRASH] {crash_path.name}: the target stopped without "
-                    f"a sanitizer report, so there is nothing to report"
+                    f"[NOT A CRASH] {crash_path.name}: no sanitizer report or "
+                    f"fatal-signal fault (the target stopped on its own, e.g. an "
+                    f"exit() from option parsing) -- not a memory-safety finding"
                 )
                 return None
 
