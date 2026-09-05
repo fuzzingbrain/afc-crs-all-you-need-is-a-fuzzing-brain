@@ -75,6 +75,11 @@ PROFILES: Dict[str, Profile] = {
         compression=GPT_4_1_NANO,
         base=O3,
     ),
+    # Note: an all-Anthropic period-correct profile is not possible -- the AIxCC
+    # finals-era Claude models (Opus 4 / Sonnet 4 2025-05, 3.5 Haiku 2024-10) are
+    # retired from the first-party API (404); the oldest still served is Sonnet 4.5
+    # (2025-09), already post-freeze. Only OpenAI's o3 / GPT-4.1 (2025-04) remain.
+    #
     # Reproduces today's de-facto picks, for regression/baseline. finder/verifier/
     # poc are the Sonnet defaults; seed/utility are the opus the leak sites hit;
     # compression is the haiku every BaseAgent uses.
