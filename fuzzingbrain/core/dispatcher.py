@@ -620,6 +620,11 @@ def generate(variant: int = 1) -> bytes:
             "log_dir": str(log_dir) if log_dir else None,
             # Image the fuzzer binary runs in (has its libs); PoV verify uses it.
             "docker_image": self.config.docker_image,
+            # Model routing -- built into a ModelRouter at the worker boundary.
+            "model_profile": self.config.model_profile,
+            "models": self.config.model_overrides,
+            "force_model": self.config.force_model,
+            "strict_models": self.config.strict_models,
             # Pre-built fuzzer info from Analyzer
             "fuzzer_binary_path": fuzzer_binary_path,
             "build_dir": build_dir,

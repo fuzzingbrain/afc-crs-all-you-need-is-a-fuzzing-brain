@@ -17,11 +17,12 @@ This replaces the scattered ``stage_model(..) or CLAUDE_X`` picks and the two
 """
 from __future__ import annotations
 
-import logging
 import os
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Mapping, Optional
+
+from loguru import logger
 
 from .models import (
     ModelInfo,
@@ -34,9 +35,6 @@ from .models import (
     CLAUDE_SONNET_4_5,
     CLAUDE_HAIKU_4_5,
 )
-
-logger = logging.getLogger(__name__)
-
 
 class Role(str, Enum):
     """Every distinct LLM job in the pipeline. Agents declare a role, not a model."""
@@ -234,15 +232,12 @@ class ModelRouter:
             parts.append(f"{r.value}={res.model.id}({res.source})")
             if res.source == "base":
                 logger.warning(
-                    "routing: role %s fell to profile.base=%s -- no explicit model configured",
-                    r.value,
-                    res.model.id,
+                    f"routing: role {r.value} fell to profile.base={res.model.id} "
+                    f"-- no explicit model configured"
                 )
         logger.info(
-            "routing[profile=%s strict=%s]: %s",
-            self._config.profile,
-            self._config.strict_models,
-            "  ".join(parts),
+            f"routing[profile={self._config.profile} "
+            f"strict={self._config.strict_models}]: {'  '.join(parts)}"
         )
 
 

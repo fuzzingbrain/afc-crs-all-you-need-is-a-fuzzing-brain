@@ -556,6 +556,31 @@ class LLMClient:
         # Don't fallback for context length (need to reduce input)
         if isinstance(error, LLMContextLengthError):
             return False
+        # strict_models (experiment mode): a pinned model whose key was revoked or
+        # whose quota is exhausted must NOT silently fall back to some other model
+        # -- that would pollute a period-correct run with an unchosen model. Fail
+        # loud so the sweep stops on this run instead of yielding tainted data.
+        # Transient rate limits (without an insufficient-quota marker) still fall
+        # back, since they are recoverable.
+        try:
+            from .routing import active_router
+
+            strict = active_router().strict_models
+        except Exception:
+            strict = False
+        if strict:
+            es = str(error).lower()
+            terminal_key_or_quota = (
+                isinstance(error, LLMAuthError)
+                or "insufficient_quota" in es
+                or "exceeded your current quota" in es
+            )
+            if terminal_key_or_quota:
+                logger.error(
+                    f"strict_models: {type(error).__name__} on a pinned model "
+                    f"-- not falling back; aborting this run so data stays clean"
+                )
+                return False
         # Fallback for other errors
         return True
 
