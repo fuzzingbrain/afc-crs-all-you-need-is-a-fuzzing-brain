@@ -1,0 +1,170 @@
+{
+ "avro-02": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 1690,
+  "sinks": 2700,
+  "rec": 326
+ },
+ "cups-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 2798,
+  "sinks": 17101,
+  "rec": 80
+ },
+ "flatbuffers-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 1584,
+  "sinks": 3428,
+  "rec": 189
+ },
+ "freerdp-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 9766,
+  "sinks": 14022,
+  "rec": 57
+ },
+ "freetype-01": {
+  "hit_line": false,
+  "hit_func": true,
+  "reach": 2814,
+  "sinks": 6081,
+  "rec": 14
+ },
+ "ghidra-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 6433,
+  "sinks": 16919,
+  "rec": 2409
+ },
+ "graal-01": {
+  "hit_line": false,
+  "hit_func": false,
+  "reach": 3236,
+  "sinks": 5039,
+  "rec": 1967
+ },
+ "hunspell-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 529,
+  "sinks": 2077,
+  "rec": 89
+ },
+ "imagemagick-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 6129,
+  "sinks": 26238,
+  "rec": 675
+ },
+ "libaom-01": {
+  "hit_line": true,
+  "hit_func": false,
+  "reach": 14482,
+  "sinks": 85653,
+  "rec": 30
+ },
+ "libpng-01": {
+  "hit_line": false,
+  "hit_func": false,
+  "reach": 696,
+  "sinks": 241,
+  "rec": 0
+ },
+ "libwebp-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 2829,
+  "sinks": 5253,
+  "rec": 17
+ },
+ "libwebsockets-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 5891,
+  "sinks": 26927,
+  "rec": 23
+ },
+ "libxml2-02": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 3764,
+  "sinks": 3359,
+  "rec": 33
+ },
+ "mongoose-02": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 951,
+  "sinks": 2588,
+  "rec": 10
+ },
+ "net-snmp-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 7739,
+  "sinks": 18878,
+  "rec": 64
+ },
+ "opc-ua-01": {
+  "hit_line": false,
+  "hit_func": false,
+  "reach": 2553,
+  "sinks": 7571,
+  "rec": 16
+ },
+ "openh264-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 2187,
+  "sinks": 13127,
+  "rec": 27
+ },
+ "openldap-02": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 7002,
+  "sinks": 28751,
+  "rec": 101
+ },
+ "pdfbox-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 3160,
+  "sinks": 6088,
+  "rec": 2256
+ },
+ "pdfbox-03": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 3160,
+  "sinks": 6088,
+  "rec": 2256
+ },
+ "simdutf-01": {
+  "hit_line": false,
+  "hit_func": true,
+  "reach": 1380,
+  "sinks": 3326,
+  "rec": 55
+ },
+ "systemd-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 11236,
+  "sinks": 32714,
+  "rec": 210
+ },
+ "upx-02": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 1594,
+  "sinks": 5498,
+  "rec": 94
+ }
+}

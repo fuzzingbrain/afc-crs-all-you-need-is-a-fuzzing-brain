@@ -1,0 +1,237 @@
+{
+ "rows": [
+  [
+   "graal-01",
+   "java",
+   {
+    "flawfinder": "n/a",
+    "cppcheck": "n/a",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "opc-ua-01",
+   "c",
+   {
+    "flawfinder": "\u00b7(41)",
+    "cppcheck": "\u00b7(2)",
+    "semgrep": "\u00b7(6)"
+   }
+  ],
+  [
+   "libxml2-02",
+   "c",
+   {
+    "flawfinder": "HIT(23)",
+    "cppcheck": "HIT(38)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "libwebp-01",
+   "c",
+   {
+    "flawfinder": "HIT(2)",
+    "cppcheck": "HIT(10)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "libpng-01",
+   "c",
+   {
+    "flawfinder": "\u00b7(10)",
+    "cppcheck": "\u00b7(3)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "upx-02",
+   "cpp",
+   {
+    "flawfinder": "\u00b7(101)",
+    "cppcheck": "\u00b7(4)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "simdutf-01",
+   "c",
+   {
+    "flawfinder": "HIT(2)",
+    "cppcheck": "\u00b7(1)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "net-snmp-01",
+   "c",
+   {
+    "flawfinder": "\u00b7(10)",
+    "cppcheck": "\u00b7(17)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "libwebsockets-01",
+   "c",
+   {
+    "flawfinder": "HIT(16)",
+    "cppcheck": "\u00b7(7)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "hunspell-01",
+   "cpp",
+   {
+    "flawfinder": "HIT(19)",
+    "cppcheck": "\u00b7(27)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "openldap-02",
+   "c",
+   {
+    "flawfinder": "HIT(12)",
+    "cppcheck": "\u00b7(3)",
+    "semgrep": "HIT(7)"
+   }
+  ],
+  [
+   "freetype-01",
+   "c",
+   {
+    "flawfinder": "\u00b7(0)",
+    "cppcheck": "\u00b7(2)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "flatbuffers-01",
+   "c",
+   {
+    "flawfinder": "HIT(7)",
+    "cppcheck": "\u00b7(2)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "systemd-01",
+   "c",
+   {
+    "flawfinder": "\u00b7(4)",
+    "cppcheck": "\u00b7(2)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "ghidra-01",
+   "c",
+   {
+    "flawfinder": "HIT(13)",
+    "cppcheck": "HIT(11)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "pdfbox-03",
+   "java",
+   {
+    "flawfinder": "n/a",
+    "cppcheck": "n/a",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "pdfbox-01",
+   "java",
+   {
+    "flawfinder": "n/a",
+    "cppcheck": "n/a",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "openh264-01",
+   "cpp",
+   {
+    "flawfinder": "\u00b7(0)",
+    "cppcheck": "\u00b7(8)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "mongoose-02",
+   "c",
+   {
+    "flawfinder": "\u00b7(271)",
+    "cppcheck": "\u00b7(67)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "libaom-01",
+   "c",
+   {
+    "flawfinder": "\u00b7(0)",
+    "cppcheck": "HIT(6)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "imagemagick-01",
+   "c",
+   {
+    "flawfinder": "HIT(6)",
+    "cppcheck": "HIT(22)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "freerdp-01",
+   "c",
+   {
+    "flawfinder": "\u00b7(28)",
+    "cppcheck": "\u00b7(2)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "cups-01",
+   "c",
+   {
+    "flawfinder": "\u00b7(6)",
+    "cppcheck": "HIT(9)",
+    "semgrep": "\u00b7(0)"
+   }
+  ],
+  [
+   "avro-02",
+   "c",
+   {
+    "flawfinder": "\u00b7(13)",
+    "cppcheck": "HIT(28)",
+    "semgrep": "\u00b7(1)"
+   }
+  ]
+ ],
+ "summary": {
+  "flawfinder": {
+   "hit": 9,
+   "n": 24,
+   "applic": 21
+  },
+  "cppcheck": {
+   "hit": 7,
+   "n": 24,
+   "applic": 21
+  },
+  "semgrep": {
+   "hit": 1,
+   "n": 24,
+   "applic": 24
+  }
+ }
+}

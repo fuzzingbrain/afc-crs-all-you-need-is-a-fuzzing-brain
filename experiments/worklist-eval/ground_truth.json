@@ -1,0 +1,761 @@
+{
+ "graaljs-01": {
+  "func": "",
+  "file": "graal-js/src/com.oracle.truffle.js/src/com/oracle/truffle/js/runtime/util/IntlUtil.java",
+  "line_range": [],
+  "site_line": 535,
+  "tol": 15,
+  "class": "uncaught-exception"
+ },
+ "openssl-01": {
+  "func": "DES_ede3_ofb64_encrypt",
+  "file": "crypto/des/ofb64ede.c",
+  "line_range": [
+   40,
+   80
+  ],
+  "site_line": 58,
+  "tol": 5,
+  "class": "stack-buffer-overflow"
+ },
+ "libaom-02": {
+  "func": "av1_update_temporal_layer_framerate",
+  "file": "av1/encoder/svc_layercontext.c",
+  "line_range": [
+   100,
+   700
+  ],
+  "site_line": 192,
+  "tol": 30,
+  "class": "heap-buffer-overflow"
+ },
+ "libaom-03": {
+  "func": "interpolate_core",
+  "file": "av1/common/resize.c",
+  "line_range": [
+   200,
+   700
+  ],
+  "site_line": 592,
+  "tol": 30,
+  "class": "abrt"
+ },
+ "libaom-01": {
+  "func": "aom_rb_read_literal",
+  "file": "aom_dsp/bitreader_buffer.c",
+  "line_range": [
+   30,
+   55
+  ],
+  "site_line": 40,
+  "tol": 20,
+  "class": "abrt"
+ },
+ "graal-01": {
+  "func": "consumeChar",
+  "file": "regex/src/com.oracle.truffle.regex/src/com/oracle/truffle/regex/tregex/parser/RegexLexer.java",
+  "line_range": [
+   543,
+   547
+  ],
+  "site_line": 544,
+  "tol": 0,
+  "class": "uncaught-exception"
+ },
+ "libwebp-03": {
+  "func": "FixedPointInterpolation",
+  "file": "sharpyuv/sharpyuv_gamma.c",
+  "line_range": [
+   70,
+   330
+  ],
+  "site_line": 91,
+  "tol": 30,
+  "class": "segv"
+ },
+ "libwebp-02": {
+  "func": "DoSharpArgbToYuv",
+  "file": "sharpyuv/sharpyuv.c",
+  "line_range": [
+   330,
+   400
+  ],
+  "site_line": 91,
+  "tol": 20,
+  "class": "segv"
+ },
+ "libwebp-01": {
+  "func": "GetFrameInfo",
+  "file": "src/mux/muxedit.c",
+  "line_range": [
+   400,
+   640
+  ],
+  "site_line": 407,
+  "tol": 30,
+  "class": "segv"
+ },
+ "json-java-03": {
+  "func": "unescapeEntity",
+  "file": "src/main/java/org/json/XMLTokener.java",
+  "line_range": [
+   140,
+   220
+  ],
+  "site_line": 165,
+  "tol": 40,
+  "class": "oob-read"
+ },
+ "json-java-01": {
+  "func": "toJSONArray",
+  "file": "src/main/java/org/json/JSONML.java",
+  "line_range": [
+   270,
+   400
+  ],
+  "site_line": 279,
+  "tol": 30,
+  "class": "class-cast"
+ },
+ "json-java-02": {
+  "func": "unescapeEntity",
+  "file": "src/main/java/org/json/XMLTokener.java",
+  "line_range": [
+   140,
+   220
+  ],
+  "site_line": 169,
+  "tol": 40,
+  "class": "uncaught-exception"
+ },
+ "libxml2-03": {
+  "func": "xmlFAParsePosCharGroup",
+  "file": "xmlregexp.c",
+  "line_range": [
+   5087,
+   5118
+  ],
+  "site_line": 5104,
+  "tol": 10,
+  "class": "heap-buffer-overflow"
+ },
+ "libxml2-04": {
+  "func": "xmlIsID",
+  "file": "valid.c",
+  "line_range": [
+   2332,
+   2390
+  ],
+  "site_line": 2366,
+  "tol": 10,
+  "class": "heap-use-after-free"
+ },
+ "libxml2-01": {
+  "func": "xmlSAX2Text",
+  "file": "SAX2.c",
+  "line_range": [
+   2446,
+   2576
+  ],
+  "site_line": 2535,
+  "tol": 10,
+  "class": "heap-buffer-overflow"
+ },
+ "libxml2-02": {
+  "func": "xmlEscapeText",
+  "file": "xmlIO.c",
+  "line_range": [
+   247,
+   373
+  ],
+  "site_line": 63,
+  "tol": 10,
+  "class": "stack-use-after-scope"
+ },
+ "binutils-01": {
+  "func": "demangle_binder",
+  "file": "libiberty/rust-demangle.c",
+  "line_range": [
+   646,
+   665
+  ],
+  "site_line": 1553,
+  "tol": 5,
+  "class": "oom"
+ },
+ "jq-01": {
+  "func": "dump_operation",
+  "file": "src/bytecode.c",
+  "line_range": [
+   80,
+   140
+  ],
+  "site_line": 109,
+  "tol": 5,
+  "class": "segv"
+ },
+ "hunspell-01": {
+  "func": "HashMgr::load_tables",
+  "file": "src/hunspell/hashmgr.cxx",
+  "line_range": [
+   600,
+   660
+  ],
+  "site_line": 642,
+  "tol": 15,
+  "class": "oom"
+ },
+ "openscreen-01": {
+  "func": "",
+  "file": "",
+  "line_range": null,
+  "site_line": null,
+  "tol": null,
+  "class": "heap-buffer-overflow"
+ },
+ "openscreen-02": {
+  "func": "",
+  "file": "",
+  "line_range": null,
+  "site_line": null,
+  "tol": null,
+  "class": "abrt"
+ },
+ "flatbuffers-03": {
+  "func": "VerifyObject",
+  "file": "src/reflection.cpp",
+  "line_range": [
+   200,
+   300
+  ],
+  "site_line": 428,
+  "tol": 10,
+  "class": "heap-buffer-overflow"
+ },
+ "flatbuffers-01": {
+  "func": "ToString",
+  "file": "include/flatbuffers/flexbuffers.h",
+  "line_range": [
+   580,
+   620
+  ],
+  "site_line": 614,
+  "tol": 10,
+  "class": "heap-buffer-overflow"
+ },
+ "flatbuffers-02": {
+  "func": "Deserialize",
+  "file": "src/idl_parser.cpp",
+  "line_range": [
+   4433,
+   4470
+  ],
+  "site_line": 242,
+  "tol": 10,
+  "class": "heap-use-after-free"
+ },
+ "systemd-02": {
+  "func": "uki_hash",
+  "file": "src/shared/pe-binary.c",
+  "line_range": [
+   519,
+   600
+  ],
+  "site_line": 581,
+  "tol": 8,
+  "class": "timeout"
+ },
+ "systemd-01": {
+  "func": "trie_fnmatch_f",
+  "file": "src/libsystemd/sd-hwdb/sd-hwdb.c",
+  "line_range": [
+   176,
+   200
+  ],
+  "site_line": 187,
+  "tol": 8,
+  "class": "segv"
+ },
+ "libpng-01": {
+  "func": "png_zlib_inflate",
+  "file": "pngrutil.c",
+  "line_range": [
+   495,
+   525
+  ],
+  "site_line": 511,
+  "tol": 30,
+  "class": "heap-use-after-free"
+ },
+ "upx-02": {
+  "func": "generateElfHdr",
+  "file": "src/p_lx_elf.cpp",
+  "line_range": [
+   4190,
+   4280
+  ],
+  "site_line": 4261,
+  "tol": 80,
+  "class": "heap-buffer-overflow"
+ },
+ "upx-01": {
+  "func": "addLoader",
+  "file": "src/linker.cpp",
+  "line_range": [
+   350,
+   400
+  ],
+  "site_line": 369,
+  "tol": 10,
+  "class": "memory-leak"
+ },
+ "libwebsockets-01": {
+  "func": "lhp_element_has_class",
+  "file": "lib/misc/lhp.c",
+  "line_range": [
+   800,
+   850
+  ],
+  "site_line": 824,
+  "tol": 20,
+  "class": "heap-buffer-overflow"
+ },
+ "simdutf-01": {
+  "func": "convert_with_errors",
+  "file": "scalar/utf16_to_utf8/utf16_to_utf8.h",
+  "line_range": [
+   100,
+   200
+  ],
+  "site_line": 125,
+  "tol": 30,
+  "class": "heap-buffer-overflow"
+ },
+ "libheif-01": {
+  "func": "crop",
+  "file": "libheif/pixelimage.cc",
+  "line_range": [
+   1270,
+   1340
+  ],
+  "site_line": 1313,
+  "tol": 30,
+  "class": "heap-buffer-overflow"
+ },
+ "imagemagick-01": {
+  "func": "AcquireKernelInfo",
+  "file": "MagickCore/morphology.c",
+  "line_range": [
+   450,
+   1100
+  ],
+  "site_line": 277,
+  "tol": 30,
+  "class": "allocation-size-too-big"
+ },
+ "imagemagick-03": {
+  "func": "",
+  "file": "coders/msl.c",
+  "line_range": [],
+  "site_line": 4000,
+  "tol": 8000,
+  "class": "stack-overflow"
+ },
+ "imagemagick-02": {
+  "func": "MSLEndElement",
+  "file": "coders/msl.c",
+  "line_range": [
+   7080,
+   7110
+  ],
+  "site_line": 7091,
+  "tol": 10,
+  "class": "abrt"
+ },
+ "fwupd-04": {
+  "func": "fu_sbatlevel_section_add_entry",
+  "file": "libfwupdplugin/fu-sbatlevel-section.c",
+  "line_range": [],
+  "site_line": 150,
+  "tol": 10,
+  "class": "oom"
+ },
+ "fwupd-03": {
+  "func": "",
+  "file": "libfwupd/fwupd-json-parser.c",
+  "line_range": [],
+  "site_line": 308,
+  "tol": 50,
+  "class": "stack-overflow"
+ },
+ "fwupd-02": {
+  "func": "",
+  "file": "plugins/logitech-bulkcontroller/fu-logitech-bulkcontroller-device.c",
+  "line_range": [],
+  "site_line": 244,
+  "tol": 30,
+  "class": "heap-buffer-overflow"
+ },
+ "fwupd-01": {
+  "func": "",
+  "file": "libfwupdplugin/fu-cab-firmware.c",
+  "line_range": [],
+  "site_line": 0,
+  "tol": 0,
+  "class": "oom"
+ },
+ "opc-ua-01": {
+  "func": "lookAheadForKey",
+  "file": "src/ua_types_encoding_json_105.c",
+  "line_range": [
+   1380,
+   1480
+  ],
+  "site_line": 1435,
+  "tol": 30,
+  "class": "abrt"
+ },
+ "openh264-01": {
+  "func": "WelsSampleSad8x8_c",
+  "file": "codec/common/src/sad_common.cpp",
+  "line_range": [
+   60,
+   100
+  ],
+  "site_line": 82,
+  "tol": 20,
+  "class": "heap-buffer-overflow"
+ },
+ "libavif-01": {
+  "func": "",
+  "file": "src/stream.c",
+  "line_range": [],
+  "site_line": 128,
+  "tol": 200,
+  "class": "heap-buffer-overflow"
+ },
+ "ots-01": {
+  "func": "ProcessGeneric",
+  "file": "src/ots.cc",
+  "line_range": [
+   750,
+   820
+  ],
+  "site_line": 781,
+  "tol": 25,
+  "class": "segv"
+ },
+ "pdfbox-02": {
+  "func": "getDecode",
+  "file": "pdfbox/src/main/java/org/apache/pdfbox/pdmodel/graphics/image/PDInlineImage.java",
+  "line_range": [
+   260,
+   320
+  ],
+  "site_line": 281,
+  "tol": 30,
+  "class": "class-cast"
+ },
+ "pdfbox-03": {
+  "func": "parsePfb",
+  "file": "fontbox/src/main/java/org/apache/fontbox/pfb/PfbParser.java",
+  "line_range": [
+   140,
+   200
+  ],
+  "site_line": 162,
+  "tol": 30,
+  "class": "uncaught-exception"
+ },
+ "pdfbox-01": {
+  "func": "increment",
+  "file": "fontbox/src/main/java/org/apache/fontbox/cmap/CMapParser.java",
+  "line_range": [
+   780,
+   850
+  ],
+  "site_line": 813,
+  "tol": 30,
+  "class": "oob-read"
+ },
+ "avro-01": {
+  "func": "",
+  "file": "lang/java/avro/src/main/java/org/apache/avro/file/DataFileStream.java",
+  "line_range": [
+   227,
+   381
+  ],
+  "site_line": 83,
+  "tol": 5,
+  "class": "oom"
+ },
+ "avro-02": {
+  "func": "file_read_block_count",
+  "file": "lang/c/src/datafile.c",
+  "line_range": [
+   437,
+   470
+  ],
+  "site_line": 529,
+  "tol": 5,
+  "class": "allocation-size-too-big"
+ },
+ "avro-03": {
+  "func": "read_map_value",
+  "file": "lang/c/src/value-read.c",
+  "line_range": [
+   79,
+   128
+  ],
+  "site_line": 103,
+  "tol": 5,
+  "class": "allocation-size-too-big"
+ },
+ "ndpi-01": {
+  "func": "ndpi_hex_decode",
+  "file": "src/lib/ndpi_utils.c",
+  "line_range": [
+   1100,
+   1180
+  ],
+  "site_line": 1144,
+  "tol": 5,
+  "class": "segv"
+ },
+ "cups-01": {
+  "func": "cupsUTF8ToCharset",
+  "file": "cups/transcode.c",
+  "line_range": [
+   235,
+   255
+  ],
+  "site_line": 245,
+  "tol": 12,
+  "class": "heap-buffer-overflow"
+ },
+ "mongoose-02": {
+  "func": "mg_mqtt_next_prop",
+  "file": "mongoose.c",
+  "line_range": [
+   4090,
+   4160
+  ],
+  "site_line": 4132,
+  "tol": 5,
+  "class": "heap-buffer-overflow"
+ },
+ "mongoose-01": {
+  "func": "mg_match",
+  "file": "mongoose.c",
+  "line_range": [
+   11140,
+   11220
+  ],
+  "site_line": 11175,
+  "tol": 5,
+  "class": "heap-buffer-overflow"
+ },
+ "dtc-01": {
+  "func": "fdt_next_tag",
+  "file": "libfdt/fdt.c",
+  "line_range": [
+   160,
+   200
+  ],
+  "site_line": 173,
+  "tol": 5,
+  "class": "misaligned-access"
+ },
+ "net-snmp-01": {
+  "func": "smux_rreq_process",
+  "file": "agent/mibgroup/smux/smux.c",
+  "line_range": [
+   1100,
+   1120
+  ],
+  "site_line": 350,
+  "tol": 5,
+  "class": "heap-use-after-free"
+ },
+ "net-snmp-02": {
+  "func": "vacm_parse_config_group",
+  "file": "snmplib/vacm.c",
+  "line_range": [
+   380,
+   480
+  ],
+  "site_line": 412,
+  "tol": 30,
+  "class": "segv"
+ },
+ "icu-02": {
+  "func": "parseFilterID",
+  "file": "icu4c/source/i18n/tridpars.cpp",
+  "line_range": [
+   200,
+   260
+  ],
+  "site_line": 229,
+  "tol": 5,
+  "class": "memory-leak"
+ },
+ "icu-01": {
+  "func": "~TransliterationRule",
+  "file": "icu4c/source/i18n/rbt_rule.cpp",
+  "line_range": [
+   180,
+   210
+  ],
+  "site_line": 196,
+  "tol": 30,
+  "class": "segv"
+ },
+ "ghidra-01": {
+  "func": "str_buf_reserve",
+  "file": "ghidra-demangler/rust-demangle.c",
+  "line_range": [
+   1530,
+   1590
+  ],
+  "site_line": 1553,
+  "tol": 5,
+  "class": "oom"
+ },
+ "libvpx-03": {
+  "func": "saturate_cast_double_to_int",
+  "file": "vpx_dsp/vpx_dsp_common.h",
+  "line_range": [
+   80,
+   95
+  ],
+  "site_line": 89,
+  "tol": 5,
+  "class": "float-cast-overflow"
+ },
+ "libvpx-02": {
+  "func": "init_encode_frame_mb_context",
+  "file": "vp9/encoder/vp9_encodeframe.c",
+  "line_range": [
+   4200,
+   6000
+  ],
+  "site_line": 4293,
+  "tol": 30,
+  "class": "heap-buffer-overflow"
+ },
+ "libvpx-04": {
+  "func": "vpx_img_flip",
+  "file": "vpx/src/vpx_image.c",
+  "line_range": [
+   245,
+   270
+  ],
+  "site_line": 263,
+  "tol": 5,
+  "class": "null-deref"
+ },
+ "libvpx-01": {
+  "func": "vp9_caq_select_segment",
+  "file": "vp9/encoder/vp9_aq_complexity.c",
+  "line_range": [
+   100,
+   140
+  ],
+  "site_line": 128,
+  "tol": 12,
+  "class": "abrt"
+ },
+ "harfbuzz-01": {
+  "func": "",
+  "file": "src/rust/font.rs",
+  "line_range": [],
+  "site_line": 988,
+  "tol": 20,
+  "class": "stack-buffer-overflow"
+ },
+ "opencv-01": {
+  "func": "",
+  "file": "modules/core/src/persistence_yml.cpp",
+  "line_range": [],
+  "site_line": 435,
+  "tol": 30,
+  "class": "heap-buffer-overflow"
+ },
+ "freerdp-01": {
+  "func": "ntlm_ContextNew",
+  "file": "winpr/libwinpr/sspi/NTLM/ntlm.c",
+  "line_range": [
+   230,
+   280
+  ],
+  "site_line": 244,
+  "tol": 10,
+  "class": "memory-leak"
+ },
+ "freetype-01": {
+  "func": "FT_Bitmap_Copy",
+  "file": "src/base/ftbitmap.c",
+  "line_range": [
+   100,
+   140
+  ],
+  "site_line": 123,
+  "tol": 20,
+  "class": "heap-use-after-free"
+ },
+ "spirv-tools-02": {
+  "func": "ParseInstruction",
+  "file": "source/name_mapper.cpp",
+  "line_range": [
+   160,
+   360
+  ],
+  "site_line": 268,
+  "tol": 15,
+  "class": "heap-buffer-overflow"
+ },
+ "spirv-tools-01": {
+  "func": "OrderBlocks",
+  "file": "source/disassemble.cpp",
+  "line_range": [
+   400,
+   500
+  ],
+  "site_line": 416,
+  "tol": 30,
+  "class": "segv"
+ },
+ "openldap-01": {
+  "func": "ldif_read_record",
+  "file": "libraries/libldap/ldif.c",
+  "line_range": [
+   700,
+   900
+  ],
+  "site_line": 811,
+  "tol": 5,
+  "class": "stack-buffer-underflow"
+ },
+ "openldap-02": {
+  "func": "parse_whsp",
+  "file": "libraries/libldap/schema.c",
+  "line_range": [
+   1050,
+   1130
+  ],
+  "site_line": 1090,
+  "tol": 5,
+  "class": "heap-buffer-overflow"
+ },
+ "skia-01": {
+  "func": "eval_blur_passes",
+  "file": "src/core/SkBlurEngine.cpp",
+  "line_range": [
+   200,
+   245
+  ],
+  "site_line": 387,
+  "tol": 5,
+  "class": "abrt"
+ }
+}

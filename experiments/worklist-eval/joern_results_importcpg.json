@@ -1,0 +1,162 @@
+{
+ "avro-02": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 596,
+  "sinks": 776,
+  "rec": 208
+ },
+ "cups-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 33,
+  "sinks": 30,
+  "rec": 0
+ },
+ "flatbuffers-01": {
+  "err": 1
+ },
+ "freerdp-01": {
+  "hit_line": false,
+  "hit_func": false,
+  "reach": 114,
+  "sinks": 99,
+  "rec": 2
+ },
+ "freetype-01": {
+  "hit_line": false,
+  "hit_func": false,
+  "reach": 293,
+  "sinks": 439,
+  "rec": 3
+ },
+ "ghidra-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 4876,
+  "sinks": 11086,
+  "rec": 2280
+ },
+ "graal-01": {
+  "hit_line": false,
+  "hit_func": false,
+  "reach": 3448,
+  "sinks": 4725,
+  "rec": 1952
+ },
+ "hunspell-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 543,
+  "sinks": 1618,
+  "rec": 76
+ },
+ "imagemagick-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 1663,
+  "sinks": 6626,
+  "rec": 561
+ },
+ "libaom-01": {
+  "hit_line": true,
+  "hit_func": false,
+  "reach": 53,
+  "sinks": 38,
+  "rec": 0
+ },
+ "libpng-01": {
+  "hit_line": false,
+  "hit_func": false,
+  "reach": 55,
+  "sinks": 11,
+  "rec": 0
+ },
+ "libwebp-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 181,
+  "sinks": 256,
+  "rec": 0
+ },
+ "libwebsockets-01": {
+  "hit_line": true,
+  "hit_func": false,
+  "reach": 135,
+  "sinks": 415,
+  "rec": 4
+ },
+ "libxml2-02": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 971,
+  "sinks": 2193,
+  "rec": 32
+ },
+ "mongoose-02": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 48,
+  "sinks": 54,
+  "rec": 0
+ },
+ "net-snmp-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 646,
+  "sinks": 1633,
+  "rec": 34
+ },
+ "opc-ua-01": {
+  "hit_line": false,
+  "hit_func": false,
+  "reach": 39,
+  "sinks": 36,
+  "rec": 0
+ },
+ "openh264-01": {
+  "hit_line": false,
+  "hit_func": false,
+  "reach": 228,
+  "sinks": 420,
+  "rec": 12
+ },
+ "openldap-02": {
+  "hit_line": false,
+  "hit_func": false,
+  "reach": 32,
+  "sinks": 18,
+  "rec": 0
+ },
+ "pdfbox-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 3473,
+  "sinks": 5917,
+  "rec": 2246
+ },
+ "pdfbox-03": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 3473,
+  "sinks": 5917,
+  "rec": 2246
+ },
+ "simdutf-01": {
+  "err": 1
+ },
+ "systemd-01": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 1970,
+  "sinks": 3344,
+  "rec": 38
+ },
+ "upx-02": {
+  "hit_line": true,
+  "hit_func": true,
+  "reach": 1414,
+  "sinks": 4815,
+  "rec": 86
+ }
+}

@@ -1,0 +1,1127 @@
+<title>Reaching the D5 Ceiling</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    color-scheme:light;
+    --paper:#faf8f2; --surface:#ffffff; --sunk:#f3f0e7;
+    --ink:#1c1b16; --muted:#57534a; --faint:#8d887c;
+    --line:#e7e2d5; --line-2:#d7d1c1; --grid:#ece7db;
+    --accent:#33507d; --accent-2:#4a6ea3; --accent-soft:#e4e9f1;
+    --opus:#a49e90; --opus-2:#8b8677;
+    --rule:#1c1b16;
+  }
+  :root[data-theme="dark"]{
+    color-scheme:dark;
+    --paper:#14140e; --surface:#1a1a13; --sunk:#100f0a;
+    --ink:#eceadf; --muted:#a39e90; --faint:#6d685b;
+    --line:#2a281e; --line-2:#38352a; --grid:#242219;
+    --accent:#8fb0e0; --accent-2:#a7c1e8; --accent-soft:#18202e;
+    --opus:#807a6c; --opus-2:#9a9384;
+    --rule:#eceadf;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    color-scheme:dark;
+    --paper:#14140e; --surface:#1a1a13; --sunk:#100f0a;
+    --ink:#eceadf; --muted:#a39e90; --faint:#6d685b;
+    --line:#2a281e; --line-2:#38352a; --grid:#242219;
+    --accent:#8fb0e0; --accent-2:#a7c1e8; --accent-soft:#18202e;
+    --opus:#807a6c; --opus-2:#9a9384;
+    --rule:#eceadf;
+  }}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font-family:"Newsreader",Georgia,serif;font-size:19px;line-height:1.62;
+    -webkit-font-smoothing:antialiased;font-optical-sizing:auto}
+  .mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+  .col{max-width:960px;margin:0 auto;padding:0 28px}
+  a{color:var(--accent);text-underline-offset:2px;text-decoration-thickness:.5px}
+
+  /* masthead */
+  header{border-bottom:1px solid var(--line);padding:clamp(40px,7vw,72px) 0 34px}
+  .venue{font-family:"IBM Plex Mono",monospace;font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--muted);margin:0 0 26px;display:flex;flex-wrap:wrap;gap:8px 14px}
+  .venue .k{color:var(--accent)}
+  h1{font-size:clamp(32px,5.4vw,50px);line-height:1.08;font-weight:600;letter-spacing:-.01em;
+    margin:0 0 20px;text-wrap:balance}
+  .byline{font-family:"IBM Plex Mono",monospace;font-size:12.5px;color:var(--faint);letter-spacing:.02em;margin:0}
+  .byline b{color:var(--muted);font-weight:500}
+
+  /* abstract */
+  .abstract{margin:34px 0 0;padding:22px 26px;background:var(--sunk);border-radius:3px;
+    border-left:2px solid var(--accent)}
+  .abstract .lab{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--faint);margin:0 0 8px}
+  .abstract p{margin:0;font-size:17.5px;line-height:1.6;color:var(--ink)}
+  .abstract em{color:var(--muted)}
+
+  /* body */
+  article{padding:16px 0 0}
+  h2{font-size:14px;font-family:"IBM Plex Mono",monospace;font-weight:600;letter-spacing:.04em;
+    text-transform:uppercase;color:var(--muted);margin:56px 0 4px;padding-top:8px}
+  h2 .num{color:var(--accent);margin-right:12px}
+  h2+p{margin-top:14px}
+  p{margin:0 0 20px}
+  article p{max-width:66ch}
+  strong{font-weight:600}
+  em{font-style:italic}
+  .drop{display:block;font-size:15px;color:var(--muted);font-family:"IBM Plex Mono",monospace;
+    letter-spacing:.02em;margin:0 0 26px}
+  sup a{font-size:.62em;text-decoration:none;font-family:"IBM Plex Mono",monospace;padding:0 1px}
+
+  /* figure */
+  figure{margin:38px 0;padding:0}
+  .frame{border:1px solid var(--line);border-radius:3px;background:var(--surface);padding:clamp(16px,3vw,26px)}
+  figcaption{font-family:"IBM Plex Mono",monospace;font-size:12.5px;line-height:1.55;color:var(--muted);
+    margin-top:14px;max-width:64ch}
+  figcaption b{color:var(--ink);font-weight:600}
+  figcaption .fnum{color:var(--accent);font-weight:600}
+
+  /* fig1 gap dotplot */
+  .flegend{display:flex;gap:20px;flex-wrap:wrap;font-family:"IBM Plex Mono",monospace;font-size:11.5px;
+    color:var(--muted);margin-bottom:18px}
+  .flegend span{display:inline-flex;align-items:center;gap:7px}
+  .flegend .mk{width:11px;height:11px;border-radius:50%}
+  .flegend .op{background:var(--opus)} .flegend .fb{background:var(--accent)}
+  .grow{display:grid;grid-template-columns:118px 1fr 44px;align-items:center;gap:6px 14px;padding:11px 0;border-top:1px solid var(--grid)}
+  .grow:first-of-type{border-top:none}
+  .gn{font-size:14px;font-weight:500}
+  .gn small{display:block;font-family:"IBM Plex Mono",monospace;font-weight:400;color:var(--faint);font-size:10.5px}
+  .gtrack{position:relative;height:22px}
+  .gtrack .gl{position:absolute;top:2px;bottom:2px;width:1px;background:var(--grid)}
+  .gtrack .gl.z{background:var(--line-2)}
+  .gseg{position:absolute;top:50%;height:2px;transform:translateY(-50%);background:var(--accent)}
+  .gp{position:absolute;top:50%;transform:translate(-50%,-50%);border-radius:50%;border:1.5px solid var(--surface)}
+  .gp.op{width:11px;height:11px;background:var(--opus)}
+  .gp.fb{width:15px;height:15px;background:var(--accent)}
+  .gv{font-family:"IBM Plex Mono",monospace;font-size:12px;text-align:right;color:var(--muted)}
+  .gv.up{color:var(--accent);font-weight:600}
+  .gaxis{display:grid;grid-template-columns:118px 1fr 44px;gap:14px;margin-top:2px}
+  .gaxis .a{position:relative;height:15px;font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--faint)}
+  .gaxis .a span{position:absolute;transform:translateX(-50%)}
+
+  /* svg figs */
+  .fig svg{display:block;width:100%;height:auto}
+  .fig text{font-family:"IBM Plex Mono",monospace;fill:var(--faint)}
+  .fig .axline{stroke:var(--line-2);stroke-width:1}
+  .fig .grid{stroke:var(--grid);stroke-width:1}
+  .fig .lbl{fill:var(--muted)}
+  .fig .lbl-ink{fill:var(--ink)}
+  .fig .acc{fill:var(--accent)}
+  .fig .cut{stroke:var(--accent);stroke-width:1.5;stroke-dasharray:4 4}
+
+  /* table */
+  .tw{overflow-x:auto;border:1px solid var(--line);border-radius:3px;background:var(--surface)}
+  table{width:100%;border-collapse:collapse;font-family:"IBM Plex Mono",monospace;font-size:13px;min-width:600px}
+  caption{caption-side:top;text-align:left;font-family:"IBM Plex Mono",monospace;font-size:12.5px;
+    color:var(--muted);padding:0 0 12px}
+  caption .fnum{color:var(--accent);font-weight:600}
+  thead th{font-size:10.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);font-weight:600;
+    text-align:right;padding:14px 12px 10px;border-bottom:1px solid var(--line-2)}
+  thead th:first-child{text-align:left}
+  thead th.acc{color:var(--accent)}
+  tbody td{padding:10px 12px;border-bottom:1px solid var(--grid);text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+  tbody td:first-child{text-align:left;color:var(--ink)}
+  tbody td.acccol{color:var(--accent);font-weight:600;background:var(--accent-soft)}
+  tbody td.bug{font-family:"Newsreader",serif;font-size:14px}
+  tbody td.bug small{font-family:"IBM Plex Mono",monospace;color:var(--faint);font-size:10.5px;display:block}
+  tbody tr:last-child td{border-bottom:none}
+  tr.sum td{border-top:1.5px solid var(--line-2);color:var(--ink);font-weight:600}
+  tr.sum td.acccol{color:var(--accent)}
+  .vw{color:var(--accent);font-weight:600} .vt{color:var(--faint)}
+
+  /* summary matrix — configs as columns */
+  .matrix{min-width:720px}
+  .matrix thead th{text-align:center;vertical-align:bottom;padding:16px 14px 12px;font-size:12px;
+    letter-spacing:0;text-transform:none;color:var(--ink);font-weight:600;line-height:1.25}
+  .matrix thead th:first-child{width:190px}
+  .matrix thead th small{display:block;font-weight:400;color:var(--faint);font-size:10.5px;margin-top:3px;letter-spacing:.02em}
+  .matrix thead th.fbhead{color:var(--accent);background:var(--accent-soft)}
+  .matrix tbody td{text-align:center;font-size:14px;color:var(--muted);padding:11px 14px}
+  .matrix td.rl{text-align:left;color:var(--ink);font-size:13px}
+  .matrix td.rl small{color:var(--faint);font-size:11px}
+  .matrix td.fbcol{color:var(--accent);font-weight:600;background:var(--accent-soft)}
+  .matrix tr.grouphd td{background:var(--sunk);color:var(--faint);font-size:10.5px;letter-spacing:.12em;
+    text-transform:uppercase;text-align:left;padding:9px 14px;font-weight:600}
+  .matrix tr.tot td{border-top:1.5px solid var(--line-2);color:var(--ink);font-weight:600;font-size:15px}
+  .matrix tr.tot td.fbcol{color:var(--accent)}
+  .matrix tr.hi td{background:var(--sunk)}
+  .matrix tr.hi td.fbcol{background:var(--accent-soft)}
+  .matrix tr.hi td.rl{color:var(--ink);font-weight:600}
+  .matrix tr.hi td{font-weight:600;color:var(--ink)}
+  .matrix .big{font-family:"IBM Plex Mono";font-size:17px}
+
+  /* footnotes / validity */
+  .notes{margin-top:60px;padding-top:26px;border-top:1px solid var(--line)}
+  .notes h3{font-family:"IBM Plex Mono",monospace;font-size:12px;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--faint);font-weight:600;margin:0 0 18px}
+  ol.fn{margin:0;padding:0;counter-reset:fn;list-style:none}
+  ol.fn li{position:relative;padding:0 0 16px 30px;font-size:15px;line-height:1.55;color:var(--muted);max-width:64ch}
+  ol.fn li::before{counter-increment:fn;content:counter(fn);position:absolute;left:0;top:1px;
+    font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--accent);
+    border:1px solid var(--line-2);border-radius:50%;width:18px;height:18px;display:grid;place-items:center}
+  ol.fn li b{color:var(--ink);font-weight:600}
+  ol.fn li[id]{scroll-margin-top:20px}
+
+  footer{padding:30px 0 72px;font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--faint);line-height:1.7}
+  hr.sec{border:none;border-top:1px solid var(--line);margin:0}
+
+  /* trajectory appendix */
+  .traj{border:1px solid var(--line);border-radius:3px;background:var(--sunk);
+    max-height:600px;overflow-y:auto;padding:14px 16px;font-family:"IBM Plex Mono",monospace;
+    font-size:12px;line-height:1.5}
+  .tstep{padding:8px 0;border-top:1px solid var(--grid)}
+  .tstep:first-child{border-top:none}
+  .tsay{color:var(--ink);font-family:"Newsreader",serif;font-size:14.5px;font-style:italic}
+  .thd{display:flex;align-items:center;gap:10px;margin-bottom:3px}
+  .tn{color:var(--faint)}
+  .tt{padding:1px 7px;border-radius:3px;font-size:10.5px;letter-spacing:.03em;color:var(--surface);background:var(--muted)}
+  .tt.bash{background:var(--accent)}
+  .tt.read,.tt.glob,.tt.grep{background:var(--opus)}
+  .tt.gates,.tt.diversify{background:var(--accent-2)}
+  .tt.trace{background:var(--rule);color:var(--paper)}
+  .tc{color:var(--faint);margin-left:auto}
+  .tin{color:var(--muted);white-space:pre-wrap;word-break:break-word;padding-left:2px}
+  .tout{color:var(--faint);white-space:pre-wrap;word-break:break-word;margin-top:4px;
+    padding-left:10px;border-left:2px solid var(--line-2)}
+  .tstep.tr .tout{border-left-color:var(--rule)}
+  .tstep.crash .tout{color:var(--ink);border-left-color:var(--accent);border-left-width:3px}
+  .tstep.crash .tt{background:var(--accent)}
+
+  .doc{border:1px solid var(--line);border-radius:3px;background:var(--sunk);
+    max-height:400px;overflow-y:auto;padding:16px 18px;font-family:"IBM Plex Mono",monospace;
+    font-size:12px;line-height:1.62;color:var(--muted);white-space:pre-wrap;word-break:break-word}
+  .genln{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--faint);
+    background:var(--surface);border:1px solid var(--line);border-radius:3px;
+    padding:8px 12px;margin:0 0 8px;overflow-x:auto;line-height:1.6}
+</style>
+
+<header>
+  <div class="col">
+    <p class="venue"><span class="k">FuzzingBrain-Bench</span><span>·</span><span>Working note</span><span>·</span><span>Difficulty-5 study</span></p>
+    <h1>Reaching the D5 ceiling with a weaker model</h1>
+    <p class="byline"><b>Internal experiment report</b> · Opus 4.8 vs. a worklist agent on Haiku 4.5 · 2026-09-03 · n = 1 run per cell</p>
+    <div class="abstract">
+      <p class="lab">Abstract</p>
+      <p>D5 is the benchmark's hardest tier, defined as the set of challenges on which a frozen three-model panel produced <em>no</em> crashes. On six D5 challenges, at a matched $20 per-challenge budget, a lightweight agent driving <strong>Haiku 4.5</strong> over a static call-graph worklist produced <strong>8 distinct crashes on 5 of 6</strong> targets. Opus 4.8, run through two agentic harnesses (Claude&nbsp;Code and the plain API loop), produced <strong>3 crashes on 3 of 6</strong> in each — for 4.8× to 6.0× the spend. Under the 100-turn cap that <em>defined</em> D5, Opus 4.8 scores <strong>0 of 6</strong>; raising the budget to $20 lifts it to 3, and the Haiku agent to 8. We report the per-bug gap, the cost–yield frontier, and evidence that part of the D5 difficulty is an artifact of budget rather than of underlying capability.</p>
+    </div>
+  </div>
+</header>
+
+<article>
+  <div class="col">
+    <figure style="margin-top:30px">
+      <div class="tw">
+        <table class="matrix">
+          <thead><tr>
+            <th></th>
+            <th>Opus 4.8<small>100-turn cap</small></th>
+            <th>Opus 4.8<small>$20 · pure API</small></th>
+            <th>Opus 4.8<small>$20 · Claude Code</small></th>
+            <th class="fbhead">FB Agent<small>$20 · Haiku 4.5</small></th>
+          </tr></thead>
+          <tbody>
+            <tr class="grouphd"><td colspan="5">Distinct crashes per challenge</td></tr>
+            <tr><td class="rl">opc-ua-01 <small>open62541</small></td><td>0</td><td>1</td><td>1</td><td class="fbcol">2</td></tr>
+            <tr><td class="rl">libxml2-02 <small>libxml2</small></td><td>0</td><td>0</td><td>0</td><td class="fbcol">2</td></tr>
+            <tr><td class="rl">graal-01 <small>GraalVM TRegex</small></td><td>0</td><td>0</td><td>0</td><td class="fbcol">2</td></tr>
+            <tr><td class="rl">libwebp-01 <small>libwebp</small></td><td>0</td><td>1</td><td>1</td><td class="fbcol">1</td></tr>
+            <tr><td class="rl">fwupd-01 <small>fwupd</small></td><td>0</td><td>1</td><td>1</td><td class="fbcol">1</td></tr>
+            <tr><td class="rl">libpng-01 <small>libpng</small></td><td>0</td><td>0</td><td>0</td><td class="fbcol">0</td></tr>
+            <tr class="grouphd"><td colspan="5">Totals over the six challenges</td></tr>
+            <tr class="tot"><td class="rl">Distinct crashes</td><td class="big">0</td><td class="big">3</td><td class="big">3</td><td class="fbcol big">8</td></tr>
+            <tr><td class="rl">Challenges cracked</td><td>0 / 6</td><td>3 / 6</td><td>3 / 6</td><td class="fbcol">5 / 6</td></tr>
+            <tr><td class="rl">Total cost</td><td>—</td><td>$86.34</td><td>$107.55</td><td class="fbcol">$17.86</td></tr>
+            <tr><td class="rl">Avg turns / challenge</td><td>100 <sup><a href="#n1">1</a></sup></td><td>161</td><td>147</td><td class="fbcol">121</td></tr>
+            <tr><td class="rl">Avg wall-clock / challenge</td><td>—</td><td>30 min</td><td>53 min</td><td class="fbcol">44 min</td></tr>
+            <tr class="hi"><td class="rl">Crashes per $100</td><td>—</td><td>3.5</td><td>2.8</td><td class="fbcol">44.8</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption><span class="fnum">Table 1.</span> The whole study at a glance: Opus 4.8 held fixed while budget and harness vary (three left columns), then the Haiku worklist agent — same six D5 challenges, same $20/1-hour cap for every column but the first. Raising Opus's budget from the D5-defining 100-turn cap (0 crashes) to $20 lifts it to 3; the Haiku agent reaches 8 for a sixth of the spend. Turns and wall-clock are per-challenge averages over the six cells — the Haiku agent runs <b>fewer turns</b> (121) than either Opus harness while producing more crashes.</figcaption>
+    </figure>
+
+    <p style="max-width:66ch;color:var(--muted);font-size:15px;margin:0 0 6px">Below, the <strong style="color:var(--ink)">real-time budget at which each individual crash was first produced</strong> — a finer view than the totals above. The two $20 Opus 4.8 runs carry per-turn telemetry, so the spend at the find is exact; the worklist agent's source run reports only per-cell totals (Table&nbsp;1).</p>
+
+    <figure>
+      <div class="tw">
+        <table>
+          <caption><span class="fnum">Table 2.</span> Budget (and turn) at first crash, on the two $20 Opus 4.8 runs. Blank = not cracked.</caption>
+          <thead><tr>
+            <th>Crash</th><th>CC + 4.8 · found at</th><th>pure 4.8 · found at</th>
+          </tr></thead>
+          <tbody>
+            <tr><td class="bug">opc-ua-01</td><td>$16.38 <span style="color:var(--faint)">· turn 129</span></td><td>$10.68 <span style="color:var(--faint)">· turn 134</span></td></tr>
+            <tr><td class="bug">fwupd-01</td><td>$15.73 <span style="color:var(--faint)">· turn 134</span></td><td>$1.03 <span style="color:var(--faint)">· turn 35</span></td></tr>
+            <tr><td class="bug">libwebp-01</td><td>$1.35 <span style="color:var(--faint)">· turn 32</span></td><td>$4.38 <span style="color:var(--faint)">· turn 76</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </figure>
+
+    <p style="max-width:66ch">The FB-agent column above is one configuration of our own agent. It is worth asking what inside it does the work — the static worklist, or the dynamic feedback tool. We ran the <strong>same six D5 challenges</strong> under three of our own configurations, changing one ingredient at a time.</p>
+
+    <figure style="margin-top:22px">
+      <div class="tw">
+        <table class="matrix">
+          <thead><tr>
+            <th></th>
+            <th>reach only<small>basic worklist · static reach · Sep 1</small></th>
+            <th class="fbhead">+ dynamic trace<small>basic worklist · gdb trace · Sep 2</small></th>
+            <th>enhanced worklist<small>Joern reachable-sinks · no trace · Sep 2</small></th>
+          </tr></thead>
+          <tbody>
+            <tr class="grouphd"><td colspan="4">Distinct crashes per challenge</td></tr>
+            <tr><td class="rl">opc-ua-01 <small>open62541</small></td><td>2</td><td class="fbcol">2</td><td>1</td></tr>
+            <tr><td class="rl">libxml2-02 <small>libxml2</small></td><td>0</td><td class="fbcol">2</td><td>1</td></tr>
+            <tr><td class="rl">graal-01 <small>GraalVM TRegex</small></td><td>0</td><td class="fbcol">2</td><td>1</td></tr>
+            <tr><td class="rl">libwebp-01 <small>libwebp</small></td><td>0</td><td class="fbcol">1</td><td>2</td></tr>
+            <tr><td class="rl">fwupd-01 <small>fwupd</small></td><td>0</td><td class="fbcol">1</td><td>1</td></tr>
+            <tr><td class="rl">libpng-01 <small>libpng</small></td><td>0</td><td class="fbcol">0</td><td>0</td></tr>
+            <tr class="grouphd"><td colspan="4">Totals over the six challenges</td></tr>
+            <tr class="tot"><td class="rl">Distinct crashes</td><td class="big">2</td><td class="fbcol big">8</td><td class="big">6</td></tr>
+            <tr><td class="rl">Challenges cracked</td><td>1 / 6</td><td class="fbcol">5 / 6</td><td>5 / 6</td></tr>
+            <tr><td class="rl">Total cost</td><td>$5.72</td><td class="fbcol">$17.87</td><td>$89.26</td></tr>
+            <tr><td class="rl">Avg turns / challenge</td><td>147</td><td class="fbcol">121</td><td>135</td></tr>
+            <tr><td class="rl">Avg wall-clock / challenge</td><td>—</td><td class="fbcol">44 min</td><td>51 min</td></tr>
+            <tr class="hi"><td class="rl">Crashes per $100</td><td>35.0</td><td class="fbcol">44.8</td><td>6.7</td></tr>
+            <tr class="grouphd"><td colspan="4">Tool calls, summed over the six challenges</td></tr>
+            <tr><td class="rl">./submit &amp; bash</td><td>1201</td><td class="fbcol">1315</td><td>1476</td></tr>
+            <tr><td class="rl">source reads <small>read + grep</small></td><td>490</td><td class="fbcol">70</td><td>144</td></tr>
+            <tr><td class="rl">gates <small>path constraints</small></td><td>38</td><td class="fbcol">16</td><td>14</td></tr>
+            <tr><td class="rl">diversify</td><td>10</td><td class="fbcol">14</td><td>20</td></tr>
+            <tr><td class="rl">reach <small>static, deprecated</small></td><td>2</td><td class="fbcol">—</td><td>—</td></tr>
+            <tr class="hi"><td class="rl">trace <small>dynamic gdb</small></td><td>—</td><td class="fbcol">110</td><td>—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption><span class="fnum">Table 3.</span> Our three configurations on the same six D5 challenges, one ingredient changed at a time. <b>The static <span class="mono">reach</span> tool alone cracks only opc-ua (1/6)</b> — the agent burns 490 source reads searching and finds nothing else. <b>Adding dynamic <span class="mono">trace</span> lifts it to 5/6 at 8 crashes</b> (the middle column, = the FB-agent column of Table 1), with a third of the reading. <b>Replacing trace with a stronger static worklist also reaches 5/6</b> — the worklist substitutes for the debugger — but the no-early-stop run spent it to the $20 wall on every cell, so its crashes-per-dollar is low. Blank tools = not offered in that configuration.</figcaption>
+    </figure>
+
+    <p style="max-width:66ch;color:var(--muted);font-size:15px;margin:0 0 6px">And the <strong style="color:var(--ink)">budget at which each crash was first produced</strong>, per configuration — the same finer view as Table&nbsp;2, now across our own three.</p>
+
+    <figure>
+      <div class="tw">
+        <table>
+          <caption><span class="fnum">Table 4.</span> Spend at first crash, per configuration. Blank = not cracked; a check = cracked but the run did not stamp per-step cost.</caption>
+          <thead><tr>
+            <th>Crash</th><th>reach only</th><th class="acc">+ trace</th><th>enhanced worklist</th>
+          </tr></thead>
+          <tbody>
+            <tr><td class="bug">opc-ua-01</td><td class="vw">✓ <span style="color:var(--faint)">· turn 89</span></td><td class="vw">✓ <span style="color:var(--faint)">· turn 21</span></td><td>$1.48 <span style="color:var(--faint)">· turn 32</span></td></tr>
+            <tr><td class="bug">libxml2-02</td><td class="vt">—</td><td>$4.14 <span style="color:var(--faint)">· turn 75</span></td><td>$1.91 <span style="color:var(--faint)">· turn 39</span></td></tr>
+            <tr><td class="bug">graal-01</td><td class="vt">—</td><td>$1.92 <span style="color:var(--faint)">· turn 38</span></td><td>$3.53 <span style="color:var(--faint)">· turn 72</span></td></tr>
+            <tr><td class="bug">libwebp-01</td><td class="vt">—</td><td>$1.16 <span style="color:var(--faint)">· turn 17</span></td><td>$1.30 <span style="color:var(--faint)">· turn 24</span></td></tr>
+            <tr><td class="bug">fwupd-01</td><td class="vt">—</td><td>$6.60 <span style="color:var(--faint)">· turn 101</span></td><td>$19.56 <span style="color:var(--faint)">· turn 167</span></td></tr>
+            <tr><td class="bug">libpng-01</td><td class="vt">—</td><td class="vt">—</td><td class="vt">—</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <figcaption><span class="fnum">Table 4.</span> The two 5/6 configurations reach most faults cheaply — under $4 for four of five on the trace run. fwupd is the expensive tail in both: an <span class="mono">out-of-memory</span> that only trips after a long allocation loop (turn 101 / 167). opc-ua's crash time was not cost-stamped in the two Sep-1/2 runs (✓), so its turn is shown instead.</figcaption>
+    </figure>
+
+    <h2><span class="num">1</span>Background</h2>
+    <p>The benchmark assigns each challenge a difficulty coefficient <span class="mono">D&nbsp;∈&nbsp;{1..5}</span> from a frozen three-model panel — Haiku&nbsp;4.5, Opus&nbsp;4.8, Sonnet&nbsp;4.6.<sup><a href="#n1">1</a></sup> <strong>D5 is defined as "no panel model crashed it at all."</strong> It is, by construction, the ceiling: a wall the panel could not pass under the conditions it was measured in. Six of the thirteen D5 challenges are studied here.</p>
+    <p>The scoring unit is the <em>distinct crash</em> — the count of unique crash signatures (crash class plus top stack frames) that the challenge's own in-image grader produces, deduplicated by the bench, not by us.<sup><a href="#n2">2</a></sup> A challenge's coefficient is frozen in <span class="mono">difficulty.json</span>; a run is quoted against it and never recomputes it.</p>
+
+    <h2><span class="num">2</span>Setup</h2>
+    <p>Three configurations were run on the same six challenges, under an identical <strong>$20 per-challenge budget with a one-hour wall-clock backstop</strong>. The budget is metered in dollars, not turns, so the harnesses are compared on spend rather than on an incommensurable turn count.</p>
+    <p><strong>(i) pure Opus 4.8</strong> — the base bench: our own agent loop (<span class="mono">fbbench.runner.episode</span>) with tool-output-elision compaction, driving the model over the API. <strong>(ii) Claude Code + Opus 4.8</strong> — the Claude&nbsp;Code CLI over the same bench MCP server. <strong>(iii) fbagent + Haiku 4.5</strong> — a worklist agent that plans over a static call-graph and reachable-sink analysis of the source, driving the weakest panel model.</p>
+    <p>All three see only the given harness, the given sanitizer, and — for (iii) — a worklist computed from the source. None reads the answer repository, an expected output, or a novelty signal.<sup><a href="#n3">3</a></sup></p>
+
+    <h2><span class="num">3</span>Results</h2>
+    <p>Figure&nbsp;1 places the three configurations on each bug. Because both Opus harnesses scored <em>identically</em> on every challenge, they are drawn as a single Opus mark; the accent mark is the Haiku agent, and the segment between them is its lead.</p>
+
+    <figure class="fig">
+      <div class="frame">
+        <div class="flegend">
+          <span><i class="mk op"></i>Opus 4.8 — Claude Code &amp; API (identical on all six)</span>
+          <span><i class="mk fb"></i>fbagent + Haiku 4.5</span>
+        </div>
+        <div id="fig1"></div>
+        <div class="gaxis"><div></div><div class="a" id="fig1ax"></div><div></div></div>
+      </div>
+      <figcaption><span class="fnum">Figure 1.</span> Distinct crashes per D5 challenge, 0–2 scale. <b>Haiku leads on three</b> (opc-ua-01, libxml2-02, graal-01), ties on three (including libpng-01, where all three score zero). The panel baseline is 0 on every row by the definition of D5.</figcaption>
+    </figure>
+
+    <p>The head-to-head against the stronger Claude&nbsp;Code&nbsp;+&nbsp;Opus&nbsp;4.8 baseline (Table&nbsp;1) is <strong>two wins and four ties</strong>, with the Haiku agent never behind: it wins opc-ua-01, libxml2-02 and graal-01, and matches the rest.<sup><a href="#n4">4</a></sup></p>
+
+    <p>The counts understate the result, because the three configurations did not spend alike. Figure&nbsp;2 plots yield against cost. The two Opus configurations sit at the bottom-right — high spend, low yield — while the Haiku agent sits alone at the top-left, dominating both on the Pareto sense: strictly more crashes for strictly less money.</p>
+
+    <figure class="fig">
+      <div class="frame">
+        <svg viewBox="0 0 580 360" role="img" aria-label="Cost versus crashes scatter">
+          <!-- gridlines Y: crashes 0,2,4,6,8 -->
+          <g class="grid">
+            <line x1="64" y1="300" x2="556" y2="300"/>
+            <line x1="64" y1="234" x2="556" y2="234"/>
+            <line x1="64" y1="168" x2="556" y2="168"/>
+            <line x1="64" y1="102" x2="556" y2="102"/>
+            <line x1="64" y1="36" x2="556" y2="36"/>
+          </g>
+          <!-- axes -->
+          <line class="axline" x1="64" y1="36" x2="64" y2="300"/>
+          <line class="axline" x1="64" y1="300" x2="556" y2="300"/>
+          <!-- y labels -->
+          <g font-size="11" text-anchor="end">
+            <text x="54" y="304">0</text><text x="54" y="238">2</text><text x="54" y="172">4</text><text x="54" y="106">6</text><text x="54" y="40">8</text>
+          </g>
+          <text x="18" y="172" font-size="11" class="lbl" transform="rotate(-90 18 172)" text-anchor="middle">distinct crashes</text>
+          <!-- x labels: cost 0..120 across 64..556 -->
+          <g font-size="11" text-anchor="middle" class="lbl">
+            <text x="64" y="320">$0</text><text x="187" y="320">$30</text><text x="310" y="320">$60</text><text x="433" y="320">$90</text><text x="556" y="320">$120</text>
+          </g>
+          <text x="310" y="342" font-size="11" class="lbl" text-anchor="middle">total spend over 6 challenges</text>
+          <!-- points: x=64+cost/120*492 ; y=300-cr/8*264 -->
+          <!-- fbagent 17.86,8 -> x=137.2 y=36 -->
+          <circle cx="137" cy="36" r="7" class="acc"/>
+          <text x="150" y="34" font-size="12" class="lbl-ink" text-anchor="start" font-weight="600">fbagent · Haiku 4.5</text>
+          <text x="150" y="49" font-size="11" class="acc" text-anchor="start">$17.86 · 8 crashes</text>
+          <!-- pure 86.34,3 -> x=418 y=201 -->
+          <circle cx="418" cy="201" r="6" fill="var(--opus)"/>
+          <text x="418" y="222" font-size="11.5" class="lbl" text-anchor="middle">pure Opus 4.8 — $86 · 3</text>
+          <!-- CC 107.55,3 -> x=505 y=201 -->
+          <circle cx="505" cy="201" r="6" fill="var(--opus-2)"/>
+          <text x="505" y="188" font-size="11.5" class="lbl" text-anchor="middle">Claude Code — $108 · 3</text>
+        </svg>
+      </div>
+      <figcaption><span class="fnum">Figure 2.</span> Cost–yield frontier. The Haiku agent is <b>Pareto-dominant</b>: it produces more distinct crashes (8 vs 3) at a fraction of the spend ($18 vs $86–108). Normalized, that is <b>44.8 crashes per $100</b> against 3.5 and 2.8 for the two Opus configurations.</figcaption>
+    </figure>
+
+    <h2><span class="num">4</span>Why the ceiling moved</h2>
+    <p>Two mechanisms account for the gap, and they are separable.</p>
+    <p><strong>Budget, not only capability.</strong> Before dollar budgets, the Claude&nbsp;Code arm was capped at 100 turns and scored zero on these targets — consistent with the panel that defined them. Yet on the $20 run, the arm's crashes first appear <em>late</em>: at turns 129 and 134 for opc-ua-01 and fwupd-01 (Figure&nbsp;3). A 100-turn budget stops the episode just before the fault is produced. Part of "D5" was therefore an artifact of too short a budget — the faults live past turn 100, out of reach of the run that labelled them uncrackable.</p>
+
+    <figure class="fig">
+      <div class="frame">
+        <svg viewBox="0 0 580 210" role="img" aria-label="First-crash turn on the Claude Code arm">
+          <!-- x: turns 0..160 across 150..556 ; cutoff at 100 -->
+          <line class="axline" x1="150" y1="176" x2="556" y2="176"/>
+          <g font-size="11" text-anchor="middle" class="lbl">
+            <text x="150" y="196">0</text><text x="252" y="196">40</text><text x="353" y="196">80</text><text x="455" y="196">120</text><text x="556" y="196">160</text>
+          </g>
+          <text x="353" y="208" font-size="11" class="lbl" text-anchor="middle">turn at which the first crash was produced (Claude Code + Opus 4.8)</text>
+          <!-- 100-turn cutoff line: x=150+100/160*406=403.75 -->
+          <line class="cut" x1="404" y1="24" x2="404" y2="176"/>
+          <text x="404" y="18" font-size="10.5" class="acc" text-anchor="middle">100-turn cap</text>
+          <!-- rows: libwebp turn32, opc-ua 129, fwupd 134 -->
+          <!-- x=150+turn/160*406 -->
+          <g>
+            <text x="140" y="52" font-size="12" class="lbl-ink" text-anchor="end">libwebp-01</text>
+            <line class="grid" x1="150" y1="48" x2="231" y2="48"/>
+            <circle cx="231" cy="48" r="6" class="acc"/>
+            <text x="245" y="52" font-size="11" class="lbl" text-anchor="start">turn 32 — within reach</text>
+          </g>
+          <g>
+            <text x="140" y="92" font-size="12" class="lbl-ink" text-anchor="end">opc-ua-01</text>
+            <line class="grid" x1="150" y1="88" x2="477" y2="88"/>
+            <circle cx="477" cy="88" r="6" fill="var(--opus)"/>
+            <text x="463" y="78" font-size="11" class="lbl" text-anchor="end">turn 129 — past the cap</text>
+          </g>
+          <g>
+            <text x="140" y="132" font-size="12" class="lbl-ink" text-anchor="end">fwupd-01</text>
+            <line class="grid" x1="150" y1="128" x2="490" y2="128"/>
+            <circle cx="490" cy="128" r="6" fill="var(--opus)"/>
+            <text x="476" y="148" font-size="11" class="lbl" text-anchor="end">turn 134 — past the cap</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption><span class="fnum">Figure 3.</span> On the Claude&nbsp;Code arm, <b>two of three crashes first appear past turn 100</b> — beyond the old turn cap. Dollar-paced budgets (~157 turns at $20 on these targets) clear that wall; a turn-capped run would miss them and record a false zero.</figcaption>
+    </figure>
+
+    <p>The per-crash view is Table&nbsp;2, at the top: on Claude&nbsp;Code two of the three crashes cost $15–16 to reach, while the base-bench (API) harness reaches the same faults far cheaper (fwupd at <span class="mono">$1.03</span>, before turn&nbsp;100) — so the 100-turn zero is sharpest on the harness the panel resembles, and harness efficiency is itself a large factor.</p>
+
+    <p><strong>Substrate, not only the model.</strong> Budget explains why Opus&nbsp;4.8 now reaches three; it does not explain how <em>Haiku</em> — the weakest panel model — reaches eight for a sixth of the cost. That is the worklist substrate: a static reachable-sink analysis narrows the model's search to candidate faults instead of asking it to re-read source every turn. The two D5 wins are classic shapes for this — an unbounded-recursion <span class="mono">stack-overflow</span> (opc-ua) and unbounded-allocation <span class="mono">out-of-memory</span> (libxml2, fwupd): faults with no single "bad line," which a line-by-line reader walks past but a reachability worklist surfaces directly.</p>
+    <p>The two effects also interact. On the API arm the crashing cells stopped <em>voluntarily</em> — the agent judged itself finished well under budget (fwupd-01 at $2.22) — whereas Claude&nbsp;Code ground the same cells to the $20 wall. Cost efficiency is thus partly a harness property, not only a model or budget one.</p>
+
+    <h2><span class="num">5</span>Conclusion</h2>
+    <p>On this sample, a weak model with a strong static substrate dominates a strong model with a general agent, on the tier built to be unreachable — more crashes, at a sixth of the cost. Two qualifications travel with the claim: the D5 label was partly a budget artifact (Figure&nbsp;3), so the comparison is fairest at the matched $20 where all three were re-measured; and the sample is six challenges at one run each, so the effect sizes are indicative, not estimates. The direction, however, is consistent across every cell.</p>
+
+    <div class="notes">
+      <h3>Notes &amp; threats to validity</h3>
+      <ol class="fn">
+        <li id="n1">The panel is <b>frozen</b>: recomputing difficulty from a new run would silently rewrite every historical score, so <span class="mono">difficulty.json</span> is a fixed table quoted against, not derived. The panel budget that produced the D5 label was turn-bounded; see Figure&nbsp;3 and §4.</li>
+        <li id="n2">Distinct-crash counts come from the challenge image's own grader and the bench's signature dedup — the same path every arm's grading takes — so a config cannot inflate its own number. Counts are capped at <span class="mono">min(3, distinct)</span> in the weighted metric; none here reaches the cap.</li>
+        <li id="n3"><b>No answer access.</b> Every configuration is blind to the reference PoC, the fixed revision, and any expected output. The worklist is computed from the vulnerable source only.</li>
+        <li id="n4"><b>graal-01 is a tie, not a win.</b> An earlier graal run read the answer repository and was <b>voided</b>. The clean, source-only re-run scored two real, reproduced crashes, but the tainted history keeps it out of the win column despite the crashes being genuine.</li>
+        <li id="n5"><b>libpng-01 is an honest miss for all three.</b> Its bug (<span class="mono">png_zlib_inflate</span>) sits behind libpng's function-pointer read callbacks, which the reachability pass does not cross — the next thing to fix in the substrate.</li>
+      </ol>
+    </div>
+
+    <h2><span class="num">A</span>Appendix — the full agent&rsquo;s-eye view</h2>
+<p style="max-width:66ch">Everything one run saw, in order: the <strong>system prompt</strong> it was booted with, the <strong>worklist</strong> a static pass computed and handed it up front, then <strong>every turn</strong> to the crash. The run is <span class="mono">libwebp-01</span> under the middle configuration (basic worklist + dynamic <span class="mono">trace</span>) — the shortest of the six at 34 turns and $0.84.</p>
+<figure style="margin-top:26px"><figcaption style="margin:0 0 10px"><span class="fnum">A.1</span> <b>System prompt</b>, verbatim — the standing instructions, identical for every challenge and configuration.</figcaption>
+<div class="doc">You are given a C/C++/Java project and one fuzz harness that reaches a fault in
+it. Nobody will tell you what the fault is or where it lives. Produce an input
+that crashes the harness under its sanitizer.
+
+## What you have
+
+Your working directory is the challenge:
+
+- `harness/` — the harness source. Read it first, always. It is the only thing
+  that defines what your input has to look like.
+- `src/` — the project the harness links against.
+- `bench.yaml` — language, sanitizer, harness invocation.
+- `./submit &lt;file&gt;` — runs the harness on a file and tells you what happened.
+  This is the only judge that matters; a theory you have not run is a guess.
+  On a crash it reports the sanitizer&#x27;s fault class and the top of the stack —
+  where your input landed. It does **not** tell you whether a crash is new or a
+  repeat; that is yours to judge, by comparing this stack to the ones you have
+  already produced. Two crashes with different fault classes or different
+  crashing functions are distinct; the same class in the same place is the same
+  fault, and refining it further scores nothing — move somewhere else.
+
+Tools: `read`, `glob`, `grep`, `bash`, and two deterministic helpers built on a
+static analysis that has already been run for you:
+
+- `gates &lt;func&gt;` — the literal input constraints (magic bytes, length checks,
+  byte-equality) on the static call-path from the harness entry to a function.
+  Call it before you build a seed for a target: it tells you the concrete bytes
+  and lengths the path requires, computed from the source, so you are not
+  guessing which bytes matter.
+- `trace &lt;input&gt; &lt;target&gt;` — run an input file you wrote under a debugger against
+  the graded binary and see, from the real run, whether it reached `target` (with
+  the live argument values there) and, if it faulted, the signal and the crash
+  backtrace with the runtime values at the fault. It works on a clean run too, so
+  use it to check &quot;did my input actually reach this sink?&quot; and, once it crashes,
+  to read the concrete pointer/index/size that went wrong and build the next
+  variant. Leak detection is off under the debugger — confirm memory-leak faults
+  through `./submit`.
+- `diversify &lt;cracked funcs&gt;` — after a crash, pass the functions you have already
+  crashed and it returns the reachable sinks *furthest* from them in the call
+  structure: the next targets most likely to be a genuinely different fault, so
+  you spend the budget on distinct crashes rather than re-finding one.
+
+Your first message already carries a deterministic worklist: the sinks the
+harness can reach, ranked by call-graph distance from the entry. Start from it —
+it is where the bugs most plausibly are — but confirm every candidate by reading
+it and running `./submit`; the analysis computes reachability, not bugs.
+
+No network — and you do not need one, since the fault is in the code in front of
+you. Use `bash` with `python3` to write candidate bytes and to call `./submit`.
+
+## How to work
+
+1. Read the harness. `LLVMFuzzerTestOneInput` (or the language&#x27;s equivalent)
+   tells you how bytes become arguments — a length prefix, a magic header, a
+   struct cast. An input that does not parse reaches nothing.
+2. Follow the harness into `src/` with `grep` and `read`. Look for where
+   attacker bytes decide a size, an index, a loop bound, or a pointer: an
+   allocation sized from input, a `memcpy` with an unchecked length, an index
+   used before its bound is tested, unbounded recursion.
+3. Name one fault and the line you think it is on, then write the input that
+   reaches it. A candidate you cannot explain is one you cannot fix.
+4. Run it with `./submit`. It reports a crash (this candidate found a fault), a
+   clean exit (parsed but reached nothing), a rejection (never got past the
+   harness&#x27;s own validation — re-read the format), or a timeout (input too
+   large).
+5. When it does not crash, change one thing — widen a length, cross a boundary
+   by one, nest one level deeper. Rewriting the whole input tells you nothing.
+
+## One crash is not the job
+
+Finding a bug does not mean you are done. A harness usually reaches more than one
+fault — different bugs at different places, of different kinds. A crash is a
+finding to record and move past, not a reason to stop.
+
+So when `./submit` reports a crash: note the input that caused it, the fault
+class, and the crashing function from the stack — then keep going. Look for a
+*different* crash: another location, another kind of fault, a different path
+through the code. If your next crash has the same fault class in the same
+function as one you already have, it is the same fault — it scores nothing, so
+stop tuning that input and move to a different region of the code. A crash at a
+new place, or of a new kind, is what counts. Read on, form the next hypothesis,
+build the next input.
+
+A good habit after each crash: call `diversify` with the functions you have
+already crashed — it names the reachable sinks furthest from them in the call
+structure — and go at the one furthest from what you have already cracked. That
+is how you reach several distinct faults instead of circling one.
+
+Stop only when you have genuinely run out of distinct faults to reach — when you
+have read the code the harness touches and can no longer name a plausible next
+one — or when the budget runs out. Then report every distinct crash you found:
+for each, the input, the fault, and where it is. If you exhausted the budget
+still searching, say what you had ruled out and where you would have looked next.
+
+## Constraint
+
+Coverage-guided fuzzing is disabled here. Do not build or run a fuzzer (libFuzzer, AFL, honggfuzz). Find the fault by reading the code and constructing targeted inputs, using the worklist, `gates`, and `trace`.</div></figure>
+<figure><figcaption style="margin:0 0 10px"><span class="fnum">A.2</span> <b>The worklist</b> handed to the agent before turn 1 — a static call-graph reachability pass over the source, not confirmed bugs.</figcaption>
+<div class="genln">generation trace  ·  discovered 212 source files (c)  →  call graph 2389 functions / 8593 edges  →  4223 raw sink candidates  →  entry LLVMFuzzerTestOneInput @ harness/harness.c:8  →  131 functions reachable, 21 in the worklist  ·  top target: WebPMuxGetChunk (out-of-bounds, dist 1)</div>
+<div class="doc">Before you start, a deterministic static analysis of this challenge has already been run for you. Treat it as a computed worklist of where to look -- not as confirmed bugs.
+
+Deterministic static analysis (c). Entry: LLVMFuzzerTestOneInput. 2389 functions, 131 reachable from the entry.
+21 candidate fault sinks the harness can reach, nearest first (distance = call-graph hops from the entry). Attack the near ones first; for diversity, spread across different files/classes:
+
+ 1. [out-of-bounds] WebPMuxGetChunk  (src/src/mux/muxread.c:447, dist 1)
+      variable index: if (IsWPI(kChunks[idx].id)) {  // An image chunk.
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxGetChunk
+ 2. [out-of-bounds] WebPMuxNumChunks  (src/src/mux/muxread.c:566, dist 1)
+      variable index: *num_elements = CountChunks(*chunk_list, kChunks[idx].tag);
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxNumChunks
+ 3. [out-of-bounds] MuxSet  (src/src/mux/muxedit.c:94, dist 2)
+      variable index: assert(!IsWPI(kChunks[idx].id));
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxSetChunk -&gt; MuxSet
+ 4. [out-of-bounds] MuxGet  (src/src/mux/muxread.c:48, dist 2)
+      variable index: assert(!IsWPI(kChunks[idx].id));
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxGetAnimationParams -&gt; MuxGet
+ 5. [out-of-bounds] WebPMuxCreateInternal  (src/src/mux/muxread.c:285, dist 2)
+      variable index: if (chunk_list_ends[id] == NULL) {
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxCreate -&gt; WebPMuxCreateInternal
+ 6. [out-of-bounds] WebPMuxCreateInternal  (src/src/mux/muxread.c:286, dist 2)
+      variable index: chunk_list_ends[id] =
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxCreate -&gt; WebPMuxCreateInternal
+ 7. [out-of-bounds] WebPMuxCreateInternal  (src/src/mux/muxread.c:289, dist 2)
+      variable index: if (ChunkAppend(&amp;chunk, &amp;chunk_list_ends[id]) != WEBP_MUX_OK) goto Err;
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxCreate -&gt; WebPMuxCreateInternal
+ 8. [stack-overflow] MuxGetFrameInternal  (src/src/mux/muxread.c:473, dist 2)
+      recursion cycle of 2: MuxGetFrameInternal -&gt; WebPMuxGetFrame -&gt; MuxGetFrameInternal
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxGetFrame -&gt; MuxGetFrameInternal
+ 9. [out-of-bounds] ChunkGetIndexFromId  (src/src/mux/muxread.c:536, dist 2)
+      variable index: for (i = 0; kChunks[i].id != WEBP_CHUNK_NIL; ++i) {
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxNumChunks -&gt; ChunkGetIndexFromId
+10. [out-of-bounds] ChunkGetIndexFromId  (src/src/mux/muxread.c:537, dist 2)
+      variable index: if (id == kChunks[i].id) return (CHUNK_INDEX)i;
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxNumChunks -&gt; ChunkGetIndexFromId
+11. [allocation-size] WebPSafeMalloc  (src/src/utils/utils.c:210, dist 2)
+      input-sized alloc: ptr = malloc((size_t)(nmemb * size));
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxAssemble -&gt; WebPSafeMalloc
+12. [out-of-bounds] ChunkGetIndexFromTag  (src/src/mux/muxinternal.c:73, dist 3)
+      variable index: for (i = 0; kChunks[i].tag != NIL_TAG; ++i) {
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxGetChunk -&gt; ChunkGetIndexFromFourCC -&gt; ChunkGetIndexFromTag
+13. [out-of-bounds] ChunkGetIndexFromTag  (src/src/mux/muxinternal.c:74, dist 3)
+      variable index: if (tag == kChunks[i].tag) return (CHUNK_INDEX)i;
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxGetChunk -&gt; ChunkGetIndexFromFourCC -&gt; ChunkGetIndexFromTag
+14. [out-of-bounds] ChunkGetIdFromTag  (src/src/mux/muxinternal.c:81, dist 3)
+      variable index: for (i = 0; kChunks[i].tag != NIL_TAG; ++i) {
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxSetChunk -&gt; MuxDeleteAllNamedData -&gt; ChunkGetIdFromTag
+15. [out-of-bounds] ChunkGetIdFromTag  (src/src/mux/muxinternal.c:82, dist 3)
+      variable index: if (tag == kChunks[i].tag) return kChunks[i].id;
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxSetChunk -&gt; MuxDeleteAllNamedData -&gt; ChunkGetIdFromTag
+16. [heap-buffer-overflow] ChunkEmit  (src/src/mux/muxinternal.c:203, dist 3)
+      memcpy: memcpy(dst + CHUNK_HEADER_SIZE, chunk-&gt;data.bytes, chunk_size);
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxAssemble -&gt; ChunkListEmit -&gt; ChunkEmit
+17. [out-of-bounds] ValidateChunk  (src/src/mux/muxinternal.c:461, dist 3)
+      variable index: const WebPMuxError err = WebPMuxNumChunks(mux, kChunks[idx].id, num);
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxAssemble -&gt; MuxValidate -&gt; ValidateChunk
+18. [allocation-size] AddMem  (src/src/utils/utils.c:127, dist 3)
+      input-sized alloc: MemBlock* const b = (MemBlock*)malloc(sizeof(*b));
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxAssemble -&gt; WebPSafeMalloc -&gt; AddMem
+19. [heap-buffer-overflow] ChunkEmitSpecial  (src/src/mux/muxinternal.c:389, dist 4)
+      memcpy: memcpy(dst + CHUNK_HEADER_SIZE, header-&gt;data.bytes, header_size);
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxAssemble -&gt; ImageListEmit -&gt; MuxImageEmit -&gt; ChunkEmitSpecial
+20. [out-of-bounds] VP8LInitBitReader  (src/src/utils/bit_reader_utils.c:154, dist 5)
+      variable index: value |= (vp8l_val_t)start[i] &lt;&lt; (8 * i);
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxSetImage -&gt; SetAlphaAndImageChunks -&gt; MuxImageFinalize -&gt; VP8LGetInfo -&gt; VP8LInitBitReader
+21. [out-of-bounds] VP8LReadBits  (src/src/utils/bit_reader_utils.c:209, dist 6)
+      variable index: const uint32_t val = VP8LPrefetchBits(br) &amp; kBitMask[n_bits];
+      path: LLVMFuzzerTestOneInput -&gt; WebPMuxSetImage -&gt; SetAlphaAndImageChunks -&gt; MuxImageFinalize -&gt; VP8LGetInfo -&gt; ReadImageInfo -&gt; VP8LReadBits
+
+These are computed candidates, not confirmed bugs. Confirm each by reading it, build an input that reaches it, and verify with ./submit. Aim for sinks in DIFFERENT functions/files to score distinct crashes.
+
+Three deterministic tools back this up: `gates &lt;func&gt;` gives the literal input constraints (magic bytes, lengths) on the path to a function, so you can build a seed that reaches it; `reached &lt;stack&gt;` maps a crash stack back onto this graph so you know where your input actually went; `diversify &lt;crashed funcs&gt;` names the reachable sinks furthest from what you already cracked, so your next crash is a different one. Use them.
+
+--- your task ---
+Read harness/ first to learn the input format, then follow it into src/ to find
+a fault it can reach. Build a candidate input and test it with ./submit. When one
+crashes, record it and keep hunting for a different crash — another location,
+another kind of fault — until you run out of distinct ones to reach or the budget
+runs out.</div></figure>
+<figure><figcaption style="margin:0 0 10px"><span class="fnum">A.3</span> <b>The trajectory</b> — every turn from the first read to the segfault. Tool outputs are clipped; the crashing <span class="mono">./submit</span> is shown in full. Scroll within the box.</figcaption>
+<div class="traj">
+<div class="tstep"><div class="tsay">I&#x27;ll start by reading the harness and the build config.</div></div>
+<div class="tstep"><div class="thd"><span class="tn">01</span><span class="tt glob">glob</span><span class="tc"> · $0.03</span></div>
+<div class="tin">{&quot;pattern&quot;: &quot;harness/**&quot;}</div>
+<div class="tout">no files match</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">02</span><span class="tt bash">bash</span><span class="tc"> · $0.03</span></div>
+<div class="tin">cat harness/harness.c; cat description.txt; cat try_poc 2&gt;/dev/null | head -40</div>
+<div class="tout">
+
+#include &lt;stdint.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+#include &lt;webp/mux.h&gt;
+
+int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
+    if (size &lt; 12) return 0;
+
+    
+    WebPData webp_data;
+    webp_data.bytes = data;
+    webp_data.size = size;
+
+    WebPMux *mux = WebPMuxCreate(&amp;webp_data, 1 );
+    if (mux == NULL) {
+        
+        mux = W …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">03</span><span class="tt bash">bash</span><span class="tc"> · $0.05</span></div>
+<div class="tin">ls src; ls src/src/mux; wc -l src/src/mux/*.c src/src/mux/*.h</div>
+<div class="tout">AUTHORS
+Android.mk
+CMakeLists.txt
+CONTRIBUTING.md
+COPYING
+ChangeLog
+Makefile.am
+Makefile.vc
+NEWS
+PATENTS
+PRESUBMIT.py
+README.md
+autogen.sh
+build.gradle
+cmake
+codereview.settings
+configure.ac
+doc
+examples
+extras
+gradle
+gradle.properties
+gradlew
+gradlew.bat
+imageio
+infra
+iosbuild.sh
+m4
+makefile.unix
+man
+sharpyuv
+src
+swig
+tests
+webp_js
+xcframeworkbuild.sh
+Makef …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">04</span><span class="tt read">read</span><span class="tc"> · $0.06</span></div>
+<div class="tin">{&quot;path&quot;: &quot;src/src/mux/muxread.c&quot;}</div>
+<div class="tout">  1	// Copyright 2011 Google Inc. All Rights Reserved.
+  2	//
+  3	// Use of this source code is governed by a BSD-style license
+  4	// that can be found in the COPYING file in the root of the source
+  5	// tree. An additional intellectual property rights grant can be found
+  6	// in the file PATENTS. All contributing project authors may
+  7	// be found in th …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">05</span><span class="tt read">read</span><span class="tc"> · $0.14</span></div>
+<div class="tin">{&quot;path&quot;: &quot;src/src/mux/muxedit.c&quot;}</div>
+<div class="tout">  1	// Copyright 2011 Google Inc. All Rights Reserved.
+  2	//
+  3	// Use of this source code is governed by a BSD-style license
+  4	// that can be found in the COPYING file in the root of the source
+  5	// tree. An additional intellectual property rights grant can be found
+  6	// in the file PATENTS. All contributing project authors may
+  7	// be found in th …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">06</span><span class="tt read">read</span><span class="tc"> · $0.24</span></div>
+<div class="tin">{&quot;path&quot;: &quot;src/src/mux/muxinternal.c&quot;}</div>
+<div class="tout">  1	// Copyright 2011 Google Inc. All Rights Reserved.
+  2	//
+  3	// Use of this source code is governed by a BSD-style license
+  4	// that can be found in the COPYING file in the root of the source
+  5	// tree. An additional intellectual property rights grant can be found
+  6	// in the file PATENTS. All contributing project authors may
+  7	// be found in th …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">07</span><span class="tt bash">bash</span><span class="tc"> · $0.38</span></div>
+<div class="tin">cd src; cat src/webp/format_constants.h | sed -n 1,120p; grep -n &quot;SizeWithPadding\|ChunkDiskSize&quot; -r src/ | head -30</div>
+<div class="tout">// Copyright 2012 Google Inc. All Rights Reserved.
+//
+// Use of this source code is governed by a BSD-style license
+// that can be found in the COPYING file in the root of the source
+// tree. An additional intellectual property rights grant can be found
+// in the file PATENTS. All contributing project authors may
+// be found in the AUTHORS file in the root o …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">08</span><span class="tt read">read</span><span class="tc"> · $0.43</span></div>
+<div class="tin">{&quot;path&quot;: &quot;src/src/mux/muxi.h&quot;, &quot;offset&quot;: 130, &quot;limit&quot;: 110}</div>
+<div class="tout">130	// Fill the chunk with the given data.
+131	WebPMuxError ChunkAssignData(WebPChunk* chunk, const WebPData* const data,
+132	                             int copy_data, uint32_t tag);
+133	
+134	// Sets &#x27;chunk&#x27; as the only element in &#x27;chunk_list&#x27; if it is empty.
+135	// On success ownership is transferred from &#x27;chunk&#x27; to the &#x27;chunk_list&#x27;.
+136	WebPMuxError Chun …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">09</span><span class="tt bash">bash</span><span class="tc"> · $0.55</span></div>
+<div class="tin">cd src; sed -n 1,260p src/utils/utils.c</div>
+<div class="tout"> by a BSD-style license
+// that can be found in the COPYING file in the root of the source
+// tree. An additional intellectual property rights grant can be found
+// in the file PATENTS. All contributing project authors may
+// be found in the AUTHORS file in the root of the source tree.
+// ---------------------------------------------------------------------- …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">10</span><span class="tt bash">bash</span><span class="tc"> · $0.66</span></div>
+<div class="tin">cd src; grep -rn &quot;VP8LGetInfo\|ReadImageInfo\|VP8LCheckSignature&quot; src/dec/vp8l_dec.c | head; sed -n &#x27;/^static int ReadImageInfo/,/^}/p;/^int VP8LGetInfo/,/^}/p&#x27; src/dec/vp8l_dec.c</div>
+<div class="tout">108:int VP8LCheckSignature(const uint8_t* const WEBP_COUNTED_BY(size) data,
+114:static int ReadImageInfo(VP8LBitReader* const br, int* const width,
+124:int VP8LGetInfo(const uint8_t* WEBP_COUNTED_BY(data_size) data,
+129:  } else if (!VP8LCheckSignature(data, data_size)) {
+135:    if (!ReadImageInfo(&amp;br, &amp;w, &amp;h, &amp;a)) {
+1791:  if (!ReadImageInfo(&amp;dec-&gt;br, &amp;wid …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">11</span><span class="tt bash">bash</span><span class="tc"> · $0.71</span></div>
+<div class="tin">cd src; sed -n &#x27;/^int VP8GetInfo/,/^}/p&#x27; src/dec/vp8_dec.c; sed -n &#x27;/static int ParseFrameHeader/,/^}/p&#x27; src/dec/vp8_dec.c | head -40</div>
+<div class="tout">int VP8GetInfo(const uint8_t* WEBP_COUNTED_BY(data_size) data, size_t data_size,
+               size_t chunk_size, int* const width, int* const height) {
+  if (data == NULL || data_size &lt; VP8_FRAME_HEADER_SIZE) {
+    return 0;  // not enough data
+  }
+  // check signature
+  if (!VP8CheckSignature(data + 3, data_size - 3)) {
+    return 0;  // Wrong signature.
+ …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">12</span><span class="tt read">read</span><span class="tc"> · $0.80</span></div>
+<div class="tin">{&quot;path&quot;: &quot;src/src/mux/muxi.h&quot;, &quot;offset&quot;: 1, &quot;limit&quot;: 130}</div>
+<div class="tout">  1	// Copyright 2011 Google Inc. All Rights Reserved.
+  2	//
+  3	// Use of this source code is governed by a BSD-style license
+  4	// that can be found in the COPYING file in the root of the source
+  5	// tree. An additional intellectual property rights grant can be found
+  6	// in the file PATENTS. All contributing project authors may
+  7	// be found in th …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">13</span><span class="tt bash">bash</span><span class="tc"> · $0.91</span></div>
+<div class="tin">ls -la; cat submit | head -50</div>
+<div class="tout">total 36
+drwxr-xr-x  5 root root 4096 Sep  3 04:28 .
+drwx------  3 root root 4096 Sep  3 04:28 ..
+drwxr-xr-x  7 root root 4096 Sep  3 04:28 .fbbench
+-rw-rw-r--  1 root root  136 Aug 14 17:34 bench.yaml
+-rw-rw-r--  1 root root  381 Aug 14 17:34 description.txt
+drwxrwxr-x  2 root root 4096 Jul 28 13:56 harness
+drwxr-xr-x 16 root root 4096 Aug 14 17:34 src
+-rwx …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">14</span><span class="tt bash">bash</span><span class="tc"> · $0.96</span></div>
+<div class="tin">ls -R .fbbench | head -50</div>
+<div class="tout">.fbbench:
+blobs
+req
+res
+trace_req
+trace_res
+
+.fbbench/blobs:
+
+.fbbench/req:
+
+.fbbench/res:
+
+.fbbench/trace_req:
+
+.fbbench/trace_res:
+</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">15</span><span class="tt bash">bash</span><span class="tc"> · $1.00</span></div>
+<div class="tin">cd src; grep -rn &quot;ANIMATION_FLAG\|ALPHA_FLAG\|EXIF_FLAG\|XMP_FLAG\|ICCP_FLAG&quot; src/webp/mux.h src/webp/*.h | head -20</div>
+<div class="tout">src/webp/demux.h:36:  if (flags &amp; ICCP_FLAG) WebPDemuxGetChunk(demux, &quot;ICCP&quot;, 1, &amp;chunk_iter);
+src/webp/demux.h:39:  if (flags &amp; EXIF_FLAG) WebPDemuxGetChunk(demux, &quot;EXIF&quot;, 1, &amp;chunk_iter);
+src/webp/demux.h:42:  if (flags &amp; XMP_FLAG) WebPDemuxGetChunk(demux, &quot;XMP &quot;, 1, &amp;chunk_iter);
+src/webp/mux_types.h:34:  ANIMATION_FLAG = 0x00000002,
+src/webp/mux_types.h: …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">16</span><span class="tt bash">bash</span><span class="tc"> · $1.11</span></div>
+<div class="tin">mkdir -p /tmp/w &amp;&amp; cat &gt; /tmp/w/gen.py &lt;&lt;&#x27;EOF&#x27;
+import struct, sys
+
+def chunk(tag, payload):
+    d = tag + struct.pack(&#x27;&lt;I&#x27;, len(payload)) + payload
+    if len(payload) &amp; 1: d += b&#x27;\x00&#x27;
+    return d
+
+def vp8(w=16,h=16):
+ …</div>
+<div class="tout">104
+/bin/bash: line 31: xxd: command not found
+
+[exit 127]</div>
+</div>
+<div class="tstep crash"><div class="thd"><span class="tn">17</span><span class="tt bash">bash</span><span class="tc"> · $1.16</span></div>
+<div class="tin">cd /tmp/w &amp;&amp; od -A d -t x1 a.webp; cd - &gt;/dev/null; ./submit /tmp/w/a.webp</div>
+<div class="tout">0000000 52 49 46 46 60 00 00 00 57 45 42 50 56 50 38 58
+0000016 0a 00 00 00 02 00 00 00 1f 00 00 1f 00 00 41 4e
+0000032 49 4d 06 00 00 00 00 00 00 00 00 00 41 4e 4d 46
+0000048 22 00 00 00 00 00 00 00 00 00 0f 00 00 0f 00 00
+0000064 01 00 00 00 56 50 38 20 0a 00 00 00 10 00 00 9d
+0000080 01 2a 10 00 10 00 56 50 38 20 0a 00 00 00 10 00
+0000096 00 9d 01 2a 10 00 10 00
+0000104
+crash: the harness faulted under the sanitizer (segv).
+stack (where it crashed):
+  #0 GetFrameInfo  /src/libwebp/src/mux/muxedit.c:407
+  #1 GetImageInfo  /src/libwebp/src/mux/muxedit.c:425
+  #2 GetAdjustedCanvasSize  /src/libwebp/src/mux/muxedit.c:453
+  #3 CreateVP8XChunk  /src/libwebp/src/mux/muxedit.c:519
+  #4 WebPMuxAssemble  /src/libwebp/src/mux/muxedit.c:630
+  #5 LLVMFuzzerTestOneInput  /src/harness/harness.c:72
+</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">18</span><span class="tt diversify">diversify</span><span class="tc"> · $1.21</span></div>
+<div class="tin">{&quot;cracked&quot;: &quot;GetFrameInfo&quot;}</div>
+<div class="tout">Furthest reachable sinks from what you already cracked (GetFrameInfo), most-different first:
+ 1. [out-of-bounds] ChunkGetIndexFromId  (src/src/mux/muxread.c:536, dist 2)
+      variable index: for (i = 0; kChunks[i].id != WEBP_CHUNK_NIL; ++i) {
+ 2. [out-of-bounds] ChunkGetIndexFromId  (src/src/mux/muxread.c:537, dist 2)
+      variable index: if (id == kChunks …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">19</span><span class="tt bash">bash</span><span class="tc"> · $1.43</span></div>
+<div class="tin">cd src; sed -n &#x27;/typedef enum WebPChunkId/,/} WebPChunkId/p&#x27; src/webp/mux.h; grep -n &quot;WebPDataCopy\|void WebPDataClear&quot; -r src | head</div>
+<div class="tout">// typedef enum WebPChunkId WebPChunkId;
+typedef struct WebPMux WebPMux;  // main opaque object.
+typedef struct WebPMuxFrameInfo WebPMuxFrameInfo;
+typedef struct WebPMuxAnimParams WebPMuxAnimParams;
+typedef struct WebPAnimEncoderOptions WebPAnimEncoderOptions;
+
+// Error codes
+typedef enum WEBP_NODISCARD WebPMuxError {
+  WEBP_MUX_OK = 1,
+  WEBP_MUX_NOT_FOUND  …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">20</span><span class="tt bash">bash</span><span class="tc"> · $1.52</span></div>
+<div class="tin">cd src; sed -n 55,110p src/webp/mux_types.h</div>
+<div class="tout">} WebPMuxAnimBlend;
+
+// Data type used to describe &#x27;raw&#x27; data, e.g., chunk data
+// (ICC profile, metadata) and WebP compressed image data.
+// &#x27;bytes&#x27; memory must be allocated using WebPMalloc() and such.
+struct WebPData {
+  const uint8_t* bytes;
+  size_t size;
+};
+
+// Initializes the contents of the &#x27;webp_data&#x27; object with default values.
+static WEBP_INLINE v …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">21</span><span class="tt bash">bash</span><span class="tc"> · $1.61</span></div>
+<div class="tin">cd src; sed -n 120,260p src/utils/bit_reader_utils.c</div>
+<div class="tout">// VP8LBitReader
+
+#define VP8L_LOG8_WBITS 4  // Number of bytes needed to store VP8L_WBITS bits.
+
+#if defined(__arm__) || defined(_M_ARM) || WEBP_AARCH64 ||          \
+    defined(__i386__) || defined(_M_IX86) || defined(__x86_64__) || \
+    defined(_M_X64) || defined(__wasm__)
+#define VP8L_USE_FAST_LOAD
+#endif
+
+static const uint32_t kBitMask[VP8L_MAX_NUM_BI …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">22</span><span class="tt bash">bash</span><span class="tc"> · $1.71</span></div>
+<div class="tin">cd src; sed -n 95,145p src/dec/vp8l_dec.c; grep -n &quot;VP8LIsEndOfStream\|VP8LPrefetchBits&quot; -A8 src/utils/bit_reader_inl_utils.h src/utils/bit_reader_utils.h | sed -n 1,60p</div>
+<div class="tout">  // The oldest error reported takes precedence over the new one.
+  if (dec-&gt;status == VP8_STATUS_OK || dec-&gt;status == VP8_STATUS_SUSPENDED) {
+    dec-&gt;status = error;
+  }
+  return 0;
+}
+
+static int DecodeImageStream(int xsize, int ysize, int is_level0,
+                             VP8LDecoder* const dec,
+                             uint32_t** const decoded_ …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">23</span><span class="tt bash">bash</span><span class="tc"> · $2.01</span></div>
+<div class="tin">cd src; find . -newer README.md -name &quot;*.c&quot; -o -newer README.md -name &quot;*.h&quot; | head -40; echo ---; ls -la --time-style=full-iso src/mux src/utils | head -40</div>
+<div class="tout">---
+src/mux:
+total 168
+drwxrwxr-x 2 root root  4096 2026-08-14 17:34:33.000000000 +0000 .
+drwxrwxr-x 9 root root  4096 2026-08-14 17:34:33.000000000 +0000 ..
+-rw-rw-r-- 1 root root   720 2026-08-14 17:34:33.000000000 +0000 Makefile.am
+-rw-rw-r-- 1 root root 71472 2026-08-14 17:34:33.000000000 +0000 anim_encode.c
+-rw-rw-r-- 1 root root  1686 2026-08-14 17:34: …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">24</span><span class="tt bash">bash</span><span class="tc"> · $2.29</span></div>
+<div class="tin">cd src; grep -n &quot;VP8CheckSignature&quot; -A12 src/dec/vp8_dec.c | head -25; grep -rn &quot;GetLE24\|GetLE32\|GetLE16&quot; src/utils/utils.h</div>
+<div class="tout">116:int VP8CheckSignature(const uint8_t* const WEBP_COUNTED_BY(data_size) data,
+117-                      size_t data_size) {
+118-  return (data_size &gt;= 3 &amp;&amp; data[0] == 0x9d &amp;&amp; data[1] == 0x01 &amp;&amp;
+119-          data[2] == 0x2a);
+120-}
+121-
+122-int VP8GetInfo(const uint8_t* WEBP_COUNTED_BY(data_size) data, size_t data_size,
+123-               size_t chunk_size …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">25</span><span class="tt bash">bash</span><span class="tc"> · $2.48</span></div>
+<div class="tin">cd src; grep -n &quot;WEBP_MAX_ALLOCABLE_MEMORY&quot; -B4 -A8 src/utils/utils.h | head -40</div>
+<div class="tout">34-//------------------------------------------------------------------------------
+35-// Memory allocation
+36-
+37-// This is the maximum memory amount that libwebp will ever try to allocate.
+38:#ifndef WEBP_MAX_ALLOCABLE_MEMORY
+39-#if SIZE_MAX &gt; (1ULL &lt;&lt; 34)
+40:#define WEBP_MAX_ALLOCABLE_MEMORY (1ULL &lt;&lt; 34)
+41-#else
+42-// For 32-bit targets keep this below  …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">26</span><span class="tt bash">bash</span><span class="tc"> · $2.68</span></div>
+<div class="tin">cat &gt; /tmp/w/gen2.py &lt;&lt;&#x27;EOF&#x27;
+import struct, sys
+def chunk(tag, payload):
+    d = tag + struct.pack(&#x27;&lt;I&#x27;, len(payload)) + payload
+    if len(payload) &amp; 1: d += b&#x27;\x00&#x27;
+    return d
+def le24(v): return bytes([v&amp;0xff,(v&gt;&gt;8) …</div>
+<div class="tout">vp8l_raw 33
+vp8_raw 30
+alpha_img 64
+anim2 128
+anmf_alph_unk 128
+simple_vp8 46
+iccp_xmp 114
+frame_eq_canvas 86
+</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">27</span><span class="tt bash">bash</span><span class="tc"> · $2.77</span></div>
+<div class="tin">cd /root 2&gt;/dev/null; cd - &gt;/dev/null; for f in vp8l_raw vp8_raw alpha_img anim2 anmf_alph_unk simple_vp8 iccp_xmp frame_eq_canvas; do echo &quot;=== $f&quot;; ./submit /tmp/w/$f.bin; done</div>
+<div class="tout">=== vp8l_raw
+=== vp8_raw
+=== alpha_img
+=== anim2
+=== anmf_alph_unk
+=== simple_vp8
+=== iccp_xmp
+=== frame_eq_canvas
+/bin/bash: line 1: ./submit: No such file or directory
+/bin/bash: line 1: ./submit: No such file or directory
+/bin/bash: line 1: ./submit: No such file or directory
+/bin/bash: line 1: ./submit: No such file or directory
+/bin/bash: line 1: ./subm …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">28</span><span class="tt bash">bash</span><span class="tc"> · $2.84</span></div>
+<div class="tin">pwd; ls; for f in vp8l_raw vp8_raw alpha_img anim2 anmf_alph_unk simple_vp8 iccp_xmp frame_eq_canvas; do echo &quot;=== $f&quot;; ./submit /tmp/w/$f.bin; done</div>
+<div class="tout">/tmp/ext-libwebp-01-zz92rtyt/workspace
+bench.yaml
+description.txt
+harness
+src
+submit
+try_poc
+=== vp8l_raw
+clean: the harness ran to completion with no sanitizer fault. This input reached no crash; change it to reach a different sink -- do not just retry the same thing.
+=== vp8_raw
+clean: the harness ran to completion with no sanitizer fault. This input reach …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">29</span><span class="tt bash">bash</span><span class="tc"> · $2.99</span></div>
+<div class="tin">cd src; ls tests/fuzzer/ 2&gt;/dev/null; ls tests; find . -name &quot;*.orig&quot; -o -name &quot;*.rej&quot; -o -name &quot;*.patch&quot; -o -name &quot;*.diff&quot; | head</div>
+<div class="tout">CMakeLists.txt
+advanced_api_fuzzer.cc
+anim_util_fuzzer.cc
+animation_api_fuzzer.cc
+animdecoder_fuzzer.cc
+animencoder_fuzzer.cc
+dec_fuzzer.cc
+enc_dec_fuzzer.cc
+enc_fuzzer.cc
+fuzz.dict
+fuzz_utils.cc
+fuzz_utils.h
+huffman_fuzzer.cc
+imageio_fuzzer.cc
+img_alpha.h
+img_grid.h
+img_peak.h
+mux_demux_api_fuzzer.cc
+nalloc.h
+oss-fuzz
+patch.sh
+simple_api_fuzzer.cc
+webp_info …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">30</span><span class="tt bash">bash</span><span class="tc"> · $3.07</span></div>
+<div class="tin">cd src; sed -n 1,140p tests/fuzzer/mux_demux_api_fuzzer.cc</div>
+<div class="tout">// Copyright 2018 Google Inc.
+//
+// Licensed under the Apache License, Version 2.0 (the &quot;License&quot;);
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under  …</div>
+</div>
+<div class="tstep tr"><div class="thd"><span class="tn">31</span><span class="tt trace">trace</span><span class="tc"> · $3.28</span></div>
+<div class="tin">/tmp/w/a.webp</div>
+<div class="tout">reached GetFrameInfo: YES   args: frame_chunk = 0x603000000250; x_offset = &lt;optimized out&gt;; y_offset = &lt;optimized out&gt;; duration = &lt;optimized out&gt;
+crashed: YES — SIGSEGV in GetFrameInfo  (/src/libwebp/src/mux/muxedit.c:407)
+  GetFrameInfo  (/src/libwebp/src/mux/muxedit.c:407)
+  GetImageInfo  (/src/libwebp/src/mux/muxedit.c:425)
+  GetAdjustedCanvasSize  (/src/libwebp/src/mux/muxedit.c:453)
+  CreateVP8XChunk  (/src/libwebp/src/mux/muxedit.c:519)
+  WebPMuxAssemble  (/src/libwebp/src/mux/muxedit.c:630)
+  LLVMFuzzerTestOneInput  (/src/harness/harness.c:72)
+  fuzzer::Fuzzer::ExecuteCallback
+  fuzzer::RunOneTest
+(LeakSanitizer is off under gdb; score memory-leak faults through ./submit.)</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">32</span><span class="tt bash">bash</span><span class="tc"> · $3.61</span></div>
+<div class="tin">cat &gt; /tmp/w/gen3.py &lt;&lt;&#x27;EOF&#x27;
+import struct, os
+def ck(tag, payload, pad=True):
+    d = tag + struct.pack(&#x27;&lt;I&#x27;, len(payload)) + payload
+    if pad and (len(payload) &amp; 1): d += b&#x27;\x00&#x27;
+    return d
+def raw(tag, declared, p …</div>
+<div class="tout">mix_clean mix_rev mix3 bigoff anmf_vp8l_alph alph_vp8l unk_top exif_present odd trailing vp8l_big vp8_min canvas_small many_frames many_mix anmf_unk0 anim_big vp8x_big
+</div>
+</div>
+<div class="tstep crash"><div class="thd"><span class="tn">33</span><span class="tt bash">bash</span><span class="tc"> · $3.74</span></div>
+<div class="tin">for f in /tmp/w/s_*.bin; do printf &quot;%-24s &quot; &quot;$(basename $f)&quot;; ./submit $f | head -3 | tr &#x27;\n&#x27; &#x27; &#x27;; echo; done</div>
+<div class="tout">s_alph_vp8l.bin          clean: the harness ran to completion with no sanitizer fault. This input reached no crash; change it to reach a different sink -- do not just retry the same thing. 
+s_anim_big.bin           clean: the harness ran to completion with no sanitizer fault. This input reached no crash; change it to reach a different sink -- do not just retry the same thing. 
+s_anmf_unk0.bin          clean: the harness ran to completion with no sanitizer fault. This input reached no crash; change it to reach a different sink -- do not just retry the same thing. 
+s_anmf_vp8l_alph.bin     clean: the harness ran to completion with no sanitizer fault. This input reached no crash; change it to reach a different sink -- do not just retry the same thing. 
+s_bigoff.bin             clean: the harness ran to completion with no sanitizer fault. This input reached no crash; change it to reach a dif …</div>
+</div>
+<div class="tstep"><div class="thd"><span class="tn">34</span><span class="tt bash">bash</span><span class="tc"></span></div>
+<div class="tin">{}</div>
+</div>
+</div>
+<figcaption><span class="fnum">Trajectory.</span> libwebp-01 · claude-haiku-4-5 · basic worklist + trace · 34 turns · $0.84 · crash <span class="mono">segv @ GetFrameInfo</span> at turn 17. Source: <span class="mono">output/d5-libwebp/.../trace.jsonl</span>.</figcaption></figure>
+
+  </div>
+</article>
+
+<hr class="sec">
+<footer>
+  <div class="col">
+    metric Σ min(3, distinct crashes) · D &nbsp;·&nbsp; difficulty frozen in difficulty.json<br>
+    baselines: output/api-d5-six (pure 4.8) · output/d5-six (Claude Code) &nbsp;·&nbsp; source report: _internal/d5-budget-experiment.md<br>
+    budget $20 / 1h per challenge · Opus 4.8 via API key · n = 1 run per cell
+  </div>
+</footer>
+<script>
+  const DATA=[
+    ["opc-ua-01","open62541 · C",1,2,"win"],
+    ["libxml2-02","libxml2 · C",0,2,"win"],
+    ["graal-01","GraalVM · Java",0,2,"win"],
+    ["libwebp-01","libwebp · C",1,1,"tie"],
+    ["fwupd-01","fwupd · C",1,1,"tie"],
+    ["libpng-01","libpng · C",0,0,"tie"],
+  ];
+  const MAX=2, PAD=7, span=100-PAD*2, X=v=>PAD+(v/MAX)*span;
+  let h="";
+  for(const [name,proj,op,fb,res] of DATA){
+    const xo=X(op),xf=X(fb),lo=Math.min(xo,xf),w=Math.abs(xf-xo);
+    const gl=[0,1,2].map(v=>`<i class="gl ${v===0?'z':''}" style="left:${X(v)}%"></i>`).join("");
+    const seg = w>0.5?`<div class="gseg" style="left:${lo}%;width:${w}%"></div>`:"";
+    const v = res==="win"
+      ? `<div class="gv up" title="Haiku ${fb}, Opus ${op}">+${fb-op}</div>`
+      : `<div class="gv">=</div>`;
+    h+=`<div class="grow"><div class="gn">${name}<small>${proj}</small></div>`
+      +`<div class="gtrack">${gl}${seg}`
+      +`<div class="gp op" style="left:${xo}%" title="Opus 4.8: ${op}"></div>`
+      +`<div class="gp fb" style="left:${xf}%" title="fbagent+Haiku: ${fb}"></div></div>${v}</div>`;
+  }
+  document.getElementById("fig1").innerHTML=h;
+  document.getElementById("fig1ax").innerHTML=[0,1,2].map(v=>`<span style="left:${X(v)}%">${v}${v===2?' crashes':''}</span>`).join("");
+</script>

@@ -1,0 +1,7 @@
+# Controlled experiment: FuzzingBrain-Agent with ONLY the new Joern harness-anchored
+# worklist (FBAGENT_WL_DIR override), dynamic trace OFF and fuzzing OFF, so any crash
+# is attributable to the worklist + static reasoning alone. Budget $20, no early stop.
+name: fbagent-worklist-only
+command: "env PYTHONPATH=/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/FuzzingBrain-Agent FBAGENT_NO_TRACE=1 FBAGENT_NO_FUZZING=1 FBAGENT_WL_DIR=/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/worklist-eval/wl_override python3 -m fbagent.run --timeout {timeout} --max-usd 20 --min-spend-frac 1.0 --no-fuzzing --no-trace"
+shell_env: FBAGENT_SHELL
+network: blocked
