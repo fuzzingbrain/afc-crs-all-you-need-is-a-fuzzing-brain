@@ -63,6 +63,76 @@ Innovation over generic scanners:
   (match the struct field a function is stored into against the field an indirect call reads) is the
   principled fix; it stalls here because the address-taking sites are not reliably parsed/scoped.
 
+## C/C++ only: recall AND precision, with the agent's own built-in worklist in the table
+
+The scoreboard above omits the generator the agent actually ships with (`fbagent/analysis.py`:
+lexical call graph + 8 regex sinks, top 40 shown to the model). Measured 2026-09-09 with
+`eval_default.py` on the same bug-window metric, restricted to the 21 C/C++ challenges of the
+24 (Java set aside: 15 C + 6 C++).
+
+**Recall** (the bug's line window contains at least one emitted point):
+
+| generator | C (15) | C++ (6) | C/C++ (21) |
+|---|:--:|:--:|:--:|
+| agent default (lexical + regex), any rank | 4 · 27% | 1 · 17% | 5 · 24% |
+| agent default, top-40 actually shown | — | — | 4 · 19% |
+| agent default + clang refinement | 4 · 27% | 3 · 50% | 7 · 33% |
+| flawfinder | 6 · 40% | 3 · 50% | 9 · 43% |
+| cppcheck | 6 · 40% | 1 · 17% | 7 · 33% |
+| semgrep (p/security-audit) | 1 · 7% | 0 | 1 · 5% |
+| OURS Joern precise | 10 · 67% | 4 · 67% | 14 · 67% |
+| OURS Joern recall (full-CFI) | 12 · 80% | 5 · 83% | 17 · 81% |
+
+**Precision** (= challenges hit / all suspicious points emitted over the 21; one real bug per challenge):
+
+| generator | hits | points emitted | precision | median / challenge | max |
+|---|:--:|--:|--:|--:|--:|
+| agent default, all reachable sinks | 5 | 5,553 | 0.09% | 56 | 2,077 |
+| agent default, top-40 shown | 4 | 586 | 0.68% | 40 | 40 |
+| agent default + clang | 7 | 7,732 | 0.09% | 130 | 2,081 |
+| flawfinder | 9 | 584 | 1.54% | 10 | 271 |
+| cppcheck | 7 | 271 | 2.58% | 7 | 67 |
+| semgrep | 1 | 14 | 7.14% | 0 | 7 |
+| OURS Joern precise | 14 | 38,694 | 0.04% | 543 | 11,123 |
+| OURS Joern recall | 17 | 322,452 | 0.01% | 7,571 | 85,653 |
+
+Two caveats that change how to read the precision column:
+- flawfinder / cppcheck / semgrep were run on the **single bug file** only, so their denominators
+  are badly understated; whole-tree flawfinder is thousands of points and lands at a few tenths
+  of a percent like everything else.
+- The Joern denominators are every memory-op line in every reachable function (ghidra alone
+  11,123; systemd 5,660). Its recall is bought with density — the list is far too large to hand
+  a model as-is, which is why the D5 worklist-only runs used a per-function compaction
+  (`wl_override/`), not the raw list.
+
+What the two tables say together:
+- Every generator is under 1% precise; the methods differ only in how wide a net they cast. The
+  agent default casts a small net with too narrow a sink set (regex: memcpy/strcpy/alloc/variable
+  index) — it is below flawfinder on recall. clang refinement adds nothing on C (only C++ method
+  reachability: simdutf, upx).
+- The 9 C/C++ bugs the default *reaches* (bug function is in the call graph at a finite distance)
+  but does not *flag* are mostly pointer dereferences and `p[i]` reads (libpng `*png_ptr->zstream.next_in`,
+  mongoose `i[0]`, cups `*src`, libwebp `data->size`) plus an assert (opc-ua `UA_assert`). Those are
+  sink classes, not reachability problems.
+- The 6 the default cannot reach at all (freerdp, freetype, hunspell, openh264, simdutf, upx-02) have
+  direct callers in the graph, none of them reachable from the entry: indirect calls / C++ method
+  calls break the chain. This is the same gap as Joern precise→recall (14→17).
+- Three bugs no method reaches under any setting: **libpng-01, opc-ua-01, freetype-01**.
+
+**Correction to the D5 attribution.** The D5 head-to-head runs (report §B) used the agent
+default worklist, which flags only libxml2-02 among the six D5 — and outside the shown top-40.
+The 5/6 there is the model's own reading; the Joern worklist entered only the worklist-only
+ablation (§C). Claims that the head-to-head win came from the CPG worklist are wrong.
+
+**Direction this fixes on.** Widen the sink classes toward Joern's operator set (indirection,
+indexed access, dangerous calls, assert), keep reachability ranking, and emit **one line per
+function** (function, file, sink line numbers, kinds) capped at a few dozen functions — the
+`wl_override/` shape. Recall moves toward Joern precise; the context stays at tens of lines.
+
+Repro: `python3 eval_default.py` (add `--clang`; `--top N`) → `default_results.json`,
+`default_results_clang.json`. Precision table: the inline script in this session, over those two
+files + `joern_precise.json`, `joern_recall.json`, `results2.json`.
+
 ## Repro
 - `eval2.py`  — shallow tools on the bug file.
 - `joern_driver.py` — scope (exclude vendored/example/test dirs) → c2cpg/javasrc2cpg → q.sc → coverage.
