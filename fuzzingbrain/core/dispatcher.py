@@ -18,6 +18,7 @@ from bson import ObjectId
 
 from .logging import logger
 from .config import Config
+from .docker_limits import docker_resource_args
 from .models import Task, Fuzzer, FuzzerStatus, Worker, WorkerStatus
 from ..db import RepositoryManager
 from ..analyzer import AnalyzeResult
@@ -65,7 +66,7 @@ class WorkerDispatcher:
         self._redis = self._connect_redis(config.redis_url)
 
         # Task-level FuzzerMonitor (auto-discovers crash directories)
-        docker_image = f"gcr.io/oss-fuzz/{self.project_name}"
+        docker_image = self.config.docker_image or f"gcr.io/oss-fuzz/{self.project_name}"
 
         # Get log directory for FuzzerMonitor log file
         from .logging import get_log_dir
@@ -298,7 +299,7 @@ def generate(variant: int = 1) -> bytes:
 
         FALLBACK_IMAGE = "gcr.io/oss-fuzz-base/base-runner"
 
-        docker_image = f"gcr.io/oss-fuzz/{self.project_name}"
+        docker_image = self.config.docker_image or f"gcr.io/oss-fuzz/{self.project_name}"
         fuzzer_path = Path(fuzzer_path)
         crash_path = Path(crash_path)
         fuzzer_dir = fuzzer_path.parent
@@ -310,6 +311,7 @@ def generate(variant: int = 1) -> bytes:
                 "docker",
                 "run",
                 "--rm",
+                *docker_resource_args(memory_mb=4096, cpus=1),
                 "--platform",
                 "linux/amd64",
                 "--entrypoint",
@@ -616,6 +618,13 @@ def generate(variant: int = 1) -> bytes:
             "task_workspace_path": str(task_workspace),
             "project_name": self.project_name,
             "log_dir": str(log_dir) if log_dir else None,
+            # Image the fuzzer binary runs in (has its libs); PoV verify uses it.
+            "docker_image": self.config.docker_image,
+            # Model routing -- built into a ModelRouter at the worker boundary.
+            "model_profile": self.config.model_profile,
+            "models": self.config.model_overrides,
+            "force_model": self.config.force_model,
+            "strict_models": self.config.strict_models,
             # Pre-built fuzzer info from Analyzer
             "fuzzer_binary_path": fuzzer_binary_path,
             "build_dir": build_dir,
@@ -949,7 +958,8 @@ def generate(variant: int = 1) -> bytes:
                 try:
                     step()
                 except Exception as e:
-                    logger.warning(f"Shutdown step {step.__name__} failed: {e}")
+                    name = getattr(step, "__name__", repr(step))
+                    logger.warning(f"Shutdown step {name} failed: {e}")
             finished.set()
 
         thread = threading.Thread(

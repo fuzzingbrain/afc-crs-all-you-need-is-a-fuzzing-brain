@@ -111,7 +111,6 @@ def _ensure_sp_context() -> Optional[Dict[str, Any]]:
 
 def create_suspicious_point_impl(
     function_name: str,
-    vuln_type: str,
     description: str,
     score: float = 0.5,
     important_controlflow: List[Dict[str, str]] = None,
@@ -127,7 +126,6 @@ def create_suspicious_point_impl(
         result = client.create_suspicious_point(
             function_name=function_name,
             description=description,
-            vuln_type=vuln_type,
             score=score,
             important_controlflow=important_controlflow or [],
             harness_name=harness_name or "",
@@ -140,11 +138,11 @@ def create_suspicious_point_impl(
         sp_id = result.get("id")
 
         if merged:
-            logger.info(f"[MERGED SP] {sp_id[:8]} <- {function_name} ({vuln_type})")
+            logger.info(f"[MERGED SP] {sp_id[:8]} <- {function_name}")
             return {"success": True, "merged": True, "id": sp_id[:8]}
         else:
             logger.info(
-                f"[NEW SP] {sp_id[:8]} -> {function_name} ({vuln_type}, score={score})"
+                f"[NEW SP] {sp_id[:8]} -> {function_name} (score={score})"
             )
             return {"success": True, "created": True, "id": sp_id[:8]}
     except (BrokenPipeError, ConnectionError, OSError) as e:
@@ -160,8 +158,8 @@ def create_suspicious_point_impl(
 def update_suspicious_point_impl(
     suspicious_point_id: str,
     score: float = None,
-    is_checked: bool = None,
-    is_real: bool = None,
+    is_checked_by_verifier: bool = None,
+    is_crash_found: bool = None,
     is_important: bool = None,
     verification_notes: str = None,
     pov_guidance: str = None,
@@ -186,8 +184,8 @@ def update_suspicious_point_impl(
         _, _, _, agent_id = get_sp_context()
         result = client.update_suspicious_point(
             sp_id=suspicious_point_id,
-            is_checked=is_checked,
-            is_real=is_real,
+            is_checked_by_verifier=is_checked_by_verifier,
+            is_crash_found=is_crash_found,
             is_important=is_important,
             score=score,
             verification_notes=verification_notes,
@@ -201,8 +199,8 @@ def update_suspicious_point_impl(
         update_json = json.dumps(
             {
                 "id": suspicious_point_id,
-                "is_checked": is_checked,
-                "is_real": is_real,
+                "is_checked_by_verifier": is_checked_by_verifier,
+                "is_crash_found": is_crash_found,
                 "is_important": is_important,
                 "score": score,
                 "verification_notes": verification_notes,
@@ -281,7 +279,6 @@ def get_suspicious_point_impl(suspicious_point_id: str) -> Dict[str, Any]:
 def create_suspicious_point(
     function_name: str,
     description: str,
-    vuln_type: str,
     score: float = 0.5,
     important_controlflow: List[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
@@ -293,19 +290,11 @@ def create_suspicious_point(
     Args:
         function_name: The function containing the suspicious code
         description: Detailed description of the potential vulnerability.
-                    Describe using control flow, not line numbers.
+                    Describe using control flow, not line numbers, and NAME THE BUG
+                    TYPE in the description (e.g. "stack buffer overflow because...").
                     Example: "The length parameter from user input flows into
-                    memcpy without bounds checking after the if-else branch"
-        vuln_type: Type of vulnerability. One of:
-            - buffer-overflow
-            - use-after-free
-            - integer-overflow
-            - null-pointer-dereference
-            - format-string
-            - double-free
-            - uninitialized-memory
-            - out-of-bounds-read
-            - out-of-bounds-write
+                    memcpy without bounds checking after the if-else branch —
+                    an out-of-bounds write"
         score: Confidence score (0.0-1.0). Higher means more likely to be real.
             - 0.8-1.0: Very confident, clear vulnerability pattern
             - 0.5-0.8: Moderate confidence, needs verification
@@ -328,7 +317,6 @@ def create_suspicious_point(
         result = client.create_suspicious_point(
             function_name=function_name,
             description=description,
-            vuln_type=vuln_type,
             score=score,
             important_controlflow=important_controlflow or [],
             harness_name=harness_name or "",
@@ -341,11 +329,11 @@ def create_suspicious_point(
         sp_id = result.get("id")
 
         if merged:
-            logger.info(f"[MERGED SP] {sp_id[:8]} <- {function_name} ({vuln_type})")
+            logger.info(f"[MERGED SP] {sp_id[:8]} <- {function_name}")
             return {"success": True, "merged": True, "id": sp_id[:8]}
         else:
             logger.info(
-                f"[NEW SP] {sp_id[:8]} -> {function_name} ({vuln_type}, score={score})"
+                f"[NEW SP] {sp_id[:8]} -> {function_name} (score={score})"
             )
             return {"success": True, "created": True, "id": sp_id[:8]}
     except (BrokenPipeError, ConnectionError, OSError) as e:
@@ -361,8 +349,8 @@ def create_suspicious_point(
 @tools_mcp.tool
 def update_suspicious_point(
     suspicious_point_id: str,
-    is_checked: bool = None,
-    is_real: bool = None,
+    is_checked_by_verifier: bool = None,
+    is_crash_found: bool = None,
     is_important: bool = None,
     score: float = None,
     verification_notes: str = None,
@@ -375,8 +363,8 @@ def update_suspicious_point(
 
     Args:
         suspicious_point_id: The ID of the suspicious point to update
-        is_checked: Set to True when verification is complete
-        is_real: Set to True if confirmed as real vulnerability, False if false positive
+        is_checked_by_verifier: Set to True when verification is complete
+        is_crash_found: Set to True if confirmed as real vulnerability, False if false positive
         is_important: Set to True if this is a high-priority vulnerability (will proceed to POV)
         score: Updated confidence score based on analysis
         verification_notes: Notes explaining the verification result.
@@ -409,8 +397,8 @@ def update_suspicious_point(
         _, _, _, agent_id = get_sp_context()
         result = client.update_suspicious_point(
             sp_id=suspicious_point_id,
-            is_checked=is_checked,
-            is_real=is_real,
+            is_checked_by_verifier=is_checked_by_verifier,
+            is_crash_found=is_crash_found,
             is_important=is_important,
             score=score,
             verification_notes=verification_notes,
@@ -422,8 +410,8 @@ def update_suspicious_point(
         update_json = json.dumps(
             {
                 "id": suspicious_point_id,
-                "is_checked": is_checked,
-                "is_real": is_real,
+                "is_checked_by_verifier": is_checked_by_verifier,
+                "is_crash_found": is_crash_found,
                 "is_important": is_important,
                 "score": score,
                 "verification_notes": verification_notes,

@@ -319,7 +319,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             self.collection.create_index([("task_id", 1), ("status", 1)])
             self.collection.create_index([("task_id", 1), ("function_name", 1)])
             self.collection.create_index([("task_id", 1), ("score", -1)])
-            self.collection.create_index([("task_id", 1), ("is_checked", 1)])
+            self.collection.create_index([("task_id", 1), ("is_checked_by_verifier", 1)])
             # Compound index for claim_for_verify priority sorting
             self.collection.create_index(
                 [
@@ -347,12 +347,12 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
 
     def find_unchecked(self, task_id: str) -> List[SuspiciousPoint]:
         """Find unchecked suspicious points for a task"""
-        return self.find_all({"task_id": ObjectId(task_id), "is_checked": False})
+        return self.find_all({"task_id": ObjectId(task_id), "is_checked_by_verifier": False})
 
     def find_real(self, task_id: str) -> List[SuspiciousPoint]:
         """Find verified real vulnerabilities for a task"""
         return self.find_all(
-            {"task_id": ObjectId(task_id), "is_checked": True, "is_real": True}
+            {"task_id": ObjectId(task_id), "is_checked_by_verifier": True, "is_crash_found": True}
         )
 
     def find_important(self, task_id: str) -> List[SuspiciousPoint]:
@@ -372,9 +372,9 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             logger.error(f"Failed to find suspicious points by score: {e}")
             return []
 
-    def mark_checked(self, sp_id: str, is_real: bool, notes: str = None) -> bool:
+    def mark_checked(self, sp_id: str, is_crash_found: bool, notes: str = None) -> bool:
         """Mark a suspicious point as checked"""
-        updates = {"is_checked": True, "is_real": is_real, "checked_at": datetime.now()}
+        updates = {"is_checked_by_verifier": True, "is_crash_found": is_crash_found, "checked_at": datetime.now()}
         if notes:
             updates["verification_notes"] = notes
         return self.update(sp_id, updates)
@@ -414,7 +414,6 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         self,
         sp_id: str,
         description: str,
-        vuln_type: str,
         harness_name: str,
         sanitizer: str,
         score: float = 0.0,
@@ -428,7 +427,6 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         Args:
             sp_id: Suspicious point ID that the duplicate was merged into
             description: Description of the duplicate SP
-            vuln_type: Vulnerability type of the duplicate
             harness_name: Harness that discovered the duplicate
             sanitizer: Sanitizer used
             score: Score of the duplicate
@@ -439,7 +437,6 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         try:
             merged_record = {
                 "description": description,
-                "vuln_type": vuln_type,
                 "harness_name": harness_name,
                 "sanitizer": sanitizer,
                 "score": score,
@@ -507,10 +504,10 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             # Otherwise return all counts (original behavior)
             total = self.collection.count_documents({"task_id": ObjectId(task_id)})
             checked = self.collection.count_documents(
-                {"task_id": ObjectId(task_id), "is_checked": True}
+                {"task_id": ObjectId(task_id), "is_checked_by_verifier": True}
             )
             real = self.collection.count_documents(
-                {"task_id": ObjectId(task_id), "is_checked": True, "is_real": True}
+                {"task_id": ObjectId(task_id), "is_checked_by_verifier": True, "is_crash_found": True}
             )
             important = self.collection.count_documents(
                 {"task_id": ObjectId(task_id), "is_important": True}
@@ -683,7 +680,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
     def complete_verify(
         self,
         sp_id: str,
-        is_real: bool,
+        is_crash_found: bool,
         score: float,
         notes: str = None,
         is_important: bool = False,
@@ -694,7 +691,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
 
         Args:
             sp_id: Suspicious point ID
-            is_real: Whether it's a real vulnerability
+            is_crash_found: Whether it's a real vulnerability
             score: Updated score
             notes: Verification notes
             is_important: Whether to mark as important
@@ -715,8 +712,8 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             updates = {
                 "status": next_status,
                 "processor_id": None,  # Release the lock
-                "is_checked": True,
-                "is_real": is_real,
+                "is_checked_by_verifier": True,
+                "is_crash_found": is_crash_found,
                 "score": score,
                 "is_important": is_important,
                 "checked_at": datetime.now(),
@@ -772,7 +769,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                             "pov_id": pov_id,
                             "pov_success_by": success_record,
                             "pov_generated_at": datetime.now(),
-                            "is_real": True,
+                            "is_crash_found": True,
                         },
                     },
                 )

@@ -8,7 +8,7 @@ Business invariants under test:
 1. claim_for_verify atomically transitions PENDING_VERIFY → VERIFYING
 2. complete_verify routes: is_important + score >= threshold → PENDING_POV, else VERIFIED
 3. pov_guidance is REQUIRED when is_important=True (even via _impl path)
-4. verified_by_agent_id is set when agent calls update with is_checked=True
+4. verified_by_agent_id is set when agent calls update with is_checked_by_verifier=True
 5. claim priority: is_important DESC, score DESC, created_at ASC
 6. complete_verify releases processor_id (lock)
 """
@@ -38,7 +38,6 @@ def _make_sp(task_id, function_name="parse_chunk", score=0.7, status=None):
         task_id=task_id,
         function_name=function_name,
         description=f"potential overflow in {function_name}",
-        vuln_type="buffer-overflow",
         score=score,
         sources=[{"harness_name": "fuzz_png", "sanitizer": "address"}],
     )
@@ -150,7 +149,7 @@ class TestCompleteVerifyRouting:
 
         sp_repo.complete_verify(
             sp.suspicious_point_id,
-            is_real=True,
+            is_crash_found=True,
             score=0.9,
             is_important=True,
             proceed_to_pov=True,
@@ -167,7 +166,7 @@ class TestCompleteVerifyRouting:
 
         sp_repo.complete_verify(
             sp.suspicious_point_id,
-            is_real=False,
+            is_crash_found=False,
             score=0.2,
             is_important=False,
             proceed_to_pov=False,
@@ -185,7 +184,7 @@ class TestCompleteVerifyRouting:
 
         sp_repo.complete_verify(
             sp.suspicious_point_id,
-            is_real=True,
+            is_crash_found=True,
             score=0.8,
             proceed_to_pov=True,
             is_important=True,
@@ -195,19 +194,19 @@ class TestCompleteVerifyRouting:
         assert updated.processor_id is None
 
     def test_complete_verify_sets_is_checked(self, sp_repo):
-        """After complete_verify, is_checked must be True."""
+        """After complete_verify, is_checked_by_verifier must be True."""
         task_id = str(ObjectId())
         sp = _make_sp(task_id, status=SPStatus.VERIFYING.value)
         sp_repo.save(sp)
 
         sp_repo.complete_verify(
             sp.suspicious_point_id,
-            is_real=True,
+            is_crash_found=True,
             score=0.8,
         )
 
         updated = sp_repo.find_by_id(sp.suspicious_point_id)
-        assert updated.is_checked is True
+        assert updated.is_checked_by_verifier is True
 
 
 # =========================================================================
@@ -242,8 +241,8 @@ class TestPovGuidanceValidation:
 
         result = update_suspicious_point_impl(
             suspicious_point_id=str(ObjectId()),
-            is_checked=True,
-            is_real=True,
+            is_checked_by_verifier=True,
+            is_crash_found=True,
             is_important=True,
             score=0.95,
             verification_notes="Confirmed buffer overflow",
@@ -268,8 +267,8 @@ class TestPovGuidanceValidation:
 
         result = update_suspicious_point_impl(
             suspicious_point_id=str(ObjectId()),
-            is_checked=True,
-            is_real=True,
+            is_checked_by_verifier=True,
+            is_crash_found=True,
             is_important=True,
             score=0.95,
             verification_notes="Confirmed buffer overflow",
@@ -290,8 +289,8 @@ class TestPovGuidanceValidation:
 
         result = update_suspicious_point_impl(
             suspicious_point_id=str(ObjectId()),
-            is_checked=True,
-            is_real=False,
+            is_checked_by_verifier=True,
+            is_crash_found=False,
             is_important=False,
             score=0.2,
             verification_notes="False positive",
@@ -307,14 +306,14 @@ class TestPovGuidanceValidation:
 
 class TestVerifiedByTracking:
     """
-    Business rule: when an agent verifies an SP (is_checked=True),
+    Business rule: when an agent verifies an SP (is_checked_by_verifier=True),
     the server must record which agent did it (verified_by_agent_id).
     """
 
     def test_server_sets_verified_by_agent_id(self):
         """
         Server _update_suspicious_point (async) must set verified_by_agent_id
-        when is_checked=True and agent_id is provided.
+        when is_checked_by_verifier=True and agent_id is provided.
 
         The conversion agent_id → verified_by_agent_id happens in the async method,
         which builds the updates dict before passing to _sync.
@@ -344,8 +343,8 @@ class TestVerifiedByTracking:
             server._update_suspicious_point(
                 {
                     "id": sp_id,
-                    "is_checked": True,
-                    "is_real": True,
+                    "is_checked_by_verifier": True,
+                    "is_crash_found": True,
                     "score": 0.9,
                     "agent_id": agent_id,
                 }
@@ -361,7 +360,7 @@ class TestVerifiedByTracking:
 
     def test_server_does_not_set_verified_when_not_checked(self):
         """
-        If is_checked is not set, verified_by_agent_id must NOT be set.
+        If is_checked_by_verifier is not set, verified_by_agent_id must NOT be set.
         """
         import asyncio
         from fuzzingbrain.analyzer.server import AnalysisServer
@@ -388,7 +387,7 @@ class TestVerifiedByTracking:
                     "id": sp_id,
                     "score": 0.5,
                     "agent_id": agent_id,
-                    # is_checked not set
+                    # is_checked_by_verifier not set
                 }
             )
         )

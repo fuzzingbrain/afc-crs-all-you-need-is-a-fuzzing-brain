@@ -44,7 +44,7 @@ Bugs here reduce analysis quality.
 |---|--------|---------------|-------------|
 | 11 | `agents/base.py` | `test_agent_base.py` | `run()` loop with mock LLM, tool call dispatch, max iteration enforcement, error/exception handling, message history management |
 | 12 | `agents/sp_generators.py` | `test_sp_generators.py` | Prompt construction, SP extraction from LLM response, score parsing, different generator types (Full, LargeFull, Delta) |
-| 13 | `agents/sp_verifier.py` | `test_sp_verifier.py` | Verification decision logic, `_extract_sp_info()`, reachability analysis, `is_checked` update flow, `id=unknown` edge case (#88) |
+| 13 | `agents/sp_verifier.py` | `test_sp_verifier.py` | Verification decision logic, `_extract_sp_info()`, reachability analysis, `is_checked_by_verifier` update flow, `id=unknown` edge case (#88) |
 | 14 | `agents/pov_agent.py` | `test_pov_agent.py` | POV generation flow, context setup with SP ID, exploit code extraction |
 
 ### P3 — Tools & Infrastructure

@@ -99,11 +99,6 @@ from .exceptions import (
     LLMShutdownError,
 )
 
-from .distributor import (
-    ModelTier,
-    LLMDistributor,
-    get_distributor,
-)
 
 from .buffer import (
     WorkerLLMBuffer,
@@ -116,7 +111,6 @@ __all__ = [
     # Enums
     "Provider",
     "TaskType",
-    "ModelTier",
     # Model dataclass
     "ModelInfo",
     # Client
@@ -173,9 +167,6 @@ __all__ = [
     "get_fallback_chain",
     "get_recommended_model",
     "get_recommended_models",
-    # Distributor
-    "LLMDistributor",
-    "get_distributor",
     # LLM Call Buffer
     "WorkerLLMBuffer",
     "get_worker_buffer",

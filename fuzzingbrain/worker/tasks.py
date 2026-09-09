@@ -67,6 +67,10 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     task_type = assignment["task_type"]
     project_name = assignment["project_name"]
     log_dir = assignment.get("log_dir")
+    # Image the fuzzer binary runs in for PoV verify. From the task JSON when set
+    # (a prebuilt/imported binary must run in the image it was built in), else the
+    # OSS-Fuzz convention.
+    pov_docker_image = assignment.get("docker_image") or f"gcr.io/oss-fuzz/{project_name}"
 
     # Pre-built fuzzer info from Analyzer (new architecture)
     fuzzer_binary_path = assignment.get("fuzzer_binary_path")
@@ -126,6 +130,21 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     logger.info("Worker starting")
     start_time = datetime.now()
 
+    # Install this run's model router (single source of truth for role -> model),
+    # now that worker logging is configured so its resolved map lands in worker.log.
+    # task fields win over env; from_sources validates and set_active_router logs.
+    from ..llms.routing import ModelRouter, set_active_router
+
+    _router = ModelRouter.from_sources(
+        task={
+            "model_profile": assignment.get("model_profile"),
+            "models": assignment.get("models"),
+            "force_model": assignment.get("force_model"),
+            "strict_models": assignment.get("strict_models"),
+        }
+    )
+    set_active_router(_router)
+
     # Initialize database connection for this worker process
     try:
         from ..core import Config
@@ -133,6 +152,18 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         config = Config.from_env()
         db = MongoDB.connect(config.mongodb_url, config.mongodb_db)
         repos = init_repos(db)
+        # Persist the resolved role -> model map so the run is reproducible and
+        # the report can show exactly which model ran each role (design §8).
+        try:
+            repos.tasks.update(
+                task_id,
+                {
+                    "model_profile": _router.profile,
+                    "model_routing": _router.resolved_map(),
+                },
+            )
+        except Exception as e:  # non-fatal: the loguru summary already logged it
+            logger.debug(f"could not persist model routing: {e}")
     except Exception as e:
         logger.exception(f"Failed to initialize worker: {e}")
         return {
@@ -168,6 +199,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             analysis_socket_path=analysis_socket_path,
             diff_path=diff_path,
             log_dir=log_dir,
+            docker_image=pov_docker_image,
             max_parallel_fuzzers=max_parallel_fuzzers,
             sp_max_count=sp_max_count,
             # Pass celery_job_id for WorkerContext

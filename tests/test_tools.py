@@ -34,8 +34,8 @@ class TestUpdateSuspiciousPointParameters:
         # Must have these parameters
         assert "suspicious_point_id" in params
         assert "score" in params
-        assert "is_checked" in params
-        assert "is_real" in params
+        assert "is_checked_by_verifier" in params
+        assert "is_crash_found" in params
         assert "is_important" in params
         assert "verification_notes" in params
         assert "pov_guidance" in params
@@ -62,7 +62,7 @@ class TestUpdateSuspiciousPointParameters:
         result = update_suspicious_point_impl(
             suspicious_point_id="sp123",
             score=0.8,
-            is_checked=True,
+            is_checked_by_verifier=True,
             is_important=True,
             pov_guidance="Trigger via oversized input to function pointer path",
             reachability_status="pointer_call",
@@ -89,7 +89,6 @@ class TestCreateSuspiciousPointParameters:
         params = list(sig.parameters.keys())
 
         assert "function_name" in params
-        assert "vuln_type" in params
         assert "description" in params
         assert "score" in params
         assert "important_controlflow" in params
@@ -111,7 +110,6 @@ class TestCreateSuspiciousPointParameters:
 
         result = create_suspicious_point_impl(
             function_name="png_read_row",
-            vuln_type="heap-buffer-overflow",
             description="Buffer overflow in row processing",
             score=0.7,
         )
@@ -221,7 +219,6 @@ class TestToolErrorHandling:
             mock.return_value = {"success": False, "error": "No client"}
             result = create_suspicious_point_impl(
                 function_name="test",
-                vuln_type="overflow",
                 description="test",
             )
             assert result["success"] is False

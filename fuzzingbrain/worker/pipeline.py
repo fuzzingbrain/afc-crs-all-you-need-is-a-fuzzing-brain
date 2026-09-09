@@ -30,7 +30,7 @@ from ..core.models import SPStatus
 from ..db import RepositoryManager
 from ..tools.analyzer import set_analyzer_context
 from ..fuzzer import FuzzerManager, get_fuzzer_manager
-from ..llms import CLAUDE_SONNET_4_5
+from ..llms.routing import Role, model_for
 
 
 @dataclass
@@ -50,7 +50,7 @@ class PipelineConfig:
 
     # POV Agent settings
     max_iterations: int = 100  # Max agent loop iterations
-    max_pov_attempts: int = 20  # Max POV generation attempts
+    max_pov_attempts: int = 100  # Max POV generation attempts
 
     # Fuzzer settings (for POV verification)
     fuzzer_path: Optional[Path] = None  # Path to fuzzer binary
@@ -301,7 +301,7 @@ class AgentPipeline:
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
                     scan_mode=self.scan_mode,  # Use pipeline's scan_mode
-                    model=CLAUDE_SONNET_4_5,  # Force Sonnet for SP analysis
+                    model=model_for(Role.VERIFIER),
                     task_id=self.task_id,
                     worker_id=self.worker_id,  # Use actual worker_id, not agent_id
                     log_dir=self.log_dir,
@@ -323,21 +323,21 @@ class AgentPipeline:
 
                 if updated_sp:
                     # Check if agent actually updated the SP
-                    # If is_checked is still False, agent terminated abnormally
+                    # If is_checked_by_verifier is still False, agent terminated abnormally
                     # In that case, default to letting it pass (is_important=True)
-                    if not updated_sp.is_checked:
+                    if not updated_sp.is_checked_by_verifier:
                         logger.warning(
                             f"[Pipeline:{agent_id}] Agent did not update SP {sp.suspicious_point_id}, "
                             f"defaulting to pass-through (is_important=True)"
                         )
                         # Default to pass-through when agent fails
                         is_important = True
-                        is_real = False
+                        is_crash_found = False
                         score = updated_sp.score
                         notes = "Agent terminated without verdict - defaulting to pass-through"
                     else:
                         is_important = updated_sp.is_important
-                        is_real = updated_sp.is_real
+                        is_crash_found = updated_sp.is_crash_found
                         score = updated_sp.score
                         notes = updated_sp.verification_notes
 
@@ -347,7 +347,7 @@ class AgentPipeline:
                     # Complete verification
                     self.repos.suspicious_points.complete_verify(
                         sp.suspicious_point_id,
-                        is_real=is_real,
+                        is_crash_found=is_crash_found,
                         score=score,
                         notes=notes,
                         is_important=is_important,
@@ -357,14 +357,14 @@ class AgentPipeline:
 
                     # Update stats
                     self.stats.sp_verified += 1
-                    if is_real:
+                    if is_crash_found:
                         self.stats.sp_verified_real += 1
                     else:
                         self.stats.sp_verified_fp += 1
 
                     logger.info(
                         f"[Pipeline:{agent_id}] Verified SP {sp.suspicious_point_id}: "
-                        f"score={score:.2f}, real={is_real}, "
+                        f"score={score:.2f}, real={is_crash_found}, "
                         f"proceed_to_pov={proceed_to_pov}"
                     )
                 else:
@@ -521,7 +521,7 @@ class AgentPipeline:
                 pov_agent = POVAgent(
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
-                    model=CLAUDE_SONNET_4_5,  # Force Sonnet for POV generation
+                    model=model_for(Role.POC),
                     task_id=self.task_id,
                     worker_id=self.worker_id,  # Use actual worker_id, not agent_id
                     output_dir=self.output_dir,
@@ -619,7 +619,7 @@ async def run_pipeline(
     fuzzer_path: Path = None,
     docker_image: str = None,
     max_iterations: int = 200,
-    max_pov_attempts: int = 40,
+    max_pov_attempts: int = 100,
     workspace_path: Path = None,
     fuzzer_code: str = "",
     sp_finding_done: bool = True,  # Default True for delta mode

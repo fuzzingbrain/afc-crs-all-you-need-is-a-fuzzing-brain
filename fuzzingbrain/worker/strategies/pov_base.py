@@ -18,7 +18,7 @@ from ...core.scoring import get_scoring
 from ...tools.code_viewer import set_code_viewer_context
 from ...tools.analyzer import set_analyzer_context
 from ...tools.suspicious_points import set_sp_context
-from ...llms import CLAUDE_SONNET_4_5
+from ...llms.routing import Role, model_for
 
 
 class POVBaseStrategy(BaseStrategy):
@@ -310,7 +310,7 @@ class POVBaseStrategy(BaseStrategy):
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             scan_mode=self.scan_mode,  # Use strategy's scan_mode for verify prompt
-            model=CLAUDE_SONNET_4_5,
+            model=model_for(Role.VERIFIER),
             verbose=True,
             task_id=self.task_id,
             worker_id=self.worker_id,
@@ -325,7 +325,7 @@ class POVBaseStrategy(BaseStrategy):
         for i, point in enumerate(suspicious_points):
             point_start = time.time()
             self.log_info(
-                f"  [{i + 1}/{total}] Verifying: {point.function_name} ({point.vuln_type}, score={point.score:.2f})"
+                f"  [{i + 1}/{total}] Verifying: {point.function_name} (score={point.score:.2f})"
             )
 
             # Convert SuspiciousPoint to dict for agent
@@ -374,7 +374,7 @@ class POVBaseStrategy(BaseStrategy):
             except Exception as e:
                 self.log_error(f"  [{i + 1}/{total}] Failed to verify: {e}")
                 # Mark as checked but not verified due to error
-                point.is_checked = True
+                point.is_checked_by_verifier = True
                 point.verification_notes = f"Verification failed: {e}"
                 verified.append(point)
 
@@ -417,6 +417,7 @@ class POVBaseStrategy(BaseStrategy):
             try:
                 # Create SeedAgent for this FP
                 seed_agent = SeedAgent(
+                    model=model_for(Role.SEED),
                     task_id=self.task_id,
                     worker_id=self.worker_id,  # ObjectId for MongoDB linking
                     fuzzer=self.fuzzer,
@@ -434,7 +435,6 @@ class POVBaseStrategy(BaseStrategy):
                     seed_agent.generate_fp_seeds(
                         sp_id=point.suspicious_point_id,
                         function_name=point.function_name,
-                        vuln_type=point.vuln_type,
                         description=point.description or "",
                     )
                 )
@@ -535,16 +535,15 @@ class POVBaseStrategy(BaseStrategy):
             "sanitizer": self.sanitizer,
             "scan_mode": self.scan_mode,
             "total_points": len(fresh_points),
-            "confirmed_bugs": len([p for p in fresh_points if p.is_real]),
+            "confirmed_bugs": len([p for p in fresh_points if p.is_crash_found]),
             "suspicious_points": [
                 {
                     "id": p.suspicious_point_id,
                     "function": p.function_name,
-                    "vuln_type": p.vuln_type,
                     "description": p.description,
                     "score": p.score,
                     "is_important": p.is_important,
-                    "is_real": p.is_real,
+                    "is_crash_found": p.is_crash_found,
                     "verification_notes": p.verification_notes,
                 }
                 for p in fresh_points
@@ -624,7 +623,7 @@ class POVBaseStrategy(BaseStrategy):
                 coverage_fuzzer_dir=coverage_fuzzer_dir,
                 project_name=self.project_name,
                 src_dir=self.executor.task_workspace_path / "repo",
-                docker_image=f"gcr.io/oss-fuzz/{self.project_name}",
+                docker_image=self.executor.docker_image,
                 work_dir=self.results_path / "coverage_work",
             )
 
@@ -637,9 +636,9 @@ class POVBaseStrategy(BaseStrategy):
             poll_interval=1.0,  # Poll every 1 second
             max_idle_cycles=10,  # Exit after 10 idle cycles
             max_iterations=100,  # Max POV agent iterations
-            max_pov_attempts=20,  # Max POV generation attempts
+            max_pov_attempts=100,  # Max POV generation attempts
             fuzzer_path=self.executor.fuzzer_binary_path,
-            docker_image=f"gcr.io/oss-fuzz/{self.project_name}",
+            docker_image=self.executor.docker_image,
         )
 
         # Get fuzzer source code for agent context

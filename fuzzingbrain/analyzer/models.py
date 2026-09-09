@@ -35,6 +35,9 @@ class AnalyzeRequest:
     # opt-in module (see fuzzingbrain/analyzer).
     enable_static_analysis: bool = False
     build_coverage: bool = True
+    # Prebuilt fuzzer binaries (fuzzer_name -> path). When set, the analyzer
+    # copies them into build/out and skips the OSS-Fuzz compile.
+    prebuilt_fuzzers: Dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -50,6 +53,7 @@ class AnalyzeRequest:
             "fuzzer_sources": self.fuzzer_sources,
             "enable_static_analysis": self.enable_static_analysis,
             "build_coverage": self.build_coverage,
+            "prebuilt_fuzzers": self.prebuilt_fuzzers,
         }
 
     @classmethod
@@ -67,6 +71,7 @@ class AnalyzeRequest:
             fuzzer_sources=data.get("fuzzer_sources", {}),
             enable_static_analysis=data.get("enable_static_analysis", False),
             build_coverage=data.get("build_coverage", True),
+            prebuilt_fuzzers=data.get("prebuilt_fuzzers", {}),
         )
 
 

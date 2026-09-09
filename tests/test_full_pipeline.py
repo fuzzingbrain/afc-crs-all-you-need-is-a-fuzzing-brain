@@ -205,7 +205,6 @@ class TestSPVerifier:
         sp_dict = {
             "suspicious_point_id": str(ObjectId()),
             "function_name": "png_read_row",
-            "vuln_type": "heap-buffer-overflow",
             "score": 0.7,
             "static_reachable": True,
         }
@@ -226,7 +225,6 @@ class TestSPVerifier:
             suspicious_point_id=str(ObjectId()),
             task_id=str(ObjectId()),
             function_name="png_read_row",
-            vuln_type="heap-buffer-overflow",
             processor_id="verify_1",  # Non-ObjectId string
         )
 
@@ -301,7 +299,6 @@ class TestSuspiciousPointFlow:
             task_id=str(ObjectId()),
             direction_id=str(ObjectId()),
             function_name="png_read_row",
-            vuln_type="heap-buffer-overflow",
             status=SPStatus.PENDING_VERIFY.value,
             score=0.7,
         )
@@ -343,7 +340,7 @@ class TestSuspiciousPointFlow:
 
         # Simulate verification complete
         sp.status = SPStatus.PENDING_POV.value
-        sp.is_checked = True
+        sp.is_checked_by_verifier = True
 
         assert sp.status == "pending_pov"
         assert sp.is_important is True
@@ -361,7 +358,7 @@ class TestSuspiciousPointFlow:
 
         # Simulate verification complete
         sp.status = SPStatus.VERIFIED.value
-        sp.is_checked = True
+        sp.is_checked_by_verifier = True
 
         assert sp.status == "verified"
         assert sp.is_important is False
@@ -466,7 +463,6 @@ class TestFullPipelineIntegration:
             task_id=task_id,
             direction_id=direction_id,
             function_name="png_read_row",
-            vuln_type="heap-buffer-overflow",
             status=SPStatus.PENDING_VERIFY.value,
             processor_id="verify_1",  # Non-ObjectId - should still work
         )
@@ -485,7 +481,7 @@ class TestFullPipelineIntegration:
 
         # 6. Simulate verification complete, create POV
         sp.status = SPStatus.PENDING_POV.value
-        sp.is_checked = True
+        sp.is_checked_by_verifier = True
         sp.is_important = True
         sp.score = 0.85
 

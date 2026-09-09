@@ -121,6 +121,7 @@ class AnalysisServer:
         fuzzer_sources: Optional[Dict[str, Union[str, List[str]]]] = None,
         enable_static_analysis: bool = False,
         build_coverage: bool = True,
+        prebuilt_fuzzers: Optional[Dict[str, str]] = None,
     ):
         # Store task_id as ObjectId for consistent MongoDB queries
         # String representation is used for socket paths and logging
@@ -137,6 +138,7 @@ class AnalysisServer:
         # Introspector static analysis is opt-in; off by default in production.
         self.enable_static_analysis = enable_static_analysis
         self.build_coverage = build_coverage
+        self.prebuilt_fuzzers = prebuilt_fuzzers or {}
 
         # Socket path in /tmp to avoid path length limit (108 chars max for Unix sockets)
         # Use task_id to ensure uniqueness
@@ -325,6 +327,7 @@ class AnalysisServer:
             log_dir=self.log_dir,
             skip_introspector=skip_introspector,
             analyzer_only_log_callback=self._log_analyzer_only,
+            prebuilt_fuzzers=self.prebuilt_fuzzers,
         )
 
         # Run build in thread pool to not block event loop
@@ -1441,7 +1444,6 @@ class AnalysisServer:
         harness_name: str,
         sanitizer: str,
         description: str,
-        vuln_type: str,
         score: float,
     ) -> bool:
         """Sync: Merge source into existing SP."""
@@ -1451,7 +1453,6 @@ class AnalysisServer:
         self.repos.suspicious_points.add_merged_duplicate(
             sp_id=duplicate_id,
             description=description,
-            vuln_type=vuln_type,
             harness_name=harness_name,
             sanitizer=sanitizer,
             score=score,
@@ -1464,7 +1465,6 @@ class AnalysisServer:
         harness_name: str,
         sanitizer: str,
         description: str,
-        vuln_type: str,
         score: float,
         important_controlflow: list,
         direction_id: str = "",
@@ -1480,7 +1480,6 @@ class AnalysisServer:
             created_by_agent_id=agent_id if agent_id else None,
             sources=[{"harness_name": harness_name, "sanitizer": sanitizer}],
             description=description,
-            vuln_type=vuln_type,
             score=score,
             important_controlflow=important_controlflow,
         )
@@ -1503,7 +1502,6 @@ class AnalysisServer:
         harness_name = params.get("harness_name", "")
         sanitizer = params.get("sanitizer", "")
         description = params.get("description", "")
-        vuln_type = params.get("vuln_type", "")
         score = params.get("score", 0.0)
         important_controlflow = params.get("important_controlflow", [])
         direction_id = params.get("direction_id", "")
@@ -1528,7 +1526,6 @@ class AnalysisServer:
                     harness_name,
                     sanitizer,
                     description,
-                    vuln_type,
                     score,
                 )
 
@@ -1550,7 +1547,6 @@ class AnalysisServer:
             harness_name,
             sanitizer,
             description,
-            vuln_type,
             score,
             important_controlflow,
             direction_id,
@@ -1584,10 +1580,10 @@ class AnalysisServer:
             raise ValueError("Missing suspicious point id")
 
         updates = {}
-        if "is_checked" in params:
-            updates["is_checked"] = params["is_checked"]
-        if "is_real" in params:
-            updates["is_real"] = params["is_real"]
+        if "is_checked_by_verifier" in params:
+            updates["is_checked_by_verifier"] = params["is_checked_by_verifier"]
+        if "is_crash_found" in params:
+            updates["is_crash_found"] = params["is_crash_found"]
         if "is_important" in params:
             updates["is_important"] = params["is_important"]
         if "score" in params:
@@ -1602,16 +1598,16 @@ class AnalysisServer:
             updates["reachability_multiplier"] = params["reachability_multiplier"]
         if "reachability_reason" in params:
             updates["reachability_reason"] = params["reachability_reason"]
-        if params.get("is_checked"):
+        if params.get("is_checked_by_verifier"):
             updates["checked_at"] = datetime.now()
         # Track which agent verified this SP
-        if params.get("agent_id") and params.get("is_checked"):
+        if params.get("agent_id") and params.get("is_checked_by_verifier"):
             from bson import ObjectId
 
             updates["verified_by_agent_id"] = ObjectId(params["agent_id"])
 
         self._log(
-            f"Updating suspicious point {suspicious_point_id[:8]}... with: is_checked={updates.get('is_checked')}, score={updates.get('score')}"
+            f"Updating suspicious point {suspicious_point_id[:8]}... with: is_checked_by_verifier={updates.get('is_checked_by_verifier')}, score={updates.get('score')}"
         )
         success = await self._run_sync(
             self._update_suspicious_point_sync, suspicious_point_id, updates

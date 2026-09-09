@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Tuple, List
 
 from ..core import logger
+from ..core.docker_limits import docker_resource_args
 from ..builder import BuildJob, run_build
 from ..builder.engine import DEFAULT_BUILD_TIMEOUT_S
 
@@ -170,6 +171,7 @@ class WorkerBuilder:
                     "docker",
                     "run",
                     "--rm",
+                    *docker_resource_args(memory_mb=512, cpus=1),
                     "-v",
                     f"{path.absolute()}:/fix_perms",
                     "alpine:latest",
@@ -209,6 +211,7 @@ class WorkerBuilder:
                             "docker",
                             "run",
                             "--rm",
+                            *docker_resource_args(memory_mb=512, cpus=1),
                             "-v",
                             f"{dir_path.absolute()}:/fix_perms",
                             "alpine:latest",

@@ -96,7 +96,6 @@ class TestSPCreateContextFlow:
 
         result = create_suspicious_point_impl(
             function_name="png_read_chunk",
-            vuln_type="buffer-overflow",
             description="Unbounded memcpy from chunk data",
             score=0.8,
         )
@@ -108,7 +107,6 @@ class TestSPCreateContextFlow:
         assert kw["direction_id"] == "dir_chunk_handlers"
         assert kw["agent_id"] == "agent_spg_001"
         assert kw["function_name"] == "png_read_chunk"
-        assert kw["vuln_type"] == "buffer-overflow"
 
     def test_phase1_parallel_spg_agents_share_direction_context(self):
         """
@@ -153,7 +151,6 @@ class TestSPCreateContextFlow:
                 ):
                     create_suspicious_point_impl(
                         function_name=func_name,
-                        vuln_type="buffer-overflow",
                         description=f"Bug in {func_name}",
                     )
                     captured[func_name] = mock_client.create_suspicious_point.call_args[
@@ -207,8 +204,8 @@ class TestSPUpdateContextFlow:
 
         result = update_suspicious_point_impl(
             suspicious_point_id="sp_abc12345",
-            is_checked=True,
-            is_real=True,
+            is_checked_by_verifier=True,
+            is_crash_found=True,
             is_important=True,
             verification_notes="Confirmed: no bounds check before memcpy",
             pov_guidance="Send chunk with length > 4096",
@@ -218,8 +215,8 @@ class TestSPUpdateContextFlow:
         kw = client.update_suspicious_point.call_args[1]
         assert kw["agent_id"] == "agent_spv_001"
         assert kw["sp_id"] == "sp_abc12345"
-        assert kw["is_checked"] is True
-        assert kw["is_real"] is True
+        assert kw["is_checked_by_verifier"] is True
+        assert kw["is_crash_found"] is True
 
     @patch("fuzzingbrain.tools.suspicious_points._get_client")
     @patch("fuzzingbrain.tools.suspicious_points._ensure_client", return_value=None)
@@ -245,7 +242,6 @@ class TestSPUpdateContextFlow:
         )
         create_suspicious_point_impl(
             function_name="parse_chunk",
-            vuln_type="buffer-overflow",
             description="memcpy without bounds check",
         )
 
@@ -258,8 +254,8 @@ class TestSPUpdateContextFlow:
 
         update_suspicious_point_impl(
             suspicious_point_id="sp_abc12345",
-            is_checked=True,
-            is_real=False,
+            is_checked_by_verifier=True,
+            is_crash_found=False,
             verification_notes="False positive: length validated in caller",
         )
 
@@ -396,7 +392,6 @@ class TestParallelAgentToolCalls:
                 ):
                     create_suspicious_point_impl(
                         function_name=f"func_{name}",
-                        vuln_type="buffer-overflow",
                         description="test",
                     )
                     captured[name] = mock_client.create_suspicious_point.call_args[1]
@@ -462,7 +457,6 @@ class TestParallelAgentToolCalls:
                 ):
                     create_suspicious_point_impl(
                         function_name="png_read_chunk",
-                        vuln_type="buffer-overflow",
                         description="New SP from Phase 1",
                     )
                     captured["sp_find"] = mock_client.create_suspicious_point.call_args[
@@ -493,8 +487,8 @@ class TestParallelAgentToolCalls:
                 ):
                     update_suspicious_point_impl(
                         suspicious_point_id="sp_earlier_001",
-                        is_checked=True,
-                        is_real=True,
+                        is_checked_by_verifier=True,
+                        is_crash_found=True,
                         is_important=True,
                         verification_notes="Confirmed from earlier SP",
                         pov_guidance="Craft ICC profile",
@@ -548,7 +542,6 @@ class TestContextLeakBetweenPipelinePhases:
         )
         result1 = create_suspicious_point_impl(
             function_name="parse_chunk",
-            vuln_type="buffer-overflow",
             description="test",
         )
         assert result1["success"] is True
@@ -584,7 +577,6 @@ class TestContextLeakBetweenPipelinePhases:
         )
         create_suspicious_point_impl(
             function_name="parse_chunk",
-            vuln_type="buffer-overflow",
             description="test",
         )
 
@@ -597,7 +589,6 @@ class TestContextLeakBetweenPipelinePhases:
         )
         create_suspicious_point_impl(
             function_name="parse_icc",
-            vuln_type="out-of-bounds-read",
             description="test",
         )
         kw_fixed = client.create_suspicious_point.call_args[1]
@@ -640,8 +631,8 @@ class TestContextLeakBetweenPipelinePhases:
                 ):
                     update_suspicious_point_impl(
                         suspicious_point_id="sp_001",
-                        is_checked=True,
-                        is_real=True,
+                        is_checked_by_verifier=True,
+                        is_crash_found=True,
                         is_important=True,
                         verification_notes="Confirmed buffer overflow",
                         pov_guidance="Oversize chunk length",
@@ -673,8 +664,8 @@ class TestContextLeakBetweenPipelinePhases:
                 ):
                     update_suspicious_point_impl(
                         suspicious_point_id="sp_002",
-                        is_checked=True,
-                        is_real=True,
+                        is_checked_by_verifier=True,
+                        is_crash_found=True,
                         is_important=True,
                         verification_notes="Also confirmed",
                         pov_guidance="Crafted ICC profile",

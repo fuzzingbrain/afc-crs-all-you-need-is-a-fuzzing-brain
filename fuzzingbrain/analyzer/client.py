@@ -398,7 +398,6 @@ class AnalysisClient:
         self,
         function_name: str,
         description: str,
-        vuln_type: str,
         score: float = 0.0,
         important_controlflow: List[dict] = None,
         harness_name: str = "",
@@ -411,8 +410,8 @@ class AnalysisClient:
 
         Args:
             function_name: Name of the function containing the suspicious code
-            description: Description of the potential vulnerability (use control flow, not line numbers)
-            vuln_type: Type of vulnerability (buffer-overflow, use-after-free, etc.)
+            description: Description of the potential vulnerability (use control flow,
+                not line numbers; name the bug type in the description)
             score: Initial score (0.0-1.0)
             important_controlflow: List of related functions/variables
             harness_name: Fuzzer harness name that created this SP
@@ -428,7 +427,6 @@ class AnalysisClient:
             {
                 "function_name": function_name,
                 "description": description,
-                "vuln_type": vuln_type,
                 "score": score,
                 "important_controlflow": important_controlflow or [],
                 "harness_name": harness_name,
@@ -441,8 +439,8 @@ class AnalysisClient:
     def update_suspicious_point(
         self,
         sp_id: str,
-        is_checked: bool = None,
-        is_real: bool = None,
+        is_checked_by_verifier: bool = None,
+        is_crash_found: bool = None,
         is_important: bool = None,
         score: float = None,
         verification_notes: str = None,
@@ -457,8 +455,8 @@ class AnalysisClient:
 
         Args:
             sp_id: Suspicious point ID
-            is_checked: Whether verification is complete
-            is_real: Whether it's a real vulnerability
+            is_checked_by_verifier: Whether verification is complete
+            is_crash_found: Whether it's a real vulnerability
             is_important: Whether it's high priority
             score: Updated score
             verification_notes: Notes from verification
@@ -472,10 +470,10 @@ class AnalysisClient:
             Dict with 'updated' status
         """
         params = {"id": sp_id}
-        if is_checked is not None:
-            params["is_checked"] = is_checked
-        if is_real is not None:
-            params["is_real"] = is_real
+        if is_checked_by_verifier is not None:
+            params["is_checked_by_verifier"] = is_checked_by_verifier
+        if is_crash_found is not None:
+            params["is_crash_found"] = is_crash_found
         if is_important is not None:
             params["is_important"] = is_important
         if score is not None:

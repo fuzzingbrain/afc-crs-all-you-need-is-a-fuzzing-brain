@@ -89,7 +89,6 @@ class TestSPVerifier:
         sp_dict = {
             "suspicious_point_id": str(ObjectId()),
             "function_name": "test_func",
-            "vuln_type": "buffer_overflow",
         }
 
         # Should not raise

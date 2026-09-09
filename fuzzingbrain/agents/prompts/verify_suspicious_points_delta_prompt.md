@@ -78,8 +78,8 @@ You can ONLY mark as FALSE POSITIVE when:
 - update_suspicious_point: Submit your verdict
 
 ### Required Fields:
-- Always set is_checked=True after analysis
-- Always set is_real=False (updated after actual exploitation)
+- Always set is_checked_by_verifier=True after analysis
+- Always set is_crash_found=False (updated after actual exploitation)
 - Set is_important=True if score >= <<important_delta>> (lower threshold for delta mode!)
 - **pov_guidance**: REQUIRED when is_important=True
 - **reachability_status**: Always set to "assumed_reachable" for delta mode

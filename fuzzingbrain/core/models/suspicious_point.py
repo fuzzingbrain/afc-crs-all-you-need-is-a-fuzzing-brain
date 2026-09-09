@@ -70,21 +70,21 @@ class SuspiciousPoint:
     # Format: [{"harness_name": "fuzz_png", "sanitizer": "address"}, ...]
     sources: List[Dict] = field(default_factory=list)
 
-    # Description (uses control flow instead of line numbers, as LLMs are not good at generating line numbers)
+    # Description (uses control flow instead of line numbers, as LLMs are not good
+    # at generating line numbers). The bug type is described here in prose too —
+    # there is no separate vuln_type field (the only trustworthy type is the ASan
+    # crash type, which lives on the POV, not the SP).
     description: str = ""
-
-    # Vulnerability type
-    vuln_type: str = (
-        ""  # buffer-overflow, use-after-free, integer-overflow, null-pointer, etc.
-    )
 
     # Pipeline status (for parallel processing)
     status: str = SPStatus.PENDING_VERIFY.value  # Current pipeline status
     processor_id: Optional[str] = None  # ID of agent currently processing this SP
 
     # Verification status
-    is_checked: bool = False  # Whether verified by LLM
-    is_real: bool = False  # True if Agent confirms it's a real bug
+    is_checked_by_verifier: bool = False  # Whether verified by LLM
+    is_crash_found: bool = (
+        False  # True once a PoV actually crashes (set by complete_pov, not the LLM)
+    )
 
     # Priority
     score: float = 0.0  # Score (0.0-1.0), used for queue ordering
@@ -153,13 +153,12 @@ class SuspiciousPoint:
             else None,
             "sources": self.sources,
             "description": self.description,
-            "vuln_type": self.vuln_type,
             "status": self.status,
             "processor_id": safe_object_id(self.processor_id)
             if self.processor_id
             else None,
-            "is_checked": self.is_checked,
-            "is_real": self.is_real,
+            "is_checked_by_verifier": self.is_checked_by_verifier,
+            "is_crash_found": self.is_crash_found,
             "score": self.score,
             "is_important": self.is_important,
             "static_reachable": self.static_reachable,
@@ -244,11 +243,14 @@ class SuspiciousPoint:
             verified_by_agent_id=verified_by_agent_id,
             sources=sources,
             description=data.get("description", ""),
-            vuln_type=data.get("vuln_type", ""),
             status=data.get("status", SPStatus.PENDING_VERIFY.value),
             processor_id=processor_id,
-            is_checked=data.get("is_checked", False),
-            is_real=data.get("is_real", False),
+            # backward-compat: legacy docs stored this under "is_checked"
+            is_checked_by_verifier=data.get(
+                "is_checked_by_verifier", data.get("is_checked", False)
+            ),
+            # backward-compat: legacy docs stored this under "is_real"
+            is_crash_found=data.get("is_crash_found", data.get("is_real", False)),
             score=data.get("score", 0.0),
             is_important=data.get("is_important", False),
             static_reachable=data.get("static_reachable", True),
@@ -267,10 +269,10 @@ class SuspiciousPoint:
             pov_generated_at=parse_datetime(data.get("pov_generated_at")),
         )
 
-    def mark_checked(self, is_real: bool, notes: str = None):
+    def mark_checked(self, is_crash_found: bool, notes: str = None):
         """Mark as verified"""
-        self.is_checked = True
-        self.is_real = is_real
+        self.is_checked_by_verifier = True
+        self.is_crash_found = is_crash_found
         self.checked_at = datetime.now()
         if notes:
             self.verification_notes = notes

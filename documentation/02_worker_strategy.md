@@ -136,7 +136,7 @@ Strategies encapsulate different analysis workflows:
 │     - Extract crash type (heap-buffer-overflow, UAF, etc.)       │
 │                                                                  │
 │  3. POV Confirmation                                             │
-│     - If crash confirmed, update SP is_real = true               │
+│     - If crash confirmed, update SP is_crash_found = true               │
 │     - Save POV file (blob + crash info) to povs directory        │
 └─────────────────────────────────────────────────────────────────┘
 ```

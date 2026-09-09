@@ -17,6 +17,7 @@ from ..fuzzer import (
     FuzzerManager,
     register_fuzzer_manager,
 )
+from ..fuzzer.signature import extract_class
 from .context import WorkerContext
 
 
@@ -367,6 +368,14 @@ def generate(variant: int = 1) -> bytes:
             logger.info(
                 f"[{self.worker_display_name}] Generating report for POV {pov_id[:8]}..."
             )
+            if not extract_class(pov.sanitizer_output or ""):
+                logger.warning(
+                    f"[{self.worker_display_name}] POV {pov_id[:8]} NOT activated: "
+                    f"no real fault class (sanitizer/fatal-signal) in its output -- "
+                    f"a plain exit() is not a memory-safety finding"
+                )
+                return
+
             zip_path = await packager.package_pov_async(pov.to_dict(), None)
 
             if zip_path:
@@ -407,6 +416,14 @@ def generate(variant: int = 1) -> bytes:
             logger.info(
                 f"[{self.worker_display_name}] Generating report for POV {pov_id[:8]}..."
             )
+            if not extract_class(pov.sanitizer_output or ""):
+                logger.warning(
+                    f"[{self.worker_display_name}] POV {pov_id[:8]} NOT activated: "
+                    f"no real fault class (sanitizer/fatal-signal) in its output -- "
+                    f"a plain exit() is not a memory-safety finding"
+                )
+                return
+
             zip_path = packager.package_pov(pov.to_dict(), None)
 
             if zip_path:

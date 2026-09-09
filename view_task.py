@@ -288,13 +288,13 @@ def generate_html(task_id: str, data: dict) -> str:
     sp_html = ""
     for i, sp in enumerate(suspicious_points, 1):
         score = sp.get("score", 0)
-        is_real = sp.get("is_real", False)
-        is_checked = sp.get("is_checked", False)
+        is_crash_found = sp.get("is_crash_found", False)
+        is_checked_by_verifier = sp.get("is_checked_by_verifier", False)
         vuln_type = sp.get("vuln_type", "unknown")
 
         real_badge = ""
-        if is_checked:
-            if is_real:
+        if is_checked_by_verifier:
+            if is_crash_found:
                 real_badge = '<span class="badge badge-real">CONFIRMED</span>'
             else:
                 real_badge = '<span class="badge badge-fp">FALSE POSITIVE</span>'
@@ -336,8 +336,8 @@ def generate_html(task_id: str, data: dict) -> str:
 
     # Summary stats
     total_sp = len(suspicious_points)
-    confirmed = len([sp for sp in suspicious_points if sp.get("is_real")])
-    checked = len([sp for sp in suspicious_points if sp.get("is_checked")])
+    confirmed = len([sp for sp in suspicious_points if sp.get("is_crash_found")])
+    checked = len([sp for sp in suspicious_points if sp.get("is_checked_by_verifier")])
     high_score = len([sp for sp in suspicious_points if sp.get("score", 0) >= 0.8])
 
     # POV stats

@@ -44,6 +44,11 @@ def format_tool_args(args: dict, limit: int = 160) -> str:
     return rendered if len(rendered) <= limit else rendered[: limit - 3] + "..."
 
 
+# Marker prefix for the per-turn budget line injected into every agent's context.
+# Exactly one is kept current: the previous one is stripped before the next is added.
+_PROGRESS_TAG = "[Budget:"
+
+
 class BaseAgent(ABC):
     """
     Base class for MCP-based AI agents.
@@ -65,7 +70,9 @@ class BaseAgent(ABC):
     # Model used for the mechanical compression/summarization step. Tiered down
     # to a cheap model by default (summarization does not need the flagship);
     # subclasses can override. Falls back to a mechanical summary on failure.
-    compression_model_id: str = "claude-haiku-4-5-20251001"
+    # None -> resolved from the router (Role.COMPRESSION) at use time; set a
+    # concrete id to override for one agent.
+    compression_model_id: Optional[str] = None
 
     def __init__(
         self,
@@ -375,6 +382,27 @@ class BaseAgent(ABC):
         """
         return None
 
+    def _progress_reminder(self, iteration: int, remaining: int) -> str:
+        """Always-on budget line so the model paces itself.
+
+        Every agent gets this each turn -- a reasoning model (o3) otherwise keeps
+        exploring until the hard iteration cap and records nothing (the direction
+        agent hit 100/100 with 0 directions). Escalates to a finalize order once
+        the budget runs low.
+        """
+        msg = (
+            f"{_PROGRESS_TAG} iteration {iteration}/{self.max_iterations}, "
+            f"{remaining} tool-call(s) left."
+        )
+        if remaining <= max(3, self.max_iterations // 5):
+            msg += (
+                " Budget is running low -- STOP exploring and finalize NOW by "
+                "calling your recording tool (e.g. create_direction / "
+                "create_suspicious_point / submit the PoV). An agent that reaches "
+                "the cap without recording a result produces nothing."
+            )
+        return msg
+
     def _get_compression_criteria(self) -> str:
         """
         Get task-specific compression criteria for context compression.
@@ -504,9 +532,11 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         )
 
         try:
+            from ..llms.routing import Role, model_for
+
             response = await self.llm_client.acall(
                 messages=[{"role": "user", "content": compression_prompt}],
-                model=self.compression_model_id,
+                model=self.compression_model_id or model_for(Role.COMPRESSION),
                 max_tokens=2000,
             )
             summary = f"[CONTEXT COMPRESSED - {len(middle_messages)} messages]\n\n{response.content}"
@@ -1033,19 +1063,24 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             if self.enable_context_compression and iteration > 0 and iteration % 5 == 0:
                 await self._compress_context()
 
-            # Check for urgency message (when running low on iterations)
-            urgency_message = self._get_urgency_message(iteration, remaining)
-            if urgency_message:
-                self._log(
-                    f"Injecting urgency message (remaining={remaining})", level="INFO"
+            # Show the agent its remaining budget EVERY turn so it paces itself
+            # and finalizes in time. Keep exactly one current budget line: drop the
+            # prior one (it was injected before an earlier assistant turn, so it
+            # never splits a tool_call/tool_result pair) before adding the new one.
+            self.messages = [
+                m
+                for m in self.messages
+                if not (
+                    m.get("role") == "user"
+                    and str(m.get("content", "")).startswith(_PROGRESS_TAG)
                 )
-                self.messages.append(
-                    {
-                        "role": "user",
-                        "content": urgency_message,
-                    }
-                )
-                self._log_chat_message("user", urgency_message, iteration=iteration)
+            ]
+            progress = self._progress_reminder(iteration, remaining)
+            extra = self._get_urgency_message(iteration, remaining)
+            if extra:
+                progress = progress + "\n" + extra
+            self.messages.append({"role": "user", "content": progress})
+            self._log_chat_message("user", progress, iteration=iteration)
 
             # Call LLM with tools (async to avoid blocking event loop)
             self.llm_client.reset_tried_models()
