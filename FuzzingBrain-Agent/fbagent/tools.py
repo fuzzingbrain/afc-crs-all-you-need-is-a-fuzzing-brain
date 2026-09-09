@@ -327,3 +327,20 @@ SCHEMAS = [
             ["input", "target"]),
     _schema("diversify", {"cracked": {"type": "string"}}, []),
 ]
+
+# Controlled-experiment switch: drop the dynamic `trace` tool so a run's result
+# is attributable to static reasoning + the worklist alone, with no runtime
+# feedback. Read from the env at import — set it before launching python
+# (e.g. `FBAGENT_NO_TRACE=1 python3 -m fbagent.run ...`).
+import os as _os  # noqa: E402
+def _flag(name):
+    return _os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+if _flag("FBAGENT_NO_TRACE"):
+    SCHEMAS = [s for s in SCHEMAS if s["name"] != "trace"]
+    _IMPL.pop("trace", None)
+# Ablation: drop the deterministic static-analysis helpers (gates, diversify) so a
+# "bare + worklist" run isolates the worklist alone. Leaves read/glob/grep/bash.
+if _flag("FBAGENT_NO_HELPERS"):
+    SCHEMAS = [s for s in SCHEMAS if s["name"] not in ("gates", "diversify")]
+    _IMPL.pop("gates", None)
+    _IMPL.pop("diversify", None)

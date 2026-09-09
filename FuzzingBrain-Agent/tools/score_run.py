@@ -47,9 +47,11 @@ HAIKU45_DEV = {
     'pdfbox-01': 8, 'pdfbox-03': 1, 'assimp-01': 0, 'binutils-01': 0, 'ghidra-01': 0,
     'icu-03': 0, 'systemd-01': 0, 'flatbuffers-01': 0, 'freetype-01': 0, 'harfbuzz-02': 0,
     'net-snmp-03': 0, 'openldap-02': 0, 'upx-01': 1, 'hunspell-01': 0, 'libheif-01': 0,
-    'libwebsockets-01': 0, 'net-snmp-01': 1, 'simdutf-01': 0, 'upx-02': 0, 'fwupd-01': 2,
+    'libwebsockets-01': 0, 'net-snmp-01': 1, 'simdutf-01': 0, 'upx-02': 0, 'fwupd-01': 0,
     'graal-01': 0, 'libpng-01': 0, 'libwebp-01': 0, 'libxml2-02': 0, 'opc-ua-01': 0,
 }
+# NOTE: fwupd-01 corrected 2->0 — the frozen difficulty has it at D5 ("no model
+# crashed it"), so Haiku's count there must be 0; the 2 was a Table-2 WebFetch error.
 
 
 def load_scores(run_dir: Path) -> dict[str, dict]:

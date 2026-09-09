@@ -64,3 +64,4 @@ fuzzingbrain/dashboard
 # are NOT ignored -- 880 KB total, and nothing can regenerate them.
 examples/aixcc-challenges/**/mongodb/
 examples/aixcc-challenges/**/bugs/*/bin/
+dynamic-analysis/

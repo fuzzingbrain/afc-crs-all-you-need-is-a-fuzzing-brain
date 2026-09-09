@@ -35,7 +35,52 @@ def _opening_with_recon(recon: list | None = None) -> str:
     computed — files scanned, entry found or not, graph size, reachability) so a
     reader can audit not just the worklist but how it was produced.
     """
+    import os
     from pathlib import Path
+    # Ablation "bare" mode: hand the model NO worklist at all (no static analysis,
+    # no override) -- just the plain task. Isolates what the worklist itself adds.
+    if os.environ.get("FBAGENT_NO_WORKLIST", "").strip().lower() in ("1","true","yes","on"):
+        if recon is not None:
+            recon.append({"kind": "recon", "phase": "bare", "note": "no worklist (ablation)"})
+        return OPENING
+    # Controlled-experiment override: a precomputed worklist replaces the built-in
+    # static analysis, so we can measure what a DIFFERENT worklist generator brings
+    # with everything else held fixed. FBAGENT_WL_DIR/<bug_id>.md, keyed by the
+    # challenge's bench.yaml bug_id. Absent or missing file -> normal analysis.
+    wl_dir = os.environ.get("FBAGENT_WL_DIR", "").strip()
+    if wl_dir:
+        try:
+            import yaml
+            bench = Path.cwd() / "bench.yaml"
+            bug_id = (yaml.safe_load(bench.read_text()) or {}).get("bug_id") \
+                if bench.is_file() else None
+            wl_file = (Path(wl_dir) / f"{bug_id}.md") if bug_id else None
+            if wl_file and wl_file.is_file():
+                summary = wl_file.read_text()
+                no_trace = os.environ.get("FBAGENT_NO_TRACE", "").strip().lower() \
+                    in ("1", "true", "yes", "on")
+                tool_blurb = (
+                    "\n\nTwo deterministic tools back this up: `gates <func>` gives "
+                    "the literal input constraints (magic bytes, lengths) on the "
+                    "path to a function, so you can build a seed that reaches it; "
+                    "`diversify <crashed funcs>` names the reachable sinks furthest "
+                    "from what you already cracked. Use them."
+                    if no_trace else
+                    "\n\nThree deterministic tools back this up: `gates`, `trace`, "
+                    "`diversify`. Use them.")
+                if recon is not None:
+                    recon.append({"kind": "recon", "phase": "override",
+                                  "note": f"worklist override from {wl_file}"})
+                return (
+                    "Before you start, a deterministic static analysis of this "
+                    "challenge has already been run for you. Treat it as a computed "
+                    "worklist of where to look -- not as confirmed bugs.\n\n"
+                    + summary + tool_blurb
+                    + "\n\n--- your task ---\n" + OPENING)
+        except Exception as e:
+            if recon is not None:
+                recon.append({"kind": "recon", "phase": "override-error",
+                              "note": repr(e)})
     try:
         from fbagent import analysis
         out = analysis.analyze(Path.cwd(), recon=recon)
@@ -139,16 +184,47 @@ def main() -> int:
                     in ("1", "true", "yes", "on"),
                     help="disable building/running a coverage-guided fuzzer "
                          "(env: FBAGENT_NO_FUZZING)")
+    # Dynamic tracing (the gdb `trace` bridge) is on by default; a controlled
+    # experiment that wants the result attributable to static reasoning + the
+    # worklist alone turns it off. tools.py reads FBAGENT_NO_TRACE at import.
+    ap.add_argument("--no-trace", action="store_true",
+                    default=os.environ.get("FBAGENT_NO_TRACE", "").strip().lower()
+                    in ("1", "true", "yes", "on"),
+                    help="disable the dynamic gdb `trace` tool "
+                         "(env: FBAGENT_NO_TRACE)")
     ap.add_argument("--model", default=None)
     args = ap.parse_args()
 
-    system = SYSTEM
+    if args.no_trace:
+        os.environ["FBAGENT_NO_TRACE"] = "1"       # belt-and-suspenders; tools reads at import
     if args.no_fuzzing:
         os.environ["FBAGENT_NO_FUZZING"] = "1"     # what tools.bash's guard reads
+
+    system = SYSTEM
+    # Authoritative tool-availability note for ablation runs: the prose above may
+    # describe helpers this run does not have, so state exactly what IS callable.
+    def _envflag(n):
+        return os.environ.get(n, "").strip().lower() in ("1", "true", "yes", "on")
+    no_helpers = _envflag("FBAGENT_NO_HELPERS")
+    no_trace = _envflag("FBAGENT_NO_TRACE") or args.no_trace
+    no_fuzz = _envflag("FBAGENT_NO_FUZZING") or args.no_fuzzing
+    if no_helpers or no_trace:
+        avail = ["read", "glob", "grep", "bash"]
+        if not no_helpers:
+            avail += ["gates", "diversify"]
+        if not no_trace:
+            avail.append("trace")
+        gone = [t for t in ("gates", "trace", "diversify") if t not in avail]
+        system += ("\n\n## Tools available in this run\n\nOnly these tools exist here: "
+                   + ", ".join(f"`{t}`" for t in avail)
+                   + ". Ignore any mention of " + ", ".join(f"`{t}`" for t in gone)
+                   + " elsewhere in these instructions -- "
+                   + ("it is" if len(gone) == 1 else "they are")
+                   + " not available. Find the fault by reading the code and confirming "
+                     "with `./submit`.")
+    if no_fuzz:
         system += ("\n\n## Constraint\n\nCoverage-guided fuzzing is disabled here. "
-                   "Do not build or run a fuzzer (libFuzzer, AFL, honggfuzz). Find "
-                   "the fault by reading the code and constructing targeted inputs, "
-                   "using the worklist, `gates`, and `trace`.")
+                   "Do not build or run a fuzzer (libFuzzer, AFL, honggfuzz).")
 
     llm = LLM(model=args.model) if args.model else LLM()
     agent = Agent(system, llm=llm, max_steps=args.max_steps,
