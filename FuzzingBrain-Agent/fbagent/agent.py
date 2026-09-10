@@ -38,6 +38,7 @@ _COMPACT_LARGE_CHARS = 1500      # only elide a result body larger than this
 _ELIDED_PREFIX = "[elided:"      # marker so compaction is idempotent
 _COLD_TOKENS_PER_CHAR = 0.25     # until a real ratio is observed
 _BUDGET_EVERY = 30               # inject the progress note every N steps
+_MAX_CONSECUTIVE_TRUNC = 8       # give up after this many back-to-back truncations
 
 
 def _is_tool_result_turn(m: dict) -> bool:
@@ -113,6 +114,7 @@ class Agent:
         self.steps = 0
         self._tokens_per_char = _COLD_TOKENS_PER_CHAR   # self-calibrated each call
         self.compactions = 0                            # how many times we elided
+        self._consecutive_trunc = 0                     # back-to-back max_tokens hits
         self.stop_reason = "unstarted"
 
     def _total_tokens(self) -> int:
@@ -369,6 +371,23 @@ class Agent:
 
             if resp.stop_reason != "tool_use":
                 reason = resp.stop_reason or "end_turn"
+                # A truncated reply (hit the per-turn output cap) is NOT the model
+                # choosing to stop -- it ran out of room mid-reply. Ending the run
+                # here wastes the rest of the budget (this capped a Haiku cell at
+                # $2.93). Nudge it to continue concisely instead; the top-of-loop
+                # budget check still bounds it, and a run of pure truncations
+                # (never yielding a tool call) is capped so it can't spin forever.
+                if reason == "max_tokens":
+                    self._consecutive_trunc += 1
+                    if self._consecutive_trunc <= _MAX_CONSECUTIVE_TRUNC:
+                        self.forced_continuations += 1
+                        self.messages.append({"role": "user", "content":
+                            "(Your previous reply hit the output limit before it "
+                            "finished. Continue from where you left off; be concise "
+                            "and make a tool call.)"})
+                        continue
+                    self.stop_reason = "max_tokens (repeated truncation)"
+                    break
                 # Below the spend line, a voluntary stop becomes a nudge to hunt a
                 # different bug rather than an end — the budget is there to spend.
                 if self._keep_hunting(reason):
@@ -377,6 +396,7 @@ class Agent:
                     continue
                 self.stop_reason = reason
                 break
+            self._consecutive_trunc = 0   # a real tool-use turn resets the counter
 
             # Run every tool the model asked for and return all results in one
             # user turn — splitting them trains the model out of parallel calls.

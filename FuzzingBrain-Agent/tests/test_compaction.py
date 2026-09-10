@@ -151,3 +151,53 @@ def test_assistant_compaction_idempotent():
     a = _agent_asst()
     a._compact_assistant_history(keep_recent=2, large_chars=1500)
     assert a._compact_assistant_history(keep_recent=2, large_chars=1500) == 0
+
+
+# --- truncation handling: max_tokens is a cut-off, not a voluntary stop --------
+
+class _Resp:
+    def __init__(self, reason, blocks=None):
+        self.stop_reason = reason
+        self.content = blocks or [type("B", (), {"type": "text", "text": "..."})()]
+
+
+def _fake_llm(seq):
+    llm = LLM.__new__(LLM)
+    llm.model = "claude-haiku-4-5"
+    llm.context_window = context_window("claude-haiku-4-5")
+    llm.usage = {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
+    llm.last_prompt_tokens = 100
+    llm.served_model = None
+    it = iter(seq)
+    llm.call = lambda s, m, t: next(it)
+    type(llm).cost_usd = property(lambda self: 0.5)   # always under any cap
+    return llm
+
+
+def _run(seq):
+    a = Agent("sys", llm=_fake_llm(seq), max_usd=10, min_spend_fraction=0.0, deadline_s=3600)
+    return a.run("go")
+
+
+def test_max_tokens_continues_then_stops_on_end_turn():
+    r = _run([_Resp("max_tokens"), _Resp("max_tokens"), _Resp("end_turn")])
+    assert r["stop_reason"] == "end_turn"
+    assert r["forced_continuations"] == 2   # both truncations were continued, not stopped
+
+
+def test_repeated_truncation_is_capped():
+    from fbagent.agent import _MAX_CONSECUTIVE_TRUNC
+    r = _run([_Resp("max_tokens")] * 50)
+    assert "repeated truncation" in r["stop_reason"]
+    assert r["steps"] <= _MAX_CONSECUTIVE_TRUNC + 2   # bounded, not infinite
+
+
+def test_tool_use_turn_resets_truncation_counter(monkeypatch):
+    import fbagent.tools as T
+    monkeypatch.setattr(T, "run_tool", lambda n, a: ("ok", False))
+    tool = _Resp("tool_use", [type("B", (), {"type": "tool_use", "id": "t",
+                                             "name": "read", "input": {"path": "x"}})()])
+    # 2 truncations, a real tool turn, 2 more truncations: never 3-in-a-row, so no give-up
+    r = _run([_Resp("max_tokens"), _Resp("max_tokens"), tool,
+              _Resp("max_tokens"), _Resp("max_tokens"), _Resp("end_turn")])
+    assert r["stop_reason"] == "end_turn"

@@ -94,7 +94,7 @@ class LLM:
     """One Claude endpoint, configured once, with our cache policy baked in."""
 
     def __init__(self, model: str = DEFAULT_MODEL, effort: str = DEFAULT_EFFORT,
-                 max_tokens: int = 16000):
+                 max_tokens: int = 32000):
         self.client = anthropic.Anthropic()
         self.model = model
         self.served_model: str | None = None
