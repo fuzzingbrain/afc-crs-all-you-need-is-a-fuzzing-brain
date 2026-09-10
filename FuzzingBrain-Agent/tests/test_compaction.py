@@ -88,3 +88,66 @@ def test_context_overflow_detection():
     assert _is_context_overflow(Exception("prompt is too long: 210000 tokens"))
     assert _is_context_overflow(Exception("context_length_exceeded"))
     assert not _is_context_overflow(Exception("rate limit"))
+
+
+def _agent_asst(n_turns=300, script_chars=4000, prose_chars=4000):
+    """A run whose bulk is the model's OWN output (bash scripts + prose); tool
+    results are tiny, so only assistant compaction can bring it under the window."""
+    llm = LLM.__new__(LLM)
+    llm.model = "claude-haiku-4-5"
+    llm.context_window = context_window("claude-haiku-4-5")
+    llm.last_prompt_tokens = 0
+    llm.usage = {"input": 0, "output": 0, "cache_read": 0, "cache_write": 0}
+    a = Agent.__new__(Agent)
+    a.system = "S" * 500
+    a.llm = llm
+    a._tokens_per_char = 0.25
+    a.compactions = 0
+    a.max_usd = 20.0
+    a.deadline = None
+    a._deadline_total_s = 0
+    a.steps = n_turns
+    a.messages = [{"role": "user", "content": "OPENING"}]
+    script = "x=1\n" * (script_chars // 4)
+    prose = "I will analyze this now. " * (prose_chars // 25)
+    for i in range(n_turns):
+        a.messages.append({"role": "assistant", "content": [
+            {"type": "text", "text": prose},
+            {"type": "tool_use", "id": f"t{i}", "name": "bash",
+             "input": {"command": script}}]})
+        a.messages.append({"role": "user", "content": [
+            {"type": "tool_result", "tool_use_id": f"t{i}", "content": "ok"}]})
+    return a
+
+
+def test_assistant_compaction_fits_when_output_is_the_bulk():
+    a = _agent_asst()
+    win = a.llm.context_window
+    assert a._estimate_tokens() > win          # own output overflows
+    a._compact_to_fit()
+    assert a._estimate_tokens() <= min(0.85 * win, win - 24_000)
+
+
+def test_assistant_compaction_keeps_ids_and_recent_and_thinking():
+    a = _agent_asst()
+    # a thinking block in an OLD turn must survive verbatim (reasoning models)
+    a.messages[1]["content"].insert(0, {"type": "thinking", "thinking": "T" * 5000, "signature": "s"})
+    a._compact_to_fit()
+    at = [m for m in a.messages if m["role"] == "assistant"]
+    # newest 2 assistant turns kept whole
+    for m in at[-2:]:
+        for b in m["content"]:
+            if b.get("type") == "tool_use":
+                assert "__elided__" not in str(b["input"])
+    # old bash args elided, id kept -> pairing valid
+    old_tu = [b for b in at[0]["content"] if b.get("type") == "tool_use"][0]
+    assert "__elided__" in str(old_tu["input"]) and old_tu["id"] == "t0"
+    # thinking block never touched
+    think = [b for m in at for b in m["content"] if b.get("type") == "thinking"]
+    assert think and think[0]["thinking"] == "T" * 5000
+
+
+def test_assistant_compaction_idempotent():
+    a = _agent_asst()
+    a._compact_assistant_history(keep_recent=2, large_chars=1500)
+    assert a._compact_assistant_history(keep_recent=2, large_chars=1500) == 0

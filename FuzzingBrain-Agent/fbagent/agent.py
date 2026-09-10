@@ -216,6 +216,47 @@ class Agent:
             self.messages[i] = {**self.messages[i], "content": new_blocks}
         return reclaimed
 
+    def _compact_assistant_history(self, keep_recent: int, large_chars: int) -> int:
+        """Elide the OWN output of OLD assistant turns: big tool-call ARGS (the
+        bash scripts the model wrote) and long prose. This is the other half of
+        the context -- on a small window a 600-step Haiku run fills it with its
+        own text/scripts, which tool-result compaction never touches. Keeps every
+        tool_use id+name (so pairing stays valid) and never touches `thinking`
+        blocks (a reasoning model must get them back verbatim). Idempotent."""
+        idxs = [i for i, m in enumerate(self.messages)
+                if m.get("role") == "assistant" and isinstance(m.get("content"), list)]
+        old = idxs[:-keep_recent] if keep_recent > 0 else idxs
+        reclaimed = 0
+        for i in old:
+            new_blocks = []
+            for b in self.messages[i]["content"]:
+                kind = b.get("type") if isinstance(b, dict) else getattr(b, "type", None)
+                if kind == "tool_use":
+                    name = b.get("name") if isinstance(b, dict) else getattr(b, "name", "")
+                    bid = b.get("id") if isinstance(b, dict) else getattr(b, "id", "")
+                    inp = b.get("input") if isinstance(b, dict) else getattr(b, "input", None)
+                    args = json.dumps(inp or {}, default=str)
+                    if len(args) > large_chars and "__elided__" not in args:
+                        reclaimed += len(args)
+                        new_blocks.append({"type": "tool_use", "id": bid, "name": name,
+                                           "input": {"__elided__": f"{len(args)} chars of args "
+                                                     "removed to save context"}})
+                        continue
+                    new_blocks.append({"type": "tool_use", "id": bid, "name": name, "input": inp})
+                elif kind == "text":
+                    txt = b.get("text") if isinstance(b, dict) else getattr(b, "text", "")
+                    if txt and len(txt) > large_chars and not txt.startswith(_ELIDED_PREFIX):
+                        reclaimed += len(txt) - 200
+                        new_blocks.append({"type": "text",
+                                           "text": f"{_ELIDED_PREFIX} {len(txt)} chars, kept the head] "
+                                                   + txt[:200]})
+                    else:
+                        new_blocks.append({"type": "text", "text": txt})
+                else:
+                    new_blocks.append(b)   # thinking / anything else: verbatim
+            self.messages[i] = {**self.messages[i], "content": new_blocks}
+        return reclaimed
+
     def _compact_to_fit(self) -> int:
         """Compact BEFORE sending so the about-to-send context leaves room for a
         full reply. Escalates: elide old large bodies (keep recent 4), then keep
@@ -226,14 +267,22 @@ class Agent:
             return 0
         target = min(_COMPACT_TRIGGER_FRAC * window, window - _OUTPUT_RESERVE)
         reclaimed = 0
-        for keep in (_COMPACT_KEEP_RECENT, 1, 0):
+        # First reclaim tool-result bodies (keep recent 4 -> 1 -> 0), then, if the
+        # estimate still does not fit, the assistant's own turns (its scripts and
+        # prose), same escalation. The newest 2 assistant turns are always kept
+        # whole so the model still sees what it just did.
+        steps = [("tool", 4), ("tool", 1), ("tool", 0),
+                 ("asst", 4), ("asst", 2)]
+        for kind, keep in steps:
             if self._estimate_tokens() <= target:
                 break
-            r = self._compact_history(keep_recent=keep,
-                                      large_chars=_COMPACT_LARGE_CHARS)
+            if kind == "tool":
+                r = self._compact_history(keep_recent=keep,
+                                          large_chars=_COMPACT_LARGE_CHARS)
+            else:
+                r = self._compact_assistant_history(keep_recent=keep,
+                                                    large_chars=_COMPACT_LARGE_CHARS)
             reclaimed += r
-            if r == 0 and keep == 0:
-                break
         if reclaimed:
             self.compactions += 1
         return reclaimed
@@ -297,6 +346,7 @@ class Agent:
                 # -- the exact failure that capped the Haiku D5 cells at ~$4.
                 if _is_context_overflow(e):
                     self._compact_history(keep_recent=0, large_chars=1)
+                    self._compact_assistant_history(keep_recent=2, large_chars=1)
                     self.compactions += 1
                     try:
                         resp = self.llm.call(self.system, self.messages, SCHEMAS)
