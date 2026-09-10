@@ -1563,11 +1563,19 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
 
     if not success:
         logger.warning(f"[POV] Verification failed: {error}")
+        # Keep whatever the run produced (or the error) so the dashboard can
+        # show why a verify failed instead of a blank "No crash output".
+        try:
+            pov.sanitizer_output = (output or error or "")[:5000]
+            pov.verified_at = datetime.now()
+            repos.povs.save(pov)
+        except Exception as e:
+            logger.debug(f"[POV] Could not record failed-verify output: {e}")
         return {
             "success": False,
             "crashed": False,
             "vuln_type": None,
-            "sanitizer_output": "",
+            "sanitizer_output": output or error or "",
             "error": error,
         }
 
@@ -1596,6 +1604,9 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
                         "duplicate_of": dup.get("first_pov_id") or "",
                         "vuln_type": vuln_type,
                         "is_successful": False,
+                        # It crashed -- keep the sanitizer output even though it
+                        # repeats a known bug, so the dashboard can show it.
+                        "sanitizer_output": output[:10000],
                     },
                 )
             except Exception as e:
