@@ -216,7 +216,14 @@ class WorkerContext:
 
         self.ended_at = datetime.now()
 
-        if exc_type:
+        if exc_type and exc_type.__name__ in ("Terminated", "SystemExit", "KeyboardInterrupt"):
+            # The controller revokes every worker once the task is over
+            # (target reached, budget, timeout); billiard delivers that as
+            # Terminated(-signum). Recording it as "failed: -241" made a run
+            # that had just found its POV read like a crash.
+            self.status = "completed"
+            self.error = f"Stopped by controller ({exc_type.__name__})"
+        elif exc_type:
             self.status = "failed"
             self.error = str(exc_val) if exc_val else str(exc_type)
         else:

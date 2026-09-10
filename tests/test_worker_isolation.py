@@ -362,3 +362,27 @@ class TestWorkerContextRegistry:
         )
         assert ctx.status == "failed"
         assert "boom" in ctx.error
+
+    def test_revoked_worker_is_stopped_not_failed(self):
+        """
+        The controller revokes every worker once the task is over, and
+        billiard delivers that SIGTERM as Terminated(-signum). That is the
+        task ending, not the worker breaking: it must not be recorded as
+        failed with an error of "-241".
+        """
+        from billiard.exceptions import Terminated
+
+        ctx = WorkerContext(
+            task_id=str(ObjectId()),
+            fuzzer="test_fuzzer",
+            sanitizer="address",
+        )
+        with _worker_contexts_lock:
+            _worker_contexts[ctx.worker_id] = ctx
+
+        with patch("fuzzingbrain.db.get_database", return_value=MagicMock()):
+            ctx.__exit__(Terminated, Terminated(-241), None)
+
+        assert ctx.worker_id not in _worker_contexts
+        assert ctx.status == "completed"
+        assert "Stopped by controller" in ctx.error

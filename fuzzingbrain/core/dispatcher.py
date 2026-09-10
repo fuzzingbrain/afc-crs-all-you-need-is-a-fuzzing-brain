@@ -904,6 +904,17 @@ def generate(variant: int = 1) -> bytes:
 
         logger.info(f"Shutdown {shutdown_count} FuzzerManager(s)")
 
+        # The managers above live in the Celery worker process, not here, so
+        # that loop finds nothing once the worker has been revoked -- and the
+        # revoke's SIGTERM stops the Python side only, leaving the fuzzer
+        # containers running. Find them by the task label instead.
+        try:
+            from .docker_limits import kill_task_containers
+
+            kill_task_containers(str(self.task.task_id))
+        except Exception as e:
+            logger.warning(f"Could not sweep the task's containers: {e}")
+
         # The slot ledger outlives the processes that held slots in it, so
         # whatever is still listed belongs to a worker that is already gone.
         try:

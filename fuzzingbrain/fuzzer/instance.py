@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from loguru import logger
 
-from ..core.docker_limits import docker_resource_args
+from ..core.docker_limits import docker_resource_args, task_label_args
 from .models import (
     CRASH_ARTIFACT_PREFIXES,
     FuzzerStatus,
@@ -43,6 +43,7 @@ class FuzzerInstance:
         crashes_dir: Path,
         fuzzer_type: FuzzerType = FuzzerType.GLOBAL,
         config: Union[GlobalFuzzerConfig, SPFuzzerConfig] = None,
+        task_id: str = "",
     ):
         """
         Initialize FuzzerInstance.
@@ -55,8 +56,11 @@ class FuzzerInstance:
             crashes_dir: Directory for crash outputs
             fuzzer_type: GLOBAL or SP
             config: Fuzzer configuration
+            task_id: Owning task; stamped on the container as a label so the
+                controller can kill it after the worker process is gone
         """
         self.instance_id = instance_id
+        self.task_id = str(task_id or "")
         self.fuzzer_path = Path(fuzzer_path)
         self.docker_image = docker_image
         self.corpus_dir = Path(corpus_dir)
@@ -114,6 +118,7 @@ class FuzzerInstance:
             "linux/amd64",
             "--entrypoint",
             "",  # Bypass base-runner's entrypoint
+            *task_label_args(self.task_id),
         ]
 
         # Cap the container itself: fork mode runs fork_level children, each
