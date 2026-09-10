@@ -7,6 +7,7 @@ Runs one instance per task, communicates via Unix Domain Socket.
 """
 
 import asyncio
+import re as _re
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 import json
@@ -35,6 +36,64 @@ from ..analysis import extract_functions_from_file
 from ..db import MongoDB, init_repos
 from ..core import Config
 from ..core.logging import get_analyzer_banner_and_header
+
+
+def _path_parts(path: str) -> List[str]:
+    """A path's components, with the relative noise stripped.
+
+    The index records whatever the compiler wrote into DWARF: "url.c",
+    "../lib/nonblock.c", "/src/curl/lib/url.c" all occur in one graph. A
+    diff names the same files repo-relative ("lib/url.c"). Neither form is
+    a prefix or substring of the other, so matching is done on the
+    components that both sides actually share.
+    """
+    return [p for p in path.replace("\\", "/").split("/") if p and p != ".." and p != "."]
+
+
+def file_basename_pattern(file_path: str) -> Optional[str]:
+    """Regex matching every indexed path whose last component is this file's.
+
+    Anchored at both ends so "url.c" does not also pick up "curl_url.c" or
+    "urlapi.c" -- the unescaped, unanchored substring match it replaces did
+    both and, worse, matched nothing at all for "lib/url.c" because the index
+    never stores that directory.
+    """
+    parts = _path_parts(file_path or "")
+    if not parts:
+        return None
+    return r"(^|/)" + _re.escape(parts[-1]) + r"$"
+
+
+def select_by_path_suffix(functions: List[dict], file_path: str) -> List[dict]:
+    """Narrow basename matches to the ones whose directories agree too.
+
+    Two files can share a basename (lib/x.c and tests/x.c). When any
+    candidate's path ends with as much of the query's path as it has to
+    compare against, only those candidates are returned; otherwise every
+    basename match is, because a bare "x.c" in the index says nothing about
+    its directory and rejecting it would rediscover the original bug.
+    """
+    query = _path_parts(file_path or "")
+    if len(query) < 2 or not functions:
+        return functions
+
+    def shared_suffix(candidate: str) -> int:
+        parts = _path_parts(candidate)
+        n = 0
+        while (
+            n < len(parts)
+            and n < len(query)
+            and parts[-1 - n] == query[-1 - n]
+        ):
+            n += 1
+        return n
+
+    best = max(shared_suffix(f.get("file_path", "")) for f in functions)
+    if best < 2:
+        return functions
+    return [f for f in functions if shared_suffix(f.get("file_path", "")) == best]
+
+
 
 # Type variable for generic return type
 T = TypeVar("T")
@@ -738,17 +797,20 @@ class AnalysisServer:
 
     def _get_functions_by_file_sync(self, file_path: str) -> List[dict]:
         """Sync implementation of _get_functions_by_file."""
+        pattern = file_basename_pattern(file_path)
+        if pattern is None:
+            return []
         cursor = self.repos.functions.collection.find(
             {
                 "task_id": self.task_id,
-                "file_path": {"$regex": file_path},
+                "file_path": {"$regex": pattern},
             }
         )
         results = []
         for func in cursor:
             func.pop("_id", None)
             results.append(_serialize_doc(func))
-        return results
+        return select_by_path_suffix(results, file_path)
 
     async def _get_functions_by_file(self, file_path: str) -> List[dict]:
         """Get all functions in a file."""

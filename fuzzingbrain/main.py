@@ -527,6 +527,17 @@ def create_config_from_args(args: argparse.Namespace) -> Config:
     # JSON mode - load from file
     if args.config:
         config = Config.from_json(args.config)
+        # A task file that names no model profile would run on the routing
+        # default ("current": Sonnet 4.5 everywhere) without saying so. One
+        # cu-delta-01 run did exactly that and cost five times the
+        # period-correct run it was meant to repeat. Refuse instead.
+        if not config.model_profile and not os.environ.get("FB_MODEL_PROFILE"):
+            raise SystemExit(
+                f"{args.config}: no \"model_profile\" in the task file and "
+                "FB_MODEL_PROFILE is unset. Add \"model_profile\": "
+                "\"period-correct\" (or \"current\") rather than falling back "
+                "to the default silently."
+            )
         # Infrastructure config from environment (not from JSON)
         config.mongodb_url = os.environ.get("MONGODB_URL", "mongodb://localhost:27017")
         config.mongodb_db = os.environ.get("MONGODB_DB", "fuzzingbrain")

@@ -448,7 +448,7 @@ This shows how input enters the library - only reachable code matters!
     ) -> str:
         """Format suspicious point details section."""
         reachability_note = ""
-        if not static_reachable:
+        if not static_reachable and self.scan_mode != "delta":
             reachability_note = "\nWarning: **Static analysis says UNREACHABLE** - Check for function pointer patterns!"
 
         section = f"""## Suspicious Point Details
@@ -496,10 +496,33 @@ Before marking as FP, you MUST check for function pointer patterns:
         function_name: str,
     ) -> str:
         """Format verification steps section."""
-        fp_check = self._format_fp_check_section(static_reachable, function_name)
-
-        callers_hint = self.find_callers_hint(function_name)
         source_hint = self.read_function_hint(function_name)
+
+        if self.scan_mode == "delta":
+            # The system prompt for delta mode says reachability is not this
+            # agent's job; the steps must say the same thing, or the model
+            # follows whichever it read last. One verifier read "verify a
+            # direct path exists" here, found the harness allow-lists ws/wss,
+            # and marked the real bug a false positive without noticing the
+            # diff had changed the scheme lookup to let the new protocol in.
+            return f"""
+
+## Verification Steps (Complete ALL)
+
+1. **READ SOURCE CODE**: Use {source_hint} for {function_name}. Confirm the
+   bug described is actually in the code.
+
+2. **VERIFY SANITIZER COMPATIBILITY**: Is the bug type detectable by {self.sanitizer}?
+   - {self._get_sanitizer_vuln_types()}
+
+3. **UPDATE SP**: Call update_suspicious_point with your verdict. Set
+   reachability_status="assumed_reachable"; reachability is left to the POV test.
+
+Do NOT spend tool calls on callers, protocol allow-lists or entry-point paths.
+"""
+
+        fp_check = self._format_fp_check_section(static_reachable, function_name)
+        callers_hint = self.find_callers_hint(function_name)
         return f"""
 
 ## Verification Steps (Complete ALL)
@@ -522,6 +545,24 @@ Before marking as FP, you MUST check for function pointer patterns:
 Start by verifying reachability with {callers_hint}.
 """
 
+    def _format_validity_section(self) -> str:
+        """What makes a suspicious point valid, by scan mode."""
+        if self.scan_mode == "delta":
+            return f"""A suspicious point is VALID if:
+1. The bug described is really in the code
+2. It's DETECTABLE by `{self.sanitizer}` (bug type must match)
+
+Reachability from `{self.fuzzer}` is NOT judged in delta mode: assume the code
+is reachable and let the POV agent test it. Protocol allow-lists, option checks
+and call-graph gaps are not grounds for a false positive here.
+"""
+        return f"""A suspicious point is VALID only if:
+1. It's REACHABLE from `{self.fuzzer}` (verify call path exists)
+2. It's DETECTABLE by `{self.sanitizer}` (bug type must match)
+
+If either is NO -> mark as FALSE POSITIVE immediately.
+"""
+
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message for verification mode."""
         suspicious_point = kwargs.get("suspicious_point", self.suspicious_point)
@@ -541,12 +582,7 @@ Start by verifying reachability with {callers_hint}.
 **Fuzzer**: `{self.fuzzer}`
 **Sanitizer**: `{self.sanitizer}`
 
-A suspicious point is VALID only if:
-1. It's REACHABLE from `{self.fuzzer}` (verify call path exists)
-2. It's DETECTABLE by `{self.sanitizer}` (bug type must match)
-
-If either is NO -> mark as FALSE POSITIVE immediately.
-
+{self._format_validity_section()}
 """
         message += self._format_fuzzer_code_section(fuzzer_code)
 
