@@ -1,0 +1,8 @@
+# FuzzingBrain-Agent v1.1 (full substrate: worklist + gates + trace + diversify),
+# pinned to ONE model in the command line so the model can never come from the
+# environment. $20 cap, no voluntary stop before the cap, fuzzing allowed.
+#   fb-bench run <bugs> --agent /home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/FuzzingBrain-Agent/fbagent-opus48.agent.yaml --model claude-opus-4-8 --timeout 3600
+name: fbagent-opus48
+command: "python3 -m fbagent.run --timeout {timeout} --model claude-opus-4-8 --max-usd 20 --min-spend-frac 1.0"
+shell_env: FBAGENT_SHELL
+network: blocked

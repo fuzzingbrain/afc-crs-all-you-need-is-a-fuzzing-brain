@@ -14,6 +14,7 @@ later.
 
 from __future__ import annotations
 
+import json
 import time
 
 import anthropic
@@ -22,6 +23,59 @@ from .llm import LLM
 from .tools import SCHEMAS, run_tool
 
 
+# --- Context compaction (mirrors the bench runner) --------------------------
+# The message list is append-only, so a long run grows until it overflows the
+# model's window and the API rejects the call with a 400 "prompt is too long".
+# Before each call we estimate the about-to-send size and, if it crosses a
+# fraction of the window, elide the large output BODIES of OLD tool results --
+# keeping the tool call (name+args live in the assistant turn) and a short
+# placeholder, so the model still knows what it ran, just not the full dump.
+# Pinned and never elided: the opening task turn and every nudge (both strings).
+_COMPACT_TRIGGER_FRAC = 0.85     # of the total window...
+_OUTPUT_RESERVE = 24_000         # ...but always leave room for a full reply
+_COMPACT_KEEP_RECENT = 4         # newest tool-result turns kept whole
+_COMPACT_LARGE_CHARS = 1500      # only elide a result body larger than this
+_ELIDED_PREFIX = "[elided:"      # marker so compaction is idempotent
+_COLD_TOKENS_PER_CHAR = 0.25     # until a real ratio is observed
+_BUDGET_EVERY = 30               # inject the progress note every N steps
+
+
+def _is_tool_result_turn(m: dict) -> bool:
+    c = m.get("content")
+    return (m.get("role") == "user" and isinstance(c, list) and c
+            and all(isinstance(b, dict) and b.get("type") == "tool_result" for b in c))
+
+
+def _block_chars(b) -> int:
+    """Characters a single content block contributes to the request."""
+    if isinstance(b, dict):
+        if b.get("type") == "tool_result":
+            return len(str(b.get("content") or ""))
+        if b.get("type") == "text":
+            return len(b.get("text") or "")
+        return len(json.dumps(b, default=str))
+    # SDK object on an assistant turn: text / thinking / tool_use input
+    kind = getattr(b, "type", None)
+    if kind == "text":
+        return len(getattr(b, "text", "") or "")
+    if kind == "thinking":
+        return len(getattr(b, "thinking", "") or "")
+    if kind == "tool_use":
+        return len(json.dumps(getattr(b, "input", None) or {}, default=str))
+    return 0
+
+
+_CONTEXT_OVERFLOW_MARKERS = (
+    "prompt is too long", "context length", "context_length_exceeded",
+    "maximum context", "too many tokens", "reduce the length",
+)
+
+
+def _is_context_overflow(e: Exception) -> bool:
+    return any(mk in str(e).lower() for mk in _CONTEXT_OVERFLOW_MARKERS)
+
+
+# --- The loop --------------------------------------------------------------
 class Agent:
     """The loop, bounded by the three classic budgets.
 
@@ -43,6 +97,7 @@ class Agent:
         self.max_tokens = max_tokens        # 0 = no token cap
         self.max_usd = max_usd              # 0 = no spend cap
         self.deadline = (time.time() + deadline_s) if deadline_s else None
+        self._deadline_total_s = deadline_s or 0
         # Keep-hunting guard: the model may not volunteer to stop until it has
         # spent this fraction of the spend cap. The metric rewards *distinct*
         # crashes, and a weak model tends to quit with most of its budget unused;
@@ -56,6 +111,8 @@ class Agent:
         self.step_cost: dict[int, float] = {}   # cumulative $ after each step's call
         self.messages: list[dict] = []
         self.steps = 0
+        self._tokens_per_char = _COLD_TOKENS_PER_CHAR   # self-calibrated each call
+        self.compactions = 0                            # how many times we elided
         self.stop_reason = "unstarted"
 
     def _total_tokens(self) -> int:
@@ -110,6 +167,108 @@ class Agent:
             return "deadline"
         return None
 
+    def _measure_chars(self) -> int:
+        chars = len(self.system or "")
+        for m in self.messages:
+            c = m.get("content")
+            if isinstance(c, str):
+                chars += len(c)
+            elif isinstance(c, list):
+                for b in c:
+                    chars += _block_chars(b)
+        return chars
+
+    def _estimate_tokens(self) -> int:
+        """Pre-call size estimate: measured chars x a ratio calibrated from the
+        provider's real prompt-token count on the previous call, so it tracks
+        this model's tokenizer and the tools-schema overhead a char count misses.
+        A guard only; the provider's own count is authoritative."""
+        return int(self._measure_chars() * self._tokens_per_char)
+
+    def _calibrate(self) -> None:
+        sent = self._measure_chars()
+        real = self.llm.last_prompt_tokens
+        if sent > 0 and real > 0:
+            self._tokens_per_char = real / sent
+
+    def _compact_history(self, keep_recent: int, large_chars: int) -> int:
+        """Elide big OLD tool-result bodies in place; return chars reclaimed.
+        Keeps the tool_use_id/is_error (so the call<->result pairing stays valid),
+        spares the newest `keep_recent` tool-result turns and any small body, and
+        is idempotent (an already-elided body is skipped)."""
+        idxs = [i for i, m in enumerate(self.messages) if _is_tool_result_turn(m)]
+        old = idxs[:-keep_recent] if keep_recent > 0 else idxs
+        reclaimed = 0
+        for i in old:
+            new_blocks = []
+            for b in self.messages[i]["content"]:
+                body = str(b.get("content") or "")
+                if (not body.startswith(_ELIDED_PREFIX)
+                        and len(body) > large_chars):
+                    reclaimed += len(body)
+                    nb = dict(b)
+                    nb["content"] = (f"{_ELIDED_PREFIX} tool output was "
+                                     f"{len(body)} chars, removed to save context; "
+                                     f"re-run the tool if you need it again]")
+                    new_blocks.append(nb)
+                else:
+                    new_blocks.append(b)
+            self.messages[i] = {**self.messages[i], "content": new_blocks}
+        return reclaimed
+
+    def _compact_to_fit(self) -> int:
+        """Compact BEFORE sending so the about-to-send context leaves room for a
+        full reply. Escalates: elide old large bodies (keep recent 4), then keep
+        1, then all, until the estimate fits or nothing is left. Returns chars
+        reclaimed (0 if no compaction was needed)."""
+        window = self.llm.context_window
+        if window <= 0:
+            return 0
+        target = min(_COMPACT_TRIGGER_FRAC * window, window - _OUTPUT_RESERVE)
+        reclaimed = 0
+        for keep in (_COMPACT_KEEP_RECENT, 1, 0):
+            if self._estimate_tokens() <= target:
+                break
+            r = self._compact_history(keep_recent=keep,
+                                      large_chars=_COMPACT_LARGE_CHARS)
+            reclaimed += r
+            if r == 0 and keep == 0:
+                break
+        if reclaimed:
+            self.compactions += 1
+        return reclaimed
+
+    def _progress_note(self) -> str | None:
+        """A short turn/budget line, injected every _BUDGET_EVERY steps and once
+        the run is past 75% of its spend or time budget, so the model can pace
+        itself and lock in a candidate before a cap. Leaks no scorer signal."""
+        spent_frac = (self.llm.cost_usd / self.max_usd) if self.max_usd else 0.0
+        low = spent_frac >= 0.75 or self._time_frac() >= 0.75
+        if not (self.steps % _BUDGET_EVERY == 0 or low):
+            return None
+        parts = [f"Progress: step {self.steps}"]
+        if self.max_usd:
+            parts.append(f"spent ${self.llm.cost_usd:.2f} of ${self.max_usd:.0f}")
+        if self.deadline:
+            rem = max(0, int((self.deadline - time.time()) / 60))
+            parts.append(f"~{rem}m of wall-clock left")
+        note = "[" + "; ".join(parts) + ".]"
+        if low:
+            note += (" You are past 75% of your budget -- make sure every crash "
+                     "you have is locked in via ./submit, and spend what is left "
+                     "reaching a DIFFERENT fault, not refining one you already have.")
+        return note
+
+    def _time_frac(self) -> float:
+        if not self.deadline:
+            return 0.0
+        remaining = self.deadline - time.time()
+        # deadline was set as now+deadline_s; recover elapsed fraction lazily
+        total = getattr(self, "_deadline_total_s", None)
+        if not total:
+            return 0.0
+        return max(0.0, min(1.0, 1.0 - remaining / total))
+
     def run(self, opening: str) -> dict:
         """Run to a natural stop or the budget, and report what happened."""
         self.messages.append({"role": "user", "content": opening})
@@ -121,6 +280,10 @@ class Agent:
                 break
 
             self.steps += 1
+            # Pre-call compaction: elide old large tool outputs BEFORE sending so
+            # a turn that just appended a lot cannot overflow the window on this
+            # call. Keyed off the model's real window (Haiku 200k, Opus 1M).
+            self._compact_to_fit()
             # The SDK retries transient failures under the call; one that gets
             # past that ends the run cleanly rather than crashing the process —
             # any candidate already submitted has still been graded, so a
@@ -128,8 +291,23 @@ class Agent:
             try:
                 resp = self.llm.call(self.system, self.messages, SCHEMAS)
             except anthropic.APIError as e:
-                self.stop_reason = f"api_error: {type(e).__name__}"
-                break
+                # A context-overflow 400 is recoverable: hard-compact everything
+                # (no recent-turn protection, tiny threshold) and retry ONCE, so
+                # the run degrades instead of dying with most of its budget unused
+                # -- the exact failure that capped the Haiku D5 cells at ~$4.
+                if _is_context_overflow(e):
+                    self._compact_history(keep_recent=0, large_chars=1)
+                    self.compactions += 1
+                    try:
+                        resp = self.llm.call(self.system, self.messages, SCHEMAS)
+                    except anthropic.APIError as e2:
+                        self.stop_reason = f"api_error: {type(e2).__name__}"
+                        break
+                else:
+                    self.stop_reason = f"api_error: {type(e).__name__}"
+                    break
+            # Calibrate tokens/char from the provider's real prompt-token count.
+            self._calibrate()
 
             # Cumulative spend after this step's call, so a crash seen in this
             # step's tool results can be read back as "found at $X" (trace()).
@@ -168,6 +346,9 @@ class Agent:
             if not results:
                 self.stop_reason = "no tool calls"
                 break
+            note = self._progress_note()
+            if note:
+                results = results + [{"type": "text", "text": note}]
             self.messages.append({"role": "user", "content": results})
 
         return {
@@ -176,6 +357,7 @@ class Agent:
             "usage": dict(self.llm.usage),
             "cache_hit_rate": round(self.llm.cache_hit_rate, 3),
             "forced_continuations": self.forced_continuations,
+            "compactions": self.compactions,
         }
 
     def transcript_text(self) -> str:

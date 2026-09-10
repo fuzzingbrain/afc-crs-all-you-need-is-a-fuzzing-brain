@@ -134,7 +134,8 @@ def _archive(records: list, result: dict, llm, agent) -> str | None:
         sid = str(uuid.uuid4())
         meta = {"kind": "meta", "session": sid, "cwd": str(Path.cwd().resolve()),
                 "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-                "model": llm.model, "effort": getattr(llm, "effort", None),
+                "model": llm.model, "served_model": getattr(llm, "served_model", None),
+                "effort": getattr(llm, "effort", None),
                 "reasoning": getattr(llm, "reasoning", None),
                 "stop_reason": result.get("stop_reason"), "steps": result.get("steps"),
                 "cost_usd": round(llm.cost_usd, 4),
@@ -233,7 +234,13 @@ def main() -> int:
 
     recon: list = []
     opening = _opening_with_recon(recon)
+    print(f"[fbagent] model={llm.model} max_usd={agent.max_usd} "
+          f"min_spend_frac={agent.min_spend_fraction} timeout_s={args.timeout}",
+          flush=True)
     result = agent.run(opening)
+    if llm.served_model and llm.model.split("-2")[0] not in llm.served_model:
+        print(f"[fbagent] WARNING: requested {llm.model} but API served "
+              f"{llm.served_model}", file=sys.stderr)
 
     # The complete trajectory: the system prompt, then the recon generation trace
     # (how the worklist was computed — files, entry, graph, reachability), then
@@ -262,6 +269,8 @@ def main() -> int:
     print(agent.transcript_text())
     print("\n" + "=" * 60)
     print(json.dumps({
+        "model": llm.model,                       # what was requested
+        "served_model": llm.served_model,         # what the API actually ran
         "stop_reason": result["stop_reason"],
         "steps": result["steps"],
         "cost_usd": round(llm.cost_usd, 4),

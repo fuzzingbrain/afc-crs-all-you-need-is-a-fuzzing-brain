@@ -67,6 +67,29 @@ def _supports_reasoning(model: str) -> bool:
     return "haiku" not in m
 
 
+# Total context window (input + output + tools + reasoning) per model, mirroring
+# the bench's own table (fbbench/models/catalog.py). Compaction triggers off this
+# so a long run degrades instead of dying with a 400 "prompt is too long" -- the
+# exact failure that capped the Haiku D5 cells at ~$4 (188k of 200k) while Opus,
+# on a 1M window, ran to $20.
+_CONTEXT_WINDOWS = {
+    "opus-5": 1_000_000, "opus-4-8": 1_000_000, "opus-4-7": 1_000_000,
+    "sonnet-4-6": 1_000_000, "sonnet-4-5": 1_000_000,
+    "haiku-4-5": 200_000,
+}
+_DEFAULT_CONTEXT_WINDOW = 200_000
+
+
+def context_window(model: str) -> int:
+    """The model's total context window in tokens; a conservative 200k for an
+    unrecognized model so compaction errs toward triggering, not overflowing."""
+    m = (model or "").lower()
+    for key, win in _CONTEXT_WINDOWS.items():
+        if key in m:
+            return win
+    return _DEFAULT_CONTEXT_WINDOW
+
+
 class LLM:
     """One Claude endpoint, configured once, with our cache policy baked in."""
 
@@ -74,6 +97,11 @@ class LLM:
                  max_tokens: int = 16000):
         self.client = anthropic.Anthropic()
         self.model = model
+        self.served_model: str | None = None
+        self.context_window = context_window(model)
+        # True prompt size the provider counted on the last call (input + both
+        # cache tiers); the compaction guard reads this as ground truth.
+        self.last_prompt_tokens = 0
         self.effort = effort
         self.max_tokens = max_tokens
         self.reasoning = _supports_reasoning(model)
@@ -146,7 +174,14 @@ class LLM:
             kw["output_config"] = {"effort": self.effort}
         with self.client.messages.stream(**kw) as stream:
             resp = stream.get_final_message()
+        # The model the API actually served, recorded from the response, not the
+        # request: a run's model attribution must come from what ran.
+        self.served_model = getattr(resp, "model", None) or self.served_model
         u = resp.usage
+        self.last_prompt_tokens = (
+            (getattr(u, "input_tokens", 0) or 0)
+            + (getattr(u, "cache_read_input_tokens", 0) or 0)
+            + (getattr(u, "cache_creation_input_tokens", 0) or 0))
         self.usage["input"] += getattr(u, "input_tokens", 0) or 0
         self.usage["output"] += getattr(u, "output_tokens", 0) or 0
         self.usage["cache_read"] += getattr(u, "cache_read_input_tokens", 0) or 0
