@@ -702,13 +702,26 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
         reachability_status: str = None,
         reachability_multiplier: float = None,
         reachability_reason: str = None,
+        pattern: str = None,
+        taint: str = None,
+        control_flow_correct: str = None,
+        suppressed_upstream: str = None,
+        sanitizer_class_unobservable: bool = None,
     ) -> Dict[str, Any]:
         """
         Update an existing suspicious point after verification.
 
+        Report the DECOMPOSED evidence conditions; the system computes the score and
+        is_important from them (recall-first) — do NOT try to set a score yourself.
+
         Args:
             suspicious_point_id: ID of the suspicious point to update
-            score: Updated confidence score
+            pattern: "confirmed"/"refuted"/"unknown" — a dangerous op of the claimed class exists
+            taint: "confirmed"/"refuted"/"unknown" — the dangerous operand derives from fuzzer input
+            control_flow_correct: "confirmed"/"refuted"/"unknown" — path from harness to site is right
+            suppressed_upstream: "confirmed"/"refuted"/"unknown" — error already handled upstream (does NOT hard-reject)
+            sanitizer_class_unobservable: true ONLY if this class has no sanitizer signal (pure logic/info bug)
+            score: (legacy; ignored when evidence conditions are given)
             is_checked_by_verifier: Whether the point has been verified
             is_crash_found: Whether it's confirmed as a real vulnerability
             is_important: Whether it's high priority

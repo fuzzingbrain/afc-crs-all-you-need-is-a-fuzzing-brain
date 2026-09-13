@@ -24,6 +24,24 @@ from ..llms import LLMClient, ModelInfo
 from ..core.models.agent import AgentType
 
 
+from .evidence_score import Evidence, proceeds, priority, sanitizer_rule, CONFIRMED, REFUTED, UNKNOWN
+
+
+def _ev_from_args(a: dict, crash_type: str, is_crash_found) -> Evidence:
+    """Build the evidence vector from the LLM's decomposed report + dynamic crash.
+    sanitizer_match is a RULE on the bug class, never the LLM's merits call."""
+    def b(x):
+        return x if x in (CONFIRMED, REFUTED, UNKNOWN) else UNKNOWN
+    return Evidence(
+        sanitizer_match=(REFUTED if a.get("sanitizer_class_unobservable")
+                         else sanitizer_rule(crash_type)),
+        pattern=b(a.get("pattern")), taint=b(a.get("taint")),
+        control_flow_correct=b(a.get("control_flow_correct")),
+        suppressed_upstream=b(a.get("suppressed_upstream")),
+        crashed=CONFIRMED if is_crash_found else UNKNOWN,
+    )
+
+
 class SPVerifier(BaseAgent):
     """
     SP Verification Agent.
@@ -333,11 +351,32 @@ class SPVerifier(BaseAgent):
             try:
                 data = json.loads(result)
                 if data.get("success"):
-                    self.verify_result = {
-                        "score": tool_args.get("score", self.SCORE_DEFAULT),
-                        "is_important": tool_args.get("is_important", False),
-                        "reason": tool_args.get("verification_notes", "No notes"),
-                    }
+                    # Evidence-bounded (recall-first): if the LLM reported the
+                    # decomposed conditions, COMPUTE is_important/score from them —
+                    # the LLM never asserts the score. Falls back to the LLM's
+                    # values only when no evidence fields were reported.
+                    ev_keys = ("pattern", "taint", "control_flow_correct",
+                               "suppressed_upstream", "sanitizer_class_unobservable")
+                    if any(tool_args.get(k) is not None for k in ev_keys):
+                        crash_type = (self.suspicious_point or {}).get("vuln_type") or \
+                                     (self.suspicious_point or {}).get("crash_type") or \
+                                     tool_args.get("crash_type", "")
+                        ev = _ev_from_args(tool_args, crash_type,
+                                           tool_args.get("is_crash_found"))
+                        self.verify_result = {
+                            "score": round(priority(ev), 3),
+                            "is_important": proceeds(ev),
+                            "reason": tool_args.get("verification_notes", "No notes"),
+                            "evidence": {k: getattr(ev, k) for k in
+                                ("sanitizer_match","pattern","taint",
+                                 "control_flow_correct","suppressed_upstream","crashed")},
+                        }
+                    else:
+                        self.verify_result = {
+                            "score": tool_args.get("score", self.SCORE_DEFAULT),
+                            "is_important": tool_args.get("is_important", False),
+                            "reason": tool_args.get("verification_notes", "No notes"),
+                        }
                     self._log(
                         f"Verify result: score={tool_args.get('score')}",
                         level="INFO",

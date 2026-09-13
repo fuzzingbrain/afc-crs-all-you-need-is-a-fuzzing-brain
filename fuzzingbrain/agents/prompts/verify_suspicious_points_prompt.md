@@ -189,3 +189,20 @@ Then you MUST:
 
 IMPORTANT: You must call get_callers and get_function_source before making any judgment.
 Do not rely solely on the suspicious point description - verify it with actual code analysis.
+
+## How to report (evidence-bounded — you do NOT set a score)
+
+Call `update_suspicious_point` reporting the DECOMPOSED conditions. The system
+computes is_important/score from them (recall-first): a real SP is kept unless the
+bug CLASS is fundamentally not sanitizer-observable, or a clamp is dynamically
+observed. Your read alone never rejects a real bug.
+
+Report:
+- `pattern`: confirmed/refuted/unknown — does a dangerous op of the claimed class exist?
+- `taint`: confirmed/refuted/unknown — does the dangerous operand come from fuzzer input?
+- `control_flow_correct`: confirmed/refuted/unknown — is the path harness→site right?
+- `suppressed_upstream`: confirmed/refuted/unknown — is the error already handled upstream?
+  (this does NOT hard-reject — it only lowers priority; the LLM misreads real bugs)
+- `sanitizer_class_unobservable`: true ONLY for a pure logic/info bug with no sanitizer signal.
+
+Do NOT pass a `score`. Report what you read; the system decides.
