@@ -277,9 +277,9 @@ class TestSPClaimScheduling:
     def test_claim_verify_respects_priority(self, repos):
         """Important SPs claimed before high-score, high-score before low."""
         task_id = generate_id()
-        low = self._make_sp(task_id, score=0.3, is_important=False)
-        high = self._make_sp(task_id, score=0.9, is_important=False)
-        important = self._make_sp(task_id, score=0.5, is_important=True)
+        low = self._make_sp(task_id, score=0.3, priority=0.0)
+        high = self._make_sp(task_id, score=0.9, priority=0.0)
+        important = self._make_sp(task_id, score=0.5, priority=1.0)
         for sp in [low, high, important]:
             repos.suspicious_points.save(sp)
 
@@ -633,7 +633,7 @@ class TestSPPipelineCompletion:
         """Status counts drive the dashboard and scheduling decisions."""
         task_id = generate_id()
         repos.suspicious_points.save(
-            self._make_sp(task_id, is_checked_by_verifier=True, is_crash_found=True, is_important=True)
+            self._make_sp(task_id, is_checked_by_verifier=True, is_crash_found=True, priority=1.0)
         )
         repos.suspicious_points.save(
             self._make_sp(task_id, is_checked_by_verifier=True, is_crash_found=False)
@@ -646,7 +646,7 @@ class TestSPPipelineCompletion:
         assert counts["unchecked"] == 1
         assert counts["real"] == 1
         assert counts["false_positive"] == 1
-        assert counts["important"] == 1
+        assert counts["important"] == 3  # proceed-count (recall-first): all pass by default
 
 
 # =========================================================================

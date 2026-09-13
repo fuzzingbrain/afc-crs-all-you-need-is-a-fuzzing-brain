@@ -36,7 +36,7 @@ class TestUpdateSuspiciousPointParameters:
         assert "score" in params
         assert "is_checked_by_verifier" in params
         assert "is_crash_found" in params
-        assert "is_important" in params
+        assert "pattern" in params
         assert "verification_notes" in params
         assert "pov_guidance" in params
         # NEW - these caused the validation error
@@ -63,7 +63,7 @@ class TestUpdateSuspiciousPointParameters:
             suspicious_point_id="sp123",
             score=0.8,
             is_checked_by_verifier=True,
-            is_important=True,
+            pattern="confirmed",
             pov_guidance="Trigger via oversized input to function pointer path",
             reachability_status="pointer_call",
             reachability_multiplier=0.95,

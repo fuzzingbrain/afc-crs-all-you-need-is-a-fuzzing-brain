@@ -325,8 +325,8 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 [
                     ("task_id", 1),
                     ("status", 1),
-                    ("is_important", -1),
-                    ("score", -1),
+                    ("proceed", -1),
+                    ("priority", -1),
                     ("created_at", 1),
                 ]
             )
@@ -357,7 +357,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
 
     def find_important(self, task_id: str) -> List[SuspiciousPoint]:
         """Find important (high priority) suspicious points"""
-        return self.find_all({"task_id": ObjectId(task_id), "is_important": True})
+        return self.find_all({"task_id": ObjectId(task_id), "proceed": True})
 
     def find_by_score(
         self, task_id: str, min_score: float = 0.0
@@ -380,8 +380,8 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         return self.update(sp_id, updates)
 
     def mark_important(self, sp_id: str) -> bool:
-        """Mark a suspicious point as important (high priority)"""
-        return self.update(sp_id, {"is_important": True})
+        """Mark a suspicious point as proceed=True (kept name for compat)."""
+        return self.update(sp_id, {"proceed": True})
 
     def update_score(self, sp_id: str, score: float) -> bool:
         """Update the score of a suspicious point"""
@@ -510,7 +510,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 {"task_id": ObjectId(task_id), "is_checked_by_verifier": True, "is_crash_found": True}
             )
             important = self.collection.count_documents(
-                {"task_id": ObjectId(task_id), "is_important": True}
+                {"task_id": ObjectId(task_id), "proceed": True}
             )
             return {
                 "total": total,
@@ -583,8 +583,8 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                         "processor_id": processor_id,
                     }
                 },
-                # Priority: is_important DESC, score DESC, created_at ASC
-                sort=[("is_important", -1), ("score", -1), ("created_at", 1)],
+                # Priority: priority DESC, score DESC, created_at ASC
+                sort=[("priority", -1), ("score", -1), ("created_at", 1)],
                 return_document=ReturnDocument.AFTER,
             )
 
@@ -661,8 +661,8 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                     },
                     "$addToSet": {"pov_attempted_by": attempt_record},
                 },
-                # Priority: is_important DESC, score DESC
-                sort=[("is_important", -1), ("score", -1)],
+                # Priority: priority DESC, score DESC
+                sort=[("priority", -1), ("score", -1)],
                 return_document=ReturnDocument.AFTER,
             )
 
@@ -683,7 +683,9 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         is_crash_found: bool,
         score: float,
         notes: str = None,
-        is_important: bool = False,
+        proceed: bool = True,
+        priority: float = 0.0,
+        evidence: dict = None,
         proceed_to_pov: bool = False,
     ) -> bool:
         """
@@ -694,7 +696,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             is_crash_found: Whether it's a real vulnerability
             score: Updated score
             notes: Verification notes
-            is_important: Whether to mark as important
+            proceed: recall-first verdict; priority: PoV queue order
             proceed_to_pov: Whether to proceed to POV generation stage
 
         Returns:
@@ -715,7 +717,9 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 "is_checked_by_verifier": True,
                 "is_crash_found": is_crash_found,
                 "score": score,
-                "is_important": is_important,
+                "proceed": proceed,
+                "priority": priority,
+                "evidence": evidence or {},
                 "checked_at": datetime.now(),
             }
             if notes:

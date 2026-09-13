@@ -24,17 +24,18 @@ from ..llms import LLMClient, ModelInfo
 from ..core.models.agent import AgentType
 
 
-from .evidence_score import Evidence, proceeds, priority, sanitizer_rule, CONFIRMED, REFUTED, UNKNOWN
+from ..core.evidence_score import Evidence, proceeds, priority, CONFIRMED, REFUTED, UNKNOWN
 
 
 def _ev_from_args(a: dict, crash_type: str, is_crash_found) -> Evidence:
     """Build the evidence vector from the LLM's decomposed report + dynamic crash.
-    sanitizer_match is a RULE on the bug class, never the LLM's merits call."""
+    sanitizer_match: a memory-safety class is observable; only a pure logic/info bug
+    the LLM flags is REFUTED (never the LLM's merits doubt on a real bug)."""
     def b(x):
         return x if x in (CONFIRMED, REFUTED, UNKNOWN) else UNKNOWN
     return Evidence(
         sanitizer_match=(REFUTED if a.get("sanitizer_class_unobservable")
-                         else sanitizer_rule(crash_type)),
+                         else CONFIRMED),
         pattern=b(a.get("pattern")), taint=b(a.get("taint")),
         control_flow_correct=b(a.get("control_flow_correct")),
         suppressed_upstream=b(a.get("suppressed_upstream")),
@@ -244,17 +245,15 @@ class SPVerifier(BaseAgent):
             original_score = self.suspicious_point.get("score", self.SCORE_DEFAULT)
 
         verdict = self.VERDICT_UNKNOWN
-        final_score = original_score
-        is_important = False
+        final_priority = 0.0
+        proceed = True
         reason = "No verification performed"
 
         if self.verify_result:
-            final_score = self.verify_result.get("score", original_score)
-            is_important = self.verify_result.get("is_important", False)
-            if final_score >= self.SCORE_MEDIUM_CONFIDENCE and is_important:
-                verdict = self.VERDICT_REAL_VULNERABILITY
-            else:
-                verdict = self.VERDICT_FALSE_POSITIVE
+            final_priority = self.verify_result.get("priority", 0.0)
+            proceed = self.verify_result.get("proceed", True)
+            verdict = (self.VERDICT_REAL_VULNERABILITY if proceed
+                       else self.VERDICT_FALSE_POSITIVE)
             reason = self.verify_result.get("reason", "No reason provided")
 
         verdict_icon = "+" if verdict == self.VERDICT_REAL_VULNERABILITY else "-"
@@ -272,8 +271,8 @@ class SPVerifier(BaseAgent):
         lines.append("+" + "-" * self.TABLE_WIDTH + "+")
         lines.append(self._build_table_row(f"[{verdict_icon}] {verdict}"))
         lines.append(self._build_table_row(f"Original Score: {original_score:.2f}"))
-        lines.append(self._build_table_row(f"Final Score: {final_score:.2f}"))
-        lines.append(self._build_table_row(f"Is Important: {is_important}"))
+        lines.append(self._build_table_row(f"Priority: {final_priority:.2f}"))
+        lines.append(self._build_table_row(f"Proceed: {proceed}"))
         lines.append("+" + "-" * self.TABLE_WIDTH + "+")
         lines.append("|" + " REASON ".center(self.TABLE_WIDTH) + "|")
         lines.append("+" + "-" * self.TABLE_WIDTH + "+")
@@ -352,20 +351,17 @@ class SPVerifier(BaseAgent):
                 data = json.loads(result)
                 if data.get("success"):
                     # Evidence-bounded (recall-first): if the LLM reported the
-                    # decomposed conditions, COMPUTE is_important/score from them —
+                    # decomposed conditions, COMPUTE proceed/priority from them —
                     # the LLM never asserts the score. Falls back to the LLM's
                     # values only when no evidence fields were reported.
                     ev_keys = ("pattern", "taint", "control_flow_correct",
                                "suppressed_upstream", "sanitizer_class_unobservable")
                     if any(tool_args.get(k) is not None for k in ev_keys):
-                        crash_type = (self.suspicious_point or {}).get("vuln_type") or \
-                                     (self.suspicious_point or {}).get("crash_type") or \
-                                     tool_args.get("crash_type", "")
-                        ev = _ev_from_args(tool_args, crash_type,
+                        ev = _ev_from_args(tool_args, "",
                                            tool_args.get("is_crash_found"))
                         self.verify_result = {
-                            "score": round(priority(ev), 3),
-                            "is_important": proceeds(ev),
+                            "proceed": proceeds(ev),
+                            "priority": round(priority(ev), 3),
                             "reason": tool_args.get("verification_notes", "No notes"),
                             "evidence": {k: getattr(ev, k) for k in
                                 ("sanitizer_match","pattern","taint",
@@ -373,12 +369,13 @@ class SPVerifier(BaseAgent):
                         }
                     else:
                         self.verify_result = {
-                            "score": tool_args.get("score", self.SCORE_DEFAULT),
-                            "is_important": tool_args.get("is_important", False),
+                            "proceed": True,
+                            "priority": 0.0,
                             "reason": tool_args.get("verification_notes", "No notes"),
                         }
                     self._log(
-                        f"Verify result: score={tool_args.get('score')}",
+                        f"Verify result: proceed={self.verify_result['proceed']} "
+                        f"priority={self.verify_result['priority']}",
                         level="INFO",
                     )
 
@@ -408,8 +405,8 @@ Start wrapping up your analysis. You should be ready to call `{self.TOOL_UPDATE_
 
 Call `{self.TOOL_UPDATE_SUSPICIOUS_POINT}` immediately with your best judgment:
 - Set is_checked_by_verifier=True
-- Set is_important based on whether this looks real
-- Set score based on your confidence
+- Report pattern/taint/control_flow_correct/suppressed_upstream (confirmed/refuted/unknown)
+- Set sanitizer_class_unobservable=true ONLY for a pure logic/info bug
 - Include verification_notes explaining your reasoning
 
 Do NOT let iterations run out without a decision!

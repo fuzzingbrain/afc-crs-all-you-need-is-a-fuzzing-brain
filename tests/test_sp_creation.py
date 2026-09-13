@@ -230,7 +230,7 @@ class TestSPInitialState:
         sp = SuspiciousPoint()
         assert sp.is_checked_by_verifier is False
         assert sp.is_crash_found is False
-        assert sp.is_important is False
+        assert sp.proceed is True
 
     def test_sp_saved_with_pending_verify_found_by_claim(self, sp_repo):
         """Save SP → claim_for_verify must find it."""

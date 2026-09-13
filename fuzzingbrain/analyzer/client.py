@@ -441,10 +441,14 @@ class AnalysisClient:
         sp_id: str,
         is_checked_by_verifier: bool = None,
         is_crash_found: bool = None,
-        is_important: bool = None,
         score: float = None,
         verification_notes: str = None,
         pov_guidance: str = None,
+        pattern: str = None,
+        taint: str = None,
+        control_flow_correct: str = None,
+        suppressed_upstream: str = None,
+        sanitizer_class_unobservable: bool = None,
         reachability_status: str = None,
         reachability_multiplier: float = None,
         reachability_reason: str = None,
@@ -457,7 +461,6 @@ class AnalysisClient:
             sp_id: Suspicious point ID
             is_checked_by_verifier: Whether verification is complete
             is_crash_found: Whether it's a real vulnerability
-            is_important: Whether it's high priority
             score: Updated score
             verification_notes: Notes from verification
             pov_guidance: Guidance for POV agent (input directions, what to watch for)
@@ -474,10 +477,20 @@ class AnalysisClient:
             params["is_checked_by_verifier"] = is_checked_by_verifier
         if is_crash_found is not None:
             params["is_crash_found"] = is_crash_found
-        if is_important is not None:
-            params["is_important"] = is_important
         if score is not None:
             params["score"] = score
+        for _k, _v in (("pattern", pattern), ("taint", taint),
+                       ("control_flow_correct", control_flow_correct),
+                       ("suppressed_upstream", suppressed_upstream),
+                       ("sanitizer_class_unobservable", sanitizer_class_unobservable)):
+            if _v is not None:
+                params[_k] = _v
+        if reachability_status is not None:
+            params["reachability_status"] = reachability_status
+        if reachability_multiplier is not None:
+            params["reachability_multiplier"] = reachability_multiplier
+        if reachability_reason is not None:
+            params["reachability_reason"] = reachability_reason
         if verification_notes is not None:
             params["verification_notes"] = verification_notes
         if pov_guidance is not None:

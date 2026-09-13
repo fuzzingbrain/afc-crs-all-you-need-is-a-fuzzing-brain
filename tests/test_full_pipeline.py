@@ -335,7 +335,7 @@ class TestSuspiciousPointFlow:
             function_name="png_read_row",
             status=SPStatus.VERIFYING.value,
             score=0.8,
-            is_important=True,
+            proceed=True,
         )
 
         # Simulate verification complete
@@ -343,7 +343,7 @@ class TestSuspiciousPointFlow:
         sp.is_checked_by_verifier = True
 
         assert sp.status == "pending_pov"
-        assert sp.is_important is True
+        assert sp.proceed is True
 
     def test_sp_verified_low_score(self):
         """Low-score verified SP should stay verified (no POV)."""
@@ -353,7 +353,7 @@ class TestSuspiciousPointFlow:
             function_name="png_read_row",
             status=SPStatus.VERIFYING.value,
             score=0.3,
-            is_important=False,
+            proceed=False,
         )
 
         # Simulate verification complete
@@ -361,7 +361,7 @@ class TestSuspiciousPointFlow:
         sp.is_checked_by_verifier = True
 
         assert sp.status == "verified"
-        assert sp.is_important is False
+        assert sp.proceed is False
 
 
 class TestDirectionFlow:
@@ -482,7 +482,7 @@ class TestFullPipelineIntegration:
         # 6. Simulate verification complete, create POV
         sp.status = SPStatus.PENDING_POV.value
         sp.is_checked_by_verifier = True
-        sp.is_important = True
+        sp.proceed = True
         sp.score = 0.85
 
         pov = POV(

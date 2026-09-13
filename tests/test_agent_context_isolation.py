@@ -206,7 +206,7 @@ class TestSPUpdateContextFlow:
             suspicious_point_id="sp_abc12345",
             is_checked_by_verifier=True,
             is_crash_found=True,
-            is_important=True,
+            pattern="confirmed",
             verification_notes="Confirmed: no bounds check before memcpy",
             pov_guidance="Send chunk with length > 4096",
         )
@@ -489,7 +489,7 @@ class TestParallelAgentToolCalls:
                         suspicious_point_id="sp_earlier_001",
                         is_checked_by_verifier=True,
                         is_crash_found=True,
-                        is_important=True,
+                        pattern="confirmed",
                         verification_notes="Confirmed from earlier SP",
                         pov_guidance="Craft ICC profile",
                     )
@@ -633,7 +633,7 @@ class TestContextLeakBetweenPipelinePhases:
                         suspicious_point_id="sp_001",
                         is_checked_by_verifier=True,
                         is_crash_found=True,
-                        is_important=True,
+                        pattern="confirmed",
                         verification_notes="Confirmed buffer overflow",
                         pov_guidance="Oversize chunk length",
                     )
@@ -666,7 +666,7 @@ class TestContextLeakBetweenPipelinePhases:
                         suspicious_point_id="sp_002",
                         is_checked_by_verifier=True,
                         is_crash_found=True,
-                        is_important=True,
+                        pattern="confirmed",
                         verification_notes="Also confirmed",
                         pov_guidance="Crafted ICC profile",
                     )

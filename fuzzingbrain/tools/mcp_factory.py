@@ -696,7 +696,6 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
         score: float = None,
         is_checked_by_verifier: bool = None,
         is_crash_found: bool = None,
-        is_important: bool = None,
         verification_notes: str = None,
         pov_guidance: str = None,
         reachability_status: str = None,
@@ -712,7 +711,6 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
         Update an existing suspicious point after verification.
 
         Report the DECOMPOSED evidence conditions; the system computes the score and
-        is_important from them (recall-first) — do NOT try to set a score yourself.
 
         Args:
             suspicious_point_id: ID of the suspicious point to update
@@ -724,7 +722,6 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
             score: (legacy; ignored when evidence conditions are given)
             is_checked_by_verifier: Whether the point has been verified
             is_crash_found: Whether it's confirmed as a real vulnerability
-            is_important: Whether it's high priority
             verification_notes: Notes from verification analysis
             pov_guidance: Guidance for POV agent (input direction, how to reach vuln)
             reachability_status: Reachability status (direct, pointer_call, unreachable)
@@ -734,16 +731,20 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
         from .suspicious_points import update_suspicious_point_impl
 
         return update_suspicious_point_impl(
-            suspicious_point_id,
-            score,
-            is_checked_by_verifier,
-            is_crash_found,
-            is_important,
-            verification_notes,
-            pov_guidance,
-            reachability_status,
-            reachability_multiplier,
-            reachability_reason,
+            suspicious_point_id=suspicious_point_id,
+            score=score,
+            is_checked_by_verifier=is_checked_by_verifier,
+            is_crash_found=is_crash_found,
+            verification_notes=verification_notes,
+            pov_guidance=pov_guidance,
+            pattern=pattern,
+            taint=taint,
+            control_flow_correct=control_flow_correct,
+            suppressed_upstream=suppressed_upstream,
+            sanitizer_class_unobservable=sanitizer_class_unobservable,
+            reachability_status=reachability_status,
+            reachability_multiplier=reachability_multiplier,
+            reachability_reason=reachability_reason,
         )
 
     @mcp.tool

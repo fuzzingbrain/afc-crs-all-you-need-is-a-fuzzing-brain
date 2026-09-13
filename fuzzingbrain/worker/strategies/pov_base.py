@@ -238,7 +238,7 @@ class POVBaseStrategy(BaseStrategy):
             # written here: the prompt states it to the model too, and the
             # two have to be the same number.
             bar = get_scoring().high_confidence
-            high_conf = [p for p in sorted_points if p.is_important or p.score >= bar]
+            high_conf = [p for p in sorted_points if p.proceed]
             result["high_confidence_bugs"] = len(high_conf)
 
             # Count POVs generated
@@ -345,17 +345,13 @@ class POVBaseStrategy(BaseStrategy):
 
                     # Not important and below the bar the prompt calls
                     # "worth testing": a false positive.
-                    is_fp = (
-                        not updated_point.is_important
-                        and updated_point.score < get_scoring().worth_testing
-                    )
+                    is_fp = not updated_point.proceed
 
                     if is_fp:
                         status = "FP"
                         fp_points.append(updated_point)
                     elif (
-                        updated_point.is_important
-                        or updated_point.score >= get_scoring().high_confidence
+                        updated_point.proceed
                     ):
                         status = "HIGH"
                     else:
@@ -494,8 +490,8 @@ class POVBaseStrategy(BaseStrategy):
         Sort suspicious points by priority.
 
         Sorting order:
-        1. is_important (high priority bugs first)
-        2. score (higher score = more likely to be real)
+        1. proceed (recall-first pass first)
+        2. priority (higher = processed earlier)
 
         Args:
             suspicious_points: List of points to sort
@@ -505,7 +501,7 @@ class POVBaseStrategy(BaseStrategy):
         """
         return sorted(
             suspicious_points,
-            key=lambda p: (p.is_important, p.score),
+            key=lambda p: (p.proceed, p.priority),
             reverse=True,
         )
 
@@ -542,7 +538,8 @@ class POVBaseStrategy(BaseStrategy):
                     "function": p.function_name,
                     "description": p.description,
                     "score": p.score,
-                    "is_important": p.is_important,
+                    "proceed": p.proceed,
+                    "priority": p.priority,
                     "is_crash_found": p.is_crash_found,
                     "verification_notes": p.verification_notes,
                 }

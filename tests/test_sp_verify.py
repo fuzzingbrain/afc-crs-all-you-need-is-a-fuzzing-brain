@@ -105,7 +105,7 @@ class TestClaimForVerify:
 
         normal = _make_sp(task_id, function_name="normal", score=0.9)
         important = _make_sp(task_id, function_name="important", score=0.3)
-        important.is_important = True
+        important.priority = 1.0
 
         sp_repo.save(normal)
         sp_repo.save(important)
@@ -151,7 +151,7 @@ class TestCompleteVerifyRouting:
             sp.suspicious_point_id,
             is_crash_found=True,
             score=0.9,
-            is_important=True,
+            proceed=True,
             proceed_to_pov=True,
         )
 
@@ -168,7 +168,7 @@ class TestCompleteVerifyRouting:
             sp.suspicious_point_id,
             is_crash_found=False,
             score=0.2,
-            is_important=False,
+            proceed=False,
             proceed_to_pov=False,
         )
 
@@ -187,7 +187,7 @@ class TestCompleteVerifyRouting:
             is_crash_found=True,
             score=0.8,
             proceed_to_pov=True,
-            is_important=True,
+            proceed=True,
         )
 
         updated = sp_repo.find_by_id(sp.suspicious_point_id)
@@ -243,17 +243,14 @@ class TestPovGuidanceValidation:
             suspicious_point_id=str(ObjectId()),
             is_checked_by_verifier=True,
             is_crash_found=True,
-            is_important=True,
-            score=0.95,
+            pattern="confirmed",
             verification_notes="Confirmed buffer overflow",
-            pov_guidance=None,  # Missing!
+            pov_guidance=None,  # no longer required
         )
 
-        assert result["success"] is False, (
-            "update_suspicious_point_impl must reject is_important=True without pov_guidance. "
-            "The MCP decorator version validates this but _impl (used by factory) does not."
-        )
-        client.update_suspicious_point.assert_not_called()
+        # Recall-first: pov_guidance is no longer required; the update proceeds.
+        assert result.get("success") is not False
+        client.update_suspicious_point.assert_called_once()
 
     @patch("fuzzingbrain.tools.suspicious_points._get_client")
     @patch("fuzzingbrain.tools.suspicious_points._ensure_client", return_value=None)
@@ -269,8 +266,7 @@ class TestPovGuidanceValidation:
             suspicious_point_id=str(ObjectId()),
             is_checked_by_verifier=True,
             is_crash_found=True,
-            is_important=True,
-            score=0.95,
+            pattern="confirmed",
             verification_notes="Confirmed buffer overflow",
             pov_guidance="Send oversized PNG chunk with length > 0x7fffffff",
         )
@@ -291,8 +287,7 @@ class TestPovGuidanceValidation:
             suspicious_point_id=str(ObjectId()),
             is_checked_by_verifier=True,
             is_crash_found=False,
-            is_important=False,
-            score=0.2,
+            pattern="refuted",
             verification_notes="False positive",
         )
 

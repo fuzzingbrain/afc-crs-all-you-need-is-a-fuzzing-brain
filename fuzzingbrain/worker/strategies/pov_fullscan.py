@@ -118,7 +118,7 @@ class POVFullscanStrategy(POVBaseStrategy):
 
             # Count high-confidence bugs
             bar = get_scoring().high_confidence
-            high_conf = [p for p in all_points if p.is_important or p.score >= bar]
+            high_conf = [p for p in all_points if p.proceed]
             result["high_confidence_bugs"] = len(high_conf)
 
             # Save results

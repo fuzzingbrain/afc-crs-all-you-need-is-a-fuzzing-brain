@@ -98,7 +98,7 @@ class AgentPipeline:
 
     Uses claim-based task distribution:
     - Agents atomically claim tasks from MongoDB
-    - Priority queue: is_important > score
+    - Priority queue: proceed then priority
     - Automatic load balancing (fast agents do more work)
     """
 
@@ -324,25 +324,30 @@ class AgentPipeline:
                 if updated_sp:
                     # Check if agent actually updated the SP
                     # If is_checked_by_verifier is still False, agent terminated abnormally
-                    # In that case, default to letting it pass (is_important=True)
+                    # In that case, default to letting it pass (proceed=True)
                     if not updated_sp.is_checked_by_verifier:
                         logger.warning(
                             f"[Pipeline:{agent_id}] Agent did not update SP {sp.suspicious_point_id}, "
-                            f"defaulting to pass-through (is_important=True)"
+                            f"defaulting to pass-through (proceed=True)"
                         )
-                        # Default to pass-through when agent fails
-                        is_important = True
+                        # Recall-first: default to pass-through when the agent fails
+                        proceed = True
+                        priority = updated_sp.priority
+                        evidence = updated_sp.evidence
                         is_crash_found = False
                         score = updated_sp.score
                         notes = "Agent terminated without verdict - defaulting to pass-through"
                     else:
-                        is_important = updated_sp.is_important
+                        proceed = updated_sp.proceed
+                        priority = updated_sp.priority
+                        evidence = updated_sp.evidence
                         is_crash_found = updated_sp.is_crash_found
                         score = updated_sp.score
                         notes = updated_sp.verification_notes
 
-                    # Determine if should proceed to POV
-                    proceed_to_pov = score >= self.config.pov_min_score and is_important
+                    # Recall-first gate: proceed unless strongly disconfirmed.
+                    # (a crash always proceeds; the score threshold is gone)
+                    proceed_to_pov = bool(proceed) or bool(is_crash_found)
 
                     # Complete verification
                     self.repos.suspicious_points.complete_verify(
@@ -350,7 +355,9 @@ class AgentPipeline:
                         is_crash_found=is_crash_found,
                         score=score,
                         notes=notes,
-                        is_important=is_important,
+                        proceed=proceed,
+                        priority=priority,
+                        evidence=evidence,
                         proceed_to_pov=proceed_to_pov,
                     )
                     claimed_sp_id = None  # Successfully processed
@@ -364,8 +371,8 @@ class AgentPipeline:
 
                     logger.info(
                         f"[Pipeline:{agent_id}] Verified SP {sp.suspicious_point_id}: "
-                        f"score={score:.2f}, real={is_crash_found}, "
-                        f"proceed_to_pov={proceed_to_pov}"
+                        f"priority={priority:.2f}, real={is_crash_found}, "
+                        f"proceed={proceed}, proceed_to_pov={proceed_to_pov}"
                     )
                 else:
                     # SP not found, release claim

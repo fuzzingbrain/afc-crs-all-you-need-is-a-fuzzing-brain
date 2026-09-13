@@ -86,11 +86,11 @@ class SuspiciousPoint:
         False  # True once a PoV actually crashes (set by complete_pov, not the LLM)
     )
 
-    # Priority
-    score: float = 0.0  # Score (0.0-1.0), used for queue ordering
-    is_important: bool = (
-        False  # If marked as high-probability bug, goes to front of queue
-    )
+    # Verdict (recall-first) + ordering. Replaces the old is_important / score-threshold.
+    score: float = 0.0        # legacy finder hint; ordering fallback, NOT a gate
+    proceed: bool = True       # recall-first gate: pass unless strongly disconfirmed
+    priority: float = 0.0      # PoV queue ordering only (ordinal, not a probability)
+    evidence: Dict = field(default_factory=dict)  # the evidence vector behind proceed/priority
 
     # Reachability analysis (for delta scan)
     # Static analysis may incorrectly mark function-pointer-called functions as unreachable
@@ -116,7 +116,7 @@ class SuspiciousPoint:
     # Verification notes
     verification_notes: Optional[str] = None
 
-    # POV guidance - filled by Verify agent when is_important=True
+    # POV guidance - filled by Verify agent when the SP proceeds
     # Brief guidance for POV agent: what input directions to try, what to watch out for
     pov_guidance: Optional[str] = None
 
@@ -160,7 +160,9 @@ class SuspiciousPoint:
             "is_checked_by_verifier": self.is_checked_by_verifier,
             "is_crash_found": self.is_crash_found,
             "score": self.score,
-            "is_important": self.is_important,
+            "proceed": self.proceed,
+            "priority": self.priority,
+            "evidence": self.evidence,
             "static_reachable": self.static_reachable,
             "reachability_status": self.reachability_status,
             "reachability_reason": self.reachability_reason,
@@ -252,7 +254,9 @@ class SuspiciousPoint:
             # backward-compat: legacy docs stored this under "is_real"
             is_crash_found=data.get("is_crash_found", data.get("is_real", False)),
             score=data.get("score", 0.0),
-            is_important=data.get("is_important", False),
+            proceed=data.get("proceed", True),
+            priority=data.get("priority", 0.0),
+            evidence=data.get("evidence", {}),
             static_reachable=data.get("static_reachable", True),
             reachability_status=data.get("reachability_status", "unknown"),
             reachability_reason=data.get("reachability_reason", ""),
@@ -277,9 +281,12 @@ class SuspiciousPoint:
         if notes:
             self.verification_notes = notes
 
-    def mark_important(self):
-        """Mark as important (high priority)"""
-        self.is_important = True
+    def set_verdict(self, proceed: bool, priority: float = 0.0, evidence: dict = None):
+        """Recall-first verdict written by the verifier."""
+        self.proceed = proceed
+        self.priority = priority
+        if evidence is not None:
+            self.evidence = evidence
 
     def has_source(self, harness_name: str, sanitizer: str) -> bool:
         """Check if this SP has a specific source"""

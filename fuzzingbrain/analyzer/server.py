@@ -1646,10 +1646,32 @@ class AnalysisServer:
             updates["is_checked_by_verifier"] = params["is_checked_by_verifier"]
         if "is_crash_found" in params:
             updates["is_crash_found"] = params["is_crash_found"]
-        if "is_important" in params:
-            updates["is_important"] = params["is_important"]
         if "score" in params:
             updates["score"] = params["score"]
+        # Recall-first: compute proceed/priority from the decomposed evidence the
+        # verifier reported (LLM never sets a score). sanitizer class observability
+        # is a rule (the LLM only flags a pure logic/info bug as unobservable).
+        _ev_keys = ("pattern", "taint", "control_flow_correct", "suppressed_upstream",
+                    "sanitizer_class_unobservable")
+        if any(k in params for k in _ev_keys):
+            from ..core.evidence_score import (
+                Evidence, proceeds as _proc, priority as _prio,
+                CONFIRMED, REFUTED, UNKNOWN)
+            def _b(x):
+                return x if x in (CONFIRMED, REFUTED, UNKNOWN) else UNKNOWN
+            _ev = Evidence(
+                sanitizer_match=(REFUTED if params.get("sanitizer_class_unobservable")
+                                 else CONFIRMED),
+                pattern=_b(params.get("pattern")), taint=_b(params.get("taint")),
+                control_flow_correct=_b(params.get("control_flow_correct")),
+                suppressed_upstream=_b(params.get("suppressed_upstream")),
+                crashed=CONFIRMED if params.get("is_crash_found") else UNKNOWN,
+            )
+            updates["proceed"] = _proc(_ev)
+            updates["priority"] = round(_prio(_ev), 3)
+            updates["evidence"] = {k: getattr(_ev, k) for k in
+                ("sanitizer_match","pattern","taint","control_flow_correct",
+                 "suppressed_upstream","crashed")}
         if "verification_notes" in params:
             updates["verification_notes"] = params["verification_notes"]
         if "pov_guidance" in params:

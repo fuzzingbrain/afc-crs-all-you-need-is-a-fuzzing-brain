@@ -160,19 +160,22 @@ def update_suspicious_point_impl(
     score: float = None,
     is_checked_by_verifier: bool = None,
     is_crash_found: bool = None,
-    is_important: bool = None,
     verification_notes: str = None,
     pov_guidance: str = None,
+    pattern: str = None,
+    taint: str = None,
+    control_flow_correct: str = None,
+    suppressed_upstream: str = None,
+    sanitizer_class_unobservable: bool = None,
     reachability_status: str = None,
     reachability_multiplier: float = None,
     reachability_reason: str = None,
 ) -> Dict[str, Any]:
-    """Implementation of update_suspicious_point (without MCP decorator)."""
-    if is_important and not pov_guidance:
-        return {
-            "success": False,
-            "error": "pov_guidance is required when is_important=True",
-        }
+    """Implementation of update_suspicious_point (without MCP decorator).
+
+    The verifier reports DECOMPOSED evidence; proceed/priority are computed
+    server-side (recall-first). No LLM-chosen score.
+    """
 
     err = _ensure_client()
     if err:
@@ -186,14 +189,18 @@ def update_suspicious_point_impl(
             sp_id=suspicious_point_id,
             is_checked_by_verifier=is_checked_by_verifier,
             is_crash_found=is_crash_found,
-            is_important=is_important,
             score=score,
             verification_notes=verification_notes,
             pov_guidance=pov_guidance,
+            pattern=pattern,
+            taint=taint,
+            control_flow_correct=control_flow_correct,
+            suppressed_upstream=suppressed_upstream,
+            sanitizer_class_unobservable=sanitizer_class_unobservable,
             reachability_status=reachability_status,
             reachability_multiplier=reachability_multiplier,
             reachability_reason=reachability_reason,
-            agent_id=agent_id or "",  # Track which agent verified this SP
+            agent_id=agent_id or "",
         )
 
         update_json = json.dumps(
@@ -201,7 +208,6 @@ def update_suspicious_point_impl(
                 "id": suspicious_point_id,
                 "is_checked_by_verifier": is_checked_by_verifier,
                 "is_crash_found": is_crash_found,
-                "is_important": is_important,
                 "score": score,
                 "verification_notes": verification_notes,
                 "pov_guidance": pov_guidance,
@@ -351,10 +357,14 @@ def update_suspicious_point(
     suspicious_point_id: str,
     is_checked_by_verifier: bool = None,
     is_crash_found: bool = None,
-    is_important: bool = None,
     score: float = None,
     verification_notes: str = None,
     pov_guidance: str = None,
+    pattern: str = None,
+    taint: str = None,
+    control_flow_correct: str = None,
+    suppressed_upstream: str = None,
+    sanitizer_class_unobservable: bool = None,
 ) -> Dict[str, Any]:
     """
     Update a suspicious point after verification.
@@ -365,12 +375,13 @@ def update_suspicious_point(
         suspicious_point_id: The ID of the suspicious point to update
         is_checked_by_verifier: Set to True when verification is complete
         is_crash_found: Set to True if confirmed as real vulnerability, False if false positive
-        is_important: Set to True if this is a high-priority vulnerability (will proceed to POV)
-        score: Updated confidence score based on analysis
+        pattern/taint/control_flow_correct/suppressed_upstream: confirmed/refuted/unknown
+        sanitizer_class_unobservable: true ONLY for a pure logic/info bug (no sanitizer signal)
+        score: (legacy; ignored — proceed/priority are computed from the evidence)
         verification_notes: Notes explaining the verification result.
             Example: "Confirmed: no bounds check before memcpy, attacker-controlled length"
             Example: "False positive: length is validated in caller function"
-        pov_guidance: REQUIRED when is_important=True. Brief guidance for POV agent:
+        pov_guidance: Brief guidance for POV agent:
             1. Input direction: What kind of input to generate
             2. How to reach the vuln: What input structure/values help the payload
                pass through earlier checks and reach the vulnerable code
@@ -384,13 +395,6 @@ def update_suspicious_point(
     if err:
         return err
 
-    # Validate: pov_guidance is REQUIRED when is_important=True
-    if is_important is True and not pov_guidance:
-        return {
-            "success": False,
-            "error": "pov_guidance is REQUIRED when is_important=True. Please provide brief guidance for POV agent: what input to generate and how to reach the vulnerability.",
-        }
-
     try:
         client = _get_client()
         # Get agent_id from context for tracking verified_by_agent_id
@@ -399,11 +403,15 @@ def update_suspicious_point(
             sp_id=suspicious_point_id,
             is_checked_by_verifier=is_checked_by_verifier,
             is_crash_found=is_crash_found,
-            is_important=is_important,
             score=score,
             verification_notes=verification_notes,
             pov_guidance=pov_guidance,
-            agent_id=agent_id or "",  # Track which agent verified this SP
+            pattern=pattern,
+            taint=taint,
+            control_flow_correct=control_flow_correct,
+            suppressed_upstream=suppressed_upstream,
+            sanitizer_class_unobservable=sanitizer_class_unobservable,
+            agent_id=agent_id or "",
         )
 
         # Log the update with server result
@@ -412,7 +420,6 @@ def update_suspicious_point(
                 "id": suspicious_point_id,
                 "is_checked_by_verifier": is_checked_by_verifier,
                 "is_crash_found": is_crash_found,
-                "is_important": is_important,
                 "score": score,
                 "verification_notes": verification_notes,
                 "pov_guidance": pov_guidance,
