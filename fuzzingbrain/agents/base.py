@@ -195,6 +195,16 @@ class BaseAgent(ABC):
         return False
 
     @property
+    def include_reach_probe_tools(self) -> bool:
+        """Whether to include the verify-stage dynamic reach-probe tool.
+
+        Override to True in SPVerifier so verification gets execution evidence
+        (reach / crash / margin) by running an LLM-authored candidate input
+        through the ASan binary under gdb-15. Other agents don't need it.
+        """
+        return False
+
+    @property
     def include_sp_tools(self) -> bool:
         """Whether to include suspicious point tools in MCP server.
 
@@ -232,7 +242,7 @@ class BaseAgent(ABC):
         them.
 
         An empty index with the tools still advertised is the failure this
-        prevents: get_function_source returns nothing, and the model reads that
+        prevents: the graph tools return nothing, and the model reads that
         as "the function does not exist" rather than "there is no index". It
         then has no way to read code at all, while the run reports success.
         Read, Grep and Glob remain either way.
@@ -298,8 +308,8 @@ class BaseAgent(ABC):
         Naming a tool the agent was not given costs a whole iteration: the call
         fails, and the model has to work out why before it does anything useful.
         """
-        if self.include_static_analysis_tools:
-            return f'get_function_source("{function_name}")'
+        # get_function_source is retired (it duplicated Read/Grep and routed
+        # through the shared analyzer/mongo); reading source is always Grep+Read.
         return (
             f'Grep(pattern="{function_name}", output_mode="content") to find it, '
             f"then Read that file around the match"
@@ -1260,6 +1270,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                     include_direction_tools=self.include_direction_tools,
                     include_static_analysis_tools=static_analysis_tools,
                     include_coverage_tools=coverage_tools,
+                    include_reach_probe_tools=self.include_reach_probe_tools,
                 )
                 self._log(
                     f"Created isolated MCP server: {agent_id} "

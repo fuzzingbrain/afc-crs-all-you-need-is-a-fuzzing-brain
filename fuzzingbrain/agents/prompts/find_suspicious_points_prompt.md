@@ -42,7 +42,7 @@ If NO, don't create the SP.
 
 - get_diff: Read the diff file to see what changed
 - get_file_content: Read source files (USE THIS TO READ FUZZER SOURCE FIRST)
-- get_function_source: Get source code of a specific function
+- Read / Grep: read a specific function's source directly from the repo files
 - get_callers: Find functions that call a given function
 - get_callees: Find functions called by a given function
 - check_reachability: Check if a function is reachable from the fuzzer
@@ -86,6 +86,7 @@ These are DIFFERENT vulnerabilities with different root causes - create separate
 
 ## When Creating Suspicious Points
 
+- Check whether this bug can be detected by the sanitizer
 - Use control flow descriptions, NOT line numbers
 - Describe the ROOT CAUSE of the vulnerability
 - Name the bug type IN the description (e.g. "stack buffer overflow because...") — there is no separate type field

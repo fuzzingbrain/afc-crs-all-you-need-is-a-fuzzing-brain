@@ -452,6 +452,11 @@ class AnalysisClient:
         reachability_status: str = None,
         reachability_multiplier: float = None,
         reachability_reason: str = None,
+        dyn_reached: str = None,
+        dyn_crashed: str = None,
+        dyn_margin: float = None,
+        dyn_margin_confirmed: bool = None,
+        dyn_clamp_observed: str = None,
         agent_id: str = "",
     ) -> dict:
         """
@@ -501,6 +506,12 @@ class AnalysisClient:
             params["reachability_multiplier"] = reachability_multiplier
         if reachability_reason is not None:
             params["reachability_reason"] = reachability_reason
+        for _k, _v in (("dyn_reached", dyn_reached), ("dyn_crashed", dyn_crashed),
+                       ("dyn_margin", dyn_margin),
+                       ("dyn_margin_confirmed", dyn_margin_confirmed),
+                       ("dyn_clamp_observed", dyn_clamp_observed)):
+            if _v is not None:
+                params[_k] = _v
         if agent_id:
             params["agent_id"] = agent_id
         return self._request(Method.UPDATE_SUSPICIOUS_POINT, params)

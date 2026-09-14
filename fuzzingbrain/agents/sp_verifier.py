@@ -55,7 +55,6 @@ class SPVerifier(BaseAgent):
     TOOL_UPDATE_SUSPICIOUS_POINT = "update_suspicious_point"
     TOOL_FIND_ALL_PATHS = "find_all_paths"
     TOOL_CHECK_REACHABILITY = "check_reachability"
-    TOOL_GET_FUNCTION_SOURCE = "get_function_source"
 
     # Score thresholds
     SCORE_HIGH_CONFIDENCE = 0.8
@@ -94,6 +93,12 @@ class SPVerifier(BaseAgent):
     def include_sp_create_tools(self) -> bool:
         """SPVerifier only reads/updates SPs, never creates new ones."""
         return False
+
+    @property
+    def include_reach_probe_tools(self) -> bool:
+        """SPVerifier runs candidate inputs under gdb-15 for dynamic evidence
+        (reach / crash / margin) — its distinguishing capability."""
+        return True
 
     def __init__(
         self,
@@ -324,7 +329,7 @@ class SPVerifier(BaseAgent):
         Allow:
         - update_suspicious_point: main output
         - find_all_paths, check_reachability: thorough verification
-        - get_function_source, get_callers, get_callees: code analysis
+        - Read/Grep (read source directly), get_callers, get_callees: code analysis
 
         Exclude:
         - create_suspicious_point: verification only updates
@@ -470,7 +475,7 @@ Vulnerabilities must be reachable through this entry point.
         else:
             return f"""## Fuzzer Source Code
 
-IMPORTANT: First read the fuzzer source with {self.TOOL_GET_FUNCTION_SOURCE}("{self.fuzzer}").
+IMPORTANT: First read the fuzzer source with get_fuzzer_source("{self.fuzzer}").
 This shows how input enters the library - only reachable code matters!
 
 """

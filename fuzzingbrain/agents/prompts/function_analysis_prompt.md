@@ -19,7 +19,7 @@ You are given key context upfront:
 3. Some caller functions source code
 4. Callee function names
 
-If you need MORE caller/callee code, use `get_function_source()`.
+If you need MORE caller/callee code, use `Read`/`Grep` to read the source file directly.
 But try to analyze with provided info first to save iterations.
 
 ## Decision Making

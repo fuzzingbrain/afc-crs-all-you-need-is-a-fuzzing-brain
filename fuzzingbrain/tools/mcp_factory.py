@@ -15,7 +15,7 @@ Usage:
 """
 
 from fastmcp import FastMCP
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from .utils import async_tool
 
@@ -30,6 +30,7 @@ def create_isolated_mcp_server(
     include_direction_tools: bool = True,
     include_static_analysis_tools: bool = True,
     include_coverage_tools: bool = True,
+    include_reach_probe_tools: bool = False,
 ) -> FastMCP:
     """
     Create an isolated FastMCP server instance with all tools registered.
@@ -108,6 +109,10 @@ def create_isolated_mcp_server(
             _register_pov_tools(mcp, worker_id=worker_id)
             if include_coverage_tools:
                 _register_coverage_tools(mcp)
+        # Verify-stage dynamic reach-probe (independent of POV tools): the
+        # SPVerifier gets execution evidence without a pre-existing PoV.
+        if include_reach_probe_tools:
+            _register_reach_probe_tools(mcp)
 
     return mcp
 
@@ -189,113 +194,15 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
                 logger.warning(f"Connection error, invalidated client cache: {e}")
         return {"success": False, "error": str(e)}
 
-    @mcp.tool
-    @async_tool
-    def get_function(function_name: str) -> Dict[str, Any]:
-        """
-        Get metadata about a function (file path, line numbers, complexity, parameters).
-
-        Args:
-            function_name: The exact name of the function to look up
-
-        Returns:
-            Function metadata: name, file_path, start_line, end_line, complexity, args, return_type
-        """
-        err = _ensure_client()
-        if err:
-            return err
-        try:
-            client = _get_client()
-            func = client.get_function(function_name)
-            if func is None:
-                return {
-                    "success": False,
-                    "error": f"Function '{function_name}' not found",
-                }
-            return {"success": True, "function": func}
-        except Exception as e:
-            return _handle_client_error(e)
-
-    @mcp.tool
-    @async_tool
-    def get_functions_by_file(file_path: str) -> Dict[str, Any]:
-        """
-        Get all functions defined in a specific file.
-
-        Args:
-            file_path: File path (can be partial, e.g., "png.c")
-        """
-        err = _ensure_client()
-        if err:
-            return err
-        try:
-            client = _get_client()
-            functions = client.get_functions_by_file(file_path)
-            total = len(functions)
-            # Limit to 50 to save context
-            return {
-                "success": True,
-                "count": total,
-                "functions": functions[:50],
-                "truncated": total > 50,
-            }
-        except Exception as e:
-            return _handle_client_error(e)
-
-    @mcp.tool
-    @async_tool
-    def search_functions(pattern: str, limit: int = 50) -> Dict[str, Any]:
-        """
-        Search for functions by name pattern.
-
-        Args:
-            pattern: Regex pattern to match function names
-            limit: Maximum number of results
-        """
-        err = _ensure_client()
-        if err:
-            return err
-        try:
-            client = _get_client()
-            functions = client.search_functions(pattern, limit)
-            return {
-                "success": True,
-                "pattern": pattern,
-                "count": len(functions),
-                "functions": functions,
-            }
-        except Exception as e:
-            return _handle_client_error(e)
-
-    @mcp.tool
-    @async_tool
-    def get_function_source(function_name: str) -> Dict[str, Any]:
-        """
-        Get the full source code of a function.
-
-        Use this to read the implementation details of a specific function.
-        For analyzing vulnerability patterns, always read the source code.
-
-        Args:
-            function_name: The exact name of the function
-
-        Returns:
-            source: The complete source code of the function
-        """
-        err = _ensure_client()
-        if err:
-            return err
-        try:
-            client = _get_client()
-            source = client.get_function_source(function_name)
-            if source is None:
-                return {
-                    "success": False,
-                    "error": f"Source not available for function '{function_name}'",
-                }
-            return {"success": True, "function_name": function_name, "source": source}
-        except Exception as e:
-            return _handle_client_error(e)
+    # NOTE: get_function, get_functions_by_file, search_functions and
+    # get_function_source are DISABLED as MCP tools. They are pure code-
+    # reading/searching duplicates of the Read / Grep / Glob filesystem tools
+    # and are NOT static analysis (the call graph tools below are). Routing
+    # them through the shared MongoDB made it the bottleneck (regex scans +
+    # per-function tree-sitter file reads) and starved the real work under
+    # full-scan's SP write storm. Agents read source via Read/Grep/Glob now.
+    # The underlying AnalysisClient methods remain available for internal use
+    # (diff_parser, executor), same pattern as get_reachable_functions below.
 
     @mcp.tool
     @async_tool
@@ -706,6 +613,11 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
         control_flow_correct: str = None,
         suppressed_upstream: str = None,
         sanitizer_class_unobservable: bool = None,
+        dyn_reached: str = None,
+        dyn_crashed: str = None,
+        dyn_margin: float = None,
+        dyn_margin_confirmed: bool = None,
+        dyn_clamp_observed: str = None,
     ) -> Dict[str, Any]:
         """
         Update an existing suspicious point after verification.
@@ -719,6 +631,11 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
             control_flow_correct: "confirmed"/"refuted"/"unknown" — path from harness to site is right
             suppressed_upstream: "confirmed"/"refuted"/"unknown" — error already handled upstream (does NOT hard-reject)
             sanitizer_class_unobservable: true ONLY if this class has no sanitizer signal (pure logic/info bug)
+            dyn_reached: "confirmed"/"unknown" — relay reach_probe's reach result (an input reached the site)
+            dyn_crashed: "confirmed"/"unknown" — relay reach_probe's crash result (sanitizer fired); crashes rank top
+            dyn_margin: numeric distance-to-violation from reach_probe (<=0 means past the boundary); ORDERING only
+            dyn_margin_confirmed: true only when reach_probe actually produced the margin (never assert it yourself)
+            dyn_clamp_observed: "confirmed" ONLY if check_clamp dynamically observed the tainted value clamped (this REJECTS)
             score: (legacy; ignored when evidence conditions are given)
             is_checked_by_verifier: Whether the point has been verified
             is_crash_found: Whether it's confirmed as a real vulnerability
@@ -745,6 +662,11 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
             reachability_status=reachability_status,
             reachability_multiplier=reachability_multiplier,
             reachability_reason=reachability_reason,
+            dyn_reached=dyn_reached,
+            dyn_crashed=dyn_crashed,
+            dyn_margin=dyn_margin,
+            dyn_margin_confirmed=dyn_margin_confirmed,
+            dyn_clamp_observed=dyn_clamp_observed,
         )
 
     @mcp.tool
@@ -767,6 +689,92 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
         from .suspicious_points import get_suspicious_point_impl
 
         return get_suspicious_point_impl(suspicious_point_id)
+
+
+def _register_reach_probe_tools(mcp: FastMCP) -> None:
+    """Register the verify-stage dynamic reach-probe tools (gdb-15 execution).
+
+    The verifier does not have a PoV, so it authors a candidate input and runs
+    it through the ASan binary under gdb to obtain execution FACTS (reach / crash
+    / margin) that it cannot fabricate. These upgrade the PoV-queue ordering; they
+    never floor a real SP (recall-first). A dynamically observed clamp is the one
+    execution fact that disconfirms."""
+
+    @mcp.tool
+    @async_tool
+    def reach_probe(
+        generator_code: str,
+        targets: List[str] = None,
+        sink: str = None,
+        sp_function: str = None,
+        sp_crash_type: str = None,
+    ) -> Dict[str, Any]:
+        """
+        Run ONE candidate input through the ASan fuzzer under gdb-15 and return
+        dynamic evidence: which target functions were reached, whether it crashed
+        (+ sanitizer type and crash frame), the exact overflow margin from the ASan
+        report (negative = past the boundary), and whether the crash matches the SP.
+
+        Use this to CONFIRM the SP is reachable/triggerable. Iterate: read the code,
+        write a better generator, probe again. Reaching or crashing is worth more
+        than any amount of reading. Relay the returned reached/crashed/asan_margin
+        into update_suspicious_point's dyn_* fields.
+
+        Args:
+            generator_code: Python defining `def generate(variant: int) -> bytes`
+                            that returns the input bytes to feed the fuzzer.
+            targets: function names to set breakpoints on (report which were hit).
+            sink: optional single function to break at and dump args/locals.
+            sp_function: the SP's function name (for crash_matches_sp).
+            sp_crash_type: the SP's claimed bug class (for crash_matches_sp).
+        """
+        from .gdb_trace import reach_probe as _reach_probe
+
+        return _reach_probe(
+            generator_code=generator_code,
+            targets=targets,
+            sink=sink,
+            sp_function=sp_function,
+            sp_crash_type=sp_crash_type,
+        )
+
+    @mcp.tool
+    @async_tool
+    def check_clamp(
+        generator_code: str,
+        var: str,
+        at_function: str,
+    ) -> Dict[str, Any]:
+        """
+        SLOW watchpoint trace: watch a tainted variable inside `at_function` while
+        running an input, and report its value-change trace. A value that is REDUCED
+        (bounded) at a guard before the sink is a DYNAMICALLY OBSERVED clamp — the
+        one execution fact that disconfirms the SP. Use only when you suspect the
+        tainted value is clamped before the dangerous site.
+
+        Args:
+            generator_code: Python defining `def generate(variant: int) -> bytes`.
+            var: the variable/expression to watch (e.g. "len", "idx").
+            at_function: function to break in before setting the watchpoint.
+        """
+        from .gdb_trace import check_clamp as _check_clamp
+        from .coverage import get_reach_context, get_coverage_context
+        from .pov import _execute_generator_code
+
+        elf, fuzzer_name, project, _image = get_reach_context()
+        if not project:
+            _, project, _ = get_coverage_context()
+        if elf is None or not project:
+            return {"error": "reach context not set (no ASan ELF / project)"}
+        blobs, err = _execute_generator_code(generator_code or "", num_variants=1)
+        if err or not blobs:
+            return {"error": f"generator failed: {err or 'no bytes'}"}
+        from .gdb_trace import _argv_tmpl_for
+        try:
+            return _check_clamp(str(elf), _argv_tmpl_for(fuzzer_name), blobs[0],
+                                project, var=var, at_function=at_function)
+        except Exception as e:
+            return {"error": f"check_clamp error: {type(e).__name__}: {e}"}
 
 
 # Keep backward-compatible alias
@@ -839,16 +847,13 @@ def _register_pov_tools(mcp: FastMCP, worker_id: str = None) -> None:
     # Capture worker_id in closure - each tool will use this specific worker_id
     bound_worker_id = worker_id
 
-    @mcp.tool
-    @async_tool
-    def get_fuzzer_info() -> Dict[str, Any]:
-        """
-        Get fuzzer source code and sanitizer info.
-        Use this to refresh your memory about how input enters the target.
-        """
-        from .pov import get_fuzzer_info_impl
-
-        return get_fuzzer_info_impl(worker_id=bound_worker_id)
+    # NOTE: get_fuzzer_info is DISABLED as an MCP tool -- it duplicated
+    # get_fuzzer_source (both return the harness source). get_fuzzer_source
+    # (always-on, build_info group) is kept because it resolves through the
+    # analysis server and explicitly honours the `fuzzer_sources` config
+    # (server.py priority 2), which get_fuzzer_info did not. Agents read the
+    # harness via get_fuzzer_source(<fuzzer_name>). get_fuzzer_info_impl stays
+    # available for internal use.
 
     @mcp.tool
     @async_tool

@@ -5,7 +5,7 @@ Your task is to analyze a verified crash (POV) and write a professional vulnerab
 ## Available Tools
 
 ### Code Analysis Tools
-- get_function_source(function_name): Read the source code of a function
+- Read / Grep: read a function's source directly from the repo files
 - get_file_content(file_path, start_line, end_line): Read file content
 - get_callers(function_name): Find functions that call this function
 - get_callees(function_name): Find functions called by this function

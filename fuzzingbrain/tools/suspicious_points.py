@@ -170,6 +170,11 @@ def update_suspicious_point_impl(
     reachability_status: str = None,
     reachability_multiplier: float = None,
     reachability_reason: str = None,
+    dyn_reached: str = None,
+    dyn_crashed: str = None,
+    dyn_margin: float = None,
+    dyn_margin_confirmed: bool = None,
+    dyn_clamp_observed: str = None,
 ) -> Dict[str, Any]:
     """Implementation of update_suspicious_point (without MCP decorator).
 
@@ -200,6 +205,11 @@ def update_suspicious_point_impl(
             reachability_status=reachability_status,
             reachability_multiplier=reachability_multiplier,
             reachability_reason=reachability_reason,
+            dyn_reached=dyn_reached,
+            dyn_crashed=dyn_crashed,
+            dyn_margin=dyn_margin,
+            dyn_margin_confirmed=dyn_margin_confirmed,
+            dyn_clamp_observed=dyn_clamp_observed,
             agent_id=agent_id or "",
         )
 

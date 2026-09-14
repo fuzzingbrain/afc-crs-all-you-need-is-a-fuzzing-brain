@@ -377,6 +377,12 @@ class POVFullscanStrategy(POVBaseStrategy):
                 work_dir=self.results_path / "coverage_work",
             )
 
+        # Verify-stage reach-probe context: the exact ASan ELF + fuzzer name so
+        # the verifier can run candidate inputs under gdb-15 for dynamic evidence
+        # (reach / crash / margin). Independent of the coverage build.
+        from ...tools.coverage import set_reach_context
+        set_reach_context(self.executor.fuzzer_binary_path, self.fuzzer, self.project_name, self.executor.docker_image)
+
         fuzzer_code = self._get_fuzzer_source_code()
         agent_log_dir = self.agent_log_dir
 
@@ -388,6 +394,8 @@ class POVFullscanStrategy(POVBaseStrategy):
             pov_min_score=0.5,
             poll_interval=2.0,
             max_idle_cycles=30,
+            max_iterations=200,      # room for reach_probe diagnosis + up to 50 create_pov
+            max_pov_attempts=60,
             fuzzer_path=self.executor.fuzzer_binary_path,
             docker_image=self.executor.docker_image,
         )

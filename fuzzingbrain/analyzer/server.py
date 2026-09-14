@@ -1652,26 +1652,38 @@ class AnalysisServer:
         # verifier reported (LLM never sets a score). sanitizer class observability
         # is a rule (the LLM only flags a pure logic/info bug as unobservable).
         _ev_keys = ("pattern", "taint", "control_flow_correct", "suppressed_upstream",
-                    "sanitizer_class_unobservable")
+                    "sanitizer_class_unobservable",
+                    "dyn_reached", "dyn_crashed", "dyn_margin",
+                    "dyn_margin_confirmed", "dyn_clamp_observed")
         if any(k in params for k in _ev_keys):
             from ..core.evidence_score import (
                 Evidence, proceeds as _proc, priority as _prio,
                 CONFIRMED, REFUTED, UNKNOWN)
             def _b(x):
                 return x if x in (CONFIRMED, REFUTED, UNKNOWN) else UNKNOWN
+            # Dynamic crash proceeds and ranks top even if reported only here.
+            _dyn_crashed = (CONFIRMED if (params.get("dyn_crashed") == CONFIRMED
+                                          or params.get("is_crash_found"))
+                            else UNKNOWN)
             _ev = Evidence(
                 sanitizer_match=(REFUTED if params.get("sanitizer_class_unobservable")
                                  else CONFIRMED),
                 pattern=_b(params.get("pattern")), taint=_b(params.get("taint")),
                 control_flow_correct=_b(params.get("control_flow_correct")),
                 suppressed_upstream=_b(params.get("suppressed_upstream")),
-                crashed=CONFIRMED if params.get("is_crash_found") else UNKNOWN,
+                reached=_b(params.get("dyn_reached")),
+                margin_value=params.get("dyn_margin"),
+                margin_source=(CONFIRMED if params.get("dyn_margin_confirmed")
+                               else UNKNOWN),
+                clamp_observed_dyn=_b(params.get("dyn_clamp_observed")),
+                crashed=_dyn_crashed,
             )
             updates["proceed"] = _proc(_ev)
             updates["priority"] = round(_prio(_ev), 3)
             updates["evidence"] = {k: getattr(_ev, k) for k in
                 ("sanitizer_match","pattern","taint","control_flow_correct",
-                 "suppressed_upstream","crashed")}
+                 "suppressed_upstream","reached","margin_value","margin_source",
+                 "clamp_observed_dyn","crashed")}
         if "verification_notes" in params:
             updates["verification_notes"] = params["verification_notes"]
         if "pov_guidance" in params:

@@ -1216,6 +1216,12 @@ class POVStrategy(BaseStrategy):
                 work_dir=self.results_path / "coverage_work",
             )
 
+        # Verify-stage reach-probe context: the exact ASan ELF + fuzzer name so
+        # the verifier can run candidate inputs under gdb-15 for dynamic evidence
+        # (reach / crash / margin). Independent of the coverage build.
+        from ...tools.coverage import set_reach_context
+        set_reach_context(self.executor.fuzzer_binary_path, self.fuzzer, self.project_name, self.executor.docker_image)
+
         # Configure pipeline
         concurrency = get_concurrency()
         config = PipelineConfig(

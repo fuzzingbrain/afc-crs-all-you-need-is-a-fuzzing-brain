@@ -18,7 +18,7 @@
 ## 可用工具
 
 ### 代码分析（按需使用，不要过度）
-- get_function_source：读取函数源码
+- Read / Grep：直接从源文件读取函数源码(不再走 analyzer)
 - get_file_content：读取源文件
 - get_callers/get_callees：追踪调用关系（有可能因为静态分析不稳定失败）
 - search_code：搜索代码模式
@@ -26,7 +26,7 @@
 ### PoV 生成（核心工具）
 - **create_pov**：生成 3 个 blob 变体并自动验证
 - **trace_pov**：调试执行路径，查看 blob 走到哪里（3 次失败后可用）
-- get_fuzzer_info：获取 fuzzer 源码
+- get_fuzzer_source：获取 harness 源码(传 fuzzer 名字)
 
 ## 工作流程
 

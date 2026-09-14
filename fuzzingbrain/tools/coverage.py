@@ -420,6 +420,44 @@ def get_asan_fuzzer_dir() -> Optional[Path]:
     return _asan_fuzzer_dir.get()
 
 
+# Reach-probe context: the exact ASan fuzzer ELF (host path) and its fuzzer name,
+# used by the verify-stage dynamic reach/margin tool (gdb_trace.reach_probe).
+# Kept separate from the coverage dir because the verifier runs the *ASan* binary
+# under gdb-15, and needs the precise binary + fuzztest-vs-libFuzzer argv shape.
+_reach_elf: ContextVar[Optional[Path]] = ContextVar("reach_elf", default=None)
+_reach_fuzzer_name: ContextVar[Optional[str]] = ContextVar(
+    "reach_fuzzer_name", default=None
+)
+_reach_project: ContextVar[Optional[str]] = ContextVar("reach_project", default=None)
+_reach_image: ContextVar[Optional[str]] = ContextVar("reach_image", default=None)
+
+
+def set_reach_context(
+    elf_path: Optional[Path],
+    fuzzer_name: Optional[str],
+    project: Optional[str] = None,
+    image: Optional[str] = None,
+) -> None:
+    """Set the ASan ELF + fuzzer name (+ project/image) for the verify-stage
+    reach-probe tool. Carries project/image directly so it does NOT depend on the
+    coverage build being present (skip-build runs have no coverage context)."""
+    _reach_elf.set(Path(elf_path) if elf_path else None)
+    _reach_fuzzer_name.set(fuzzer_name or None)
+    _reach_project.set(project or None)
+    _reach_image.set(image or None)
+
+
+def get_reach_context() -> Tuple[Optional[Path], Optional[str], Optional[str], Optional[str]]:
+    """Return (asan_elf_host_path, fuzzer_name, project, image) for reach-probe."""
+    return (_reach_elf.get(), _reach_fuzzer_name.get(),
+            _reach_project.get(), _reach_image.get())
+
+
+def get_docker_image() -> Optional[str]:
+    """Current run's docker image (e.g. aixcc-afc/<project>)."""
+    return _docker_image.get()
+
+
 def _get_or_build_gdb_image(base_image: str) -> str:
     """
     Get or build a Docker image with GDB installed.
@@ -1310,4 +1348,7 @@ __all__ = [
     "run_gdb_trace",
     "set_asan_fuzzer_dir",
     "get_asan_fuzzer_dir",
+    "set_reach_context",
+    "get_reach_context",
+    "get_docker_image",
 ]

@@ -71,7 +71,7 @@ LOW RISK:
 
 ## Available Tools
 
-- get_function_source: Read source code of a function
+- Read / Grep: read a function's source directly from the repo files
 - get_callers: Get functions that call a given function
 - get_callees: Get functions called by a given function
 - get_call_graph: Get the complete call graph from fuzzer

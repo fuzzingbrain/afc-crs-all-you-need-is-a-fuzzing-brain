@@ -177,6 +177,24 @@ class WorkerExecutor:
                         max_parallel_fuzzers=self.max_parallel_fuzzers,
                         # Note: crash_monitor is Task-level (in Dispatcher), not Worker-level
                     )
+                    # Wire the worker-local monitor's crash callback so that
+                    # crashes found by the Global / SP fuzzers get promoted to
+                    # scored POVs. Without this, monitor._handle_crash records
+                    # the crash ([CRASH FOUND] Global) but on_crash is None, so
+                    # the POV is never created/activated and the fuzzer-found bug
+                    # scores 0 -- only POVAgent create_pov crashes counted.
+                    try:
+                        _mon = getattr(self._fuzzer_manager, "crash_monitor", None)
+                        if _mon is not None and getattr(_mon, "on_crash", None) is None:
+                            _mon.on_crash = self._on_crash_found
+                            logger.info(
+                                f"[{self.worker_display_name}] Wired fuzzer crash callback "
+                                f"(global/SP crashes now promote to POVs)"
+                            )
+                    except Exception as _e:
+                        logger.warning(
+                            f"[{self.worker_display_name}] Could not wire crash callback: {_e}"
+                        )
                     # Register for cross-module access using ObjectId
                     register_fuzzer_manager(self.worker_id, self._fuzzer_manager)
                     logger.info(

@@ -41,7 +41,6 @@ class SPGeneratorBase(BaseAgent):
 
     # Tool names
     TOOL_CREATE_SUSPICIOUS_POINT = "create_suspicious_point"
-    TOOL_GET_FUNCTION_SOURCE = "get_function_source"
 
     # Lower temperature for focused analysis
     default_temperature: float = 0.5
@@ -808,7 +807,7 @@ Vulnerabilities must be reachable through this entry point.
         else:
             return f"""## Fuzzer Source Code
 
-IMPORTANT: First read the fuzzer source with {self.TOOL_GET_FUNCTION_SOURCE}("{self.fuzzer}").
+IMPORTANT: First read the fuzzer source with get_fuzzer_source("{self.fuzzer}").
 This shows how input enters the library - only reachable code matters!
 
 """

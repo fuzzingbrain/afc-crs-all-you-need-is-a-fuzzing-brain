@@ -111,6 +111,11 @@ analyzer:
     # -------------------------------------------------------------------------
     # Function Queries
     # -------------------------------------------------------------------------
+    # DISABLED as MCP tools (retired): get_function, get_functions_by_file,
+    # search_functions, get_function_source. They duplicated Read/Grep/Glob and
+    # routed code reads through the shared analyzer/mongo (bottleneck). Agents
+    # read source with Read/Grep/Glob; harness source with get_fuzzer_source.
+    # The client methods below remain for internal use (diff_parser/executor).
     get_function:
       description: "Get metadata about a function (file path, line numbers, complexity, parameters)"
       category: "function_query"

@@ -47,7 +47,7 @@ Only skip if confidence < 0.3 (you're genuinely certain it's safe).
 
 ## Tools
 
-- get_function_source: Read function code (USE THIS A LOT)
+- Read / Grep: read function code directly from source files (USE THESE A LOT)
 - get_callers: Quick check who calls a function (USE THIS for reachability)
 - get_callees: See what a function calls
 - search_code: Find patterns in codebase

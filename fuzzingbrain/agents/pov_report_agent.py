@@ -7,7 +7,7 @@ Has access to code analysis tools to understand the root cause by reading
 source code of functions in the crash stack trace.
 
 Tools available:
-- get_function_source: Read source code of a function
+- Read / Grep: read a function's source directly from the repo files
 - Read: Read a file, with line numbers
 - Grep: Search file contents by regex
 - get_callers: Find functions that call a given function

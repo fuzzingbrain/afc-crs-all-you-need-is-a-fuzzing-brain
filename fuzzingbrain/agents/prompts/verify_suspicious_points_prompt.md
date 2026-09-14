@@ -18,7 +18,7 @@ itself make the SP a false positive.
 
 ## Steps
 
-1. **Read the code.** Call `get_function_source` for the suspicious function (and callers
+1. **Read the code.** Use `Read`/`Grep` to read the suspicious function's source (and callers
    / callees / paths as needed). You MUST read the real code before reporting.
 2. **Decide the necessary conditions** (each: confirmed / refuted / unknown):
    - `pattern` — does a dangerous operation of the claimed bug class actually exist here?
@@ -27,24 +27,41 @@ itself make the SP a false positive.
    - `suppressed_upstream` — is the error already fully handled/suppressed before the site?
 3. **Sanitizer class** (`sanitizer_class_unobservable`): set true ONLY if this is a pure
    logic/info bug with no sanitizer signal. For any memory-safety class leave it false.
-4. **Correct the SP if needed.** If the LOCATION is right but the DESCRIPTION/bug-type is
+4. **PROBE IT DYNAMICALLY (the strongest evidence).** Your code-reading tells you what input
+   should reach the site — turn that into a real run:
+   - Write `def generate(variant: int) -> bytes` producing an input meant to reach the SP.
+   - Call `reach_probe(generator_code=..., targets=[the SP function], sp_function=..., sp_crash_type=...)`.
+   - Read the result: `reached` (did the input hit the target), `crashed` + `sanitizer_type` +
+     `crash_frame` (did it fault), `asan_margin` (exact distance past the boundary on a crash),
+     `crash_matches_sp`. Iterate 2–4 times: refine `generate` toward reaching, then crashing.
+   - Reaching or crashing is worth more than any amount of reading. A crash here is a near-PoV.
+   - If you suspect the tainted value is bounded before the sink, use
+     `check_clamp(generator_code=..., var="<the value>", at_function="<enclosing fn>")`. A value
+     REDUCED at a guard is a real clamp (and only THEN is the SP disconfirmed).
+5. **Correct the SP if needed.** If the LOCATION is right but the DESCRIPTION/bug-type is
    wrong, fix it in `verification_notes` (do not discard the SP over an inaccurate wording).
-5. **Optionally** give `pov_guidance`: 1–3 sentences on what input might reach/trigger it.
-   It is a hint for the PoV agent, not required.
+6. **Optionally** give `pov_guidance`: 1–3 sentences on what input might reach/trigger it.
 
 ## What NOT to do
 
 - Do NOT set `score`, and do NOT try to decide "important" — those are computed.
 - Do NOT reject a real memory-safety SP because it "looks unreachable" or "looks guarded";
   report `control_flow_correct` / `suppressed_upstream` instead (neither hard-rejects).
+- Do NOT invent dynamic numbers. Only report `dyn_*` values that `reach_probe`/`check_clamp`
+  actually returned; if you never ran them, leave the `dyn_*` fields unset.
 
 ## Tools
 
-- `get_function_source`, `get_callers`, `get_callees`, `find_all_paths`, `check_reachability`,
+- `Read`/`Grep` (read source directly), `get_callers`, `get_callees`, `find_all_paths`, `check_reachability`,
   `search_code` — read the code and the call graph.
+- `reach_probe` — run one candidate input through the ASan binary under gdb-15; returns
+  reach / crash / type / frame / margin. `check_clamp` — watch a tainted value for a runtime clamp.
 - `update_suspicious_point` — report your evidence. Call it once when done, with:
   `is_checked_by_verifier=True`, the decomposed conditions above, optional `verification_notes`,
-  `pov_guidance`, and (if you assessed it) `reachability_status`/`reachability_reason`.
-  Leave `is_crash_found=False` (set later by actual exploitation).
+  `pov_guidance`, `reachability_status`/`reachability_reason`, and the dynamic results you got:
+  `dyn_reached` ("confirmed" if reach_probe reached), `dyn_crashed` ("confirmed" if it crashed),
+  `dyn_margin` (the returned `asan_margin`) with `dyn_margin_confirmed=True`, and
+  `dyn_clamp_observed="confirmed"` ONLY if check_clamp actually saw a clamp.
+  Leave `is_crash_found=False` (a real PoV is confirmed later by exploitation).
 
-Report what you read; the system decides whether it proceeds and how it is ranked.
+Report what you read AND what you ran; the system decides whether it proceeds and how it is ranked.

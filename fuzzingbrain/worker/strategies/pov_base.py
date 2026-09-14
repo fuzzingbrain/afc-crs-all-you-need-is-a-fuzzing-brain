@@ -624,6 +624,12 @@ class POVBaseStrategy(BaseStrategy):
                 work_dir=self.results_path / "coverage_work",
             )
 
+        # Verify-stage reach-probe context: the exact ASan ELF + fuzzer name so
+        # the verifier can run candidate inputs under gdb-15 for dynamic evidence
+        # (reach / crash / margin). Independent of the coverage build.
+        from ...tools.coverage import set_reach_context
+        set_reach_context(self.executor.fuzzer_binary_path, self.fuzzer, self.project_name, self.executor.docker_image)
+
         # Configure pipeline
         concurrency = get_concurrency()
         config = PipelineConfig(
@@ -632,7 +638,7 @@ class POVBaseStrategy(BaseStrategy):
             pov_min_score=0.5,  # Minimum score to proceed to POV
             poll_interval=1.0,  # Poll every 1 second
             max_idle_cycles=10,  # Exit after 10 idle cycles
-            max_iterations=100,  # Max POV agent iterations
+            max_iterations=200,  # Max POV agent iterations (hard-push through o3 stalls)
             max_pov_attempts=100,  # Max POV generation attempts
             fuzzer_path=self.executor.fuzzer_binary_path,
             docker_image=self.executor.docker_image,

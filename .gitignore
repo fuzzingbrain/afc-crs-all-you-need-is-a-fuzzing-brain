@@ -7,6 +7,7 @@
 # Virtual environments
 **/venv/
 
+**/paper/**
 # Workspace / runtime data
 **/workspace/
 **/workspace/*

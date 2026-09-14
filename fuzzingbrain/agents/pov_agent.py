@@ -205,6 +205,15 @@ class POVAgent(BaseAgent):
         return True
 
     @property
+    def include_reach_probe_tools(self) -> bool:
+        """POVAgent gets the SAME strong gdb-15 trace as the verifier
+        (reach_probe / check_clamp): breakpoint-accurate reach map, crash type +
+        frame, exact ASan overflow margin, and operand dump. Used to diagnose why
+        a candidate input does not reach / trigger the target, instead of blindly
+        burning create_pov attempts."""
+        return True
+
+    @property
     def include_sp_create_tools(self) -> bool:
         """POVAgent only reads SPs for context, never creates new ones."""
         return False
@@ -424,7 +433,7 @@ Your POV must:
 This code shows EXACTLY how your POV input enters the target library.
 Study it carefully - it determines what input format you must use.
 
-**NOTE: Fuzzer source is already provided below. Do NOT call get_fuzzer_info() unless you forget it.**
+**NOTE: Fuzzer source is already provided below. Do NOT call get_fuzzer_source unless you forget it.**
 
 ```c
 {fuzzer_source}
@@ -439,7 +448,7 @@ Key things to identify:
         else:
             message += """## Fuzzer Source Code
 
-**Fuzzer source not pre-loaded. You MUST call get_fuzzer_info() to read it first.**
+**Fuzzer source not pre-loaded. You MUST call get_fuzzer_source (with your fuzzer's name) to read it first.**
 This is CRITICAL - you need to understand how your input enters the library!
 
 """
@@ -605,7 +614,10 @@ Start by reading the vulnerable function source: {source_hint}.
         final_response = ""
         response = None
         consecutive_no_tool_calls = 0  # Track consecutive iterations without tool calls
-        max_consecutive_no_tools = 5  # Give up after this many consecutive refusals
+        consecutive_llm_failures = 0  # Track consecutive LLM API failures (o3 timeouts)
+        max_consecutive_no_tools = 12  # Give up only after many refusals (reasoning
+        # models emit bare-text turns; a low threshold ended PoV early with most of the
+        # attempt/iteration budget unused — nudge them back instead of quitting fast)
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -652,6 +664,24 @@ Start by reading the vulnerable function source: {source_hint}.
                         level="INFO",
                     )
 
+            # Proactive budget visibility: the iteration/attempt counters live only in
+            # logs and non-standard message keys the API drops, so the model cannot see
+            # how much budget it has and tends to "conclude" prematurely. Periodically
+            # surface the remaining budget in the visible prompt while no crash yet.
+            if iteration % 8 == 0 and not self.pov_success:
+                _rem = self.max_pov_attempts - self.pov_attempts
+                self.messages.append({
+                    "role": "user",
+                    "content": (
+                        f"PROGRESS: iteration {iteration}/{self.max_iterations}, "
+                        f"POV attempts {self.pov_attempts}/{self.max_pov_attempts} "
+                        f"({_rem} create_pov attempts still left). You have ample budget — "
+                        f"do NOT conclude 'false positive' or stop. Only a real crash "
+                        f"(create_pov reports crashed) ends this. Keep constructing NEW "
+                        f"inputs and use reach_probe to confirm you reach the target."
+                    ),
+                })
+
             # Call LLM with tools (async to avoid blocking event loop)
             self.llm_client.reset_tried_models()
             try:
@@ -671,7 +701,19 @@ Start by reading the vulnerable function source: {source_hint}.
 
                 self._log(f"LLM call failed: {e}", level="ERROR")
                 self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
-                break
+                # o3 occasionally hits a 120s API timeout; a single failure must NOT
+                # end the run before the turn budget is spent. Skip this turn and
+                # retry on the next iteration. Only bail if the LLM is wedged (many
+                # consecutive failures = not a transient timeout).
+                consecutive_llm_failures += 1
+                if consecutive_llm_failures >= 8:
+                    self._log(
+                        f"LLM failed {consecutive_llm_failures}x in a row — wedged, stopping",
+                        level="ERROR",
+                    )
+                    break
+                continue
+            consecutive_llm_failures = 0
 
             # Compress context when input tokens exceed 100K
             if self.enable_context_compression and response.input_tokens >= 60_000:
@@ -821,14 +863,16 @@ Use {source_hint} or trace_pov (if available) to understand better, then create 
                     level="WARNING",
                 )
 
-                # Give up after too many consecutive refusals
+                # NEVER give up on no-tool turns: the run must use its full iteration
+                # budget (only a real crash or max_iterations/max_pov_attempts ends it).
+                # Just log and fall through to the nudge below, then continue the loop.
                 if consecutive_no_tool_calls >= max_consecutive_no_tools:
                     self._log(
-                        f"LLM refused to call tools {max_consecutive_no_tools} times, giving up",
-                        level="ERROR",
+                        f"LLM emitted {consecutive_no_tool_calls} consecutive bare-text "
+                        f"turns — nudging hard and continuing (no early give-up)",
+                        level="WARNING",
                     )
-                    final_response = response.content or "LLM stopped trying"
-                    break
+                    consecutive_no_tool_calls = 0  # reset so we keep nudging, not quit
 
                 # Add the assistant's response
                 if response.content:
@@ -846,14 +890,16 @@ Use {source_hint} or trace_pov (if available) to understand better, then create 
                 self.messages.append(
                     {
                         "role": "user",
-                        "content": f"""You still have {remaining_attempts} POV attempts remaining. Do NOT give up.
+                        "content": f"""You still have {remaining_attempts} POV attempts remaining — you are NOT out of budget.
 
-Try a DIFFERENT approach:
-- If previous blobs didn't crash, analyze WHY and adjust
-- Try different byte values, sizes, or structures
-- Look for alternative code paths to the vulnerable function
+Do NOT stop, and do NOT conclude "false positive" / "not reproducible": you may only stop when create_pov actually reports crashed. A vulnerability that you can REACH (confirm with reach_probe) is real; if it is not crashing yet, you have not shaped the triggering value correctly — that is a reason to iterate, not to quit.
 
-Call create_pov with a new generator code NOW.""",
+Try a DIFFERENT concrete approach right now:
+- Use reach_probe(targets=[the vuln function]) to confirm you reach it; if not reached, fix the input FORMAT first.
+- If reached but no crash: push the tainted size/offset/index further past the boundary; vary byte values, lengths, counts.
+- Read the exact vulnerable line again and make the operand cross the bound.
+
+Call create_pov (or reach_probe to diagnose) with NEW generator code NOW — every remaining turn must call a tool.""",
                         "iteration": f"{iteration}/{self.max_iterations}",
                         "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
                     }
