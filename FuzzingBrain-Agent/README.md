@@ -1,122 +1,66 @@
 # FuzzingBrain-Agent
 
-A from-scratch agent that reads a fuzz target's source, reasons about where a
-fault lives, and produces an input that crashes it. The loop is ours — not a
-wrapper around a third-party CLI — so the two things a framework hides are ours
-to control: the prompt cache, and (next) context management.
+Empty. The agent is being rebuilt from scratch on this branch.
 
-```bash
-# through the bench, the standard way:
-fb-bench run avro-03 --agent fbagent-native
-```
+## What is here
 
-## Why it exists
+    fbagent/__init__.py   package marker
+    fbagent/llm.py        Anthropic client, pricing table, context windows
 
-An earlier version drove `omp` (a third-party coding CLI). It worked, but the
-agent loop, the context handling, and the prompt caching all lived inside a
-binary we did not write and could not tune. This version replaces that binary
-with about 520 lines of our own: one model, one loop, four tools, and the Anthropic
-API driven directly. Everything the model does, and everything we send it, is
-in this folder.
+That is deliberately all of it. There is no loop, no tool surface, no prompts,
+no entry point, no bench manifest.
 
-## What's here
+## Why it was emptied
 
-```
-fbagent/
-├── agent.py   the loop — linear message-append, the shape mini-swe-agent proved
-├── llm.py     the model call + the prompt-cache policy (the reason we wrote our own)
-├── tools.py   read / glob / grep / bash — schema shape here, text from prompts/
-├── prompts.py the one door to every word the model reads
-└── run.py     entry point: run once in the challenge directory
-prompts/       all model-facing text, kept out of the code
-├── system.md    the system prompt
-├── opening.md   the first user message
-└── tools.yaml   the tool descriptions
-fbagent-native.agent.yaml   the bench manifest — five lines that plug it into fb-bench
-```
+The previous agent encoded one strategy: compensate for a weak model by taking
+many cheap shots. Its prompts told the model to submit early, batch its
+candidates, enumerate the finite surfaces, and grow inputs until something
+broke. On Claude Haiku 4.5 that was the right trade and it measurably worked —
+bare Haiku 31 points on dev-40 against 52 with the substrate.
 
-### The loop (`agent.py`)
+On a frontier model the same instructions are a downgrade, because that model's
+advantage is aim rather than volume. Measured on harfbuzz-02, one cell each:
 
-The whole state is one growing message list. Each step: call the model, append
-its turn verbatim, run whatever tools it asked for, append the results, repeat —
-until it stops asking or the budget (steps / wall clock) runs out. No planner,
-no branching, no hidden memory. A survived API error ends the run cleanly rather
-than crashing it, so a candidate already submitted is still graded.
+    bare Opus 5          5 distinct faults from    8 candidates
+    the old agent + Opus 5   1 distinct fault from  356 candidates
 
-### The cache policy (`llm.py`)
+Left alone, Opus 5 read ~3,000 lines of the target subsystem across 29
+consecutive turns, wrote a font generator program, and crashed on its first
+submission. Under the agent it began submitting at step 11 and spent the rest
+of the run enumerating.
 
-This is why the loop is ours. Prompt caching is a prefix match, rendered
-`tools → system → messages`, so we put a breakpoint on the stable things (the
-tool schemas, the system prompt) and move one breakpoint to the tail of the
-history each turn. The grown prefix is then a cache *read* on the next turn, and
-only the newest exchange is billed in full. On a 20-step run that is about a
-**0.91 cache-read rate** — the number to watch: if it falls toward zero, a
-breakpoint is being invalidated. It is reported at the end of every run.
+So the strategy layer was not worth porting, and keeping it would have anchored
+whatever came next.
 
-The call is streamed (`messages.stream()` + `get_final_message()`) because a
-hard turn with adaptive thinking at `xhigh` effort can run for minutes, past a
-non-streaming HTTP timeout. Model is `claude-opus-5`; both are overridable with
-`FBAGENT_MODEL` / `FBAGENT_EFFORT`.
+## What was removed, and why nothing else broke
 
-### The tools (`tools.py`)
+The loop and its context compaction, the tool surface, the CLI entry point, the
+frontier picker, every prompt, every bench manifest, the tests that pinned them,
+and finally the static analysis pass.
 
-`read` / `glob` / `grep` to navigate the source; `bash` to build a candidate
-(with `python3`) and test it (`./submit <file>`). Paths are confined to the
-working directory. `bash` runs through the sandbox shell the bench provides in
-`$FBAGENT_SHELL` — the Docker socket masked, the network blocked — so a tool
-cannot reach the sealed answer or fetch a published PoC. A failed tool comes
-back to the model marked `is_error`, not passed off as data.
+Nothing under `fuzzingbrain/` — the CRS itself — ever imported any of it, so the
+product is unaffected. The only dependents were `experiments/worklist-eval`,
+which imports `fbagent.analysis` in two eval scripts and invokes
+`python3 -m fbagent.run` from one manifest. Those are broken until the rebuild
+provides replacements, or the experiment is pointed at the old code:
 
-## How it runs
+    git show <previous-branch>:FuzzingBrain-Agent/fbagent/analysis.py
 
-The agent knows nothing about Docker, the challenge image, or grading. The bench
-hands it two things and grades the rest:
+The old agent is not lost — `agentic-workflow`, `agent-improvement`, `unified`,
+`reach-fallback` and the `perf/*` branches all still carry it.
 
-1. a directory of the challenge source (staged from the sealed image — the
-   answer is not in it), which becomes the working directory;
-2. a `./submit <file>` command that runs a candidate on the sealed harness and
-   returns the verdict.
+## What the rebuild has to get right
 
-The agent reads the source, tests candidates through `./submit`, and stops when
-one crashes. The bench documents the contract every external agent plugs into in its
-own `docs/external-agents.md`.
+1. The budget must be the same currency as the arm it is compared against.
+   The bench caps the api arm by turns; it passes `max_turns` to the external
+   arm and never enforces it, so the old agent ran on wall clock and dollars —
+   and because it drove `./submit` from shell loops, its graded-candidate count
+   was unbounded. 356 against 8 is not a fair comparison in either direction.
 
-### Registering the name
+2. Reach has to be observable per candidate. A batch of 356 came back with
+   crash/clean, a millisecond count and a size — no way to tell which one got
+   closest. There is nothing to climb in that.
 
-`--agent fbagent-native` resolves the manifest from a search path. Register once:
-
-```bash
-mkdir -p ~/.config/fbbench/agents
-ln -s "$PWD/fbagent-native.agent.yaml" ~/.config/fbbench/agents/fbagent-native.agent.yaml
-```
-
-or point `$FBBENCH_AGENTS` at this directory, or pass the full path to `--agent`.
-
-## Keys and environment
-
-This folder lives inside the FuzzingBrain v2 repo and shares its `.env` and its
-virtualenv. `ANTHROPIC_API_KEY` is read from `../.env` if the environment does
-not already carry it, and the v2 venv is added to `sys.path` if `anthropic` is
-not importable under the interpreter the bench happens to launch — so there is
-nothing to install or export a second time.
-
-## Standalone
-
-To drive the loop without the bench, run it in a directory that already holds
-the challenge source and a `./submit`:
-
-```bash
-cd <a staged challenge dir>
-python3 -m fbagent.run --timeout 900
-```
-
-The bench's external arm is what normally produces that directory and that
-`submit`; standalone is for poking at the loop directly.
-
-## What's done, and what's next
-
-- loop, four tools, prompt caching, standard SDK usage (streaming, error
-  handling, `is_error`) — **done**, and it solves avro-03 graded by the bench.
-- **context management (compaction / context editing)** — not yet. The runs so
-  far stay well under the context window; this is for long challenges and is the
-  next thing to own, the same way the cache is owned here.
+3. The agent should supply what the model cannot do itself — deterministic
+   analysis, and signals it has no way to observe — and not steer how it
+   searches.
