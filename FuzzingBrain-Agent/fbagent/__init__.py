@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""FuzzingBrain-Agent: a from-scratch agent loop over the Anthropic API.
+"""FuzzingBrain-Agent.
 
 This package lives inside the FuzzingBrain v2 repository and shares its
 virtualenv, the same way it shares the repo's .env for keys. The bench starts
