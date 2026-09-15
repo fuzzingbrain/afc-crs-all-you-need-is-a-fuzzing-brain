@@ -5,7 +5,6 @@ What tools each agent actually gets, from `create_isolated_mcp_server` + each ag
 
 ## All tools (20), by category
 
-
 ### code_view (read code / source)
 - **`Read`** — Read a file from the task workspace. Returns numbered lines, so you can
 - **`Grep`** — Search file contents by regular expression.

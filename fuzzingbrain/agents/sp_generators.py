@@ -41,6 +41,17 @@ class SPGeneratorBase(BaseAgent):
     # Tool names
     TOOL_CREATE_SUSPICIOUS_POINT = "create_suspicious_point"
 
+    # Appended to a successful create_suspicious_point result: a function can hold
+    # several dangerous operations, so keep the agent scanning instead of stopping
+    # after the first SP. It ends by emitting the done phrase (no tool call).
+    SP_CREATED_NUDGE = (
+        "You have successfully created a suspicious point. Now look back at the "
+        "function and follow the analysis steps again to check whether there is any "
+        "OTHER potential crash / dangerous operation you may have missed -- create a "
+        "separate suspicious point for each. Output ASSESSMENT COMPLETE only once you "
+        "are sure you have checked every memory-related operation in this function."
+    )
+
     # Lower temperature for focused analysis
     default_temperature: float = 0.5
 
@@ -181,6 +192,11 @@ class SPGeneratorBase(BaseAgent):
                         self._context.sp_created = True
                         self._context.sp_details = self.sp_details
 
+                    # Nudge: one function can have several dangerous operations, so
+                    # do not stop after a single SP. Push the agent back through the
+                    # steps until it has checked everything, then finish explicitly.
+                    result = result + "\n\n" + self.SP_CREATED_NUDGE
+
             except (json.JSONDecodeError, TypeError):
                 pass
 
@@ -220,7 +236,7 @@ class FullSPGenerator(SPGeneratorBase):
         # Agent config
         llm_client: Optional[LLMClient] = None,
         model: Optional[Union[ModelInfo, str]] = None,
-        max_iterations: int = 5,
+        max_iterations: int = 15,
         verbose: bool = True,
         task_id: str = "",
         worker_id: str = "",
@@ -486,7 +502,7 @@ class LargeFullSPGenerator(FullSPGenerator):
         direction_id: str = "",
         llm_client: Optional[LLMClient] = None,
         model: Optional[Union[ModelInfo, str]] = None,
-        max_iterations: int = 6,
+        max_iterations: int = 15,
         verbose: bool = True,
         task_id: str = "",
         worker_id: str = "",

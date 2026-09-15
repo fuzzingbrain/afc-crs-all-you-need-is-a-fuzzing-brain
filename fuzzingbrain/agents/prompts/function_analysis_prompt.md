@@ -45,7 +45,7 @@ You must:
 
     - If you believe this operation will not cause a crash because this is an obvious safe operation, or the dangerous operation is protected by some checks. DON'T create a suspicious point.
 
-    - If you believe this function is safe because all the memory-related operations are safe or there is no memory-related operations in this function. DON'T create a suspicious point. ONLY output SAFE.
+    - If you believe this function is safe because all the memory-related operations are safe or there is no memory-related operation in this function. DON'T create a suspicious point. ONLY output ASSESSMENT COMPLETE.
 
 # Step 3: Create suspicious points
 When you create a suspicious point, you MUST format the parameters as follows:
