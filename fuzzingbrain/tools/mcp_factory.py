@@ -497,47 +497,34 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
         score: float = None,
         is_checked_by_verifier: bool = None,
         is_crash_found: bool = None,
+        evidence: str = None,
         verification_notes: str = None,
         pov_guidance: str = None,
-        reachability_status: str = None,
-        reachability_multiplier: float = None,
-        reachability_reason: str = None,
-        pattern: str = None,
-        taint: str = None,
-        control_flow_correct: str = None,
-        suppressed_upstream: str = None,
-        sanitizer_class_unobservable: bool = None,
-        dyn_reached: str = None,
-        dyn_crashed: str = None,
-        dyn_margin: float = None,
-        dyn_margin_confirmed: bool = None,
-        dyn_clamp_observed: str = None,
+        description: str = None,
+        important_controlflow: str = None,
     ) -> Dict[str, Any]:
         """
-        Update an existing suspicious point after verification.
-
-        Report the DECOMPOSED evidence conditions; the system computes the score and
+        Update a suspicious point after verifying it. Make this call ONCE, at the
+        end, recording your whole verdict together.
 
         Args:
             suspicious_point_id: ID of the suspicious point to update
-            pattern: "confirmed"/"refuted"/"unknown" — a dangerous op of the claimed class exists
-            taint: "confirmed"/"refuted"/"unknown" — the dangerous operand derives from fuzzer input
-            control_flow_correct: "confirmed"/"refuted"/"unknown" — path from harness to site is right
-            suppressed_upstream: "confirmed"/"refuted"/"unknown" — error already handled upstream (does NOT hard-reject)
-            sanitizer_class_unobservable: true ONLY if this class has no sanitizer signal (pure logic/info bug)
-            dyn_reached: "confirmed"/"unknown" — relay reach_probe's reach result (an input reached the site)
-            dyn_crashed: "confirmed"/"unknown" — relay reach_probe's crash result (sanitizer fired); crashes rank top
-            dyn_margin: numeric distance-to-violation from reach_probe (<=0 means past the boundary); ORDERING only
-            dyn_margin_confirmed: true only when reach_probe actually produced the margin (never assert it yourself)
-            dyn_clamp_observed: "confirmed" ONLY if check_clamp dynamically observed the tainted value clamped (this REJECTS)
-            score: (legacy; ignored when evidence conditions are given)
-            is_checked_by_verifier: Whether the point has been verified
-            is_crash_found: Whether it's confirmed as a real vulnerability
-            verification_notes: Notes from verification analysis
-            pov_guidance: Guidance for POV agent (input direction, how to reach vuln)
-            reachability_status: Reachability status (direct, pointer_call, unreachable)
-            reachability_multiplier: Score multiplier based on reachability (0.0-1.0)
-            reachability_reason: Explanation for reachability determination
+            score: Your confidence in [0,1] that the bug is real AND detectable by this
+                sanitizer via this harness (1.0 = you reproduced a crash). The system
+                derives proceed/priority from it — higher score ranks higher in the PoV
+                queue; a low score with clear disconfirming evidence drops it.
+            is_checked_by_verifier: Set True when your verification is complete.
+            is_crash_found: Set True only if you reproduced a crash with reach_probe.
+            evidence: The concrete facts you established, FOR and AGAINST the bug, each
+                with where it came from (`file:line` for reads, reach_probe/check_clamp
+                results for runs). Write facts, not conclusions. Write it all here at once.
+            verification_notes: Short summary of your verdict.
+            pov_guidance: Guidance for the POV agent (input direction, how to reach the
+                vuln, what you already tried).
+            description: Revised root-cause description — set ONLY when the incoming
+                description was wrong or imprecise.
+            important_controlflow: Revised key functions/variables note — set ONLY when
+                the incoming one was wrong or imprecise.
         """
         from .suspicious_points import update_suspicious_point_impl
 
@@ -546,21 +533,11 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
             score=score,
             is_checked_by_verifier=is_checked_by_verifier,
             is_crash_found=is_crash_found,
+            evidence=evidence,
             verification_notes=verification_notes,
             pov_guidance=pov_guidance,
-            pattern=pattern,
-            taint=taint,
-            control_flow_correct=control_flow_correct,
-            suppressed_upstream=suppressed_upstream,
-            sanitizer_class_unobservable=sanitizer_class_unobservable,
-            reachability_status=reachability_status,
-            reachability_multiplier=reachability_multiplier,
-            reachability_reason=reachability_reason,
-            dyn_reached=dyn_reached,
-            dyn_crashed=dyn_crashed,
-            dyn_margin=dyn_margin,
-            dyn_margin_confirmed=dyn_margin_confirmed,
-            dyn_clamp_observed=dyn_clamp_observed,
+            description=description,
+            important_controlflow=important_controlflow,
         )
 
     @mcp.tool
@@ -603,8 +580,8 @@ def _register_reach_probe_tools(mcp: FastMCP) -> None:
 
         Use this to CONFIRM the SP is reachable/triggerable. Iterate: read the code,
         write a better generator, probe again. Reaching or crashing is worth more
-        than any amount of reading. Relay the returned reached/crashed/asan_margin
-        into update_suspicious_point's dyn_* fields.
+        than any amount of reading. Record the returned reached/crashed/asan_margin as
+        facts in update_suspicious_point's `evidence` (a crash means score = 1.0).
 
         Args:
             generator_code: Python defining `def generate(variant: int) -> bytes`

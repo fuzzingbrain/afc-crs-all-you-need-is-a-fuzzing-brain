@@ -24,25 +24,6 @@ from ..llms import LLMClient, ModelInfo
 from ..core.models.agent import AgentType
 
 
-from ..core.evidence_score import Evidence, proceeds, priority, CONFIRMED, REFUTED, UNKNOWN
-
-
-def _ev_from_args(a: dict, crash_type: str, is_crash_found) -> Evidence:
-    """Build the evidence vector from the LLM's decomposed report + dynamic crash.
-    sanitizer_match: a memory-safety class is observable; only a pure logic/info bug
-    the LLM flags is REFUTED (never the LLM's merits doubt on a real bug)."""
-    def b(x):
-        return x if x in (CONFIRMED, REFUTED, UNKNOWN) else UNKNOWN
-    return Evidence(
-        sanitizer_match=(REFUTED if a.get("sanitizer_class_unobservable")
-                         else CONFIRMED),
-        pattern=b(a.get("pattern")), taint=b(a.get("taint")),
-        control_flow_correct=b(a.get("control_flow_correct")),
-        suppressed_upstream=b(a.get("suppressed_upstream")),
-        crashed=CONFIRMED if is_crash_found else UNKNOWN,
-    )
-
-
 class SPVerifier(BaseAgent):
     """
     SP Verification Agent.
@@ -114,6 +95,7 @@ class SPVerifier(BaseAgent):
         log_dir: Optional[Path] = None,
         index: int = 0,
         target_name: str = "",
+        fuzzer_source: str = "",
     ):
         """
         Initialize SP Verifier.
@@ -131,6 +113,7 @@ class SPVerifier(BaseAgent):
             log_dir: Directory for log files
             index: Agent index for numbered log files
             target_name: SP ID or function_name for log filename
+            fuzzer_source: Full harness source, embedded (cached) in the system prompt
         """
         super().__init__(
             llm_client=llm_client,
@@ -146,6 +129,8 @@ class SPVerifier(BaseAgent):
             sanitizer=sanitizer,
         )
         self.scan_mode = scan_mode
+        # Full harness source, embedded in the system prompt (cached per worker).
+        self.fuzzer_source = fuzzer_source
 
         # Context for verification
         self.suspicious_point: Optional[Dict[str, Any]] = None
@@ -318,7 +303,12 @@ class SPVerifier(BaseAgent):
             prompt = VERIFY_SUSPICIOUS_POINTS_PROMPT
         sanitizer_guidance = f"\n\n## Sanitizer-Specific Patterns: {self.sanitizer}\n\nFocus ONLY on these bug types (other bugs won't be detected by this sanitizer):\n"
         sanitizer_guidance += self._get_sanitizer_guidance()
-        return prompt + sanitizer_guidance
+        harness = self.fuzzer_source or "(harness source unavailable)"
+        harness_section = (
+            "\n\n## Fuzzer Source Codes (how input enters the target)\n"
+            f"```c\n{harness}\n```\n"
+        )
+        return prompt + sanitizer_guidance + harness_section
 
     def _filter_tools_for_mode(
         self, tools: List[Dict[str, Any]]
@@ -355,29 +345,19 @@ class SPVerifier(BaseAgent):
             try:
                 data = json.loads(result)
                 if data.get("success"):
-                    # Evidence-bounded (recall-first): if the LLM reported the
-                    # decomposed conditions, COMPUTE proceed/priority from them —
-                    # the LLM never asserts the score. Falls back to the LLM's
-                    # values only when no evidence fields were reported.
-                    ev_keys = ("pattern", "taint", "control_flow_correct",
-                               "suppressed_upstream", "sanitizer_class_unobservable")
-                    if any(tool_args.get(k) is not None for k in ev_keys):
-                        ev = _ev_from_args(tool_args, "",
-                                           tool_args.get("is_crash_found"))
-                        self.verify_result = {
-                            "proceed": proceeds(ev),
-                            "priority": round(priority(ev), 3),
-                            "reason": tool_args.get("verification_notes", "No notes"),
-                            "evidence": {k: getattr(ev, k) for k in
-                                ("sanitizer_match","pattern","taint",
-                                 "control_flow_correct","suppressed_upstream","crashed")},
-                        }
-                    else:
-                        self.verify_result = {
-                            "proceed": True,
-                            "priority": 0.0,
-                            "reason": tool_args.get("verification_notes", "No notes"),
-                        }
+                    # Recall-first: proceed/priority are derived from the verifier's
+                    # confidence score (the server is authoritative; this mirror is for
+                    # the summary/log). A reproduced crash always proceeds.
+                    _s = tool_args.get("score")
+                    _crash = bool(tool_args.get("is_crash_found"))
+                    _priority = round(float(_s), 3) if _s is not None else 0.0
+                    _proceed = bool((_s is not None and _s >= 0.5) or _crash)
+                    self.verify_result = {
+                        "proceed": _proceed,
+                        "priority": _priority,
+                        "reason": tool_args.get("verification_notes", "No notes"),
+                        "evidence": tool_args.get("evidence", ""),
+                    }
                     self._log(
                         f"Verify result: proceed={self.verify_result['proceed']} "
                         f"priority={self.verify_result['priority']}",
@@ -392,6 +372,22 @@ class SPVerifier(BaseAgent):
                 pass
 
         return result
+
+    def _is_terminal_tool_result(
+        self, tool_name: str, tool_args: Dict[str, Any], tool_result: str
+    ) -> bool:
+        """The verifier finishes the moment it records its verdict: a successful
+        update_suspicious_point that sets is_checked_by_verifier=True. A mid-flow
+        update (e.g. CHECK 3 revising the description) does not set that flag, so it
+        does not end the run."""
+        if tool_name != self.TOOL_UPDATE_SUSPICIOUS_POINT:
+            return False
+        if not tool_args.get("is_checked_by_verifier"):
+            return False
+        try:
+            return bool(json.loads(tool_result).get("success"))
+        except (json.JSONDecodeError, TypeError):
+            return False
 
     def _should_skip_urgency_message(self) -> bool:
         """Check if urgency message should be skipped."""
@@ -410,9 +406,8 @@ Start wrapping up your analysis. You should be ready to call `{self.TOOL_UPDATE_
 
 Call `{self.TOOL_UPDATE_SUSPICIOUS_POINT}` immediately with your best judgment:
 - Set is_checked_by_verifier=True
-- Report pattern/taint/control_flow_correct/suppressed_upstream (confirmed/refuted/unknown)
-- Set sanitizer_class_unobservable=true ONLY for a pure logic/info bug
-- Include verification_notes explaining your reasoning
+- Set score (your confidence in [0,1] that the bug is real and sanitizer-observable)
+- Include evidence (the concrete facts, FOR and AGAINST) and verification_notes
 
 Do NOT let iterations run out without a decision!
 """
@@ -459,27 +454,6 @@ Discard:
         static_reachable = suspicious_point.get("static_reachable", True)
         return sp_id, function_name, static_reachable
 
-    def _format_fuzzer_code_section(self, fuzzer_code: str) -> str:
-        """Format fuzzer source code section for initial message."""
-        if fuzzer_code:
-            return f"""## Fuzzer Source Code (CRITICAL - READ THIS FIRST!)
-
-This code shows EXACTLY how input enters the target library.
-Vulnerabilities must be reachable through this entry point.
-
-```c
-{fuzzer_code}
-```
-
-"""
-        else:
-            return f"""## Fuzzer Source Code
-
-IMPORTANT: First read the fuzzer source with get_fuzzer_source("{self.fuzzer}").
-This shows how input enters the library - only reachable code matters!
-
-"""
-
     def _format_sp_details_section(
         self,
         sp_id: str,
@@ -521,22 +495,6 @@ This shows how input enters the library - only reachable code matters!
                 section += f"  - {item}\n"
         return section
 
-    def _format_fp_check_section(
-        self, static_reachable: bool, function_name: str
-    ) -> str:
-        """Format function pointer check instruction section."""
-        if static_reachable:
-            return ""
-
-        return f"""
-**CRITICAL**: This function is marked as static-unreachable.
-Before marking as FP, you MUST check for function pointer patterns:
-- Search for where `{function_name}` is assigned to a struct member
-- Look for patterns like `methods.xxx = {function_name}` or `handler->xxx = {function_name}`
-- If found, the function IS reachable via function pointer!
-
-"""
-
     def _format_verification_steps_section(
         self,
         static_reachable: bool,
@@ -562,34 +520,21 @@ Before marking as FP, you MUST check for function pointer patterns:
 2. **VERIFY SANITIZER COMPATIBILITY**: Is the bug type detectable by {self.sanitizer}?
    - {self._get_sanitizer_vuln_types()}
 
-3. **UPDATE SP**: Call update_suspicious_point with your verdict. Set
-   reachability_status="assumed_reachable"; reachability is left to the POV test.
+3. **UPDATE SP**: Call update_suspicious_point once with your verdict (score +
+   evidence). Reachability is assumed here and left to the POV test.
 
 Do NOT spend tool calls on callers, protocol allow-lists or entry-point paths.
 """
 
-        fp_check = self._format_fp_check_section(static_reachable, function_name)
         callers_hint = self.find_callers_hint(function_name)
         return f"""
 
-## Verification Steps (Complete ALL)
-{fp_check}
-1. **CHECK REACHABILITY**:
-   - If static_reachable=True: Use {callers_hint} to verify a direct path exists
-   - If static_reachable=False: Search for function pointer assignment patterns first!
-   - If function pointer pattern found -> set reachability_status="pointer_call", reachability_multiplier=0.95
-   - If truly unreachable -> mark as FALSE POSITIVE with reachability_multiplier=0.3
-
-2. **VERIFY SANITIZER COMPATIBILITY**: Is the bug type described in the SP detectable by {self.sanitizer}?
-   - {self._get_sanitizer_vuln_types()}
-
-3. **READ SOURCE CODE**: Use {source_hint} for {function_name}, and read its callers too
-
-4. **CHECK SECURITY BOUNDARIES**: Look for input validation, bounds checks in the path
-
-5. **UPDATE SP**: Call update_suspicious_point with your verdict
-
-Start by verifying reachability with {callers_hint}.
+Follow Step 1 -> Step 2 -> Step 3 in your instructions. Concretely: read
+`{function_name}` with {source_hint} and confirm the bug is in the code; check the
+claimed condition is satisfiable and not mitigated on the path in (walk callers with
+{callers_hint} if useful, and check whether the bug type is observable by
+{self.sanitizer}); then try `reach_probe` to reproduce it. Record your whole verdict
+in one final `update_suspicious_point`.
 """
 
     def _format_validity_section(self) -> str:
@@ -603,11 +548,12 @@ Reachability from `{self.fuzzer}` is NOT judged in delta mode: assume the code
 is reachable and let the POV agent test it. Protocol allow-lists, option checks
 and call-graph gaps are not grounds for a false positive here.
 """
-        return f"""A suspicious point is VALID only if:
-1. It's REACHABLE from `{self.fuzzer}` (verify call path exists)
-2. It's DETECTABLE by `{self.sanitizer}` (bug type must match)
-
-If either is NO -> mark as FALSE POSITIVE immediately.
+        return f"""You are setting a confidence score for this suspicious point (see
+your instructions). The bug must be DETECTABLE by `{self.sanitizer}` — a bug type this
+sanitizer cannot observe scores 0. The function is expected to be reachable from
+`{self.fuzzer}`; if you cannot immediately trace the path, that LOWERS your confidence,
+it is NOT an automatic false positive (recall-first: do not discard a real bug over a
+call-graph gap).
 """
 
     def get_initial_message(self, **kwargs) -> str:
@@ -631,8 +577,6 @@ If either is NO -> mark as FALSE POSITIVE immediately.
 
 {self._format_validity_section()}
 """
-        message += self._format_fuzzer_code_section(fuzzer_code)
-
         message += self._format_sp_details_section(
             sp_id, function_name, suspicious_point, static_reachable
         )

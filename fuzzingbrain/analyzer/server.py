@@ -1646,54 +1646,24 @@ class AnalysisServer:
             updates["is_checked_by_verifier"] = params["is_checked_by_verifier"]
         if "is_crash_found" in params:
             updates["is_crash_found"] = params["is_crash_found"]
-        if "score" in params:
-            updates["score"] = params["score"]
-        # Recall-first: compute proceed/priority from the decomposed evidence the
-        # verifier reported (LLM never sets a score). sanitizer class observability
-        # is a rule (the LLM only flags a pure logic/info bug as unobservable).
-        _ev_keys = ("pattern", "taint", "control_flow_correct", "suppressed_upstream",
-                    "sanitizer_class_unobservable",
-                    "dyn_reached", "dyn_crashed", "dyn_margin",
-                    "dyn_margin_confirmed", "dyn_clamp_observed")
-        if any(k in params for k in _ev_keys):
-            from ..core.evidence_score import (
-                Evidence, proceeds as _proc, priority as _prio,
-                CONFIRMED, REFUTED, UNKNOWN)
-            def _b(x):
-                return x if x in (CONFIRMED, REFUTED, UNKNOWN) else UNKNOWN
-            # Dynamic crash proceeds and ranks top even if reported only here.
-            _dyn_crashed = (CONFIRMED if (params.get("dyn_crashed") == CONFIRMED
-                                          or params.get("is_crash_found"))
-                            else UNKNOWN)
-            _ev = Evidence(
-                sanitizer_match=(REFUTED if params.get("sanitizer_class_unobservable")
-                                 else CONFIRMED),
-                pattern=_b(params.get("pattern")), taint=_b(params.get("taint")),
-                control_flow_correct=_b(params.get("control_flow_correct")),
-                suppressed_upstream=_b(params.get("suppressed_upstream")),
-                reached=_b(params.get("dyn_reached")),
-                margin_value=params.get("dyn_margin"),
-                margin_source=(CONFIRMED if params.get("dyn_margin_confirmed")
-                               else UNKNOWN),
-                clamp_observed_dyn=_b(params.get("dyn_clamp_observed")),
-                crashed=_dyn_crashed,
-            )
-            updates["proceed"] = _proc(_ev)
-            updates["priority"] = round(_prio(_ev), 3)
-            updates["evidence"] = {k: getattr(_ev, k) for k in
-                ("sanitizer_match","pattern","taint","control_flow_correct",
-                 "suppressed_upstream","reached","margin_value","margin_source",
-                 "clamp_observed_dyn","crashed")}
+        # Recall-first verdict: the verifier sets a confidence score; proceed/priority
+        # are derived from it. A reproduced crash always proceeds and ranks top.
+        if params.get("score") is not None:
+            _s = float(params["score"])
+            updates["score"] = _s
+            updates["priority"] = round(_s, 3)
+            updates["proceed"] = bool(_s >= 0.5 or params.get("is_crash_found"))
+        if "evidence" in params:
+            updates["evidence"] = params["evidence"] or ""
         if "verification_notes" in params:
             updates["verification_notes"] = params["verification_notes"]
         if "pov_guidance" in params:
             updates["pov_guidance"] = params["pov_guidance"]
-        if "reachability_status" in params:
-            updates["reachability_status"] = params["reachability_status"]
-        if "reachability_multiplier" in params:
-            updates["reachability_multiplier"] = params["reachability_multiplier"]
-        if "reachability_reason" in params:
-            updates["reachability_reason"] = params["reachability_reason"]
+        # The verifier may correct an imprecise finder hypothesis.
+        if "description" in params:
+            updates["description"] = params["description"]
+        if "important_controlflow" in params:
+            updates["important_controlflow"] = params["important_controlflow"]
         if params.get("is_checked_by_verifier"):
             updates["checked_at"] = datetime.now()
         # Track which agent verified this SP

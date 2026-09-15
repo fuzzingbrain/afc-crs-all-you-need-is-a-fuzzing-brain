@@ -160,26 +160,16 @@ def update_suspicious_point_impl(
     score: float = None,
     is_checked_by_verifier: bool = None,
     is_crash_found: bool = None,
+    evidence: str = None,
     verification_notes: str = None,
     pov_guidance: str = None,
-    pattern: str = None,
-    taint: str = None,
-    control_flow_correct: str = None,
-    suppressed_upstream: str = None,
-    sanitizer_class_unobservable: bool = None,
-    reachability_status: str = None,
-    reachability_multiplier: float = None,
-    reachability_reason: str = None,
-    dyn_reached: str = None,
-    dyn_crashed: str = None,
-    dyn_margin: float = None,
-    dyn_margin_confirmed: bool = None,
-    dyn_clamp_observed: str = None,
+    description: str = None,
+    important_controlflow: str = None,
 ) -> Dict[str, Any]:
     """Implementation of update_suspicious_point (without MCP decorator).
 
-    The verifier reports DECOMPOSED evidence; proceed/priority are computed
-    server-side (recall-first). No LLM-chosen score.
+    The verifier sets a confidence `score` and writes free-text `evidence`;
+    proceed/priority are derived from the score server-side (recall-first).
     """
 
     err = _ensure_client()
@@ -195,21 +185,11 @@ def update_suspicious_point_impl(
             is_checked_by_verifier=is_checked_by_verifier,
             is_crash_found=is_crash_found,
             score=score,
+            evidence=evidence,
             verification_notes=verification_notes,
             pov_guidance=pov_guidance,
-            pattern=pattern,
-            taint=taint,
-            control_flow_correct=control_flow_correct,
-            suppressed_upstream=suppressed_upstream,
-            sanitizer_class_unobservable=sanitizer_class_unobservable,
-            reachability_status=reachability_status,
-            reachability_multiplier=reachability_multiplier,
-            reachability_reason=reachability_reason,
-            dyn_reached=dyn_reached,
-            dyn_crashed=dyn_crashed,
-            dyn_margin=dyn_margin,
-            dyn_margin_confirmed=dyn_margin_confirmed,
-            dyn_clamp_observed=dyn_clamp_observed,
+            description=description,
+            important_controlflow=important_controlflow,
             agent_id=agent_id or "",
         )
 
@@ -219,6 +199,7 @@ def update_suspicious_point_impl(
                 "is_checked_by_verifier": is_checked_by_verifier,
                 "is_crash_found": is_crash_found,
                 "score": score,
+                "evidence": evidence,
                 "verification_notes": verification_notes,
                 "pov_guidance": pov_guidance,
             },
@@ -368,13 +349,11 @@ def update_suspicious_point(
     is_checked_by_verifier: bool = None,
     is_crash_found: bool = None,
     score: float = None,
+    evidence: str = None,
     verification_notes: str = None,
     pov_guidance: str = None,
-    pattern: str = None,
-    taint: str = None,
-    control_flow_correct: str = None,
-    suppressed_upstream: str = None,
-    sanitizer_class_unobservable: bool = None,
+    description: str = None,
+    important_controlflow: str = None,
 ) -> Dict[str, Any]:
     """
     Update a suspicious point after verification.
@@ -384,18 +363,14 @@ def update_suspicious_point(
     Args:
         suspicious_point_id: The ID of the suspicious point to update
         is_checked_by_verifier: Set to True when verification is complete
-        is_crash_found: Set to True if confirmed as real vulnerability, False if false positive
-        pattern/taint/control_flow_correct/suppressed_upstream: confirmed/refuted/unknown
-        sanitizer_class_unobservable: true ONLY for a pure logic/info bug (no sanitizer signal)
-        score: (legacy; ignored — proceed/priority are computed from the evidence)
-        verification_notes: Notes explaining the verification result.
-            Example: "Confirmed: no bounds check before memcpy, attacker-controlled length"
-            Example: "False positive: length is validated in caller function"
-        pov_guidance: Brief guidance for POV agent:
-            1. Input direction: What kind of input to generate
-            2. How to reach the vuln: What input structure/values help the payload
-               pass through earlier checks and reach the vulnerable code
-            Keep it simple, 1-3 sentences. POV agent uses this as reference only.
+        is_crash_found: Set to True if a crash was reproduced
+        score: Your confidence (0-1) that the bug is real and sanitizer-observable;
+            proceed/priority are derived from it.
+        evidence: Free-text facts (FOR and AGAINST), each with where it came from.
+        verification_notes: Summary explaining the verification result.
+        pov_guidance: Brief guidance for POV agent (input direction, how to reach vuln).
+        description: Revised root-cause description (when the finder's was imprecise).
+        important_controlflow: Revised key functions/variables note.
 
     Returns:
         {"success": True, "updated": True} on success
@@ -414,13 +389,11 @@ def update_suspicious_point(
             is_checked_by_verifier=is_checked_by_verifier,
             is_crash_found=is_crash_found,
             score=score,
+            evidence=evidence,
             verification_notes=verification_notes,
             pov_guidance=pov_guidance,
-            pattern=pattern,
-            taint=taint,
-            control_flow_correct=control_flow_correct,
-            suppressed_upstream=suppressed_upstream,
-            sanitizer_class_unobservable=sanitizer_class_unobservable,
+            description=description,
+            important_controlflow=important_controlflow,
             agent_id=agent_id or "",
         )
 

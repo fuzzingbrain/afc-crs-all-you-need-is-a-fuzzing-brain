@@ -685,7 +685,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
         notes: str = None,
         proceed: bool = True,
         priority: float = 0.0,
-        evidence: dict = None,
+        evidence: str = None,
         proceed_to_pov: bool = False,
     ) -> bool:
         """
@@ -719,7 +719,7 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
                 "score": score,
                 "proceed": proceed,
                 "priority": priority,
-                "evidence": evidence or {},
+                "evidence": evidence or "",
                 "checked_at": datetime.now(),
             }
             if notes:

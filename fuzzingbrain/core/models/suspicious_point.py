@@ -90,7 +90,7 @@ class SuspiciousPoint:
     score: float = 0.0        # legacy finder hint; ordering fallback, NOT a gate
     proceed: bool = True       # recall-first gate: pass unless strongly disconfirmed
     priority: float = 0.0      # PoV queue ordering only (ordinal, not a probability)
-    evidence: Dict = field(default_factory=dict)  # the evidence vector behind proceed/priority
+    evidence: str = ""  # verifier's free-text facts (FOR/AGAINST) behind the score
 
     # Reachability analysis (for delta scan)
     # Static analysis may incorrectly mark function-pointer-called functions as unreachable
@@ -257,7 +257,7 @@ class SuspiciousPoint:
             score=data.get("score", 0.0),
             proceed=data.get("proceed", True),
             priority=data.get("priority", 0.0),
-            evidence=data.get("evidence", {}),
+            evidence=data.get("evidence", "") or "",
             static_reachable=data.get("static_reachable", True),
             reachability_status=data.get("reachability_status", "unknown"),
             reachability_reason=data.get("reachability_reason", ""),
@@ -282,7 +282,7 @@ class SuspiciousPoint:
         if notes:
             self.verification_notes = notes
 
-    def set_verdict(self, proceed: bool, priority: float = 0.0, evidence: dict = None):
+    def set_verdict(self, proceed: bool, priority: float = 0.0, evidence: str = None):
         """Recall-first verdict written by the verifier."""
         self.proceed = proceed
         self.priority = priority

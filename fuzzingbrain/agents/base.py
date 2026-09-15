@@ -403,6 +403,17 @@ class BaseAgent(ABC):
         """
         return None
 
+    def _is_terminal_tool_result(
+        self, tool_name: str, tool_args: Dict[str, Any], tool_result: str
+    ) -> bool:
+        """Whether this tool call ends the run right after its result is recorded.
+
+        Default: no tool is terminal (the agent ends by emitting a turn with no
+        tool call). Subclasses override this for a deterministic finish -- e.g. the
+        verifier ends the moment it records its verdict.
+        """
+        return False
+
     def _progress_reminder(self, iteration: int, remaining: int) -> str:
         """Always-on budget line so the model paces itself.
 
@@ -418,9 +429,8 @@ class BaseAgent(ABC):
         if remaining <= max(3, self.max_iterations // 5):
             msg += (
                 " Budget is running low -- STOP exploring and finalize NOW by "
-                "calling your recording tool (e.g. create_direction / "
-                "create_suspicious_point / submit the PoV). An agent that reaches "
-                "the cap without recording a result produces nothing."
+                "calling your recording tool. An agent that reaches the cap "
+                "without recording a result produces nothing."
             )
         return msg
 
@@ -1148,6 +1158,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                 )
 
                 # Execute each tool call
+                terminal = False
                 for tool_call in response.tool_calls:
                     tool_name = tool_call["function"]["name"]
                     tool_args_str = tool_call["function"]["arguments"]
@@ -1188,6 +1199,22 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                         iteration=iteration,
                         tool_call_id=tool_id,
                     )
+
+                    # A terminal tool (e.g. the verifier's recorded verdict) ends the
+                    # run. Finish the loop over this turn's tool_calls first so every
+                    # tool_call keeps its matching tool_result, then stop.
+                    if self._is_terminal_tool_result(tool_name, tool_args, tool_result):
+                        terminal = True
+
+                if terminal:
+                    final_response = response.content or ""
+                    self._log(
+                        f"Terminal tool call reached; ending run after {iteration} "
+                        "iteration(s)",
+                        level="INFO",
+                    )
+                    self._log_conversation()
+                    break
 
             else:
                 # No tool calls - agent is done

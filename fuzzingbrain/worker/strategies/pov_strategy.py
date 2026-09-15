@@ -1255,6 +1255,7 @@ class POVStrategy(BaseStrategy):
             workspace_path=self.executor.task_workspace_path,
             worker_id=self.worker_id,  # For SP Fuzzer lifecycle
             fuzzer_code=fuzzer_code,
+            fuzzer_source=self.executor.harness_source(),  # full harness for verifier
         )
 
         # In delta mode, SP finding is already done (SPs come from diff analysis)

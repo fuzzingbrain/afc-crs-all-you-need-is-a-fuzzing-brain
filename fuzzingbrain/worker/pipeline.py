@@ -114,6 +114,7 @@ class AgentPipeline:
         log_dir: Path = None,
         workspace_path: Path = None,
         fuzzer_code: str = "",
+        fuzzer_source: str = "",
         mcp_socket_path: str = None,
         worker_id: str = None,
     ):
@@ -143,6 +144,8 @@ class AgentPipeline:
         self.log_dir = log_dir
         self.workspace_path = workspace_path
         self.fuzzer_code = fuzzer_code
+        # Full harness blob for the verifier's system prompt (cached per worker).
+        self.fuzzer_source = fuzzer_source
         self.mcp_socket_path = mcp_socket_path
         self.worker_id = worker_id
 
@@ -307,6 +310,7 @@ class AgentPipeline:
                     log_dir=self.log_dir,
                     index=agent_index,
                     target_name=sp.function_name or "",
+                    fuzzer_source=self.fuzzer_source,
                 )
                 verify_agent.set_context(suspicious_point=sp.to_dict())
 
@@ -629,6 +633,7 @@ async def run_pipeline(
     max_pov_attempts: int = 100,
     workspace_path: Path = None,
     fuzzer_code: str = "",
+    fuzzer_source: str = "",
     sp_finding_done: bool = True,  # Default True for delta mode
     worker_id: str = None,
 ) -> PipelineStats:
@@ -678,6 +683,7 @@ async def run_pipeline(
         log_dir=log_dir,
         workspace_path=workspace_path,
         fuzzer_code=fuzzer_code,
+        fuzzer_source=fuzzer_source,
         worker_id=worker_id,
     )
 

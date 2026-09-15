@@ -442,74 +442,42 @@ class AnalysisClient:
         is_checked_by_verifier: bool = None,
         is_crash_found: bool = None,
         score: float = None,
+        evidence: str = None,
         verification_notes: str = None,
         pov_guidance: str = None,
-        pattern: str = None,
-        taint: str = None,
-        control_flow_correct: str = None,
-        suppressed_upstream: str = None,
-        sanitizer_class_unobservable: bool = None,
-        reachability_status: str = None,
-        reachability_multiplier: float = None,
-        reachability_reason: str = None,
-        dyn_reached: str = None,
-        dyn_crashed: str = None,
-        dyn_margin: float = None,
-        dyn_margin_confirmed: bool = None,
-        dyn_clamp_observed: str = None,
+        description: str = None,
+        important_controlflow: str = None,
         agent_id: str = "",
     ) -> dict:
         """
-        Update a suspicious point.
+        Update a suspicious point after verification.
 
         Args:
             sp_id: Suspicious point ID
             is_checked_by_verifier: Whether verification is complete
-            is_crash_found: Whether it's a real vulnerability
-            score: Updated score
-            verification_notes: Notes from verification
+            is_crash_found: Whether a crash was reproduced
+            score: Verifier confidence (0-1); proceed/priority are derived from it
+            evidence: Free-text facts (FOR/AGAINST) established while verifying
+            verification_notes: Summary from verification
             pov_guidance: Guidance for POV agent (input directions, what to watch for)
-            reachability_status: Reachability status (direct, pointer_call, unreachable)
-            reachability_multiplier: Score multiplier based on reachability (0.0-1.0)
-            reachability_reason: Explanation for reachability determination
+            description: Revised root-cause description (when the finder's was imprecise)
+            important_controlflow: Revised key functions/variables note
             agent_id: Agent ObjectId that verified this SP
 
         Returns:
             Dict with 'updated' status
         """
         params = {"id": sp_id}
-        if is_checked_by_verifier is not None:
-            params["is_checked_by_verifier"] = is_checked_by_verifier
-        if is_crash_found is not None:
-            params["is_crash_found"] = is_crash_found
-        if score is not None:
-            params["score"] = score
-        for _k, _v in (("pattern", pattern), ("taint", taint),
-                       ("control_flow_correct", control_flow_correct),
-                       ("suppressed_upstream", suppressed_upstream),
-                       ("sanitizer_class_unobservable", sanitizer_class_unobservable)):
-            if _v is not None:
-                params[_k] = _v
-        if reachability_status is not None:
-            params["reachability_status"] = reachability_status
-        if reachability_multiplier is not None:
-            params["reachability_multiplier"] = reachability_multiplier
-        if reachability_reason is not None:
-            params["reachability_reason"] = reachability_reason
-        if verification_notes is not None:
-            params["verification_notes"] = verification_notes
-        if pov_guidance is not None:
-            params["pov_guidance"] = pov_guidance
-        if reachability_status is not None:
-            params["reachability_status"] = reachability_status
-        if reachability_multiplier is not None:
-            params["reachability_multiplier"] = reachability_multiplier
-        if reachability_reason is not None:
-            params["reachability_reason"] = reachability_reason
-        for _k, _v in (("dyn_reached", dyn_reached), ("dyn_crashed", dyn_crashed),
-                       ("dyn_margin", dyn_margin),
-                       ("dyn_margin_confirmed", dyn_margin_confirmed),
-                       ("dyn_clamp_observed", dyn_clamp_observed)):
+        for _k, _v in (
+            ("is_checked_by_verifier", is_checked_by_verifier),
+            ("is_crash_found", is_crash_found),
+            ("score", score),
+            ("evidence", evidence),
+            ("verification_notes", verification_notes),
+            ("pov_guidance", pov_guidance),
+            ("description", description),
+            ("important_controlflow", important_controlflow),
+        ):
             if _v is not None:
                 params[_k] = _v
         if agent_id:

@@ -413,6 +413,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             log_dir=self.agent_log_dir,
             workspace_path=self.executor.task_workspace_path,
             fuzzer_code=fuzzer_code,
+            fuzzer_source=self.executor.harness_source(),  # full harness for verifier
             mcp_socket_path=self.executor.analysis_socket_path,
             worker_id=self.worker_id,
         )
