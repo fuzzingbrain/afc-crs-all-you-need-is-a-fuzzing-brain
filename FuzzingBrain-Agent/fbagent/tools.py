@@ -148,6 +148,21 @@ _SIG_RE = re.compile(r"received signal (?P<sig>SIG[A-Z]+)")
 _TRACE_REQ = WORKSPACE / ".fbbench" / "trace_req"
 _TRACE_RES = WORKSPACE / ".fbbench" / "trace_res"
 
+# Whether anything is actually answering on the bridge. The directory existing
+# proves only that `submit` is wired, not that a trace responder is listening.
+# Where none is, every call used to wait the full 220 seconds before giving up:
+# 18 calls across the recorded D5 runs returned 8 timeouts and zero reports, and
+# each timeout cost 220s of a 1800s cell. So the first call probes briefly and,
+# if nothing has even claimed the request, every later call fails immediately.
+_TRACE_PROBE_S = 8.0
+_trace_bridge_dead = False
+_trace_seen = False   # a responder has answered at least once
+
+
+def _mark_trace_alive() -> None:
+    global _trace_seen
+    _trace_seen = True
+
 
 def _parse_trace(raw: str, target: str) -> str:
     """Turn the raw gdb batch output into a compact 'where it went / what it hit'
@@ -206,6 +221,7 @@ def trace(input: str, target: str) -> str:
     The gdb run happens in the challenge container (the agent's host workspace has
     no graded binary); this drops a request on the `.fbbench` bridge and reads the
     raw gdb output back, then parses it here."""
+    global _trace_bridge_dead
     inp = Path(input)
     if not inp.is_file():
         return f"error: no input file at {input!r}; write your candidate bytes there first."
@@ -214,6 +230,10 @@ def trace(input: str, target: str) -> str:
         return "error: give a target function to break on (the sink you are aiming for)."
     if not _TRACE_REQ.parent.is_dir():
         return "error: trace unavailable — not running under the bench harness (no bridge)."
+    if _trace_bridge_dead:
+        return ("error: trace is unavailable in this environment (no debugger bridge "
+                "answered earlier in this run). Read the run time on ./submit's clean "
+                "verdict instead: non-zero means the target did real work on your input.")
     _TRACE_REQ.mkdir(parents=True, exist_ok=True)
     rid = f"{time.time_ns()}-{os.getpid()}"
     try:
@@ -222,14 +242,31 @@ def trace(input: str, target: str) -> str:
     except OSError as e:
         return f"error: could not post trace request: {e}"
     res = _TRACE_RES / rid
-    for _ in range(1100):                               # ~220s; the bridge caps gdb at 180s
+    waited = 0.0
+    while waited < 220.0:                               # the bridge caps gdb at 180s
         if res.exists():
             raw = res.read_text()
             res.unlink(missing_ok=True)
+            _mark_trace_alive()
             if raw.startswith("error:"):
                 return raw.strip()
             return _parse_trace(raw, tgt)
+        # The responder claims a request by removing its `.tgt` the moment it
+        # picks it up, so a `.tgt` still sitting here means nobody is home --
+        # whereas the `.bin` stays for the whole run and proves nothing. That
+        # distinction is what lets a gdb run that legitimately takes two minutes
+        # avoid being mistaken for an absent bridge.
+        if not _trace_seen and waited >= _TRACE_PROBE_S \
+                and (_TRACE_REQ / f"{rid}.tgt").exists():
+            _trace_bridge_dead = True
+            (_TRACE_REQ / f"{rid}.bin").unlink(missing_ok=True)
+            (_TRACE_REQ / f"{rid}.tgt").unlink(missing_ok=True)
+            return ("error: trace is unavailable -- no debugger bridge is answering in "
+                    "this environment, so reachability cannot be confirmed this way. "
+                    "Use the run time on ./submit's clean verdict instead: a non-zero "
+                    "time means the target did real work on your input.")
         time.sleep(0.2)
+        waited += 0.2
     return "error: trace timed out waiting for the bridge."
 
 
