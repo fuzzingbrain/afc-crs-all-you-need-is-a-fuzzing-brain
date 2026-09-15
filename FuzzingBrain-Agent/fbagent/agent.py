@@ -416,6 +416,24 @@ class Agent:
             if not results:
                 self.stop_reason = "no tool calls"
                 break
+            # One tailable line per step, flushed. This is the only view of a
+            # run in flight: everything else is written after the loop ends.
+            try:
+                _verdicts = []
+                for r in results:
+                    c = r.get("content")
+                    if isinstance(c, str):
+                        for ln in c.splitlines():
+                            if ln.startswith(("crash:", "clean:")):
+                                _verdicts.append(ln[:120])
+                progress_mod.step(
+                    n=self.steps, cost=self.llm.cost_usd,
+                    tools=[b.name for b in resp.content
+                           if getattr(b, "type", None) == "tool_use"],
+                    verdicts=_verdicts[:6])
+            except Exception:  # noqa: BLE001 - reporting never breaks the run
+                pass
+
             note = self._progress_note()
             if note:
                 results = results + [{"type": "text", "text": note}]
