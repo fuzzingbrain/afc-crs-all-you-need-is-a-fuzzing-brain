@@ -574,7 +574,7 @@ def _register_sp_create_tools(mcp: FastMCP) -> None:
         function_name: str,
         description: str,
         score: float = 0.5,
-        important_controlflow: list = None,
+        important_controlflow: str = None,
     ) -> Dict[str, Any]:
         """
         Create a new suspicious point for a potential vulnerability.
@@ -584,7 +584,8 @@ def _register_sp_create_tools(mcp: FastMCP) -> None:
             description: Detailed description of the potential vulnerability;
                 name the bug type in the description (there is no separate type field)
             score: Confidence score (0.0-1.0)
-            important_controlflow: List of related control flow elements
+            important_controlflow: Free-text note naming the key functions/variables
+                in the flow to the bug and why they matter (one short paragraph).
         """
         from .suspicious_points import create_suspicious_point_impl
 

@@ -653,6 +653,10 @@ def generate(variant: int = 1) -> bytes:
             # to travel with the assignment.
             "concurrency": self.config.concurrency.to_dict(),
             "scoring": self.config.scoring.to_dict(),
+            # {fuzzer: [abs source path, ...]} manually set in the task file.
+            # Travels here so the worker can read the harness source from disk
+            # into an in-memory cache instead of hitting the Analysis Server.
+            "fuzzer_sources": self.config.fuzzer_sources,
         }
 
         # Dispatch Celery task with dynamic time limit based on config

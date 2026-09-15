@@ -103,9 +103,10 @@ class SuspiciousPoint:
         1.0  # Score multiplier based on reachability (0.3-1.0)
     )
 
-    # Related control flow information
-    important_controlflow: List[Dict] = field(default_factory=list)
-    # Format: [{"type": "function"|"variable", "name": "xxx", "location": "xxx"}, ...]
+    # Related control flow information: a free-text note naming the key
+    # functions/variables in the flow and why they matter (verifier + PoV read it
+    # as plain text). Legacy docs may hold a list of dicts; consumers tolerate both.
+    important_controlflow: str = ""
 
     # Merged duplicates - records of SPs that were identified as duplicates and merged into this one
     # For human review of dedup decisions
@@ -261,7 +262,7 @@ class SuspiciousPoint:
             reachability_status=data.get("reachability_status", "unknown"),
             reachability_reason=data.get("reachability_reason", ""),
             reachability_multiplier=data.get("reachability_multiplier", 1.0),
-            important_controlflow=data.get("important_controlflow", []),
+            important_controlflow=data.get("important_controlflow", ""),
             merged_duplicates=data.get("merged_duplicates", []),
             verification_notes=data.get("verification_notes"),
             pov_guidance=data.get("pov_guidance"),

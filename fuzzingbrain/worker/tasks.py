@@ -87,6 +87,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         "max_parallel_fuzzers", DEFAULT_MAX_PARALLEL_FUZZERS
     )
     sp_max_count = assignment.get("sp_max_count")
+    fuzzer_sources = assignment.get("fuzzer_sources")
 
     # Install this run's concurrency and thresholds before anything reads them.
     from ..core.concurrency import set_concurrency
@@ -202,6 +203,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
             docker_image=pov_docker_image,
             max_parallel_fuzzers=max_parallel_fuzzers,
             sp_max_count=sp_max_count,
+            fuzzer_sources=fuzzer_sources,
             # Pass celery_job_id for WorkerContext
             celery_job_id=self.request.id,
         )

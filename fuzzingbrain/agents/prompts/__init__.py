@@ -105,18 +105,3 @@ from .sanitizer_guidance import (
     GENERAL_SANITIZER_GUIDANCE,
 )
 
-# Sanitizer patterns for function analysis (structured data, kept in Python)
-SANITIZER_PATTERNS = {
-    "address": """- Buffer overflow: memcpy, strcpy with unchecked length
-- Out-of-bounds access: array indexing without validation
-- Use-after-free: accessing freed memory
-- Double-free: calling free() twice on same pointer
-- Heap corruption: write beyond allocation size""",
-    "memory": """- Uninitialized memory read: using variables before initialization
-- Uninitialized struct fields: accessing unset struct members
-- Information leak: copying uninitialized data""",
-    "undefined": """- Integer overflow: signed arithmetic overflow
-- Null pointer dereference: accessing through NULL
-- Division by zero: unchecked divisor
-- Shift errors: shifting by invalid amount""",
-}

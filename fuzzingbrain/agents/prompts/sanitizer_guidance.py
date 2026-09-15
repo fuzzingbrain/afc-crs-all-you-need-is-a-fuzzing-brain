@@ -9,6 +9,8 @@ can detect, helping agents focus on relevant bug types.
 ADDRESS_SANITIZER_GUIDANCE = """
 ### AddressSanitizer Detectable Bugs
 
+MUST BE MEMORY SAFETY BUGS!
+
 **1. Type and Integer Issues** (Root cause of many bugs!)
 - Signed types used for sizes, lengths, counts (can become negative!)
 - Type changes in struct members between versions
@@ -42,6 +44,12 @@ ADDRESS_SANITIZER_GUIDANCE = """
 - Macros generating runtime values used as array indices
 - Non-standard macro patterns that hide dangerous operations
 - Compile-time vs runtime value confusion
+
+**7. Null / Wild Pointer, Dynamic Stack & Format String**
+- Missing NULL check after an alloc/lookup that can return NULL (SEGV on deref)
+- Deref of an uninitialized or out-of-range pointer, not just NULL (wild-pointer SEGV)
+- alloca()/VLA sized from attacker-controlled input (dynamic stack buffer overflow)
+- Attacker-controlled format string passed to a printf-family call (%n -> write)
 
 ### Variable Shadowing
 

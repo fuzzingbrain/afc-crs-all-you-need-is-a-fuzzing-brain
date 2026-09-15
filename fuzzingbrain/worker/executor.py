@@ -21,6 +21,29 @@ from ..fuzzer.signature import extract_class
 from .context import WorkerContext
 
 
+def build_harness_source_blob(paths) -> str:
+    """Assemble harness/fuzzer source files into one text blob for prompts.
+
+    `paths` is a str, a list of absolute paths, or None (typically
+    fuzzer_sources[fuzzer] from the task file). Each readable file becomes
+    ``<basename>\\n<full contents>`` (basename only, no path); blocks are joined
+    by a line containing only ``----``. Missing/unreadable files are skipped.
+    Returns "" when nothing is configured or readable. Not truncated.
+    """
+    if not paths:
+        return ""
+    if isinstance(paths, str):
+        paths = [paths]
+    blocks = []
+    for p in paths:
+        try:
+            f = Path(p)
+            blocks.append(f"{f.name}\n{f.read_text()}")
+        except Exception:
+            continue
+    return "\n----\n".join(blocks)
+
+
 class WorkerExecutor:
     """
     Executes fuzzing strategies for a {fuzzer, sanitizer} pair.
@@ -52,6 +75,7 @@ class WorkerExecutor:
         task_workspace_path: str = None,
         max_parallel_fuzzers: int = DEFAULT_MAX_PARALLEL_FUZZERS,
         sp_max_count: Optional[int] = None,
+        fuzzer_sources: Optional[dict] = None,
     ):
         """
         Initialize WorkerExecutor.
@@ -93,6 +117,11 @@ class WorkerExecutor:
         self.max_parallel_fuzzers = max_parallel_fuzzers
         self.sp_max_count = sp_max_count
         self.celery_job_id = celery_job_id
+        # {fuzzer_name: [abs source path, ...]} from the task file, carried in the
+        # assignment. Read directly from disk into an in-memory blob (cached) so the
+        # many agents that need the harness source never hammer the Analysis Server.
+        self.fuzzer_sources = fuzzer_sources or {}
+        self._harness_source_cache: Optional[str] = None
 
         # Fuzzer binary path (from Analyzer or built locally)
         self.fuzzer_binary_path = (
@@ -511,6 +540,22 @@ def generate(variant: int = 1) -> bytes:
             except Exception as e:
                 logger.warning(f"Failed to get source for {name}: {e}")
         return None
+
+    def harness_source(self) -> str:
+        """Full harness/fuzzer source for this worker's fuzzer, as one text blob.
+
+        Read once from the absolute paths in fuzzer_sources (from the task file)
+        and cached in memory — every agent/prompt that needs the harness reads
+        this, so we never round-trip the Analysis Server for it. Format is, per
+        file, the basename (no path) then its full contents, blocks joined by a
+        `----` line. Empty string if no sources are configured/readable.
+        """
+        if self._harness_source_cache is not None:
+            return self._harness_source_cache
+        self._harness_source_cache = build_harness_source_blob(
+            self.fuzzer_sources.get(self.fuzzer)
+        )
+        return self._harness_source_cache
 
     def get_callees(self, function: str) -> list:
         """Get functions called by the given function."""

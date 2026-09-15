@@ -1528,7 +1528,7 @@ class AnalysisServer:
         sanitizer: str,
         description: str,
         score: float,
-        important_controlflow: list,
+        important_controlflow: str,
         direction_id: str = "",
         agent_id: str = "",
     ) -> str:
@@ -1565,7 +1565,7 @@ class AnalysisServer:
         sanitizer = params.get("sanitizer", "")
         description = params.get("description", "")
         score = params.get("score", 0.0)
-        important_controlflow = params.get("important_controlflow", [])
+        important_controlflow = params.get("important_controlflow", "")
         direction_id = params.get("direction_id", "")
         agent_id = params.get("agent_id", "")  # Agent that created this SP
 

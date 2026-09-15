@@ -454,21 +454,26 @@ This is CRITICAL - you need to understand how your input enters the library!
 """
 
         # Add control flow info if available
-        if suspicious_point.get("important_controlflow"):
+        cf = suspicious_point.get("important_controlflow")
+        if cf:
             message += "## Related Control Flow\n\n"
-            for item in suspicious_point["important_controlflow"]:
-                if isinstance(item, dict):
-                    item_type = item.get("type", "unknown")
-                    item_name = item.get("name", "unknown")
-                    item_loc = item.get("location", "")
-                    message += f"- {item_type}: {item_name}"
-                    if item_loc:
-                        message += f" ({item_loc})"
-                    message += "\n"
-                else:
-                    # Handle string format
-                    message += f"- {item}\n"
-            message += "\n"
+            if isinstance(cf, str):
+                # Current format: a free-text note.
+                message += cf + "\n\n"
+            else:
+                # Legacy format: a list of dicts/strings.
+                for item in cf:
+                    if isinstance(item, dict):
+                        item_type = item.get("type", "unknown")
+                        item_name = item.get("name", "unknown")
+                        item_loc = item.get("location", "")
+                        message += f"- {item_type}: {item_name}"
+                        if item_loc:
+                            message += f" ({item_loc})"
+                        message += "\n"
+                    else:
+                        message += f"- {item}\n"
+                message += "\n"
 
         # Add verification notes if available
         if suspicious_point.get("verification_notes"):

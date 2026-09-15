@@ -19,7 +19,6 @@ from .base import BaseAgent
 from .prompts import (
     FUNCTION_ANALYSIS_PROMPT,
     FIND_SUSPICIOUS_POINTS_PROMPT,
-    SANITIZER_PATTERNS,
     ADDRESS_SANITIZER_GUIDANCE,
     MEMORY_SANITIZER_GUIDANCE,
     UNDEFINED_SANITIZER_GUIDANCE,
@@ -114,14 +113,6 @@ class SPGeneratorBase(BaseAgent):
             return UNDEFINED_SANITIZER_GUIDANCE
         else:
             return GENERAL_SANITIZER_GUIDANCE
-
-    def _get_sanitizer_patterns(self) -> str:
-        """Get sanitizer-specific patterns for prompts."""
-        sanitizer_lower = self.sanitizer.lower()
-        for key, patterns in SANITIZER_PATTERNS.items():
-            if key in sanitizer_lower:
-                return patterns
-        return SANITIZER_PATTERNS["address"]
 
     def _filter_tools_for_mode(
         self, tools: List[Dict[str, Any]]
@@ -340,7 +331,8 @@ class FullSPGenerator(SPGeneratorBase):
         return FUNCTION_ANALYSIS_PROMPT.format(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
-            sanitizer_patterns=self._get_sanitizer_patterns(),
+            sanitizer_patterns=self._get_sanitizer_guidance(),
+            fuzzer_source_codes=self.fuzzer_source or "(harness source unavailable)",
         )
 
     def _get_agent_metadata(self) -> dict:
@@ -413,18 +405,8 @@ File: `{self.function_file}` | Lines: {self.function_lines[0]}-{self.function_li
 ```
 """
 
-        if self.fuzzer_source:
-            fuzzer_src = self.fuzzer_source
-            if len(fuzzer_src) > 3000:
-                fuzzer_src = fuzzer_src[:3000] + "\n... (truncated)"
-            message += f"""
-## Fuzzer Entry Point: `{self.fuzzer}`
-Shows how input data enters the program:
-
-```c
-{fuzzer_src}
-```
-"""
+        # Harness/fuzzer source is carried in the system prompt (stable per worker,
+        # so it caches across every function) — not repeated here.
 
         if self.caller_sources:
             message += "\n## Caller Functions\n"

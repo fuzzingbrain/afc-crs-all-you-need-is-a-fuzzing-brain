@@ -791,6 +791,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             agent = LargeFullSPGenerator(
                 function_name=func.name,
                 function_source=func_source,  # Use fetched source
+                fuzzer_source=self.executor.harness_source(),  # cached per worker
                 function_file=func.file_path or "",
                 function_lines=(func.start_line or 0, func.end_line or 0),
                 callers=callers,
@@ -808,6 +809,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             agent = FullSPGenerator(
                 function_name=func.name,
                 function_source=func_source,  # Use fetched source
+                fuzzer_source=self.executor.harness_source(),  # cached per worker
                 function_file=func.file_path or "",
                 function_lines=(func.start_line or 0, func.end_line or 0),
                 callers=callers,

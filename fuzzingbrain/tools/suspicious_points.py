@@ -113,7 +113,7 @@ def create_suspicious_point_impl(
     function_name: str,
     description: str,
     score: float = 0.5,
-    important_controlflow: List[Dict[str, str]] = None,
+    important_controlflow: str = None,
 ) -> Dict[str, Any]:
     """Implementation of create_suspicious_point (without MCP decorator)."""
     err = _ensure_client()
@@ -127,7 +127,7 @@ def create_suspicious_point_impl(
             function_name=function_name,
             description=description,
             score=score,
-            important_controlflow=important_controlflow or [],
+            important_controlflow=important_controlflow or "",
             harness_name=harness_name or "",
             sanitizer=sanitizer or "",
             direction_id=direction_id or "",

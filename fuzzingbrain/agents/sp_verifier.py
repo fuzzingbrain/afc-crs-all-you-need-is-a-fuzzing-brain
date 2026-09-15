@@ -502,13 +502,19 @@ This shows how input enters the library - only reachable code matters!
 """
         return section
 
-    def _format_control_flow_section(self, control_flow_items: List[Any]) -> str:
-        """Format control flow section if available."""
+    def _format_control_flow_section(self, control_flow_items) -> str:
+        """Format control flow section if available.
+
+        important_controlflow is a free-text string; legacy docs may hold a list
+        of dicts/strings, so both are tolerated.
+        """
         if not control_flow_items:
             return ""
 
         section = "\n### Related Control Flow\n"
-        for item in control_flow_items:
+        if isinstance(control_flow_items, str):
+            return section + control_flow_items + "\n"
+        for item in control_flow_items:  # legacy list
             if isinstance(item, dict):
                 section += f"  - {item.get('type', self.DEFAULT_FUNCTION_NAME)}: {item.get('name', self.DEFAULT_FUNCTION_NAME)} ({item.get('location', '')})\n"
             else:
