@@ -36,18 +36,20 @@ whatever came next.
 
 The loop and its context compaction, the tool surface, the CLI entry point, the
 frontier picker, every prompt, every bench manifest, the tests that pinned them,
-and finally the static analysis pass.
+and the static analysis pass.
 
 Nothing under `fuzzingbrain/` — the CRS itself — ever imported any of it, so the
-product is unaffected. The only dependents were `experiments/worklist-eval`,
-which imports `fbagent.analysis` in two eval scripts and invokes
-`python3 -m fbagent.run` from one manifest. Those are broken until the rebuild
-provides replacements, or the experiment is pointed at the old code:
+product is unaffected. The only dependent was `experiments/worklist-eval`, a
+finished experiment that scored the old worklist generator; it imported
+`fbagent.analysis` directly, so it was removed here too rather than left
+dangling or given a vendored copy.
 
-    git show <previous-branch>:FuzzingBrain-Agent/fbagent/analysis.py
+None of this is lost. The agent, the experiment and its results are all intact
+on `agentic-workflow`, `agent-improvement`, `unified`, `reach-fallback` and
+upstream `main`:
 
-The old agent is not lost — `agentic-workflow`, `agent-improvement`, `unified`,
-`reach-fallback` and the `perf/*` branches all still carry it.
+    git show main:FuzzingBrain-Agent/fbagent/analysis.py
+    git checkout main -- experiments/worklist-eval
 
 ## What the rebuild has to get right
 
