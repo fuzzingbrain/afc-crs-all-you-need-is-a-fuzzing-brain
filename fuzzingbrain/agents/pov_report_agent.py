@@ -114,6 +114,11 @@ class POVReportAgent(BaseAgent):
         return False
 
     @property
+    def include_sp_create_tools(self) -> bool:
+        """The report agent writes a post-crash report; it never creates SPs."""
+        return False
+
+    @property
     def system_prompt(self) -> str:
         return REPORT_SYSTEM_PROMPT
 

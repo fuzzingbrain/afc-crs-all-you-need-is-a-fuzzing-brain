@@ -3,7 +3,7 @@
 POV Agent
 
 LLM-based agent for generating POV (Proof of Vulnerability) inputs.
-Uses create_pov, verify_pov, and trace_pov tools to iteratively
+Uses create_pov, verify_pov, and reach_probe tools to iteratively
 generate and test inputs that trigger vulnerabilities.
 """
 
@@ -89,7 +89,7 @@ class POVAgent(BaseAgent):
     2. Design test inputs
     3. Generate POVs with create_pov
     4. Verify with verify_pov
-    5. Debug with trace_pov if needed
+    5. Diagnose with reach_probe if needed
 
     Stop conditions (OR):
     - max_iterations reached (default 300)
@@ -497,10 +497,10 @@ This is CRITICAL - you need to understand how your input enters the library!
 3. Design a test input that triggers the vulnerability described above
 4. Use create_pov to generate the test input
 5. Use verify_pov to check if it causes a crash
-6. Iterate with different approaches (trace_pov available after 3 failed attempts)
+6. Iterate with different approaches; use reach_probe anytime to see how far your input got
 
-**GREEDY MODE**: For your first 3 POV attempts, trace_pov is disabled.
-Focus on understanding the code and making educated guesses about triggering inputs.
+**Try create_pov early**: for your first few attempts, make educated guesses and generate a
+POV rather than over-analyzing. Focus on understanding the code and triggering inputs.
 
 Start by reading the vulnerable function source: {source_hint}.
 """
@@ -604,7 +604,8 @@ Start by reading the vulnerable function source: {source_hint}.
         self._tools = await self._get_tools(client)
         self._log(f"Loaded {len(self._tools)} MCP tools", level="INFO")
 
-        # Greedy mode: disable trace_pov for first 10 attempts to force direct POV generation
+        # For the first N attempts, nudge the agent to call create_pov early
+        # instead of over-analyzing (no tool is gated — this only adds a reminder).
         self._greedy_attempts_threshold = 3
 
         # Log model info
@@ -650,24 +651,9 @@ Start by reading the vulnerable function source: {source_hint}.
                 self._log("POV already succeeded, stopping", level="INFO")
                 break
 
-            # Greedy mode: filter out trace_pov for first N attempts
-            # This forces the agent to try direct POV generation instead of tracing
-            if self.pov_attempts < self._greedy_attempts_threshold:
-                available_tools = [
-                    t for t in self._tools if t["function"]["name"] != "trace_pov"
-                ]
-                if self.pov_attempts == self._greedy_attempts_threshold - 1:
-                    self._log(
-                        "Greedy mode ending after this attempt - trace_pov will be available",
-                        level="INFO",
-                    )
-            else:
-                available_tools = self._tools
-                if self.pov_attempts == self._greedy_attempts_threshold:
-                    self._log(
-                        "Greedy mode ended - trace_pov is now available for debugging",
-                        level="INFO",
-                    )
+            # No tool gating: every diagnostic tool (reach_probe, check_clamp) is
+            # available from the first attempt.
+            available_tools = self._tools
 
             # Proactive budget visibility: the iteration/attempt counters live only in
             # logs and non-standard message keys the API drops, so the model cannot see
@@ -698,7 +684,7 @@ Start by reading the vulnerable function source: {source_hint}.
                     # emit their analysis as plain text without calling a tool, which
                     # tripped the "refused to call tools 5 times, giving up" guard and
                     # ended PoV generation early -- the whole loop exists to iterate
-                    # through create_pov / trace_pov, so a bare-text turn is never wanted.
+                    # through create_pov / reach_probe, so a bare-text turn is never wanted.
                     tool_choice="required",
                 )
             except Exception as e:
@@ -820,7 +806,7 @@ Start by reading the vulnerable function source: {source_hint}.
 2. What conditions are needed to trigger the vulnerability?
 3. What's different between your input and what the vulnerability needs?
 
-Use {source_hint} or trace_pov (if available) to understand better, then create a NEW POV with adjusted approach.""",
+Use {source_hint} or reach_probe to understand better, then create a NEW POV with adjusted approach.""",
                                         "iteration": f"{iteration}/{self.max_iterations}",
                                         "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
                                     }

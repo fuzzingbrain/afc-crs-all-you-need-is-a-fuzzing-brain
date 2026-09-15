@@ -31,6 +31,7 @@ def create_isolated_mcp_server(
     include_static_analysis_tools: bool = True,
     include_coverage_tools: bool = True,
     include_reach_probe_tools: bool = False,
+    include_diff_tool: bool = True,
 ) -> FastMCP:
     """
     Create an isolated FastMCP server instance with all tools registered.
@@ -67,9 +68,6 @@ def create_isolated_mcp_server(
                                 produced nothing: all four read the coverage
                                 build output, and would otherwise fail in a way
                                 that reads as "this target has no coverage".
-                                trace_pov is unaffected -- it traces with gdb
-                                against the ASAN binary and only falls back to
-                                coverage, so it degrades rather than breaking.
 
     Returns:
         A new FastMCP instance with all tools registered
@@ -79,7 +77,8 @@ def create_isolated_mcp_server(
 
     # Filesystem tools first: they need nothing but a checked-out tree, so they
     # are what remains when the index is unavailable.
-    _register_code_viewer_tools(mcp)
+    if include_diff_tool:
+        _register_code_viewer_tools(mcp)
     _register_file_tools(mcp)
 
     # Index and call graph tools, only when there is an index to read. Both
@@ -270,69 +269,6 @@ def _register_analyzer_tools(mcp: FastMCP) -> None:
 
     @mcp.tool
     @async_tool
-    def get_call_graph(fuzzer_name: str, depth: int = 3) -> Dict[str, Any]:
-        """
-        Get the call graph starting from a fuzzer entry point.
-
-        Returns all functions reachable from the fuzzer up to the specified depth.
-
-        Args:
-            fuzzer_name: Name of the fuzzer
-            depth: Maximum call depth to traverse (default: 3)
-
-        Returns:
-            call_graph: Dict mapping function names to their callees
-        """
-        err = _ensure_client()
-        if err:
-            return err
-        try:
-            client = _get_client()
-            graph = client.get_call_graph(fuzzer_name, depth)
-            return {
-                "success": True,
-                "fuzzer_name": fuzzer_name,
-                "depth": depth,
-                "node_count": len(graph),
-                "call_graph": graph,
-            }
-        except Exception as e:
-            return _handle_client_error(e)
-
-    @mcp.tool
-    @async_tool
-    def find_all_paths(
-        from_function: str, to_function: str, max_depth: int = 10, max_paths: int = 20
-    ) -> Dict[str, Any]:
-        """
-        Find all call paths from one function to another.
-
-        Use this to understand how input flows from entry point to a target function.
-
-        Args:
-            from_function: Start function (e.g., fuzzer entry point)
-            to_function: Target function to reach
-            max_depth: Maximum path length (default: 10)
-            max_paths: Maximum paths to return (default: 20)
-
-        Returns:
-            paths: List of function call chains from start to target
-        """
-        err = _ensure_client()
-        if err:
-            return err
-        try:
-            client = _get_client()
-            result = client.find_all_paths(
-                from_function, to_function, max_depth, max_paths
-            )
-            paths = result.get("paths", [])
-            return {"success": True, "path_count": len(paths), "paths": paths[:20]}
-        except Exception as e:
-            return _handle_client_error(e)
-
-    @mcp.tool
-    @async_tool
     def check_reachability(fuzzer_name: str, function_name: str) -> Dict[str, Any]:
         """
         Check if a function is reachable from a fuzzer entry point.
@@ -380,34 +316,6 @@ def _register_build_info_tools(mcp: FastMCP) -> None:
 
     @mcp.tool
     @async_tool
-    def analyzer_status() -> Dict[str, Any]:
-        """Get Analysis Server status."""
-        err = _ensure_client()
-        if err:
-            return err
-        try:
-            client = _get_client()
-            status = client.get_status()
-            return {"success": True, "status": status}
-        except Exception as e:
-            return _handle_client_error(e)
-
-    @mcp.tool
-    @async_tool
-    def get_fuzzers() -> Dict[str, Any]:
-        """Get list of all built fuzzers."""
-        err = _ensure_client()
-        if err:
-            return err
-        try:
-            client = _get_client()
-            fuzzers = client.get_fuzzers()
-            return {"success": True, "count": len(fuzzers), "fuzzers": fuzzers}
-        except Exception as e:
-            return _handle_client_error(e)
-
-    @mcp.tool
-    @async_tool
     def get_fuzzer_source(fuzzer_name: str) -> Dict[str, Any]:
         """
         Get the source code of a fuzzer/harness.
@@ -434,21 +342,6 @@ def _register_build_info_tools(mcp: FastMCP) -> None:
             return {"success": True, **result}
         except Exception as e:
             return _handle_client_error(e)
-
-    @mcp.tool
-    @async_tool
-    def get_build_paths() -> Dict[str, Any]:
-        """Get build output paths for each sanitizer."""
-        err = _ensure_client()
-        if err:
-            return err
-        try:
-            client = _get_client()
-            paths = client.get_build_paths()
-            return {"success": True, "build_paths": paths}
-        except Exception as e:
-            return _handle_client_error(e)
-
 
 def _register_code_viewer_tools(mcp: FastMCP) -> None:
     """Register get_diff.
@@ -672,14 +565,6 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
 
     @mcp.tool
     @async_tool
-    def list_suspicious_points() -> Dict[str, Any]:
-        """List all suspicious points for the current task."""
-        from .suspicious_points import list_suspicious_points_impl
-
-        return list_suspicious_points_impl()
-
-    @mcp.tool
-    @async_tool
     def get_suspicious_point(suspicious_point_id: str) -> Dict[str, Any]:
         """
         Get details of a specific suspicious point.
@@ -818,7 +703,7 @@ def _register_direction_tools(mcp: FastMCP) -> None:
     @mcp.tool
     @async_tool
     def list_directions() -> Dict[str, Any]:
-        """List all directions for the current task."""
+        """List the analysis directions for this worker's fuzzer."""
         from .directions import list_directions_impl
 
         return list_directions_impl()
@@ -881,25 +766,6 @@ def _register_pov_tools(mcp: FastMCP, worker_id: str = None) -> None:
         from .pov import verify_pov_impl
 
         return verify_pov_impl(pov_id, worker_id=bound_worker_id)
-
-    @mcp.tool
-    @async_tool
-    def trace_pov(
-        generator_code: str, target_functions: list = None, agent_msg: str = None
-    ) -> Dict[str, Any]:
-        """
-        Trace execution path of ONE blob to see which functions it reaches. An LLM will analyze the trace and provide suggestions.
-
-        Args:
-            generator_code: Python code with generate() -> bytes (single blob, no variant param)
-            target_functions: Functions to check if reached (e.g. ["vuln_func"])
-            agent_msg: Question to the LLM (e.g. "why is size check failing?")
-        """
-        from .pov import trace_pov_impl
-
-        return trace_pov_impl(
-            generator_code, target_functions, agent_msg, worker_id=bound_worker_id
-        )
 
 
 def _register_coverage_tools(mcp: FastMCP) -> None:

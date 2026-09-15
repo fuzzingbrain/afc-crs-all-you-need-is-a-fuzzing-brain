@@ -98,6 +98,11 @@ class DirectionPlanningAgent(BaseAgent):
         """
         return False
 
+    @property
+    def include_direction_tools(self) -> bool:
+        """The DirectionPlanningAgent is the only agent that creates/manages directions."""
+        return True
+
     def _get_summary_table(self) -> str:
         """Generate summary table for direction planning."""
         duration = (

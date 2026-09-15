@@ -613,6 +613,11 @@ class DeltaSPGenerator(SPGeneratorBase):
     Used when there are code modifications between versions.
     """
 
+    @property
+    def include_diff_tool(self) -> bool:
+        """The delta finder is the one agent that reads the raw diff."""
+        return True
+
     # Score thresholds
     SCORE_HIGH_CONFIDENCE = 0.8
     SCORE_MEDIUM_CONFIDENCE = 0.5

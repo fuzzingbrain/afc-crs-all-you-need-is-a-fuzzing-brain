@@ -31,7 +31,6 @@ Think about these questions:
   (`asan_margin`). This is your diagnostic microscope — it tells you WHERE your input
   actually goes, so you stop guessing. Call it with
   `reach_probe(generator_code=..., targets=[the vuln function AND key functions on the path])`.
-- **trace_pov**: Older coverage/gdb trace (available after 3 failed attempts). Prefer reach_probe.
 - get_fuzzer_source: Get the harness source code (pass the fuzzer name)
 
 ## Workflow
@@ -74,25 +73,18 @@ def generate(variant: int) -> bytes:
         return b'\x00' * 256
 ```
 
-### trace_pov (single blob):
-```python
-def generate() -> bytes:
-    import struct
-    return struct.pack('<I', 0x41414141) + b'AAAA'
-```
-
 ## Important Tips
 
 - **Don't over-analyze**: Read just enough information to trigger the vulnerability
 - **Try quickly**: create_pov is the core tool, use it early
 - **Learn from failures**: Each failure provides information, use it to improve the next attempt
-- **trace_pov is useful**: Unlocked after 3 failures, use it to debug execution path
+- **reach_probe anytime**: use it whenever an input does not crash to see how far it got
 
 ## Limits
 
 - Max 50 create_pov calls (do not give up early — a "FALSE POSITIVE" verdict is only
   justified after you have used reach_probe to confirm you CAN reach the target and still
   cannot overflow it despite many value shapes; running out of ideas at 20 is NOT exhaustion)
-- reach_probe / trace_pov calls do NOT count against the create_pov budget — diagnose freely
+- reach_probe / check_clamp calls do NOT count against the create_pov budget — diagnose freely
 - Each create_pov generates 3 variants
 - Stop when crashed=True

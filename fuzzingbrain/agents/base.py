@@ -224,11 +224,22 @@ class BaseAgent(ABC):
 
     @property
     def include_direction_tools(self) -> bool:
-        """Whether to include direction tools in MCP server.
+        """Whether to include direction tools (create/get/list_direction).
 
-        Default True. Override to False if agent doesn't need direction tools.
+        Only the DirectionPlanningAgent creates and manages directions; every
+        other agent is dispatched under a direction and does not touch them, so
+        this defaults to False (a leaked create_direction had the full-scan
+        finder inventing 9 spurious directions in one run). Override True only in
+        DirectionPlanningAgent.
         """
-        return True
+        return False
+
+    @property
+    def include_diff_tool(self) -> bool:
+        """Whether to include get_diff. It reads the delta diff, so only the
+        delta SP finder needs it; every other agent (full finder, verifier, POV,
+        direction, seed, report) works from source/SPs, not the raw diff."""
+        return False
 
     @property
     def include_static_analysis_tools(self) -> bool:
@@ -1271,6 +1282,7 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                     include_static_analysis_tools=static_analysis_tools,
                     include_coverage_tools=coverage_tools,
                     include_reach_probe_tools=self.include_reach_probe_tools,
+                    include_diff_tool=self.include_diff_tool,
                 )
                 self._log(
                     f"Created isolated MCP server: {agent_id} "
