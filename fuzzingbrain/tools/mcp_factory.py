@@ -684,15 +684,19 @@ def _register_direction_tools(mcp: FastMCP) -> None:
         code_summary: str = "",
     ) -> Dict[str, Any]:
         """
-        Create a new analysis direction for Full-scan mode.
+        Create an analysis direction: ONE business feature/module of the code
+        reachable from the fuzzer.
 
         Args:
-            name: Direction name (e.g., "Input Parsing", "Memory Management")
-            risk_level: Risk level ("high", "medium", "low")
-            risk_reason: Explanation of why this risk level
-            core_functions: List of main functions in this direction
-            entry_functions: How fuzzer input reaches this direction
-            code_summary: Brief description of what this code does
+            name: Business feature name -- what this code DOES, not a bug pattern.
+                Good: "PNG chunk decoding", "JSON value parsing". Bad: "Input
+                Parsing", "Memory Management", "Buffer Operations".
+            risk_level: one of "high", "medium", "low" -- how likely this feature
+                triggers a crash.
+            risk_reason: what this feature does and why it has that risk level.
+            core_functions: the main functions that implement this feature.
+            entry_functions: the functions where fuzzer input enters this feature.
+            code_summary: brief description of what this feature does.
         """
         from .directions import create_direction_impl
 

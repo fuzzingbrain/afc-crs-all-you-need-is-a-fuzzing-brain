@@ -19,7 +19,13 @@ from typing import Any, Dict, Optional, Union
 from fastmcp import Client
 
 from .base import BaseAgent
-from .prompts import DIRECTION_PLANNING_PROMPT
+from .prompts import (
+    DIRECTION_PLANNING_PROMPT,
+    ADDRESS_SANITIZER_GUIDANCE,
+    MEMORY_SANITIZER_GUIDANCE,
+    UNDEFINED_SANITIZER_GUIDANCE,
+    GENERAL_SANITIZER_GUIDANCE,
+)
 from ..llms import LLMClient, ModelInfo
 from ..core.models.agent import AgentType
 
@@ -51,6 +57,7 @@ class DirectionPlanningAgent(BaseAgent):
         verbose: bool = True,
         log_dir: Optional[Path] = None,
         max_directions: int = 5,
+        fuzzer_source: str = "",
     ):
         """
         Initialize Direction Planning Agent.
@@ -79,6 +86,8 @@ class DirectionPlanningAgent(BaseAgent):
             sanitizer=sanitizer,
         )
         self.max_directions = max_directions
+        # Full harness source, embedded in the system prompt.
+        self.fuzzer_source = fuzzer_source
 
         # Track created directions
         self.directions_created = 0
@@ -205,145 +214,59 @@ class DirectionPlanningAgent(BaseAgent):
             "Goal": "Divide call graph into logical directions for parallel analysis",
         }
 
+    def _get_sanitizer_guidance(self) -> str:
+        s = self.sanitizer.lower()
+        if "address" in s:
+            return ADDRESS_SANITIZER_GUIDANCE
+        if "memory" in s:
+            return MEMORY_SANITIZER_GUIDANCE
+        if "undefined" in s:
+            return UNDEFINED_SANITIZER_GUIDANCE
+        return GENERAL_SANITIZER_GUIDANCE
+
     @property
     def system_prompt(self) -> str:
-        # Replace direction count placeholder with actual config
         prompt = DIRECTION_PLANNING_PROMPT.replace(
             "Create at most 5 directions (prioritize by risk level)",
             f"Create at most {self.max_directions} directions (prioritize by risk level)",
         )
-
-        # Add sanitizer-specific guidance
-        sanitizer_context = f"""
-
-## Sanitizer-Specific Guidance: {self.sanitizer}
-
-When assigning risk levels, prioritize directions that handle code patterns detectable by {self.sanitizer}:
-"""
-        if "address" in self.sanitizer.lower():
-            sanitizer_context += """
-### AddressSanitizer Detectable Patterns (HIGH PRIORITY)
-
-**Buffer Operations** - Mark as HIGH risk:
-- Functions using memcpy, memmove, strcpy, strncpy
-- Array indexing with external input
-- Pointer arithmetic
-
-**Memory Lifecycle** - Mark as HIGH risk:
-- Allocation functions (malloc, realloc, calloc)
-- Deallocation and cleanup paths
-- Object lifecycle management
-
-**Bounds Checking** - Mark as HIGH risk:
-- Length/size calculations
-- Loop bounds derived from input
-- String length handling
-"""
-        elif "memory" in self.sanitizer.lower():
-            sanitizer_context += """
-### MemorySanitizer Detectable Patterns (HIGH PRIORITY)
-
-**Initialization Paths** - Mark as HIGH risk:
-- Struct/buffer initialization
-- Partial initialization patterns
-- Default value handling
-
-**Data Flow** - Mark as HIGH risk:
-- Functions reading from buffers
-- Conditional branches on data values
-- Output/return value paths
-"""
-        elif "undefined" in self.sanitizer.lower():
-            sanitizer_context += """
-### UndefinedBehaviorSanitizer Detectable Patterns (HIGH PRIORITY)
-
-**Integer Operations** - Mark as HIGH risk:
-- Arithmetic on sizes/lengths
-- Type conversions (narrowing)
-- Multiplication of sizes
-
-**Pointer Operations** - Mark as HIGH risk:
-- Null checks (or lack thereof)
-- Pointer dereferences after conditions
-
-**Division/Shift** - Mark as HIGH risk:
-- Division operations
-- Bit shift operations
-"""
-        else:
-            sanitizer_context += """
-### General Vulnerability Patterns
-
-- Memory safety issues
-- Input validation
-- Error handling paths
-"""
-
-        return prompt + sanitizer_context
+        harness = self.fuzzer_source or "(harness source unavailable)"
+        return (
+            prompt
+            + f"\n\n## Sanitizer-Specific Guidance: {self.sanitizer}\n"
+            + "Prioritize directions whose code has patterns this sanitizer can observe:\n"
+            + self._get_sanitizer_guidance()
+            + "\n\n## Fuzzer Source Codes (how input enters the target)\n"
+            + f"```c\n{harness}\n```\n"
+        )
 
     def get_initial_message(self, **kwargs) -> str:
-        """Generate initial message for direction planning."""
-        source_hint = self.read_function_hint(self.fuzzer)
-        fuzzer_code = kwargs.get("fuzzer_code", "")
+        """Initial message for direction planning: only the dynamic context. The
+        instructions, sanitizer guidance and harness source are in the system prompt."""
         reachable_count = kwargs.get("reachable_count", 0)
         vuln_hint = kwargs.get("vuln_hint", "") or ""
 
-        # A caller-supplied vulnerability description (e.g. a bug report or
-        # benchmark prompt) is a strong prior: lead with it so the agent creates
-        # a focused direction quickly instead of exploring the whole codebase.
+        # A caller-supplied vulnerability description (e.g. a bug report or benchmark
+        # prompt) is a strong prior: lead with it so the agent creates a focused
+        # direction quickly instead of exploring the whole codebase.
         hint_block = ""
         if vuln_hint.strip():
-            hint_block = f"""## Known Vulnerability Report (PRIORITIZE THIS)
+            hint_block = (
+                "## Known Vulnerability Report (PRIORITIZE THIS)\n\n"
+                "A vulnerability has been reported in this target. Use it to create a "
+                "focused, high-risk direction toward the implicated code FIRST, then "
+                "verify by reading the relevant functions. Do not exhaust your budget "
+                "exploring unrelated code.\n\n"
+                f'"""\n{vuln_hint.strip()}\n"""\n\n'
+            )
 
-A vulnerability has been reported in this target. Use it to create a focused,
-high-risk direction toward the implicated code FIRST, then verify by reading the
-relevant functions. Do not exhaust your budget exploring unrelated code.
-
-\"\"\"
-{vuln_hint.strip()}
-\"\"\"
-
-"""
-
-        message = (
-            f"""Plan the analysis directions for a Full-scan security audit.
-
-{hint_block}"""
-            + f"""
-
-## Your Target Configuration
-
-**Fuzzer**: `{self.fuzzer}`
-**Sanitizer**: `{self.sanitizer}`
-
-These are FIXED. Only analyze vulnerabilities that:
-1. Are REACHABLE from this specific fuzzer
-2. Are DETECTABLE by {self.sanitizer} sanitizer
-
-## Fuzzer Source Code (CRITICAL - READ THIS CAREFULLY)
-
-This code shows EXACTLY how fuzzer input enters the target library.
-Understanding this is MANDATORY - it defines what code is exploitable.
-
-```c
-{fuzzer_code if fuzzer_code else f"// Fuzzer source not provided - read it with {source_hint}"}
-```
-
-## Codebase Information
-- Approximately {reachable_count} functions reachable from this fuzzer
-
-## Your Task
-
-1. **FIRST**: If fuzzer code is not shown above, read it: {source_hint}
-2. Understand how input flows from the fuzzer into the library
-3. Use get_call_graph to understand the call structure
-4. Group reachable functions into logical directions
-6. Prioritize by: (a) closeness to fuzzer input, (b) {self.sanitizer} vulnerability types
-
-Remember: Only reachable code matters. Only {self.sanitizer}-detectable bugs matter.
-"""
+        return (
+            f"Plan the analysis directions for `{self.fuzzer}` / `{self.sanitizer}`, "
+            "following the steps in your instructions.\n\n"
+            f"{hint_block}"
+            f"## Codebase Information\n"
+            f"- Approximately {reachable_count} functions reachable from this fuzzer.\n"
         )
-        return message
 
     async def plan_directions_async(
         self,

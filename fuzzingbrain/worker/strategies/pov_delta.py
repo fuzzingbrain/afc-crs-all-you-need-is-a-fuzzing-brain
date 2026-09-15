@@ -67,6 +67,7 @@ class POVDeltaStrategy(POVBaseStrategy):
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
             max_iterations=self.SP_ITERATIONS_WITH_INDEX,
+            fuzzer_source=self.executor.harness_source(),  # full harness, cached per worker
         )
 
     # Iteration budgets for the delta SP generator. The first is enough when the

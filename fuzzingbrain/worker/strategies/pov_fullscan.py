@@ -159,6 +159,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
             max_iterations=100,
+            fuzzer_source=self.executor.harness_source(),  # full harness, cached
         )
         vuln_hint = self._get_vuln_hint()
 
@@ -199,6 +200,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
             max_iterations=100,
+            fuzzer_source=self.executor.harness_source(),  # full harness, cached
         )
         vuln_hint = self._get_vuln_hint()
 

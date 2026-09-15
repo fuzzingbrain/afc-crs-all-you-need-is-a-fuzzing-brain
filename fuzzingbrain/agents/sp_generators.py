@@ -659,6 +659,7 @@ class DeltaSPGenerator(SPGeneratorBase):
         log_dir: Optional[Path] = None,
         index: int = 0,
         target_name: str = "",
+        fuzzer_source: str = "",
     ):
         super().__init__(
             fuzzer=fuzzer,
@@ -674,6 +675,8 @@ class DeltaSPGenerator(SPGeneratorBase):
             target_name=target_name,
         )
 
+        # Full harness source, embedded in the system prompt (stable per worker).
+        self.fuzzer_source = fuzzer_source
         # Context for delta analysis
         self.reachable_changes: List[Dict[str, Any]] = []
         self.sp_list: List[tuple] = []  # (func_name, score)
@@ -689,10 +692,12 @@ class DeltaSPGenerator(SPGeneratorBase):
 
     @property
     def system_prompt(self) -> str:
-        prompt = FIND_SUSPICIOUS_POINTS_PROMPT
-        sanitizer_guidance = f"\n\n## Sanitizer-Specific Patterns: {self.sanitizer}\n\nFocus ONLY on these bug types (other bugs won't be detected by this sanitizer):\n"
-        sanitizer_guidance += self._get_sanitizer_guidance()
-        return prompt + sanitizer_guidance
+        return FIND_SUSPICIOUS_POINTS_PROMPT.format(
+            fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
+            sanitizer_patterns=self._get_sanitizer_guidance(),
+            fuzzer_source_codes=self.fuzzer_source or "(harness source unavailable)",
+        )
 
     def _get_agent_metadata(self) -> dict:
         """Get metadata for agent banner."""
@@ -849,49 +854,17 @@ This shows how input enters the library - only reachable code matters!
         return message
 
     def get_initial_message(self, **kwargs) -> str:
-        """Generate initial message for delta find mode."""
+        """Initial message for delta find mode: just the changed-function worklist.
+        The instructions, sanitizer patterns and harness source live in the system
+        prompt, so this message only carries the dynamic context."""
         reachable_changes = kwargs.get("reachable_changes", self.reachable_changes)
-        fuzzer_code = kwargs.get("fuzzer_code", "")
 
-        message = f"""Analyze the code changes for potential vulnerabilities.
-
-## Your Target Configuration (FIXED - cannot change)
-
-**Fuzzer**: `{self.fuzzer}`
-**Sanitizer**: `{self.sanitizer}`
-
-Only find vulnerabilities that are:
-1. REACHABLE from `{self.fuzzer}` (verify call path exists)
-2. DETECTABLE by `{self.sanitizer}` sanitizer (bug type must match)
-
-"""
-        message += self._format_fuzzer_code_section(fuzzer_code)
+        message = (
+            "Analyze the changed functions below for potential vulnerabilities, "
+            "following the steps in your instructions. Call `get_diff` to see the "
+            "exact changes, then work through EACH changed function.\n\n"
+        )
         message += self._format_changed_functions_section(reachable_changes)
-
-        source_hint = self.read_function_hint(self.fuzzer)
-        message += f"""## Your Task
-
-Follow these steps IN ORDER:
-
-1. **READ THE DIFF**: Call get_diff to see what code was changed
-
-2. **ANALYZE ALL CHANGED FUNCTIONS** (including static-unreachable!):
-   - Read each function's source code: {source_hint}
-   - Look for {self.sanitizer}-detectable vulnerabilities:
-     - {self._get_sanitizer_vuln_types()}
-"""
-
-        message += """
-3. **CREATE SUSPICIOUS POINTS**: For each potential vulnerability:
-   - One SP per unique root cause (not per symptom)
-   - Use control flow description, not line numbers
-   - Set confidence score based on vulnerability clarity
-   - Include static_reachable info if known
-
-**IMPORTANT**: Do NOT skip static-unreachable functions! They may be reachable via function pointers.
-The Verify agent will judge actual reachability later.
-"""
-
         return message
 
     def set_context(
