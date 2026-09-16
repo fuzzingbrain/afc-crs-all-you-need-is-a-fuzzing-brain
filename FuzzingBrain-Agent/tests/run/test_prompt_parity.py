@@ -71,8 +71,9 @@ def test_the_divergences_are_the_ones_we_meant():
     # prompt text: the model would have been told, in its own instructions, which
     # parts of those instructions we had changed and why.
     assert raw.count("#   1. The tools bullet") == 1
-    for name in ("system_template", "instance_template", "action_observation_template"):
-        template = cfg["agent"][name]
+    templates = {f"agent.{k}": v for k, v in cfg["agent"].items() if k.endswith("_template")}
+    templates |= {f"model.{k}": v for k, v in cfg["model"].items() if k.endswith("_template")}
+    for name, template in templates.items():
         assert "FB-AGENT" not in template, name
         # A leaked YAML comment is "# note"; a markdown heading the model is
         # meant to read is "## Reading a verdict". One hash and a space is the
@@ -85,3 +86,29 @@ def test_the_divergences_are_the_ones_we_meant():
     for absent in ("mcp__harness__", "run_poc_on_harness", "RESULT.md", "ASSESSMENT COMPLETE"):
         assert absent not in ours, absent
     assert "./submit" in ours
+
+
+# ---- the harness's own prompt layer ----------------------------------------
+# Separate from the task text: what wraps a command's output and what comes back
+# when a reply will not parse. Sent every turn, whatever the task is.
+
+def test_the_harness_templates_are_where_the_model_reads_them():
+    # They belong to the model, which renders them. Put under `agent:` they are
+    # silently dropped -- AgentConfig has no such field and pydantic ignores
+    # extras -- and every command's output goes back untruncated, which on a
+    # verbose build is how a run loses its context window.
+    from minisweagent.agents.default import AgentConfig
+    cfg = yaml.safe_load(CONFIG.read_text())
+    assert "observation_template" in cfg["model"]
+    assert "format_error_template" in cfg["model"]
+    for key in cfg["agent"]:
+        assert key in AgentConfig.model_fields, f"agent.{key} is not a field; it will be ignored"
+
+
+def test_long_output_is_truncated_before_it_reaches_the_model():
+    from jinja2 import StrictUndefined, Template
+    cfg = yaml.safe_load(CONFIG.read_text())
+    rendered = Template(cfg["model"]["observation_template"], undefined=StrictUndefined).render(
+        output={"output": "A" * 40_000, "returncode": 0, "exception_info": ""})
+    assert len(rendered) < 15_000, len(rendered)
+    assert "elided_chars" in rendered
