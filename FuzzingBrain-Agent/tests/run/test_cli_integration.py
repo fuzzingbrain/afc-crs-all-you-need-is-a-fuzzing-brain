@@ -310,7 +310,7 @@ def test_mini_help():
     assert result.returncode == 0
     # Strip ANSI color codes for reliable text matching
     clean_output = strip_ansi_codes(result.stdout)
-    assert "Run mini-SWE-agent in your local environment." in clean_output
+    assert "Run fb-agent in your local environment." in clean_output
     assert "--help" in clean_output
     assert "--config" in clean_output
     assert "--model" in clean_output
@@ -329,7 +329,7 @@ def test_mini_help_with_typer_runner():
     assert result.exit_code == 0
     # Strip ANSI color codes for reliable text matching
     clean_output = strip_ansi_codes(result.stdout)
-    assert "Run mini-SWE-agent in your local environment." in clean_output
+    assert "Run fb-agent in your local environment." in clean_output
     assert "--help" in clean_output
     assert "--config" in clean_output
     assert "--model" in clean_output
@@ -348,44 +348,20 @@ def test_python_m_minisweagent_help():
     )
 
     assert result.returncode == 0
-    assert "mini-SWE-agent" in result.stdout
+    assert "fb-agent" in result.stdout
 
 
-def test_mini_script_help():
-    """Test that the mini script entry point help works."""
-    result = subprocess.run(
-        ["mini", "--help"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
+def test_fb_agent_help():
+    """Test that the fb-agent script entry point help works."""
+    result = subprocess.run(["fb-agent", "--help"], capture_output=True, text=True, timeout=10)
 
     assert result.returncode == 0
-    assert "mini-SWE-agent" in result.stdout
+    assert "fb-agent" in strip_ansi_codes(result.stdout)
 
 
-def test_mini_swe_agent_help():
-    """Test that mini-swe-agent --help works correctly."""
-    result = subprocess.run(
-        ["mini-swe-agent", "--help"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-
-    assert result.returncode == 0
-    clean_output = strip_ansi_codes(result.stdout)
-    assert "mini-SWE-agent" in clean_output
-
-
-def test_mini_extra_help():
-    """Test that mini-extra --help works correctly."""
-    result = subprocess.run(
-        ["mini-extra", "--help"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
+def test_fb_agent_extra_help():
+    """Test that fb-agent-extra --help works correctly."""
+    result = subprocess.run(["fb-agent-extra", "--help"], capture_output=True, text=True, timeout=10)
 
     assert result.returncode == 0
     clean_output = strip_ansi_codes(result.stdout)
@@ -393,20 +369,6 @@ def test_mini_extra_help():
     assert "config" in clean_output
     assert "inspect" in clean_output
     assert "swebench" in clean_output
-
-
-def test_mini_e_help():
-    """Test that mini-e --help works correctly."""
-    result = subprocess.run(
-        ["mini-e", "--help"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-
-    assert result.returncode == 0
-    clean_output = strip_ansi_codes(result.stdout)
-    assert "central entry point for all extra commands" in clean_output
 
 
 @pytest.mark.parametrize(
@@ -418,11 +380,11 @@ def test_mini_e_help():
         ("swebench-single", ["swebench-single"]),
     ],
 )
-def test_mini_extra_subcommand_help(subcommand: str, aliases: list[str]):
-    """Test that mini-extra subcommands --help work correctly."""
+def test_fb_agent_extra_subcommand_help(subcommand: str, aliases: list[str]):
+    """Test that fb-agent-extra subcommands --help work correctly."""
     for alias in aliases:
         result = subprocess.run(
-            ["mini-extra", alias, "--help"],
+            ["fb-agent-extra", alias, "--help"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -433,10 +395,10 @@ def test_mini_extra_subcommand_help(subcommand: str, aliases: list[str]):
         assert len(result.stdout) > 0
 
 
-def test_mini_extra_config_help():
+def test_fb_agent_extra_config_help():
     """Test that mini-extra config --help works correctly."""
     result = subprocess.run(
-        ["mini-extra", "config", "--help"],
+        ["fb-agent-extra", "config", "--help"],
         capture_output=True,
         text=True,
         timeout=10,

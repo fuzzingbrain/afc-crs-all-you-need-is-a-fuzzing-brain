@@ -23,10 +23,11 @@ DEFAULT_CONFIG_FILE = Path(os.getenv("MSWEA_MINI_CONFIG_PATH", builtin_config_di
 DEFAULT_OUTPUT_FILE = global_config_dir / "last_mini_run.traj.json"
 
 
-_HELP_TEXT = """Run mini-SWE-agent in your local environment.
+_HELP_TEXT = """Run fb-agent in your local environment.
 
 [not dim]
-More information about the usage: [bold green]https://mini-swe-agent.com/latest/usage/mini/[/bold green]
+Forked from mini-swe-agent; upstream usage docs still apply:
+[bold green]https://mini-swe-agent.com/latest/usage/mini/[/bold green]
 [/not dim]
 """
 

@@ -1,4 +1,5 @@
-"""Basic agent class. See https://mini-swe-agent.com/latest/advanced/control_flow/ for visual explanation
+"""Basic agent class. See https://mini-swe-agent.com/latest/advanced/control_flow/ for a visual explanation
+of the upstream control flow this is built on
 or https://minimal-agent.com for a tutorial on the basic building principles.
 """
 
@@ -200,12 +201,12 @@ class DefaultAgent:
                     "agent": self.config.model_dump(mode="json"),
                     "agent_type": f"{self.__class__.__module__}.{self.__class__.__name__}",
                 },
-                "mini_version": __version__,
+                "agent_version": __version__,
                 "exit_status": last_extra.get("exit_status", ""),
                 "submission": last_extra.get("submission", ""),
             },
             "messages": self.messages,
-            "trajectory_format": "mini-swe-agent-1.1",
+            "trajectory_format": "fb-agent-1",
         }
         return recursive_merge(agent_data, self.model.serialize(), self.env.serialize(), *extra_dicts)
 
