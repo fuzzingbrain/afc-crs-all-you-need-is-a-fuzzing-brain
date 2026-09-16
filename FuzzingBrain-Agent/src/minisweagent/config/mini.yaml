@@ -98,8 +98,8 @@ agent:
     ```bash
     anything
     ```
-  step_limit: 0
-  cost_limit: 3.
+  turn_limit: 0
+  cost_limit: 0
   mode: confirm
 environment:
   env:

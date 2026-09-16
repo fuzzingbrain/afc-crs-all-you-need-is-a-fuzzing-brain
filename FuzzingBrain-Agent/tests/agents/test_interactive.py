@@ -147,7 +147,7 @@ def test_successful_completion_with_confirmation(model_factory):
         info = agent.run("Test completion with confirmation")
         assert info["exit_status"] == "Submitted"
         assert info["submission"] == "completed\n"
-        assert agent.n_calls == 1
+        assert agent.n_turns == 1
 
 
 def test_action_rejection_and_recovery(model_factory):
@@ -174,7 +174,7 @@ def test_action_rejection_and_recovery(model_factory):
         info = agent.run("Test action rejection")
         assert info["exit_status"] == "Submitted"
         assert info["submission"] == "recovered\n"
-        assert agent.n_calls == 2
+        assert agent.n_turns == 2
         # Should have rejection message in conversation
         rejection_messages = [msg for msg in agent.messages if "User rejected this action" in get_text(msg)]
         assert len(rejection_messages) == 1
@@ -357,7 +357,7 @@ def test_multiple_confirmations_and_commands(model_factory):
         assert info["exit_status"] == "Submitted"
         assert info["submission"] == "complex flow completed\n"
         assert agent.config.mode == "yolo"  # Should be in yolo mode
-        assert agent.n_calls == 2
+        assert agent.n_turns == 2
 
 
 def test_non_whitelisted_action_requires_confirmation(model_factory):
@@ -411,7 +411,7 @@ def test_human_mode_basic_functionality(model_factory):
         assert info["exit_status"] == "Submitted"
         assert info["submission"] == "human mode works\n"
         assert agent.config.mode == "human"
-        assert agent.n_calls == 0  # LM should not be called
+        assert agent.n_turns == 0  # LM should not be called
 
 
 def test_human_mode_switch_to_yolo(model_factory):
@@ -444,7 +444,7 @@ def test_human_mode_switch_to_yolo(model_factory):
         assert info["exit_status"] == "Submitted"
         assert info["submission"] == "switched to yolo\n"
         assert agent.config.mode == "yolo"
-        assert agent.n_calls == 1
+        assert agent.n_turns == 1
 
 
 def test_human_mode_switch_to_confirm(model_factory):
@@ -477,7 +477,7 @@ def test_human_mode_switch_to_confirm(model_factory):
         assert info["exit_status"] == "Submitted"
         assert info["submission"] == "switched to confirm\n"
         assert agent.config.mode == "confirm"
-        assert agent.n_calls == 1
+        assert agent.n_turns == 1
 
 
 def test_confirmation_mode_switch_to_human_with_rejection(model_factory):
@@ -831,7 +831,7 @@ def test_limits_exceeded_with_user_continuation(model_factory):
         env=LocalEnvironment(),
         **{
             **config,
-            "step_limit": 10,  # High enough to not interfere initially
+            "turn_limit": 10,  # High enough to not interfere initially
             "cost_limit": 0.5,  # Will be exceeded with first model call (cost=0.6),
             "mode": "yolo",  # Use yolo mode to avoid confirmation prompts,
         },
@@ -840,15 +840,15 @@ def test_limits_exceeded_with_user_continuation(model_factory):
     # Mock input() to provide new limits when prompted (simulating an
     # interactive terminal, so isatty() must report True).
     with patch.object(InteractiveAgent, "_stdin_is_interactive", return_value=True):
-        with patch("builtins.input", side_effect=["10", "5.0"]):  # New step_limit=10, cost_limit=5.0
+        with patch("builtins.input", side_effect=["10", "5.0"]):  # New turn_limit=10, cost_limit=5.0
             with mock_prompts([""]):  # No new task
                 with patch("minisweagent.agents.interactive.console.print"):  # Suppress console output
                     info = agent.run("Test limits exceeded with continuation")
 
     assert info["exit_status"] == "Submitted"
     assert info["submission"] == "completed after limit increase\n"
-    assert agent.n_calls == 3  # Should complete all 3 steps
-    assert agent.config.step_limit == 10  # Should have updated step limit
+    assert agent.n_turns == 3  # Should complete all 3 steps
+    assert agent.config.turn_limit == 10  # Should have updated step limit
     assert agent.config.cost_limit == 5.0  # Should have updated cost limit
 
 
@@ -876,14 +876,14 @@ def test_limits_exceeded_multiple_times_with_continuation(model_factory):
         env=LocalEnvironment(),
         **{
             **config,
-            "step_limit": 1,  # Will be exceeded after first step
+            "turn_limit": 1,  # Will be exceeded after first step
             "cost_limit": 100.0,  # High enough to not interfere,
             "mode": "yolo",
         },
     )
 
     # Mock input() to provide new limits multiple times (interactive terminal).
-    # First limit increase: step_limit=2, then step_limit=10 when exceeded again
+    # First limit increase: turn_limit=2, then turn_limit=10 when exceeded again
     with patch.object(InteractiveAgent, "_stdin_is_interactive", return_value=True):
         with patch("builtins.input", side_effect=["2", "100.0", "10", "100.0"]):
             with mock_prompts([""]):  # No new task
@@ -892,8 +892,8 @@ def test_limits_exceeded_multiple_times_with_continuation(model_factory):
 
     assert info["exit_status"] == "Submitted"
     assert info["submission"] == "completed after multiple increases\n"
-    assert agent.n_calls == 5  # Should complete all 5 steps
-    assert agent.config.step_limit == 10  # Should have final updated step limit
+    assert agent.n_turns == 5  # Should complete all 5 steps
+    assert agent.config.turn_limit == 10  # Should have final updated step limit
 
 
 def test_limits_exceeded_non_interactive_stops_cleanly(model_factory):
@@ -909,7 +909,7 @@ def test_limits_exceeded_non_interactive_stops_cleanly(model_factory):
         env=LocalEnvironment(),
         **{
             **config,
-            "step_limit": 10,
+            "turn_limit": 10,
             "cost_limit": 0.5,
             "mode": "yolo",
         },
@@ -921,7 +921,7 @@ def test_limits_exceeded_non_interactive_stops_cleanly(model_factory):
                 info = agent.run("Test non-interactive limit stop")
 
     assert info["exit_status"] == "LimitsExceeded"
-    assert agent.n_calls == 1  # one model call happened, the next was blocked by the limit
+    assert agent.n_turns == 1  # one model call happened, the next was blocked by the limit
     mock_in.assert_not_called()
 
 
@@ -933,7 +933,7 @@ def test_time_exceeded_never_prompts(model_factory):
     agent = InteractiveAgent(
         model=factory([("Step 1", [{"command": "echo 'first step'"}])]),
         env=LocalEnvironment(),
-        **{**config, "step_limit": 10, "cost_limit": 100.0, "wall_time_limit_seconds": 1, "mode": "yolo"},
+        **{**config, "turn_limit": 10, "cost_limit": 100.0, "wall_time_limit_seconds": 1, "mode": "yolo"},
     )
     agent._start_time = 0  # force the wall-clock budget to be already exhausted
 
@@ -943,7 +943,7 @@ def test_time_exceeded_never_prompts(model_factory):
                 info = agent.run("Test time-exceeded clean stop")
 
     assert info["exit_status"] == "TimeExceeded"
-    assert agent.n_calls == 0  # limit tripped before any model call
+    assert agent.n_turns == 0  # limit tripped before any model call
     mock_in.assert_not_called()
 
 
@@ -978,7 +978,7 @@ def test_continue_after_completion_with_new_task(model_factory):
         info = agent.run("Complete the initial task")
         assert info["exit_status"] == "Submitted"
         assert info["submission"] == "new task completed\n"
-        assert agent.n_calls == 2
+        assert agent.n_turns == 2
         # Should have the new task message in conversation
         new_task_messages = [
             msg for msg in agent.messages if "The user added a new task: Create a new file" in get_text(msg)
@@ -1011,7 +1011,7 @@ def test_continue_after_completion_without_new_task(model_factory):
         info = agent.run("Complete the task")
         assert info["exit_status"] == "Submitted"
         assert info["submission"] == "original task completed\n"
-        assert agent.n_calls == 1
+        assert agent.n_turns == 1
         # Should not have any new task messages
         new_task_messages = [msg for msg in agent.messages if "The user added a new task" in get_text(msg)]
         assert len(new_task_messages) == 0
@@ -1045,7 +1045,7 @@ def test_continue_after_completion_multiple_cycles(model_factory):
         info = agent.run("Initial task")
         assert info["exit_status"] == "Submitted"
         assert info["submission"] == "third completed\n"
-        assert agent.n_calls == 3
+        assert agent.n_turns == 3
         # Should have both new task messages
         new_task_messages = [msg for msg in agent.messages if "The user added a new task" in get_text(msg)]
         assert len(new_task_messages) == 2
@@ -1083,7 +1083,7 @@ def test_continue_after_completion_in_yolo_mode(model_factory):
         assert info["exit_status"] == "Submitted"
         assert info["submission"] == "second task completed\n"
         assert agent.config.mode == "yolo"
-        assert agent.n_calls == 2
+        assert agent.n_turns == 2
         # Should have the new task message
         new_task_messages = [msg for msg in agent.messages if "Create a second task" in get_text(msg)]
         assert len(new_task_messages) == 1
@@ -1109,7 +1109,7 @@ def test_confirm_exit_enabled_asks_for_confirmation(model_factory):
         info = agent.run("Test confirm exit enabled")
         assert info["exit_status"] == "Submitted"
         assert info["submission"] == "completed\n"
-        assert agent.n_calls == 1
+        assert agent.n_turns == 1
 
 
 def test_confirm_exit_disabled_exits_immediately(model_factory):
@@ -1132,7 +1132,7 @@ def test_confirm_exit_disabled_exits_immediately(model_factory):
         info = agent.run("Test confirm exit disabled")
         assert info["exit_status"] == "Submitted"
         assert info["submission"] == "completed\n"
-        assert agent.n_calls == 1
+        assert agent.n_turns == 1
 
 
 def test_confirm_exit_with_new_task_continues_execution(model_factory):
@@ -1166,7 +1166,7 @@ def test_confirm_exit_with_new_task_continues_execution(model_factory):
         info = agent.run("Test exit with new task")
         assert info["exit_status"] == "Submitted"
         assert info["submission"] == "additional done\n"
-        assert agent.n_calls == 2
+        assert agent.n_turns == 2
         # Check that the new task was added to the conversation
         new_task_messages = [msg for msg in agent.messages if "Please do one more thing" in get_text(msg)]
         assert len(new_task_messages) == 1
@@ -1232,7 +1232,7 @@ def test_submission_help_then_human_mode(model_factory):
     assert info["exit_status"] == "Submitted"
     assert info["submission"] == "done\n"
     assert agent.config.mode == "human"
-    assert agent.n_calls == 1
+    assert agent.n_turns == 1
     # Help was shown
     assert any("/y" in str(c) for c in mock_print.call_args_list)
     # echo 'test' output is visible in the conversation
@@ -1253,4 +1253,4 @@ def test_submission_enter_quits(model_factory):
         info = agent.run("Solve the issue")
     assert info["exit_status"] == "Submitted"
     assert info["submission"] == "completed\n"
-    assert agent.n_calls == 1
+    assert agent.n_turns == 1

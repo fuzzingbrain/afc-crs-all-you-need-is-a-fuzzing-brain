@@ -23,14 +23,30 @@ class AgentConfig(BaseModel):
     """Template for the system message (the first message)."""
     instance_template: str
     """Template for the first user message specifying the task (the second message overall)."""
-    step_limit: int = 0
-    """Maximum number of steps the agent can take."""
-    cost_limit: float = 3.0
-    """Stop agent after exceeding (!) this cost."""
+    turn_limit: int = 0
+    """Maximum number of turns the agent can take. 0 means no limit.
+
+    A turn is one usable model reply -- the same unit the bench's api arm counts
+    (`for turn in range(max_turns)`, one turn per accepted completion) and the
+    same unit claudecode's `--max-turns` caps. Upstream called this `step_limit`
+    and compared it against model calls, which is the same number only when
+    nothing has to be re-drawn; see the FormatError handler in `run`."""
+    cost_limit: float = 0.0
+    """Stop agent after exceeding (!) this cost. 0 means no limit, and that is
+    the only setting this fork ships: the bench's api arm (a bare model) has no
+    dollar cap, so an agent driving the same model may not have one either or
+    the two are not spending the same resources. Upstream defaults this to 3.0."""
     wall_time_limit_seconds: int = 0
     """Stop agent after this many seconds of wall-clock time. 0 means no limit."""
     max_consecutive_format_errors: int = 3
     """Exit after this many format errors in a row (0 = no limit)."""
+    free_format_error_redraws: int = 3
+    """How many unusable replies a turn may absorb before they start costing
+    turns. The bench's api arm re-draws up to 3 times inside one iteration
+    (`for attempt in range(3)`), so 3 is what keeps a turn worth the same on
+    both arms. It is deliberately NOT max_consecutive_format_errors: that one
+    decides when to give up, and setting it to 0 (no limit) must not turn the
+    refund into an unbounded one. See the FormatError handler in `run`."""
     output_path: Path | None = None
     """Save the trajectory to this path."""
 
@@ -45,7 +61,7 @@ class DefaultAgent:
         self.extra_template_vars = {}
         self.logger = logging.getLogger("agent")
         self.cost = 0.0
-        self.n_calls = 0
+        self.n_turns = 0
         self.n_consecutive_format_errors = 0
         self._start_time = time.time()
 
@@ -55,7 +71,7 @@ class DefaultAgent:
             self.env.get_template_vars(),
             self.model.get_template_vars(),
             {
-                "n_model_calls": self.n_calls,
+                "n_turns": self.n_turns,
                 "model_cost": self.cost,
                 "elapsed_seconds": int(time.time() - self._start_time),
             },
@@ -101,6 +117,20 @@ class DefaultAgent:
                 # The call was billed before parsing failed, so query() never got to charge it.
                 self.cost += e.messages[0].get("extra", {}).get("cost", 0.0)
                 self.n_consecutive_format_errors += 1
+                # Refund the re-draw, so a turn costs the same here as on the
+                # bench's api arm. That arm charges the turn once, up front
+                # (`result.turns_used = turn + 1`), then re-draws up to 3 more
+                # times inside the SAME iteration when a reply comes back
+                # unusable. So the turn's own call is charged and only the
+                # re-draws are free -- refunding the first failure too would make
+                # the agent cheaper than the bare model, which is the same
+                # problem in the other direction. This sits ahead of the
+                # give-up branch on purpose: the call that exhausts
+                # max_consecutive_format_errors is still a re-draw, and the api
+                # arm does not charge a turn for giving up either.
+                redraws_used = self.n_consecutive_format_errors - 1
+                if 1 <= redraws_used <= self.config.free_format_error_redraws:
+                    self.n_turns -= 1
                 if 0 < self.config.max_consecutive_format_errors <= self.n_consecutive_format_errors:
                     self.add_messages(
                         *e.messages,
@@ -129,7 +159,7 @@ class DefaultAgent:
 
     def query(self) -> dict:
         """Query the model and return model messages. Override to add hooks."""
-        if 0 < self.config.step_limit <= self.n_calls or 0 < self.config.cost_limit <= self.cost:
+        if 0 < self.config.turn_limit <= self.n_turns or 0 < self.config.cost_limit <= self.cost:
             raise LimitsExceeded(
                 {
                     "role": "exit",
@@ -145,7 +175,7 @@ class DefaultAgent:
                     "extra": {"exit_status": "TimeExceeded", "submission": ""},
                 }
             )
-        self.n_calls += 1
+        self.n_turns += 1
         message = self.model.query(self.messages)
         self.cost += message.get("extra", {}).get("cost", 0.0)
         self.add_messages(message)
@@ -164,7 +194,7 @@ class DefaultAgent:
             "info": {
                 "model_stats": {
                     "instance_cost": self.cost,
-                    "api_calls": self.n_calls,
+                    "turns_used": self.n_turns,
                 },
                 "config": {
                     "agent": self.config.model_dump(mode="json"),

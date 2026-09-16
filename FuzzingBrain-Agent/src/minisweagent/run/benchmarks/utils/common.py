@@ -13,5 +13,5 @@ class ProgressTrackingAgent(DefaultAgent):
         self.instance_id = instance_id
 
     def step(self) -> dict:
-        self.progress_manager.update_instance_status(self.instance_id, f"Step {self.n_calls + 1:3d} (${self.cost:.2f})")
+        self.progress_manager.update_instance_status(self.instance_id, f"Turn {self.n_turns + 1:3d} (${self.cost:.2f})")
         return super().step()

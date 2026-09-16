@@ -148,10 +148,10 @@ def test_successful_completion(model_factory):
     info = agent.run("Echo hello world then finish")
     assert info["exit_status"] == "Submitted"
     assert info["submission"] == "Task completed successfully\n"
-    assert agent.n_calls == 2
+    assert agent.n_turns == 2
 
 
-def test_step_limit_enforcement(model_factory):
+def test_turn_limit_enforcement(model_factory):
     """Test agent stops when step limit is reached."""
     factory, config = model_factory
     agent = DefaultAgent(
@@ -162,12 +162,12 @@ def test_step_limit_enforcement(model_factory):
             ]
         ),
         env=LocalEnvironment(),
-        **{**config, "step_limit": 1},
+        **{**config, "turn_limit": 1},
     )
 
     info = agent.run("Run multiple commands")
     assert info["exit_status"] == "LimitsExceeded"
-    assert agent.n_calls == 1
+    assert agent.n_turns == 1
 
 
 def test_cost_limit_enforcement(model_factory):
@@ -251,7 +251,7 @@ def test_multiple_steps_before_completion(model_factory):
     info = agent.run("Multi-step task")
     assert info["exit_status"] == "Submitted"
     assert info["submission"] == "completed all steps\n"
-    assert agent.n_calls == 4
+    assert agent.n_turns == 4
 
 
 def test_custom_config(model_factory):
@@ -271,7 +271,7 @@ def test_custom_config(model_factory):
             **config,
             "system_template": "You are a test assistant.",
             "instance_template": "Task: {{task}}. Return bash command.",
-            "step_limit": 2,
+            "turn_limit": 2,
             "cost_limit": 1.0,
         },
     )
@@ -284,7 +284,7 @@ def test_custom_config(model_factory):
 
 
 def test_render_template_model_stats(model_factory):
-    """Test that render_template has access to n_model_calls and model_cost from agent."""
+    """Test that render_template has access to n_turns and model_cost from agent."""
     factory, config = model_factory
     agent = DefaultAgent(
         model=factory(
@@ -303,8 +303,8 @@ def test_render_template_model_stats(model_factory):
     agent.query()
 
     # Test template rendering with agent stats
-    template = "Calls: {{n_model_calls}}, Cost: {{model_cost}}"
-    assert agent._render_template(template) == "Calls: 2, Cost: 2.0"
+    template = "Turns: {{n_turns}}, Cost: {{model_cost}}"
+    assert agent._render_template(template) == "Turns: 2, Cost: 2.0"
 
 
 def test_messages_include_timestamps(model_factory):
@@ -423,7 +423,7 @@ def test_wall_time_limit_enforcement(model_factory):
 
     info = agent.run("Test wall time limit")
     assert info["exit_status"] == "TimeExceeded"
-    assert agent.n_calls == 1
+    assert agent.n_turns == 1
 
 
 def test_wall_time_limit_template_vars(model_factory):
@@ -457,7 +457,7 @@ def test_empty_actions_handling(model_factory):
     info = agent.run("Test empty actions")
     assert info["exit_status"] == "Submitted"
     assert info["submission"] == "done\n"
-    assert agent.n_calls == 2
+    assert agent.n_turns == 2
 
 
 class _FlakyToolcallModel(DeterministicToolcallModel):
@@ -490,7 +490,10 @@ def test_repeated_format_errors_terminate_cleanly(toolcall_config):
     )
     info = agent.run("Test repeated format errors")
     assert info["exit_status"] == "RepeatedFormatError"
-    assert agent.n_calls == 2  # stopped at the 2nd consecutive error, didn't burn all 5
+    # Stopped at the 2nd consecutive error, didn't burn all 5. Two calls, one
+    # turn: the 2nd was a free re-draw, the way the api arm re-draws in-turn.
+    assert agent.model.current_index == 1
+    assert agent.n_turns == 1
 
 
 def test_format_error_counter_resets_on_success(toolcall_config):
@@ -529,16 +532,19 @@ class _BilledFormatErrorModel(DeterministicToolcallModel):
 
 def test_format_errors_count_against_cost_limit(toolcall_config, reset_global_stats):
     """Turns that fail to parse are still billed, so they have to count against cost_limit.
-    step_limit is only a backstop here: if the format-error path stopped charging, the run would
+    turn_limit is only a backstop here: if the format-error path stopped charging, the run would
     run on to that limit with agent.cost still at zero."""
     agent = DefaultAgent(
         model=_BilledFormatErrorModel(outputs=[], cost_per_call=1.0),
         env=LocalEnvironment(),
-        **{**toolcall_config, "cost_limit": 2.5, "step_limit": 8, "max_consecutive_format_errors": 0},
+        **{**toolcall_config, "cost_limit": 2.5, "turn_limit": 8, "max_consecutive_format_errors": 0},
     )
 
     info = agent.run("Test billed format errors")
     assert info["exit_status"] == "LimitsExceeded"
-    assert agent.n_calls == 3
+    # 3 calls, all billed; only the first cost a turn. The other two were free
+    # re-draws, the way the api arm re-draws inside one turn -- which is exactly
+    # why cost, not turns, is what has to stop this run.
+    assert agent.n_turns == 1
     assert agent.cost == 3.0
     assert agent.cost == GLOBAL_MODEL_STATS.cost

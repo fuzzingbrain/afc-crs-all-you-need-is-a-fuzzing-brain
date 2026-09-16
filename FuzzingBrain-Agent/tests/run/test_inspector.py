@@ -51,7 +51,7 @@ def sample_swebench_trajectory():
         "info": {
             "exit_status": "Submitted",
             "submission": "Fixed the issue",
-            "model_stats": {"instance_cost": 0.05, "api_calls": 3},
+            "model_stats": {"instance_cost": 0.05, "turns_used": 3},
         },
         "messages": [
             {"role": "system", "content": "You are a helpful assistant."},

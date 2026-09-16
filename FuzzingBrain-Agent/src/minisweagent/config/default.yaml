@@ -101,8 +101,8 @@ agent:
     ```mswea_bash_command
     anything
     ```
-  step_limit: 0
-  cost_limit: 0.
+  turn_limit: 0
+  cost_limit: 0
 environment:
   env:
     PAGER: cat

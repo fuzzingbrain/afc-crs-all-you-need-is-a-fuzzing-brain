@@ -59,5 +59,5 @@ class TestGetAgent:
         assert isinstance(agent, InteractiveAgent)
 
     def test_config_passed_to_agent(self, model, env, base_config):
-        agent = get_agent(model, env, {**base_config, "step_limit": 42}, default_type="default")
-        assert agent.config.step_limit == 42
+        agent = get_agent(model, env, {**base_config, "turn_limit": 42}, default_type="default")
+        assert agent.config.turn_limit == 42

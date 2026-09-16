@@ -425,11 +425,11 @@ class ExceptionModel:
         self.exception_type = exception_type
         self.exception_message = exception_message
         self.cost = 0.0
-        self.n_calls = 0
+        self.n_turns = 0
         self.config = ExceptionModelConfig()
 
     def query(self, *args, **kwargs):
-        self.n_calls += 1
+        self.n_turns += 1
         raise self.exception_type(self.exception_message)
 
     def format_message(self, **kwargs) -> dict:
@@ -441,14 +441,14 @@ class ExceptionModel:
         return [self.format_message(role="user", content=str(o)) for o in outputs]
 
     def get_template_vars(self, **kwargs) -> dict:
-        return self.config.model_dump() | {"n_model_calls": self.n_calls, "model_cost": self.cost}
+        return self.config.model_dump() | {"n_turns": self.n_turns, "model_cost": self.cost}
 
     def serialize(self) -> dict:
         return {
             "info": {
                 "model_stats": {
                     "instance_cost": self.cost,
-                    "api_calls": self.n_calls,
+                    "turns_used": self.n_turns,
                 },
                 "config": {
                     "model": self.config.model_dump(mode="json"),
