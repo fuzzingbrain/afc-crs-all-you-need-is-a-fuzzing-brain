@@ -53,6 +53,14 @@ class LitellmModel:
         litellm.exceptions.PermissionDeniedError,
         litellm.exceptions.ContextWindowExceededError,
         litellm.exceptions.AuthenticationError,
+        # A 400 means the same request will fail again, so retrying it only
+        # spends the wall clock. A model name litellm cannot route ("LLM
+        # Provider NOT provided") raises this, and under the default policy a
+        # mistyped --model burned ~5 minutes of exponential backoff per turn
+        # before the cell gave up -- across a sweep, every cell, no crashes, no
+        # obvious cause. ContextWindowExceededError is a BadRequestError
+        # subclass and was already listed above; this only widens it.
+        litellm.exceptions.BadRequestError,
         KeyboardInterrupt,
     ]
 

@@ -185,3 +185,50 @@ def test_the_trace_the_bench_renders_its_report_from_is_complete(tmp_path):
     verdicts = [rec["content"] for rec in recs if rec["kind"] == "tool_result"]
     assert any("crash: abrt|parse|main" in v for v in verdicts), verdicts
     assert all(rec["step"] >= 1 for rec in recs)
+
+
+# ---- the config values the bench's contract depends on ----------------------
+# Bare numbers in a YAML file are the shape that drifts back silently: correct
+# today, quietly wrong after someone tidies the config, and wrong in a way that
+# costs a whole run rather than failing. The dollar cap already did this once.
+
+def _fbbench_config() -> dict:
+    import yaml
+    return yaml.safe_load(CONFIG.read_text())
+
+
+def test_a_command_may_run_longer_than_submit_takes_to_answer():
+    # ./submit polls for a verdict 900 times at 0.2s -- 180 seconds -- before it
+    # gives up. A command timeout at or under that kills the one command the
+    # agent most needs to finish, and the agent sees a dead shell rather than a
+    # verdict. Upstream's default is 30.
+    assert _fbbench_config()["environment"]["timeout"] > 180
+
+
+def test_the_config_caps_nothing_the_bench_has_not_asked_it_to():
+    # Both budgets arrive on the command line. A limit baked in here would
+    # override a bench that asked for more, and the cell would report a budget
+    # it never actually had.
+    agent = _fbbench_config()["agent"]
+    assert agent["turn_limit"] == 0
+    assert agent["cost_limit"] == 0
+    assert agent["wall_time_limit_seconds"] == 0
+
+
+def test_the_manifest_passes_on_every_field_the_bench_offers():
+    # A field the manifest drops is a budget or a label the agent never hears
+    # about -- {model} was exactly that, and nothing failed, the runs were just
+    # mislabelled.
+    manifest = (REPO / "fb-agent.agent.yaml").read_text()
+    for field in ("{workspace}", "{opening}", "{model}", "{max_turns}", "{timeout}"):
+        assert field in manifest, field
+    assert "network: blocked" in manifest
+
+
+def test_a_model_name_that_cannot_be_routed_fails_fast():
+    # Not a bench-contract test but a wall-clock one: a mistyped --model used to
+    # retry ten times with exponential backoff, spending minutes per turn on a
+    # request that could never succeed.
+    import litellm
+    from minisweagent.models.litellm_model import LitellmModel
+    assert litellm.exceptions.BadRequestError in LitellmModel.abort_exceptions
