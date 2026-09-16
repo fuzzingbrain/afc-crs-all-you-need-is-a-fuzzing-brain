@@ -245,17 +245,20 @@ def test_a_finish_with_budget_left_is_refused_and_the_run_continues(tmp_path):
         _say("Trying to finish early.", _DONE),
         _say("Fine, going after the sink.", "printf 'X' > c1 && ./submit c1"),
         _say("Done now.", _DONE),
-        _say("Really done.", _DONE),
         _say("Truly nothing left.", _DONE),
-    ], max_turns=50, timeout=600)
+    ], max_turns=50, timeout=3600)
     assert r.returncode == 0, r.stderr[-2000:]
     traj = json.loads((ws / ".fbbench" / "traj.json").read_text())
-    blob = json.dumps(traj)
-    assert blob.count("[not yet]") == 3, "refused a different number of times than MAX_PUSHBACKS"
-    assert "png_read_end" in blob, "its own sinks.md was not handed back"
+    # Count MESSAGES, not substring hits: the serialised trajectory carries the
+    # same text in more than one field.
+    pushbacks = [m for m in traj["messages"] if "[not yet]" in str(m.get("content", ""))]
+    # Empty-handed: asked twice. A run with a fault already banked is asked once,
+    # because most of this corpus does not have a second fault to find.
+    assert len(pushbacks) == 2, len(pushbacks)
+    assert "png_read_end" in json.dumps(traj), "its own sinks.md was not handed back"
     # It ran past the refusals and then was allowed to stop, rather than being
     # held hostage -- an agent that can never finish is the worse bug.
-    assert traj["info"]["model_stats"]["turns_used"] == 5
+    assert traj["info"]["model_stats"]["turns_used"] == 4
     assert traj["info"]["exit_status"] == "Submitted"
 
 
@@ -322,3 +325,91 @@ def test_reach_is_installed_and_offered_only_when_the_tracer_is_there(tmp_path):
     bare = _stage(tmp_path / "bare")
     _run(bare, [_say("Done.", _DONE)])
     assert not (bare / "reach").exists(), "offered a tracer this bench build has not got"
+
+
+def _tc(text: str, command: str, call_id: str) -> dict:
+    """One scripted reply in the TOOLCALL shape -- what a real Anthropic run
+    produces, and the shape the pushback bug only appears in."""
+    return {"role": "assistant", "content": text,
+            "tool_calls": [{"id": call_id, "type": "function",
+                            "function": {"name": "bash",
+                                         "arguments": json.dumps({"command": command})}}],
+            "extra": {"actions": [{"command": command, "tool_call_id": call_id}],
+                      "cost": 0.01}}
+
+
+def test_the_pushback_is_a_tool_result_not_a_user_message(tmp_path):
+    # The live run died one turn after its first pushback:
+    #   "messages.172: tool_use ids were found without tool_result blocks
+    #    immediately after"
+    # The assistant turn that raises Submitted carries a tool_use block, and the
+    # API requires a tool_result right after it. A user message there makes every
+    # later request invalid -- so the rule against stopping early is what ended
+    # the run, 12 turns and 6 minutes short.
+    ws = _stage(tmp_path)
+    cfg = ws / "scripted.yaml"
+    cfg.write_text(json.dumps({"model": {
+        "model_class": "minisweagent.models.test_models.DeterministicToolcallModel",
+        "outputs": [_tc("Quitting early.", _DONE, "call_1"),
+                    _tc("Fine, working.", "echo still here", "call_2"),
+                    _tc("Done now.", _DONE, "call_3"),
+                    _tc("Nothing left to try.", _DONE, "call_4")]}}))
+    r = subprocess.run(_argv(ws, cfg, 100, 3600), capture_output=True, text=True,
+                       timeout=300, env=_env(), cwd=str(ws))
+    assert r.returncode == 0, r.stderr[-2000:]
+    traj = json.loads((ws / ".fbbench" / "traj.json").read_text())
+    msgs = traj["messages"]
+    push = next((i for i, m in enumerate(msgs)
+                 if "[not yet]" in str(m.get("content", ""))), None)
+    assert push is not None, "no pushback happened"
+    # Whatever answers a tool call must be a tool result carrying its id.
+    assert msgs[push]["role"] == "tool", msgs[push]["role"]
+    assert msgs[push].get("tool_call_id") == "call_1", msgs[push]
+    # And the run carried on past it rather than dying on the next request.
+    assert traj["info"]["exit_status"] == "Submitted"
+    assert traj["info"]["model_stats"]["turns_used"] == 4
+
+
+# ---- the report has to be readable by the same eyes that read a bare run ----
+
+def test_submit_and_reach_are_named_in_the_trace(tmp_path):
+    # Everything the agent does is bash, so an unlabelled trace renders as a wall
+    # of identical `bash` calls -- while the bare model's report shows `exec` and
+    # `run_poc_on_harness` with the candidate path. You could not see which turn
+    # submitted what.
+    ws = _stage(tmp_path, "crash: abrt|f|g")
+    (ws / ".fbbench" / "trace_req").mkdir()
+    r = _run(ws, [
+        _say("Reading.", "cat harness.c"),
+        _say("Submitting.", "printf 'FUZZ' > c1 && ./submit c1"),
+        _say("Checking reach.", "./reach c1 png_read_end || true"),
+        _say("Done.", _DONE),
+    ])
+    assert r.returncode == 0, r.stderr[-2000:]
+    recs = [json.loads(l) for l in (ws / ".fbagent-trace.jsonl").read_text().splitlines() if l.strip()]
+    calls = {rec["tool"]: rec["input"] for rec in recs if rec["kind"] == "tool_call"}
+    assert set(calls) == {"bash", "submit", "reach"}, sorted(calls)
+    assert calls["submit"]["path"] == "c1"
+    assert calls["reach"] == {"path": "c1", "function": "png_read_end",
+                              "command": "./reach c1 png_read_end || true"}
+    # the verdict has to land under `submit`, not under `bash`
+    sub = [rec for rec in recs if rec["kind"] == "tool_result" and rec["tool"] == "submit"]
+    assert sub and "crash: abrt|f|g" in sub[0]["content"]
+
+
+def test_the_report_survives_a_failure_whose_message_is_itself_json(tmp_path):
+    # The live run died on an API error whose text was JSON. The bench's report
+    # regex tolerates one level of nesting, `usage` uses it up, so the final
+    # report was skipped: the cell recorded 87 turns for a run that reached 88.
+    import sys as _sys
+    _sys.path.insert(0, str(REPO / "src"))
+    from minisweagent.run.fbbench import _flatten
+    msg = 'BadRequestError: {"type":"error","error":{"message":"tool_use ids..."}}'
+    rep = json.dumps({"stop_reason": _flatten(msg), "turns_used": 88, "failed": True,
+                      "cost_usd": 7.67, "model": "m", "usage": {"input_tokens": 1}})
+    import re
+    found = [json.loads(m.group(0)) for m in
+             re.finditer(r"\{(?:[^{}]|\{[^{}]*\})*\}", rep)
+             if "usage" in json.loads(m.group(0))]
+    assert found and found[-1]["turns_used"] == 88
+    assert found[-1]["failed"] is True, "a crashed run must not read as a clean finish"

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -69,6 +70,29 @@ def _tokens(agent: DefaultAgent) -> dict:
             "cache_read_tokens": cache_read, "cache_write_tokens": cache_write}
 
 
+_SUBMIT_RE = re.compile(r"\./(?:submit|try_poc)\s+(\S+)")
+_REACH_RE = re.compile(r"\./reach\s+(\S+)\s+(\S+)")
+
+
+def tool_label(command: str) -> tuple[str, dict]:
+    """What to call this command in the trace, and what its inputs were.
+
+    Everything the agent does is bash, so an unlabelled trace renders as 90
+    identical `bash` calls -- where the bare model's report shows `setup`,
+    `exec` and `run_poc_on_harness` with the candidate path and the harness
+    output. You could not see, from our report, which turn submitted what.
+
+    The command still runs as bash and the budget is unchanged; this only names
+    the salient part of a compound command, so the report reads like the arm it
+    is being compared against.
+    """
+    if m := _SUBMIT_RE.search(command):
+        return "submit", {"path": m.group(1), "command": command}
+    if m := _REACH_RE.search(command):
+        return "reach", {"path": m.group(1), "function": m.group(2), "command": command}
+    return "bash", {"command": command}
+
+
 def _append(message: dict, text: str) -> None:
     """Add text to an observation, whichever shape its content is in."""
     content = message.get("content")
@@ -91,9 +115,28 @@ def _text_of(message: dict) -> str:
     return str(content or "").strip()
 
 
+def _flatten(text: str) -> str:
+    """One line, no braces.
+
+    The bench finds the report by scanning stdout for a JSON object, with a
+    regex that tolerates ONE level of nesting -- `usage` uses it up. The live
+    run died on an API error whose text was itself JSON, so the final report
+    was unparseable, silently skipped, and the cell recorded 87 turns for a run
+    that reached 88. An error message must not be able to hide the report it
+    travels in."""
+    return " ".join(str(text).replace("{", "(").replace("}", ")").split())[:400]
+
+
 def _report(agent: DefaultAgent, model_name: str, stop_reason: str) -> dict:
-    return {"stop_reason": stop_reason, "turns_used": agent.n_turns,
+    return {"stop_reason": _flatten(stop_reason), "turns_used": agent.n_turns,
             "cost_usd": round(agent.cost, 6), "model": model_name,
+            # `failed` is the flag a reader needs and could not previously get:
+            # the agent catches its own exceptions and exits 0, so a run that
+            # died on turn 88 was recorded by the bench as terminated "done",
+            # indistinguishable from one that finished its work.
+            "failed": stop_reason not in ("Submitted", "LimitsExceeded",
+                                          "TimeExceeded", "Completed", "running",
+                                          "starting", "RepeatedFormatError"),
             "usage": _tokens(agent)}
 
 
@@ -158,7 +201,19 @@ class _ReportingAgent(DefaultAgent):
             push += "\n\n" + self.coach.budget_line(
                 self.n_turns, time.time() - self._start_time)
             self._trace_write(kind="tool_result", tool="bash", is_error=False, content=push)
-            return self.add_messages(self.model.format_message(role="user", content=push))
+            # As a TOOL RESULT, not a user message. The assistant turn that
+            # raised Submitted carries a tool_use block, and the API requires a
+            # tool_result immediately after it; a user message in that slot
+            # makes the conversation invalid from there on. The live run died on
+            # exactly this, one turn after the first pushback --
+            #   "messages.172: tool_use ids were found without tool_result
+            #    blocks immediately after"
+            # -- so the rule against stopping early ended the run 12 turns and 6
+            # minutes short. The refusal path above was always right; this one
+            # was not.
+            return self.add_messages(*self.model.format_observation_messages(
+                message, [{"output": push, "returncode": 0, "exception_info": ""}],
+                self.get_template_vars()))
 
     def _sinks(self) -> str:
         """The agent's own notes, quoted back at it.
@@ -182,14 +237,17 @@ class _ReportingAgent(DefaultAgent):
         # The rendered text is the right thing to trace anyway: it is what the
         # model was actually shown, truncation and all.
         observations = super().execute_actions(message)
-        commands = " ; ".join(a.get("command", "")
-                              for a in (message.get("extra") or {}).get("actions", []))
+        actions = (message.get("extra") or {}).get("actions", [])
+        commands = " ; ".join(a.get("command", "") for a in actions)
+        # Pair each result with the name its call was given, so the report shows
+        # a submit's verdict under `submit` and not under a wall of `bash`.
+        names = [tool_label(a.get("command", ""))[0] for a in actions] or ["bash"]
         notes = self.coach.observe(commands, "\n".join(_text_of(o) for o in observations),
                                    self.n_turns, time.time() - self._start_time)
         if notes and observations:
             _append(observations[-1], "\n\n" + "\n".join(notes))
-        for obs in observations:
-            self._trace_write(kind="tool_result", tool="bash",
+        for i, obs in enumerate(observations):
+            self._trace_write(kind="tool_result", tool=names[min(i, len(names) - 1)],
                               is_error=False, content=_text_of(obs)[:20000])
         return observations
 
@@ -203,8 +261,8 @@ class _ReportingAgent(DefaultAgent):
         if text := _text_of(message):
             self._trace_write(kind="text", text=text)
         for action in (message.get("extra") or {}).get("actions", []):
-            self._trace_write(kind="tool_call", tool="bash",
-                              input={"command": action.get("command", "")})
+            name, inp = tool_label(action.get("command", ""))
+            self._trace_write(kind="tool_call", tool=name, input=inp)
         return message
 
     def publish(self, stop_reason: str) -> dict:

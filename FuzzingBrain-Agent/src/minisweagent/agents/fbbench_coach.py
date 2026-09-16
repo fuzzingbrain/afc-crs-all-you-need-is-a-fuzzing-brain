@@ -35,6 +35,7 @@ tool call, so a shell loop would make our turn cap mean nothing).
 
 from __future__ import annotations
 
+import json
 import re
 
 # ---- the prohibition --------------------------------------------------------
@@ -94,12 +95,62 @@ _CLEAN = re.compile(r"^clean: no fault", re.M)
 _SUBMIT_CALL = re.compile(r"\./(submit|try_poc)\b")
 
 
+def command_output(observation: str) -> str:
+    """The command's own output, dug out of whatever the template wrapped it in.
+
+    This exists because of a silent failure worth remembering. The toolcall
+    template renders an observation as JSON:
+
+        { "returncode": 0, "output": "590381\\ncrash: out-of-memory|...\\n" }
+
+    so the whole of a command's output is ONE line with escaped newlines, and
+    `^crash:` under re.MULTILINE can never match. Three of the five coaching
+    signals fired zero times for a whole live run, and the finish pushback told
+    the model it had found nothing while an out-of-memory sat in the log.
+
+    Decoding first, rather than making the patterns cleverer, is what keeps the
+    signals working when the template changes again -- and it hands the patterns
+    real text, so a signature comes back as `<no-frames>` and not as
+    `\\u003cno-frames\\u003e`.
+    """
+    text = (observation or "").strip()
+    if text.startswith("{"):
+        try:
+            obj = json.loads(text)
+        except ValueError:
+            return observation or ""
+        if isinstance(obj, dict):
+            parts = [str(obj[k]) for k in ("output", "output_head", "output_tail")
+                     if isinstance(obj.get(k), str)]
+            if parts:
+                return "\n".join(parts)
+    return observation or ""
+
+
 class Coach:
     """Tracks what the run has banked and what it is neglecting."""
 
     NO_SUBMIT_WARN = 12          # turns of reading before the oracle is nagged
-    MAX_PUSHBACKS = 3            # times a finish is refused while budget remains
     ENOUGH = 3                   # distinct signatures; a 4th scores nothing
+
+    # How hard to argue with a finish, by what the run has actually found.
+    #
+    # Not a flat quota. Most of the corpus does not HAVE three faults: of the 22
+    # challenges the bare model scored exactly one on, not a single one has ever
+    # yielded a second across every run on record -- opc-ua-01 over eight
+    # attempts, graal-01 and libwebp-01 over four. Flogging a one-fault
+    # challenge toward a quota of three buys nothing and costs real money; this
+    # run spent $8.64 against the bare model's $4.61.
+    #
+    # Where the money IS: a run that found NOTHING and stopped anyway. That was
+    # 105 of the 241 unclaimed points, and those runs quit with up to 47 turns
+    # and 20 minutes in hand. So argue hard at zero, once at one or two, and
+    # only while enough budget is left for the argument to be worth having.
+    PUSHBACKS_EMPTY_HANDED = 2   # nothing found: stopping is clearly premature
+    PUSHBACKS_WITH_A_FAULT = 1   # something found: ask once, then respect the answer
+    MIN_TURN_FRACTION = 0.25     # ... and only with this much of the turns left
+    MIN_TURN_FRACTION_HELD = 0.40   # a higher bar once a fault is already banked
+    MIN_SECONDS_LEFT = 300       # ... and this much clock, so it can act on it
 
     def __init__(self, turn_limit: int, wall_limit_s: int):
         self.turn_limit = turn_limit
@@ -122,6 +173,7 @@ class Coach:
 
     def observe(self, command: str, output: str, turn: int, elapsed_s: float) -> list[str]:
         """The lines appended to this turn's observation, in order."""
+        output = command_output(output)
         notes = [self.budget_line(turn, elapsed_s)]
         submitted = bool(_SUBMIT_CALL.search(command))
         self.turns_since_submit = 0 if submitted else self.turns_since_submit + 1
@@ -163,32 +215,43 @@ class Coach:
     def may_finish(self, turn: int, elapsed_s: float) -> str | None:
         """None to allow the run to end, or the pushback the model must answer.
 
-        Allowed unconditionally once three distinct faults are banked (a fourth
-        scores nothing), or when the budget is nearly gone, or after
-        MAX_PUSHBACKS -- an agent that can never stop is a worse bug than one
-        that stops early, and burning the last turns arguing is not persistence.
+        The run is allowed to stop when it has three faults (a fourth scores
+        nothing), when the budget left is too small to act on an answer, or once
+        it has already been asked as often as its position warrants. Arguing
+        past that point is not persistence, it is paying for turns that have
+        nowhere to go.
         """
         if len(self.banked) >= self.ENOUGH:
             return None
         turns_left = (self.turn_limit - turn) if self.turn_limit else 0
         secs_left = (self.wall_limit_s - elapsed_s) if self.wall_limit_s else 0
-        nearly_done = (self.turn_limit and turns_left <= max(5, self.turn_limit * 0.1)) or \
-                      (self.wall_limit_s and secs_left <= 120)
-        if nearly_done or self.pushbacks >= self.MAX_PUSHBACKS:
+
+        empty = not self.banked
+        allowed = self.PUSHBACKS_EMPTY_HANDED if empty else self.PUSHBACKS_WITH_A_FAULT
+        need_frac = self.MIN_TURN_FRACTION if empty else self.MIN_TURN_FRACTION_HELD
+        enough_turns = (not self.turn_limit) or turns_left >= self.turn_limit * need_frac
+        enough_time = (not self.wall_limit_s) or secs_left >= self.MIN_SECONDS_LEFT
+        if self.pushbacks >= allowed or not (enough_turns and enough_time):
             return None
+
         self.pushbacks += 1
-        have = ", ".join(self.banked) if self.banked else "nothing"
+        mins = int(max(0, secs_left) // 60)
+        if empty:
+            return (
+                f"[not yet] {turns_left} turns and {mins} minutes left, and no fault yet.\n"
+                "Stopping now is the single most expensive thing the bare model did on "
+                "these challenges: it stopped itself on 69 of 77, having used a median "
+                "of half its turns. On the seven it scored nothing on it quit with up "
+                "to 47 turns and 20 minutes in hand, twice writing that it was out of "
+                "budget when it was not.\n"
+                "Name one sink you have read and not yet tried to reach, and go after "
+                "it. If you kept notes, re-read them now. If you truly have no untried "
+                "hypothesis, say so and finish again.")
         return (
-            f"[not yet] You have {turns_left} turns and "
-            f"{int(max(0, secs_left) // 60)} minutes left, and {len(self.banked)} of "
-            f"{self.ENOUGH} distinct faults ({have}).\n"
-            "The last bare model to run these challenges stopped itself on 69 of 77 "
-            "of them, having used a median of half its turns, and left 42% of the "
-            "available points unclaimed. On the seven it scored zero on, it stopped "
-            "with up to 47 turns and 20 minutes in hand, twice writing that it was "
-            "out of budget when it was not. Stopping early is the single most "
-            "expensive thing it did.\n"
-            "So: name one sink in the code you have read and NOT yet tried to "
-            "reach, and go after it. If you kept notes, re-read them now. If you "
-            "genuinely have no untried hypothesis left, say so and finish again -- "
-            f"this will not be asked more than {self.MAX_PUSHBACKS} times.")
+            f"[one more look] {turns_left} turns and {mins} minutes left, and "
+            f"{len(self.banked)} of {self.ENOUGH} distinct faults ({', '.join(self.banked)}).\n"
+            "A second DISTINCT signature is worth as much as the first; another "
+            "variant of what you have is worth nothing. Many targets genuinely have "
+            "only one reachable fault, so this is a question and not a demand: is "
+            "there a sink you identified and never tried? If yes, go. If no, finish "
+            "and say so -- you will not be asked again.")

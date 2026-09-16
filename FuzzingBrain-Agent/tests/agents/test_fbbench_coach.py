@@ -127,13 +127,35 @@ def test_a_verdict_that_did_reach_is_left_alone():
 
 # ---- 1. don't let me stop --------------------------------------------------
 
-def test_finishing_early_is_refused():
+def test_finishing_empty_handed_is_refused():
     # 69 of 77 runs ended "ASSESSMENT COMPLETE"; one was stopped by the budget.
+    # Finding nothing and stopping anyway was 105 of the 241 unclaimed points.
     c = Coach(turn_limit=100, wall_limit_s=1800)
     push = c.may_finish(turn=30, elapsed_s=400)
     assert push is not None
-    assert "70 turns" in push and "0 of 3" in push
+    assert "70 turns" in push and "no fault yet" in push
     assert "name one sink" in push.lower()
+
+
+def test_a_run_that_already_has_a_fault_is_asked_once_and_then_believed():
+    # Most of this corpus does not have a second fault: of the 22 challenges the
+    # bare model scored exactly one on, not one has ever yielded a second across
+    # every run on record. Flogging those toward a quota of three costs money and
+    # finds nothing.
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    c.observe("./submit x", "crash: heap-buffer-overflow|f|g", 5, 60)
+    first = c.may_finish(turn=30, elapsed_s=400)
+    assert first is not None and "one more look" in first
+    assert "only one reachable fault" in first, "the ask has to admit it may be futile"
+    assert c.may_finish(turn=35, elapsed_s=450) is None, "asked twice"
+
+
+def test_a_late_stop_with_a_fault_in_hand_is_not_argued_with():
+    # The shape of the live fwupd-01 run: one fault banked, turn 87 of 100.
+    # Arguing there buys 13 turns that have nowhere to go.
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    c.observe("./submit x", "crash: out-of-memory|<no-frames>", 40, 470)
+    assert c.may_finish(turn=87, elapsed_s=1417) is None
 
 
 def test_three_distinct_faults_may_always_finish():
@@ -148,10 +170,15 @@ def test_the_pushback_gives_up_rather_than_burning_the_last_turns():
     # An agent that can never stop is a worse bug than one that stops early.
     c = Coach(turn_limit=100, wall_limit_s=1800)
     pushes = [c.may_finish(turn=20 + i, elapsed_s=200) for i in range(5)]
-    assert sum(p is not None for p in pushes) == Coach.MAX_PUSHBACKS
+    assert sum(p is not None for p in pushes) == Coach.PUSHBACKS_EMPTY_HANDED
+
+
+def test_no_argument_once_the_budget_left_is_too_small_to_use():
+    # Below a quarter of the turns, or five minutes, an answer has nowhere to go.
+    assert Coach(100, 1800).may_finish(turn=80, elapsed_s=400) is None   # 20% turns
+    assert Coach(100, 1800).may_finish(turn=10, elapsed_s=1600) is None  # 3m20s left
 
 
 def test_a_run_that_really_is_out_of_budget_may_finish():
-    c = Coach(turn_limit=100, wall_limit_s=1800)
-    assert c.may_finish(turn=97, elapsed_s=400) is None          # turns nearly gone
-    assert Coach(100, 1800).may_finish(turn=10, elapsed_s=1750) is None   # clock nearly gone
+    assert Coach(100, 1800).may_finish(turn=97, elapsed_s=400) is None    # turns gone
+    assert Coach(100, 1800).may_finish(turn=10, elapsed_s=1750) is None   # clock gone
