@@ -17,6 +17,11 @@ from fastmcp import Client
 from loguru import logger
 
 from ..agents.base import BaseAgent
+from ..agents.prompts import (
+    SEED_DIRECTION_SYSTEM_PROMPT,
+    SEED_FP_SYSTEM_PROMPT,
+    SEED_DELTA_SYSTEM_PROMPT,
+)
 from ..llms import LLMClient, ModelInfo
 from ..db import RepositoryManager
 from ..tools.code_viewer import set_code_viewer_context
@@ -24,62 +29,7 @@ from ..core.models.agent import AgentType
 from .seed_tools import set_seed_context, clear_seed_context, update_seed_context
 
 
-SEED_AGENT_SYSTEM_PROMPT = """You are an expert fuzzer seed generator. Your goal is to create effective seed inputs that will help the fuzzer explore interesting code paths and potentially trigger vulnerabilities.
-
-## Your Task
-Based on the analysis context provided, generate Python code that creates diverse seed inputs.
-
-## Guidelines for Seed Generation
-
-1. **Diversity is Key**: Generate seeds that explore DIFFERENT aspects:
-   - Different sizes (small, medium, large)
-   - Different structures (valid, invalid, edge cases)
-   - Different encoding/formatting approaches
-
-2. **Format-Aware**: If the fuzzer expects a specific format (XML, JSON, binary protocol):
-   - Include valid examples
-   - Include malformed examples (missing delimiters, wrong encoding)
-   - Include boundary cases (empty, very large, nested)
-
-3. **Vulnerability-Focused**: Consider common vulnerability patterns:
-   - Integer overflows (large numbers, negative numbers, boundary values)
-   - Buffer overflows (oversized inputs, format string specifiers)
-   - Type confusion (mixed types, null values)
-   - Resource exhaustion (deeply nested structures, circular references)
-
-4. **Use the create_seed Tool**: Call the create_seed tool with Python code that defines a generate(seed_num) function.
-
-## Example
-
-```python
-def generate(seed_num: int) -> bytes:
-    import struct
-
-    if seed_num == 1:
-        # Minimal valid input
-        return struct.pack('<I', 4) + b'test'
-    elif seed_num == 2:
-        # Large size field (potential integer overflow)
-        return struct.pack('<I', 0xFFFFFFFF) + b'data'
-    elif seed_num == 3:
-        # Zero-length (edge case)
-        return struct.pack('<I', 0)
-    elif seed_num == 4:
-        # Negative size (signed vs unsigned confusion)
-        return struct.pack('<i', -1) + b'test'
-    else:
-        # Large payload
-        return struct.pack('<I', 10000) + b'A' * 10000
-```
-
-## Important Notes
-- Each call to generate(seed_num) should return DIFFERENT bytes
-- The fuzzer will mutate these seeds, so focus on structural diversity
-- Consider the specific code path or vulnerability type mentioned in the context
-"""
-
-
-DIRECTION_SEED_PROMPT = """## Direction Analysis Context
+DIRECTION_SEED_MSG = """## Direction Analysis Context
 
 **Direction ID**: {direction_id}
 **Target Functions**: {target_functions}
@@ -87,47 +37,30 @@ DIRECTION_SEED_PROMPT = """## Direction Analysis Context
 **Risk Reason**: {risk_reason}
 
 **Fuzzer**: {fuzzer}
+**Sanitizer**: {sanitizer}
 **Fuzzer Source** (how the fuzzer processes input):
 ```c
 {fuzzer_source}
 ```
-
-## Your Task
-Generate 5 diverse seeds that will help the fuzzer:
-1. Reach the target functions mentioned above
-2. Explore the risky code paths identified
-3. Trigger potential vulnerabilities
-
-Consider the fuzzer's input processing and create seeds that will pass initial parsing but exercise the target code paths.
-
-Call the create_seed tool to generate the seeds.
 """
 
 
-FP_SEED_PROMPT = """## False Positive Analysis Context
+FP_SEED_MSG = """## False Positive Analysis Context
 
 **SP ID**: {sp_id}
 **Function**: {function_name}
 **Vulnerability Type**: {vuln_type}
 **Description**: {description}
-
-This suspicious point was analyzed but determined to be a False Positive. However, the code pattern is still interesting for fuzzing.
+**Important Control Flow**: {important_controlflow}
+**Verifier Notes**: {verification_notes}
+**Evidence**: {evidence}
 
 **Fuzzer**: {fuzzer}
+**Sanitizer**: {sanitizer}
 **Fuzzer Source**:
 ```c
 {fuzzer_source}
 ```
-
-## Your Task
-Generate 5 seeds that:
-1. Target the same code path that triggered this false positive
-2. Try variations that might trigger a REAL vulnerability in similar code
-3. Explore edge cases around the pattern that was flagged
-
-The goal is to use this "near miss" to find actual bugs in related code.
-
-Call the create_seed tool to generate the seeds.
 """
 
 
@@ -135,7 +68,7 @@ Call the create_seed tool to generate the seeds.
 # sweeping commit, so one does not crowd out the fuzzer source in the prompt.
 MAX_DIFF_CHARS = 24000
 
-DELTA_SEED_PROMPT = """## Delta-scan Seed Generation Context
+DELTA_SEED_MSG = """## Delta-scan Seed Generation Context
 
 You are generating initial fuzzing seeds for a **delta-scan** analysis.
 The commit/diff has changed specific functions, and we've identified potential vulnerabilities.
@@ -160,29 +93,6 @@ The commit/diff has changed specific functions, and we've identified potential v
 
 {suspicious_points}
 
-## Your Task
-
-Generate 5 diverse seeds that will help the fuzzer:
-
-1. **Reach the changed functions** - Design inputs that flow through the fuzzer to the modified code
-2. **Target the suspicious points** - Create inputs likely to trigger the identified vulnerabilities
-3. **Explore edge cases** - Include boundary values, malformed data, and special cases
-
-### Key Considerations:
-
-- Read the fuzzer source carefully to understand the expected input format
-- Consider what input values would reach the vulnerable code paths
-- Include both valid-looking inputs and malformed inputs
-- Think about integer overflows, buffer boundaries, null values, etc.
-
-Call the create_seed tool with Python code that generates diverse test inputs.
-
-### Example approach:
-- Seed 1: Minimal input that reaches the changed function
-- Seed 2: Input with boundary values (max int, zero, negative)
-- Seed 3: Input with unusual sizes (very small, very large)
-- Seed 4: Malformed input (missing fields, wrong types)
-- Seed 5: Input targeting the specific vulnerability pattern
 """
 
 
@@ -280,13 +190,24 @@ class SeedAgent(BaseAgent):
 
     @property
     def system_prompt(self) -> str:
-        """System prompt for seed generation."""
-        return SEED_AGENT_SYSTEM_PROMPT
+        """Mode-specific system prompt (static; per-run data goes in the
+        get_initial_message user message)."""
+        if self.seed_type == "fp":
+            return SEED_FP_SYSTEM_PROMPT
+        if self.seed_type == "delta":
+            return SEED_DELTA_SYSTEM_PROMPT
+        return SEED_DIRECTION_SYSTEM_PROMPT
 
     @property
     def include_seed_tools(self) -> bool:
         """Include seed tools in MCP server."""
         return True
+
+    async def _get_tools(self, client: Client) -> List[Dict[str, Any]]:
+        """Drop get_diff: only delta mode has a diff, and it is already injected
+        into the delta message, so the tool is redundant for every mode."""
+        tools = await super()._get_tools(client)
+        return [t for t in tools if t.get("function", {}).get("name") != "get_diff"]
 
     # Note: mcp_context_id now uses AgentContext.agent_id from BaseAgent
     # This provides unique ObjectId for each instance, preventing collision
@@ -414,12 +335,13 @@ Generate seeds NOW or this run will produce nothing useful."""
 
         self.direction_id = direction_id
 
-        return DIRECTION_SEED_PROMPT.format(
+        return DIRECTION_SEED_MSG.format(
             direction_id=direction_id,
             target_functions=", ".join(target_functions) if target_functions else "N/A",
             risk_level=risk_level,
             risk_reason=risk_reason,
             fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
             fuzzer_source=self.fuzzer_source or "(Fuzzer source not available)",
         )
 
@@ -429,15 +351,22 @@ Generate seeds NOW or this run will produce nothing useful."""
         function_name = kwargs.get("function_name", "")
         vuln_type = kwargs.get("vuln_type", "")
         description = kwargs.get("description", "")
+        important_controlflow = kwargs.get("important_controlflow", "")
+        verification_notes = kwargs.get("verification_notes", "")
+        evidence = kwargs.get("evidence", "")
 
         self.sp_id = sp_id
 
-        return FP_SEED_PROMPT.format(
+        return FP_SEED_MSG.format(
             sp_id=sp_id,
             function_name=function_name,
             vuln_type=vuln_type,
             description=description,
+            important_controlflow=important_controlflow or "(none)",
+            verification_notes=verification_notes or "(none)",
+            evidence=evidence or "(none)",
             fuzzer=self.fuzzer,
+            sanitizer=self.sanitizer,
             fuzzer_source=self.fuzzer_source or "(Fuzzer source not available)",
         )
 
@@ -491,7 +420,7 @@ Generate seeds NOW or this run will produce nothing useful."""
         else:
             diff_text = "(No diff available)"
 
-        return DELTA_SEED_PROMPT.format(
+        return DELTA_SEED_MSG.format(
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             fuzzer_source=self.fuzzer_source or "(Fuzzer source not available)",
@@ -618,6 +547,9 @@ Generate seeds NOW or this run will produce nothing useful."""
         function_name: str = "",
         vuln_type: str = "",
         description: str = "",
+        important_controlflow: str = "",
+        verification_notes: str = "",
+        evidence: str = "",
     ) -> Dict[str, Any]:
         """
         Generate seeds based on a false positive analysis.
@@ -627,6 +559,9 @@ Generate seeds NOW or this run will produce nothing useful."""
             function_name: Function name
             vuln_type: Vulnerability type
             description: SP description
+            important_controlflow: key functions/variables note (from finder/verifier)
+            verification_notes: the verifier's summary
+            evidence: the verifier's concrete facts (file:line, reach_probe results)
 
         Returns:
             Result dict with seeds_generated count
@@ -645,6 +580,9 @@ Generate seeds NOW or this run will produce nothing useful."""
             function_name=function_name,
             vuln_type=vuln_type,
             description=description,
+            important_controlflow=important_controlflow,
+            verification_notes=verification_notes,
+            evidence=evidence,
         )
 
         # seeds_generated is updated in run_async() before context cleanup

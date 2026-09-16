@@ -456,18 +456,7 @@ class POVDeltaStrategy(POVBaseStrategy):
             for sp in suspicious_points
         ]
 
-        # Get fuzzer source code
-        fuzzer_source = ""
-        analysis_client = self.get_analysis_client()
-        if analysis_client:
-            try:
-                result = analysis_client.get_fuzzer_source(self.fuzzer)
-                if result and isinstance(result, dict):
-                    fuzzer_source = result.get("source", "")
-            except Exception as e:
-                self.log_warning(f"Failed to get fuzzer source: {e}")
-
-        # Create SeedAgent
+        # Create SeedAgent (full harness is passed via executor.harness_source())
         from ...fuzzer import SeedAgent
 
         agent_log_dir = self.agent_log_dir
@@ -479,7 +468,7 @@ class POVDeltaStrategy(POVBaseStrategy):
             sanitizer=self.sanitizer,
             fuzzer_manager=fuzzer_manager,
             repos=self.repos,
-            fuzzer_source=fuzzer_source,
+            fuzzer_source=self.executor.harness_source(),  # full harness
             workspace_path=self.executor.task_workspace_path,
             log_dir=agent_log_dir,
             max_iterations=15,  # Allow more iterations for delta seeds (with urgency forcing on last 2)

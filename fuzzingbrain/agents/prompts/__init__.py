@@ -96,6 +96,11 @@ VERIFY_SUSPICIOUS_POINTS_PROMPT = _load_prompt_from_markdown(
 VERIFY_SUSPICIOUS_POINTS_DELTA_PROMPT = _load_prompt_from_markdown(
     "verify_suspicious_points_delta_prompt.md"
 )
+# Seed agent: one static system prompt per mode (dynamic data stays in the
+# per-mode user message built by SeedAgent.get_initial_message).
+SEED_DIRECTION_SYSTEM_PROMPT = _load_prompt_from_markdown("seed_direction_system.md")
+SEED_FP_SYSTEM_PROMPT = _load_prompt_from_markdown("seed_fp_system.md")
+SEED_DELTA_SYSTEM_PROMPT = _load_prompt_from_markdown("seed_delta_system.md")
 
 # Sanitizer guidance templates
 from .sanitizer_guidance import (

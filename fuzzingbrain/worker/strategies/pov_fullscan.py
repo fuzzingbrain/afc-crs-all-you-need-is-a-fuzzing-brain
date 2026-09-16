@@ -929,7 +929,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                     model=model_for(Role.SEED),
                     fuzzer_manager=fuzzer_manager,
                     repos=self.repos,
-                    fuzzer_source=fuzzer_code,
+                    fuzzer_source=self.executor.harness_source(),  # full harness
                     log_dir=agent_log_dir,
                     max_iterations=20,
                     index=seed_index,

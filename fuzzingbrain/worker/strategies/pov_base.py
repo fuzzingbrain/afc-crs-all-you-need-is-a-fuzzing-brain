@@ -418,6 +418,7 @@ class POVBaseStrategy(BaseStrategy):
                     worker_id=self.worker_id,  # ObjectId for MongoDB linking
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
+                    fuzzer_source=self.executor.harness_source(),  # full harness
                     fuzzer_manager=fuzzer_manager,
                     repos=self.repos,
                     log_dir=agent_log_dir,
@@ -432,6 +433,9 @@ class POVBaseStrategy(BaseStrategy):
                         sp_id=point.suspicious_point_id,
                         function_name=point.function_name,
                         description=point.description or "",
+                        important_controlflow=point.important_controlflow or "",
+                        verification_notes=point.verification_notes or "",
+                        evidence=point.evidence or "",
                     )
                 )
 
