@@ -49,6 +49,7 @@ def test_submitting_in_a_loop_is_refused(command):
     "python3 -c \"open('c1','wb').write(b'FUZZ')\"",
 ])
 def test_ordinary_work_is_not_blocked(command):
+    # see also test_building_a_candidate_with_a_loop_is_not_batching below
     # The guard has to be narrow. Compiling a reproducer to read a stack trace
     # is exactly the work we want; blocking it would cost more than fuzzing did.
     assert forbidden(command) is None
@@ -182,3 +183,40 @@ def test_no_argument_once_the_budget_left_is_too_small_to_use():
 def test_a_run_that_really_is_out_of_budget_may_finish():
     assert Coach(100, 1800).may_finish(turn=97, elapsed_s=400) is None    # turns gone
     assert Coach(100, 1800).may_finish(turn=10, elapsed_s=1750) is None   # clock gone
+
+
+# The false positive that cost a live run. My original tests here were all shell
+# loops, so the ALLOW direction was never checked: a `for` inside python3 -c is
+# Python, not shell, and blocking it blocks the only sane way to build a binary
+# candidate for a FuzzedDataProvider harness.
+
+_REAL = """cd /tmp && python3 -c "
+import sys; sys.path.insert(0,'/tmp')
+from fdp import Enc
+e=Enc()
+e.u8(6)
+for v in [1,0,1, 0,1,1, 1,1,0]: e.f(-10,10,float(v))
+d=e.out(); open('c3','wb').write(d); print(len(d))
+" && cd /ws && ./submit /tmp/c3"""
+
+
+@pytest.mark.parametrize("command", [
+    _REAL,                                                        # verbatim shape from the run
+    'python3 -c "for i in range(8): w(i)" > c1 && ./submit c1',
+    "python3 -c 'while n: n-=1' > c1 && ./submit c1",
+    "awk 'BEGIN{for(i=0;i<9;i++)printf \"A\"}' > c1 && ./submit c1",
+])
+def test_building_a_candidate_with_a_loop_is_not_batching(command):
+    assert forbidden(command) is None, "one submission is one submission"
+
+
+@pytest.mark.parametrize("command", [
+    "for f in c1 c2 c3; do ./submit $f; done",
+    "while read f; do ./submit $f; done < list",
+    "ls cand/* | xargs -n1 ./submit",
+    "for f in {1..40}; do ./try_poc $f.bin; done",
+    'python3 -c "print(1)" && for f in a b; do ./submit $f; done',   # both in one line
+])
+def test_a_shell_loop_over_submit_is_still_blocked(command):
+    why = forbidden(command)
+    assert why and "one candidate per turn" in why.lower()

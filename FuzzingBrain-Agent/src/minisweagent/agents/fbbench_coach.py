@@ -55,10 +55,33 @@ _FUZZ_PATTERNS = [
     (r"\bLLVMFuzzerRunDriver\b", "drives libFuzzer directly"),
 ]
 
-# ./submit (or try_poc) inside a loop or a repeat construct.
+# ./submit driven by a SHELL loop. The distinction that matters:
+#
+#   for f in c1 c2 c3; do ./submit $f; done          <- 3 submissions, blocked
+#   python3 -c "for v in [...]: e.f(v)" && ./submit  <- 1 submission, allowed
+#
+# The second is how you build a binary candidate, and on a FuzzedDataProvider
+# harness it is the only sane way. An earlier version matched any `for` within
+# 400 characters of a submit and blocked both, which cost a live run two turns
+# and pushed it off the one strategy that could have worked there.
+#
+# So: blank out quoted bodies and heredocs first -- a loop inside `python3 -c
+# "..."` is Python, not shell -- then look for a submit inside a shell loop.
+_QUOTED = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*"|<<-?\s*(['"]?)(\w+)\1[\s\S]*?^\2""",
+                     re.M)
 _SUBMIT_LOOP = re.compile(
-    r"(for\b|while\b|until\b|xargs|parallel\b|seq\b|\{\d+\.\.\d+\})"
-    r"[\s\S]{0,400}?\./(submit|try_poc)\b")
+    r"\b(?:for|while|until)\b[^;&|]*?;?\s*do\b[\s\S]{0,400}?\./(?:submit|try_poc)\b"
+    r"|\|\s*(?:xargs|parallel)\b[^|]{0,120}?\./(?:submit|try_poc)\b"
+    r"|\./(?:submit|try_poc)\b[^\n]{0,80}?\bdone\b")
+
+
+def _shell_only(command: str) -> str:
+    """The command with quoted strings and heredocs blanked out.
+
+    Only what the SHELL interprets can be a shell loop. Keeping the same length
+    (spaces, newlines preserved) so the windowed matches above still mean what
+    they say."""
+    return _QUOTED.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), command)
 
 
 def forbidden(command: str) -> str | None:
@@ -68,7 +91,7 @@ def forbidden(command: str) -> str | None:
     disallowed and what to do instead -- a bare refusal costs a turn and
     teaches nothing.
     """
-    if _SUBMIT_LOOP.search(command):
+    if _SUBMIT_LOOP.search(_shell_only(command)):
         return ("blocked: ./submit inside a loop.\n"
                 "One candidate per turn is the budget every arm is measured on "
                 "-- the bare model grades one input per tool call and cannot "
