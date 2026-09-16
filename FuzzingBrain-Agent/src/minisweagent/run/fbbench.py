@@ -211,12 +211,17 @@ class _ReportingAgent(DefaultAgent):
         return report
 
 
+# NOTE: this script is written INTO the workspace, so the model can read it.
+# Keep every word of it generic -- no challenge name, no project, no hint about
+# any particular target. An earlier version quoted the run it was designed from
+# and named the challenge; on that challenge it would have told the model both
+# that the target was hard and roughly where to look.
 _REACH = r"""#!/bin/bash
 # ./reach <input-file> <function>  -- did this input execute that function?
 #
-# The bench has always answered these requests; nothing ever asked. The bare
-# model that scored zero on skia-01 submitted 37 candidates in the right size
-# band with no way to learn whether any of them even selected the right filter.
+# Runs the input under a debugger with a breakpoint on the named function and
+# reports whether it was reached. A clean verdict says an input did not crash;
+# this says whether it even got there, which is a different problem.
 set -u
 if [ $# -ne 2 ] || [ ! -f "$1" ]; then
   echo "usage: ./reach <input-file> <function>" >&2; exit 2
