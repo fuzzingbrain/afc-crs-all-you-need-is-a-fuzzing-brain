@@ -32,6 +32,34 @@ honest list; the two that matter so far:
 `tests/agents/test_budget_parity.py` guards both, because both are the kind of
 thing that silently drifts back and quietly invalidates a comparison.
 
+## Running it on the benchmark
+
+```bash
+pip install -e ".[dev]"
+export FB_AGENT_PYTHON=$(which python)          # the interpreter that just got the deps
+ln -s "$PWD/fb-agent.agent.yaml" ~/.config/fbbench/agents/fb-agent.agent.yaml
+fb-bench run avro-03 --agent fb-agent --model claude-opus-5
+```
+
+The bench stages the challenge, drops a `./submit <file>` beside it and runs
+`fb-agent.agent.yaml`'s command in that directory. Submission and grading are
+the bench's: `./submit` answers `crash: <signature>` or `clean: no fault |
+target ran N ms | N bytes`, and a judge on the other side grades and persists
+every candidate as it arrives. The agent gets all of that by having a bash tool,
+which is most of why this base was chosen.
+
+What the agent owes back, all in `src/minisweagent/run/fbbench.py`:
+
+| | where the bench reads it |
+|---|---|
+| turns used | the last JSON object it printed on stdout |
+| tokens | `.fbbench/usage.json` in the workspace |
+| the dialogue | `.fbagent-trace.jsonl`, which becomes `transcript.jsonl` + `report.html` |
+
+All three are rewritten after **every** turn. The bench hard-kills on the wall
+clock with no grace period — no other arm gets one either — so anything written
+only at exit is lost exactly when the run cost the most.
+
 ## Running the tests
 
 ```bash

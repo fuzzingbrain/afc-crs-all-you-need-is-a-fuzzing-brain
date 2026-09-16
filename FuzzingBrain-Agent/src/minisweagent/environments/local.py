@@ -14,6 +14,13 @@ class LocalEnvironmentConfig(BaseModel):
     cwd: str = ""
     env: dict[str, str] = {}
     timeout: int = 30
+    executable: str = ""
+    """Shell binary to interpret commands. Empty means /bin/sh, as `shell=True`
+    always did. The bench hands an external agent a sandbox wrapper here (via
+    $SHELL) that masks the Docker socket and drops the network; running through
+    /bin/sh instead would quietly step around it -- the run would look identical
+    and be unsandboxed, which score.json would then report as a sandbox it never
+    had. DockerEnvironmentConfig already has `interpreter` for the same reason."""
 
 
 class LocalEnvironment:
@@ -26,7 +33,8 @@ class LocalEnvironment:
         command = action.get("command", "")
         cwd = cwd or self.config.cwd or os.getcwd()
         try:
-            result = _run(command, cwd, os.environ | self.config.env, timeout or self.config.timeout)
+            result = _run(command, cwd, os.environ | self.config.env,
+                          timeout or self.config.timeout, self.config.executable)
             output = {"output": result.stdout, "returncode": result.returncode, "exception_info": ""}
         except Exception as e:
             raw_output = getattr(e, "output", None)
@@ -69,11 +77,13 @@ class LocalEnvironment:
         }
 
 
-def _run(command: str, cwd: str, env: dict[str, str], timeout: int) -> subprocess.CompletedProcess[str]:
+def _run(command: str, cwd: str, env: dict[str, str], timeout: int,
+         executable: str = "") -> subprocess.CompletedProcess[str]:
     """Like subprocess.run, but kills the whole process group on timeout so no children are orphaned."""
     process = subprocess.Popen(
         command,
         shell=True,
+        executable=executable or None,
         text=True,
         cwd=cwd,
         env=env,

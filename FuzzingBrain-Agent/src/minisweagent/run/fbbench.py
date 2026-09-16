@@ -1,0 +1,196 @@
+"""Run script for FuzzingBrain-Bench's `external` arm.
+
+The bench stages a challenge, drops a `./submit <file>` next to it, and runs
+this as a plain command in that directory. Submission and grading are already
+the bench's: `./submit` is a shell script the agent calls like any other, and a
+judge thread on the other side grades each candidate and persists it as it goes.
+So there is nothing to implement here for either -- the agent gets them by
+having a bash tool, which is the whole reason for this base.
+
+What this script owes the bench:
+
+  * honour the turn and wall-clock budgets it is handed, since the api arm and
+    claudecode both do and the comparison is meaningless otherwise;
+  * report turns and tokens where the bench looks for them.
+
+Both reports are written after EVERY turn, not at the end. The bench hard-kills
+this process on its wall clock with no grace period (by design -- no other arm
+gets one), so a report written only on exit is a report lost exactly when the
+run was most expensive.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+import typer
+
+from minisweagent.agents.default import DefaultAgent
+from minisweagent.config import builtin_config_dir, get_config_from_spec
+from minisweagent.environments import get_environment
+from minisweagent.models import get_model
+from minisweagent.utils.serialize import recursive_merge
+
+DEFAULT_CONFIG_FILE = Path(os.getenv("FBBENCH_CONFIG_PATH", builtin_config_dir / "fbbench.yaml"))
+
+app = typer.Typer(rich_markup_mode="rich", add_completion=False)
+
+
+def _tokens(agent: DefaultAgent) -> dict:
+    """Token counts, summed out of the raw provider responses the model layer
+    already keeps on each message.
+
+    litellm normalises usage across providers but not the cache fields, which
+    are where nearly all of an Anthropic run's input tokens live -- a measured
+    fbagent run read 98.3% of its input from cache. Counting only
+    prompt_tokens would price such a run at roughly fifty times its cost.
+    """
+    inp = out = cache_read = cache_write = 0
+    for msg in agent.messages:
+        usage = ((msg.get("extra") or {}).get("response") or {}).get("usage") or {}
+        if not isinstance(usage, dict):
+            continue
+        out += int(usage.get("completion_tokens") or 0)
+        cr = int((usage.get("prompt_tokens_details") or {}).get("cached_tokens") or 0)
+        cw = int(usage.get("cache_creation_input_tokens") or 0)
+        cache_read += cr
+        cache_write += cw
+        # prompt_tokens is the total including the cached prefix; the bench
+        # wants them apart, so de-total here rather than setting input_is_total
+        # and making the bench guess which of the two cache fields was folded in.
+        inp += max(0, int(usage.get("prompt_tokens") or 0) - cr)
+    return {"input_tokens": inp, "output_tokens": out,
+            "cache_read_tokens": cache_read, "cache_write_tokens": cache_write}
+
+
+def _text_of(message: dict) -> str:
+    """The assistant's prose. `content` is a string for most providers and a
+    list of blocks for some, and None when the reply was tool calls only."""
+    content = message.get("content")
+    if isinstance(content, list):
+        return "\n".join(str(b.get("text", "")) for b in content if isinstance(b, dict)).strip()
+    return str(content or "").strip()
+
+
+def _report(agent: DefaultAgent, model_name: str, stop_reason: str) -> dict:
+    return {"stop_reason": stop_reason, "turns_used": agent.n_turns,
+            "cost_usd": round(agent.cost, 6), "model": model_name,
+            "usage": _tokens(agent)}
+
+
+class _ReportingAgent(DefaultAgent):
+    """DefaultAgent that leaves its report on disk and on stdout every turn.
+
+    The bench reads turns from the last JSON object the agent printed and tokens
+    from `.fbbench/usage.json`, and it kills this process the moment the wall
+    clock runs out. Writing both as we go means a killed run is still costed and
+    still counted, and it doubles as the progress stream a long cell otherwise
+    has none of.
+    """
+
+    def __init__(self, *args, workspace: Path, model_name: str, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._usage_file = workspace / ".fbbench" / "usage.json"
+        self._model_name = model_name
+        # The bench rescues this out of the workspace before deleting it and
+        # renders transcript.jsonl and report.html from it, so writing it is
+        # what gives this arm the same browsable paper trail as the api arm.
+        # Without it the bench falls back to reconstructing a transcript from
+        # the submissions alone -- every candidate, no reasoning.
+        self._trace = workspace / ".fbagent-trace.jsonl"
+        self._trace.parent.mkdir(parents=True, exist_ok=True)
+        self._trace.write_text("")
+
+    def _trace_write(self, **rec) -> None:
+        try:
+            with self._trace.open("a") as fh:
+                fh.write(json.dumps({"step": self.n_turns, **rec}) + "\n")
+        except (OSError, TypeError):
+            pass  # a lost trace line must not cost the run a turn
+
+    def execute_actions(self, message: dict) -> list[dict]:
+        # What comes back is the OBSERVATION MESSAGES, already rendered through
+        # the template -- not the raw {output, returncode} dicts the environment
+        # produced. Tracing `output` off these silently wrote empty results.
+        # The rendered text is the right thing to trace anyway: it is what the
+        # model was actually shown, truncation and all.
+        observations = super().execute_actions(message)
+        for obs in observations:
+            self._trace_write(kind="tool_result", tool="bash",
+                              is_error=False, content=_text_of(obs)[:20000])
+        return observations
+
+    def query(self) -> dict:
+        # Published here rather than after the action, because this is the
+        # moment the tokens were actually spent. A turn whose command runs for
+        # minutes -- a build, a long ./submit -- would otherwise be unreported
+        # for all of it, and a kill in that window would lose the whole run.
+        message = super().query()
+        self.publish("running")
+        if text := _text_of(message):
+            self._trace_write(kind="text", text=text)
+        for action in (message.get("extra") or {}).get("actions", []):
+            self._trace_write(kind="tool_call", tool="bash",
+                              input={"command": action.get("command", "")})
+        return message
+
+    def publish(self, stop_reason: str) -> dict:
+        report = _report(self, self._model_name, stop_reason)
+        try:
+            self._usage_file.parent.mkdir(parents=True, exist_ok=True)
+            self._usage_file.write_text(json.dumps(
+                {"model": self._model_name, **report["usage"], "input_is_total": False}, indent=2))
+        except OSError:
+            pass
+        print(json.dumps(report), flush=True)
+        return report
+
+
+@app.command(help="Run fb-agent on one staged FuzzingBrain-Bench challenge.")
+def main(
+    workspace: Path = typer.Option(..., "--workspace", help="The staged challenge directory."),
+    task: str = typer.Option(..., "--task", help="The bench's opening instruction."),
+    model_name: str = typer.Option(..., "--model", help="Model to run, as the bench names it."),
+    max_turns: int = typer.Option(..., "--max-turns", help="Turn budget. One turn is one usable model reply."),
+    timeout: int = typer.Option(..., "--timeout", help="Wall-clock budget in seconds."),
+    config_spec: list[str] = typer.Option([str(DEFAULT_CONFIG_FILE)], "-c", "--config"),
+) -> int:
+    config = recursive_merge(*[get_config_from_spec(spec) for spec in config_spec], {
+        "agent": {"turn_limit": max_turns, "cost_limit": 0, "wall_time_limit_seconds": timeout},
+        "model": {"model_name": model_name},
+        # The bench points $SHELL at a sandbox wrapper that masks the Docker
+        # socket and drops the network. Going through /bin/sh instead would step
+        # around it silently, and score.json would claim a sandbox this run
+        # never had.
+        "environment": {"cwd": str(workspace), "executable": os.environ.get("SHELL", "")},
+    })
+    # DefaultAgent.run() re-saves this after every turn, so a killed run keeps
+    # the conversation up to the kill -- the same reason the report is published
+    # per turn rather than at exit.
+    config.setdefault("agent", {})["output_path"] = workspace / ".fbbench" / "traj.json"
+
+    agent = _ReportingAgent(
+        get_model(config=config.get("model", {})),
+        get_environment(config.get("environment", {}), default_type="local"),
+        workspace=workspace, model_name=model_name, **config.get("agent", {}),
+    )
+    # One report before the first model call, so a run killed early is costed
+    # as zero rather than as nothing -- the bench prints an unreported cost as
+    # "$ --", and "we do not know" is a different claim from "it was free".
+    agent.publish("starting")
+    try:
+        stop_reason = (agent.run(task) or {}).get("exit_status") or "Completed"
+    except Exception as e:  # noqa: BLE001
+        # A crashed agent still submitted candidates the bench has already
+        # graded, and still spent money. Report both, then let the cell finish.
+        stop_reason = f"{type(e).__name__}: {e}"
+        print(f"fb-agent: {stop_reason}", file=sys.stderr, flush=True)
+    agent.publish(stop_reason)
+    return 0
+
+
+if __name__ == "__main__":
+    app()
