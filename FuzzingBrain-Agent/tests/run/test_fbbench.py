@@ -232,3 +232,71 @@ def test_a_model_name_that_cannot_be_routed_fails_fast():
     import litellm
     from minisweagent.models.litellm_model import LitellmModel
     assert litellm.exceptions.BadRequestError in LitellmModel.abort_exceptions
+
+
+# ---- the coaching layer, end to end -----------------------------------------
+
+def test_a_finish_with_budget_left_is_refused_and_the_run_continues(tmp_path):
+    # The whole point: 69 of 77 bare-model runs ended themselves with budget in
+    # hand. A unit test of Coach proves the rule; this proves it is wired in.
+    ws = _stage(tmp_path, "clean: no fault | target ran 40 ms | 8 bytes")
+    (ws / "sinks.md").write_text("- png_read_end: unchecked length\n")
+    r = _run(ws, [
+        _say("Trying to finish early.", _DONE),
+        _say("Fine, going after the sink.", "printf 'X' > c1 && ./submit c1"),
+        _say("Done now.", _DONE),
+        _say("Really done.", _DONE),
+        _say("Truly nothing left.", _DONE),
+    ], max_turns=50, timeout=600)
+    assert r.returncode == 0, r.stderr[-2000:]
+    traj = json.loads((ws / ".fbbench" / "traj.json").read_text())
+    blob = json.dumps(traj)
+    assert blob.count("[not yet]") == 3, "refused a different number of times than MAX_PUSHBACKS"
+    assert "png_read_end" in blob, "its own sinks.md was not handed back"
+    # It ran past the refusals and then was allowed to stop, rather than being
+    # held hostage -- an agent that can never finish is the worse bug.
+    assert traj["info"]["model_stats"]["turns_used"] == 5
+    assert traj["info"]["exit_status"] == "Submitted"
+
+
+def test_a_fuzzer_never_runs(tmp_path):
+    ws = _stage(tmp_path)
+    r = _run(ws, [
+        _say("Building a fuzzer.", "clang -fsanitize=fuzzer,address h.c -o hfuzz && touch BUILT"),
+        _say("Fine.", _DONE),
+    ])
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert not (ws / "BUILT").exists(), "the command ran despite being blocked"
+    blob = (ws / ".fbagent-trace.jsonl").read_text()
+    assert "fuzzing is not available" in blob
+
+
+def test_submitting_in_a_loop_never_runs(tmp_path):
+    ws = _stage(tmp_path)
+    r = _run(ws, [
+        _say("Batching.", "for i in 1 2 3; do ./submit c$i; done; touch LOOPED"),
+        _say("Fine.", _DONE),
+    ])
+    assert r.returncode == 0, r.stderr[-2000:]
+    assert not (ws / "LOOPED").exists()
+    assert "one candidate per turn" in (ws / ".fbagent-trace.jsonl").read_text().lower()
+
+
+def test_the_budget_line_reaches_the_model_every_turn(tmp_path):
+    ws = _stage(tmp_path)
+    r = _run(ws, [_say("Look.", "echo hi"), _say("Done.", _DONE)], max_turns=40)
+    assert r.returncode == 0, r.stderr[-2000:]
+    recs = [json.loads(l) for l in (ws / ".fbagent-trace.jsonl").read_text().splitlines() if l.strip()]
+    results = [r["content"] for r in recs if r["kind"] == "tool_result"]
+    assert results and all("[budget]" in c for c in results), results
+
+
+def test_reach_is_installed_and_offered_only_when_the_tracer_is_there(tmp_path):
+    ws = _stage(tmp_path)
+    (ws / ".fbbench" / "trace_req").mkdir()
+    _run(ws, [_say("Done.", _DONE)])
+    assert (ws / "reach").is_file() and (ws / "reach").stat().st_mode & 0o111
+
+    bare = _stage(tmp_path / "bare")
+    _run(bare, [_say("Done.", _DONE)])
+    assert not (bare / "reach").exists(), "offered a tracer this bench build has not got"

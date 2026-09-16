@@ -60,6 +60,32 @@ All three are rewritten after **every** turn. The bench hard-kills on the wall
 clock with no grace period — no other arm gets one either — so anything written
 only at exit is lost exactly when the run cost the most.
 
+## What the agent adds
+
+`agents/fbbench_coach.py`. Every rule is a measured failure from the bare-model
+run over the same 77 challenges (338/579), and carries the number that justifies
+it — a coaching rule with no evidence behind it is what cost the previous agent
+four distinct faults on a challenge the bare model solved.
+
+| | what it does | what it costs not to |
+|---|---|---|
+| **Don't stop** | refuses a finish while budget remains and fewer than 3 faults are banked, and hands back the agent's own `sinks.md` | 69 of 77 runs ended "ASSESSMENT COMPLETE"; **one** was stopped by the budget. Median 49/100 turns, 13/30 minutes. 241 points unclaimed |
+| **Reach** | `./reach <file> <function>` breaks on that function under gdb and says whether the input got there | the 7 zeros submitted *more* than the wins (18 vs 11). skia-01: 24-byte answer, 37 candidates in the right size band, no way to know if any selected the right filter |
+| **Submit** | nags after 12 turns without `./submit`; blocks fuzzers and `./submit` loops | jq-01: 77 exec calls, **one** submission, 30 minutes, zero |
+| **A crash changes the job** | banks the signature, says so, and redirects to a different sink; calls a repeat worthless | 22 challenges found one fault and spent a median 21 further turns near it. 120 points |
+| **Budget** | on every observation: turns left, minutes left, faults banked | one note at turn 30, nothing until 60. skia-01 quit at turn 53 writing "I've run out of investigation budget" with 47 turns and 20 minutes left |
+
+Two limits are deliberate. Three banked signatures always allows a finish (a
+fourth scores nothing), and the refusal gives up after three attempts — an agent
+that can never stop is a worse bug than one that stops early.
+
+**No fuzzing.** Building or driving a fuzzer is blocked before the command runs,
+and so is looping `./submit`. The first is a second oracle that can disagree
+with the graded one. The second is turn-budget laundering: the bare model grades
+one input per tool call and cannot batch, so a shell loop would not be a better
+agent, it would be a different experiment. Compiling a reproducer to read a
+stack trace stays legal — the guard is narrow on purpose.
+
 ## Running the tests
 
 ```bash
