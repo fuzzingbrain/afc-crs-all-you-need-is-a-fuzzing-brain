@@ -291,6 +291,28 @@ def test_the_budget_line_reaches_the_model_every_turn(tmp_path):
     assert results and all("[budget]" in c for c in results), results
 
 
+def test_the_budget_line_survives_a_refusal_and_a_pushback(tmp_path):
+    # A refusal and a pushback are the turns the model is most likely to read as
+    # being stuck. Dropping the line that says how much room is left, on exactly
+    # those turns, is how a run talks itself into stopping.
+    ws = _stage(tmp_path)
+    r = _run(ws, [
+        _say("Fuzzing.", "clang -fsanitize=fuzzer x.c -o h"),
+        _say("Quitting.", _DONE),
+        _say("Quitting again.", _DONE),
+        _say("And again.", _DONE),
+        _say("Done.", _DONE),
+    # timeout well clear of the coach's 120s "nearly done" margin, or the
+    # finish is legitimately allowed and there is no pushback to check.
+    ], max_turns=40, timeout=900)
+    assert r.returncode == 0, r.stderr[-2000:]
+    recs = [json.loads(l) for l in (ws / ".fbagent-trace.jsonl").read_text().splitlines() if l.strip()]
+    results = [x["content"] for x in recs if x["kind"] == "tool_result"]
+    assert any("fuzzing is not available" in c for c in results)
+    assert any("[not yet]" in c for c in results)
+    assert all("[budget]" in c for c in results), [c[:80] for c in results]
+
+
 def test_reach_is_installed_and_offered_only_when_the_tracer_is_there(tmp_path):
     ws = _stage(tmp_path)
     (ws / ".fbbench" / "trace_req").mkdir()

@@ -135,6 +135,12 @@ class _ReportingAgent(DefaultAgent):
         # fact only wastes the turn that built it.
         for action in (message.get("extra") or {}).get("actions", []):
             if (why := forbidden(action.get("command", ""))):
+                # The budget line belongs here too. A refusal and a pushback are
+                # the turns the model is most likely to conclude it is stuck on,
+                # and dropping the one line that says how much room is left is
+                # how a run talks itself into stopping.
+                why += "\n\n" + self.coach.budget_line(
+                    self.n_turns, time.time() - self._start_time)
                 obs = self.model.format_observation_messages(
                     message, [{"output": why, "returncode": 126, "exception_info": ""}],
                     self.get_template_vars())
@@ -149,6 +155,8 @@ class _ReportingAgent(DefaultAgent):
             if (push := self.coach.may_finish(self.n_turns, time.time() - self._start_time)) is None:
                 raise
             push += self._sinks()
+            push += "\n\n" + self.coach.budget_line(
+                self.n_turns, time.time() - self._start_time)
             self._trace_write(kind="tool_result", tool="bash", is_error=False, content=push)
             return self.add_messages(self.model.format_message(role="user", content=push))
 
