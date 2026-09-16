@@ -1,0 +1,586 @@
+import json
+import tempfile
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+import typer
+
+from minisweagent.run.utilities.inspector import TrajectoryInspector, main
+
+
+def get_screen_text(app: TrajectoryInspector) -> str:
+    """Extract all text content from the app's UI."""
+    text_parts = []
+
+    def _append_visible_static_text(container):
+        for static_widget in container.query("Static"):
+            if static_widget.display:
+                if hasattr(static_widget, "content") and static_widget.content:  # type: ignore[attr-defined]
+                    text_parts.append(str(static_widget.content))  # type: ignore[attr-defined]
+                elif hasattr(static_widget, "renderable") and static_widget.renderable:  # type: ignore[attr-defined]
+                    text_parts.append(str(static_widget.renderable))  # type: ignore[attr-defined]
+
+    # Get all Static widgets in the main content container
+    content_container = app.query_one("#content")
+    _append_visible_static_text(content_container)
+
+    return "\n".join(text_parts)
+
+
+@pytest.fixture
+def sample_simple_trajectory():
+    """Sample trajectory in simple format (list of messages)."""
+    return [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Hello, solve this problem."},
+        {"role": "assistant", "content": "I'll help you solve this.\n\n```mswea_bash_command\nls -la\n```"},
+        {"role": "user", "content": "Command output here."},
+        {
+            "role": "assistant",
+            "content": "Now I'll finish.\n\n```mswea_bash_command\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```",
+        },
+    ]
+
+
+@pytest.fixture
+def sample_swebench_trajectory():
+    """Sample trajectory in SWEBench format (dict with messages array)."""
+    return {
+        "instance_id": "test-instance-1",
+        "info": {
+            "exit_status": "Submitted",
+            "submission": "Fixed the issue",
+            "model_stats": {"instance_cost": 0.05, "api_calls": 3},
+        },
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": [{"type": "text", "text": "Please solve this issue."}]},
+            {"role": "assistant", "content": "I'll analyze the issue.\n\n```mswea_bash_command\ncat file.py\n```"},
+            {"role": "user", "content": [{"type": "text", "text": "File contents here."}]},
+            {
+                "role": "assistant",
+                "content": "Fixed!\n\n```mswea_bash_command\necho COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT\n```",
+            },
+        ],
+    }
+
+
+@pytest.fixture
+def sample_toolcall_trajectory():
+    """Sample trajectory with tool_calls format."""
+    return [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "List files."},
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": "1", "function": {"name": "bash", "arguments": '{"command": "ls -la"}'}}],
+        },
+        {"role": "tool", "tool_call_id": "1", "content": '{"returncode": 0, "output": "file.txt"}'},
+    ]
+
+
+@pytest.fixture
+def sample_response_api_trajectory():
+    """Sample trajectory with Responses API format."""
+    return [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "List files."},
+        {
+            "type": "assistant",
+            "output": [
+                {"type": "message", "content": [{"type": "text", "text": "Let me check."}]},
+                {"type": "function_call", "name": "bash", "arguments": '{"command": "ls"}'},
+            ],
+        },
+    ]
+
+
+@pytest.fixture
+def temp_trajectory_files(sample_simple_trajectory, sample_swebench_trajectory):
+    """Create temporary trajectory files for testing."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+
+        # Simple format trajectory
+        simple_file = temp_path / "simple.traj.json"
+        simple_file.write_text(json.dumps(sample_simple_trajectory, indent=2))
+
+        # SWEBench format trajectory
+        swebench_file = temp_path / "swebench.traj.json"
+        swebench_file.write_text(json.dumps(sample_swebench_trajectory, indent=2))
+
+        # Invalid JSON file
+        invalid_file = temp_path / "invalid.traj.json"
+        invalid_file.write_text("invalid json content")
+
+        yield [simple_file, swebench_file, invalid_file]
+
+
+@pytest.mark.slow
+async def test_trajectory_inspector_basic_navigation(temp_trajectory_files):
+    """Test basic step navigation in trajectory inspector."""
+    valid_files = [f for f in temp_trajectory_files if f.name != "invalid.traj.json"]
+
+    app = TrajectoryInspector(valid_files)
+
+    async with app.run_test() as pilot:
+        # Should start with first trajectory, first step
+        await pilot.pause(0.1)
+        assert "Trajectory 1/2 - simple.traj.json - Step 1/3" in app.title
+        content = get_screen_text(app)
+        assert "SYSTEM" in content
+        assert "You are a helpful assistant" in content
+        assert "solve this problem" in content
+
+        # Navigate to next step
+        await pilot.press("l")
+        assert "Step 2/3" in app.title
+        assert "ASSISTANT" in get_screen_text(app)
+        assert "I'll help you solve this" in get_screen_text(app)
+
+        # Navigate to last step
+        await pilot.press("$")
+        assert "Step 3/3" in app.title
+        assert "ASSISTANT" in get_screen_text(app)
+        assert "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in get_screen_text(app)
+
+        # Navigate back to first step
+        await pilot.press("0")
+        assert "Step 1/3" in app.title
+        assert "SYSTEM" in get_screen_text(app)
+
+        # Navigate with left/right arrows
+        await pilot.press("right")
+        assert "Step 2/3" in app.title
+        await pilot.press("left")
+        assert "Step 1/3" in app.title
+
+
+@pytest.mark.slow
+async def test_trajectory_inspector_trajectory_navigation(temp_trajectory_files):
+    """Test navigation between different trajectory files."""
+    valid_files = [f for f in temp_trajectory_files if f.name != "invalid.traj.json"]
+
+    app = TrajectoryInspector(valid_files)
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.1)
+
+        # Should start with first trajectory
+        assert "Trajectory 1/2 - simple.traj.json" in app.title
+        content = get_screen_text(app)
+        assert "You are a helpful assistant" in content
+
+        # Navigate to next trajectory
+        await pilot.press("L")
+        assert "Trajectory 2/2 - swebench.traj.json" in app.title
+        await pilot.pause(0.1)
+        content = get_screen_text(app)
+        assert "You are a helpful assistant" in content
+
+        # Navigate back to previous trajectory
+        await pilot.press("H")
+        assert "Trajectory 1/2 - simple.traj.json" in app.title
+
+        # Try to navigate beyond bounds
+        await pilot.press("H")  # Should stay at first
+        assert "Trajectory 1/2 - simple.traj.json" in app.title
+
+        await pilot.press("L")  # Go to second
+        await pilot.press("L")  # Try to go beyond
+        assert "Trajectory 2/2 - swebench.traj.json" in app.title  # Should stay at last
+
+
+@pytest.mark.slow
+async def test_trajectory_inspector_swebench_format(temp_trajectory_files):
+    """Test that SWEBench format trajectories are handled correctly."""
+    valid_files = [f for f in temp_trajectory_files if f.name != "invalid.traj.json"]
+
+    app = TrajectoryInspector(valid_files)
+
+    async with app.run_test() as pilot:
+        # Navigate to SWEBench trajectory
+        await pilot.press("L")
+        await pilot.pause(0.1)
+
+        assert "Trajectory 2/2 - swebench.traj.json" in app.title
+        assert "Step 1/3" in app.title
+
+        # Check that list content is properly rendered - step 1 should have the initial user message
+        content = get_screen_text(app)
+        assert "Please solve this issue" in content
+
+
+@pytest.mark.slow
+async def test_trajectory_inspector_scrolling(temp_trajectory_files):
+    """Test scrolling behavior in trajectory inspector."""
+    valid_files = [f for f in temp_trajectory_files if f.name != "invalid.traj.json"]
+
+    app = TrajectoryInspector(valid_files)
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.1)
+
+        # Test scrolling
+        vs = app.query_one("VerticalScroll")
+        initial_y = vs.scroll_target_y
+
+        await pilot.press("j")  # scroll down
+        assert vs.scroll_target_y >= initial_y
+
+        await pilot.press("k")  # scroll up
+        # Should scroll up (may not be exactly equal due to content constraints)
+
+
+@pytest.mark.slow
+async def test_trajectory_inspector_empty_trajectory():
+    """Test inspector behavior with empty trajectory list."""
+    app = TrajectoryInspector([])
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.1)
+
+        assert "Trajectory Inspector - No Data" in app.title
+        assert "No trajectory loaded" in get_screen_text(app)
+
+        # Navigation should not crash
+        await pilot.press("l")
+        await pilot.press("h")
+        await pilot.press("L")
+        await pilot.press("H")
+
+
+async def test_trajectory_inspector_invalid_file(temp_trajectory_files):
+    """Test inspector behavior with invalid JSON file."""
+    invalid_file = [f for f in temp_trajectory_files if f.name == "invalid.traj.json"][0]
+
+    # Mock notify to capture error messages
+    app = TrajectoryInspector([invalid_file])
+
+    # Since this is not an async run_test, we need to manually trigger the load
+    # The error should be captured when _load_current_trajectory is called
+    app._load_current_trajectory()
+
+    assert app.messages == []
+    assert app.steps == []
+
+
+def test_trajectory_inspector_load_trajectory_formats(
+    sample_simple_trajectory, sample_swebench_trajectory, sample_toolcall_trajectory, sample_response_api_trajectory
+):
+    """Test loading different trajectory formats."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+
+        # Test simple format (text-based actions)
+        simple_file = temp_path / "simple.traj.json"
+        simple_file.write_text(json.dumps(sample_simple_trajectory))
+        app = TrajectoryInspector([simple_file])
+        assert len(app.messages) == 5
+        assert len(app.steps) == 3
+
+        # Test SWEBench format (dict with messages array)
+        swebench_file = temp_path / "swebench.traj.json"
+        swebench_file.write_text(json.dumps(sample_swebench_trajectory))
+        app = TrajectoryInspector([swebench_file])
+        assert len(app.messages) == 5
+        assert len(app.steps) == 3
+
+        # Test tool_calls format (OpenAI function calling)
+        toolcall_file = temp_path / "toolcall.traj.json"
+        toolcall_file.write_text(json.dumps(sample_toolcall_trajectory))
+        app = TrajectoryInspector([toolcall_file])
+        assert len(app.messages) == 4
+        assert len(app.steps) == 2
+
+        # Test Responses API format (step splitting uses 'role', not 'type')
+        response_api_file = temp_path / "response_api.traj.json"
+        response_api_file.write_text(json.dumps(sample_response_api_trajectory))
+        app = TrajectoryInspector([response_api_file])
+        assert len(app.messages) == 3
+        assert len(app.steps) == 1
+
+
+def test_trajectory_inspector_unrecognized_format():
+    """Test inspector behavior with unrecognized trajectory format."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+
+        # Create file with unrecognized format
+        unrecognized_file = temp_path / "unrecognized.traj.json"
+        unrecognized_file.write_text(json.dumps({"some": "other", "format": True}))
+
+        app = TrajectoryInspector([unrecognized_file])
+
+        # Should handle gracefully
+        assert app.messages == []
+        assert app.steps == []
+
+
+def test_trajectory_inspector_current_trajectory_name():
+    """Test current_trajectory_name property."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        temp_path = Path(temp_dir)
+        test_file = temp_path / "test.traj.json"
+        test_file.write_text(json.dumps([]))
+
+        app = TrajectoryInspector([test_file])
+        assert app.current_trajectory_name == "test.traj.json"
+
+        # Test with empty trajectory list
+        app = TrajectoryInspector([])
+        assert app.current_trajectory_name == "No trajectories"
+
+
+@pytest.mark.slow
+async def test_trajectory_inspector_css_loading():
+    """Test that CSS is properly loaded from config."""
+    app = TrajectoryInspector([])
+
+    # Verify CSS contains expected styles
+    assert ".message-container" in app.CSS
+    assert ".message-header" in app.CSS
+    assert ".message-content" in app.CSS
+    assert ".reasoning-header" in app.CSS
+    assert ".reasoning-content" in app.CSS
+
+
+@pytest.mark.slow
+async def test_trajectory_inspector_quit_binding(temp_trajectory_files):
+    """Test quit functionality."""
+    valid_files = [f for f in temp_trajectory_files if f.name != "invalid.traj.json"]
+
+    app = TrajectoryInspector(valid_files)
+
+    async with app.run_test() as pilot:
+        await pilot.pause(0.1)
+
+        # Test quit functionality
+        await pilot.press("q")
+        await pilot.pause(0.1)
+
+        # App should exit gracefully (the test framework handles this)
+
+
+def test_trajectory_inspector_binding_labels():
+    """Test that binding labels use arrow symbols."""
+    bindings = {b.action: b.description for b in TrajectoryInspector.BINDINGS}
+    assert bindings["scroll_down"] == "↓"
+    assert bindings["scroll_up"] == "↑"
+
+
+@patch("minisweagent.run.utilities.inspector.TrajectoryInspector.run")
+def test_main_no_reasoning_flag(mock_run, temp_trajectory_files):
+    """Test that --no-reasoning passes show_reasoning=False to TrajectoryInspector."""
+    valid_file = temp_trajectory_files[0]
+    with patch("minisweagent.run.utilities.inspector.TrajectoryInspector.__init__", return_value=None) as mock_init:
+        main(str(valid_file), reasoning=False)
+        mock_init.assert_called_once_with([valid_file], show_reasoning=False)
+        mock_run.assert_called_once()
+
+
+@pytest.fixture
+def sample_reasoning_trajectory():
+    """Sample trajectory with reasoning_content on an assistant message."""
+    return [
+        {"role": "user", "content": "Think about this."},
+        {"role": "assistant", "content": "My answer.", "reasoning_content": "Let me think..."},
+    ]
+
+
+@pytest.mark.slow
+async def test_trajectory_inspector_reasoning_display(sample_reasoning_trajectory):
+    """Test that reasoning_content is shown/hidden based on show_reasoning flag."""
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / "r.traj.json"
+        f.write_text(json.dumps(sample_reasoning_trajectory))
+
+        app = TrajectoryInspector([f], show_reasoning=True)
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+            await pilot.press("l")  # step with assistant message
+            await pilot.pause(0.1)
+            content = get_screen_text(app)
+            assert "REASONING" in content
+            assert "Let me think..." in content
+
+        app2 = TrajectoryInspector([f], show_reasoning=False)
+        async with app2.run_test() as pilot:
+            await pilot.pause(0.1)
+            await pilot.press("l")
+            await pilot.pause(0.1)
+            assert "REASONING" not in get_screen_text(app2)
+
+
+@pytest.mark.slow
+async def test_trajectory_inspector_toggle_reasoning(sample_reasoning_trajectory):
+    """Test that pressing r toggles reasoning blocks on and off."""
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / "r.traj.json"
+        f.write_text(json.dumps(sample_reasoning_trajectory))
+
+        app = TrajectoryInspector([f])
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+            await pilot.press("l")
+            await pilot.pause(0.1)
+            assert "REASONING" in get_screen_text(app)
+
+            await pilot.press("r")  # toggle off
+            assert "REASONING" not in get_screen_text(app)
+
+            await pilot.press("r")  # toggle back on
+            assert "REASONING" in get_screen_text(app)
+
+
+@pytest.mark.slow
+async def test_trajectory_inspector_reload(sample_simple_trajectory):
+    """Test that R reloads the file and preserves step position."""
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / "t.traj.json"
+        f.write_text(json.dumps(sample_simple_trajectory))
+
+        app = TrajectoryInspector([f])
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+            await pilot.press("l")  # go to step 2
+            assert "Step 2/3" in app.title
+
+            f.write_text(
+                json.dumps(
+                    sample_simple_trajectory
+                    + [
+                        {"role": "user", "content": "extra output"},
+                        {"role": "assistant", "content": "Done."},
+                    ]
+                )
+            )
+            await pilot.press("R")
+            await pilot.pause(0.1)
+            assert "Step 2/4" in app.title
+
+
+@pytest.mark.slow
+async def test_trajectory_inspector_reload_clamps_step(sample_simple_trajectory):
+    """Test that R clamps step to last when the file shrinks."""
+    with tempfile.TemporaryDirectory() as tmp:
+        f = Path(tmp) / "t.traj.json"
+        f.write_text(json.dumps(sample_simple_trajectory))
+
+        app = TrajectoryInspector([f])
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+            await pilot.press("$")  # go to last step (3/3)
+            assert "Step 3/3" in app.title
+
+            f.write_text(json.dumps(sample_simple_trajectory[:2]))
+            await pilot.press("R")
+            await pilot.pause(0.1)
+            assert "Step 1/1" in app.title
+
+
+@pytest.fixture
+def sample_ansi_trajectory():
+    """Sample trajectory with ANSI escape codes and null bytes in tool output (e.g. from TUI programs)."""
+    return {
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Run the program."},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{"id": "1", "function": {"name": "bash", "arguments": '{"command": "./executable"}'}}],
+                "extra": {"actions": [{"command": "./executable", "tool_call_id": "1"}]},
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "1",
+                "content": "<returncode>0</returncode>\n<output>\n\x1b[?1049h\x1b[?7l\x1b[?1000h\x00\r\x1b[2K\x1b[39m\x1b[47m\xe2\x94\x80 Score \xe2\x94\x80\x1b[0m\nDone\n</output>",
+            },
+        ],
+    }
+
+
+@pytest.mark.slow
+async def test_trajectory_inspector_ansi_content(sample_ansi_trajectory):
+    """Test that ANSI escape codes and null bytes in tool output don't break rendering."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        traj_file = Path(temp_dir) / "ansi.traj.json"
+        traj_file.write_text(json.dumps(sample_ansi_trajectory))
+        app = TrajectoryInspector([traj_file])
+        async with app.run_test() as pilot:
+            await pilot.pause(0.1)
+            # Navigate to step with ANSI content
+            await pilot.press("l")
+            await pilot.pause(0.1)
+            content = get_screen_text(app)
+            assert "Done" in content
+            assert "\x1b" not in content
+            assert "\x00" not in content
+
+
+@patch("minisweagent.run.utilities.inspector.TrajectoryInspector.run")
+def test_main_with_single_file(mock_run, temp_trajectory_files):
+    """Test main function with a single trajectory file."""
+    valid_file = temp_trajectory_files[0]  # simple.traj.json
+
+    main(str(valid_file))
+
+    mock_run.assert_called_once()
+    # Verify the inspector was created with the correct file
+    assert mock_run.call_count == 1
+
+
+@patch("minisweagent.run.utilities.inspector.TrajectoryInspector.run")
+def test_main_with_directory_containing_trajectories(mock_run, temp_trajectory_files):
+    """Test main function with a directory containing trajectory files."""
+    directory = temp_trajectory_files[0].parent
+
+    main(str(directory))
+
+    mock_run.assert_called_once()
+
+
+@patch("minisweagent.run.utilities.inspector.TrajectoryInspector.run")
+def test_main_with_directory_no_trajectories(mock_run):
+    """Test main function with a directory containing no trajectory files."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create some non-trajectory files
+        temp_path = Path(temp_dir)
+        (temp_path / "other.json").write_text('{"not": "trajectory"}')
+        (temp_path / "readme.txt").write_text("some text")
+
+        with pytest.raises(typer.BadParameter, match="No trajectory files found"):
+            main(str(temp_dir))
+
+        mock_run.assert_not_called()
+
+
+@patch("minisweagent.run.utilities.inspector.TrajectoryInspector.run")
+def test_main_with_nonexistent_path(mock_run):
+    """Test main function with a path that doesn't exist."""
+    nonexistent_path = "/this/path/does/not/exist"
+
+    with pytest.raises(typer.BadParameter, match="Path .* does not exist"):
+        main(nonexistent_path)
+
+    mock_run.assert_not_called()
+
+
+@patch("minisweagent.run.utilities.inspector.TrajectoryInspector.run")
+def test_main_with_current_directory_default(mock_run, temp_trajectory_files):
+    """Test main function with default argument (current directory)."""
+    directory = temp_trajectory_files[0].parent
+
+    # Change to the temp directory to test the default "." behavior
+    import os
+
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(str(directory))
+        main(".")  # Explicitly test with "." since default is handled by typer
+        mock_run.assert_called_once()
+    finally:
+        os.chdir(original_cwd)
