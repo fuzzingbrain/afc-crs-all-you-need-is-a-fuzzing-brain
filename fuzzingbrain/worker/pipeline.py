@@ -544,6 +544,7 @@ class AgentPipeline:
                     docker_image=self.config.docker_image,
                     workspace_path=self.workspace_path,
                     fuzzer_code=self.fuzzer_code,
+                    fuzzer_source=self.fuzzer_source,  # full multi-file harness (cached)
                     fuzzer_manager=self.fuzzer_manager,  # For SP Fuzzer integration
                     index=agent_index,
                     target_name=sp.function_name or "",

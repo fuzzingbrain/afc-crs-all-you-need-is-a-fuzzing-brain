@@ -3,7 +3,7 @@
 POV Agent
 
 LLM-based agent for generating POV (Proof of Vulnerability) inputs.
-Uses create_pov, verify_pov, and reach_probe tools to iteratively
+Uses create_pov and reach_probe tools to iteratively
 generate and test inputs that trigger vulnerabilities.
 """
 
@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from fastmcp import Client
 from loguru import logger
@@ -87,9 +87,8 @@ class POVAgent(BaseAgent):
     Uses LLM to iteratively:
     1. Analyze the vulnerable code
     2. Design test inputs
-    3. Generate POVs with create_pov
-    4. Verify with verify_pov
-    5. Diagnose with reach_probe if needed
+    3. Generate POVs with create_pov (auto-verifies each variant)
+    4. Diagnose with reach_probe if needed
 
     Stop conditions (OR):
     - max_iterations reached (default 300)
@@ -130,6 +129,9 @@ class POVAgent(BaseAgent):
         docker_image: Optional[str] = None,
         # Fuzzer source code (passed directly to avoid DB lookup)
         fuzzer_code: str = "",
+        # Full multi-file harness blob (from executor.harness_source(); the
+        # fuzzer_sources absolute paths in the task file). Preferred over fuzzer_code.
+        fuzzer_source: str = "",
         # FuzzerManager for SP Fuzzer integration
         fuzzer_manager: Any = None,
         # New: for numbered log files
@@ -182,6 +184,8 @@ class POVAgent(BaseAgent):
 
         # Fuzzer source code (passed directly or loaded on demand)
         self._fuzzer_source: Optional[str] = fuzzer_code if fuzzer_code else None
+        # Full multi-file harness, embedded (cached) in the system prompt.
+        self.fuzzer_source = fuzzer_source
 
         # FuzzerManager for SP Fuzzer integration
         self.fuzzer_manager = fuzzer_manager
@@ -201,7 +205,7 @@ class POVAgent(BaseAgent):
 
     @property
     def include_pov_tools(self) -> bool:
-        """POVAgent needs POV tools (create_pov, verify_pov, etc.)."""
+        """POVAgent needs POV tools (create_pov; verify_pov is filtered out)."""
         return True
 
     @property
@@ -217,6 +221,26 @@ class POVAgent(BaseAgent):
     def include_sp_create_tools(self) -> bool:
         """POVAgent only reads SPs for context, never creates new ones."""
         return False
+
+    @property
+    def include_sp_tools(self) -> bool:
+        """POVAgent is fed the SP dict directly; it never reads or updates SPs via
+        tools (PoV results are recorded by the pipeline via complete_pov)."""
+        return False
+
+    @property
+    def include_coverage_tools(self) -> bool:
+        """We do not build coverage; the coverage tools would be dead weight and
+        overlap with reach_probe (which is more precise)."""
+        return False
+
+    async def _get_tools(self, client: Client) -> List[Dict[str, Any]]:
+        """Drop verify_pov: create_pov already auto-verifies each variant, so a
+        separate verify tool is redundant and only invites wasted turns."""
+        tools = await super()._get_tools(client)
+        return [
+            t for t in tools if t.get("function", {}).get("name") != "verify_pov"
+        ]
 
     def _get_summary_table(self) -> str:
         """Generate summary table for POV generation."""
@@ -319,7 +343,14 @@ class POVAgent(BaseAgent):
 
     @property
     def system_prompt(self) -> str:
-        """Get system prompt."""
+        """Get system prompt with the full harness source appended (cached)."""
+        harness = self.fuzzer_source or self._load_fuzzer_source()
+        if harness:
+            return (
+                POV_AGENT_SYSTEM_PROMPT
+                + "\n\n## Fuzzer Source Codes (how input enters the target — read ALL files)\n"
+                + f"```c\n{harness}\n```\n"
+            )
         return POV_AGENT_SYSTEM_PROMPT
 
     def _load_fuzzer_source(self) -> Optional[str]:
@@ -425,33 +456,7 @@ Your POV must:
 
 """
 
-        # Add fuzzer source code
-        fuzzer_source = self._load_fuzzer_source()
-        if fuzzer_source:
-            message += f"""## Fuzzer Source Code (CRITICAL - READ THIS FIRST!)
-
-This code shows EXACTLY how your POV input enters the target library.
-Study it carefully - it determines what input format you must use.
-
-**NOTE: Fuzzer source is already provided below. Do NOT call get_fuzzer_source unless you forget it.**
-
-```c
-{fuzzer_source}
-```
-
-Key things to identify:
-- How input bytes are read (fread, memcpy, etc.)
-- What library functions are called first
-- Any format requirements (headers, magic bytes, sizes)
-
-"""
-        else:
-            message += """## Fuzzer Source Code
-
-**Fuzzer source not pre-loaded. You MUST call get_fuzzer_source (with your fuzzer's name) to read it first.**
-This is CRITICAL - you need to understand how your input enters the library!
-
-"""
+        # (Harness source is in the system prompt — full, multi-file, cached.)
 
         # Add control flow info if available
         cf = suspicious_point.get("important_controlflow")
@@ -475,6 +480,11 @@ This is CRITICAL - you need to understand how your input enters the library!
                         message += f"- {item}\n"
                 message += "\n"
 
+        # Add the verifier's concrete evidence (file:line facts, reach_probe /
+        # check_clamp results — where the bug is, whether it is reachable, the margin).
+        if suspicious_point.get("evidence"):
+            message += f"## Evidence (from Verify Agent)\n\n{suspicious_point['evidence']}\n\n"
+
         # Add verification notes if available
         if suspicious_point.get("verification_notes"):
             message += (
@@ -492,17 +502,10 @@ This is CRITICAL - you need to understand how your input enters the library!
         source_hint = self.read_function_hint(function_name)
         message += f"""## Your Task
 
-1. Read the source code of `{function_name}` to understand the vulnerability
-2. Analyze how the fuzzer input flows to the vulnerable function
-3. Design a test input that triggers the vulnerability described above
-4. Use create_pov to generate the test input
-5. Use verify_pov to check if it causes a crash
-6. Iterate with different approaches; use reach_probe anytime to see how far your input got
-
-**Try create_pov early**: for your first few attempts, make educated guesses and generate a
-POV rather than over-analyzing. Focus on understanding the code and triggering inputs.
-
-Start by reading the vulnerable function source: {source_hint}.
+Follow the steps in your instructions to generate a PoV for `{function_name}`. Start
+from the pov_guidance above, call `create_pov` early (it auto-verifies each variant),
+and use `reach_probe` to see how far an input got. Begin by reading the vulnerable
+function: {source_hint}.
 """
 
         return message
@@ -547,18 +550,25 @@ Start by reading the vulnerable function source: {source_hint}.
 
     def _check_tool_result_for_success(self, tool_name: str, result_str: str) -> bool:
         """
-        Check if a tool result indicates POV success.
+        Check if a tool result indicates POV success (the loop's stop signal).
 
-        Returns True if verify_pov returned crashed=True.
+        create_pov auto-verifies its variants, so its result is the signal:
+        `crashed` is the count of variants that crashed. Records the crashing
+        pov_id. (verify_pov is no longer offered; kept tolerant just in case.)
         """
-        if tool_name == "verify_pov":
-            try:
-                result = json.loads(result_str)
-                if result.get("crashed") is True:
-                    self._log("POV SUCCESS! Crash detected!", level="INFO")
-                    return True
-            except (json.JSONDecodeError, TypeError):
-                pass
+        try:
+            result = json.loads(result_str)
+        except (json.JSONDecodeError, TypeError):
+            return False
+        if tool_name == "create_pov" and result.get("crashed"):
+            ids = result.get("successful_pov_ids") or []
+            if ids:
+                self.successful_pov_id = ids[0]
+            self._log("POV SUCCESS! create_pov reported a crash!", level="INFO")
+            return True
+        if tool_name == "verify_pov" and result.get("crashed") is True:
+            self._log("POV SUCCESS! Crash detected!", level="INFO")
+            return True
         return False
 
     def _check_tool_for_pov_attempt(self, tool_name: str, result_str: str) -> bool:
@@ -772,25 +782,23 @@ Start by reading the vulnerable function source: {source_hint}.
                     # Check for POV attempt
                     self._check_tool_for_pov_attempt(tool_name, tool_result)
 
-                    # Check for POV success
+                    # Check for POV success (create_pov crash; successful_pov_id is
+                    # recorded inside _check_tool_result_for_success).
                     if self._check_tool_result_for_success(tool_name, tool_result):
                         self.pov_success = True
-                        # Extract POV ID from result
-                        try:
-                            result = json.loads(tool_result)
-                            # verify_pov is called with pov_id, get it from the tool args
-                            self.successful_pov_id = tool_args.get("pov_id", "")
-                        except (json.JSONDecodeError, TypeError):
-                            pass
                         break
 
-                    # Check for verify_pov failure - inject analysis prompt
-                    if tool_name == "verify_pov":
+                    # create_pov ran but no variant crashed -> inject analysis prompt
+                    if tool_name == "create_pov":
                         try:
                             result = json.loads(tool_result)
                             if result.get("success") and not result.get("crashed"):
-                                # POV didn't crash - inject analysis prompt
-                                output_hint = result.get("output_hint", "")
+                                details = result.get("verify_details") or []
+                                hint = "; ".join(
+                                    d.get("output_summary", "")
+                                    for d in details
+                                    if not d.get("crashed")
+                                )[:300]
                                 sp_function = (self.suspicious_point or {}).get(
                                     "function_name", "the vulnerable function"
                                 )
@@ -798,10 +806,10 @@ Start by reading the vulnerable function source: {source_hint}.
                                 self.messages.append(
                                     {
                                         "role": "user",
-                                        "content": f"""This POV did not trigger a crash. Before trying again, ANALYZE:
+                                        "content": f"""None of the variants crashed. Before trying again, ANALYZE:
 
-1. Did the input reach the vulnerable function? Check the output hint:
-{output_hint[:300] if output_hint else "(no output)"}
+1. Did the input reach the vulnerable function? Variant feedback:
+{hint if hint else "(no details)"}
 
 2. What conditions are needed to trigger the vulnerability?
 3. What's different between your input and what the vulnerability needs?
