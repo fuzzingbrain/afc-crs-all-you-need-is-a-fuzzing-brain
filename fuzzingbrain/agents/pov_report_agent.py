@@ -114,6 +114,16 @@ class POVReportAgent(BaseAgent):
         return False
 
     @property
+    def include_sp_tools(self) -> bool:
+        """No suspicious-point tools. The report agent reads its SP from the
+        record passed in (self._sp) and writes only via its own update_pov_info;
+        it must not get update/get/list_suspicious_point. A fuzzer-found POV has
+        no SP (sp_id empty), and with update_suspicious_point in scope the model
+        called it with the crash hash as the SP id, looping on 'not found'.
+        """
+        return False
+
+    @property
     def include_sp_create_tools(self) -> bool:
         """The report agent writes a post-crash report; it never creates SPs."""
         return False

@@ -400,6 +400,51 @@ class FuzzerManager:
 
         return success
 
+    def _pool_sp_corpus_into_global(self, sp_id: str) -> int:
+        """Copy a stopped SP fuzzer's corpus (and crash inputs, the deepest
+        seeds) into the global corpus, deduplicated by content.
+
+        SP fuzzers keep separate corpora, so the seeds an SP fuzzer evolved to
+        reach a specific sink die with it. The global fuzzer runs with -fork and
+        libFuzzer's default -reload, so once these units land in the global
+        corpus dir it picks them up and mutates them -- letting a seed that
+        reached deep code become a springboard for a nearby bug no single SP
+        fuzzer reaches. Verified on shadowsocks (json_parse_ex, 5 bugs): per-SP
+        fuzzing found 2/5 lines, pooling every SP corpus surfaced all 5.
+
+        Oversized inputs (e.g. a 1 GiB OOM attempt) are junk that only slows the
+        fuzzer -- the real bugs trigger on tiny inputs -- so they are skipped.
+
+        Returns the number of new seeds added to the global corpus.
+        """
+        import hashlib
+
+        MAX_SEED_BYTES = 1_048_576
+        added = 0
+        sp_dir = self.sp_base_dir / sp_id
+        for sub in ("corpus", "crashes"):
+            src = sp_dir / sub
+            if not src.is_dir():
+                continue
+            for f in src.iterdir():
+                if not f.is_file():
+                    continue
+                try:
+                    data = f.read_bytes()
+                except Exception:
+                    continue
+                if not data or len(data) > MAX_SEED_BYTES:
+                    continue
+                dst = self.global_corpus_dir / f"sp_{hashlib.sha1(data).hexdigest()}"
+                if dst.exists():
+                    continue
+                try:
+                    dst.write_bytes(data)
+                    added += 1
+                except Exception:
+                    pass
+        return added
+
     async def stop_sp_fuzzer(self, sp_id: str) -> None:
         """
         Stop an SP Fuzzer.
@@ -417,6 +462,22 @@ class FuzzerManager:
         # Remove .active marker
         active_marker = self.sp_base_dir / sp_id / ".active"
         active_marker.unlink(missing_ok=True)
+
+        # Pool this SP fuzzer's evolved seeds into the global corpus before it is
+        # gone, so the still-running global fuzzer keeps mutating them. The SP
+        # fuzzer process is already stopped, so its corpus is frozen and safe to
+        # copy.
+        try:
+            pooled = self._pool_sp_corpus_into_global(sp_id)
+            if pooled:
+                logger.info(
+                    f"[{self.worker_id}] Pooled {pooled} seeds from SP "
+                    f"{sp_id[:8]} into global corpus"
+                )
+        except Exception as e:
+            logger.warning(
+                f"[{self.worker_id}] Failed to pool SP {sp_id[:8]} corpus: {e}"
+            )
 
         del self.sp_fuzzers[sp_id]
 

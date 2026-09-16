@@ -363,6 +363,11 @@ def generate(variant: int = 1) -> bytes:
                 if crash_record.sanitizer_output
                 else "",
                 description=f"Fuzzer-discovered crash ({source})",
+                # The monitor already deduplicated this crash and computed its
+                # signature; carrying it onto the POV is what lets the POV count
+                # be a count of bugs (one signature = one bug) across workers.
+                # Without it every fuzzer-found crash reached the DB unsigned.
+                signature=crash_record.signature,
                 is_successful=False,  # NOT yet! Generate report first
                 is_active=True,
                 verified_at=None,  # Not verified yet

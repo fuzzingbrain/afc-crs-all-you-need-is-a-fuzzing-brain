@@ -167,6 +167,12 @@ class FuzzerInstance:
                 "/corpus",
                 "-artifact_prefix=/crashes/",
                 f"-fork={self.config.fork_level}",
+                # Keep fuzzing after a crash instead of stopping at the first one.
+                # A harness can hide several bugs (shadowsocks json_fuzz has 5 in
+                # json_parse_ex); without this the fuzzer finds the shallowest and
+                # quits, never reaching the others. Each distinct crash is still
+                # saved to /crashes for the monitor to pick up and score.
+                "-ignore_crashes=1",
                 f"-rss_limit_mb={self.config.rss_limit_mb}",
                 f"-timeout={self.config.timeout_per_input}",
                 "-print_final_stats=1",

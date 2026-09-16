@@ -73,12 +73,22 @@ class WorkerDispatcher:
 
         log_dir = get_log_dir()
 
+        # NOTE: on_crash is deliberately NOT wired here. Each worker runs in its
+        # own Celery process with its own FuzzerManager monitor, which registers
+        # the exact prebuilt fuzzer_path/docker_image and wires on_crash to
+        # promote crashes to scored POVs (see WorkerExecutor). Wiring on_crash on
+        # this task-level auto-discovery monitor too made BOTH monitors process
+        # every crash file (they have independent _processed_artifacts and live
+        # in different processes), producing duplicate POV records for one bug
+        # and contradictory CRASH FOUND / NOT A CRASH logs. The worker monitor is
+        # the single promoter; this task-level monitor stays for get_stats() and
+        # task-wide crash logging only.
         self.crash_monitor: Optional[FuzzerMonitor] = FuzzerMonitor(
             task_id=task.task_id,
             workspace_path=Path(task.task_path),
             auto_discover=True,
             docker_image=docker_image,
-            on_crash=self._on_crash_found,
+            on_crash=None,
             log_dir=log_dir,
             repos=repos,
         )

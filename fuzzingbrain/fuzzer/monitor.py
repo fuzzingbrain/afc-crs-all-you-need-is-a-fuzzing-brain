@@ -675,9 +675,19 @@ class FuzzerMonitor:
         Returns:
             Path to fuzzer binary, or None if not found
         """
-        # Try fuzz-tooling build output
-        fuzz_tooling = worker_dir / "fuzz-tooling" / "build" / "out"
-        if fuzz_tooling.exists():
+        # fuzz-tooling/build/out lives at the TASK workspace root, not under the
+        # per-worker directory. Auto-discovery iterates worker_workspace/<worker>/,
+        # so searching only worker_dir/fuzz-tooling never finds the binary in
+        # prebuilt mode and verification is skipped (every crash -> NOT A CRASH).
+        # Search both the worker dir and the task workspace root.
+        roots = [worker_dir]
+        if self.workspace_path and self.workspace_path not in roots:
+            roots.append(self.workspace_path)
+
+        for root in roots:
+            fuzz_tooling = root / "fuzz-tooling" / "build" / "out"
+            if not fuzz_tooling.exists():
+                continue
             # Look for sanitizer-specific directory
             for subdir in fuzz_tooling.iterdir():
                 if sanitizer in subdir.name:

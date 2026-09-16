@@ -125,8 +125,12 @@ class TestAnExitIsNotACrash:
         from fuzzingbrain.fuzzer.monitor import FuzzerMonitor
 
         src = inspect.getsource(FuzzerMonitor._handle_crash)
+        # A finding requires a real sanitizer/signal fault class. When the
+        # signature carries no crash_class (an orderly exit), the monitor logs
+        # NOT A CRASH and drops the artifact instead of promoting a POV.
         assert "signature.crash_class" in src
-        assert "_check_crash(sanitizer_output)" in src
+        assert "if not signature.crash_class:" in src
+        assert "NOT A CRASH" in src
 
 
 class TestAFuzzerCrashCarriesItsSignature:
@@ -143,6 +147,18 @@ class TestAFuzzerCrashCarriesItsSignature:
 
         assert "signature=crash_record.signature" in inspect.getsource(
             WorkerDispatcher._on_crash_found
+        )
+
+    def test_the_worker_promotion_path_records_it(self):
+        # The worker-local FuzzerManager monitor is the single crash->POV
+        # promoter (the task-level dispatcher monitor no longer wires on_crash),
+        # so the live promotion path must carry the signature onto the POV too.
+        import inspect
+
+        from fuzzingbrain.worker.executor import WorkerExecutor
+
+        assert "signature=crash_record.signature" in inspect.getsource(
+            WorkerExecutor._on_crash_found
         )
 
     def test_the_crash_record_has_somewhere_to_put_it(self):
