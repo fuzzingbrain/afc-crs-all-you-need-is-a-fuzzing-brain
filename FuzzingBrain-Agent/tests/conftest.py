@@ -134,3 +134,36 @@ def github_test_data():
 def local_test_data():
     """Load local test fixtures"""
     return get_test_data("local")
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Remove containers the environment tests left behind.
+
+    The tests do call cleanup(), and cleanup() works -- but it backgrounds its
+    `docker stop`, and the container it started sleeps for container_timeout (2h
+    by default). So a suite that is KILLED rather than finished -- a timeout, a
+    Ctrl-C, a harness that backgrounds it and moves on -- leaves them running
+    for two hours. That is how 43 accumulated here, on a machine with no swap
+    that has been livelocked once, holding ~3 GB of disk and ~2.4 GB of RAM.
+
+    This is a backstop for the interrupted case, not a fix for cleanup(). It
+    matches only the exact name DockerEnvironment generates,
+    `minisweagent-<8 hex>`, so nothing else on the machine can be caught by it.
+    """
+    import re
+    import subprocess
+
+    pattern = re.compile(r"^minisweagent-[0-9a-f]{8}$")
+    for exe in ("docker", "podman"):
+        try:
+            out = subprocess.run([exe, "ps", "-q", "--format", "{{.Names}}"],
+                                 capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if out.returncode != 0:
+            continue
+        stale = [n for n in out.stdout.split() if pattern.match(n)]
+        if stale:
+            subprocess.run([exe, "rm", "-f", *stale],
+                           capture_output=True, timeout=120)
+        break
