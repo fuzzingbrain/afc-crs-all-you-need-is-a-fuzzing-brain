@@ -1162,6 +1162,15 @@ CRASH_INDICATORS = [
     "UndefinedBehaviorSanitizer: undefined-behavior",
     "AddressSanitizer:DEADLYSIGNAL",
     "assertion failed",
+    # A fatal signal libFuzzer catches when no sanitizer printed its own report
+    # first: a _FORTIFY_SOURCE abort (memcpy/strcpy overflow via __chk_fail), a
+    # bare SIGABRT/SIGSEGV, a failed assert. Real crashes (process aborted,
+    # non-zero exit) -- e.g. aim_get_buddyname's 256-byte overflow reports only
+    # as "libFuzzer: deadly signal". A recoverable UBSan (clean exit) is still
+    # filtered by _is_recoverable_ubsan_only + the returncode gate.
+    "ERROR: libFuzzer: deadly signal",
+    "buffer overflow detected",
+    "__fortify_fail",
 ]
 
 # Patterns to extract vulnerability type
