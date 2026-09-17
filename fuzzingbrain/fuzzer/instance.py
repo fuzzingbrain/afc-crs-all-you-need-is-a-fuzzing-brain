@@ -152,6 +152,13 @@ class FuzzerInstance:
                 "SANITIZER=address",
                 "-e",
                 "ARCHITECTURE=x86_64",
+                # No challenge in this set is a memory-leak (CWE-401) bug, but
+                # fuzzed dissectors leak incidentally all the time; with LSan on
+                # (the ASan default) libFuzzer saves those as crashes and the
+                # monitor promotes an incidental 56-byte leak as a bogus PoV,
+                # stopping the run before it finds the real bug. Turn it off.
+                "-e",
+                "ASAN_OPTIONS=detect_leaks=0",
             ]
         )
 

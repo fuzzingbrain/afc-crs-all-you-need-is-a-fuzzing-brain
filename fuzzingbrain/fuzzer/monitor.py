@@ -963,6 +963,10 @@ class FuzzerMonitor:
                 f"SANITIZER={sanitizer}",
                 "-e",
                 "ARCHITECTURE=x86_64",
+                # No leak challenges here; don't let an incidental LSan leak
+                # re-verify as a crash (matches the fuzzer + create_pov).
+                "-e",
+                "ASAN_OPTIONS=detect_leaks=0",
                 "-v",
                 f"{fuzzer_dir}:/fuzzers:ro",
                 "-v",

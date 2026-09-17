@@ -1361,6 +1361,10 @@ def _run_fuzzer_docker(
             f"SANITIZER={sanitizer}",
             "-e",
             "ARCHITECTURE=x86_64",
+            # No challenge here is a leak bug; incidental dissector leaks under
+            # LSan would verify as bogus PoVs. Keep it off (matches the fuzzer).
+            "-e",
+            "ASAN_OPTIONS=detect_leaks=0",
             "-e",
             "FUZZ_VERBOSE=1",  # Enable verbose output for debugging
             "-v",
