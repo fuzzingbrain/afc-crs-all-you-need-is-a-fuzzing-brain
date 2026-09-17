@@ -86,7 +86,7 @@ PROFILES: Dict[str, Profile] = {
     "current": Profile(
         finder=CLAUDE_SONNET_4_5,
         verifier=CLAUDE_SONNET_4_5,
-        poc=CLAUDE_SONNET_4_5,
+        poc=CLAUDE_OPUS_4_5,  # PoV synthesis = flagship, matching o3's role in period-correct
         seed=CLAUDE_OPUS_4_5,
         utility=CLAUDE_OPUS_4_5,
         compression=CLAUDE_HAIKU_4_5,
