@@ -13,7 +13,7 @@ margin is arithmetic the caller does on the returned operand values; this tool
 returns the raw runtime values.
 """
 from __future__ import annotations
-import json, re, shutil, subprocess, tempfile
+import json, os, re, shutil, subprocess, tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -62,7 +62,9 @@ def stage_project_libs(project: str, elf_host_path: str, image: str = None) -> P
 
 def _gen_script(targets: List[str], sink: Optional[str], operands: Dict[str, str]) -> str:
     lines = ["set pagination off", "set confirm off", "set breakpoint pending on",
-             "set environment LD_LIBRARY_PATH=/projlibs",
+             # /projlibs = libs staged from the project image; /b/blibs = libs
+             # shipped next to the binary (e.g. systemd's libsystemd-shared).
+             "set environment LD_LIBRARY_PATH=/projlibs:/b/blibs:/b",
              "handle SIGSEGV SIGABRT SIGBUS SIGFPE stop nopass"]
     for t in targets or []:
         lines += [f"break {t}", "commands", "  silent", f'  printf "HIT:{t}\\n"',
@@ -111,7 +113,11 @@ def _parse(out: str, targets: List[str], sink: Optional[str], operands: Dict[str
     # sets CRASHED:1 and is not counted as a crash here.
     ubs = re.findall(r"runtime error:\s*([^\n:]+)", out)
     ub_type = re.sub(r"\s+", "-", ubs[-1].strip().lower()) if ubs else None
-    crashed = ("CRASHED:1" in out) or bool(asan) or bool(sig)
+    # A fatal UB (‑fno‑sanitize‑recover) aborts, but on a worker thread gdb may
+    # not register the abort as a caught signal, so also count a UB error whose
+    # inferior did NOT exit cleanly. A *recoverable* UB runs to a clean exit.
+    clean_exit = ("exited normally" in out) or ("exited with code 0]" in out)
+    crashed = ("CRASHED:1" in out) or bool(asan) or bool(sig) or (bool(ub_type) and not clean_exit)
     # crashing frame: prefer the ASan report's bug frame, else the first NON-runtime gdb frame
     frame = None
     sm = re.search(r"SUMMARY: AddressSanitizer: [\w-]+ ([^\s]+:\d+)(?::\d+)? in (\w+)", out)
@@ -155,6 +161,22 @@ def trace(elf_host_path: str, run_argv_tmpl, input_bytes: bytes, project: str,
     work = Path(tempfile.mkdtemp(prefix="trace_"))
     try:
         shutil.copy(elf_host_path, work / "elf")
+        # Some prebuilt fuzzers ship non-executable (OSS-Fuzz build.sh chmod -x's
+        # the raw binary when a wrapper is the entry point); gdb then dies with
+        # "exec: Permission denied" and the run looks like a clean no-crash.
+        os.chmod(work / "elf", 0o755)
+        # Stage shared libs shipped next to the binary (e.g. systemd's
+        # libsystemd-shared-258.so under bin/address/src/shared/), which its
+        # RUNPATH resolves relative to $ORIGIN -- lost when we copy just the elf.
+        blibs = work / "blibs"; blibs.mkdir(exist_ok=True)
+        try:
+            for so in Path(elf_host_path).parent.rglob("*.so*"):
+                if so.is_file():
+                    dst = blibs / so.name
+                    if not dst.exists():
+                        shutil.copy(so, dst)
+        except Exception:
+            pass
         (work / "input").write_bytes(input_bytes)
         (work / "t.gdb").write_text(_gen_script(targets, sink, operands))
         argv = run_argv_tmpl("/b/input")
@@ -203,6 +225,7 @@ def check_clamp(elf_host_path: str, run_argv_tmpl, input_bytes: bytes, project: 
     work = Path(tempfile.mkdtemp(prefix="clamp_"))
     try:
         shutil.copy(elf_host_path, work / "elf")
+        os.chmod(work / "elf", 0o755)
         (work / "input").write_bytes(input_bytes)
         script = "\n".join([
             "set pagination off", "set confirm off",
