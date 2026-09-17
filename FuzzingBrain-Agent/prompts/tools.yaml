@@ -37,22 +37,26 @@ gates:
     concrete bytes and lengths the path requires, so you are not guessing which
     bytes matter. Computed from the source, not a model's opinion.
   params:
-    func: "the target function name (one from the worklist above)"
+    func: "the target function name"
 
 trace:
   description: >
-    Dynamic reach + crash report from a real run. Give it an input file you
-    wrote and a target function; it runs that input under a debugger and tells
-    you whether it reached the target (with the live argument values there),
-    and, if it faulted, the signal and the crash backtrace with the runtime
-    values at the fault. Unlike reading a crash stack, this works on a CLEAN run
-    too -- so use it to check "did my input actually reach this sink?" and, once
-    it crashes, to see the concrete pointer/index/size that went wrong and build
-    the next variant. Note: leak detection is off under the debugger, so a
-    memory-leak fault will not show here -- confirm those through ./submit.
+    Run an input file you wrote through the real graded binary under a debugger
+    and report, from that run, WHERE it went and WHY it stopped: the dynamic
+    call sequence through the project's functions, the deepest call, and the
+    stop point with the live values on the stack -- an error message and who
+    raised it, a longjmp or exception, an abort, or the sanitizer fault. Works
+    on a clean run as well as a crash, so use it whenever ./submit says clean
+    and you want to know how far the input got and what rejected it. By default
+    the report is brief (about ten lines): the outcome, why it stopped, the
+    deepest call, and for each target named whether it was reached and what it
+    returned. Ask for verbose when you need the live arguments at the stop, the
+    full list of functions reached, or the call sequence. Leak detection is off
+    under the debugger, so confirm memory-leak faults through ./submit.
   params:
     input: "path to the candidate input file you wrote (e.g. /tmp/x.bin)"
-    target: "the function to break on (a sink from the worklist you are aiming for)"
+    target: "optional: function(s) to report reached / returned status for, comma-separated (e.g. the sink you are aiming for and the parser on the way to it)"
+    verbose: "optional, default false: true adds the live arguments at the stop, every function reached with call counts, and the full call sequence"
 
 diversify:
   description: >
@@ -61,6 +65,6 @@ diversify:
     returns the reachable sinks that are FURTHEST from them in the call
     structure -- the targets most likely to be a genuinely different fault, so
     your next crash lands somewhere new. Call it after each crash to choose where
-    to go next; with no argument it returns the nearest-first worklist.
+    to go next.
   params:
     cracked: "comma-separated function names where you already found crashes"

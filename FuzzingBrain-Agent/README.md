@@ -25,7 +25,9 @@ in this folder.
 fbagent/
 ├── agent.py   the loop — linear message-append, the shape mini-swe-agent proved
 ├── llm.py     the model call + the prompt-cache policy (the reason we wrote our own)
-├── tools.py   read / glob / grep / bash — schema shape here, text from prompts/
+├── tools.py   read / glob / grep / bash / gates / trace / diversify — schema shape here, text from prompts/
+├── gdb_tracer.py  the gdb-side half of `trace`: runs inside gdb in the challenge
+│              container, reports where an input went and why it stopped as JSON
 ├── prompts.py the one door to every word the model reads
 └── run.py     entry point: run once in the challenge directory
 prompts/       all model-facing text, kept out of the code

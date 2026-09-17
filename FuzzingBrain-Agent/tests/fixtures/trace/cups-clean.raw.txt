@@ -1,0 +1,31 @@
+Function "__libc_siglongjmp" not defined.
+Function "__assert_fail" not defined.
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 2121831290
+INFO: Loaded 1 modules   (3 inline 8-bit counters): 3 [0x5555557bb580, 0x5555557bb583), 
+INFO: Loaded 1 PC tables (3 PCs): 3 [0x5555557bb588,0x5555557bb5b8), 
+[New Thread 0x7ffff3cf96c0 (LWP 2944211)]
+/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/trace_demo/bin/cups-01/asan/harness: Running 1 inputs 1 time(s) each.
+Running: out/cups-clean.bin
+
+Thread 1 "harness" hit Breakpoint -509, cupsUTF8ToCharset (dest=<optimized out>, src=<optimized out>, maxout=<optimized out>, encoding=<optimized out>) at transcode.c:200
+200	transcode.c: No such file or directory.
+Executed out/cups-clean.bin in 5 ms
+***
+*** NOTE: fuzzing was not performed, you have only
+***       executed the target code on a fixed set of inputs.
+***
+[Thread 0x7ffff3cf96c0 (LWP 2944211) exited]
+[Inferior 1 (process 2944208) exited normally]
+@@TRACE_JSON@@
+{"ev": "setup", "project_functions": 506, "breakpoints": 486, "targets": ["cupsUTF8ToCharset"], "t": 0.09}
+{"ev": "call", "fn": "cupsUTF8ToCharset", "depth": 6, "at": "transcode.c:200", "args": ["dest=<optimized out>", "src=<optimized out>", "maxout=<optimized out>", "encoding=<optimized out>"]}
+{"ev": "ret", "fn": "cupsUTF8ToCharset", "value": "1", "to": "/src/harness/harness.cc:20"}
+{"ev": "stop", "fn": "exit", "depth": 3, "at": "./stdlib/exit.c:146", "args": ["status=0"], "stack": [{"fn": "__GI_exit", "at": "./stdlib/exit.c:146"}, {"fn": "fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long))", "at": "?:0"}, {"fn": "main", "at": "?:0"}]}
+{"ev": "stop", "fn": "_exit", "depth": 5, "at": "../sysdeps/unix/sysv/linux/_exit.c:27", "args": ["status=0"], "stack": [{"fn": "__GI__exit", "at": "../sysdeps/unix/sysv/linux/_exit.c:27"}, {"fn": "__run_exit_handlers", "at": "./stdlib/exit.c:139"}, {"fn": "__GI_exit", "at": "./stdlib/exit.c:146"}, {"fn": "fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long))", "at": "?:0"}, {"fn": "main", "at": "?:0"}]}
+{"ev": "exit", "outcome": "exited", "code": 0, "hits": 4, "t": 0.64}
+{"ev": "seq", "n": 4, "truncated": false, "seq": ["LLVMFuzzerTestOneInput:5", "cupsUTF8ToCharset:6", "exit:3", "_exit:5"]}
+{"ev": "counts", "distinct": 4, "capped": [], "top": [["LLVMFuzzerTestOneInput", 1], ["cupsUTF8ToCharset", 1], ["exit", 1], ["_exit", 1]]}
+@@TRACE_END@@

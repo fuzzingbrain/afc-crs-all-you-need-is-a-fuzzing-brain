@@ -1,0 +1,48 @@
+Function "__libc_siglongjmp" not defined.
+Function "__assert_fail" not defined.
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 3250493455
+INFO: Loaded 1 modules   (119 inline 8-bit counters): 119 [0x55555576ce10, 0x55555576ce87), 
+INFO: Loaded 1 PC tables (119 PCs): 119 [0x55555576ce88,0x55555576d5f8), 
+[New Thread 0x7ffff45f96c0 (LWP 2944033)]
+/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/trace_demo/bin/libpng-01/asan/harness: Running 1 inputs 1 time(s) each.
+Running: out/libpng-short.bin
+
+Thread 1 "harness" hit Breakpoint -468, png_sig_cmp (sig=0x604000000090 "\211PNG\r\n\032\n", start=0, num_to_check=8) at /src/libpng/png.c:84
+84	/src/libpng/png.c: No such file or directory.
+
+Thread 1 "harness" hit Breakpoint -469, png_read_info (png_ptr=0x61a000000080, info_ptr=0x613000000040) at /src/libpng/pngread.c:110
+110	/src/libpng/pngread.c: No such file or directory.
+
+Thread 1 "harness" hit Breakpoint -468, png_sig_cmp (sig=sig@entry=0x61300000006c "\211PNG\r\n\032\n", start=start@entry=0, num_to_check=num_to_check@entry=8) at /src/libpng/png.c:84
+84	/src/libpng/png.c: No such file or directory.
+
+Thread 1 "harness" hit Breakpoint -470, png_handle_IHDR (png_ptr=<optimized out>, info_ptr=<optimized out>, length=<optimized out>) at /src/libpng/pngrutil.c:884
+884	/src/libpng/pngrutil.c: No such file or directory.
+libpng error: read error
+Executed out/libpng-short.bin in 41 ms
+***
+*** NOTE: fuzzing was not performed, you have only
+***       executed the target code on a fixed set of inputs.
+***
+[Thread 0x7ffff45f96c0 (LWP 2944033) exited]
+[Inferior 1 (process 2944027) exited normally]
+@@TRACE_JSON@@
+{"ev": "setup", "project_functions": 468, "breakpoints": 464, "targets": ["png_sig_cmp", "png_read_info", "png_handle_IHDR", "png_read_IDAT_data"], "t": 0.11}
+{"ev": "call", "fn": "png_sig_cmp", "depth": 6, "at": "/src/libpng/png.c:84", "args": ["sig=0x604000000090 \"\\211PNG\\r\\n\\032\\n\"  bytes=89 50 4e 47 0d 0a 1a 0a 00 00 00 0d 49 48 44 52", "start=0", "num_to_check=8"]}
+{"ev": "ret", "fn": "png_sig_cmp", "value": "0", "to": "/src/harness/harness.cc:186"}
+{"ev": "call", "fn": "png_read_info", "depth": 6, "at": "/src/libpng/pngread.c:110", "args": ["png_ptr=0x61a000000080", "info_ptr=0x613000000040"]}
+{"ev": "call", "fn": "png_sig_cmp", "depth": 8, "at": "/src/libpng/png.c:84", "args": ["sig=0x61300000006c \"\\211PNG\\r\\n\\032\\n\"  bytes=89 50 4e 47 0d 0a 1a 0a 00 00 00 00 00 00 00 00", "start=0", "num_to_check=8"]}
+{"ev": "ret", "fn": "png_sig_cmp", "value": "0", "to": "/src/libpng/pngrutil.c:135"}
+{"ev": "call", "fn": "png_handle_IHDR", "depth": 8, "at": "/src/libpng/pngrutil.c:884", "args": ["png_ptr=<optimized out>", "info_ptr=<optimized out>", "length=<optimized out>"]}
+{"ev": "ret", "fn": "png_handle_IHDR", "value": "handled_ok", "to": "/src/libpng/pngrutil.c:3353"}
+{"ev": "stop", "fn": "longjmp", "depth": 12, "at": "?:0", "args": [], "stack": [{"fn": "longjmp", "at": "?:0"}, {"fn": "png_longjmp", "at": "/src/libpng/pngerror.c:670", "args": ["png_ptr=0x61a000000080", "val=1"]}, {"fn": "png_default_error", "at": "/src/libpng/pngerror.c:660", "args": ["png_ptr=0x61a000000080", "error_message=0x555555729920 <str> \"read error\"  bytes=72 65 61 64 20 65 72 72 6f 72 00 00 00 00 00 00"]}, {"fn": "png_error", "at": "/src/libpng/pngerror.c:60", "args": ["png_ptr=0x61a000000080", "error_message=0x555555729920 <str> \"read error\"  bytes=72 65 61 64 20 65 72 72 6f 72 00 00 00 00 00 00"]}, {"fn": "(anonymous namespace)::user_read_data", "at": "/src/harness/harness.cc:67", "args": ["png_ptr=0x61a000000080", "dst=<optimized out>", "length=<optimized out>"]}, {"fn": "png_read_chunk_header", "at": "/src/libpng/pngrutil.c:196", "args": ["png_ptr=0x61a000000080"]}, {"fn": "png_read_info", "at": "/src/libpng/pngread.c:118", "args": []}, {"fn": "LLVMFuzzerTestOneInput", "at": "/src/harness/harness.cc:282", "args": ["data=<optimized out>", "size=<optimized out>"]}, {"fn": "fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long)", "at": "?:0"}, {"fn": "fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long)", "at": "?:0"}, {"fn": "fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long))", "at": "?:0"}, {"fn": "main", "at": "?:0"}]}
+{"ev": "stop", "fn": "exit", "depth": 3, "at": "./stdlib/exit.c:146", "args": ["status=0"], "stack": [{"fn": "__GI_exit", "at": "./stdlib/exit.c:146"}, {"fn": "fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long))", "at": "?:0"}, {"fn": "main", "at": "?:0"}]}
+{"ev": "stop", "fn": "_exit", "depth": 5, "at": "../sysdeps/unix/sysv/linux/_exit.c:27", "args": ["status=0"], "stack": [{"fn": "__GI__exit", "at": "../sysdeps/unix/sysv/linux/_exit.c:27"}, {"fn": "__run_exit_handlers", "at": "./stdlib/exit.c:139"}, {"fn": "__GI_exit", "at": "./stdlib/exit.c:146"}, {"fn": "fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long))", "at": "?:0"}, {"fn": "main", "at": "?:0"}]}
+{"ev": "ret_lost", "fn": "png_read_info", "note": "frame left without a normal return (longjmp / exception / abort)"}
+{"ev": "exit", "outcome": "exited", "code": 0, "hits": 87, "t": 0.75}
+{"ev": "seq", "n": 83, "truncated": false, "seq": ["LLVMFuzzerTestOneInput:5", "png_sig_cmp:6", "png_create_read_struct:7", "png_create_read_struct_2:7", "png_create_png_struct:8", "png_set_mem_fn:9", "png_set_error_fn:9", "png_user_version_check:9", "png_malloc_warn:9", "png_malloc_base:9", "png_target_init:8", "png_set_option:8", "png_set_read_fn:8", "png_create_info_struct:6", "png_malloc_base:7", "png_create_info_struct:6", "png_malloc_base:7", "png_set_longjmp_fn:6", "png_set_mem_fn:6", "png_set_crc_action:6", "png_set_user_limits:6", "png_set_chunk_cache_max:6", "png_set_chunk_malloc_max:6", "png_set_keep_unknown_chunks:6", "png_set_read_fn:6", "png_read_info:6", "png_read_sig:7", "png_read_data:8", "png_get_io_ptr:9", "png_sig_cmp:8", "png_read_chunk_header:7", "png_read_data:8", "png_get_io_ptr:9", "png_get_uint_31:7", "png_reset_crc:8", "png_calculate_crc:8", "png_handle_chunk:7", "png_handle_IHDR:8", "png_crc_read:8", "png_read_data:10", "png_get_io_ptr:11", "png_calculate_crc:10", "png_crc_finish:8", "png_crc_finish_critical:10", "png_read_data:12", "png_get_io_ptr:13", "png_get_uint_31:8", "png_get_uint_31:8", "png_set_IHDR:9", "png_check_IHDR:10", "png_read_chunk_header:7", "png_read_data:8", "png_get_io_ptr:9", "png_error:9", "png_default_error:10", "png_longjmp:11", "longjmp:12", "png_destroy_read_struct:7", "png_destroy_info_struct:8", "png_free_data:9", "png_free:8", "png_destroy_info_struct:8", "png_free_data:9", "png_free:8", "png_destroy_gamma_table:9", "png_free:10", "png_free:10", "png_free:10", "png_free:9", "png_free:9", "png_free:9", "png_free:9", "png_free:9", "png_free:9", "png_free:9", "png_free:9", "png_free:9", "png_free:9", "png_destroy_png_struct:7", "png_free:7", "png_free_jmpbuf:8", "exit:3", "_exit:5"]}
+{"ev": "counts", "distinct": 51, "capped": [], "top": [["png_free", 16], ["png_read_data", 5], ["png_get_io_ptr", 5], ["png_malloc_base", 3], ["png_get_uint_31", 3], ["png_sig_cmp", 2], ["png_set_mem_fn", 2], ["png_set_read_fn", 2], ["png_create_info_struct", 2], ["png_read_chunk_header", 2], ["png_calculate_crc", 2], ["png_destroy_info_struct", 2], ["png_free_data", 2], ["LLVMFuzzerTestOneInput", 1], ["png_create_read_struct", 1], ["png_create_read_struct_2", 1], ["png_create_png_struct", 1], ["png_set_error_fn", 1], ["png_user_version_check", 1], ["png_malloc_warn", 1], ["png_target_init", 1], ["png_set_option", 1], ["png_set_longjmp_fn", 1], ["png_set_crc_action", 1], ["png_set_user_limits", 1], ["png_set_chunk_cache_max", 1], ["png_set_chunk_malloc_max", 1], ["png_set_keep_unknown_chunks", 1], ["png_read_info", 1], ["png_read_sig", 1], ["png_reset_crc", 1], ["png_handle_chunk", 1], ["png_handle_IHDR", 1], ["png_crc_read", 1], ["png_crc_finish", 1], ["png_crc_finish_critical", 1], ["png_set_IHDR", 1], ["png_check_IHDR", 1], ["png_error", 1], ["png_default_error", 1]]}
+@@TRACE_END@@

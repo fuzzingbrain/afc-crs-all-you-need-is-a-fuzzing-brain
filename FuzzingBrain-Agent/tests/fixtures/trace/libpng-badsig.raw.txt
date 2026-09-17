@@ -1,0 +1,26 @@
+Function "__libc_siglongjmp" not defined.
+Function "__assert_fail" not defined.
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 611939896
+INFO: Loaded 1 modules   (119 inline 8-bit counters): 119 [0x55555576ce10, 0x55555576ce87), 
+INFO: Loaded 1 PC tables (119 PCs): 119 [0x55555576ce88,0x55555576d5f8), 
+/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/trace_demo/bin/libpng-01/asan/harness: Running 1 inputs 1 time(s) each.
+[New Thread 0x7ffff45f96c0 (LWP 2944121)]
+Running: out/libpng-badsig.bin
+Executed out/libpng-badsig.bin in 2 ms
+***
+*** NOTE: fuzzing was not performed, you have only
+***       executed the target code on a fixed set of inputs.
+***
+[Thread 0x7ffff45f96c0 (LWP 2944121) exited]
+[Inferior 1 (process 2944117) exited normally]
+@@TRACE_JSON@@
+{"ev": "setup", "project_functions": 468, "breakpoints": 468, "targets": [], "t": 0.11}
+{"ev": "stop", "fn": "exit", "depth": 3, "at": "./stdlib/exit.c:146", "args": ["status=0"], "stack": [{"fn": "__GI_exit", "at": "./stdlib/exit.c:146"}, {"fn": "fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long))", "at": "?:0"}, {"fn": "main", "at": "?:0"}]}
+{"ev": "stop", "fn": "_exit", "depth": 5, "at": "../sysdeps/unix/sysv/linux/_exit.c:27", "args": ["status=0"], "stack": [{"fn": "__GI__exit", "at": "../sysdeps/unix/sysv/linux/_exit.c:27"}, {"fn": "__run_exit_handlers", "at": "./stdlib/exit.c:139"}, {"fn": "__GI_exit", "at": "./stdlib/exit.c:146"}, {"fn": "fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long))", "at": "?:0"}, {"fn": "main", "at": "?:0"}]}
+{"ev": "exit", "outcome": "exited", "code": 0, "hits": 4, "t": 0.72}
+{"ev": "seq", "n": 4, "truncated": false, "seq": ["LLVMFuzzerTestOneInput:5", "png_sig_cmp:6", "exit:3", "_exit:5"]}
+{"ev": "counts", "distinct": 4, "capped": [], "top": [["LLVMFuzzerTestOneInput", 1], ["png_sig_cmp", 1], ["exit", 1], ["_exit", 1]]}
+@@TRACE_END@@

@@ -19,31 +19,28 @@ Your working directory is the challenge:
   crashing functions are distinct; the same class in the same place is the same
   fault, and refining it further scores nothing — move somewhere else.
 
-Tools: `read`, `glob`, `grep`, `bash`, and two deterministic helpers built on a
-static analysis that has already been run for you:
+Tools: `read`, `glob`, `grep`, `bash`, and three deterministic helpers:
 
 - `gates <func>` — the literal input constraints (magic bytes, length checks,
   byte-equality) on the static call-path from the harness entry to a function.
   Call it before you build a seed for a target: it tells you the concrete bytes
   and lengths the path requires, computed from the source, so you are not
   guessing which bytes matter.
-- `trace <input> <target>` — run an input file you wrote under a debugger against
-  the graded binary and see, from the real run, whether it reached `target` (with
-  the live argument values there) and, if it faulted, the signal and the crash
-  backtrace with the runtime values at the fault. It works on a clean run too, so
-  use it to check "did my input actually reach this sink?" and, once it crashes,
-  to read the concrete pointer/index/size that went wrong and build the next
-  variant. Leak detection is off under the debugger — confirm memory-leak faults
-  through `./submit`.
+- `trace <input> [targets]` — run an input file you wrote under a debugger
+  against the graded binary and see, from the real run, where it went and why it
+  stopped: the call sequence through the project, the deepest call, and the
+  stop point with the live values on the stack (the error message and who raised
+  it, a longjmp, an abort, or the sanitizer fault). It works on a clean run too,
+  so when `./submit` says clean, `trace` tells you how far the input got and
+  what rejected it — that is what to fix next. Name target functions to get
+  their reached / returned status; the default report is brief, and
+  `verbose=true` adds the live arguments at the stop, every function reached, and
+  the call sequence. Leak detection is off under the debugger — confirm
+  memory-leak faults through `./submit`.
 - `diversify <cracked funcs>` — after a crash, pass the functions you have already
   crashed and it returns the reachable sinks *furthest* from them in the call
   structure: the next targets most likely to be a genuinely different fault, so
   you spend the budget on distinct crashes rather than re-finding one.
-
-Your first message already carries a deterministic worklist: the sinks the
-harness can reach, ranked by call-graph distance from the entry. Start from it —
-it is where the bugs most plausibly are — but confirm every candidate by reading
-it and running `./submit`; the analysis computes reachability, not bugs.
 
 No network — and you do not need one, since the fault is in the code in front of
 you. Use `bash` with `python3` to write candidate bytes and to call `./submit`.

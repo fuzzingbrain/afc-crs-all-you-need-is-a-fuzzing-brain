@@ -15,6 +15,8 @@ the bench deliberately kept out of the workspace.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import re
 import shutil
@@ -111,8 +113,8 @@ def bash(command: str, timeout: int = 120) -> str:
         return ("error: coverage-guided fuzzing is disabled for this benchmark. "
                 "Do not build or run a fuzzer (libFuzzer -fork/-max_total_time/"
                 "-fsanitize=fuzzer, AFL, honggfuzz). Find the bug by reading the "
-                "code and constructing targeted inputs — use the worklist, gates, "
-                "and trace tools.")
+                "code and constructing targeted inputs — use the gates and trace "
+                "tools.")
     try:
         out = subprocess.run([_SANDBOX_SHELL, "-c", command], cwd=WORKSPACE,
                              capture_output=True, text=True, timeout=timeout)
@@ -130,7 +132,7 @@ def gates(func: str) -> str:
     """Deterministic P7: the literal input constraints on the static path from
     the harness entry to `func` -- magic bytes, minimum lengths, byte-equality
     gates -- so a seed for that target can be built to satisfy them."""
-    from . import analysis
+    from .worklist import analysis
     try:
         return analysis.gates_to(WORKSPACE, func)
     except Exception as e:  # noqa: BLE001
@@ -147,17 +149,18 @@ _SIG_RE = re.compile(r"received signal (?P<sig>SIG[A-Z]+)")
 # uses. Absent this dir, we are not running under the harness and trace is a no-op.
 _TRACE_REQ = WORKSPACE / ".fbbench" / "trace_req"
 _TRACE_RES = WORKSPACE / ".fbbench" / "trace_res"
+# The gdb-side script the bridge runs for us (gdb_tracer.py, next to this file).
+# It is copied into the request so the bench needs nothing from this package.
+_TRACER_PY = Path(__file__).resolve().with_name("gdb_tracer.py")
 
 
-def _parse_trace(raw: str, target: str) -> str:
-    """Turn the raw gdb batch output into a compact 'where it went / what it hit'
-    report: whether the input reached `target` (with the live args there), and,
-    if it faulted, the signal and the crash backtrace."""
+def _parse_trace_legacy(raw: str, target: str) -> str:
+    """The pre-tracer report, for a bench that still runs the one-breakpoint
+    script: whether the input reached `target`, and the crash stack if any."""
     reached = f"@@REACHED {target}@@" in raw
     lines = raw.splitlines()
     out = []
     if reached:
-        # `info args` sits between the marker and the first backtrace frame.
         try:
             i = next(k for k, l in enumerate(lines) if l.startswith(f"@@REACHED {target}@@"))
         except StopIteration:
@@ -172,12 +175,8 @@ def _parse_trace(raw: str, target: str) -> str:
                    + (f"   args: {'; '.join(args)}" if args else ""))
     else:
         out.append(f"reached {target}: no — this input did not hit it")
-
     sig = _SIG_RE.search(raw)
     if sig:
-        # The crash backtrace is everything after the fault signal (the reach
-        # frames printed at the breakpoint come before it), so the top frame here
-        # is the real fault site, not a frame the input merely passed through.
         crash_bt = raw[sig.end():]
         frames = []
         for l in crash_bt.splitlines():
@@ -195,30 +194,314 @@ def _parse_trace(raw: str, target: str) -> str:
     return "\n".join(out)
 
 
-def trace(input: str, target: str) -> str:
-    """Run one candidate input under gdb against the graded binary and report,
-    from the real run, where it reached and -- if it faulted -- the crash site
-    with the live values there. Unlike a static crash-stack parse it works on a
-    clean run too (did the input reach `target`?). LeakSanitizer is off under the
-    debugger, so a memory-leak fault will not surface here -- score those through
-    ./submit, which keeps the sanitizer on.
+# --- the tracer's JSON events -> the report the model reads -------------------
+_RUNTIME_FNS = {"longjmp", "_longjmp", "__longjmp_chk", "siglongjmp", "__libc_siglongjmp",
+                "abort", "__assert_fail", "__cxa_throw", "_exit", "exit"}
+_SYS_AT = ("/usr/", "/lib/", "/build/", "compiler-rt", "libFuzzer", "Fuzzer", "libcxx",
+           "libc++", "glibc", "sysdeps/", "nptl/", "csu/", "stdlib/", "setjmp/", "?:0")
+_ASAN_ERR = re.compile(r"==\d+==\s*ERROR:\s*(?P<msg>[^\n]+)")
+_ASAN_FRAME = re.compile(r"^\s*#\d+\s+0x[0-9a-fA-F]+\s+in\s+(?P<fn>\S+)\s+(?P<loc>/?\S+:\d+)", re.M)
+_SEQ_LINES = 60
 
-    The gdb run happens in the challenge container (the agent's host workspace has
-    no graded binary); this drops a request on the `.fbbench` bridge and reads the
-    raw gdb output back, then parses it here."""
+
+def _trace_events(raw: str) -> list[dict] | None:
+    if "@@TRACE_JSON@@" not in raw:
+        return None
+    body = raw.split("@@TRACE_JSON@@", 1)[1].split("@@TRACE_END@@", 1)[0]
+    evs = []
+    for l in body.splitlines():
+        l = l.strip()
+        if l.startswith("{"):
+            try:
+                evs.append(json.loads(l))
+            except json.JSONDecodeError:
+                pass
+    return evs
+
+
+def _proj_at(at: str) -> bool:
+    return bool(at) and not any(m in at for m in _SYS_AT)
+
+
+def _short_at(at: str) -> str:
+    return at.rsplit("/", 1)[-1] if at else "?"
+
+
+_ARG_STR = re.compile(r'^(?P<name>\w+)=0x[0-9a-fA-F]+(?: <[^>]*>)? "(?P<txt>[^"]*)"(?P<rest>.*)$', re.S)
+_ARG_BYTES = re.compile(r"  bytes=(?P<hex>[0-9a-f ]+)$")
+
+
+def _fmt_arg(a: str) -> str:
+    """One `name=value` from the tracer, made readable: a clean C string shows
+    as name="text", binary data as name=bytes[..], optimized-out as ?."""
+    a = a.replace("<optimized out>", "?")
+    m = _ARG_STR.match(a)
+    if m:
+        txt, rest = m.group("txt"), m.group("rest")
+        clean = txt.isprintable() and "\\" not in txt and "incomplete" not in rest
+        if clean and txt:
+            return f'{m.group("name")}="{txt}"'
+        b = _ARG_BYTES.search(rest)
+        if b:
+            return f'{m.group("name")}=bytes[{b.group("hex").strip()}]'
+    b = _ARG_BYTES.search(a)
+    if b:
+        return a[:b.start()].split(" ")[0] + f"=bytes[{b.group('hex').strip()}]"
+    return a[:110]
+
+
+def _fmt_args(args: list, limit: int = 5) -> str:
+    out = [_fmt_arg(a) for a in args[:limit]]
+    tail = "" if len(args) <= limit else f" (+{len(args) - limit} more)"
+    return ", ".join(out) + tail
+
+
+def _frame_line(fr: dict, indent: str = "    ") -> str:
+    s = f"{indent}{fr.get('fn', '?')}  ({_short_at(fr.get('at', ''))})"
+    args = fr.get("args") or []
+    if args:
+        s += "   " + _fmt_args(args)
+    return s
+
+
+def _stop_message(stack: list) -> tuple[str | None, str | None, int]:
+    """(message, raised-from, index) from the stop stack: the first string
+    argument found walking outward through project frames is the error message;
+    the frames that carry it are the error wrappers (png_error and friends); the
+    project frame just outside the last wrapper is where the error was raised.
+    `index` is that frame's position in `stack` (or the first carrier's)."""
+    msg = None
+    last_carrier = -1
+    for i, fr in enumerate(stack):
+        if not _proj_at(fr.get("at", "")):
+            continue
+        strings = [_fmt_arg(a).split("=", 1)[1] for a in (fr.get("args") or [])
+                   if '="' in _fmt_arg(a)]
+        if msg is None and strings:
+            msg = strings[0]
+        if msg is not None and msg in strings:
+            last_carrier = i
+        elif msg is not None:
+            break
+    if msg is None:
+        return None, None, 0
+    raiser = next((fr for fr in stack[last_carrier + 1:] if _proj_at(fr.get("at", ""))), None)
+    idx = stack.index(raiser) if raiser else last_carrier
+    return msg, (f"{raiser.get('fn')} ({_short_at(raiser.get('at', ''))})" if raiser else None), idx
+
+
+def _chain(frames: list, n: int = 5) -> str:
+    """fn (file:line) ← fn (file:line) ← ..., innermost first."""
+    return " ← ".join(f"{fr.get('fn', '?')} ({_short_at(fr.get('at', ''))})" for fr in frames[:n])
+
+
+def _summarize_trace(raw: str, targets: list[str], verbose: bool = False) -> str:
+    """The report the model reads.
+
+    Brief (default): the outcome, one line on why it stopped, the deepest call,
+    and each target's reached / returned / not-reached status -- about ten
+    lines, enough to answer "did it get there, and if not what rejected it".
+    Verbose: the same plus the live arguments of every project frame at the
+    stop, every function reached with its call count, and the indented call
+    sequence -- for when the brief answer is not enough to pick the next input.
+    """
+    evs = _trace_events(raw)
+    if evs is None:
+        return _parse_trace_legacy(raw, targets[0] if targets else "")
+    by: dict[str, list] = {}
+    for e in evs:
+        by.setdefault(e.get("ev"), []).append(e)
+    setup = (by.get("setup") or [{}])[0]
+    exit_ev = (by.get("exit") or [{}])[-1]
+    seq_ev = (by.get("seq") or [{}])[0]
+    counts_ev = (by.get("counts") or [{}])[0]
+    seq = seq_ev.get("seq") or []
+    counts = [(n, c) for n, c in (counts_ev.get("top") or []) if n not in _RUNTIME_FNS]
+    signal = (by.get("signal") or [None])[-1]
+    # a stop is interesting only if the project is on the stack (libFuzzer's own
+    # exit() at the end of a normal run has no project frame)
+    stops = [e for e in by.get("stop", [])
+             if any(_proj_at(fr.get("at", "")) for fr in e.get("stack", []))]
+    hits = exit_ev.get("hits", 0)
+    out = [f"trace: {hits} calls into {counts_ev.get('distinct', '?')} project functions, "
+           f"{exit_ev.get('t', '?')}s under gdb"
+           + (f" (breakpoints on {setup.get('breakpoints')} functions)"
+              if verbose and setup.get("breakpoints") else "")]
+
+    # ---- outcome + why it stopped
+    if signal:
+        m = _ASAN_ERR.search(raw)
+        out.append(f"outcome: CRASHED — {signal.get('sig')}"
+                   + (f"; sanitizer: {m.group('msg').strip()}" if m else ""))
+        # only the fault stack: the report goes on with "allocated by" / "freed by"
+        first = raw.split("ERROR:", 1)[1] if "ERROR:" in raw else raw
+        first = first.split("\n\n", 1)[0]
+        frames = [(fm.group("fn"), fm.group("loc")) for fm in _ASAN_FRAME.finditer(first)]
+        proj = [{"fn": fn, "at": loc} for fn, loc in frames if _proj_at(loc)]
+        if not proj:
+            proj = [fr for fr in signal.get("stack", []) if _proj_at(fr.get("at", ""))]
+        if proj and verbose:
+            out.append("  fault site (project frames, innermost first):")
+            out += [f"    {fr['fn']}  ({_short_at(fr['at'])})" for fr in proj[:6]]
+        elif proj:
+            out.append(f"  fault site: {_chain(proj, 4)}")
+    elif exit_ev.get("outcome") == "timeout":
+        out.append(f"outcome: KILLED after {exit_ev.get('t')}s under gdb (timeout); the trace below is partial")
+    elif stops:
+        st = stops[0]
+        kind = st.get("fn", "")
+        if "longjmp" in kind:
+            label = "the program gave up (longjmp back to the harness)"
+        elif kind == "__cxa_throw":
+            label = "a C++ exception was thrown"
+        elif kind in ("abort", "__assert_fail"):
+            label = f"{kind}() was called"
+        else:
+            label = f"{kind}() was called from inside the harness"
+        out.append(f"outcome: no crash; {label}; process exit code {exit_ev.get('code')}")
+        proj_frames = [fr for fr in st.get("stack", []) if _proj_at(fr.get("at", ""))]
+        if verbose:
+            out.append("  why it stopped — the stack at that moment, innermost first, with live arguments:")
+            out += [_frame_line(fr) for fr in proj_frames[:8]]
+            if len(stops) > 1:
+                out.append(f"  ({len(stops) - 1} more such stop(s) later in the run)")
+        else:
+            stack = st.get("stack", [])
+            msg, raiser, idx = _stop_message(stack)
+            line = "  why: "
+            if msg and raiser:
+                line += f"{msg} raised from {raiser}; "
+            elif msg:
+                line += f"{msg}; "
+            # the chain from the raising frame outward (the error wrappers
+            # inside it are plumbing, not the answer)
+            chain = [fr for fr in stack[idx:] if _proj_at(fr.get("at", ""))] if msg else proj_frames
+            line += "stack: " + _chain(chain, 6)
+            out.append(line)
+    else:
+        out.append(f"outcome: no crash; ran to the end, process exit code {exit_ev.get('code')}")
+
+    # ---- deepest project call
+    base = int(seq[0].rsplit(":", 1)[1]) if seq and ":" in seq[0] else 0
+    if seq:
+        deepest = max(((int(x.rsplit(":", 1)[1]) - base, x.rsplit(":", 1)[0]) for x in seq
+                       if x.rsplit(":", 1)[0] not in _RUNTIME_FNS), default=None)
+        if deepest:
+            out.append(f"deepest call: {deepest[1]}  ({deepest[0]} levels below the harness entry)")
+
+    # ---- targets
+    if targets:
+        out.append("targets:")
+        calls = by.get("call", [])
+        rets = by.get("ret", [])
+        lost = by.get("ret_lost", [])
+        for t in targets:
+            c = [e for e in calls if e.get("fn") == t]
+            if not c:
+                out.append(f"  {t}: NOT reached")
+                continue
+            line = f"  {t}: reached ({len(c)} call{'s' if len(c) > 1 else ''})"
+            args = c[0].get("args") or []
+            if verbose and args:
+                line += f"; args at first call: {_fmt_args(args)}"
+            t_rets = [e for e in rets if e.get("fn") == t]
+            n_lost = sum(1 for e in lost if e.get("fn") == t)
+            if verbose:
+                out.append(line)
+                for r in t_rets[:3]:
+                    v = r.get("value")
+                    out.append(f"      returned {v if v is not None else '(void)'} -> {_short_at(r.get('to', ''))}")
+                if n_lost:
+                    out.append(f"      {n_lost} call(s) never returned: the frame was dropped by longjmp / exception / abort")
+            else:
+                bits = []
+                if t_rets:
+                    vals = [r.get("value") if r.get("value") is not None else "(void)" for r in t_rets[:3]]
+                    bits.append("returned " + ", ".join(str(v) for v in vals))
+                if n_lost:
+                    bits.append(f"{n_lost} call(s) never returned (frame dropped by longjmp / exception / abort)")
+                out.append(line + ("; " + "; ".join(bits) if bits else ""))
+
+    if not verbose:
+        out.append("(verbose=true adds the live arguments at the stop, every function reached, and the call sequence)")
+        return "\n".join(out)
+
+    # ---- reached
+    if counts:
+        out.append("functions reached (calls): "
+                   + ", ".join(f"{n}×{c}" if c > 1 else n for n, c in counts[:30])
+                   + (" ..." if len(counts) > 30 else ""))
+        capped = counts_ev.get("capped") or []
+        if capped:
+            out.append(f"  (hot functions capped at {len(capped)}: {', '.join(capped[:8])}"
+                       + (" ..." if len(capped) > 8 else "") + ")")
+
+    # ---- the sequence, compressed and indented by depth
+    if seq:
+        items: list = []
+        for x in seq:
+            fn, d = x.rsplit(":", 1)
+            if fn in _RUNTIME_FNS:
+                continue
+            d = int(d) - base
+            if items and items[-1][0] == fn and items[-1][1] == d:
+                items[-1][2] += 1
+            else:
+                items.append([fn, d, 1])
+        lines = [f"  {'  ' * max(0, d)}{fn}" + (f" ×{k}" if k > 1 else "") for fn, d, k in items]
+        if len(lines) > _SEQ_LINES:
+            lines = lines[:_SEQ_LINES - 15] + [f"  ... {len(lines) - _SEQ_LINES} calls omitted ..."] + lines[-15:]
+        out.append("call sequence (indent = stack depth; approximate where the compiler inlined):")
+        out += lines
+        if seq_ev.get("truncated"):
+            out.append("  (sequence capped; counts above are complete)")
+    out.append("(LeakSanitizer is off under gdb; score memory-leak faults through ./submit.)")
+    return "\n".join(out)
+
+
+# The last few raw gdb outputs, keyed by (input bytes, targets): a brief call
+# followed by a verbose one on the same input renders from the same run instead
+# of paying for gdb twice.
+_TRACE_CACHE: dict[tuple, str] = {}
+_TRACE_CACHE_MAX = 16
+
+
+def trace(input: str, target: str = "", verbose: bool = False) -> str:
+    """Run one candidate input under gdb against the graded binary and report,
+    from the real run, where it went and why it stopped: the stop point with
+    the live values on the stack (an error message, a longjmp, an abort, a
+    sanitizer fault), the deepest call, and -- for any `target` functions
+    named -- whether each was reached and what it returned. `verbose` adds the
+    full call sequence, every function reached, and the arguments at the stop.
+    Works on a clean run as well as a crash. LeakSanitizer is off under the
+    debugger, so a memory-leak fault will not surface here -- score those
+    through ./submit.
+
+    The gdb run happens in the challenge container (the agent's host workspace
+    has no graded binary): this drops the input, the gdb-side script and the
+    target list on the `.fbbench` bridge, reads the raw gdb output back, and
+    turns the tracer's JSON events into the report here."""
     inp = Path(input)
     if not inp.is_file():
         return f"error: no input file at {input!r}; write your candidate bytes there first."
-    tgt = (target or "").strip().split("::")[-1]
-    if not tgt:
-        return "error: give a target function to break on (the sink you are aiming for)."
+    targets = [t.strip().split("::")[-1] for t in (target or "").replace(";", ",").split(",")
+               if t.strip()]
+    if isinstance(verbose, str):
+        verbose = verbose.strip().lower() in ("1", "true", "yes", "on")
+    try:
+        key = (hashlib.sha256(inp.read_bytes()).hexdigest(), tuple(targets))
+    except OSError as e:
+        return f"error: could not read {input!r}: {e}"
+    if key in _TRACE_CACHE:
+        return _summarize_trace(_TRACE_CACHE[key], targets, verbose=bool(verbose))
     if not _TRACE_REQ.parent.is_dir():
         return "error: trace unavailable — not running under the bench harness (no bridge)."
     _TRACE_REQ.mkdir(parents=True, exist_ok=True)
     rid = f"{time.time_ns()}-{os.getpid()}"
     try:
         shutil.copyfile(inp, _TRACE_REQ / f"{rid}.bin")
-        (_TRACE_REQ / f"{rid}.tgt").write_text(tgt)     # written last = request ready
+        shutil.copyfile(_TRACER_PY, _TRACE_REQ / f"{rid}.tracer.py")
+        (_TRACE_REQ / f"{rid}.tgt").write_text(",".join(targets))   # written last = request ready
     except OSError as e:
         return f"error: could not post trace request: {e}"
     res = _TRACE_RES / rid
@@ -228,7 +511,10 @@ def trace(input: str, target: str) -> str:
             res.unlink(missing_ok=True)
             if raw.startswith("error:"):
                 return raw.strip()
-            return _parse_trace(raw, tgt)
+            if len(_TRACE_CACHE) >= _TRACE_CACHE_MAX:
+                _TRACE_CACHE.pop(next(iter(_TRACE_CACHE)))
+            _TRACE_CACHE[key] = raw
+            return _summarize_trace(raw, targets, verbose=bool(verbose))
         time.sleep(0.2)
     return "error: trace timed out waiting for the bridge."
 
@@ -237,19 +523,22 @@ def diversify(cracked: str = "") -> str:
     """Deterministic Furthest-Point-First: given the functions where you already
     found distinct crashes (comma-separated), return the reachable sinks that are
     *furthest* from them in the call structure -- the next targets most likely to
-    be a different fault. With none given, returns the nearest-first worklist."""
-    from . import analysis, frontier
+    be a different fault. Needs at least one crashed function."""
+    from .worklist import analysis, frontier
     try:
         ctx = analysis.build(WORKSPACE)
         if not ctx.entry:
             return "no entry point; cannot rank targets."
         names = [x.strip() for x in cracked.replace(";", ",").split(",") if x.strip()]
+        if not names:
+            return ("give diversify the functions where you already found crashes "
+                    "(comma-separated); it ranks the remaining reachable sinks by "
+                    "call-graph distance from them.")
         far = frontier.furthest_first(ctx, names)
         if not far:
             return "no reachable sinks to suggest."
         head = ("Furthest reachable sinks from what you already cracked "
-                f"({', '.join(names)}), most-different first:" if names
-                else "Reachable sinks, nearest-first (no crashes recorded yet):")
+                f"({', '.join(names)}), most-different first:")
         lines = [head]
         for i, s in enumerate(far, 1):
             lines.append(f"{i:2}. [{s.klass}] {s.func}  ({s.file}:{s.line}, dist {s.distance})")
@@ -323,8 +612,9 @@ SCHEMAS = [
             ["pattern"]),
     _schema("bash", {"command": {"type": "string"}}, ["command"]),
     _schema("gates", {"func": {"type": "string"}}, ["func"]),
-    _schema("trace", {"input": {"type": "string"}, "target": {"type": "string"}},
-            ["input", "target"]),
+    _schema("trace", {"input": {"type": "string"}, "target": {"type": "string"},
+                      "verbose": {"type": "boolean"}},
+            ["input"]),
     _schema("diversify", {"cracked": {"type": "string"}}, []),
 ]
 

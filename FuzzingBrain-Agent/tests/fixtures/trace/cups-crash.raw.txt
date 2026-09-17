@@ -1,0 +1,86 @@
+Function "__libc_siglongjmp" not defined.
+Function "__assert_fail" not defined.
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib/x86_64-linux-gnu/libthread_db.so.1".
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 1294324570
+INFO: Loaded 1 modules   (3 inline 8-bit counters): 3 [0x5555557bb580, 0x5555557bb583), 
+INFO: Loaded 1 PC tables (3 PCs): 3 [0x5555557bb588,0x5555557bb5b8), 
+[New Thread 0x7ffff3cf96c0 (LWP 2944167)]
+/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/trace_demo/bin/cups-01/asan/harness: Running 1 inputs 1 time(s) each.
+Running: out/cups-crash.bin
+
+Thread 1 "harness" hit Breakpoint -509, cupsUTF8ToCharset (dest=<optimized out>, src=<optimized out>, maxout=<optimized out>, encoding=<optimized out>) at transcode.c:200
+200	transcode.c: No such file or directory.
+=================================================================
+==2944161==ERROR: AddressSanitizer: heap-buffer-overflow on address 0x602000000052 at pc 0x5555556c1c73 bp 0x7fffffffc290 sp 0x7fffffffc288
+READ of size 1 at 0x602000000052 thread T0
+[Detaching after fork from child process 2944168]
+    #0 0x5555556c1c72 in cupsUTF8ToCharset /src/cups/cups/transcode.c:245:12
+    #1 0x5555556c0e08 in LLVMFuzzerTestOneInput /src/harness/harness.cc:19:3
+    #2 0x5555555e7013 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/trace_demo/bin/cups-01/asan/harness+0x93013) (BuildId: e5ef57c4d8d123fb4ea87a3a9ebc93eae219b353)
+    #3 0x5555555d101f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/trace_demo/bin/cups-01/asan/harness+0x7d01f) (BuildId: e5ef57c4d8d123fb4ea87a3a9ebc93eae219b353)
+    #4 0x5555555d6d56 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/trace_demo/bin/cups-01/asan/harness+0x82d56) (BuildId: e5ef57c4d8d123fb4ea87a3a9ebc93eae219b353)
+    #5 0x555555600b92 in main (/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/trace_demo/bin/cups-01/asan/harness+0xacb92) (BuildId: e5ef57c4d8d123fb4ea87a3a9ebc93eae219b353)
+    #6 0x7ffff7445249 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+    #7 0x7ffff7445304 in __libc_start_main csu/../csu/libc-start.c:360:3
+    #8 0x5555555cb6b0 in _start (/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/trace_demo/bin/cups-01/asan/harness+0x776b0) (BuildId: e5ef57c4d8d123fb4ea87a3a9ebc93eae219b353)
+
+0x602000000052 is located 0 bytes to the right of 2-byte region [0x602000000050,0x602000000052)
+allocated by thread T0 here:
+    #0 0x55555568391e in malloc (/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/trace_demo/bin/cups-01/asan/harness+0x12f91e) (BuildId: e5ef57c4d8d123fb4ea87a3a9ebc93eae219b353)
+    #1 0x5555556c0d9c in LLVMFuzzerTestOneInput /src/harness/harness.cc:14:37
+    #2 0x5555555e7013 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/trace_demo/bin/cups-01/asan/harness+0x93013) (BuildId: e5ef57c4d8d123fb4ea87a3a9ebc93eae219b353)
+    #3 0x5555555d101f in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/trace_demo/bin/cups-01/asan/harness+0x7d01f) (BuildId: e5ef57c4d8d123fb4ea87a3a9ebc93eae219b353)
+    #4 0x5555555d6d56 in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/trace_demo/bin/cups-01/asan/harness+0x82d56) (BuildId: e5ef57c4d8d123fb4ea87a3a9ebc93eae219b353)
+    #5 0x555555600b92 in main (/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/trace_demo/bin/cups-01/asan/harness+0xacb92) (BuildId: e5ef57c4d8d123fb4ea87a3a9ebc93eae219b353)
+    #6 0x7ffff7445249 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+
+SUMMARY: AddressSanitizer: heap-buffer-overflow /src/cups/cups/transcode.c:245:12 in cupsUTF8ToCharset
+Shadow bytes around the buggy address:
+  0x0c047fff7fb0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7fc0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7fd0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7fe0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x0c047fff7ff0: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x0c047fff8000: fa fa 01 fa fa fa 01 fa fa fa[02]fa fa fa fa fa
+  0x0c047fff8010: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8020: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8030: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8040: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+  0x0c047fff8050: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa
+Shadow byte legend (one shadow byte represents 8 application bytes):
+  Addressable:           00
+  Partially addressable: 01 02 03 04 05 06 07 
+  Heap left redzone:       fa
+  Freed heap region:       fd
+  Stack left redzone:      f1
+  Stack mid redzone:       f2
+  Stack right redzone:     f3
+  Stack after return:      f5
+  Stack use after scope:   f8
+  Global redzone:          f9
+  Global init order:       f6
+  Poisoned by user:        f7
+  Container overflow:      fc
+  Array cookie:            ac
+  Intra object redzone:    bb
+  ASan internal:           fe
+  Left alloca redzone:     ca
+  Right alloca redzone:    cb
+==2944161==ABORTING
+
+Thread 1 "harness" received signal SIGABRT, Aborted.
+__pthread_kill_implementation (threadid=<optimized out>, signo=signo@entry=6, no_tid=no_tid@entry=0) at ./nptl/pthread_kill.c:44
+44	./nptl/pthread_kill.c: No such file or directory.
+[Inferior 1 (process 2944161) killed]
+@@TRACE_JSON@@
+{"ev": "setup", "project_functions": 506, "breakpoints": 486, "targets": ["cupsUTF8ToCharset"], "t": 0.09}
+{"ev": "call", "fn": "cupsUTF8ToCharset", "depth": 6, "at": "transcode.c:200", "args": ["dest=<optimized out>", "src=<optimized out>", "maxout=<optimized out>", "encoding=<optimized out>"]}
+{"ev": "stop", "fn": "abort", "depth": 12, "at": "./stdlib/abort.c:49", "args": [], "stack": [{"fn": "__GI_abort", "at": "./stdlib/abort.c:49"}, {"fn": "__sanitizer::Abort()", "at": "?:0"}, {"fn": "__sanitizer::Die()", "at": "?:0"}, {"fn": "__asan::ScopedInErrorReport::~ScopedInErrorReport()", "at": "?:0"}, {"fn": "__asan::ReportGenericError(unsigned long, unsigned long, unsigned long, unsigned long, bool, unsigned long, unsigned int, bool)", "at": "?:0"}, {"fn": "__asan_report_load1", "at": "?:0"}, {"fn": "cupsUTF8ToCharset", "at": "transcode.c:245", "args": []}, {"fn": "LLVMFuzzerTestOneInput", "at": "/src/harness/harness.cc:19", "args": ["data=<optimized out>", "size=<optimized out>"]}, {"fn": "fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long)", "at": "?:0"}, {"fn": "fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long)", "at": "?:0"}, {"fn": "fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long))", "at": "?:0"}, {"fn": "main", "at": "?:0"}]}
+{"ev": "signal", "sig": "SIGABRT", "stack": [{"fn": "__pthread_kill_implementation", "at": "./nptl/pthread_kill.c:44"}, {"fn": "__pthread_kill_internal", "at": "./nptl/pthread_kill.c:78"}, {"fn": "__GI_raise", "at": "../sysdeps/posix/raise.c:26"}, {"fn": "__GI_abort", "at": "./stdlib/abort.c:79"}, {"fn": "__sanitizer::Abort()", "at": "?:0"}, {"fn": "__sanitizer::Die()", "at": "?:0"}, {"fn": "__asan::ScopedInErrorReport::~ScopedInErrorReport()", "at": "?:0"}, {"fn": "__asan::ReportGenericError(unsigned long, unsigned long, unsigned long, unsigned long, bool, unsigned long, unsigned int, bool)", "at": "?:0"}, {"fn": "__asan_report_load1", "at": "?:0"}, {"fn": "cupsUTF8ToCharset", "at": "transcode.c:245", "args": []}, {"fn": "LLVMFuzzerTestOneInput", "at": "/src/harness/harness.cc:19", "args": ["data=<optimized out>", "size=<optimized out>"]}, {"fn": "fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long)", "at": "?:0"}, {"fn": "fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long)", "at": "?:0"}, {"fn": "fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long))", "at": "?:0"}, {"fn": "main", "at": "?:0"}]}
+{"ev": "ret_lost", "fn": "cupsUTF8ToCharset", "note": "frame left without a normal return (longjmp / exception / abort)"}
+{"ev": "exit", "outcome": "signal", "code": null, "hits": 3, "t": 0.72}
+{"ev": "seq", "n": 3, "truncated": false, "seq": ["LLVMFuzzerTestOneInput:5", "cupsUTF8ToCharset:6", "abort:12"]}
+{"ev": "counts", "distinct": 3, "capped": [], "top": [["LLVMFuzzerTestOneInput", 1], ["cupsUTF8ToCharset", 1], ["abort", 1]]}
+@@TRACE_END@@
