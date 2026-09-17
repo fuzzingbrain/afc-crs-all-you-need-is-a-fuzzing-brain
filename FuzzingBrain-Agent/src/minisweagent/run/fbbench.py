@@ -160,7 +160,10 @@ class _ReportingAgent(DefaultAgent):
         # Without it the bench falls back to reconstructing a transcript from
         # the submissions alone -- every candidate, no reasoning.
         self.coach = Coach(turn_limit=self.config.turn_limit,
-                           wall_limit_s=self.config.wall_time_limit_seconds)
+                           wall_limit_s=self.config.wall_time_limit_seconds,
+                           workspace=workspace)
+        self._last_prompt_tokens = 0
+        self._compacted_at = -10_000
         self._trace = workspace / ".fbagent-trace.jsonl"
         self._trace.parent.mkdir(parents=True, exist_ok=True)
         self._trace.write_text("")
@@ -251,12 +254,74 @@ class _ReportingAgent(DefaultAgent):
                               is_error=False, content=_text_of(obs)[:20000])
         return observations
 
+    # ---- context compaction -------------------------------------------------
+    # 88% of this agent's context is command output: 174 KB of it on fwupd-01,
+    # against 2 KB of model text. With no compaction the whole of that is re-read
+    # on every turn, and cache reads were 47% of that run's $7.61.
+    #
+    # The trap is that compaction fights the prompt cache. We run at a 95% hit
+    # rate; a cache read costs $0.50/MTok and a cache write $6.25/MTok, so
+    # rewriting history converts cheap reads into writes at 12.5x. Compacting
+    # every turn would cost more than it saves. So: once, when the context
+    # crosses a threshold, and then not again for a long stretch -- one expensive
+    # re-write, then cheap again for the rest of the run.
+    COMPACT_ABOVE_TOKENS = 60_000   # measured: fwupd-01 averaged ~93k per turn
+    COMPACT_KEEP_RECENT = 10        # turns whose output stays verbatim
+    COMPACT_COOLDOWN_TURNS = 25     # never twice in quick succession
+
+    def _compact(self) -> None:
+        """Stub out old command output, in place.
+
+        Only the CONTENT of observation messages changes. Nothing is removed and
+        no role is touched: an assistant tool_use must keep its matching
+        tool_result or the next request is rejected outright, which is how an
+        earlier version of this agent killed a run 12 turns early.
+
+        Three things survive verbatim, because they are the run's actual state:
+        every model message (its reasoning and its commands), any observation
+        carrying a ./submit verdict, and the last COMPACT_KEEP_RECENT turns.
+        """
+        keep_from = max(0, len(self.messages) - self.COMPACT_KEEP_RECENT * 2)
+        saved = 0
+        for i, m in enumerate(self.messages):
+            if i >= keep_from or m.get("role") not in ("tool", "user"):
+                continue
+            text = _text_of(m)
+            if len(text) < 400 or "crash:" in text or "clean: no fault" in text:
+                continue          # verdicts are the record; short output is free
+            saved += len(text)
+            stub = f"<elided: {len(text) // 1024 or 1} KB of output from an earlier turn>"
+            if isinstance(m.get("content"), list):
+                m["content"] = [{"type": "text", "text": stub}]
+            else:
+                m["content"] = stub
+        self._compacted_at = self.n_turns
+        self._trace_write(kind="text",
+                          text=f"[compacted] elided ~{saved // 1024} KB of earlier "
+                               f"command output, keeping the last "
+                               f"{self.COMPACT_KEEP_RECENT} turns and every verdict")
+        print(json.dumps({"event": "compacted", "turn": self.n_turns,
+                          "elided_bytes": saved}), flush=True)
+
+    def _maybe_compact(self) -> None:
+        if self._last_prompt_tokens < self.COMPACT_ABOVE_TOKENS:
+            return
+        if self.n_turns - self._compacted_at < self.COMPACT_COOLDOWN_TURNS:
+            return
+        self._compact()
+
     def query(self) -> dict:
         # Published here rather than after the action, because this is the
         # moment the tokens were actually spent. A turn whose command runs for
         # minutes -- a build, a long ./submit -- would otherwise be unreported
         # for all of it, and a kill in that window would lose the whole run.
+        self._maybe_compact()
         message = super().query()
+        # The provider's own count of what we just sent -- the only honest
+        # measure of context size, and free.
+        usage = ((message.get("extra") or {}).get("response") or {}).get("usage") or {}
+        if isinstance(usage, dict) and usage.get("prompt_tokens"):
+            self._last_prompt_tokens = int(usage["prompt_tokens"])
         self.publish("running")
         if text := _text_of(message):
             self._trace_write(kind="text", text=text)
@@ -292,15 +357,35 @@ set -u
 if [ $# -ne 2 ] || [ ! -f "$1" ]; then
   echo "usage: ./reach <input-file> <function>" >&2; exit 2
 fi
-h="$(cd "$(dirname "$0")" && pwd)"; id="$(date +%s%N)-$$"
+h="$(cd "$(dirname "$0")" && pwd)"
+DEAD="$h/.fbbench/reach_unavailable"
+
+# Learned once, remembered for the rest of the run: not every image ships a
+# debugger, and there is no way to know without asking. Asking costs a turn, so
+# asking repeatedly costs one each time.
+if [ -f "$DEAD" ]; then cat "$DEAD" >&2; exit 1; fi
+
+id="$(date +%s%N)-$$"
 cp -- "$1" "$h/.fbbench/trace_req/$id.bin"
 printf '%s' "$2" > "$h/.fbbench/trace_req/$id.tgt"   # .tgt last: it means ready
+note_dead() {
+  printf '%s\n' "$1" > "$DEAD"
+  cat "$DEAD" >&2
+  exit 1
+}
 for i in $(seq 1 1200); do
-  [ -f "$h/.fbbench/trace_res/$id" ] && { cat "$h/.fbbench/trace_res/$id"; exit 0; }
+  if [ -f "$h/.fbbench/trace_res/$id" ]; then
+    out=$(cat "$h/.fbbench/trace_res/$id")
+    case "$out" in
+      *"gdb: not found"*|*"exec: gdb"*|*"No such file or directory"*gdb*)
+        note_dead "reach: not available on this challenge - its image ships no debugger. Do not call ./reach again; judge how far an input gets from the ./submit verdict instead (0 ms means it never reached the library)." ;;
+    esac
+    printf '%s\n' "$out"; exit 0
+  fi
   # Unclaimed after 5s means nothing is listening; a claimed one may take minutes.
   if [ "$i" -gt 25 ] && [ -f "$h/.fbbench/trace_req/$id.tgt" ]; then
     rm -f "$h/.fbbench/trace_req/$id."*
-    echo "reach: no responder (this bench build has no tracer)" >&2; exit 1
+    note_dead "reach: not available on this bench build - nothing answers trace requests. Do not call ./reach again; use the ./submit verdict instead."
   fi
   sleep 0.2
 done

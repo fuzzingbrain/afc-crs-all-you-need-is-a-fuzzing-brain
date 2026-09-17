@@ -413,3 +413,71 @@ def test_the_report_survives_a_failure_whose_message_is_itself_json(tmp_path):
              if "usage" in json.loads(m.group(0))]
     assert found and found[-1]["turns_used"] == 88
     assert found[-1]["failed"] is True, "a crashed run must not read as a clean finish"
+
+
+# ---- context compaction -----------------------------------------------------
+# 88% of this agent's context is command output, and with no compaction all of
+# it is re-read every turn -- cache reads were 47% of fwupd-01's $7.61. But
+# compaction fights the prompt cache (reads $0.50/MTok, writes $6.25/MTok at a
+# 95% hit rate), so it happens once at a threshold, not every turn.
+
+def _agent_for_compaction(tmp_path):
+    import sys as _s
+    _s.path.insert(0, str(REPO / "src"))
+    from minisweagent.run.fbbench import _ReportingAgent
+    from minisweagent.environments.local import LocalEnvironment
+    from minisweagent.models.test_models import DeterministicModel
+    ws = tmp_path / "ws"; (ws / ".fbbench").mkdir(parents=True)
+    a = _ReportingAgent(DeterministicModel(outputs=[]), LocalEnvironment(),
+                        workspace=ws, model_name="m",
+                        system_template="", instance_template="")
+    a.messages = [
+        {"role": "system", "content": "sys"},
+        {"role": "assistant", "content": "thinking about the harness"},
+        {"role": "tool", "content": "A" * 9000},                       # old, bulky
+        {"role": "assistant", "content": "more thinking"},
+        {"role": "tool", "content": "crash: abrt|f|g"},                # a verdict
+        {"role": "tool", "content": "B" * 9000},                       # old, bulky
+    ] + [{"role": "tool", "content": "C" * 9000} for _ in range(20)]   # recent
+    return a
+
+
+def test_compaction_elides_old_output_but_keeps_verdicts_and_reasoning(tmp_path):
+    a = _agent_for_compaction(tmp_path)
+    before = len(a.messages)
+    a._compact()
+    assert len(a.messages) == before, "messages must never be removed"
+    assert a.messages[1]["content"] == "thinking about the harness"
+    assert a.messages[3]["content"] == "more thinking", "model reasoning is the state"
+    assert a.messages[4]["content"] == "crash: abrt|f|g", "verdicts are the record"
+    assert "elided" in a.messages[2]["content"], "old bulk output should be stubbed"
+    assert a.messages[-1]["content"] == "C" * 9000, "recent turns stay verbatim"
+
+
+def test_compaction_never_breaks_the_tool_use_pairing(tmp_path):
+    # An assistant tool_use must keep its matching tool_result, or the next
+    # request is rejected outright. That bug killed a live run 12 turns early.
+    a = _agent_for_compaction(tmp_path)
+    roles_before = [m["role"] for m in a.messages]
+    a._compact()
+    assert [m["role"] for m in a.messages] == roles_before
+
+
+def test_compaction_waits_for_the_threshold_and_then_cools_down(tmp_path):
+    a = _agent_for_compaction(tmp_path)
+    a._last_prompt_tokens = 10_000
+    a.n_turns = 40
+    a._maybe_compact()
+    assert a._compacted_at < 0, "must not fire below the token threshold"
+
+    a._last_prompt_tokens = 80_000
+    a._maybe_compact()
+    assert a._compacted_at == 40, "should fire once over the threshold"
+
+    a.n_turns = 45
+    a._maybe_compact()
+    assert a._compacted_at == 40, "must not fire again inside the cooldown"
+
+    a.n_turns = 70
+    a._maybe_compact()
+    assert a._compacted_at == 70, "may fire again well after the cooldown"

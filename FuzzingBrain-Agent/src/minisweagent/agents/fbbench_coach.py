@@ -175,10 +175,14 @@ class Coach:
     MIN_TURN_FRACTION_HELD = 0.40   # a higher bar once a fault is already banked
     MIN_SECONDS_LEFT = 300       # ... and this much clock, so it can act on it
 
-    def __init__(self, turn_limit: int, wall_limit_s: int):
+    def __init__(self, turn_limit: int, wall_limit_s: int, workspace=None):
         self.turn_limit = turn_limit
         self.wall_limit_s = wall_limit_s
         self.banked: list[str] = []
+        # Written by ./reach the first time the tracer cannot answer, so the
+        # hint below stops recommending a tool this challenge has not got.
+        self._reach_dead = ((workspace / ".fbbench" / "reach_unavailable")
+                            if workspace else None)
         self.turns_since_submit = 0
         self.pushbacks = 0
 
@@ -228,11 +232,25 @@ class Coach:
         # -- 2. reach, when the verdict is flat ------------------------------
         if _CLEAN.search(output or "") and "target ran 0 ms" in (output or ""):
             notes.append(
-                "[reach] 0 ms means the harness threw that input out before the "
-                "library saw it. Nothing about its contents matters yet. Re-read "
-                "the entry checks, or run `./reach <file> <function>` to see "
-                "which of them you are failing.")
+                "[gate] 0 ms means the harness threw that input out before the "
+                "library saw it. Nothing about its contents matters yet -- re-read "
+                "the entry checks in the harness and work out which one you are "
+                "failing."
+                + ("" if self._reach_unavailable() else
+                   " `./reach <file> <function>` will tell you which functions you "
+                   "did get to."))
         return notes
+
+    def _reach_unavailable(self) -> bool:
+        """Has ./reach already reported that this challenge has no tracer?
+
+        About half the challenge images ship no debugger, and nothing says
+        which. Recommending the tool there costs a turn per suggestion and
+        teaches the model nothing -- libxml2-04 spent four that way."""
+        try:
+            return bool(self._reach_dead and self._reach_dead.exists())
+        except OSError:
+            return False
 
     # -- 1. don't let me stop ------------------------------------------------
     def may_finish(self, turn: int, elapsed_s: float) -> str | None:
