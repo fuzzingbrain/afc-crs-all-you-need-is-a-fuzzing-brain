@@ -1,0 +1,28 @@
+# fb-agent, as FuzzingBrain-Bench's `external` arm invokes it.
+#
+#   fb-bench run <bugs> --agent /path/to/this/file --model claude-opus-5
+#
+# or register it once and use the name:
+#   ln -s "$PWD/fb-agent.agent.yaml" ~/.config/fbbench/agents/fb-agent.agent.yaml
+#   fb-bench run <bugs> --agent fb-agent --model claude-opus-5
+name: fb-agent
+
+# The bench puts this file's directory on PYTHONPATH, so `-m fb_agent` resolves
+# with no install. fb_agent.py then finds an interpreter that has the
+# dependencies and re-execs into it -- see its docstring.
+command: >
+  python3 -m fb_agent
+  --workspace {workspace}
+  --task "{opening}"
+  --model {model}
+  --max-turns {max_turns}
+  --timeout {timeout}
+
+# The bench hands us a sandboxed shell here; the agent runs every command
+# through it (see LocalEnvironmentConfig.executable).
+shell_env: SHELL
+
+# The challenge and its harness are already in the workspace. An agent that can
+# reach the internet can also reach a published PoC for the CVE it is being
+# scored on, which would not be a result.
+network: blocked
