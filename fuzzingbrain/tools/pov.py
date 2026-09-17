@@ -1202,6 +1202,30 @@ def _check_crash(output: str) -> bool:
     return False
 
 
+# Hard markers of a process-terminating crash (these always abort). Used to tell
+# a *fatal* sanitizer error from a *recoverable* UBSAN "runtime error:" that
+# prints but exits cleanly -- e.g. dav1d msac.c unsigned-integer-overflow, a
+# benign intentional wrap. A UBSAN target built with -fno-sanitize-recover only
+# aborts on the fatal checks (e.g. signed-integer-overflow); recoverable ones
+# print and continue, so counting a bare "runtime error:" as a crash is a false
+# positive that would verify a bogus PoV.
+_HARD_ABORT_MARKERS = (
+    "addresssanitizer:", "memorysanitizer:", "threadsanitizer:",
+    "hwaddresssanitizer:", "deadlysignal", "deadly signal", "segv",
+    "segmentation fault", "aborting", "assertion failed",
+)
+
+
+def _is_recoverable_ubsan_only(output: str) -> bool:
+    """True iff the only crash signal is a UBSAN 'runtime error:' / undefined-
+    behavior line with no hard abort marker -- a recoverable UB that did not
+    terminate the process. Pair with a clean (zero) exit code before acting."""
+    low = output.lower()
+    if "runtime error:" not in low and "undefinedbehaviorsanitizer" not in low:
+        return False
+    return not any(m in low for m in _HARD_ABORT_MARKERS)
+
+
 def _extract_hit_functions(output: str, target_functions: List[str]) -> List[str]:
     """
     Extract which target functions appear in crash backtrace.
@@ -1381,6 +1405,18 @@ def _run_fuzzer_docker(
 
         # Check for crash
         crashed = _check_crash(combined_output)
+
+        # A recoverable UBSAN error (printed "runtime error:" but the process
+        # exited cleanly) is not a crash -- e.g. dav1d msac.c unsigned wrap.
+        if (
+            crashed
+            and result.returncode == 0
+            and _is_recoverable_ubsan_only(combined_output)
+        ):
+            logger.info(
+                "[POV] recoverable UBSAN runtime error with clean exit -- not a crash"
+            )
+            crashed = False
 
         # Also check return code
         if result.returncode != 0 and not crashed:

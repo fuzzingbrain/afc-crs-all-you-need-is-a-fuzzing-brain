@@ -102,16 +102,34 @@ class WorkspaceSetup:
 
         try:
             logger.info(f"Cloning {self.config.repo_url} to {repo_path}")
+            target = (self.config.target_commit or "").strip()
+            if target:
+                # A specific (often non-tip) commit is required -- e.g. a full
+                # challenge pinned to its vulnerable revision. A shallow clone of
+                # the default branch would silently give the wrong source (a
+                # patched HEAD), so clone with history and check the commit out.
+                clone_cmd = ["git", "clone", self.config.repo_url, str(repo_path)]
+                clone_timeout = 600
+            else:
+                clone_cmd = ["git", "clone", "--depth", "1", self.config.repo_url, str(repo_path)]
+                clone_timeout = 300
             result = subprocess.run(
-                ["git", "clone", "--depth", "1", self.config.repo_url, str(repo_path)],
-                capture_output=True,
-                text=True,
-                timeout=300,
+                clone_cmd, capture_output=True, text=True, timeout=clone_timeout
             )
 
             if result.returncode != 0:
                 logger.error(f"Git clone failed: {result.stderr}")
                 return False, result.stderr
+
+            if target:
+                co = subprocess.run(
+                    ["git", "-C", str(repo_path), "checkout", "--detach", target],
+                    capture_output=True, text=True, timeout=120,
+                )
+                if co.returncode != 0:
+                    logger.error(f"git checkout {target} failed: {co.stderr}")
+                    return False, f"checkout {target}: {co.stderr}"
+                logger.info(f"Checked out target_commit {target[:12]}")
 
             logger.info("Repository cloned successfully")
             return True, "Cloned"

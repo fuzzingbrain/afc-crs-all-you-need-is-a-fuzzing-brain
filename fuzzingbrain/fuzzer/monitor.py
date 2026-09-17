@@ -84,6 +84,25 @@ VULN_TYPE_PATTERNS = [
     (r"runtime error: ([\w\s-]+)", 1),
 ]
 
+# Hard markers of a process-terminating crash. Used to tell a fatal sanitizer
+# error from a recoverable UBSAN "runtime error:" that prints but exits cleanly
+# (e.g. dav1d msac.c unsigned-integer-overflow -- a benign intentional wrap).
+_HARD_ABORT_MARKERS = (
+    "addresssanitizer:", "memorysanitizer:", "threadsanitizer:",
+    "hwaddresssanitizer:", "deadlysignal", "deadly signal", "segv",
+    "segmentation fault", "aborting", "assertion failed",
+)
+
+
+def _is_recoverable_ubsan_only(output: str) -> bool:
+    """True iff the only crash signal is a UBSAN 'runtime error:' / undefined-
+    behavior line with no hard abort marker. Pair with a clean (zero) exit
+    before treating it as non-crashing."""
+    low = output.lower()
+    if "runtime error:" not in low and "undefinedbehaviorsanitizer" not in low:
+        return False
+    return not any(m in low for m in _HARD_ABORT_MARKERS)
+
 
 class FuzzerMonitor:
     """
@@ -955,10 +974,10 @@ class FuzzerMonitor:
                 timeout=60,
             )
 
-            return result.stderr + "\n" + result.stdout
+            return result.returncode, result.stderr + "\n" + result.stdout
 
         try:
-            combined_output = _run_with_image(docker_image)
+            returncode, combined_output = _run_with_image(docker_image)
 
             # Fallback to base-runner on GLIBC / shared library errors
             if (
@@ -969,9 +988,17 @@ class FuzzerMonitor:
                     f"[FuzzerMonitor:{self.task_id}] Library error with {docker_image}, "
                     f"falling back to {FALLBACK_IMAGE}"
                 )
-                combined_output = _run_with_image(FALLBACK_IMAGE)
+                returncode, combined_output = _run_with_image(FALLBACK_IMAGE)
 
             crashed = self._check_crash(combined_output)
+
+            # A recoverable UBSAN error (printed "runtime error:" but exited
+            # cleanly) is not a crash -- e.g. dav1d msac.c unsigned wrap.
+            if crashed and returncode == 0 and _is_recoverable_ubsan_only(combined_output):
+                logger.info(
+                    f"[FuzzerMonitor:{self.task_id}] recoverable UBSAN, clean exit -- not a crash"
+                )
+                crashed = False
             vuln_type = self._parse_vuln_type(combined_output) if crashed else None
 
             return {

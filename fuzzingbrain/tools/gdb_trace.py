@@ -102,6 +102,15 @@ def _parse(out: str, targets: List[str], sink: Optional[str], operands: Dict[str
         n = int(am.group(1))
         asan_margin = -(n if am.group(2) == "after" else n)  # <=0 means overflow past the edge
     asan = _ASAN.search(out); sig = _SIG.search(out)
+    # UBSan: fatal checks (e.g. signed-integer-overflow; built -fno-sanitize-
+    # recover) abort via SIGABRT, which gdb catches -> CRASHED:1. Capture the
+    # specific UB type from the last "runtime error:" before the abort, so
+    # crash_matches_sp can match an SP whose crash_type is e.g.
+    # "signed-integer-overflow" instead of a generic "ABRT". A *recoverable*
+    # UB (e.g. dav1d msac.c unsigned wrap) does not raise a signal, so it never
+    # sets CRASHED:1 and is not counted as a crash here.
+    ubs = re.findall(r"runtime error:\s*([^\n:]+)", out)
+    ub_type = re.sub(r"\s+", "-", ubs[-1].strip().lower()) if ubs else None
     crashed = ("CRASHED:1" in out) or bool(asan) or bool(sig)
     # crashing frame: prefer the ASan report's bug frame, else the first NON-runtime gdb frame
     frame = None
@@ -121,11 +130,16 @@ def _parse(out: str, targets: List[str], sink: Optional[str], operands: Dict[str
     first_unreached = next((t for t in (targets or []) if not reached[t]), None)
     return {"reached": reached, "sink_reached": sink_reached, "first_unreached": first_unreached,
             "operands": ops, "asan_margin": asan_margin, "crashed": crashed,
-            # Under gdb the inferior's SIGSEGV is caught before ASan prints its
-            # own "SEGV" report, so fall back to the specific signal name (SEGV/
-            # ABRT/BUS/FPE/ILL) -- not a generic "signal" -- so crash_matches_sp
-            # can match an SP whose crash_type is e.g. "SEGV".
-            "sanitizer_type": asan.group(1) if asan else (sig.group(1) if sig else None),
+            # Attribution precedence: ASan report type > UBSan type (when a
+            # SIGABRT-triggering fatal UB fired) > the raw signal name (SEGV/
+            # ABRT/BUS/FPE/ILL, since gdb catches the inferior's signal before
+            # ASan prints its own report) > a UBSan type with no signal.
+            "sanitizer_type": (
+                asan.group(1) if asan
+                else ub_type if (sig and sig.group(1) == "ABRT" and ub_type)
+                else sig.group(1) if sig
+                else ub_type
+            ),
             "crash_frame": frame}
 
 
