@@ -2,7 +2,7 @@
 """Compare worklist generators by how many real bugs' functions they cover."""
 import json, os, re, subprocess, sys, glob
 sys.path.insert(0, "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/FuzzingBrain-Agent")
-from fbagent import analysis
+from fbagent.worklist import analysis
 
 BASE="/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/experiments/worklist-eval"
 GT=json.load(open(f"{BASE}/ground_truth.json"))

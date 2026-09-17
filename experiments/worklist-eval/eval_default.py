@@ -13,7 +13,7 @@ Usage: python3 eval_default.py [--top 40] [--clang] [chal ...]
 """
 import json, os, sys, time, importlib
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "FuzzingBrain-Agent"))
-from fbagent import analysis
+from fbagent.worklist import analysis
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 SRC = json.load(open(f"{BASE}/srctrees.json")); GT = json.load(open(f"{BASE}/ground_truth.json"))

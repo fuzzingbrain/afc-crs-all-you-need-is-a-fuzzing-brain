@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fbagent import analysis, frontier
+from fbagent.worklist import analysis, frontier
 
 
 def _ctx():

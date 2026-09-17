@@ -154,8 +154,8 @@ class Agent:
             "Right now: go after something you have NOT already crashed. Use "
             "`diversify` on the function(s) you have crashed to get the reachable "
             "sink furthest from them, pick one, and build a fresh input for it. No "
-            "crash yet? Take a different worklist sink than the ones you have "
-            "tried, or push deeper past a gate you have not satisfied. Keep going."
+            "crash yet? Take a parser path or sink you have not tried, or use "
+            "`trace` to see where your best input stops and push past it. Keep going."
         )
 
     def _out_of_budget(self) -> str | None:

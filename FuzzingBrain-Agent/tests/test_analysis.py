@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fbagent import analysis
+from fbagent.worklist import analysis
 
 
 # ------------------------------------------------------------------ segmentation

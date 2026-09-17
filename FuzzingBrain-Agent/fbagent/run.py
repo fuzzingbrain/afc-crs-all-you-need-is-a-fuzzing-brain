@@ -18,90 +18,8 @@ import sys
 
 from fbagent.agent import Agent
 from fbagent.llm import LLM
-from fbagent.prompts import OPENING, SYSTEM
-
-
-def _opening_with_recon(recon: list | None = None) -> str:
-    """The opening message, with the deterministic recon prepended.
-
-    Before the model reads a line, the static substrate (analysis.py) has already
-    built a call graph from the harness entry, pre-screened the source for sink
-    patterns, and ranked the sinks the entry can actually reach by call-graph
-    distance. That worklist is handed to the model up front so it starts from a
-    computed set of targets instead of an unguided read. A failure here never
-    stops the run -- the model just gets the plain opening and reads for itself.
-
-    `recon`, if given, is filled with the generation trace (how the worklist was
-    computed — files scanned, entry found or not, graph size, reachability) so a
-    reader can audit not just the worklist but how it was produced.
-    """
-    import os
-    from pathlib import Path
-    # Ablation "bare" mode: hand the model NO worklist at all (no static analysis,
-    # no override) -- just the plain task. Isolates what the worklist itself adds.
-    if os.environ.get("FBAGENT_NO_WORKLIST", "").strip().lower() in ("1","true","yes","on"):
-        if recon is not None:
-            recon.append({"kind": "recon", "phase": "bare", "note": "no worklist (ablation)"})
-        return OPENING
-    # Controlled-experiment override: a precomputed worklist replaces the built-in
-    # static analysis, so we can measure what a DIFFERENT worklist generator brings
-    # with everything else held fixed. FBAGENT_WL_DIR/<bug_id>.md, keyed by the
-    # challenge's bench.yaml bug_id. Absent or missing file -> normal analysis.
-    wl_dir = os.environ.get("FBAGENT_WL_DIR", "").strip()
-    if wl_dir:
-        try:
-            import yaml
-            bench = Path.cwd() / "bench.yaml"
-            bug_id = (yaml.safe_load(bench.read_text()) or {}).get("bug_id") \
-                if bench.is_file() else None
-            wl_file = (Path(wl_dir) / f"{bug_id}.md") if bug_id else None
-            if wl_file and wl_file.is_file():
-                summary = wl_file.read_text()
-                no_trace = os.environ.get("FBAGENT_NO_TRACE", "").strip().lower() \
-                    in ("1", "true", "yes", "on")
-                tool_blurb = (
-                    "\n\nTwo deterministic tools back this up: `gates <func>` gives "
-                    "the literal input constraints (magic bytes, lengths) on the "
-                    "path to a function, so you can build a seed that reaches it; "
-                    "`diversify <crashed funcs>` names the reachable sinks furthest "
-                    "from what you already cracked. Use them."
-                    if no_trace else
-                    "\n\nThree deterministic tools back this up: `gates`, `trace`, "
-                    "`diversify`. Use them.")
-                if recon is not None:
-                    recon.append({"kind": "recon", "phase": "override",
-                                  "note": f"worklist override from {wl_file}"})
-                return (
-                    "Before you start, a deterministic static analysis of this "
-                    "challenge has already been run for you. Treat it as a computed "
-                    "worklist of where to look -- not as confirmed bugs.\n\n"
-                    + summary + tool_blurb
-                    + "\n\n--- your task ---\n" + OPENING)
-        except Exception as e:
-            if recon is not None:
-                recon.append({"kind": "recon", "phase": "override-error",
-                              "note": repr(e)})
-    try:
-        from fbagent import analysis
-        out = analysis.analyze(Path.cwd(), recon=recon)
-        if out.get("entry") and out.get("reachable_sinks"):
-            return (
-                "Before you start, a deterministic static analysis of this "
-                "challenge has already been run for you. Treat it as a computed "
-                "worklist of where to look -- not as confirmed bugs.\n\n"
-                + out["summary"]
-                + "\n\nThree deterministic tools back this up: `gates <func>` gives "
-                "the literal input constraints (magic bytes, lengths) on the path "
-                "to a function, so you can build a seed that reaches it; `reached "
-                "<stack>` maps a crash stack back onto this graph so you know "
-                "where your input actually went; `diversify <crashed funcs>` names "
-                "the reachable sinks furthest from what you already cracked, so your "
-                "next crash is a different one. Use them.\n\n"
-                "--- your task ---\n" + OPENING)
-    except Exception as e:
-        if recon is not None:
-            recon.append({"kind": "recon", "phase": "error", "note": repr(e)})
-    return OPENING
+from fbagent.prompts import OPENING, SYSTEM  # noqa: F401 -- OPENING kept for callers
+from fbagent.worklist.inject import opening_with_recon
 
 
 def _project_slug(cwd) -> str:
@@ -233,7 +151,7 @@ def main() -> int:
                   deadline_s=args.timeout, min_spend_fraction=args.min_spend_frac)
 
     recon: list = []
-    opening = _opening_with_recon(recon)
+    opening = opening_with_recon(recon)
     print(f"[fbagent] model={llm.model} max_usd={agent.max_usd} "
           f"min_spend_frac={agent.min_spend_fraction} timeout_s={args.timeout}",
           flush=True)

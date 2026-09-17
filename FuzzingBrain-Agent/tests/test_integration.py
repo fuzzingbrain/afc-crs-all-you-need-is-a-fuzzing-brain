@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fbagent import analysis
+from fbagent.worklist import analysis
 
 
 def _c_tree(tmp: Path):
@@ -52,3 +52,17 @@ def test_diversify_tool_dispatch(tmp_path: Path, monkeypatch):
     out, err = tools.run_tool("diversify", {"cracked": "walk"})
     assert not err, out
     assert "furthest" in out.lower() or "reachable sinks" in out.lower()
+
+
+def test_worklist_is_off_by_default(monkeypatch):
+    """The opening carries no static worklist unless an experiment switch asks."""
+    from fbagent import run as fbrun
+    from fbagent.prompts import OPENING
+    for v in ("FBAGENT_WORKLIST", "FBAGENT_WL_DIR", "FBAGENT_NO_WORKLIST"):
+        monkeypatch.delenv(v, raising=False)
+    recon: list = []
+    assert fbrun.opening_with_recon(recon) == OPENING
+    assert recon and recon[0]["phase"] == "off"
+    monkeypatch.setenv("FBAGENT_WORKLIST", "1")
+    monkeypatch.setenv("FBAGENT_NO_WORKLIST", "1")   # the kill switch wins
+    assert fbrun.opening_with_recon([]) == OPENING
