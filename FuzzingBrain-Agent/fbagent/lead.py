@@ -46,6 +46,13 @@ _CLASS_WORDS = (
     "double-free", "invalid-free", "out-of-bounds", "oob", "segv",
     "null-dereference", "null-pointer", "uninitialized", "overflow",
     "memory-leak", "memory leak", "leak",
+    # Jazzer / JVM crash classes (an uncaught throwable or a Jazzer finding)
+    "arrayindexoutofbounds", "stringindexoutofbounds", "indexoutofbounds",
+    "classcastexception", "nullpointerexception", "numberformatexception",
+    "arithmeticexception", "negativearraysize", "stackoverflow", "outofmemory",
+    "assertionerror", "illegalstate", "illegalargument", "command injection",
+    "server side request forgery", "ssrf", "path traversal", "deserialization",
+    "sql injection", "regex injection",
 )
 
 

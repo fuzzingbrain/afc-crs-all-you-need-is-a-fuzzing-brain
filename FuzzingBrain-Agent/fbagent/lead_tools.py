@@ -71,11 +71,15 @@ _BOARD_SCHEMAS = {"create_lead": _CREATE_LEAD_SCHEMA, "update_lead": _UPDATE_LEA
 
 
 def build(role: str, board: LeadBoard, *, lead_id: str | None = None,
-          origin: str = "", harness: str = "", sanitizer: str = "address"):
+          origin: str = "", harness: str = "", sanitizer: str = "address",
+          with_trace: bool = True):
     """Return (schemas, runner) for `role`. `lead_id` is the Lead a verify /
     reproduce instance is working (create_lead ignores it). The runner sends
-    board tools to `board` and everything else to tools.run_tool."""
-    names = ROLE_TOOLS[role]
+    board tools to `board` and everything else to tools.run_tool.
+
+    `with_trace=False` drops the gdb `trace` tool — it is C/C++ only, so a
+    Java/Jazzer target does not offer it and leans on ./submit instead."""
+    names = [n for n in ROLE_TOOLS[role] if with_trace or n != "trace"]
     builtin = {s["name"]: s for s in _tools.SCHEMAS}
     schemas = []
     for n in names:

@@ -29,6 +29,19 @@ def _role_prompt(name: str) -> str:
     return (_PROMPT_DIR / f"{name}.md").read_text().strip()
 
 
+def _is_java(sanitizer: str) -> bool:
+    """A Jazzer/JVM target: no sanitizer-instrumented binary and no gdb trace,
+    so the trace tool is dropped and ./submit is the only dynamic feedback."""
+    s = (sanitizer or "").lower()
+    return "jazzer" in s or "jvm" in s or "java" in s
+
+
+_NO_TRACE_NOTE = (
+    "\n\n## Note for this target\n\nThis is a Java/Jazzer target: there is no "
+    "gdb `trace` tool here. Confirm reachability by reading the Java call path "
+    "and by running `./submit`.")
+
+
 def harness_source(workspace: Path, limit_bytes: int = 200_000) -> str:
     """Every file under harness/, concatenated with a path banner each — the
     thing that defines the input format. Cached in the system prompt (see the
@@ -145,9 +158,12 @@ def run_verification(lead: Lead, *, llm, board: LeadBoard, workspace: str = ".",
     ws = Path(workspace)
     rev0 = lead.rev          # snapshot: the board mutates the Lead in place
     hnames = harness_names or ([lead.harness.rsplit("/", 1)[-1]] if lead.harness else [])
-    system = _role_prompt("verify") + "\n\n## Harness source\n\n" + harness_source(ws)
+    java = _is_java(lead.sanitizer)
+    system = _role_prompt("verify") + (_NO_TRACE_NOTE if java else "") \
+        + "\n\n## Harness source\n\n" + harness_source(ws)
     schemas, runner = lead_tools.build("verify", board, lead_id=lead.id,
-                                       harness=lead.harness, sanitizer=lead.sanitizer)
+                                       harness=lead.harness, sanitizer=lead.sanitizer,
+                                       with_trace=not java)
     agent = Agent(system, llm=llm, tools=schemas, tool_runner=runner,
                   deadline_s=deadline_s, max_usd=max_usd, min_spend_fraction=0.0)
     result = agent.run(_lead_brief(lead))
@@ -177,9 +193,12 @@ def run_reproduction(lead: Lead, *, llm, board: LeadBoard, workspace: str = ".",
     (signature -> Lead) or the deepest point reached, and returns a summary."""
     ws = Path(workspace)
     harness_names = harness_names or [lead.harness.rsplit("/", 1)[-1]] if lead.harness else []
-    system = _role_prompt("reproduce") + "\n\n## Harness source\n\n" + harness_source(ws)
+    java = _is_java(lead.sanitizer)
+    system = _role_prompt("reproduce") + (_NO_TRACE_NOTE if java else "") \
+        + "\n\n## Harness source\n\n" + harness_source(ws)
     schemas, runner = lead_tools.build("reproduce", board, lead_id=lead.id,
-                                       harness=lead.harness, sanitizer=lead.sanitizer)
+                                       harness=lead.harness, sanitizer=lead.sanitizer,
+                                       with_trace=not java)
     agent = Agent(system, llm=llm, tools=schemas, tool_runner=runner,
                   deadline_s=deadline_s, max_usd=max_usd, min_spend_fraction=0.0)
     result = agent.run(_lead_brief(lead))

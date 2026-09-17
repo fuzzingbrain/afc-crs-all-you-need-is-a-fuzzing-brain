@@ -103,8 +103,44 @@ GENERAL_SANITIZER_GUIDANCE = """
 
 # Selector: map a bench.yaml sanitizer name to its guidance. Basic version runs
 # ASan (memory-safety incl. LeakSanitizer's leaks); undefined/memory kept for later.
+JAZZER_GUIDANCE = """
+### Jazzer (JVM) Detectable Bugs
+
+The target is Java/Kotlin fuzzed with Jazzer. A "crash" is an UNCAUGHT throwable
+or a Jazzer sanitizer finding — NOT a memory-safety fault. Look for:
+
+**1. Uncaught runtime exceptions from attacker input**
+- Array/string index from input without a bounds check -> ArrayIndexOutOfBounds,
+  StringIndexOutOfBounds.
+- Unvalidated cast or type assumption -> ClassCastException.
+- Null returned by a lookup/parse then dereferenced -> NullPointerException.
+- Integer parse / arithmetic on input -> NumberFormatException, ArithmeticException
+  (divide by zero), NegativeArraySizeException.
+- Unbounded recursion or a huge input-driven allocation -> StackOverflowError,
+  OutOfMemoryError.
+- assert / explicit throw reachable from input -> AssertionError, IllegalState/
+  IllegalArgumentException on a path a fuzzer input can drive.
+
+**2. Jazzer security sanitizers (higher value — a "bug detected" finding)**
+- OS command injection: input reaching Runtime.exec / ProcessBuilder.
+- Server-side request forgery / SSRF: input reaching a URL/socket connect.
+- Path traversal: input reaching File/Path/open with ".." it controls.
+- Unsafe deserialization: input reaching ObjectInputStream.readObject.
+- SQL/expression/script injection: input reaching a query/eval.
+- Regex injection / ReDoS: input compiled as a pattern or matched with catastrophic backtracking.
+
+**How input enters:** the harness gets a FuzzedDataProvider (consumeString /
+consumeInt / consumeBytes / consumeRemainingAsBytes) or a raw byte[]. Follow how
+those consumed values reach the operations above. There is no sanitizer-
+instrumented binary and no gdb trace here — confirm reachability by reading the
+Java call path and by running ./submit.
+"""
+
+
 def guidance_for(sanitizer: str) -> str:
     s = (sanitizer or "").lower()
+    if "jazzer" in s or "jvm" in s or "java" in s:
+        return JAZZER_GUIDANCE
     if "undefined" in s or s == "ubsan":
         return UNDEFINED_SANITIZER_GUIDANCE
     if "memory" in s or s == "msan":
