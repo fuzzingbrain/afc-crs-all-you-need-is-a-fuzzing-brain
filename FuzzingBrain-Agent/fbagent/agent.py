@@ -91,9 +91,16 @@ class Agent:
 
     def __init__(self, system: str, llm: LLM | None = None,
                  max_steps: int = 0, max_tokens: int = 0, max_usd: float = 0.0,
-                 deadline_s: float | None = None, min_spend_fraction: float = 0.5):
+                 deadline_s: float | None = None, min_spend_fraction: float = 0.5,
+                 tools: list | None = None, tool_runner=None):
         self.system = system
         self.llm = llm or LLM()
+        # Which tools this instance exposes and who runs them. A role (discovery
+        # / verify / reproduce) passes its own whitelist + a runner bound to the
+        # LeadBoard; the default is the full built-in tool set. This is what lets
+        # one loop serve every stage without the loop itself changing.
+        self.tools = tools if tools is not None else SCHEMAS
+        self._run_tool = tool_runner if tool_runner is not None else run_tool
         self.max_steps = max_steps          # 0 = no step cap
         self.max_tokens = max_tokens        # 0 = no token cap
         self.max_usd = max_usd              # 0 = no spend cap
@@ -340,7 +347,7 @@ class Agent:
             # any candidate already submitted has still been graded, so a
             # recorded stop beats a traceback that loses the whole cell.
             try:
-                resp = self.llm.call(self.system, self.messages, SCHEMAS)
+                resp = self.llm.call(self.system, self.messages, self.tools)
             except anthropic.APIError as e:
                 # A context-overflow 400 is recoverable: hard-compact everything
                 # (no recent-turn protection, tiny threshold) and retry ONCE, so
@@ -351,7 +358,7 @@ class Agent:
                     self._compact_assistant_history(keep_recent=2, large_chars=1)
                     self.compactions += 1
                     try:
-                        resp = self.llm.call(self.system, self.messages, SCHEMAS)
+                        resp = self.llm.call(self.system, self.messages, self.tools)
                     except anthropic.APIError as e2:
                         self.stop_reason = f"api_error: {type(e2).__name__}"
                         break
@@ -404,7 +411,7 @@ class Agent:
             for block in resp.content:
                 if getattr(block, "type", None) != "tool_use":
                     continue
-                output, is_error = run_tool(block.name, dict(block.input or {}))
+                output, is_error = self._run_tool(block.name, dict(block.input or {}))
                 result = {
                     "type": "tool_result",
                     "tool_use_id": block.id,
