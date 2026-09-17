@@ -170,7 +170,9 @@ def _fake_llm(seq):
     llm.served_model = None
     it = iter(seq)
     llm.call = lambda s, m, t: next(it)
-    type(llm).cost_usd = property(lambda self: 0.5)   # always under any cap
+    # usage stays all-zero (call is faked, nothing accumulates), so cost_usd is
+    # 0.0 — under any cap. (An earlier version monkeypatched type(llm).cost_usd
+    # here, which leaked a fixed 0.5 into every later test's LLM class.)
     return llm
 
 
