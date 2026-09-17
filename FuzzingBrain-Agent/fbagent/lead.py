@@ -205,3 +205,13 @@ class LeadBoard:
 
     def solved_signatures(self) -> set[str]:
         return {l.signature for l in self._leads.values() if l.signature}
+
+    def next_for_pov(self) -> "Lead | None":
+        """The next Lead to attempt reproduction on. Basic ordering: highest
+        score, then fewest attempts, then oldest. (Furthest-Point-First from the
+        already-solved crashes — steering toward a distinct fault — is a later
+        refinement that needs the call graph; score/attempts is enough to start.)"""
+        pend = self.by_status(PENDING_POV)
+        if not pend:
+            return None
+        return sorted(pend, key=lambda l: (-l.score, l.attempts, l.rev))[0]
