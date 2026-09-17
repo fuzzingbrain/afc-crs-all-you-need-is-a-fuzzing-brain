@@ -118,7 +118,7 @@ def run_discovery(*, llm, board: LeadBoard, workspace: str = ".",
     sanitizer's crash classes. Free-exploration mode (the model drives the read);
     a worklist can feed candidate functions later. Returns the Leads created."""
     ws = Path(workspace)
-    before = {l.id for l in board.all()}
+    before = {ld.id for ld in board.all()}
     system = ("\n\n".join([_role_prompt("discovery"),
                            "## Sanitizer guidance (" + sanitizer + ")\n" + guidance_for(sanitizer),
                            "## Harness source\n\n" + harness_source(ws)]))
@@ -130,7 +130,7 @@ def run_discovery(*, llm, board: LeadBoard, workspace: str = ".",
                "could crash the sanitizer, and record each as a Lead with "
                "create_lead. Start at the harness and follow the code it drives.")
     result = agent.run(opening)
-    created = [l.id for l in board.all() if l.id not in before]
+    created = [ld.id for ld in board.all() if ld.id not in before]
     return {"created": created, "n": len(created), "stop_reason": result["stop_reason"],
             "steps": result["steps"]}
 

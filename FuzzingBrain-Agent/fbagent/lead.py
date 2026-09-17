@@ -201,10 +201,10 @@ class LeadBoard:
         return list(self._leads.values())
 
     def by_status(self, status: str) -> list[Lead]:
-        return [l for l in self._leads.values() if l.status == status]
+        return [ld for ld in self._leads.values() if ld.status == status]
 
     def solved_signatures(self) -> set[str]:
-        return {l.signature for l in self._leads.values() if l.signature}
+        return {ld.signature for ld in self._leads.values() if ld.signature}
 
     def next_for_pov(self) -> "Lead | None":
         """The next Lead to attempt reproduction on. Basic ordering: highest
@@ -214,4 +214,4 @@ class LeadBoard:
         pend = self.by_status(PENDING_POV)
         if not pend:
             return None
-        return sorted(pend, key=lambda l: (-l.score, l.attempts, l.rev))[0]
+        return sorted(pend, key=lambda ld: (-ld.score, ld.attempts, ld.rev))[0]
