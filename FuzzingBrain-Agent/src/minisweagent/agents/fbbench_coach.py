@@ -106,8 +106,7 @@ def forbidden(command: str) -> str | None:
                     "77 shell commands on a harness it had built itself, made ONE "
                     "real submission, and scored zero.\n"
                     "Read the harness, form a hypothesis about a specific sink, "
-                    "and test it with ./submit. Use ./reach to find out whether "
-                    "your input got there.")
+                    "and test it with ./submit.")
     return None
 
 
@@ -228,10 +227,10 @@ class Coach:
         # -- 2. reach, when the verdict is flat ------------------------------
         if _CLEAN.search(output or "") and "target ran 0 ms" in (output or ""):
             notes.append(
-                "[reach] 0 ms means the harness threw that input out before the "
-                "library saw it. Nothing about its contents matters yet. Re-read "
-                "the entry checks, or run `./reach <file> <function>` to see "
-                "which of them you are failing.")
+                "[gate] 0 ms means the harness threw that input out before the "
+                "library saw it. Nothing about its contents matters yet -- re-read "
+                "the entry checks in the harness and work out which one you are "
+                "failing before changing anything else.")
         return notes
 
     # -- 1. don't let me stop ------------------------------------------------

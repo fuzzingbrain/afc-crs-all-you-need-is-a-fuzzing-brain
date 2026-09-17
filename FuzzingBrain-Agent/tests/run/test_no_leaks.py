@@ -5,11 +5,11 @@ source is full of challenge names and the reasons each one failed. That is fine
 in a comment and fatal in anything the model can see: a win that came from
 knowing which challenge it was on is not a win.
 
-The surfaces are everything rendered into the conversation (prompts, coaching,
-refusals) plus anything written into the workspace, which the model can `cat`.
-The ./reach helper is the one that bites -- it lives in the workspace, so its
-own header comment is model-visible, and an earlier version named the challenge
-it was designed from.
+The surfaces are everything rendered into the conversation: both prompts, the
+coaching messages and the refusals. An earlier version of this agent also wrote
+a ./reach helper into the workspace, whose header comment named the challenge it
+was designed from -- that helper has since been removed, but the lesson stands:
+anything written into the workspace is model-visible and belongs on this list.
 """
 
 import re
@@ -41,8 +41,6 @@ def _forbidden_names() -> list[str]:
 def _surfaces() -> dict[str, str]:
     sys.path.insert(0, str(REPO / "src"))
     from minisweagent.agents.fbbench_coach import Coach, forbidden
-    from minisweagent.run.fbbench import _REACH
-
     cfg = yaml.safe_load(CONFIG.read_text())
     out = {f"config agent.{k}": v for k, v in cfg["agent"].items() if isinstance(v, str)}
     out |= {f"config model.{k}": v for k, v in cfg["model"].items() if isinstance(v, str)}
@@ -58,8 +56,6 @@ def _surfaces() -> dict[str, str]:
     out["finish pushback"] = c.may_finish(20, 200) or ""
     out["refusal: fuzzer"] = forbidden("clang -fsanitize=fuzzer a.c") or ""
     out["refusal: submit loop"] = forbidden("for i in 1 2; do ./submit c$i; done") or ""
-    # Written into the workspace -- the model can read this file.
-    out["./reach script"] = _REACH
     return out
 
 
@@ -71,7 +67,10 @@ def test_no_model_visible_text_names_a_target(surface):
     assert not hits, f"{surface} names {hits} — the model can read this"
 
 
-def test_the_reach_helper_is_checked_because_it_lives_in_the_workspace():
-    # Guard against the surface list quietly losing the one entry that is not a
-    # prompt: ./reach is a file the agent drops next to ./submit.
-    assert "./reach script" in _surfaces()
+def test_nothing_is_written_into_the_workspace_for_the_model_to_read():
+    # The agent must not drop files the model can cat. ./reach used to, and its
+    # header named a challenge. If a helper is ever added back, it goes on the
+    # surface list above.
+    from minisweagent.run import fbbench
+    assert not hasattr(fbbench, "_REACH")
+    assert not hasattr(fbbench, "_install_reach")

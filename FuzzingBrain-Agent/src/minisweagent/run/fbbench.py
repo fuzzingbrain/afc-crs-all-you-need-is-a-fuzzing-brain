@@ -71,7 +71,6 @@ def _tokens(agent: DefaultAgent) -> dict:
 
 
 _SUBMIT_RE = re.compile(r"\./(?:submit|try_poc)\s+(\S+)")
-_REACH_RE = re.compile(r"\./reach\s+(\S+)\s+(\S+)")
 
 
 def tool_label(command: str) -> tuple[str, dict]:
@@ -88,8 +87,6 @@ def tool_label(command: str) -> tuple[str, dict]:
     """
     if m := _SUBMIT_RE.search(command):
         return "submit", {"path": m.group(1), "command": command}
-    if m := _REACH_RE.search(command):
-        return "reach", {"path": m.group(1), "function": m.group(2), "command": command}
     return "bash", {"command": command}
 
 
@@ -277,50 +274,6 @@ class _ReportingAgent(DefaultAgent):
         return report
 
 
-# NOTE: this script is written INTO the workspace, so the model can read it.
-# Keep every word of it generic -- no challenge name, no project, no hint about
-# any particular target. An earlier version quoted the run it was designed from
-# and named the challenge; on that challenge it would have told the model both
-# that the target was hard and roughly where to look.
-_REACH = r"""#!/bin/bash
-# ./reach <input-file> <function>  -- did this input execute that function?
-#
-# Runs the input under a debugger with a breakpoint on the named function and
-# reports whether it was reached. A clean verdict says an input did not crash;
-# this says whether it even got there, which is a different problem.
-set -u
-if [ $# -ne 2 ] || [ ! -f "$1" ]; then
-  echo "usage: ./reach <input-file> <function>" >&2; exit 2
-fi
-h="$(cd "$(dirname "$0")" && pwd)"; id="$(date +%s%N)-$$"
-cp -- "$1" "$h/.fbbench/trace_req/$id.bin"
-printf '%s' "$2" > "$h/.fbbench/trace_req/$id.tgt"   # .tgt last: it means ready
-for i in $(seq 1 1200); do
-  [ -f "$h/.fbbench/trace_res/$id" ] && { cat "$h/.fbbench/trace_res/$id"; exit 0; }
-  # Unclaimed after 5s means nothing is listening; a claimed one may take minutes.
-  if [ "$i" -gt 25 ] && [ -f "$h/.fbbench/trace_req/$id.tgt" ]; then
-    rm -f "$h/.fbbench/trace_req/$id."*
-    echo "reach: no responder (this bench build has no tracer)" >&2; exit 1
-  fi
-  sleep 0.2
-done
-echo "reach: timed out" >&2; exit 1
-"""
-
-
-def _install_reach(workspace: Path) -> bool:
-    """Drop ./reach next to the bench's ./submit, if the tracer is there."""
-    if not (workspace / ".fbbench" / "trace_req").is_dir():
-        return False
-    try:
-        script = workspace / "reach"
-        script.write_text(_REACH)
-        script.chmod(0o755)
-        return True
-    except OSError:
-        return False
-
-
 @app.command(help="Run fb-agent on one staged FuzzingBrain-Bench challenge.")
 def main(
     workspace: Path = typer.Option(..., "--workspace", help="The staged challenge directory."),
@@ -344,21 +297,11 @@ def main(
     # per turn rather than at exit.
     config.setdefault("agent", {})["output_path"] = workspace / ".fbbench" / "traj.json"
 
-    # 2. Reach. The prompt only mentions ./reach when it is really there, so a
-    # bench build without the tracer does not send the model chasing a tool that
-    # will answer "no responder".
-    has_reach = _install_reach(workspace)
-
     agent = _ReportingAgent(
         get_model(config=config.get("model", {})),
         get_environment(config.get("environment", {}), default_type="local"),
         workspace=workspace, model_name=model_name, **config.get("agent", {}),
     )
-    # extra_template_vars is an ATTRIBUTE, not an AgentConfig field -- passing
-    # it as config would be dropped without a word, the way pydantic drops every
-    # unknown agent key.
-    agent.extra_template_vars["has_reach"] = has_reach
-
     # One report before the first model call, so a run killed early is costed
     # as zero rather than as nothing -- the bench prints an unreported cost as
     # "$ --", and "we do not know" is a different claim from "it was free".
