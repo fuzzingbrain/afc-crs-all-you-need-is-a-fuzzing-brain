@@ -166,3 +166,36 @@ def compute_signature(
         if len(frames) >= max(1, frame_depth):
             break
     return CrashSignature(crash_class=extract_class(output), frames=tuple(frames))
+
+
+# --------------------------------------------------------------- submit verdict
+# ./submit prints a trimmed crash: "crash: the harness faulted under the
+# sanitizer (<class>)." then frames as "#N func  file:line" (the "0x.. in" is
+# stripped, unlike a raw sanitizer report). Parse that shape into a signature so
+# a crash the reproduction/verify stage sees through ./submit dedups the same
+# way a raw report does.
+_SUBMIT_CLASS = re.compile(r"faulted under the sanitizer(?:\s*\(([^)]+)\))?")
+_SUBMIT_FRAME = re.compile(r"#\d+\s+([A-Za-z_][\w:~<>.$]*)\s+([^\s:]+):(-?\d+)")
+
+
+def is_submit_crash(text: str) -> bool:
+    """Whether a ./submit tool output reports a crash."""
+    return "crash: the harness faulted" in (text or "")
+
+
+def signature_from_submit(text: str,
+                          harness_names: Optional[Sequence[str]] = None,
+                          frame_depth: int = 3) -> CrashSignature:
+    """A CrashSignature from the trimmed crash verdict ./submit shows the agent."""
+    harness_names = list(harness_names or [])
+    m = _SUBMIT_CLASS.search(text or "")
+    klass = _canonical_class(m.group(1).strip()) if m and m.group(1) else ""
+    frames: List[tuple] = []
+    for fm in _SUBMIT_FRAME.finditer(text or ""):
+        func, path, line = fm.group(1), fm.group(2), fm.group(3)
+        if _is_runtime_frame(func, path, harness_names):
+            continue
+        frames.append((func, path.rsplit("/", 1)[-1], int(line)))
+        if len(frames) >= max(1, frame_depth):
+            break
+    return CrashSignature(crash_class=klass, frames=tuple(frames))

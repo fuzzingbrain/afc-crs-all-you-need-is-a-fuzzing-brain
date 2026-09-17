@@ -180,11 +180,14 @@ class LeadBoard:
             raise ValueError(f"unknown status: {status}")
         return self.update(lead_id, status=status)
 
-    def record_crash(self, lead_id: str, signature: str) -> Lead:
+    def record_crash(self, lead_id: str, signature: str, candidate: str = "") -> Lead:
         """A submit-backed crash landed on this Lead (from any stage/tool).
-        Records the signature and marks it solved."""
+        Records the signature (and the crashing input, the PoV) and marks it
+        solved."""
         lead = self._leads[lead_id]
         lead.signature = signature
+        if candidate:
+            lead.best_candidate = candidate
         lead.status = POV_GENERATED
         lead.rev += 1
         self._append(lead)
