@@ -1,0 +1,8 @@
+# FuzzingBrain-Agent v2 — the three-stage pipeline (discovery -> verification ->
+# reproduction), a Lead board tying them, a code controller. ASan basic version.
+# The model is pinned in the command line so it can never come from the env.
+#   fb-bench run <bugs> --agent /home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/FuzzingBrain-Agent/fbagent-3stage.agent.yaml --model claude-opus-5 --timeout 3600
+name: fbagent-3stage
+command: "python3 -m fbagent.run_stages --timeout {timeout} --model claude-opus-5 --max-usd 20"
+shell_env: FBAGENT_SHELL
+network: blocked
