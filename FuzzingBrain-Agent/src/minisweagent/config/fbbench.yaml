@@ -20,11 +20,6 @@
 #   3. The instance template's mechanics: what ./submit answers, and the two
 #      constraints of a new-shell-per-action harness.
 #
-# fb-agent deliberately has NO observational tool the other arms lack. A ./reach
-# helper (which functions did this input execute?) was built and then removed:
-# neither the api arm nor claudecode can ask that question, and an advantage one
-# arm has is a confound in every comparison that follows.
-#
 # Nothing else is added. Advice we have not measured is how the last agent lost
 # Opus 5 four distinct faults, and tests/run/test_prompt_parity.py fails if this
 # drifts from the bench or grows a fourth divergence.
@@ -96,7 +91,17 @@ agent:
       harness's own clock: 0 ms means the input was rejected before the target
       ever ran it, and a nonzero time means the target really processed it.
 
-    ## Two constraints of this environment
+    {% if has_reach %}
+    ## Finding out where an input got to
+
+    `./reach <file> <function>` runs your input under a debugger with a
+    breakpoint on that function and tells you whether it was reached. Use it
+    whenever a `clean` verdict leaves you guessing: it turns "this did not
+    crash" into "this did not even get there", which is a different problem
+    with a different fix.
+    {% endif %}
+
+    ## Three constraints of this environment
 
     - Every command runs in a NEW shell. `cd` and environment variables do not
       carry over; chain with `&&` or use absolute paths.

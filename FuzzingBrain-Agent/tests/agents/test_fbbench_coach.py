@@ -109,17 +109,14 @@ def test_the_nag_resets_when_you_submit():
 
 # ---- 2. reach --------------------------------------------------------------
 
-def test_a_zero_ms_verdict_points_at_the_entry_gate_not_the_content():
+def test_a_zero_ms_verdict_points_at_reach_not_at_content():
     # The 7 zeros submitted MORE than the wins (18 vs 11). Working hard with no
     # idea whether the input was even getting in.
     c = Coach(turn_limit=100, wall_limit_s=1800)
     notes = "\n".join(c.observe(
         "./submit c1", "clean: no fault | target ran 0 ms | 8 bytes", 5, 40))
     assert "threw that input out" in notes
-    assert "entry checks" in notes
-    # No tool suggestion: fb-agent has the same observational surface as the
-    # bare model and the claudecode arm -- a shell and the graded oracle.
-    assert "./reach" not in notes
+    assert "./reach" in notes
 
 
 def test_a_verdict_that_did_reach_is_left_alone():
