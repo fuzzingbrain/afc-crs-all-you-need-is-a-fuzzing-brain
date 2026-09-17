@@ -34,9 +34,31 @@ thing that silently drifts back and quietly invalidates a comparison.
 
 ## Running it on the benchmark
 
+From a fresh clone, on any machine:
+
 ```bash
-pip install -e ".[dev]"
-export FB_AGENT_PYTHON=$(which python)          # the interpreter that just got the deps
+./setup.sh
+fb-bench run avro-03 --agent "$PWD/fb-agent.agent.yaml" --model claude-opus-5
+```
+
+`setup.sh` creates `.venv` beside itself and installs `requirements.lock` — the
+exact versions the recorded cells ran on. That is the only setup step. There is
+no interpreter to nominate, nothing to activate, and nothing to install
+globally; `fb_agent.py` finds `.venv` on its own. Re-running it is safe.
+
+Two things it cannot do for you:
+
+- **A model API key.** The bench reads it from its own `.env` (e.g.
+  `ANTHROPIC_API_KEY=...`), the same way it does for every other arm.
+- **Docker.** The bench runs the sealed challenge image; the agent itself never
+  touches it.
+
+`--agent` takes a path, so nothing has to be registered. If you would rather
+type a name than a path, symlink the manifest once — this is a convenience, not
+a requirement:
+
+```bash
+mkdir -p ~/.config/fbbench/agents
 ln -s "$PWD/fb-agent.agent.yaml" ~/.config/fbbench/agents/fb-agent.agent.yaml
 fb-bench run avro-03 --agent fb-agent --model claude-opus-5
 ```
