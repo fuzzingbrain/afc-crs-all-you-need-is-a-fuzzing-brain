@@ -145,6 +145,18 @@ class BaseAgent(ABC):
         # Context compression state (mechanical eviction)
         self._last_input_tokens: int = 0  # updated after each LLM response
         self._evict_seq: int = 0  # monotonic ref id for stored evicted results
+        # Unique-per-instance token for the recall store dir. MUST NOT be id(self):
+        # a memory address is reused after an agent is GC'd, so sequential POV
+        # agents collided on one dir and overwrote each other's recall files
+        # (recall then returned another agent's result).
+        import uuid as _uuid
+
+        self._evict_token: str = _uuid.uuid4().hex[:12]
+        # Pinned ledger of verified facts, keyed so it stays bounded (overwrite,
+        # never grow unboundedly). Populated deterministically when known tool
+        # results (reach_probe / create_pov) are evicted, and rendered into a
+        # single pinned message that is never evicted.
+        self._ledger: Dict[str, str] = {}
 
         # Statistics
         self.total_iterations = 0
@@ -452,7 +464,7 @@ class BaseAgent(ABC):
         import tempfile
 
         base = self.log_dir if self.log_dir else Path(tempfile.gettempdir())
-        d = Path(base) / "agent_ctx" / f"{self.agent_name}_{id(self)}"
+        d = Path(base) / "agent_ctx" / f"{self.agent_name}_{self._evict_token}"
         d.mkdir(parents=True, exist_ok=True)
         return d
 
@@ -513,6 +525,12 @@ class BaseAgent(ABC):
                 continue
             name, args = self._tool_name_by_call_id(m.get("tool_call_id", ""))
 
+            # Before the raw result leaves the window, lift its load-bearing
+            # facts (reachability, crash, margin) into the pinned ledger so they
+            # stay visible even after the result is gone.
+            for k, v in self._extract_ledger_facts(name, content):
+                self._ledger[k] = v
+
             if name in self._IDEMPOTENT_READ_TOOLS:
                 arg_short = args.replace("\n", " ")[:80]
                 m["content"] = (
@@ -534,11 +552,91 @@ class BaseAgent(ABC):
             m["content"] = f"[evicted #{ref} · {name} · {size}B · recall({ref}) to restore]"
             evicted += 1
 
+        # Refresh the pinned ledger message with whatever facts we lifted.
+        self._sync_ledger_message()
+
         if evicted:
             self._log(
-                f"Context: evicted {evicted} old tool result(s), kept last {keep} verbatim",
+                f"Context: evicted {evicted} old tool result(s), kept last {keep} "
+                f"verbatim, ledger={len(self._ledger)} facts",
                 level="INFO",
             )
+
+    def _extract_ledger_facts(self, tool_name: str, content: str):
+        """Deterministically pull load-bearing facts from a known tool result
+        being evicted. Returns a list of (key, value); keys are a small fixed set
+        so the ledger stays bounded (later facts overwrite earlier ones under the
+        same key). No LLM, no guessing — only structured fields we know the shape
+        of (reach_probe / create_pov, per gdb_trace.py / pov.py)."""
+        if not isinstance(content, str):
+            return []
+        s = content.lstrip()
+        if not s.startswith("{"):
+            return []
+        try:
+            data = json.loads(content)
+        except Exception:
+            return []
+        if not isinstance(data, dict):
+            return []
+
+        facts = []
+        if tool_name == "reach_probe":
+            parts = []
+            if "sink_reached" in data:
+                parts.append(f"sink_reached={data.get('sink_reached')}")
+            if data.get("asan_margin") is not None:
+                parts.append(f"asan_margin={data.get('asan_margin')}")
+            if data.get("first_unreached"):
+                parts.append(f"first_unreached={data.get('first_unreached')}")
+            if data.get("crash_frame"):
+                parts.append(f"crash_frame={data.get('crash_frame')}")
+            if parts:
+                # A crashing/sink-reaching probe is the load-bearing one; give it
+                # its own key so it is not overwritten by a later shallow probe.
+                if data.get("crashed"):
+                    key = "reach:CRASHED"
+                elif data.get("sink_reached"):
+                    key = "reach:sink-reached"
+                else:
+                    key = "reach:last"
+                facts.append((key, "reach_probe: " + " ".join(parts)))
+        elif tool_name == "create_pov":
+            if data.get("crashed"):
+                facts.append(
+                    (
+                        "pov:CRASHED",
+                        f"create_pov CRASHED (crash_matches_sp={data.get('crash_matches_sp')})",
+                    )
+                )
+            elif data.get("asan_margin") is not None:
+                facts.append(
+                    ("pov:closest", f"create_pov not-crashed asan_margin={data.get('asan_margin')}")
+                )
+        return facts
+
+    def _sync_ledger_message(self) -> None:
+        """Render the ledger into a single pinned user message (inserted once,
+        after the first user message, and updated in place thereafter). It is a
+        plain user message, so it never sits between a tool_call and its result
+        and cannot break pairing; and it lives before the recent tail, so
+        eviction never touches it."""
+        if not self._ledger:
+            return
+        body = (
+            "## LEDGER (verified facts, preserved across context compression)\n"
+            + "\n".join(f"- [{k}] {v}" for k, v in self._ledger.items())
+        )
+        for m in self.messages:
+            if (
+                m.get("role") == "user"
+                and isinstance(m.get("content"), str)
+                and m["content"].startswith("## LEDGER")
+            ):
+                m["content"] = body
+                return
+        idx = 2 if len(self.messages) >= 2 else len(self.messages)
+        self.messages.insert(idx, {"role": "user", "content": body})
 
     def _handle_recall(self, args: Dict[str, Any]) -> str:
         """Restore a previously evicted (stored) tool result by its ref id."""

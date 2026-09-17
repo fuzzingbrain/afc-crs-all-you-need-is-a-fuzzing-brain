@@ -35,11 +35,21 @@ def _make_agent(tmp_path: Path, keep: int = 2) -> _StubAgent:
     a.messages = []
     a._evict_seq = 0
     a._last_input_tokens = 0
+    a._ledger = {}
+    import uuid
+    a._evict_token = uuid.uuid4().hex[:12]  # unique per instance (never id(self))
     a.enable_context_compression = True
     a.compress_keep_recent_tools = keep
     a.log_dir = tmp_path
     a._log = lambda *args, **kwargs: None  # silence
     return a
+
+
+def _ledger_msg(msgs):
+    for m in msgs:
+        if m.get("role") == "user" and isinstance(m.get("content"), str) and m["content"].startswith("## LEDGER"):
+            return m["content"]
+    return None
 
 
 def _asst(call_id, name, args="{}"):
@@ -156,11 +166,95 @@ def test_idempotent_vs_nonidempotent(tmp_path):
     assert restored == "PROBE_RESULT" * 100
 
 
+def test_two_agents_do_not_collide_in_recall_store(tmp_path):
+    """Regression: the recall store dir was keyed on id(self), a memory address
+    reused across GC'd agents, so sequential POV agents overwrote each other's
+    <ref>.txt files and recall() returned another agent's result. Two agents
+    sharing a log_dir must get distinct store dirs and independent refs."""
+    a = _make_agent(tmp_path, keep=0)
+    b = _make_agent(tmp_path, keep=0)
+    assert a._evict_dir() != b._evict_dir(), "two agents collided on one store dir"
+
+    a.messages = [
+        {"role": "system", "content": "s"}, {"role": "user", "content": "t"},
+        _asst("x1", "reach_probe"), _tool("x1", json.dumps({"sink_reached": True, "who": "A"})),
+        _asst("x2", "noop"), _tool("x2", "keepA"),
+    ]
+    b.messages = [
+        {"role": "system", "content": "s"}, {"role": "user", "content": "t"},
+        _asst("y1", "create_pov"), _tool("y1", json.dumps({"pov_ids": ["B"], "who": "B"})),
+        _asst("y2", "noop"), _tool("y2", "keepB"),
+    ]
+    asyncio.run(a._compress_context())
+    asyncio.run(b._compress_context())
+
+    # Both evicted their first tool result to ref #1, but in DIFFERENT dirs, so
+    # each recall(1) returns ITS OWN content, not the other agent's.
+    assert '"who": "A"' in a._handle_recall({"ref": 1})
+    assert '"who": "B"' in b._handle_recall({"ref": 1})
+    assert '"who": "B"' not in a._handle_recall({"ref": 1})
+
+
 def test_recall_bad_ref(tmp_path):
     a = _make_agent(tmp_path, keep=2)
     a.messages = [{"role": "system", "content": "s"}]
     assert "invalid ref" in a._handle_recall({"ref": "abc"})
     assert "no evicted result" in a._handle_recall({"ref": 999})
+
+
+def test_ledger_pins_reach_and_pov_facts(tmp_path):
+    a = _make_agent(tmp_path, keep=1)
+    reach = json.dumps(
+        {"sink_reached": True, "asan_margin": 3, "first_unreached": None, "crashed": False}
+    )
+    pov = json.dumps({"crashed": True, "crash_matches_sp": True})
+    a.messages = [
+        {"role": "system", "content": "FRAME"},
+        {"role": "user", "content": "TASK"},
+        _asst("c1", "reach_probe"),
+        _tool("c1", reach),          # evicted -> fact lifted
+        _asst("c2", "create_pov"),
+        _tool("c2", pov),            # evicted -> fact lifted
+        _asst("c3", "reach_probe"),
+        _tool("c3", "{}recent"),     # kept (recent)
+    ]
+    asyncio.run(a._compress_context())
+
+    led = _ledger_msg(a.messages)
+    assert led is not None, "ledger message was not pinned"
+    assert "sink_reached=True" in led and "asan_margin=3" in led
+    assert "pov:CRASHED" in led and "create_pov CRASHED" in led
+    # Structure still valid after inserting the ledger message.
+    assert _pairs_valid(a.messages)
+
+
+def test_ledger_is_bounded_and_updated_in_place(tmp_path):
+    a = _make_agent(tmp_path, keep=0)
+    # Two shallow probes under the same key -> second overwrites first (bounded).
+    a.messages = [
+        {"role": "system", "content": "FRAME"},
+        {"role": "user", "content": "TASK"},
+        _asst("c1", "reach_probe"),
+        _tool("c1", json.dumps({"sink_reached": False, "asan_margin": 10})),
+        _asst("c2", "reach_probe"),
+        _tool("c2", json.dumps({"sink_reached": False, "asan_margin": 4})),
+    ]
+    asyncio.run(a._compress_context())
+    # one 'reach:last' key, holding the latter value; ledger did not grow to 2.
+    assert len(a._ledger) == 1
+    led = _ledger_msg(a.messages)
+    assert "asan_margin=4" in led and "asan_margin=10" not in led
+
+    # A second compression must update the SAME ledger message, not add another.
+    a.messages.append(_asst("c3", "reach_probe"))
+    a.messages.append(_tool("c3", json.dumps({"crashed": True, "crash_frame": "foo"})))
+    asyncio.run(a._compress_context())
+    ledger_msgs = [
+        m for m in a.messages
+        if m.get("role") == "user" and str(m.get("content", "")).startswith("## LEDGER")
+    ]
+    assert len(ledger_msgs) == 1, "ledger message was duplicated"
+    assert "reach:CRASHED" in ledger_msgs[0]["content"]
 
 
 def test_second_pass_is_idempotent(tmp_path):
