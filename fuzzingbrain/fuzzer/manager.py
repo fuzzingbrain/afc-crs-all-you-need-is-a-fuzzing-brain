@@ -21,6 +21,7 @@ from .models import (
     SPFuzzerConfig,
     SeedInfo,
 )
+from ..core.fuzzer_spec import is_no_oom
 from .budget import DEFAULT_MAX_PARALLEL_FUZZERS, FuzzerBudget
 from .instance import FuzzerInstance
 from .monitor import FuzzerMonitor
@@ -178,6 +179,7 @@ class FuzzerManager:
             fuzzer_type=FuzzerType.GLOBAL,
             config=self.global_config,
             task_id=self.task_id,
+            no_oom=is_no_oom(self.fuzzer_name),
         )
 
         # Add initial seeds
@@ -365,6 +367,7 @@ class FuzzerManager:
             fuzzer_type=FuzzerType.SP,
             config=self.sp_config,
             task_id=self.task_id,
+            no_oom=is_no_oom(self.fuzzer_name),
         )
 
         # Register crash directory (with worker_id)

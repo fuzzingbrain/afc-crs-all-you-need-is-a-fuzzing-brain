@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Union
 from loguru import logger
 
 from ..core.docker_limits import docker_resource_args, task_label_args
+from ..core.fuzzer_spec import libfuzzer_oom_flags, NO_OOM_MEMORY_MB
 from .models import (
     CRASH_ARTIFACT_PREFIXES,
     FuzzerStatus,
@@ -44,6 +45,7 @@ class FuzzerInstance:
         fuzzer_type: FuzzerType = FuzzerType.GLOBAL,
         config: Union[GlobalFuzzerConfig, SPFuzzerConfig] = None,
         task_id: str = "",
+        no_oom: bool = False,
     ):
         """
         Initialize FuzzerInstance.
@@ -66,6 +68,9 @@ class FuzzerInstance:
         self.corpus_dir = Path(corpus_dir)
         self.crashes_dir = Path(crashes_dir)
         self.fuzzer_type = fuzzer_type
+        # @NO_OOM target: disable libFuzzer's allocator guard (else a memory-heavy
+        # decoder floods /crashes with OOM "crashes" and never reaches deep sinks).
+        self.no_oom = no_oom
 
         # Configuration
         if config is None:
@@ -122,11 +127,18 @@ class FuzzerInstance:
         ]
 
         # Cap the container itself: fork mode runs fork_level children, each
-        # allowed rss_limit_mb, plus ASAN/runtime headroom.
+        # allowed rss_limit_mb, plus ASAN/runtime headroom. A @NO_OOM target has
+        # no per-process libFuzzer guard, so the cgroup is the only bound -- give
+        # it real headroom or a legitimate large decode gets SIGKILLed.
         fork = max(self.config.fork_level, 1)
+        container_mem = (
+            NO_OOM_MEMORY_MB
+            if self.no_oom
+            else self.config.rss_limit_mb * fork + 1024
+        )
         cmd.extend(
             docker_resource_args(
-                memory_mb=self.config.rss_limit_mb * fork + 1024,
+                memory_mb=container_mem,
                 cpus=fork,
             )
         )
@@ -173,7 +185,13 @@ class FuzzerInstance:
                 # quits, never reaching the others. Each distinct crash is still
                 # saved to /crashes for the monitor to pick up and score.
                 "-ignore_crashes=1",
-                f"-rss_limit_mb={self.config.rss_limit_mb}",
+                # @NO_OOM: disable the allocator guard (-rss_limit_mb=0
+                # -malloc_limit_mb=0); otherwise use the configured limit.
+                *(
+                    libfuzzer_oom_flags(True)
+                    if self.no_oom
+                    else [f"-rss_limit_mb={self.config.rss_limit_mb}"]
+                ),
                 f"-timeout={self.config.timeout_per_input}",
                 "-print_final_stats=1",
             ]

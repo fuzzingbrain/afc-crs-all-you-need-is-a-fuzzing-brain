@@ -17,6 +17,8 @@ import json, re, shutil, subprocess, tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..core.fuzzer_spec import parse_fuzzer_spec, libfuzzer_oom_flags, NO_OOM_MEMORY_MB
+
 GDB15_IMAGE = "gdbx-u24"          # ubuntu-24-04 base-runner + gdb 15 (DWARF5-capable)
 _LIB_CACHE = Path("/home/ze/fb-graphs/.projlib-cache")
 # glibc/runtime core the inferior should take from ubuntu-24, NOT from the project
@@ -119,16 +121,22 @@ def _parse(out: str, targets: List[str], sink: Optional[str], operands: Dict[str
     first_unreached = next((t for t in (targets or []) if not reached[t]), None)
     return {"reached": reached, "sink_reached": sink_reached, "first_unreached": first_unreached,
             "operands": ops, "asan_margin": asan_margin, "crashed": crashed,
-            "sanitizer_type": asan.group(1) if asan else ("signal" if sig else None),
+            # Under gdb the inferior's SIGSEGV is caught before ASan prints its
+            # own "SEGV" report, so fall back to the specific signal name (SEGV/
+            # ABRT/BUS/FPE/ILL) -- not a generic "signal" -- so crash_matches_sp
+            # can match an SP whose crash_type is e.g. "SEGV".
+            "sanitizer_type": asan.group(1) if asan else (sig.group(1) if sig else None),
             "crash_frame": frame}
 
 
 def trace(elf_host_path: str, run_argv_tmpl, input_bytes: bytes, project: str,
           targets: List[str] = None, sink: str = None, operands: Dict[str, str] = None,
           sp_function: str = None, sp_crash_type: str = None,
-          timeout: int = 150, image: str = None) -> Dict[str, Any]:
+          timeout: int = 150, image: str = None, memory_mb: int = 2048) -> Dict[str, Any]:
     """One gdb-15 run. `run_argv_tmpl(input_in_container)->[argv]` builds the run
-    command (fuzztest vs libFuzzer). Returns the bundle."""
+    command (fuzztest vs libFuzzer). `memory_mb` caps the container -- raise it
+    for memory-heavy decoders (@NO_OOM targets) or a valid input SIGKILLs before
+    reaching the sink. Returns the bundle."""
     libdir = stage_project_libs(project, elf_host_path, image=image)
     work = Path(tempfile.mkdtemp(prefix="trace_"))
     try:
@@ -139,7 +147,8 @@ def trace(elf_host_path: str, run_argv_tmpl, input_bytes: bytes, project: str,
         argv[0] = "/b/elf"
         cmd = ["docker", "run", "--rm", "--cap-add=SYS_PTRACE",
                "--security-opt", "seccomp=unconfined",
-               "--memory=2048m", "--memory-swap=2048m", "--cpus=1", "--pids-limit=512",
+               f"--memory={memory_mb}m", f"--memory-swap={memory_mb}m",
+               "--cpus=1", "--pids-limit=512",
                "-v", f"{work}:/b", "-v", f"{libdir}:/projlibs:ro",
                "-e", "ASAN_OPTIONS=abort_on_error=1:detect_leaks=0",
                GDB15_IMAGE, "bash", "-c",
@@ -235,11 +244,18 @@ def check_clamp(elf_host_path: str, run_argv_tmpl, input_bytes: bytes, project: 
 # ============================================================================
 
 def _argv_tmpl_for(fuzzer_name: Optional[str]):
-    """libFuzzer: [elf, input]. fuzztest (name@Test): [elf, --fuzz=Test, --, input]."""
-    if fuzzer_name and "@" in fuzzer_name:
-        _, test = fuzzer_name.split("@", 1)
-        return lambda inp: ["/b/elf", f"--fuzz={test}", "--", inp]
-    return lambda inp: ["/b/elf", inp]
+    """Build the run argv for a logical fuzzer name.
+
+    libFuzzer:          [elf, <oom flags>, input]
+    fuzztest (name@Test): [elf, --fuzz=Test, --, input]
+    @NO_OOM adds -rss_limit_mb=0 -malloc_limit_mb=0 so the allocator guard does
+    not abort a memory-heavy decode before it reaches the sink.
+    """
+    _, no_oom, fuzztest = parse_fuzzer_spec(fuzzer_name or "")
+    oom = libfuzzer_oom_flags(no_oom)
+    if fuzztest:
+        return lambda inp: ["/b/elf", f"--fuzz={fuzztest}", "--", inp]
+    return lambda inp: ["/b/elf", *oom, inp]
 
 
 def reach_probe(generator_code: str,
@@ -280,11 +296,13 @@ def reach_probe(generator_code: str,
     if err or not blobs:
         return {"error": f"generator failed: {err or 'no bytes produced'}"}
 
+    _, no_oom, _ = parse_fuzzer_spec(fuzzer_name or "")
+    mem = NO_OOM_MEMORY_MB if no_oom else 2048
     try:
         res = trace(str(elf), _argv_tmpl_for(fuzzer_name), blobs[0], project,
                     targets=targets, sink=sink, operands=operands,
                     sp_function=sp_function, sp_crash_type=sp_crash_type,
-                    timeout=timeout, image=image)
+                    timeout=timeout, image=image, memory_mb=mem)
     except subprocess.TimeoutExpired:
         return {"error": f"gdb trace timed out after {timeout}s", "crashed": False}
     except Exception as e:  # never let a probe failure kill verification

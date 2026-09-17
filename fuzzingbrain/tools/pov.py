@@ -32,6 +32,7 @@ from .coverage import (
     get_coverage_context,
 )
 from ..core.docker_limits import docker_resource_args
+from ..core.fuzzer_spec import is_no_oom, libfuzzer_oom_flags, NO_OOM_MEMORY_MB
 from ..core.models import POV
 from ..core.pov_packager import POVPackager
 from ..core.utils import generate_id
@@ -497,6 +498,7 @@ def trace_pov_impl(
                 blob_path=blob_path,
                 docker_image=docker_image,
                 sanitizer=sanitizer,
+                no_oom=is_no_oom(fuzzer_name),
             )
 
             if success and crashed:
@@ -843,11 +845,6 @@ def _create_pov_core(
     ctx_worker_id = ctx["worker_id"]
     output_dir = ctx["output_dir"]
 
-    # TEST_ONLY
-    with open("/tmp/pov_debug.log", "a") as f:
-        f.write("\n=== _create_pov_core ===\n")
-        f.write(f"output_dir: {output_dir}\n")
-        f.write(f"docker_image: {ctx.get('docker_image')}\n")
     repos = ctx["repos"]
     fuzzer = ctx.get("fuzzer", "")
     sanitizer = ctx.get("sanitizer", "address")
@@ -1010,6 +1007,7 @@ def _create_pov_core(
                         fuzzer_path=Path(other_fuzzer.binary_path),
                         docker_image=docker_image,
                         sanitizer=sanitizer,
+                        no_oom=is_no_oom(other_fuzzer.fuzzer_name),
                     )
                     if other_result.get("crashed"):
                         cross_fuzzer_hits += 1
@@ -1238,6 +1236,7 @@ def _verify_blob_on_fuzzer(
     docker_image: str,
     sanitizer: str = "address",
     timeout: int = 30,
+    no_oom: bool = False,
 ) -> Dict[str, Any]:
     """
     Verify a blob on a specific fuzzer.
@@ -1266,6 +1265,7 @@ def _verify_blob_on_fuzzer(
             docker_image=docker_image,
             sanitizer=sanitizer,
             timeout=timeout,
+            no_oom=no_oom,
         )
         return {
             "success": success,
@@ -1287,12 +1287,17 @@ def _run_fuzzer_docker(
     docker_image: str,
     sanitizer: str = "address",
     timeout: int = 30,
+    no_oom: bool = False,
 ) -> tuple:
     """
     Run fuzzer in Docker container with blob input.
 
     Includes fallback mechanism: if the primary docker_image fails due to
     missing shared libraries, automatically retry with base-runner.
+
+    `no_oom` (a @NO_OOM target) disables libFuzzer's allocator guard and gives
+    the container real memory headroom, so a memory-heavy decode reaches the
+    sink instead of aborting/being SIGKILLed on the way there.
 
     Returns:
         Tuple of (success, crashed, output, error)
@@ -1304,6 +1309,7 @@ def _run_fuzzer_docker(
 
     # Mount blob's parent directory directly — blob is already in worker workspace
     work_dir = blob_path.parent
+    memory_mb = NO_OOM_MEMORY_MB if no_oom else 4096
 
     def run_with_image(image: str):
         """Run fuzzer with specified docker image."""
@@ -1315,7 +1321,7 @@ def _run_fuzzer_docker(
             "linux/amd64",
             "--entrypoint",
             "",  # Bypass base-runner's entrypoint script
-            *docker_resource_args(memory_mb=4096, cpus=1),
+            *docker_resource_args(memory_mb=memory_mb, cpus=1),
             "-e",
             "FUZZING_ENGINE=libfuzzer",
             "-e",
@@ -1331,18 +1337,11 @@ def _run_fuzzer_docker(
             image,
             f"/fuzzers/{fuzzer_name}",
             f"-timeout={timeout}",
+            *libfuzzer_oom_flags(no_oom),
             f"/work/{blob_path.name}",
         ]
 
         logger.info(f"[POV] Running Docker: {' '.join(docker_cmd)}")
-
-        # TEST_ONLY: 写日志到文件
-        with open("/tmp/pov_debug.log", "a") as f:
-            f.write("\n=== _run_fuzzer_docker ===\n")
-            f.write(f"fuzzer_path: {fuzzer_path}\n")
-            f.write(f"blob_path: {blob_path}\n")
-            f.write(f"docker_image: {docker_image}\n")
-            f.write(f"docker_cmd: {' '.join(docker_cmd)}\n")
 
         result = subprocess.run(
             docker_cmd,
@@ -1354,12 +1353,6 @@ def _run_fuzzer_docker(
         )
 
         combined_output = result.stderr + "\n" + result.stdout
-
-        # TEST_ONLY: 写结果到文件
-        with open("/tmp/pov_debug.log", "a") as f:
-            f.write(f"returncode: {result.returncode}\n")
-            f.write(f"output:\n{combined_output}\n")
-            f.write("=== END ===\n")
 
         return result, combined_output
 
@@ -1480,12 +1473,6 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
     Args:
         worker_id: Explicit worker_id for context lookup (preferred over ContextVar)
     """
-    # TEST_ONLY
-    with open("/tmp/pov_debug.log", "a") as f:
-        f.write("\n=== _verify_pov_core called ===\n")
-        f.write(f"pov_id: {pov_id}\n")
-        f.write(f"worker_id: {worker_id}\n")
-
     ctx = _get_context_by_worker_id(worker_id) if worker_id else _get_current_context()
     repos = ctx["repos"]
     sanitizer = ctx.get("sanitizer", "address")
@@ -1493,18 +1480,10 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
     # Get POV from database
     pov = repos.povs.find_by_id(pov_id)
     if not pov:
-        with open("/tmp/pov_debug.log", "a") as f:
-            f.write("ERROR: POV not found\n")
         return {"success": False, "error": f"POV {pov_id} not found"}
 
     # Get blob path
     blob_path = pov.blob_path
-    # TEST_ONLY
-    with open("/tmp/pov_debug.log", "a") as f:
-        f.write(f"blob_path from pov: {blob_path}\n")
-        f.write(
-            f"blob_path exists: {Path(blob_path).exists() if blob_path else 'N/A'}\n"
-        )
 
     if not blob_path or not Path(blob_path).exists():
         # Try to reconstruct from base64 blob
@@ -1516,15 +1495,11 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
                 temp_blob.write_bytes(base64.b64decode(pov.blob))
                 blob_path = str(temp_blob)
             else:
-                with open("/tmp/pov_debug.log", "a") as f:
-                    f.write("ERROR: No output_dir\n")
                 return {
                     "success": False,
                     "error": "No blob path and no output_dir to reconstruct",
                 }
         else:
-            with open("/tmp/pov_debug.log", "a") as f:
-                f.write("ERROR: POV has no blob data\n")
             return {"success": False, "error": "POV has no blob data"}
 
     blob_path = Path(blob_path)
@@ -1536,11 +1511,6 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
     # It was referenced there but never defined, so every crash raised
     # NameError('fuzzer') and no PoV was ever registered as successful.
     fuzzer = ctx.get("fuzzer", "") or (fuzzer_path.name if fuzzer_path else "")
-
-    # TEST_ONLY
-    with open("/tmp/pov_debug.log", "a") as f:
-        f.write(f"fuzzer_path: {fuzzer_path}\n")
-        f.write(f"docker_image: {docker_image}\n")
 
     if not fuzzer_path:
         return {"success": False, "error": "fuzzer_path not set in POV context"}
@@ -1559,6 +1529,7 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
         blob_path=blob_path,
         docker_image=docker_image,
         sanitizer=sanitizer,
+        no_oom=is_no_oom(fuzzer),
     )
 
     if not success:
