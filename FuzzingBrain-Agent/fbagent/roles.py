@@ -110,6 +110,41 @@ def _deepest_from_trace(output: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+def run_verification(lead: Lead, *, llm, board: LeadBoard, workspace: str = ".",
+                     deadline_s: float | None = None, max_usd: float = 0.0,
+                     harness_names=None) -> dict:
+    """Drive verification of `lead`: the agent reads + traces, records a verdict
+    via update_lead, and — since it holds bash + trace — may carry a crash. A
+    submit-backed crash is banked straight away (skips reproduction). Returns
+    the score and whether it crashed; the controller applies the >=0.5 gate."""
+    ws = Path(workspace)
+    rev0 = lead.rev          # snapshot: the board mutates the Lead in place
+    hnames = harness_names or ([lead.harness.rsplit("/", 1)[-1]] if lead.harness else [])
+    system = _role_prompt("verify") + "\n\n## Harness source\n\n" + harness_source(ws)
+    schemas, runner = lead_tools.build("verify", board, lead_id=lead.id,
+                                       harness=lead.harness, sanitizer=lead.sanitizer)
+    agent = Agent(system, llm=llm, tools=schemas, tool_runner=runner,
+                  deadline_s=deadline_s, max_usd=max_usd, min_spend_fraction=0.0)
+    result = agent.run(_lead_brief(lead))
+    sig, deepest, best = _scan_outcome(agent, hnames)
+    if sig and sig.crash_class:
+        board.record_crash(lead.id, sig.key, candidate=best)
+        return {"lead": lead.id, "crashed": True, "signature": sig.key,
+                "score": 1.0, "stop_reason": result["stop_reason"]}
+    fresh = board.get(lead.id)
+    # No verdict recorded -> recall-first: proceed (score defaults to 0, so lift
+    # it to the gate) rather than silently dropping a Lead the agent ran out on.
+    score = fresh.score
+    if fresh.rev == rev0:              # update_lead never fired
+        score = 0.5
+        board.update(lead.id, allowed=None, score=score,
+                     evidence="(verifier recorded no verdict; recall-first proceed)")
+    if deepest and not fresh.deepest_reached:
+        board.update(lead.id, allowed=None, deepest_reached=deepest)
+    return {"lead": lead.id, "crashed": False, "score": score,
+            "stop_reason": result["stop_reason"]}
+
+
 def run_reproduction(lead: Lead, *, llm, board: LeadBoard, workspace: str = ".",
                      deadline_s: float | None = None, max_usd: float = 0.0,
                      harness_names=None) -> dict:
