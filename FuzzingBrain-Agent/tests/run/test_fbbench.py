@@ -13,6 +13,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
@@ -415,69 +416,75 @@ def test_the_report_survives_a_failure_whose_message_is_itself_json(tmp_path):
     assert found[-1]["failed"] is True, "a crashed run must not read as a clean finish"
 
 
-# ---- context compaction -----------------------------------------------------
-# 88% of this agent's context is command output, and with no compaction all of
-# it is re-read every turn -- cache reads were 47% of fwupd-01's $7.61. But
-# compaction fights the prompt cache (reads $0.50/MTok, writes $6.25/MTok at a
-# 95% hit rate), so it happens once at a threshold, not every turn.
+# ---- reach, when the image ships no debugger --------------------------------
+# libxml2-04 scored 0. At step 9 the model got `./reach: No such file or
+# directory`, at step 11 `sh: 1: exec: gdb: not found`, and the coach went on
+# recommending ./reach regardless. Roughly half the images have no debugger and
+# nothing announces which, so the script has to learn it once and remember.
+#
+# These drive the real script against a fake responder rather than reading its
+# source, because the bug that mattered was behavioural: it kept paying a turn
+# per call to rediscover the same dead end.
 
-def _agent_for_compaction(tmp_path):
-    import sys as _s
-    _s.path.insert(0, str(REPO / "src"))
-    from minisweagent.run.fbbench import _ReportingAgent
-    from minisweagent.environments.local import LocalEnvironment
-    from minisweagent.models.test_models import DeterministicModel
-    ws = tmp_path / "ws"; (ws / ".fbbench").mkdir(parents=True)
-    a = _ReportingAgent(DeterministicModel(outputs=[]), LocalEnvironment(),
-                        workspace=ws, model_name="m",
-                        system_template="", instance_template="")
-    a.messages = [
-        {"role": "system", "content": "sys"},
-        {"role": "assistant", "content": "thinking about the harness"},
-        {"role": "tool", "content": "A" * 9000},                       # old, bulky
-        {"role": "assistant", "content": "more thinking"},
-        {"role": "tool", "content": "crash: abrt|f|g"},                # a verdict
-        {"role": "tool", "content": "B" * 9000},                       # old, bulky
-    ] + [{"role": "tool", "content": "C" * 9000} for _ in range(20)]   # recent
-    return a
+def _reach_ws(tmp_path: Path) -> Path:
+    ws = _stage(tmp_path)
+    (ws / ".fbbench" / "trace_req").mkdir()
+    (ws / ".fbbench" / "trace_res").mkdir()
+    _run(ws, [_say("Done.", _DONE)])
+    assert (ws / "reach").is_file(), "the tracer dir is there, so ./reach should be too"
+    (ws / "cand.bin").write_bytes(b"FUZZ....")
+    return ws
 
 
-def test_compaction_elides_old_output_but_keeps_verdicts_and_reasoning(tmp_path):
-    a = _agent_for_compaction(tmp_path)
-    before = len(a.messages)
-    a._compact()
-    assert len(a.messages) == before, "messages must never be removed"
-    assert a.messages[1]["content"] == "thinking about the harness"
-    assert a.messages[3]["content"] == "more thinking", "model reasoning is the state"
-    assert a.messages[4]["content"] == "crash: abrt|f|g", "verdicts are the record"
-    assert "elided" in a.messages[2]["content"], "old bulk output should be stubbed"
-    assert a.messages[-1]["content"] == "C" * 9000, "recent turns stay verbatim"
+def _answer(ws: Path, text: str, timeout: float = 20.0) -> str:
+    """Play the bench's responder: wait for a request, reply to it."""
+    req = ws / ".fbbench" / "trace_req"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        tgt = sorted(req.glob("*.tgt"))
+        if tgt:
+            rid = tgt[0].name[:-4]
+            (ws / ".fbbench" / "trace_res" / rid).write_text(text)
+            return rid
+        time.sleep(0.05)
+    raise AssertionError("./reach never posted a trace request")
 
 
-def test_compaction_never_breaks_the_tool_use_pairing(tmp_path):
-    # An assistant tool_use must keep its matching tool_result, or the next
-    # request is rejected outright. That bug killed a live run 12 turns early.
-    a = _agent_for_compaction(tmp_path)
-    roles_before = [m["role"] for m in a.messages]
-    a._compact()
-    assert [m["role"] for m in a.messages] == roles_before
+def test_a_missing_debugger_is_learned_once_and_not_paid_for_again(tmp_path):
+    ws = _reach_ws(tmp_path)
+    marker = ws / ".fbbench" / "reach_unavailable"
+
+    p = subprocess.Popen([str(ws / "reach"), "cand.bin", "parse"], cwd=ws,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    _answer(ws, "\nsh: 1: exec: gdb: not found\n")      # libxml2-04's actual reply
+    _, err = p.communicate(timeout=30)
+
+    assert p.returncode == 1
+    assert marker.is_file(), "a dead tracer must be remembered on disk"
+    assert "Do not call ./reach again" in err
+    assert "0 ms" in err, "it should still say how to read the verdict instead"
+
+    # The second call must cost nothing: no request posted, no waiting.
+    before = {f.name for f in (ws / ".fbbench" / "trace_req").iterdir()}
+    t0 = time.time()
+    r2 = subprocess.run([str(ws / "reach"), "cand.bin", "parse"], cwd=ws,
+                        capture_output=True, text=True, timeout=30)
+    after = {f.name for f in (ws / ".fbbench" / "trace_req").iterdir()}
+
+    assert r2.returncode == 1
+    assert after == before, "short-circuit must not post another request"
+    assert time.time() - t0 < 2.0, "short-circuit must not wait on a responder"
+    assert "Do not call ./reach again" in r2.stderr
 
 
-def test_compaction_waits_for_the_threshold_and_then_cools_down(tmp_path):
-    a = _agent_for_compaction(tmp_path)
-    a._last_prompt_tokens = 10_000
-    a.n_turns = 40
-    a._maybe_compact()
-    assert a._compacted_at < 0, "must not fire below the token threshold"
+def test_a_working_debugger_is_not_mistaken_for_a_dead_one(tmp_path):
+    ws = _reach_ws(tmp_path)
+    p = subprocess.Popen([str(ws / "reach"), "cand.bin", "parse"], cwd=ws,
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    _answer(ws, "@@REACHED parse@@\nd = 0x7ffd, n = 8\n")
+    out, _ = p.communicate(timeout=30)
 
-    a._last_prompt_tokens = 80_000
-    a._maybe_compact()
-    assert a._compacted_at == 40, "should fire once over the threshold"
-
-    a.n_turns = 45
-    a._maybe_compact()
-    assert a._compacted_at == 40, "must not fire again inside the cooldown"
-
-    a.n_turns = 70
-    a._maybe_compact()
-    assert a._compacted_at == 70, "may fire again well after the cooldown"
+    assert p.returncode == 0
+    assert "@@REACHED parse@@" in out
+    assert not (ws / ".fbbench" / "reach_unavailable").exists(), \
+        "a good answer must not disable the tool for the rest of the run"

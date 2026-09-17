@@ -162,8 +162,6 @@ class _ReportingAgent(DefaultAgent):
         self.coach = Coach(turn_limit=self.config.turn_limit,
                            wall_limit_s=self.config.wall_time_limit_seconds,
                            workspace=workspace)
-        self._last_prompt_tokens = 0
-        self._compacted_at = -10_000
         self._trace = workspace / ".fbagent-trace.jsonl"
         self._trace.parent.mkdir(parents=True, exist_ok=True)
         self._trace.write_text("")
@@ -254,74 +252,34 @@ class _ReportingAgent(DefaultAgent):
                               is_error=False, content=_text_of(obs)[:20000])
         return observations
 
-    # ---- context compaction -------------------------------------------------
-    # 88% of this agent's context is command output: 174 KB of it on fwupd-01,
-    # against 2 KB of model text. With no compaction the whole of that is re-read
-    # on every turn, and cache reads were 47% of that run's $7.61.
+    # ---- why there is no context compaction ---------------------------------
+    # There was, briefly. Replaying the four recorded v2 cells through it showed
+    # it made them 9.7% MORE expensive ($22.52 -> $24.71 modelled), so it came
+    # back out. The reason is that eviction rewrites the prompt prefix, which
+    # invalidates the cache from the first changed byte: a read at $0.50/MTok
+    # becomes a write at $6.25/MTok. One firing must therefore earn back a 12.5x
+    # premium on the whole surviving prefix:
     #
-    # The trap is that compaction fights the prompt cache. We run at a 95% hit
-    # rate; a cache read costs $0.50/MTok and a cache write $6.25/MTok, so
-    # rewriting history converts cheap reads into writes at 12.5x. Compacting
-    # every turn would cost more than it saves. So: once, when the context
-    # crosses a threshold, and then not again for a long stretch -- one expensive
-    # re-write, then cheap again for the rest of the run.
-    COMPACT_ABOVE_TOKENS = 60_000   # measured: fwupd-01 averaged ~93k per turn
-    COMPACT_KEEP_RECENT = 10        # turns whose output stays verbatim
-    COMPACT_COOLDOWN_TURNS = 25     # never twice in quick succession
-
-    def _compact(self) -> None:
-        """Stub out old command output, in place.
-
-        Only the CONTENT of observation messages changes. Nothing is removed and
-        no role is touched: an assistant tool_use must keep its matching
-        tool_result or the next request is rejected outright, which is how an
-        earlier version of this agent killed a run 12 turns early.
-
-        Three things survive verbatim, because they are the run's actual state:
-        every model message (its reasoning and its commands), any observation
-        carrying a ./submit verdict, and the last COMPACT_KEEP_RECENT turns.
-        """
-        keep_from = max(0, len(self.messages) - self.COMPACT_KEEP_RECENT * 2)
-        saved = 0
-        for i, m in enumerate(self.messages):
-            if i >= keep_from or m.get("role") not in ("tool", "user"):
-                continue
-            text = _text_of(m)
-            if len(text) < 400 or "crash:" in text or "clean: no fault" in text:
-                continue          # verdicts are the record; short output is free
-            saved += len(text)
-            stub = f"<elided: {len(text) // 1024 or 1} KB of output from an earlier turn>"
-            if isinstance(m.get("content"), list):
-                m["content"] = [{"type": "text", "text": stub}]
-            else:
-                m["content"] = stub
-        self._compacted_at = self.n_turns
-        self._trace_write(kind="text",
-                          text=f"[compacted] elided ~{saved // 1024} KB of earlier "
-                               f"command output, keeping the last "
-                               f"{self.COMPACT_KEEP_RECENT} turns and every verdict")
-        print(json.dumps({"event": "compacted", "turn": self.n_turns,
-                          "elided_bytes": saved}), flush=True)
-
-    def _maybe_compact(self) -> None:
-        if self._last_prompt_tokens < self.COMPACT_ABOVE_TOKENS:
-            return
-        if self.n_turns - self._compacted_at < self.COMPACT_COOLDOWN_TURNS:
-            return
-        self._compact()
+    #     elided x turns_remaining  >=  11.5 x context_after
+    #
+    # At an 80k context that needs ~30k tokens elided with 25 turns left. The
+    # measured pool was 7-20k, because 59-69% of this agent's context is the
+    # model's own reasoning, which eviction must not touch, and the fixed prompt
+    # is another 15-27k. Only the last third is command output.
+    #
+    # Firing once instead of three times does flip it (-3.1%), but -3% is inside
+    # run-to-run noise and not worth a live-run risk. Cost work should go after
+    # output tokens instead: on fwupd-01, 92k output tokens re-read ~41 times are
+    # 57% of the cache-read bill, so a thinking token really costs ~$45/MTok, not
+    # $25. See fb-agent-compaction-and-reach.pdf, and arXiv 2606.11213 S5, which
+    # reports the same net-negative-for-caching result independently.
 
     def query(self) -> dict:
         # Published here rather than after the action, because this is the
         # moment the tokens were actually spent. A turn whose command runs for
         # minutes -- a build, a long ./submit -- would otherwise be unreported
         # for all of it, and a kill in that window would lose the whole run.
-        self._maybe_compact()
         message = super().query()
-        # The provider's own count of what we just sent -- the only honest
-        # measure of context size, and free.
-        usage = ((message.get("extra") or {}).get("response") or {}).get("usage") or {}
-        if isinstance(usage, dict) and usage.get("prompt_tokens"):
-            self._last_prompt_tokens = int(usage["prompt_tokens"])
         self.publish("running")
         if text := _text_of(message):
             self._trace_write(kind="text", text=text)

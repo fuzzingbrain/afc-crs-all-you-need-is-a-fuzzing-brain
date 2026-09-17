@@ -220,3 +220,29 @@ def test_building_a_candidate_with_a_loop_is_not_batching(command):
 def test_a_shell_loop_over_submit_is_still_blocked(command):
     why = forbidden(command)
     assert why and "one candidate per turn" in why.lower()
+
+
+def test_the_gate_hint_stops_naming_reach_once_it_is_known_dead(tmp_path):
+    # libxml2-04 burned four turns on a tool its image had not got. The insight
+    # (a 0 ms verdict means the harness rejected the input) is still worth
+    # saying; the pointer to the dead tool is not.
+    ws = tmp_path / "ws"
+    (ws / ".fbbench").mkdir(parents=True)
+    verdict = "clean: no fault | target ran 0 ms | 8 bytes"
+
+    live = "\n".join(Coach(turn_limit=100, wall_limit_s=1800,
+                           workspace=ws).observe("./submit c1", verdict, 5, 40))
+    assert "./reach" in live
+
+    (ws / ".fbbench" / "reach_unavailable").write_text("reach: not available\n")
+    dead = "\n".join(Coach(turn_limit=100, wall_limit_s=1800,
+                           workspace=ws).observe("./submit c1", verdict, 5, 40))
+    assert "./reach" not in dead, "still recommending a tool this image cannot run"
+    assert "threw that input out" in dead, "the gate insight must survive"
+
+
+def test_the_coach_works_without_a_workspace():
+    # Every other caller in the tests constructs a Coach with no workspace.
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    notes = "\n".join(c.observe("./submit c1", "clean: no fault | target ran 0 ms | 8 bytes", 5, 40))
+    assert "./reach" in notes
