@@ -67,12 +67,20 @@ class BaseAgent(ABC):
     # Enable context compression (can be disabled by subclasses that need full context)
     enable_context_compression: bool = True
 
-    # Model used for the mechanical compression/summarization step. Tiered down
-    # to a cheap model by default (summarization does not need the flagship);
-    # subclasses can override. Falls back to a mechanical summary on failure.
-    # None -> resolved from the router (Role.COMPRESSION) at use time; set a
-    # concrete id to override for one agent.
-    compression_model_id: Optional[str] = None
+    # Context compression is MECHANICAL (no summarizer LLM). When the live input
+    # crosses this many tokens, old tool RESULTS are evicted out of the window;
+    # the last `compress_keep_recent_tools` results are always kept verbatim, and
+    # the system/harness/tools frame and the first user message are never touched.
+    compress_trigger_tokens: int = 60_000
+    compress_keep_recent_tools: int = 8
+
+    # Pure static reads whose result is stable and side-effect-free: evicting one
+    # needs no storage — the stub just tells the model to re-call the tool. Every
+    # other tool (dynamic probes, anything with a side effect, mutable DB reads)
+    # is stored to disk and restored via recall(); the safe default is "store".
+    _IDEMPOTENT_READ_TOOLS: frozenset = frozenset(
+        {"get_callers", "get_callees", "get_diff", "get_fuzzer_source", "check_reachability"}
+    )
 
     def __init__(
         self,
@@ -133,6 +141,10 @@ class BaseAgent(ABC):
 
         # Tool definitions (populated when connecting to MCP)
         self._tools: List[Dict[str, Any]] = []
+
+        # Context compression state (mechanical eviction)
+        self._last_input_tokens: int = 0  # updated after each LLM response
+        self._evict_seq: int = 0  # monotonic ref id for stored evicted results
 
         # Statistics
         self.total_iterations = 0
@@ -434,174 +446,116 @@ class BaseAgent(ABC):
             )
         return msg
 
-    def _get_compression_criteria(self) -> str:
-        """
-        Get task-specific compression criteria for context compression.
+    def _evict_dir(self) -> Path:
+        """Per-instance directory holding evicted (non-idempotent) tool results
+        so recall() can restore them verbatim within this agent's run."""
+        import tempfile
 
-        Subclasses should override this to provide agent-specific criteria.
-        This tells the compression LLM what to keep vs discard.
+        base = self.log_dir if self.log_dir else Path(tempfile.gettempdir())
+        d = Path(base) / "agent_ctx" / f"{self.agent_name}_{id(self)}"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
 
-        Returns:
-            Compression criteria string describing what's relevant for this agent
-        """
-        return "Keep information relevant to security analysis and vulnerability discovery."
-
-    def _get_compression_context(self) -> str:
-        """
-        Get task context for compression LLM.
-
-        By default, uses system prompt + initial user message as context.
-        These are preserved anyway, but help compression LLM understand what's relevant.
-
-        Returns:
-            Task context string to help compression LLM understand what's important
-        """
-        context_parts = []
-        if len(self.messages) > 0:
-            # System prompt (truncated if too long)
-            sys_content = self.messages[0].get("content", "")
-            if len(sys_content) > 1000:
-                sys_content = sys_content[:1000] + "..."
-            context_parts.append(f"[SYSTEM]: {sys_content}")
-        if len(self.messages) > 1:
-            # Initial user message (task description)
-            user_content = self.messages[1].get("content", "")
-            if len(user_content) > 1500:
-                user_content = user_content[:1500] + "..."
-            context_parts.append(f"[TASK]: {user_content}")
-        return "\n\n".join(context_parts)
-
-    def _load_compression_prompt(self) -> str:
-        """Load the context compression prompt template."""
-        prompt_path = (
-            Path(__file__).parent / "prompts" / "context_compression_prompt.md"
-        )
-        if prompt_path.exists():
-            return prompt_path.read_text(encoding="utf-8")
-        # Fallback
-        return """Compress tool results. Keep only what's relevant to: {compression_criteria}
-
-Messages:
-{messages_text}
-
-Output compressed version with format:
-Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
+    def _tool_name_by_call_id(self, tool_call_id: str) -> tuple:
+        """Find (name, args_str) of the assistant tool_call that produced a given
+        tool result, so an evicted result can name its origin (and, for idempotent
+        reads, tell the model exactly what to re-call)."""
+        for msg in self.messages:
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    if tc.get("id") == tool_call_id:
+                        fn = tc.get("function", {})
+                        return fn.get("name", "tool"), fn.get("arguments", "") or ""
+        return "tool", ""
 
     async def _compress_context(self) -> None:
-        """
-        Compress conversation context to reduce token usage.
+        """Mechanically evict OLD tool results out of the context window.
 
-        Called every 5 iterations. Uses Sonnet for task-aware compression.
-        Preserves function signatures and relevant code lines, marks irrelevant results.
-        Must preserve tool_call -> tool_result pairs to maintain valid message structure.
-        """
-        self._log(f"Compression check: {len(self.messages)} messages", level="DEBUG")
+        No summarizer LLM. The frame (system + harness + tools, all in
+        ``messages[0]`` and the separate ``tools=`` param) and the first user
+        message are never touched. The last ``compress_keep_recent_tools`` tool
+        results are kept verbatim; older tool results have their CONTENT replaced
+        by a short stub while the paired assistant ``tool_call`` is kept intact,
+        so ``tool_call -> tool_result`` pairing stays valid:
 
-        # Only compress if we have enough messages (at least 10)
-        if len(self.messages) < 10:
-            self._log(
-                f"Skipping compression: not enough messages ({len(self.messages)} < 10)",
-                level="DEBUG",
-            )
+          - idempotent pure reads (§ ``_IDEMPOTENT_READ_TOOLS``) -> stub tells the
+            model to re-call the tool; nothing stored (re-reading is free/stable).
+          - everything else -> raw content stored to disk; stub says ``recall(ref)``.
+
+        Reversible: ``recall(ref)`` restores a stored result verbatim; idempotent
+        reads are restored by the model simply calling the tool again. This
+        function only mutates message *content*; it never removes messages, so it
+        cannot orphan a tool_call or a tool_result.
+        """
+        msgs = self.messages
+        if len(msgs) < 6:
             return
 
-        # Keep first 2 messages (system + initial user)
-        keep_start = 2
-
-        # Find safe cut point for end - must not break tool_call/tool_result pairs
-        # Start with 3 messages from end, extend if needed
-        keep_end = 3
-        while keep_end < len(self.messages) - keep_start:
-            end_idx = len(self.messages) - keep_end
-            if end_idx >= 0 and self.messages[end_idx].get("role") == "tool":
-                # This would cut in the middle of a tool sequence, extend
-                keep_end += 1
-            else:
-                break
-
-        if len(self.messages) <= keep_start + keep_end:
-            self._log(
-                f"Skipping compression: not enough middle ({len(self.messages)} <= {keep_start}+{keep_end})",
-                level="DEBUG",
-            )
+        # Tool-result messages, oldest first. messages[0] (system) and [1] (first
+        # user) are out of range by construction.
+        tool_idxs = [i for i, m in enumerate(msgs) if i >= 2 and m.get("role") == "tool"]
+        # Keep the most recent N verbatim; the older ones are eviction candidates.
+        keep = max(0, self.compress_keep_recent_tools)
+        evict_idxs = tool_idxs[: max(0, len(tool_idxs) - keep)]
+        if not evict_idxs:
             return
 
-        # Messages to compress
-        middle_messages = self.messages[keep_start:-keep_end]
+        evicted = 0
+        for i in evict_idxs:
+            m = msgs[i]
+            content = m.get("content", "")
+            if not isinstance(content, str):
+                continue
+            if content.startswith("[evicted"):  # already evicted in a prior pass
+                continue
+            size = len(content)
+            if size == 0:
+                continue
+            name, args = self._tool_name_by_call_id(m.get("tool_call_id", ""))
 
-        # Build conversation text for compression
-        conv_text = []
-        for msg in middle_messages:
-            role = msg.get("role", "")
-            content = msg.get("content", "")
-            if role == "assistant" and msg.get("tool_calls"):
-                tools_info = []
-                for tc in msg["tool_calls"]:
-                    func_name = tc.get("function", {}).get("name", "")
-                    func_args = tc.get("function", {}).get("arguments", "{}")
-                    tools_info.append(f"{func_name}({func_args[:100]})")
-                conv_text.append(f"[ASSISTANT CALLS: {', '.join(tools_info)}]")
-                if content:
-                    conv_text.append(f"[ASSISTANT REASONING: {content}]")
-            elif role == "tool":
-                tool_id = msg.get("tool_call_id", "")
-                # Keep full content for compression LLM to analyze
-                conv_text.append(f"[TOOL RESULT {tool_id}]:\n{content}")
-            elif content:
-                conv_text.append(f"[{role.upper()}]: {content}")
+            if name in self._IDEMPOTENT_READ_TOOLS:
+                arg_short = args.replace("\n", " ")[:80]
+                m["content"] = (
+                    f"[evicted · {name}({arg_short}) · {size}B · re-call {name} to restore]"
+                )
+                evicted += 1
+                continue
 
-        # Get task-specific compression criteria and context
-        compression_criteria = self._get_compression_criteria()
-        task_context = self._get_compression_context()
+            # Non-idempotent (dynamic / side-effecting / mutable): store, then stub.
+            self._evict_seq += 1
+            ref = self._evict_seq
+            try:
+                (self._evict_dir() / f"{ref}.txt").write_text(content, encoding="utf-8")
+            except Exception as e:
+                # Could not store -> keep the content verbatim rather than lose it.
+                self._evict_seq -= 1
+                self._log(f"Evict store failed for {name}: {e}", level="WARNING")
+                continue
+            m["content"] = f"[evicted #{ref} · {name} · {size}B · recall({ref}) to restore]"
+            evicted += 1
 
-        # Load and format compression prompt
-        prompt_template = self._load_compression_prompt()
-        compression_prompt = prompt_template.format(
-            task_context=task_context or "Security analysis task",
-            compression_criteria=compression_criteria,
-            messages_text="\n\n".join(conv_text),
-        )
+        if evicted:
+            self._log(
+                f"Context: evicted {evicted} old tool result(s), kept last {keep} verbatim",
+                level="INFO",
+            )
 
+    def _handle_recall(self, args: Dict[str, Any]) -> str:
+        """Restore a previously evicted (stored) tool result by its ref id."""
+        ref = args.get("ref")
         try:
-            from ..llms.routing import Role, model_for
-
-            response = await self.llm_client.acall(
-                messages=[{"role": "user", "content": compression_prompt}],
-                model=self.compression_model_id or model_for(Role.COMPRESSION),
-                max_tokens=2000,
+            ref = int(ref)
+        except (TypeError, ValueError):
+            return json.dumps({"error": f"invalid ref: {ref!r}"})
+        path = self._evict_dir() / f"{ref}.txt"
+        if not path.exists():
+            return json.dumps(
+                {"error": f"no evicted result #{ref} (idempotent reads are restored by re-calling the tool)"}
             )
-            summary = f"[CONTEXT COMPRESSED - {len(middle_messages)} messages]\n\n{response.content}"
+        try:
+            return path.read_text(encoding="utf-8")
         except Exception as e:
-            # Fallback to simple summary
-            self._log(f"LLM compression failed: {e}, using fallback", level="WARNING")
-            # Mechanical fallback: just keep tool names and truncate results
-            fallback_lines = []
-            for msg in middle_messages:
-                if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                    tools = [
-                        tc.get("function", {}).get("name", "")
-                        for tc in msg["tool_calls"]
-                    ]
-                    fallback_lines.append(f"Called: {', '.join(tools)}")
-                elif msg.get("role") == "tool":
-                    content = msg.get("content", "")[:200]
-                    fallback_lines.append(f"Result: {content}...")
-            summary = (
-                f"[CONTEXT COMPRESSED - {len(middle_messages)} messages]\n"
-                + "\n".join(fallback_lines)
-            )
-
-        # Replace middle messages with compressed summary
-        self.messages = (
-            self.messages[:keep_start]
-            + [{"role": "user", "content": summary}]
-            + self.messages[-keep_end:]
-        )
-
-        self._log(
-            f"Context compressed: {len(middle_messages)} messages → 1 summary",
-            level="INFO",
-        )
+            return json.dumps({"error": f"recall failed: {e}"})
 
     def _setup_logging(self) -> None:
         """Set up agent-specific logging."""
@@ -921,7 +875,37 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
             List of OpenAI-format tool definitions
         """
         mcp_tools = await client.list_tools()
-        return self._convert_mcp_tools_to_openai(mcp_tools)
+        tools = self._convert_mcp_tools_to_openai(mcp_tools)
+        # Mechanical compression evicts old tool results to short stubs; recall()
+        # restores a stored one verbatim when the model finds it still needs it.
+        if self.enable_context_compression:
+            tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "recall",
+                        "description": (
+                            "Restore a tool result that was evicted from context. Pass the "
+                            "ref number shown in an '[evicted #N ...]' placeholder to get its "
+                            "full original content back. Idempotent reads (get_callers, "
+                            "get_callees, get_diff, get_fuzzer_source, check_reachability) "
+                            "shown as '[evicted ... re-call ...]' do NOT use recall — just "
+                            "call that tool again."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "ref": {
+                                    "type": "integer",
+                                    "description": "The ref number N from an '[evicted #N ...]' placeholder.",
+                                }
+                            },
+                            "required": ["ref"],
+                        },
+                    },
+                }
+            )
+        return tools
 
     async def _execute_tool(
         self,
@@ -947,6 +931,10 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
         self._log(
             f"  Args: {json.dumps(tool_args, ensure_ascii=False)[:500]}", level="DEBUG"
         )
+
+        # recall() is a local, non-MCP tool: restore an evicted result verbatim.
+        if tool_name == "recall":
+            return self._handle_recall(tool_args)
 
         success = True
         error_type = None
@@ -1090,8 +1078,13 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                 f"=== Iteration {iteration}/{self.max_iterations} ===", level="INFO"
             )
 
-            # Compress context every 5 iterations to reduce token usage
-            if self.enable_context_compression and iteration > 0 and iteration % 5 == 0:
+            # Compress context when the live input crosses the token threshold
+            # (token-based, not a blind every-N-iterations cadence). Mechanical
+            # eviction — no summarizer LLM.
+            if (
+                self.enable_context_compression
+                and self._last_input_tokens >= self.compress_trigger_tokens
+            ):
                 await self._compress_context()
 
             # Show the agent its remaining budget EVERY turn so it paces itself
@@ -1128,6 +1121,9 @@ Tool: name(args) - [useful: key findings] or [checked, not relevant]"""
                 self._log(f"LLM call failed: {e}", level="ERROR")
                 self._log(f"Traceback:\n{traceback.format_exc()}", level="ERROR")
                 break
+
+            # Track live input size for the next iteration's compression trigger.
+            self._last_input_tokens = getattr(response, "input_tokens", 0) or 0
 
             # Log LLM response
             if response.content:

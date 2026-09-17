@@ -397,27 +397,6 @@ class POVAgent(BaseAgent):
             logger.warning(f"[POVAgent] Failed to load fuzzer source: {e}")
             return None
 
-    def _load_compression_prompt(self) -> str:
-        """Load POV-specific compression prompt that discards irrelevant tool calls."""
-        prompt_path = Path(__file__).parent / "prompts" / "pov_compression_prompt.md"
-        if prompt_path.exists():
-            return prompt_path.read_text(encoding="utf-8")
-        return super()._load_compression_prompt()
-
-    def _get_compression_criteria(self) -> str:
-        """POV-specific compression criteria: focus on data flow and crash triggers."""
-        return """For POV generation, keep:
-1. Data flow: how input reaches the vulnerable function (call chain, parameter passing)
-2. Constraints: size limits, format requirements, magic bytes
-3. Crash conditions: what triggers the vulnerability (buffer size, specific values)
-4. Previous POV attempts: what was tried and why it failed
-5. Trace results: which functions were reached, where execution stopped
-
-Discard:
-- Unrelated functions that don't affect the data flow
-- Duplicate information already captured
-- Verbose tool outputs that don't inform POV construction"""
-
     def get_initial_message(self, **kwargs) -> str:
         """Generate initial message with suspicious point context."""
         suspicious_point = kwargs.get("suspicious_point", self.suspicious_point)
@@ -717,7 +696,12 @@ function: {source_hint}.
             consecutive_llm_failures = 0
 
             # Compress context when input tokens exceed 100K
-            if self.enable_context_compression and response.input_tokens >= 60_000:
+            # Mechanical eviction of old tool results (POV has its own loop, so it
+            # triggers compression here rather than via the base loop).
+            if (
+                self.enable_context_compression
+                and (getattr(response, "input_tokens", 0) or 0) >= self.compress_trigger_tokens
+            ):
                 await self._compress_context()
 
             # Log LLM response

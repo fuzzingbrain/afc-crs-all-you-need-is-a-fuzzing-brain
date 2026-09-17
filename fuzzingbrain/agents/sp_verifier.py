@@ -429,18 +429,6 @@ Do NOT let iterations run out without a decision!
 
         return None
 
-    def _get_compression_criteria(self) -> str:
-        """SP verification compression criteria: focus on vulnerability evidence."""
-        return """For suspicious point verification, keep:
-1. Vulnerability evidence: unsafe operations, missing bounds checks, dangerous patterns
-2. Reachability: can the suspicious code be reached from fuzzer entry point
-3. Data flow: how user input reaches the suspicious location
-4. Verdict reasoning: why this is/isn't a real vulnerability
-
-Discard:
-- Functions unrelated to the suspicious point
-- Boilerplate code without security implications
-- Duplicate analysis of the same code"""
 
     def _extract_sp_info(self, suspicious_point: Dict[str, Any]) -> tuple:
         """Extract basic information from suspicious point."""
