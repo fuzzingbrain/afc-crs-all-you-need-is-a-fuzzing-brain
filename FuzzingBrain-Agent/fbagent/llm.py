@@ -151,6 +151,13 @@ class ClaudeAdapter:
         self.effort = effort
         self.max_tokens = max_tokens
         self.reasoning = _supports_reasoning(model)
+        # Optional: let the API mechanically clear old tool results server-side
+        # (context editing, clear_tool_uses) instead of relying only on our own
+        # compaction. Off by default — our loop's _compact_to_fit already keeps a
+        # long run inside the window, and this changes the request path (beta) —
+        # so it is opt-in via FBAGENT_CLAUDE_CTX_EDIT=1 for the long challenges.
+        self.ctx_edit = os.environ.get("FBAGENT_CLAUDE_CTX_EDIT", "").strip().lower() \
+            in ("1", "true", "yes", "on")
 
     def _cached_system(self, system: str) -> list[dict]:
         return [{"type": "text", "text": system, "cache_control": _EPHEMERAL}]
@@ -188,6 +195,12 @@ class ClaudeAdapter:
         if self.reasoning:
             kw["thinking"] = {"type": "adaptive"}
             kw["output_config"] = {"effort": self.effort}
+        if self.ctx_edit:
+            # Server-side mechanical eviction of old tool results (not a summary).
+            kw["betas"] = ["context-management-2025-06-27"]
+            kw["context_management"] = {"edits": [{"type": "clear_tool_uses_20250919"}]}
+            with self.client.beta.messages.stream(**kw) as stream:
+                return stream.get_final_message()
         with self.client.messages.stream(**kw) as stream:
             return stream.get_final_message()
 

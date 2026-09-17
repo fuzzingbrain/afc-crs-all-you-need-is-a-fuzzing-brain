@@ -132,3 +132,39 @@ def test_cost_rates_differ_by_provider():
     oai = LLM.__new__(LLM); oai.model = "o3"; oai.provider = "openai"
     oai.usage = {"input": 1_000_000, "output": 0, "cache_read": 0, "cache_write": 0}
     assert abs(oai.cost_usd - 2.0) < 1e-6
+
+
+def test_claude_ctx_edit_assembles_beta_call(monkeypatch):
+    """With FBAGENT_CLAUDE_CTX_EDIT on, the Claude adapter routes through the
+    beta endpoint with the clear_tool_uses context-management edit; off, it uses
+    the plain endpoint and sends no context_management."""
+    monkeypatch.setenv("FBAGENT_CLAUDE_CTX_EDIT", "1")
+    from fbagent.llm import ClaudeAdapter
+
+    captured = {}
+
+    class _Stream:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def get_final_message(self):
+            return "msg"
+
+    class _Msgs:
+        def stream(self, **kw):
+            captured["path"] = "plain"; captured["kw"] = kw; return _Stream()
+
+    class _BetaMsgs:
+        def stream(self, **kw):
+            captured["path"] = "beta"; captured["kw"] = kw; return _Stream()
+
+    a = ClaudeAdapter.__new__(ClaudeAdapter)
+    a.model = "claude-opus-5"; a.effort = "high"; a.max_tokens = 1000
+    a.reasoning = True; a.ctx_edit = True
+    a.client = type("C", (), {"messages": _Msgs(),
+                              "beta": type("B", (), {"messages": _BetaMsgs()})()})()
+    a.call("sys", [{"role": "user", "content": "hi"}], [{"name": "read", "input_schema": {}}])
+    assert captured["path"] == "beta"
+    assert captured["kw"]["betas"] == ["context-management-2025-06-27"]
+    assert captured["kw"]["context_management"]["edits"][0]["type"] == "clear_tool_uses_20250919"
