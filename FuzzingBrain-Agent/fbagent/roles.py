@@ -18,6 +18,7 @@ from pathlib import Path
 from . import lead_tools
 from .agent import Agent
 from .lead import Lead, LeadBoard
+from .sanitizer_guidance import guidance_for
 from .signature import is_submit_crash, signature_from_submit
 
 _PROMPT_DIR = Path(__file__).resolve().parent.parent / "prompts" / "roles"
@@ -108,6 +109,30 @@ def _deepest_from_trace(output: str) -> str:
     import re
     m = re.search(r"deepest call:\s*(.+)", output or "")
     return m.group(1).strip() if m else ""
+
+
+def run_discovery(*, llm, board: LeadBoard, workspace: str = ".",
+                  harness: str = "", sanitizer: str = "address",
+                  deadline_s: float | None = None, max_usd: float = 0.0) -> dict:
+    """Explore the reachable code from the harness and create Leads for the
+    sanitizer's crash classes. Free-exploration mode (the model drives the read);
+    a worklist can feed candidate functions later. Returns the Leads created."""
+    ws = Path(workspace)
+    before = {l.id for l in board.all()}
+    system = ("\n\n".join([_role_prompt("discovery"),
+                           "## Sanitizer guidance (" + sanitizer + ")\n" + guidance_for(sanitizer),
+                           "## Harness source\n\n" + harness_source(ws)]))
+    schemas, runner = lead_tools.build("discovery", board, origin="discovery/llm",
+                                       harness=harness, sanitizer=sanitizer)
+    agent = Agent(system, llm=llm, tools=schemas, tool_runner=runner,
+                  deadline_s=deadline_s, max_usd=max_usd, min_spend_fraction=0.0)
+    opening = ("Find the operations in this project's harness-reachable code that "
+               "could crash the sanitizer, and record each as a Lead with "
+               "create_lead. Start at the harness and follow the code it drives.")
+    result = agent.run(opening)
+    created = [l.id for l in board.all() if l.id not in before]
+    return {"created": created, "n": len(created), "stop_reason": result["stop_reason"],
+            "steps": result["steps"]}
 
 
 def run_verification(lead: Lead, *, llm, board: LeadBoard, workspace: str = ".",
