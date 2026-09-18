@@ -15,6 +15,8 @@ Tool sets (basic, ASan):
   reproduce   : read glob grep bash trace gates          (no board tool; the
                 controller banks a submit-backed crash on the Lead itself)
 """
+# Provenance: original. Per-agent isolated tool set follows Claude Code
+# subagents / fbv2's per-agent MCP factory. See PROVENANCE.md.
 from __future__ import annotations
 
 from typing import Callable

@@ -11,11 +11,14 @@ discovery follow. A crash is a bug only when ./submit backs it (task contract),
 whichever stage's tools produced it — so the outcome scanner reads the agent's
 own tool trace for a submit crash and banks it on the Lead.
 """
+# Provenance: original. Stages hand off only through the LeadBoard (never a
+# shared conversation) — the Claude Code subagent pattern. Prompts adapted
+# from fbv2 (see prompts/roles/ and PROVENANCE.md).
 from __future__ import annotations
 
 from pathlib import Path
 
-from . import lead_tools
+from . import lead_tools, store
 from .agent import Agent
 from .lead import Lead, LeadBoard
 from .sanitizer_guidance import guidance_for
@@ -90,6 +93,7 @@ def _scan_outcome(agent: Agent, harness_names):
     signature = None
     deepest = ""
     best_candidate = ""
+    crash_text = ""
     last_submit_path = ""
     for rec in agent.trace():
         kind = rec.get("kind")
@@ -103,11 +107,12 @@ def _scan_outcome(agent: Agent, harness_names):
             if signature is None and is_submit_crash(out):
                 signature = signature_from_submit(out, harness_names=harness_names)
                 best_candidate = last_submit_path
+                crash_text = out
         elif kind == "tool_result" and rec.get("tool") == "trace":
             d = _deepest_from_trace(rec.get("output", ""))
             if d:
                 deepest = d      # keep the last (typically deepest attempt)
-    return signature, deepest, best_candidate
+    return signature, deepest, best_candidate, crash_text
 
 
 def _submit_path(command: str) -> str:
@@ -167,9 +172,15 @@ def run_verification(lead: Lead, *, llm, board: LeadBoard, workspace: str = ".",
     agent = Agent(system, llm=llm, tools=schemas, tool_runner=runner,
                   deadline_s=deadline_s, max_usd=max_usd, min_spend_fraction=0.0)
     result = agent.run(_lead_brief(lead))
-    sig, deepest, best = _scan_outcome(agent, hnames)
+    sig, deepest, best, crash_text = _scan_outcome(agent, hnames)
+    store.archive_session(ws, "verify", lead.id, lead.attempts, agent,
+                          {"stop_reason": result["stop_reason"], "crashed": bool(sig)})
     if sig and sig.crash_class:
-        board.record_crash(lead.id, sig.key, candidate=best)
+        stored = store.save_candidate(ws, lead.id, lead.attempts, best)
+        store.save_crash(ws, sig.key, stored or best, crash_text, lead.id)
+        board.record_crash(lead.id, sig.key, candidate=stored or best)
+        store.ledger_append(ws, {"stage": "verify", "lead": lead.id, "crashed": True,
+                                 "signature": sig.key})
         return {"lead": lead.id, "crashed": True, "signature": sig.key,
                 "score": 1.0, "stop_reason": result["stop_reason"]}
     fresh = board.get(lead.id)
@@ -182,6 +193,8 @@ def run_verification(lead: Lead, *, llm, board: LeadBoard, workspace: str = ".",
                      evidence="(verifier recorded no verdict; recall-first proceed)")
     if deepest and not fresh.deepest_reached:
         board.update(lead.id, allowed=None, deepest_reached=deepest)
+    store.ledger_append(ws, {"stage": "verify", "lead": lead.id, "crashed": False,
+                             "score": score, "deepest_reached": deepest})
     return {"lead": lead.id, "crashed": False, "score": score,
             "stop_reason": result["stop_reason"]}
 
@@ -199,15 +212,26 @@ def run_reproduction(lead: Lead, *, llm, board: LeadBoard, workspace: str = ".",
     schemas, runner = lead_tools.build("reproduce", board, lead_id=lead.id,
                                        harness=lead.harness, sanitizer=lead.sanitizer,
                                        with_trace=not java)
+    attempt = lead.attempts + 1
     agent = Agent(system, llm=llm, tools=schemas, tool_runner=runner,
                   deadline_s=deadline_s, max_usd=max_usd, min_spend_fraction=0.0)
     result = agent.run(_lead_brief(lead))
-    sig, deepest, best = _scan_outcome(agent, harness_names)
+    sig, deepest, best, crash_text = _scan_outcome(agent, harness_names)
+    store.archive_session(ws, "reproduce", lead.id, attempt, agent,
+                          {"stop_reason": result["stop_reason"], "crashed": bool(sig)})
     if sig and sig.crash_class:
-        board.record_crash(lead.id, sig.key, candidate=best)
+        stored = store.save_candidate(ws, lead.id, attempt, best)
+        store.save_crash(ws, sig.key, stored or best, crash_text, lead.id)
+        board.record_crash(lead.id, sig.key, candidate=stored or best)
+        store.ledger_append(ws, {"stage": "reproduce", "lead": lead.id, "crashed": True,
+                                 "signature": sig.key, "attempt": attempt})
         return {"lead": lead.id, "crashed": True, "signature": sig.key,
                 "stop_reason": result["stop_reason"], "steps": result["steps"]}
-    board.update(lead.id, allowed=None, attempts=lead.attempts + 1,
-                 deepest_reached=deepest or lead.deepest_reached, best_candidate=best)
+    stored = store.save_candidate(ws, lead.id, attempt, best)
+    board.update(lead.id, allowed=None, attempts=attempt,
+                 deepest_reached=deepest or lead.deepest_reached,
+                 best_candidate=stored or best)
+    store.ledger_append(ws, {"stage": "reproduce", "lead": lead.id, "crashed": False,
+                             "attempt": attempt, "deepest_reached": deepest})
     return {"lead": lead.id, "crashed": False, "deepest_reached": deepest,
             "stop_reason": result["stop_reason"], "steps": result["steps"]}

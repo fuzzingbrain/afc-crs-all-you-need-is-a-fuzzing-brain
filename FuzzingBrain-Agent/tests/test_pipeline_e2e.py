@@ -65,7 +65,8 @@ class _StageLLM:
             ],
         }
         it = self._iters.setdefault(stage, iter(scripts[stage]))
-        return next(it)
+        # exhausted (e.g. a second discovery round with nothing new) -> just stop
+        return next(it, _done("ASSESSMENT COMPLETE"))
 
 
 def test_pipeline_reaches_a_banked_crash(tmp_path, monkeypatch):
@@ -91,7 +92,11 @@ def test_pipeline_reaches_a_banked_crash(tmp_path, monkeypatch):
     assert out["solved"] == 1
     assert out["signatures"] == ["heap-buffer-overflow|cupsUTF8ToCharset@transcode.c:245"]
     stages = [e["stage"] for e in out["log"]]
-    assert stages == ["discovery", "verify", "reproduce"]   # ran in order, once each
+    # discovery -> verify -> reproduce in order; after the crash the pool drains
+    # and the controller re-runs discovery for a DISTINCT fault (finds none here
+    # -> stops), so a trailing discovery round is expected (the diversity drive).
+    assert stages[:3] == ["discovery", "verify", "reproduce"]
+    assert all(s == "discovery" for s in stages[3:])
     # the Lead carries the whole trail: verdict, PoV, solved status
     from fbagent.lead import LeadBoard
     b = LeadBoard(tmp_path / ".fb" / "leads.jsonl")
