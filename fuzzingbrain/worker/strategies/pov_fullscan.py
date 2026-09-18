@@ -16,6 +16,7 @@ Breadth-First Per-Direction Architecture:
 
 import asyncio
 import time
+from collections import deque
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
@@ -572,27 +573,41 @@ class POVFullscanStrategy(POVBaseStrategy):
         except Exception as e:
             self.log_debug(f"Could not mark direction skipped: {e}")
 
-    def _find_reachable_from_entries(self, entry_functions: List[str]) -> set:
+    def _find_reachable_from_entries(
+        self, entry_functions: List[str]
+    ) -> Dict[str, int]:
         """
-        BFS from entry_functions through call graph to find all reachable functions.
+        BFS from entry_functions through the call graph.
+
+        Returns a map ``{function_name: bfs_distance}`` where the distance is the
+        number of call hops from the nearest entry (entries are distance 0). The
+        distance is what lets the big pool be scanned nearest-first; before, this
+        method BFS'd but threw the level away into a plain set, so the big pool
+        came out in Python set (hash) order -- neither distance nor random.
+
+        Uses a deque so the frontier is popped in O(1); the old ``list.pop(0)``
+        was O(n) per step, i.e. O(n^2) over a 90k-node Wireshark graph.
         """
-        reachable = set()
-        queue = list(entry_functions)
-        visited = set(entry_functions)
+        depth: Dict[str, int] = {}
+        queue = deque()
+        for entry in entry_functions:
+            if entry not in depth:
+                depth[entry] = 0
+                queue.append(entry)
 
         while queue:
-            func_name = queue.pop(0)
-            reachable.add(func_name)
+            func_name = queue.popleft()
+            d = depth[func_name]
 
             callees = self.repos.callgraph_nodes.find_callees(
                 self.task_id, self.fuzzer, func_name
             )
             for callee in callees or []:
-                if callee not in visited:
-                    visited.add(callee)
+                if callee not in depth:
+                    depth[callee] = d + 1
                     queue.append(callee)
 
-        return reachable
+        return depth
 
     def _resolve_function(self, name: str):
         """A Function for `name`, from the index when there is one.
@@ -644,18 +659,29 @@ class POVFullscanStrategy(POVBaseStrategy):
             small_pool_names = set(direction.core_functions or [])
             small_pool_names.update(direction.entry_functions or [])
 
-            # Find reachable functions from this direction's entry points
-            reachable = self._find_reachable_from_entries(
+            # Find reachable functions from this direction's entry points,
+            # each tagged with its BFS distance from the entry.
+            reachable_depth = self._find_reachable_from_entries(
                 direction.entry_functions or []
             )
 
-            # Big pool = reachable - small pool
-            big_pool_names = reachable - small_pool_names
+            # Big pool = reachable - small pool, ORDERED nearest-first by distance
+            # (ties broken by name for determinism). The small/core pool is
+            # scanned first and untouched; only once it is exhausted do we walk
+            # the big pool outward ring by ring instead of in set/hash order.
+            big_pool_names = [
+                name
+                for name in sorted(
+                    reachable_depth.keys(),
+                    key=lambda n: (reachable_depth[n], n),
+                )
+                if name not in small_pool_names
+            ]
 
             self.log_info(
                 f"  [{direction.name}] Small: {len(small_pool_names)}, "
-                f"Big: {len(big_pool_names)}, "
-                f"Total reachable: {len(reachable)}"
+                f"Big: {len(big_pool_names)} (distance-ordered), "
+                f"Total reachable: {len(reachable_depth)}"
             )
 
             # Resolve function objects and partition by analyzed status
