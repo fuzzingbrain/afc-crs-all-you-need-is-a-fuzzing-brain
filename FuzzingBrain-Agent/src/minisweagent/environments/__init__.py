@@ -9,6 +9,9 @@ _ENVIRONMENT_MAPPING = {
     "docker": "minisweagent.environments.docker.DockerEnvironment",
     "singularity": "minisweagent.environments.singularity.SingularityEnvironment",
     "local": "minisweagent.environments.local.LocalEnvironment",
+    # FuzzingBrain-Bench v2: the agent drives the bench's own MCP server
+    # instead of a shell, so every arm gets one tool surface.
+    "mcp_bench": "minisweagent.environments.mcp_bench.McpBenchEnvironment",
     "swerex_docker": "minisweagent.environments.extra.swerex_docker.SwerexDockerEnvironment",
     "swerex_modal": "minisweagent.environments.extra.swerex_modal.SwerexModalEnvironment",
     "bubblewrap": "minisweagent.environments.extra.bubblewrap.BubblewrapEnvironment",
