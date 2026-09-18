@@ -70,8 +70,7 @@ def _tokens(agent: DefaultAgent) -> dict:
             "cache_read_tokens": cache_read, "cache_write_tokens": cache_write}
 
 
-_SUBMIT_RE = re.compile(r"\./(?:submit|try_poc)\s+(\S+)")
-_REACH_RE = re.compile(r"\./reach\s+(\S+)\s+(\S+)")
+_GRADE_RE = re.compile(r"\brun_poc_on_harness\s*\(?\s*([^)\s]+)")
 
 
 def tool_label(command: str) -> tuple[str, dict]:
@@ -86,11 +85,9 @@ def tool_label(command: str) -> tuple[str, dict]:
     the salient part of a compound command, so the report reads like the arm it
     is being compared against.
     """
-    if m := _SUBMIT_RE.search(command):
-        return "submit", {"path": m.group(1), "command": command}
-    if m := _REACH_RE.search(command):
-        return "reach", {"path": m.group(1), "function": m.group(2), "command": command}
-    return "bash", {"command": command}
+    if m := _GRADE_RE.search(command):
+        return "run_poc_on_harness", {"path": m.group(1), "command": command}
+    return "exec", {"command": command}
 
 
 def _append(message: dict, text: str) -> None:
@@ -305,68 +302,15 @@ class _ReportingAgent(DefaultAgent):
 # any particular target. An earlier version quoted the run it was designed from
 # and named the challenge; on that challenge it would have told the model both
 # that the target was hard and roughly where to look.
-_REACH = r"""#!/bin/bash
-# ./reach <input-file> <function>  -- did this input execute that function?
-#
-# Runs the input under a debugger with a breakpoint on the named function and
-# reports whether it was reached. A clean verdict says an input did not crash;
-# this says whether it even got there, which is a different problem.
-set -u
-if [ $# -ne 2 ] || [ ! -f "$1" ]; then
-  echo "usage: ./reach <input-file> <function>" >&2; exit 2
-fi
-h="$(cd "$(dirname "$0")" && pwd)"
-DEAD="$h/.fbbench/reach_unavailable"
-
-# Learned once, remembered for the rest of the run: not every image ships a
-# debugger, and there is no way to know without asking. Asking costs a turn, so
-# asking repeatedly costs one each time.
-if [ -f "$DEAD" ]; then cat "$DEAD" >&2; exit 1; fi
-
-id="$(date +%s%N)-$$"
-cp -- "$1" "$h/.fbbench/trace_req/$id.bin"
-printf '%s' "$2" > "$h/.fbbench/trace_req/$id.tgt"   # .tgt last: it means ready
-note_dead() {
-  printf '%s\n' "$1" > "$DEAD"
-  cat "$DEAD" >&2
-  exit 1
-}
-for i in $(seq 1 1200); do
-  if [ -f "$h/.fbbench/trace_res/$id" ]; then
-    out=$(cat "$h/.fbbench/trace_res/$id")
-    case "$out" in
-      *"gdb: not found"*|*"exec: gdb"*|*"No such file or directory"*gdb*)
-        note_dead "reach: not available on this challenge - its image ships no debugger. Do not call ./reach again; judge how far an input gets from the ./submit verdict instead (0 ms means it never reached the library)." ;;
-    esac
-    printf '%s\n' "$out"; exit 0
-  fi
-  # Unclaimed after 5s means nothing is listening; a claimed one may take minutes.
-  if [ "$i" -gt 25 ] && [ -f "$h/.fbbench/trace_req/$id.tgt" ]; then
-    rm -f "$h/.fbbench/trace_req/$id."*
-    note_dead "reach: not available on this bench build - nothing answers trace requests. Do not call ./reach again; use the ./submit verdict instead."
-  fi
-  sleep 0.2
-done
-echo "reach: timed out" >&2; exit 1
-"""
-
-
-def _install_reach(workspace: Path) -> bool:
-    """Drop ./reach next to the bench's ./submit, if the tracer is there."""
-    if not (workspace / ".fbbench" / "trace_req").is_dir():
-        return False
-    try:
-        script = workspace / "reach"
-        script.write_text(_REACH)
-        script.chmod(0o755)
-        return True
-    except OSError:
-        return False
-
+# ./reach is gone. v2 gives this agent exec inside the challenge image, so it
+# runs gdb itself on the graded binary where the image ships one -- the same
+# access claudecode and codex always had. A bench-side tracer only this arm
+# could call was the asymmetry, not the fix for it.
 
 @app.command(help="Run fb-agent on one staged FuzzingBrain-Bench challenge.")
 def main(
-    workspace: Path = typer.Option(..., "--workspace", help="The staged challenge directory."),
+    workspace: Path = typer.Option(..., "--workspace", help="Where the agent writes its own artefacts; bind-mounted to /workspace in the challenge image."),
+    mcp_socket: str = typer.Option("", "--mcp-socket", help="This episode's bench MCP server. Defaults to $FBBENCH_MCP_SOCKET."),
     task: str = typer.Option(..., "--task", help="The bench's opening instruction."),
     model_name: str = typer.Option(..., "--model", help="Model to run, as the bench names it."),
     max_turns: int = typer.Option(..., "--max-turns", help="Turn budget. One turn is one usable model reply."),
@@ -376,31 +320,25 @@ def main(
     config = recursive_merge(*[get_config_from_spec(spec) for spec in config_spec], {
         "agent": {"turn_limit": max_turns, "cost_limit": 0, "wall_time_limit_seconds": timeout},
         "model": {"model_name": model_name},
-        # The bench points $SHELL at a sandbox wrapper that masks the Docker
-        # socket and drops the network. Going through /bin/sh instead would step
-        # around it silently, and score.json would claim a sandbox this run
-        # never had.
-        "environment": {"cwd": str(workspace), "executable": os.environ.get("SHELL", "")},
+        # v2: every arm drives one per-episode mcp-server inside the sealed
+        # challenge image. There is no host shell to sandbox any more -- cwd is
+        # /challenge and read-only, /workspace is writable, and the grader is
+        # run_poc_on_harness. The socket is the bench's; refusing to start
+        # without it is deliberate, since a silent fall back to a local shell
+        # would mean the agent never touched the challenge.
+        "environment": {"environment_class": "mcp_bench",
+                        "socket_path": mcp_socket or os.environ.get("FBBENCH_MCP_SOCKET", "")},
     })
     # DefaultAgent.run() re-saves this after every turn, so a killed run keeps
     # the conversation up to the kill -- the same reason the report is published
     # per turn rather than at exit.
     config.setdefault("agent", {})["output_path"] = workspace / ".fbbench" / "traj.json"
 
-    # 2. Reach. The prompt only mentions ./reach when it is really there, so a
-    # bench build without the tracer does not send the model chasing a tool that
-    # will answer "no responder".
-    has_reach = _install_reach(workspace)
-
     agent = _ReportingAgent(
         get_model(config=config.get("model", {})),
-        get_environment(config.get("environment", {}), default_type="local"),
+        get_environment(config.get("environment", {}), default_type="mcp_bench"),
         workspace=workspace, model_name=model_name, **config.get("agent", {}),
     )
-    # extra_template_vars is an ATTRIBUTE, not an AgentConfig field -- passing
-    # it as config would be dropped without a word, the way pydantic drops every
-    # unknown agent key.
-    agent.extra_template_vars["has_reach"] = has_reach
 
     # One report before the first model call, so a run killed early is costed
     # as zero rather than as nothing -- the bench prints an unreported cost as

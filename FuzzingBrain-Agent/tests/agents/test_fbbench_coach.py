@@ -8,6 +8,26 @@ import pytest
 
 from minisweagent.agents.fbbench_coach import Coach, forbidden
 
+# v2 verdicts are what the model actually sees: the harness's own output as
+# text (McpBenchEnvironment._render_verdict), then the structured fields. Not
+# the one-line `crash:`/`clean:` summary the bench used to write for this arm.
+def _crash(kind="heap-use-after-free", where="/src/x.c:10 in foo"):
+    return (f"==1==ERROR: AddressSanitizer: {kind}\n"
+            f"    #0 0x1 in foo {where}\n"
+            f"SUMMARY: AddressSanitizer: {kind} {where}\n\n"
+            "crash_novelty: new\nexit_code: 1\nsignal: SIGABRT")
+
+
+def _gate():
+    """Ran for no measurable time: the harness rejected it at the door."""
+    return "exit_code: 0\nsignal: \nduration_ms: 0"
+
+
+def _clean():
+    return "exit_code: 0\nsignal: \nduration_ms: 42"
+
+
+
 
 # ---- the prohibition: no fuzzing, no batching ------------------------------
 
@@ -24,14 +44,14 @@ def test_a_fuzzer_is_refused_before_it_runs(command):
     # to the real oracle, 30 minutes, zero score.
     why = forbidden(command)
     assert why and "fuzzing is not available" in why
-    assert "./submit" in why, "a refusal that does not say what to do instead wastes the turn"
+    assert "run_poc_on_harness" in why, "a refusal that does not say what to do instead wastes the turn"
 
 
 @pytest.mark.parametrize("command", [
-    "for i in $(seq 1 500); do ./submit c$i; done",
-    "while read f; do ./submit $f; done < list",
-    "ls cand/* | xargs -n1 ./submit",
-    "for f in {1..40}; do ./try_poc $f.bin; done",
+    "for i in $(seq 1 500); do run_poc_on_harness /workspace/c$i; done",
+    "while read f; do run_poc_on_harness /workspace/$f; done < list",
+    "ls cand/* | xargs -n1 run_poc_on_harness",
+    "for f in {1..40}; do run_poc_on_harness /workspace/$f.bin; done",
 ])
 def test_submitting_in_a_loop_is_refused(command):
     # Turn-budget laundering: the api arm grades one input per tool call and
@@ -73,18 +93,18 @@ def test_a_new_crash_is_banked_and_redirects():
     # 22 challenges found exactly one fault and spent a median 21 further turns
     # near it, finding nothing. Worth 120 points.
     c = Coach(turn_limit=100, wall_limit_s=1800)
-    notes = "\n".join(c.observe("./submit c1", "crash: abrt|parse|main", 10, 60))
+    notes = "\n".join(c.observe("run_poc_on_harness(/workspace/c1)", _crash(), 10, 60))
     assert "banked 1/3" in notes
     assert "DIFFERENT function" in notes
-    assert c.banked == ["abrt|parse|main"]
+    assert c.banked == ["heap-use-after-free /src/x.c:10 in foo"]
 
 
 def test_the_same_crash_again_is_called_worthless():
     c = Coach(turn_limit=100, wall_limit_s=1800)
-    c.observe("./submit c1", "crash: abrt|parse|main", 10, 60)
-    notes = "\n".join(c.observe("./submit c2", "crash: abrt|parse|main", 12, 70))
+    c.observe("run_poc_on_harness(/workspace/c1)", _crash(), 10, 60)
+    notes = "\n".join(c.observe("run_poc_on_harness(/workspace/c2)", _crash(), 12, 70))
     assert "duplicate" in notes and "adds nothing" in notes
-    assert c.banked == ["abrt|parse|main"], "a repeat must not count twice"
+    assert c.banked == ["heap-use-after-free /src/x.c:10 in foo"], "a repeat must not count twice"
 
 
 # ---- 3. submit against the real thing --------------------------------------
@@ -103,26 +123,26 @@ def test_the_nag_resets_when_you_submit():
     c = Coach(turn_limit=100, wall_limit_s=1800)
     for turn in range(1, 13):
         c.observe("sed -n 1,50p src/x.c", "<output/>", turn, turn * 10)
-    c.observe("./submit c1", "clean: no fault | target ran 12 ms | 40 bytes", 13, 130)
+    c.observe("run_poc_on_harness(/workspace/c1)", _clean(), 13, 130)
     assert c.turns_since_submit == 0
 
 
 # ---- 2. reach --------------------------------------------------------------
 
-def test_a_zero_ms_verdict_points_at_reach_not_at_content():
+def test_a_verdict_that_never_reached_the_library_says_so():
     # The 7 zeros submitted MORE than the wins (18 vs 11). Working hard with no
     # idea whether the input was even getting in.
     c = Coach(turn_limit=100, wall_limit_s=1800)
     notes = "\n".join(c.observe(
-        "./submit c1", "clean: no fault | target ran 0 ms | 8 bytes", 5, 40))
+        "run_poc_on_harness(/workspace/c1)", _gate(), 5, 40))
     assert "threw that input out" in notes
-    assert "./reach" in notes
+    assert "gdb" in notes
 
 
 def test_a_verdict_that_did_reach_is_left_alone():
     c = Coach(turn_limit=100, wall_limit_s=1800)
     notes = "\n".join(c.observe(
-        "./submit c1", "clean: no fault | target ran 180 ms | 40 bytes", 5, 40))
+        "run_poc_on_harness(/workspace/c1)", _clean(), 5, 40))
     assert "threw that input out" not in notes
 
 
@@ -144,7 +164,7 @@ def test_a_run_that_already_has_a_fault_is_asked_once_and_then_believed():
     # every run on record. Flogging those toward a quota of three costs money and
     # finds nothing.
     c = Coach(turn_limit=100, wall_limit_s=1800)
-    c.observe("./submit x", "crash: heap-buffer-overflow|f|g", 5, 60)
+    c.observe("run_poc_on_harness(/workspace/x)", _crash(), 5, 60)
     first = c.may_finish(turn=30, elapsed_s=400)
     assert first is not None and "one more look" in first
     assert "only one reachable fault" in first, "the ask has to admit it may be futile"
@@ -155,15 +175,15 @@ def test_a_late_stop_with_a_fault_in_hand_is_not_argued_with():
     # The shape of the live fwupd-01 run: one fault banked, turn 87 of 100.
     # Arguing there buys 13 turns that have nowhere to go.
     c = Coach(turn_limit=100, wall_limit_s=1800)
-    c.observe("./submit x", "crash: out-of-memory|<no-frames>", 40, 470)
+    c.observe("run_poc_on_harness(/workspace/x)", _crash(), 40, 470)
     assert c.may_finish(turn=87, elapsed_s=1417) is None
 
 
 def test_three_distinct_faults_may_always_finish():
     # A fourth signature scores nothing; holding it hostage would waste budget.
     c = Coach(turn_limit=100, wall_limit_s=1800)
-    for i, sig in enumerate(("a|f1", "b|f2", "c|f3")):
-        c.observe("./submit x", f"crash: {sig}", i, i * 10)
+    for i, where in enumerate(("/src/a.c:1 in f1", "/src/b.c:2 in f2", "/src/c.c:3 in f3")):
+        c.observe("run_poc_on_harness(/workspace/x)", _crash(where=where), i, i * 10)
     assert c.may_finish(turn=10, elapsed_s=100) is None
 
 
@@ -211,38 +231,33 @@ def test_building_a_candidate_with_a_loop_is_not_batching(command):
 
 
 @pytest.mark.parametrize("command", [
-    "for f in c1 c2 c3; do ./submit $f; done",
-    "while read f; do ./submit $f; done < list",
-    "ls cand/* | xargs -n1 ./submit",
-    "for f in {1..40}; do ./try_poc $f.bin; done",
-    'python3 -c "print(1)" && for f in a b; do ./submit $f; done',   # both in one line
+    "for f in c1 c2 c3; do run_poc_on_harness /workspace/$f; done",
+    "while read f; do run_poc_on_harness /workspace/$f; done < list",
+    "ls cand/* | xargs -n1 run_poc_on_harness",
+    "for f in {1..40}; do run_poc_on_harness /workspace/$f.bin; done",
+    'python3 -c "print(1)" && for f in a b; do run_poc_on_harness /workspace/$f; done',   # both in one line
 ])
 def test_a_shell_loop_over_submit_is_still_blocked(command):
     why = forbidden(command)
     assert why and "one candidate per turn" in why.lower()
 
 
-def test_the_gate_hint_stops_naming_reach_once_it_is_known_dead(tmp_path):
-    # libxml2-04 burned four turns on a tool its image had not got. The insight
-    # (a 0 ms verdict means the harness rejected the input) is still worth
-    # saying; the pointer to the dead tool is not.
+def test_the_gate_hint_points_at_the_debugger_the_image_actually_has(tmp_path):
+    """v1 pointed at ./reach, a bench-side tracer only this arm had -- and on
+    libxml2-04, whose image ships no gdb, it burned four turns answering
+    nothing. v2 has exec inside the container, so the hint names gdb, which is
+    the same access every other arm has."""
     ws = tmp_path / "ws"
     (ws / ".fbbench").mkdir(parents=True)
-    verdict = "clean: no fault | target ran 0 ms | 8 bytes"
-
-    live = "\n".join(Coach(turn_limit=100, wall_limit_s=1800,
-                           workspace=ws).observe("./submit c1", verdict, 5, 40))
-    assert "./reach" in live
-
-    (ws / ".fbbench" / "reach_unavailable").write_text("reach: not available\n")
-    dead = "\n".join(Coach(turn_limit=100, wall_limit_s=1800,
-                           workspace=ws).observe("./submit c1", verdict, 5, 40))
-    assert "./reach" not in dead, "still recommending a tool this image cannot run"
-    assert "threw that input out" in dead, "the gate insight must survive"
+    notes = "\n".join(Coach(turn_limit=100, wall_limit_s=1800, workspace=ws)
+                      .observe("run_poc_on_harness(/workspace/c1)", _gate(), 5, 40))
+    assert "threw that input out" in notes, "the gate insight must survive"
+    assert "gdb" in notes
+    assert "./reach" not in notes, "that tool does not exist in v2"
 
 
 def test_the_coach_works_without_a_workspace():
     # Every other caller in the tests constructs a Coach with no workspace.
     c = Coach(turn_limit=100, wall_limit_s=1800)
-    notes = "\n".join(c.observe("./submit c1", "clean: no fault | target ran 0 ms | 8 bytes", 5, 40))
-    assert "./reach" in notes
+    notes = "\n".join(c.observe("run_poc_on_harness(/workspace/c1)", _gate(), 5, 40))
+    assert "gdb" in notes

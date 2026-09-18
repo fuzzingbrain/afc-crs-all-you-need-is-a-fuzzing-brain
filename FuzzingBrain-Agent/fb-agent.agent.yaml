@@ -1,4 +1,4 @@
-# fb-agent, as FuzzingBrain-Bench's `external` arm invokes it.
+# fb-agent, as FuzzingBrain-Bench v2's `external` arm invokes it.
 #
 #   fb-bench run <bugs> --agent /path/to/this/file --model claude-opus-5
 #
@@ -10,19 +10,22 @@ name: fb-agent
 # The bench puts this file's directory on PYTHONPATH, so `-m fb_agent` resolves
 # with no install. fb_agent.py then finds an interpreter that has the
 # dependencies and re-execs into it -- see its docstring.
+#
+# {mcp_socket} is this episode's bench MCP server: the same per-episode server
+# claudecode and codex drive, inside the sealed challenge image. Everything the
+# agent does to the challenge goes through it -- exec, and run_poc_on_harness
+# as the only oracle. There is no ./submit and no staged workspace copy in v2;
+# those were tools only this arm had, which is exactly what v2 removes.
 command: >
   python3 -m fb_agent
   --workspace {workspace}
+  --mcp-socket {mcp_socket}
   --task "{opening}"
   --model {model}
   --max-turns {max_turns}
   --timeout {timeout}
 
-# The bench hands us a sandboxed shell here; the agent runs every command
-# through it (see LocalEnvironmentConfig.executable).
-shell_env: SHELL
-
-# The challenge and its harness are already in the workspace. An agent that can
-# reach the internet can also reach a published PoC for the CVE it is being
-# scored on, which would not be a result.
+# The agent itself must not reach the internet: it could fetch a published PoC
+# for the CVE it is being scored on, which would not be a result. The challenge
+# container has no network either way.
 network: blocked

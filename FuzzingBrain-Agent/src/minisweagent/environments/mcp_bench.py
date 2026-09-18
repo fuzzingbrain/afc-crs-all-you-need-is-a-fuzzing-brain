@@ -30,10 +30,33 @@ from typing import Any
 from pydantic import BaseModel
 
 from minisweagent.exceptions import Submitted
+from minisweagent.utils.serialize import recursive_merge
 
 # The model asks for a grading run the way the shared task prompt names it:
 # `run_poc_on_harness(/workspace/c1.bin)` or `run_poc_on_harness /workspace/c1.bin`.
 _GRADE = re.compile(r"^\s*run_poc_on_harness\s*(?:\(\s*)?([^)\s]+)\s*\)?\s*$")
+
+
+def _render_verdict(out: Any) -> str:
+    """The harness's own output first, as text, then the structured fields.
+
+    json.dumps would escape every newline, so the sanitizer report -- the whole
+    reason v2 hands this arm the raw result instead of a one-line verdict --
+    would arrive as one unreadable line. The other arms read the report as the
+    harness printed it; so does this one.
+    """
+    if not isinstance(out, dict):
+        return str(out)
+    ho = out.get("harness_output") or {}
+    parts = []
+    for stream in ("stdout", "stderr"):
+        if text := (ho.get(stream) or "").strip():
+            parts.append(text)
+    meta = {k: v for k, v in out.items() if k != "harness_output"}
+    meta |= {k: v for k, v in ho.items() if k not in ("stdout", "stderr")}
+    if meta:
+        parts.append("\n".join(f"{k}: {v}" for k, v in meta.items()))
+    return "\n\n".join(parts) if parts else json.dumps(out, indent=2)
 
 
 class McpBenchEnvironmentConfig(BaseModel):
@@ -100,10 +123,7 @@ class McpBenchEnvironment:
             if m:
                 out = self._tool("run_poc_on_harness",
                                  {"path": shlex.split(m.group(1))[0]}, t)
-                # The whole result, not a one-line summary. The other arms get
-                # the raw harness stdout/stderr -- the full sanitizer report --
-                # and a one-line verdict was the external arm's real handicap.
-                text = json.dumps(out, indent=2) if not isinstance(out, str) else out
+                text = _render_verdict(out)
                 output = {"output": text, "returncode": 0, "exception_info": ""}
             else:
                 out = self._tool("exec", {"cmd": command, "timeout_s": int(t)}, t)
@@ -133,6 +153,26 @@ class McpBenchEnvironment:
                 "content": submission,
                 "extra": {"exit_status": "Submitted", "submission": submission},
             })
+
+    def get_template_vars(self, **kwargs) -> dict[str, Any]:
+        """The prompt renders against these. The agent is not on this host any
+        more -- it acts inside the challenge image -- so reporting the host's
+        uname would describe a machine the model never touches."""
+        return recursive_merge(self.config.model_dump(),
+                               {"system": "Linux", "machine": "x86_64",
+                                "release": "", "version": "",
+                                "cwd": "/challenge"},
+                               kwargs)
+
+    def serialize(self) -> dict:
+        return {
+            "info": {
+                "config": {
+                    "environment": self.config.model_dump(mode="json"),
+                    "environment_type": f"{self.__class__.__module__}.{self.__class__.__name__}",
+                }
+            }
+        }
 
     def close(self) -> None:
         try:

@@ -16,6 +16,8 @@ import sys
 import time
 from pathlib import Path
 
+from tests.fakebench import FakeBenchServer
+
 REPO = Path(__file__).resolve().parents[2]
 CONFIG = REPO / "src" / "minisweagent" / "config" / "fbbench.yaml"
 
@@ -26,24 +28,32 @@ def _say(text: str, command: str | None) -> dict:
             "extra": {"actions": [{"command": command}] if command else [], "cost": 0.01}}
 
 
-def _stage(tmp_path: Path, verdict: str = "clean: no fault | target ran 0 ms | 4 bytes") -> Path:
-    """A workspace shaped like the bench's: a harness to read, and a ./submit
-    that answers in one line. The real one round-trips through a judge thread;
-    the answer on stdout is the only part the agent can see."""
+_SERVERS = []
+
+
+def _stage(tmp_path: Path, verdict: dict | None = None) -> Path:
+    """A workspace and a stand-in for the bench's per-episode MCP server.
+
+    v2 has no ./submit script and no staged copy: the agent drives the bench's
+    own server, so the fake speaks the same JSON-RPC on a real unix socket.
+    `exec` runs for real in the workspace; run_poc_on_harness answers with a
+    canned verdict in the shape the environment renders.
+    """
     ws = tmp_path / "ws"
     (ws / ".fbbench").mkdir(parents=True)
     (ws / "harness.c").write_text(
         'int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n) {\n'
         '  if (n < 4 || memcmp(d, "FUZZ", 4)) return 0;\n  parse(d + 4, n - 4);\n}\n')
-    submit = ws / "submit"
-    submit.write_text(f'#!/bin/bash\n[ -f "$1" ] || exit 2\necho "{verdict}"\n')
-    submit.chmod(0o755)
+    srv = FakeBenchServer(str(tmp_path / "bench.sock"), str(ws), verdict)
+    _SERVERS.append(srv)
     return ws
 
 
 def _argv(ws: Path, cfg: Path, max_turns: int, timeout: int) -> list[str]:
     # Exactly how fb-agent.agent.yaml invokes it: `-m fb_agent`, nothing installed assumed.
-    return [sys.executable, "-m", "fb_agent", "--workspace", str(ws), "--task", "Find a crash.",
+    sock = str(Path(ws).parent / "bench.sock")
+    return [sys.executable, "-m", "fb_agent", "--workspace", str(ws),
+            "--mcp-socket", sock, "--task", "Find a crash.",
             "--model", "deterministic", "--max-turns", str(max_turns), "--timeout", str(timeout),
             "-c", str(CONFIG), "-c", str(cfg)]
 
@@ -82,19 +92,30 @@ def _reports(stdout: str) -> list[dict]:
 _DONE = "echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT"
 
 
-def test_the_agent_submits_a_candidate_and_the_verdict_comes_back(tmp_path):
-    ws = _stage(tmp_path, "crash: abrt|parse|main")
+def test_the_agent_grades_a_candidate_and_the_whole_report_comes_back(tmp_path):
+    """v1 got one line, `crash: a|b|c`, while every other arm got the harness's
+    own output. The sanitizer report -- the faulting frame, the allocation site
+    -- has to reach the model, or this arm is reasoning with less than the
+    others."""
+    verdict = {"harness_output": {
+        "exit_code": 1, "signal": "SIGABRT", "stdout": "",
+        "stderr": "==1==ERROR: AddressSanitizer: heap-use-after-free\n"
+                  "    #0 0x1 in parse /src/p.c:42\n"
+                  "SUMMARY: AddressSanitizer: heap-use-after-free /src/p.c:42 in parse"},
+        "crash_novelty": "new", "duration_ms": 7}
+    ws = _stage(tmp_path, verdict)
     r = _run(ws, [
-        _say("Building a candidate.", "printf 'FUZZ\\x41' > c1"),
-        _say("Submitting it.", "./submit c1"),
+        _say("Building a candidate.", "printf 'FUZZA' > /workspace/c1"),
+        _say("Grading it.", "run_poc_on_harness(/workspace/c1)"),
         _say("It crashed.", _DONE),
     ])
     assert r.returncode == 0, r.stderr[-2000:]
-    assert (ws / "c1").read_bytes() == b"FUZZ\x41"
-    # The verdict has to land in the conversation. If it does not, the agent is
-    # submitting blind and mid-run grading is decorative.
+    assert (ws / "c1").read_bytes() == b"FUZZA"
     traj = json.loads((ws / ".fbbench" / "traj.json").read_text())
-    assert any("crash: abrt|parse|main" in str(m.get("content", "")) for m in traj["messages"])
+    convo = " ".join(str(m.get("content", "")) for m in traj["messages"])
+    assert "AddressSanitizer: heap-use-after-free" in convo
+    assert "/src/p.c:42 in parse" in convo, "the faulting location must reach the model"
+    assert "crash_novelty: new" in convo
 
 
 def test_turns_and_tokens_land_where_the_bench_looks_for_them(tmp_path):
@@ -145,22 +166,6 @@ def test_a_report_survives_the_process_being_killed(tmp_path):
     assert _reports(out), out[-2000:]
 
 
-def test_every_command_goes_through_the_shell_the_bench_handed_us(tmp_path):
-    # $SHELL is the bench's sandbox wrapper. A run that quietly used /bin/sh
-    # would look identical and be unsandboxed, and score.json would report a
-    # sandbox it never had.
-    ws = _stage(tmp_path)
-    marker = tmp_path / "shell-was-used"
-    fake = tmp_path / "fake-shell"
-    fake.write_text(f'#!/bin/bash\ntouch "{marker}"\nexec /bin/bash "$@"\n')
-    fake.chmod(0o755)
-    cfg = _script(ws, [_say("One.", "echo one"), _say("Done.", _DONE)])
-    r = subprocess.run(_argv(ws, cfg, 10, 120), capture_output=True, text=True, timeout=300,
-                       env=_env() | {"SHELL": str(fake)}, cwd=str(ws))
-    assert r.returncode == 0, r.stderr[-2000:]
-    assert marker.is_file(), "commands did not go through $SHELL"
-
-
 def test_the_trace_the_bench_renders_its_report_from_is_complete(tmp_path):
     # The bench copies .fbagent-trace.jsonl out of the workspace before deleting
     # it and builds transcript.jsonl and report.html from it. Without it the
@@ -170,7 +175,7 @@ def test_the_trace_the_bench_renders_its_report_from_is_complete(tmp_path):
     ws = _stage(tmp_path, "crash: abrt|parse|main")
     r = _run(ws, [
         _say("Building.", "printf 'FUZZ' > c1"),
-        _say("Submitting.", "./submit c1"),
+        _say("Submitting.", "run_poc_on_harness(/workspace/c1)"),
         _say("Done.", _DONE),
     ])
     assert r.returncode == 0, r.stderr[-2000:]
@@ -182,7 +187,7 @@ def test_the_trace_the_bench_renders_its_report_from_is_complete(tmp_path):
     # environment, so the run ends before its observation is ever rendered.
     assert kinds.count("tool_result") == 2
     assert [rec["input"]["command"] for rec in recs if rec["kind"] == "tool_call"] == [
-        "printf 'FUZZ' > c1", "./submit c1", _DONE]
+        "printf 'FUZZ' > c1", "run_poc_on_harness(/workspace/c1)", _DONE]
     verdicts = [rec["content"] for rec in recs if rec["kind"] == "tool_result"]
     assert any("crash: abrt|parse|main" in v for v in verdicts), verdicts
     assert all(rec["step"] >= 1 for rec in recs)
@@ -244,7 +249,7 @@ def test_a_finish_with_budget_left_is_refused_and_the_run_continues(tmp_path):
     (ws / "sinks.md").write_text("- png_read_end: unchecked length\n")
     r = _run(ws, [
         _say("Trying to finish early.", _DONE),
-        _say("Fine, going after the sink.", "printf 'X' > c1 && ./submit c1"),
+        _say("Fine, going after the sink.", "printf 'X' > c1 && run_poc_on_harness(/workspace/c1)"),
         _say("Done now.", _DONE),
         _say("Truly nothing left.", _DONE),
     ], max_turns=50, timeout=3600)
@@ -275,10 +280,11 @@ def test_a_fuzzer_never_runs(tmp_path):
     assert "fuzzing is not available" in blob
 
 
-def test_submitting_in_a_loop_never_runs(tmp_path):
+def test_grading_in_a_loop_never_runs(tmp_path):
     ws = _stage(tmp_path)
     r = _run(ws, [
-        _say("Batching.", "for i in 1 2 3; do ./submit c$i; done; touch LOOPED"),
+        _say("Batching.",
+             "for i in 1 2 3; do run_poc_on_harness /workspace/c$i; done; touch LOOPED"),
         _say("Fine.", _DONE),
     ])
     assert r.returncode == 0, r.stderr[-2000:]
@@ -315,17 +321,6 @@ def test_the_budget_line_survives_a_refusal_and_a_pushback(tmp_path):
     assert any("fuzzing is not available" in c for c in results)
     assert any("[not yet]" in c for c in results)
     assert all("[budget]" in c for c in results), [c[:80] for c in results]
-
-
-def test_reach_is_installed_and_offered_only_when_the_tracer_is_there(tmp_path):
-    ws = _stage(tmp_path)
-    (ws / ".fbbench" / "trace_req").mkdir()
-    _run(ws, [_say("Done.", _DONE)])
-    assert (ws / "reach").is_file() and (ws / "reach").stat().st_mode & 0o111
-
-    bare = _stage(tmp_path / "bare")
-    _run(bare, [_say("Done.", _DONE)])
-    assert not (bare / "reach").exists(), "offered a tracer this bench build has not got"
 
 
 def _tc(text: str, command: str, call_id: str) -> dict:
@@ -372,31 +367,6 @@ def test_the_pushback_is_a_tool_result_not_a_user_message(tmp_path):
 
 
 # ---- the report has to be readable by the same eyes that read a bare run ----
-
-def test_submit_and_reach_are_named_in_the_trace(tmp_path):
-    # Everything the agent does is bash, so an unlabelled trace renders as a wall
-    # of identical `bash` calls -- while the bare model's report shows `exec` and
-    # `run_poc_on_harness` with the candidate path. You could not see which turn
-    # submitted what.
-    ws = _stage(tmp_path, "crash: abrt|f|g")
-    (ws / ".fbbench" / "trace_req").mkdir()
-    r = _run(ws, [
-        _say("Reading.", "cat harness.c"),
-        _say("Submitting.", "printf 'FUZZ' > c1 && ./submit c1"),
-        _say("Checking reach.", "./reach c1 png_read_end || true"),
-        _say("Done.", _DONE),
-    ])
-    assert r.returncode == 0, r.stderr[-2000:]
-    recs = [json.loads(l) for l in (ws / ".fbagent-trace.jsonl").read_text().splitlines() if l.strip()]
-    calls = {rec["tool"]: rec["input"] for rec in recs if rec["kind"] == "tool_call"}
-    assert set(calls) == {"bash", "submit", "reach"}, sorted(calls)
-    assert calls["submit"]["path"] == "c1"
-    assert calls["reach"] == {"path": "c1", "function": "png_read_end",
-                              "command": "./reach c1 png_read_end || true"}
-    # the verdict has to land under `submit`, not under `bash`
-    sub = [rec for rec in recs if rec["kind"] == "tool_result" and rec["tool"] == "submit"]
-    assert sub and "crash: abrt|f|g" in sub[0]["content"]
-
 
 def test_the_report_survives_a_failure_whose_message_is_itself_json(tmp_path):
     # The live run died on an API error whose text was JSON. The bench's report
@@ -450,41 +420,7 @@ def _answer(ws: Path, text: str, timeout: float = 20.0) -> str:
     raise AssertionError("./reach never posted a trace request")
 
 
-def test_a_missing_debugger_is_learned_once_and_not_paid_for_again(tmp_path):
-    ws = _reach_ws(tmp_path)
-    marker = ws / ".fbbench" / "reach_unavailable"
-
-    p = subprocess.Popen([str(ws / "reach"), "cand.bin", "parse"], cwd=ws,
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    _answer(ws, "\nsh: 1: exec: gdb: not found\n")      # libxml2-04's actual reply
-    _, err = p.communicate(timeout=30)
-
-    assert p.returncode == 1
-    assert marker.is_file(), "a dead tracer must be remembered on disk"
-    assert "Do not call ./reach again" in err
-    assert "0 ms" in err, "it should still say how to read the verdict instead"
-
-    # The second call must cost nothing: no request posted, no waiting.
-    before = {f.name for f in (ws / ".fbbench" / "trace_req").iterdir()}
-    t0 = time.time()
-    r2 = subprocess.run([str(ws / "reach"), "cand.bin", "parse"], cwd=ws,
-                        capture_output=True, text=True, timeout=30)
-    after = {f.name for f in (ws / ".fbbench" / "trace_req").iterdir()}
-
-    assert r2.returncode == 1
-    assert after == before, "short-circuit must not post another request"
-    assert time.time() - t0 < 2.0, "short-circuit must not wait on a responder"
-    assert "Do not call ./reach again" in r2.stderr
-
-
-def test_a_working_debugger_is_not_mistaken_for_a_dead_one(tmp_path):
-    ws = _reach_ws(tmp_path)
-    p = subprocess.Popen([str(ws / "reach"), "cand.bin", "parse"], cwd=ws,
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-    _answer(ws, "@@REACHED parse@@\nd = 0x7ffd, n = 8\n")
-    out, _ = p.communicate(timeout=30)
-
-    assert p.returncode == 0
-    assert "@@REACHED parse@@" in out
-    assert not (ws / ".fbbench" / "reach_unavailable").exists(), \
-        "a good answer must not disable the tool for the rest of the run"
+# Removed with v1: ./reach and its gdb-unavailable escape (the agent has exec in
+# the challenge image now and runs gdb itself), and the $SHELL sandbox check
+# (there is no host shell -- every action is an MCP call, covered directly by
+# tests/environments/test_mcp_bench.py).

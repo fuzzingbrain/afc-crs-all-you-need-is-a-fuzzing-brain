@@ -81,11 +81,15 @@ def test_the_divergences_are_the_ones_we_meant():
         leaked = [l for l in template.splitlines() if re.match(r"^\s*# ", l)]
         assert not leaked, (name, leaked)
     ours = _norm(cfg["agent"]["system_template"])
-    # The other arms' tool names must not leak in: they do not exist here, and
-    # an agent told to call run_poc_on_harness() would burn turns on it.
-    for absent in ("mcp__harness__", "run_poc_on_harness", "RESULT.md", "ASSESSMENT COMPLETE"):
+    # v1 asserted the other arms' tool names must NOT appear, because this arm
+    # did not have them. v2 gives every arm the same bench tools, so
+    # run_poc_on_harness is now correct here and ./submit is the thing that must
+    # not come back. What stays out is each arm's own ENDING: ours is the
+    # environment's finish command, not RESULT.md or "ASSESSMENT COMPLETE".
+    for absent in ("mcp__harness__", "RESULT.md", "ASSESSMENT COMPLETE",
+                   "./submit", "./reach"):
         assert absent not in ours, absent
-    assert "./submit" in ours
+    assert "run_poc_on_harness" in ours
 
 
 # ---- the harness's own prompt layer ----------------------------------------
