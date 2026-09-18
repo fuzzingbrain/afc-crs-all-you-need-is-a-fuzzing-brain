@@ -175,6 +175,17 @@ def trace(elf_host_path: str, run_argv_tmpl, input_bytes: bytes, project: str,
                     dst = blibs / so.name
                     if not dst.exists():
                         shutil.copy(so, dst)
+            # Vendored fallback libs for a NEEDED that is in neither the binary
+            # tree nor the project image (systemd's libsystemd-shared -> libcap.so.2).
+            # Without it the inferior aborts at load and the trace looks like a
+            # clean no-crash -- the same gap that made the audit's agent path fail
+            # on systemd while native reproduced fine.
+            vendored = Path(__file__).resolve().parent.parent / "analyzer" / "runtime_libs"
+            if vendored.is_dir():
+                for lib in vendored.glob("*.so*"):
+                    dst = blibs / lib.name
+                    if not dst.exists():
+                        shutil.copy(lib, dst)
         except Exception:
             pass
         (work / "input").write_bytes(input_bytes)
