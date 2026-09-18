@@ -112,7 +112,26 @@ class McpBenchEnvironment:
                 self._buf += chunk
 
     def _tool(self, name: str, arguments: dict, timeout: float | None = None) -> Any:
-        return self._rpc("tools/call", {"name": name, "arguments": arguments}, timeout)
+        """Unwrap the MCP envelope the way the bench's own client does.
+
+        A tools/call result is {"content": [...blocks...], "structuredContent":
+        {...}}. Reading the envelope instead of its payload is silent: every
+        exec() came back with an empty stdout and the model spent its whole
+        budget looking at nothing, with no error anywhere.
+        """
+        resp = self._rpc("tools/call", {"name": name, "arguments": arguments}, timeout)
+        if isinstance(resp, dict):
+            if isinstance(sc := resp.get("structuredContent"), dict):
+                return sc
+            if isinstance(blocks := resp.get("content"), list):
+                text = "\n".join(b.get("text", "") for b in blocks
+                                  if isinstance(b, dict) and b.get("type") == "text")
+                if text:
+                    try:
+                        return json.loads(text)
+                    except ValueError:
+                        return {"stdout": text, "stderr": "", "exit_code": 0}
+        return resp
 
     # -- the environment interface ----------------------------------------
     def execute(self, action: dict, cwd: str = "", *, timeout: int | None = None) -> dict[str, Any]:

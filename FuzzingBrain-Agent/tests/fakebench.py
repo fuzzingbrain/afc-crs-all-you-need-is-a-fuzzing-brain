@@ -14,7 +14,11 @@ import threading
 
 
 class FakeBenchServer:
-    def __init__(self, path: str, cwd: str, verdict: dict | None = None):
+    def __init__(self, path: str, cwd: str, verdict: dict | None = None,
+                 observer=None):
+        # The real episode server tees both pumps into CandidateLog; a fake
+        # that skipped it would leave the observer untested.
+        self.observer = observer
         self.path, self.cwd = str(path), str(cwd)
         self.verdict = verdict if verdict is not None else {
             "harness_output": {"exit_code": 0, "signal": "", "stdout": "", "stderr": ""},
@@ -43,6 +47,8 @@ class FakeBenchServer:
                 return
             if not b:
                 return
+            if self.observer is not None:
+                self.observer.saw_request(b)
             buf += b
             while b"\n" in buf:
                 line, buf = buf.split(b"\n", 1)
@@ -53,9 +59,11 @@ class FakeBenchServer:
                 except ValueError:
                     continue
                 try:
-                    conn.sendall((json.dumps(
-                        {"jsonrpc": "2.0", "id": msg.get("id"),
-                         "result": self._handle(msg)}) + "\n").encode())
+                    reply = (json.dumps({"jsonrpc": "2.0", "id": msg.get("id"),
+                                         "result": self._handle(msg)}) + "\n").encode()
+                    if self.observer is not None:
+                        self.observer.saw_response(reply)
+                    conn.sendall(reply)
                 except OSError:
                     return
 

@@ -148,3 +148,27 @@ def test_the_socket_is_taken_from_the_environment_when_not_passed(server, monkey
     env = McpBenchEnvironment(timeout=5)
     env.execute({"command": "pwd"})
     assert server.calls[-1][0] == "exec"
+
+
+def test_the_real_mcp_envelope_is_unwrapped(tmp_path):
+    """A live smoke run caught what these tests did not: the server answers
+    tools/call with {"content": [...], "structuredContent": {...}}, and reading
+    the envelope instead of its payload gives an empty stdout with no error
+    anywhere. The model spent its whole budget looking at nothing."""
+    real = {"content": [{"type": "text", "text": '{"stdout": "total 44\\nsrc\\n", '
+                                                 '"stderr": "", "exit_code": 0}'}],
+            "structuredContent": {"stdout": "total 44\nsrc\n", "stderr": "",
+                                  "exit_code": 0}}
+    srv = FakeServer(tmp_path / "s.sock", reply=lambda n, a: real)
+    env = McpBenchEnvironment(socket_path=srv.path, timeout=5)
+    out = env.execute({"command": "ls -la /challenge"})
+    assert "total 44" in out["output"], out
+    assert out["returncode"] == 0
+
+
+def test_content_blocks_alone_are_enough(tmp_path):
+    """Older servers answer with content blocks and no structuredContent."""
+    real = {"content": [{"type": "text", "text": '{"stdout": "hi", "exit_code": 0}'}]}
+    srv = FakeServer(tmp_path / "s.sock", reply=lambda n, a: real)
+    env = McpBenchEnvironment(socket_path=srv.path, timeout=5)
+    assert env.execute({"command": "echo hi"})["output"] == "hi"
