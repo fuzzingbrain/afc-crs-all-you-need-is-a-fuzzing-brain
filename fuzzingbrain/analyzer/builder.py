@@ -343,6 +343,13 @@ class AnalyzerBuilder:
                 ):
                     if sib.exists():
                         shutil.copy2(sib, out_dir / sib.name)
+                # Carry over shared libraries the binary loads via an
+                # $ORIGIN-relative RUNPATH/RPATH (e.g. systemd's
+                # $ORIGIN/src/shared/libsystemd-shared-*.so). Copying only the
+                # binary leaves those unresolved, so in the run container the
+                # loader aborts with rc=127 and every PoV silently reports "no
+                # crash" -- the finder looks fine while nothing is ever executed.
+                self._stage_origin_runpath_libs(src_path, out_dir)
                 placed += 1
                 self.log(
                     f"Placed prebuilt fuzzer {name} -> {dest} [{sanitizer}], skipping compile"
@@ -363,6 +370,87 @@ class AnalyzerBuilder:
             f"{len(self.fuzzers)} fuzzers available."
         )
         return True, f"Imported {placed} prebuilt fuzzer binaries in {elapsed:.1f}s"
+
+    def _stage_origin_runpath_libs(self, binary: Path, out_dir: Path) -> None:
+        """Copy shared-library directories a prebuilt binary resolves through an
+        ``$ORIGIN``-relative RUNPATH/RPATH into ``out_dir`` at the same relative
+        path, so ``$ORIGIN`` still resolves once the binary is mounted in the run
+        container.
+
+        systemd is the case that forced this: its fuzzers link
+        ``libsystemd-shared-*.so`` with RUNPATH ``$ORIGIN/src/shared``. Staging
+        only the binary drops that tree, the loader can't find the library, the
+        binary exits 127, and every PoV attempt looks like a clean no-crash.
+
+        Best-effort: any failure (no readelf, unreadable binary, no RUNPATH)
+        leaves the previous binary-only behaviour untouched, so other projects
+        are unaffected.
+        """
+        import re
+
+        try:
+            proc = subprocess.run(
+                ["readelf", "-d", str(binary)],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except Exception as e:  # readelf missing, timeout, etc.
+            self.log(f"runpath staging skipped for {binary.name}: {e}", "DEBUG")
+            return
+
+        rels = set()
+        for m in re.finditer(
+            r"\((?:RUNPATH|RPATH)\)\s+Library (?:runpath|rpath): \[([^\]]*)\]",
+            proc.stdout,
+        ):
+            for entry in m.group(1).split(":"):
+                entry = entry.strip()
+                if entry.startswith("$ORIGIN"):
+                    rel = entry[len("$ORIGIN") :].strip("/")
+                    # Only same-tree relative dirs; never climb out with "..".
+                    if rel and ".." not in rel.split("/"):
+                        rels.add(rel)
+
+        src_dir = binary.parent
+        staged_dirs = []
+        for rel in sorted(rels):
+            src_sub = src_dir / rel
+            if not src_sub.is_dir():
+                continue
+            dst_sub = out_dir / rel
+            try:
+                shutil.copytree(src_sub, dst_sub, dirs_exist_ok=True)
+                for f in dst_sub.rglob("*"):
+                    if f.is_file():
+                        os.chmod(f, 0o755)
+                staged_dirs.append(dst_sub)
+                self.log(
+                    f"Staged $ORIGIN/{rel} shared libs for {binary.name} "
+                    f"(from {src_sub})"
+                )
+            except Exception as e:
+                self.log(
+                    f"runpath staging of {rel} for {binary.name} failed: {e}",
+                    "WARN",
+                )
+
+        # Some prebuilt binaries need a runtime library that is present neither in
+        # their shipped tree nor in the challenge image (systemd's libsystemd-shared
+        # NEEDs libcap.so.2, absent from both). Drop any vendored fallback libs next
+        # to the staged $ORIGIN libs so LD_LIBRARY_PATH resolves the whole chain.
+        # Only files not already staged are added, so a real lib always wins.
+        vendored = Path(__file__).resolve().parent / "runtime_libs"
+        if staged_dirs and vendored.is_dir():
+            for lib in vendored.glob("*.so*"):
+                for dst_sub in staged_dirs:
+                    target = dst_sub / lib.name
+                    if not target.exists():
+                        shutil.copy2(lib, target)
+                        os.chmod(target, 0o755)
+                        self.log(
+                            f"Staged vendored runtime lib {lib.name} -> {target}"
+                        )
 
     def _build_all_sequential(self) -> Tuple[bool, str]:
         """Sequential build (original implementation)."""

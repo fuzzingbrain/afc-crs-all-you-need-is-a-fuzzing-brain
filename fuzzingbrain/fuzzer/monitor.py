@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from loguru import logger
 
 from ..core.docker_limits import docker_resource_args
+from ..core.fuzzer_spec import staged_ld_library_path
 from .models import CRASH_ARTIFACT_PREFIXES, CrashRecord
 from .signature import compute_signature
 
@@ -946,6 +947,9 @@ class FuzzerMonitor:
         fuzzer_dir = fuzzer_path.parent
         fuzzer_binary = fuzzer_path.name
         work_dir = crash_path.parent
+        # Resolve staged $ORIGIN/vendored shared libs (e.g. systemd's
+        # libsystemd-shared -> libcap.so.2) so the binary actually loads.
+        ld_library_path = staged_ld_library_path(fuzzer_dir, "/fuzzers")
 
         def _run_with_image(image: str):
             cmd = [
@@ -967,6 +971,11 @@ class FuzzerMonitor:
                 # re-verify as a crash (matches the fuzzer + create_pov).
                 "-e",
                 "ASAN_OPTIONS=detect_leaks=0",
+                *(
+                    ["-e", f"LD_LIBRARY_PATH={ld_library_path}"]
+                    if ld_library_path
+                    else []
+                ),
                 "-v",
                 f"{fuzzer_dir}:/fuzzers:ro",
                 "-v",

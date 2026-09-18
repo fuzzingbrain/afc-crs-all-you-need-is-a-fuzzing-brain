@@ -32,7 +32,12 @@ from .coverage import (
     get_coverage_context,
 )
 from ..core.docker_limits import docker_resource_args
-from ..core.fuzzer_spec import is_no_oom, libfuzzer_oom_flags, NO_OOM_MEMORY_MB
+from ..core.fuzzer_spec import (
+    is_no_oom,
+    libfuzzer_oom_flags,
+    staged_ld_library_path,
+    NO_OOM_MEMORY_MB,
+)
 from ..core.models import POV
 from ..core.pov_packager import POVPackager
 from ..core.utils import generate_id
@@ -1344,6 +1349,13 @@ def _run_fuzzer_docker(
     work_dir = blob_path.parent
     memory_mb = NO_OOM_MEMORY_MB if no_oom else 4096
 
+    # Staged shared libs (the binary's $ORIGIN runpath dirs plus vendored fallback
+    # libs) live under fuzzer_dir; the loader needs them on LD_LIBRARY_PATH because a
+    # NEEDED like libsystemd-shared -> libcap.so.2 is transitive and DT_RUNPATH does
+    # not carry across. Without this the systemd binaries abort at load (rc=127) and
+    # every PoV silently reads as "no crash".
+    ld_library_path = staged_ld_library_path(fuzzer_dir, "/fuzzers")
+
     def run_with_image(image: str):
         """Run fuzzer with specified docker image."""
         docker_cmd = [
@@ -1367,6 +1379,11 @@ def _run_fuzzer_docker(
             "ASAN_OPTIONS=detect_leaks=0",
             "-e",
             "FUZZ_VERBOSE=1",  # Enable verbose output for debugging
+            *(
+                ["-e", f"LD_LIBRARY_PATH={ld_library_path}"]
+                if ld_library_path
+                else []
+            ),
             "-v",
             f"{fuzzer_dir}:/fuzzers:ro",
             "-v",

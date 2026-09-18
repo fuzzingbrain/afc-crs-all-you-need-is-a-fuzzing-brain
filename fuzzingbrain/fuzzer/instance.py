@@ -15,7 +15,11 @@ from typing import Any, Dict, List, Optional, Union
 from loguru import logger
 
 from ..core.docker_limits import docker_resource_args, task_label_args
-from ..core.fuzzer_spec import libfuzzer_oom_flags, NO_OOM_MEMORY_MB
+from ..core.fuzzer_spec import (
+    libfuzzer_oom_flags,
+    staged_ld_library_path,
+    NO_OOM_MEMORY_MB,
+)
 from .models import (
     CRASH_ARTIFACT_PREFIXES,
     FuzzerStatus,
@@ -159,6 +163,11 @@ class FuzzerInstance:
                 # stopping the run before it finds the real bug. Turn it off.
                 "-e",
                 "ASAN_OPTIONS=detect_leaks=0",
+                *(
+                    ["-e", f"LD_LIBRARY_PATH={staged_ld_library_path(fuzzer_dir, '/fuzzers')}"]
+                    if staged_ld_library_path(fuzzer_dir, "/fuzzers")
+                    else []
+                ),
             ]
         )
 

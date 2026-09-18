@@ -21,7 +21,8 @@ prebuilt map strips), so callers run ``base``, not the logical name.
 """
 from __future__ import annotations
 
-from typing import List, Optional, Tuple
+from pathlib import Path
+from typing import List, Optional, Tuple, Union
 
 NO_OOM_TOKEN = "NO_OOM"
 
@@ -55,3 +56,34 @@ def is_no_oom(name: str) -> bool:
 def libfuzzer_oom_flags(no_oom: bool) -> List[str]:
     """The libFuzzer flags that disable its OOM detection, or [] when off."""
     return ["-rss_limit_mb=0", "-malloc_limit_mb=0"] if no_oom else []
+
+
+def staged_ld_library_path(
+    fuzzer_dir: Union[str, Path], mount_point: str = "/fuzzers"
+) -> str:
+    """``LD_LIBRARY_PATH`` (container-side) covering shared libraries staged under
+    the mounted fuzzer directory.
+
+    The prebuilt-import step stages a binary's ``$ORIGIN`` runpath dirs (e.g.
+    systemd's ``src/shared``) and vendored fallback libs alongside the binary.
+    A NEEDED chain like ``fuzzer -> libsystemd-shared -> libcap.so.2`` is
+    transitive, and ``DT_RUNPATH`` is not carried across links, so the loader
+    only finds ``libcap`` if the staged dir is on ``LD_LIBRARY_PATH``. Missing it
+    makes the binary abort at load (rc=127) and every PoV read as "no crash".
+
+    Returns ``mount_point``-rooted, ``:``-joined paths for every subdirectory of
+    ``fuzzer_dir`` that holds a ``.so``, or ``""`` when there are none (so the
+    caller can skip setting the variable for ordinary projects).
+    """
+    fuzzer_dir = Path(fuzzer_dir)
+    rels = set()
+    try:
+        for so in fuzzer_dir.rglob("*.so*"):
+            if so.is_file():
+                rels.add(so.parent.relative_to(fuzzer_dir))
+    except Exception:
+        return ""
+    parts = []
+    for rel in sorted(rels, key=str):
+        parts.append(mount_point if rel == Path(".") else f"{mount_point}/{rel}")
+    return ":".join(parts)
