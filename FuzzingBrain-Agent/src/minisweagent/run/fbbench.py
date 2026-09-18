@@ -70,7 +70,6 @@ def _tokens(agent: DefaultAgent) -> dict:
             "cache_read_tokens": cache_read, "cache_write_tokens": cache_write}
 
 
-_GRADE_RE = re.compile(r"\brun_poc_on_harness\s*\(?\s*([^)\s]+)")
 
 
 def tool_label(command: str) -> tuple[str, dict]:
@@ -85,8 +84,6 @@ def tool_label(command: str) -> tuple[str, dict]:
     the salient part of a compound command, so the report reads like the arm it
     is being compared against.
     """
-    if m := _GRADE_RE.search(command):
-        return "run_poc_on_harness", {"path": m.group(1), "command": command}
     return "exec", {"command": command}
 
 
@@ -239,7 +236,8 @@ class _ReportingAgent(DefaultAgent):
         commands = " ; ".join(a.get("command", "") for a in actions)
         # Pair each result with the name its call was given, so the report shows
         # a submit's verdict under `submit` and not under a wall of `bash`.
-        names = [tool_label(a.get("command", ""))[0] for a in actions] or ["bash"]
+        names = [a.get("tool") or tool_label(a.get("command", ""))[0]
+                 for a in actions] or ["exec"]
         notes = self.coach.observe(commands, "\n".join(_text_of(o) for o in observations),
                                    self.n_turns, time.time() - self._start_time)
         if notes and observations:
@@ -281,7 +279,8 @@ class _ReportingAgent(DefaultAgent):
         if text := _text_of(message):
             self._trace_write(kind="text", text=text)
         for action in (message.get("extra") or {}).get("actions", []):
-            name, inp = tool_label(action.get("command", ""))
+            name = action.get("tool") or tool_label(action.get("command", ""))[0]
+            inp = dict(action.get("args") or {}) or {"command": action.get("command", "")}
             self._trace_write(kind="tool_call", tool=name, input=inp)
         return message
 

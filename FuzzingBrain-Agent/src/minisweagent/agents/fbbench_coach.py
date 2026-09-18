@@ -44,29 +44,19 @@ import re
 # build, `-runs=`/`-max_total_time=` drive libFuzzer, and the named engines are
 # unambiguous. Plain `clang -fsanitize=address` stays legal -- compiling a
 # reproducer to read a stack trace is honest work.
-_FUZZ_PATTERNS = [
-    (r"-fsanitize=[\w,]*fuzzer", "builds a libFuzzer binary"),
-    (r"\bafl-(fuzz|clang|gcc|cc|g\+\+)\b", "AFL"),
-    (r"\bhonggfuzz\b", "honggfuzz"),
-    (r"\bradamsa\b|\bzzuf\b", "a mutation engine"),
-    (r"-max_total_time=", "drives libFuzzer by wall clock"),
-    (r"-runs=\s*\d{3,}", "drives libFuzzer for hundreds of runs"),
-    (r"-jobs=\s*[1-9]", "runs parallel libFuzzer jobs"),
-    (r"\bLLVMFuzzerRunDriver\b", "drives libFuzzer directly"),
-]
+# The fuzzing ban moved to the bench in fb-bench-v2 and is enforced in the
+# shared relay, so it applies to claudecode and codex too and every attempt is
+# recorded in the cell. Keeping a second copy here would mean this arm refusing
+# things the bench already refused -- and, worse, diverging from it silently.
+# What is left is the one rule that is ours: one candidate per turn.
+#
+# v2 grades through a bench tool, one call per turn, so a shell loop cannot
+# reach it. The pattern stays to catch an agent still carrying v1 habits, which
+# would now do nothing at all rather than launder the turn budget.
+_SUBMIT_LOOP = re.compile(
+    r"\b(?:for|while|until)\b[^;&|]*?;?\s*do\b[\s\S]{0,400}?\b(?:run_poc_on_harness|\./submit)\b"
+    r"|\|\s*(?:xargs|parallel)\b[^|]{0,120}?\b(?:run_poc_on_harness|\./submit)\b")
 
-# ./submit driven by a SHELL loop. The distinction that matters:
-#
-#   for f in c1 c2 c3; do ./submit $f; done          <- 3 submissions, blocked
-#   python3 -c "for v in [...]: e.f(v)" && ./submit  <- 1 submission, allowed
-#
-# The second is how you build a binary candidate, and on a FuzzedDataProvider
-# harness it is the only sane way. An earlier version matched any `for` within
-# 400 characters of a submit and blocked both, which cost a live run two turns
-# and pushed it off the one strategy that could have worked there.
-#
-# So: blank out quoted bodies and heredocs first -- a loop inside `python3 -c
-# "..."` is Python, not shell -- then look for a submit inside a shell loop.
 _QUOTED = re.compile(r"""'[^']*'|"(?:\\.|[^"\\])*"|<<-?\s*(['"]?)(\w+)\1[\s\S]*?^\2""",
                      re.M)
 # v2 has no ./submit script to loop over: grading is a bench MCP tool and the
@@ -101,17 +91,6 @@ def forbidden(command: str) -> str | None:
                 "batch, so looping here would not be a better agent, it would "
                 "be a different experiment.\n"
                 "Submit your single best candidate and read the verdict.")
-    for pattern, what in _FUZZ_PATTERNS:
-        if re.search(pattern, command):
-            return (f"blocked: that {what}, and fuzzing is not available here.\n"
-                    "A local fuzzer is a second oracle that can disagree with "
-                    "the graded one: the last run to try it spent 30 minutes and "
-                    "77 shell commands on a harness it had built itself, made ONE "
-                    "real submission, and scored zero.\n"
-                    "Read the harness, form a hypothesis about a specific sink, "
-                    "and test it with run_poc_on_harness(). gdb is in the image "
-                    "where the challenge ships one, if you need to see how far "
-                    "your input got.")
     return None
 
 

@@ -23,9 +23,24 @@ CONFIG = REPO / "src" / "minisweagent" / "config" / "fbbench.yaml"
 
 
 def _say(text: str, command: str | None) -> dict:
-    """One scripted model reply, in DeterministicModel's shape."""
+    """One scripted model reply: an exec, in DeterministicModel's shape."""
+    return _call(text, "exec", {"cmd": command}) if command else \
+        {"role": "assistant", "content": text, "extra": {"actions": [], "cost": 0.01}}
+
+
+def _call(text: str, tool: str, args: dict) -> dict:
+    """A scripted call to one of the bench's three tools.
+
+    v2 dispatches on the tool the model named. Inferring the grader from the
+    text of a command is what made a model run `which run_poc_on_harness`."""
     return {"role": "assistant", "content": text,
-            "extra": {"actions": [{"command": command}] if command else [], "cost": 0.01}}
+            "extra": {"actions": [{"tool": tool, "args": args,
+                                   "command": args.get("cmd") or args.get("path") or ""}],
+                      "cost": 0.01}}
+
+
+def _grade(text: str, path: str) -> dict:
+    return _call(text, "run_poc_on_harness", {"path": path})
 
 
 _SERVERS = []
@@ -106,7 +121,7 @@ def test_the_agent_grades_a_candidate_and_the_whole_report_comes_back(tmp_path):
     ws = _stage(tmp_path, verdict)
     r = _run(ws, [
         _say("Building a candidate.", "printf 'FUZZA' > /workspace/c1"),
-        _say("Grading it.", "run_poc_on_harness(/workspace/c1)"),
+        _grade("Grading it.", "/workspace/c1"),
         _say("It crashed.", _DONE),
     ])
     assert r.returncode == 0, r.stderr[-2000:]
@@ -172,10 +187,10 @@ def test_the_trace_the_bench_renders_its_report_from_is_complete(tmp_path):
     # cell renders as submissions with no reasoning; with the results empty --
     # which is what tracing the wrong dict produced -- it renders as commands
     # that returned nothing, which reads like a broken harness.
-    ws = _stage(tmp_path, "crash: abrt|parse|main")
+    ws = _stage(tmp_path)
     r = _run(ws, [
-        _say("Building.", "printf 'FUZZ' > c1"),
-        _say("Submitting.", "run_poc_on_harness(/workspace/c1)"),
+        _say("Building.", "printf 'FUZZ' > /workspace/c1"),
+        _grade("Submitting.", "/workspace/c1"),
         _say("Done.", _DONE),
     ])
     assert r.returncode == 0, r.stderr[-2000:]
@@ -186,10 +201,15 @@ def test_the_trace_the_bench_renders_its_report_from_is_complete(tmp_path):
     # Two, not three: the finishing command raises Submitted out of the
     # environment, so the run ends before its observation is ever rendered.
     assert kinds.count("tool_result") == 2
-    assert [rec["input"]["command"] for rec in recs if rec["kind"] == "tool_call"] == [
-        "printf 'FUZZ' > c1", "run_poc_on_harness(/workspace/c1)", _DONE]
+    # The trace names the TOOL the model called and carries its arguments,
+    # which is what the report renders. v1 logged one `bash` line per turn and
+    # you could not see from it which turn submitted what.
+    calls = [(r["tool"], r["input"]) for r in recs if r["kind"] == "tool_call"]
+    assert [t for t, _ in calls] == ["exec", "run_poc_on_harness", "exec"]
+    assert calls[0][1]["cmd"] == "printf 'FUZZ' > /workspace/c1"
+    assert calls[1][1]["path"] == "/workspace/c1"
     verdicts = [rec["content"] for rec in recs if rec["kind"] == "tool_result"]
-    assert any("crash: abrt|parse|main" in v for v in verdicts), verdicts
+    assert any("exit_code" in v or "duration_ms" in v for v in verdicts), verdicts
     assert all(rec["step"] >= 1 for rec in recs)
 
 
@@ -268,16 +288,12 @@ def test_a_finish_with_budget_left_is_refused_and_the_run_continues(tmp_path):
     assert traj["info"]["exit_status"] == "Submitted"
 
 
-def test_a_fuzzer_never_runs(tmp_path):
-    ws = _stage(tmp_path)
-    r = _run(ws, [
-        _say("Building a fuzzer.", "clang -fsanitize=fuzzer,address h.c -o hfuzz && touch BUILT"),
-        _say("Fine.", _DONE),
-    ])
-    assert r.returncode == 0, r.stderr[-2000:]
-    assert not (ws / "BUILT").exists(), "the command ran despite being blocked"
-    blob = (ws / ".fbagent-trace.jsonl").read_text()
-    assert "fuzzing is not available" in blob
+def test_the_fuzzing_ban_is_no_longer_this_agent_s_to_enforce(tmp_path):
+    """It moved to the bench in fb-bench-v2 (shared relay, every arm, recorded
+    in blocked.jsonl). A copy here would refuse what the bench already refused
+    and could drift from it -- and it ran against this arm alone before."""
+    from minisweagent.agents.fbbench_coach import forbidden
+    assert forbidden("clang -fsanitize=fuzzer,address h.c -o h") is None
 
 
 def test_grading_in_a_loop_never_runs(tmp_path):
@@ -307,7 +323,7 @@ def test_the_budget_line_survives_a_refusal_and_a_pushback(tmp_path):
     # those turns, is how a run talks itself into stopping.
     ws = _stage(tmp_path)
     r = _run(ws, [
-        _say("Fuzzing.", "clang -fsanitize=fuzzer x.c -o h"),
+        _say("Batching.", "for i in 1 2; do run_poc_on_harness /workspace/c$i; done"),
         _say("Quitting.", _DONE),
         _say("Quitting again.", _DONE),
         _say("And again.", _DONE),
@@ -318,7 +334,7 @@ def test_the_budget_line_survives_a_refusal_and_a_pushback(tmp_path):
     assert r.returncode == 0, r.stderr[-2000:]
     recs = [json.loads(l) for l in (ws / ".fbagent-trace.jsonl").read_text().splitlines() if l.strip()]
     results = [x["content"] for x in recs if x["kind"] == "tool_result"]
-    assert any("fuzzing is not available" in c for c in results)
+    assert any("one candidate per turn" in c.lower() for c in results)
     assert any("[not yet]" in c for c in results)
     assert all("[budget]" in c for c in results), [c[:80] for c in results]
 

@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from minisweagent.exceptions import FormatError
 from minisweagent.models import GLOBAL_MODEL_STATS
 from minisweagent.models.utils.actions_toolcall import (
+    BENCH_TOOLS,
     BASH_TOOL,
     format_toolcall_observation_messages,
     parse_toolcall_actions,
@@ -25,6 +26,9 @@ logger = logging.getLogger("litellm_model")
 
 
 class LitellmModelConfig(BaseModel):
+    tool_set: str = ""
+    """Which tools to declare. "bench" = FuzzingBrain-Bench's three;
+    anything else keeps the single bash tool this fork ships with."""
     model_name: str
     """Model name. Highly recommended to include the provider in the model name, e.g., `anthropic/claude-sonnet-4-5-20250929`."""
     model_kwargs: dict[str, Any] = {}
@@ -74,7 +78,7 @@ class LitellmModel:
             return litellm.completion(
                 model=self.config.model_name,
                 messages=messages,
-                tools=[BASH_TOOL],
+                tools=self._tools(),
                 **(self.config.model_kwargs | kwargs),
             )
         except litellm.exceptions.AuthenticationError as e:
@@ -133,11 +137,20 @@ class LitellmModel:
                 raise RuntimeError(msg) from e
         return {"cost": cost}
 
+    def _tools(self) -> list[dict]:
+        """Which tool surface this run drives.
+
+        `tool_set: bench` is FuzzingBrain-Bench's own three tools, declared to
+        the model so it calls them by name. The default stays the single bash
+        tool, so every other use of this fork is untouched."""
+        return BENCH_TOOLS if getattr(self.config, "tool_set", "") == "bench" else [BASH_TOOL]
+
     def _parse_actions(self, response) -> list[dict]:
         """Parse tool calls from the response. Raises FormatError if unknown tool."""
         tool_calls = response.choices[0].message.tool_calls or []
         return parse_toolcall_actions(
             tool_calls,
+            tools=self._tools(),
             format_error_template=self.config.format_error_template,
             template_kwargs={"finish_reason": response.choices[0].finish_reason},
         )

@@ -76,16 +76,24 @@ def test_a_plain_command_goes_to_exec(server):
     assert out["output"] == "ok" and out["returncode"] == 0
 
 
-def test_a_grading_call_goes_to_the_oracle_not_the_shell(server):
-    """`./submit` is gone. The shared task prompt names run_poc_on_harness, so
-    the environment has to honour that name."""
+def test_the_model_names_the_tool_and_nothing_is_guessed(server):
+    """v2 dispatches on the tool the model called. Inferring the grader from the
+    text of a bash command is what made a model run `which run_poc_on_harness`,
+    looking for a binary, and spend 30 turns never grading anything."""
     env = _env(server)
-    for form in ("run_poc_on_harness(/workspace/c1.bin)",
-                 "run_poc_on_harness /workspace/c1.bin",
-                 "  run_poc_on_harness( /workspace/c1.bin )  "):
-        env.execute({"command": form})
-        assert server.calls[-1][0] == "run_poc_on_harness"
-        assert server.calls[-1][1]["path"] == "/workspace/c1.bin"
+    env.execute({"tool": "run_poc_on_harness", "args": {"path": "/workspace/c1.bin"}})
+    assert server.calls[-1] == ("run_poc_on_harness", {"path": "/workspace/c1.bin"})
+    env.execute({"tool": "exec", "args": {"cmd": "ls /challenge"}})
+    assert server.calls[-1][0] == "exec" and server.calls[-1][1]["cmd"] == "ls /challenge"
+    env.execute({"tool": "setup", "args": {}})
+    assert server.calls[-1] == ("setup", {})
+
+
+def test_a_bash_shaped_action_still_reaches_exec(server):
+    """Anything that hands over only a command string is an exec."""
+    env = _env(server)
+    env.execute({"command": "echo hi"})
+    assert server.calls[-1][0] == "exec" and server.calls[-1][1]["cmd"] == "echo hi"
 
 
 def test_the_agent_gets_the_whole_verdict_not_one_line(tmp_path):
@@ -97,7 +105,7 @@ def test_the_agent_gets_the_whole_verdict_not_one_line(tmp_path):
             "crash_novelty": "new", "crashed_rounds": 3, "total_rounds": 3}
     srv = FakeServer(tmp_path / "s.sock", reply=lambda n, a: full)
     env = McpBenchEnvironment(socket_path=srv.path, timeout=5)
-    out = env.execute({"command": "run_poc_on_harness(/workspace/c1.bin)"})
+    out = env.execute({"tool": "run_poc_on_harness", "args": {"path": "/workspace/c1.bin"}})
     assert "AddressSanitizer: heap-use-after-free" in out["output"]
     assert "valid.c:2366" in out["output"]
     assert "crash_novelty" in out["output"]

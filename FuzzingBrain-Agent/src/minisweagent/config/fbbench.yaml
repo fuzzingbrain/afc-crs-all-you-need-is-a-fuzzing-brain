@@ -178,5 +178,9 @@ model:
     If you want to end the task, please issue the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`
     without any other command.
     {%- endif %}
+  # The bench's own three tools, declared to the model so it calls them by
+  # name. Driving them through one bash-shaped action meant the grader was a
+  # magic string, and a model that sees a shell treats everything as a shell.
+  tool_set: bench
   model_kwargs:
     drop_params: true

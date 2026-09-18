@@ -21,8 +21,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
-import shlex
 import socket
 import threading
 from typing import Any
@@ -31,11 +29,6 @@ from pydantic import BaseModel
 
 from minisweagent.exceptions import Submitted
 from minisweagent.utils.serialize import recursive_merge
-
-# The model asks for a grading run the way the shared task prompt names it:
-# `run_poc_on_harness(/workspace/c1.bin)` or `run_poc_on_harness /workspace/c1.bin`.
-_GRADE = re.compile(r"^\s*run_poc_on_harness\s*(?:\(\s*)?([^)\s]+)\s*\)?\s*$")
-
 
 def _render_verdict(out: Any) -> str:
     """The harness's own output first, as text, then the structured fields.
@@ -135,17 +128,26 @@ class McpBenchEnvironment:
 
     # -- the environment interface ----------------------------------------
     def execute(self, action: dict, cwd: str = "", *, timeout: int | None = None) -> dict[str, Any]:
-        command = action.get("command", "")
         t = timeout or self.config.timeout
+        # The model names the tool; nothing is inferred from the text of a
+        # command any more. Guessing the grader out of a bash string is what
+        # made a model run `which run_poc_on_harness`, looking for a binary.
+        name = action.get("tool") or "exec"
+        args = dict(action.get("args") or {})
+        if not args and action.get("command"):      # a bash-shaped caller
+            name, args = "exec", {"cmd": action["command"]}
         try:
-            m = _GRADE.match(command)
-            if m:
-                out = self._tool("run_poc_on_harness",
-                                 {"path": shlex.split(m.group(1))[0]}, t)
-                text = _render_verdict(out)
-                output = {"output": text, "returncode": 0, "exception_info": ""}
+            if name == "run_poc_on_harness":
+                out = self._tool(name, {"path": args.get("path", "")}, t)
+                output = {"output": _render_verdict(out), "returncode": 0,
+                          "exception_info": ""}
+            elif name == "setup":
+                out = self._tool(name, {}, t)
+                output = {"output": json.dumps(out, indent=2), "returncode": 0,
+                          "exception_info": ""}
             else:
-                out = self._tool("exec", {"cmd": command, "timeout_s": int(t)}, t)
+                args.setdefault("timeout_s", int(t))
+                out = self._tool("exec", args, t)
                 out = out if isinstance(out, dict) else {"stdout": str(out)}
                 text = (out.get("stdout") or "") + (out.get("stderr") or "")
                 output = {"output": text,

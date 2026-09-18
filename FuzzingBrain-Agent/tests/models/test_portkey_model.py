@@ -77,7 +77,7 @@ def test_portkey_model_query():
                 messages = [{"role": "user", "content": "Hello!"}]
                 result = model.query(messages)
 
-                assert result["extra"]["actions"] == [{"command": "echo 'Hello!'", "tool_call_id": "call_123"}]
+                assert result["extra"]["actions"] == [{"tool": "bash", "args": {"command": "echo 'Hello!'"}, "command": "echo 'Hello!'", "tool_call_id": "call_123"}]
                 assert result["extra"]["response"] == {"test": "response"}
                 assert result["extra"]["cost"] == 0.01
 
@@ -145,7 +145,7 @@ def test_portkey_model_cost_tracking_ignore_errors():
                 messages = [{"role": "user", "content": "test"}]
                 result = model.query(messages)
 
-                assert result["extra"]["actions"] == [{"command": "echo test", "tool_call_id": "call_456"}]
+                assert result["extra"]["actions"] == [{"tool": "bash", "args": {"command": "echo test"}, "command": "echo test", "tool_call_id": "call_456"}]
                 assert result["extra"]["cost"] == 0.0
                 assert GLOBAL_MODEL_STATS.cost == initial_cost
 

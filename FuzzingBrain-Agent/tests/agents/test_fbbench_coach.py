@@ -31,20 +31,22 @@ def _clean():
 
 # ---- the prohibition: no fuzzing, no batching ------------------------------
 
-@pytest.mark.parametrize("command", [
-    "clang -fsanitize=fuzzer,address harness.c -o h",
-    "afl-fuzz -i in -o out -- ./target @@",
-    "./h -max_total_time=600 corpus/",
-    "./h -runs=1000000 corpus/",
-    "honggfuzz -f in -- ./target",
-    "./h -jobs=8 corpus/",
-])
-def test_a_fuzzer_is_refused_before_it_runs(command):
-    # jq-01: 77 exec calls building and driving a local harness, ONE submission
-    # to the real oracle, 30 minutes, zero score.
-    why = forbidden(command)
-    assert why and "fuzzing is not available" in why
-    assert "run_poc_on_harness" in why, "a refusal that does not say what to do instead wastes the turn"
+def test_the_coach_no_longer_owns_the_fuzzing_ban():
+    """It moved to the bench in fb-bench-v2, enforced in the shared relay so it
+    applies to claudecode and codex too and every attempt is recorded. A second
+    copy here would mean refusing what the bench already refused, and diverging
+    from it silently."""
+    for cmd in ("clang -fsanitize=fuzzer,address h.c -o h",
+                "afl-fuzz -i in -o out -- ./t",
+                "./h -runs=1000000 corpus/"):
+        assert forbidden(cmd) is None, cmd
+
+
+def test_the_one_rule_still_ours_is_one_candidate_per_turn():
+    why = forbidden("for i in 1 2 3; do run_poc_on_harness /workspace/c$i; done")
+    assert why and "one candidate per turn" in why.lower()
+    # ...and a python loop building a candidate is not a shell loop.
+    assert forbidden('python3 -c "for v in [1,2]: enc.f(v)"') is None
 
 
 @pytest.mark.parametrize("command", [

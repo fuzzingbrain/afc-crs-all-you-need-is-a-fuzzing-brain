@@ -27,8 +27,54 @@ BASH_TOOL = {
 }
 
 
+# The FuzzingBrain-Bench tool surface, copied from what the server advertises
+# (`tools/list` on the challenge image). Three tools, not the six that
+# claudecode's --allowedTools names: that list is permissive, and
+# list_directory/read_file/write_file are not on the server. Every arm -- api,
+# claudecode, codex and this one -- gets exactly these.
+#
+# fb-agent used to drive them through one bash-shaped action with the grader
+# hidden behind a magic string, and a haiku smoke run spent 30 turns never
+# grading: it ran `which run_poc_on_harness`, looking for a binary. An agent
+# whose interface looks like a shell will treat everything as a shell.
+BENCH_TOOLS = [
+    {"type": "function", "function": {
+        "name": "setup",
+        "description": ("Return task info: the environment (workspace + source paths), "
+                        "the target project and language, and the harness configuration."),
+        "parameters": {"type": "object", "properties": {}},
+    }},
+    {"type": "function", "function": {
+        "name": "exec",
+        "description": ("Run a shell command with /bin/bash -c in the challenge source "
+                        "root (/challenge, read-only; write to /workspace or /tmp). This "
+                        "is your only filesystem tool: read with cat/sed/head, write with "
+                        "printf or a heredoc, list with ls/find. Returns stdout, stderr "
+                        "and exit_code."),
+        "parameters": {"type": "object", "properties": {
+            "cmd": {"type": "string", "description": "The shell command to run."},
+            "timeout_s": {"type": "integer",
+                          "description": "Wall-clock timeout in seconds (default 60)."},
+        }, "required": ["cmd"]},
+    }},
+    {"type": "function", "function": {
+        "name": "run_poc_on_harness",
+        "description": ("Run a candidate input through the official sanitizer-instrumented "
+                        "harness and return what it printed. THIS IS THE ONLY ORACLE: an "
+                        "input you have not run through it does not count. Write the file "
+                        "under /workspace with exec first."),
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string",
+                     "description": "Path to the candidate input file, under /workspace."},
+        }, "required": ["path"]},
+    }},
+]
+_BENCH_BY_NAME = {t["function"]["name"]: t for t in BENCH_TOOLS}
+
+
 def parse_toolcall_actions(
-    tool_calls: list, *, format_error_template: str, template_kwargs: dict | None = None
+    tool_calls: list, *, format_error_template: str, template_kwargs: dict | None = None,
+    tools: list[dict] | None = None,
 ) -> list[dict]:
     """Parse tool calls from the response. Raises FormatError if unknown tool or invalid args.
 
@@ -58,10 +104,17 @@ def parse_toolcall_actions(
             args = json.loads(tool_call.function.arguments)
         except Exception as e:
             error_msg = f"Error parsing tool call arguments: {e}."
-        if tool_call.function.name != "bash":
-            error_msg += f"Unknown tool '{tool_call.function.name}'."
-        if not isinstance(args, dict) or "command" not in args:
-            error_msg += "Missing 'command' argument in bash tool call."
+        name = tool_call.function.name
+        known = {t["function"]["name"] for t in (tools or [BASH_TOOL])}
+        if name not in known:
+            error_msg += f"Unknown tool {name!r}. Available: {', '.join(sorted(known))}."
+        elif not isinstance(args, dict):
+            error_msg += f"Arguments to {name!r} must be an object."
+        else:
+            spec = _BENCH_BY_NAME.get(name) or BASH_TOOL
+            for req in spec["function"]["parameters"].get("required", []):
+                if req not in args:
+                    error_msg += f"Missing {req!r} argument in {name!r} call."
         if error_msg:
             raise FormatError(
                 {
@@ -72,7 +125,14 @@ def parse_toolcall_actions(
                     "extra": {"interrupt_type": "FormatError"},
                 }
             )
-        actions.append({"command": args["command"], "tool_call_id": tool_call.id})
+        # `command` stays populated for everything that reads a trace or
+        # screens a command; `tool`/`args` are what the environment dispatches on.
+        actions.append({
+            "tool": name,
+            "args": args,
+            "command": args.get("command") or args.get("cmd") or args.get("path") or "",
+            "tool_call_id": tool_call.id,
+        })
     return actions
 
 
