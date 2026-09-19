@@ -33,5 +33,17 @@
     "budget_usd": 50,
     "fuzzer_time_cap_min": 30,
     "note": "fuzzer found unrelated crash that also crashes fix (out-of-scope); finder had assign_file_to_slot source+hint but did not flag the integer overflow"
+  },
+  "fbv2_o3": {
+    "status": "FAILED",
+    "provenance": "-",
+    "cost": 7.85,
+    "fn_match": false,
+    "canonical": false,
+    "strict": false,
+    "note": "o3 finder FLAGGED assign_file_to_slot but verifier didn't proceed it; POV agent worked the caller allocate_filenum without success; no fuzzer crash promoted",
+    "force_model": "o3",
+    "budget_usd": 50,
+    "fuzzer_time_cap_min": 30
   }
 }

@@ -32,5 +32,18 @@
     "model_profile": "period-correct",
     "budget_usd": 50,
     "fuzzer_time_cap_min": 30
+  },
+  "fbv2_o3": {
+    "status": "SOLVED",
+    "provenance": "S",
+    "cost": 1.44,
+    "crash_fn": "mng_get_long",
+    "fn_match": true,
+    "canonical": true,
+    "strict": true,
+    "note": "o3 finder solved via AGENT (period-correct gpt-4.1 finder needed the global fuzzer) -> confirms the finder-model gap",
+    "force_model": "o3",
+    "budget_usd": 50,
+    "fuzzer_time_cap_min": 30
   }
 }

@@ -28,5 +28,18 @@
     "model_profile": "period-correct",
     "budget_usd": 50,
     "fuzzer_time_cap_min": 30
+  },
+  "fbv2_o3": {
+    "status": "CANONICAL-ONLY",
+    "provenance": "G",
+    "cost": 0.9,
+    "crash_fn": "cff_parser_run",
+    "official_fn": "cff_parse_num",
+    "fn_match": false,
+    "canonical": true,
+    "strict": false,
+    "force_model": "o3",
+    "budget_usd": 50,
+    "fuzzer_time_cap_min": 30
   }
 }
