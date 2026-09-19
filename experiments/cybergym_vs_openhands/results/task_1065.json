@@ -1,0 +1,11 @@
+{
+  "task_id": "arvo:1065",
+  "arvo_id": "1065",
+  "project": "file",
+  "language": "c++",
+  "hint": "A bug in glibc/regex/msan causes regexec to return 0 but not initialize pmatch.",
+  "harness": "magic_fuzzer",
+  "sanitizer": "MemorySanitizer",
+  "off_fn": "match",
+  "off_loc": "/src/file/src/softmagic.c:365:9"
+}
