@@ -919,30 +919,80 @@ class AnalysisServer:
         return None
 
     async def _get_function_source(self, name: str) -> Optional[str]:
-        """Get function source code with tree-sitter fallback."""
+        """Get function source code, with tree-sitter and repo fallbacks.
+
+        (1) indexed content; (2) tree-sitter on the indexed file_path when the
+        content is empty; (3) a cached tree-sitter parse of the project source
+        under repo/ when the function is not indexed at all -- which is what lets
+        a full scan work on an imported prebuilt / CyberGym target that has no
+        introspector index, instead of handing the finder an empty stub.
+        """
         func = await self._get_function(name)
-        if not func:
-            return None
+        content = func.get("content", "") if func else ""
 
-        content = func.get("content", "")
-
-        # If content is empty, try tree-sitter extraction
-        if not content:
+        if not content and func:
             file_path = func.get("file_path", "")
             if file_path:
-                self._log(
-                    f"Content empty for {name}, trying tree-sitter fallback", "DEBUG"
-                )
                 content = await self._run_sync(
                     self._extract_source_with_treesitter, file_path, name
                 )
-                if content:
-                    self._log(
-                        f"Tree-sitter extracted {len(content)} chars for {name}",
-                        "DEBUG",
-                    )
+
+        if not content:
+            content = await self._run_sync(self._search_repo_for_function, name)
 
         return content
+
+    def _search_repo_for_function(self, name: str) -> Optional[str]:
+        """Body of `name` from a cached parse of repo/, or None."""
+        if not name or not _re.match(r"^[A-Za-z_]\w*$", name):
+            return None
+        return self._repo_function_index().get(name)
+
+    def _repo_function_index(self) -> Dict[str, str]:
+        """Cached {function_name: body} for project source under repo/.
+
+        Built once, lazily, under a lock (tree-sitter is not safe to drive from
+        several request threads at once), pruning .git/fuzz-tooling/vendored
+        fuzzer trees and capping the file count so a huge repo cannot stall the
+        server. First definition seen for a name wins.
+        """
+        cache = getattr(self, "_repo_func_cache", None)
+        if cache is not None:
+            return cache
+        import threading
+
+        lock = getattr(self, "_repo_func_lock", None)
+        if lock is None:
+            lock = self._repo_func_lock = threading.Lock()
+        with lock:
+            cache = getattr(self, "_repo_func_cache", None)
+            if cache is None:
+                cache = self._build_repo_function_index()
+                self._repo_func_cache = cache
+        return cache
+
+    def _build_repo_function_index(self) -> Dict[str, str]:
+        cache: Dict[str, str] = {}
+        repo = self.task_path / "repo"
+        exts = {".c", ".cc", ".cpp", ".cxx", ".c++"}
+        skip = {".git", "fuzz-tooling", "aflplusplus", "afl", "libfuzzer"}
+        parsed = 0
+        if repo.exists():
+            for root, dirs, files in os.walk(repo):
+                dirs[:] = [d for d in dirs if d not in skip]
+                for fn in files:
+                    if os.path.splitext(fn)[1].lower() not in exts:
+                        continue
+                    try:
+                        for fi in extract_functions_from_file(os.path.join(root, fn)):
+                            if fi.name and fi.content and "\n" in fi.content and fi.name not in cache:
+                                cache[fi.name] = fi.content
+                    except Exception:
+                        continue
+                    parsed += 1
+                    if parsed >= 6000:
+                        return cache
+        return cache
 
     def _resolve_source_file(self, source_path: str) -> Optional[Path]:
         """Resolve a source path to an actual file on disk.
