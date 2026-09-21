@@ -133,6 +133,28 @@ agent:
       you do not have. Grade ONE candidate per turn, aimed at a sink you can
       name. The limit is on grading, not on thinking.
 
+    ## First get past the gate
+
+    `LLVMFuzzerTestOneInput` almost always begins with guards that `return 0` on
+    malformed input -- a size range, a magic prefix, a header parse. An input
+    that trips one never reaches the library, and its verdict tells you nothing
+    about any bug. The verdict shows this as a duration of 0 ms.
+
+    So before hunting anything, earn ONE input that provably gets through:
+
+    1. Read the first 30 lines of the harness and write down every `return 0`
+       condition. These are the entry requirements, and they are not optional.
+    2. Look for a real sample to start from -- `/challenge/src/test`,
+       `/challenge/src/tests`, `testdata`, `fuzz/corpus` and similar usually
+       hold valid files for exactly this format. Copying one is far cheaper
+       than deriving the format from scratch.
+    3. Grade it and check the duration is non-zero. Only then start varying it.
+
+    Keep that passing input as your base and mutate it, so every later candidate
+    still clears the guards. A run that never gets a non-zero duration scores
+    nothing no matter how good the bug reasoning is, and whole runs have been
+    lost this way with every single candidate rejected at the gate.
+
     ## What actually scores
 
     A fault is identified by its type plus the top stack frames, not by the

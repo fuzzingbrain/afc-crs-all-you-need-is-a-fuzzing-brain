@@ -177,7 +177,9 @@ class Coach:
     """Tracks what the run has banked and what it is neglecting."""
 
     NO_SUBMIT_WARN = 12          # turns of reading before the oracle is nagged
-    ENOUGH = 3                   # distinct signatures; a 4th scores nothing
+    ENOUGH = 3
+                        # distinct signatures; a 4th scores nothing
+    GATE_ESCALATE = 3   # gated verdicts before the soft nudge gives up
 
     # How hard to argue with a finish, by what the run has actually found.
     #
@@ -204,6 +206,7 @@ class Coach:
         self.banked: list[str] = []
         self.turns_since_submit = 0
         self.pushbacks = 0
+        self.gated = 0          # consecutive verdicts rejected at the harness gate
 
     # -- 5. budget, every single turn ----------------------------------------
     def budget_line(self, turn: int, elapsed_s: float) -> str:
@@ -216,12 +219,15 @@ class Coach:
             parts.append(f"{int(left_s // 60)}m{int(left_s % 60):02d}s left")
         parts.append(f"{len(self.banked)}/{self.ENOUGH} distinct faults banked")
         return "[budget] " + " · ".join(parts)
+        self.gated = 0
 
     def observe(self, command: str, output: str, turn: int, elapsed_s: float) -> list[str]:
         """The lines appended to this turn's observation, in order."""
         output = command_output(output)
         notes = [self.budget_line(turn, elapsed_s)]
         submitted = bool(_SUBMIT_CALL.search(command))
+        if submitted and not _GATE.search(output or ""):
+            self.gated = 0          # a candidate got through; the run is unstuck
         self.turns_since_submit = 0 if submitted else self.turns_since_submit + 1
 
         # -- 4. a crash changes the job --------------------------------------
@@ -264,13 +270,35 @@ class Coach:
         # v1 read this off a "target ran 0 ms" field the bench wrote for this
         # arm alone. v2 reads the harness's own duration, which every arm sees.
         if _GATE.search(output or ""):
-            notes.append(
-                "[gate] the harness threw that input out before the library saw "
-                "it -- it ran for no measurable time. Nothing about its contents "
-                "matters yet: re-read the entry checks in the harness and work "
-                "out which one you are failing. gdb is on PATH on every "
-                "challenge; break on the first library function you expect to "
-                "reach and see whether you get there.")
+            self.gated += 1
+            if self.gated < self.GATE_ESCALATE:
+                notes.append(
+                    "[gate] the harness threw that input out before the library "
+                    "saw it -- it ran for no measurable time. Nothing about its "
+                    "contents matters yet: re-read the entry checks in the "
+                    "harness and work out which one you are failing. gdb is on "
+                    "PATH on every challenge; break on the first library "
+                    "function you expect to reach and see whether you get "
+                    "there.")
+            else:
+                # Escalation, because the gentle version was not working: on
+                # systemd-01 all 25 graded candidates were rejected here, and
+                # on flatbuffers-03 17 of 18. Every one of those turns bought
+                # nothing, and no amount of bug reasoning can pay for them.
+                notes.append(
+                    f"[gate x{self.gated}] STOP hunting the bug. {self.gated} of "
+                    "your candidates have been thrown out before the library "
+                    "ran, so none of them has told you anything, and more of "
+                    "the same will not either.\n"
+                    "Your only job this turn is ONE input with a non-zero "
+                    "duration. The cheapest route is a real sample rather than "
+                    "a derivation: look in /challenge/src/test, "
+                    "/challenge/src/tests, testdata/ or fuzz/corpus for a valid "
+                    "file of this format, copy it to /workspace and grade it "
+                    "unmodified. If that passes, mutate THAT from now on. If "
+                    "there is no sample, list every `return 0` in the first 30 "
+                    "lines of LLVMFuzzerTestOneInput and satisfy them one at a "
+                    "time.")
         return notes
 
     # -- 1. don't let me stop ------------------------------------------------

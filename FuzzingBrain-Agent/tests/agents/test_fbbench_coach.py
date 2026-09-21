@@ -374,3 +374,22 @@ def test_an_exact_duplicate_still_says_the_chain_is_what_repeats():
     assert "duplicate" in notes.lower()
     assert "different caller" in notes
     assert "Go somewhere else" not in notes
+
+
+def test_the_gate_nudge_escalates_and_resets():
+    """The soft version was not working. Measured on our zero-scoring cells,
+    every one of 25 graded candidates on one challenge was rejected before the
+    library ran, and 17 of 18 on another -- the nudge fired every time and the
+    run never recovered. After GATE_ESCALATE it stops suggesting and gives one
+    instruction: get a non-zero duration, starting from a real sample in the
+    source tree."""
+    from minisweagent.agents.fbbench_coach import Coach
+    gated = "duration_ms: 0\nexit_code: 0\nsignal: "
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    seen = [" ".join(c.observe("run_poc_on_harness('/w/a')", gated, i, 1.0))
+            for i in range(1, 5)]
+    assert "[gate x" not in seen[0] and "[gate]" in seen[0]
+    assert "[gate x3]" in seen[2] and "STOP hunting the bug" in seen[2]
+    assert "/challenge/src/test" in seen[2]
+    c.observe("run_poc_on_harness('/w/b')", "duration_ms: 42\nexit_code: 0", 5, 2.0)
+    assert c.gated == 0, "a candidate that gets through must unstick the run"
