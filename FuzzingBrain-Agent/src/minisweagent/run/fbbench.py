@@ -302,7 +302,8 @@ class _ReportingAgent(DefaultAgent):
 # and named the challenge; on that challenge it would have told the model both
 # that the target was hard and roughly where to look.
 # ./reach is gone. v2 gives this agent exec inside the challenge image, so it
-# runs gdb itself on the graded binary where the image ships one -- the same
+# runs gdb itself on the graded binary, which the bench mounts on every
+# challenge -- the same
 # access claudecode and codex always had. A bench-side tracer only this arm
 # could call was the asymmetry, not the fix for it.
 

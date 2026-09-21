@@ -2,13 +2,14 @@
 
 v2 of the bench gives every agent arm one tool surface: a per-episode
 mcp-server inside the sealed challenge image, reached over a unix socket.
-claudecode, codex and this agent all drive the same six tools. There is no
+claudecode, codex and this agent all drive the same three tools:
+setup(), exec() and run_poc_on_harness(). There is no
 `./submit`, no `./reach` and no staged host copy any more -- those were the
 external arm's own tools, and having them was the asymmetry.
 
 What the agent sees, identical to every other arm:
   cwd /challenge, read-only   /workspace and /tmp writable
-  gdb where the image ships one          no network
+  gdb on PATH on every challenge         no network
   run_poc_on_harness() as the only oracle
 
 This keeps fb-agent's single-action loop. The model still writes one command

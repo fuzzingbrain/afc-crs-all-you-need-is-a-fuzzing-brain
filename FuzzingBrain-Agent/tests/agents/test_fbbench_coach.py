@@ -263,3 +263,25 @@ def test_the_coach_works_without_a_workspace():
     c = Coach(turn_limit=100, wall_limit_s=1800)
     notes = "\n".join(c.observe("run_poc_on_harness(/workspace/c1)", _gate(), 5, 40))
     assert "gdb" in notes
+
+
+def test_no_prompt_text_hedges_about_gdb():
+    """The bench mounts gdb on all 78 challenges, so nothing the model reads
+    may suggest it might be missing.
+
+    A live haiku run on libxml2-04 showed the agent being told "gdb is in the
+    image where the challenge ships one" -- from the coach's gate nudge, a
+    second source of gdb guidance that survived the config being corrected.
+    Text the model reads at runtime is as much prompt as the config is.
+    """
+    import inspect
+    from minisweagent.agents import fbbench_coach
+    from pathlib import Path
+    sources = [inspect.getsource(fbbench_coach)]
+    cfg = Path(fbbench_coach.__file__).parent.parent / "config" / "fbbench.yaml"
+    sources.append(cfg.read_text())
+    for src in sources:
+        low = src.lower()
+        for hedge in ("ships one", "where the image", "on most challenges",
+                      "not all", "if gdb", "if available"):
+            assert hedge not in low, f"gdb is hedged: {hedge!r}"

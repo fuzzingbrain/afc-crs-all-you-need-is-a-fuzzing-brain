@@ -237,9 +237,9 @@ class Coach:
                 "[gate] the harness threw that input out before the library saw "
                 "it -- it ran for no measurable time. Nothing about its contents "
                 "matters yet: re-read the entry checks in the harness and work "
-                "out which one you are failing. gdb is in the image where the "
-                "challenge ships one; break on the first library function you "
-                "expect to reach and see whether you get there.")
+                "out which one you are failing. gdb is on PATH on every "
+                "challenge; break on the first library function you expect to "
+                "reach and see whether you get there.")
         return notes
 
     # -- 1. don't let me stop ------------------------------------------------
