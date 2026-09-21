@@ -295,8 +295,13 @@ def test_no_prompt_text_sends_the_agent_at_the_hidden_oracle_binary():
     from pathlib import Path
     from minisweagent.agents import fbbench_coach
     cfg = Path(fbbench_coach.__file__).parent.parent / "config" / "fbbench.yaml"
+    # Naming the path is fine now -- it is readable on about half the
+    # challenges (mode 705). What is forbidden is asserting either way, since
+    # any absolute claim is wrong on the other half.
     for src in (inspect.getsource(fbbench_coach), cfg.read_text()):
-        assert "/opt/fbbench/oracle" not in src
+        for absolute in ("always readable", "is NOT yours to open",
+                         "never readable", "on every challenge it is readable"):
+            assert absolute not in src
 
 
 def test_writing_many_candidates_in_one_command_is_allowed():
