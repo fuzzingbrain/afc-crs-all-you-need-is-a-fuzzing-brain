@@ -285,3 +285,15 @@ def test_no_prompt_text_hedges_about_gdb():
         for hedge in ("ships one", "where the image", "on most challenges",
                       "not all", "if gdb", "if available"):
             assert hedge not in low, f"gdb is hedged: {hedge!r}"
+
+
+def test_no_prompt_text_sends_the_agent_at_the_hidden_oracle_binary():
+    """The graded binary is hidden -- Permission denied even to root on some
+    challenges, world-executable on others. A live run burned 2 of 12 turns
+    on the path the prompt handed it, so no prompt text may hand it over."""
+    import inspect
+    from pathlib import Path
+    from minisweagent.agents import fbbench_coach
+    cfg = Path(fbbench_coach.__file__).parent.parent / "config" / "fbbench.yaml"
+    for src in (inspect.getsource(fbbench_coach), cfg.read_text()):
+        assert "/opt/fbbench/oracle" not in src
