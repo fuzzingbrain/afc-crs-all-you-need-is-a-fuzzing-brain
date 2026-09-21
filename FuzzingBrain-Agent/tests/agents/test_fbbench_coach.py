@@ -44,7 +44,7 @@ def test_the_coach_no_longer_owns_the_fuzzing_ban():
 
 def test_the_one_rule_still_ours_is_one_candidate_per_turn():
     why = forbidden("for i in 1 2 3; do run_poc_on_harness /workspace/c$i; done")
-    assert why and "one candidate per turn" in why.lower()
+    assert why and "one graded candidate per turn" in why.lower()
     # ...and a python loop building a candidate is not a shell loop.
     assert forbidden('python3 -c "for v in [1,2]: enc.f(v)"') is None
 
@@ -60,7 +60,7 @@ def test_submitting_in_a_loop_is_refused(command):
     # cannot batch, so a shell loop here is a different experiment, not a
     # better agent.
     why = forbidden(command)
-    assert why and "one candidate per turn" in why.lower()
+    assert why and "one graded candidate per turn" in why.lower()
 
 
 @pytest.mark.parametrize("command", [
@@ -241,7 +241,7 @@ def test_building_a_candidate_with_a_loop_is_not_batching(command):
 ])
 def test_a_shell_loop_over_submit_is_still_blocked(command):
     why = forbidden(command)
-    assert why and "one candidate per turn" in why.lower()
+    assert why and "one graded candidate per turn" in why.lower()
 
 
 def test_the_gate_hint_points_at_the_debugger_the_image_actually_has(tmp_path):
@@ -297,3 +297,28 @@ def test_no_prompt_text_sends_the_agent_at_the_hidden_oracle_binary():
     cfg = Path(fbbench_coach.__file__).parent.parent / "config" / "fbbench.yaml"
     for src in (inspect.getsource(fbbench_coach), cfg.read_text()):
         assert "/opt/fbbench/oracle" not in src
+
+
+def test_writing_many_candidates_in_one_command_is_allowed():
+    """Only GRADING is one-at-a-time. Generating a family costs one turn.
+
+    The config used to say "One candidate per turn" and justify it with
+    "batching would spend a budget the models you are measured against cannot
+    spend" -- true of grading, false of generation. Measured over five
+    challenges, Claude Code designed a family of variants in one command 9-12
+    times per run where this agent did it 0-4, and that prose was the only
+    thing stopping us.
+    """
+    from minisweagent.agents.fbbench_coach import forbidden
+    gen = ("python3 - <<'EOF'\n"
+           "for i in range(10):\n"
+           "    open(f'/workspace/c{i}.bin','wb').write(bytes([i])*i)\n"
+           "EOF")
+    assert forbidden(gen) is None, "generating a family of candidates must be allowed"
+
+
+def test_the_grader_in_a_loop_is_still_blocked():
+    from minisweagent.agents.fbbench_coach import forbidden
+    msg = forbidden("for f in /workspace/*.bin; do run_poc_on_harness $f; done")
+    assert msg and "loop" in msg
+    assert "encouraged" in msg, "the refusal must say what IS allowed instead"

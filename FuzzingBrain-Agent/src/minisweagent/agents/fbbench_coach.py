@@ -48,7 +48,10 @@ import re
 # shared relay, so it applies to claudecode and codex too and every attempt is
 # recorded in the cell. Keeping a second copy here would mean this arm refusing
 # things the bench already refused -- and, worse, diverging from it silently.
-# What is left is the one rule that is ours: one candidate per turn.
+# What is left is the one rule that is ours: one GRADED candidate per turn.
+# Generating many candidates in a single command is free -- one turn -- and
+# the config now asks for it. Claude Code did it 9-12 times per run where
+# this agent did it 0-4, and our prose was the only thing stopping us.
 #
 # v2 grades through a bench tool, one call per turn, so a shell loop cannot
 # reach it. The pattern stays to catch an agent still carrying v1 habits, which
@@ -86,11 +89,14 @@ def forbidden(command: str) -> str | None:
     """
     if _SUBMIT_LOOP.search(_shell_only(command)):
         return ("blocked: the grader inside a loop.\n"
-                "One candidate per turn is the budget every arm is measured on "
-                "-- the bare model grades one input per tool call and cannot "
-                "batch, so looping here would not be a better agent, it would "
-                "be a different experiment.\n"
-                "Submit your single best candidate and read the verdict.")
+                "One GRADED candidate per turn is the budget every arm is "
+                "measured on -- the bare model grades one input per tool call, "
+                "so looping here would not be a better agent, it would be a "
+                "different experiment.\n"
+                "Writing many candidates in one command is fine and encouraged; "
+                "it is only the grading that is one at a time. Keep the files "
+                "you just generated, grade the most promising one, and work "
+                "down the list as the verdicts come back.")
     return None
 
 

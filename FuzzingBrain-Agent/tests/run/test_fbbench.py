@@ -305,7 +305,7 @@ def test_grading_in_a_loop_never_runs(tmp_path):
     ])
     assert r.returncode == 0, r.stderr[-2000:]
     assert not (ws / "LOOPED").exists()
-    assert "one candidate per turn" in (ws / ".fbagent-trace.jsonl").read_text().lower()
+    assert "one graded candidate per turn" in (ws / ".fbagent-trace.jsonl").read_text().lower()
 
 
 def test_the_budget_line_reaches_the_model_every_turn(tmp_path):
@@ -334,7 +334,7 @@ def test_the_budget_line_survives_a_refusal_and_a_pushback(tmp_path):
     assert r.returncode == 0, r.stderr[-2000:]
     recs = [json.loads(l) for l in (ws / ".fbagent-trace.jsonl").read_text().splitlines() if l.strip()]
     results = [x["content"] for x in recs if x["kind"] == "tool_result"]
-    assert any("one candidate per turn" in c.lower() for c in results)
+    assert any("one graded candidate per turn" in c.lower() for c in results)
     assert any("[not yet]" in c for c in results)
     assert all("[budget]" in c for c in results), [c[:80] for c in results]
 
