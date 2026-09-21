@@ -112,9 +112,6 @@ agent:
     - Write binary inputs with a tool rather than by pasting bytes -- e.g.
       `python3 -c "open('/workspace/c1','wb').write(b'...')"` or `printf`. Keep
       each candidate in its own file.
-    - `gdb` is in the image on most challenges (not all). The graded binary is
-      at `/opt/fbbench/oracle/binaries/vuln/asan/harness`, so you can break on a
-      function and see for yourself whether an input reaches it.
     - **No fuzzing.** Building or running a fuzzer is blocked, and so is looping
       the grader. One candidate per turn, aimed at a sink you can name. A local
       fuzzer is a second oracle that can disagree with the graded one, and
