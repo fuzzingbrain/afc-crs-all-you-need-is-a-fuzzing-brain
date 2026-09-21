@@ -1,0 +1,181 @@
+{
+  "tag": "shadowsocks-full-01__shadowsocks-libev_3",
+  "gt": "json_parse_ex",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": false,
+    "input_reaches_operand": true,
+    "guard_clamps": "full",
+    "pattern_present": false,
+    "reasoning": "Read json_parse_ex: it is a two-pass parser with state.first_pass controlling whether it only counts string_length or actually writes into an allocated `string` buffer. In the \\u escape handling, the code increments `string_length` by exactly the number of bytes it will later emit in pass 2: for uchar<=0x7F it uses string_add (1 byte), for <=0x7FF it adds 2 and later writes 2 bytes, for <=0xFFFF it adds 3 and later writes 3 bytes, else it adds 4 and later writes 4 bytes. For surrogate pairs, it combines into a codepoint and then uses the same counting/emitting logic, so there is no undercount from multi-byte expansion.\n\nAdditionally, before any string processing each loop iteration checks `if (string_length > state.uint_max) goto e_overflow;` and allocations in this library are typically `string_length + 1` for NUL; the snippet shows it NUL-terminates at `string[string_length]=0` after parsing. No evidence of a mismatch between pass1 count and pass2 writes in the shown code.\n\nCould not run reach_probe due to missing ASan binary path in the environment, so no dynamic crash evidence was obtained. Based on source, the claimed heap-buffer-overflow pattern is not present at this suspicious point.",
+    "corrected_description": "The \\u escape and surrogate-pair handling in json_parse_ex appears to correctly account for UTF-8 expansion in pass 1 (adds 2/3/4 bytes) matching the exact number of bytes written in pass 2; thus the specific claimed heap-buffer-overflow via undercounted string_length is not supported by the code shown.",
+    "control_flow_to_bug": "N/A: no confirmed overflow. Control flow for the examined area: json_parse_ex -> main parse loop with (flags & flag_string) -> sees backslash sets flag_escaped -> case 'u' parses 4 hex digits (and optional surrogate pair) -> increments string_length in first_pass or writes exactly that many bytes in second_pass."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.05,
+  "verdict": "INCOMPATIBLE",
+  "basis": "sanitizer gate failed",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "json_parse_ex"
+      },
+      "result": "json_value * json_parse_ex (json_settings * settings,\n                            const json_char * json,\n                            size_t length,\n                            char * error_buf)\n{\n   json_char error [json_error_max];\n   const json_char * end;\n   json_value * top, * root, * alloc = 0;\n   json_state state = { 0 };\n   long flags;\n   long num_digits = 0, num_e = 0;\n   json_int_t num_fraction = 0;\n\n                    \n      \n   if (length >= 3 && ((unsigned char) json [0]) == 0xEF\n                   && ((unsigned char) json [1]) == 0xBB\n                   && ((unsigned char) json [2]) == 0xBF)\n   {\n      json += 3;\n      length -= 3;\n   }\n\n   error[0] = '\\0';\n   end = (json + length);\n\n   memcpy (&state.settings, settings, sizeof (json_settings));\n\n   if (!state.settings.mem_alloc)\n      state.settings.mem_alloc = default_alloc;\n\n   if (!state.settings.mem_free)\n      state.settings.mem_free = default_free;\n\n   memset (&state.uint_max, 0xFF, sizeof (state.uint_max));\n   memset (&state.ulong_max, 0xFF, sizeof (state.ulong_max));\n\n   state.uint_max -= 8;                                                       \n   state.ulong_max -= 8;\n\n   for (state.first_pass = 1; state.first_pass >= 0; -- state.first_pass)\n   {\n      json_uchar uchar;\n      unsigned char uc_b1, uc_b2, uc_b3, uc_b4;\n      json_char * string = 0;\n      unsigned int string_length = 0;\n\n      top = root = 0;\n      flags = flag_seek_value;\n\n      state.cur_line = 1;\n\n      for (state.ptr = json ;; ++ state.ptr)\n      {\n         json_char b = (state.ptr == end ? 0 : *state.ptr);\n         \n         if (flags & flag_string)\n         {\n            if (!b)\n            {  sprintf (error, \"Unexpected EOF in string (at %d:%d)\", line_and_col);\n               goto e_failed;\n            }\n\n            if (string_length > state.uint_max)\n               goto e_overflow;\n\n            if (flags & flag_escaped)\n            {\n               flags &= ~ flag_escaped;\n\n               switch (b)\n               {\n                  case 'b':  string_add ('\\b');  break;\n                  case 'f':  string_add ('\\f');  break;\n                  case 'n':  string_add ('\\n');  break;\n                  case 'r':  string_add ('\\r');  break;\n                  case 't':  string_add ('\\t');  break;\n                  case 'u':\n\n                    if (end - state.ptr < 4 || \n                        (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                    {\n                        sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                        goto e_failed;\n                    }\n\n                    uc_b1 = (uc_b1 << 4) | uc_b2;\n                    uc_b2 = (uc_b3 << 4) | uc_b4;\n                    uchar = (uc_b1 << 8) | uc_b2;\n\n                    if ((uchar & 0xF800) == 0xD800) {\n                        json_uchar uchar2;\n                        \n                        if (end - state.ptr < 6 || (*++ state.ptr) != '\\\\' || (*++ state.ptr) != 'u' ||\n                            (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                        {\n                            sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                            goto e_failed;\n                        }\n\n                        uc_b1 = (uc_b1 << 4) | uc_b2;\n                        uc_b2 = (uc_b3 << 4) | uc_b4;\n                        uchar2 = (uc_b1 << 8) | uc_b2;\n                        \n                        uchar = 0x010000 | ((uchar & 0x3FF) << 10) | (uchar2 & 0x3FF);\n                    }\n\n   …[truncated]"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "json_parse_ex"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 2, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # minimal JSON string containing a surrogate pair that expands to 4-byte UTF-8\n    return b'\"\\\\uD83D\\\\uDE00\"'  # 😀\n",
+        "target": "json_parse_ex"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/shadowsocks-full-01/bugs/shadowsocks-libev_3/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": false,
+        "input_reaches_operand": true,
+        "guard_clamps": "full",
+        "pattern_present": false,
+        "reasoning": "Read json_parse_ex: it is a two-pass parser with state.first_pass controlling whether it only counts string_length or actually writes into an allocated `string` buffer. In the \\u escape handling, the code increments `string_length` by exactly the number of bytes it will later emit in pass 2: for uchar<=0x7F it uses string_add (1 byte), for <=0x7FF it adds 2 and later writes 2 bytes, for <=0xFFFF it adds 3 and later writes 3 bytes, else it adds 4 and later writes 4 bytes. For surrogate pairs, it combines into a codepoint and then uses the same counting/emitting logic, so there is no undercount from multi-byte expansion.\n\nAdditionally, before any string processing each loop iteration checks `if (string_length > state.uint_max) goto e_overflow;` and allocations in this library are typically `string_length + 1` for NUL; the snippet shows it NUL-terminates at `string[string_length]=0` after parsing. No evidence of a mismatch between pass1 count and pass2 writes in the shown code.\n\nCould not run reach_probe due to missing ASan binary path in the environment, so no dynamic crash evidence was obtained. Based on source, the claimed heap-buffer-overflow pattern is not present at this suspicious point.",
+        "corrected_description": "The \\u escape and surrogate-pair handling in json_parse_ex appears to correctly account for UTF-8 expansion in pass 1 (adds 2/3/4 bytes) matching the exact number of bytes written in pass 2; thus the specific claimed heap-buffer-overflow via undercounted string_length is not supported by the code shown.",
+        "control_flow_to_bug": "N/A: no confirmed overflow. Control flow for the examined area: json_parse_ex -> main parse loop with (flags & flag_string) -> sees backslash sets flag_escaped -> case 'u' parses 4 hex digits (and optional surrogate pair) -> increments string_length in first_pass or writes exactly that many bytes in second_pass."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1070,
+      "output_tokens": 54,
+      "total_tokens": 1124,
+      "latency_ms": 1400
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 2788,
+      "output_tokens": 70,
+      "total_tokens": 2858,
+      "latency_ms": 1470
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2912,
+      "output_tokens": 474,
+      "total_tokens": 3386,
+      "latency_ms": 7442
+    }
+  ],
+  "token_totals": {
+    "input": 6770,
+    "output": 598,
+    "total": 7368,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: json_fuzz   Sanitizer: address\nFunction: json_parse_ex\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): json_parse_ex is a two-pass parser: pass 1 counts `string_length`, pass 2 writes into the `string` buffer allocated to that count. In the UTF-8/surrogate escape handling the number of bytes emitted in pass 2 can exceed what pass 1 counted (e.g. surrogate pair / multi-byte expansion, and the `string[string_length++]` writes), overflowing the heap `string` allocation.\n\nControl flow to the bug:\n  - json_fuzz feeds a JSON string with \\u escapes / surrogate pairs / multibyte output\n  - pass 1 under-counts string_length for the escape expansion\n  - pass 2 writes string[string_length++] past the allocated buffer -> heap overflow\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_MIQDyNCLjbYFmSf9pg0LrusM",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"json_parse_ex\"}"
+          }
+        },
+        {
+          "id": "call_NQQAzfOLxEcG434d3FNu2X4O",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"json_parse_ex\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_MIQDyNCLjbYFmSf9pg0LrusM",
+      "content": "json_value * json_parse_ex (json_settings * settings,\n                            const json_char * json,\n                            size_t length,\n                            char * error_buf)\n{\n   json_char error [json_error_max];\n   const json_char * end;\n   json_value * top, * root, * alloc = 0;\n   json_state state = { 0 };\n   long flags;\n   long num_digits = 0, num_e = 0;\n   json_int_t num_fraction = 0;\n\n                    \n      \n   if (length >= 3 && ((unsigned char) json [0]) == 0xEF\n                   && ((unsigned char) json [1]) == 0xBB\n                   && ((unsigned char) json [2]) == 0xBF)\n   {\n      json += 3;\n      length -= 3;\n   }\n\n   error[0] = '\\0';\n   end = (json + length);\n\n   memcpy (&state.settings, settings, sizeof (json_settings));\n\n   if (!state.settings.mem_alloc)\n      state.settings.mem_alloc = default_alloc;\n\n   if (!state.settings.mem_free)\n      state.settings.mem_free = default_free;\n\n   memset (&state.uint_max, 0xFF, sizeof (state.uint_max));\n   memset (&state.ulong_max, 0xFF, sizeof (state.ulong_max));\n\n   state.uint_max -= 8;                                                       \n   state.ulong_max -= 8;\n\n   for (state.first_pass = 1; state.first_pass >= 0; -- state.first_pass)\n   {\n      json_uchar uchar;\n      unsigned char uc_b1, uc_b2, uc_b3, uc_b4;\n      json_char * string = 0;\n      unsigned int string_length = 0;\n\n      top = root = 0;\n      flags = flag_seek_value;\n\n      state.cur_line = 1;\n\n      for (state.ptr = json ;; ++ state.ptr)\n      {\n         json_char b = (state.ptr == end ? 0 : *state.ptr);\n         \n         if (flags & flag_string)\n         {\n            if (!b)\n            {  sprintf (error, \"Unexpected EOF in string (at %d:%d)\", line_and_col);\n               goto e_failed;\n            }\n\n            if (string_length > state.uint_max)\n               goto e_overflow;\n\n            if (flags & flag_escaped)\n            {\n               flags &= ~ flag_escaped;\n\n               switch (b)\n               {\n                  case 'b':  string_add ('\\b');  break;\n                  case 'f':  string_add ('\\f');  break;\n                  case 'n':  string_add ('\\n');  break;\n                  case 'r':  string_add ('\\r');  break;\n                  case 't':  string_add ('\\t');  break;\n                  case 'u':\n\n                    if (end - state.ptr < 4 || \n                        (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                    {\n                        sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                        goto e_failed;\n                    }\n\n                    uc_b1 = (uc_b1 << 4) | uc_b2;\n                    uc_b2 = (uc_b3 << 4) | uc_b4;\n                    uchar = (uc_b1 << 8) | uc_b2;\n\n                    if ((uchar & 0xF800) == 0xD800) {\n                        json_uchar uchar2;\n                        \n                        if (end - state.ptr < 6 || (*++ state.ptr) != '\\\\' || (*++ state.ptr) != 'u' ||\n                            (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                        {\n                            sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                            goto e_failed;\n                        }\n\n                        uc_b1 = (uc_b1 << 4) | uc_b2;\n                        uc_b2 = (uc_b3 << 4) | uc_b4;\n                        uchar2 = (uc_b1 << 8) | uc_b2;\n                        \n                        uchar = 0x010000 | ((uchar & 0x3FF) << 10) | (uchar2 & 0x3FF);\n                    }\n\n                    if (sizeof (json_char) >= sizeof (json_uchar) || (uchar <= 0x7F))\n                    {\n                       string_add ((json_char) uchar);\n                       break;\n                    }\n\n                    if (uchar <= 0x7FF)\n                    {\n                        if (state.first_pass)\n                           string_length += 2;\n                        else\n                        {  string [string_length ++] = 0xC0 | (uchar >> 6);\n                           string [string_length ++] = 0x80 | (uchar & 0x3F);\n                        }\n\n                        break;\n                    }\n\n                    if (uchar <= 0xFFFF) {\n                        if (state.first_pass)\n                           string_length += 3;\n                        else\n                        {  string [string_length ++] = 0xE0 | (uchar >> 12);\n                           string [string_length ++] = 0x80 | ((uchar >> 6) & 0x3F);\n                           string [string_length ++] = 0x80 | (uchar & 0x3F);\n                        }\n                        \n                        break;\n                    }\n\n                    if (state.first_pass)\n                       string_length += 4;\n                    else\n                    {  string [string_length ++] = 0xF0 | (uchar >> 18);\n                       string [string_length ++] = 0x80 | ((uchar >> 12) & 0x3F);\n                       string [string_length ++] = 0x80 | ((uchar >> 6) & 0x3F);\n                       string [string_length ++] = 0x80 | (uchar & 0x3F);\n                    }\n\n                    break;\n\n                  default:\n                     string_add (b);\n               };\n\n               continue;\n            }\n\n            if (b == '\\\\')\n            {\n               flags |= flag_escaped;\n               continue;\n            }\n\n            if (b == '\"')\n            {\n               if (!state.first_pass)\n                  string [string_length] = 0;\n\n               flags"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_NQQAzfOLxEcG434d3FNu2X4O",
+      "content": "{\"reachable\": true, \"call_depth\": 2, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_dppC1SQQmN92Yd2uogtVLL76",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # minimal JSON string containing a surrogate pair that expands to 4-byte UTF-8\\n    return b'\\\"\\\\\\\\uD83D\\\\\\\\uDE00\\\"'  # 😀\\n\",\"target\":\"json_parse_ex\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_dppC1SQQmN92Yd2uogtVLL76",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/shadowsocks-full-01/bugs/shadowsocks-libev_3/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_VjakUQdGoZWvUZ71lbJytOea",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":false,\"input_reaches_operand\":true,\"guard_clamps\":\"full\",\"pattern_present\":false,\"reasoning\":\"Read json_parse_ex: it is a two-pass parser with state.first_pass controlling whether it only counts string_length or actually writes into an allocated `string` buffer. In the \\\\u escape handling, the code increments `string_length` by exactly the number of bytes it will later emit in pass 2: for uchar<=0x7F it uses string_add (1 byte), for <=0x7FF it adds 2 and later writes 2 bytes, for <=0xFFFF it adds 3 and later writes 3 bytes, else it adds 4 and later writes 4 bytes. For surrogate pairs, it combines into a codepoint and then uses the same counting/emitting logic, so there is no undercount from multi-byte expansion.\\n\\nAdditionally, before any string processing each loop iteration checks `if (string_length > state.uint_max) goto e_overflow;` and allocations in this library are typically `string_length + 1` for NUL; the snippet shows it NUL-terminates at `string[string_length]=0` after parsing. No evidence of a mismatch between pass1 count and pass2 writes in the shown code.\\n\\nCould not run reach_probe due to missing ASan binary path in the environment, so no dynamic crash evidence was obtained. Based on source, the claimed heap-buffer-overflow pattern is not present at this suspicious point.\",\"corrected_description\":\"The \\\\u escape and surrogate-pair handling in json_parse_ex appears to correctly account for UTF-8 expansion in pass 1 (adds 2/3/4 bytes) matching the exact number of bytes written in pass 2; thus the specific claimed heap-buffer-overflow via undercounted string_length is not supported by the code shown.\",\"control_flow_to_bug\":\"N/A: no confirmed overflow. Control flow for the examined area: json_parse_ex -> main parse loop with (flags & flag_string) -> sees backslash sets flag_escaped -> case 'u' parses 4 hex digits (and optional surrogate pair) -> increments string_length in first_pass or writes exactly that many bytes in second_pass.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_VjakUQdGoZWvUZ71lbJytOea",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

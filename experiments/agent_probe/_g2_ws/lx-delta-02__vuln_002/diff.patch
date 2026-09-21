@@ -1,0 +1,130 @@
+diff --git a/parser.c b/parser.c
+--- a/parser.c
++++ b/parser.c
+@@ -0,0 +1,126 @@
++xmlParseAttribute2(xmlParserCtxtPtr ctxt,
++                   const xmlChar * pref, const xmlChar * elem,
++                   xmlHashedString * hprefix, xmlChar ** value,
++                   int *len, int *alloc)
++{
++    xmlHashedString hname;
++    const xmlChar *prefix, *name;
++    xmlChar *val = NULL, *internal_val = NULL;
++    int normalize = 0;
++    int isNamespace;
++
++    *value = NULL;
++    GROW;
++    hname = xmlParseQNameHashed(ctxt, hprefix);
++    if (hname.name == NULL) {
++        xmlFatalErrMsg(ctxt, XML_ERR_NAME_REQUIRED,
++                       "error parsing attribute name\n");
++        return(hname);
++    }
++    name = hname.name;
++    prefix = hprefix->name;
++
++      
++                             
++       
++    if (ctxt->attsSpecial != NULL) {
++        int type;
++
++        type = (int) (ptrdiff_t) xmlHashQLookup2(ctxt->attsSpecial,
++                                                 pref, elem,
++                                                 prefix, name);
++        if (type != 0)
++            normalize = 1;
++    }
++
++      
++                     
++       
++    SKIP_BLANKS;
++    if (RAW == '=') {
++        NEXT;
++        SKIP_BLANKS;
++        isNamespace = (((prefix == NULL) && (name == ctxt->str_xmlns)) ||
++                       (prefix == ctxt->str_xmlns));
++        val = xmlParseAttValueInternal(ctxt, len, alloc, normalize,
++                                       isNamespace);
++        if (val == NULL)
++            goto error;
++    } else {
++        xmlFatalErrMsgStr(ctxt, XML_ERR_ATTRIBUTE_WITHOUT_VALUE,
++                          "Specification mandates value for attribute %s\n",
++                          name);
++        goto error;
++    }
++
++    if (prefix == ctxt->str_xml) {
++          
++                                                            
++                                                                      
++                                                          
++           
++        if ((ctxt->pedantic) && (xmlStrEqual(name, BAD_CAST "lang"))) {
++            internal_val = xmlStrndup(val, *len);
++            if (internal_val == NULL)
++                goto mem_error;
++            if (!xmlCheckLanguageID(internal_val)) {
++                xmlWarningMsg(ctxt, XML_WAR_LANG_VALUE,
++                              "Malformed value for xml:lang : %s\n",
++                              internal_val, NULL);
++            }
++        }
++
++          
++                                                             
++           
++        if (xmlStrEqual(name, BAD_CAST "space")) {
++            internal_val = xmlStrndup(val, *len);
++            if (internal_val == NULL)
++                goto mem_error;
++            if (xmlStrEqual(internal_val, BAD_CAST "default"))
++                *(ctxt->space) = 0;
++            else if (xmlStrEqual(internal_val, BAD_CAST "preserve"))
++                *(ctxt->space) = 1;
++            else {
++                xmlWarningMsg(ctxt, XML_WAR_SPACE_VALUE,
++                              "Invalid value \"%s\" for xml:space : \"default\" or \"preserve\" expected\n",
++                              internal_val, NULL);
++            }
++        }
++          
++                                                           
++           
++        if (xmlStrEqual(name, BAD_CAST "tab")) {
++            internal_val = xmlStrndup(val, *len);
++            if (internal_val == NULL)
++                goto mem_error;
++            if (xmlStrEqual(internal_val, BAD_CAST "default"))
++                *(ctxt->tab) = 0;
++            else if (xmlStrEqual(internal_val, BAD_CAST "preserve"))
++                *(ctxt->tab) = 1;
++            else if (xmlStrEqual(internal_val, BAD_CAST "expand"))
++                *(ctxt->tab) = 2;
++            else if (xmlStrEqual(internal_val, BAD_CAST "skip"))
++                *(ctxt->tab) = 3;
++            else {
++                xmlWarningMsg(ctxt, XML_WAR_TAB_VALUE,
++                              "Invalid value \"%s\" for xml:tab : \"default\", \"preserve\", \"expand\", or \"skip\" expected\n",
++                              internal_val, NULL);
++                xmlFree(internal_val);
++            }
++        }
++        if (internal_val) {
++            xmlFree(internal_val);
++        }
++    }
++
++    *value = val;
++    return (hname);
++
++mem_error:
++    xmlErrMemory(ctxt);
++error:
++    if ((val != NULL) && (*alloc != 0))
++        xmlFree(val);
++    return(hname);
++}

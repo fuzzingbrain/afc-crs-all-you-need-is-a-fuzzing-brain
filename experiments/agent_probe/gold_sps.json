@@ -1,0 +1,575 @@
+{
+ "av-delta-02__avif-002": {
+  "function_name": "avifImageYUVAnyToRGBAnySlow",
+  "vuln_type": "dynamic-stack-buffer-overflow",
+  "description": "Two variable-length arrays `float uspill_image[image->width][image->height]` and `vspill_image[...][...]` are declared on the stack with dimensions taken directly from the attacker-controlled image width/height. A moderately sized image makes the VLA product huge, blowing the stack; even a small one is written via uspill_image[i][j] with no bound tying i,j to the declared extents.",
+  "important_controlflow": [
+   "fuzzer YuvRgbFuzzTest.Convert decodes an image with attacker width/height",
+   "reformat path selects the SPILL chroma-upsampling slow path (YUV420, coefficients mode)",
+   "avifImageYUVAnyToRGBAnySlow declares stack VLAs sized width*height*sizeof(float)",
+   "stack write/overflow when width*height is large or indices exceed the frame"
+  ]
+ },
+ "cm-full-01__lcms-001": {
+  "function_name": "EmitCIEBasedDEF",
+  "vuln_type": "SEGV",
+  "description": "After the CurveSet stage is consumed, `mpe = mpe->Next` can become NULL, but the code then calls `cmsStageType(mpe)` (and WriteCLUT) without a NULL check, dereferencing a NULL pipeline stage.",
+  "important_controlflow": [
+   "PostScript CRD/CSA generation walks the profile pipeline",
+   "EmitCIEBasedDEF advances mpe past the curve set: mpe = mpe->Next",
+   "pipeline has no following CLUT stage -> mpe == NULL",
+   "cmsStageType(mpe) dereferences NULL -> SEGV"
+  ]
+ },
+ "cm-full-01__lcms-002": {
+  "function_name": "IsProperColorSpace",
+  "vuln_type": "stack-buffer-overflow",
+  "description": "IsProperColorSpace gates the virtual-profile transform by comparing the requested T_COLORSPACE(dwFormat) against the profile color space. When it wrongly accepts a mismatched space, a downstream transform writes pixel data into a fixed stack buffer sized for the expected channel count, overflowing it. The suspicious point is the permissive color-space acceptance that lets an inconsistent format through.",
+  "important_controlflow": [
+   "virtual profile fuzzer opens a crafted profile and runs a transform",
+   "IsProperColorSpace(Check, dwFormat) returns TRUE for a space/format mismatch",
+   "transform proceeds with more channels than the destination stack buffer holds",
+   "fixed-size stack buffer overflows"
+  ]
+ },
+ "cu-delta-01__curl-005": {
+  "function_name": "verynormalprotocol_doing",
+  "vuln_type": "SEGV",
+  "description": "On the `crashycrashy` response branch the code executes `*(unsigned int *)result = CURLE_OK;` where `result` is a CURLcode (a small enum value), so its *value* (e.g. 0..~90) is reinterpreted as a pointer and written through: a wild pointer write.",
+  "important_controlflow": [
+   "fuzzer feeds the ws protocol; verynormalprotocol_doing reads a 128-byte response",
+   "response equals \"crashycrashy\"",
+   "*(unsigned int *)result = CURLE_OK writes through result-as-pointer -> SEGV"
+  ]
+ },
+ "cu-delta-02__curl-006": {
+  "function_name": "totallyfineprotocl_sm",
+  "vuln_type": "SEGV",
+  "description": "In state DO3, the `crashycrashy\\r\\n` branch runs `*(unsigned int *)result = CURLE_OK;`, treating the small CURLcode value `result` as a pointer and writing through it (wild pointer write).",
+  "important_controlflow": [
+   "drive the state machine START->DO1->DO2->DO3 with the exact magic strings (supermagic12, aaaa..., challengeresponse)",
+   "in DO3, send response == \"crashycrashy\\r\\n\"",
+   "*(unsigned int *)result = CURLE_OK -> wild write -> SEGV"
+  ]
+ },
+ "cu-delta-03__curl-007": {
+  "function_name": "alliswellprotocoll_sm",
+  "vuln_type": "SEGV",
+  "description": "State DO3 does `*(unsigned int *)result = CURLE_OK;` (result is a CURLcode value, not a pointer) -> wild pointer write. The state1/2/3 arrays are also filled from the 128-byte response.",
+  "important_controlflow": [
+   "START reads 128 bytes, XORs into state1; DO1/DO2 match memcmp then transform into state2/state3",
+   "reach DO3 with response matching state3 (128 bytes)",
+   "*(unsigned int *)result = CURLE_OK -> SEGV"
+  ]
+ },
+ "cu-delta-04__curl-003": {
+  "function_name": "Curl_http_header",
+  "vuln_type": "SEGV",
+  "description": "The delta added header-parsing paths (Content-Length / Content-Range / Content-Encoding) that dereference response-derived pointers without validating them; a crafted response header drives an unchecked pointer/offset use leading to a crash.",
+  "important_controlflow": [
+   "curl_fuzzer_http feeds HTTP response headers",
+   "Curl_http_header dispatches on the header's first char and parses its value",
+   "a crafted Content-Range/Content-Length value drives an unvalidated pointer/offset -> SEGV"
+  ]
+ },
+ "cu-delta-04__curl-008": {
+  "function_name": "extremelygoodprtcl_sm",
+  "vuln_type": "SEGV",
+  "description": "DO2 branch runs `*(unsigned int *)result = CURLE_OK;` (wild pointer write). Additionally START does `strcpy(vnormal->state1, base64)` of the base64 of a 256-byte ciphertext into a fixed state1 buffer (possible overflow).",
+  "important_controlflow": [
+   "START encrypts the 128-byte response into ciphertext[256], base64-encodes, strcpy into state1",
+   "reach DO2 and send response == \"crashycrashy\\r\\n\"",
+   "*(unsigned int *)result = CURLE_OK -> wild write -> SEGV"
+  ]
+ },
+ "cu-delta-05__curl-001": {
+  "function_name": "dict_do",
+  "vuln_type": "SEGV",
+  "description": "Several unchecked pointer computations: `user_start = strchr(path,'/') + 1` (NULL+1 when no slash), and `combined = malloc(strlen(second_space)+strlen(passwd))` (no +1 for the terminator) followed by two strcpy that write a NUL past the allocation. A crafted DICT URL drives a wild pointer or heap over-write ending in a crash.",
+  "important_controlflow": [
+   "curl_fuzzer_dict; dict_do URL-decodes the path and parses user=auth@ syntax",
+   "strchr(path,'/')+1 with no '/' yields a bogus user_start",
+   "malloc(len2+lenpw) without +1, then strcpy(combined,...) + strcpy(combined+len2,...) writes the terminator OOB -> crash"
+  ]
+ },
+ "cu-delta-05__curl-002": {
+  "function_name": "ftp_state_mdtm_resp",
+  "vuln_type": "global-buffer-overflow",
+  "description": "The Last-Modified header is built by indexing global tables with tm fields: `Curl_seconds[tm->tm_sec]`, `Curl_wkday[...]`, `Curl_month[tm->tm_mon]`. tm_sec can be 60/61 (leap second) and tm_mon can be out of the table's range, indexing past the global arrays.",
+  "important_controlflow": [
+   "curl_fuzzer_ftp; MDTM 213 reply carries a date parsed by ftp_213_date",
+   "Curl_gmtime yields tm_sec==60/61 (leap second) or out-of-range tm_mon",
+   "Curl_seconds[tm->tm_sec] / Curl_month[tm->tm_mon] read past the global array"
+  ]
+ },
+ "cu-full-01__curl-004": {
+  "function_name": "file_do",
+  "vuln_type": "stack-buffer-overflow",
+  "description": "`char header[80];` is written by `msnprintf(header, sizeof(no_body), \"%s (%ld bytes)\\r\\n\", no_body, expected_size)` -- the size bound is `sizeof(no_body)` (the long static no_body string, ~130 bytes) instead of `sizeof(header)`, so the 80-byte stack buffer overflows.",
+  "important_controlflow": [
+   "curl_fuzzer file:// with no_body (HEAD-like) and fstat succeeding",
+   "msnprintf writes into header[80] bounded by sizeof(no_body) (~130) not sizeof(header)",
+   "stack buffer header[80] overflows"
+  ]
+ },
+ "da-full-01__dav1d-001": {
+  "function_name": "dav1d_decode_frame_init",
+  "vuln_type": "signed-integer-overflow",
+  "description": "dav1d_decode_frame_init sizes the per-frame coefficient/cbi thread buffers from the sequence OBU dimensions: num_sb128 = sb128w * sb128h, then cbi_sz/cf_sz = num_sb128 * size_mul[...] as int. A sequence OBU declaring very large width/height makes these int multiplications overflow (CWE-190), undefined behavior flagged by UBSan at src/decode.c:2853.",
+  "important_controlflow": [
+   "dav1d_fuzzer_mt feeds an OBU stream; a large sequence OBU sets huge frame width/height",
+   "dav1d_decode_frame_init computes num_sb128 = sb128w * sb128h and cf_sz/cbi_sz = num_sb128 * size_mul as signed int",
+   "the int multiplication overflows INT_MAX -> signed-integer-overflow (UBSan, decode.c:2853)"
+  ]
+ },
+ "ex-delta-01__exif-003": {
+  "function_name": "exif_mnote_data_apple_identify",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "`strcmp((const char *) e->data, \"Apple iOS\")` runs strcmp over the entry's heap data buffer, which is not guaranteed NUL-terminated; strcmp reads past the end of the heap allocation.",
+  "important_controlflow": [
+   "exif_loader_fuzzer parses a MakerNote entry into e->data (attacker length, no forced NUL)",
+   "exif_mnote_data_apple_identify calls strcmp((char*)e->data, \"Apple iOS\")",
+   "strcmp reads past the end of the heap buffer -> heap-buffer-overflow"
+  ]
+ },
+ "ex-delta-01__exif-004": {
+  "function_name": "exif_mnote_data_apple_load",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "`tcount = exif_get_short(buf+ofs+14)` is used in the bound `buf_size < 6+16+tcount*6+4`, which integer-overflows for large tcount and bypasses the check; the loop then reads `buf+ofs`/`buf+dofs` and `memcpy(entry->data, buf+dofs, dsize)` with dsize = format_size*components past the buffer end. `dofs > buf_size` uses `>` (off-by-one) and dsize isn't re-checked against remaining bytes.",
+  "important_controlflow": [
+   "Apple MakerNote loaded; tcount read from buf",
+   "buf_size < 6+16+tcount*6+4 integer-overflows -> check bypassed",
+   "per-entry dofs/dsize from data; memcpy(entry->data, buf+dofs, dsize) reads past buf end"
+  ]
+ },
+ "ex-delta-01__exif-005": {
+  "function_name": "exif_get_sshort",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "Reads `buf[0]` and `buf[1]` with only a NULL check and no length parameter; when a caller invokes it near the end of the EXIF buffer, it reads 1-2 bytes past the heap allocation.",
+  "important_controlflow": [
+   "exif_from_data_fuzzer parses entries; a value offset lands at buffer end",
+   "exif_get_sshort(buf, order) dereferences buf[0], buf[1] with no bounds",
+   "heap over-read past the EXIF buffer"
+  ]
+ },
+ "ex-delta-02__exif-001": {
+  "function_name": "exif_get_slong",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "Reads `b[0..3]` (4 bytes) with only a NULL check and no length parameter; a caller near the buffer end causes a heap over-read of up to 4 bytes.",
+  "important_controlflow": [
+   "exif_from_data_fuzzer parses an entry whose data offset is near the buffer end",
+   "exif_get_slong(b, order) reads b[0..3] unconditionally",
+   "heap over-read"
+  ]
+ },
+ "ex-delta-03__exif-002": {
+  "function_name": "exif_data_load_data_entry",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "`exif_get_short(d+offset+0/2)` and `exif_get_long(d+offset+4)` read the entry header at the attacker-supplied `offset` before any check that offset+8 is within `size`, so a large offset over-reads the heap buffer. (The later doff/s checks guard the data copy, not the header read.)",
+  "important_controlflow": [
+   "exif_from_data parses directory entries at attacker-controlled offset",
+   "exif_data_load_data_entry reads tag/format/components at d+offset without validating offset vs size",
+   "heap over-read of the entry header"
+  ]
+ },
+ "fp-delta-01__vuln_001": {
+  "function_name": "freerdp_bio_read_pem_with_policy",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "`offset` and `length` are uint16_t; the loop does `offset += status; length += blocksize(2048)` each iteration. With enough PEM data, `length` wraps past 65535 (and `pem[offset]` / next BIO_read use the wrapped size), so realloc allocates a buffer smaller than `offset`, and `pem[offset] = 0` plus the next BIO_read write past the allocation.",
+  "important_controlflow": [
+   "certificate PEM fuzzer feeds a large BIO",
+   "loop: realloc(pem, length+1); BIO_read into pem[offset]; offset += status; length += 2048",
+   "uint16_t length/offset wrap -> realloc smaller than offset -> pem[offset]=0 / BIO_read OOB write"
+  ]
+ },
+ "fp-delta-02__vuln_002": {
+  "function_name": "x509_validate_subject_aternative_names",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "`dns_name = malloc(strlen(ASN1_STRING_get0_data(dNSName)) + 1)` sizes by strlen (stops at the first NUL), but `memcpy(dns_name, data, ASN1_STRING_length(dNSName))` copies the full ASN.1 length. A SAN dNSName containing an embedded NUL makes length > strlen+1, overflowing the heap buffer.",
+  "important_controlflow": [
+   "certificate with a subjectAltName dNSName containing an embedded NUL byte",
+   "malloc(strlen(data)+1) under-sizes; memcpy(..., ASN1_STRING_length(...)) copies more",
+   "heap-buffer-overflow of dns_name"
+  ]
+ },
+ "fp-delta-03__vuln_003": {
+  "function_name": "rfx_process_message_metadata",
+  "vuln_type": "SEGV",
+  "description": "After validating the frame magic, the function executes `*(UINT64*)metadataBlock = metadataData;` writing a 64-bit value through an undeclared/garbage `metadataBlock` pointer -- a wild write.",
+  "important_controlflow": [
+   "TestFuzzCodecs feeds an RFX message; expected block == WBT_FRAME_END",
+   "Stream_Read_UINT32 magic == WF_MAGIC passes",
+   "*(UINT64*)metadataBlock = metadataData -> wild 64-bit write -> SEGV"
+  ]
+ },
+ "fp-full-01__vuln_004": {
+  "function_name": "gcc_read_client_network_data",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "The stream length is validated as `4 + channelCount*12`, but each loop iteration consumes `Stream_Read(channel->Name, CHANNEL_NAME_LEN+1)` plus `Stream_Read_UINT32(options)` = 13 bytes, more than the 12 validated per channel, so the reads run past the validated stream buffer.",
+  "important_controlflow": [
+   "TestFuzzCoreServer; gcc_read_client_network_data reads channelCount (UINT8)",
+   "blockLength check uses 12 bytes/channel; loop reads CHANNEL_NAME_LEN+1 (+4) = 13/channel",
+   "Stream_Read past the validated buffer -> heap over-read"
+  ]
+ },
+ "fp-full-01__vuln_005": {
+  "function_name": "mcs_recv_connect_response",
+  "vuln_type": "SEGV",
+  "description": "An injected branch (guarded by BER application tag 0x42) posix_memalign's a page, mprotect's it RWX (prot 7), copies attacker UINT64 words from the stream into it, then casts it to a function pointer and calls it -- executing attacker-controlled bytes.",
+  "important_controlflow": [
+   "TestFuzzCoreServer; mcs_recv_connect_response reads a BER application tag",
+   "tag == 0x42 selects the injected block",
+   "stream bytes copied into an RWX page and called as code -> arbitrary exec / SEGV"
+  ]
+ },
+ "lx-delta-01__vuln_001": {
+  "function_name": "htmlSecureComment",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "The comment scanner appends parsed characters (including character-reference / entity expansions) into `buffer` (reused from ctxt->spaceTab, size ctxt->spaceMax) but the growth checks do not cover every append path, so certain NCR/entity sequences write past the buffer.",
+  "important_controlflow": [
+   "html fuzzer feeds a comment with numeric-character-references / entities",
+   "htmlSecureComment appends into buffer sized buffer_size without regrowing on some paths",
+   "used index exceeds buffer_size -> heap-buffer-overflow"
+  ]
+ },
+ "lx-delta-02__vuln_002": {
+  "function_name": "xmlParseAttribute2",
+  "vuln_type": "double-free",
+  "description": "In the `xml:tab` handling, the invalid-value else-branch calls `xmlFree(internal_val)`, then control falls through to the shared `if (internal_val) { xmlFree(internal_val); }`, freeing the same pointer twice.",
+  "important_controlflow": [
+   "xml fuzzer parses an attribute named \"tab\" in the xml: namespace",
+   "value is not one of default/preserve/expand/skip -> else branch xmlFree(internal_val)",
+   "shared trailing if(internal_val) xmlFree(internal_val) frees it again -> double-free"
+  ]
+ },
+ "lx-delta-03__vuln_004": {
+  "function_name": "UTF32ToUTF8",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "The surrogate branch writes 4 bytes (`out[0..3]`) without checking remaining output space, and reads `in[0..3]` where only 2 bytes may remain (inend = in + (*inlen & ~1)); both over-run the buffers on crafted UTF-32 input.",
+  "important_controlflow": [
+   "html encoding conversion invokes UTF32ToUTF8",
+   "input decodes to the surrogate path (c & 0xF800 == 0xD800)",
+   "out[0..3] write / in[2..3] read exceed the buffer bounds -> heap overflow"
+  ]
+ },
+ "lx-full-01__vuln_003": {
+  "function_name": "xmlSBufAddEntitySecure",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "The grow guard is wrong: it only grows when `buf->cap == 0`. When cap>0 but `buf->size + len` exceeds the current capacity, no growth happens and `memcpy(buf->mem + buf->size, str, len)` overflows. (The `buf->max - buf->size < len` check bounds the logical limit, not the physical allocation.)",
+  "important_controlflow": [
+   "xml fuzzer triggers entity expansion appending len bytes",
+   "buffer already allocated (cap>0) but size+len > cap; grow only runs when cap==0",
+   "memcpy(buf->mem+buf->size, str, len) overflows the heap allocation"
+  ]
+ },
+ "lx-full-01__vuln_005": {
+  "function_name": "LLVMFuzzerTestOneInput",
+  "vuln_type": "double-free",
+  "description": "The libxml2 api fuzzer interprets a byte program of node/doc operations (DUP + free/parse). A sequence that duplicates a node reference and then frees it through two owners double-frees the underlying object.",
+  "important_controlflow": [
+   "api fuzzer reads an opcode stream",
+   "OP_DUP_* aliases a node/doc slot, then two owners free it",
+   "double-free of the shared node/doc"
+  ]
+ },
+ "mg-delta-01__mongoose_1": {
+  "function_name": "mg_pfn_iobuf_private",
+  "vuln_type": "stack-buffer-overflow",
+  "description": "When called with `expand == false` on a fixed stack-backed iobuf (as mg_snprintf into a stack buffer does), the resize is skipped and the `io->len + 2 <= io->size` / `io->len < io->size` handling still advances `io->len`, writing past the fixed stack buffer for long formatted output.",
+  "important_controlflow": [
+   "mg_snprintf/format into a fixed stack iobuf (expand=false)",
+   "mg_pfn_iobuf_private skips resize; writes io->buf[io->len++] near/over io->size",
+   "stack buffer overflow on long output"
+  ]
+ },
+ "mg-delta-02__mongoose_2": {
+  "function_name": "rx_icmp",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "`space = ifp->tx.len - hlen` underflows (size_t) when tx.len < hlen; the clamp `if (plen > space) plen = space;` then leaves plen = pkt->pay.len (attacker length), and `memcpy(icmp + 1, pkt->pay.buf, plen)` overflows the tx buffer.",
+  "important_controlflow": [
+   "ICMP echo request (type 8) to the interface IP",
+   "ifp->tx.len < hlen -> space = tx.len - hlen underflows to a huge size_t",
+   "plen stays = payload length; memcpy(icmp+1, pay, plen) overflows tx buffer"
+  ]
+ },
+ "mg-full-01__mongoose_0": {
+  "function_name": "mg_json_get",
+  "vuln_type": "stack-buffer-overflow",
+  "description": "`unsigned char nesting[MG_JSON_MAX_DEPTH]` is indexed by `nesting[depth++]` while the depth guard compares `depth > MG_JSON_MAX_NESTING`; if MAX_NESTING is not strictly below MAX_DEPTH, deeply nested JSON writes past the nesting[] stack array.",
+  "important_controlflow": [
+   "mg_json_get parses deeply nested JSON ({ or [ repeated)",
+   "each nesting level does nesting[depth++]=c with an off-by-one/loose depth guard",
+   "stack array nesting[] overflows"
+  ]
+ },
+ "shadowsocks-full-01__shadowsocks-libev_0": {
+  "function_name": "json_parse_ex",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "json_parse_ex is a two-pass parser: pass 1 counts `string_length`, pass 2 writes into the `string` buffer allocated to that count. In the UTF-8/surrogate escape handling the number of bytes emitted in pass 2 can exceed what pass 1 counted (e.g. surrogate pair / multi-byte expansion, and the `string[string_length++]` writes), overflowing the heap `string` allocation.",
+  "important_controlflow": [
+   "json_fuzz feeds a JSON string with \\u escapes / surrogate pairs / multibyte output",
+   "pass 1 under-counts string_length for the escape expansion",
+   "pass 2 writes string[string_length++] past the allocated buffer -> heap overflow"
+  ]
+ },
+ "shadowsocks-full-01__shadowsocks-libev_1": {
+  "function_name": "json_parse_ex",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "json_parse_ex is a two-pass parser: pass 1 counts `string_length`, pass 2 writes into the `string` buffer allocated to that count. In the UTF-8/surrogate escape handling the number of bytes emitted in pass 2 can exceed what pass 1 counted (e.g. surrogate pair / multi-byte expansion, and the `string[string_length++]` writes), overflowing the heap `string` allocation.",
+  "important_controlflow": [
+   "json_fuzz feeds a JSON string with \\u escapes / surrogate pairs / multibyte output",
+   "pass 1 under-counts string_length for the escape expansion",
+   "pass 2 writes string[string_length++] past the allocated buffer -> heap overflow"
+  ]
+ },
+ "shadowsocks-full-01__shadowsocks-libev_2": {
+  "function_name": "json_parse_ex",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "json_parse_ex is a two-pass parser: pass 1 counts `string_length`, pass 2 writes into the `string` buffer allocated to that count. In the UTF-8/surrogate escape handling the number of bytes emitted in pass 2 can exceed what pass 1 counted (e.g. surrogate pair / multi-byte expansion, and the `string[string_length++]` writes), overflowing the heap `string` allocation.",
+  "important_controlflow": [
+   "json_fuzz feeds a JSON string with \\u escapes / surrogate pairs / multibyte output",
+   "pass 1 under-counts string_length for the escape expansion",
+   "pass 2 writes string[string_length++] past the allocated buffer -> heap overflow"
+  ]
+ },
+ "shadowsocks-full-01__shadowsocks-libev_3": {
+  "function_name": "json_parse_ex",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "json_parse_ex is a two-pass parser: pass 1 counts `string_length`, pass 2 writes into the `string` buffer allocated to that count. In the UTF-8/surrogate escape handling the number of bytes emitted in pass 2 can exceed what pass 1 counted (e.g. surrogate pair / multi-byte expansion, and the `string[string_length++]` writes), overflowing the heap `string` allocation.",
+  "important_controlflow": [
+   "json_fuzz feeds a JSON string with \\u escapes / surrogate pairs / multibyte output",
+   "pass 1 under-counts string_length for the escape expansion",
+   "pass 2 writes string[string_length++] past the allocated buffer -> heap overflow"
+  ]
+ },
+ "shadowsocks-full-01__shadowsocks-libev_4": {
+  "function_name": "json_parse_ex",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "json_parse_ex is a two-pass parser: pass 1 counts `string_length`, pass 2 writes into the `string` buffer allocated to that count. In the UTF-8/surrogate escape handling the number of bytes emitted in pass 2 can exceed what pass 1 counted (e.g. surrogate pair / multi-byte expansion, and the `string[string_length++]` writes), overflowing the heap `string` allocation.",
+  "important_controlflow": [
+   "json_fuzz feeds a JSON string with \\u escapes / surrogate pairs / multibyte output",
+   "pass 1 under-counts string_length for the escape expansion",
+   "pass 2 writes string[string_length++] past the allocated buffer -> heap overflow"
+  ]
+ },
+ "sq-delta-01__SQL-006": {
+  "function_name": "base85",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "The TEXT->blob path sizes the output as `nb = 4*(nv/5) + nv%5` and mallocs nb, then `fromBase85(cBuf, nc, bBuf)` decodes; the size formula under-estimates the decoded length for some base85 inputs, so fromBase85 writes past bBuf.",
+  "important_controlflow": [
+   "SELECT base85(x) with x a crafted base85 text value",
+   "nb = 4*(nv/5)+nv%5 undersizes the output buffer",
+   "fromBase85 writes decoded bytes past bBuf -> heap overflow"
+  ]
+ },
+ "sq-delta-02__SQL-008": {
+  "function_name": "lsm1BestIndex",
+  "vuln_type": "SEGV",
+  "description": "`iIdx2` is assigned a computed `idxNum` value (e.g. 3) rather than a constraint index, and then `pIdxInfo->aConstraintUsage[iIdx2]` is written; iIdx2 can exceed nConstraint, an out-of-bounds write into aConstraintUsage.",
+  "important_controlflow": [
+   "query an lsm1 virtual table with GE/GT then LE/LT constraints",
+   "iIdx2 set from idxNum (a value, not a constraint index)",
+   "aConstraintUsage[iIdx2] out-of-bounds write -> SEGV"
+  ]
+ },
+ "sq-delta-03__SQL-010": {
+  "function_name": "fileToString",
+  "vuln_type": "stack-buffer-overflow",
+  "description": "`snprintf(&aBuf[i], nBuf-i, ...)` advances i by strlen, and then `aBuf[nBuf] = 0` writes one past the nBuf-sized buffer; i can also grow beyond nBuf across the concatenations, overflowing the caller's stack buffer.",
+  "important_controlflow": [
+   "lsm structure dump builds a string into aBuf[nBuf]",
+   "segToString output concatenated; i can exceed nBuf",
+   "aBuf[nBuf] = 0 writes one past the buffer -> stack overflow"
+  ]
+ },
+ "sq-full-01__SQL-003": {
+  "function_name": "rot13func",
+  "vuln_type": "stack-buffer-overflow",
+  "description": "`unsigned char zTemp[100]`; the guard is `if (nIn <= sizeof(zTemp)) zOut = zTemp;` (should be `<`). With nIn == 100, zOut = zTemp, the loop fills zTemp[0..99], then `zOut[i] = 0` writes zTemp[100] -- one byte past the stack buffer.",
+  "important_controlflow": [
+   "SELECT rot13(x) with x exactly 100 bytes of text",
+   "nIn == sizeof(zTemp) still picks the stack buffer (<= off-by-one)",
+   "zOut[100] = 0 writes past zTemp[100] -> stack overflow"
+  ]
+ },
+ "sq-full-01__SQL-004": {
+  "function_name": "sqlite3ExprCodeGeneratedColumn",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "Generated-column code generation copies the column's expression and applies affinity; a self-referential / mutually-referential generated column drives unbounded recursion or a register/cursor index out of range during codegen, corrupting memory. (The recorded crash frame also passes through shell_error_context.)",
+  "important_controlflow": [
+   "a CREATE TABLE with generated columns referencing each other",
+   "sqlite3ExprCodeGeneratedColumn recurses through sqlite3ExprCodeCopy on the self-reference",
+   "register/index out of range -> memory corruption"
+  ]
+ },
+ "systemd-full-001__systemd-001": {
+  "function_name": "udev_rule_parse_value",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "The leading-flag scan `for (k = str; *k != '\"'; k++) pos++;` has no bound, and the prefix-match branch writes `str[pos + l - 1] = '*'`, `str[pos + l] = '\\0'`, `str[pos + l + 1] = '\\0'` (and memcpy at str+pos-1), indices derived from pos/l that run past the `str` allocation.",
+  "important_controlflow": [
+   "fuzz-udev-rule-parse-value feeds a rule value with e/i/p flags then a quote",
+   "prefix-match ('p') path rewrites str using pos+l offsets",
+   "writes at str[pos+l-1/+l/+l+1] exceed the str buffer -> heap overflow"
+  ]
+ },
+ "systemd-full-001__systemd-003": {
+  "function_name": "finish_item",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "An injected trigger: `if (payload[0] == ((ILLEGAL_CAT_ENTRY%10)+'0')) payload[ILLEGAL_CAT_ENTRY*100] = '\\0';` writes at index ILLEGAL_CAT_ENTRY*100, far beyond payload_size -- an out-of-bounds heap write.",
+  "important_controlflow": [
+   "fuzz-catalog parses an entry; finish_item receives payload/payload_size",
+   "payload[0] matches the trigger digit",
+   "payload[ILLEGAL_CAT_ENTRY*100] = '\\0' writes past the payload allocation"
+  ]
+ },
+ "systemd-full-001__systemd-004": {
+  "function_name": "condition_free",
+  "vuln_type": "heap-use-after-free",
+  "description": "condition_free frees `c->parameter` and then `mfree(c)`; a link-parser path retains and reuses a Condition (or its parameter) after this free, dereferencing freed memory.",
+  "important_controlflow": [
+   "fuzz-link-parser builds Conditions and frees one via condition_free",
+   "a retained reference to the freed Condition/parameter is used afterward",
+   "use-after-free read/write"
+  ]
+ },
+ "systemd-full-001__systemd-005": {
+  "function_name": "unsetp",
+  "vuln_type": "double-free",
+  "description": "The systemctl argv parser's cleanup handling frees an option string on one path and again through the `unsetp`/_cleanup_ handler (which mismanages the pointer), double-freeing the allocation.",
+  "important_controlflow": [
+   "fuzz-systemctl-parse-argv parses options with a cleanup-attributed pointer",
+   "an option string is freed on an error path and again by the cleanup handler",
+   "double-free"
+  ]
+ },
+ "ws-delta-01__vuln_003": {
+  "function_name": "dissect_ber_GeneralString",
+  "vuln_type": "stack-buffer-overflow",
+  "description": "The length clamp `if (len >= (max_len - 1)) len = max_len - 1;` uses unsigned `max_len`; when a caller passes a name buffer with `name_len == 0`, max_len becomes 0 and `max_len - 1` underflows to UINT_MAX, so the clamp never fires and `tvb_memcpy(tvb, str, offset, len)` copies an attacker-length run into the 256-byte `str_arr` (or the caller buffer).",
+  "important_controlflow": [
+   "handler_ber; dissect_ber_GeneralString with a UNI GeneralString tag",
+   "name_string path with name_len 0 -> max_len 0 -> (max_len-1) underflows",
+   "len clamp bypassed; tvb_memcpy overflows str_arr[256]"
+  ]
+ },
+ "ws-delta-02__vuln_004": {
+  "function_name": "dissect_interface_identification_object",
+  "vuln_type": "stack-buffer-overflow",
+  "description": "`obj_length = tvb_get_ntohs(tvb, offset)` is attacker-controlled; the C-Type==NAME case does `tvb_memcpy(tvb, ident_name, offset, obj_length - 4)` into the fixed `ident_name[ICMP_MAX_IDENT_NAME_LENGTH]` with no bound tying obj_length to the buffer size, overflowing the stack array.",
+  "important_controlflow": [
+   "handler_icmp; ICMP extended echo Interface Identification Object",
+   "C-Type == ICMP_EXT_ECHO_IDENT_NAME with large obj_length",
+   "tvb_memcpy(ident_name, offset, obj_length-4) overflows ident_name[] -> stack overflow"
+  ]
+ },
+ "ws-delta-03__vuln_006": {
+  "function_name": "dissect_irc_names",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "`channel_name = malloc(CHANNELLEN+1)`; most copies clamp to CHANNELLEN, but the no-comma path does `tvb_memcpy(tvb, channel_name, start_offset, length)` with `length = tvb_captured_length_remaining(...)` unclamped, overflowing the heap buffer.",
+  "important_controlflow": [
+   "handler_irc; dissect_irc_names iterates channel names",
+   "a channel token without a trailing comma takes the unclamped branch",
+   "tvb_memcpy(channel_name, start_offset, length) with full remaining length -> heap overflow"
+  ]
+ },
+ "ws-delta-04__vuln_007": {
+  "function_name": "json_string_unescape",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "The `\\U` (8-hex) and its surrogate-continuation loops read `string[read_index]` and increment read_index inside `for (i<8)` / `for (i<4)` without re-checking `read_index < string_length`, reading past the end of the input string.",
+  "important_controlflow": [
+   "handler_json; json_string_unescape on a string with a \\U escape",
+   "the 8-hex / surrogate loops advance read_index without bound checks",
+   "string[read_index] reads past the buffer -> heap over-read"
+  ]
+ },
+ "ws-delta-05__vuln_008": {
+  "function_name": "dissect_netbios",
+  "vuln_type": "global-buffer-overflow",
+  "description": "`command = MIN(command, array_length(dissect_netb));` clamps to the array length rather than length-1, so `command` can equal array_length; `dissect_netb[command]` then indexes one past the global function-pointer table and the result is called.",
+  "important_controlflow": [
+   "handler_netbios with a command byte >= array_length(dissect_netb)",
+   "MIN(command, array_length(dissect_netb)) allows command == length (off-by-one)",
+   "dissect_netb[command] reads past the global table and is called -> global-buffer-overflow"
+  ]
+ },
+ "ws-delta-07__vuln_013": {
+  "function_name": "dissect_extended_bootstrap_register",
+  "vuln_type": "global-buffer-overflow",
+  "description": "`gvcp_register_number[gvcp_register_count] = addr; gvcp_register_value[gvcp_register_count++] = value;` index global arrays by a monotonically increasing `gvcp_register_count` that is never bounds-checked, so a packet with enough register writes overflows the global arrays.",
+  "important_controlflow": [
+   "handler_gvcp writes a sequence of registers",
+   "each dissect_register/dissect_extended_bootstrap_register does gvcp_register_*[gvcp_register_count++]",
+   "gvcp_register_count exceeds the global array size -> global-buffer-overflow"
+  ]
+ },
+ "ws-full-01__vuln_001": {
+  "function_name": "dissect_openvpn_msg_common",
+  "vuln_type": "stack-buffer-overflow",
+  "description": "An attacker-controlled packet-ID array length (`pid_arraylength = tvb_get_uint8`, up to 255) and the session/HMAC parsing drive writes past the fixed 8-byte stack `buf[8]` / advance offset without matching the fixed buffers, overflowing stack storage in the control-channel parse.",
+  "important_controlflow": [
+   "handler_openvpn.udp control-channel message",
+   "pid_arraylength (uint8, up to 255) and tls_auth/tls_crypt sizes drive the parse",
+   "writes exceed the fixed 8-byte stack buffer -> stack overflow"
+  ]
+ },
+ "ws-full-01__vuln_002": {
+  "function_name": "dissect_vmware_subopt",
+  "vuln_type": "heap-use-after-free",
+  "description": "The VMware telnet suboption frees a conversation-keyed heap blob (`wmem_free(pinfo->pool, conv_key[0].blob.val)`) and a subsequent access (copy/compare of the blob) uses the freed pointer -- a use-after-free.",
+  "important_controlflow": [
+   "handler_telnet; dissect_vmware_subopt handles a VMware suboption",
+   "conv_key[0].blob.val is wmem_free'd",
+   "the freed blob is read/copied afterward -> heap-use-after-free"
+  ]
+ },
+ "ws-full-01__vuln_005": {
+  "function_name": "dissect_bat_vis_v24",
+  "vuln_type": "SEGV",
+  "description": "`vis_packeth_raw_data` (a 1024-byte stack buffer) is filled from the packet without forcing NUL-termination, then `snprintf(d_output_buffer, ..., \"...%s\", vis_packeth_raw_data)` and especially `fprintf(stderr, d_output_buffer)` -- an attacker-controlled format string -- are used; the format-string bug (and strlen on the unterminated buffer) crash.",
+  "important_controlflow": [
+   "handler_bat.vis; dissect_bat_vis_v24 reads raw_data_size (<=1024) bytes into a stack buffer",
+   "d_output_buffer is built from the non-terminated raw_data",
+   "fprintf(stderr, d_output_buffer) uses attacker data as a format string -> SEGV"
+  ]
+ },
+ "ws-full-01__vuln_010": {
+  "function_name": "dissect_netb_terminate_trace",
+  "vuln_type": "heap-buffer-overflow",
+  "description": "`signature` is g_malloc'd to NB_SIZE_HMAC+1 or NB_SIZE_TMAC+1, but the while loop writes `signature[index++]` twice per input byte over `tvb_offset_exists(...)` (the whole remaining packet), with no bound on index vs the allocation, overflowing the heap buffer.",
+  "important_controlflow": [
+   "handler_netbios terminate-trace command",
+   "loop over remaining bytes writes 2 hex chars per byte into signature[index++]",
+   "index exceeds the small signature allocation -> heap overflow"
+  ]
+ },
+ "ws-full-01__vuln_011": {
+  "function_name": "aim_get_buddyname",
+  "vuln_type": "ABRT",
+  "description": "`*name = wmem_alloc(pool, 256)` then `memcpy(*name, tvb_get_ptr(tvb, offset, 1), buddyname_length)` copies `buddyname_length` (a 16-bit value, up to 65535) from a 1-byte tvb pointer into the 256-byte buffer -- both a heap overflow and a tvb over-read that ASan aborts on.",
+  "important_controlflow": [
+   "handler_aim; aim_get_buddyname reads buddyname_length = tvb_get_ntohs(...)",
+   "memcpy(*name, tvb_get_ptr(tvb, offset, 1), buddyname_length) with length up to 65535",
+   "256-byte buffer overflow + tvb over-read -> ASan abort"
+  ]
+ },
+ "ws-full-01__vuln_012": {
+  "function_name": "dissect_zbee_zdp_req_mgmt_nwk_disc",
+  "vuln_type": "SEGV",
+  "description": "`channels_arr` holds max_channel_count(27) entries, but the debug dump loops `for (i = 0; i <= channels; i++) ... channels_arr[i]->...` with `channels` up to 27 -- `channels_arr[27]` is one past the array, dereferencing an out-of-bounds (garbage) pointer.",
+  "important_controlflow": [
+   "handler_zbee_zdp mgmt_nwk_disc with channels == 27 and the 0xfff4131b flag bits set",
+   "debug loop for (i=0; i<=channels; i++) indexes channels_arr[i]",
+   "channels_arr[27] out-of-bounds pointer dereferenced -> SEGV"
+  ]
+ },
+ "xz-full-01__xz-001": {
+  "function_name": "compute_tree_checksum",
+  "vuln_type": "heap-use-after-free",
+  "description": "The recursive walk dereferences `node->state` before the visited/hashed guard and unconditionally `free(node->edges); free(node);` at the end. A node reachable via two parents (shared child / DAG) is freed on the first visit and then dereferenced (`node->state`) on the second, a use-after-free.",
+  "important_controlflow": [
+   "fuzz_encode_stream builds a tree with a shared child (two parents)",
+   "compute_tree_checksum frees node->edges and node after recursing",
+   "the second parent recurses into the freed node and reads node->state -> use-after-free"
+  ]
+ }
+}

@@ -1,0 +1,553 @@
+{
+  "tag": "lx-full-01__vuln_005",
+  "gt": "LLVMFuzzerTestOneInput",
+  "crash_type": "double-free",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "read_function",
+    "read_function",
+    "read_function",
+    "read_function",
+    "read_function",
+    "read_function",
+    "read_function",
+    "read_function",
+    "read_function",
+    "read_function",
+    "read_function",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "partial",
+    "pattern_present": true,
+    "reasoning": "From code inspection of the harness helpers:\n\n- The harness maintains a ring of xmlNodePtr registers vars->nodes[]. setNode() overwrites a slot and calls dropNode(oldNode) to free the old node/doc if no other register references the same tree/doc.\n- opDup(OP_DUP_NODE) can create multiple registers pointing to the same xmlNodePtr (aliasing) by setNode(0, getNode(offset)).\n- removeNode(node) exists and clears all registers equal to a node pointer, but it is only effective if called whenever a node is freed/detached by libxml2 APIs.\n- dropNode(node) attempts to avoid double-free by scanning all registers: if any other register’s nodeGetTree(other) equals the tree of the node being dropped, it returns without freeing. This is a partial guard.\n\nHowever, this guard is incomplete for the suspicious scenario described: if a libxml2 API frees a node/tree/doc indirectly (e.g., xmlFreeNodeList(copy), xmlRemoveProp/xmlUnsetProp, or other detach/free operations) without the harness clearing corresponding vars->nodes[] entries, then vars->nodes[] can retain stale pointers. Later, when setNode overwrites that slot or final cleanup calls dropNode(stale), dropNode will dereference node->doc and call nodeGetTree(node) on freed memory, leading to ASan UAF; or it may call xmlFreeNode/xmlFreeDoc again, leading to double-free. The harness does not have a general mechanism to invalidate registers on indirect frees; it relies on explicit removeNode calls.\n\nI did not run a reach_probe, so no concrete crashing input is confirmed; evidence is limited to the presence of aliasing + partial lifetime tracking + freeing in dropNode that dereferences node fields.",
+    "corrected_description": "Likely heap use-after-free (and possibly double-free) in the fuzz harness lifetime management: vars->nodes[] may retain pointers to libxml2 nodes/docs that were freed indirectly by certain libxml2 operations; later dropNode() dereferences and/or frees them again during register overwrite or cleanup.",
+    "control_flow_to_bug": "LLVMFuzzerTestOneInput loop executes operations that (1) store xmlNodePtr/xmlDocPtr into vars->nodes via setNode(), possibly aliasing via OP_DUP_NODE; (2) perform some libxml2 operation that frees/detaches a node/attr/list without calling removeNode() to clear all registers; then (3) either overwrite a register slot (setNode -> dropNode(oldNode)) or exit and run cleanup that calls dropNode() on remaining vars->nodes entries. dropNode() calls nodeGetTree(node) and reads node->doc, then may call xmlFreeNode(tree) and/or xmlFreeDoc(doc), triggering UAF/double-free if node/doc already freed."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.5,
+  "verdict": "LIKELY",
+  "basis": "tainted, partial clamp (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "LLVMFuzzerTestOneInput"
+      },
+      "result": "LLVMFuzzerTestOneInput(const char *data, size_t size) {\n    size_t failurePos;\n    int i;\n\n    if (size > 1000)\n        return 0;\n\n    memset(vars, 0, sizeof(*vars));\n\n    xmlFuzzDataInit(data, size);\n\n    failurePos = xmlFuzzReadInt(4) % (size * 50 + 10);\n    xmlFuzzInjectFailure(failurePos);\n\n      \n                       \n      \n                                              \n      \n                              \n                                                   \n                                           \n                            \n                      \n                            \n                                                \n                                 \n       \n\n    while (xmlFuzzBytesRemaining()) {\n        size_t readSize;\n        int op = xmlFuzzReadInt(1);\n        int oomReport = -1;                       \n        int ioReport = 0;\n\n        vars->opName = \"[unset]\";\n\n        switch (op) {\n            case OP_CREATE_INTEGER:\n                incIntIdx();\n                setInt(0, (int) xmlFuzzReadInt(4));\n                break;\n\n            case OP_CREATE_STRING:\n                incStrIdx();\n                copyStr(0, BAD_CAST xmlFuzzReadString(&readSize));\n                break;\n\n            case OP_DUP_INTEGER:\n            case OP_DUP_STRING:\n            case OP_DUP_NODE:\n                opDup(op);\n                break;\n\n            case OP_PARSE_DOCUMENT:\n                  \n                                                                       \n                                                                 \n                                        \n                  \n                                                                      \n                                                     \n                   \n                startOp(\"xmlReadDoc\");\n                incNodeIdx();\n                setNode(0, (xmlNodePtr) xmlReadDoc(\n                    getStr(0),\n                    getCStr(1),\n                    getCStr(2),\n                    getInt(0)));\n                break;\n\n            case OP_XML_NEW_DOC: {\n                xmlDocPtr doc;\n\n                  \n                                                                     \n                                                                     \n                                              \n                   \n                startOp(\"xmlNewDoc\");\n                incNodeIdx();\n                doc = xmlNewDoc(getStr(0));\n                oomReport = (doc == NULL);\n                setNode(0, (xmlNodePtr) doc);\n                break;\n            }\n\n            case OP_XML_NEW_NODE: {\n                xmlNodePtr node;\n                const xmlChar *name;\n\n                startOp(\"xmlNewNode\");\n                incNodeIdx();\n                node = xmlNewNode(\n                    nodeGetNs(getNode(1), getInt(0)),\n                    name = getStr(0));\n                oomReport = (name != NULL && node == NULL);\n                if (fixNs(node) < 0)\n                    oomReport = 1;\n                setNode(0, node);\n                break;\n            }\n\n            case OP_XML_NEW_NODE_EAT_NAME: {\n                xmlNodePtr node;\n                xmlChar *name;\n\n                startOp(\"xmlNewNodeEatName\");\n                incNodeIdx();\n                node = xmlNewNodeEatName(\n                    nodeGetNs(getNode(1), getInt(0)),\n                    name = uncheckedStrdup(getStr(0)));\n                oomReport = (name != NULL && node == NULL);\n                if (fixNs(node) < 0)\n                    oomReport = 1;\n                setNode(0, node);\n                break;\n            }\n\n            case OP_XML_NEW_DOC_NODE: {\n                xmlNodePtr node;\n                const xmlChar *name;\n\n                startOp(\"xmlNewDocNode\");\n                incNodeIdx();\n                node = xmlNewDocNode(\n                    getDoc(1),\n                    nodeGetNs(getNode(2), getInt(0)),\n                    name = getStr(0),\n                    getStr(1));\n       …[truncated]"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "LLVMFuzzerTestOneInput"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 0, \"reached_via\": \"direct\", \"n_callers\": 2}"
+    },
+    {
+      "iter": 1,
+      "tool": "read_function",
+      "args": {
+        "name": "dropNode"
+      },
+      "result": "dropNode(xmlNodePtr node) {\n    xmlNodePtr *nodes = vars->nodes;\n    xmlNodePtr tree;\n    xmlDocPtr doc;\n    int docReferenced = 0;\n    int i;\n\n    if (node == NULL)\n        return;\n\n    tree = nodeGetTree(node);\n    doc = node->doc;\n\n    for (i = 0; i < REG_MAX; i++) {\n        xmlNodePtr other;\n\n        other = nodes[i];\n        if (other == NULL)\n            continue;\n\n          \n                                                         \n           \n        if (nodeGetTree(other) == tree)\n            return;\n        if (doc != NULL && other->doc == doc)\n            docReferenced = 1;\n    }\n\n    if (tree != (xmlNodePtr) doc && !isDtdChild(tree)) {\n        if (doc == NULL || tree->type != XML_DTD_NODE ||\n            ((xmlDtdPtr) tree != doc->intSubset &&\n             (xmlDtdPtr) tree != doc->extSubset))\n            xmlFreeNode(tree);\n    }\n\n      \n                                                                 \n       \n    if (doc != NULL && !docReferenced)\n        xmlFreeDoc(doc);\n}"
+    },
+    {
+      "iter": 2,
+      "tool": "read_function",
+      "args": {
+        "name": "removeNode"
+      },
+      "result": "removeNode(xmlNodePtr node) {\n    int i;\n\n    for (i = 0; i < REG_MAX; i++)\n        if (vars->nodes[i] == node)\n            vars->nodes[i] = NULL;\n}"
+    },
+    {
+      "iter": 3,
+      "tool": "read_function",
+      "args": {
+        "name": "setNode"
+      },
+      "result": "setNode(int offset, xmlNodePtr node) {\n    int idx = (vars->nodeIdx - offset - 1) & REG_MASK;\n    xmlNodePtr oldNode = vars->nodes[idx];\n\n    if (node != oldNode) {\n        vars->nodes[idx] = node;\n        dropNode(oldNode);\n    }\n\n    if (node == NULL)\n        DEBUG(\" ) /* NULL */\\n\");\n    else\n        DEBUG(\" ) -> n%d\\n\", idx);\n}"
+    },
+    {
+      "iter": 4,
+      "tool": "read_function",
+      "args": {
+        "name": "getNode"
+      },
+      "result": "getNode(int offset) {\n    int idx = (vars->nodeIdx - offset - 1) & REG_MASK;\n    if (vars->nodes[idx])\n        DEBUG(\" n%d\", idx);\n    else\n        DEBUG(\" NULL\");\n    fflush(stdout);\n    return vars->nodes[idx];\n}"
+    },
+    {
+      "iter": 5,
+      "tool": "read_function",
+      "args": {
+        "name": "opXmlCopyNodeList"
+      },
+      "result": "(not found)"
+    },
+    {
+      "iter": 6,
+      "tool": "read_function",
+      "args": {
+        "name": "opDup"
+      },
+      "result": "opDup(int op) {\n    int offset;\n\n    switch (op) {\n        case OP_DUP_INTEGER:\n            incIntIdx(); break;\n        case OP_DUP_STRING:\n            incStrIdx(); break;\n        case OP_DUP_NODE:\n            incNodeIdx(); break;\n        default:\n            break;\n    }\n\n    offset = (xmlFuzzReadInt(1) + 1) & REG_MASK;\n\n    if (offset != 0) {\n        startOp(\"dup\");\n        switch (op) {\n            case OP_DUP_INTEGER:\n                setInt(0, getInt(offset));\n                endOp();\n                break;\n            case OP_DUP_STRING:\n                copyStr(0, getStr(offset));\n                endOp();\n                break;\n            case OP_DUP_NODE:\n                setNode(0, getNode(offset));\n                break;\n            default:\n                break;\n        }\n    }\n}"
+    },
+    {
+      "iter": 7,
+      "tool": "read_function",
+      "args": {
+        "name": "opXmlCopyNodeList"
+      },
+      "result": "(not found)"
+    },
+    {
+      "iter": 8,
+      "tool": "read_function",
+      "args": {
+        "name": "opXmlDocCopyNodeList"
+      },
+      "result": "(not found)"
+    },
+    {
+      "iter": 9,
+      "tool": "read_function",
+      "args": {
+        "name": "opXmlRemoveProp"
+      },
+      "result": "(not found)"
+    },
+    {
+      "iter": 10,
+      "tool": "read_function",
+      "args": {
+        "name": "opXmlUnsetProp"
+      },
+      "result": "(not found)"
+    },
+    {
+      "iter": 11,
+      "tool": "read_function",
+      "args": {
+        "name": "opXmlCopyNode"
+      },
+      "result": "(not found)"
+    },
+    {
+      "iter": 12,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "partial",
+        "pattern_present": true,
+        "reasoning": "From code inspection of the harness helpers:\n\n- The harness maintains a ring of xmlNodePtr registers vars->nodes[]. setNode() overwrites a slot and calls dropNode(oldNode) to free the old node/doc if no other register references the same tree/doc.\n- opDup(OP_DUP_NODE) can create multiple registers pointing to the same xmlNodePtr (aliasing) by setNode(0, getNode(offset)).\n- removeNode(node) exists and clears all registers equal to a node pointer, but it is only effective if called whenever a node is freed/detached by libxml2 APIs.\n- dropNode(node) attempts to avoid double-free by scanning all registers: if any other register’s nodeGetTree(other) equals the tree of the node being dropped, it returns without freeing. This is a partial guard.\n\nHowever, this guard is incomplete for the suspicious scenario described: if a libxml2 API frees a node/tree/doc indirectly (e.g., xmlFreeNodeList(copy), xmlRemoveProp/xmlUnsetProp, or other detach/free operations) without the harness clearing corresponding vars->nodes[] entries, then vars->nodes[] can retain stale pointers. Later, when setNode overwrites that slot or final cleanup calls dropNode(stale), dropNode will dereference node->doc and call nodeGetTree(node) on freed memory, leading to ASan UAF; or it may call xmlFreeNode/xmlFreeDoc again, leading to double-free. The harness does not have a general mechanism to invalidate registers on indirect frees; it relies on explicit removeNode calls.\n\nI did not run a reach_probe, so no concrete crashing input is confirmed; evidence is limited to the presence of aliasing + partial lifetime tracking + freeing in dropNode that dereferences node fields.",
+        "corrected_description": "Likely heap use-after-free (and possibly double-free) in the fuzz harness lifetime management: vars->nodes[] may retain pointers to libxml2 nodes/docs that were freed indirectly by certain libxml2 operations; later dropNode() dereferences and/or frees them again during register overwrite or cleanup.",
+        "control_flow_to_bug": "LLVMFuzzerTestOneInput loop executes operations that (1) store xmlNodePtr/xmlDocPtr into vars->nodes via setNode(), possibly aliasing via OP_DUP_NODE; (2) perform some libxml2 operation that frees/detaches a node/attr/list without calling removeNode() to clear all registers; then (3) either overwrite a register slot (setNode -> dropNode(oldNode)) or exit and run cleanup that calls dropNode() on remaining vars->nodes entries. dropNode() calls nodeGetTree(node) and reads node->doc, then may call xmlFreeNode(tree) and/or xmlFreeDoc(doc), triggering UAF/double-free if node/doc already freed."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1084,
+      "output_tokens": 60,
+      "total_tokens": 1144,
+      "latency_ms": 1008
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 2566,
+      "output_tokens": 18,
+      "total_tokens": 2584,
+      "latency_ms": 751
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2835,
+      "output_tokens": 18,
+      "total_tokens": 2853,
+      "latency_ms": 812
+    },
+    {
+      "iter": 3,
+      "model": "gpt-5.2",
+      "input_tokens": 2912,
+      "output_tokens": 18,
+      "total_tokens": 2930,
+      "latency_ms": 848
+    },
+    {
+      "iter": 4,
+      "model": "gpt-5.2",
+      "input_tokens": 3041,
+      "output_tokens": 18,
+      "total_tokens": 3059,
+      "latency_ms": 728
+    },
+    {
+      "iter": 5,
+      "model": "gpt-5.2",
+      "input_tokens": 3131,
+      "output_tokens": 21,
+      "total_tokens": 3152,
+      "latency_ms": 828
+    },
+    {
+      "iter": 6,
+      "model": "gpt-5.2",
+      "input_tokens": 3166,
+      "output_tokens": 18,
+      "total_tokens": 3184,
+      "latency_ms": 772
+    },
+    {
+      "iter": 7,
+      "model": "gpt-5.2",
+      "input_tokens": 3375,
+      "output_tokens": 21,
+      "total_tokens": 3396,
+      "latency_ms": 811
+    },
+    {
+      "iter": 8,
+      "model": "gpt-5.2",
+      "input_tokens": 3410,
+      "output_tokens": 22,
+      "total_tokens": 3432,
+      "latency_ms": 1021
+    },
+    {
+      "iter": 9,
+      "model": "gpt-5.2",
+      "input_tokens": 3446,
+      "output_tokens": 20,
+      "total_tokens": 3466,
+      "latency_ms": 792
+    },
+    {
+      "iter": 10,
+      "model": "gpt-5.2",
+      "input_tokens": 3480,
+      "output_tokens": 20,
+      "total_tokens": 3500,
+      "latency_ms": 893
+    },
+    {
+      "iter": 11,
+      "model": "gpt-5.2",
+      "input_tokens": 3514,
+      "output_tokens": 20,
+      "total_tokens": 3534,
+      "latency_ms": 708
+    },
+    {
+      "iter": 12,
+      "model": "gpt-5.2",
+      "input_tokens": 3575,
+      "output_tokens": 625,
+      "total_tokens": 4200,
+      "latency_ms": 8309
+    }
+  ],
+  "token_totals": {
+    "input": 39535,
+    "output": 899,
+    "total": 40434,
+    "llm_calls": 13
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: api   Sanitizer: address\nFunction: LLVMFuzzerTestOneInput\nClaimed bug type: double-free\nSuspicious-point description (from the finder — may be imprecise): Potential heap use-after-free / double-free due to manual lifetime management of xmlNode/xmlAttr pointers stored in vars->nodes combined with operations that explicitly free or detach nodes/attrs. In particular, cases like OP_XML_COPY_NODE_LIST/OP_XML_DOC_COPY_NODE_LIST free returned lists via xmlFreeNodeList(copy) without clearing any corresponding register; other cases call removeNode(node), dropNode(oldParent/oldDoc), xmlRemoveProp/xmlUnsetProp which may free underlying structures. If any of these freed pointers remain stored in vars->nodes and later reused by getNode/getAttr or freed again in the final cleanup loop (dropNode(node)), ASan could detect UAF/double-free. Root cause: fuzzer keeps global registry of pointers but does not consistently null/replace entries when library calls may free them indirectly.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a double-free\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_ZYAsc42d7Hlk1grcr57aOWOH",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"LLVMFuzzerTestOneInput\"}"
+          }
+        },
+        {
+          "id": "call_V0kHTx8nn86EKAnV4fWmftYN",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"LLVMFuzzerTestOneInput\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ZYAsc42d7Hlk1grcr57aOWOH",
+      "content": "LLVMFuzzerTestOneInput(const char *data, size_t size) {\n    size_t failurePos;\n    int i;\n\n    if (size > 1000)\n        return 0;\n\n    memset(vars, 0, sizeof(*vars));\n\n    xmlFuzzDataInit(data, size);\n\n    failurePos = xmlFuzzReadInt(4) % (size * 50 + 10);\n    xmlFuzzInjectFailure(failurePos);\n\n      \n                       \n      \n                                              \n      \n                              \n                                                   \n                                           \n                            \n                      \n                            \n                                                \n                                 \n       \n\n    while (xmlFuzzBytesRemaining()) {\n        size_t readSize;\n        int op = xmlFuzzReadInt(1);\n        int oomReport = -1;                       \n        int ioReport = 0;\n\n        vars->opName = \"[unset]\";\n\n        switch (op) {\n            case OP_CREATE_INTEGER:\n                incIntIdx();\n                setInt(0, (int) xmlFuzzReadInt(4));\n                break;\n\n            case OP_CREATE_STRING:\n                incStrIdx();\n                copyStr(0, BAD_CAST xmlFuzzReadString(&readSize));\n                break;\n\n            case OP_DUP_INTEGER:\n            case OP_DUP_STRING:\n            case OP_DUP_NODE:\n                opDup(op);\n                break;\n\n            case OP_PARSE_DOCUMENT:\n                  \n                                                                       \n                                                                 \n                                        \n                  \n                                                                      \n                                                     \n                   \n                startOp(\"xmlReadDoc\");\n                incNodeIdx();\n                setNode(0, (xmlNodePtr) xmlReadDoc(\n                    getStr(0),\n                    getCStr(1),\n                    getCStr(2),\n                    getInt(0)));\n                break;\n\n            case OP_XML_NEW_DOC: {\n                xmlDocPtr doc;\n\n                  \n                                                                     \n                                                                     \n                                              \n                   \n                startOp(\"xmlNewDoc\");\n                incNodeIdx();\n                doc = xmlNewDoc(getStr(0));\n                oomReport = (doc == NULL);\n                setNode(0, (xmlNodePtr) doc);\n                break;\n            }\n\n            case OP_XML_NEW_NODE: {\n                xmlNodePtr node;\n                const xmlChar *name;\n\n                startOp(\"xmlNewNode\");\n                incNodeIdx();\n                node = xmlNewNode(\n                    nodeGetNs(getNode(1), getInt(0)),\n                    name = getStr(0));\n                oomReport = (name != NULL && node == NULL);\n                if (fixNs(node) < 0)\n                    oomReport = 1;\n                setNode(0, node);\n                break;\n            }\n\n            case OP_XML_NEW_NODE_EAT_NAME: {\n                xmlNodePtr node;\n                xmlChar *name;\n\n                startOp(\"xmlNewNodeEatName\");\n                incNodeIdx();\n                node = xmlNewNodeEatName(\n                    nodeGetNs(getNode(1), getInt(0)),\n                    name = uncheckedStrdup(getStr(0)));\n                oomReport = (name != NULL && node == NULL);\n                if (fixNs(node) < 0)\n                    oomReport = 1;\n                setNode(0, node);\n                break;\n            }\n\n            case OP_XML_NEW_DOC_NODE: {\n                xmlNodePtr node;\n                const xmlChar *name;\n\n                startOp(\"xmlNewDocNode\");\n                incNodeIdx();\n                node = xmlNewDocNode(\n                    getDoc(1),\n                    nodeGetNs(getNode(2), getInt(0)),\n                    name = getStr(0),\n                    getStr(1));\n                oomReport = (name != NULL && node == NULL);\n                if (fixNs(node) < 0)\n                    oomReport = 1;\n                setNode(0, node);\n                break;\n            }\n\n            case OP_XML_NEW_DOC_NODE_EAT_NAME: {\n                xmlNodePtr node;\n                xmlChar *name;\n\n                startOp(\"xmlNewDocNodeEatName\");\n                incNodeIdx();\n                node = xmlNewDocNodeEatName(\n                    getDoc(1),\n                    nodeGetNs(getNode(2), getInt(0)),\n                    name = uncheckedStrdup(getStr(0)),\n                    getStr(1));\n                oomReport = (name != NULL && node == NULL);\n                if (fixNs(node) < 0)\n                    oomReport = 1;\n                setNode(0, node);\n                break;\n            }\n\n            case OP_XML_NEW_DOC_RAW_NODE: {\n                xmlNodePtr node;\n                const xmlChar *name;\n\n                startOp(\"xmlNewDocRawNode\");\n                incNodeIdx();\n                node = xmlNewDocRawNode(\n                    getDoc(1),\n                    nodeGetNs(getNode(2), getInt(0)),\n                    name = getStr(0),\n                    getStr(1));\n                oomReport = (name != NULL && node == NULL);\n                if (fixNs(node) < 0)\n                    oomReport = 1;\n                setNode(0, node);\n                break;\n            }\n\n            case OP_XML_NEW_CHILD: {\n                xmlNodePtr parent, node;\n                const xmlChar *name;\n\n                startOp(\"xmlNewChild\");\n                incNodeIdx();\n                                                        \n                node = xmlNewChild(\n                    parent = getNode(1),\n                    nodeGetNs(getNode(1), getInt(0)),\n                    name = getStr(0),\n                    getStr(1));\n                oomReport =\n                    (parent != NULL &&\n                     isValidChildType(parent, XML_ELEMENT_NODE) &&\n                     "
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_V0kHTx8nn86EKAnV4fWmftYN",
+      "content": "{\"reachable\": true, \"call_depth\": 0, \"reached_via\": \"direct\", \"n_callers\": 2}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_OlNff9bJD5IjgkkdYzjNtSMt",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"dropNode\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_OlNff9bJD5IjgkkdYzjNtSMt",
+      "content": "dropNode(xmlNodePtr node) {\n    xmlNodePtr *nodes = vars->nodes;\n    xmlNodePtr tree;\n    xmlDocPtr doc;\n    int docReferenced = 0;\n    int i;\n\n    if (node == NULL)\n        return;\n\n    tree = nodeGetTree(node);\n    doc = node->doc;\n\n    for (i = 0; i < REG_MAX; i++) {\n        xmlNodePtr other;\n\n        other = nodes[i];\n        if (other == NULL)\n            continue;\n\n          \n                                                         \n           \n        if (nodeGetTree(other) == tree)\n            return;\n        if (doc != NULL && other->doc == doc)\n            docReferenced = 1;\n    }\n\n    if (tree != (xmlNodePtr) doc && !isDtdChild(tree)) {\n        if (doc == NULL || tree->type != XML_DTD_NODE ||\n            ((xmlDtdPtr) tree != doc->intSubset &&\n             (xmlDtdPtr) tree != doc->extSubset))\n            xmlFreeNode(tree);\n    }\n\n      \n                                                                 \n       \n    if (doc != NULL && !docReferenced)\n        xmlFreeDoc(doc);\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_6bBHblt7EazWuNlS8fJ7Zhes",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"removeNode\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_6bBHblt7EazWuNlS8fJ7Zhes",
+      "content": "removeNode(xmlNodePtr node) {\n    int i;\n\n    for (i = 0; i < REG_MAX; i++)\n        if (vars->nodes[i] == node)\n            vars->nodes[i] = NULL;\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_DA8PRdyRjZFnyjf70RWhvigJ",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"setNode\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_DA8PRdyRjZFnyjf70RWhvigJ",
+      "content": "setNode(int offset, xmlNodePtr node) {\n    int idx = (vars->nodeIdx - offset - 1) & REG_MASK;\n    xmlNodePtr oldNode = vars->nodes[idx];\n\n    if (node != oldNode) {\n        vars->nodes[idx] = node;\n        dropNode(oldNode);\n    }\n\n    if (node == NULL)\n        DEBUG(\" ) /* NULL */\\n\");\n    else\n        DEBUG(\" ) -> n%d\\n\", idx);\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_lYAcewgUBVICn0iprdwfH0gY",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"getNode\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_lYAcewgUBVICn0iprdwfH0gY",
+      "content": "getNode(int offset) {\n    int idx = (vars->nodeIdx - offset - 1) & REG_MASK;\n    if (vars->nodes[idx])\n        DEBUG(\" n%d\", idx);\n    else\n        DEBUG(\" NULL\");\n    fflush(stdout);\n    return vars->nodes[idx];\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_rEnH1FTTkfh0ruhMG7F5BWci",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"opXmlCopyNodeList\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_rEnH1FTTkfh0ruhMG7F5BWci",
+      "content": "(not found)"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_FJ3SR4P0VD2DX9dPiTPDV7iN",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"opDup\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_FJ3SR4P0VD2DX9dPiTPDV7iN",
+      "content": "opDup(int op) {\n    int offset;\n\n    switch (op) {\n        case OP_DUP_INTEGER:\n            incIntIdx(); break;\n        case OP_DUP_STRING:\n            incStrIdx(); break;\n        case OP_DUP_NODE:\n            incNodeIdx(); break;\n        default:\n            break;\n    }\n\n    offset = (xmlFuzzReadInt(1) + 1) & REG_MASK;\n\n    if (offset != 0) {\n        startOp(\"dup\");\n        switch (op) {\n            case OP_DUP_INTEGER:\n                setInt(0, getInt(offset));\n                endOp();\n                break;\n            case OP_DUP_STRING:\n                copyStr(0, getStr(offset));\n                endOp();\n                break;\n            case OP_DUP_NODE:\n                setNode(0, getNode(offset));\n                break;\n            default:\n                break;\n        }\n    }\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_fVK4s30VkXL5xuoyY0djkjU3",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"opXmlCopyNodeList\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_fVK4s30VkXL5xuoyY0djkjU3",
+      "content": "(not found)"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_AiS8ZmbkP4C6ODuoSvbo2IM5",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"opXmlDocCopyNodeList\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_AiS8ZmbkP4C6ODuoSvbo2IM5",
+      "content": "(not found)"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_QVeSIWQJUllQlJ2W8f4129fv",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"opXmlRemoveProp\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_QVeSIWQJUllQlJ2W8f4129fv",
+      "content": "(not found)"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_FR51Wq7wRc7R6nHcqLycUbw2",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"opXmlUnsetProp\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_FR51Wq7wRc7R6nHcqLycUbw2",
+      "content": "(not found)"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_Vk45QAizyjl0QQHQB2eMd07I",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"opXmlCopyNode\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Vk45QAizyjl0QQHQB2eMd07I",
+      "content": "(not found)"
+    },
+    {
+      "role": "user",
+      "content": "You are out of steps. Call submit_evidence NOW with your best reading — do not read or probe further."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_gcCYmk613DA0VyAqHSCi88G2",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"partial\",\"pattern_present\":true,\"reasoning\":\"From code inspection of the harness helpers:\\n\\n- The harness maintains a ring of xmlNodePtr registers vars->nodes[]. setNode() overwrites a slot and calls dropNode(oldNode) to free the old node/doc if no other register references the same tree/doc.\\n- opDup(OP_DUP_NODE) can create multiple registers pointing to the same xmlNodePtr (aliasing) by setNode(0, getNode(offset)).\\n- removeNode(node) exists and clears all registers equal to a node pointer, but it is only effective if called whenever a node is freed/detached by libxml2 APIs.\\n- dropNode(node) attempts to avoid double-free by scanning all registers: if any other register’s nodeGetTree(other) equals the tree of the node being dropped, it returns without freeing. This is a partial guard.\\n\\nHowever, this guard is incomplete for the suspicious scenario described: if a libxml2 API frees a node/tree/doc indirectly (e.g., xmlFreeNodeList(copy), xmlRemoveProp/xmlUnsetProp, or other detach/free operations) without the harness clearing corresponding vars->nodes[] entries, then vars->nodes[] can retain stale pointers. Later, when setNode overwrites that slot or final cleanup calls dropNode(stale), dropNode will dereference node->doc and call nodeGetTree(node) on freed memory, leading to ASan UAF; or it may call xmlFreeNode/xmlFreeDoc again, leading to double-free. The harness does not have a general mechanism to invalidate registers on indirect frees; it relies on explicit removeNode calls.\\n\\nI did not run a reach_probe, so no concrete crashing input is confirmed; evidence is limited to the presence of aliasing + partial lifetime tracking + freeing in dropNode that dereferences node fields.\" ,\"corrected_description\":\"Likely heap use-after-free (and possibly double-free) in the fuzz harness lifetime management: vars->nodes[] may retain pointers to libxml2 nodes/docs that were freed indirectly by certain libxml2 operations; later dropNode() dereferences and/or frees them again during register overwrite or cleanup.\",\"control_flow_to_bug\":\"LLVMFuzzerTestOneInput loop executes operations that (1) store xmlNodePtr/xmlDocPtr into vars->nodes via setNode(), possibly aliasing via OP_DUP_NODE; (2) perform some libxml2 operation that frees/detaches a node/attr/list without calling removeNode() to clear all registers; then (3) either overwrite a register slot (setNode -> dropNode(oldNode)) or exit and run cleanup that calls dropNode() on remaining vars->nodes entries. dropNode() calls nodeGetTree(node) and reads node->doc, then may call xmlFreeNode(tree) and/or xmlFreeDoc(doc), triggering UAF/double-free if node/doc already freed.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_gcCYmk613DA0VyAqHSCi88G2",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "LLVMFuzzerTestOneInput"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Potential heap use-after-free / double-free due to manual lifetime management of xmlNode/xmlAttr pointers stored in vars->nodes combined with operations that explicitly free or detach nodes/attrs. In particular, cases like OP_XML_COPY_NODE_LIST/OP_XML_DOC_COPY_NODE_LIST free returned lists via xmlFreeNodeList(copy) without clearing any corresponding register; other cases call removeNode(node), dropNode(oldParent/oldDoc), xmlRemoveProp/xmlUnsetProp which may free underlying structures. If any of these freed pointers remain stored in vars->nodes and later reused by getNode/getAttr or freed again in the final cleanup loop (dropNode(node)), ASan could detect UAF/double-free. Root cause: fuzzer keeps global registry of pointers but does not consistently null/replace entries when library calls may free them indirectly.",
+  "finder_vuln_type": ""
+}

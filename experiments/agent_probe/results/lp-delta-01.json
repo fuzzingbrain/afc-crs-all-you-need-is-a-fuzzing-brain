@@ -1,0 +1,26 @@
+{
+  "challenge": "lp-delta-01",
+  "fuzzer": "libpng_read_fuzzer",
+  "sanitizer": "address",
+  "functions_indexed": 1310,
+  "ground_truth_functions": [
+    "png_handle_iCCP"
+  ],
+  "q1_finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "png_handle_iCCP"
+    ],
+    "found_ground_truth": true,
+    "matched_functions": [
+      "png_handle_iCCP"
+    ]
+  },
+  "q2_verifier": {
+    "verdict_real": true,
+    "score": 0.95,
+    "is_important": true,
+    "reason": "CONFIRMED: Stack buffer overflow in png_handle_iCCP due to type confusion. Buffer is wpng_byte[41] (82 bytes, 41 elements of 2-byte wpng_byte), but loop bound uses sizeof(keyword)=82 as if it were element count. Loop at line 1446 can access keyword[0] through keyword[80], but valid indices are only 0-40. This is a classic sizeof() confusion bug where byte size is used as element count for non-char",
+    "target_function": "png_handle_iCCP"
+  }
+}

@@ -1,0 +1,190 @@
+{
+  "tag": "cm-full-01__lcms-001",
+  "gt": "EmitCIEBasedDEF",
+  "crash_type": "SEGV",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": false,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Read EmitCIEBasedDEF: it unconditionally does `mpe = Pipeline->Elements;` then immediately calls `cmsStageInputChannels(mpe)` and later `cmsStageType(mpe)` without checking `Pipeline` or `mpe` for NULL. It also does `mpe = mpe->Next;` and then calls `cmsStageType(mpe)` again without checking if `mpe` became NULL. Therefore a NULL dereference is structurally present if Pipeline==NULL, Pipeline->Elements==NULL (empty pipeline), or if the first stage is a CurveSet and there is no next stage. However, I could not run reach_probe due to missing ASan binary path in the environment, so I have no dynamic evidence that fuzzer input can actually construct such a pipeline and reach this function with those NULL conditions. From code alone, the bug exists but taint-to-operand and triggerability from fuzzer input are unproven here.",
+    "corrected_description": "Potential NULL pointer dereference in EmitCIEBasedDEF: it dereferences `Pipeline` and `Pipeline->Elements` without NULL checks and may dereference `mpe` after advancing to `mpe->Next` without verifying non-NULL. If called with a NULL/empty pipeline or a pipeline whose first stage is CurveSet with no subsequent stage, it can SEGV in cmsStageInputChannels/cmsStageType/_cmsStageGetPtrToCurveSet.",
+    "control_flow_to_bug": "cms_postscript_fuzzer -> (postscript generation path) -> caller of EmitCIEBasedDEF (single direct caller per reachability) -> EmitCIEBasedDEF(m, Pipeline, Intent, BlackPoint): sets `mpe = Pipeline->Elements`; crash if Pipeline==NULL or Elements==NULL when calling cmsStageInputChannels(mpe). Alternatively, if first stage is cmsSigCurveSetElemType, it does `mpe = mpe->Next`; crash if Next==NULL when calling cmsStageType(mpe) in the subsequent CLUT check."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.2,
+  "verdict": "WEAK/FP",
+  "basis": "operand not input-tainted",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "EmitCIEBasedDEF"
+      },
+      "result": "int EmitCIEBasedDEF(cmsIOHANDLER* m, cmsPipeline* Pipeline, cmsUInt32Number Intent, cmsCIEXYZ* BlackPoint)\n{\n    const char* PreMaj;\n    const char* PostMaj;\n    const char* PreMin, *PostMin;\n    cmsStage* mpe;\n        \n    mpe = Pipeline->Elements;\n\n    switch (cmsStageInputChannels(mpe)) {\n    case 3:\n        _cmsIOPrintf(m, \"[ /CIEBasedDEF\\n\");\n        PreMaj = \"<\";\n        PostMaj = \">\\n\";\n        PreMin = PostMin = \"\";\n        break;\n\n    case 4:\n        _cmsIOPrintf(m, \"[ /CIEBasedDEFG\\n\");\n        PreMaj = \"[\";\n        PostMaj = \"]\\n\";\n        PreMin = \"<\";\n        PostMin = \">\\n\";\n        break;\n\n    default:\n        return 0;\n\n    }\n\n    _cmsIOPrintf(m, \"<<\\n\");\n\n    if (cmsStageType(mpe) == cmsSigCurveSetElemType) {\n\n        _cmsIOPrintf(m, \"/DecodeDEF [ \");\n        EmitNGamma(m, cmsStageOutputChannels(mpe), _cmsStageGetPtrToCurveSet(mpe));\n        _cmsIOPrintf(m, \"]\\n\");\n\n        mpe = mpe ->Next;\n    }\n\n    if (cmsStageType(mpe) == cmsSigCLutElemType) {\n\n            _cmsIOPrintf(m, \"/Table \");\n            WriteCLUT(m, mpe, PreMaj, PostMaj, PreMin, PostMin, FALSE, (cmsColorSpaceSignature) 0);\n            _cmsIOPrintf(m, \"]\\n\");\n    }\n\n    EmitLab2XYZ(m);\n    EmitWhiteBlackD50(m, BlackPoint);\n    EmitIntent(m, Intent);\n\n    _cmsIOPrintf(m, \"   >>\\n\");\n    _cmsIOPrintf(m, \"]\\n\");\n\n    return 1;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "EmitCIEBasedDEF"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Minimal ICC-like blob; likely rejected but try to reach PS writer paths.\n    # We'll just return empty to see if fuzzer harness constructs Pipeline anyway.\n    return b\"\"",
+        "target": "EmitCIEBasedDEF"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cm-full-01/bugs/lcms-001/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": false,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Read EmitCIEBasedDEF: it unconditionally does `mpe = Pipeline->Elements;` then immediately calls `cmsStageInputChannels(mpe)` and later `cmsStageType(mpe)` without checking `Pipeline` or `mpe` for NULL. It also does `mpe = mpe->Next;` and then calls `cmsStageType(mpe)` again without checking if `mpe` became NULL. Therefore a NULL dereference is structurally present if Pipeline==NULL, Pipeline->Elements==NULL (empty pipeline), or if the first stage is a CurveSet and there is no next stage. However, I could not run reach_probe due to missing ASan binary path in the environment, so I have no dynamic evidence that fuzzer input can actually construct such a pipeline and reach this function with those NULL conditions. From code alone, the bug exists but taint-to-operand and triggerability from fuzzer input are unproven here.",
+        "corrected_description": "Potential NULL pointer dereference in EmitCIEBasedDEF: it dereferences `Pipeline` and `Pipeline->Elements` without NULL checks and may dereference `mpe` after advancing to `mpe->Next` without verifying non-NULL. If called with a NULL/empty pipeline or a pipeline whose first stage is CurveSet with no subsequent stage, it can SEGV in cmsStageInputChannels/cmsStageType/_cmsStageGetPtrToCurveSet.",
+        "control_flow_to_bug": "cms_postscript_fuzzer -> (postscript generation path) -> caller of EmitCIEBasedDEF (single direct caller per reachability) -> EmitCIEBasedDEF(m, Pipeline, Intent, BlackPoint): sets `mpe = Pipeline->Elements`; crash if Pipeline==NULL or Elements==NULL when calling cmsStageInputChannels(mpe). Alternatively, if first stage is cmsSigCurveSetElemType, it does `mpe = mpe->Next`; crash if Next==NULL when calling cmsStageType(mpe) in the subsequent CLUT check."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1088,
+      "output_tokens": 58,
+      "total_tokens": 1146,
+      "latency_ms": 1099
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1692,
+      "output_tokens": 72,
+      "total_tokens": 1764,
+      "latency_ms": 1817
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1813,
+      "output_tokens": 455,
+      "total_tokens": 2268,
+      "latency_ms": 5621
+    }
+  ],
+  "token_totals": {
+    "input": 4593,
+    "output": 585,
+    "total": 5178,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: cms_postscript_fuzzer   Sanitizer: address\nFunction: EmitCIEBasedDEF\nClaimed bug type: SEGV\nSuspicious-point description (from the finder — may be imprecise): Null pointer dereference in newly added EmitCIEBasedDEF: function assigns `mpe = Pipeline->Elements` and immediately calls `cmsStageInputChannels(mpe)`/`cmsStageType(mpe)` without validating `Pipeline` or `Pipeline->Elements`. It then advances `mpe = mpe->Next` and again calls `cmsStageType(mpe)` and `_cmsStageGetPtrToCurveSet(mpe)` without checking `mpe` is non-NULL after traversal. If a profile leads to a `cmsPipeline` with zero stages or fewer stages than expected, ASan will crash on dereference/call through NULL. Related vars/calls: `Pipeline->Elements`, `mpe->Next`, `cmsStageInputChannels`, `cmsStageType`, `_cmsStageGetPtrToCurveSet`.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a SEGV\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_gNiWipcMgSkHO3YA88usYOOU",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"EmitCIEBasedDEF\"}"
+          }
+        },
+        {
+          "id": "call_EdH8IQsdRh65ZMQKKsnmQNkc",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"EmitCIEBasedDEF\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_gNiWipcMgSkHO3YA88usYOOU",
+      "content": "int EmitCIEBasedDEF(cmsIOHANDLER* m, cmsPipeline* Pipeline, cmsUInt32Number Intent, cmsCIEXYZ* BlackPoint)\n{\n    const char* PreMaj;\n    const char* PostMaj;\n    const char* PreMin, *PostMin;\n    cmsStage* mpe;\n        \n    mpe = Pipeline->Elements;\n\n    switch (cmsStageInputChannels(mpe)) {\n    case 3:\n        _cmsIOPrintf(m, \"[ /CIEBasedDEF\\n\");\n        PreMaj = \"<\";\n        PostMaj = \">\\n\";\n        PreMin = PostMin = \"\";\n        break;\n\n    case 4:\n        _cmsIOPrintf(m, \"[ /CIEBasedDEFG\\n\");\n        PreMaj = \"[\";\n        PostMaj = \"]\\n\";\n        PreMin = \"<\";\n        PostMin = \">\\n\";\n        break;\n\n    default:\n        return 0;\n\n    }\n\n    _cmsIOPrintf(m, \"<<\\n\");\n\n    if (cmsStageType(mpe) == cmsSigCurveSetElemType) {\n\n        _cmsIOPrintf(m, \"/DecodeDEF [ \");\n        EmitNGamma(m, cmsStageOutputChannels(mpe), _cmsStageGetPtrToCurveSet(mpe));\n        _cmsIOPrintf(m, \"]\\n\");\n\n        mpe = mpe ->Next;\n    }\n\n    if (cmsStageType(mpe) == cmsSigCLutElemType) {\n\n            _cmsIOPrintf(m, \"/Table \");\n            WriteCLUT(m, mpe, PreMaj, PostMaj, PreMin, PostMin, FALSE, (cmsColorSpaceSignature) 0);\n            _cmsIOPrintf(m, \"]\\n\");\n    }\n\n    EmitLab2XYZ(m);\n    EmitWhiteBlackD50(m, BlackPoint);\n    EmitIntent(m, Intent);\n\n    _cmsIOPrintf(m, \"   >>\\n\");\n    _cmsIOPrintf(m, \"]\\n\");\n\n    return 1;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_EdH8IQsdRh65ZMQKKsnmQNkc",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_EM3Dk1M6StfxHx6U5DkFf8Vr",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Minimal ICC-like blob; likely rejected but try to reach PS writer paths.\\n    # We'll just return empty to see if fuzzer harness constructs Pipeline anyway.\\n    return b\\\"\\\"\",\"target\":\"EmitCIEBasedDEF\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_EM3Dk1M6StfxHx6U5DkFf8Vr",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cm-full-01/bugs/lcms-001/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_ONSoXXMpgCW14WZ4Te9eQCOF",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":false,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Read EmitCIEBasedDEF: it unconditionally does `mpe = Pipeline->Elements;` then immediately calls `cmsStageInputChannels(mpe)` and later `cmsStageType(mpe)` without checking `Pipeline` or `mpe` for NULL. It also does `mpe = mpe->Next;` and then calls `cmsStageType(mpe)` again without checking if `mpe` became NULL. Therefore a NULL dereference is structurally present if Pipeline==NULL, Pipeline->Elements==NULL (empty pipeline), or if the first stage is a CurveSet and there is no next stage. However, I could not run reach_probe due to missing ASan binary path in the environment, so I have no dynamic evidence that fuzzer input can actually construct such a pipeline and reach this function with those NULL conditions. From code alone, the bug exists but taint-to-operand and triggerability from fuzzer input are unproven here.\",\"corrected_description\":\"Potential NULL pointer dereference in EmitCIEBasedDEF: it dereferences `Pipeline` and `Pipeline->Elements` without NULL checks and may dereference `mpe` after advancing to `mpe->Next` without verifying non-NULL. If called with a NULL/empty pipeline or a pipeline whose first stage is CurveSet with no subsequent stage, it can SEGV in cmsStageInputChannels/cmsStageType/_cmsStageGetPtrToCurveSet.\",\"control_flow_to_bug\":\"cms_postscript_fuzzer -> (postscript generation path) -> caller of EmitCIEBasedDEF (single direct caller per reachability) -> EmitCIEBasedDEF(m, Pipeline, Intent, BlackPoint): sets `mpe = Pipeline->Elements`; crash if Pipeline==NULL or Elements==NULL when calling cmsStageInputChannels(mpe). Alternatively, if first stage is cmsSigCurveSetElemType, it does `mpe = mpe->Next`; crash if Next==NULL when calling cmsStageType(mpe) in the subsequent CLUT check.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ONSoXXMpgCW14WZ4Te9eQCOF",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "EmitCIEBasedDEF"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Null pointer dereference in newly added EmitCIEBasedDEF: function assigns `mpe = Pipeline->Elements` and immediately calls `cmsStageInputChannels(mpe)`/`cmsStageType(mpe)` without validating `Pipeline` or `Pipeline->Elements`. It then advances `mpe = mpe->Next` and again calls `cmsStageType(mpe)` and `_cmsStageGetPtrToCurveSet(mpe)` without checking `mpe` is non-NULL after traversal. If a profile leads to a `cmsPipeline` with zero stages or fewer stages than expected, ASan will crash on dereference/call through NULL. Related vars/calls: `Pipeline->Elements`, `mpe->Next`, `cmsStageInputChannels`, `cmsStageType`, `_cmsStageGetPtrToCurveSet`.",
+  "finder_vuln_type": ""
+}

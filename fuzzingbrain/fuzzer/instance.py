@@ -50,6 +50,7 @@ class FuzzerInstance:
         config: Union[GlobalFuzzerConfig, SPFuzzerConfig] = None,
         task_id: str = "",
         no_oom: bool = False,
+        sanitizer: str = "address",
     ):
         """
         Initialize FuzzerInstance.
@@ -72,6 +73,7 @@ class FuzzerInstance:
         self.corpus_dir = Path(corpus_dir)
         self.crashes_dir = Path(crashes_dir)
         self.fuzzer_type = fuzzer_type
+        self.sanitizer = (sanitizer or "address").lower()
         # @NO_OOM target: disable libFuzzer's allocator guard (else a memory-heavy
         # decoder floods /crashes with OOM "crashes" and never reaches deep sinks).
         self.no_oom = no_oom
@@ -147,22 +149,26 @@ class FuzzerInstance:
             )
         )
 
-        # Environment variables
+        # Environment variables. SANITIZER and the *_OPTIONS must match the task's
+        # actual sanitizer (was hard-coded to address, which is wrong for memory/
+        # undefined builds). detect_leaks=0 for ASan (an incidental leak must not be
+        # promoted to a bogus PoV that stops the run); halt_on_error for MSan/UBSan
+        # so a finding aborts and libFuzzer records it.
+        _san_opt = {
+            "address": "ASAN_OPTIONS=detect_leaks=0",
+            "memory": "MSAN_OPTIONS=halt_on_error=1",
+            "undefined": "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1",
+        }.get(self.sanitizer, "ASAN_OPTIONS=detect_leaks=0")
         cmd.extend(
             [
                 "-e",
                 "FUZZING_ENGINE=libfuzzer",
                 "-e",
-                "SANITIZER=address",
+                f"SANITIZER={self.sanitizer}",
                 "-e",
                 "ARCHITECTURE=x86_64",
-                # No challenge in this set is a memory-leak (CWE-401) bug, but
-                # fuzzed dissectors leak incidentally all the time; with LSan on
-                # (the ASan default) libFuzzer saves those as crashes and the
-                # monitor promotes an incidental 56-byte leak as a bogus PoV,
-                # stopping the run before it finds the real bug. Turn it off.
                 "-e",
-                "ASAN_OPTIONS=detect_leaks=0",
+                _san_opt,
                 *(
                     ["-e", f"LD_LIBRARY_PATH={staged_ld_library_path(fuzzer_dir, '/fuzzers')}"]
                     if staged_ld_library_path(fuzzer_dir, "/fuzzers")

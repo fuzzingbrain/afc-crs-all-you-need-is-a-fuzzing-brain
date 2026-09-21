@@ -1,0 +1,181 @@
+{
+  "tag": "ws-delta-03__vuln_006",
+  "gt": "dissect_irc_names",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "partial",
+    "pattern_present": true,
+    "reasoning": "Source shows channel_name = malloc(CHANNELLEN+1). In the loop, length = tvb_captured_length_remaining(tvb, start_offset). It searches for ',' within that length. If end_offset == -1 (no comma), it copies with clamp: tvb_memcpy(..., (length < CHANNELLEN)?length:CHANNELLEN) so no overflow there. However, in the comma-present path (end_offset != -1), it does tvb_memcpy(tvb, channel_name, start_offset, length) with length being the entire remaining captured length, not bounded to CHANNELLEN nor to (end_offset-start_offset). This can overflow channel_name when there is a comma anywhere later in the remaining buffer and the remaining length exceeds CHANNELLEN+1. Thus the finder’s description is slightly off: the unclamped copy is in the comma branch, not the no-comma branch. Reachability confirmed by check_reachability (indirect, depth 5). Could not run reach_probe due to missing ASan binary path in environment, so no runtime crash evidence gathered.",
+    "corrected_description": "Heap-buffer-overflow in dissect_irc_names: channel_name is allocated CHANNELLEN+1, but when a comma is found (end_offset != -1) the code calls tvb_memcpy(..., length) where length is tvb_captured_length_remaining from start_offset (potentially much larger than CHANNELLEN), overflowing channel_name. The no-comma path actually clamps the copy.",
+    "control_flow_to_bug": "handler_irc -> IRC request parsing that invokes dissect_irc_names on NAMES command parameters. In dissect_irc_names: first byte at offset must be '#'. Loop: compute length = tvb_captured_length_remaining(tvb, start_offset); find comma with tvb_find_uint8(..., ',', ...). If a comma exists anywhere in remaining buffer (end_offset != -1) and remaining length > CHANNELLEN+1, then tvb_memcpy(tvb, channel_name, start_offset, length) overflows heap buffer before appending text."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.5,
+  "verdict": "LIKELY",
+  "basis": "tainted, partial clamp (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "dissect_irc_names"
+      },
+      "result": " dissect_irc_names(tvbuff_t *tvb, proto_item *item, int offset)\n {\n     proto_tree *tree;\n     int start_offset;\n     int end_offset;\n     int length;\n     uint8_t *channel_name;\n \n     if (tvb_get_uint8(tvb, offset) != '#')\n         return;\n     \n     channel_name = malloc(CHANNELLEN+1);\n \n     if (channel_name == NULL ) {\n         return;\n     }\n \n     start_offset = offset;\n \n     tree = proto_item_add_subtree(item, ett_irc_request_command_names);\n \n     while(tvb_offset_exists(tvb, start_offset) ) {\n         length = tvb_captured_length_remaining(tvb, start_offset);\n         end_offset = tvb_find_uint8(tvb, start_offset, length, ',');\n \n         if ( end_offset == -1 ) {\n             proto_tree_add_item(tree, hf_irc_request_command_names_channel, tvb, start_offset, length, ENC_ASCII);\n             \n             memset(channel_name, 0, CHANNELLEN+1);\n             tvb_memcpy(tvb, channel_name, start_offset, (length < CHANNELLEN) ? length : CHANNELLEN);\n             proto_item_append_text(tree, \"Channel: %s\", channel_name);\n \n             free(channel_name);\n             return;\n         }\n \n         memset(channel_name, 0, CHANNELLEN+1);\n         tvb_memcpy(tvb, channel_name, start_offset, length);\n         proto_item_append_text(tree, \"Channel: %s\", channel_name);\n \n         proto_tree_add_item(tree, hf_irc_request_command_names_channel, tvb, start_offset, end_offset-start_offset, ENC_ASCII);\n         start_offset = end_offset + 1;\n     }\n \n     free(channel_name);\n     return;\n }"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "dissect_irc_names"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 2}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to craft an IRC NAMES command with a comma so we take the comma branch.\n    # Put a very long channel token before comma to overflow channel_name.\n    chan = b\"#\" + b\"A\"*5000 + b\",\" + b\"#b\\r\\n\"\n    # Minimal IRC line: \"NAMES <channels>\\r\\n\"\n    return b\"NAMES \" + chan\n",
+        "target": "dissect_irc_names"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-delta-03/bugs/vuln_006/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "partial",
+        "pattern_present": true,
+        "reasoning": "Source shows channel_name = malloc(CHANNELLEN+1). In the loop, length = tvb_captured_length_remaining(tvb, start_offset). It searches for ',' within that length. If end_offset == -1 (no comma), it copies with clamp: tvb_memcpy(..., (length < CHANNELLEN)?length:CHANNELLEN) so no overflow there. However, in the comma-present path (end_offset != -1), it does tvb_memcpy(tvb, channel_name, start_offset, length) with length being the entire remaining captured length, not bounded to CHANNELLEN nor to (end_offset-start_offset). This can overflow channel_name when there is a comma anywhere later in the remaining buffer and the remaining length exceeds CHANNELLEN+1. Thus the finder’s description is slightly off: the unclamped copy is in the comma branch, not the no-comma branch. Reachability confirmed by check_reachability (indirect, depth 5). Could not run reach_probe due to missing ASan binary path in environment, so no runtime crash evidence gathered.",
+        "corrected_description": "Heap-buffer-overflow in dissect_irc_names: channel_name is allocated CHANNELLEN+1, but when a comma is found (end_offset != -1) the code calls tvb_memcpy(..., length) where length is tvb_captured_length_remaining from start_offset (potentially much larger than CHANNELLEN), overflowing channel_name. The no-comma path actually clamps the copy.",
+        "control_flow_to_bug": "handler_irc -> IRC request parsing that invokes dissect_irc_names on NAMES command parameters. In dissect_irc_names: first byte at offset must be '#'. Loop: compute length = tvb_captured_length_remaining(tvb, start_offset); find comma with tvb_find_uint8(..., ',', ...). If a comma exists anywhere in remaining buffer (end_offset != -1) and remaining length > CHANNELLEN+1, then tvb_memcpy(tvb, channel_name, start_offset, length) overflows heap buffer before appending text."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1046,
+      "output_tokens": 58,
+      "total_tokens": 1104,
+      "latency_ms": 1696
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1581,
+      "output_tokens": 126,
+      "total_tokens": 1707,
+      "latency_ms": 2482
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1758,
+      "output_tokens": 476,
+      "total_tokens": 2234,
+      "latency_ms": 8643
+    }
+  ],
+  "token_totals": {
+    "input": 4385,
+    "output": 660,
+    "total": 5045,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: handler_irc   Sanitizer: address\nFunction: dissect_irc_names\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): `channel_name = malloc(CHANNELLEN+1)`; most copies clamp to CHANNELLEN, but the no-comma path does `tvb_memcpy(tvb, channel_name, start_offset, length)` with `length = tvb_captured_length_remaining(...)` unclamped, overflowing the heap buffer.\n\nControl flow to the bug:\n  - handler_irc; dissect_irc_names iterates channel names\n  - a channel token without a trailing comma takes the unclamped branch\n  - tvb_memcpy(channel_name, start_offset, length) with full remaining length -> heap overflow\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_SyI66pFiuJWjsxfsewLD0iLa",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"dissect_irc_names\"}"
+          }
+        },
+        {
+          "id": "call_6L5Z0n4zuYuwbz4QBF6f8OmK",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"dissect_irc_names\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_SyI66pFiuJWjsxfsewLD0iLa",
+      "content": " dissect_irc_names(tvbuff_t *tvb, proto_item *item, int offset)\n {\n     proto_tree *tree;\n     int start_offset;\n     int end_offset;\n     int length;\n     uint8_t *channel_name;\n \n     if (tvb_get_uint8(tvb, offset) != '#')\n         return;\n     \n     channel_name = malloc(CHANNELLEN+1);\n \n     if (channel_name == NULL ) {\n         return;\n     }\n \n     start_offset = offset;\n \n     tree = proto_item_add_subtree(item, ett_irc_request_command_names);\n \n     while(tvb_offset_exists(tvb, start_offset) ) {\n         length = tvb_captured_length_remaining(tvb, start_offset);\n         end_offset = tvb_find_uint8(tvb, start_offset, length, ',');\n \n         if ( end_offset == -1 ) {\n             proto_tree_add_item(tree, hf_irc_request_command_names_channel, tvb, start_offset, length, ENC_ASCII);\n             \n             memset(channel_name, 0, CHANNELLEN+1);\n             tvb_memcpy(tvb, channel_name, start_offset, (length < CHANNELLEN) ? length : CHANNELLEN);\n             proto_item_append_text(tree, \"Channel: %s\", channel_name);\n \n             free(channel_name);\n             return;\n         }\n \n         memset(channel_name, 0, CHANNELLEN+1);\n         tvb_memcpy(tvb, channel_name, start_offset, length);\n         proto_item_append_text(tree, \"Channel: %s\", channel_name);\n \n         proto_tree_add_item(tree, hf_irc_request_command_names_channel, tvb, start_offset, end_offset-start_offset, ENC_ASCII);\n         start_offset = end_offset + 1;\n     }\n \n     free(channel_name);\n     return;\n }"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_6L5Z0n4zuYuwbz4QBF6f8OmK",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 2}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_G7TcNheynvFBTEKJE2ywomGG",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to craft an IRC NAMES command with a comma so we take the comma branch.\\n    # Put a very long channel token before comma to overflow channel_name.\\n    chan = b\\\"#\\\" + b\\\"A\\\"*5000 + b\\\",\\\" + b\\\"#b\\\\r\\\\n\\\"\\n    # Minimal IRC line: \\\"NAMES <channels>\\\\r\\\\n\\\"\\n    return b\\\"NAMES \\\" + chan\\n\",\"target\":\"dissect_irc_names\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_G7TcNheynvFBTEKJE2ywomGG",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-delta-03/bugs/vuln_006/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_vuUrbzmnneWGsCcPqYUNGjph",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"partial\",\"pattern_present\":true,\"reasoning\":\"Source shows channel_name = malloc(CHANNELLEN+1). In the loop, length = tvb_captured_length_remaining(tvb, start_offset). It searches for ',' within that length. If end_offset == -1 (no comma), it copies with clamp: tvb_memcpy(..., (length < CHANNELLEN)?length:CHANNELLEN) so no overflow there. However, in the comma-present path (end_offset != -1), it does tvb_memcpy(tvb, channel_name, start_offset, length) with length being the entire remaining captured length, not bounded to CHANNELLEN nor to (end_offset-start_offset). This can overflow channel_name when there is a comma anywhere later in the remaining buffer and the remaining length exceeds CHANNELLEN+1. Thus the finder’s description is slightly off: the unclamped copy is in the comma branch, not the no-comma branch. Reachability confirmed by check_reachability (indirect, depth 5). Could not run reach_probe due to missing ASan binary path in environment, so no runtime crash evidence gathered.\",\"corrected_description\":\"Heap-buffer-overflow in dissect_irc_names: channel_name is allocated CHANNELLEN+1, but when a comma is found (end_offset != -1) the code calls tvb_memcpy(..., length) where length is tvb_captured_length_remaining from start_offset (potentially much larger than CHANNELLEN), overflowing channel_name. The no-comma path actually clamps the copy.\",\"control_flow_to_bug\":\"handler_irc -> IRC request parsing that invokes dissect_irc_names on NAMES command parameters. In dissect_irc_names: first byte at offset must be '#'. Loop: compute length = tvb_captured_length_remaining(tvb, start_offset); find comma with tvb_find_uint8(..., ',', ...). If a comma exists anywhere in remaining buffer (end_offset != -1) and remaining length > CHANNELLEN+1, then tvb_memcpy(tvb, channel_name, start_offset, length) overflows heap buffer before appending text.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_vuUrbzmnneWGsCcPqYUNGjph",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

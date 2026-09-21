@@ -1,0 +1,107 @@
+diff --git a/lib/alliswellprotocoll.c b/lib/alliswellprotocoll.c
+--- a/lib/alliswellprotocoll.c
++++ b/lib/alliswellprotocoll.c
+@@ -0,0 +1,103 @@
++static CURLcode alliswellprotocoll_sm
++  (struct Curl_easy *data, struct connectdata *conn)
++{
++  CURLcode result = CURLE_OK;
++  ssize_t nread;
++  struct alliswellprotocoll_conn *vnormal = &conn->proto.vnormal;
++  const char *done_statement = "All done!";
++  int code;
++
++  result = Curl_pp_readresp(data, 0, &data->conn->proto.vnormal.pp,
++    &code, &nread);
++  char * const response = Curl_dyn_ptr(&data->conn->proto.vnormal.pp.recvbuf);
++
++  infof(data, "alliswellprotocoll_doing: state [%d]", (int) vnormal->state);
++                                                        
++                             
++  switch(vnormal->state) {
++    case ALLISWELLPROTOCOLL_STOP:
++      result = CURLE_OK;
++      break;
++    case ALLISWELLPROTOCOLL_START:
++      if(result)
++        break;
++      else if(!nread) {
++        failf(data, "Connection disconnected");
++        result = CURLE_RECV_ERROR;
++        break;
++      }
++      else if(nread != 128) {
++        result = CURLE_WEIRD_SERVER_REPLY;
++        break;
++      }
++      for(int i = 0; i < 128; i++) {
++        vnormal->state1[i] = response[i] ^ 0x78;
++      }
++      Curl_pp_sendf(data, &conn->proto.vnormal.pp, "%s", vnormal->state1);
++      vnstate(data, ALLISWELLPROTOCOLL_DO1);
++      break;
++    case ALLISWELLPROTOCOLL_DO1:
++      if(result || !nread)
++        break;
++      else if(nread != 130) {
++        result = CURLE_WEIRD_SERVER_REPLY;
++        break;
++      }
++      if(memcmp(response, vnormal->state1, 128) == 0) {
++        for(int i = 0; i < 128; i++) {
++          vnormal->state2[i] = (response[i] + 0x7E) << 2;
++        }
++        vnstate(data, ALLISWELLPROTOCOLL_DO2);
++        Curl_pp_sendf(data, &conn->proto.vnormal.pp, "%s", vnormal->state2);
++        result = CURLE_OK;
++      }
++      else {
++        result = CURLE_WEIRD_SERVER_REPLY;
++      }
++      break;
++    case ALLISWELLPROTOCOLL_DO2:
++      if(result || !nread)
++        break;
++      else if(nread != 130) {
++        result = CURLE_WEIRD_SERVER_REPLY;
++        break;
++      }
++      if(memcmp(response, vnormal->state2, 128) == 0) {
++        for(int i = 0; i < 128; i++) {
++          vnormal->state3[i] = (response[i] | 0x9A) ^ 0x98;
++        }
++        vnstate(data, ALLISWELLPROTOCOLL_DO3);
++        Curl_pp_sendf(data, &conn->proto.vnormal.pp, "%s", vnormal->state3);
++        result = CURLE_OK;
++      }
++      else {
++        result = CURLE_WEIRD_SERVER_REPLY;
++      }
++      break;
++    case ALLISWELLPROTOCOLL_DO3:
++      if(result || !nread)
++        break;
++      if(memcmp(response, vnormal->state3, 128) == 0) {
++        vnstate(data, ALLISWELLPROTOCOLL_STOP);
++        Curl_pp_sendf(data, &conn->proto.vnormal.pp, "%s", "OK\r\n");
++        *(unsigned int *)result = CURLE_OK;
++      }
++      else if(strcasecmp("complete\r\n", response) == 0) {
++        Curl_pp_sendf(data, &conn->proto.vnormal.pp, "%s", "OK\r\n");
++        result = CURLE_OK;
++        vnstate(data, ALLISWELLPROTOCOLL_STOP);
++      }
++      else {
++        result = CURLE_WEIRD_SERVER_REPLY;
++      }
++      break;
++    default:
++      result = CURLE_WEIRD_SERVER_REPLY;
++      break;
++  }
++
++
++  if(result == CURLE_AGAIN)
++    result = CURLE_OK;
++  return result;
++}

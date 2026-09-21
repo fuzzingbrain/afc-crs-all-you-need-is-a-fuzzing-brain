@@ -1,0 +1,394 @@
+{
+ "av2-del-02": {
+  "challenge": "av-delta-02",
+  "bug": "avif-002",
+  "harness": "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+  "seeds": 0,
+  "source": "none: Convert uses a FuzzTest generative domain; the wrapper sets TEST_DATA_DIRS=<bindir>/corpus itself",
+  "libfuzzer_extra": [],
+  "note": "FuzzTest wrapper, not a plain libFuzzer target; SoK KF4 lists av2 as a broken-dependency CP"
+ },
+ "cu2-del-06": {
+  "challenge": "cu-delta-02",
+  "bug": "curl-006",
+  "harness": "curl_fuzzer_ws",
+  "seeds": 5,
+  "source": "tooling pkgs/curl_fuzzer.tar.gz -> corpora/curl_fuzzer_ws/ (scripts/create_zip.sh)",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "cu3-del-07": {
+  "challenge": "cu-delta-03",
+  "bug": "curl-007",
+  "harness": "curl_fuzzer_ws",
+  "seeds": 5,
+  "source": "tooling pkgs/curl_fuzzer.tar.gz -> corpora/curl_fuzzer_ws/ (scripts/create_zip.sh)",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "cu4-del-03": {
+  "challenge": "cu-delta-04",
+  "bug": "curl-003",
+  "harness": "curl_fuzzer_http",
+  "seeds": 41,
+  "source": "tooling pkgs/curl_fuzzer.tar.gz -> corpora/curl_fuzzer_http/ (scripts/create_zip.sh)",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "cu4-del-08": {
+  "challenge": "cu-delta-04",
+  "bug": "curl-008",
+  "harness": "curl_fuzzer_ws",
+  "seeds": 5,
+  "source": "tooling pkgs/curl_fuzzer.tar.gz -> corpora/curl_fuzzer_ws/ (scripts/create_zip.sh)",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "cu5-del-01": {
+  "challenge": "cu-delta-05",
+  "bug": "curl-001",
+  "harness": "curl_fuzzer_dict",
+  "seeds": 3,
+  "source": "tooling pkgs/curl_fuzzer.tar.gz -> corpora/curl_fuzzer_dict/ (scripts/create_zip.sh)",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "cu5-del-02": {
+  "challenge": "cu-delta-05",
+  "bug": "curl-002",
+  "harness": "curl_fuzzer_ftp",
+  "seeds": 4,
+  "source": "tooling pkgs/curl_fuzzer.tar.gz -> corpora/curl_fuzzer_ftp/ (scripts/create_zip.sh)",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "ex2-del-01": {
+  "challenge": "ex-delta-02",
+  "bug": "exif-001",
+  "harness": "exif_from_data_fuzzer",
+  "seeds": 106,
+  "source": "tooling pkgs/exif-samples.tar.gz (*.jpg,*.tiff) + challenge test/testdata/*.jpg",
+  "libfuzzer_extra": [],
+  "note": "mv -n keeps the first of duplicate basenames; find order is filesystem-dependent"
+ },
+ "ex3-del-02": {
+  "challenge": "ex-delta-03",
+  "bug": "exif-002",
+  "harness": "exif_from_data_fuzzer",
+  "seeds": 106,
+  "source": "tooling pkgs/exif-samples.tar.gz (*.jpg,*.tiff) + challenge test/testdata/*.jpg",
+  "libfuzzer_extra": [],
+  "note": "mv -n keeps the first of duplicate basenames; find order is filesystem-dependent"
+ },
+ "fp2-del-02": {
+  "challenge": "fp-delta-02",
+  "bug": "vuln_002",
+  "harness": "TestFuzzCryptoCertificateDataSetPEM",
+  "seeds": 0,
+  "source": "none: pinned build.sh copies only *.options, creates no seed zip",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "fp3-del-03": {
+  "challenge": "fp-delta-03",
+  "bug": "vuln_003",
+  "harness": "TestFuzzCodecs",
+  "seeds": 0,
+  "source": "none: pinned build.sh copies only *.options, creates no seed zip",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "lx3-del-04": {
+  "challenge": "lx-delta-03",
+  "bug": "vuln_004",
+  "harness": "html",
+  "seeds": 45,
+  "source": "genSeed html test/HTML/* at the pinned commit (fuzz/Makefile.am seed/html.stamp)",
+  "libfuzzer_extra": [
+   "-dict=/cfg/html.dict"
+  ],
+  "note": ""
+ },
+ "mg1-del-01": {
+  "challenge": "mg-delta-01",
+  "bug": "mongoose_1",
+  "harness": "fuzz",
+  "seeds": 0,
+  "source": "none: pinned build.sh copies only *.options, creates no seed zip",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "mg2-del-02": {
+  "challenge": "mg-delta-02",
+  "bug": "mongoose_2",
+  "harness": "fuzz",
+  "seeds": 0,
+  "source": "none: pinned build.sh copies only *.options, creates no seed zip",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "ws1-del-03": {
+  "challenge": "ws-delta-01",
+  "bug": "vuln_003",
+  "harness": "handler_ber",
+  "seeds": 0,
+  "source": "none: fuzzdb has no samples/<proto>/ for this handler, so fuzzshark build.sh zips nothing",
+  "libfuzzer_extra": [
+   "-max_len=1024"
+  ],
+  "note": ""
+ },
+ "ws2-del-04": {
+  "challenge": "ws-delta-02",
+  "bug": "vuln_004",
+  "harness": "handler_icmp",
+  "seeds": 0,
+  "source": "none: fuzzdb has no samples/<proto>/ for this handler, so fuzzshark build.sh zips nothing",
+  "libfuzzer_extra": [
+   "-max_len=1024"
+  ],
+  "note": ""
+ },
+ "ws3-del-06": {
+  "challenge": "ws-delta-03",
+  "bug": "vuln_006",
+  "harness": "handler_irc",
+  "seeds": 0,
+  "source": "none: fuzzdb has no samples/<proto>/ for this handler, so fuzzshark build.sh zips nothing",
+  "libfuzzer_extra": [
+   "-max_len=1024"
+  ],
+  "note": ""
+ },
+ "ws4-del-07": {
+  "challenge": "ws-delta-04",
+  "bug": "vuln_007",
+  "harness": "handler_json",
+  "seeds": 0,
+  "source": "none: fuzzdb has no samples/<proto>/ for this handler, so fuzzshark build.sh zips nothing",
+  "libfuzzer_extra": [
+   "-max_len=1024"
+  ],
+  "note": ""
+ },
+ "ws5-del-08": {
+  "challenge": "ws-delta-05",
+  "bug": "vuln_008",
+  "harness": "handler_netbios",
+  "seeds": 0,
+  "source": "none: fuzzdb has no samples/<proto>/ for this handler, so fuzzshark build.sh zips nothing",
+  "libfuzzer_extra": [
+   "-max_len=1024"
+  ],
+  "note": ""
+ },
+ "ws7-del-13": {
+  "challenge": "ws-delta-07",
+  "bug": "vuln_013",
+  "harness": "handler_gvcp",
+  "seeds": 0,
+  "source": "none: fuzzdb has no samples/<proto>/ for this handler, so fuzzshark build.sh zips nothing",
+  "libfuzzer_extra": [
+   "-max_len=1024"
+  ],
+  "note": ""
+ },
+ "cm1-fu-01": {
+  "challenge": "cm-full-01",
+  "bug": "lcms-001",
+  "harness": "cms_postscript_fuzzer",
+  "seeds": 11,
+  "source": "challenge testbed/*.icc, the 11 named in tooling Dockerfile -> seed_corpus.zip",
+  "libfuzzer_extra": [
+   "-dict=/cfg/cms_postscript_fuzzer.dict"
+  ],
+  "note": ""
+ },
+ "cm1-fu-02": {
+  "challenge": "cm-full-01",
+  "bug": "lcms-002",
+  "harness": "cms_virtual_profile_fuzzer",
+  "seeds": 11,
+  "source": "challenge testbed/*.icc, the 11 named in tooling Dockerfile -> seed_corpus.zip",
+  "libfuzzer_extra": [
+   "-dict=/cfg/cms_virtual_profile_fuzzer.dict"
+  ],
+  "note": ""
+ },
+ "da1-fu-01": {
+  "challenge": "da-full-01",
+  "bug": "dav1d-001",
+  "harness": "dav1d_fuzzer_mt@NO_OOM",
+  "seeds": 0,
+  "source": "none: run_fuzzer looks for dav1d_fuzzer_mt@NO_OOM_seed_corpus.zip, which build.sh never creates",
+  "libfuzzer_extra": [],
+  "note": "corpus_alt/da1-fu-01 holds the 922 files of dav1d_fuzzer_mt_seed_corpus.zip (dec zip + testdata/) for a non-competition variant"
+ },
+ "mg1-fu-00": {
+  "challenge": "mg-full-01",
+  "bug": "mongoose_0",
+  "harness": "fuzz",
+  "seeds": 0,
+  "source": "none: pinned build.sh copies only *.options, creates no seed zip",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "sd1-fu-01": {
+  "challenge": "systemd-full-001",
+  "bug": "systemd-001",
+  "harness": "fuzz-udev-rule-parse-value",
+  "seeds": 0,
+  "source": "challenge test/fuzz/fuzz-udev-rule-parse-value/ (tools/oss-fuzz.sh zips every test/fuzz/fuzz-* dir)",
+  "libfuzzer_extra": [],
+  "note": "no test/fuzz dir for this harness -> no seed zip is produced"
+ },
+ "sd1-fu-03": {
+  "challenge": "systemd-full-001",
+  "bug": "systemd-003",
+  "harness": "fuzz-catalog",
+  "seeds": 2,
+  "source": "challenge test/fuzz/fuzz-catalog/ (tools/oss-fuzz.sh zips every test/fuzz/fuzz-* dir)",
+  "libfuzzer_extra": [],
+  "note": "build-generated corpora ($build/test/fuzz/<harness>*) are not reproduced here"
+ },
+ "sd1-fu-04": {
+  "challenge": "systemd-full-001",
+  "bug": "systemd-004",
+  "harness": "fuzz-link-parser",
+  "seeds": 5,
+  "source": "challenge test/fuzz/fuzz-link-parser/ (tools/oss-fuzz.sh zips every test/fuzz/fuzz-* dir)",
+  "libfuzzer_extra": [],
+  "note": "build-generated corpora ($build/test/fuzz/<harness>*) are not reproduced here"
+ },
+ "sd1-fu-05": {
+  "challenge": "systemd-full-001",
+  "bug": "systemd-005",
+  "harness": "fuzz-systemctl-parse-argv",
+  "seeds": 6,
+  "source": "challenge test/fuzz/fuzz-systemctl-parse-argv/ (tools/oss-fuzz.sh zips every test/fuzz/fuzz-* dir)",
+  "libfuzzer_extra": [],
+  "note": "build-generated corpora ($build/test/fuzz/<harness>*) are not reproduced here"
+ },
+ "ss1-fu-00": {
+  "challenge": "shadowsocks-full-01",
+  "bug": "shadowsocks-libev_0",
+  "harness": "json_fuzz",
+  "seeds": 0,
+  "source": "none: pinned build.sh copies only *.options, creates no seed zip",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "ss1-fu-01": {
+  "challenge": "shadowsocks-full-01",
+  "bug": "shadowsocks-libev_1",
+  "harness": "json_fuzz",
+  "seeds": 0,
+  "source": "none: pinned build.sh copies only *.options, creates no seed zip",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "ss1-fu-02": {
+  "challenge": "shadowsocks-full-01",
+  "bug": "shadowsocks-libev_2",
+  "harness": "json_fuzz",
+  "seeds": 0,
+  "source": "none: pinned build.sh copies only *.options, creates no seed zip",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "ss1-fu-03": {
+  "challenge": "shadowsocks-full-01",
+  "bug": "shadowsocks-libev_3",
+  "harness": "json_fuzz",
+  "seeds": 0,
+  "source": "none: pinned build.sh copies only *.options, creates no seed zip",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "ss1-fu-04": {
+  "challenge": "shadowsocks-full-01",
+  "bug": "shadowsocks-libev_4",
+  "harness": "json_fuzz",
+  "seeds": 0,
+  "source": "none: pinned build.sh copies only *.options, creates no seed zip",
+  "libfuzzer_extra": [],
+  "note": ""
+ },
+ "ws1-fu-01": {
+  "challenge": "ws-full-01",
+  "bug": "vuln_001",
+  "harness": "handler_openvpn.udp",
+  "seeds": 0,
+  "source": "none: fuzzdb has no samples/<proto>/ for this handler, so fuzzshark build.sh zips nothing",
+  "libfuzzer_extra": [
+   "-max_len=1024"
+  ],
+  "note": ""
+ },
+ "ws1-fu-02": {
+  "challenge": "ws-full-01",
+  "bug": "vuln_002",
+  "harness": "handler_telnet",
+  "seeds": 0,
+  "source": "none: fuzzdb has no samples/<proto>/ for this handler, so fuzzshark build.sh zips nothing",
+  "libfuzzer_extra": [
+   "-max_len=1024"
+  ],
+  "note": ""
+ },
+ "ws1-fu-05": {
+  "challenge": "ws-full-01",
+  "bug": "vuln_005",
+  "harness": "handler_bat.vis",
+  "seeds": 0,
+  "source": "none: fuzzdb has no samples/<proto>/ for this handler, so fuzzshark build.sh zips nothing",
+  "libfuzzer_extra": [
+   "-max_len=1024"
+  ],
+  "note": ""
+ },
+ "ws1-fu-10": {
+  "challenge": "ws-full-01",
+  "bug": "vuln_010",
+  "harness": "handler_netbios",
+  "seeds": 0,
+  "source": "none: fuzzdb has no samples/<proto>/ for this handler, so fuzzshark build.sh zips nothing",
+  "libfuzzer_extra": [
+   "-max_len=1024"
+  ],
+  "note": ""
+ },
+ "ws1-fu-11": {
+  "challenge": "ws-full-01",
+  "bug": "vuln_011",
+  "harness": "handler_aim",
+  "seeds": 0,
+  "source": "none: fuzzdb has no samples/<proto>/ for this handler, so fuzzshark build.sh zips nothing",
+  "libfuzzer_extra": [
+   "-max_len=1024"
+  ],
+  "note": ""
+ },
+ "ws1-fu-12": {
+  "challenge": "ws-full-01",
+  "bug": "vuln_012",
+  "harness": "handler_zbee_zdp",
+  "seeds": 0,
+  "source": "none: fuzzdb has no samples/<proto>/ for this handler, so fuzzshark build.sh zips nothing",
+  "libfuzzer_extra": [
+   "-max_len=1024"
+  ],
+  "note": ""
+ },
+ "xz1-fu-01": {
+  "challenge": "xz-full-01",
+  "bug": "xz-001",
+  "harness": "fuzz_encode_stream",
+  "seeds": 0,
+  "source": "none: build.sh only zips *.lzma/*.xz for the two decoder harnesses",
+  "libfuzzer_extra": [
+   "-max_len=4096"
+  ],
+  "note": "fuzz_xz.dict/fuzz_lzma.dict are copied to $OUT but no fuzz_encode_stream.dict exists, so run_fuzzer passes no dict"
+ }
+}

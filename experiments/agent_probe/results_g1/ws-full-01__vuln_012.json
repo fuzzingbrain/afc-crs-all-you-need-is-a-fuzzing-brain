@@ -1,0 +1,181 @@
+{
+  "tag": "ws-full-01__vuln_012",
+  "gt": "dissect_zbee_zdp_req_mgmt_nwk_disc",
+  "crash_type": "SEGV",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source shows channels_and_flags = tvb_get_letohl(tvb,0); channels = channels_and_flags & 0xff. It checks if (channels > max_channel_count) return; with max_channel_count=27, so channels==27 passes. channels_arr is allocated for 27 pointers indexed 0..26. Later, if (channels_and_flags & 0xfff4131b) it executes for (i=0; i <= channels; i++) and dereferences channels_arr[i]->... . When channels==27, loop reaches i==27 and dereferences channels_arr[27], a one-past-the-end OOB read of a pointer followed by dereference, which can SEGV/ASan OOB. Additionally, the printf format string has 5 conversions but 6 arguments (includes channels_arr[i]->text), which is undefined behavior and can also crash, but the primary issue is the OOB index. I attempted reach_probe but the ASan binary path was missing, so no runtime confirmation.",
+    "corrected_description": "Off-by-one out-of-bounds access: channels_arr is allocated with max_channel_count=27 (valid indices 0..26) but the debug dump loop uses `for (i=0; i <= channels; i++)` where `channels` is the low byte of input and can be 27, causing `channels_arr[27]` dereference. Also, the debug printf has a format/argument count mismatch (UB).",
+    "control_flow_to_bug": "handler_zbee_zdp -> ZDP request dissector dispatch -> dissect_zbee_zdp_req_mgmt_nwk_disc: read channels_and_flags (little-endian u32) from tvb offset 0; set channels = channels_and_flags & 0xff; require channels <= 27 (so channels==27); require tree != NULL (so debug code runs); require (channels_and_flags & 0xfff4131b) != 0 to enter debug dump; then debug loop `for i=0..channels inclusive` dereferences channels_arr[i], hitting i==27 OOB."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "dissect_zbee_zdp_req_mgmt_nwk_disc"
+      },
+      "result": "dissect_zbee_zdp_req_mgmt_nwk_disc(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, int hf_channel)\n{\n    proto_item  *ti;\n    unsigned    i;\n    size_t max_channel_count = 27;\n    struct ZBChannel** channels_arr;\n    char tmp[128];\n\n    unsigned   offset = 0;\n    uint32_t channels;\n    uint32_t channels_and_flags;\n\n                                 \n    channels_and_flags = tvb_get_letohl(tvb, offset);\n    channels = channels_and_flags & 0xff;\n\n                      \n    if (channels > max_channel_count)\n        return;\n\n    channels_arr = (struct ZBChannel**)malloc(sizeof(struct ZBChannel*) * max_channel_count);\n    for (i=0; i < max_channel_count; i++) {\n        channels_arr[i] = (struct ZBChannel*)malloc(sizeof(struct ZBChannel));\n        channels_arr[i]->free_text = 0;\n    }\n\n    if (tree) {\n        bool        first = 1;\n        ti = proto_tree_add_uint_format(tree, hf_channel, tvb, offset, 4, channels, \"Scan Channels: \");\n\n        for (i=0; i<27; i++) {\n            if (channels & (1<<i)) {\n                if (first) {\n                    proto_item_append_text(ti, \"%d\", i);\n                } else {\n                    proto_item_append_text(ti, \", %d\", i);\n                    sprintf(tmp, \"%d\", i);\n                    channels_arr[i]->text = strdup(tmp);\n                    channels_arr[i]->free_text = 1;\n                    tmp[0] = '\\0';\n                }\n                if (channels & (2<<i)) {\n                    while ((channels&(2<<i)) && (i<26)) i++;\n                    proto_item_append_text(ti, \"-%d\", i);\n                }\n                first = 0;\n                channels_arr[i]->channel_id = i;\n                channels_arr[i]->channels = channels;\n            }\n        }\n        if (first)\n            proto_item_append_text(ti, \"None\");\n        if (channels_and_flags & 0xfff4131b) {\n            for (i=0; i <= channels; i++) {\n                printf(\"DEBUG:\\t(0x%x/0x%x)\\t%d / 0x%x\\t%s\\n\",\n                        i, channels,\n                        channels_arr[i]->channel_id,\n                        channels_arr[i]->channels,\n                        channels_arr[i]->free_text,\n                        channels_arr[i]->text);\n            }\n        }\n    }\n\n                                     \n    for (i=0; i < max_channel_count; i++) {\n        if (channels_arr[i]->free_text)\n            free(channels_arr[i]->text);\n        free(channels_arr[i]);\n    }\n\n    free(channels_arr);\n\n    offset += 4;\n\n    proto_tree_add_item(tree, hf_zbee_zdp_duration, tvb, offset, 1, ENC_LITTLE_ENDIAN);\n    offset += 1;\n    proto_tree_add_item(tree, hf_zbee_zdp_index, tvb, offset, 1, ENC_LITTLE_ENDIAN);\n    offset += 1;\n\n                                  \n    zdp_dump_excess(tvb, offset, pinfo, tree);\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "dissect_zbee_zdp_req_mgmt_nwk_disc"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 3}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Minimal ZigBee ZDP mgmt_nwk_disc request frame for this harness is unknown.\n    # We'll just provide 4 bytes so tvb_get_letohl reads channels_and_flags.\n    # Set channels_and_flags low byte to 0x1b (27) and also set a high flag bit\n    # within 0xfff4131b to enter debug loop.\n    val = 0x0004001b  # includes 0x00040000 flag and channels=0x1b\n    return val.to_bytes(4,'little') + b'\\x00\\x00'\n",
+        "target": "dissect_zbee_zdp_req_mgmt_nwk_disc"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-full-01/bugs/vuln_012/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source shows channels_and_flags = tvb_get_letohl(tvb,0); channels = channels_and_flags & 0xff. It checks if (channels > max_channel_count) return; with max_channel_count=27, so channels==27 passes. channels_arr is allocated for 27 pointers indexed 0..26. Later, if (channels_and_flags & 0xfff4131b) it executes for (i=0; i <= channels; i++) and dereferences channels_arr[i]->... . When channels==27, loop reaches i==27 and dereferences channels_arr[27], a one-past-the-end OOB read of a pointer followed by dereference, which can SEGV/ASan OOB. Additionally, the printf format string has 5 conversions but 6 arguments (includes channels_arr[i]->text), which is undefined behavior and can also crash, but the primary issue is the OOB index. I attempted reach_probe but the ASan binary path was missing, so no runtime confirmation.",
+        "corrected_description": "Off-by-one out-of-bounds access: channels_arr is allocated with max_channel_count=27 (valid indices 0..26) but the debug dump loop uses `for (i=0; i <= channels; i++)` where `channels` is the low byte of input and can be 27, causing `channels_arr[27]` dereference. Also, the debug printf has a format/argument count mismatch (UB).",
+        "control_flow_to_bug": "handler_zbee_zdp -> ZDP request dissector dispatch -> dissect_zbee_zdp_req_mgmt_nwk_disc: read channels_and_flags (little-endian u32) from tvb offset 0; set channels = channels_and_flags & 0xff; require channels <= 27 (so channels==27); require tree != NULL (so debug code runs); require (channels_and_flags & 0xfff4131b) != 0 to enter debug dump; then debug loop `for i=0..channels inclusive` dereferences channels_arr[i], hitting i==27 OOB."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1077,
+      "output_tokens": 72,
+      "total_tokens": 1149,
+      "latency_ms": 1327
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1969,
+      "output_tokens": 171,
+      "total_tokens": 2140,
+      "latency_ms": 2889
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2190,
+      "output_tokens": 474,
+      "total_tokens": 2664,
+      "latency_ms": 6251
+    }
+  ],
+  "token_totals": {
+    "input": 5236,
+    "output": 717,
+    "total": 5953,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: handler_zbee_zdp   Sanitizer: address\nFunction: dissect_zbee_zdp_req_mgmt_nwk_disc\nClaimed bug type: SEGV\nSuspicious-point description (from the finder — may be imprecise): `channels_arr` holds max_channel_count(27) entries, but the debug dump loops `for (i = 0; i <= channels; i++) ... channels_arr[i]->...` with `channels` up to 27 -- `channels_arr[27]` is one past the array, dereferencing an out-of-bounds (garbage) pointer.\n\nControl flow to the bug:\n  - handler_zbee_zdp mgmt_nwk_disc with channels == 27 and the 0xfff4131b flag bits set\n  - debug loop for (i=0; i<=channels; i++) indexes channels_arr[i]\n  - channels_arr[27] out-of-bounds pointer dereferenced -> SEGV\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a SEGV\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_TqR2CAhmCFcfI2XZA30fGyfa",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"dissect_zbee_zdp_req_mgmt_nwk_disc\"}"
+          }
+        },
+        {
+          "id": "call_hkSFYAR4h7ydX5IJ69yrYK5Z",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"dissect_zbee_zdp_req_mgmt_nwk_disc\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_TqR2CAhmCFcfI2XZA30fGyfa",
+      "content": "dissect_zbee_zdp_req_mgmt_nwk_disc(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, int hf_channel)\n{\n    proto_item  *ti;\n    unsigned    i;\n    size_t max_channel_count = 27;\n    struct ZBChannel** channels_arr;\n    char tmp[128];\n\n    unsigned   offset = 0;\n    uint32_t channels;\n    uint32_t channels_and_flags;\n\n                                 \n    channels_and_flags = tvb_get_letohl(tvb, offset);\n    channels = channels_and_flags & 0xff;\n\n                      \n    if (channels > max_channel_count)\n        return;\n\n    channels_arr = (struct ZBChannel**)malloc(sizeof(struct ZBChannel*) * max_channel_count);\n    for (i=0; i < max_channel_count; i++) {\n        channels_arr[i] = (struct ZBChannel*)malloc(sizeof(struct ZBChannel));\n        channels_arr[i]->free_text = 0;\n    }\n\n    if (tree) {\n        bool        first = 1;\n        ti = proto_tree_add_uint_format(tree, hf_channel, tvb, offset, 4, channels, \"Scan Channels: \");\n\n        for (i=0; i<27; i++) {\n            if (channels & (1<<i)) {\n                if (first) {\n                    proto_item_append_text(ti, \"%d\", i);\n                } else {\n                    proto_item_append_text(ti, \", %d\", i);\n                    sprintf(tmp, \"%d\", i);\n                    channels_arr[i]->text = strdup(tmp);\n                    channels_arr[i]->free_text = 1;\n                    tmp[0] = '\\0';\n                }\n                if (channels & (2<<i)) {\n                    while ((channels&(2<<i)) && (i<26)) i++;\n                    proto_item_append_text(ti, \"-%d\", i);\n                }\n                first = 0;\n                channels_arr[i]->channel_id = i;\n                channels_arr[i]->channels = channels;\n            }\n        }\n        if (first)\n            proto_item_append_text(ti, \"None\");\n        if (channels_and_flags & 0xfff4131b) {\n            for (i=0; i <= channels; i++) {\n                printf(\"DEBUG:\\t(0x%x/0x%x)\\t%d / 0x%x\\t%s\\n\",\n                        i, channels,\n                        channels_arr[i]->channel_id,\n                        channels_arr[i]->channels,\n                        channels_arr[i]->free_text,\n                        channels_arr[i]->text);\n            }\n        }\n    }\n\n                                     \n    for (i=0; i < max_channel_count; i++) {\n        if (channels_arr[i]->free_text)\n            free(channels_arr[i]->text);\n        free(channels_arr[i]);\n    }\n\n    free(channels_arr);\n\n    offset += 4;\n\n    proto_tree_add_item(tree, hf_zbee_zdp_duration, tvb, offset, 1, ENC_LITTLE_ENDIAN);\n    offset += 1;\n    proto_tree_add_item(tree, hf_zbee_zdp_index, tvb, offset, 1, ENC_LITTLE_ENDIAN);\n    offset += 1;\n\n                                  \n    zdp_dump_excess(tvb, offset, pinfo, tree);\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_hkSFYAR4h7ydX5IJ69yrYK5Z",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 3}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_9Nbtcut7YuCUmrnMcE5G5rpf",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Minimal ZigBee ZDP mgmt_nwk_disc request frame for this harness is unknown.\\n    # We'll just provide 4 bytes so tvb_get_letohl reads channels_and_flags.\\n    # Set channels_and_flags low byte to 0x1b (27) and also set a high flag bit\\n    # within 0xfff4131b to enter debug loop.\\n    val = 0x0004001b  # includes 0x00040000 flag and channels=0x1b\\n    return val.to_bytes(4,'little') + b'\\\\x00\\\\x00'\\n\",\"target\":\"dissect_zbee_zdp_req_mgmt_nwk_disc\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_9Nbtcut7YuCUmrnMcE5G5rpf",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-full-01/bugs/vuln_012/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_4uPA25dQwc3CpGjtpb4TBLJO",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source shows channels_and_flags = tvb_get_letohl(tvb,0); channels = channels_and_flags & 0xff. It checks if (channels > max_channel_count) return; with max_channel_count=27, so channels==27 passes. channels_arr is allocated for 27 pointers indexed 0..26. Later, if (channels_and_flags & 0xfff4131b) it executes for (i=0; i <= channels; i++) and dereferences channels_arr[i]->... . When channels==27, loop reaches i==27 and dereferences channels_arr[27], a one-past-the-end OOB read of a pointer followed by dereference, which can SEGV/ASan OOB. Additionally, the printf format string has 5 conversions but 6 arguments (includes channels_arr[i]->text), which is undefined behavior and can also crash, but the primary issue is the OOB index. I attempted reach_probe but the ASan binary path was missing, so no runtime confirmation.\",\"corrected_description\":\"Off-by-one out-of-bounds access: channels_arr is allocated with max_channel_count=27 (valid indices 0..26) but the debug dump loop uses `for (i=0; i <= channels; i++)` where `channels` is the low byte of input and can be 27, causing `channels_arr[27]` dereference. Also, the debug printf has a format/argument count mismatch (UB).\",\"control_flow_to_bug\":\"handler_zbee_zdp -> ZDP request dissector dispatch -> dissect_zbee_zdp_req_mgmt_nwk_disc: read channels_and_flags (little-endian u32) from tvb offset 0; set channels = channels_and_flags & 0xff; require channels <= 27 (so channels==27); require tree != NULL (so debug code runs); require (channels_and_flags & 0xfff4131b) != 0 to enter debug dump; then debug loop `for i=0..channels inclusive` dereferences channels_arr[i], hitting i==27 OOB.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_4uPA25dQwc3CpGjtpb4TBLJO",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

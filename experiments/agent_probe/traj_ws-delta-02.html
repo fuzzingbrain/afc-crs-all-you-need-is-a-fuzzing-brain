@@ -1,0 +1,651 @@
+<title>Verify Trace · ws-delta-02__vuln_004</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  --bg:#f6f5f1; --panel:#fffefb; --ink:#1c1e26; --dim:#5c5f6b; --faint:#8a8d99;
+  --line:#e5e3db; --line2:#efedE6;
+  --accent:#b3701e; --accent-soft:#f0e4d2;
+  --read:#3a6ea5; --reach:#7d5ba6; --probe:#c07a1e; --submit:#2f8f5b; --def:#6b6f7a;
+  --code:#f1efe8;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#14161c; --panel:#1b1e26; --ink:#e7e8ee; --dim:#a4a8b6; --faint:#71757f;
+  --line:#2a2e39; --line2:#232631;
+  --accent:#e5a24b; --accent-soft:#3a2e1c;
+  --read:#6ea3d8; --reach:#b18ad6; --probe:#e5a24b; --submit:#5cc088; --def:#8b909c;
+  --code:#12141a;
+}}
+:root[data-theme="dark"]{
+  --bg:#14161c; --panel:#1b1e26; --ink:#e7e8ee; --dim:#a4a8b6; --faint:#71757f;
+  --line:#2a2e39; --line2:#232631; --accent:#e5a24b; --accent-soft:#3a2e1c;
+  --read:#6ea3d8; --reach:#b18ad6; --probe:#e5a24b; --submit:#5cc088; --def:#8b909c;
+  --code:#12141a;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);margin:0;
+  font-family:"IBM Plex Sans",system-ui,sans-serif;line-height:1.5;
+  -webkit-font-smoothing:antialiased}
+.wrap{max-width:940px;margin:0 auto;padding:32px 20px 80px}
+pre{margin:0;white-space:pre-wrap;word-break:break-word;
+  font-family:"IBM Plex Mono",ui-monospace,monospace}
+header.top{border:1px solid var(--line);background:var(--panel);border-radius:14px;
+  padding:22px 24px;margin-bottom:26px}
+.eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);
+  font-weight:600}
+h1{font-size:22px;font-weight:600;margin:6px 0 2px;letter-spacing:-.01em;
+  font-family:"IBM Plex Mono",monospace;text-wrap:balance}
+.sub{color:var(--dim);font-size:13px}
+.sub b{color:var(--ink);font-weight:600}
+.scorebar{display:flex;gap:18px;align-items:stretch;margin-top:18px;flex-wrap:wrap}
+.verdict{border:1px solid var(--line);border-radius:12px;padding:12px 18px;
+  background:var(--accent-soft);min-width:150px}
+.verdict .num{font-size:34px;font-weight:700;font-family:"IBM Plex Mono",monospace;
+  color:var(--accent);line-height:1;font-variant-numeric:tabular-nums}
+.verdict .lab{font-size:12px;color:var(--dim);margin-top:4px}
+.verdict .basis{font-size:11.5px;color:var(--faint);margin-top:6px;max-width:220px}
+.stats{display:flex;gap:14px;flex-wrap:wrap;align-items:center}
+.stat{border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:var(--panel)}
+.stat .v{font-size:19px;font-weight:600;font-family:"IBM Plex Mono",monospace;
+  font-variant-numeric:tabular-nums}
+.stat .k{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em}
+.evidence{margin-top:16px;display:flex;flex-wrap:wrap;gap:8px}
+.er{display:flex;gap:8px;align-items:center;border:1px solid var(--line);
+  border-radius:8px;padding:5px 10px;font-size:12px;font-family:"IBM Plex Mono",monospace}
+.er .ek{color:var(--dim)}
+.er .ev{font-weight:600}
+.er .ev.good{color:var(--submit)} .er .ev.bad{color:#c2542f}
+.thread{display:flex;flex-direction:column;gap:14px}
+.msg{display:grid;grid-template-columns:4px 1fr;gap:14px}
+.msg .rail{border-radius:3px;background:var(--line)}
+.msg.asst .rail{background:var(--accent)}
+.msg.tool .rail{background:var(--def)}
+.msg.sys .rail{background:var(--reach)}
+.msg.usr .rail{background:var(--read)}
+.body{border:1px solid var(--line);border-radius:12px;background:var(--panel);
+  padding:14px 16px;min-width:0}
+.mhead{display:flex;gap:10px;align-items:baseline;margin-bottom:9px;flex-wrap:wrap}
+.who{font-size:11px;letter-spacing:.12em;text-transform:uppercase;font-weight:700;color:var(--dim)}
+.model{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--accent);
+  background:var(--accent-soft);padding:1px 8px;border-radius:20px;font-weight:500}
+.meta,.tok{font-size:11.5px;color:var(--faint);font-family:"IBM Plex Mono",monospace;margin-left:auto}
+.tok b{color:var(--dim);font-weight:600}
+.say{font-size:13px;color:var(--ink);background:transparent;
+  font-family:"IBM Plex Sans",sans-serif;margin-bottom:4px}
+.raw{font-size:12px;color:var(--dim);background:var(--code);border-radius:8px;
+  padding:11px 13px;overflow-x:auto}
+.res.tall{max-height:340px;overflow:auto}
+.call{border:1px solid var(--line);border-left:3px solid var(--def);border-radius:8px;
+  padding:9px 12px;margin-top:9px;background:var(--code)}
+.call.t-read{border-left-color:var(--read)}
+.call.t-reach{border-left-color:var(--reach)}
+.call.t-probe{border-left-color:var(--probe)}
+.call.t-submit{border-left-color:var(--submit)}
+.chead{display:flex;gap:8px;align-items:baseline;margin-bottom:6px}
+.arrow{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.1em;font-weight:600}
+.tname{font-family:"IBM Plex Mono",monospace;font-size:13px;font-weight:600}
+.call.t-read .tname{color:var(--read)} .call.t-reach .tname{color:var(--reach)}
+.call.t-probe .tname{color:var(--probe)} .call.t-submit .tname{color:var(--submit)}
+.args{font-size:12px;color:var(--ink);overflow-x:auto;max-height:300px;overflow-y:auto}
+.note{font-size:12px;color:var(--dim);border:1px dashed var(--line);border-radius:10px;
+  padding:11px 14px;margin-bottom:22px;background:var(--panel)}
+.note b{color:var(--accent)}
+</style>
+<div class="wrap">
+<header class="top">
+  <div class="eyebrow">Evidence verifier · execution trace</div>
+  <h1>ws-delta-02__vuln_004</h1>
+  <div class="sub">target function <b>dissect_interface_identification_object</b> · claimed <b>stack-buffer-overflow</b></div>
+  <div class="scorebar">
+    <div class="verdict"><div class="num">0.90</div>
+      <div class="lab">LIKELY</div>
+      <div class="basis">unclamped tainted + margin&lt;=0</div></div>
+    <div class="stats">
+      <div class="stat"><div class="v">11</div><div class="k">llm calls</div></div>
+      <div class="stat"><div class="v">56,900</div><div class="k">input tok</div></div>
+      <div class="stat"><div class="v">3,941</div><div class="k">output tok</div></div>
+      <div class="stat"><div class="v">60,841</div><div class="k">total tok</div></div>
+    </div>
+  </div>
+  <div class="evidence"><div class="er"><span class="ek">sanitizer_compatible</span><span class="ev good">True</span></div><div class="er"><span class="ek">input_reaches_operand</span><span class="ev good">True</span></div><div class="er"><span class="ek">guard_clamps</span><span class="ev ">none</span></div><div class="er"><span class="ek">margin</span><span class="ev ">overflow</span></div><div class="er"><span class="ek">pattern_present</span><span class="ev good">True</span></div></div>
+</header>
+<div class="note">Every message the agent saw, verbatim and in order. Each assistant
+turn is tagged with the model that actually answered it and its token usage.
+<b>Note:</b> models vary per turn — the built-in fallback chain was still active, so
+calls cycled across gpt-5.2 and Claude models rather than staying on one.</div>
+<div class="thread">
+<section class="msg sys"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">system prompt</span><span class="meta">1127 chars</span></div><pre class="raw">You are a vulnerability verifier. All candidate functions are already
+reachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job
+is to gather EVIDENCE about whether the reached code actually contains a
+crashing memory-safety bug of the stated type, then submit it.
+
+Gather evidence with the tools:
+- read_function(name): read the real source.
+- check_reachability(function_name): confirm the call graph (depth, direct/indirect).
+- reach_probe(generator_code, target): write Python `def generate()-&gt;bytes` that
+  produces an input aiming to REACH `target` (a function name or &quot;file.c:LINE&quot;).
+  It runs the input on the real ASan binary under gdb and tells you whether the
+  target was reached and whether it crashed. Use it to ground your judgment in a
+  real execution — a near-miss reaching input is strong evidence; a crash is proof.
+- submit_evidence(...): report your structured findings (see its schema). Call it
+  once, last.
+
+Do NOT pass things &quot;when in doubt&quot;. Report what the evidence shows. Absence of a
+crash is not proof of safety; a proven clamp/guard on the tainted value IS
+disconfirming.</pre></div></section><section class="msg usr"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">user</span></div><pre class="raw">Verify this suspicious point.
+
+Fuzzer: handler_icmp   Sanitizer: address
+Function: dissect_interface_identification_object
+Claimed bug type: stack-buffer-overflow
+The function is reachable (confirm with check_reachability if useful).
+
+Read the function, judge whether a fuzzer input can drive a stack-buffer-overflow
+there, optionally reach_probe a candidate input to ground it, then submit_evidence.</pre></div></section><section class="msg asst"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">assistant</span><span class="model">gpt-5.2</span><span class="tok"><b>696</b> in · <b>60</b> out · 1,588ms</span></div><div class="call t-reach"><div class="chead"><span class="arrow">▸ calls</span><span class="tname">check_reachability</span></div><pre class="args">{
+  &quot;function_name&quot;: &quot;dissect_interface_identification_object&quot;
+}</pre></div><div class="call t-read"><div class="chead"><span class="arrow">▸ calls</span><span class="tname">read_function</span></div><pre class="args">{
+  &quot;name&quot;: &quot;dissect_interface_identification_object&quot;
+}</pre></div></div></section><section class="msg tool"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">tool result</span><span class="meta">79 chars</span></div><pre class="raw res">{
+  &quot;reachable&quot;: true,
+  &quot;call_depth&quot;: 5,
+  &quot;reached_via&quot;: &quot;observed&quot;,
+  &quot;n_callers&quot;: 1
+}</pre></div></section><section class="msg tool"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">tool result</span><span class="meta">2,565 chars</span></div><pre class="raw res tall">dissect_interface_identification_object(tvbuff_t * tvb, int offset,
+				     proto_tree * ext_object_tree,
+				     proto_item * tf_object)
+{
+	proto_item *ti;
+	uint16_t obj_length;
+	uint8_t c_type;
+	uint8_t ident_name[ICMP_MAX_IDENT_NAME_LENGTH];
+	bool unknown_object;
+	uint32_t afi;
+	uint32_t addr_length;
+
+	unknown_object = false;
+	                   
+	obj_length = tvb_get_ntohs(tvb, offset);
+
+	            
+	c_type = tvb_get_uint8(tvb, offset + 3);
+
+	proto_item_set_text(tf_object, &quot;Interface Identification Object&quot;);
+	if (tvb_reported_length_remaining(tvb, offset) &lt; 5) {
+		                                                                  
+		return true;
+	}
+
+	ti = proto_tree_add_uint(ext_object_tree, hf_icmp_ext_c_type, tvb, offset + 3, 1, c_type);
+	proto_item_append_text(ti, &quot; (%s)&quot;, val_to_str(c_type, ext_echo_ident_str, &quot;Unknown C-Type %u&quot;));
+	offset += 4;
+
+	switch(c_type) {
+		case ICMP_EXT_ECHO_IDENT_NAME:
+			                                          
+			tvb_memcpy(tvb, ident_name, offset, obj_length - 4);
+
+			for (unsigned i = 0; i &lt; obj_length - 4; i++)
+				if (!g_ascii_isprint(ident_name[i]))
+					break;
+
+			proto_tree_add_item(ext_object_tree, hf_icmp_int_ident_name_string, tvb, offset, obj_length - 4, ENC_ASCII);
+			break;
+		case ICMP_EXT_ECHO_IDENT_INDEX:
+			proto_tree_add_item(ext_object_tree, hf_icmp_int_ident_index, tvb, offset, 4, ENC_NA);
+			break;
+		case ICMP_EXT_ECHO_IDENT_ADDRESS:
+			proto_tree_add_item_ret_uint(ext_object_tree, hf_icmp_int_ident_afi, tvb, offset, 2, ENC_BIG_ENDIAN, &amp;afi);
+			offset += 2;
+			proto_tree_add_item_ret_uint(ext_object_tree, hf_icmp_int_ident_addr_length, tvb, offset, 1, ENC_BIG_ENDIAN, &amp;addr_length);
+			offset += 1;
+			proto_tree_add_item(ext_object_tree, hf_icmp_int_ident_reserved, tvb, offset, 1, ENC_NA);
+			offset += 1;
+			switch(afi){
+				case AFNUM_INET:           
+					while(addr_length &gt;= 4 &amp;&amp; tvb_reported_length_remaining(tvb, offset) &gt;= 4) {
+						proto_tree_add_item(ext_object_tree, hf_icmp_int_ident_ipv4, tvb, offset, 4, ENC_BIG_ENDIAN);
+						offset += 4;
+						addr_length -= 4;
+					}
+					break;
+				case AFNUM_INET6:           
+					while(addr_length &gt;= 16 &amp;&amp; tvb_reported_length_remaining(tvb, offset) &gt;= 16) {
+						proto_tree_add_item(ext_object_tree, hf_icmp_int_ident_ipv6, tvb, offset, 16, ENC_NA);
+						offset += 16;
+						addr_length -= 16;
+					}
+					break;
+				default:                 
+					proto_tree_add_item(ext_object_tree, hf_icmp_int_ident_address, tvb, offset, tvb_reported_length_remaining(tvb, offset), ENC_NA);
+			}
+	}
+
+	return unknown_object;
+
+}</pre></div></section><section class="msg asst"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">assistant</span><span class="model">claude-opus-4-5-20251101</span><span class="tok"><b>2,646</b> in · <b>248</b> out · 4,222ms</span></div><pre class="say">I can see a potential stack-buffer-overflow vulnerability. Let me analyze the code more closely:
+
+1. `ident_name` is a stack buffer of size `ICMP_MAX_IDENT_NAME_LENGTH`
+2. `obj_length` is read from the input via `tvb_get_ntohs(tvb, offset)` - this is a 16-bit value controlled by the fuzzer
+3. In the `ICMP_EXT_ECHO_IDENT_NAME` case, `tvb_memcpy(tvb, ident_name, offset, obj_length - 4)` copies `obj_length - 4` bytes into the stack buffer
+
+Let me check what `ICMP_MAX_IDENT_NAME_LENGTH` is defined as:</pre><div class="call t-read"><div class="chead"><span class="arrow">▸ calls</span><span class="tname">read_function</span></div><pre class="args">{
+  &quot;name&quot;: &quot;ICMP_MAX_IDENT_NAME_LENGTH&quot;
+}</pre></div></div></section><section class="msg tool"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">tool result</span><span class="meta">11 chars</span></div><pre class="raw res">(not found)</pre></div></section><section class="msg asst"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">assistant</span><span class="model">claude-sonnet-4-5-20250929</span><span class="tok"><b>2,908</b> in · <b>704</b> out · 12,658ms</span></div><pre class="say">Let me search for related constants and understand the vulnerability better. The key issue is:
+- `obj_length` is a 16-bit value (0-65535) read from the packet
+- `obj_length - 4` bytes are copied into `ident_name` buffer
+- If `obj_length - 4` &gt; `ICMP_MAX_IDENT_NAME_LENGTH`, this is a stack buffer overflow
+
+Let me create a test input to probe this:</pre><div class="call t-probe"><div class="chead"><span class="arrow">▸ calls</span><span class="tname">reach_probe</span></div><pre class="args">{
+  &quot;target&quot;: &quot;dissect_interface_identification_object&quot;,
+  &quot;generator_code&quot;: &quot;\ndef generate() -&gt; bytes:\n    # ICMP Echo Request packet with extension\n    # We need to craft an ICMP packet that reaches dissect_interface_identification_object\n    # This function is called when parsing ICMP extensions for interface identification\n    \n    # Basic ICMP Echo Request structure\n    icmp_type = b&#x27;\\x08&#x27;  # Echo Request\n    icmp_code = b&#x27;\\x00&#x27;\n    icmp_checksum = b&#x27;\\x00\\x00&#x27;  # Will be wrong but ASan should still parse\n    icmp_id = b&#x27;\\x00\\x01&#x27;\n    icmp_seq = b&#x27;\\x00\\x01&#x27;\n    \n    # ICMP Extension header\n    # Version (4 bits) + Reserved (12 bits) + Checksum (16 bits)\n    ext_version = 2  # Version 2\n    ext_header = bytes([ext_version &lt;&lt; 4, 0x00]) + b&#x27;\\x00\\x00&#x27;  # version + reserved + checksum\n    \n    # Extension Object Header\n    # Length (16 bits) + Class-Num (8 bits) + C-Type (8 bits)\n    obj_length = 300  # Large length to trigger overflow (300 - 4 = 296 bytes to copy)\n    class_num = 3  # Interface Identification Object class\n    c_type = 1  # ICMP_EXT_ECHO_IDENT_NAME\n    \n    ext_obj_header = obj_length.to_bytes(2, &#x27;big&#x27;) + bytes([class_num, c_type])\n    \n    # Payload data for the name (obj_length - 4 bytes)\n    payload_size = obj_length - 4\n    payload = b&#x27;A&#x27; * payload_size\n    \n    # Construct full packet\n    icmp_header = icmp_type + icmp_code + icmp_checksum + icmp_id + icmp_seq\n    \n    # Add some padding to reach extension\n    padding = b&#x27;\\x00&#x27; * 100\n    \n    packet = icmp_header + padding + ext_header + ext_obj_header + payload\n    \n    return packet\n&quot;
+}</pre></div></div></section><section class="msg tool"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">tool result</span><span class="meta">55 chars</span></div><pre class="raw res">{
+  &quot;reached&quot;: false,
+  &quot;crashed&quot;: false,
+  &quot;asan_type&quot;: null
+}</pre></div></section><section class="msg asst"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">assistant</span><span class="model">claude-haiku-4-5-20251001</span><span class="tok"><b>3,641</b> in · <b>91</b> out · 1,391ms</span></div><pre class="say">The probe didn&#x27;t reach the function. Let me try a different approach - I need to understand the packet structure better. Let me look at how this function is called:</pre><div class="call t-read"><div class="chead"><span class="arrow">▸ calls</span><span class="tname">read_function</span></div><pre class="args">{
+  &quot;name&quot;: &quot;handler_icmp&quot;
+}</pre></div></div></section><section class="msg tool"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">tool result</span><span class="meta">11 chars</span></div><pre class="raw res">(not found)</pre></div></section><section class="msg asst"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">assistant</span><span class="model">claude-opus-4-5-20251101</span><span class="tok"><b>3,746</b> in · <b>57</b> out · 1,798ms</span></div><div class="call t-read"><div class="chead"><span class="arrow">▸ calls</span><span class="tname">read_function</span></div><pre class="args">{
+  &quot;name&quot;: &quot;dissect_icmp&quot;
+}</pre></div></div></section><section class="msg tool"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">tool result</span><span class="meta">6,000 chars</span></div><pre class="raw res tall">dissect_icmp(tvbuff_t * tvb, packet_info * pinfo, proto_tree * tree, void* data)
+{
+	proto_tree *icmp_tree = NULL;
+	proto_item *ti, *checksum_item;
+	uint8_t icmp_type;
+	uint8_t icmp_code;
+	uint8_t icmp_original_dgram_length;
+	unsigned captured_length, reported_length;
+	const char *type_str, *code_str;
+	uint32_t num_addrs = 0;
+	uint32_t addr_entry_size = 0;
+	uint32_t i;
+	bool save_in_error_pkt;
+	tvbuff_t *next_tvb;
+	uint32_t conv_key[3];
+	icmp_transaction_t *trans = NULL;
+	nstime_t ts, time_relative;
+	ws_ip4 *iph = WS_IP4_PTR(data);
+
+	col_set_str(pinfo-&gt;cinfo, COL_PROTOCOL, &quot;ICMP&quot;);
+	col_clear(pinfo-&gt;cinfo, COL_INFO);
+
+	                                        
+	icmp_type = tvb_get_uint8(tvb, 0);
+	icmp_code = tvb_get_uint8(tvb, 1);
+	                                                                     
+                                                      
+	icmp_original_dgram_length = tvb_get_uint8(tvb, 5);
+
+	type_str =
+	    val_to_str_const(icmp_type, icmp_type_str,
+			     &quot;Unknown ICMP (obsolete or malformed?)&quot;);
+
+	switch (icmp_type) {
+	case ICMP_UNREACH:
+		code_str =
+		    val_to_str(icmp_code, unreach_code_str,
+			       &quot;Unknown code: %u&quot;);
+		break;
+	case ICMP_REDIRECT:
+		code_str =
+		    val_to_str(icmp_code, redir_code_str,
+			       &quot;Unknown code: %u&quot;);
+		break;
+	case ICMP_ALTHOST:
+		code_str =
+		    val_to_str(icmp_code, alt_host_code_str,
+			       &quot;Unknown code: %u&quot;);
+		icmp_original_dgram_length = 0;
+		break;
+	case ICMP_RTRADVERT:
+		switch (icmp_code) {
+		case 0:	               
+		case 16:	               
+			type_str = &quot;Mobile IP Advertisement&quot;;
+			break;
+		}		                      
+		code_str =
+		    val_to_str(icmp_code, rtradvert_code_str,
+			       &quot;Unknown code: %u&quot;);
+		break;
+	case ICMP_TIMXCEED:
+		code_str =
+		    val_to_str(icmp_code, ttl_code_str,
+			       &quot;Unknown code: %u&quot;);
+		break;
+	case ICMP_PARAMPROB:
+		code_str =
+		    val_to_str(icmp_code, par_code_str,
+			       &quot;Unknown code: %u&quot;);
+		break;
+	case ICMP_PHOTURIS:
+		code_str =
+		    val_to_str(icmp_code, photuris_code_str,
+			       &quot;Unknown code: %u&quot;);
+		break;
+	case ICMP_EXTECHO:
+		code_str =
+		    val_to_str(icmp_code, ext_echo_req_code_str,
+			       &quot;Unknown code: %u&quot;);
+		break;
+	case ICMP_EXTECHOREPLY:
+		code_str =
+		    val_to_str(icmp_code, ext_echo_reply_code_str,
+			       &quot;Unknown code: %u&quot;);
+		break;
+	default:
+		code_str = NULL;
+		break;
+	}
+
+	col_add_fstr(pinfo-&gt;cinfo, COL_INFO, &quot;%-20s&quot;, type_str);
+	if (code_str) {
+		col_append_fstr(pinfo-&gt;cinfo, COL_INFO, &quot; (%s)&quot;, code_str);
+	}
+
+	captured_length = tvb_captured_length(tvb);
+	reported_length = tvb_reported_length(tvb);
+
+	ti = proto_tree_add_item(tree, proto_icmp, tvb, 0, captured_length, ENC_NA);
+	icmp_tree = proto_item_add_subtree(ti, ett_icmp);
+
+	ti = proto_tree_add_item(icmp_tree, hf_icmp_type, tvb, 0, 1,
+				 ENC_BIG_ENDIAN);
+	proto_item_append_text(ti, &quot; (%s)&quot;, type_str);
+        switch (icmp_type) {
+	case ICMP_SOURCEQUENCH:
+	case ICMP_ALTHOST:
+	case ICMP_IREQ:
+	case ICMP_IREQREPLY:
+	case ICMP_MASKREQ:
+	case ICMP_MASKREPLY:
+	case 30:
+	case 31:
+	case 32:
+	case 33:
+	case 34:
+	case 35:
+	case 36:
+	case 37:
+	case 38:
+	case 39:
+		expert_add_info(pinfo, ti, &amp;ei_icmp_type_deprecated);
+		break;
+	default:
+		break;
+	}
+
+	ti = proto_tree_add_item(icmp_tree, hf_icmp_code, tvb, 1, 1,
+				 ENC_BIG_ENDIAN);
+	if (code_str) {
+		proto_item_append_text(ti, &quot; (%s)&quot;, code_str);
+	}
+
+	if (!pinfo-&gt;fragmented &amp;&amp; captured_length &gt;= reported_length
+	    &amp;&amp; !pinfo-&gt;flags.in_error_pkt) {
+		                                                        
+                                                                            
+           
+		                                                                    
+                                                                        
+                                                                 
+                                                                      
+                                                                    
+                                                                  
+                                                                  
+                                                                    
+                                                              
+		vec_t cksum_vec[2];
+		SET_CKSUM_VEC_TVB(cksum_vec[0], tvb, 0, 2);
+		SET_CKSUM_VEC_TVB(cksum_vec[1], tvb, 4, tvb_reported_length_remaining(tvb, 4));
+		uint16_t computed_cksum = g_ntohs(in_cksum(&amp;cksum_vec[0], 2));
+		proto_tree_add_checksum(icmp_tree, tvb, 2, hf_icmp_checksum, hf_icmp_checksum_status, &amp;ei_icmp_checksum, pinfo, computed_cksum,
+								ENC_BIG_ENDIAN, PROTO_CHECKSUM_VERIFY);
+	} else {
+		checksum_item = proto_tree_add_checksum(icmp_tree, tvb, 2, hf_icmp_checksum, hf_icmp_checksum_status, &amp;ei_icmp_checksum, pinfo, 0,
+								ENC_BIG_ENDIAN, PROTO_CHECKSUM_NO_FLAGS);
+		proto_item_append_text(checksum_item, &quot; [%s]&quot;,
+					pinfo-&gt;flags.in_error_pkt ? &quot;in ICMP error packet&quot; : &quot;fragmented datagram&quot;);
+	}
+
+	                                              
+	switch (icmp_type) {
+	case ICMP_ECHOREPLY:
+	case ICMP_ECHO:
+	case ICMP_TSTAMP:
+	case ICMP_TSTAMPREPLY:
+	case ICMP_IREQ:
+	case ICMP_IREQREPLY:
+	case ICMP_MASKREQ:
+	case ICMP_MASKREPLY:
+		proto_tree_add_item(icmp_tree, hf_icmp_ident, tvb, 4, 2, ENC_BIG_ENDIAN);
+		proto_tree_add_item(icmp_tree, hf_icmp_ident_le, tvb, 4, 2, ENC_LITTLE_ENDIAN);
+		proto_tree_add_item(icmp_tree, hf_icmp_seq_num, tvb, 6, 2, ENC_BIG_ENDIAN);
+		proto_tree_add_item(icmp_tree, hf_icmp_seq_num_le, tvb, 6, 2, ENC_LITTLE_ENDIAN);
+		col_append_fstr(pinfo-&gt;cinfo, COL_INFO, &quot; id=0x%04x, seq=%u/%u&quot;,
+				tvb_get_ntohs(tvb, 4), tvb_get_ntohs(tvb, 6), tvb_get_letohs(tvb, 6));
+		if (iph != NULL) {
+			col_append_fstr(pinfo-&gt;cinfo, COL_INFO, &quot;, ttl=%u&quot;, iph-&gt;ip_ttl);
+		}
+		break;
+
+	case ICMP_UNREACH:
+		if (icmp_original_dgram_length &gt; 0) {
+			proto_tree_add_item(icmp_tree, hf_icmp_unused, tvb, 4, 1, ENC_NA);
+			proto_tree_add_item(icmp_tree, hf_icmp_length, tvb, 5, 1, ENC_BIG_ENDIAN);
+			ti = proto_tree_add_uint(icmp_tree, hf_icm</pre></div></section><section class="msg asst"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">assistant</span><span class="model">gpt-5.2</span><span class="tok"><b>4,306</b> in · <b>21</b> out · 1,325ms</span></div><div class="call t-read"><div class="chead"><span class="arrow">▸ calls</span><span class="tname">read_function</span></div><pre class="args">{
+  &quot;name&quot;: &quot;dissect_icmp_extensions&quot;
+}</pre></div></div></section><section class="msg tool"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">tool result</span><span class="meta">11 chars</span></div><pre class="raw res">(not found)</pre></div></section><section class="msg asst"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">assistant</span><span class="model">claude-sonnet-4-5-20250929</span><span class="tok"><b>6,394</b> in · <b>1,073</b> out · 14,436ms</span></div><pre class="say">Let me search for functions that call dissect_interface_identification_object:</pre><div class="call t-probe"><div class="chead"><span class="arrow">▸ calls</span><span class="tname">reach_probe</span></div><pre class="args">{
+  &quot;target&quot;: &quot;dissect_interface_identification_object&quot;,
+  &quot;generator_code&quot;: &quot;\ndef generate() -&gt; bytes:\n    # ICMP Extended Echo Request (Type 42)\n    # This should trigger the interface identification object parsing\n    \n    # IP header (minimal, 20 bytes)\n    ip_version_ihl = 0x45  # Version 4, IHL 5 (20 bytes)\n    ip_tos = 0x00\n    ip_total_length = 0x0100  # Will be larger\n    ip_id = 0x1234\n    ip_flags_offset = 0x0000\n    ip_ttl = 64\n    ip_protocol = 1  # ICMP\n    ip_checksum = 0x0000\n    ip_src = bytes([127, 0, 0, 1])\n    ip_dst = bytes([127, 0, 0, 2])\n    \n    ip_header = bytes([\n        ip_version_ihl, ip_tos,\n        (ip_total_length &gt;&gt; 8) &amp; 0xFF, ip_total_length &amp; 0xFF,\n        (ip_id &gt;&gt; 8) &amp; 0xFF, ip_id &amp; 0xFF,\n        (ip_flags_offset &gt;&gt; 8) &amp; 0xFF, ip_flags_offset &amp; 0xFF,\n        ip_ttl, ip_protocol,\n        (ip_checksum &gt;&gt; 8) &amp; 0xFF, ip_checksum &amp; 0xFF\n    ]) + ip_src + ip_dst\n    \n    # ICMP Extended Echo Request (Type 42, Code 0)\n    icmp_type = 42  # ICMP_EXTECHO\n    icmp_code = 0\n    icmp_checksum = 0x0000\n    icmp_id = 0x0001\n    icmp_seq = 0x0001\n    \n    # L bit (1 bit) + Reserved (7 bits) + Reserved (16 bits)\n    l_bit_reserved = 0x00  # L=0 (no local)\n    reserved = 0x0000\n    \n    icmp_header = bytes([\n        icmp_type, icmp_code,\n        (icmp_checksum &gt;&gt; 8) &amp; 0xFF, icmp_checksum &amp; 0xFF,\n        (icmp_id &gt;&gt; 8) &amp; 0xFF, icmp_id &amp; 0xFF,\n        (icmp_seq &gt;&gt; 8) &amp; 0xFF, icmp_seq &amp; 0xFF,\n        l_bit_reserved,\n        (reserved &gt;&gt; 8) &amp; 0xFF, reserved &amp; 0xFF\n    ])\n    \n    # ICMP Extension header (4 bytes)\n    # Version (4 bits) = 2, Reserved (12 bits), Checksum (16 bits)\n    ext_version = 2\n    ext_header = bytes([\n        (ext_version &lt;&lt; 4) | 0x00, 0x00,  # Version + reserved\n        0x00, 0x00  # Checksum\n    ])\n    \n    # Extension Object for Interface Identification\n    # Length (16 bits) + Class-Num (8 bits) + C-Type (8 bits)\n    obj_length = 500  # Large value to trigger overflow (500 - 4 = 496 bytes)\n    class_num = 3  # Interface Identification Object\n    c_type = 1  # ICMP_EXT_ECHO_IDENT_NAME\n    \n    ext_obj_header = bytes([\n        (obj_length &gt;&gt; 8) &amp; 0xFF, obj_length &amp; 0xFF,\n        class_num, c_type\n    ])\n    \n    # Payload - name data (obj_length - 4 bytes)\n    payload_size = obj_length - 4\n    payload = b&#x27;A&#x27; * payload_size\n    \n    # Construct ICMP packet\n    icmp_packet = icmp_header + ext_header + ext_obj_header + payload\n    \n    # Return just ICMP (fuzzer might add IP layer)\n    return icmp_packet\n&quot;
+}</pre></div></div></section><section class="msg tool"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">tool result</span><span class="meta">55 chars</span></div><pre class="raw res">{
+  &quot;reached&quot;: false,
+  &quot;crashed&quot;: false,
+  &quot;asan_type&quot;: null
+}</pre></div></section><section class="msg asst"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">assistant</span><span class="model">claude-haiku-4-5-20251001</span><span class="tok"><b>7,496</b> in · <b>525</b> out · 5,189ms</span></div><pre class="say">Let me try a simpler approach - just send raw ICMP data:</pre><div class="call t-probe"><div class="chead"><span class="arrow">▸ calls</span><span class="tname">reach_probe</span></div><pre class="args">{
+  &quot;target&quot;: &quot;dissect_interface_identification_object&quot;,
+  &quot;generator_code&quot;: &quot;\ndef generate() -&gt; bytes:\n    # Minimal ICMP Extended Echo packet\n    # Type 42 (Extended Echo Request)\n    \n    # ICMP header: Type(1) + Code(1) + Checksum(2) + ID(2) + Seq(2) + L+Reserved(1) + Reserved(2)\n    icmp_header = bytes([\n        42,      # Type: Extended Echo Request\n        0,       # Code\n        0, 0,    # Checksum\n        0, 1,    # ID\n        0, 1,    # Sequence\n        0,       # L bit + Reserved\n        0, 0     # Reserved\n    ])\n    \n    # ICMP Extension header (4 bytes minimum)\n    # Version (4 bits) + Reserved (12 bits) + Checksum (16 bits)\n    ext_header = bytes([\n        0x20,    # Version 2 in upper 4 bits\n        0, 0, 0  # Reserved + Checksum\n    ])\n    \n    # Extension Object Header\n    # Length (16 bits) + Class (8 bits) + C-Type (8 bits)\n    # Class 3 = Interface Identification Object\n    # C-Type 1 = Name\n    obj_length = 1000  # Large length to overflow\n    ext_obj = bytes([\n        (obj_length &gt;&gt; 8) &amp; 0xFF,\n        obj_length &amp; 0xFF,\n        3,       # Class: Interface Identification\n        1        # C-Type: Name\n    ])\n    \n    # Payload data (obj_length - 4 bytes)\n    payload = b&#x27;X&#x27; * (obj_length - 4)\n    \n    return icmp_header + ext_header + ext_obj + payload\n&quot;
+}</pre></div></div></section><section class="msg tool"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">tool result</span><span class="meta">55 chars</span></div><pre class="raw res">{
+  &quot;reached&quot;: false,
+  &quot;crashed&quot;: false,
+  &quot;asan_type&quot;: null
+}</pre></div></section><section class="msg asst"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">assistant</span><span class="model">claude-opus-4-5-20251101</span><span class="tok"><b>8,050</b> in · <b>71</b> out · 2,141ms</span></div><pre class="say">Let me look at how the extension objects are parsed:</pre><div class="call t-read"><div class="chead"><span class="arrow">▸ calls</span><span class="tname">read_function</span></div><pre class="args">{
+  &quot;name&quot;: &quot;dissect_icmp_extension&quot;
+}</pre></div></div></section><section class="msg tool"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">tool result</span><span class="meta">4,484 chars</span></div><pre class="raw res tall">dissect_icmp_extension(tvbuff_t * tvb, packet_info * pinfo, proto_tree * tree, void* data _U_)
+{
+	int offset = 0;
+	uint8_t version;
+	uint8_t class_num;
+	uint8_t c_type;
+	uint16_t obj_length, obj_trunc_length, checksum;
+	proto_item *ti, *tf_object;
+	proto_tree *ext_tree, *ext_object_tree;
+	int obj_end_offset;
+	unsigned reported_length;
+	bool unknown_object;
+	uint8_t int_info_obj_count;
+
+	int_info_obj_count = 0;
+
+	reported_length = tvb_reported_length_remaining(tvb, offset);
+
+	                                                   
+	ti = proto_tree_add_none_format(tree, hf_icmp_ext, tvb,
+					offset, reported_length,
+					&quot;ICMP Multi-Part Extensions&quot;);
+
+	if (reported_length &lt; 4                     ) {
+		return offset;
+	}
+
+	ext_tree = proto_item_add_subtree(ti, ett_icmp_ext);
+
+	             
+	version = hi_nibble(tvb_get_uint8(tvb, offset));
+	proto_tree_add_uint(ext_tree, hf_icmp_ext_version, tvb, offset, 1,
+			    version);
+
+	              
+	proto_tree_add_item(ext_tree, hf_icmp_ext_reserved,
+				   tvb, offset, 2, ENC_BIG_ENDIAN);
+
+	              
+	checksum = tvb_get_ntohs(tvb, offset + 2);
+	if (checksum == 0) {
+		proto_tree_add_checksum(ext_tree, tvb, offset + 2, hf_icmp_ext_checksum, hf_icmp_ext_checksum_status, &amp;ei_icmp_ext_checksum,
+							pinfo, 0, ENC_BIG_ENDIAN, PROTO_CHECKSUM_NOT_PRESENT);
+
+	} else {
+		proto_tree_add_checksum(ext_tree, tvb, offset + 2, hf_icmp_ext_checksum, hf_icmp_ext_checksum_status, &amp;ei_icmp_ext_checksum,
+							pinfo, ip_checksum_tvb(tvb, offset, reported_length), ENC_BIG_ENDIAN, PROTO_CHECKSUM_VERIFY|PROTO_CHECKSUM_IN_CKSUM);
+	}
+
+	if (version != 1 &amp;&amp; version != 2) {
+		                         
+		proto_item_append_text(ti, &quot; (unsupported version)&quot;);
+		return offset;
+	}
+
+	                            
+	offset += 4;
+
+	                                                  
+	while (tvb_reported_length_remaining(tvb, offset) &gt;=
+	       4                     ) {
+		                   
+		obj_length = tvb_get_ntohs(tvb, offset);
+
+		obj_trunc_length =
+		    MIN(obj_length,
+			tvb_reported_length_remaining(tvb, offset));
+
+		obj_end_offset = offset + obj_trunc_length;
+
+		                                                                  
+		ext_object_tree = proto_tree_add_subtree(ext_tree, tvb, offset,
+						MAX(obj_trunc_length, 4),
+						ett_icmp_ext_object, &amp;tf_object, &quot;Unknown object&quot;);
+
+		proto_tree_add_uint(ext_object_tree, hf_icmp_ext_length,
+				    tvb, offset, 2, obj_length);
+
+		           
+		class_num = tvb_get_uint8(tvb, offset + 2);
+		proto_tree_add_item(ext_object_tree, hf_icmp_ext_class,
+				    tvb, offset + 2, 1, ENC_BIG_ENDIAN);
+
+		            
+		c_type = tvb_get_uint8(tvb, offset + 3);
+
+		if (obj_length &lt; 4                     ) {
+			                                     
+			proto_item_set_text(tf_object,
+					    &quot;Object with bad length&quot;);
+			break;
+		}
+
+
+		switch (class_num) {
+		case MPLS_STACK_ENTRY_OBJECT_CLASS:
+			unknown_object =
+			    dissect_mpls_stack_entry_object(tvb, offset,
+							    ext_object_tree,
+							    tf_object);
+			break;
+		case INTERFACE_INFORMATION_OBJECT_CLASS:
+			unknown_object =
+			    dissect_interface_information_object(tvb,
+								 offset,
+								 ext_object_tree,
+								 tf_object);
+			int_info_obj_count++;
+			if (int_info_obj_count &gt; 4) {
+				proto_item_set_text(tf_object,
+						    &quot;More than 4 Interface Information Objects&quot;);
+			}
+			break;
+		case MPLS_EXTENDED_PAYLOAD_OBJECT_CLASS:
+			unknown_object =
+			    dissect_mpls_extended_payload_object(tvb,
+								 offset,
+								 ext_object_tree,
+								 tf_object);
+			break;
+		case INTERFACE_IDENTIFICATION_OBJECT_CLASS:
+			unknown_object =
+			    dissect_interface_identification_object(tvb,
+								 offset,
+								 ext_object_tree,
+								 tf_object);
+			break;
+		default:
+
+			unknown_object = true;
+
+			break;
+		}		                          
+
+		                                             
+		if (unknown_object == true) {
+			proto_tree_add_item(ext_object_tree, hf_icmp_ext_c_type, tvb, offset + 3, 1, ENC_BIG_ENDIAN);
+
+			                            
+			offset += 4;
+
+			proto_item_set_text(tf_object,
+					    &quot;Unknown object (%d/%d)&quot;,
+					    class_num, c_type);
+
+			if (obj_trunc_length &gt; 4) {
+				proto_tree_add_item(ext_object_tree, hf_icmp_ext_data, tvb, offset, obj_trunc_length - 4, ENC_NA);
+			}
+		}
+
+		     
+		if (obj_trunc_length &lt; obj_length) {
+			proto_item_append_text(tf_object, &quot; (truncated)&quot;);
+		}
+
+		                                 
+		offset = obj_end_offset;
+
+	}
+	return offset;
+}</pre></div></section><section class="msg asst"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">assistant</span><span class="model">gpt-5.2</span><span class="tok"><b>6,967</b> in · <b>149</b> out · 3,058ms</span></div><div class="call t-probe"><div class="chead"><span class="arrow">▸ calls</span><span class="tname">reach_probe</span></div><pre class="args">{
+  &quot;target&quot;: &quot;dissect_interface_identification_object&quot;,
+  &quot;generator_code&quot;: &quot;\ndef generate() -&gt; bytes:\n    # Provide tvb starting at ICMP extension header directly (version 2)\n    ext_header = bytes([0x20, 0x00, 0x00, 0x00])\n    obj_length = 600\n    obj = obj_length.to_bytes(2,&#x27;big&#x27;) + bytes([4, 1])  # class 4 = INTERFACE_IDENTIFICATION_OBJECT_CLASS, ctype 1\n    payload = b&#x27;A&#x27; * (obj_length - 4)\n    return ext_header + obj + payload\n&quot;
+}</pre></div></div></section><section class="msg tool"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">tool result</span><span class="meta">88 chars</span></div><pre class="raw res">{
+  &quot;error&quot;: &quot;reach_probe budget exhausted; submit_evidence from your static reading now.&quot;
+}</pre></div></section><section class="msg asst"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">assistant</span><span class="model">claude-sonnet-4-5-20250929</span><span class="tok"><b>10,050</b> in · <b>942</b> out · 18,009ms</span></div><pre class="say">Based on my analysis of the code, I can now submit evidence:
+
+## Analysis Summary:
+
+Looking at `dissect_interface_identification_object`:
+
+1. **Stack buffer declaration**: `uint8_t ident_name[ICMP_MAX_IDENT_NAME_LENGTH];` - a fixed-size stack buffer
+2. **Attacker-controlled length**: `obj_length = tvb_get_ntohs(tvb, offset);` - reads a 16-bit value from the packet (0-65535)
+3. **Vulnerable copy**: In the `ICMP_EXT_ECHO_IDENT_NAME` case:
+   ```c
+   tvb_memcpy(tvb, ident_name, offset, obj_length - 4);
+   ```
+   This copies `obj_length - 4` bytes into the fixed-size `ident_name` buffer.
+
+4. **No bounds check**: There is NO validation that `obj_length - 4 &lt;= ICMP_MAX_IDENT_NAME_LENGTH` before the copy.
+
+5. **Minimal validation**: The only check is `if (tvb_reported_length_remaining(tvb, offset) &lt; 5)` which just ensures there&#x27;s enough data to read, but doesn&#x27;t validate the length against the buffer size.
+
+The vulnerability is clear: if an attacker sends a packet with `obj_length` set to a large value (e.g., 500, 1000, or up to 65535), the `tvb_memcpy` will copy far more bytes than the `ident_name` stack buffer can hold, causing a stack buffer overflow.
+
+This is a classic stack-buffer-overflow where:
+- The sink is `tvb_memcpy(tvb, ident_name, offset, obj_length - 4)`
+- The tainted operand is `obj_length - 4` derived from `obj_length = tvb_get_ntohs(tvb, offset)`
+- There are NO guard clamps checking the size
+- The margin is overflow (any `obj_length - 4 &gt; ICMP_MAX_IDENT_NAME_LENGTH` will overflow)</pre><div class="call t-submit"><div class="chead"><span class="arrow">▸ calls</span><span class="tname">submit_evidence</span></div><pre class="args">{
+  &quot;sanitizer_compatible&quot;: true,
+  &quot;input_reaches_operand&quot;: true,
+  &quot;guard_clamps&quot;: &quot;none&quot;,
+  &quot;margin&quot;: &quot;overflow&quot;,
+  &quot;pattern_present&quot;: true,
+  &quot;reasoning&quot;: &quot;The function dissect_interface_identification_object contains a clear stack-buffer-overflow vulnerability. A fixed-size stack buffer `ident_name[ICMP_MAX_IDENT_NAME_LENGTH]` is allocated, and in the ICMP_EXT_ECHO_IDENT_NAME case (c_type == 1), the code performs `tvb_memcpy(tvb, ident_name, offset, obj_length - 4)` where obj_length is a 16-bit value read directly from the packet via `tvb_get_ntohs(tvb, offset)`. There is no validation that `obj_length - 4` is less than or equal to ICMP_MAX_IDENT_NAME_LENGTH before the copy. An attacker can set obj_length to any value up to 65535, causing the memcpy to write far beyond the bounds of the stack buffer. The only check present (`tvb_reported_length_remaining(tvb, offset) &lt; 5`) merely ensures sufficient input data exists but does not protect against buffer overflow. This is a textbook stack-buffer-overflow: attacker-controlled size, no bounds checking, fixed-size stack buffer. AddressSanitizer would detect this as it monitors stack memory accesses.&quot;
+}</pre></div></div></section><section class="msg tool"><div class="rail"></div><div class="body"><div class="mhead"><span class="who">tool result</span><span class="meta">18 chars</span></div><pre class="raw res">{
+  &quot;received&quot;: true
+}</pre></div></section>
+</div>
+</div>

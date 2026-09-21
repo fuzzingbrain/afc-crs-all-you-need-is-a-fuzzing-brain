@@ -1,0 +1,212 @@
+{
+  "tag": "lx-full-01__vuln_003",
+  "gt": "xmlSBufAddEntitySecure",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "partial",
+    "pattern_present": true,
+    "reasoning": "Source of xmlSBufAddEntitySecure:\n\n- It checks only the resource limit: `if (buf->max - buf->size < len) return;`.\n- It grows the backing allocation only when `buf->cap == 0`, via `xmlSBufGrow(buf, len * 2)`.\n- It then unconditionally does `memcpy(buf->mem + buf->size, str, len); buf->size += len;`.\n\nThis is a classic capacity/size mismatch: if `buf->cap` is nonzero but `buf->cap - buf->size < len`, the memcpy writes past the allocated buffer. There is no check against `buf->cap` in this function.\n\n`xmlSBufGrow` reallocates to `cap = (buf->size + len) * 2` (min 240) and sets `buf->cap = cap`. That is correct when called, but xmlSBufAddEntitySecure may skip calling it even when needed.\n\nThus the heap-buffer-overflow pattern is present in the real code.\n\nTaint: `len` and `str` are derived from parsed XML entity content/expansion, which is ultimately influenced by fuzzer input. The function is reachable (check_reachability reports direct reach, depth 8).\n\nHowever, I could not run a reach_probe to obtain a concrete ASan crash because the provided harness/binary path was missing in this environment (`No such file or directory .../bin/address`). Therefore I cannot provide runtime proof that a fuzzer input can drive `buf->cap - buf->size < len` while `buf->max - buf->size >= len` in practice; the code-level evidence indicates it is possible if `max` is larger than `cap` (or if `cap` can lag behind `max`).",
+    "corrected_description": "Heap-buffer-overflow in xmlSBufAddEntitySecure: it checks only `buf->max` (resource limit) and only grows when `buf->cap == 0`; if `buf->cap` is nonzero but insufficient for `len`, it still memcpy()s `len` bytes to `buf->mem + buf->size`, overflowing the heap allocation. Missing check/grow for `buf->cap - buf->size >= len`.",
+    "control_flow_to_bug": "Fuzzer XML input -> XML parser processes entity expansion / serialization into an xmlSBuf -> calls xmlSBufAddEntitySecure(buf, str, len) with attacker-influenced `str/len` -> passes resource-limit check (`buf->max - buf->size >= len`) -> `buf->cap != 0` so no xmlSBufGrow call -> memcpy(buf->mem + buf->size, str, len) executes with `buf->cap - buf->size < len` -> heap OOB write."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.5,
+  "verdict": "LIKELY",
+  "basis": "tainted, partial clamp (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "xmlSBufAddEntitySecure"
+      },
+      "result": "xmlSBufAddEntitySecure(xmlSBuf *buf, const xmlChar *str, unsigned len) {\n    if (buf->max - buf->size < len) {\n        if (buf->code == XML_ERR_OK)\n            buf->code = XML_ERR_RESOURCE_LIMIT;\n        return;\n    }\n\n    if (buf->cap == 0) {\n                                                              \n                                                      \n        if (xmlSBufGrow(buf, len * 2) < 0)\n            return;\n    }\n\n    if (len > 0)\n        memcpy(buf->mem + buf->size, str, len);\n    buf->size += len;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "xmlSBufGrow"
+      },
+      "result": "xmlSBufGrow(xmlSBuf *buf, unsigned len) {\n    xmlChar *mem;\n    unsigned cap;\n\n    if (len >= UINT_MAX / 2 - buf->size) {\n        if (buf->code == XML_ERR_OK)\n            buf->code = XML_ERR_RESOURCE_LIMIT;\n        return(-1);\n    }\n\n    cap = (buf->size + len) * 2;\n    if (cap < 240)\n        cap = 240;\n\n    mem = xmlRealloc(buf->mem, cap);\n    if (mem == NULL) {\n        buf->code = XML_ERR_NO_MEMORY;\n        return(-1);\n    }\n\n    buf->mem = mem;\n    buf->cap = cap;\n\n    return(0);\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "xmlSBufAddEntitySecure"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 8, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to force repeated entity expansions to grow size beyond initial cap\n    # while keeping buf->cap nonzero and not triggering grow in xmlSBufAddEntitySecure.\n    # We'll craft a small internal subset with a recursive entity that expands.\n    xml = b\"<!DOCTYPE r [\\n\"\n    xml += b\"<!ENTITY a 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'>\\n\"\n    xml += b\"<!ENTITY b '&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;'>\\n\"\n    xml += b\"]>\\n<r>&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;</r>\\n\"\n    return xml\n",
+        "target": "xmlSBufAddEntitySecure"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/lx-full-01/bugs/vuln_003/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "partial",
+        "pattern_present": true,
+        "reasoning": "Source of xmlSBufAddEntitySecure:\n\n- It checks only the resource limit: `if (buf->max - buf->size < len) return;`.\n- It grows the backing allocation only when `buf->cap == 0`, via `xmlSBufGrow(buf, len * 2)`.\n- It then unconditionally does `memcpy(buf->mem + buf->size, str, len); buf->size += len;`.\n\nThis is a classic capacity/size mismatch: if `buf->cap` is nonzero but `buf->cap - buf->size < len`, the memcpy writes past the allocated buffer. There is no check against `buf->cap` in this function.\n\n`xmlSBufGrow` reallocates to `cap = (buf->size + len) * 2` (min 240) and sets `buf->cap = cap`. That is correct when called, but xmlSBufAddEntitySecure may skip calling it even when needed.\n\nThus the heap-buffer-overflow pattern is present in the real code.\n\nTaint: `len` and `str` are derived from parsed XML entity content/expansion, which is ultimately influenced by fuzzer input. The function is reachable (check_reachability reports direct reach, depth 8).\n\nHowever, I could not run a reach_probe to obtain a concrete ASan crash because the provided harness/binary path was missing in this environment (`No such file or directory .../bin/address`). Therefore I cannot provide runtime proof that a fuzzer input can drive `buf->cap - buf->size < len` while `buf->max - buf->size >= len` in practice; the code-level evidence indicates it is possible if `max` is larger than `cap` (or if `cap` can lag behind `max`).",
+        "corrected_description": "Heap-buffer-overflow in xmlSBufAddEntitySecure: it checks only `buf->max` (resource limit) and only grows when `buf->cap == 0`; if `buf->cap` is nonzero but insufficient for `len`, it still memcpy()s `len` bytes to `buf->mem + buf->size`, overflowing the heap allocation. Missing check/grow for `buf->cap - buf->size >= len`.",
+        "control_flow_to_bug": "Fuzzer XML input -> XML parser processes entity expansion / serialization into an xmlSBuf -> calls xmlSBufAddEntitySecure(buf, str, len) with attacker-influenced `str/len` -> passes resource-limit check (`buf->max - buf->size >= len`) -> `buf->cap != 0` so no xmlSBufGrow call -> memcpy(buf->mem + buf->size, str, len) executes with `buf->cap - buf->size < len` -> heap OOB write."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1097,
+      "output_tokens": 77,
+      "total_tokens": 1174,
+      "latency_ms": 1441
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1542,
+      "output_tokens": 195,
+      "total_tokens": 1737,
+      "latency_ms": 2900
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1788,
+      "output_tokens": 638,
+      "total_tokens": 2426,
+      "latency_ms": 7458
+    }
+  ],
+  "token_totals": {
+    "input": 4427,
+    "output": 910,
+    "total": 5337,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: xml   Sanitizer: address\nFunction: xmlSBufAddEntitySecure\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): Potential heap buffer overflow in memcpy due to incomplete capacity checks/growth logic. Function checks resource limit using (buf->max - buf->size < len) but then only grows buffer when buf->cap == 0, calling xmlSBufGrow(buf, len*2). If buf->cap is nonzero but buf->size+len exceeds current allocated capacity (buf->cap), the code will still execute memcpy(buf->mem + buf->size, str, len) and increment size, writing past allocation. Root cause: mismatch between max-limit check and actual allocated capacity management; missing ensure(buf->cap - buf->size >= len) for nonzero cap or after grow. ASan would detect OOB write in memcpy. Related fields: buf->cap, buf->size, buf->max, buf->mem; related function: xmlSBufGrow.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_kX93EdcetAy6BEqPoTS3XxwG",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"xmlSBufAddEntitySecure\"}"
+          }
+        },
+        {
+          "id": "call_dqGCCxVrAtX7TWfE9bibQosl",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"xmlSBufGrow\"}"
+          }
+        },
+        {
+          "id": "call_DmEs4gRivSfNbl8fLCJyrOo6",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"xmlSBufAddEntitySecure\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_kX93EdcetAy6BEqPoTS3XxwG",
+      "content": "xmlSBufAddEntitySecure(xmlSBuf *buf, const xmlChar *str, unsigned len) {\n    if (buf->max - buf->size < len) {\n        if (buf->code == XML_ERR_OK)\n            buf->code = XML_ERR_RESOURCE_LIMIT;\n        return;\n    }\n\n    if (buf->cap == 0) {\n                                                              \n                                                      \n        if (xmlSBufGrow(buf, len * 2) < 0)\n            return;\n    }\n\n    if (len > 0)\n        memcpy(buf->mem + buf->size, str, len);\n    buf->size += len;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_dqGCCxVrAtX7TWfE9bibQosl",
+      "content": "xmlSBufGrow(xmlSBuf *buf, unsigned len) {\n    xmlChar *mem;\n    unsigned cap;\n\n    if (len >= UINT_MAX / 2 - buf->size) {\n        if (buf->code == XML_ERR_OK)\n            buf->code = XML_ERR_RESOURCE_LIMIT;\n        return(-1);\n    }\n\n    cap = (buf->size + len) * 2;\n    if (cap < 240)\n        cap = 240;\n\n    mem = xmlRealloc(buf->mem, cap);\n    if (mem == NULL) {\n        buf->code = XML_ERR_NO_MEMORY;\n        return(-1);\n    }\n\n    buf->mem = mem;\n    buf->cap = cap;\n\n    return(0);\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_DmEs4gRivSfNbl8fLCJyrOo6",
+      "content": "{\"reachable\": true, \"call_depth\": 8, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_Ba9iz4eP3BbBgnpHzcrwmT1s",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to force repeated entity expansions to grow size beyond initial cap\\n    # while keeping buf->cap nonzero and not triggering grow in xmlSBufAddEntitySecure.\\n    # We'll craft a small internal subset with a recursive entity that expands.\\n    xml = b\\\"<!DOCTYPE r [\\\\n\\\"\\n    xml += b\\\"<!ENTITY a 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'>\\\\n\\\"\\n    xml += b\\\"<!ENTITY b '&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;'>\\\\n\\\"\\n    xml += b\\\"]>\\\\n<r>&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;</r>\\\\n\\\"\\n    return xml\\n\",\"target\":\"xmlSBufAddEntitySecure\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Ba9iz4eP3BbBgnpHzcrwmT1s",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/lx-full-01/bugs/vuln_003/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_JcPHgqHnLUdF90u8oPbkSdsa",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"partial\",\"pattern_present\":true,\"reasoning\":\"Source of xmlSBufAddEntitySecure:\\n\\n- It checks only the resource limit: `if (buf->max - buf->size < len) return;`.\\n- It grows the backing allocation only when `buf->cap == 0`, via `xmlSBufGrow(buf, len * 2)`.\\n- It then unconditionally does `memcpy(buf->mem + buf->size, str, len); buf->size += len;`.\\n\\nThis is a classic capacity/size mismatch: if `buf->cap` is nonzero but `buf->cap - buf->size < len`, the memcpy writes past the allocated buffer. There is no check against `buf->cap` in this function.\\n\\n`xmlSBufGrow` reallocates to `cap = (buf->size + len) * 2` (min 240) and sets `buf->cap = cap`. That is correct when called, but xmlSBufAddEntitySecure may skip calling it even when needed.\\n\\nThus the heap-buffer-overflow pattern is present in the real code.\\n\\nTaint: `len` and `str` are derived from parsed XML entity content/expansion, which is ultimately influenced by fuzzer input. The function is reachable (check_reachability reports direct reach, depth 8).\\n\\nHowever, I could not run a reach_probe to obtain a concrete ASan crash because the provided harness/binary path was missing in this environment (`No such file or directory .../bin/address`). Therefore I cannot provide runtime proof that a fuzzer input can drive `buf->cap - buf->size < len` while `buf->max - buf->size >= len` in practice; the code-level evidence indicates it is possible if `max` is larger than `cap` (or if `cap` can lag behind `max`).\",\"corrected_description\":\"Heap-buffer-overflow in xmlSBufAddEntitySecure: it checks only `buf->max` (resource limit) and only grows when `buf->cap == 0`; if `buf->cap` is nonzero but insufficient for `len`, it still memcpy()s `len` bytes to `buf->mem + buf->size`, overflowing the heap allocation. Missing check/grow for `buf->cap - buf->size >= len`.\",\"control_flow_to_bug\":\"Fuzzer XML input -> XML parser processes entity expansion / serialization into an xmlSBuf -> calls xmlSBufAddEntitySecure(buf, str, len) with attacker-influenced `str/len` -> passes resource-limit check (`buf->max - buf->size >= len`) -> `buf->cap != 0` so no xmlSBufGrow call -> memcpy(buf->mem + buf->size, str, len) executes with `buf->cap - buf->size < len` -> heap OOB write.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_JcPHgqHnLUdF90u8oPbkSdsa",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "xmlSBufAddEntitySecure"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Potential heap buffer overflow in memcpy due to incomplete capacity checks/growth logic. Function checks resource limit using (buf->max - buf->size < len) but then only grows buffer when buf->cap == 0, calling xmlSBufGrow(buf, len*2). If buf->cap is nonzero but buf->size+len exceeds current allocated capacity (buf->cap), the code will still execute memcpy(buf->mem + buf->size, str, len) and increment size, writing past allocation. Root cause: mismatch between max-limit check and actual allocated capacity management; missing ensure(buf->cap - buf->size >= len) for nonzero cap or after grow. ASan would detect OOB write in memcpy. Related fields: buf->cap, buf->size, buf->max, buf->mem; related function: xmlSBufGrow.",
+  "finder_vuln_type": ""
+}

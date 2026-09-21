@@ -1,0 +1,17 @@
+{
+  "challenge": "cu-delta-04__curl-003",
+  "source_root": "/home/ze/fbv2/experiments/agent_probe/_work/cu-delta-04/repo",
+  "workspace": "/home/ze/fbv2/experiments/agent_probe/_work/cu-delta-04",
+  "repo_subdir": "repo",
+  "diff_filename": "diff/ref.diff",
+  "fuzzer": "curl_fuzzer_http",
+  "sanitizer": "address",
+  "scan_mode": "delta",
+  "changed_functions": [
+    "Curl_http_header"
+  ],
+  "ground_truth_functions": [
+    "Curl_http_header"
+  ],
+  "crash_type": "SEGV"
+}

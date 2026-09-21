@@ -1,0 +1,26 @@
+{
+  "challenge": "fp-delta-01__vuln_001",
+  "fuzzer": "TestFuzzCryptoCertificateDataSetPEM",
+  "sanitizer": "address",
+  "functions_indexed": 0,
+  "ground_truth_functions": [
+    "freerdp_bio_read_pem_with_policy"
+  ],
+  "q1_finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "freerdp_bio_read_pem_with_policy"
+    ],
+    "found_ground_truth": true,
+    "matched_functions": [
+      "freerdp_bio_read_pem_with_policy"
+    ]
+  },
+  "q2_verifier": {
+    "verdict_real": true,
+    "score": 0.95,
+    "is_important": true,
+    "reason": "CONFIRMED VULNERABILITY: Integer overflow in freerdp_bio_read_pem_with_policy leading to heap buffer overflow.\n\nROOT CAUSE:\n1. Uses uint16_t for length/offset variables (lines 1537-1539)\n2. Loop condition 'while (status != 0)' doesn't check for overflow (line 1546)\n3. 'length += blocksize' causes uint16_t overflow after ~32 iterations (line 1567)\n4. When length wraps (e.g., 65536 → 0, then 2048), ",
+    "target_function": "freerdp_bio_read_pem_with_policy"
+  }
+}

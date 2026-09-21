@@ -1,0 +1,181 @@
+{
+  "tag": "ws-delta-04__vuln_007",
+  "gt": "json_string_unescape",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "partial",
+    "pattern_present": true,
+    "reasoning": "Source shows bounds checks in the main 8-hex loop for initial \\\\U escape and in the 4-hex loop for \\\\u continuation. However, in the surrogate-handling branch when a lead surrogate is followed by a second escape of the form \\\\U (uppercase), the code enters `else if (current_character == 'U')` and then runs `for (int i = 0; i < 8; i++) { current_character = string[read_index]; read_index++; ... }` with NO `read_index < string_length` check and NO validation of `ws_xton` return value. If the input ends before 8 hex digits, `string[read_index]` reads past the NUL terminator / buffer end, which can be a heap-buffer-overflow under ASan depending on allocation layout. This matches the finder’s claim but only for the surrogate-continuation `\\\\U` loop; the initial `\\\\U` loop is guarded. I could not run reach_probe due to missing ASan binary path in the environment, so no crash evidence was obtained.",
+    "corrected_description": "Heap out-of-bounds read in json_string_unescape when parsing a lead surrogate from a `\\\\UXXXXXXXX` escape followed by a surrogate continuation written as `\\\\U` (uppercase) and fewer than 8 following hex digits. The continuation loop lacks `read_index < string_length` bounds checks (unlike the initial `\\\\U` loop), causing OOB read past end of string.",
+    "control_flow_to_bug": "handler_json -> JSON string parsing -> json_string_unescape(scope, string, &len). In json_string_unescape: encounter backslash then 'U' -> parse 8 hex digits into code_point (guarded). If code_point is a lead surrogate (0xD800-0xDBFF), then next char must be '\\\\' then next char 'U' (uppercase) to take the vulnerable branch. In that branch, it increments read_index and enters `for i in 0..7` reading `string[read_index]` and incrementing without checking `read_index < string_length`; if the input ends early, it reads past the buffer."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.5,
+  "verdict": "LIKELY",
+  "basis": "tainted, partial clamp (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "json_string_unescape"
+      },
+      "result": "json_string_unescape(wmem_allocator_t *scope, const char *string, size_t *length_ptr)\n{\n\tsize_t read_index = 0;\n\tsize_t string_length = strlen(string);\n\n\twmem_strbuf_t* output_string_buffer = wmem_strbuf_new_sized(scope, string_length);\n\n\twhile (true)\n\t{\n\t\t                               \n\t\tif (!(read_index < string_length))\n\t\t{\n\t\t\tbreak;\n\t\t}\n\n\t\tuint8_t current_character = string[read_index];\n\n\t\t                                \n\t\tif (current_character != '\\\\')\n\t\t{\n\t\t\t                                                         \n\t\t\t                                                                                                 \n\t\t\tint utf8_character_length = ws_utf8_char_len(current_character);\n\n\t\t\tif (utf8_character_length <= 0)\n\t\t\t{\n\t\t\t\tbreak;\n\t\t\t}\n\n\t\t\tfor (int i = 0; i < utf8_character_length; i++)\n\t\t\t{\n\t\t\t\t                               \n\t\t\t\tif (!(read_index < string_length))\n\t\t\t\t{\n\t\t\t\t\tbreak;\n\t\t\t\t}\n\n\t\t\t\tcurrent_character = string[read_index];\n\t\t\t\tread_index++;\n\t\t\t\twmem_strbuf_append_c(output_string_buffer, current_character);\n\t\t\t}\n\t\t}\n\t\t                            \n\t\telse\n\t\t{\n\t\t\tread_index++;\n\n\t\t\t                               \n\t\t\tif (!(read_index < string_length))\n\t\t\t{\n\t\t\t\tbreak;\n\t\t\t}\n\n\t\t\tcurrent_character = string[read_index];\n\n\t\t\tif (current_character == '\\\"' || current_character == '\\\\' || current_character == '/')\n\t\t\t{\n\t\t\t\tread_index++;\n\t\t\t\twmem_strbuf_append_c(output_string_buffer, current_character);\n\t\t\t}\n\t\t\telse if (current_character == 'b')\n\t\t\t{\n\t\t\t\tread_index++;\n\t\t\t\twmem_strbuf_append_c(output_string_buffer, '\\b');\n\t\t\t}\n\t\t\telse if (current_character == 'f')\n\t\t\t{\n\t\t\t\tread_index++;\n\t\t\t\twmem_strbuf_append_c(output_string_buffer, '\\f');\n\t\t\t}\n\t\t\telse if (current_character == 'n')\n\t\t\t{\n\t\t\t\tread_index++;\n\t\t\t\twmem_strbuf_append_c(output_string_buffer, '\\n');\n\t\t\t}\n\t\t\telse if (current_character == 'r')\n\t\t\t{\n\t\t\t\tread_index++;\n\t\t\t\twmem_strbuf_append_c(output_string_buffer, '\\r');\n\t\t\t}\n\t\t\telse if (current_character == 't')\n\t\t\t{\n\t\t\t\tread_index++;\n\t\t\t\twmem_strbuf_append_c(output_string_buffer, '\\t');\n\t\t\t}\n\t\t\telse if (current_character == 'U')\n\t\t\t{\n\t\t\t\tread_index++;\n\t\t\t\t\n\t\t\t\tuint32_t code_point = 0;\n\t\t\t\tbool is_valid_unicode_character = true;\n\t\n\t\t\t\tfor (int i = 0; i < 8; i++)\n\t\t\t\t{\n\t\t\t\t\t                               \n\t\t\t\t\tif (!(read_index < string_length))\n\t\t\t\t\t{\n\t\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\t\n\t\t\t\t\tcurrent_character = string[read_index];\n\t\t\t\t\tread_index++;\n\t\n\t\t\t\t\tint nibble = ws_xton(current_character);\n\t\n\t\t\t\t\tif(nibble < 0)\n\t\t\t\t\t{\n\t\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\t\n\t\t\t\t\tcode_point <<= 4;\n\t\t\t\t\tcode_point |= nibble;\n\t\t\t\t}\n\t\n\t\t\t\tif ((IS_LEAD_SURROGATE(code_point)))\n\t\t\t\t{\n\t\t\t\t\t                               \n\t\t\t\t\tif (!(read_index < string_length))\n\t\t\t\t\t{\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\t\t\t\t\tcurrent_character = string[read_index];\n\t\n\t\t\t\t\tif (current_character == '\\\\')\n\t\t\t\t\t{\n\t\t\t\t\t\tread_index++;\n\t\n\t\t\t\t\t\t                               \n\t\t\t\t\t\tif (!(read_index < string_length))\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t}\n\t\n\t\t\t\t\t\tcurrent_character = string[read_index];\n\t\t\t\t\t\tif (current_character == 'u') {\n\t\t\t\t\t\t\tuint16_t lead_surrogate = code_point;\n\t\t\t\t\t\t\tuint16_t trail_surrogate = 0;\n\t\n\t\t\t\t\t\t\tread_index++;\n\t\n\t\t\t\t\t\t\tfor (int i = 0; i < 4; i++)\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t                               \n\t\t\t\t\t\t\t\tif (!(read_index < string_length))\n\t\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\t}\n\t\n\t\t\t\t\t\t\t\tcurrent_character = string[read_index];\n\t\t\t\t\t\t\t\tread_index++;\n\t\n\t\t\t\t\t\t\t\tint nibble = ws_xton(current_character);\n\t\n\t\t\t\t\t\t\t\tif (nibble < 0)\n\t\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\t}\n\t\n\t\t\t\t\t\t\t\ttrail_surrogate <<= 4;\n\t\t\t\t\t\t\t\ttrail_surrogate |= nibble;\n\t\t\t\t\t\t\t}\n\t\n\t\t\t\t\t\t\tif ((IS_TRAIL_SURROGATE(trail_surrogate)))\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\tcode_point = SURROGATE_VALUE(lead_surrogate, trail_surrogate);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\telse\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\n\t\t\t\t\t\telse if (current_character == 'U') {\n\t\t\t\t\t\t\tuint16_t lead_s…[truncated]"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "json_string_unescape"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 7, \"reached_via\": \"observed\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # minimal JSON string that triggers surrogate path with '\\\\U' then lead surrogate then '\\\\U' with too few hex digits\n    return b'\"\\\\U0000D800\\\\U\"'\n",
+        "target": "json_string_unescape"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-delta-04/bugs/vuln_007/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "partial",
+        "pattern_present": true,
+        "reasoning": "Source shows bounds checks in the main 8-hex loop for initial \\\\U escape and in the 4-hex loop for \\\\u continuation. However, in the surrogate-handling branch when a lead surrogate is followed by a second escape of the form \\\\U (uppercase), the code enters `else if (current_character == 'U')` and then runs `for (int i = 0; i < 8; i++) { current_character = string[read_index]; read_index++; ... }` with NO `read_index < string_length` check and NO validation of `ws_xton` return value. If the input ends before 8 hex digits, `string[read_index]` reads past the NUL terminator / buffer end, which can be a heap-buffer-overflow under ASan depending on allocation layout. This matches the finder’s claim but only for the surrogate-continuation `\\\\U` loop; the initial `\\\\U` loop is guarded. I could not run reach_probe due to missing ASan binary path in the environment, so no crash evidence was obtained.",
+        "corrected_description": "Heap out-of-bounds read in json_string_unescape when parsing a lead surrogate from a `\\\\UXXXXXXXX` escape followed by a surrogate continuation written as `\\\\U` (uppercase) and fewer than 8 following hex digits. The continuation loop lacks `read_index < string_length` bounds checks (unlike the initial `\\\\U` loop), causing OOB read past end of string.",
+        "control_flow_to_bug": "handler_json -> JSON string parsing -> json_string_unescape(scope, string, &len). In json_string_unescape: encounter backslash then 'U' -> parse 8 hex digits into code_point (guarded). If code_point is a lead surrogate (0xD800-0xDBFF), then next char must be '\\\\' then next char 'U' (uppercase) to take the vulnerable branch. In that branch, it increments read_index and enters `for i in 0..7` reading `string[read_index]` and incrementing without checking `read_index < string_length`; if the input ends early, it reads past the buffer."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1044,
+      "output_tokens": 56,
+      "total_tokens": 1100,
+      "latency_ms": 1043
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 3809,
+      "output_tokens": 75,
+      "total_tokens": 3884,
+      "latency_ms": 1878
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 3935,
+      "output_tokens": 499,
+      "total_tokens": 4434,
+      "latency_ms": 7417
+    }
+  ],
+  "token_totals": {
+    "input": 8788,
+    "output": 630,
+    "total": 9418,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: handler_json   Sanitizer: address\nFunction: json_string_unescape\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): The `\\U` (8-hex) and its surrogate-continuation loops read `string[read_index]` and increment read_index inside `for (i<8)` / `for (i<4)` without re-checking `read_index < string_length`, reading past the end of the input string.\n\nControl flow to the bug:\n  - handler_json; json_string_unescape on a string with a \\U escape\n  - the 8-hex / surrogate loops advance read_index without bound checks\n  - string[read_index] reads past the buffer -> heap over-read\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_YOHOLOMiHudMclHWItqNSrRb",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"json_string_unescape\"}"
+          }
+        },
+        {
+          "id": "call_jeWDgUvY5y0jW6eVIKaDqKBg",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"json_string_unescape\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_YOHOLOMiHudMclHWItqNSrRb",
+      "content": "json_string_unescape(wmem_allocator_t *scope, const char *string, size_t *length_ptr)\n{\n\tsize_t read_index = 0;\n\tsize_t string_length = strlen(string);\n\n\twmem_strbuf_t* output_string_buffer = wmem_strbuf_new_sized(scope, string_length);\n\n\twhile (true)\n\t{\n\t\t                               \n\t\tif (!(read_index < string_length))\n\t\t{\n\t\t\tbreak;\n\t\t}\n\n\t\tuint8_t current_character = string[read_index];\n\n\t\t                                \n\t\tif (current_character != '\\\\')\n\t\t{\n\t\t\t                                                         \n\t\t\t                                                                                                 \n\t\t\tint utf8_character_length = ws_utf8_char_len(current_character);\n\n\t\t\tif (utf8_character_length <= 0)\n\t\t\t{\n\t\t\t\tbreak;\n\t\t\t}\n\n\t\t\tfor (int i = 0; i < utf8_character_length; i++)\n\t\t\t{\n\t\t\t\t                               \n\t\t\t\tif (!(read_index < string_length))\n\t\t\t\t{\n\t\t\t\t\tbreak;\n\t\t\t\t}\n\n\t\t\t\tcurrent_character = string[read_index];\n\t\t\t\tread_index++;\n\t\t\t\twmem_strbuf_append_c(output_string_buffer, current_character);\n\t\t\t}\n\t\t}\n\t\t                            \n\t\telse\n\t\t{\n\t\t\tread_index++;\n\n\t\t\t                               \n\t\t\tif (!(read_index < string_length))\n\t\t\t{\n\t\t\t\tbreak;\n\t\t\t}\n\n\t\t\tcurrent_character = string[read_index];\n\n\t\t\tif (current_character == '\\\"' || current_character == '\\\\' || current_character == '/')\n\t\t\t{\n\t\t\t\tread_index++;\n\t\t\t\twmem_strbuf_append_c(output_string_buffer, current_character);\n\t\t\t}\n\t\t\telse if (current_character == 'b')\n\t\t\t{\n\t\t\t\tread_index++;\n\t\t\t\twmem_strbuf_append_c(output_string_buffer, '\\b');\n\t\t\t}\n\t\t\telse if (current_character == 'f')\n\t\t\t{\n\t\t\t\tread_index++;\n\t\t\t\twmem_strbuf_append_c(output_string_buffer, '\\f');\n\t\t\t}\n\t\t\telse if (current_character == 'n')\n\t\t\t{\n\t\t\t\tread_index++;\n\t\t\t\twmem_strbuf_append_c(output_string_buffer, '\\n');\n\t\t\t}\n\t\t\telse if (current_character == 'r')\n\t\t\t{\n\t\t\t\tread_index++;\n\t\t\t\twmem_strbuf_append_c(output_string_buffer, '\\r');\n\t\t\t}\n\t\t\telse if (current_character == 't')\n\t\t\t{\n\t\t\t\tread_index++;\n\t\t\t\twmem_strbuf_append_c(output_string_buffer, '\\t');\n\t\t\t}\n\t\t\telse if (current_character == 'U')\n\t\t\t{\n\t\t\t\tread_index++;\n\t\t\t\t\n\t\t\t\tuint32_t code_point = 0;\n\t\t\t\tbool is_valid_unicode_character = true;\n\t\n\t\t\t\tfor (int i = 0; i < 8; i++)\n\t\t\t\t{\n\t\t\t\t\t                               \n\t\t\t\t\tif (!(read_index < string_length))\n\t\t\t\t\t{\n\t\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\t\n\t\t\t\t\tcurrent_character = string[read_index];\n\t\t\t\t\tread_index++;\n\t\n\t\t\t\t\tint nibble = ws_xton(current_character);\n\t\n\t\t\t\t\tif(nibble < 0)\n\t\t\t\t\t{\n\t\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\t\n\t\t\t\t\tcode_point <<= 4;\n\t\t\t\t\tcode_point |= nibble;\n\t\t\t\t}\n\t\n\t\t\t\tif ((IS_LEAD_SURROGATE(code_point)))\n\t\t\t\t{\n\t\t\t\t\t                               \n\t\t\t\t\tif (!(read_index < string_length))\n\t\t\t\t\t{\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\t\t\t\t\tcurrent_character = string[read_index];\n\t\n\t\t\t\t\tif (current_character == '\\\\')\n\t\t\t\t\t{\n\t\t\t\t\t\tread_index++;\n\t\n\t\t\t\t\t\t                               \n\t\t\t\t\t\tif (!(read_index < string_length))\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t}\n\t\n\t\t\t\t\t\tcurrent_character = string[read_index];\n\t\t\t\t\t\tif (current_character == 'u') {\n\t\t\t\t\t\t\tuint16_t lead_surrogate = code_point;\n\t\t\t\t\t\t\tuint16_t trail_surrogate = 0;\n\t\n\t\t\t\t\t\t\tread_index++;\n\t\n\t\t\t\t\t\t\tfor (int i = 0; i < 4; i++)\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t                               \n\t\t\t\t\t\t\t\tif (!(read_index < string_length))\n\t\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\t}\n\t\n\t\t\t\t\t\t\t\tcurrent_character = string[read_index];\n\t\t\t\t\t\t\t\tread_index++;\n\t\n\t\t\t\t\t\t\t\tint nibble = ws_xton(current_character);\n\t\n\t\t\t\t\t\t\t\tif (nibble < 0)\n\t\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t\t\t\t\t\tbreak;\n\t\t\t\t\t\t\t\t}\n\t\n\t\t\t\t\t\t\t\ttrail_surrogate <<= 4;\n\t\t\t\t\t\t\t\ttrail_surrogate |= nibble;\n\t\t\t\t\t\t\t}\n\t\n\t\t\t\t\t\t\tif ((IS_TRAIL_SURROGATE(trail_surrogate)))\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\tcode_point = SURROGATE_VALUE(lead_surrogate, trail_surrogate);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\telse\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\t\n\t\t\t\t\t\telse if (current_character == 'U') {\n\t\t\t\t\t\t\tuint16_t lead_surrogate = code_point;\n\t\t\t\t\t\t\tuint16_t trail_surrogate = 0;\n\t\n\t\t\t\t\t\t\tread_index++;\n\t\n\t\t\t\t\t\t\tfor (int i = 0; i < 8; i++)\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\tcurrent_character = string[read_index];\n\t\t\t\t\t\t\t\tread_index++;\n\t\n\t\t\t\t\t\t\t\tint nibble = ws_xton(current_character);\n\t\n\t\t\t\t\t\t\t\ttrail_surrogate <<= 4;\n\t\t\t\t\t\t\t\ttrail_surrogate |= nibble;\n\t\t\t\t\t\t\t}\n\t\n\t\t\t\t\t\t\tif ((IS_TRAIL_SURROGATE(trail_surrogate)))\n\t\t\t\t\t\t\t{\t\n\t\t\t\t\t\t\t\tcode_point = SURROGATE_VALUE(lead_surrogate, trail_surrogate);\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t\telse\n\t\t\t\t\t\t\t{\n\t\t\t\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t\t\t\t}\n\t\t\t\t\t\t}\n\t\t\t\t\t\telse\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tread_index++;\n\t\t\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\telse\n\t\t\t\t\t{\n\t\t\t\t\t\tread_index++;\n\t\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\telse if ((IS_TRAIL_SURROGATE(code_point)))\n\t\t\t\t{\n\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t}\n\n\t\t\t\tif (is_valid_unicode_character)\n\t\t\t\t{\n\t\t\t\t\tif (g_unichar_validate(code_point) && g_unichar_isprint(code_point))\n\t\t\t\t\t{\n\t\t\t\t\t\tchar length_test_buffer[6];\n\t\t\t\t\t\tint utf8_character_length = (int)g_unichar_to_utf8(code_point, length_test_buffer);\n\t\n\t\t\t\t\t\tfor (int i = 0; i < utf8_character_length; i++)\n\t\t\t\t\t\t{\n\t\t\t\t\t\t\tcurrent_character = length_test_buffer[i];\n\t\t\t\t\t\t\twmem_strbuf_append_c(output_string_buffer, current_character);\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\telse\n\t\t\t\t{\n\t\t\t\t\twmem_strbuf_append_unichar_repl(output_string_buffer);\n\t\t\t\t}\n\t\t\t}\n\t\t\telse if (current_character == 'u')\n\t\t\t{\n\t\t\t\tread_index++;\n\n\t\t\t\tuint32_t code_point = 0;\n\t\t\t\tbool is_valid_unicode_character = true;\n\n\t\t\t\tfor (int i = 0; i < 4; i++)\n\t\t\t\t{\n\t\t\t\t\t                               \n\t\t\t\t\tif (!(read_index < string_length))\n\t\t\t\t\t{\n\t\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\n\t\t\t\t\tcurrent_character = string[read_index];\n\t\t\t\t\tread_index++;\n\n\t\t\t\t\tint nibble = ws_xton(current_character);\n\n\t\t\t\t\tif(nibble < 0)\n\t\t\t\t\t{\n\t\t\t\t\t\tis_valid_unicode_character = false;\n\t\t\t\t\t\tbreak;\n\t\t\t\t\t}\n\n\t\t\t\t\tcode_point <<= 4;\n\t\t\t\t\tcode_point |= nibble;\n\t\t\t\t}\n\n\t\t\t\tif ((IS_LEAD_SURROGATE(code_point)))"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_jeWDgUvY5y0jW6eVIKaDqKBg",
+      "content": "{\"reachable\": true, \"call_depth\": 7, \"reached_via\": \"observed\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_NXjSObLrVwKk21jyUquHAk1R",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # minimal JSON string that triggers surrogate path with '\\\\\\\\U' then lead surrogate then '\\\\\\\\U' with too few hex digits\\n    return b'\\\"\\\\\\\\U0000D800\\\\\\\\U\\\"'\\n\",\"target\":\"json_string_unescape\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_NXjSObLrVwKk21jyUquHAk1R",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-delta-04/bugs/vuln_007/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_QOXlPxtECeEZ6wqHIXbFivmw",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"partial\",\"pattern_present\":true,\"reasoning\":\"Source shows bounds checks in the main 8-hex loop for initial \\\\\\\\U escape and in the 4-hex loop for \\\\\\\\u continuation. However, in the surrogate-handling branch when a lead surrogate is followed by a second escape of the form \\\\\\\\U (uppercase), the code enters `else if (current_character == 'U')` and then runs `for (int i = 0; i < 8; i++) { current_character = string[read_index]; read_index++; ... }` with NO `read_index < string_length` check and NO validation of `ws_xton` return value. If the input ends before 8 hex digits, `string[read_index]` reads past the NUL terminator / buffer end, which can be a heap-buffer-overflow under ASan depending on allocation layout. This matches the finder’s claim but only for the surrogate-continuation `\\\\\\\\U` loop; the initial `\\\\\\\\U` loop is guarded. I could not run reach_probe due to missing ASan binary path in the environment, so no crash evidence was obtained.\",\"corrected_description\":\"Heap out-of-bounds read in json_string_unescape when parsing a lead surrogate from a `\\\\\\\\UXXXXXXXX` escape followed by a surrogate continuation written as `\\\\\\\\U` (uppercase) and fewer than 8 following hex digits. The continuation loop lacks `read_index < string_length` bounds checks (unlike the initial `\\\\\\\\U` loop), causing OOB read past end of string.\",\"control_flow_to_bug\":\"handler_json -> JSON string parsing -> json_string_unescape(scope, string, &len). In json_string_unescape: encounter backslash then 'U' -> parse 8 hex digits into code_point (guarded). If code_point is a lead surrogate (0xD800-0xDBFF), then next char must be '\\\\\\\\' then next char 'U' (uppercase) to take the vulnerable branch. In that branch, it increments read_index and enters `for i in 0..7` reading `string[read_index]` and incrementing without checking `read_index < string_length`; if the input ends early, it reads past the buffer.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_QOXlPxtECeEZ6wqHIXbFivmw",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

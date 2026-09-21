@@ -1,0 +1,22 @@
+{
+  "challenge": "sq-delta-03",
+  "bug": "SQL-010",
+  "tag": "sq-delta-03__SQL-010",
+  "round": "pre-competition",
+  "scan_mode": "delta",
+  "harness": "customfuzz3",
+  "fuzzer": "customfuzz3",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "fileToString"
+  ],
+  "crash_type": "stack-buffer-overflow",
+  "graphs_root": "/home/ze/fb-graphs/build/sq-delta-03",
+  "source_root": "/home/ze/fb-graphs/build/sq-delta-03/repo",
+  "callgraph": "/home/ze/fb-graphs/build/sq-delta-03/graph-customfuzz3/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/sqlite3:latest",
+  "project": "sqlite3",
+  "blob": "/home/ze/fb-graphs/build/sq-delta-03/bugs/SQL-010/blob"
+}

@@ -1,0 +1,32 @@
+{
+  "project_name": "arrow",
+  "task_type": "pov",
+  "scan_mode": "full",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "parquet-arrow-fuzz"
+  ],
+  "workspace": "/tmp/claude-1000/e2e-fbv2-arm/arrow_447480433",
+  "in_place": true,
+  "build_coverage": false,
+  "enable_static_analysis": true,
+  "docker_image": "cybergym/e2e:arrow",
+  "prebuilt_fuzzers": {
+    "parquet-arrow-fuzz": "/tmp/claude-1000/e2e-fbv2-arm/arrow_447480433/prebuilt/parquet-arrow-fuzz"
+  },
+  "work_id": "arrow_447480433",
+  "fuzzer_sources": {
+    "parquet-arrow-fuzz": [
+      "/tmp/claude-1000/e2e-fbv2-arm/arrow_447480433/repo/arrow/cpp/src/parquet/arrow/fuzz.cc"
+    ]
+  },
+  "model_profile": "period-correct",
+  "force_model": "gpt-5.5",
+  "pov_count": 1,
+  "budget_limit": 20.0,
+  "timeout_minutes": 90,
+  "concurrency": 5,
+  "prebuild_dir": "/tmp/claude-1000/e2e-fbv2-arm/arrow_447480433/prebuild/arrow_447480433"
+}

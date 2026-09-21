@@ -1,0 +1,325 @@
+{
+  "tag": "mg-delta-01__mongoose_1",
+  "gt": "mg_pfn_iobuf_private",
+  "crash_type": "stack-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "read_function",
+    "read_function",
+    "read_function",
+    "read_function",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "full",
+    "pattern_present": false,
+    "reasoning": "Read mg_pfn_iobuf_private: when expand==false it does not resize, but it only writes a character and a NUL when `io->len + 2 <= io->size`. Otherwise, if `io->len < io->size`, it writes a single NUL at `io->buf[io->len++]` (still within bounds because len<size). If `io->len >= io->size`, it writes nothing. Therefore io->len is never incremented past io->size in a way that causes an out-of-bounds write; writes are guarded by comparisons against io->size.\n\nChecked mg_vsnprintf: it sets `struct mg_iobuf io = {(uint8_t *) buf, len, 0, 0};` so io.size==len and io.len starts at 0. Output goes through mg_putchar_iobuf_static -> mg_pfn_iobuf_private(expand=false). The guard `io->len + 2 <= io->size` ensures room for char+terminator; the else-if ensures terminator write only when there is at least one byte left. This matches safe snprintf-like truncation behavior.\n\nAttempted reach_probe to ground with execution, but the tool failed due to missing ASan binary path in this environment, so no runtime crash evidence was obtained.",
+    "corrected_description": "No stack-buffer-overflow in mg_pfn_iobuf_private for expand=false: it truncates output safely. It only writes within `io->size` and stops writing once `io->len >= io->size` (or writes a final NUL when one byte remains).",
+    "control_flow_to_bug": "mg_vsnprintf initializes mg_iobuf with buf/len and len=0; mg_vxprintf emits characters via mg_putchar_iobuf_static -> mg_pfn_iobuf_private(expand=false). In mg_pfn_iobuf_private, writes occur only under `io->len + 2 <= io->size` (write ch and NUL) or `io->len < io->size` (write NUL). No path performs an out-of-bounds write; when `io->len >= io->size` it writes nothing."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.1,
+  "verdict": "WEAK/FP",
+  "basis": "LLM: pattern absent",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "mg_pfn_iobuf_private"
+      },
+      "result": "static void mg_pfn_iobuf_private(char ch, void *param, bool expand) {\n  struct mg_iobuf *io = (struct mg_iobuf *) param;\n  if (expand && io->len + 2 > io->size) mg_iobuf_resize(io, io->len + 2);\n  if (io->len + 2 <= io->size) {\n    io->buf[io->len++] = (uint8_t) ch;\n    io->buf[io->len] = 0;\n  } else if (io->len < io->size) {\n    io->buf[io->len++] = 0;                             \n  }\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "mg_pfn_iobuf_private"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"direct\", \"n_callers\": 7}"
+    },
+    {
+      "iter": 1,
+      "tool": "read_function",
+      "args": {
+        "name": "mg_snprintf"
+      },
+      "result": "size_t mg_snprintf(char *buf, size_t len, const char *fmt, ...) {\n  va_list ap;\n  size_t n;\n  va_start(ap, fmt);\n  n = mg_vsnprintf(buf, len, fmt, &ap);\n  va_end(ap);\n  return n;\n}"
+    },
+    {
+      "iter": 2,
+      "tool": "read_function",
+      "args": {
+        "name": "mg_vsnprintf"
+      },
+      "result": "size_t mg_vsnprintf(char *buf, size_t len, const char *fmt, va_list *ap) {\n  struct mg_iobuf io = {(uint8_t *) buf, len, 0, 0};\n  size_t n = mg_vxprintf(mg_putchar_iobuf_static, &io, fmt, ap);\n  if (n < len) buf[n] = '\\0';\n  return n;\n}"
+    },
+    {
+      "iter": 3,
+      "tool": "read_function",
+      "args": {
+        "name": "mg_putchar_iobuf_static"
+      },
+      "result": "static void mg_putchar_iobuf_static(char ch, void *param) {\n  mg_pfn_iobuf_private(ch, param, false);\n}"
+    },
+    {
+      "iter": 4,
+      "tool": "read_function",
+      "args": {
+        "name": "mg_vxprintf"
+      },
+      "result": "size_t mg_vxprintf(void (*out)(char, void *), void *param, const char *fmt,\n                   va_list *ap) {\n  size_t i = 0, n = 0;\n  while (fmt[i] != '\\0') {\n    if (fmt[i] == '%') {\n      size_t j, k, x = 0, is_long = 0, w = 0            , pr = ~0U           ;\n      char pad = ' ', minus = 0, c = fmt[++i];\n      if (c == '#') x++, c = fmt[++i];\n      if (c == '-') minus++, c = fmt[++i];\n      if (c == '0') pad = '0', c = fmt[++i];\n      while (is_digit(c)) w *= 10, w += (size_t) (c - '0'), c = fmt[++i];\n      if (c == '.') {\n        c = fmt[++i];\n        if (c == '*') {\n          pr = (size_t) va_arg(*ap, int);\n          c = fmt[++i];\n        } else {\n          pr = 0;\n          while (is_digit(c)) pr *= 10, pr += (size_t) (c - '0'), c = fmt[++i];\n        }\n      }\n      while (c == 'h') c = fmt[++i];                          \n      if (c == 'l') {\n        is_long++, c = fmt[++i];\n        if (c == 'l') is_long++, c = fmt[++i];\n      }\n      if (c == 'p') x = 1, is_long = 1;\n      if (c == 'd' || c == 'u' || c == 'x' || c == 'X' || c == 'p' ||\n          c == 'g' || c == 'f') {\n        bool s = (c == 'd'), h = (c == 'x' || c == 'X' || c == 'p');\n        char tmp[40];\n        size_t xl = x ? 2 : 0;\n        if (c == 'g' || c == 'f') {\n          double v = va_arg(*ap, double);\n          if (pr == ~0U) pr = 6;\n          k = mg_dtoa(tmp, sizeof(tmp), v, (int) pr, c == 'g');\n        } else if (is_long == 2) {\n          int64_t v = va_arg(*ap, int64_t);\n          k = mg_lld(tmp, v, s, h);\n        } else if (is_long == 1) {\n          long v = va_arg(*ap, long);\n          k = mg_lld(tmp, s ? (int64_t) v : (int64_t) (unsigned long) v, s, h);\n        } else {\n          int v = va_arg(*ap, int);\n          k = mg_lld(tmp, s ? (int64_t) v : (int64_t) (unsigned) v, s, h);\n        }\n        for (j = 0; j < xl && w > 0; j++) w--;\n        for (j = 0; pad == ' ' && !minus && k < w && j + k < w; j++)\n          n += scpy(out, param, &pad, 1);\n        n += scpy(out, param, (char *) \"0x\", xl);\n        for (j = 0; pad == '0' && k < w && j + k < w; j++)\n          n += scpy(out, param, &pad, 1);\n        n += scpy(out, param, tmp, k);\n        for (j = 0; pad == ' ' && minus && k < w && j + k < w; j++)\n          n += scpy(out, param, &pad, 1);\n      } else if (c == 'm' || c == 'M') {\n        mg_pm_t f = va_arg(*ap, mg_pm_t);\n        if (c == 'm') out('\"', param);\n        n += f(out, param, ap);\n        if (c == 'm') n += 2, out('\"', param);\n      } else if (c == 'c') {\n        int ch = va_arg(*ap, int);\n        out((char) ch, param);\n        n++;\n      } else if (c == 's') {\n        char *p = va_arg(*ap, char *);\n        if (pr == ~0U) pr = p == NULL ? 0 : strlen(p);\n        for (j = 0; !minus && pr < w && j + pr < w; j++)\n          n += scpy(out, param, &pad, 1);\n        n += scpy(out, param, p, pr);\n        for (j = 0; minus && pr < w && j + pr < w; j++)\n          n += scpy(out, param, &pad, 1);\n      } else if (c == 'e' || c == 'E') {\n\t\t  char tmp[8];\n          double d = va_arg(*ap, double);\n          int64_t exponent = (int64_t)log10(my_fabs(d));\n          double mantissa = d / power(10, exponent);\n          k = mg_dtoa(tmp, 10, mantissa, 8, c == 'e');\n          n += scpy(out, param, tmp, k);\n          out(c, param);\n          n++;\n\t\t  k = mg_lld(tmp, exponent, 1, 0);\n          n += scpy(out, param, tmp, k);\n\t  } else if (c == '%') {\n        out('%', param);\n        n++;\n      } else {\n        out('%', param);\n        out(c, param);\n        n += 2;\n      }\n      i++;\n    } else {\n      out(fmt[i], param), n++, i++;\n    }\n  }\n  return n;\n}"
+    },
+    {
+      "iter": 5,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to drive mg_snprintf with a long %s into a small stack buffer.\n    # Many fuzz harnesses pass input as the string argument.\n    return b\"A\"*4096\n",
+        "target": "mg_pfn_iobuf_private"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/mg-delta-01/bugs/mongoose_1/bin/address'\"}"
+    },
+    {
+      "iter": 6,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "full",
+        "pattern_present": false,
+        "reasoning": "Read mg_pfn_iobuf_private: when expand==false it does not resize, but it only writes a character and a NUL when `io->len + 2 <= io->size`. Otherwise, if `io->len < io->size`, it writes a single NUL at `io->buf[io->len++]` (still within bounds because len<size). If `io->len >= io->size`, it writes nothing. Therefore io->len is never incremented past io->size in a way that causes an out-of-bounds write; writes are guarded by comparisons against io->size.\n\nChecked mg_vsnprintf: it sets `struct mg_iobuf io = {(uint8_t *) buf, len, 0, 0};` so io.size==len and io.len starts at 0. Output goes through mg_putchar_iobuf_static -> mg_pfn_iobuf_private(expand=false). The guard `io->len + 2 <= io->size` ensures room for char+terminator; the else-if ensures terminator write only when there is at least one byte left. This matches safe snprintf-like truncation behavior.\n\nAttempted reach_probe to ground with execution, but the tool failed due to missing ASan binary path in this environment, so no runtime crash evidence was obtained.",
+        "corrected_description": "No stack-buffer-overflow in mg_pfn_iobuf_private for expand=false: it truncates output safely. It only writes within `io->size` and stops writing once `io->len >= io->size` (or writes a final NUL when one byte remains).",
+        "control_flow_to_bug": "mg_vsnprintf initializes mg_iobuf with buf/len and len=0; mg_vxprintf emits characters via mg_putchar_iobuf_static -> mg_pfn_iobuf_private(expand=false). In mg_pfn_iobuf_private, writes occur only under `io->len + 2 <= io->size` (write ch and NUL) or `io->len < io->size` (write NUL). No path performs an out-of-bounds write; when `io->len >= io->size` it writes nothing."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1055,
+      "output_tokens": 60,
+      "total_tokens": 1115,
+      "latency_ms": 1159
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1308,
+      "output_tokens": 19,
+      "total_tokens": 1327,
+      "latency_ms": 750
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1401,
+      "output_tokens": 20,
+      "total_tokens": 1421,
+      "latency_ms": 1057
+    },
+    {
+      "iter": 3,
+      "model": "gpt-5.2",
+      "input_tokens": 1521,
+      "output_tokens": 21,
+      "total_tokens": 1542,
+      "latency_ms": 870
+    },
+    {
+      "iter": 4,
+      "model": "gpt-5.2",
+      "input_tokens": 1582,
+      "output_tokens": 20,
+      "total_tokens": 1602,
+      "latency_ms": 820
+    },
+    {
+      "iter": 5,
+      "model": "gpt-5.2",
+      "input_tokens": 2890,
+      "output_tokens": 77,
+      "total_tokens": 2967,
+      "latency_ms": 1707
+    },
+    {
+      "iter": 6,
+      "model": "gpt-5.2",
+      "input_tokens": 3018,
+      "output_tokens": 492,
+      "total_tokens": 3510,
+      "latency_ms": 7191
+    }
+  ],
+  "token_totals": {
+    "input": 12775,
+    "output": 709,
+    "total": 13484,
+    "llm_calls": 7
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: fuzz   Sanitizer: address\nFunction: mg_pfn_iobuf_private\nClaimed bug type: stack-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): When called with `expand == false` on a fixed stack-backed iobuf (as mg_snprintf into a stack buffer does), the resize is skipped and the `io->len + 2 <= io->size` / `io->len < io->size` handling still advances `io->len`, writing past the fixed stack buffer for long formatted output.\n\nControl flow to the bug:\n  - mg_snprintf/format into a fixed stack iobuf (expand=false)\n  - mg_pfn_iobuf_private skips resize; writes io->buf[io->len++] near/over io->size\n  - stack buffer overflow on long output\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a stack-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_SUOTlVipQckXrcfoIwGYWwJT",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"mg_pfn_iobuf_private\"}"
+          }
+        },
+        {
+          "id": "call_7zWukILZ4Yoc86ac41JDILUl",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"mg_pfn_iobuf_private\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_SUOTlVipQckXrcfoIwGYWwJT",
+      "content": "static void mg_pfn_iobuf_private(char ch, void *param, bool expand) {\n  struct mg_iobuf *io = (struct mg_iobuf *) param;\n  if (expand && io->len + 2 > io->size) mg_iobuf_resize(io, io->len + 2);\n  if (io->len + 2 <= io->size) {\n    io->buf[io->len++] = (uint8_t) ch;\n    io->buf[io->len] = 0;\n  } else if (io->len < io->size) {\n    io->buf[io->len++] = 0;                             \n  }\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_7zWukILZ4Yoc86ac41JDILUl",
+      "content": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"direct\", \"n_callers\": 7}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_wxzkJkbvd3wD5bLY7hD8EeSy",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"mg_snprintf\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_wxzkJkbvd3wD5bLY7hD8EeSy",
+      "content": "size_t mg_snprintf(char *buf, size_t len, const char *fmt, ...) {\n  va_list ap;\n  size_t n;\n  va_start(ap, fmt);\n  n = mg_vsnprintf(buf, len, fmt, &ap);\n  va_end(ap);\n  return n;\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_ssNtiCWC5btehlbyWkZTjXH6",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"mg_vsnprintf\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ssNtiCWC5btehlbyWkZTjXH6",
+      "content": "size_t mg_vsnprintf(char *buf, size_t len, const char *fmt, va_list *ap) {\n  struct mg_iobuf io = {(uint8_t *) buf, len, 0, 0};\n  size_t n = mg_vxprintf(mg_putchar_iobuf_static, &io, fmt, ap);\n  if (n < len) buf[n] = '\\0';\n  return n;\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_BLsudqNAY1DvhAjGKKcMwWlu",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"mg_putchar_iobuf_static\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_BLsudqNAY1DvhAjGKKcMwWlu",
+      "content": "static void mg_putchar_iobuf_static(char ch, void *param) {\n  mg_pfn_iobuf_private(ch, param, false);\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_POpDjWBJZz8bAuHDDPuCi32T",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"mg_vxprintf\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_POpDjWBJZz8bAuHDDPuCi32T",
+      "content": "size_t mg_vxprintf(void (*out)(char, void *), void *param, const char *fmt,\n                   va_list *ap) {\n  size_t i = 0, n = 0;\n  while (fmt[i] != '\\0') {\n    if (fmt[i] == '%') {\n      size_t j, k, x = 0, is_long = 0, w = 0            , pr = ~0U           ;\n      char pad = ' ', minus = 0, c = fmt[++i];\n      if (c == '#') x++, c = fmt[++i];\n      if (c == '-') minus++, c = fmt[++i];\n      if (c == '0') pad = '0', c = fmt[++i];\n      while (is_digit(c)) w *= 10, w += (size_t) (c - '0'), c = fmt[++i];\n      if (c == '.') {\n        c = fmt[++i];\n        if (c == '*') {\n          pr = (size_t) va_arg(*ap, int);\n          c = fmt[++i];\n        } else {\n          pr = 0;\n          while (is_digit(c)) pr *= 10, pr += (size_t) (c - '0'), c = fmt[++i];\n        }\n      }\n      while (c == 'h') c = fmt[++i];                          \n      if (c == 'l') {\n        is_long++, c = fmt[++i];\n        if (c == 'l') is_long++, c = fmt[++i];\n      }\n      if (c == 'p') x = 1, is_long = 1;\n      if (c == 'd' || c == 'u' || c == 'x' || c == 'X' || c == 'p' ||\n          c == 'g' || c == 'f') {\n        bool s = (c == 'd'), h = (c == 'x' || c == 'X' || c == 'p');\n        char tmp[40];\n        size_t xl = x ? 2 : 0;\n        if (c == 'g' || c == 'f') {\n          double v = va_arg(*ap, double);\n          if (pr == ~0U) pr = 6;\n          k = mg_dtoa(tmp, sizeof(tmp), v, (int) pr, c == 'g');\n        } else if (is_long == 2) {\n          int64_t v = va_arg(*ap, int64_t);\n          k = mg_lld(tmp, v, s, h);\n        } else if (is_long == 1) {\n          long v = va_arg(*ap, long);\n          k = mg_lld(tmp, s ? (int64_t) v : (int64_t) (unsigned long) v, s, h);\n        } else {\n          int v = va_arg(*ap, int);\n          k = mg_lld(tmp, s ? (int64_t) v : (int64_t) (unsigned) v, s, h);\n        }\n        for (j = 0; j < xl && w > 0; j++) w--;\n        for (j = 0; pad == ' ' && !minus && k < w && j + k < w; j++)\n          n += scpy(out, param, &pad, 1);\n        n += scpy(out, param, (char *) \"0x\", xl);\n        for (j = 0; pad == '0' && k < w && j + k < w; j++)\n          n += scpy(out, param, &pad, 1);\n        n += scpy(out, param, tmp, k);\n        for (j = 0; pad == ' ' && minus && k < w && j + k < w; j++)\n          n += scpy(out, param, &pad, 1);\n      } else if (c == 'm' || c == 'M') {\n        mg_pm_t f = va_arg(*ap, mg_pm_t);\n        if (c == 'm') out('\"', param);\n        n += f(out, param, ap);\n        if (c == 'm') n += 2, out('\"', param);\n      } else if (c == 'c') {\n        int ch = va_arg(*ap, int);\n        out((char) ch, param);\n        n++;\n      } else if (c == 's') {\n        char *p = va_arg(*ap, char *);\n        if (pr == ~0U) pr = p == NULL ? 0 : strlen(p);\n        for (j = 0; !minus && pr < w && j + pr < w; j++)\n          n += scpy(out, param, &pad, 1);\n        n += scpy(out, param, p, pr);\n        for (j = 0; minus && pr < w && j + pr < w; j++)\n          n += scpy(out, param, &pad, 1);\n      } else if (c == 'e' || c == 'E') {\n\t\t  char tmp[8];\n          double d = va_arg(*ap, double);\n          int64_t exponent = (int64_t)log10(my_fabs(d));\n          double mantissa = d / power(10, exponent);\n          k = mg_dtoa(tmp, 10, mantissa, 8, c == 'e');\n          n += scpy(out, param, tmp, k);\n          out(c, param);\n          n++;\n\t\t  k = mg_lld(tmp, exponent, 1, 0);\n          n += scpy(out, param, tmp, k);\n\t  } else if (c == '%') {\n        out('%', param);\n        n++;\n      } else {\n        out('%', param);\n        out(c, param);\n        n += 2;\n      }\n      i++;\n    } else {\n      out(fmt[i], param), n++, i++;\n    }\n  }\n  return n;\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_9W2hQKtOydHBEU8gX99tDv3t",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to drive mg_snprintf with a long %s into a small stack buffer.\\n    # Many fuzz harnesses pass input as the string argument.\\n    return b\\\"A\\\"*4096\\n\",\"target\":\"mg_pfn_iobuf_private\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_9W2hQKtOydHBEU8gX99tDv3t",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/mg-delta-01/bugs/mongoose_1/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_n38kBHoGX42twYL1XIArlOL0",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"full\",\"pattern_present\":false,\"reasoning\":\"Read mg_pfn_iobuf_private: when expand==false it does not resize, but it only writes a character and a NUL when `io->len + 2 <= io->size`. Otherwise, if `io->len < io->size`, it writes a single NUL at `io->buf[io->len++]` (still within bounds because len<size). If `io->len >= io->size`, it writes nothing. Therefore io->len is never incremented past io->size in a way that causes an out-of-bounds write; writes are guarded by comparisons against io->size.\\n\\nChecked mg_vsnprintf: it sets `struct mg_iobuf io = {(uint8_t *) buf, len, 0, 0};` so io.size==len and io.len starts at 0. Output goes through mg_putchar_iobuf_static -> mg_pfn_iobuf_private(expand=false). The guard `io->len + 2 <= io->size` ensures room for char+terminator; the else-if ensures terminator write only when there is at least one byte left. This matches safe snprintf-like truncation behavior.\\n\\nAttempted reach_probe to ground with execution, but the tool failed due to missing ASan binary path in this environment, so no runtime crash evidence was obtained.\",\"corrected_description\":\"No stack-buffer-overflow in mg_pfn_iobuf_private for expand=false: it truncates output safely. It only writes within `io->size` and stops writing once `io->len >= io->size` (or writes a final NUL when one byte remains).\",\"control_flow_to_bug\":\"mg_vsnprintf initializes mg_iobuf with buf/len and len=0; mg_vxprintf emits characters via mg_putchar_iobuf_static -> mg_pfn_iobuf_private(expand=false). In mg_pfn_iobuf_private, writes occur only under `io->len + 2 <= io->size` (write ch and NUL) or `io->len < io->size` (write NUL). No path performs an out-of-bounds write; when `io->len >= io->size` it writes nothing.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_n38kBHoGX42twYL1XIArlOL0",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

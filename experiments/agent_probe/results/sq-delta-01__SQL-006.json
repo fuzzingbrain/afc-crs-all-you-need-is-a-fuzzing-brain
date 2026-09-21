@@ -1,0 +1,24 @@
+{
+  "challenge": "sq-delta-01__SQL-006",
+  "fuzzer": "customfuzz3",
+  "sanitizer": "address",
+  "functions_indexed": 9843,
+  "ground_truth_functions": [
+    "base85"
+  ],
+  "q1_finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "fromBase85"
+    ],
+    "found_ground_truth": false,
+    "matched_functions": []
+  },
+  "q2_verifier": {
+    "verdict_real": true,
+    "score": 0.95,
+    "is_important": true,
+    "reason": "CONFIRMED VULNERABILITY: The delta adds Adobe 'z' extension to base85 encoding/decoding. In fromBase85(), each 'z' character expands to 4 zero bytes. However, the buffer allocation in base85() SQL function (line 332) uses formula: nb = 4*(nv/5) + nv%5, which assumes 5 chars -> 4 bytes. With 'z' extension, 1 char -> 4 bytes, causing massive underallocation.\n\nExample: Input \"zzzzz\" (5 chars):\n- Allo",
+    "target_function": "base85"
+  }
+}

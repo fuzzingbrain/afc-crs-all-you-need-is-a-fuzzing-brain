@@ -1,0 +1,190 @@
+{
+  "tag": "xz-full-01__xz-001",
+  "gt": "compute_tree_checksum",
+  "crash_type": "heap-use-after-free",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "partial",
+    "pattern_present": true,
+    "reasoning": "Source shows compute_tree_checksum(TreeNode *node, depth) reads node->state/value/edge_count/edges, recurses into each child, then unconditionally frees node->edges and node before returning.\n\nA state guard exists: if (!node || node->state==STATE_HASHED) return 0; and for STATE_CLEAR it sets STATE_VISITED, recurses, then sets STATE_HASHED. This prevents revisiting a node *only if* the node is still allocated and its state can be read safely.\n\nHowever, because the function frees the node at the end regardless of state, any subsequent traversal that reaches the same TreeNode pointer (e.g., shared child referenced by multiple parents, or a cycle) will dereference freed memory at the top of the function when checking node->state, causing heap-use-after-free. Additionally, if the second traversal proceeds far enough, it will free(node) again (double-free). The state mechanism cannot reliably prevent this because it requires reading node->state from freed memory.\n\nThus the bug pattern (UAF/double-free due to freeing during traversal without unique ownership/visited-set) is present in the function.\n\nI attempted to run a reach_probe to ground with an actual crash, but the configured ASan binary path was missing in this environment, so no runtime evidence could be collected.",
+    "corrected_description": "compute_tree_checksum() performs a recursive traversal and then frees node->edges and node unconditionally. If the same TreeNode is reachable via multiple incoming edges (shared subtree) or via a cycle, later recursion will call compute_tree_checksum() again with a dangling pointer and immediately read node->state/value/edges, causing heap-use-after-free; it may also double-free node/edges. The STATE_HASHED guard is insufficient because it requires dereferencing the freed node to check the state.",
+    "control_flow_to_bug": "fuzz_encode_stream -> (parser/build tree) -> caller of compute_tree_checksum(root,0). During recursion: parent A visits child C and frees C on return. Later, another path (e.g., parent B edge to same C, or a back-edge in a cycle) calls compute_tree_checksum(C, depth) again; function dereferences C to check node->state (UAF) and may reach free(node->edges)/free(node) again (double-free). Conditions: graph must contain shared node pointer or cycle; node must have been freed by an earlier traversal before the second call."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.5,
+  "verdict": "LIKELY",
+  "basis": "tainted, partial clamp (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "compute_tree_checksum"
+      },
+      "result": "static uint32_t compute_tree_checksum(TreeNode *node, unsigned int depth)\n{\n                           \n  if (!node || node->state == STATE_HASHED) {\n    return 0;\n  }\n\n                                                  \n  uint32_t sum = node->value * (depth + 1);\n\n                                                    \n  if (node->state == STATE_CLEAR) {\n    node->state = STATE_VISITED;\n    for (size_t i = 0; i < node->edge_count; ++i) {\n      TreeNode *child = node->edges[i];\n      if (child) {\n        sum += compute_tree_checksum(child, depth + 1);\n      }\n    }\n    node->state = STATE_HASHED;\n  }\n\n                            \n  free(node->edges);\n  free(node);\n\n  return sum;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "compute_tree_checksum"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"indirect\", \"n_callers\": 2}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to create a graph with shared child: parent A and parent B both point to same node.\n    # Without knowing exact format, emit a variety of small structured patterns.\n    # Common pattern: [node_count][edges...]. We'll brute a few candidates.\n    import struct, random\n    out=b''\n    # candidate header: magic + counts\n    out+=b'TREE'\n    out+=struct.pack('<I',3)  # 3 nodes\n    # values\n    out+=struct.pack('<III',1,2,3)\n    # edge counts\n    out+=struct.pack('<III',1,1,0)\n    # edges: node0->node2, node1->node2 (shared), node2 none\n    out+=struct.pack('<II',2,2)\n    # pad\n    out+=b'\\x00'*16\n    return out\n",
+        "target": "compute_tree_checksum"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/xz-full-01/bugs/xz-001/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "partial",
+        "pattern_present": true,
+        "reasoning": "Source shows compute_tree_checksum(TreeNode *node, depth) reads node->state/value/edge_count/edges, recurses into each child, then unconditionally frees node->edges and node before returning.\n\nA state guard exists: if (!node || node->state==STATE_HASHED) return 0; and for STATE_CLEAR it sets STATE_VISITED, recurses, then sets STATE_HASHED. This prevents revisiting a node *only if* the node is still allocated and its state can be read safely.\n\nHowever, because the function frees the node at the end regardless of state, any subsequent traversal that reaches the same TreeNode pointer (e.g., shared child referenced by multiple parents, or a cycle) will dereference freed memory at the top of the function when checking node->state, causing heap-use-after-free. Additionally, if the second traversal proceeds far enough, it will free(node) again (double-free). The state mechanism cannot reliably prevent this because it requires reading node->state from freed memory.\n\nThus the bug pattern (UAF/double-free due to freeing during traversal without unique ownership/visited-set) is present in the function.\n\nI attempted to run a reach_probe to ground with an actual crash, but the configured ASan binary path was missing in this environment, so no runtime evidence could be collected.",
+        "corrected_description": "compute_tree_checksum() performs a recursive traversal and then frees node->edges and node unconditionally. If the same TreeNode is reachable via multiple incoming edges (shared subtree) or via a cycle, later recursion will call compute_tree_checksum() again with a dangling pointer and immediately read node->state/value/edges, causing heap-use-after-free; it may also double-free node/edges. The STATE_HASHED guard is insufficient because it requires dereferencing the freed node to check the state.",
+        "control_flow_to_bug": "fuzz_encode_stream -> (parser/build tree) -> caller of compute_tree_checksum(root,0). During recursion: parent A visits child C and frees C on return. Later, another path (e.g., parent B edge to same C, or a back-edge in a cycle) calls compute_tree_checksum(C, depth) again; function dereferences C to check node->state (UAF) and may reach free(node->edges)/free(node) again (double-free). Conditions: graph must contain shared node pointer or cycle; node must have been freed by an earlier traversal before the second call."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1053,
+      "output_tokens": 54,
+      "total_tokens": 1107,
+      "latency_ms": 1067
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1342,
+      "output_tokens": 226,
+      "total_tokens": 1568,
+      "latency_ms": 3220
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1618,
+      "output_tokens": 548,
+      "total_tokens": 2166,
+      "latency_ms": 7561
+    }
+  ],
+  "token_totals": {
+    "input": 4013,
+    "output": 828,
+    "total": 4841,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: fuzz_encode_stream   Sanitizer: address\nFunction: compute_tree_checksum\nClaimed bug type: heap-use-after-free\nSuspicious-point description (from the finder — may be imprecise): Heap use-after-free / double-free risk due to freeing nodes during recursive traversal: compute_tree_checksum() recursively visits children via node->edges[i] and then unconditionally frees node->edges and node before returning. If the tree has shared subtrees (a child referenced by multiple parents) or cycles not fully prevented by state transitions, the same TreeNode can be traversed from another path after it has been freed, leading to UAF when reading child->state/value/edges or double-free when freeing it again. Root cause is ownership/lifetime mismatch: function both computes checksum and destroys nodes without ensuring unique ownership or global visited-set for all entry paths.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-use-after-free\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_i9OTmQf8cN5g4aKR8s0Z1tPM",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"compute_tree_checksum\"}"
+          }
+        },
+        {
+          "id": "call_4aanm2AxqkC96HZ1l5hN3heJ",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"compute_tree_checksum\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_i9OTmQf8cN5g4aKR8s0Z1tPM",
+      "content": "static uint32_t compute_tree_checksum(TreeNode *node, unsigned int depth)\n{\n                           \n  if (!node || node->state == STATE_HASHED) {\n    return 0;\n  }\n\n                                                  \n  uint32_t sum = node->value * (depth + 1);\n\n                                                    \n  if (node->state == STATE_CLEAR) {\n    node->state = STATE_VISITED;\n    for (size_t i = 0; i < node->edge_count; ++i) {\n      TreeNode *child = node->edges[i];\n      if (child) {\n        sum += compute_tree_checksum(child, depth + 1);\n      }\n    }\n    node->state = STATE_HASHED;\n  }\n\n                            \n  free(node->edges);\n  free(node);\n\n  return sum;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_4aanm2AxqkC96HZ1l5hN3heJ",
+      "content": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"indirect\", \"n_callers\": 2}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_QABjiQHlyPDsiBlNcLSUqQV2",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to create a graph with shared child: parent A and parent B both point to same node.\\n    # Without knowing exact format, emit a variety of small structured patterns.\\n    # Common pattern: [node_count][edges...]. We'll brute a few candidates.\\n    import struct, random\\n    out=b''\\n    # candidate header: magic + counts\\n    out+=b'TREE'\\n    out+=struct.pack('<I',3)  # 3 nodes\\n    # values\\n    out+=struct.pack('<III',1,2,3)\\n    # edge counts\\n    out+=struct.pack('<III',1,1,0)\\n    # edges: node0->node2, node1->node2 (shared), node2 none\\n    out+=struct.pack('<II',2,2)\\n    # pad\\n    out+=b'\\\\x00'*16\\n    return out\\n\",\"target\":\"compute_tree_checksum\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_QABjiQHlyPDsiBlNcLSUqQV2",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/xz-full-01/bugs/xz-001/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_wUsXb3pt28OlG5Gi3IMsJk5w",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"partial\",\"pattern_present\":true,\"reasoning\":\"Source shows compute_tree_checksum(TreeNode *node, depth) reads node->state/value/edge_count/edges, recurses into each child, then unconditionally frees node->edges and node before returning.\\n\\nA state guard exists: if (!node || node->state==STATE_HASHED) return 0; and for STATE_CLEAR it sets STATE_VISITED, recurses, then sets STATE_HASHED. This prevents revisiting a node *only if* the node is still allocated and its state can be read safely.\\n\\nHowever, because the function frees the node at the end regardless of state, any subsequent traversal that reaches the same TreeNode pointer (e.g., shared child referenced by multiple parents, or a cycle) will dereference freed memory at the top of the function when checking node->state, causing heap-use-after-free. Additionally, if the second traversal proceeds far enough, it will free(node) again (double-free). The state mechanism cannot reliably prevent this because it requires reading node->state from freed memory.\\n\\nThus the bug pattern (UAF/double-free due to freeing during traversal without unique ownership/visited-set) is present in the function.\\n\\nI attempted to run a reach_probe to ground with an actual crash, but the configured ASan binary path was missing in this environment, so no runtime evidence could be collected.\" ,\"corrected_description\":\"compute_tree_checksum() performs a recursive traversal and then frees node->edges and node unconditionally. If the same TreeNode is reachable via multiple incoming edges (shared subtree) or via a cycle, later recursion will call compute_tree_checksum() again with a dangling pointer and immediately read node->state/value/edges, causing heap-use-after-free; it may also double-free node/edges. The STATE_HASHED guard is insufficient because it requires dereferencing the freed node to check the state.\",\"control_flow_to_bug\":\"fuzz_encode_stream -> (parser/build tree) -> caller of compute_tree_checksum(root,0). During recursion: parent A visits child C and frees C on return. Later, another path (e.g., parent B edge to same C, or a back-edge in a cycle) calls compute_tree_checksum(C, depth) again; function dereferences C to check node->state (UAF) and may reach free(node->edges)/free(node) again (double-free). Conditions: graph must contain shared node pointer or cycle; node must have been freed by an earlier traversal before the second call.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_wUsXb3pt28OlG5Gi3IMsJk5w",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "compute_tree_checksum"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Heap use-after-free / double-free risk due to freeing nodes during recursive traversal: compute_tree_checksum() recursively visits children via node->edges[i] and then unconditionally frees node->edges and node before returning. If the tree has shared subtrees (a child referenced by multiple parents) or cycles not fully prevented by state transitions, the same TreeNode can be traversed from another path after it has been freed, leading to UAF when reading child->state/value/edges or double-free when freeing it again. Root cause is ownership/lifetime mismatch: function both computes checksum and destroys nodes without ensuring unique ownership or global visited-set for all entry paths.",
+  "finder_vuln_type": ""
+}

@@ -1,0 +1,35 @@
+{
+  "project_name": "libspectre",
+  "task_type": "pov",
+  "scan_mode": "full",
+  "sanitizers": [
+    "memory"
+  ],
+  "fuzzers": [
+    "spectre_read_fuzzer"
+  ],
+  "workspace": "/tmp/claude-1000/e2e-fbv2-arm/libspectre_21670",
+  "in_place": true,
+  "build_coverage": false,
+  "enable_static_analysis": true,
+  "docker_image": "gcr.io/oss-fuzz-base/base-builder@sha256:fba1033c6a64433642ab97b6ea987ddaa9938e06596c6cace1c786130fc1461b",
+  "prebuilt_fuzzers": {
+    "spectre_read_fuzzer": "/tmp/claude-1000/e2e-fbv2-arm/libspectre_21670/prebuilt/spectre_read_fuzzer"
+  },
+  "work_id": "libspectre_21670",
+  "fuzzer_sources": {
+    "spectre_read_fuzzer": [
+      "/tmp/claude-1000/e2e-fbv2-arm/libspectre_21670/repo/libspectre/test/spectre_read_fuzzer.c",
+      "/tmp/claude-1000/e2e-fbv2-arm/libspectre_21670/repo/libspectre/libspectre/spectre.h",
+      "/tmp/claude-1000/e2e-fbv2-arm/libspectre_21670/repo/libspectre/libspectre/spectre-utils.h",
+      "/tmp/claude-1000/e2e-fbv2-arm/libspectre_21670/repo/libspectre/libspectre/ps.h"
+    ]
+  },
+  "model_profile": "period-correct",
+  "force_model": "gpt-5.5",
+  "pov_count": 1,
+  "budget_limit": 20.0,
+  "timeout_minutes": 90,
+  "concurrency": 5,
+  "prebuild_dir": "/tmp/claude-1000/e2e-fbv2-arm/libspectre_21670/prebuild/libspectre_21670"
+}

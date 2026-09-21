@@ -397,7 +397,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             pov_min_score=0.5,
             poll_interval=2.0,
             max_idle_cycles=30,
-            max_iterations=200,      # room for reach_probe diagnosis + up to 50 create_pov
+            max_iterations=150,      # room for reach_probe diagnosis + create_pov (user: 150)
             max_pov_attempts=60,
             fuzzer_path=self.executor.fuzzer_binary_path,
             docker_image=self.executor.docker_image,

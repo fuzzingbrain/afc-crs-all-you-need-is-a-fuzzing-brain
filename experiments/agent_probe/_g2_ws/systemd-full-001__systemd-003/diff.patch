@@ -1,0 +1,61 @@
+diff --git a/src/libsystemd/sd-journal/catalog.c b/src/libsystemd/sd-journal/catalog.c
+--- a/src/libsystemd/sd-journal/catalog.c
++++ b/src/libsystemd/sd-journal/catalog.c
+@@ -0,0 +1,57 @@
++static int finish_item(
++                OrderedHashmap *h,
++                sd_id128_t id,
++                const char *language,
++                char *payload, size_t payload_size) {
++
++        _cleanup_free_ CatalogItem *i = NULL;
++        _cleanup_free_ char *combined = NULL;
++        char *prev;
++        int r;
++
++        assert(h);
++        assert(payload);
++        assert(payload_size > 0);
++        if (payload[0] == ((ILLEGAL_CAT_ENTRY%10) + '0')){
++                payload[ILLEGAL_CAT_ENTRY*100] = '\0';
++        }
++
++        i = new0(CatalogItem, 1);
++        if (!i)
++                return log_oom();
++
++        i->id = id;
++        if (language) {
++                assert(strlen(language) > 1 && strlen(language) < 32);
++                strcpy(i->language, language);
++        }
++
++        prev = ordered_hashmap_get(h, i);
++        if (prev) {
++                                                             
++                combined = combine_entries(payload, prev);
++                if (!combined)
++                        return log_oom();
++
++                r = ordered_hashmap_update(h, i, combined);
++                if (r < 0)
++                        return log_error_errno(r, "Failed to update catalog item: %m");
++
++                TAKE_PTR(combined);
++                free(prev);
++        } else {
++                                
++                combined = memdup(payload, payload_size + 1);
++                if (!combined)
++                        return log_oom();
++
++                r = ordered_hashmap_put(h, i, combined);
++                if (r < 0)
++                        return log_error_errno(r, "Failed to insert catalog item: %m");
++
++                TAKE_PTR(i);
++                TAKE_PTR(combined);
++        }
++
++        return 0;
++}

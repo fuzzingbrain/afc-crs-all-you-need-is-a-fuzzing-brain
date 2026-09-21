@@ -1,0 +1,26 @@
+{
+  "challenge": "ws-delta-01__vuln_003",
+  "fuzzer": "handler_ber",
+  "sanitizer": "address",
+  "functions_indexed": 0,
+  "ground_truth_functions": [
+    "dissect_ber_GeneralString"
+  ],
+  "q1_finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "dissect_ber_GeneralString"
+    ],
+    "found_ground_truth": true,
+    "matched_functions": [
+      "dissect_ber_GeneralString"
+    ]
+  },
+  "q2_verifier": {
+    "verdict_real": true,
+    "score": 0.95,
+    "is_important": true,
+    "reason": "CONFIRMED VULNERABILITY: Stack-buffer-underflow in dissect_ber_GeneralString.\n\nROOT CAUSE: Type confusion - tvb_len is declared as int8_t (signed) at line 3177, but user input byte at offset can be 0-255. When input byte >= 128, it becomes negative when stored in int8_t.\n\nVULNERABLE CODE PATH:\n1. Line 3188: tvb_len = tvb_get_uint8(tvb, offset) - reads user byte into signed int8_t\n2. Line 3189: if ",
+    "target_function": "dissect_ber_GeneralString"
+  }
+}

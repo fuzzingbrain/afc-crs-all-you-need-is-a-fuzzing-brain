@@ -1,0 +1,22 @@
+{
+  "challenge": "lx-full-01",
+  "bug": "vuln_005",
+  "tag": "lx-full-01__vuln_005",
+  "round": "pre-competition",
+  "scan_mode": "full",
+  "harness": "api",
+  "fuzzer": "api",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "LLVMFuzzerTestOneInput"
+  ],
+  "crash_type": "double-free",
+  "graphs_root": "/home/ze/fb-graphs/build/lx-full-01",
+  "source_root": "/home/ze/fb-graphs/build/lx-full-01/repo",
+  "callgraph": "/home/ze/fb-graphs/build/lx-full-01/graph-api/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/libxml2:latest",
+  "project": "libxml2",
+  "blob": "/home/ze/fb-graphs/build/lx-full-01/bugs/vuln_005/blob"
+}

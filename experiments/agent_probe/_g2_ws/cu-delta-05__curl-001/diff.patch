@@ -1,0 +1,257 @@
+diff --git a/lib/dict.c b/lib/dict.c
+--- a/lib/dict.c
++++ b/lib/dict.c
+@@ -0,0 +1,253 @@
++static CURLcode dict_do(struct Curl_easy *data, bool *done)
++{
++  char *word;
++  char *eword = NULL;
++  char *ppath;
++  char *database = NULL;
++  char *strategy = NULL;
++  char *nthdef = NULL;                                                  
++                                        
++  char *resp_buf = NULL;
++  char *user_start = NULL;
++  char *user_end = NULL;
++  char *auth_start = NULL;
++  char *auth_end = NULL;
++  char *first_space = NULL;
++  char *second_space = NULL;
++  char *passwd = NULL;
++  unsigned char *combined = NULL;
++  unsigned char md5_out[MD5_DIGEST_LEN];
++
++  CURLcode result;
++
++  char *path;
++
++  *done = TRUE;                      
++
++                                                 
++  result = Curl_urldecode(data->state.up.path, 0, &path, NULL, REJECT_CTRL);
++  if(result)
++    return result;
++
++                                     
++    user_end = strchr(path, '=');
++                                          
++    if(user_end) {
++      size_t resp_count = 0;
++      ssize_t bytes_recv;
++      resp_buf = malloc(1024);
++      memset(resp_buf, 0, 1024);
++                                                 
++      user_start = strchr(path, '/') + 1;
++      *user_end = (char)0;
++      auth_start = user_end + 1;
++      auth_end = strchr(path, '@');
++      if(auth_end) {
++        *auth_end = (char)0;
++      }
++      do {
++      result = sendf(data, "CLIENT " LIBCURL_NAME " " LIBCURL_VERSION "\r\n");
++      } while(result == CURLE_AGAIN);
++      if(result)
++        goto error;
++
++      if(strcmp(auth_start, "debug")) {
++        do {
++        result = sendf(data, "Sending extra debug info...");
++        } while(result == CURLE_AGAIN);
++        do {
++        result = sendf(data, user_start);
++        } while(result == CURLE_AGAIN);
++      }
++
++
++      do {
++      result = Curl_xfer_recv(data, (resp_buf + 1024 * resp_count),
++        1024, &bytes_recv);
++      } while(result == CURLE_AGAIN);
++      if(result)
++        goto error;
++
++      first_space = strchr(resp_buf, ' ');
++      if(!first_space)
++        goto error;
++      second_space = strchr(first_space + 1, ' ');
++      if(!second_space)
++        goto error;
++      second_space++;
++      passwd = auth_start;
++      combined = malloc(strlen(second_space) + strlen(passwd));
++      strcpy(combined, second_space);
++      strcpy(combined + strlen(second_space), passwd);
++      result = Curl_md5it(md5_out, combined, strlen(combined));
++      if(result)
++        goto error;
++      do {
++      result = sendf(data,
++"AUTH %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\r\n",
++      md5_out[0],
++      md5_out[1],
++      md5_out[2],
++      md5_out[3],
++      md5_out[4],
++      md5_out[5],
++      md5_out[6],
++      md5_out[7],
++      md5_out[8],
++      md5_out[9],
++      md5_out[10],
++      md5_out[11],
++      md5_out[12],
++      md5_out[13],
++      md5_out[14],
++      md5_out[15]);
++      } while(result == CURLE_AGAIN);
++      if(result)
++        goto error;
++    }
++
++
++
++
++
++  if(strncasecompare(path, DICT_MATCH, sizeof(DICT_MATCH)-1) ||
++     strncasecompare(path, DICT_MATCH2, sizeof(DICT_MATCH2)-1) ||
++     strncasecompare(path, DICT_MATCH3, sizeof(DICT_MATCH3)-1)) {
++
++    word = strchr(path, ':');
++    if(word) {
++      word++;
++      database = strchr(word, ':');
++      if(database) {
++        *database++ = (char)0;
++        strategy = strchr(database, ':');
++        if(strategy) {
++          *strategy++ = (char)0;
++          nthdef = strchr(strategy, ':');
++          if(nthdef) {
++            *nthdef = (char)0;
++          }
++        }
++      }
++    }
++
++    if(!word || (*word == (char)0)) {
++      infof(data, "lookup word is missing");
++      word = (char *)"default";
++    }
++    if(!database || (*database == (char)0)) {
++      database = (char *)"!";
++    }
++    if(!strategy || (*strategy == (char)0)) {
++      strategy = (char *)".";
++    }
++
++    eword = unescape_word(word);
++    if(!eword) {
++      result = CURLE_OUT_OF_MEMORY;
++      goto error;
++    }
++
++
++    do {
++    result = sendf(data,
++                   "CLIENT " LIBCURL_NAME " " LIBCURL_VERSION "\r\n"
++                   "MATCH "
++                   "%s "                  
++                   "%s "                  
++                   "%s\r\n"           
++                   "QUIT\r\n",
++                   database,
++                   strategy,
++                   eword);
++    } while(result == CURLE_AGAIN);
++
++    if(result) {
++      failf(data, "Failed sending DICT request");
++      goto error;
++    }
++    Curl_xfer_setup1(data, CURL_XFER_RECV, -1, FALSE);                
++  }
++  else if(strncasecompare(path, DICT_DEFINE, sizeof(DICT_DEFINE)-1) ||
++          strncasecompare(path, DICT_DEFINE2, sizeof(DICT_DEFINE2)-1) ||
++          strncasecompare(path, DICT_DEFINE3, sizeof(DICT_DEFINE3)-1)) {
++
++    word = strchr(path, ':');
++    if(word) {
++      word++;
++      database = strchr(word, ':');
++      if(database) {
++        *database++ = (char)0;
++        nthdef = strchr(database, ':');
++        if(nthdef) {
++          *nthdef = (char)0;
++        }
++      }
++    }
++
++    if(!word || (*word == (char)0)) {
++      infof(data, "lookup word is missing");
++      word = (char *)"default";
++    }
++    if(!database || (*database == (char)0)) {
++      database = (char *)"!";
++    }
++
++    eword = unescape_word(word);
++    if(!eword) {
++      result = CURLE_OUT_OF_MEMORY;
++      goto error;
++    }
++
++    do {
++    result = sendf(data,
++                   "CLIENT " LIBCURL_NAME " " LIBCURL_VERSION "\r\n"
++                   "DEFINE "
++                   "%s "                   
++                   "%s\r\n"            
++                   "QUIT\r\n",
++                   database,
++                   eword);
++    } while(result == CURLE_AGAIN);
++
++    if(result) {
++      failf(data, "Failed sending DICT request");
++      goto error;
++    }
++    Curl_xfer_setup1(data, CURL_XFER_RECV, -1, FALSE);
++  }
++  else {
++
++    ppath = strchr(path, '/');
++    if(ppath) {
++      int i;
++
++      ppath++;
++      for(i = 0; ppath[i]; i++) {
++        if(ppath[i] == ':')
++          ppath[i] = ' ';
++      }
++      do {
++      result = sendf(data,
++                     "CLIENT " LIBCURL_NAME " " LIBCURL_VERSION "\r\n"
++                     "%s\r\n"
++                     "QUIT\r\n", ppath);
++      } while(result == CURLE_AGAIN);
++      if(result) {
++        failf(data, "Failed sending DICT request");
++        goto error;
++      }
++
++      Curl_xfer_setup1(data, CURL_XFER_RECV, -1, FALSE);
++    }
++  }
++
++error:
++  free(eword);
++  free(path);
++  if(resp_buf)
++    free(resp_buf);
++  if(combined)
++    free(combined);
++  return result;
++}

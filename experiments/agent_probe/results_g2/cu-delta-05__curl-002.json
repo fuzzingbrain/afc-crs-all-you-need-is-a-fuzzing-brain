@@ -1,0 +1,15 @@
+{
+  "tag": "cu-delta-05__curl-002",
+  "gt": "ftp_state_mdtm_resp",
+  "finder": {
+    "sp_count": 0,
+    "sp_functions": [],
+    "found_gt": false
+  },
+  "score": null,
+  "verdict": "FINDER_MISS",
+  "dynamic": {
+    "probes": []
+  },
+  "basis": "finder did not flag the vulnerable function"
+}

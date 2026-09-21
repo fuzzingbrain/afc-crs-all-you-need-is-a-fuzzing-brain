@@ -1,0 +1,547 @@
+diff --git a/epan/dissectors/packet-gvcp.c b/epan/dissectors/packet-gvcp.c
+--- a/epan/dissectors/packet-gvcp.c
++++ b/epan/dissectors/packet-gvcp.c
+@@ -0,0 +1,29 @@
++static int dissect_extended_bootstrap_register(uint32_t addr, proto_tree *branch, tvbuff_t *tvb, int offset, int length _U_)
++{
++	uint32_t value = 0;
++	
++	value = tvb_get_letohl(tvb, offset);
++	gvcp_register_number[gvcp_register_count] = addr;
++	gvcp_register_value[gvcp_register_count++] = value;
++
++	switch (addr)
++	{
++	case GVCP_SC_GENDC_DESCRIPTOR_ADDRESS:
++		proto_tree_add_item(branch, hf_gvcp_sc_gendc_descriptor_address_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++	case GVCP_SC_GENDC_DESCRIPTOR_SIZE:
++		proto_tree_add_item(branch, hf_gvcp_sc_gendc_descriptor_size_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++	case GVCP_SC_GENDC_FLOW_MAPPING_TABLE_ADDRESS:
++		proto_tree_add_item(branch, hf_gvcp_sc_gendc_flow_mapping_table_address_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++	case GVCP_SC_GENDC_FLOW_MAPPING_TABLE_SIZE:
++		proto_tree_add_item(branch, hf_gvcp_sc_gendc_flow_mapping_table_size_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	default:
++		return 0;
++	}
++
++	return 1;
++}
+diff --git a/epan/dissectors/packet-gvcp.c b/epan/dissectors/packet-gvcp.c
+--- a/epan/dissectors/packet-gvcp.c
++++ b/epan/dissectors/packet-gvcp.c
+@@ -0,0 +1,510 @@
++static int dissect_register(uint32_t addr, proto_tree *branch, tvbuff_t *tvb, int offset, int length)
++{
++	uint32_t value = 0;
++	
++	value = tvb_get_letohl(tvb, offset);
++	gvcp_register_number[gvcp_register_count] = addr;
++	gvcp_register_value[gvcp_register_count++] = value;
++
++	switch (addr)
++	{
++	case GVCP_VERSION:
++		proto_tree_add_item(branch, hf_gvcp_spec_version_major, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_spec_version_minor, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_DEVICE_MODE:
++		proto_tree_add_item(branch, hf_gvcp_devicemode_endianness, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_devicemode_deviceclass, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_devicemode_current_link_configuration_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_devicemode_characterset, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_DEVICE_MAC_HIGH_0:
++	case GVCP_DEVICE_MAC_HIGH_1:
++	case GVCP_DEVICE_MAC_HIGH_2:
++	case GVCP_DEVICE_MAC_HIGH_3:
++		proto_tree_add_item(branch, hf_gvcp_machigh, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_DEVICE_MAC_LOW_0:
++	case GVCP_DEVICE_MAC_LOW_1:
++	case GVCP_DEVICE_MAC_LOW_2:
++	case GVCP_DEVICE_MAC_LOW_3:
++		proto_tree_add_item(branch, hf_gvcp_maclow, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_SUPPORTED_IP_CONFIGURATION_0:
++	case GVCP_SUPPORTED_IP_CONFIGURATION_1:
++	case GVCP_SUPPORTED_IP_CONFIGURATION_2:
++	case GVCP_SUPPORTED_IP_CONFIGURATION_3:
++		proto_tree_add_item(branch, hf_gvcp_ip_config_can_handle_pause_frames_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_ip_config_can_generate_pause_frames_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_ip_config_lla, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_ip_config_dhcp, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_ip_config_persistent_ip, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_CURIPCFG_0:
++	case GVCP_CURIPCFG_1:
++	case GVCP_CURIPCFG_2:
++	case GVCP_CURIPCFG_3:
++		proto_tree_add_item(branch, hf_gvcp_ip_config_can_handle_pause_frames_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_ip_config_can_generate_pause_frames_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_ip_config_lla, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_ip_config_dhcp, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_ip_config_persistent_ip, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_CURRENT_IP_ADDRESS_0:
++	case GVCP_CURRENT_IP_ADDRESS_1:
++	case GVCP_CURRENT_IP_ADDRESS_2:
++	case GVCP_CURRENT_IP_ADDRESS_3:
++		proto_tree_add_item(branch, hf_gvcp_current_IP, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_CURRENT_SUBNET_MASK_0:
++	case GVCP_CURRENT_SUBNET_MASK_1:
++	case GVCP_CURRENT_SUBNET_MASK_2:
++	case GVCP_CURRENT_SUBNET_MASK_3:
++		proto_tree_add_item(branch, hf_gvcp_current_subnet_mask, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_CURRENT_DEFAULT_GATEWAY_0:
++	case GVCP_CURRENT_DEFAULT_GATEWAY_1:
++	case GVCP_CURRENT_DEFAULT_GATEWAY_2:
++	case GVCP_CURRENT_DEFAULT_GATEWAY_3:
++		proto_tree_add_item(branch, hf_gvcp_current_default_gateway, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_MANUFACTURER_NAME:
++		proto_tree_add_item(branch, hf_gvcp_reserved_bit, tvb, 0, length, ENC_NA);       
++		break;
++
++	case GVCP_MODEL_NAME:
++		proto_tree_add_item(branch, hf_gvcp_reserved_bit, tvb, 0, length, ENC_NA);       
++		break;
++
++	case GVCP_DEVICE_VERSION:
++		proto_tree_add_item(branch, hf_gvcp_reserved_bit, tvb, 0, length, ENC_NA);       
++		break;
++
++	case GVCP_MANUFACTURER_INFO:
++		proto_tree_add_item(branch, hf_gvcp_reserved_bit, tvb, 0, length, ENC_NA);       
++		break;
++
++	case GVCP_SERIAL_NUMBER:
++		proto_tree_add_item(branch, hf_gvcp_reserved_bit, tvb, 0, length, ENC_NA);       
++		break;
++
++	case GVCP_USER_DEFINED_NAME:
++		proto_tree_add_item(branch, hf_gvcp_user_defined_name, tvb, offset, 4, ENC_ASCII);       
++		break;
++
++	case GVCP_FIRST_URL:
++		proto_tree_add_item(branch, hf_gvcp_reserved_bit, tvb, 0, length, ENC_NA);       
++		break;
++
++	case GVCP_SECOND_URL:
++		proto_tree_add_item(branch, hf_gvcp_reserved_bit, tvb, 0, length, ENC_NA);       
++		break;
++
++	case GVCP_NUMBER_OF_NETWORK_INTERFACES:
++		proto_tree_add_item(branch, hf_gvcp_number_interfaces, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_PERSISTENT_IP_ADDRESS_0:
++	case GVCP_PERSISTENT_IP_ADDRESS_1:
++	case GVCP_PERSISTENT_IP_ADDRESS_2:
++	case GVCP_PERSISTENT_IP_ADDRESS_3:
++		proto_tree_add_item(branch, hf_gvcp_persistent_ip, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_PERSISTENT_SUBNET_MASK_0:
++	case GVCP_PERSISTENT_SUBNET_MASK_1:
++	case GVCP_PERSISTENT_SUBNET_MASK_2:
++	case GVCP_PERSISTENT_SUBNET_MASK_3:
++		proto_tree_add_item(branch, hf_gvcp_persistent_subnet, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_PERSISTENT_DEFAULT_GATEWAY_0:
++	case GVCP_PERSISTENT_DEFAULT_GATEWAY_1:
++	case GVCP_PERSISTENT_DEFAULT_GATEWAY_2:
++	case GVCP_PERSISTENT_DEFAULT_GATEWAY_3:
++		proto_tree_add_item(branch, hf_gvcp_persistent_gateway, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_LINK_SPEED_0:
++	case GVCP_LINK_SPEED_1:
++	case GVCP_LINK_SPEED_2:
++	case GVCP_LINK_SPEED_3:
++		proto_tree_add_item(branch, hf_gvcp_link_speed, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_NUMBER_OF_MESSAGE_CHANNELS:
++		proto_tree_add_item(branch, hf_gvcp_number_message_channels, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_NUMBER_OF_STREAM_CHANNELS:
++		proto_tree_add_item(branch, hf_gvcp_number_stream_channels, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_NUMBER_OF_ACTION_SIGNALS:
++		proto_tree_add_item(branch, hf_gvcp_number_action_signals, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_ACTION_DEVICE_KEY:
++		proto_tree_add_item(branch, hf_gvcp_writeregcmd_data, tvb, offset, 4, ENC_BIG_ENDIAN);       
++		break;
++
++	case GVCP_NUMBER_OF_ACTIVE_LINKS:
++		proto_tree_add_item(branch, hf_gvcp_number_of_active_links_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_SC_CAPS:
++		proto_tree_add_item(branch, hf_gvcp_sccaps_scspx_register_supported, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sccaps_legacy_16bit_blockid_supported_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sccaps_scmbsx_supported_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sccaps_scebax_supported_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_MESSAGE_CHANNEL_CAPS:
++		proto_tree_add_item(branch, hf_gvcp_mcsp_supported, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_mccfg_supported_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_mcec_supported_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_CAPABILITY:
++		proto_tree_add_item(branch, hf_gvcp_capability_user_defined, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_serial_number, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_heartbeat_disable, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_link_speed, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_ccp_application_portip, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_manifest_table, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_test_data, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_discovery_ACK_delay, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_writable_discovery_ACK_delay, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_extended_status_code_v1_1, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_primary_application_switchover, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_unconditional_action_command, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_1588_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_extended_status_code_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_scheduled_action_command_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_ieee1588_extended_capabilities_v2_1, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_action_command, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_pending, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_evendata, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_event, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_packetresend, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_writemem, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_capability_concatenation, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_HEARTBEAT_TIMEOUT:
++		proto_tree_add_item(branch, hf_gvcp_heartbeat, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_TIMESTAMP_TICK_FREQUENCY_HIGH:
++		proto_tree_add_item(branch, hf_gvcp_high_timestamp_frequency, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_TIMESTAMP_TICK_FREQUENCY_LOW:
++		proto_tree_add_item(branch, hf_gvcp_low_timestamp_frequency, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_TIMESTAMP_CONTROL:
++		proto_tree_add_item(branch, hf_gvcp_timestamp_control_latch, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_timestamp_control_reset, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_TIMESTAMP_VALUE_HIGH:
++		proto_tree_add_item(branch, hf_gvcp_high_timestamp_value, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_TIMESTAMP_VALUE_LOW:
++		proto_tree_add_item(branch, hf_gvcp_low_timestamp_value, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_DISCOVERY_ACK_DELAY:
++		proto_tree_add_item(branch, hf_gvcp_discovery_ACK_delay, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_CONFIGURATION:
++		proto_tree_add_item(branch, hf_gvcp_configuration_1588_enable_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_configuration_extended_status_codes_enable_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_configuration_unconditional_action_command_enable_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_configuration_extended_status_codes_enable_v1_1, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_configuration_pending_ack_enable, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_configuration_heartbeat_disable, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_PENDING_TIMEOUT:
++		proto_tree_add_item(branch, hf_gvcp_pending_timeout_max_execution, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_CONTROL_SWITCHOVER_KEY:
++		proto_tree_add_item(branch, hf_gvcp_control_switchover_key_register, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_GVSCP_CONFIGURATION:
++		proto_tree_add_item(branch, hf_gvcp_gvsp_configuration_64bit_blockid_enable_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_PHYSICAL_LINK_CAPABILITY:
++		proto_tree_add_item(branch, hf_gvcp_link_dlag_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_link_slag_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_link_ml_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_link_sl_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_PHYSICAL_LINK_CONFIGURATION:
++		proto_tree_add_item(branch, hf_gvcp_link_dlag_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_link_slag_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_link_ml_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_link_sl_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_IEEE_1588_STATUS:
++		proto_tree_add_item(branch, hf_gvcp_ieee1588_clock_status_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_SCHEDULED_ACTION_COMMAND_QUEUE_SIZE:
++		proto_tree_add_item(branch, hf_gvcp_scheduled_action_command_queue_size_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_IEEE_1588_EXTENDED_CAPABILITY:
++		proto_tree_add_item(branch, hf_gvcp_ieee1588_profile_registers_present_v2_1, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_IEEE_1588_SUPPORTED_PROFILES:
++		proto_tree_add_item(branch, hf_gvcp_ieee1588_ptp_profile_supported_v2_1, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_ieee1588_802dot1as_profile_supported_v2_1, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_IEEE_1588_SELECTED_PROFILE:
++		proto_tree_add_item(branch, hf_gvcp_selected_ieee1588_profile_v2_1, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_CCP:
++		proto_tree_add_item(branch, hf_gvcp_control_switchover_key, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_control_switchover_en, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_control_access, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_exclusive_access, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_PRIMARY_APPLICATION_PORT:
++		proto_tree_add_item(branch, hf_gvcp_primary_application_host_port, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_PRIMARY_APPLICATION_IP_ADDRESS:
++		proto_tree_add_item(branch, hf_gvcp_primary_application_ip_address, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_MC_DESTINATION_PORT:
++		proto_tree_add_item(branch, hf_gvcp_network_interface_index, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_host_port, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_MC_DESTINATION_ADDRESS:
++		proto_tree_add_item(branch, hf_gvcp_channel_destination_ip, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_MC_TIMEOUT:
++		proto_tree_add_item(branch, hf_gvcp_message_channel_transmission_timeout, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_MC_RETRY_COUNT:
++		proto_tree_add_item(branch, hf_gvcp_message_channel_retry_count, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_MC_SOURCE_PORT:
++		proto_tree_add_item(branch, hf_gvcp_message_channel_source_port, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_MC_CONFIGURATION:
++		proto_tree_add_item(branch, hf_gvcp_mcec_enabled_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_SC_DESTINATION_PORT(0):
++	case GVCP_SC_DESTINATION_PORT(1):
++	case GVCP_SC_DESTINATION_PORT(2):
++	case GVCP_SC_DESTINATION_PORT(3):
++		proto_tree_add_item(branch, hf_gvcp_sc_direction, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_ni_index, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_host_port, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_SC_PACKET_SIZE(0):
++	case GVCP_SC_PACKET_SIZE(1):
++	case GVCP_SC_PACKET_SIZE(2):
++	case GVCP_SC_PACKET_SIZE(3):
++		proto_tree_add_item(branch, hf_gvcp_sc_fire_test_packet, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_do_not_fragment, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_pixel_endianness, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_packet_size, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_SC_PACKET_DELAY(0):
++	case GVCP_SC_PACKET_DELAY(1):
++	case GVCP_SC_PACKET_DELAY(2):
++	case GVCP_SC_PACKET_DELAY(3):
++		proto_tree_add_item(branch, hf_gvcp_sc_packet_delay, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_SC_DESTINATION_ADDRESS(0):
++	case GVCP_SC_DESTINATION_ADDRESS(1):
++	case GVCP_SC_DESTINATION_ADDRESS(2):
++	case GVCP_SC_DESTINATION_ADDRESS(3):
++		{
++			value = tvb_get_letohl(tvb, offset);
++			proto_tree_add_ipv4(branch, hf_gvcp_sc_destination_ip, tvb, offset, 4, value);
++		}
++		break;
++
++	case GVCP_SC_SOURCE_PORT(0):
++	case GVCP_SC_SOURCE_PORT(1):
++	case GVCP_SC_SOURCE_PORT(2):
++	case GVCP_SC_SOURCE_PORT(3):
++		proto_tree_add_item(branch, hf_gvcp_sc_source_port, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_SC_CAPABILITY(0):
++	case GVCP_SC_CAPABILITY(1):
++	case GVCP_SC_CAPABILITY(2):
++	case GVCP_SC_CAPABILITY(3):
++		proto_tree_add_item(branch, hf_gvcp_sc_big_little_endian_supported, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_ip_reassembly_supported, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_scmpcx_supported_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_gendc_supported_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_multi_part_supported_v2_1, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_large_leader_trailer_supported_v2_1, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_multizone_supported_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_packet_resend_destination_option_supported_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_packet_resend_all_in_transmission_supported_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_unconditional_streaming_supported, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_extended_chunk_data_supported, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_SC_CONFIGURATION(0):
++	case GVCP_SC_CONFIGURATION(1):
++	case GVCP_SC_CONFIGURATION(2):
++	case GVCP_SC_CONFIGURATION(3):
++		proto_tree_add_item(branch, hf_gvcp_sc_gendc_enabled_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_multi_part_enabled_v2_1, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_large_leader_trailer_enabled_v2_1, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_packet_resend_destination_option_enabled_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_packet_resend_all_in_transmission_enabled_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_unconditional_streaming_enabled, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_extended_chunk_data_enabled, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_SC_ZONE(0):
++	case GVCP_SC_ZONE(1):
++	case GVCP_SC_ZONE(2):
++	case GVCP_SC_ZONE(3):
++		proto_tree_add_item(branch, hf_gvcp_sc_additional_zones_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_SC_ZONE_DIRECTION(0):
++	case GVCP_SC_ZONE_DIRECTION(1):
++	case GVCP_SC_ZONE_DIRECTION(2):
++	case GVCP_SC_ZONE_DIRECTION(3):
++		proto_tree_add_item(branch, hf_gvcp_sc_zone0_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone1_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone2_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone3_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone4_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone5_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone6_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone7_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone8_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone9_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone10_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone11_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone12_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone13_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone14_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone15_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone16_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone17_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone18_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone19_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone20_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone21_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone22_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone23_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone24_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone25_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone26_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone27_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone28_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone29_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone30_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		proto_tree_add_item(branch, hf_gvcp_sc_zone31_direction_v2_0, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_SC_MAX_PACKET_COUNT(0):
++	case GVCP_SC_MAX_PACKET_COUNT(1):
++	case GVCP_SC_MAX_PACKET_COUNT(2):
++	case GVCP_SC_MAX_PACKET_COUNT(3):
++		proto_tree_add_item(branch, hf_gvcp_sc_max_packet_count_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_SC_MAX_BLOCK_SIZE_HIGH(0):
++	case GVCP_SC_MAX_BLOCK_SIZE_HIGH(1):
++	case GVCP_SC_MAX_BLOCK_SIZE_HIGH(2):
++	case GVCP_SC_MAX_BLOCK_SIZE_HIGH(3):
++		proto_tree_add_item(branch, hf_gvcp_sc_max_block_size_high_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_SC_MAX_BLOCK_SIZE_LOW(0):
++	case GVCP_SC_MAX_BLOCK_SIZE_LOW(1):
++	case GVCP_SC_MAX_BLOCK_SIZE_LOW(2):
++	case GVCP_SC_MAX_BLOCK_SIZE_LOW(3):
++		proto_tree_add_item(branch, hf_gvcp_sc_max_block_size_low_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_SC_EXTENDED_BOOTSTRAP_ADDRESS(0):
++	case GVCP_SC_EXTENDED_BOOTSTRAP_ADDRESS(1):
++	case GVCP_SC_EXTENDED_BOOTSTRAP_ADDRESS(2):
++	case GVCP_SC_EXTENDED_BOOTSTRAP_ADDRESS(3):
++		proto_tree_add_item(branch, hf_gvcp_sc_extended_registers_address_v2_2, tvb, offset, 4, ENC_BIG_ENDIAN);
++
++		break;
++
++	case GVCP_MANIFEST_TABLE:
++		proto_tree_add_item(branch, hf_gvcp_manifest_table, tvb, 0, length, ENC_NA);
++		break;
++
++	case GVCP_ACTION_GROUP_KEY(0):
++	case GVCP_ACTION_GROUP_KEY(1):
++	case GVCP_ACTION_GROUP_KEY(2):
++	case GVCP_ACTION_GROUP_KEY(3):
++	case GVCP_ACTION_GROUP_KEY(4):
++	case GVCP_ACTION_GROUP_KEY(5):
++	case GVCP_ACTION_GROUP_KEY(6):
++	case GVCP_ACTION_GROUP_KEY(7):
++	case GVCP_ACTION_GROUP_KEY(8):
++	case GVCP_ACTION_GROUP_KEY(9):
++		proto_tree_add_item(branch, hf_gvcp_action_group_key, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	case GVCP_ACTION_GROUP_MASK(0):
++	case GVCP_ACTION_GROUP_MASK(1):
++	case GVCP_ACTION_GROUP_MASK(2):
++	case GVCP_ACTION_GROUP_MASK(3):
++	case GVCP_ACTION_GROUP_MASK(4):
++	case GVCP_ACTION_GROUP_MASK(5):
++	case GVCP_ACTION_GROUP_MASK(6):
++	case GVCP_ACTION_GROUP_MASK(7):
++	case GVCP_ACTION_GROUP_MASK(8):
++	case GVCP_ACTION_GROUP_MASK(9):
++		proto_tree_add_item(branch, hf_gvcp_action_group_mask, tvb, offset, 4, ENC_BIG_ENDIAN);
++		break;
++
++	default:
++		return 0;
++	}
++
++	return 1;
++}

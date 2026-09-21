@@ -1,0 +1,181 @@
+{
+  "tag": "fp-delta-01__vuln_001",
+  "gt": "freerdp_bio_read_pem_with_policy",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source shows offset and length are uint16_t. Each loop realloc(pem, length+1) then BIO_read into pem[offset] for (length-offset) bytes, then offset += status; length += 2048. With sufficiently large input, offset and/or length can wrap at 65535. After wrap, realloc may allocate a small buffer (length+1) while offset is large (or has wrapped inconsistently), and pem[offset]='\\0' after the loop can write out of bounds. Also BIO_read writes into &pem[offset] with size (length-offset) computed in uint16_t then cast to int; after wrap this can become a large positive due to underflow in (length-offset) if offset>length, causing a write far past allocation. There are no checks preventing offset>length or preventing wrap; no use of size_t for counters. This is a plausible heap-buffer-overflow under ASan given a large enough BIO stream.\n\nI attempted to run reach_probe with a large PEM blob, but the tool failed due to missing ASan binary path in this environment, so I cannot provide runtime crash evidence here.",
+    "corrected_description": "Integer wraparound of uint16_t offset/length in freerdp_bio_read_pem_with_policy leads to incorrect realloc size and incorrect BIO_read size/pointer, causing heap-buffer-overflow (OOB write) either in BIO_read(&pem[offset], length-offset) when offset>length after wrap (underflow) or at pem[offset]='\\0' after loop.",
+    "control_flow_to_bug": "TestFuzzCryptoCertificateDataSetPEM provides large PEM data -> code constructs BIO over input -> freerdp_bio_read_pem_with_policy(bio,&pem,&len): initializes uint16_t offset=0,length=2048; loop realloc(pem,length+1); status=BIO_read(bio,&pem[offset],(int)(length-offset)); if status>0 then offset+=status; length+=2048; repeat until BIO_read returns 0. With enough iterations, offset/length wrap at 16-bit, leading to offset>length and/or realloc smaller than required; subsequent BIO_read writes past allocation and/or pem[offset]='\\0' writes OOB."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "freerdp_bio_read_pem_with_policy"
+      },
+      "result": "static BOOL freerdp_bio_read_pem_with_policy(BIO* bio, char** ppem, size_t* plength)\n{\n\tBOOL rc = FALSE;\n\tint status = -1;\n\n\tWINPR_ASSERT(bio);\n\tWINPR_ASSERT(ppem);\n\n\tconst uint16_t blocksize = 2048;\n\tuint16_t offset = 0;\n\tuint16_t length = blocksize;\n\tchar* pem = NULL;\n\n\t*ppem = NULL;\n\tif (plength)\n\t\t*plength = 0;\n\n\twhile (status != 0)\n\t{\n\t\tchar* tmp = realloc(pem, length + 1);\n\t\tif (!tmp)\n\t\t\tgoto fail;\n\n\t\tpem = tmp;\n\n\t\tERR_clear_error();\n\n\t\tstatus = BIO_read(bio, &pem[offset], (int)(length - offset));\n\t\tif (status < 0)\n\t\t{\n\t\t\tWLog_ERR(TAG, \"failed to read certificate\");\n\t\t\tgoto fail;\n\t\t}\n\n\t\tif (status == 0)\n\t\t\tbreak;\n\n\t\toffset += (size_t)status;\n\t\tlength += blocksize;\n\n\t}\n\tpem[offset] = '\\0';\n\t*ppem = pem;\n\tif (plength)\n\t\t*plength = offset;\n\trc = TRUE;\nfail:\n\tif (!rc)\n\t\tfree(pem);\n\n\treturn rc;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "freerdp_bio_read_pem_with_policy"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to force many BIO_read iterations by providing a large PEM blob.\n    # Use a plausible PEM header/footer with lots of base64-ish data.\n    header = b\"-----BEGIN CERTIFICATE-----\\n\"\n    footer = b\"\\n-----END CERTIFICATE-----\\n\"\n    # 200k of 'A' with newlines every 64 chars\n    n = 200000\n    line = b\"A\"*64 + b\"\\n\"\n    body = line * (n//65)\n    return header + body + footer\n",
+        "target": "freerdp_bio_read_pem_with_policy"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/fp-delta-01/bugs/vuln_001/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source shows offset and length are uint16_t. Each loop realloc(pem, length+1) then BIO_read into pem[offset] for (length-offset) bytes, then offset += status; length += 2048. With sufficiently large input, offset and/or length can wrap at 65535. After wrap, realloc may allocate a small buffer (length+1) while offset is large (or has wrapped inconsistently), and pem[offset]='\\0' after the loop can write out of bounds. Also BIO_read writes into &pem[offset] with size (length-offset) computed in uint16_t then cast to int; after wrap this can become a large positive due to underflow in (length-offset) if offset>length, causing a write far past allocation. There are no checks preventing offset>length or preventing wrap; no use of size_t for counters. This is a plausible heap-buffer-overflow under ASan given a large enough BIO stream.\n\nI attempted to run reach_probe with a large PEM blob, but the tool failed due to missing ASan binary path in this environment, so I cannot provide runtime crash evidence here.",
+        "corrected_description": "Integer wraparound of uint16_t offset/length in freerdp_bio_read_pem_with_policy leads to incorrect realloc size and incorrect BIO_read size/pointer, causing heap-buffer-overflow (OOB write) either in BIO_read(&pem[offset], length-offset) when offset>length after wrap (underflow) or at pem[offset]='\\0' after loop.",
+        "control_flow_to_bug": "TestFuzzCryptoCertificateDataSetPEM provides large PEM data -> code constructs BIO over input -> freerdp_bio_read_pem_with_policy(bio,&pem,&len): initializes uint16_t offset=0,length=2048; loop realloc(pem,length+1); status=BIO_read(bio,&pem[offset],(int)(length-offset)); if status>0 then offset+=status; length+=2048; repeat until BIO_read returns 0. With enough iterations, offset/length wrap at 16-bit, leading to offset>length and/or realloc smaller than required; subsequent BIO_read writes past allocation and/or pem[offset]='\\0' writes OOB."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1096,
+      "output_tokens": 68,
+      "total_tokens": 1164,
+      "latency_ms": 1198
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1569,
+      "output_tokens": 160,
+      "total_tokens": 1729,
+      "latency_ms": 2481
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1781,
+      "output_tokens": 501,
+      "total_tokens": 2282,
+      "latency_ms": 7511
+    }
+  ],
+  "token_totals": {
+    "input": 4446,
+    "output": 729,
+    "total": 5175,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: TestFuzzCryptoCertificateDataSetPEM   Sanitizer: address\nFunction: freerdp_bio_read_pem_with_policy\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): `offset` and `length` are uint16_t; the loop does `offset += status; length += blocksize(2048)` each iteration. With enough PEM data, `length` wraps past 65535 (and `pem[offset]` / next BIO_read use the wrapped size), so realloc allocates a buffer smaller than `offset`, and `pem[offset] = 0` plus the next BIO_read write past the allocation.\n\nControl flow to the bug:\n  - certificate PEM fuzzer feeds a large BIO\n  - loop: realloc(pem, length+1); BIO_read into pem[offset]; offset += status; length += 2048\n  - uint16_t length/offset wrap -> realloc smaller than offset -> pem[offset]=0 / BIO_read OOB write\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_yar6zkr2fkOdByeY5WFSoKsw",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"freerdp_bio_read_pem_with_policy\"}"
+          }
+        },
+        {
+          "id": "call_lqUT01UdHsLtS6gI533L6Mvr",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"freerdp_bio_read_pem_with_policy\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_yar6zkr2fkOdByeY5WFSoKsw",
+      "content": "static BOOL freerdp_bio_read_pem_with_policy(BIO* bio, char** ppem, size_t* plength)\n{\n\tBOOL rc = FALSE;\n\tint status = -1;\n\n\tWINPR_ASSERT(bio);\n\tWINPR_ASSERT(ppem);\n\n\tconst uint16_t blocksize = 2048;\n\tuint16_t offset = 0;\n\tuint16_t length = blocksize;\n\tchar* pem = NULL;\n\n\t*ppem = NULL;\n\tif (plength)\n\t\t*plength = 0;\n\n\twhile (status != 0)\n\t{\n\t\tchar* tmp = realloc(pem, length + 1);\n\t\tif (!tmp)\n\t\t\tgoto fail;\n\n\t\tpem = tmp;\n\n\t\tERR_clear_error();\n\n\t\tstatus = BIO_read(bio, &pem[offset], (int)(length - offset));\n\t\tif (status < 0)\n\t\t{\n\t\t\tWLog_ERR(TAG, \"failed to read certificate\");\n\t\t\tgoto fail;\n\t\t}\n\n\t\tif (status == 0)\n\t\t\tbreak;\n\n\t\toffset += (size_t)status;\n\t\tlength += blocksize;\n\n\t}\n\tpem[offset] = '\\0';\n\t*ppem = pem;\n\tif (plength)\n\t\t*plength = offset;\n\trc = TRUE;\nfail:\n\tif (!rc)\n\t\tfree(pem);\n\n\treturn rc;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_lqUT01UdHsLtS6gI533L6Mvr",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_7Uyc6JBaqvCIOljCqxRQEUsk",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to force many BIO_read iterations by providing a large PEM blob.\\n    # Use a plausible PEM header/footer with lots of base64-ish data.\\n    header = b\\\"-----BEGIN CERTIFICATE-----\\\\n\\\"\\n    footer = b\\\"\\\\n-----END CERTIFICATE-----\\\\n\\\"\\n    # 200k of 'A' with newlines every 64 chars\\n    n = 200000\\n    line = b\\\"A\\\"*64 + b\\\"\\\\n\\\"\\n    body = line * (n//65)\\n    return header + body + footer\\n\",\"target\":\"freerdp_bio_read_pem_with_policy\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_7Uyc6JBaqvCIOljCqxRQEUsk",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/fp-delta-01/bugs/vuln_001/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_K7zdPvZ7Cg60n4D1bjSBPvES",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source shows offset and length are uint16_t. Each loop realloc(pem, length+1) then BIO_read into pem[offset] for (length-offset) bytes, then offset += status; length += 2048. With sufficiently large input, offset and/or length can wrap at 65535. After wrap, realloc may allocate a small buffer (length+1) while offset is large (or has wrapped inconsistently), and pem[offset]='\\\\0' after the loop can write out of bounds. Also BIO_read writes into &pem[offset] with size (length-offset) computed in uint16_t then cast to int; after wrap this can become a large positive due to underflow in (length-offset) if offset>length, causing a write far past allocation. There are no checks preventing offset>length or preventing wrap; no use of size_t for counters. This is a plausible heap-buffer-overflow under ASan given a large enough BIO stream.\\n\\nI attempted to run reach_probe with a large PEM blob, but the tool failed due to missing ASan binary path in this environment, so I cannot provide runtime crash evidence here.\" ,\"corrected_description\":\"Integer wraparound of uint16_t offset/length in freerdp_bio_read_pem_with_policy leads to incorrect realloc size and incorrect BIO_read size/pointer, causing heap-buffer-overflow (OOB write) either in BIO_read(&pem[offset], length-offset) when offset>length after wrap (underflow) or at pem[offset]='\\\\0' after loop.\" ,\"control_flow_to_bug\":\"TestFuzzCryptoCertificateDataSetPEM provides large PEM data -> code constructs BIO over input -> freerdp_bio_read_pem_with_policy(bio,&pem,&len): initializes uint16_t offset=0,length=2048; loop realloc(pem,length+1); status=BIO_read(bio,&pem[offset],(int)(length-offset)); if status>0 then offset+=status; length+=2048; repeat until BIO_read returns 0. With enough iterations, offset/length wrap at 16-bit, leading to offset>length and/or realloc smaller than required; subsequent BIO_read writes past allocation and/or pem[offset]='\\\\0' writes OOB.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_K7zdPvZ7Cg60n4D1bjSBPvES",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

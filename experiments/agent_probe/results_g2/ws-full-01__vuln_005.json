@@ -1,0 +1,190 @@
+{
+  "tag": "ws-full-01__vuln_005",
+  "gt": "dissect_bat_vis_v24",
+  "crash_type": "SEGV",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "partial",
+    "pattern_present": true,
+    "reasoning": "Source shows a classic non-NUL-terminated stack buffer used as C-string.\n\nIn dissect_bat_vis_v24:\n- Reads vis_packeth_raw_data_size from tvb, checks only `> sizeof(vis_packeth_raw_data)` (1024) and returns if larger.\n- Copies exactly vis_packeth_raw_data_size bytes into `char vis_packeth_raw_data[1024]` with no terminator.\n- Unconditionally (when `tree` is non-NULL) calls `snprintf(d_output_buffer, ..., \"... %s\", vis_packeth_raw_data);` which will read past the 1024-byte array if it contains no NUL.\n- Later calls `strlen(vis_packeth_raw_data)` in a conditional when size>4.\n\nThus if the input sets vis_packeth_raw_data_size==1024 and provides 1024 non-zero bytes, both snprintf(\"%s\") and strlen() can perform out-of-bounds reads until a NUL is found, which is ASan-detectable and can manifest as SEGV.\n\nThe size check is only a partial guard: it prevents overflow writes but allows the exact-full-buffer case that is unsafe for string APIs.\n\nI attempted to run reach_probe with a crafted input (size=1024, raw='A'*1024) but the probe infrastructure failed due to missing ASan binary path, so I cannot provide runtime crash confirmation here.",
+    "corrected_description": "Out-of-bounds read / stack-buffer-over-read due to missing NUL termination: vis_packeth_raw_data is filled with up to 1024 bytes from the packet and then treated as a C-string in snprintf(\"%s\") and strlen() without ensuring a terminating '\\0' when size==1024 (or when data contains no NUL).",
+    "control_flow_to_bug": "fuzzer entry -> BAT_VIS dissector -> dissect_bat_vis_v24(tvb,pinfo,tree)\n1) offset=8 parse header fields; read vis_packeth_raw_data_size (uint32)\n2) pass check: vis_packeth_raw_data_size <= 1024\n3) copy vis_packeth_raw_data_size bytes from tvb into local vis_packeth_raw_data[1024] with no terminator\n4) if (tree != NULL): snprintf(..., \"%s\", vis_packeth_raw_data) triggers OOB read when no NUL in first 1024 bytes\n5) additionally, if (vis_packeth_raw_data_size > 4 && strlen(vis_packeth_raw_data) > 4) strlen can also trigger OOB read"
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.5,
+  "verdict": "LIKELY",
+  "basis": "tainted, partial clamp (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "dissect_bat_vis_v24"
+      },
+      "result": "static void dissect_bat_vis_v24(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)\n{\n\tstruct vis_packet_v23 *vis_packeth;\n\tuint32_t sender_ip;\n\tproto_tree *bat_vis_tree = NULL;\n\tint vis_packeth_raw_data_size=0;\n\tchar vis_packeth_raw_data[1024];\n\tchar d_output_buffer[1024];\n\n\ttvbuff_t *next_tvb;\n\tint length_remaining, i, offset;\n\n\td_output_buffer[0] = 0;\n\n\tvis_packeth = wmem_new(pinfo->pool, struct vis_packet_v23);\n\n\tsender_ip = tvb_get_ipv4(tvb, 0);\n\tset_address_tvb(&vis_packeth->sender_ip, AT_IPv4, 4, tvb, 0);\n\toffset = 8;\n\tvis_packeth->version = tvb_get_uint8(tvb, offset++);\n\tvis_packeth->gw_class = tvb_get_uint8(tvb, offset++);\n\tvis_packeth->tq_max = tvb_get_uint8(tvb, offset++);\n\tvis_packeth_raw_data_size = tvb_get_uint32(tvb, offset++, 0);\n\toffset += 4;\n\tif ((unsigned long)vis_packeth_raw_data_size > sizeof(vis_packeth_raw_data))\n\t\treturn;\n\n\tfor (i=0; i < vis_packeth_raw_data_size; i++) {\n\t\tvis_packeth_raw_data[i] = tvb_get_uint8(tvb, offset);\n\t\toffset++;\n\t}\n\n\t                       \n\tcol_set_str(pinfo->cinfo, COL_PROTOCOL, \"BAT_VIS\");\n\n\t                     \n\tcol_add_fstr(pinfo->cinfo, COL_INFO, \"Src: %s\",\n\t\t\taddress_with_resolution_to_str(pinfo->pool, &vis_packeth->sender_ip));\n\n\t                   \n\tif (tree) {\n\t\tproto_item *ti;\n\n\t\tti = proto_tree_add_protocol_format(tree, proto_bat_vis, tvb, 0, VIS_PACKET_V23_SIZE,\n\t\t\t\t\t\t\t\t\"B.A.T.M.A.N. Vis, Src: %s\",\n\t\t\t\t\t\t\t\taddress_with_resolution_to_str(pinfo->pool, &vis_packeth->sender_ip));\n\t\tsnprintf(d_output_buffer, sizeof(d_output_buffer), \"B.A.T.M.A.N. Vis, raw_data %s\", vis_packeth_raw_data);\n\t\tbat_vis_tree = proto_item_add_subtree(ti, ett_bat_vis);\n\n\t\t           \n\t\tproto_tree_add_ipv4(bat_vis_tree, hf_bat_vis_vis_orig, tvb, offset, 4, sender_ip);\n\t\toffset += 4;\n\n\t\tproto_tree_add_item(bat_vis_tree, hf_bat_vis_version, tvb, offset, 1, ENC_BIG_ENDIAN);\n\t\toffset += 1;\n\n\t\tproto_tree_add_item(bat_vis_tree, hf_bat_vis_gwflags, tvb, offset, 1, ENC_BIG_ENDIAN);\n\t\toffset += 1;\n\n\t\tproto_tree_add_item(bat_vis_tree, hf_bat_max_tq_v23, tvb, offset, 1, ENC_BIG_ENDIAN);\n\t\t                \n\t}\n\n\tif ((vis_packeth_raw_data_size > 4) && (strlen(vis_packeth_raw_data) > 4))\n\t\tfprintf(stderr, d_output_buffer);\n\n\ttap_queue_packet(bat_tap, pinfo, vis_packeth);\n\n\tlength_remaining = tvb_reported_length_remaining(tvb, offset);\n\n\tfor (i = 0; i < length_remaining; i += VIS_PACKET_V23_DATA_SIZE) {\n\t\tnext_tvb = tvb_new_subset_length(tvb, offset, VIS_PACKET_V23_DATA_SIZE);\n\n\t\tif (have_tap_listener(bat_follow_tap)) {\n\t\t\ttap_queue_packet(bat_follow_tap, pinfo, next_tvb);\n\t\t}\n\n\t\tif (bat_vis_tree != NULL) {\n\t\t\tdissect_vis_entry_v23(next_tvb, pinfo, tree);\n\t\t}\n\n\t\toffset += VIS_PACKET_V23_DATA_SIZE;\n\t}\n\n\tlength_remaining = tvb_reported_length_remaining(tvb, offset);\n\tif (length_remaining > 0) {\n\t\tnext_tvb = tvb_new_subset_remaining(tvb, offset);\n\n\t\tif (have_tap_listener(bat_follow_tap)) {\n\t\t\ttap_queue_packet(bat_follow_tap, pinfo, next_tvb);\n\t\t}\n\n\t\tcall_data_dissector(next_tvb, pinfo, tree);\n\t}\n\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "dissect_bat_vis_v24"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"observed\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Layout inferred from dissect_bat_vis_v24:\n    # 0..3 sender_ip (ipv4)\n    # 4..7 ? (unused here)\n    # offset=8: version, gw_class, tq_max, then uint32 raw_data_size read at offset 11\n    # then offset +=4 (so raw data starts at 16)\n    sender_ip = b\"\\x01\\x02\\x03\\x04\"\n    pad4 = b\"\\x00\\x00\\x00\\x00\"\n    version = b\"\\x18\"  # arbitrary\n    gw = b\"\\x00\"\n    tq = b\"\\x00\"\n    raw_size = (1024).to_bytes(4, 'big')\n    raw = b\"A\"*1024  # no NUL\n    # add some extra bytes so later tvb accesses don't throw before our bug\n    extra = b\"B\"*64\n    return sender_ip + pad4 + version + gw + tq + raw_size + raw + extra\n",
+        "target": "dissect_bat_vis_v24"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-full-01/bugs/vuln_005/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "partial",
+        "pattern_present": true,
+        "reasoning": "Source shows a classic non-NUL-terminated stack buffer used as C-string.\n\nIn dissect_bat_vis_v24:\n- Reads vis_packeth_raw_data_size from tvb, checks only `> sizeof(vis_packeth_raw_data)` (1024) and returns if larger.\n- Copies exactly vis_packeth_raw_data_size bytes into `char vis_packeth_raw_data[1024]` with no terminator.\n- Unconditionally (when `tree` is non-NULL) calls `snprintf(d_output_buffer, ..., \"... %s\", vis_packeth_raw_data);` which will read past the 1024-byte array if it contains no NUL.\n- Later calls `strlen(vis_packeth_raw_data)` in a conditional when size>4.\n\nThus if the input sets vis_packeth_raw_data_size==1024 and provides 1024 non-zero bytes, both snprintf(\"%s\") and strlen() can perform out-of-bounds reads until a NUL is found, which is ASan-detectable and can manifest as SEGV.\n\nThe size check is only a partial guard: it prevents overflow writes but allows the exact-full-buffer case that is unsafe for string APIs.\n\nI attempted to run reach_probe with a crafted input (size=1024, raw='A'*1024) but the probe infrastructure failed due to missing ASan binary path, so I cannot provide runtime crash confirmation here.",
+        "corrected_description": "Out-of-bounds read / stack-buffer-over-read due to missing NUL termination: vis_packeth_raw_data is filled with up to 1024 bytes from the packet and then treated as a C-string in snprintf(\"%s\") and strlen() without ensuring a terminating '\\0' when size==1024 (or when data contains no NUL).",
+        "control_flow_to_bug": "fuzzer entry -> BAT_VIS dissector -> dissect_bat_vis_v24(tvb,pinfo,tree)\n1) offset=8 parse header fields; read vis_packeth_raw_data_size (uint32)\n2) pass check: vis_packeth_raw_data_size <= 1024\n3) copy vis_packeth_raw_data_size bytes from tvb into local vis_packeth_raw_data[1024] with no terminator\n4) if (tree != NULL): snprintf(..., \"%s\", vis_packeth_raw_data) triggers OOB read when no NUL in first 1024 bytes\n5) additionally, if (vis_packeth_raw_data_size > 4 && strlen(vis_packeth_raw_data) > 4) strlen can also trigger OOB read"
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1104,
+      "output_tokens": 62,
+      "total_tokens": 1166,
+      "latency_ms": 1046
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 2318,
+      "output_tokens": 269,
+      "total_tokens": 2587,
+      "latency_ms": 3195
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2637,
+      "output_tokens": 582,
+      "total_tokens": 3219,
+      "latency_ms": 7890
+    }
+  ],
+  "token_totals": {
+    "input": 6059,
+    "output": 913,
+    "total": 6972,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: handler_bat.vis   Sanitizer: address\nFunction: dissect_bat_vis_v24\nClaimed bug type: SEGV\nSuspicious-point description (from the finder — may be imprecise): Potential out-of-bounds read via non-null-terminated fixed buffer: function reads vis_packeth_raw_data_size from tvb and copies that many bytes into local char vis_packeth_raw_data[1024] after checking size <= sizeof(buffer). When size equals 1024, the buffer is completely filled with non-NUL data and no terminator is appended. Later code passes vis_packeth_raw_data to snprintf with \"%s\" and also calls strlen(vis_packeth_raw_data) in a conditional, both of which will read past the end of the 1024-byte array until a NUL is found, triggering AddressSanitizer OOB read. Root cause: treating raw byte array as C-string without ensuring NUL termination (need size<sizeof or append terminator). Related vars/ops: vis_packeth_raw_data_size, loop copying bytes, snprintf(\"...%s\"), strlen().\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a SEGV\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_5rutZR3QEjwPsBZGidGBdiTj",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"dissect_bat_vis_v24\"}"
+          }
+        },
+        {
+          "id": "call_UBpsB5673KEGhIY3D1Nk0shs",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"dissect_bat_vis_v24\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_5rutZR3QEjwPsBZGidGBdiTj",
+      "content": "static void dissect_bat_vis_v24(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)\n{\n\tstruct vis_packet_v23 *vis_packeth;\n\tuint32_t sender_ip;\n\tproto_tree *bat_vis_tree = NULL;\n\tint vis_packeth_raw_data_size=0;\n\tchar vis_packeth_raw_data[1024];\n\tchar d_output_buffer[1024];\n\n\ttvbuff_t *next_tvb;\n\tint length_remaining, i, offset;\n\n\td_output_buffer[0] = 0;\n\n\tvis_packeth = wmem_new(pinfo->pool, struct vis_packet_v23);\n\n\tsender_ip = tvb_get_ipv4(tvb, 0);\n\tset_address_tvb(&vis_packeth->sender_ip, AT_IPv4, 4, tvb, 0);\n\toffset = 8;\n\tvis_packeth->version = tvb_get_uint8(tvb, offset++);\n\tvis_packeth->gw_class = tvb_get_uint8(tvb, offset++);\n\tvis_packeth->tq_max = tvb_get_uint8(tvb, offset++);\n\tvis_packeth_raw_data_size = tvb_get_uint32(tvb, offset++, 0);\n\toffset += 4;\n\tif ((unsigned long)vis_packeth_raw_data_size > sizeof(vis_packeth_raw_data))\n\t\treturn;\n\n\tfor (i=0; i < vis_packeth_raw_data_size; i++) {\n\t\tvis_packeth_raw_data[i] = tvb_get_uint8(tvb, offset);\n\t\toffset++;\n\t}\n\n\t                       \n\tcol_set_str(pinfo->cinfo, COL_PROTOCOL, \"BAT_VIS\");\n\n\t                     \n\tcol_add_fstr(pinfo->cinfo, COL_INFO, \"Src: %s\",\n\t\t\taddress_with_resolution_to_str(pinfo->pool, &vis_packeth->sender_ip));\n\n\t                   \n\tif (tree) {\n\t\tproto_item *ti;\n\n\t\tti = proto_tree_add_protocol_format(tree, proto_bat_vis, tvb, 0, VIS_PACKET_V23_SIZE,\n\t\t\t\t\t\t\t\t\"B.A.T.M.A.N. Vis, Src: %s\",\n\t\t\t\t\t\t\t\taddress_with_resolution_to_str(pinfo->pool, &vis_packeth->sender_ip));\n\t\tsnprintf(d_output_buffer, sizeof(d_output_buffer), \"B.A.T.M.A.N. Vis, raw_data %s\", vis_packeth_raw_data);\n\t\tbat_vis_tree = proto_item_add_subtree(ti, ett_bat_vis);\n\n\t\t           \n\t\tproto_tree_add_ipv4(bat_vis_tree, hf_bat_vis_vis_orig, tvb, offset, 4, sender_ip);\n\t\toffset += 4;\n\n\t\tproto_tree_add_item(bat_vis_tree, hf_bat_vis_version, tvb, offset, 1, ENC_BIG_ENDIAN);\n\t\toffset += 1;\n\n\t\tproto_tree_add_item(bat_vis_tree, hf_bat_vis_gwflags, tvb, offset, 1, ENC_BIG_ENDIAN);\n\t\toffset += 1;\n\n\t\tproto_tree_add_item(bat_vis_tree, hf_bat_max_tq_v23, tvb, offset, 1, ENC_BIG_ENDIAN);\n\t\t                \n\t}\n\n\tif ((vis_packeth_raw_data_size > 4) && (strlen(vis_packeth_raw_data) > 4))\n\t\tfprintf(stderr, d_output_buffer);\n\n\ttap_queue_packet(bat_tap, pinfo, vis_packeth);\n\n\tlength_remaining = tvb_reported_length_remaining(tvb, offset);\n\n\tfor (i = 0; i < length_remaining; i += VIS_PACKET_V23_DATA_SIZE) {\n\t\tnext_tvb = tvb_new_subset_length(tvb, offset, VIS_PACKET_V23_DATA_SIZE);\n\n\t\tif (have_tap_listener(bat_follow_tap)) {\n\t\t\ttap_queue_packet(bat_follow_tap, pinfo, next_tvb);\n\t\t}\n\n\t\tif (bat_vis_tree != NULL) {\n\t\t\tdissect_vis_entry_v23(next_tvb, pinfo, tree);\n\t\t}\n\n\t\toffset += VIS_PACKET_V23_DATA_SIZE;\n\t}\n\n\tlength_remaining = tvb_reported_length_remaining(tvb, offset);\n\tif (length_remaining > 0) {\n\t\tnext_tvb = tvb_new_subset_remaining(tvb, offset);\n\n\t\tif (have_tap_listener(bat_follow_tap)) {\n\t\t\ttap_queue_packet(bat_follow_tap, pinfo, next_tvb);\n\t\t}\n\n\t\tcall_data_dissector(next_tvb, pinfo, tree);\n\t}\n\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_UBpsB5673KEGhIY3D1Nk0shs",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"observed\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_cPrPOdCaAqYrSvao5n05Orju",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Layout inferred from dissect_bat_vis_v24:\\n    # 0..3 sender_ip (ipv4)\\n    # 4..7 ? (unused here)\\n    # offset=8: version, gw_class, tq_max, then uint32 raw_data_size read at offset 11\\n    # then offset +=4 (so raw data starts at 16)\\n    sender_ip = b\\\"\\\\x01\\\\x02\\\\x03\\\\x04\\\"\\n    pad4 = b\\\"\\\\x00\\\\x00\\\\x00\\\\x00\\\"\\n    version = b\\\"\\\\x18\\\"  # arbitrary\\n    gw = b\\\"\\\\x00\\\"\\n    tq = b\\\"\\\\x00\\\"\\n    raw_size = (1024).to_bytes(4, 'big')\\n    raw = b\\\"A\\\"*1024  # no NUL\\n    # add some extra bytes so later tvb accesses don't throw before our bug\\n    extra = b\\\"B\\\"*64\\n    return sender_ip + pad4 + version + gw + tq + raw_size + raw + extra\\n\",\"target\":\"dissect_bat_vis_v24\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_cPrPOdCaAqYrSvao5n05Orju",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-full-01/bugs/vuln_005/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_olSxZkFc0CQYqa0rWRMn4Uak",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"partial\",\"pattern_present\":true,\"reasoning\":\"Source shows a classic non-NUL-terminated stack buffer used as C-string.\\n\\nIn dissect_bat_vis_v24:\\n- Reads vis_packeth_raw_data_size from tvb, checks only `> sizeof(vis_packeth_raw_data)` (1024) and returns if larger.\\n- Copies exactly vis_packeth_raw_data_size bytes into `char vis_packeth_raw_data[1024]` with no terminator.\\n- Unconditionally (when `tree` is non-NULL) calls `snprintf(d_output_buffer, ..., \\\"... %s\\\", vis_packeth_raw_data);` which will read past the 1024-byte array if it contains no NUL.\\n- Later calls `strlen(vis_packeth_raw_data)` in a conditional when size>4.\\n\\nThus if the input sets vis_packeth_raw_data_size==1024 and provides 1024 non-zero bytes, both snprintf(\\\"%s\\\") and strlen() can perform out-of-bounds reads until a NUL is found, which is ASan-detectable and can manifest as SEGV.\\n\\nThe size check is only a partial guard: it prevents overflow writes but allows the exact-full-buffer case that is unsafe for string APIs.\\n\\nI attempted to run reach_probe with a crafted input (size=1024, raw='A'*1024) but the probe infrastructure failed due to missing ASan binary path, so I cannot provide runtime crash confirmation here.\" ,\"corrected_description\":\"Out-of-bounds read / stack-buffer-over-read due to missing NUL termination: vis_packeth_raw_data is filled with up to 1024 bytes from the packet and then treated as a C-string in snprintf(\\\"%s\\\") and strlen() without ensuring a terminating '\\\\0' when size==1024 (or when data contains no NUL).\",\"control_flow_to_bug\":\"fuzzer entry -> BAT_VIS dissector -> dissect_bat_vis_v24(tvb,pinfo,tree)\\n1) offset=8 parse header fields; read vis_packeth_raw_data_size (uint32)\\n2) pass check: vis_packeth_raw_data_size <= 1024\\n3) copy vis_packeth_raw_data_size bytes from tvb into local vis_packeth_raw_data[1024] with no terminator\\n4) if (tree != NULL): snprintf(..., \\\"%s\\\", vis_packeth_raw_data) triggers OOB read when no NUL in first 1024 bytes\\n5) additionally, if (vis_packeth_raw_data_size > 4 && strlen(vis_packeth_raw_data) > 4) strlen can also trigger OOB read\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_olSxZkFc0CQYqa0rWRMn4Uak",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "dissect_bat_vis_v24"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Potential out-of-bounds read via non-null-terminated fixed buffer: function reads vis_packeth_raw_data_size from tvb and copies that many bytes into local char vis_packeth_raw_data[1024] after checking size <= sizeof(buffer). When size equals 1024, the buffer is completely filled with non-NUL data and no terminator is appended. Later code passes vis_packeth_raw_data to snprintf with \"%s\" and also calls strlen(vis_packeth_raw_data) in a conditional, both of which will read past the end of the 1024-byte array until a NUL is found, triggering AddressSanitizer OOB read. Root cause: treating raw byte array as C-string without ensuring NUL termination (need size<sizeof or append terminator). Related vars/ops: vis_packeth_raw_data_size, loop copying bytes, snprintf(\"...%s\"), strlen().",
+  "finder_vuln_type": ""
+}

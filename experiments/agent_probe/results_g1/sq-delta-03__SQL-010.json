@@ -1,0 +1,181 @@
+{
+  "tag": "sq-delta-03__SQL-010",
+  "gt": "fileToString",
+  "crash_type": "stack-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Read fileToString(): it unconditionally writes aBuf[nBuf] = 0 when pSeg!=NULL. Since aBuf is documented/used as a buffer of size nBuf (caller passes stack array aBuf[nBuf]), valid indices are 0..nBuf-1. Writing at index nBuf is a 1-byte out-of-bounds write (stack-buffer-overflow if aBuf is stack allocated). This occurs regardless of i/concatenation lengths, so no guard prevents it.\n\nAdditionally, the concatenation logic is unsafe: after snprintf(&aBuf[i], nBuf-i, ...), it does i += strlen(&aBuf[i]). If i>=nBuf, then nBuf-i is <=0; snprintf with size 0 writes nothing but strlen(&aBuf[i]) will read from aBuf[i] which is already out-of-bounds, causing OOB read. Even before that, if i is close to nBuf, snprintf truncates and NUL-terminates within the remaining space, so strlen is bounded by remaining space; but once i crosses nBuf due to earlier increments (e.g., under LSM_LOG_FREELIST branch uses snprintf(&aBuf[i], nBuf-1, ...) which ignores i and can overflow if i>0), subsequent operations can go OOB.\n\nNo reach_probe crash evidence was obtained because the provided ASan binary path was missing in the environment, so dynamic confirmation is unavailable. However, the unconditional aBuf[nBuf]=0 is a definite OOB write if nBuf is the allocated length, independent of input content once fileToString is reached with pSeg!=NULL.",
+    "corrected_description": "Definite off-by-one out-of-bounds write: when pSeg!=NULL, fileToString unconditionally executes aBuf[nBuf] = 0, writing 1 byte past the end of the caller-provided buffer of length nBuf. There are also potential OOB read/write issues in the concatenation logic when i grows (including an LSM_LOG_FREELIST snprintf call that uses nBuf-1 instead of nBuf-i).",
+    "control_flow_to_bug": "Fuzzer input drives code that dumps LSM/segment structure -> caller allocates/uses stack buffer aBuf of size nBuf and calls fileToString(pDb, aBuf, nBuf, nMin, pSeg). Condition: pSeg must be non-NULL. Then fileToString formats segToString output into aBuf and finally executes aBuf[nBuf]=0 unconditionally, causing 1-byte OOB write past end of aBuf."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "fileToString"
+      },
+      "result": "static int fileToString(\n  lsm_db *pDb,                                       \n  char *aBuf, \n  int nBuf, \n  int nMin,\n  Segment *pSeg\n){\n  int i = 0;\n  if( pSeg ){\n    char *zSeg;\n\n    zSeg = segToString(pDb->pEnv, pSeg, nMin);\n    snprintf(&aBuf[i], nBuf-i, \"%s\", zSeg);\n    i += strlen(&aBuf[i]);\n    lsmFree(pDb->pEnv, zSeg);\n\n#ifdef LSM_LOG_FREELIST\n    lsmInfoArrayStructure(pDb, 1, pSeg->iFirst, &zSeg);\n    snprintf(&aBuf[i], nBuf-1, \"    (%s)\", zSeg);\n    i += strlen(&aBuf[i]);\n    lsmFree(pDb->pEnv, zSeg);\n#endif\n    aBuf[nBuf] = 0;\n  }else{\n    aBuf[0] = '\\0';\n  }\n\n  return i;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "fileToString"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 9, \"reached_via\": \"indirect\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to trigger code paths that dump LSM structure and call fileToString.\n    # Provide a minimal-ish input; actual format unknown, so just random-ish bytes.\n    return b\"A\"*4096\n",
+        "target": "fileToString"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/sq-delta-03/bugs/SQL-010/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Read fileToString(): it unconditionally writes aBuf[nBuf] = 0 when pSeg!=NULL. Since aBuf is documented/used as a buffer of size nBuf (caller passes stack array aBuf[nBuf]), valid indices are 0..nBuf-1. Writing at index nBuf is a 1-byte out-of-bounds write (stack-buffer-overflow if aBuf is stack allocated). This occurs regardless of i/concatenation lengths, so no guard prevents it.\n\nAdditionally, the concatenation logic is unsafe: after snprintf(&aBuf[i], nBuf-i, ...), it does i += strlen(&aBuf[i]). If i>=nBuf, then nBuf-i is <=0; snprintf with size 0 writes nothing but strlen(&aBuf[i]) will read from aBuf[i] which is already out-of-bounds, causing OOB read. Even before that, if i is close to nBuf, snprintf truncates and NUL-terminates within the remaining space, so strlen is bounded by remaining space; but once i crosses nBuf due to earlier increments (e.g., under LSM_LOG_FREELIST branch uses snprintf(&aBuf[i], nBuf-1, ...) which ignores i and can overflow if i>0), subsequent operations can go OOB.\n\nNo reach_probe crash evidence was obtained because the provided ASan binary path was missing in the environment, so dynamic confirmation is unavailable. However, the unconditional aBuf[nBuf]=0 is a definite OOB write if nBuf is the allocated length, independent of input content once fileToString is reached with pSeg!=NULL.",
+        "corrected_description": "Definite off-by-one out-of-bounds write: when pSeg!=NULL, fileToString unconditionally executes aBuf[nBuf] = 0, writing 1 byte past the end of the caller-provided buffer of length nBuf. There are also potential OOB read/write issues in the concatenation logic when i grows (including an LSM_LOG_FREELIST snprintf call that uses nBuf-1 instead of nBuf-i).",
+        "control_flow_to_bug": "Fuzzer input drives code that dumps LSM/segment structure -> caller allocates/uses stack buffer aBuf of size nBuf and calls fileToString(pDb, aBuf, nBuf, nMin, pSeg). Condition: pSeg must be non-NULL. Then fileToString formats segToString output into aBuf and finally executes aBuf[nBuf]=0 unconditionally, causing 1-byte OOB write past end of aBuf."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1037,
+      "output_tokens": 54,
+      "total_tokens": 1091,
+      "latency_ms": 1214
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1390,
+      "output_tokens": 78,
+      "total_tokens": 1468,
+      "latency_ms": 1918
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1519,
+      "output_tokens": 578,
+      "total_tokens": 2097,
+      "latency_ms": 7860
+    }
+  ],
+  "token_totals": {
+    "input": 3946,
+    "output": 710,
+    "total": 4656,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: customfuzz3   Sanitizer: address\nFunction: fileToString\nClaimed bug type: stack-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): `snprintf(&aBuf[i], nBuf-i, ...)` advances i by strlen, and then `aBuf[nBuf] = 0` writes one past the nBuf-sized buffer; i can also grow beyond nBuf across the concatenations, overflowing the caller's stack buffer.\n\nControl flow to the bug:\n  - lsm structure dump builds a string into aBuf[nBuf]\n  - segToString output concatenated; i can exceed nBuf\n  - aBuf[nBuf] = 0 writes one past the buffer -> stack overflow\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a stack-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_eDPcPkw82BsFsZzQCEWqfHXs",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"fileToString\"}"
+          }
+        },
+        {
+          "id": "call_Nzx2xcjAi1zjFlLvn2oVaTTV",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"fileToString\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_eDPcPkw82BsFsZzQCEWqfHXs",
+      "content": "static int fileToString(\n  lsm_db *pDb,                                       \n  char *aBuf, \n  int nBuf, \n  int nMin,\n  Segment *pSeg\n){\n  int i = 0;\n  if( pSeg ){\n    char *zSeg;\n\n    zSeg = segToString(pDb->pEnv, pSeg, nMin);\n    snprintf(&aBuf[i], nBuf-i, \"%s\", zSeg);\n    i += strlen(&aBuf[i]);\n    lsmFree(pDb->pEnv, zSeg);\n\n#ifdef LSM_LOG_FREELIST\n    lsmInfoArrayStructure(pDb, 1, pSeg->iFirst, &zSeg);\n    snprintf(&aBuf[i], nBuf-1, \"    (%s)\", zSeg);\n    i += strlen(&aBuf[i]);\n    lsmFree(pDb->pEnv, zSeg);\n#endif\n    aBuf[nBuf] = 0;\n  }else{\n    aBuf[0] = '\\0';\n  }\n\n  return i;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Nzx2xcjAi1zjFlLvn2oVaTTV",
+      "content": "{\"reachable\": true, \"call_depth\": 9, \"reached_via\": \"indirect\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_rr8hQiZaSiKk7u3E16crWePy",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to trigger code paths that dump LSM structure and call fileToString.\\n    # Provide a minimal-ish input; actual format unknown, so just random-ish bytes.\\n    return b\\\"A\\\"*4096\\n\",\"target\":\"fileToString\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_rr8hQiZaSiKk7u3E16crWePy",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/sq-delta-03/bugs/SQL-010/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_7LhJRBh8UAjCpzmCJn3Vzj0D",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Read fileToString(): it unconditionally writes aBuf[nBuf] = 0 when pSeg!=NULL. Since aBuf is documented/used as a buffer of size nBuf (caller passes stack array aBuf[nBuf]), valid indices are 0..nBuf-1. Writing at index nBuf is a 1-byte out-of-bounds write (stack-buffer-overflow if aBuf is stack allocated). This occurs regardless of i/concatenation lengths, so no guard prevents it.\\n\\nAdditionally, the concatenation logic is unsafe: after snprintf(&aBuf[i], nBuf-i, ...), it does i += strlen(&aBuf[i]). If i>=nBuf, then nBuf-i is <=0; snprintf with size 0 writes nothing but strlen(&aBuf[i]) will read from aBuf[i] which is already out-of-bounds, causing OOB read. Even before that, if i is close to nBuf, snprintf truncates and NUL-terminates within the remaining space, so strlen is bounded by remaining space; but once i crosses nBuf due to earlier increments (e.g., under LSM_LOG_FREELIST branch uses snprintf(&aBuf[i], nBuf-1, ...) which ignores i and can overflow if i>0), subsequent operations can go OOB.\\n\\nNo reach_probe crash evidence was obtained because the provided ASan binary path was missing in the environment, so dynamic confirmation is unavailable. However, the unconditional aBuf[nBuf]=0 is a definite OOB write if nBuf is the allocated length, independent of input content once fileToString is reached with pSeg!=NULL.\",\"corrected_description\":\"Definite off-by-one out-of-bounds write: when pSeg!=NULL, fileToString unconditionally executes aBuf[nBuf] = 0, writing 1 byte past the end of the caller-provided buffer of length nBuf. There are also potential OOB read/write issues in the concatenation logic when i grows (including an LSM_LOG_FREELIST snprintf call that uses nBuf-1 instead of nBuf-i).\",\"control_flow_to_bug\":\"Fuzzer input drives code that dumps LSM/segment structure -> caller allocates/uses stack buffer aBuf of size nBuf and calls fileToString(pDb, aBuf, nBuf, nMin, pSeg). Condition: pSeg must be non-NULL. Then fileToString formats segToString output into aBuf and finally executes aBuf[nBuf]=0 unconditionally, causing 1-byte OOB write past end of aBuf.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_7LhJRBh8UAjCpzmCJn3Vzj0D",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

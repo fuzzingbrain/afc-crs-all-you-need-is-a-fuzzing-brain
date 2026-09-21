@@ -1,0 +1,22 @@
+{
+  "challenge": "lx-delta-01",
+  "bug": "vuln_001",
+  "tag": "lx-delta-01__vuln_001",
+  "round": "pre-competition",
+  "scan_mode": "delta",
+  "harness": "html",
+  "fuzzer": "html",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "htmlSecureComment"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "graphs_root": "/home/ze/fb-graphs/build/lx-delta-01",
+  "source_root": "/home/ze/fb-graphs/build/lx-delta-01/repo",
+  "callgraph": "/home/ze/fb-graphs/build/lx-delta-01/graph-html/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/libxml2:latest",
+  "project": "libxml2",
+  "blob": "/home/ze/fb-graphs/build/lx-delta-01/bugs/vuln_001/blob"
+}

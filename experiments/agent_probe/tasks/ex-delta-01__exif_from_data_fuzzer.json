@@ -1,0 +1,28 @@
+{
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-libexif.git",
+  "project_name": "libexif",
+  "task_type": "pov",
+  "scan_mode": "delta",
+  "fuzz_tooling_url": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "fuzz_tooling_ref": "challenge-state/ex-delta-01",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "exif_from_data_fuzzer"
+  ],
+  "remove_git": true,
+  "timeout_minutes": 45,
+  "budget_limit": 20.0,
+  "concurrency": 1,
+  "docker_image": "aixcc-afc/libexif:latest",
+  "prebuilt_fuzzers": {
+    "exif_from_data_fuzzer": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/ex-delta-01/bugs/exif-005/bin/address/exif_from_data_fuzzer"
+  },
+  "prebuild_dir": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/ex-delta-01",
+  "work_id": "ex-delta-01",
+  "model_profile": "current",
+  "pov_count": 1,
+  "base_commit": "ffcdfbeb5539c25b1630ba59abf8a22587657adc",
+  "delta_commit": "challenges/ex-delta-01"
+}

@@ -1,0 +1,519 @@
+{
+  "tag": "systemd-full-001__systemd-004",
+  "gt": "condition_free",
+  "crash_type": "heap-use-after-free",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "read_function",
+    "read_function",
+    "read_function",
+    "read_function",
+    "read_function",
+    "read_function",
+    "read_function",
+    "read_function",
+    "reach_probe",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": false,
+    "guard_clamps": "full",
+    "pattern_present": false,
+    "reasoning": "Read condition_free: it simply free(c->parameter) then mfree(c). This is a normal destructor and contains no dereference after free. A UAF would require some other code to retain and later use c or c->parameter after condition_free. From code inspection here, no evidence of such retention/use is shown. Additionally, condition_free_list_type appears buggy: it iterates LIST_FOREACH over a linked list and calls condition_free(c) on the current element without using a SAFE iteration macro or unlinking; this is more consistent with an iterator invalidation / UAF during list traversal (freeing current node then the macro advances via c->next from freed memory). However, the suspicious point as stated (free then later reuse elsewhere) is not evidenced. Two reach_probe attempts with plausible .link-like inputs did not even reach condition_free, so we lack runtime evidence of any crash or even execution of the destructor in this harness.",
+    "corrected_description": "No UAF in condition_free itself; it is a straightforward destructor. Potential memory-safety issue is in condition_free_list_type: freeing list nodes while iterating with LIST_FOREACH (non-SAFE) can cause use-after-free when the loop advances using pointers from the freed node, unless LIST_FOREACH is defined as safe (not confirmed here).",
+    "control_flow_to_bug": "Not established in this harness: reach_probe did not reach condition_free. If the issue exists, it would be: parser builds a Condition linked list -> cleanup calls condition_free_list_type(head, type) -> LIST_FOREACH uses c->next after condition_free(c) frees c, causing UAF during iteration."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": [
+      {
+        "target": "condition_free",
+        "hit": false,
+        "crashed": false,
+        "asan_type": null
+      },
+      {
+        "target": "condition_free",
+        "hit": false,
+        "crashed": false,
+        "asan_type": null
+      }
+    ]
+  },
+  "score": 0.1,
+  "verdict": "WEAK/FP",
+  "basis": "LLM: pattern absent",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "condition_free"
+      },
+      "result": "Condition* condition_free(Condition *c) {\n        assert(c);\n\n        free(c->parameter);\n        return mfree(c);\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "condition_free"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"indirect\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "read_function",
+      "args": {
+        "name": "link_parser_parse"
+      },
+      "result": "(not found)"
+    },
+    {
+      "iter": 2,
+      "tool": "read_function",
+      "args": {
+        "name": "condition_new"
+      },
+      "result": "Condition* condition_new(ConditionType type, const char *parameter, bool trigger, bool negate) {\n        Condition *c;\n\n        assert(type >= 0);\n        assert(type < _CONDITION_TYPE_MAX);\n        assert(parameter);\n\n        c = new(Condition, 1);\n        if (!c)\n                return NULL;\n\n        *c = (Condition) {\n                .type = type,\n                .trigger = trigger,\n                .negate = negate,\n        };\n\n        if (parameter) {\n                c->parameter = strdup(parameter);\n                if (!c->parameter)\n                        return mfree(c);\n        }\n\n        return c;\n}"
+    },
+    {
+      "iter": 3,
+      "tool": "read_function",
+      "args": {
+        "name": "config_parse_condition"
+      },
+      "result": "(not found)"
+    },
+    {
+      "iter": 4,
+      "tool": "read_function",
+      "args": {
+        "name": "link_config_parse"
+      },
+      "result": "(not found)"
+    },
+    {
+      "iter": 5,
+      "tool": "read_function",
+      "args": {
+        "name": "condition_test"
+      },
+      "result": "int condition_test(Condition *c, char **env) {\n\n        static int (*const condition_tests[_CONDITION_TYPE_MAX])(Condition *c, char **env) = {\n                [CONDITION_PATH_EXISTS]              = condition_test_path_exists,\n                [CONDITION_PATH_EXISTS_GLOB]         = condition_test_path_exists_glob,\n                [CONDITION_PATH_IS_DIRECTORY]        = condition_test_path_is_directory,\n                [CONDITION_PATH_IS_SYMBOLIC_LINK]    = condition_test_path_is_symbolic_link,\n                [CONDITION_PATH_IS_MOUNT_POINT]      = condition_test_path_is_mount_point,\n                [CONDITION_PATH_IS_READ_WRITE]       = condition_test_path_is_read_write,\n                [CONDITION_PATH_IS_ENCRYPTED]        = condition_test_path_is_encrypted,\n                [CONDITION_DIRECTORY_NOT_EMPTY]      = condition_test_directory_not_empty,\n                [CONDITION_FILE_NOT_EMPTY]           = condition_test_file_not_empty,\n                [CONDITION_FILE_IS_EXECUTABLE]       = condition_test_file_is_executable,\n                [CONDITION_KERNEL_COMMAND_LINE]      = condition_test_kernel_command_line,\n                [CONDITION_KERNEL_VERSION]           = condition_test_kernel_version,\n                [CONDITION_CREDENTIAL]               = condition_test_credential,\n                [CONDITION_VIRTUALIZATION]           = condition_test_virtualization,\n                [CONDITION_SECURITY]                 = condition_test_security,\n                [CONDITION_CAPABILITY]               = condition_test_capability,\n                [CONDITION_HOST]                     = condition_test_host,\n                [CONDITION_AC_POWER]                 = condition_test_ac_power,\n                [CONDITION_ARCHITECTURE]             = condition_test_architecture,\n                [CONDITION_FIRMWARE]                 = condition_test_firmware,\n                [CONDITION_NEEDS_UPDATE]             = condition_test_needs_update,\n                [CONDITION_FIRST_BOOT]               = condition_test_first_boot,\n                [CONDITION_USER]                     = condition_test_user,\n                [CONDITION_GROUP]                    = condition_test_group,\n                [CONDITION_CONTROL_GROUP_CONTROLLER] = condition_test_control_group_controller,\n                [CONDITION_CPUS]                     = condition_test_cpus,\n                [CONDITION_MEMORY]                   = condition_test_memory,\n                [CONDITION_ENVIRONMENT]              = condition_test_environment,\n                [CONDITION_CPU_FEATURE]              = condition_test_cpufeature,\n                [CONDITION_OS_RELEASE]               = condition_test_osrelease,\n                [CONDITION_MEMORY_PRESSURE]          = condition_test_psi,\n                [CONDITION_CPU_PRESSURE]             = condition_test_psi,\n                [CONDITION_IO_PRESSURE]              = condition_test_psi,\n                [CONDITION_KERNEL_MODULE_LOADED]     = condition_test_kernel_module_loaded,\n        };\n\n        int r, b;\n\n        assert(c);\n        assert(c->type >= 0);\n        assert(c->type < _CONDITION_TYPE_MAX);\n\n        r = condition_tests[c->type](c, env);\n        if (r < 0) {\n                c->result = CONDITION_ERROR;\n                return r;\n        }\n\n        b = (r > 0) == !c->negate;\n        c->result = b ? CONDITION_SUCCEEDED : CONDITION_FAILED;\n        return b;\n}"
+    },
+    {
+      "iter": 6,
+      "tool": "read_function",
+      "args": {
+        "name": "condition_free_list"
+      },
+      "result": "static inline Condition* condition_free_list(Condition *first) {\n        return condition_free_list_type(first, _CONDITION_TYPE_INVALID);\n}"
+    },
+    {
+      "iter": 7,
+      "tool": "read_function",
+      "args": {
+        "name": "condition_free_list_type"
+      },
+      "result": "Condition* condition_free_list_type(Condition *head, ConditionType type) {\n        LIST_FOREACH(conditions, c, head)\n                if (type < 0 || c->type == type) {\n                        condition_free(c);\n                }\n\n        assert(type >= 0 || !head);\n        return head;\n}"
+    },
+    {
+      "iter": 8,
+      "tool": "read_function",
+      "args": {
+        "name": "condition_free_list_type"
+      },
+      "result": "Condition* condition_free_list_type(Condition *head, ConditionType type) {\n        LIST_FOREACH(conditions, c, head)\n                if (type < 0 || c->type == type) {\n                        condition_free(c);\n                }\n\n        assert(type >= 0 || !head);\n        return head;\n}"
+    },
+    {
+      "iter": 9,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # minimal .link-like content; try to create a [Match] section with a Condition\n    # then trigger cleanup paths.\n    return b\"[Match]\\nHost=example\\n\\n[Link]\\nNamePolicy=kernel\\n\"",
+        "target": "condition_free"
+      },
+      "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "iter": 10,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try various condition-like keys used by systemd .link/.network parsing.\n    return b\"[Match]\\nPathExists=/tmp\\nKernelCommandLine=foo\\nHost=bar\\n\\n[Link]\\nMACAddressPolicy=persistent\\n\"",
+        "target": "condition_free"
+      },
+      "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "iter": 11,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": false,
+        "guard_clamps": "full",
+        "pattern_present": false,
+        "reasoning": "Read condition_free: it simply free(c->parameter) then mfree(c). This is a normal destructor and contains no dereference after free. A UAF would require some other code to retain and later use c or c->parameter after condition_free. From code inspection here, no evidence of such retention/use is shown. Additionally, condition_free_list_type appears buggy: it iterates LIST_FOREACH over a linked list and calls condition_free(c) on the current element without using a SAFE iteration macro or unlinking; this is more consistent with an iterator invalidation / UAF during list traversal (freeing current node then the macro advances via c->next from freed memory). However, the suspicious point as stated (free then later reuse elsewhere) is not evidenced. Two reach_probe attempts with plausible .link-like inputs did not even reach condition_free, so we lack runtime evidence of any crash or even execution of the destructor in this harness.",
+        "corrected_description": "No UAF in condition_free itself; it is a straightforward destructor. Potential memory-safety issue is in condition_free_list_type: freeing list nodes while iterating with LIST_FOREACH (non-SAFE) can cause use-after-free when the loop advances using pointers from the freed node, unless LIST_FOREACH is defined as safe (not confirmed here).",
+        "control_flow_to_bug": "Not established in this harness: reach_probe did not reach condition_free. If the issue exists, it would be: parser builds a Condition linked list -> cleanup calls condition_free_list_type(head, type) -> LIST_FOREACH uses c->next after condition_free(c) frees c, causing UAF during iteration."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1004,
+      "output_tokens": 52,
+      "total_tokens": 1056,
+      "latency_ms": 1098
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1132,
+      "output_tokens": 19,
+      "total_tokens": 1151,
+      "latency_ms": 887
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1165,
+      "output_tokens": 18,
+      "total_tokens": 1183,
+      "latency_ms": 793
+    },
+    {
+      "iter": 3,
+      "model": "gpt-5.2",
+      "input_tokens": 1323,
+      "output_tokens": 19,
+      "total_tokens": 1342,
+      "latency_ms": 1295
+    },
+    {
+      "iter": 4,
+      "model": "gpt-5.2",
+      "input_tokens": 1356,
+      "output_tokens": 19,
+      "total_tokens": 1375,
+      "latency_ms": 777
+    },
+    {
+      "iter": 5,
+      "model": "gpt-5.2",
+      "input_tokens": 1389,
+      "output_tokens": 18,
+      "total_tokens": 1407,
+      "latency_ms": 881
+    },
+    {
+      "iter": 6,
+      "model": "gpt-5.2",
+      "input_tokens": 2074,
+      "output_tokens": 19,
+      "total_tokens": 2093,
+      "latency_ms": 950
+    },
+    {
+      "iter": 7,
+      "model": "gpt-5.2",
+      "input_tokens": 2132,
+      "output_tokens": 20,
+      "total_tokens": 2152,
+      "latency_ms": 905
+    },
+    {
+      "iter": 8,
+      "model": "gpt-5.2",
+      "input_tokens": 2227,
+      "output_tokens": 20,
+      "total_tokens": 2247,
+      "latency_ms": 816
+    },
+    {
+      "iter": 9,
+      "model": "gpt-5.2",
+      "input_tokens": 2322,
+      "output_tokens": 83,
+      "total_tokens": 2405,
+      "latency_ms": 1997
+    },
+    {
+      "iter": 10,
+      "model": "gpt-5.2",
+      "input_tokens": 2434,
+      "output_tokens": 87,
+      "total_tokens": 2521,
+      "latency_ms": 1794
+    },
+    {
+      "iter": 11,
+      "model": "gpt-5.2",
+      "input_tokens": 2550,
+      "output_tokens": 376,
+      "total_tokens": 2926,
+      "latency_ms": 6864
+    }
+  ],
+  "token_totals": {
+    "input": 21108,
+    "output": 750,
+    "total": 21858,
+    "llm_calls": 12
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: fuzz-link-parser   Sanitizer: address\nFunction: condition_free\nClaimed bug type: heap-use-after-free\nSuspicious-point description (from the finder — may be imprecise): condition_free frees `c->parameter` and then `mfree(c)`; a link-parser path retains and reuses a Condition (or its parameter) after this free, dereferencing freed memory.\n\nControl flow to the bug:\n  - fuzz-link-parser builds Conditions and frees one via condition_free\n  - a retained reference to the freed Condition/parameter is used afterward\n  - use-after-free read/write\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-use-after-free\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_6Hh5d9MtgVxca37DF5joNhe3",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"condition_free\"}"
+          }
+        },
+        {
+          "id": "call_DloeCrajT4iyW5le8oahVZar",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"condition_free\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_6Hh5d9MtgVxca37DF5joNhe3",
+      "content": "Condition* condition_free(Condition *c) {\n        assert(c);\n\n        free(c->parameter);\n        return mfree(c);\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_DloeCrajT4iyW5le8oahVZar",
+      "content": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"indirect\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_0yNKdvN9mK1X8OJmkkvo5g47",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"link_parser_parse\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_0yNKdvN9mK1X8OJmkkvo5g47",
+      "content": "(not found)"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_TvVMclbx7KCy165hud1fUYOU",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"condition_new\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_TvVMclbx7KCy165hud1fUYOU",
+      "content": "Condition* condition_new(ConditionType type, const char *parameter, bool trigger, bool negate) {\n        Condition *c;\n\n        assert(type >= 0);\n        assert(type < _CONDITION_TYPE_MAX);\n        assert(parameter);\n\n        c = new(Condition, 1);\n        if (!c)\n                return NULL;\n\n        *c = (Condition) {\n                .type = type,\n                .trigger = trigger,\n                .negate = negate,\n        };\n\n        if (parameter) {\n                c->parameter = strdup(parameter);\n                if (!c->parameter)\n                        return mfree(c);\n        }\n\n        return c;\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_RZKv5CrNHj43cKH2ER7q8o5O",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"config_parse_condition\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_RZKv5CrNHj43cKH2ER7q8o5O",
+      "content": "(not found)"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_0X07B6kaGUbUZySO4lwfvkIw",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"link_config_parse\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_0X07B6kaGUbUZySO4lwfvkIw",
+      "content": "(not found)"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_z4zV3ZkUYzPvdFDOXTewpDCq",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"condition_test\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_z4zV3ZkUYzPvdFDOXTewpDCq",
+      "content": "int condition_test(Condition *c, char **env) {\n\n        static int (*const condition_tests[_CONDITION_TYPE_MAX])(Condition *c, char **env) = {\n                [CONDITION_PATH_EXISTS]              = condition_test_path_exists,\n                [CONDITION_PATH_EXISTS_GLOB]         = condition_test_path_exists_glob,\n                [CONDITION_PATH_IS_DIRECTORY]        = condition_test_path_is_directory,\n                [CONDITION_PATH_IS_SYMBOLIC_LINK]    = condition_test_path_is_symbolic_link,\n                [CONDITION_PATH_IS_MOUNT_POINT]      = condition_test_path_is_mount_point,\n                [CONDITION_PATH_IS_READ_WRITE]       = condition_test_path_is_read_write,\n                [CONDITION_PATH_IS_ENCRYPTED]        = condition_test_path_is_encrypted,\n                [CONDITION_DIRECTORY_NOT_EMPTY]      = condition_test_directory_not_empty,\n                [CONDITION_FILE_NOT_EMPTY]           = condition_test_file_not_empty,\n                [CONDITION_FILE_IS_EXECUTABLE]       = condition_test_file_is_executable,\n                [CONDITION_KERNEL_COMMAND_LINE]      = condition_test_kernel_command_line,\n                [CONDITION_KERNEL_VERSION]           = condition_test_kernel_version,\n                [CONDITION_CREDENTIAL]               = condition_test_credential,\n                [CONDITION_VIRTUALIZATION]           = condition_test_virtualization,\n                [CONDITION_SECURITY]                 = condition_test_security,\n                [CONDITION_CAPABILITY]               = condition_test_capability,\n                [CONDITION_HOST]                     = condition_test_host,\n                [CONDITION_AC_POWER]                 = condition_test_ac_power,\n                [CONDITION_ARCHITECTURE]             = condition_test_architecture,\n                [CONDITION_FIRMWARE]                 = condition_test_firmware,\n                [CONDITION_NEEDS_UPDATE]             = condition_test_needs_update,\n                [CONDITION_FIRST_BOOT]               = condition_test_first_boot,\n                [CONDITION_USER]                     = condition_test_user,\n                [CONDITION_GROUP]                    = condition_test_group,\n                [CONDITION_CONTROL_GROUP_CONTROLLER] = condition_test_control_group_controller,\n                [CONDITION_CPUS]                     = condition_test_cpus,\n                [CONDITION_MEMORY]                   = condition_test_memory,\n                [CONDITION_ENVIRONMENT]              = condition_test_environment,\n                [CONDITION_CPU_FEATURE]              = condition_test_cpufeature,\n                [CONDITION_OS_RELEASE]               = condition_test_osrelease,\n                [CONDITION_MEMORY_PRESSURE]          = condition_test_psi,\n                [CONDITION_CPU_PRESSURE]             = condition_test_psi,\n                [CONDITION_IO_PRESSURE]              = condition_test_psi,\n                [CONDITION_KERNEL_MODULE_LOADED]     = condition_test_kernel_module_loaded,\n        };\n\n        int r, b;\n\n        assert(c);\n        assert(c->type >= 0);\n        assert(c->type < _CONDITION_TYPE_MAX);\n\n        r = condition_tests[c->type](c, env);\n        if (r < 0) {\n                c->result = CONDITION_ERROR;\n                return r;\n        }\n\n        b = (r > 0) == !c->negate;\n        c->result = b ? CONDITION_SUCCEEDED : CONDITION_FAILED;\n        return b;\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_idnSMmuTryKlvhbU7pgcADah",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"condition_free_list\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_idnSMmuTryKlvhbU7pgcADah",
+      "content": "static inline Condition* condition_free_list(Condition *first) {\n        return condition_free_list_type(first, _CONDITION_TYPE_INVALID);\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_tFs6KU2TwRnVBNITqEkwS56G",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"condition_free_list_type\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_tFs6KU2TwRnVBNITqEkwS56G",
+      "content": "Condition* condition_free_list_type(Condition *head, ConditionType type) {\n        LIST_FOREACH(conditions, c, head)\n                if (type < 0 || c->type == type) {\n                        condition_free(c);\n                }\n\n        assert(type >= 0 || !head);\n        return head;\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_H6wygafrkQVXpU9MI9MgkVZL",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"condition_free_list_type\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_H6wygafrkQVXpU9MI9MgkVZL",
+      "content": "Condition* condition_free_list_type(Condition *head, ConditionType type) {\n        LIST_FOREACH(conditions, c, head)\n                if (type < 0 || c->type == type) {\n                        condition_free(c);\n                }\n\n        assert(type >= 0 || !head);\n        return head;\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_hHYAhNVXPMb5LdvRdjk4Occh",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # minimal .link-like content; try to create a [Match] section with a Condition\\n    # then trigger cleanup paths.\\n    return b\\\"[Match]\\\\nHost=example\\\\n\\\\n[Link]\\\\nNamePolicy=kernel\\\\n\\\"\",\"target\":\"condition_free\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_hHYAhNVXPMb5LdvRdjk4Occh",
+      "content": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_UuO5Wppzs1sMmMAGw6rZjA38",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try various condition-like keys used by systemd .link/.network parsing.\\n    return b\\\"[Match]\\\\nPathExists=/tmp\\\\nKernelCommandLine=foo\\\\nHost=bar\\\\n\\\\n[Link]\\\\nMACAddressPolicy=persistent\\\\n\\\"\",\"target\":\"condition_free\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_UuO5Wppzs1sMmMAGw6rZjA38",
+      "content": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_b60MSxhGnps1pM11UQCYNrDr",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":false,\"guard_clamps\":\"full\",\"pattern_present\":false,\"reasoning\":\"Read condition_free: it simply free(c->parameter) then mfree(c). This is a normal destructor and contains no dereference after free. A UAF would require some other code to retain and later use c or c->parameter after condition_free. From code inspection here, no evidence of such retention/use is shown. Additionally, condition_free_list_type appears buggy: it iterates LIST_FOREACH over a linked list and calls condition_free(c) on the current element without using a SAFE iteration macro or unlinking; this is more consistent with an iterator invalidation / UAF during list traversal (freeing current node then the macro advances via c->next from freed memory). However, the suspicious point as stated (free then later reuse elsewhere) is not evidenced. Two reach_probe attempts with plausible .link-like inputs did not even reach condition_free, so we lack runtime evidence of any crash or even execution of the destructor in this harness.\" ,\"corrected_description\":\"No UAF in condition_free itself; it is a straightforward destructor. Potential memory-safety issue is in condition_free_list_type: freeing list nodes while iterating with LIST_FOREACH (non-SAFE) can cause use-after-free when the loop advances using pointers from the freed node, unless LIST_FOREACH is defined as safe (not confirmed here).\",\"control_flow_to_bug\":\"Not established in this harness: reach_probe did not reach condition_free. If the issue exists, it would be: parser builds a Condition linked list -> cleanup calls condition_free_list_type(head, type) -> LIST_FOREACH uses c->next after condition_free(c) frees c, causing UAF during iteration.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_b60MSxhGnps1pM11UQCYNrDr",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+diff --git a/libfreerdp/crypto/certificate.c b/libfreerdp/crypto/certificate.c
+--- a/libfreerdp/crypto/certificate.c
++++ b/libfreerdp/crypto/certificate.c
+@@ -0,0 +1,52 @@
++static BOOL freerdp_bio_read_pem_with_policy(BIO* bio, char** ppem, size_t* plength)
++{
++	BOOL rc = FALSE;
++	int status = -1;
++
++	WINPR_ASSERT(bio);
++	WINPR_ASSERT(ppem);
++
++	const uint16_t blocksize = 2048;
++	uint16_t offset = 0;
++	uint16_t length = blocksize;
++	char* pem = NULL;
++
++	*ppem = NULL;
++	if (plength)
++		*plength = 0;
++
++	while (status != 0)
++	{
++		char* tmp = realloc(pem, length + 1);
++		if (!tmp)
++			goto fail;
++
++		pem = tmp;
++
++		ERR_clear_error();
++
++		status = BIO_read(bio, &pem[offset], (int)(length - offset));
++		if (status < 0)
++		{
++			WLog_ERR(TAG, "failed to read certificate");
++			goto fail;
++		}
++
++		if (status == 0)
++			break;
++
++		offset += (size_t)status;
++		length += blocksize;
++
++	}
++	pem[offset] = '\0';
++	*ppem = pem;
++	if (plength)
++		*plength = offset;
++	rc = TRUE;
++fail:
++	if (!rc)
++		free(pem);
++
++	return rc;
++}

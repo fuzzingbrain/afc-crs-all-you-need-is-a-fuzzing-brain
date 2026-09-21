@@ -1,0 +1,19 @@
+diff --git a/mongoose.c b/mongoose.c
+--- a/mongoose.c
++++ b/mongoose.c
+@@ -0,0 +1,15 @@
++static void rx_icmp(struct mg_tcpip_if *ifp, struct pkt *pkt) {
++                                      
++  if (pkt->icmp->type == 8 && pkt->ip != NULL && pkt->ip->dst == ifp->ip) {
++    size_t hlen = sizeof(struct eth) + sizeof(struct ip) + sizeof(struct icmp);
++    size_t space = ifp->tx.len - hlen, plen = pkt->pay.len;
++    if (plen > space) plen = space;
++    struct ip *ip = tx_ip(ifp, pkt->eth->src, 1, ifp->ip, pkt->ip->src,
++                          sizeof(struct icmp) + plen);
++    struct icmp *icmp = (struct icmp *) (ip + 1);
++    memset(icmp, 0, sizeof(*icmp));                        
++    memcpy(icmp + 1, pkt->pay.buf, plen);                          
++    icmp->csum = ipcsum(icmp, sizeof(*icmp) + plen);
++    ether_output(ifp, hlen + plen);
++  }
++}

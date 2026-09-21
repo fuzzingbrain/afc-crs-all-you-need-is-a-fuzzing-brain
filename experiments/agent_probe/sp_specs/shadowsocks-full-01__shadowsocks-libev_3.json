@@ -1,0 +1,22 @@
+{
+  "challenge": "shadowsocks-full-01",
+  "bug": "shadowsocks-libev_3",
+  "tag": "shadowsocks-full-01__shadowsocks-libev_3",
+  "round": "final-competition",
+  "scan_mode": "full",
+  "harness": "json_fuzz",
+  "fuzzer": "json_fuzz",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "json_parse_ex"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "graphs_root": "/home/ze/fb-graphs/build/shadowsocks-full-01",
+  "source_root": "/home/ze/fb-graphs/build/shadowsocks-full-01/repo",
+  "callgraph": "/home/ze/fb-graphs/build/shadowsocks-full-01/graph-json_fuzz/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/shadowsocks:latest",
+  "project": "shadowsocks",
+  "blob": "/home/ze/fb-graphs/build/shadowsocks-full-01/bugs/shadowsocks-libev_3/blob"
+}

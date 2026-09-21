@@ -1,0 +1,181 @@
+{
+  "tag": "mg-delta-02__mongoose_2",
+  "gt": "rx_icmp",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source shows size_t space = ifp->tx.len - hlen with no prior check that tx.len >= hlen. If tx.len < hlen, space underflows to a huge size_t. Then plen=pkt->pay.len; if (plen > space) plen=space; but with underflowed space, condition is false and plen remains attacker-controlled payload length. memcpy(icmp+1, pkt->pay.buf, plen) then copies plen bytes into the tx buffer region after the ICMP header. The tx buffer capacity is ifp->tx.len; if tx.len < hlen+plen, this is a heap-buffer-overflow write. No other bounds checks in rx_icmp. However, I could not ground with reach_probe due to missing ASan binary path in tool environment, and check_reachability reported rx_icmp not in fuzzer call graph (though user says reachable). Evidence is therefore code-level only, not a reproduced crash.",
+    "corrected_description": "Potential heap-buffer-overflow in rx_icmp: if ifp->tx.len < (eth+ip+icmp header length), size_t space underflows, preventing the plen clamp, leading to memcpy of attacker-controlled plen into the tx buffer beyond its allocated length.",
+    "control_flow_to_bug": "rx_icmp(ifp,pkt) executes when pkt->icmp->type==8 (echo request) and pkt->ip!=NULL and pkt->ip->dst==ifp->ip. It computes hlen=sizeof(eth)+sizeof(ip)+sizeof(icmp); if ifp->tx.len < hlen then space underflows; plen remains pkt->pay.len; tx_ip() builds response in ifp->tx; memcpy(icmp+1, pkt->pay.buf, plen) writes past end of ifp->tx buffer; ether_output(ifp, hlen+plen) sends."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "rx_icmp"
+      },
+      "result": "static void rx_icmp(struct mg_tcpip_if *ifp, struct pkt *pkt) {\n                                      \n  if (pkt->icmp->type == 8 && pkt->ip != NULL && pkt->ip->dst == ifp->ip) {\n    size_t hlen = sizeof(struct eth) + sizeof(struct ip) + sizeof(struct icmp);\n    size_t space = ifp->tx.len - hlen, plen = pkt->pay.len;\n    if (plen > space) plen = space;\n    struct ip *ip = tx_ip(ifp, pkt->eth->src, 1, ifp->ip, pkt->ip->src,\n                          sizeof(struct icmp) + plen);\n    struct icmp *icmp = (struct icmp *) (ip + 1);\n    memset(icmp, 0, sizeof(*icmp));                        \n    memcpy(icmp + 1, pkt->pay.buf, plen);                          \n    icmp->csum = ipcsum(icmp, sizeof(*icmp) + plen);\n    ether_output(ifp, hlen + plen);\n  }\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "rx_icmp"
+      },
+      "result": "{\"reachable\": false, \"note\": \"not in fuzzer call graph\"}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to craft an ICMP echo request to interface IP.\n    # Format guess: raw Ethernet+IPv4+ICMP with payload.\n    import struct\n    def csum(data):\n        if len(data)%2: data+=b'\\x00'\n        s=sum(struct.unpack('!%dH'%(len(data)//2),data))\n        s=(s>>16)+(s&0xffff)\n        s+=s>>16\n        return (~s)&0xffff\n    dst_mac=b'\\xff'*6\n    src_mac=b'\\x00\\x11\\x22\\x33\\x44\\x55'\n    eth_type=0x0800\n    eth=dst_mac+src_mac+struct.pack('!H',eth_type)\n    ver_ihl=0x45\n    tos=0\n    payload=b'A'*2000\n    icmp_type=8\n    icmp_code=0\n    icmp_id=1\n    icmp_seq=1\n    icmp_hdr=struct.pack('!BBHHH',icmp_type,icmp_code,0,icmp_id,icmp_seq)\n    icmp_pkt=icmp_hdr+payload\n    icmp_ck=csum(icmp_pkt)\n    icmp_pkt=struct.pack('!BBHHH',icmp_type,icmp_code,icmp_ck,icmp_id,icmp_seq)+payload\n    total_len=20+len(icmp_pkt)\n    ident=0\n    flags_frag=0\n    ttl=64\n    proto=1\n    hdr_ck=0\n    src_ip=struct.pack('!4B',10,0,0,2)\n    dst_ip=struct.pack('!4B',10,0,0,1)\n    ip_hdr=struct.pack('!BBHHHBBH4s4s',ver_ihl,tos,total_len,ident,flags_frag,ttl,proto,hdr_ck,src_ip,dst_ip)\n    hdr_ck=csum(ip_hdr)\n    ip_hdr=struct.pack('!BBHHHBBH4s4s',ver_ihl,tos,total_len,ident,flags_frag,ttl,proto,hdr_ck,src_ip,dst_ip)\n    return eth+ip_hdr+icmp_pkt\n",
+        "target": "rx_icmp"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/mg-delta-02/bugs/mongoose_2/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source shows size_t space = ifp->tx.len - hlen with no prior check that tx.len >= hlen. If tx.len < hlen, space underflows to a huge size_t. Then plen=pkt->pay.len; if (plen > space) plen=space; but with underflowed space, condition is false and plen remains attacker-controlled payload length. memcpy(icmp+1, pkt->pay.buf, plen) then copies plen bytes into the tx buffer region after the ICMP header. The tx buffer capacity is ifp->tx.len; if tx.len < hlen+plen, this is a heap-buffer-overflow write. No other bounds checks in rx_icmp. However, I could not ground with reach_probe due to missing ASan binary path in tool environment, and check_reachability reported rx_icmp not in fuzzer call graph (though user says reachable). Evidence is therefore code-level only, not a reproduced crash.",
+        "corrected_description": "Potential heap-buffer-overflow in rx_icmp: if ifp->tx.len < (eth+ip+icmp header length), size_t space underflows, preventing the plen clamp, leading to memcpy of attacker-controlled plen into the tx buffer beyond its allocated length.",
+        "control_flow_to_bug": "rx_icmp(ifp,pkt) executes when pkt->icmp->type==8 (echo request) and pkt->ip!=NULL and pkt->ip->dst==ifp->ip. It computes hlen=sizeof(eth)+sizeof(ip)+sizeof(icmp); if ifp->tx.len < hlen then space underflows; plen remains pkt->pay.len; tx_ip() builds response in ifp->tx; memcpy(icmp+1, pkt->pay.buf, plen) writes past end of ifp->tx buffer; ether_output(ifp, hlen+plen) sends."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1066,
+      "output_tokens": 54,
+      "total_tokens": 1120,
+      "latency_ms": 1335
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1393,
+      "output_tokens": 520,
+      "total_tokens": 1913,
+      "latency_ms": 6097
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1964,
+      "output_tokens": 424,
+      "total_tokens": 2388,
+      "latency_ms": 6244
+    }
+  ],
+  "token_totals": {
+    "input": 4423,
+    "output": 998,
+    "total": 5421,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: fuzz   Sanitizer: address\nFunction: rx_icmp\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): `space = ifp->tx.len - hlen` underflows (size_t) when tx.len < hlen; the clamp `if (plen > space) plen = space;` then leaves plen = pkt->pay.len (attacker length), and `memcpy(icmp + 1, pkt->pay.buf, plen)` overflows the tx buffer.\n\nControl flow to the bug:\n  - ICMP echo request (type 8) to the interface IP\n  - ifp->tx.len < hlen -> space = tx.len - hlen underflows to a huge size_t\n  - plen stays = payload length; memcpy(icmp+1, pay, plen) overflows tx buffer\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_uxc5Sz13YAD0J6yxOynSe6Kv",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"rx_icmp\"}"
+          }
+        },
+        {
+          "id": "call_KSnD5HdIbMQNVhqneNGqJtPG",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"rx_icmp\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_uxc5Sz13YAD0J6yxOynSe6Kv",
+      "content": "static void rx_icmp(struct mg_tcpip_if *ifp, struct pkt *pkt) {\n                                      \n  if (pkt->icmp->type == 8 && pkt->ip != NULL && pkt->ip->dst == ifp->ip) {\n    size_t hlen = sizeof(struct eth) + sizeof(struct ip) + sizeof(struct icmp);\n    size_t space = ifp->tx.len - hlen, plen = pkt->pay.len;\n    if (plen > space) plen = space;\n    struct ip *ip = tx_ip(ifp, pkt->eth->src, 1, ifp->ip, pkt->ip->src,\n                          sizeof(struct icmp) + plen);\n    struct icmp *icmp = (struct icmp *) (ip + 1);\n    memset(icmp, 0, sizeof(*icmp));                        \n    memcpy(icmp + 1, pkt->pay.buf, plen);                          \n    icmp->csum = ipcsum(icmp, sizeof(*icmp) + plen);\n    ether_output(ifp, hlen + plen);\n  }\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_KSnD5HdIbMQNVhqneNGqJtPG",
+      "content": "{\"reachable\": false, \"note\": \"not in fuzzer call graph\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_I0XgZxvfwKPdfA5DAp8NZnkR",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to craft an ICMP echo request to interface IP.\\n    # Format guess: raw Ethernet+IPv4+ICMP with payload.\\n    import struct\\n    def csum(data):\\n        if len(data)%2: data+=b'\\\\x00'\\n        s=sum(struct.unpack('!%dH'%(len(data)//2),data))\\n        s=(s>>16)+(s&0xffff)\\n        s+=s>>16\\n        return (~s)&0xffff\\n    dst_mac=b'\\\\xff'*6\\n    src_mac=b'\\\\x00\\\\x11\\\\x22\\\\x33\\\\x44\\\\x55'\\n    eth_type=0x0800\\n    eth=dst_mac+src_mac+struct.pack('!H',eth_type)\\n    ver_ihl=0x45\\n    tos=0\\n    payload=b'A'*2000\\n    icmp_type=8\\n    icmp_code=0\\n    icmp_id=1\\n    icmp_seq=1\\n    icmp_hdr=struct.pack('!BBHHH',icmp_type,icmp_code,0,icmp_id,icmp_seq)\\n    icmp_pkt=icmp_hdr+payload\\n    icmp_ck=csum(icmp_pkt)\\n    icmp_pkt=struct.pack('!BBHHH',icmp_type,icmp_code,icmp_ck,icmp_id,icmp_seq)+payload\\n    total_len=20+len(icmp_pkt)\\n    ident=0\\n    flags_frag=0\\n    ttl=64\\n    proto=1\\n    hdr_ck=0\\n    src_ip=struct.pack('!4B',10,0,0,2)\\n    dst_ip=struct.pack('!4B',10,0,0,1)\\n    ip_hdr=struct.pack('!BBHHHBBH4s4s',ver_ihl,tos,total_len,ident,flags_frag,ttl,proto,hdr_ck,src_ip,dst_ip)\\n    hdr_ck=csum(ip_hdr)\\n    ip_hdr=struct.pack('!BBHHHBBH4s4s',ver_ihl,tos,total_len,ident,flags_frag,ttl,proto,hdr_ck,src_ip,dst_ip)\\n    return eth+ip_hdr+icmp_pkt\\n\",\"target\":\"rx_icmp\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_I0XgZxvfwKPdfA5DAp8NZnkR",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/mg-delta-02/bugs/mongoose_2/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_ooyO6fSgljEnznA2H5j1imAb",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source shows size_t space = ifp->tx.len - hlen with no prior check that tx.len >= hlen. If tx.len < hlen, space underflows to a huge size_t. Then plen=pkt->pay.len; if (plen > space) plen=space; but with underflowed space, condition is false and plen remains attacker-controlled payload length. memcpy(icmp+1, pkt->pay.buf, plen) then copies plen bytes into the tx buffer region after the ICMP header. The tx buffer capacity is ifp->tx.len; if tx.len < hlen+plen, this is a heap-buffer-overflow write. No other bounds checks in rx_icmp. However, I could not ground with reach_probe due to missing ASan binary path in tool environment, and check_reachability reported rx_icmp not in fuzzer call graph (though user says reachable). Evidence is therefore code-level only, not a reproduced crash.\",\"corrected_description\":\"Potential heap-buffer-overflow in rx_icmp: if ifp->tx.len < (eth+ip+icmp header length), size_t space underflows, preventing the plen clamp, leading to memcpy of attacker-controlled plen into the tx buffer beyond its allocated length.\",\"control_flow_to_bug\":\"rx_icmp(ifp,pkt) executes when pkt->icmp->type==8 (echo request) and pkt->ip!=NULL and pkt->ip->dst==ifp->ip. It computes hlen=sizeof(eth)+sizeof(ip)+sizeof(icmp); if ifp->tx.len < hlen then space underflows; plen remains pkt->pay.len; tx_ip() builds response in ifp->tx; memcpy(icmp+1, pkt->pay.buf, plen) writes past end of ifp->tx buffer; ether_output(ifp, hlen+plen) sends.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ooyO6fSgljEnznA2H5j1imAb",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

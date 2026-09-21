@@ -1,0 +1,22 @@
+{
+  "challenge": "fp-full-01",
+  "bug": "vuln_005",
+  "tag": "fp-full-01__vuln_005",
+  "round": "pre-competition",
+  "scan_mode": "full",
+  "harness": "TestFuzzCoreServer",
+  "fuzzer": "TestFuzzCoreServer",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "mcs_recv_connect_response"
+  ],
+  "crash_type": "SEGV",
+  "graphs_root": "/home/ze/fb-graphs/build/fp-full-01",
+  "source_root": "/home/ze/fb-graphs/build/fp-full-01/repo",
+  "callgraph": "/home/ze/fb-graphs/build/fp-full-01/graph-TestFuzzCoreServer/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/freerdp:latest",
+  "project": "freerdp",
+  "blob": "/home/ze/fb-graphs/build/fp-full-01/bugs/vuln_005/blob"
+}

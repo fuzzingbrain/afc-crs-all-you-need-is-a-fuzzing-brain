@@ -1,0 +1,191 @@
+{
+  "tag": "cu-delta-03__curl-007",
+  "gt": "alliswellprotocoll_sm",
+  "crash_type": "SEGV",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Read alliswellprotocoll_sm: in state ALLISWELLPROTOCOLL_DO3, after successful memcmp(response, vnormal->state3, 128)==0, code executes `*(unsigned int *)result = CURLE_OK;` where `result` is a local CURLcode (enum/int) initialized to CURLE_OK (typically 0) and not a pointer. This is an invalid cast/dereference and will attempt to write 4 bytes to address equal to the numeric value of result (likely NULL/near-NULL), causing an immediate SEGV/ASan crash when that branch is taken. No guard clamps the value; it is a scalar. Trigger condition depends on protocol state machine reaching DO3 and receiving a response matching state3 for 128 bytes (nread==130 earlier states). That response is derived from peer data, which in fuzzing is ultimately controlled by input via the fuzzer's simulated network/handshake. I could not run reach_probe due to missing ASan binary path in the environment, so no runtime reach/crash evidence was obtained; conclusion is based on direct source inspection of an unconditional invalid write in that branch.",
+    "corrected_description": "Invalid write via casting a CURLcode scalar (enum/int) to `unsigned int *` and dereferencing it: `*(unsigned int *)result = CURLE_OK;` in ALLISWELLPROTOCOLL_DO3. This writes to address equal to the numeric CURLcode value (likely 0), causing a NULL/near-NULL write SEGV.",
+    "control_flow_to_bug": "curl_fuzzer_ws -> (curl protocol handling) -> alliswellprotocoll_doing/transfer loop -> alliswellprotocoll_sm(conn,data) repeatedly. Must progress vnormal->state: START (receive 128 bytes, nread==128, compute state1, send) -> DO1 (receive 130 bytes, nread==130, memcmp(response,state1,128)==0, compute state2, send) -> DO2 (receive 130 bytes, memcmp(response,state2,128)==0, compute state3, send) -> DO3 (receive response where memcmp(response,state3,128)==0) then executes the bad write `*(unsigned int *)result = CURLE_OK;` causing SEGV."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "alliswellprotocoll_sm"
+      },
+      "result": "static CURLcode alliswellprotocoll_sm\n  (struct Curl_easy *data, struct connectdata *conn)\n{\n  CURLcode result = CURLE_OK;\n  ssize_t nread;\n  struct alliswellprotocoll_conn *vnormal = &conn->proto.vnormal;\n  const char *done_statement = \"All done!\";\n  int code;\n\n  result = Curl_pp_readresp(data, 0, &data->conn->proto.vnormal.pp,\n    &code, &nread);\n  char * const response = Curl_dyn_ptr(&data->conn->proto.vnormal.pp.recvbuf);\n\n  infof(data, \"alliswellprotocoll_doing: state [%d]\", (int) vnormal->state);\n                                                        \n                             \n  switch(vnormal->state) {\n    case ALLISWELLPROTOCOLL_STOP:\n      result = CURLE_OK;\n      break;\n    case ALLISWELLPROTOCOLL_START:\n      if(result)\n        break;\n      else if(!nread) {\n        failf(data, \"Connection disconnected\");\n        result = CURLE_RECV_ERROR;\n        break;\n      }\n      else if(nread != 128) {\n        result = CURLE_WEIRD_SERVER_REPLY;\n        break;\n      }\n      for(int i = 0; i < 128; i++) {\n        vnormal->state1[i] = response[i] ^ 0x78;\n      }\n      Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", vnormal->state1);\n      vnstate(data, ALLISWELLPROTOCOLL_DO1);\n      break;\n    case ALLISWELLPROTOCOLL_DO1:\n      if(result || !nread)\n        break;\n      else if(nread != 130) {\n        result = CURLE_WEIRD_SERVER_REPLY;\n        break;\n      }\n      if(memcmp(response, vnormal->state1, 128) == 0) {\n        for(int i = 0; i < 128; i++) {\n          vnormal->state2[i] = (response[i] + 0x7E) << 2;\n        }\n        vnstate(data, ALLISWELLPROTOCOLL_DO2);\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", vnormal->state2);\n        result = CURLE_OK;\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    case ALLISWELLPROTOCOLL_DO2:\n      if(result || !nread)\n        break;\n      else if(nread != 130) {\n        result = CURLE_WEIRD_SERVER_REPLY;\n        break;\n      }\n      if(memcmp(response, vnormal->state2, 128) == 0) {\n        for(int i = 0; i < 128; i++) {\n          vnormal->state3[i] = (response[i] | 0x9A) ^ 0x98;\n        }\n        vnstate(data, ALLISWELLPROTOCOLL_DO3);\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", vnormal->state3);\n        result = CURLE_OK;\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    case ALLISWELLPROTOCOLL_DO3:\n      if(result || !nread)\n        break;\n      if(memcmp(response, vnormal->state3, 128) == 0) {\n        vnstate(data, ALLISWELLPROTOCOLL_STOP);\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", \"OK\\r\\n\");\n        *(unsigned int *)result = CURLE_OK;\n      }\n      else if(strcasecmp(\"complete\\r\\n\", response) == 0) {\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", \"OK\\r\\n\");\n        result = CURLE_OK;\n        vnstate(data, ALLISWELLPROTOCOLL_STOP);\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    default:\n      result = CURLE_WEIRD_SERVER_REPLY;\n      break;\n  }\n\n\n  if(result == CURLE_AGAIN)\n    result = CURLE_OK;\n  return result;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "alliswellprotocoll_sm"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 25}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to drive the ws fuzzer to open a connection and speak the alliswell protocol.\n    # We don't know the exact fuzzer format; provide a minimal HTTP/WebSocket-ish request\n    # with a URL using the alliswellprotocoll scheme if supported.\n    req = (\n        b\"GET / HTTP/1.1\\r\\n\"\n        b\"Host: example\\r\\n\"\n        b\"Upgrade: websocket\\r\\n\"\n        b\"Connection: Upgrade\\r\\n\"\n        b\"Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==\\r\\n\"\n        b\"Sec-WebSocket-Version: 13\\r\\n\\r\\n\"\n    )\n    # Append a URL hint; many curl fuzzers accept a command-like prefix.\n    req += b\"URL=alliswellprotocoll://127.0.0.1/\\n\"\n    return req\n",
+        "target": "alliswellprotocoll_sm"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-delta-03/bugs/curl-007/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Read alliswellprotocoll_sm: in state ALLISWELLPROTOCOLL_DO3, after successful memcmp(response, vnormal->state3, 128)==0, code executes `*(unsigned int *)result = CURLE_OK;` where `result` is a local CURLcode (enum/int) initialized to CURLE_OK (typically 0) and not a pointer. This is an invalid cast/dereference and will attempt to write 4 bytes to address equal to the numeric value of result (likely NULL/near-NULL), causing an immediate SEGV/ASan crash when that branch is taken. No guard clamps the value; it is a scalar. Trigger condition depends on protocol state machine reaching DO3 and receiving a response matching state3 for 128 bytes (nread==130 earlier states). That response is derived from peer data, which in fuzzing is ultimately controlled by input via the fuzzer's simulated network/handshake. I could not run reach_probe due to missing ASan binary path in the environment, so no runtime reach/crash evidence was obtained; conclusion is based on direct source inspection of an unconditional invalid write in that branch.",
+        "corrected_description": "Invalid write via casting a CURLcode scalar (enum/int) to `unsigned int *` and dereferencing it: `*(unsigned int *)result = CURLE_OK;` in ALLISWELLPROTOCOLL_DO3. This writes to address equal to the numeric CURLcode value (likely 0), causing a NULL/near-NULL write SEGV.",
+        "control_flow_to_bug": "curl_fuzzer_ws -> (curl protocol handling) -> alliswellprotocoll_doing/transfer loop -> alliswellprotocoll_sm(conn,data) repeatedly. Must progress vnormal->state: START (receive 128 bytes, nread==128, compute state1, send) -> DO1 (receive 130 bytes, nread==130, memcmp(response,state1,128)==0, compute state2, send) -> DO2 (receive 130 bytes, memcmp(response,state2,128)==0, compute state3, send) -> DO3 (receive response where memcmp(response,state3,128)==0) then executes the bad write `*(unsigned int *)result = CURLE_OK;` causing SEGV."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1024,
+      "output_tokens": 60,
+      "total_tokens": 1084,
+      "latency_ms": 987
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 2149,
+      "output_tokens": 251,
+      "total_tokens": 2400,
+      "latency_ms": 3868
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2450,
+      "output_tokens": 518,
+      "total_tokens": 2968,
+      "latency_ms": 6817
+    }
+  ],
+  "token_totals": {
+    "input": 5623,
+    "output": 829,
+    "total": 6452,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: curl_fuzzer_ws   Sanitizer: address\nFunction: alliswellprotocoll_sm\nClaimed bug type: SEGV\nSuspicious-point description (from the finder — may be imprecise): Stack/heap memory corruption via invalid pointer cast/dereference: in state ALLISWELLPROTOCOLL_DO3, code does `*(unsigned int *)result = CURLE_OK;` where `result` is a CURLcode scalar (likely small integer). Casting this integer value to a pointer and writing through it causes an arbitrary/near-null write (depending on enum value), leading to ASan-detectable SEGV or corruption. Root cause is treating an enum/integer as an address.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a SEGV\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_aSdOfBdj6mflqfkojjCtWBlO",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"alliswellprotocoll_sm\"}"
+          }
+        },
+        {
+          "id": "call_ykZzxuE3WBaszfUvCvq2tQA4",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"alliswellprotocoll_sm\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_aSdOfBdj6mflqfkojjCtWBlO",
+      "content": "static CURLcode alliswellprotocoll_sm\n  (struct Curl_easy *data, struct connectdata *conn)\n{\n  CURLcode result = CURLE_OK;\n  ssize_t nread;\n  struct alliswellprotocoll_conn *vnormal = &conn->proto.vnormal;\n  const char *done_statement = \"All done!\";\n  int code;\n\n  result = Curl_pp_readresp(data, 0, &data->conn->proto.vnormal.pp,\n    &code, &nread);\n  char * const response = Curl_dyn_ptr(&data->conn->proto.vnormal.pp.recvbuf);\n\n  infof(data, \"alliswellprotocoll_doing: state [%d]\", (int) vnormal->state);\n                                                        \n                             \n  switch(vnormal->state) {\n    case ALLISWELLPROTOCOLL_STOP:\n      result = CURLE_OK;\n      break;\n    case ALLISWELLPROTOCOLL_START:\n      if(result)\n        break;\n      else if(!nread) {\n        failf(data, \"Connection disconnected\");\n        result = CURLE_RECV_ERROR;\n        break;\n      }\n      else if(nread != 128) {\n        result = CURLE_WEIRD_SERVER_REPLY;\n        break;\n      }\n      for(int i = 0; i < 128; i++) {\n        vnormal->state1[i] = response[i] ^ 0x78;\n      }\n      Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", vnormal->state1);\n      vnstate(data, ALLISWELLPROTOCOLL_DO1);\n      break;\n    case ALLISWELLPROTOCOLL_DO1:\n      if(result || !nread)\n        break;\n      else if(nread != 130) {\n        result = CURLE_WEIRD_SERVER_REPLY;\n        break;\n      }\n      if(memcmp(response, vnormal->state1, 128) == 0) {\n        for(int i = 0; i < 128; i++) {\n          vnormal->state2[i] = (response[i] + 0x7E) << 2;\n        }\n        vnstate(data, ALLISWELLPROTOCOLL_DO2);\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", vnormal->state2);\n        result = CURLE_OK;\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    case ALLISWELLPROTOCOLL_DO2:\n      if(result || !nread)\n        break;\n      else if(nread != 130) {\n        result = CURLE_WEIRD_SERVER_REPLY;\n        break;\n      }\n      if(memcmp(response, vnormal->state2, 128) == 0) {\n        for(int i = 0; i < 128; i++) {\n          vnormal->state3[i] = (response[i] | 0x9A) ^ 0x98;\n        }\n        vnstate(data, ALLISWELLPROTOCOLL_DO3);\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", vnormal->state3);\n        result = CURLE_OK;\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    case ALLISWELLPROTOCOLL_DO3:\n      if(result || !nread)\n        break;\n      if(memcmp(response, vnormal->state3, 128) == 0) {\n        vnstate(data, ALLISWELLPROTOCOLL_STOP);\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", \"OK\\r\\n\");\n        *(unsigned int *)result = CURLE_OK;\n      }\n      else if(strcasecmp(\"complete\\r\\n\", response) == 0) {\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", \"OK\\r\\n\");\n        result = CURLE_OK;\n        vnstate(data, ALLISWELLPROTOCOLL_STOP);\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    default:\n      result = CURLE_WEIRD_SERVER_REPLY;\n      break;\n  }\n\n\n  if(result == CURLE_AGAIN)\n    result = CURLE_OK;\n  return result;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ykZzxuE3WBaszfUvCvq2tQA4",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 25}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_z4o00aZwfYuFBNnPHpHBirKH",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to drive the ws fuzzer to open a connection and speak the alliswell protocol.\\n    # We don't know the exact fuzzer format; provide a minimal HTTP/WebSocket-ish request\\n    # with a URL using the alliswellprotocoll scheme if supported.\\n    req = (\\n        b\\\"GET / HTTP/1.1\\\\r\\\\n\\\"\\n        b\\\"Host: example\\\\r\\\\n\\\"\\n        b\\\"Upgrade: websocket\\\\r\\\\n\\\"\\n        b\\\"Connection: Upgrade\\\\r\\\\n\\\"\\n        b\\\"Sec-WebSocket-Key: x3JJHMbDL1EzLkh9GBhXDw==\\\\r\\\\n\\\"\\n        b\\\"Sec-WebSocket-Version: 13\\\\r\\\\n\\\\r\\\\n\\\"\\n    )\\n    # Append a URL hint; many curl fuzzers accept a command-like prefix.\\n    req += b\\\"URL=alliswellprotocoll://127.0.0.1/\\\\n\\\"\\n    return req\\n\",\"target\":\"alliswellprotocoll_sm\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_z4o00aZwfYuFBNnPHpHBirKH",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-delta-03/bugs/curl-007/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_vCNENifv8RjT6wTlCssWJ4A3",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Read alliswellprotocoll_sm: in state ALLISWELLPROTOCOLL_DO3, after successful memcmp(response, vnormal->state3, 128)==0, code executes `*(unsigned int *)result = CURLE_OK;` where `result` is a local CURLcode (enum/int) initialized to CURLE_OK (typically 0) and not a pointer. This is an invalid cast/dereference and will attempt to write 4 bytes to address equal to the numeric value of result (likely NULL/near-NULL), causing an immediate SEGV/ASan crash when that branch is taken. No guard clamps the value; it is a scalar. Trigger condition depends on protocol state machine reaching DO3 and receiving a response matching state3 for 128 bytes (nread==130 earlier states). That response is derived from peer data, which in fuzzing is ultimately controlled by input via the fuzzer's simulated network/handshake. I could not run reach_probe due to missing ASan binary path in the environment, so no runtime reach/crash evidence was obtained; conclusion is based on direct source inspection of an unconditional invalid write in that branch.\",\"corrected_description\":\"Invalid write via casting a CURLcode scalar (enum/int) to `unsigned int *` and dereferencing it: `*(unsigned int *)result = CURLE_OK;` in ALLISWELLPROTOCOLL_DO3. This writes to address equal to the numeric CURLcode value (likely 0), causing a NULL/near-NULL write SEGV.\",\"control_flow_to_bug\":\"curl_fuzzer_ws -> (curl protocol handling) -> alliswellprotocoll_doing/transfer loop -> alliswellprotocoll_sm(conn,data) repeatedly. Must progress vnormal->state: START (receive 128 bytes, nread==128, compute state1, send) -> DO1 (receive 130 bytes, nread==130, memcmp(response,state1,128)==0, compute state2, send) -> DO2 (receive 130 bytes, memcmp(response,state2,128)==0, compute state3, send) -> DO3 (receive response where memcmp(response,state3,128)==0) then executes the bad write `*(unsigned int *)result = CURLE_OK;` causing SEGV.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_vCNENifv8RjT6wTlCssWJ4A3",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 2,
+    "sp_functions": [
+      "alliswellprotocoll_sm",
+      "alliswellprotocoll_sm"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Stack/heap memory corruption via invalid pointer cast/dereference: in state ALLISWELLPROTOCOLL_DO3, code does `*(unsigned int *)result = CURLE_OK;` where `result` is a CURLcode scalar (likely small integer). Casting this integer value to a pointer and writing through it causes an arbitrary/near-null write (depending on enum value), leading to ASan-detectable SEGV or corruption. Root cause is treating an enum/integer as an address.",
+  "finder_vuln_type": ""
+}

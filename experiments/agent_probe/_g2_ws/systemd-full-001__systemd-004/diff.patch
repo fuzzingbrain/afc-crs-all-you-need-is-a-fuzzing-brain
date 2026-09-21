@@ -1,0 +1,10 @@
+diff --git a/src/shared/condition.c b/src/shared/condition.c
+--- a/src/shared/condition.c
++++ b/src/shared/condition.c
+@@ -0,0 +1,6 @@
++Condition* condition_free(Condition *c) {
++        assert(c);
++
++        free(c->parameter);
++        return mfree(c);
++}

@@ -1,0 +1,33 @@
+{
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-wireshark.git",
+  "project_name": "wireshark",
+  "task_type": "pov",
+  "scan_mode": "delta",
+  "fuzz_tooling_url": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "fuzz_tooling_ref": "challenge-state/ws-delta-02",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "handler_icmp"
+  ],
+  "remove_git": true,
+  "timeout_minutes": 60,
+  "budget_limit": 30.0,
+  "concurrency": 5,
+  "docker_image": "aixcc-afc/wireshark:latest",
+  "prebuilt_fuzzers": {
+    "handler_icmp": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/ws-delta-02/bugs/vuln_004/bin/address/handler_icmp"
+  },
+  "prebuild_dir": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/ws-delta-02",
+  "work_id": "ws-delta-02",
+  "model_profile": "period-correct",
+  "pov_count": 1,
+  "base_commit": "6b19ed69c97d2207a6641ab27731a232995d5caf",
+  "delta_commit": "challenges/ws-delta-02",
+  "fuzzer_sources": {
+    "handler_icmp": [
+      "/home/ze/fbv2/experiments/agent_probe/prebuild/_wireshark_harness/fuzzshark.c"
+    ]
+  }
+}

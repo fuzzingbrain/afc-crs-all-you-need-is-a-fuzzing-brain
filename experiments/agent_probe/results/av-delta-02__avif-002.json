@@ -1,0 +1,27 @@
+{
+  "challenge": "av-delta-02__avif-002",
+  "fuzzer": "avif_fuzztest_yuvrgb",
+  "sanitizer": "address",
+  "functions_indexed": 812,
+  "ground_truth_functions": [
+    "avifImageYUVAnyToRGBAnySlow"
+  ],
+  "q1_finder": {
+    "sp_count": 2,
+    "sp_functions": [
+      "avifImageYUVAnyToRGBAnySlow",
+      "avifImageYUVAnyToRGBAnySlow"
+    ],
+    "found_ground_truth": true,
+    "matched_functions": [
+      "avifImageYUVAnyToRGBAnySlow"
+    ]
+  },
+  "q2_verifier": {
+    "verdict_real": true,
+    "score": 0.95,
+    "is_important": true,
+    "reason": "CONFIRMED VULNERABILITY: Stack buffer overflow in dampening code (lines 798-818).\n\nBUG DETAILS:\n- Variables 'a' and 'b' are calculated without bounds checking (lines 799-809)\n- Used to access uspill_image[i+a][j+b] and vspill_image[i+a][j+b] (lines 812-817)\n- When image has odd dimensions and pixel is at edge:\n  * i at last column (odd width) with i%2==0: a=1 causes i+a to exceed width\n  * j at la",
+    "target_function": "avifImageYUVAnyToRGBAnySlow"
+  }
+}

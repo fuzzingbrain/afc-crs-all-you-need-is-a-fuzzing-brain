@@ -1,0 +1,23 @@
+{
+  "challenge": "sq-full-01",
+  "bug": "SQL-004",
+  "tag": "sq-full-01__SQL-004",
+  "round": "pre-competition",
+  "scan_mode": "full",
+  "harness": "customfuzz3",
+  "fuzzer": "customfuzz3",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "shell_error_context",
+    "sqlite3ExprCodeGeneratedColumn"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "graphs_root": "/home/ze/fb-graphs/build/sq-full-01",
+  "source_root": "/home/ze/fb-graphs/build/sq-full-01/repo",
+  "callgraph": "/home/ze/fb-graphs/build/sq-full-01/graph-customfuzz3/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/sqlite3:latest",
+  "project": "sqlite3",
+  "blob": "/home/ze/fb-graphs/build/sq-full-01/bugs/SQL-004/blob"
+}

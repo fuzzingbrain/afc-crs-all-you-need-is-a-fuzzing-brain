@@ -1,0 +1,15 @@
+{
+  "tag": "ex-delta-01__exif-005",
+  "gt": "exif_get_sshort",
+  "finder": {
+    "sp_count": 0,
+    "sp_functions": [],
+    "found_gt": false
+  },
+  "score": null,
+  "verdict": "FINDER_MISS",
+  "dynamic": {
+    "probes": []
+  },
+  "basis": "finder did not flag the vulnerable function"
+}

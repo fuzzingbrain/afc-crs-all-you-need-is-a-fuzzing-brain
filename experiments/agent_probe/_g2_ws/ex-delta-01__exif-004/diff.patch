@@ -1,0 +1,85 @@
+diff --git a/libexif/apple/exif-mnote-data-apple.c b/libexif/apple/exif-mnote-data-apple.c
+--- a/libexif/apple/exif-mnote-data-apple.c
++++ b/libexif/apple/exif-mnote-data-apple.c
+@@ -0,0 +1,81 @@
++exif_mnote_data_apple_load(ExifMnoteData *md, const unsigned char *buf, unsigned int buf_size) {
++    ExifMnoteDataApple *d = (ExifMnoteDataApple *) md;
++    unsigned int tcount, i;
++    unsigned int dsize;
++    unsigned int ofs, dofs;
++
++                                     
++
++    if (!d || !buf || (buf_size < 6 + 16)) {
++        exif_log(md->log, EXIF_LOG_CODE_CORRUPT_DATA,
++                 "ExifMnoteDataApple", "Short MakerNote");
++        return;
++    }
++
++                                   
++    ofs = d->offset + 6;
++
++    if ((buf[ofs + 12] == 'M') && (buf[ofs + 13] == 'M')) {
++        d->order = EXIF_BYTE_ORDER_MOTOROLA;
++    } else if ((buf[ofs + 12] == 'I') && (buf[ofs + 13] == 'I')) {
++        d->order = EXIF_BYTE_ORDER_INTEL;
++    } else {
++        exif_log(md->log, EXIF_LOG_CODE_CORRUPT_DATA,
++                "ExifMnoteDataApple", "Unrecognized byte order");
++                                                       
++        return;
++    }
++
++    tcount = (unsigned int) exif_get_short(buf + ofs + 14, d->order);
++
++                                 
++    if (buf_size < 6 + 16 + tcount * 6 + 4) {
++        exif_log(md->log, EXIF_LOG_CODE_CORRUPT_DATA,
++                 "ExifMnoteDataApple", "Short MakerNote");
++                                                       
++        return;
++    }
++
++                                                                            
++
++    ofs += 16;
++
++    exif_mnote_data_apple_free(md);
++
++                                                                  
++    d->entries = exif_mem_alloc(md->mem, sizeof(MnoteAppleEntry) * tcount);
++    if (!d->entries) {
++        EXIF_LOG_NO_MEMORY(md->log, "ExifMnoteApple", sizeof(MnoteAppleEntry) * tcount);
++                                                       
++        return;
++    }
++
++    for (i = 0; i < tcount; i++) {
++        d->entries[i].tag = exif_get_short(buf + ofs, d->order);
++        d->entries[i].format = exif_get_short(buf + ofs + 2, d->order);
++        d->entries[i].components = exif_get_long(buf + ofs + 4, d->order);
++        d->entries[i].order = d->order;
++        dsize = exif_format_get_size(d->entries[i].format) * d->entries[i].components;
++        if (dsize > 4) {
++            dofs = d->offset + exif_get_long(buf + ofs + 8, d->order);
++        } else {
++            dofs = ofs + 8;
++        }
++	if (dofs > buf_size) {
++		exif_log (md->log, EXIF_LOG_CODE_CORRUPT_DATA,
++                                  "ExifMnoteApplet", "Tag size overflow detected (%u vs size %u)", dofs, buf_size);
++		continue;
++	}
++        ofs += 12;
++        d->entries[i].data = exif_mem_alloc(md->mem, dsize);
++        if (!d->entries[i].data) {
++            EXIF_LOG_NO_MEMORY(md->log, "ExifMnoteApple", dsize);
++            continue;
++        }
++        memcpy(d->entries[i].data, buf + dofs, dsize);
++        d->entries[i].size = dsize;
++    }
++    d->count = tcount;
++
++    return;
++}

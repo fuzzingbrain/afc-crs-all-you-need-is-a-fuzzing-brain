@@ -1,0 +1,87 @@
+diff --git a/epan/dissectors/packet-zbee-zdp-management.c b/epan/dissectors/packet-zbee-zdp-management.c
+--- a/epan/dissectors/packet-zbee-zdp-management.c
++++ b/epan/dissectors/packet-zbee-zdp-management.c
+@@ -0,0 +1,83 @@
++dissect_zbee_zdp_req_mgmt_nwk_disc(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree, int hf_channel)
++{
++    proto_item  *ti;
++    unsigned    i;
++    size_t max_channel_count = 27;
++    struct ZBChannel** channels_arr;
++    char tmp[128];
++
++    unsigned   offset = 0;
++    uint32_t channels;
++    uint32_t channels_and_flags;
++
++                                 
++    channels_and_flags = tvb_get_letohl(tvb, offset);
++    channels = channels_and_flags & 0xff;
++
++                      
++    if (channels > max_channel_count)
++        return;
++
++    channels_arr = (struct ZBChannel**)malloc(sizeof(struct ZBChannel*) * max_channel_count);
++    for (i=0; i < max_channel_count; i++) {
++        channels_arr[i] = (struct ZBChannel*)malloc(sizeof(struct ZBChannel));
++        channels_arr[i]->free_text = 0;
++    }
++
++    if (tree) {
++        bool        first = 1;
++        ti = proto_tree_add_uint_format(tree, hf_channel, tvb, offset, 4, channels, "Scan Channels: ");
++
++        for (i=0; i<27; i++) {
++            if (channels & (1<<i)) {
++                if (first) {
++                    proto_item_append_text(ti, "%d", i);
++                } else {
++                    proto_item_append_text(ti, ", %d", i);
++                    sprintf(tmp, "%d", i);
++                    channels_arr[i]->text = strdup(tmp);
++                    channels_arr[i]->free_text = 1;
++                    tmp[0] = '\0';
++                }
++                if (channels & (2<<i)) {
++                    while ((channels&(2<<i)) && (i<26)) i++;
++                    proto_item_append_text(ti, "-%d", i);
++                }
++                first = 0;
++                channels_arr[i]->channel_id = i;
++                channels_arr[i]->channels = channels;
++            }
++        }
++        if (first)
++            proto_item_append_text(ti, "None");
++        if (channels_and_flags & 0xfff4131b) {
++            for (i=0; i <= channels; i++) {
++                printf("DEBUG:\t(0x%x/0x%x)\t%d / 0x%x\t%s\n",
++                        i, channels,
++                        channels_arr[i]->channel_id,
++                        channels_arr[i]->channels,
++                        channels_arr[i]->free_text,
++                        channels_arr[i]->text);
++            }
++        }
++    }
++
++                                     
++    for (i=0; i < max_channel_count; i++) {
++        if (channels_arr[i]->free_text)
++            free(channels_arr[i]->text);
++        free(channels_arr[i]);
++    }
++
++    free(channels_arr);
++
++    offset += 4;
++
++    proto_tree_add_item(tree, hf_zbee_zdp_duration, tvb, offset, 1, ENC_LITTLE_ENDIAN);
++    offset += 1;
++    proto_tree_add_item(tree, hf_zbee_zdp_index, tvb, offset, 1, ENC_LITTLE_ENDIAN);
++    offset += 1;
++
++                                  
++    zdp_dump_excess(tvb, offset, pinfo, tree);
++}

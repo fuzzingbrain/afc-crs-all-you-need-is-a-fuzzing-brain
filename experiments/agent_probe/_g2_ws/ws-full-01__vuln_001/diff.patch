@@ -1,0 +1,191 @@
+diff --git a/epan/dissectors/packet-openvpn.c b/epan/dissectors/packet-openvpn.c
+--- a/epan/dissectors/packet-openvpn.c
++++ b/epan/dissectors/packet-openvpn.c
+@@ -0,0 +1,187 @@
++dissect_openvpn_msg_common(tvbuff_t *tvb, packet_info *pinfo, proto_tree *openvpn_tree, proto_tree *parent_tree, int offset)
++{
++  bool           tls_auth;
++  bool           tls_crypt = false;
++  unsigned       openvpn_keyid;
++  unsigned       openvpn_opcode;
++  uint32_t       msg_sessionid = -1;
++  uint8_t        openvpn_predict_tlsauth_arraylength;
++  proto_item    *ti2;
++  proto_tree    *packetarray_tree, *type_tree;
++  uint32_t       msg_length_remaining;
++  int            wkc_offset = -1;
++  uint8_t        buf[8] = { 0 };
++
++                                          
++  col_set_str(pinfo->cinfo, COL_PROTOCOL, PSNAME);
++  col_clear(pinfo->cinfo,COL_INFO);
++
++                                            
++  openvpn_opcode = tvb_get_bits8(tvb, offset*8, 5);
++  col_append_fstr(pinfo->cinfo, COL_INFO, "MessageType: %s",
++                  val_to_str_const(openvpn_opcode, openvpn_message_types, "Unknown Messagetype"));
++
++
++  openvpn_keyid = tvb_get_bits8(tvb, offset*8 + 5, 3);
++  proto_item_append_text(parent_tree, ", Opcode: %s, Key ID: %d",
++                         val_to_str(openvpn_opcode, openvpn_message_types, "Unknown (0x%02x)"),
++                         openvpn_keyid);
++
++  ti2 = proto_tree_add_item(openvpn_tree, hf_openvpn_pdu_type, tvb, offset, 1, ENC_BIG_ENDIAN);
++  proto_item_append_text(ti2, " [opcode/key_id]");
++
++  type_tree = proto_item_add_subtree(ti2, ett_openvpn_type);
++  proto_tree_add_item(type_tree, hf_openvpn_opcode, tvb, offset, 1, ENC_BIG_ENDIAN);
++  proto_tree_add_item(type_tree, hf_openvpn_keyid, tvb, offset, 1, ENC_BIG_ENDIAN);
++  offset += 1;
++
++  if (openvpn_opcode == P_DATA_V2) {
++    proto_tree_add_item(openvpn_tree, hf_openvpn_peerid, tvb, offset, 3, ENC_BIG_ENDIAN);
++    offset += 3;
++  } else if (openvpn_opcode != P_DATA_V1) {
++                                                
++
++                        
++    msg_sessionid = tvb_get_bits32(tvb, offset*8+32, 32, ENC_BIG_ENDIAN);
++    proto_tree_add_item(openvpn_tree, hf_openvpn_sessionid, tvb, offset, 8, ENC_BIG_ENDIAN);
++    offset += 8;
++
++                                                                   
++    openvpn_predict_tlsauth_arraylength = tvb_get_uint8(tvb, offset);
++
++                                                                                      
++                                                     
++    if (pref_tls_auth_override == false) {
++      if ((openvpn_opcode != P_DATA_V1)
++          && (openvpn_predict_tlsauth_arraylength > 0)
++          && check_for_valid_hmac(tvb_get_ntohl(tvb, offset))) {
++        tls_auth = true;
++      } else {
++        tls_auth = false;
++      }
++    } else {
++      tls_auth = pref_tls_auth;
++    }
++
++    if (openvpn_opcode == P_CONTROL_HARD_RESET_CLIENT_V3 || openvpn_opcode == P_CONTROL_WKC_V1 || pref_tls_crypt_override == true) {
++                                             
++      tls_crypt = true;
++      tls_auth = false;
++    }
++
++    if (tls_auth == true) {
++      proto_tree_add_item(openvpn_tree, hf_openvpn_hmac, tvb, offset, tls_auth_hmac_size, ENC_NA);
++      offset += tls_auth_hmac_size;
++    }
++
++    if (tls_auth == true || tls_crypt == true) {
++      if (tvb_reported_length_remaining(tvb, offset) >= 8) {
++        proto_tree_add_item(openvpn_tree, hf_openvpn_pid, tvb, offset, 4, ENC_BIG_ENDIAN);
++        offset += 4;
++
++        if (pref_long_format || tls_crypt == true) {
++          proto_tree_add_item(openvpn_tree, hf_openvpn_net_time, tvb, offset, 4, ENC_BIG_ENDIAN);
++          offset += 4;
++        }
++      }
++      if (tls_crypt == true) {
++                                        
++        proto_tree_add_item(openvpn_tree, hf_openvpn_hmac, tvb, offset, 32, ENC_NA);
++        offset += 32;
++      }
++    }
++
++    if (tvb_reported_length_remaining(tvb, offset) >= 1 && tls_crypt == false) {
++                                             
++      int pid_arraylength = tvb_get_uint8(tvb, offset);
++      int i;
++      proto_tree_add_item(openvpn_tree, hf_openvpn_mpid_arraylength, tvb, offset, 1, ENC_BIG_ENDIAN);
++      offset += 1;
++
++      if (pid_arraylength > 0) {
++
++        packetarray_tree = proto_tree_add_subtree(openvpn_tree, tvb, offset, 0, ett_openvpn_packetarray, NULL, "Packet-ID Array");
++        for (i = 0; i < pid_arraylength; i++) {
++          proto_tree_add_item(packetarray_tree, hf_openvpn_mpid_arrayelement, tvb, offset, 4, ENC_BIG_ENDIAN);
++          offset += 4;
++        }
++
++        if (tvb_reported_length_remaining(tvb, offset) >= 8) {
++          proto_tree_add_item(openvpn_tree, hf_openvpn_rsessionid, tvb, offset, 8, ENC_BIG_ENDIAN);
++          offset += 8;
++        }
++      }
++    }
++
++                                       
++    if (openvpn_opcode != P_ACK_V1 && tls_crypt == false) {
++                                  
++      if (tvb_reported_length_remaining(tvb, offset) >= 4) {
++        proto_tree_add_item(openvpn_tree, hf_openvpn_mpid, tvb, offset, 4, ENC_BIG_ENDIAN);
++        offset += 4;
++      }
++    }
++  }
++
++                                                       
++  msg_length_remaining = tvb_reported_length_remaining(tvb, offset);
++
++  if (msg_length_remaining == 0) {
++    return tvb_captured_length(tvb);
++  }
++
++  int data_len = msg_length_remaining;
++  int wkc_len = -1;
++  if ((openvpn_opcode == P_CONTROL_HARD_RESET_CLIENT_V3 || openvpn_opcode == P_CONTROL_WKC_V1)
++      &&  msg_length_remaining >= 2) {
++
++    wkc_len = tvb_get_ntohs(tvb, tvb_reported_length(tvb) - 2);
++    data_len = msg_length_remaining - wkc_len;
++    tvb_memcpy(tvb, buf, offset, data_len);
++    if (!strcmp((char*)&buf[0], "OpenVPN"))
++        return 0;
++  }
++
++  if (openvpn_opcode != P_CONTROL_V1) {
++    proto_tree *data_tree;
++    data_tree = proto_tree_add_subtree_format(openvpn_tree, tvb, offset, data_len,
++                              ett_openvpn_data, NULL, "Data (%d bytes)",
++                              data_len);
++
++    proto_tree_add_item(data_tree, hf_openvpn_data, tvb, offset, data_len, ENC_NA);
++
++    if (wkc_len > 0)
++    {
++      proto_tree *wkc_tree;
++      wkc_offset = tvb_reported_length(tvb) - wkc_len;
++
++      wkc_tree = proto_tree_add_subtree_format(openvpn_tree, tvb, offset, data_len,
++						ett_openvpn_wkc, NULL, "Wrapped client key (%d bytes)",
++						tvb_captured_length_remaining(tvb, wkc_offset));
++
++      proto_tree_add_item(wkc_tree, hf_openvpn_wkc_data, tvb, wkc_offset, wkc_len, ENC_NA);
++      proto_tree_add_item(wkc_tree, hf_openvpn_wkc_length, tvb,  tvb_reported_length(tvb) - 2, 2, ENC_BIG_ENDIAN);
++    }
++
++    return tvb_captured_length(tvb);
++  }
++
++                                                                              
++
++  streaming_reassembly_info_t *streaming_reassembly_info = NULL;
++
++  conversation_t *conv = find_or_create_conversation_by_id(pinfo, CONVERSATION_OPENVPN, msg_sessionid);
++  streaming_reassembly_info = conversation_get_proto_data(conv, proto_openvpn);
++  if (!streaming_reassembly_info) {
++    streaming_reassembly_info = streaming_reassembly_info_new();
++    conversation_add_proto_data(conv, proto_openvpn, streaming_reassembly_info);
++  }
++
++  reassemble_streaming_data_and_call_subdissector(tvb, pinfo, offset,
++    msg_length_remaining, openvpn_tree, parent_tree, msg_reassembly_table,
++    streaming_reassembly_info, get_virtual_frame_num64(tvb, pinfo, offset),
++    tls_handle, parent_tree, NULL                                          , "OpenVPN Message",
++    &openvpn_frag_items, hf_openvpn_fragment_bytes);
++
++  return tvb_captured_length(tvb);
++}

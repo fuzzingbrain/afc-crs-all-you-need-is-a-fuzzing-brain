@@ -1,0 +1,17 @@
+{
+  "challenge": "ws-delta-01__vuln_003",
+  "source_root": "/home/ze/fbv2/experiments/agent_probe/_work/ws-delta-01/repo",
+  "workspace": "/home/ze/fbv2/experiments/agent_probe/_work/ws-delta-01",
+  "repo_subdir": "repo",
+  "diff_filename": "diff/ref.diff",
+  "fuzzer": "handler_ber",
+  "sanitizer": "address",
+  "scan_mode": "delta",
+  "changed_functions": [
+    "dissect_ber_GeneralString"
+  ],
+  "ground_truth_functions": [
+    "dissect_ber_GeneralString"
+  ],
+  "crash_type": "stack-buffer-overflow"
+}

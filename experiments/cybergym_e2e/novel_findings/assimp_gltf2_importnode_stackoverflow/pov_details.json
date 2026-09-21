@@ -1,0 +1,17 @@
+{
+  "pov_id": "6ab0c392abadda4fd590affe",
+  "task_id": "6ab0c298ec616fd4bf4fdd4b",
+  "suspicious_point_id": "6ab0c34bf0c1b2135f4fdd5e",
+  "harness_name": "assimp_fuzzer",
+  "sanitizer": "address",
+  "vuln_type": "stack-overflow",
+  "is_successful": false,
+  "iteration": 5,
+  "attempt": 1,
+  "variant": 1,
+  "created_at": "2026-09-21T05:41:38.859000",
+  "verified_at": "2026-09-21T05:41:39.790428",
+  "blob_path": "/tmp/claude-1000/e2e-fbv2-arm/assimp_447262177/worker_workspace/assimp_assimp_fuzzer_address/results/povs/6ab0c298ec616fd4bf4fdd4b/6ab0c376abadda4fd590afac/attempt_001/v1.bin",
+  "architecture": "x86_64",
+  "engine": "libfuzzer"
+}

@@ -1,0 +1,152 @@
+diff --git a/src/udev/udev-rules.c b/src/udev/udev-rules.c
+--- a/src/udev/udev-rules.c
++++ b/src/udev/udev-rules.c
+@@ -0,0 +1,44 @@
++static void check_token_delimiters(UdevRuleLine *rule_line, const char *line) {
++        assert(rule_line);
++
++        size_t n_comma = 0;
++        bool ws_before_comma = false, ws_after_comma = false;
++        const char *p;
++
++        for (p = line; !isempty(p); ++p) {
++                if (*p == ',')
++                        ++n_comma;
++                else if (strchr(WHITESPACE, *p)) {
++                        if (n_comma > 0)
++                                ws_after_comma = true;
++                        else
++                                ws_before_comma = true;
++                } else
++                        break;
++        }
++
++        if (line == rule_line->line) {
++                                                         
++                if (n_comma > 0)
++                        log_line_notice(rule_line, "style: stray leading comma.");
++        } else if (isempty(p)) {
++                                                          
++                if (n_comma > 0)
++                        log_line_notice(rule_line, "style: stray trailing comma.");
++        } else {
++                                              
++                if (n_comma == 0)
++                        log_line_notice(rule_line, "style: a comma between tokens is expected.");
++                else if (n_comma > 1)
++                        log_line_notice(rule_line, "style: more than one comma between tokens.");
++
++                                                        
++                if (n_comma > 0) {
++                        if (ws_before_comma)
++                                log_line_notice(rule_line, "style: stray whitespace before comma.");
++                        if (!ws_after_comma)
++                                log_line_notice(rule_line, "style: whitespace after comma is expected.");
++                } else if (!ws_before_comma && !ws_after_comma)
++                        log_line_notice(rule_line, "style: whitespace between tokens is expected.");
++        }
++}
+diff --git a/src/udev/udev-rules.c b/src/udev/udev-rules.c
+--- a/src/udev/udev-rules.c
++++ b/src/udev/udev-rules.c
+@@ -0,0 +1,100 @@
++int udev_rule_parse_value(char *str, char **ret_value, char **ret_endpos, bool *ret_is_case_insensitive) {
++        char *i, *j, *m;
++        bool is_escaped = false, is_case_insensitive = false, is_prefix_match = false;
++        int pos = 0;
++
++        assert(str);
++        assert(ret_value);
++        assert(ret_endpos);
++        assert(ret_is_case_insensitive);
++
++                                            
++                            
++                                           
++                                 
++          
++                                                               
++        for (const char *k = str; *k != '"'; k++) {
++                pos++;
++                if (*k == 'e')
++                        is_escaped = true;
++                else if (*k == 'i')
++                        is_case_insensitive = true;
++                else if (*k == 'p')
++                        is_prefix_match = true;
++                else
++                        return -EINVAL; 
++        }
++
++                                           
++        if (str[pos] != '"')
++                return -EINVAL;
++        
++        m = str + is_escaped + is_case_insensitive + is_prefix_match;
++
++        if (!is_escaped) {
++                                                         
++                for (j = m, i = m + 1; *i != '"'; i++, j++) {
++                        if (*i == '\0')
++                                return -EINVAL;
++                        if (i[0] == '\\' && i[1] == '"')
++                                i++;
++                        *j = *i;
++                }
++                  
++                                                                             
++                                                               
++                   
++                if (is_prefix_match){
++                        j[0] = '*';
++                        j[1] = '\0';
++                        j[2] = '\0';
++                } else {
++                        j[0] = '\0';
++                        j[1] = '\0';
++                }
++                str = m;            
++        } else {
++                _cleanup_free_ char *unescaped = NULL;
++                ssize_t l;
++
++                                                    
++                for (i = m + 1; *i != '"'; i++) {
++                        if (i[0] == '\\')
++                                i++;
++                        if (*i == '\0')
++                                return -EINVAL;
++                }
++
++                l = cunescape_length(m + 1, i - (m + 1), 0, &unescaped);
++                if (l < 0)
++                        return l;
++
++                assert(l <= i - (m + 1));
++
++                  
++                                                                            
++                                                              
++                  
++                if (is_prefix_match){
++                                                                    
++                        memcpy(str + pos - 1, unescaped, l + 1);
++                        str[pos + l - 1] = '*';
++                        str[pos + l] = '\0';
++                        str[pos + l + 1] = '\0';
++                        m = str + pos - 1;
++
++                } else {
++                        memcpy(m, unescaped, l + 1);
++                        m[l] = '\0';
++                        m[l + 1] = '\0';
++                }
++                str = m;
++
++        }
++
++        *ret_value = str;
++        *ret_endpos = i + 1;
++        *ret_is_case_insensitive = is_case_insensitive;
++        return 0;
++}

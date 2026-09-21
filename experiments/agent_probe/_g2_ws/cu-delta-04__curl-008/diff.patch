@@ -1,0 +1,106 @@
+diff --git a/lib/extremelygoodprtcl.c b/lib/extremelygoodprtcl.c
+--- a/lib/extremelygoodprtcl.c
++++ b/lib/extremelygoodprtcl.c
+@@ -0,0 +1,102 @@
++static CURLcode extremelygoodprtcl_sm
++  (struct Curl_easy *data, struct connectdata *conn)
++{
++  CURLcode result = CURLE_OK;
++  ssize_t nread;
++  struct extremelygoodprtcl_conn *vnormal = &conn->proto.vnormal;
++  const char *done_statement = "All done!";
++  int code;
++
++  result = Curl_pp_readresp(data, 0, &data->conn->proto.vnormal.pp,
++    &code, &nread);
++  char * const response = Curl_dyn_ptr(&data->conn->proto.vnormal.pp.recvbuf);
++
++  infof(data, "extremelygoodprtcl_doing: state [%d]", (int) vnormal->state);
++                                                        
++                             
++  switch(vnormal->state) {
++    case EXTREMELYGOODPRTCL_STOP:
++      result = CURLE_OK;
++      break;
++    case EXTREMELYGOODPRTCL_START:
++      if(result)
++        break;
++      else if(!nread) {
++        failf(data, "Connection disconnected");
++        result = CURLE_RECV_ERROR;
++        break;
++      }
++      else if(nread != 128) {
++        result = CURLE_WEIRD_SERVER_REPLY;
++        break;
++      }
++                         
++      unsigned char key[] = { 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
++                            0x38, 0x39, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35,
++                            0x36, 0x37, 0x38, 0x39, 0x30, 0x31, 0x32, 0x33,
++                            0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x31
++                          };
++
++                        
++      unsigned char iv[] = { 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
++                            0x38, 0x39, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35
++                          };
++
++        
++                                                                       
++                                                                           
++                           
++        
++      unsigned char ciphertext[256];
++
++      int ciphertext_len;
++
++                                 
++      ciphertext_len = encrypt(response, strlen(response), &key, &iv,
++                                ciphertext);
++
++      char *base64;
++      size_t b64len;
++      Curl_base64_encode(ciphertext, ciphertext_len, &base64, &b64len);
++      strcpy(vnormal->state1, base64);
++      vnormal->state1_len = b64len;
++      Curl_pp_sendf(data, &conn->proto.vnormal.pp, "%s", base64);
++      free(base64);
++      vnstate(data, EXTREMELYGOODPRTCL_DO1);
++      break;
++    case EXTREMELYGOODPRTCL_DO1:
++      if(result || !nread)
++        break;
++      if(strncmp(vnormal->state1, response, vnormal->state1_len) == 0) {
++        vnstate(data, EXTREMELYGOODPRTCL_DO2);
++        Curl_pp_sendf(data, &conn->proto.vnormal.pp, "%s", "OK\r\n");
++      }
++      else {
++        result = CURLE_WEIRD_SERVER_REPLY;
++      }
++      break;
++    case EXTREMELYGOODPRTCL_DO2:
++      if(result || !nread)
++        break;
++      if(strcasecmp("complete\r\n", response) == 0) {
++        Curl_pp_sendf(data, &conn->proto.vnormal.pp, "%s", "OK\r\n");
++        result = CURLE_OK;
++        vnstate(data, EXTREMELYGOODPRTCL_STOP);
++      }
++      else if(strcasecmp(response, "crashycrashy\r\n") == 0) {
++        *(unsigned int *)result = CURLE_OK;
++      }
++      else {
++        result = CURLE_WEIRD_SERVER_REPLY;
++      }
++      break;
++    default:
++      result = CURLE_WEIRD_SERVER_REPLY;
++      break;
++  }
++
++
++  if(result == CURLE_AGAIN)
++    result = CURLE_OK;
++  return result;
++}

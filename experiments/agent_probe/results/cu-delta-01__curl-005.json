@@ -1,0 +1,27 @@
+{
+  "challenge": "cu-delta-01__curl-005",
+  "fuzzer": "curl_fuzzer_ws",
+  "sanitizer": "address",
+  "functions_indexed": 3684,
+  "ground_truth_functions": [
+    "verynormalprotocol_doing"
+  ],
+  "q1_finder": {
+    "sp_count": 2,
+    "sp_functions": [
+      "verynormalprotocol_doing",
+      "verynormalprotocol_doing"
+    ],
+    "found_ground_truth": true,
+    "matched_functions": [
+      "verynormalprotocol_doing"
+    ]
+  },
+  "q2_verifier": {
+    "verdict_real": true,
+    "score": 0.95,
+    "is_important": true,
+    "reason": "CONFIRMED VULNERABILITY: Line 141 contains a type confusion bug where a local CURLcode variable 'result' (integer enum) is cast to (unsigned int *) and dereferenced. This attempts to write to an invalid memory address, causing SEGV. The bug is triggered when server responds with \"crashycrashy\" (case-insensitive). AddressSanitizer will detect this invalid pointer dereference. Protocol handler is re",
+    "target_function": "verynormalprotocol_doing"
+  }
+}

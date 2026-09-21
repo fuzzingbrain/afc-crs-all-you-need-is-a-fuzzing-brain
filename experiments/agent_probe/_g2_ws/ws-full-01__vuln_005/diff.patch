@@ -1,0 +1,100 @@
+diff --git a/epan/dissectors/packet-bat.c b/epan/dissectors/packet-bat.c
+--- a/epan/dissectors/packet-bat.c
++++ b/epan/dissectors/packet-bat.c
+@@ -0,0 +1,96 @@
++static void dissect_bat_vis_v24(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
++{
++	struct vis_packet_v23 *vis_packeth;
++	uint32_t sender_ip;
++	proto_tree *bat_vis_tree = NULL;
++	int vis_packeth_raw_data_size=0;
++	char vis_packeth_raw_data[1024];
++	char d_output_buffer[1024];
++
++	tvbuff_t *next_tvb;
++	int length_remaining, i, offset;
++
++	d_output_buffer[0] = 0;
++
++	vis_packeth = wmem_new(pinfo->pool, struct vis_packet_v23);
++
++	sender_ip = tvb_get_ipv4(tvb, 0);
++	set_address_tvb(&vis_packeth->sender_ip, AT_IPv4, 4, tvb, 0);
++	offset = 8;
++	vis_packeth->version = tvb_get_uint8(tvb, offset++);
++	vis_packeth->gw_class = tvb_get_uint8(tvb, offset++);
++	vis_packeth->tq_max = tvb_get_uint8(tvb, offset++);
++	vis_packeth_raw_data_size = tvb_get_uint32(tvb, offset++, 0);
++	offset += 4;
++	if ((unsigned long)vis_packeth_raw_data_size > sizeof(vis_packeth_raw_data))
++		return;
++
++	for (i=0; i < vis_packeth_raw_data_size; i++) {
++		vis_packeth_raw_data[i] = tvb_get_uint8(tvb, offset);
++		offset++;
++	}
++
++	                       
++	col_set_str(pinfo->cinfo, COL_PROTOCOL, "BAT_VIS");
++
++	                     
++	col_add_fstr(pinfo->cinfo, COL_INFO, "Src: %s",
++			address_with_resolution_to_str(pinfo->pool, &vis_packeth->sender_ip));
++
++	                   
++	if (tree) {
++		proto_item *ti;
++
++		ti = proto_tree_add_protocol_format(tree, proto_bat_vis, tvb, 0, VIS_PACKET_V23_SIZE,
++								"B.A.T.M.A.N. Vis, Src: %s",
++								address_with_resolution_to_str(pinfo->pool, &vis_packeth->sender_ip));
++		snprintf(d_output_buffer, sizeof(d_output_buffer), "B.A.T.M.A.N. Vis, raw_data %s", vis_packeth_raw_data);
++		bat_vis_tree = proto_item_add_subtree(ti, ett_bat_vis);
++
++		           
++		proto_tree_add_ipv4(bat_vis_tree, hf_bat_vis_vis_orig, tvb, offset, 4, sender_ip);
++		offset += 4;
++
++		proto_tree_add_item(bat_vis_tree, hf_bat_vis_version, tvb, offset, 1, ENC_BIG_ENDIAN);
++		offset += 1;
++
++		proto_tree_add_item(bat_vis_tree, hf_bat_vis_gwflags, tvb, offset, 1, ENC_BIG_ENDIAN);
++		offset += 1;
++
++		proto_tree_add_item(bat_vis_tree, hf_bat_max_tq_v23, tvb, offset, 1, ENC_BIG_ENDIAN);
++		                
++	}
++
++	if ((vis_packeth_raw_data_size > 4) && (strlen(vis_packeth_raw_data) > 4))
++		fprintf(stderr, d_output_buffer);
++
++	tap_queue_packet(bat_tap, pinfo, vis_packeth);
++
++	length_remaining = tvb_reported_length_remaining(tvb, offset);
++
++	for (i = 0; i < length_remaining; i += VIS_PACKET_V23_DATA_SIZE) {
++		next_tvb = tvb_new_subset_length(tvb, offset, VIS_PACKET_V23_DATA_SIZE);
++
++		if (have_tap_listener(bat_follow_tap)) {
++			tap_queue_packet(bat_follow_tap, pinfo, next_tvb);
++		}
++
++		if (bat_vis_tree != NULL) {
++			dissect_vis_entry_v23(next_tvb, pinfo, tree);
++		}
++
++		offset += VIS_PACKET_V23_DATA_SIZE;
++	}
++
++	length_remaining = tvb_reported_length_remaining(tvb, offset);
++	if (length_remaining > 0) {
++		next_tvb = tvb_new_subset_remaining(tvb, offset);
++
++		if (have_tap_listener(bat_follow_tap)) {
++			tap_queue_packet(bat_follow_tap, pinfo, next_tvb);
++		}
++
++		call_data_dissector(next_tvb, pinfo, tree);
++	}
++
++}

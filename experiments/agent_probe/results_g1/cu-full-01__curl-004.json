@@ -1,0 +1,181 @@
+{
+  "tag": "cu-full-01__curl-004",
+  "gt": "file_do",
+  "crash_type": "stack-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": false,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Read file_do(): it declares `char header[80];` then in the `if(data->req.no_body)` branch calls `msnprintf(header, sizeof(no_body), \"%s (%ld bytes) \\r\\n\", no_body, expected_size);`. `no_body` is a static const char[] string much larger (~130+ bytes). Passing `sizeof(no_body)` as the size argument allows msnprintf to write up to that many bytes into `header`, overflowing the 80-byte stack buffer. This is a classic stack-buffer-overflow pattern.\n\nHowever, the overflowing content is composed of the constant `no_body` string plus formatted `expected_size` (from fstat). Fuzzer input does not directly control the bytes written into `header` (other than indirectly selecting a file path and thus file size), so taint-to-sink is weak; still, the bug can trigger if the branch is taken.\n\nNo reach_probe crash evidence was obtained because the provided ASan binary path was missing in the environment, so I could not ground with an execution trace. The code-level evidence strongly indicates a real overflow when `data->req.no_body` is true and `fstated` is true (fstat succeeded).",
+    "corrected_description": "In file_do(), `char header[80]` is overflowed because `msnprintf` is called with an incorrect size bound: `msnprintf(header, sizeof(no_body), ...)` uses the size of the large static `no_body` string instead of `sizeof(header)`. If `data->req.no_body` is set and fstat succeeded, msnprintf may write >80 bytes into `header` (stack-buffer-overflow).",
+    "control_flow_to_bug": "curl_fuzzer entry -> libcurl request setup for file:// URL -> file protocol handler -> file_do(data, done). Conditions: data->state.upload == false; fstat(file->fd, &statbuf) succeeds setting `fstated=TRUE`; then in `if(fstated)` block, take `if(data->req.no_body)` branch (HEAD/no-body request). In that branch, call `msnprintf(header, sizeof(no_body), \"%s (%ld bytes) \\r\\n\", no_body, expected_size)` writing into `header[80]` with an oversized bound, causing stack overflow before Curl_client_write()."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.2,
+  "verdict": "WEAK/FP",
+  "basis": "operand not input-tainted",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "file_do"
+      },
+      "result": "static CURLcode file_do(struct Curl_easy *data, bool *done)\n{\n                                                                 \n                                                                        \n                                                                         \n                                                                       \n    \n  CURLcode result = CURLE_OK;\n  struct_stat statbuf;                                                        \n                                                                            \n                                                                      \n  curl_off_t expected_size = -1;\n  bool size_known;\n  bool fstated = FALSE;\n  int fd;\n  struct FILEPROTO *file;\n  char *xfer_buf;\n  size_t xfer_blen;\n\n  *done = TRUE;                      \n\n  if(data->state.upload)\n    return file_upload(data);\n\n  file = data->req.p.file;\n\n                                            \n  fd = file->fd;\n\n                                                        \n  if(-1 != fstat(fd, &statbuf)) {\n    if(!S_ISDIR(statbuf.st_mode))\n      expected_size = statbuf.st_size;\n                                         \n    data->info.filetime = statbuf.st_mtime;\n    fstated = TRUE;\n  }\n\n  if(fstated && !data->state.range && data->set.timecondition &&\n     !Curl_meets_timecondition(data, data->info.filetime))\n    return CURLE_OK;\n\n  if(fstated) {\n    time_t filetime;\n    struct tm buffer;\n    const struct tm *tm = &buffer;\n    char header[80];\n    int headerlen;\n    static const char accept_ranges[]= { \"Accept-ranges: bytes\\r\\n\" };\n    static const char no_body[]= { \"File-body: suppressed.The body of \"\n      \"this file has been supressed. If you would like to include \"\n      \"the contents of this file use the -i option.\\r\\n\" };\n    static const char body_msg[]= { \"File-body: included.\\r\\n\"};\n    if(expected_size >= 0) {\n      headerlen =\n        msnprintf(header, sizeof(header), \"Content-Length: %\" FMT_OFF_T \"\\r\\n\",\n                  expected_size);\n      result = Curl_client_write(data, CLIENTWRITE_HEADER,\n                                   header, headerlen);\n      if(result)\n        return result;\n\n      result = Curl_client_write(data, CLIENTWRITE_HEADER,\n                                 accept_ranges, sizeof(accept_ranges) - 1);\n      if(result != CURLE_OK)\n        return result;\n    }\n\n    filetime = (time_t)statbuf.st_mtime;\n    result = Curl_gmtime(filetime, &buffer);\n    if(result)\n      return result;\n\n    if(data->req.no_body) {\n      headerlen =\n      msnprintf(header, sizeof(no_body), \"%s (%ld bytes) \\r\\n\",\n                  no_body, expected_size);\n      result = Curl_client_write(data, CLIENTWRITE_HEADER, header, headerlen);\n    }\n    else {\n      result = Curl_client_write(data, CLIENTWRITE_HEADER,\n                                 body_msg, sizeof(body_msg) - 1);\n    }\n    if(result)\n      return result;\n                                                 \n    headerlen =\n      msnprintf(header, sizeof(header),\n                \"Last-Modified: %s, %02d %s %4d %02d:%02d:%02d GMT\\r\\n\",\n                Curl_wkday[tm->tm_wday ? tm->tm_wday-1 : 6],\n                tm->tm_mday,\n                Curl_month[tm->tm_mon],\n                tm->tm_year + 1900,\n                tm->tm_hour,\n                tm->tm_min,\n                tm->tm_sec);\n    result = Curl_client_write(data, CLIENTWRITE_HEADER, header, headerlen);\n    if(!result)\n                          \n      result = Curl_client_write(data, CLIENTWRITE_HEADER, \"\\r\\n\", 2);\n    if(result)\n      return result;\n                                                              \n    Curl_pgrsSetDownloadSize(data, expected_size);\n    if(data->req.no_body)\n      return CURLE_OK;\n  }\n\n                                                   \n  result = Curl_range(data);\n  if(result)\n    return result;\n\n                                                                    \n                                                         \n  if(data->state.resume_from < 0) {\n    if(!fst…[truncated]"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "file_do"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 274}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Minimal curl_fuzzer input: a URL line. Try to trigger HEAD-like no_body.\n    # Many curl fuzzers accept a URL followed by optional headers; keep simple.\n    return b\"file:///etc/hosts\\n\"",
+        "target": "file_do"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-full-01/bugs/curl-004/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": false,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Read file_do(): it declares `char header[80];` then in the `if(data->req.no_body)` branch calls `msnprintf(header, sizeof(no_body), \"%s (%ld bytes) \\r\\n\", no_body, expected_size);`. `no_body` is a static const char[] string much larger (~130+ bytes). Passing `sizeof(no_body)` as the size argument allows msnprintf to write up to that many bytes into `header`, overflowing the 80-byte stack buffer. This is a classic stack-buffer-overflow pattern.\n\nHowever, the overflowing content is composed of the constant `no_body` string plus formatted `expected_size` (from fstat). Fuzzer input does not directly control the bytes written into `header` (other than indirectly selecting a file path and thus file size), so taint-to-sink is weak; still, the bug can trigger if the branch is taken.\n\nNo reach_probe crash evidence was obtained because the provided ASan binary path was missing in the environment, so I could not ground with an execution trace. The code-level evidence strongly indicates a real overflow when `data->req.no_body` is true and `fstated` is true (fstat succeeded).",
+        "corrected_description": "In file_do(), `char header[80]` is overflowed because `msnprintf` is called with an incorrect size bound: `msnprintf(header, sizeof(no_body), ...)` uses the size of the large static `no_body` string instead of `sizeof(header)`. If `data->req.no_body` is set and fstat succeeded, msnprintf may write >80 bytes into `header` (stack-buffer-overflow).",
+        "control_flow_to_bug": "curl_fuzzer entry -> libcurl request setup for file:// URL -> file protocol handler -> file_do(data, done). Conditions: data->state.upload == false; fstat(file->fd, &statbuf) succeeds setting `fstated=TRUE`; then in `if(fstated)` block, take `if(data->req.no_body)` branch (HEAD/no-body request). In that branch, call `msnprintf(header, sizeof(no_body), \"%s (%ld bytes) \\r\\n\", no_body, expected_size)` writing into `header[80]` with an oversized bound, causing stack overflow before Curl_client_write()."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1053,
+      "output_tokens": 52,
+      "total_tokens": 1105,
+      "latency_ms": 1111
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 2627,
+      "output_tokens": 80,
+      "total_tokens": 2707,
+      "latency_ms": 1766
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2756,
+      "output_tokens": 525,
+      "total_tokens": 3281,
+      "latency_ms": 6942
+    }
+  ],
+  "token_totals": {
+    "input": 6436,
+    "output": 657,
+    "total": 7093,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: curl_fuzzer   Sanitizer: address\nFunction: file_do\nClaimed bug type: stack-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): `char header[80];` is written by `msnprintf(header, sizeof(no_body), \"%s (%ld bytes)\\r\\n\", no_body, expected_size)` -- the size bound is `sizeof(no_body)` (the long static no_body string, ~130 bytes) instead of `sizeof(header)`, so the 80-byte stack buffer overflows.\n\nControl flow to the bug:\n  - curl_fuzzer file:// with no_body (HEAD-like) and fstat succeeding\n  - msnprintf writes into header[80] bounded by sizeof(no_body) (~130) not sizeof(header)\n  - stack buffer header[80] overflows\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a stack-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_VI9rQZnvLXfi7huBa5YR9vQs",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"file_do\"}"
+          }
+        },
+        {
+          "id": "call_G84hW0qb219jkESXHonMAhVW",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"file_do\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_VI9rQZnvLXfi7huBa5YR9vQs",
+      "content": "static CURLcode file_do(struct Curl_easy *data, bool *done)\n{\n                                                                 \n                                                                        \n                                                                         \n                                                                       \n    \n  CURLcode result = CURLE_OK;\n  struct_stat statbuf;                                                        \n                                                                            \n                                                                      \n  curl_off_t expected_size = -1;\n  bool size_known;\n  bool fstated = FALSE;\n  int fd;\n  struct FILEPROTO *file;\n  char *xfer_buf;\n  size_t xfer_blen;\n\n  *done = TRUE;                      \n\n  if(data->state.upload)\n    return file_upload(data);\n\n  file = data->req.p.file;\n\n                                            \n  fd = file->fd;\n\n                                                        \n  if(-1 != fstat(fd, &statbuf)) {\n    if(!S_ISDIR(statbuf.st_mode))\n      expected_size = statbuf.st_size;\n                                         \n    data->info.filetime = statbuf.st_mtime;\n    fstated = TRUE;\n  }\n\n  if(fstated && !data->state.range && data->set.timecondition &&\n     !Curl_meets_timecondition(data, data->info.filetime))\n    return CURLE_OK;\n\n  if(fstated) {\n    time_t filetime;\n    struct tm buffer;\n    const struct tm *tm = &buffer;\n    char header[80];\n    int headerlen;\n    static const char accept_ranges[]= { \"Accept-ranges: bytes\\r\\n\" };\n    static const char no_body[]= { \"File-body: suppressed.The body of \"\n      \"this file has been supressed. If you would like to include \"\n      \"the contents of this file use the -i option.\\r\\n\" };\n    static const char body_msg[]= { \"File-body: included.\\r\\n\"};\n    if(expected_size >= 0) {\n      headerlen =\n        msnprintf(header, sizeof(header), \"Content-Length: %\" FMT_OFF_T \"\\r\\n\",\n                  expected_size);\n      result = Curl_client_write(data, CLIENTWRITE_HEADER,\n                                   header, headerlen);\n      if(result)\n        return result;\n\n      result = Curl_client_write(data, CLIENTWRITE_HEADER,\n                                 accept_ranges, sizeof(accept_ranges) - 1);\n      if(result != CURLE_OK)\n        return result;\n    }\n\n    filetime = (time_t)statbuf.st_mtime;\n    result = Curl_gmtime(filetime, &buffer);\n    if(result)\n      return result;\n\n    if(data->req.no_body) {\n      headerlen =\n      msnprintf(header, sizeof(no_body), \"%s (%ld bytes) \\r\\n\",\n                  no_body, expected_size);\n      result = Curl_client_write(data, CLIENTWRITE_HEADER, header, headerlen);\n    }\n    else {\n      result = Curl_client_write(data, CLIENTWRITE_HEADER,\n                                 body_msg, sizeof(body_msg) - 1);\n    }\n    if(result)\n      return result;\n                                                 \n    headerlen =\n      msnprintf(header, sizeof(header),\n                \"Last-Modified: %s, %02d %s %4d %02d:%02d:%02d GMT\\r\\n\",\n                Curl_wkday[tm->tm_wday ? tm->tm_wday-1 : 6],\n                tm->tm_mday,\n                Curl_month[tm->tm_mon],\n                tm->tm_year + 1900,\n                tm->tm_hour,\n                tm->tm_min,\n                tm->tm_sec);\n    result = Curl_client_write(data, CLIENTWRITE_HEADER, header, headerlen);\n    if(!result)\n                          \n      result = Curl_client_write(data, CLIENTWRITE_HEADER, \"\\r\\n\", 2);\n    if(result)\n      return result;\n                                                              \n    Curl_pgrsSetDownloadSize(data, expected_size);\n    if(data->req.no_body)\n      return CURLE_OK;\n  }\n\n                                                   \n  result = Curl_range(data);\n  if(result)\n    return result;\n\n                                                                    \n                                                         \n  if(data->state.resume_from < 0) {\n    if(!fstated) {\n      failf(data, \"cannot get the size of file.\");\n      return CURLE_READ_ERROR;\n    }\n    data->state.resume_from += (curl_off_t)statbuf.st_size;\n  }\n\n  if(data->state.resume_from > 0) {\n                                                             \n                                                                       \n                                                \n    if(data->state.resume_from <= expected_size)\n      expected_size -= data->state.resume_from;\n    else {\n      failf(data, \"failed to resume file:// transfer\");\n      return CURLE_BAD_DOWNLOAD_RESUME;\n    }\n  }\n\n                                                          \n  if(data->req.maxdownload > 0)\n    expected_size = data->req.maxdownload;\n\n  if(!fstated || (expected_size <= 0))\n    size_known = FALSE;\n  else\n    size_known = TRUE;\n\n                                                               \n                                                                       \n                                                                    \n                  \n  if(size_known)\n    Curl_pgrsSetDownloadSize(data, expected_size);\n\n  if(data->state.resume_from) {\n    if(!S_ISDIR(statbuf.st_mode)) {\n      if(data->state.resume_from !=\n          lseek(fd, data->state.resume_from, SEEK_SET))\n        return CURLE_BAD_DOWNLOAD_RESUME;\n    }\n    else {\n      return CURLE_BAD_DOWNLOAD_RESUME;\n    }\n  }\n\n  result = Curl_multi_xfer_buf_borrow(data, &xfer_buf, &xfer_blen);\n  if(result)\n    goto out;\n\n  if(!S_ISDIR(statbuf.st_mode)) {\n    while(!result) {\n      ssize_t nread;\n                                                                    \n      size_t bytestoread;\n\n      if(size_known) {\n        bytestoread = (expected_size < (curl_off_t)(xfer_blen-1)) ?\n          curlx_sotouz(expected_size) : (xfer_blen-1);\n      }\n      else\n        bytestoread = xfer_blen-1;\n\n      nread = read(fd, xfer_buf, bytestoread);\n\n      if(nread > 0)\n        xfer_buf[nread] = 0;\n\n      if(nread <= 0 || (size_known && (expecte"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_G84hW0qb219jkESXHonMAhVW",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 274}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_FTp3MrGGChywl4SWsyZfOQPQ",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Minimal curl_fuzzer input: a URL line. Try to trigger HEAD-like no_body.\\n    # Many curl fuzzers accept a URL followed by optional headers; keep simple.\\n    return b\\\"file:///etc/hosts\\\\n\\\"\",\"target\":\"file_do\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_FTp3MrGGChywl4SWsyZfOQPQ",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-full-01/bugs/curl-004/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_SuTJ9OPE0Nr1YsT2kYoIIZPW",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":false,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Read file_do(): it declares `char header[80];` then in the `if(data->req.no_body)` branch calls `msnprintf(header, sizeof(no_body), \\\"%s (%ld bytes) \\\\r\\\\n\\\", no_body, expected_size);`. `no_body` is a static const char[] string much larger (~130+ bytes). Passing `sizeof(no_body)` as the size argument allows msnprintf to write up to that many bytes into `header`, overflowing the 80-byte stack buffer. This is a classic stack-buffer-overflow pattern.\\n\\nHowever, the overflowing content is composed of the constant `no_body` string plus formatted `expected_size` (from fstat). Fuzzer input does not directly control the bytes written into `header` (other than indirectly selecting a file path and thus file size), so taint-to-sink is weak; still, the bug can trigger if the branch is taken.\\n\\nNo reach_probe crash evidence was obtained because the provided ASan binary path was missing in the environment, so I could not ground with an execution trace. The code-level evidence strongly indicates a real overflow when `data->req.no_body` is true and `fstated` is true (fstat succeeded).\",\"corrected_description\":\"In file_do(), `char header[80]` is overflowed because `msnprintf` is called with an incorrect size bound: `msnprintf(header, sizeof(no_body), ...)` uses the size of the large static `no_body` string instead of `sizeof(header)`. If `data->req.no_body` is set and fstat succeeded, msnprintf may write >80 bytes into `header` (stack-buffer-overflow).\",\"control_flow_to_bug\":\"curl_fuzzer entry -> libcurl request setup for file:// URL -> file protocol handler -> file_do(data, done). Conditions: data->state.upload == false; fstat(file->fd, &statbuf) succeeds setting `fstated=TRUE`; then in `if(fstated)` block, take `if(data->req.no_body)` branch (HEAD/no-body request). In that branch, call `msnprintf(header, sizeof(no_body), \\\"%s (%ld bytes) \\\\r\\\\n\\\", no_body, expected_size)` writing into `header[80]` with an oversized bound, causing stack overflow before Curl_client_write().\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_SuTJ9OPE0Nr1YsT2kYoIIZPW",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

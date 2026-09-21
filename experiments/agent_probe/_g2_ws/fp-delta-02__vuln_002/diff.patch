@@ -1,0 +1,46 @@
+diff --git a/libfreerdp/crypto/x509_utils.c b/libfreerdp/crypto/x509_utils.c
+--- a/libfreerdp/crypto/x509_utils.c
++++ b/libfreerdp/crypto/x509_utils.c
+@@ -0,0 +1,42 @@
++BOOL x509_validate_subject_aternative_names(const X509* cert) {
++    STACK_OF(GENERAL_NAME) *san_names = NULL;
++    int i, count;
++    char *dns_name = NULL;
++	BOOL result = TRUE;
++
++                                          
++    san_names = X509_get_ext_d2i(cert, NID_subject_alt_name, NULL, NULL);
++    if (!san_names) {
++        goto end;
++    }
++
++    count = sk_GENERAL_NAME_num(san_names);
++
++    for (i = 0; i < count; i++) {
++        GENERAL_NAME *gen_name = sk_GENERAL_NAME_value(san_names, i);
++
++        if (gen_name->type == GEN_DNS) {
++			                                          
++			dns_name = malloc( strlen((char *)ASN1_STRING_get0_data(gen_name->d.dNSName)) + 1);
++
++			if (dns_name == NULL)
++				goto end;
++			
++			memcpy(dns_name, (char *)ASN1_STRING_get0_data(gen_name->d.dNSName),  
++				ASN1_STRING_length(gen_name->d.dNSName)) ;
++			
++            if (!verify_san(dns_name)) {
++				free(dns_name);
++				result = FALSE;
++				goto end;
++            } else {
++				free(dns_name);
++            }
++        }
++    }
++
++end:
++    sk_GENERAL_NAME_pop_free(san_names, GENERAL_NAME_free);
++
++	return TRUE;
++}

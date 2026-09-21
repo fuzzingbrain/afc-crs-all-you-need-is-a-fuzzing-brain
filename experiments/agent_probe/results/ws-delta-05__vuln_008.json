@@ -1,0 +1,26 @@
+{
+  "challenge": "ws-delta-05__vuln_008",
+  "fuzzer": "handler_netbios",
+  "sanitizer": "address",
+  "functions_indexed": 0,
+  "ground_truth_functions": [
+    "dissect_netbios"
+  ],
+  "q1_finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "dissect_netbios"
+    ],
+    "found_ground_truth": true,
+    "matched_functions": [
+      "dissect_netbios"
+    ]
+  },
+  "q2_verifier": {
+    "verdict_real": true,
+    "score": 0.95,
+    "is_important": true,
+    "reason": "CONFIRMED VULNERABILITY: Global-buffer-overflow in dissect_netbios at line 1144. The vulnerable code removes bounds checking on the 'command' byte (user-controlled, range 0-255) before using it as an index into the global dissect_netb array (33 entries, valid indices 0-32). Attack: craft NetBIOS packet with command byte >= 33 to trigger out-of-bounds read of function pointer from global array. Add",
+    "target_function": "dissect_netbios"
+  }
+}

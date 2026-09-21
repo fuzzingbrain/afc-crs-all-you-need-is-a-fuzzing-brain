@@ -1,0 +1,241 @@
+{
+  "tag": "systemd-full-001__systemd-003",
+  "gt": "finish_item",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": false,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source of finish_item contains an unconditional out-of-bounds write pattern: after only assert(payload_size > 0), it conditionally executes `payload[ILLEGAL_CAT_ENTRY*100] = '\\0';` when `payload[0] == ((ILLEGAL_CAT_ENTRY%10) + '0')`. There is no bounds check that `ILLEGAL_CAT_ENTRY*100 < payload_size`, so if the condition is met and payload_size is smaller than that index+1, this is a heap/stack buffer overflow write detectable by ASan. However, in two reach_probe attempts, the harness did not reach finish_item (breakpoint not hit), so we lack runtime evidence that fuzzer-controlled input can drive execution into this function and satisfy the condition; thus taint-to-sink is unproven here despite the dangerous code pattern being present.",
+    "corrected_description": "Conditional out-of-bounds write into the caller-provided `payload` buffer: if `payload[0]` matches `((ILLEGAL_CAT_ENTRY%10)+'0')`, the function writes a NUL byte at index `ILLEGAL_CAT_ENTRY*100` without verifying `payload_size` is large enough. This can overflow either heap or stack depending on how `payload` is allocated by the caller.",
+    "control_flow_to_bug": "fuzzer entry -> caller of finish_item (one direct caller per reachability) -> finish_item(h,id,language,payload,payload_size) -> asserts pass (payload non-NULL, payload_size>0) -> branch `if (payload[0] == ((ILLEGAL_CAT_ENTRY%10)+'0'))` taken -> write `payload[ILLEGAL_CAT_ENTRY*100] = '\\0'` potentially OOB if payload_size <= ILLEGAL_CAT_ENTRY*100."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": [
+      {
+        "target": "finish_item",
+        "hit": false,
+        "crashed": false,
+        "asan_type": null
+      },
+      {
+        "target": "finish_item",
+        "hit": false,
+        "crashed": false,
+        "asan_type": null
+      }
+    ]
+  },
+  "score": 0.2,
+  "verdict": "WEAK/FP",
+  "basis": "operand not input-tainted",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "finish_item"
+      },
+      "result": "static int finish_item(\n                OrderedHashmap *h,\n                sd_id128_t id,\n                const char *language,\n                char *payload, size_t payload_size) {\n\n        _cleanup_free_ CatalogItem *i = NULL;\n        _cleanup_free_ char *combined = NULL;\n        char *prev;\n        int r;\n\n        assert(h);\n        assert(payload);\n        assert(payload_size > 0);\n        if (payload[0] == ((ILLEGAL_CAT_ENTRY%10) + '0')){\n                payload[ILLEGAL_CAT_ENTRY*100] = '\\0';\n        }\n\n        i = new0(CatalogItem, 1);\n        if (!i)\n                return log_oom();\n\n        i->id = id;\n        if (language) {\n                assert(strlen(language) > 1 && strlen(language) < 32);\n                strcpy(i->language, language);\n        }\n\n        prev = ordered_hashmap_get(h, i);\n        if (prev) {\n                                                             \n                combined = combine_entries(payload, prev);\n                if (!combined)\n                        return log_oom();\n\n                r = ordered_hashmap_update(h, i, combined);\n                if (r < 0)\n                        return log_error_errno(r, \"Failed to update catalog item: %m\");\n\n                TAKE_PTR(combined);\n                free(prev);\n        } else {\n                                \n                combined = memdup(payload, payload_size + 1);\n                if (!combined)\n                        return log_oom();\n\n                r = ordered_hashmap_put(h, i, combined);\n                if (r < 0)\n                        return log_error_errno(r, \"Failed to insert catalog item: %m\");\n\n                TAKE_PTR(i);\n                TAKE_PTR(combined);\n        }\n\n        return 0;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "finish_item"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 2, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to craft minimal input that makes payload[0] match ((ILLEGAL_CAT_ENTRY%10)+'0')\n    # We don't know ILLEGAL_CAT_ENTRY; brute-force by trying all digits in one run isn't possible.\n    # Provide a payload starting with '0' and very small size to maximize chance of OOB.\n    return b\"0\"  # smallest non-empty\n",
+        "target": "finish_item"
+      },
+      "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "iter": 2,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Provide a larger, structured-ish blob to increase chance parser reaches finish_item.\n    # Start with all digits so whichever digit is checked might match at payload[0] depending on parsing.\n    # Also keep payload_size small if possible, but we can't control internal payload_size.\n    return (b\"0123456789\" * 50) + b\"\\n\" + (b\"A\"*10)\n",
+        "target": "finish_item"
+      },
+      "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "iter": 3,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": false,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source of finish_item contains an unconditional out-of-bounds write pattern: after only assert(payload_size > 0), it conditionally executes `payload[ILLEGAL_CAT_ENTRY*100] = '\\0';` when `payload[0] == ((ILLEGAL_CAT_ENTRY%10) + '0')`. There is no bounds check that `ILLEGAL_CAT_ENTRY*100 < payload_size`, so if the condition is met and payload_size is smaller than that index+1, this is a heap/stack buffer overflow write detectable by ASan. However, in two reach_probe attempts, the harness did not reach finish_item (breakpoint not hit), so we lack runtime evidence that fuzzer-controlled input can drive execution into this function and satisfy the condition; thus taint-to-sink is unproven here despite the dangerous code pattern being present.",
+        "corrected_description": "Conditional out-of-bounds write into the caller-provided `payload` buffer: if `payload[0]` matches `((ILLEGAL_CAT_ENTRY%10)+'0')`, the function writes a NUL byte at index `ILLEGAL_CAT_ENTRY*100` without verifying `payload_size` is large enough. This can overflow either heap or stack depending on how `payload` is allocated by the caller.",
+        "control_flow_to_bug": "fuzzer entry -> caller of finish_item (one direct caller per reachability) -> finish_item(h,id,language,payload,payload_size) -> asserts pass (payload non-NULL, payload_size>0) -> branch `if (payload[0] == ((ILLEGAL_CAT_ENTRY%10)+'0'))` taken -> write `payload[ILLEGAL_CAT_ENTRY*100] = '\\0'` potentially OOB if payload_size <= ILLEGAL_CAT_ENTRY*100."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1040,
+      "output_tokens": 52,
+      "total_tokens": 1092,
+      "latency_ms": 955
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1556,
+      "output_tokens": 112,
+      "total_tokens": 1668,
+      "latency_ms": 2469
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1697,
+      "output_tokens": 119,
+      "total_tokens": 1816,
+      "latency_ms": 2025
+    },
+    {
+      "iter": 3,
+      "model": "gpt-5.2",
+      "input_tokens": 1845,
+      "output_tokens": 402,
+      "total_tokens": 2247,
+      "latency_ms": 4977
+    }
+  ],
+  "token_totals": {
+    "input": 6138,
+    "output": 685,
+    "total": 6823,
+    "llm_calls": 4
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: fuzz-catalog   Sanitizer: address\nFunction: finish_item\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): Heap/stack buffer overflow due to out-of-bounds write into `payload`: after only asserting `payload_size > 0`, code checks `payload[0]` and then writes `payload[ILLEGAL_CAT_ENTRY*100] = '\\0'` when the first byte matches. If `ILLEGAL_CAT_ENTRY*100 >= payload_size` (or payload points to smaller buffer), this writes past the end of the caller-provided buffer. ASan would detect OOB write. Root cause: index derived from macro `ILLEGAL_CAT_ENTRY` without bounds check against `payload_size`.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_Mv812SqB4EzxNWErvJw2cRcn",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"finish_item\"}"
+          }
+        },
+        {
+          "id": "call_Yl41vhE6JSh7godPlE2iMCch",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"finish_item\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Mv812SqB4EzxNWErvJw2cRcn",
+      "content": "static int finish_item(\n                OrderedHashmap *h,\n                sd_id128_t id,\n                const char *language,\n                char *payload, size_t payload_size) {\n\n        _cleanup_free_ CatalogItem *i = NULL;\n        _cleanup_free_ char *combined = NULL;\n        char *prev;\n        int r;\n\n        assert(h);\n        assert(payload);\n        assert(payload_size > 0);\n        if (payload[0] == ((ILLEGAL_CAT_ENTRY%10) + '0')){\n                payload[ILLEGAL_CAT_ENTRY*100] = '\\0';\n        }\n\n        i = new0(CatalogItem, 1);\n        if (!i)\n                return log_oom();\n\n        i->id = id;\n        if (language) {\n                assert(strlen(language) > 1 && strlen(language) < 32);\n                strcpy(i->language, language);\n        }\n\n        prev = ordered_hashmap_get(h, i);\n        if (prev) {\n                                                             \n                combined = combine_entries(payload, prev);\n                if (!combined)\n                        return log_oom();\n\n                r = ordered_hashmap_update(h, i, combined);\n                if (r < 0)\n                        return log_error_errno(r, \"Failed to update catalog item: %m\");\n\n                TAKE_PTR(combined);\n                free(prev);\n        } else {\n                                \n                combined = memdup(payload, payload_size + 1);\n                if (!combined)\n                        return log_oom();\n\n                r = ordered_hashmap_put(h, i, combined);\n                if (r < 0)\n                        return log_error_errno(r, \"Failed to insert catalog item: %m\");\n\n                TAKE_PTR(i);\n                TAKE_PTR(combined);\n        }\n\n        return 0;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Yl41vhE6JSh7godPlE2iMCch",
+      "content": "{\"reachable\": true, \"call_depth\": 2, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_SxsGqXa8TvSDB05yQsyTyk7t",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to craft minimal input that makes payload[0] match ((ILLEGAL_CAT_ENTRY%10)+'0')\\n    # We don't know ILLEGAL_CAT_ENTRY; brute-force by trying all digits in one run isn't possible.\\n    # Provide a payload starting with '0' and very small size to maximize chance of OOB.\\n    return b\\\"0\\\"  # smallest non-empty\\n\",\"target\":\"finish_item\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_SxsGqXa8TvSDB05yQsyTyk7t",
+      "content": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_offLkdZgIYBvM1Z5TUY1tQom",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Provide a larger, structured-ish blob to increase chance parser reaches finish_item.\\n    # Start with all digits so whichever digit is checked might match at payload[0] depending on parsing.\\n    # Also keep payload_size small if possible, but we can't control internal payload_size.\\n    return (b\\\"0123456789\\\" * 50) + b\\\"\\\\n\\\" + (b\\\"A\\\"*10)\\n\",\"target\":\"finish_item\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_offLkdZgIYBvM1Z5TUY1tQom",
+      "content": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_PV01YJUCUCLQFeRzWUCd2EO5",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":false,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source of finish_item contains an unconditional out-of-bounds write pattern: after only assert(payload_size > 0), it conditionally executes `payload[ILLEGAL_CAT_ENTRY*100] = '\\\\0';` when `payload[0] == ((ILLEGAL_CAT_ENTRY%10) + '0')`. There is no bounds check that `ILLEGAL_CAT_ENTRY*100 < payload_size`, so if the condition is met and payload_size is smaller than that index+1, this is a heap/stack buffer overflow write detectable by ASan. However, in two reach_probe attempts, the harness did not reach finish_item (breakpoint not hit), so we lack runtime evidence that fuzzer-controlled input can drive execution into this function and satisfy the condition; thus taint-to-sink is unproven here despite the dangerous code pattern being present.\",\"corrected_description\":\"Conditional out-of-bounds write into the caller-provided `payload` buffer: if `payload[0]` matches `((ILLEGAL_CAT_ENTRY%10)+'0')`, the function writes a NUL byte at index `ILLEGAL_CAT_ENTRY*100` without verifying `payload_size` is large enough. This can overflow either heap or stack depending on how `payload` is allocated by the caller.\",\"control_flow_to_bug\":\"fuzzer entry -> caller of finish_item (one direct caller per reachability) -> finish_item(h,id,language,payload,payload_size) -> asserts pass (payload non-NULL, payload_size>0) -> branch `if (payload[0] == ((ILLEGAL_CAT_ENTRY%10)+'0'))` taken -> write `payload[ILLEGAL_CAT_ENTRY*100] = '\\\\0'` potentially OOB if payload_size <= ILLEGAL_CAT_ENTRY*100.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_PV01YJUCUCLQFeRzWUCd2EO5",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 2,
+    "sp_functions": [
+      "finish_item",
+      "finish_item"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Heap/stack buffer overflow due to out-of-bounds write into `payload`: after only asserting `payload_size > 0`, code checks `payload[0]` and then writes `payload[ILLEGAL_CAT_ENTRY*100] = '\\0'` when the first byte matches. If `ILLEGAL_CAT_ENTRY*100 >= payload_size` (or payload points to smaller buffer), this writes past the end of the caller-provided buffer. ASan would detect OOB write. Root cause: index derived from macro `ILLEGAL_CAT_ENTRY` without bounds check against `payload_size`.",
+  "finder_vuln_type": ""
+}

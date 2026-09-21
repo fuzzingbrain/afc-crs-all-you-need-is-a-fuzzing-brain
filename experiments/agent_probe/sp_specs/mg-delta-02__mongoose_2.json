@@ -1,0 +1,22 @@
+{
+  "challenge": "mg-delta-02",
+  "bug": "mongoose_2",
+  "tag": "mg-delta-02__mongoose_2",
+  "round": "final-competition",
+  "scan_mode": "delta",
+  "harness": "fuzz",
+  "fuzzer": "fuzz",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "rx_icmp"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "graphs_root": "/home/ze/fb-graphs/build/mg-delta-02",
+  "source_root": "/home/ze/fb-graphs/build/mg-delta-02/repo",
+  "callgraph": "/home/ze/fb-graphs/build/mg-delta-02/graph-fuzz/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/mongoose:latest",
+  "project": "mongoose",
+  "blob": "/home/ze/fb-graphs/build/mg-delta-02/bugs/mongoose_2/blob"
+}

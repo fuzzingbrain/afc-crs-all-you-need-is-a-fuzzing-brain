@@ -1,0 +1,33 @@
+{
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-freerdp.git",
+  "project_name": "freerdp",
+  "task_type": "pov",
+  "scan_mode": "delta",
+  "fuzz_tooling_url": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "fuzz_tooling_ref": "challenge-state/fp-delta-03",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "TestFuzzCodecs"
+  ],
+  "remove_git": true,
+  "timeout_minutes": 60,
+  "budget_limit": 30.0,
+  "concurrency": 5,
+  "docker_image": "aixcc-afc/freerdp:latest",
+  "prebuilt_fuzzers": {
+    "TestFuzzCodecs": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/fp-delta-03/bugs/vuln_003/bin/address/TestFuzzCodecs"
+  },
+  "prebuild_dir": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/fp-delta-03",
+  "work_id": "fp-delta-03",
+  "model_profile": "period-correct",
+  "pov_count": 1,
+  "base_commit": "c2b6631d6389bcc977eccdfadeb99fe8d62c4e26",
+  "delta_commit": "challenges/fp-delta-03",
+  "fuzzer_sources": {
+    "TestFuzzCodecs": [
+      "/home/ze/fbv2/experiments/agent_probe/prebuild/fp-delta-03/TestFuzzCodecs/harness_src/TestFuzzCodecs.c"
+    ]
+  }
+}

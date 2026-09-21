@@ -1,0 +1,23 @@
+{
+  "challenge": "da-full-01",
+  "bug": "dav1d-001",
+  "tag": "da-full-01__dav1d-001",
+  "round": "final-competition",
+  "scan_mode": "full",
+  "harness": "dav1d_fuzzer_mt@NO_OOM",
+  "fuzzer": "dav1d_fuzzer_mt@NO_OOM",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "undefined",
+  "ground_truth_functions": [
+    "dav1d_decode_frame_init"
+  ],
+  "ground_truth_location": "src/decode.c:2853",
+  "crash_type": "signed-integer-overflow",
+  "graphs_root": "/home/ze/fb-graphs/build/da-full-01",
+  "source_root": "/home/ze/fb-graphs/build/da-full-01/repo",
+  "callgraph": "/home/ze/fb-graphs/build/da-full-01/graph-dav1d_fuzzer_mt@NO_OOM/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/dav1d:latest",
+  "project": "dav1d",
+  "blob": "/home/ze/fb-graphs/build/da-full-01/bugs/dav1d-001/blob"
+}

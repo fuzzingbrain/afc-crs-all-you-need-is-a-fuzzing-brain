@@ -1,0 +1,22 @@
+{
+  "challenge": "ws-delta-02__vuln_004",
+  "fuzzer": "handler_icmp",
+  "sanitizer": "address",
+  "functions_indexed": 0,
+  "ground_truth_functions": [
+    "dissect_interface_identification_object"
+  ],
+  "q1_finder": {
+    "sp_count": 0,
+    "sp_functions": [],
+    "found_ground_truth": false,
+    "matched_functions": []
+  },
+  "q2_verifier": {
+    "verdict_real": true,
+    "score": 0.95,
+    "is_important": true,
+    "reason": "CONFIRMED VULNERABILITY: Stack-buffer-overflow in dissect_interface_identification_object. Fixed 128-byte buffer (line 902) with user-controlled copy size from network packet (line 909: obj_length = tvb_get_ntohs). Unsafe tvb_memcpy at line 927 copies obj_length-4 bytes without bounds check. Only validates tvb_reported_length_remaining >= 5 (lines 915-918), insufficient to prevent overflow. Attack",
+    "target_function": "dissect_interface_identification_object"
+  }
+}

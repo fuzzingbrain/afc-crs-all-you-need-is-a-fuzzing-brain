@@ -1,0 +1,374 @@
+{
+ "tag": "cu-delta-01__curl-005",
+ "gt": "verynormalprotocol_doing",
+ "crash_type": "SEGV",
+ "dynamic": {
+  "any_reach": false,
+  "any_crash": false,
+  "probes": [
+   {
+    "target": "verynormalprotocol_doing",
+    "hit": false,
+    "crashed": false,
+    "asan_type": null
+   },
+   {
+    "target": "verynormalprotocol_doing",
+    "hit": false,
+    "crashed": false,
+    "asan_type": null
+   },
+   {
+    "target": "verynormalprotocol_doing",
+    "hit": false,
+    "crashed": false,
+    "asan_type": null
+   },
+   {
+    "target": "verynormalprotocol_doing",
+    "hit": false,
+    "crashed": false,
+    "asan_type": null
+   },
+   {
+    "target": "verynormalprotocol_doing",
+    "hit": false,
+    "crashed": false,
+    "asan_type": null
+   },
+   {
+    "target": "verynormalprotocol_doing",
+    "hit": false,
+    "crashed": false,
+    "asan_type": null
+   }
+  ]
+ },
+ "raw_evidence": {
+  "pattern": "confirmed",
+  "taint": "confirmed",
+  "control_flow_correct": "unknown",
+  "suppressed_upstream": "unknown",
+  "sanitizer_class_unobservable": false,
+  "corrected_description": "Type confusion bug in verynormalprotocol_doing: when server response equals \"crashycrashy\", the code casts a CURLcode enum variable (result) to (unsigned int *) and dereferences it, writing to an invalid memory address. The line `*(unsigned int *)result = CURLE_OK;` treats the enum value as a pointer, causing a SEGV when attempting to write to that address.",
+  "control_flow_to_bug": "Fuzzer → (unknown path through function pointers) → verynormalprotocol_doing → receives \"crashycrashy\" from Curl_xfer_recv → strcasecmp matches → executes `*(unsigned int *)result = CURLE_OK;` → SEGV",
+  "reasoning": "\nSTAGE 1 - Hard gates:\n- Sanitizer class: SEGV is observable by ASan. This is a type confusion leading to invalid memory write - definitely a memory safety bug.\n- Reachability: Statically reachable (call_depth=5, n_callers=274). The function is reachable from the fuzzer.\n\nSTAGE 2 - Code reading (PRIMARY EVIDENCE):\n- PATTERN: CONFIRMED by reading. Line 138 in verynormalprotocol_doing contains `*(unsigned int *)result = CURLE_OK;` where `result` is declared as `CURLcode result = CURLE_WEIRD_SERVER_REPLY;` (an enum/integer type, not a pointer). Casting an integer to a pointer and dereferencing it will cause a SEGV.\n- TAINT: CONFIRMED by reading. The variable `response` is populated by `Curl_xfer_recv(data, response, 128, &nread)` which reads data from the network/fuzzer input. The strcasecmp compares this tainted input against \"crashycrashy\". If they match, the bug is triggered.\n- CONTROL FLOW: The path is clear in the code but I could not determine the exact call chain from the fuzzer to this function due to function pointer indirection.\n- SUPPRESSION: No upstream checks prevent the bug. The strcasecmp is the only condition, and it's checking FOR the trigger value, not preventing it.\n\nSTAGE 3 - Dynamic execution:\n- Could not reach the function in multiple attempts with different input formats. This is likely due to not understanding the exact fuzzer input format or protocol registration mechanism. The function is called through function pointers (protocol handler callbacks), making it harder to trigger without knowing the exact protocol scheme name or fuzzer TLV format.\n- However, inability to reach does NOT refute the bug - the code clearly contains the type confusion bug that will SEGV if reached with the right input.\n\nThe bug is REAL based on code reading: casting a non-pointer value to a pointer and dereferencing it is a clear memory safety violation that will cause a crash.\n",
+  "generator_code": "\ndef generate() -> bytes:\n    # Best attempt: TLV format with protocol URL and server response\n    import struct\n    \n    result = b\"\"\n    \n    # TLV 1: URL with verynormalprotocol scheme\n    url = b\"verynormalprotocol://localhost/test\"\n    result += struct.pack('>I', 1)  # type: URL\n    result += struct.pack('>I', len(url))  # length\n    result += url\n    \n    # TLV 2: Server response containing the trigger string\n    response = b\"crashycrashy\"\n    result += struct.pack('>I', 9)  # type: response body\n    result += struct.pack('>I', len(response))  # length\n    result += response\n    \n    return result\n"
+ },
+ "modified_sp": {
+  "proceed": true,
+  "reject_reason": null,
+  "tier": "READ_ONLY",
+  "priority": 0.2417,
+  "evidence_vector": {
+   "sanitizer_match": "confirmed",
+   "statically_reachable": "unknown",
+   "pattern": "confirmed",
+   "taint": "confirmed",
+   "suppressed_upstream": "unknown",
+   "control_flow_correct": "unknown",
+   "reached": "unknown",
+   "margin": null,
+   "clamp_observed_dyn": "unknown",
+   "crashed": "unknown"
+  },
+  "corrected_description": "Type confusion bug in verynormalprotocol_doing: when server response equals \"crashycrashy\", the code casts a CURLcode enum variable (result) to (unsigned int *) and dereferences it, writing to an invalid memory address. The line `*(unsigned int *)result = CURLE_OK;` treats the enum value as a pointer, causing a SEGV when attempting to write to that address.",
+  "control_flow_to_bug": "Fuzzer → (unknown path through function pointers) → verynormalprotocol_doing → receives \"crashycrashy\" from Curl_xfer_recv → strcasecmp matches → executes `*(unsigned int *)result = CURLE_OK;` → SEGV",
+  "generator_code": "\ndef generate() -> bytes:\n    # Best attempt: TLV format with protocol URL and server response\n    import struct\n    \n    result = b\"\"\n    \n    # TLV 1: URL with verynormalprotocol scheme\n    url = b\"verynormalprotocol://localhost/test\"\n    result += struct.pack('>I', 1)  # type: URL\n    result += struct.pack('>I', len(url))  # length\n    result += url\n    \n    # TLV 2: Server response containing the trigger string\n    response = b\"crashycrashy\"\n    result += struct.pack('>I', 9)  # type: response body\n    result += struct.pack('>I', len(response))  # length\n    result += response\n    \n    return result\n",
+  "operand_readout": ""
+ },
+ "trajectory": [
+  {
+   "iter": 0,
+   "tool": "read_function",
+   "args": {
+    "name": "verynormalprotocol_doing"
+   },
+   "result": "// verynormalprotocol.c:119\n\nstatic CURLcode verynormalprotocol_doing(struct Curl_easy *data, bool *done)\n{\n  CURLcode result = CURLE_WEIRD_SERVER_REPLY;\n  ssize_t nread;\n  char response[128];\n\n  *done = FALSE;\n\n  /* Read the response from the server. If we see the correct \"heartbeat\",\n     we should complete the transaction and return CURLE_OK. */\n  do {\n    result = Curl_xfer_recv(data, response, 128, &nread);\n  } while(result == CURLE_AGAIN);\n  if(result)\n    return result;\n  else if(!nread) {\n    failf(data, \"Connection disconnected\");\n    *done = TRUE;\n    result = CURLE_RECV_ERROR;\n  }\n  else if(strcasecmp(response, \"crashycrashy\") == 0) {\n    *done = TRUE;\n    *(unsigned int *)result = CURLE_OK;\n  }\n  else {\n    *done = TRUE;\n    result = CURLE_WEIRD_SERVER_REPLY;\n  }\n\n  if(result == CURLE_AGAIN)\n    result = CURLE_OK;\n  return result;\n}"
+  },
+  {
+   "iter": 0,
+   "tool": "check_reachability",
+   "args": {
+    "function_name": "verynormalprotocol_doing"
+   },
+   "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_by_fuzzers\": null, \"n_callers\": 274}"
+  },
+  {
+   "iter": 0,
+   "tool": "neighbors",
+   "args": {
+    "name": "verynormalprotocol_doing"
+   },
+   "result": "{\"callers\": [\"ASN1_dup\", \"ASN1_i2d_bio\", \"BIO_puts\", \"Curl_cf_def_conn_keep_alive\", \"Curl_client_start\", \"Curl_conn_keep_alive\", \"Curl_creader_create\", \"Curl_creader_unpause\", \"Curl_cwriter_create\", \"Curl_hash_clean_with_criterium\", \"Curl_pollset_add_socks\", \"Curl_pp_statemach\", \"Curl_sasl_continue\", \"Curl_ssl_set_engine\", \"EC_GROUP_check_discriminant\", \"EC_GROUP_copy\", \"EC_GROUP_precompute_mult\", \"EC_KEY_new_by_curve_name_ex\", \"EC_KEY_set_group\", \"EC_KEY_set_private_key\"], \"callees\": [\"Curl_failf\", \"Curl_xfer_recv\", \"__sanitizer_cov_trace_const_cmp4\", \"__sanitizer_cov_trace_const_cmp8\", \"strcasecmp\"]}"
+  },
+  {
+   "iter": 1,
+   "tool": "read_function",
+   "args": {
+    "name": "Curl_xfer_recv"
+   },
+   "result": "// transfer.c:959\n\nCURLcode Curl_xfer_recv(struct Curl_easy *data,\n                        char *buf, size_t blen,\n                        ssize_t *pnrcvd)\n{\n  int sockindex;\n\n  DEBUGASSERT(data);\n  DEBUGASSERT(data->conn);\n  DEBUGASSERT(data->set.buffer_size > 0);\n\n  sockindex = ((data->conn->sockfd != CURL_SOCKET_BAD) &&\n               (data->conn->sockfd == data->conn->sock[SECONDARYSOCKET]));\n  if((size_t)data->set.buffer_size < blen)\n    blen = (size_t)data->set.buffer_size;\n  return Curl_conn_recv(data, sockindex, buf, blen, pnrcvd);\n}"
+  },
+  {
+   "iter": 1,
+   "tool": "read_function",
+   "args": {
+    "name": "Curl_failf"
+   },
+   "result": "// curl_trc.c:91\n */\nvoid Curl_failf(struct Curl_easy *data, const char *fmt, ...)\n{\n  DEBUGASSERT(!strchr(fmt, '\\n'));\n  if(data->set.verbose || data->set.errorbuffer) {\n    va_list ap;\n    int len;\n    char error[CURL_ERROR_SIZE + 2];\n    va_start(ap, fmt);\n    len = mvsnprintf(error, CURL_ERROR_SIZE, fmt, ap);\n\n    if(data->set.errorbuffer && !data->state.errorbuf) {\n      strcpy(data->set.errorbuffer, error);\n      data->state.errorbuf = TRUE; /* wrote error string */\n    }\n    error[len++] = '\\n';\n    error[len] = '\\0';\n    Curl_debug(data, CURLINFO_TEXT, error, len);\n    va_end(ap);\n  }\n}"
+  },
+  {
+   "iter": 2,
+   "tool": "read_function",
+   "args": {
+    "name": "verynormalprotocol_connect"
+   },
+   "result": "(function 'verynormalprotocol_connect' not found)"
+  },
+  {
+   "iter": 2,
+   "tool": "read_function",
+   "args": {
+    "name": "verynormalprotocol_setup_connection"
+   },
+   "result": "(function 'verynormalprotocol_setup_connection' not found)"
+  },
+  {
+   "iter": 3,
+   "tool": "neighbors",
+   "args": {
+    "name": "Curl_pp_statemach"
+   },
+   "result": "{\"callers\": [\"ftp_block_statemach\", \"ftp_multi_statemach\", \"imap_block_statemach\", \"imap_multi_statemach\", \"pop3_block_statemach\", \"pop3_multi_statemach\", \"smtp_block_statemach\", \"smtp_multi_statemach\"], \"callees\": [\"Curl_conn_data_pending\", \"Curl_failf\", \"Curl_now\", \"Curl_pgrsUpdate\", \"Curl_pp_state_timeout\", \"Curl_socket_check\", \"Curl_speedcheck\", \"__sanitizer_cov_trace_cmp8\", \"__sanitizer_cov_trace_const_cmp4\", \"__sanitizer_cov_trace_const_cmp8\", \"__sanitizer_cov_trace_pc_indir\", \"ASIdOrRange_cmp\", \"Curl_cf_def_conn_keep_alive\", \"Curl_creader_def_init\", \"Curl_creader_def_rewind\", \"Curl_creader_def_unpause\", \"Curl_cwriter_def_init\", \"Curl_http\", \"Curl_http_connect\", \"Curl_http_setup_conn\"]}"
+  },
+  {
+   "iter": 4,
+   "tool": "read_function",
+   "args": {
+    "name": "Curl_handler_verynormalprotocol"
+   },
+   "result": "(function 'Curl_handler_verynormalprotocol' not found)"
+  },
+  {
+   "iter": 5,
+   "tool": "neighbors",
+   "args": {
+    "name": "Curl_client_start"
+   },
+   "result": "{\"callers\": [\"Curl_req_soft_reset\"], \"callees\": [\"Curl_failf\", \"Curl_trc_read\", \"__sanitizer_cov_trace_const_cmp4\", \"__sanitizer_cov_trace_pc_indir\", \"cl_reset_reader\", \"ASIdOrRange_cmp\", \"Curl_cf_def_conn_keep_alive\", \"Curl_creader_def_init\", \"Curl_creader_def_rewind\", \"Curl_creader_def_unpause\", \"Curl_cwriter_def_init\", \"Curl_http\", \"Curl_http_connect\", \"Curl_http_setup_conn\", \"Curl_none_check_cxn\", \"Curl_none_set_engine\", \"Curl_resolv_getsock\", \"EVP_CIPHER_get_asn1_iv\", \"EVP_CIPHER_set_asn1_iv\", \"EVP_PKEY_eq\"]}"
+  },
+  {
+   "iter": 6,
+   "tool": "read_function",
+   "args": {
+    "name": "Curl_handler"
+   },
+   "result": "(function 'Curl_handler' not found)"
+  },
+  {
+   "iter": 7,
+   "tool": "read_function",
+   "args": {
+    "name": "Curl_conn_keep_alive"
+   },
+   "result": "// cfilters.c:806\n\nCURLcode Curl_conn_keep_alive(struct Curl_easy *data,\n                              struct connectdata *conn,\n                              int sockindex)\n{\n  struct Curl_cfilter *cf = conn->cfilter[sockindex];\n  return cf ? cf->cft->keep_alive(cf, data) : CURLE_OK;\n}"
+  },
+  {
+   "iter": 8,
+   "tool": "reach_probe",
+   "args": {
+    "target": "verynormalprotocol_doing",
+    "generator_code": "\ndef generate() -> bytes:\n    # Try a simple WebSocket upgrade request\n    # The fuzzer likely expects HTTP-like input\n    request = b\"GET / HTTP/1.1\\r\\n\"\n    request += b\"Host: localhost\\r\\n\"\n    request += b\"Upgrade: websocket\\r\\n\"\n    request += b\"Connection: Upgrade\\r\\n\"\n    request += b\"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\\r\\n\"\n    request += b\"Sec-WebSocket-Version: 13\\r\\n\"\n    request += b\"\\r\\n\"\n    return request\n"
+   },
+   "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null, \"hint\": \"\"}"
+  },
+  {
+   "iter": 9,
+   "tool": "reach_probe",
+   "args": {
+    "target": "verynormalprotocol_doing",
+    "generator_code": "\ndef generate() -> bytes:\n    # Try a custom protocol URL\n    # The fuzzer might parse this as a URL\n    return b\"verynormalprotocol://localhost/test\"\n"
+   },
+   "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null, \"hint\": \"\"}"
+  },
+  {
+   "iter": 10,
+   "tool": "read_function",
+   "args": {
+    "name": "LLVMFuzzerTestOneInput"
+   },
+   "result": "(function 'LLVMFuzzerTestOneInput' not found)"
+  },
+  {
+   "iter": 11,
+   "tool": "read_function",
+   "args": {
+    "name": "curl_fuzzer_ws"
+   },
+   "result": "(function 'curl_fuzzer_ws' not found)"
+  },
+  {
+   "iter": 12,
+   "tool": "read_function",
+   "args": {
+    "name": "fuzz_ws"
+   },
+   "result": "(function 'fuzz_ws' not found)"
+  },
+  {
+   "iter": 13,
+   "tool": "read_function",
+   "args": {
+    "name": "Curl_http"
+   },
+   "result": "// http.c:2318\n */\nCURLcode Curl_http(struct Curl_easy *data, bool *done)\n{\n  struct connectdata *conn = data->conn;\n  CURLcode result = CURLE_OK;\n  Curl_HttpReq httpreq;\n  const char *te = \"\"; /* transfer-encoding */\n  const char *request;\n  const char *httpstring;\n  struct dynbuf req;\n  char *altused = NULL;\n  const char *p_accept;      /* Accept: string */\n\n  /* Always consider the DO phase done after this function call, even if there\n     may be parts of the request that are not yet sent, since we can deal with\n     the rest of the request in the PERFORM phase. */\n  *done = TRUE;\n\n  switch(conn->alpn) {\n  case CURL_HTTP_VERSION_3:\n    DEBUGASSERT(Curl_conn_is_http3(data, conn, FIRSTSOCKET));\n    break;\n  case CURL_HTTP_VERSION_2:\n#ifndef CURL_DISABLE_PROXY\n    if(!Curl_conn_is_http2(data, conn, FIRSTSOCKET) &&\n       conn->bits.proxy && !conn->bits.tunnel_proxy\n      ) {\n      result = Curl_http2_switch(data, conn, FIRSTSOCKET);\n      if(result)\n        goto fail;\n    }\n    else\n#endif\n      DEBUGASSERT(Curl_conn_is_http2(data, conn, FIRSTSOCKET));\n    break;\n  case CURL_HTTP_VERSION_1_1:\n    /* continue with HTTP/1.x when explicitly requested */\n    break;\n  default:\n    /* Check if user wants to use HTTP/2 with clear TCP */\n    if(Curl_http2_may_switch(data, conn, FIRSTSOCKET)) {\n      DEBUGF(infof(data, \"HTTP/2 over clean TCP\"));\n      result = Curl_http2_switch(data, conn, FIRSTSOCKET);\n      if(result)\n        goto fail;\n    }\n    break;\n  }\n\n  /* Add collecting of headers written to client. For a new connection,\n   * we might have done that already, but reuse\n   * or multiplex needs it here as well. */\n  result = Curl_headers_init(data);\n  if(result)\n    goto fail;\n\n  result = Curl_http_host(data, conn);\n  if(result)\n    goto fail;\n\n  result = Curl_http_useragent(data);\n  if(result)\n    goto fail;\n\n  Curl_http_method(data, conn, &request, &httpreq);\n\n  /* setup the authentication headers */\n  {\n    char *pq = NULL;\n    if(data->state.up.query) {\n      pq = aprintf(\"%s?%s\", data->state.up.path, data->state.up.query);\n      if(!pq)\n        return CURLE_OUT_OF_MEMORY;\n    }\n    result = Curl_http_output_auth(data, conn, request, httpreq,\n                                   (pq ? pq : data->state.up.path), FALSE);\n    free(pq);\n    if(result)\n      goto fail;\n  }\n\n  Curl_safefree(data->state.aptr.ref);\n  if(data->state.referer && !Curl_checkheaders(data, STRCONST(\"Referer\"))) {\n    data->state.aptr.ref = aprintf(\"Referer: %s\\r\\n\", data->state.referer);\n    if(!data->state.aptr.ref)\n      return CURLE_OUT_OF_MEMORY;\n  }\n\n  if(!Curl_checkheaders(data, STRCONST(\"Accept-Encoding\")) &&\n     data->set.str[STRING_ENCODING]) {\n    Curl_safefree(data->state.aptr.accept_encoding);\n    data->state.aptr.accept_encoding =\n      aprintf(\"Accept-Encoding: %s\\r\\n\", data->set.str[STRING_ENCODING]);\n    if(!data->state.aptr.accept_encoding)\n      return CURLE_OUT_OF_MEMORY;\n  }\n  else\n    Curl_safefree(data->state.aptr.accept_encoding);\n\n#ifdef HAVE_LIBZ\n  /*…"
+  },
+  {
+   "iter": 14,
+   "tool": "read_function",
+   "args": {
+    "name": "Curl_protocol_verynormalprotocol"
+   },
+   "result": "(function 'Curl_protocol_verynormalprotocol' not found)"
+  },
+  {
+   "iter": 15,
+   "tool": "reach_probe",
+   "args": {
+    "target": "verynormalprotocol_doing",
+    "generator_code": "\ndef generate() -> bytes:\n    # Try a URL with the verynormalprotocol scheme\n    # Fuzzers often parse TLV or length-prefixed data\n    # Let's try a simple format: URL\\0\n    url = b\"verynormalprotocol://example.com/\\x00\"\n    return url\n"
+   },
+   "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null, \"hint\": \"\"}"
+  },
+  {
+   "iter": 16,
+   "tool": "read_function",
+   "args": {
+    "name": "verynormalprotocol_do"
+   },
+   "result": "// verynormalprotocol.c:112\n\nstatic CURLcode verynormalprotocol_do(struct Curl_easy *data, bool *done)\n{\n  *done = FALSE; /* unconditionally */\n\n  return CURLE_OK;\n}"
+  },
+  {
+   "iter": 17,
+   "tool": "read_function",
+   "args": {
+    "name": "verynormalprotocol_disconnect"
+   },
+   "result": "(function 'verynormalprotocol_disconnect' not found)"
+  },
+  {
+   "iter": 17,
+   "tool": "neighbors",
+   "args": {
+    "name": "verynormalprotocol_do"
+   },
+   "result": "{\"callers\": [\"ASN1_dup\", \"ASN1_i2d_bio\", \"BIO_puts\", \"Curl_cf_def_conn_keep_alive\", \"Curl_client_start\", \"Curl_conn_keep_alive\", \"Curl_creader_create\", \"Curl_creader_unpause\", \"Curl_cwriter_create\", \"Curl_hash_clean_with_criterium\", \"Curl_pollset_add_socks\", \"Curl_pp_statemach\", \"Curl_sasl_continue\", \"Curl_ssl_set_engine\", \"EC_GROUP_check_discriminant\", \"EC_GROUP_copy\", \"EC_GROUP_precompute_mult\", \"EC_KEY_new_by_curve_name_ex\", \"EC_KEY_set_group\", \"EC_KEY_set_private_key\"], \"callees\": []}"
+  },
+  {
+   "iter": 18,
+   "tool": "read_function",
+   "args": {
+    "name": "Curl_handler_verynormal"
+   },
+   "result": "(function 'Curl_handler_verynormal' not found)"
+  },
+  {
+   "iter": 19,
+   "tool": "neighbors",
+   "args": {
+    "name": "verynormalprotocol_doing"
+   },
+   "result": "{\"callers\": [\"ASN1_dup\", \"ASN1_i2d_bio\", \"BIO_puts\", \"Curl_cf_def_conn_keep_alive\", \"Curl_client_start\", \"Curl_conn_keep_alive\", \"Curl_creader_create\", \"Curl_creader_unpause\", \"Curl_cwriter_create\", \"Curl_hash_clean_with_criterium\", \"Curl_pollset_add_socks\", \"Curl_pp_statemach\", \"Curl_sasl_continue\", \"Curl_ssl_set_engine\", \"EC_GROUP_check_discriminant\", \"EC_GROUP_copy\", \"EC_GROUP_precompute_mult\", \"EC_KEY_new_by_curve_name_ex\", \"EC_KEY_set_group\", \"EC_KEY_set_private_key\"], \"callees\": [\"Curl_failf\", \"Curl_xfer_recv\", \"__sanitizer_cov_trace_const_cmp4\", \"__sanitizer_cov_trace_const_cmp8\", \"strcasecmp\"]}"
+  },
+  {
+   "iter": 20,
+   "tool": "reach_probe",
+   "args": {
+    "target": "verynormalprotocol_doing",
+    "generator_code": "\ndef generate() -> bytes:\n    # WebSocket fuzzers often use a specific format\n    # Try TLV format: [type][length][value]\n    # Type 1 might be URL, Type 2 might be data\n    import struct\n    \n    # Type 1: URL\n    url = b\"verynormalprotocol://localhost/\"\n    data = struct.pack('<HH', 1, len(url)) + url\n    \n    # Type 2: Server response data\n    response = b\"crashycrashy\"\n    data += struct.pack('<HH', 2, len(response)) + response\n    \n    return data\n"
+   },
+   "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null, \"hint\": \"\"}"
+  },
+  {
+   "iter": 21,
+   "tool": "reach_probe",
+   "args": {
+    "target": "verynormalprotocol_doing",
+    "generator_code": "\ndef generate() -> bytes:\n    # Maybe the fuzzer simulates server responses directly\n    # The function reads a response and checks for \"crashycrashy\"\n    return b\"crashycrashy\\x00\"\n"
+   },
+   "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null, \"hint\": \"\"}"
+  },
+  {
+   "iter": 22,
+   "tool": "reach_probe",
+   "args": {
+    "target": "verynormalprotocol_doing",
+    "generator_code": "\ndef generate() -> bytes:\n    # Curl fuzzers often use a specific TLV format\n    # Let's try the format used by curl_fuzzer\n    import struct\n    \n    result = b\"\"\n    \n    # TLV 1: URL (type 1)\n    url = b\"verynormalprotocol://localhost/test\"\n    result += struct.pack('>I', 1)  # type\n    result += struct.pack('>I', len(url))  # length\n    result += url\n    \n    # TLV 2: Response data (type 9 for response body)\n    response = b\"crashycrashy\"\n    result += struct.pack('>I', 9)  # type\n    result += struct.pack('>I', len(response))  # length\n    result += response\n    \n    return result\n"
+   },
+   "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null, \"hint\": \"\"}"
+  },
+  {
+   "iter": 23,
+   "tool": "read_function",
+   "args": {
+    "name": "fuzz_parse_tlv"
+   },
+   "result": "(function 'fuzz_parse_tlv' not found)"
+  },
+  {
+   "iter": 24,
+   "tool": "read_function",
+   "args": {
+    "name": "curl_mvsnprintf"
+   },
+   "result": "// mprintf.c:1065\n\nint curl_mvsnprintf(char *buffer, size_t maxlength, const char *format,\n                    va_list ap_save)\n{\n  int retcode;\n  struct nsprintf info;\n\n  info.buffer = buffer;\n  info.length = 0;\n  info.max = maxlength;\n\n  retcode = formatf(&info, addbyter, format, ap_save);\n  if(info.max) {\n    /* we terminate this with a zero byte */\n    if(info.max == info.length) {\n      /* we are at maximum, scrap the last letter */\n      info.buffer[-1] = 0;\n      DEBUGASSERT(retcode);\n      retcode--; /* do not count the nul byte */\n    }\n    else\n      info.buffer[0] = 0;\n  }\n  return retcode;\n}"
+  },
+  {
+   "iter": 25,
+   "tool": "read_function",
+   "args": {
+    "name": "Curl_builtin_scheme"
+   },
+   "result": "(function 'Curl_builtin_scheme' not found)"
+  },
+  {
+   "iter": 26,
+   "tool": "read_function",
+   "args": {
+    "name": "Curl_handler_vnp"
+   },
+   "result": "(function 'Curl_handler_vnp' not found)"
+  },
+  {
+   "iter": 27,
+   "tool": "neighbors",
+   "args": {
+    "name": "verynormalprotocol_do"
+   },
+   "result": "{\"callers\": [\"ASN1_dup\", \"ASN1_i2d_bio\", \"BIO_puts\", \"Curl_cf_def_conn_keep_alive\", \"Curl_client_start\", \"Curl_conn_keep_alive\", \"Curl_creader_create\", \"Curl_creader_unpause\", \"Curl_cwriter_create\", \"Curl_hash_clean_with_criterium\", \"Curl_pollset_add_socks\", \"Curl_pp_statemach\", \"Curl_sasl_continue\", \"Curl_ssl_set_engine\", \"EC_GROUP_check_discriminant\", \"EC_GROUP_copy\", \"EC_GROUP_precompute_mult\", \"EC_KEY_new_by_curve_name_ex\", \"EC_KEY_set_group\", \"EC_KEY_set_private_key\"], \"callees\": []}"
+  },
+  {
+   "iter": 28,
+   "tool": "submit_evidence",
+   "args": {
+    "pattern": "confirmed",
+    "taint": "confirmed",
+    "control_flow_correct": "unknown",
+    "suppressed_upstream": "unknown",
+    "sanitizer_class_unobservable": false,
+    "corrected_description": "Type confusion bug in verynormalprotocol_doing: when server response equals \"crashycrashy\", the code casts a CURLcode enum variable (result) to (unsigned int *) and dereferences it, writing to an invalid memory address. The line `*(unsigned int *)result = CURLE_OK;` treats the enum value as a pointer, causing a SEGV when attempting to write to that address.",
+    "control_flow_to_bug": "Fuzzer → (unknown path through function pointers) → verynormalprotocol_doing → receives \"crashycrashy\" from Curl_xfer_recv → strcasecmp matches → executes `*(unsigned int *)result = CURLE_OK;` → SEGV",
+    "reasoning": "\nSTAGE 1 - Hard gates:\n- Sanitizer class: SEGV is observable by ASan. This is a type confusion leading to invalid memory write - definitely a memory safety bug.\n- Reachability: Statically reachable (call_depth=5, n_callers=274). The function is reachable from the fuzzer.\n\nSTAGE 2 - Code reading (PRIMARY EVIDENCE):\n- PATTERN: CONFIRMED by reading. Line 138 in verynormalprotocol_doing contains `*(unsigned int *)result = CURLE_OK;` where `result` is declared as `CURLcode result = CURLE_WEIRD_SERVER_REPLY;` (an enum/integer type, not a pointer). Casting an integer to a pointer and dereferencing it will cause a SEGV.\n- TAINT: CONFIRMED by reading. The variable `response` is populated by `Curl_xfer_recv(data, response, 128, &nread)` which reads data from the network/fuzzer input. The strcasecmp compares this tainted input against \"crashycrashy\". If they match, the bug is triggered.\n- CONTROL FLOW: The path is clear in the code but I could not determine the exact call chain from the fuzzer to this function due to function pointer indirection.\n- SUPPRESSION: No upstream checks prevent the bug. The strcasecmp is the only condition, and it's checking FOR the trigger value, not preventing it.\n\nSTAGE 3 - Dynamic execution:\n- Could not reach the function in multiple attempts with different input formats. This is likely due to not understanding the exact fuzzer input format or protocol registration mechanism. The function is called through function pointers (protocol handler callbacks), making it harder to trigger without knowing the exact protocol scheme name or fuzzer TLV format.\n- However, inability to reach does NOT refute the bug - the code clearly contains the type confusion bug that will SEGV if reached with the right input.\n\nThe bug is REAL based on code reading: casting a non-pointer value to a pointer and dereferencing it is a clear memory safety violation that will cause a crash.\n",
+    "generator_code": "\ndef generate() -> bytes:\n    # Best attempt: TLV format with protocol URL and server response\n    import struct\n    \n    result = b\"\"\n    \n    # TLV 1: URL with verynormalprotocol scheme\n    url = b\"verynormalprotocol://localhost/test\"\n    result += struct.pack('>I', 1)  # type: URL\n    result += struct.pack('>I', len(url))  # length\n    result += url\n    \n    # TLV 2: Server response containing the trigger string\n    response = b\"crashycrashy\"\n    result += struct.pack('>I', 9)  # type: response body\n    result += struct.pack('>I', len(response))  # length\n    result += response\n    \n    return result\n"
+   },
+   "result": "{\"received\": true}"
+  }
+ ],
+ "token_totals": {
+  "in": 231878,
+  "out": 4707,
+  "total": 236585,
+  "llm_calls": 29
+ }
+}

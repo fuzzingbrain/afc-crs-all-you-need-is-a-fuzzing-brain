@@ -1,0 +1,22 @@
+{
+  "challenge": "av-delta-02",
+  "bug": "avif-002",
+  "tag": "av-delta-02__avif-002",
+  "round": "final-competition",
+  "scan_mode": "delta",
+  "harness": "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+  "fuzzer": "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+  "harness_kind": "fuzztest",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "avifImageYUVAnyToRGBAnySlow"
+  ],
+  "crash_type": "dynamic-stack-buffer-overflow",
+  "graphs_root": "/home/ze/fb-graphs/build/av-delta-02",
+  "source_root": "/home/ze/fb-graphs/build/av-delta-02/repo",
+  "callgraph": "/home/ze/fb-graphs/build/av-delta-02/graph-avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert/callgraph.json",
+  "binary_on_disk": "/home/ze/fb-graphs/build/av-delta-02/bugs/avif-002/bin/address/avif_fuzztest_yuvrgb",
+  "challenge_image": "aixcc-afc/libavif:latest",
+  "project": "libavif",
+  "blob": "/home/ze/fb-graphs/build/av-delta-02/bugs/avif-002/blob"
+}

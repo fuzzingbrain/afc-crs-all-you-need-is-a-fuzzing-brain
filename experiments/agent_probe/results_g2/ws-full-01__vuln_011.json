@@ -1,0 +1,190 @@
+{
+  "tag": "ws-full-01__vuln_011",
+  "gt": "aim_get_buddyname",
+  "crash_type": "ABRT",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source of aim_get_buddyname:\n\n```\naim_get_buddyname(wmem_allocator_t *pool, uint8_t **name, tvbuff_t *tvb, int offset)\n{\n    uint16_t buddyname_length;\n\n    *name = wmem_alloc(pool, 256);\n\n    buddyname_length = tvb_get_ntohs(tvb, offset);\n\n    if (pool)\n        memcpy(*name, tvb_get_ptr(tvb,offset,1), buddyname_length);\n\n    return buddyname_length;\n}\n```\n\nEvidence of bug pattern:\n- Destination buffer is always allocated with fixed size 256 bytes (`wmem_alloc(pool, 256)`), and `*name` is written via `memcpy`.\n- Copy length `buddyname_length` is read from the packet (`tvb_get_ntohs(tvb, offset)`), i.e., attacker-controlled.\n- There is no check that `buddyname_length <= 256` before `memcpy`.\n- The only conditional is `if (pool)`, which does not constrain `buddyname_length`.\n\nTherefore, if `pool` is non-NULL and `buddyname_length > 256`, `memcpy` will write past the end of the heap allocation, which is ASan-detectable (heap-buffer-overflow). This would typically manifest as an ASan abort (ABRT) when triggered.\n\nDynamic confirmation:\n- Attempted to run reach_probe, but the tool failed due to missing ASan binary path (`No such file or directory .../bin/address`), so no runtime reach/crash evidence could be collected here.",
+    "corrected_description": "Heap buffer overflow (ASan heap-buffer-overflow leading to abort) in aim_get_buddyname: allocates 256 bytes and memcpy()s `buddyname_length` bytes where `buddyname_length` comes from `tvb_get_ntohs(tvb, offset)` without bounding it to 256 (only gated on `pool != NULL`).",
+    "control_flow_to_bug": "Fuzzer entry handler_aim -> AIM dissector parsing path (caller chain depth ~6) -> caller invokes aim_get_buddyname(pool, &name, tvb, offset) with non-NULL `pool` -> aim_get_buddyname reads 16-bit `buddyname_length` from tvb at `offset` -> if(pool) executes memcpy(*name, tvb_get_ptr(tvb, offset, 1), buddyname_length) -> overflow when buddyname_length > 256."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "aim_get_buddyname"
+      },
+      "result": "aim_get_buddyname(wmem_allocator_t *pool, uint8_t **name, tvbuff_t *tvb, int offset)\n{\n\tuint16_t buddyname_length;\n\n\t*name = wmem_alloc(pool, 256);\n\n\tbuddyname_length = tvb_get_ntohs(tvb, offset);\n\n\tif (pool)\n\t\tmemcpy(*name, tvb_get_ptr(tvb,offset,1), buddyname_length);\n\n\treturn buddyname_length;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "aim_get_buddyname"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"observed\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to craft an AIM message that reaches aim_get_buddyname and sets buddyname_length large.\n    # We don't know full protocol framing; use a generic strategy: include a 16-bit big-endian length\n    # early and lots of padding so tvb_get_ptr has data.\n    import struct\n    # Put a large length 0x0200 (512)\n    length = 0x0200\n    payload = struct.pack('>H', length) + b'A'*600\n    # Add some leading bytes that might be skipped before offset; include common AIM/OSCAR markers.\n    # FLAP header: '*' 0x2a, channel 0x02, seq 0x0001, len\n    flap = b'*' + b'\\x02' + b'\\x00\\x01' + struct.pack('>H', len(payload))\n    return flap + payload\n",
+        "target": "aim_get_buddyname"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-full-01/bugs/vuln_011/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source of aim_get_buddyname:\n\n```\naim_get_buddyname(wmem_allocator_t *pool, uint8_t **name, tvbuff_t *tvb, int offset)\n{\n    uint16_t buddyname_length;\n\n    *name = wmem_alloc(pool, 256);\n\n    buddyname_length = tvb_get_ntohs(tvb, offset);\n\n    if (pool)\n        memcpy(*name, tvb_get_ptr(tvb,offset,1), buddyname_length);\n\n    return buddyname_length;\n}\n```\n\nEvidence of bug pattern:\n- Destination buffer is always allocated with fixed size 256 bytes (`wmem_alloc(pool, 256)`), and `*name` is written via `memcpy`.\n- Copy length `buddyname_length` is read from the packet (`tvb_get_ntohs(tvb, offset)`), i.e., attacker-controlled.\n- There is no check that `buddyname_length <= 256` before `memcpy`.\n- The only conditional is `if (pool)`, which does not constrain `buddyname_length`.\n\nTherefore, if `pool` is non-NULL and `buddyname_length > 256`, `memcpy` will write past the end of the heap allocation, which is ASan-detectable (heap-buffer-overflow). This would typically manifest as an ASan abort (ABRT) when triggered.\n\nDynamic confirmation:\n- Attempted to run reach_probe, but the tool failed due to missing ASan binary path (`No such file or directory .../bin/address`), so no runtime reach/crash evidence could be collected here.",
+        "corrected_description": "Heap buffer overflow (ASan heap-buffer-overflow leading to abort) in aim_get_buddyname: allocates 256 bytes and memcpy()s `buddyname_length` bytes where `buddyname_length` comes from `tvb_get_ntohs(tvb, offset)` without bounding it to 256 (only gated on `pool != NULL`).",
+        "control_flow_to_bug": "Fuzzer entry handler_aim -> AIM dissector parsing path (caller chain depth ~6) -> caller invokes aim_get_buddyname(pool, &name, tvb, offset) with non-NULL `pool` -> aim_get_buddyname reads 16-bit `buddyname_length` from tvb at `offset` -> if(pool) executes memcpy(*name, tvb_get_ptr(tvb, offset, 1), buddyname_length) -> overflow when buddyname_length > 256."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1093,
+      "output_tokens": 58,
+      "total_tokens": 1151,
+      "latency_ms": 1171
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1306,
+      "output_tokens": 231,
+      "total_tokens": 1537,
+      "latency_ms": 4033
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1587,
+      "output_tokens": 584,
+      "total_tokens": 2171,
+      "latency_ms": 7015
+    }
+  ],
+  "token_totals": {
+    "input": 3986,
+    "output": 873,
+    "total": 4859,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: handler_aim   Sanitizer: address\nFunction: aim_get_buddyname\nClaimed bug type: ABRT\nSuspicious-point description (from the finder — may be imprecise): Heap buffer overflow in aim_get_buddyname: allocates a fixed 256-byte buffer via wmem_alloc(pool, 256) and then reads buddyname_length from tvb_get_ntohs(tvb, offset) (attacker-controlled length). It then memcpy()s buddyname_length bytes from tvb_get_ptr(...) into the 256-byte allocation without checking buddyname_length <= 256. If buddyname_length > 256, this writes past the end of the heap buffer (ASan-detectable). Control flow: allocate 256 -> parse 16-bit length from tvb -> if(pool) memcpy(dst=*name, src=tvb_get_ptr(...), len=buddyname_length) -> return length. Related vars/functions: buddyname_length, wmem_alloc, tvb_get_ntohs, tvb_get_ptr, memcpy.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a ABRT\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_0njcv0uy669gQOXxbQjcTlcU",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"aim_get_buddyname\"}"
+          }
+        },
+        {
+          "id": "call_m9Y9XZIEAcJukmkxvqmSVBjj",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"aim_get_buddyname\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_0njcv0uy669gQOXxbQjcTlcU",
+      "content": "aim_get_buddyname(wmem_allocator_t *pool, uint8_t **name, tvbuff_t *tvb, int offset)\n{\n\tuint16_t buddyname_length;\n\n\t*name = wmem_alloc(pool, 256);\n\n\tbuddyname_length = tvb_get_ntohs(tvb, offset);\n\n\tif (pool)\n\t\tmemcpy(*name, tvb_get_ptr(tvb,offset,1), buddyname_length);\n\n\treturn buddyname_length;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_m9Y9XZIEAcJukmkxvqmSVBjj",
+      "content": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"observed\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_HsR1LivGw783Rx6QSIRUAks6",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to craft an AIM message that reaches aim_get_buddyname and sets buddyname_length large.\\n    # We don't know full protocol framing; use a generic strategy: include a 16-bit big-endian length\\n    # early and lots of padding so tvb_get_ptr has data.\\n    import struct\\n    # Put a large length 0x0200 (512)\\n    length = 0x0200\\n    payload = struct.pack('>H', length) + b'A'*600\\n    # Add some leading bytes that might be skipped before offset; include common AIM/OSCAR markers.\\n    # FLAP header: '*' 0x2a, channel 0x02, seq 0x0001, len\\n    flap = b'*' + b'\\\\x02' + b'\\\\x00\\\\x01' + struct.pack('>H', len(payload))\\n    return flap + payload\\n\",\"target\":\"aim_get_buddyname\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_HsR1LivGw783Rx6QSIRUAks6",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-full-01/bugs/vuln_011/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_i5dEBpP8VzfPn4W2G5JuQvqs",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source of aim_get_buddyname:\\n\\n```\\naim_get_buddyname(wmem_allocator_t *pool, uint8_t **name, tvbuff_t *tvb, int offset)\\n{\\n    uint16_t buddyname_length;\\n\\n    *name = wmem_alloc(pool, 256);\\n\\n    buddyname_length = tvb_get_ntohs(tvb, offset);\\n\\n    if (pool)\\n        memcpy(*name, tvb_get_ptr(tvb,offset,1), buddyname_length);\\n\\n    return buddyname_length;\\n}\\n```\\n\\nEvidence of bug pattern:\\n- Destination buffer is always allocated with fixed size 256 bytes (`wmem_alloc(pool, 256)`), and `*name` is written via `memcpy`.\\n- Copy length `buddyname_length` is read from the packet (`tvb_get_ntohs(tvb, offset)`), i.e., attacker-controlled.\\n- There is no check that `buddyname_length <= 256` before `memcpy`.\\n- The only conditional is `if (pool)`, which does not constrain `buddyname_length`.\\n\\nTherefore, if `pool` is non-NULL and `buddyname_length > 256`, `memcpy` will write past the end of the heap allocation, which is ASan-detectable (heap-buffer-overflow). This would typically manifest as an ASan abort (ABRT) when triggered.\\n\\nDynamic confirmation:\\n- Attempted to run reach_probe, but the tool failed due to missing ASan binary path (`No such file or directory .../bin/address`), so no runtime reach/crash evidence could be collected here.\" ,\"corrected_description\":\"Heap buffer overflow (ASan heap-buffer-overflow leading to abort) in aim_get_buddyname: allocates 256 bytes and memcpy()s `buddyname_length` bytes where `buddyname_length` comes from `tvb_get_ntohs(tvb, offset)` without bounding it to 256 (only gated on `pool != NULL`).\",\"control_flow_to_bug\":\"Fuzzer entry handler_aim -> AIM dissector parsing path (caller chain depth ~6) -> caller invokes aim_get_buddyname(pool, &name, tvb, offset) with non-NULL `pool` -> aim_get_buddyname reads 16-bit `buddyname_length` from tvb at `offset` -> if(pool) executes memcpy(*name, tvb_get_ptr(tvb, offset, 1), buddyname_length) -> overflow when buddyname_length > 256.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_i5dEBpP8VzfPn4W2G5JuQvqs",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "aim_get_buddyname"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Heap buffer overflow in aim_get_buddyname: allocates a fixed 256-byte buffer via wmem_alloc(pool, 256) and then reads buddyname_length from tvb_get_ntohs(tvb, offset) (attacker-controlled length). It then memcpy()s buddyname_length bytes from tvb_get_ptr(...) into the 256-byte allocation without checking buddyname_length <= 256. If buddyname_length > 256, this writes past the end of the heap buffer (ASan-detectable). Control flow: allocate 256 -> parse 16-bit length from tvb -> if(pool) memcpy(dst=*name, src=tvb_get_ptr(...), len=buddyname_length) -> return length. Related vars/functions: buddyname_length, wmem_alloc, tvb_get_ntohs, tvb_get_ptr, memcpy.",
+  "finder_vuln_type": ""
+}

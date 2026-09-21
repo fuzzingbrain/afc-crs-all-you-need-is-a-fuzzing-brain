@@ -1,0 +1,195 @@
+{
+  "tag": "sq-delta-02__SQL-008",
+  "gt": "lsm1BestIndex",
+  "crash_type": "SEGV",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source shows a real OOB write risk in lsm1BestIndex(): iIdx2 is intended to store a constraint index (0..nConstraint-1) for the second bound, but in the GE/GT case when idxNum==3 it does `iIdx2 = idxNum;` (i.e., 3) instead of `iIdx2 = i;`. Later, if iIdx2>=0 it writes `pIdxInfo->aConstraintUsage[iIdx2]...` with no bounds check against pIdxInfo->nConstraint. If the query planner provides fewer than 4 constraints (common: exactly two constraints for `k>1 AND k<10`), then iIdx2==3 will index past the end of aConstraintUsage (size nConstraint), causing an out-of-bounds write and potential SEGV/ASan crash. The tainted aspect is the SQL query: by arranging constraints order so that an LE/LT constraint is seen first (sets idxNum=3) and then a GE/GT constraint is seen later (hits the buggy branch), the fuzzer can drive iIdx2 to 3 regardless of nConstraint. No clamping/guard exists. I attempted to run reach_probe but the provided ASan binary path was missing in this environment, so I cannot provide runtime crash proof here; evidence is from direct code inspection.",
+    "corrected_description": "OOB write in lsm1BestIndex(): when processing constraints, if an LE/LT constraint is encountered first (idxNum becomes 3) and later a GE/GT constraint is processed, the code mistakenly sets `iIdx2 = idxNum` (value 3) instead of `iIdx2 = i` (constraint index). This can make `iIdx2` exceed `pIdxInfo->nConstraint-1`, leading to out-of-bounds write to `pIdxInfo->aConstraintUsage[iIdx2]`.",
+    "control_flow_to_bug": "SQLite query planning calls lsm1 module xBestIndex -> lsm1BestIndex(tab,pIdxInfo). In the loop over pIdxInfo->aConstraint[0..nConstraint-1], require two usable constraints on column 0: (1) an LE/LT constraint encountered first so idxNum transitions 99->3; (2) later a GE/GT constraint encountered while idxNum==3, taking the `else if( idxNum==3 )` branch in the GE/GT case, executing `iIdx2 = idxNum; idxNum=1; ...`. After the loop, `if( iIdx2>=0 )` writes to `pIdxInfo->aConstraintUsage[iIdx2]` without checking iIdx2<nConstraint, causing OOB write when nConstraint<=3 (e.g., only 2 constraints)."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "lsm1BestIndex"
+      },
+      "result": "static int lsm1BestIndex(\n  sqlite3_vtab *tab,\n  sqlite3_index_info *pIdxInfo\n){\n  int i;                                            \n  int idxNum = 99;                           \n  int nArg = 0;                                              \n  int argIdx = -1;                                                         \n  int iIdx2 = -1;                                         \n  int omit1 = 0;\n  int omit2 = 0;\n\n  const struct sqlite3_index_constraint *pConstraint;\n  pConstraint = pIdxInfo->aConstraint;\n  for(i=0; i<pIdxInfo->nConstraint; i++, pConstraint++){\n    if( pConstraint->usable==0 ) continue;\n    if( pConstraint->iColumn!=0 ) continue;\n    switch( pConstraint->op ){\n      case SQLITE_INDEX_CONSTRAINT_EQ: {\n        if( idxNum>0 ){\n          argIdx = i;\n          iIdx2 = -1;\n          idxNum = 0;\n          omit1 = 1;\n        }\n        break;\n      }\n      case SQLITE_INDEX_CONSTRAINT_GE:\n      case SQLITE_INDEX_CONSTRAINT_GT: {\n        if( idxNum==99 ){\n          argIdx = i;\n          idxNum = 2;\n          omit1 = pConstraint->op==SQLITE_INDEX_CONSTRAINT_GE;\n        }else if( idxNum==3 ){\n          iIdx2 = idxNum;\n          omit2 = omit1;\n          argIdx = i;\n          idxNum = 1;\n          omit1 = pConstraint->op==SQLITE_INDEX_CONSTRAINT_GE;\n        }\n        break;\n      }\n      case SQLITE_INDEX_CONSTRAINT_LE:\n      case SQLITE_INDEX_CONSTRAINT_LT: {\n        if( idxNum==99 ){\n          argIdx = i;\n          idxNum = 3;\n          omit1 = pConstraint->op==SQLITE_INDEX_CONSTRAINT_LE;\n        }else if( idxNum==2 ){\n          iIdx2 = i;\n          idxNum = 1;\n          omit1 = pConstraint->op==SQLITE_INDEX_CONSTRAINT_LE;\n        }\n        break;\n      }\n    }\n  }\n  if( argIdx>=0 ){\n    pIdxInfo->aConstraintUsage[argIdx].argvIndex = ++nArg;\n    pIdxInfo->aConstraintUsage[argIdx].omit = omit1;\n  }\n  if( iIdx2>=0 ){\n    pIdxInfo->aConstraintUsage[iIdx2].argvIndex = ++nArg;\n    pIdxInfo->aConstraintUsage[iIdx2].omit = omit2;\n  }\n  if( idxNum==0 ){\n    pIdxInfo->estimatedCost = (double)1;\n    pIdxInfo->estimatedRows = 1;\n    pIdxInfo->orderByConsumed = 1;\n  }else if( idxNum==1 ){\n    pIdxInfo->estimatedCost = (double)100;\n    pIdxInfo->estimatedRows = 100;\n  }else if( idxNum<99 ){\n    pIdxInfo->estimatedCost = (double)5000;\n    pIdxInfo->estimatedRows = 5000;\n  }else{\n                         \n    pIdxInfo->estimatedCost = (double)2147483647;\n    pIdxInfo->estimatedRows = 2147483647;\n  }\n  pIdxInfo->idxNum = idxNum;\n  return SQLITE_OK;\n}"
+    },
+    {
+      "iter": 1,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "lsm1BestIndex"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"indirect\", \"n_callers\": 38}"
+    },
+    {
+      "iter": 2,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to drive SQLite to call xBestIndex on the lsm1 virtual table.\n    # Many harnesses accept SQL text as input.\n    sql = b\"CREATE VIRTUAL TABLE t USING lsm1;\\n\" \\\n          b\"SELECT * FROM t WHERE k>1 AND k<10;\\n\"\n    return sql\n",
+        "target": "lsm1BestIndex"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/sq-delta-02/bugs/SQL-008/bin/address'\"}"
+    },
+    {
+      "iter": 3,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source shows a real OOB write risk in lsm1BestIndex(): iIdx2 is intended to store a constraint index (0..nConstraint-1) for the second bound, but in the GE/GT case when idxNum==3 it does `iIdx2 = idxNum;` (i.e., 3) instead of `iIdx2 = i;`. Later, if iIdx2>=0 it writes `pIdxInfo->aConstraintUsage[iIdx2]...` with no bounds check against pIdxInfo->nConstraint. If the query planner provides fewer than 4 constraints (common: exactly two constraints for `k>1 AND k<10`), then iIdx2==3 will index past the end of aConstraintUsage (size nConstraint), causing an out-of-bounds write and potential SEGV/ASan crash. The tainted aspect is the SQL query: by arranging constraints order so that an LE/LT constraint is seen first (sets idxNum=3) and then a GE/GT constraint is seen later (hits the buggy branch), the fuzzer can drive iIdx2 to 3 regardless of nConstraint. No clamping/guard exists. I attempted to run reach_probe but the provided ASan binary path was missing in this environment, so I cannot provide runtime crash proof here; evidence is from direct code inspection.",
+        "corrected_description": "OOB write in lsm1BestIndex(): when processing constraints, if an LE/LT constraint is encountered first (idxNum becomes 3) and later a GE/GT constraint is processed, the code mistakenly sets `iIdx2 = idxNum` (value 3) instead of `iIdx2 = i` (constraint index). This can make `iIdx2` exceed `pIdxInfo->nConstraint-1`, leading to out-of-bounds write to `pIdxInfo->aConstraintUsage[iIdx2]`.",
+        "control_flow_to_bug": "SQLite query planning calls lsm1 module xBestIndex -> lsm1BestIndex(tab,pIdxInfo). In the loop over pIdxInfo->aConstraint[0..nConstraint-1], require two usable constraints on column 0: (1) an LE/LT constraint encountered first so idxNum transitions 99->3; (2) later a GE/GT constraint encountered while idxNum==3, taking the `else if( idxNum==3 )` branch in the GE/GT case, executing `iIdx2 = idxNum; idxNum=1; ...`. After the loop, `if( iIdx2>=0 )` writes to `pIdxInfo->aConstraintUsage[iIdx2]` without checking iIdx2<nConstraint, causing OOB write when nConstraint<=3 (e.g., only 2 constraints)."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1046,
+      "output_tokens": 21,
+      "total_tokens": 1067,
+      "latency_ms": 912
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1771,
+      "output_tokens": 24,
+      "total_tokens": 1795,
+      "latency_ms": 881
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1838,
+      "output_tokens": 109,
+      "total_tokens": 1947,
+      "latency_ms": 2903
+    },
+    {
+      "iter": 3,
+      "model": "gpt-5.2",
+      "input_tokens": 1998,
+      "output_tokens": 620,
+      "total_tokens": 2618,
+      "latency_ms": 8300
+    }
+  ],
+  "token_totals": {
+    "input": 6653,
+    "output": 774,
+    "total": 7427,
+    "llm_calls": 4
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: customfuzz3   Sanitizer: address\nFunction: lsm1BestIndex\nClaimed bug type: SEGV\nSuspicious-point description (from the finder — may be imprecise): `iIdx2` is assigned a computed `idxNum` value (e.g. 3) rather than a constraint index, and then `pIdxInfo->aConstraintUsage[iIdx2]` is written; iIdx2 can exceed nConstraint, an out-of-bounds write into aConstraintUsage.\n\nControl flow to the bug:\n  - query an lsm1 virtual table with GE/GT then LE/LT constraints\n  - iIdx2 set from idxNum (a value, not a constraint index)\n  - aConstraintUsage[iIdx2] out-of-bounds write -> SEGV\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a SEGV\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_3KHcvk9c6wesbf4cKA4bKVPI",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"lsm1BestIndex\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_3KHcvk9c6wesbf4cKA4bKVPI",
+      "content": "static int lsm1BestIndex(\n  sqlite3_vtab *tab,\n  sqlite3_index_info *pIdxInfo\n){\n  int i;                                            \n  int idxNum = 99;                           \n  int nArg = 0;                                              \n  int argIdx = -1;                                                         \n  int iIdx2 = -1;                                         \n  int omit1 = 0;\n  int omit2 = 0;\n\n  const struct sqlite3_index_constraint *pConstraint;\n  pConstraint = pIdxInfo->aConstraint;\n  for(i=0; i<pIdxInfo->nConstraint; i++, pConstraint++){\n    if( pConstraint->usable==0 ) continue;\n    if( pConstraint->iColumn!=0 ) continue;\n    switch( pConstraint->op ){\n      case SQLITE_INDEX_CONSTRAINT_EQ: {\n        if( idxNum>0 ){\n          argIdx = i;\n          iIdx2 = -1;\n          idxNum = 0;\n          omit1 = 1;\n        }\n        break;\n      }\n      case SQLITE_INDEX_CONSTRAINT_GE:\n      case SQLITE_INDEX_CONSTRAINT_GT: {\n        if( idxNum==99 ){\n          argIdx = i;\n          idxNum = 2;\n          omit1 = pConstraint->op==SQLITE_INDEX_CONSTRAINT_GE;\n        }else if( idxNum==3 ){\n          iIdx2 = idxNum;\n          omit2 = omit1;\n          argIdx = i;\n          idxNum = 1;\n          omit1 = pConstraint->op==SQLITE_INDEX_CONSTRAINT_GE;\n        }\n        break;\n      }\n      case SQLITE_INDEX_CONSTRAINT_LE:\n      case SQLITE_INDEX_CONSTRAINT_LT: {\n        if( idxNum==99 ){\n          argIdx = i;\n          idxNum = 3;\n          omit1 = pConstraint->op==SQLITE_INDEX_CONSTRAINT_LE;\n        }else if( idxNum==2 ){\n          iIdx2 = i;\n          idxNum = 1;\n          omit1 = pConstraint->op==SQLITE_INDEX_CONSTRAINT_LE;\n        }\n        break;\n      }\n    }\n  }\n  if( argIdx>=0 ){\n    pIdxInfo->aConstraintUsage[argIdx].argvIndex = ++nArg;\n    pIdxInfo->aConstraintUsage[argIdx].omit = omit1;\n  }\n  if( iIdx2>=0 ){\n    pIdxInfo->aConstraintUsage[iIdx2].argvIndex = ++nArg;\n    pIdxInfo->aConstraintUsage[iIdx2].omit = omit2;\n  }\n  if( idxNum==0 ){\n    pIdxInfo->estimatedCost = (double)1;\n    pIdxInfo->estimatedRows = 1;\n    pIdxInfo->orderByConsumed = 1;\n  }else if( idxNum==1 ){\n    pIdxInfo->estimatedCost = (double)100;\n    pIdxInfo->estimatedRows = 100;\n  }else if( idxNum<99 ){\n    pIdxInfo->estimatedCost = (double)5000;\n    pIdxInfo->estimatedRows = 5000;\n  }else{\n                         \n    pIdxInfo->estimatedCost = (double)2147483647;\n    pIdxInfo->estimatedRows = 2147483647;\n  }\n  pIdxInfo->idxNum = idxNum;\n  return SQLITE_OK;\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_5U7vzWYlnlU91NsKx503C4gG",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\":\"lsm1BestIndex\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_5U7vzWYlnlU91NsKx503C4gG",
+      "content": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"indirect\", \"n_callers\": 38}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_TDIXPqQ5SeWP3EnfhoxZt8bk",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to drive SQLite to call xBestIndex on the lsm1 virtual table.\\n    # Many harnesses accept SQL text as input.\\n    sql = b\\\"CREATE VIRTUAL TABLE t USING lsm1;\\\\n\\\" \\\\\\n          b\\\"SELECT * FROM t WHERE k>1 AND k<10;\\\\n\\\"\\n    return sql\\n\",\"target\":\"lsm1BestIndex\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_TDIXPqQ5SeWP3EnfhoxZt8bk",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/sq-delta-02/bugs/SQL-008/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_zMCztzr8libcDyyYjUgiLUhg",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source shows a real OOB write risk in lsm1BestIndex(): iIdx2 is intended to store a constraint index (0..nConstraint-1) for the second bound, but in the GE/GT case when idxNum==3 it does `iIdx2 = idxNum;` (i.e., 3) instead of `iIdx2 = i;`. Later, if iIdx2>=0 it writes `pIdxInfo->aConstraintUsage[iIdx2]...` with no bounds check against pIdxInfo->nConstraint. If the query planner provides fewer than 4 constraints (common: exactly two constraints for `k>1 AND k<10`), then iIdx2==3 will index past the end of aConstraintUsage (size nConstraint), causing an out-of-bounds write and potential SEGV/ASan crash. The tainted aspect is the SQL query: by arranging constraints order so that an LE/LT constraint is seen first (sets idxNum=3) and then a GE/GT constraint is seen later (hits the buggy branch), the fuzzer can drive iIdx2 to 3 regardless of nConstraint. No clamping/guard exists. I attempted to run reach_probe but the provided ASan binary path was missing in this environment, so I cannot provide runtime crash proof here; evidence is from direct code inspection.\",\"corrected_description\":\"OOB write in lsm1BestIndex(): when processing constraints, if an LE/LT constraint is encountered first (idxNum becomes 3) and later a GE/GT constraint is processed, the code mistakenly sets `iIdx2 = idxNum` (value 3) instead of `iIdx2 = i` (constraint index). This can make `iIdx2` exceed `pIdxInfo->nConstraint-1`, leading to out-of-bounds write to `pIdxInfo->aConstraintUsage[iIdx2]`.\",\"control_flow_to_bug\":\"SQLite query planning calls lsm1 module xBestIndex -> lsm1BestIndex(tab,pIdxInfo). In the loop over pIdxInfo->aConstraint[0..nConstraint-1], require two usable constraints on column 0: (1) an LE/LT constraint encountered first so idxNum transitions 99->3; (2) later a GE/GT constraint encountered while idxNum==3, taking the `else if( idxNum==3 )` branch in the GE/GT case, executing `iIdx2 = idxNum; idxNum=1; ...`. After the loop, `if( iIdx2>=0 )` writes to `pIdxInfo->aConstraintUsage[iIdx2]` without checking iIdx2<nConstraint, causing OOB write when nConstraint<=3 (e.g., only 2 constraints).\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_zMCztzr8libcDyyYjUgiLUhg",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "project_name": "kamailio",
+  "task_type": "pov",
+  "scan_mode": "full",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "fuzz_parse_msg"
+  ],
+  "workspace": "/tmp/claude-1000/e2e-fbv2-arm/kamailio_38307",
+  "in_place": true,
+  "build_coverage": false,
+  "enable_static_analysis": true,
+  "docker_image": "n132/arvo:38307-fix",
+  "prebuilt_fuzzers": {
+    "fuzz_parse_msg": "/tmp/claude-1000/e2e-fbv2-arm/kamailio_38307/prebuilt/fuzz_parse_msg"
+  },
+  "work_id": "kamailio_38307",
+  "fuzzer_sources": {
+    "fuzz_parse_msg": [
+      "/tmp/claude-1000/e2e-fbv2-arm/kamailio_38307/repo/kamailio/misc/fuzz/fuzz_parse_msg.c"
+    ]
+  },
+  "model_profile": "period-correct",
+  "force_model": "gpt-5.5",
+  "pov_count": 1,
+  "budget_limit": 20.0,
+  "timeout_minutes": 90,
+  "concurrency": 5,
+  "prebuild_dir": "/tmp/claude-1000/e2e-fbv2-arm/kamailio_38307/prebuild/kamailio_38307"
+}

@@ -1,0 +1,181 @@
+{
+  "tag": "mg-full-01__mongoose_0",
+  "gt": "mg_json_get",
+  "crash_type": "stack-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "partial",
+    "pattern_present": true,
+    "reasoning": "Read mg_json_get: it declares unsigned char nesting[MG_JSON_MAX_DEPTH]; and on '{' or '[' executes `if (depth > MG_JSON_MAX_NESTING) return MG_JSON_TOO_DEEP; ... nesting[depth++] = c;`. The write index is the current `depth` before increment. The guard is `>` not `>=`, so when depth == MG_JSON_MAX_NESTING the check passes and it writes nesting[MG_JSON_MAX_NESTING]. This is safe only if MG_JSON_MAX_NESTING <= MG_JSON_MAX_DEPTH-1. The suspicious point is real: the bound check is against a different macro than the array size, and is off-by-one relative to the write. If MG_JSON_MAX_NESTING is equal to MG_JSON_MAX_DEPTH (or larger), then a JSON with MG_JSON_MAX_NESTING+1 nested containers will write past the end of nesting[] (stack-buffer-overflow). Even if MG_JSON_MAX_NESTING is smaller, the check is still loose by one relative to that limit.\n\nCould not run reach_probe due to missing ASan binary path in the environment (tool error: No such file or directory), so no runtime crash evidence was gathered.",
+    "corrected_description": "Potential stack-buffer-overflow in mg_json_get: nesting[] is sized MG_JSON_MAX_DEPTH but indexed with `nesting[depth++]` after only checking `if (depth > MG_JSON_MAX_NESTING)` (off-by-one and uses different limit macro). If MG_JSON_MAX_NESTING >= MG_JSON_MAX_DEPTH, deeply nested JSON causes out-of-bounds write on the stack.",
+    "control_flow_to_bug": "fuzzer -> mg_json_get(json, path, toklen) -> main for-loop over json bytes -> state S_VALUE -> encounter '{' or '[' repeatedly (whitespace skipped) -> each time: optional path handling, then depth check `if (depth > MG_JSON_MAX_NESTING) return MG_JSON_TOO_DEEP;` -> execute `nesting[depth++] = c;` -> when depth reaches MG_JSON_MAX_DEPTH (or when depth==MG_JSON_MAX_NESTING==MG_JSON_MAX_DEPTH), write goes past nesting[] end, corrupting stack and potentially crashing under ASan."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.5,
+  "verdict": "LIKELY",
+  "basis": "tainted, partial clamp (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "mg_json_get"
+      },
+      "result": "int mg_json_get(struct mg_str json, const char *path, int *toklen) {\n  const char *s = json.buf;\n  int len = (int) json.len;\n  enum { S_VALUE, S_KEY, S_COLON, S_COMMA_OR_EOO } expecting = S_VALUE;\n  unsigned char nesting[MG_JSON_MAX_DEPTH];\n  int i = 0;                                     \n  int j = 0;                                                              \n  int depth = 0;                                         \n  int ed = 0;                             \n  int pos = 1;                                        \n  int ci = -1, ei = -1;                                        \n\n  if (toklen) *toklen = 0;\n  if (path[0] != '$') return MG_JSON_INVALID;\n\n#define MG_CHECKRET(x)                                  \\\n  do {                                                  \\\n    if (depth == ed && path[pos] == '\\0' && ci == ei) { \\\n      if (toklen) *toklen = i - j + 1;                  \\\n      return j;                                         \\\n    }                                                   \\\n  } while (0)\n\n                                                             \n                                                     \n#define MG_EOO(x)                                            \\\n  do {                                                       \\\n    if (depth == ed && ci != ei) return MG_JSON_NOT_FOUND;   \\\n    if (c != nesting[depth - 1] + 2) return MG_JSON_INVALID; \\\n    depth--;                                                 \\\n    MG_CHECKRET(x);                                          \\\n  } while (0)\n\n  for (i = 0; i < len; i++) {\n    unsigned char c = ((unsigned char *) s)[i];\n    if (c == ' ' || c == '\\t' || c == '\\n' || c == '\\r') continue;\n    switch (expecting) {\n      case S_VALUE:\n                                                                              \n        if (depth == ed) j = i;\n        if (c == '{') {\n          if (depth > MG_JSON_MAX_NESTING) return MG_JSON_TOO_DEEP;\n          if (depth == ed && path[pos] == '.' && ci == ei) {\n                                                          \n            ed++, pos++, ci = ei = -1;\n          }\n          nesting[depth++] = c;\n          expecting = S_KEY;\n          break;\n        } else if (c == '[') {\n          if (depth > MG_JSON_MAX_NESTING) return MG_JSON_TOO_DEEP;\n          if (depth == ed && path[pos] == '[' && ei == ci) {\n            ed++, pos++, ci = 0;\n            for (ei = 0; path[pos] != ']' && path[pos] != '\\0'; pos++) {\n              ei *= 10;\n              ei += path[pos] - '0';\n            }\n            if (path[pos] != 0) pos++;\n          }\n          nesting[depth++] = c;\n          break;\n        } else if (c == ']' && depth > 0) {                \n          MG_EOO(']');\n        } else if (c == 't' && i + 3 < len && memcmp(&s[i], \"true\", 4) == 0) {\n          i += 3;\n        } else if (c == 'n' && i + 3 < len && memcmp(&s[i], \"null\", 4) == 0) {\n          i += 3;\n        } else if (c == 'f' && i + 4 < len && memcmp(&s[i], \"false\", 5) == 0) {\n          i += 4;\n        } else if (c == '-' || ((c >= '0' && c <= '9'))) {\n          int numlen = 0;\n          mg_atod(&s[i], len - i, &numlen);\n          i += numlen - 1;\n        } else if (c == '\"') {\n          int n = mg_pass_string(&s[i + 1], len - i - 1);\n          if (n < 0) return n;\n          i += n + 1;\n        } else {\n          return MG_JSON_INVALID;\n        }\n        MG_CHECKRET('V');\n        if (depth == ed && ei >= 0) ci++;\n        expecting = S_COMMA_OR_EOO;\n        break;\n\n      case S_KEY:\n        if (c == '\"') {\n          int n = mg_pass_string(&s[i + 1], len - i - 1);\n          if (n < 0) return n;\n          if (i + 1 + n >= len) return MG_JSON_NOT_FOUND;\n          if (depth < ed) return MG_JSON_NOT_FOUND;\n          if (depth == ed && path[pos - 1] != '.') return MG_JSON_NOT_FOUND;\n                                                                              \n                                                     \n                                                                  \n            …[truncated]"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "mg_json_get"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 1, \"reached_via\": \"direct\", \"n_callers\": 2}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Create JSON with many nested arrays to drive depth++\n    n = 300\n    return (b'[' * n) + (b'0') + (b']' * n)\n",
+        "target": "mg_json_get"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/mg-full-01/bugs/mongoose_0/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "partial",
+        "pattern_present": true,
+        "reasoning": "Read mg_json_get: it declares unsigned char nesting[MG_JSON_MAX_DEPTH]; and on '{' or '[' executes `if (depth > MG_JSON_MAX_NESTING) return MG_JSON_TOO_DEEP; ... nesting[depth++] = c;`. The write index is the current `depth` before increment. The guard is `>` not `>=`, so when depth == MG_JSON_MAX_NESTING the check passes and it writes nesting[MG_JSON_MAX_NESTING]. This is safe only if MG_JSON_MAX_NESTING <= MG_JSON_MAX_DEPTH-1. The suspicious point is real: the bound check is against a different macro than the array size, and is off-by-one relative to the write. If MG_JSON_MAX_NESTING is equal to MG_JSON_MAX_DEPTH (or larger), then a JSON with MG_JSON_MAX_NESTING+1 nested containers will write past the end of nesting[] (stack-buffer-overflow). Even if MG_JSON_MAX_NESTING is smaller, the check is still loose by one relative to that limit.\n\nCould not run reach_probe due to missing ASan binary path in the environment (tool error: No such file or directory), so no runtime crash evidence was gathered.",
+        "corrected_description": "Potential stack-buffer-overflow in mg_json_get: nesting[] is sized MG_JSON_MAX_DEPTH but indexed with `nesting[depth++]` after only checking `if (depth > MG_JSON_MAX_NESTING)` (off-by-one and uses different limit macro). If MG_JSON_MAX_NESTING >= MG_JSON_MAX_DEPTH, deeply nested JSON causes out-of-bounds write on the stack.",
+        "control_flow_to_bug": "fuzzer -> mg_json_get(json, path, toklen) -> main for-loop over json bytes -> state S_VALUE -> encounter '{' or '[' repeatedly (whitespace skipped) -> each time: optional path handling, then depth check `if (depth > MG_JSON_MAX_NESTING) return MG_JSON_TOO_DEEP;` -> execute `nesting[depth++] = c;` -> when depth reaches MG_JSON_MAX_DEPTH (or when depth==MG_JSON_MAX_NESTING==MG_JSON_MAX_DEPTH), write goes past nesting[] end, corrupting stack and potentially crashing under ASan."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1031,
+      "output_tokens": 54,
+      "total_tokens": 1085,
+      "latency_ms": 1334
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 2642,
+      "output_tokens": 74,
+      "total_tokens": 2716,
+      "latency_ms": 2001
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2766,
+      "output_tokens": 502,
+      "total_tokens": 3268,
+      "latency_ms": 7687
+    }
+  ],
+  "token_totals": {
+    "input": 6439,
+    "output": 630,
+    "total": 7069,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: fuzz   Sanitizer: address\nFunction: mg_json_get\nClaimed bug type: stack-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): `unsigned char nesting[MG_JSON_MAX_DEPTH]` is indexed by `nesting[depth++]` while the depth guard compares `depth > MG_JSON_MAX_NESTING`; if MAX_NESTING is not strictly below MAX_DEPTH, deeply nested JSON writes past the nesting[] stack array.\n\nControl flow to the bug:\n  - mg_json_get parses deeply nested JSON ({ or [ repeated)\n  - each nesting level does nesting[depth++]=c with an off-by-one/loose depth guard\n  - stack array nesting[] overflows\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a stack-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_yemB3YM8uAWJo2oTB8h9Ftqk",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"mg_json_get\"}"
+          }
+        },
+        {
+          "id": "call_zg7kMc0flpXQ6QypkHuC0zZP",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"mg_json_get\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_yemB3YM8uAWJo2oTB8h9Ftqk",
+      "content": "int mg_json_get(struct mg_str json, const char *path, int *toklen) {\n  const char *s = json.buf;\n  int len = (int) json.len;\n  enum { S_VALUE, S_KEY, S_COLON, S_COMMA_OR_EOO } expecting = S_VALUE;\n  unsigned char nesting[MG_JSON_MAX_DEPTH];\n  int i = 0;                                     \n  int j = 0;                                                              \n  int depth = 0;                                         \n  int ed = 0;                             \n  int pos = 1;                                        \n  int ci = -1, ei = -1;                                        \n\n  if (toklen) *toklen = 0;\n  if (path[0] != '$') return MG_JSON_INVALID;\n\n#define MG_CHECKRET(x)                                  \\\n  do {                                                  \\\n    if (depth == ed && path[pos] == '\\0' && ci == ei) { \\\n      if (toklen) *toklen = i - j + 1;                  \\\n      return j;                                         \\\n    }                                                   \\\n  } while (0)\n\n                                                             \n                                                     \n#define MG_EOO(x)                                            \\\n  do {                                                       \\\n    if (depth == ed && ci != ei) return MG_JSON_NOT_FOUND;   \\\n    if (c != nesting[depth - 1] + 2) return MG_JSON_INVALID; \\\n    depth--;                                                 \\\n    MG_CHECKRET(x);                                          \\\n  } while (0)\n\n  for (i = 0; i < len; i++) {\n    unsigned char c = ((unsigned char *) s)[i];\n    if (c == ' ' || c == '\\t' || c == '\\n' || c == '\\r') continue;\n    switch (expecting) {\n      case S_VALUE:\n                                                                              \n        if (depth == ed) j = i;\n        if (c == '{') {\n          if (depth > MG_JSON_MAX_NESTING) return MG_JSON_TOO_DEEP;\n          if (depth == ed && path[pos] == '.' && ci == ei) {\n                                                          \n            ed++, pos++, ci = ei = -1;\n          }\n          nesting[depth++] = c;\n          expecting = S_KEY;\n          break;\n        } else if (c == '[') {\n          if (depth > MG_JSON_MAX_NESTING) return MG_JSON_TOO_DEEP;\n          if (depth == ed && path[pos] == '[' && ei == ci) {\n            ed++, pos++, ci = 0;\n            for (ei = 0; path[pos] != ']' && path[pos] != '\\0'; pos++) {\n              ei *= 10;\n              ei += path[pos] - '0';\n            }\n            if (path[pos] != 0) pos++;\n          }\n          nesting[depth++] = c;\n          break;\n        } else if (c == ']' && depth > 0) {                \n          MG_EOO(']');\n        } else if (c == 't' && i + 3 < len && memcmp(&s[i], \"true\", 4) == 0) {\n          i += 3;\n        } else if (c == 'n' && i + 3 < len && memcmp(&s[i], \"null\", 4) == 0) {\n          i += 3;\n        } else if (c == 'f' && i + 4 < len && memcmp(&s[i], \"false\", 5) == 0) {\n          i += 4;\n        } else if (c == '-' || ((c >= '0' && c <= '9'))) {\n          int numlen = 0;\n          mg_atod(&s[i], len - i, &numlen);\n          i += numlen - 1;\n        } else if (c == '\"') {\n          int n = mg_pass_string(&s[i + 1], len - i - 1);\n          if (n < 0) return n;\n          i += n + 1;\n        } else {\n          return MG_JSON_INVALID;\n        }\n        MG_CHECKRET('V');\n        if (depth == ed && ei >= 0) ci++;\n        expecting = S_COMMA_OR_EOO;\n        break;\n\n      case S_KEY:\n        if (c == '\"') {\n          int n = mg_pass_string(&s[i + 1], len - i - 1);\n          if (n < 0) return n;\n          if (i + 1 + n >= len) return MG_JSON_NOT_FOUND;\n          if (depth < ed) return MG_JSON_NOT_FOUND;\n          if (depth == ed && path[pos - 1] != '.') return MG_JSON_NOT_FOUND;\n                                                                              \n                                                     \n                                                                  \n                                                                            \n                                              \n          if (depth == ed && path[pos - 1] == '.' &&\n              strncmp(&s[i + 1], &path[pos], (size_t) n) == 0 &&\n              (path[pos + n] == '\\0' || path[pos + n] == '.' ||\n               path[pos + n] == '[')) {\n            pos += n;\n          }\n          i += n + 1;\n          expecting = S_COLON;\n        } else if (c == '}') {                 \n          MG_EOO('}');\n          expecting = S_COMMA_OR_EOO;\n          if (depth == ed && ei >= 0) ci++;\n        } else {\n          return MG_JSON_INVALID;\n        }\n        break;\n\n      case S_COLON:\n        if (c == ':') {\n          expecting = S_VALUE;\n        } else {\n          return MG_JSON_INVALID;\n        }\n        break;\n\n      case S_COMMA_OR_EOO:\n        if (depth <= 0) {\n          return MG_JSON_INVALID;\n        } else if (c == ',') {\n          expecting = (nesting[depth - 1] == '{') ? S_KEY : S_VALUE;\n        } else if (c == ']' || c == '}') {\n          if (depth == ed && c == '}' && path[pos - 1] == '.')\n            return MG_JSON_NOT_FOUND;\n          if (depth == ed && c == ']' && path[pos - 1] == ',')\n            return MG_JSON_NOT_FOUND;\n          MG_EOO('O');\n          if (depth == ed && ei >= 0) ci++;\n        } else {\n          return MG_JSON_INVALID;\n        }\n        break;\n    }"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_zg7kMc0flpXQ6QypkHuC0zZP",
+      "content": "{\"reachable\": true, \"call_depth\": 1, \"reached_via\": \"direct\", \"n_callers\": 2}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_6BKJlNu6eHXm4q51ZvMQvLMF",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Create JSON with many nested arrays to drive depth++\\n    n = 300\\n    return (b'[' * n) + (b'0') + (b']' * n)\\n\",\"target\":\"mg_json_get\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_6BKJlNu6eHXm4q51ZvMQvLMF",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/mg-full-01/bugs/mongoose_0/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_XBI2kgalcz8l8e1xjl7QuAWf",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"partial\",\"pattern_present\":true,\"reasoning\":\"Read mg_json_get: it declares unsigned char nesting[MG_JSON_MAX_DEPTH]; and on '{' or '[' executes `if (depth > MG_JSON_MAX_NESTING) return MG_JSON_TOO_DEEP; ... nesting[depth++] = c;`. The write index is the current `depth` before increment. The guard is `>` not `>=`, so when depth == MG_JSON_MAX_NESTING the check passes and it writes nesting[MG_JSON_MAX_NESTING]. This is safe only if MG_JSON_MAX_NESTING <= MG_JSON_MAX_DEPTH-1. The suspicious point is real: the bound check is against a different macro than the array size, and is off-by-one relative to the write. If MG_JSON_MAX_NESTING is equal to MG_JSON_MAX_DEPTH (or larger), then a JSON with MG_JSON_MAX_NESTING+1 nested containers will write past the end of nesting[] (stack-buffer-overflow). Even if MG_JSON_MAX_NESTING is smaller, the check is still loose by one relative to that limit.\\n\\nCould not run reach_probe due to missing ASan binary path in the environment (tool error: No such file or directory), so no runtime crash evidence was gathered.\",\"corrected_description\":\"Potential stack-buffer-overflow in mg_json_get: nesting[] is sized MG_JSON_MAX_DEPTH but indexed with `nesting[depth++]` after only checking `if (depth > MG_JSON_MAX_NESTING)` (off-by-one and uses different limit macro). If MG_JSON_MAX_NESTING >= MG_JSON_MAX_DEPTH, deeply nested JSON causes out-of-bounds write on the stack.\",\"control_flow_to_bug\":\"fuzzer -> mg_json_get(json, path, toklen) -> main for-loop over json bytes -> state S_VALUE -> encounter '{' or '[' repeatedly (whitespace skipped) -> each time: optional path handling, then depth check `if (depth > MG_JSON_MAX_NESTING) return MG_JSON_TOO_DEEP;` -> execute `nesting[depth++] = c;` -> when depth reaches MG_JSON_MAX_DEPTH (or when depth==MG_JSON_MAX_NESTING==MG_JSON_MAX_DEPTH), write goes past nesting[] end, corrupting stack and potentially crashing under ASan.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_XBI2kgalcz8l8e1xjl7QuAWf",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

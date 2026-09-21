@@ -1,0 +1,22 @@
+{
+  "challenge": "fp-delta-01",
+  "bug": "vuln_001",
+  "tag": "fp-delta-01__vuln_001",
+  "round": "pre-competition",
+  "scan_mode": "delta",
+  "harness": "TestFuzzCryptoCertificateDataSetPEM",
+  "fuzzer": "TestFuzzCryptoCertificateDataSetPEM",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "freerdp_bio_read_pem_with_policy"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "graphs_root": "/home/ze/fb-graphs/build/fp-delta-01",
+  "source_root": "/home/ze/fb-graphs/build/fp-delta-01/repo",
+  "callgraph": "/home/ze/fb-graphs/build/fp-delta-01/graph-TestFuzzCryptoCertificateDataSetPEM/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/freerdp:latest",
+  "project": "freerdp",
+  "blob": "/home/ze/fb-graphs/build/fp-delta-01/bugs/vuln_001/blob"
+}

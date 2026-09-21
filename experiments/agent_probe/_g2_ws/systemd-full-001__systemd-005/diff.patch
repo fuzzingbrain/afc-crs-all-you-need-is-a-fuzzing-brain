@@ -1,0 +1,10 @@
+diff --git a/src/basic/alloc-util.h b/src/basic/alloc-util.h
+--- a/src/basic/alloc-util.h
++++ b/src/basic/alloc-util.h
+@@ -0,0 +1,6 @@
++static inline void unsetp(void *p) {
++                                                                            
++                                                        
++
++        *(void**)p = NULL;
++}

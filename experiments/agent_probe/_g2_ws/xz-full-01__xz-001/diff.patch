@@ -1,0 +1,32 @@
+diff --git a/src/liblzma/check/treeck.c b/src/liblzma/check/treeck.c
+--- a/src/liblzma/check/treeck.c
++++ b/src/liblzma/check/treeck.c
+@@ -0,0 +1,28 @@
++static uint32_t compute_tree_checksum(TreeNode *node, unsigned int depth)
++{
++                           
++  if (!node || node->state == STATE_HASHED) {
++    return 0;
++  }
++
++                                                  
++  uint32_t sum = node->value * (depth + 1);
++
++                                                    
++  if (node->state == STATE_CLEAR) {
++    node->state = STATE_VISITED;
++    for (size_t i = 0; i < node->edge_count; ++i) {
++      TreeNode *child = node->edges[i];
++      if (child) {
++        sum += compute_tree_checksum(child, depth + 1);
++      }
++    }
++    node->state = STATE_HASHED;
++  }
++
++                            
++  free(node->edges);
++  free(node);
++
++  return sum;
++}

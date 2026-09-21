@@ -1,0 +1,22 @@
+{
+  "challenge": "ws-delta-04__vuln_007",
+  "fuzzer": "handler_json",
+  "sanitizer": "address",
+  "functions_indexed": 0,
+  "ground_truth_functions": [
+    "json_string_unescape"
+  ],
+  "q1_finder": {
+    "sp_count": 0,
+    "sp_functions": [],
+    "found_ground_truth": false,
+    "matched_functions": []
+  },
+  "q2_verifier": {
+    "verdict_real": true,
+    "score": 0.95,
+    "is_important": true,
+    "reason": "CONFIRMED VULNERABILITY: Missing bounds check in json_string_unescape at lines 359-368.\n\nVULNERABILITY DETAILS:\n- Function: json_string_unescape (lines 177-559)\n- Vulnerable code: Lines 359-368 - loop processing 8 hex digits for \\U escape in surrogate pair handling\n- Bug: Missing bounds check before accessing string[read_index] at line 361\n- All other similar loops in the function have proper boun",
+    "target_function": "json_string_unescape"
+  }
+}

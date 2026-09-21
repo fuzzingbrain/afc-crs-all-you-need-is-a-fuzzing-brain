@@ -1,0 +1,27 @@
+{
+  "challenge": "sq-delta-02__SQL-008",
+  "fuzzer": "customfuzz3",
+  "sanitizer": "address",
+  "functions_indexed": 9844,
+  "ground_truth_functions": [
+    "lsm1BestIndex"
+  ],
+  "q1_finder": {
+    "sp_count": 2,
+    "sp_functions": [
+      "lsm1BestIndex",
+      "lsm1BestIndex"
+    ],
+    "found_ground_truth": true,
+    "matched_functions": [
+      "lsm1BestIndex"
+    ]
+  },
+  "q2_verifier": {
+    "verdict_real": true,
+    "score": 0.95,
+    "is_important": true,
+    "reason": "CONFIRMED VULNERABILITY - Real bug discovered in SQLite LSM module.\n\n**Bug Location**: ext/lsm1/lsm_vtab.c:865\n**Bug Type**: Typo causing incorrect array index assignment\n**Code**: `iIdx2 = idxNum;` should be `iIdx2 = argIdx;`\n\n**Vulnerability Mechanism**:\n1. When processing range queries with LT/LE followed by GT/GE constraints\n2. Line 865 incorrectly assigns `iIdx2 = idxNum` (value 3) instead of",
+    "target_function": "lsm1BestIndex"
+  }
+}

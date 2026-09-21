@@ -1,0 +1,22 @@
+{
+  "challenge": "sq-delta-03__SQL-010",
+  "fuzzer": "customfuzz3",
+  "sanitizer": "address",
+  "functions_indexed": 9849,
+  "ground_truth_functions": [
+    "fileToString"
+  ],
+  "q1_finder": {
+    "sp_count": 0,
+    "sp_functions": [],
+    "found_ground_truth": false,
+    "matched_functions": []
+  },
+  "q2_verifier": {
+    "verdict_real": true,
+    "score": 0.85,
+    "is_important": true,
+    "reason": "REAL VULNERABILITY CONFIRMED: Two buffer overflow bugs in fileToString: (1) Line 5545 uses nBuf-1 instead of nBuf-i in snprintf, allowing overflow when i is small. (2) Line 5549 unconditionally writes aBuf[nBuf]=0, which is always 1-byte out-of-bounds since valid indices are 0 to nBuf-1. Called with 1024-byte stack buffers from sortedDbStructure. AddressSanitizer will detect this.",
+    "target_function": "fileToString"
+  }
+}

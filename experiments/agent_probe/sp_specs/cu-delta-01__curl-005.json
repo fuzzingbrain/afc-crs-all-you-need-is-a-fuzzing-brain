@@ -1,0 +1,22 @@
+{
+  "challenge": "cu-delta-01",
+  "bug": "curl-005",
+  "tag": "cu-delta-01__curl-005",
+  "round": "pre-competition",
+  "scan_mode": "delta",
+  "harness": "curl_fuzzer_ws",
+  "fuzzer": "curl_fuzzer_ws",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "verynormalprotocol_doing"
+  ],
+  "crash_type": "SEGV",
+  "graphs_root": "/home/ze/fb-graphs/build/cu-delta-01",
+  "source_root": "/home/ze/fb-graphs/build/cu-delta-01/repo",
+  "callgraph": "/home/ze/fb-graphs/build/cu-delta-01/graph-curl_fuzzer_ws/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/curl:latest",
+  "project": "curl",
+  "blob": "/home/ze/fb-graphs/build/cu-delta-01/bugs/curl-005/blob"
+}

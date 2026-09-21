@@ -1,0 +1,408 @@
+diff --git a/src/recon_tmpl.c b/src/recon_tmpl.c
+--- a/src/recon_tmpl.c
++++ b/src/recon_tmpl.c
+@@ -0,0 +1,404 @@
++static int decode_coefs(Dav1dTaskContext *const t,
++                        uint8_t *const a, uint8_t *const l,
++                        const enum RectTxfmSize tx, const enum BlockSize bs,
++                        const Av1Block *const b, const int intra,
++                        const int plane, coef *cf,
++                        enum TxfmType *const txtp, uint8_t *res_ctx)
++{
++    Dav1dTileState *const ts = t->ts;
++    const int chroma = !!plane;
++    const Dav1dFrameContext *const f = t->f;
++    const int lossless = f->frame_hdr->segmentation.lossless[b->seg_id];
++    const TxfmInfo *const t_dim = &dav1d_txfm_dimensions[tx];
++    const int dbg = DEBUG_BLOCK_INFO && plane && 0;
++
++    if (dbg)
++        printf("Start: r=%d\n", ts->msac.rng);
++
++                                                     
++    const int sctx = get_skip_ctx(t_dim, bs, a, l, chroma, f->cur.p.layout);
++    const int all_skip = dav1d_msac_decode_bool_adapt(&ts->msac,
++                             ts->cdf.coef.skip[t_dim->ctx][sctx]);
++    if (dbg)
++        printf("Post-non-zero[%d][%d][%d]: r=%d\n",
++               t_dim->ctx, sctx, all_skip, ts->msac.rng);
++    if (all_skip) {
++        *res_ctx = 0x40;
++        *txtp = lossless * WHT_WHT;                                   
++        return -1;
++    }
++
++                                                               
++    if (lossless) {
++        assert(t_dim->max == TX_4X4);
++        *txtp = WHT_WHT;
++    } else if (t_dim->max + intra >= TX_64X64) {
++        *txtp = DCT_DCT;
++    } else if (chroma) {
++                                                                      
++        *txtp = intra ? dav1d_txtp_from_uvmode[b->uv_mode] :
++                        get_uv_inter_txtp(t_dim, *txtp);
++    } else if (!f->frame_hdr->segmentation.qidx[b->seg_id]) {
++                                                                             
++                                                                            
++                                    
++        *txtp = DCT_DCT;
++    } else {
++        unsigned idx;
++        if (intra) {
++            const enum IntraPredMode y_mode_nofilt = b->y_mode == FILTER_PRED ?
++                dav1d_filter_mode_to_y_mode[b->y_angle] : b->y_mode;
++            if (f->frame_hdr->reduced_txtp_set || t_dim->min == TX_16X16) {
++                idx = dav1d_msac_decode_symbol_adapt4(&ts->msac,
++                          ts->cdf.m.txtp_intra2[t_dim->min][y_mode_nofilt], 4);
++                *txtp = dav1d_tx_types_per_set[idx + 0];
++            } else {
++                idx = dav1d_msac_decode_symbol_adapt8(&ts->msac,
++                          ts->cdf.m.txtp_intra1[t_dim->min][y_mode_nofilt], 6);
++                *txtp = dav1d_tx_types_per_set[idx + 5];
++            }
++            if (dbg)
++                printf("Post-txtp-intra[%d->%d][%d][%d->%d]: r=%d\n",
++                       tx, t_dim->min, y_mode_nofilt, idx, *txtp, ts->msac.rng);
++        } else {
++            if (f->frame_hdr->reduced_txtp_set || t_dim->max == TX_32X32) {
++                idx = dav1d_msac_decode_bool_adapt(&ts->msac,
++                          ts->cdf.m.txtp_inter3[t_dim->min]);
++                *txtp = (idx - 1) & IDTX;                           
++            } else if (t_dim->min == TX_16X16) {
++                idx = dav1d_msac_decode_symbol_adapt16(&ts->msac,
++                          ts->cdf.m.txtp_inter2, 11);
++                *txtp = dav1d_tx_types_per_set[idx + 12];
++            } else {
++                idx = dav1d_msac_decode_symbol_adapt16(&ts->msac,
++                          ts->cdf.m.txtp_inter1[t_dim->min], 15);
++                *txtp = dav1d_tx_types_per_set[idx + 24];
++            }
++            if (dbg)
++                printf("Post-txtp-inter[%d->%d][%d->%d]: r=%d\n",
++                       tx, t_dim->min, idx, *txtp, ts->msac.rng);
++        }
++    }
++
++                              
++    int eob_bin;
++    const int tx2dszctx = imin(t_dim->lw, TX_32X32) + imin(t_dim->lh, TX_32X32);
++    const enum TxClass tx_class = dav1d_tx_type_class[*txtp];
++    const int is_1d = tx_class != TX_CLASS_2D;
++    switch (tx2dszctx) {
++#define case_sz(sz, bin, ns, is_1d) \
++    case sz: { \
++        uint16_t *const eob_bin_cdf = ts->cdf.coef.eob_bin_##bin[chroma]is_1d; \
++        eob_bin = dav1d_msac_decode_symbol_adapt##ns(&ts->msac, eob_bin_cdf, 4 + sz); \
++        break; \
++    }
++    case_sz(0,   16,  4, [is_1d]);
++    case_sz(1,   32,  8, [is_1d]);
++    case_sz(2,   64,  8, [is_1d]);
++    case_sz(3,  128,  8, [is_1d]);
++    case_sz(4,  256, 16, [is_1d]);
++    case_sz(5,  512, 16,        );
++    case_sz(6, 1024, 16,        );
++#undef case_sz
++    }
++    if (dbg)
++        printf("Post-eob_bin_%d[%d][%d][%d]: r=%d\n",
++               16 << tx2dszctx, chroma, is_1d, eob_bin, ts->msac.rng);
++    int eob;
++    if (eob_bin > 1) {
++        uint16_t *const eob_hi_bit_cdf =
++            ts->cdf.coef.eob_hi_bit[t_dim->ctx][chroma][eob_bin];
++        const int eob_hi_bit = dav1d_msac_decode_bool_adapt(&ts->msac, eob_hi_bit_cdf);
++        if (dbg)
++            printf("Post-eob_hi_bit[%d][%d][%d][%d]: r=%d\n",
++                   t_dim->ctx, chroma, eob_bin, eob_hi_bit, ts->msac.rng);
++        eob = ((eob_hi_bit | 2) << (eob_bin - 2)) |
++              dav1d_msac_decode_bools(&ts->msac, eob_bin - 2);
++        if (dbg)
++            printf("Post-eob[%d]: r=%d\n", eob, ts->msac.rng);
++    } else {
++        eob = eob_bin;
++    }
++    assert(eob >= 0);
++
++                  
++    uint16_t (*const eob_cdf)[4] = ts->cdf.coef.eob_base_tok[t_dim->ctx][chroma];
++    uint16_t (*const hi_cdf)[4] = ts->cdf.coef.br_tok[imin(t_dim->ctx, 3)][chroma];
++    unsigned rc, dc_tok;
++
++    if (eob) {
++        uint16_t (*const lo_cdf)[4] = ts->cdf.coef.base_tok[t_dim->ctx][chroma];
++        uint8_t *const levels = t->scratch.levels;                              
++        const int sw = imin(t_dim->w, 8), sh = imin(t_dim->h, 8);
++
++                 
++        unsigned ctx = 1 + (eob > sw * sh * 2) + (eob > sw * sh * 4);
++        int eob_tok = dav1d_msac_decode_symbol_adapt4(&ts->msac, eob_cdf[ctx], 2);
++        int tok = eob_tok + 1;
++        int level_tok = tok * 0x41;
++        unsigned mag;
++
++#define DECODE_COEFS_CLASS(tx_class) \
++        unsigned x, y; \
++        if (tx_class == TX_CLASS_2D) \
++            rc = scan[eob], x = rc >> shift, y = rc & mask; \
++        else if (tx_class == TX_CLASS_H) \
++                                                                          \
++            x = eob & mask, y = eob >> shift, rc = eob; \
++        else                              \
++            x = eob & mask, y = eob >> shift, rc = (x << shift2) | y; \
++        if (dbg) \
++            printf("Post-lo_tok[%d][%d][%d][%d=%d=%d]: r=%d\n", \
++                   t_dim->ctx, chroma, ctx, eob, rc, tok, ts->msac.rng); \
++        if (eob_tok == 2) { \
++            ctx = (tx_class == TX_CLASS_2D ? (x | y) > 1 : y != 0) ? 14 : 7; \
++            tok = dav1d_msac_decode_hi_tok(&ts->msac, hi_cdf[ctx]); \
++            level_tok = tok + (3 << 6); \
++            if (dbg) \
++                printf("Post-hi_tok[%d][%d][%d][%d=%d=%d]: r=%d\n", \
++                       imin(t_dim->ctx, 3), chroma, ctx, eob, rc, tok, \
++                       ts->msac.rng); \
++        } \
++        cf[rc] = tok << 11; \
++        levels[x * stride + y] = (uint8_t) level_tok; \
++        for (int i = eob - 1; i > 0; i--) {          \
++            unsigned rc_i; \
++            if (tx_class == TX_CLASS_2D) \
++                rc_i = scan[i], x = rc_i >> shift, y = rc_i & mask; \
++            else if (tx_class == TX_CLASS_H) \
++                x = i & mask, y = i >> shift, rc_i = i; \
++            else                              \
++                x = i & mask, y = i >> shift, rc_i = (x << shift2) | y; \
++            assert(x < 32 && y < 32); \
++            uint8_t *const level = levels + x * stride + y; \
++            ctx = get_lo_ctx(level, tx_class, &mag, lo_ctx_offsets, x, y, stride); \
++            if (tx_class == TX_CLASS_2D) \
++                y |= x; \
++            tok = dav1d_msac_decode_symbol_adapt4(&ts->msac, lo_cdf[ctx], 3); \
++            if (dbg) \
++                printf("Post-lo_tok[%d][%d][%d][%d=%d=%d]: r=%d\n", \
++                       t_dim->ctx, chroma, ctx, i, rc_i, tok, ts->msac.rng); \
++            if (tok == 3) { \
++                mag &= 63; \
++                ctx = (y > (tx_class == TX_CLASS_2D) ? 14 : 7) + \
++                      (mag > 12 ? 6 : (mag + 1) >> 1); \
++                tok = dav1d_msac_decode_hi_tok(&ts->msac, hi_cdf[ctx]); \
++                if (dbg) \
++                    printf("Post-hi_tok[%d][%d][%d][%d=%d=%d]: r=%d\n", \
++                           imin(t_dim->ctx, 3), chroma, ctx, i, rc_i, tok, \
++                           ts->msac.rng); \
++                *level = (uint8_t) (tok + (3 << 6)); \
++                cf[rc_i] = (tok << 11) | rc; \
++                rc = rc_i; \
++            } else { \
++                                                                               \
++                tok *= 0x17ff41; \
++                *level = (uint8_t) tok; \
++                                                 \
++                tok = (tok >> 9) & (rc + ~0x7ffu); \
++                if (tok) rc = rc_i; \
++                cf[rc_i] = tok; \
++            } \
++        } \
++                 \
++        ctx = (tx_class == TX_CLASS_2D) ? 0 : \
++            get_lo_ctx(levels, tx_class, &mag, lo_ctx_offsets, 0, 0, stride); \
++        dc_tok = dav1d_msac_decode_symbol_adapt4(&ts->msac, lo_cdf[ctx], 3); \
++        if (dbg) \
++            printf("Post-dc_lo_tok[%d][%d][%d][%d]: r=%d\n", \
++                   t_dim->ctx, chroma, ctx, dc_tok, ts->msac.rng); \
++        if (dc_tok == 3) { \
++            if (tx_class == TX_CLASS_2D) \
++                mag = levels[0 * stride + 1] + levels[1 * stride + 0] + \
++                      levels[1 * stride + 1]; \
++            mag &= 63; \
++            ctx = mag > 12 ? 6 : (mag + 1) >> 1; \
++            dc_tok = dav1d_msac_decode_hi_tok(&ts->msac, hi_cdf[ctx]); \
++            if (dbg) \
++                printf("Post-dc_hi_tok[%d][%d][0][%d]: r=%d\n", \
++                       imin(t_dim->ctx, 3), chroma, dc_tok, ts->msac.rng); \
++        } \
++        break
++
++        const uint16_t *scan;
++        switch (tx_class) {
++        case TX_CLASS_2D: {
++            const unsigned nonsquare_tx = tx >= RTX_4X8;
++            const uint8_t (*const lo_ctx_offsets)[5] =
++                dav1d_lo_ctx_offsets[nonsquare_tx + (tx & nonsquare_tx)];
++            scan = dav1d_scans[tx];
++            const ptrdiff_t stride = 4 * sh;
++            const unsigned shift = t_dim->lh < 4 ? t_dim->lh + 2 : 5, shift2 = 0;
++            const unsigned mask = 4 * sh - 1;
++            memset(levels, 0, stride * (4 * sw + 2));
++            DECODE_COEFS_CLASS(TX_CLASS_2D);
++        }
++        case TX_CLASS_H: {
++            const uint8_t (*const lo_ctx_offsets)[5] = NULL;
++            const ptrdiff_t stride = 16;
++            const unsigned shift = t_dim->lh + 2, shift2 = 0;
++            const unsigned mask = 4 * sh - 1;
++            memset(levels, 0, stride * (4 * sh + 2));
++            DECODE_COEFS_CLASS(TX_CLASS_H);
++        }
++        case TX_CLASS_V: {
++            const uint8_t (*const lo_ctx_offsets)[5] = NULL;
++            const ptrdiff_t stride = 16;
++            const unsigned shift = t_dim->lw + 2, shift2 = t_dim->lh + 2;
++            const unsigned mask = 4 * sw - 1;
++            memset(levels, 0, stride * (4 * sw + 2));
++            DECODE_COEFS_CLASS(TX_CLASS_V);
++        }
++#undef DECODE_COEFS_CLASS
++        default: assert(0);
++        }
++    } else {           
++        int tok_br = dav1d_msac_decode_symbol_adapt4(&ts->msac, eob_cdf[0], 2);
++        dc_tok = 1 + tok_br;
++        if (dbg)
++            printf("Post-dc_lo_tok[%d][%d][%d][%d]: r=%d\n",
++                   t_dim->ctx, chroma, 0, dc_tok, ts->msac.rng);
++        if (tok_br == 2) {
++            dc_tok = dav1d_msac_decode_hi_tok(&ts->msac, hi_cdf[0]);
++            if (dbg)
++                printf("Post-dc_hi_tok[%d][%d][0][%d]: r=%d\n",
++                       imin(t_dim->ctx, 3), chroma, dc_tok, ts->msac.rng);
++        }
++        rc = 0;
++    }
++
++                        
++    const uint16_t *const dq_tbl = ts->dq[b->seg_id][plane];
++    const uint8_t *const qm_tbl = *txtp < IDTX ? f->qm[tx][plane] : NULL;
++    const int dq_shift = imax(0, t_dim->ctx - 2);
++    const int cf_max = ~(~127U << (BITDEPTH == 8 ? 8 : f->cur.p.bpc));
++    unsigned cul_level, dc_sign_level;
++
++    if (!dc_tok) {
++        cul_level = 0;
++        dc_sign_level = 1 << 6;
++        if (qm_tbl) goto ac_qm;
++        goto ac_noqm;
++    }
++
++    const int dc_sign_ctx = get_dc_sign_ctx(tx, a, l);
++    uint16_t *const dc_sign_cdf = ts->cdf.coef.dc_sign[chroma][dc_sign_ctx];
++    const int dc_sign = dav1d_msac_decode_bool_adapt(&ts->msac, dc_sign_cdf);
++    if (dbg)
++        printf("Post-dc_sign[%d][%d][%d]: r=%d\n",
++               chroma, dc_sign_ctx, dc_sign, ts->msac.rng);
++
++    int dc_dq = dq_tbl[0];
++    dc_sign_level = (dc_sign - 1) & (2 << 6);
++
++    if (qm_tbl) {
++        dc_dq = (dc_dq * qm_tbl[0] + 16) >> 5;
++
++        if (dc_tok == 15) {
++            dc_tok = read_golomb(&ts->msac) + 15;
++            if (dbg)
++                printf("Post-dc_residual[%d->%d]: r=%d\n",
++                       dc_tok - 15, dc_tok, ts->msac.rng);
++
++            dc_tok &= 0xfffff;
++            dc_dq = (dc_dq * dc_tok) & 0xffffff;
++        } else {
++            dc_dq *= dc_tok;
++            assert(dc_dq <= 0xffffff);
++        }
++        cul_level = dc_tok;
++        dc_dq >>= dq_shift;
++        dc_dq = umin(dc_dq, cf_max + dc_sign);
++        cf[0] = (coef) (dc_sign ? -dc_dq : dc_dq);
++
++        if (rc) ac_qm: {
++            const unsigned ac_dq = dq_tbl[1];
++            do {
++                const int sign = dav1d_msac_decode_bool_equi(&ts->msac);
++                if (dbg)
++                    printf("Post-sign[%d=%d]: r=%d\n", rc, sign, ts->msac.rng);
++                const unsigned rc_tok = cf[rc];
++                unsigned tok, dq = (ac_dq * qm_tbl[rc] + 16) >> 5;
++                int dq_sat;
++
++                if (rc_tok >= (15 << 11)) {
++                    tok = read_golomb(&ts->msac) + 15;
++                    if (dbg)
++                        printf("Post-residual[%d=%d->%d]: r=%d\n",
++                               rc, tok - 15, tok, ts->msac.rng);
++
++                    tok &= 0xfffff;
++                    dq = (dq * tok) & 0xffffff;
++                } else {
++                    tok = rc_tok >> 11;
++                    dq *= tok;
++                    assert(dq <= 0xffffff);
++                }
++                cul_level += tok;
++                dq >>= dq_shift;
++                dq_sat = umin(dq, cf_max + sign);
++                cf[rc] = (coef) (sign ? -dq_sat : dq_sat);
++
++                rc = rc_tok & 0x3ff;
++            } while (rc);
++        }
++    } else {
++                                                                                 
++        if (dc_tok == 15) {
++            dc_tok = read_golomb(&ts->msac) + 15;
++            if (dbg)
++                printf("Post-dc_residual[%d->%d]: r=%d\n",
++                       dc_tok - 15, dc_tok, ts->msac.rng);
++
++            dc_tok &= 0xfffff;
++            dc_dq = ((dc_dq * dc_tok) & 0xffffff) >> dq_shift;
++            dc_dq = umin(dc_dq, cf_max + dc_sign);
++        } else {
++            dc_dq = ((dc_dq * dc_tok) >> dq_shift);
++            assert(dc_dq <= cf_max);
++        }
++        cul_level = dc_tok;
++        cf[0] = (coef) (dc_sign ? -dc_dq : dc_dq);
++
++        if (rc) ac_noqm: {
++            const unsigned ac_dq = dq_tbl[1];
++            do {
++                const int sign = dav1d_msac_decode_bool_equi(&ts->msac);
++                if (dbg)
++                    printf("Post-sign[%d=%d]: r=%d\n", rc, sign, ts->msac.rng);
++                const unsigned rc_tok = cf[rc];
++                unsigned tok;
++                int dq;
++
++                           
++                if (rc_tok >= (15 << 11)) {
++                    tok = read_golomb(&ts->msac) + 15;
++                    if (dbg)
++                        printf("Post-residual[%d=%d->%d]: r=%d\n",
++                               rc, tok - 15, tok, ts->msac.rng);
++
++                                                       
++                    tok &= 0xfffff;
++
++                                          
++                    dq = ((ac_dq * tok) & 0xffffff) >> dq_shift;
++                    dq = umin(dq, cf_max + sign);
++                } else {
++                                                                         
++                    tok = rc_tok >> 11;
++                    dq = ((ac_dq * tok) >> dq_shift);
++                    assert(dq <= cf_max);
++                }
++                cul_level += tok;
++                cf[rc] = (coef) (sign ? -dq : dq);
++
++                rc = rc_tok & 0x3ff;                                 
++            } while (rc);
++        }
++    }
++
++              
++    *res_ctx = umin(cul_level, 63) | dc_sign_level;
++
++    return eob;
++}

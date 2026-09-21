@@ -1,0 +1,163 @@
+[
+  {
+    "source": "logs/lcms_6aa8291d8c104b75602c8197_20260914_170435/worker/cms_postscript_fuzzer_address/agent/pov/POV_5_Unroll16ToFloat.conversation.json",
+    "message": 43,
+    "agent": "POVAgent",
+    "fuzzer": "cms_postscript_fuzzer",
+    "time": "2026-09-14T20:25:25.643334",
+    "args": {
+      "generator_code": "def generate(variant: int) -> bytes:\n    import struct, random\n    def build_profile(have_lut: bool=False) -> bytes:\n        header = bytearray(128)\n        size=0 # placeholder\n        # big endian size at start later\n        header[36:40] = b'acsp'\n        # device class at 12:16 'mntr'\n        header[12:16]=b'mntr'\n        header[16:20]=b'RGB '\n        header[20:24]=b'XYZ '\n        # version at 8:12 we'll set to 0x00000400 big-endian typical 4.0  (0x04300000) but little? We'll keep 0x04300000\n        header[8:12]=struct.pack('>I',0x04300000)\n        # platform at 40:44 'APPL'\n        header[40:44]=b'APPL'\n        # flag etc zeros\n        # Tag table\n        tags=[]\n        if have_lut:\n            # create mft2 tag of minimal size with raw bytes to produce 16-bit grid etc; We'll craft length 32 random bytes.\n            payload=bytes(random.getrandbits(8) for _ in range(32))\n            tags.append((b'mft2',payload))\n        else:\n            payload=b'HelloWorld'  # 10 bytes\n            tags.append((b'desc',payload))\n        count=len(tags)\n        tag_table=struct.pack('>I',count)\n        offset=128+4+12*count\n        data=bytearray()\n        table=bytearray()\n        for sig,pl in tags:\n            table+=sig\n            table+=struct.pack('>II',offset,len(pl))\n            aligned=(len(pl)+3)//4*4\n            data+=pl+b'\\0'*(aligned-len(pl))\n            offset+=aligned\n        tag_section=tag_table+table+data\n        size=128+len(tag_section)\n        header[0:4]=struct.pack('>I',size)\n        profile=bytes(header)+tag_section\n        return profile\n    if variant==1:\n        return build_profile(False)\n    elif variant==2:\n        return build_profile(True)\n    else:\n        # bigger data to trigger\n        prof=build_profile(True)\n        return prof+bytes([0]*1000)\n",
+      "targets": [
+        "cmsGetPostScriptCSA",
+        "Unroll16ToFloat"
+      ]
+    },
+    "result": {
+      "reached": {
+        "cmsGetPostScriptCSA": true,
+        "Unroll16ToFloat": false
+      },
+      "sink_reached": false,
+      "first_unreached": "Unroll16ToFloat",
+      "operands": {},
+      "asan_margin": null,
+      "crashed": false,
+      "sanitizer_type": null,
+      "crash_frame": null,
+      "crash_matches_sp": null,
+      "raw_tail": "85.\nBreakpoint 2 at 0x1fad5b: file cmspack.c, line 1287.\n[Thread debugging using libthread_db enabled]\nUsing host libthread_db library \"/lib/x86_64-linux-gnu/libthread_db.so.1\".\n[New Thread 0x7ffff3eb06c0 (LWP 19)]\nHIT:cmsGetPostScriptCSA\nHIT:cmsGetPostScriptCSA\n[Thread 0x7ffff3eb06c0 (LWP 19) exited]\n[Inferior 1 (process 16) exited normally]\nINFO: Running with entropic power schedule (0xFF, 100).\nINFO: Seed: 1231805804\nINFO: Loaded 1 modules   (8177 inline 8-bit counters): 8177 [0x5555558610f0, 0x5555558630e1), \nINFO: Loaded 1 PC tables (8177 PCs): 8177 [0x5555558630e8,0x555555882ff8), \n/b/elf: Running 1 inputs 1 time(s) each.\nRunning: /b/input\nExecuted /b/input in 1 ms\n***\n*** NOTE: fuzzing was not performed, you have only\n***       executed the target code on a fixed set of inputs.\n***\n",
+      "input_len": 156
+    },
+    "tag": "部分命中",
+    "title": "LCMS · 路径仍未打通",
+    "note": "本次输入命中了 cmsGetPostScriptCSA，但未观察到 Unroll16ToFloat 的断点命中。接下来应检查输入 profile 与目标转换路径的关系；这一次未命中不能证明目标不可达。"
+  },
+  {
+    "source": "logs/mongoose_6aa7857d269d9f35695d0271_20260914_052626/worker/fuzz_address/agent/pov/POV_1_mg_tcpip_rx.conversation.json",
+    "message": 12,
+    "agent": "POVAgent",
+    "fuzzer": "fuzz",
+    "time": "2026-09-14T05:28:23.970057",
+    "args": {
+      "generator_code": "def generate(variant: int) -> bytes:\n    import struct\n    # Build an Ethernet + IPv4 packet\n    def build(total_len):\n        eth_dst = b'\\xff'*6\n        eth_src = b'ABCD12'  # 6 bytes\n        eth_type = struct.pack('!H', 0x0800)\n        ihl = 15  # 60-byte header\n        ver_ihl = (4<<4) | ihl\n        ip_header_base = struct.pack('!BBHHHBBH4s4s', ver_ihl, 0, total_len,\n                                     0,0,64,6,0,\n                                     b'\\x0a\\x00\\x00\\x01', b'\\x0a\\x00\\x00\\x02')\n        options = b'\\x00'*40\n        tcp_hdr = b'\\x00'*20\n        return eth_dst+eth_src+eth_type+ip_header_base+options+tcp_hdr\n    if variant==0:\n        total=40\n    elif variant==1:\n        total=20\n    else:\n        total=60\n    return build(total)\n",
+      "targets": [
+        "mg_tcpip_rx",
+        "mkpay",
+        "rx_ip"
+      ]
+    },
+    "result": {
+      "reached": {
+        "mg_tcpip_rx": true,
+        "mkpay": true,
+        "rx_ip": true
+      },
+      "sink_reached": false,
+      "first_unreached": null,
+      "operands": {},
+      "asan_margin": null,
+      "crashed": false,
+      "sanitizer_type": null,
+      "crash_frame": null,
+      "crash_matches_sp": null,
+      "raw_tail": "]\nHIT:mg_tcpip_rx\nHIT:mkpay\nHIT:mkpay\nHIT:rx_ip\nHIT:mkpay\nHIT:mg_tcpip_rx\nHIT:mkpay\nHIT:mkpay\nHIT:rx_ip\nHIT:mkpay\n0000   ff ff ff ff ff ff 41 42 43 44 31 32 08 00 4f 00   ......ABCD12..O.\n0000   ff ff ff ff ff ff 41 42 43 44 31 32 08 00 4f 00   ......ABCD12..O.\n[Thread 0x7ffff3eb06c0 (LWP 19) exited]\n[Inferior 1 (process 16) exited normally]\nINFO: Running with entropic power schedule (0xFF, 100).\nINFO: Seed: 3056363488\nINFO: Loaded 1 modules   (5018 inline 8-bit counters): 5018 [0x5555557e3708, 0x5555557e4aa2), \nINFO: Loaded 1 PC tables (5018 PCs): 5018 [0x5555557e4aa8,0x5555557f8448), \n/b/elf: Running 1 inputs 1 time(s) each.\nRunning: /b/input\nExecuted /b/input in 36 ms\n***\n*** NOTE: fuzzing was not performed, you have only\n***       executed the target code on a fixed set of inputs.\n***\n",
+      "input_len": 94
+    },
+    "tag": "命中未崩溃",
+    "title": "Mongoose · 到达函数之后",
+    "note": "三个被监测函数都被命中，当前输入没有产生崩溃。本次没有配置 sink，因此 sink_reached=false 不能解释为危险语句未到达。"
+  },
+  {
+    "source": "logs/curl_6aa6dda6070fc98c9e62bc01_20260913_173023/worker/curl_fuzzer_address/agent/pov/POV_1_file_do.conversation.json",
+    "message": 301,
+    "agent": "POVAgent",
+    "fuzzer": "curl_fuzzer",
+    "time": "2026-09-13T17:33:42.028763",
+    "args": {
+      "generator_code": "def generate(variant:int):\n    import struct\n    url=b\"file:///etc/hosts\"\n    return struct.pack('>HI',1,len(url))+url",
+      "sink": "file_do"
+    },
+    "result": {
+      "reached": {},
+      "sink_reached": true,
+      "first_unreached": null,
+      "operands": {},
+      "asan_margin": null,
+      "crashed": false,
+      "sanitizer_type": null,
+      "crash_frame": null,
+      "crash_matches_sp": null,
+      "raw_tail": "tv_nsec = 0}, st_mtim = {tv_sec = 0, tv_nsec = 0}, st_ctim = {tv_sec = 0, tv_nsec = 0}, __glibc_reserved = {0, 0, 0}}\nexpected_size = 140737318507080\nsize_known = false\nfstated = false\nfd = 1136186\nfile = 0xa2f7b0011563a\nxfer_buf = 0x0\nxfer_blen = 0\nSTATE-END\n[Thread 0x7ffff3bb06c0 (LWP 19) exited]\n[Inferior 1 (process 16) exited normally]\nINFO: Running with entropic power schedule (0xFF, 100).\nINFO: Seed: 229070718\nINFO: Loaded 1 modules   (28090 inline 8-bit counters): 28090 [0x555555c291b8, 0x555555c2ff72), \nINFO: Loaded 1 PC tables (28090 PCs): 28090 [0x555555c2ff78,0x555555c9db18), \n/b/elf: Running 1 inputs 1 time(s) each.\nRunning: /b/input\nExecuted /b/input in 9 ms\n***\n*** NOTE: fuzzing was not performed, you have only\n***       executed the target code on a fixed set of inputs.\n***\n",
+      "input_len": 23
+    },
+    "tag": "Sink 命中",
+    "title": "curl · 单独监测 sink",
+    "note": "本次将 file_do 函数作为 sink 断点，返回 sink_reached=true；没有配置 targets，所以 reached 为空。这里只证明进入该函数，不代表某条危险语句已执行，也没有观察到崩溃。"
+  },
+  {
+    "source": "logs/wireshark_6aa798444107340647a62101_20260914_064725/worker/handler_json_address/agent/sp/verify/SPV_1_json_string_unescape.conversation.json",
+    "message": 8,
+    "agent": "SPVerifier",
+    "fuzzer": "handler_json",
+    "time": "2026-09-14T06:48:57.325934",
+    "args": {
+      "generator_code": "import random,struct,os,sys,json\n\ndef generate(variant:int)->bytes:\n    # Craft JSON with malformed Unicode surrogate pair to trigger bug in json_string_unescape\n    # lead surrogate 0xD800, then second U with only 4 digits to be too short\n    bad_string = \"\\\\U0000D800\\\\U1234\"  # missing 4 digits\n    payload = '{\"key\":\"' + bad_string + '\"}'\n    return payload.encode('ascii')\n",
+      "targets": [
+        "json_string_unescape"
+      ],
+      "sp_function": "json_string_unescape",
+      "sp_crash_type": "address"
+    },
+    "result": {
+      "reached": {
+        "json_string_unescape": true
+      },
+      "sink_reached": false,
+      "first_unreached": null,
+      "operands": {},
+      "asan_margin": 0,
+      "crashed": true,
+      "sanitizer_type": "heap-buffer-overflow",
+      "crash_frame": "json_string_unescape @ /src/wireshark/epan/dissectors/packet-json.c:361:29",
+      "crash_matches_sp": false,
+      "raw_tail": " fa fa fa fa fa fa fa fa fa fa fa\n  0x50300012e100: fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa fa\nShadow byte legend (one shadow byte represents 8 application bytes):\n  Addressable:           00\n  Partially addressable: 01 02 03 04 05 06 07 \n  Heap left redzone:       fa\n  Freed heap region:       fd\n  Stack left redzone:      f1\n  Stack mid redzone:       f2\n  Stack right redzone:     f3\n  Stack after return:      f5\n  Stack use after scope:   f8\n  Global redzone:          f9\n  Global init order:       f6\n  Poisoned by user:        f7\n  Container overflow:      fc\n  Array cookie:            ac\n  Intra object redzone:    bb\n  ASan internal:           fe\n  Left alloca redzone:     ca\n  Right alloca redzone:    cb\n==16==ABORTING\nwarning: 44\t./nptl/pthread_kill.c: No such file or directory\n",
+      "input_len": 26
+    },
+    "tag": "崩溃 / 未匹配",
+    "title": "Wireshark · 崩溃与归因分开看",
+    "note": "verifier 的输入触发 heap-buffer-overflow，崩溃帧位于 json_string_unescape。工具仍返回 crash_matches_sp=false；调用参数中的 sp_crash_type 是 address。保留原始归因结果，不能仅凭 crashed=true 宣称已匹配目标 SP。asan_margin=0 是解析到的边界偏移，不代表安全。"
+  },
+  {
+    "source": "logs/mongoose_6aa8b4dbe4e70f1f86ea88e8_20260915_030048/worker/fuzz_address/agent/sp/verify/SPV_4_mg_json_get.conversation.json",
+    "message": 11,
+    "agent": "SPVerifier",
+    "fuzzer": "fuzz",
+    "time": "2026-09-15T03:15:36.190834",
+    "args": {
+      "generator_code": "def generate(variant:int)->bytes:\n    n=variant+31\n    s='['*n+']'*n\n    return s.encode()",
+      "targets": [
+        "mg_json_get"
+      ],
+      "sp_function": "mg_json_get",
+      "sp_crash_type": "stack-buffer-overflow"
+    },
+    "result": {
+      "reached": {
+        "mg_json_get": true
+      },
+      "sink_reached": false,
+      "first_unreached": null,
+      "operands": {},
+      "asan_margin": null,
+      "crashed": true,
+      "sanitizer_type": "stack-buffer-overflow",
+      "crash_frame": "mg_json_get @ /src/mongoose/src/json.c:186:28",
+      "crash_matches_sp": true,
+      "raw_tail": " 00 00 00 00 00 00 00 00 00 00 00\n  0x7ffff5f00280: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00\nShadow byte legend (one shadow byte represents 8 application bytes):\n  Addressable:           00\n  Partially addressable: 01 02 03 04 05 06 07 \n  Heap left redzone:       fa\n  Freed heap region:       fd\n  Stack left redzone:      f1\n  Stack mid redzone:       f2\n  Stack right redzone:     f3\n  Stack after return:      f5\n  Stack use after scope:   f8\n  Global redzone:          f9\n  Global init order:       f6\n  Poisoned by user:        f7\n  Container overflow:      fc\n  Array cookie:            ac\n  Intra object redzone:    bb\n  ASan internal:           fe\n  Left alloca redzone:     ca\n  Right alloca redzone:    cb\n==16==ABORTING\nwarning: 44\t./nptl/pthread_kill.c: No such file or directory\n",
+      "input_len": 64
+    },
+    "tag": "崩溃 / 已匹配",
+    "title": "Mongoose · 验证阶段触发崩溃",
+    "note": "嵌套数组输入命中了 mg_json_get，并触发 stack-buffer-overflow。工具返回 crash_matches_sp=true，表示本次按工具的函数与类型规则匹配到 SP；它不是完整漏洞正确性的独立证明。"
+  }
+]

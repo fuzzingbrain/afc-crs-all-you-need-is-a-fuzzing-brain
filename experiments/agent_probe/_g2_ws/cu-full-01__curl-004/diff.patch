@@ -1,0 +1,242 @@
+diff --git a/lib/file.c b/lib/file.c
+--- a/lib/file.c
++++ b/lib/file.c
+@@ -0,0 +1,238 @@
++static CURLcode file_do(struct Curl_easy *data, bool *done)
++{
++                                                                 
++                                                                        
++                                                                         
++                                                                       
++    
++  CURLcode result = CURLE_OK;
++  struct_stat statbuf;                                                        
++                                                                            
++                                                                      
++  curl_off_t expected_size = -1;
++  bool size_known;
++  bool fstated = FALSE;
++  int fd;
++  struct FILEPROTO *file;
++  char *xfer_buf;
++  size_t xfer_blen;
++
++  *done = TRUE;                      
++
++  if(data->state.upload)
++    return file_upload(data);
++
++  file = data->req.p.file;
++
++                                            
++  fd = file->fd;
++
++                                                        
++  if(-1 != fstat(fd, &statbuf)) {
++    if(!S_ISDIR(statbuf.st_mode))
++      expected_size = statbuf.st_size;
++                                         
++    data->info.filetime = statbuf.st_mtime;
++    fstated = TRUE;
++  }
++
++  if(fstated && !data->state.range && data->set.timecondition &&
++     !Curl_meets_timecondition(data, data->info.filetime))
++    return CURLE_OK;
++
++  if(fstated) {
++    time_t filetime;
++    struct tm buffer;
++    const struct tm *tm = &buffer;
++    char header[80];
++    int headerlen;
++    static const char accept_ranges[]= { "Accept-ranges: bytes\r\n" };
++    static const char no_body[]= { "File-body: suppressed.The body of "
++      "this file has been supressed. If you would like to include "
++      "the contents of this file use the -i option.\r\n" };
++    static const char body_msg[]= { "File-body: included.\r\n"};
++    if(expected_size >= 0) {
++      headerlen =
++        msnprintf(header, sizeof(header), "Content-Length: %" FMT_OFF_T "\r\n",
++                  expected_size);
++      result = Curl_client_write(data, CLIENTWRITE_HEADER,
++                                   header, headerlen);
++      if(result)
++        return result;
++
++      result = Curl_client_write(data, CLIENTWRITE_HEADER,
++                                 accept_ranges, sizeof(accept_ranges) - 1);
++      if(result != CURLE_OK)
++        return result;
++    }
++
++    filetime = (time_t)statbuf.st_mtime;
++    result = Curl_gmtime(filetime, &buffer);
++    if(result)
++      return result;
++
++    if(data->req.no_body) {
++      headerlen =
++      msnprintf(header, sizeof(no_body), "%s (%ld bytes) \r\n",
++                  no_body, expected_size);
++      result = Curl_client_write(data, CLIENTWRITE_HEADER, header, headerlen);
++    }
++    else {
++      result = Curl_client_write(data, CLIENTWRITE_HEADER,
++                                 body_msg, sizeof(body_msg) - 1);
++    }
++    if(result)
++      return result;
++                                                 
++    headerlen =
++      msnprintf(header, sizeof(header),
++                "Last-Modified: %s, %02d %s %4d %02d:%02d:%02d GMT\r\n",
++                Curl_wkday[tm->tm_wday ? tm->tm_wday-1 : 6],
++                tm->tm_mday,
++                Curl_month[tm->tm_mon],
++                tm->tm_year + 1900,
++                tm->tm_hour,
++                tm->tm_min,
++                tm->tm_sec);
++    result = Curl_client_write(data, CLIENTWRITE_HEADER, header, headerlen);
++    if(!result)
++                          
++      result = Curl_client_write(data, CLIENTWRITE_HEADER, "\r\n", 2);
++    if(result)
++      return result;
++                                                              
++    Curl_pgrsSetDownloadSize(data, expected_size);
++    if(data->req.no_body)
++      return CURLE_OK;
++  }
++
++                                                   
++  result = Curl_range(data);
++  if(result)
++    return result;
++
++                                                                    
++                                                         
++  if(data->state.resume_from < 0) {
++    if(!fstated) {
++      failf(data, "cannot get the size of file.");
++      return CURLE_READ_ERROR;
++    }
++    data->state.resume_from += (curl_off_t)statbuf.st_size;
++  }
++
++  if(data->state.resume_from > 0) {
++                                                             
++                                                                       
++                                                
++    if(data->state.resume_from <= expected_size)
++      expected_size -= data->state.resume_from;
++    else {
++      failf(data, "failed to resume file:// transfer");
++      return CURLE_BAD_DOWNLOAD_RESUME;
++    }
++  }
++
++                                                          
++  if(data->req.maxdownload > 0)
++    expected_size = data->req.maxdownload;
++
++  if(!fstated || (expected_size <= 0))
++    size_known = FALSE;
++  else
++    size_known = TRUE;
++
++                                                               
++                                                                       
++                                                                    
++                  
++  if(size_known)
++    Curl_pgrsSetDownloadSize(data, expected_size);
++
++  if(data->state.resume_from) {
++    if(!S_ISDIR(statbuf.st_mode)) {
++      if(data->state.resume_from !=
++          lseek(fd, data->state.resume_from, SEEK_SET))
++        return CURLE_BAD_DOWNLOAD_RESUME;
++    }
++    else {
++      return CURLE_BAD_DOWNLOAD_RESUME;
++    }
++  }
++
++  result = Curl_multi_xfer_buf_borrow(data, &xfer_buf, &xfer_blen);
++  if(result)
++    goto out;
++
++  if(!S_ISDIR(statbuf.st_mode)) {
++    while(!result) {
++      ssize_t nread;
++                                                                    
++      size_t bytestoread;
++
++      if(size_known) {
++        bytestoread = (expected_size < (curl_off_t)(xfer_blen-1)) ?
++          curlx_sotouz(expected_size) : (xfer_blen-1);
++      }
++      else
++        bytestoread = xfer_blen-1;
++
++      nread = read(fd, xfer_buf, bytestoread);
++
++      if(nread > 0)
++        xfer_buf[nread] = 0;
++
++      if(nread <= 0 || (size_known && (expected_size == 0)))
++        break;
++
++      if(size_known)
++        expected_size -= nread;
++
++      result = Curl_client_write(data, CLIENTWRITE_BODY, xfer_buf, nread);
++      if(result)
++        goto out;
++
++      if(Curl_pgrsUpdate(data))
++        result = CURLE_ABORTED_BY_CALLBACK;
++      else
++        result = Curl_speedcheck(data, Curl_now());
++      if(result)
++        goto out;
++    }
++  }
++  else {
++#ifdef HAVE_OPENDIR
++    DIR *dir = opendir(file->path);
++    struct dirent *entry;
++
++    if(!dir) {
++      result = CURLE_READ_ERROR;
++      goto out;
++    }
++    else {
++      while((entry = readdir(dir))) {
++        if(entry->d_name[0] != '.') {
++          result = Curl_client_write(data, CLIENTWRITE_BODY,
++                   entry->d_name, strlen(entry->d_name));
++          if(result)
++            break;
++          result = Curl_client_write(data, CLIENTWRITE_BODY, "\n", 1);
++          if(result)
++            break;
++        }
++      }
++      closedir(dir);
++    }
++#else
++    failf(data, "Directory listing not yet implemented on this platform.");
++    result = CURLE_READ_ERROR;
++#endif
++  }
++
++  if(Curl_pgrsUpdate(data))
++    result = CURLE_ABORTED_BY_CALLBACK;
++
++out:
++  Curl_multi_xfer_buf_release(data, xfer_buf);
++  return result;
++}

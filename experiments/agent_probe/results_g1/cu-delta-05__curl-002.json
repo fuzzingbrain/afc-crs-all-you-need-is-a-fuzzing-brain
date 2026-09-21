@@ -1,0 +1,180 @@
+{
+  "tag": "cu-delta-05__curl-002",
+  "gt": "ftp_state_mdtm_resp",
+  "crash_type": "global-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "read_function",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": false,
+    "guard_clamps": "full",
+    "pattern_present": false,
+    "reasoning": "In ftp_state_mdtm_resp(), the global table indexing happens only in the CURL_FTP_HTTPSTYLE_HEAD block, and it uses fields from struct tm produced by Curl_gmtime(filetime,&buffer), where filetime comes from Curl_getdate_capped() parsing a formatted string built from the MDTM 213 response.\n\nThe fuzzer-controlled MDTM response is parsed by ftp_213_date(), which rejects out-of-range components: month>12, hour>23, minute>59, second>60, etc. So the input cannot directly set tm fields.\n\nMore importantly, the indexed values are tm->tm_wday, tm->tm_mon, tm->tm_sec from Curl_gmtime(). Those are derived from a time_t value and should be normalized by the gmtime implementation: tm_mon is 0..11, tm_wday is 0..6, tm_sec is 0..60 (leap second). The code’s weekday indexing handles 0 specially (maps to 6) and otherwise uses tm_wday-1, which stays within 0..5.\n\nPotential concern: tm_sec==60 (leap second) could index Curl_seconds[60]. However, in curl these tables are sized to cover all valid values (seconds table typically has 61 entries 0..60). Without evidence of a smaller table, the claimed global-buffer-overflow is not established. Also, the fuzzer input cannot force Curl_gmtime() to return tm_sec==60/61; it depends on the platform time conversion and the computed time_t.\n\nNo crash evidence was produced (no reach_probe run), and the available guards/normalization disconfirm the claimed out-of-range tm_mon/wday path.",
+    "corrected_description": "The code formats a Last-Modified header using global string tables indexed by tm_wday/tm_mon/tm_sec from Curl_gmtime(). The only plausible OOB would be if Curl_seconds were not sized for tm_sec==60 (leap second) or if Curl_gmtime returned non-normalized fields, but the MDTM input is range-checked and gmtime is expected to normalize tm fields.",
+    "control_flow_to_bug": "curl_fuzzer_ftp -> FTP protocol state machine -> ftp_state_mdtm_resp(ftpcode==213) parses MDTM timestamp via ftp_213_date(); builds time string; data->info.filetime = Curl_getdate_capped(timebuf); if CURL_FTP_HTTPSTYLE_HEAD enabled and (data->req.no_body && ftpc->file && data->set.get_filetime && filetime>=0) then Curl_gmtime(filetime,&buffer) and msnprintf() indexes Curl_wkday/Curl_month/Curl_seconds with tm fields."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.1,
+  "verdict": "WEAK/FP",
+  "basis": "LLM: pattern absent",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "ftp_state_mdtm_resp"
+      },
+      "result": "static CURLcode ftp_state_mdtm_resp(struct Curl_easy *data,\n                                    int ftpcode)\n{\n  CURLcode result = CURLE_OK;\n  struct FTP *ftp = data->req.p.ftp;\n  struct connectdata *conn = data->conn;\n  struct ftp_conn *ftpc = &conn->proto.ftpc;\n\n  switch(ftpcode) {\n  case 213:\n    {\n                                                                          \n                                                                      \n      int year, month, day, hour, minute, second;\n      struct pingpong *pp = &ftpc->pp;\n      char *resp = Curl_dyn_ptr(&pp->recvbuf) + 4;\n      if(ftp_213_date(resp, &year, &month, &day, &hour, &minute, &second)) {\n                                         \n        char timebuf[24];\n        msnprintf(timebuf, sizeof(timebuf),\n                  \"%04d%02d%02d %02d:%02d:%02d GMT\",\n                  year, month, day, hour, minute, second);\n                                                    \n        data->info.filetime = Curl_getdate_capped(timebuf);\n      }\n\n#ifdef CURL_FTP_HTTPSTYLE_HEAD\n                                                                            \n                                                            \n\n      if(data->req.no_body &&\n         ftpc->file &&\n         data->set.get_filetime &&\n         (data->info.filetime >= 0) ) {\n        char headerbuf[128];\n        int headerbuflen;\n        time_t filetime = data->info.filetime;\n        struct tm buffer;\n        const struct tm *tm = &buffer;\n\n        putenv(\"TZ=right/UTC\");\n        result = Curl_gmtime(filetime, &buffer);\n        if(result)\n          return result;\n\n                                                                     \n        headerbuflen =\n          msnprintf(headerbuf, sizeof(headerbuf),\n            \"Last-Modified: %s, %02d %s %4d %02d:%02d and %s seconds GMT\\r\\n\",\n                    Curl_wkday[tm->tm_wday ? tm->tm_wday-1 : 6],\n                    tm->tm_mday,\n                    Curl_month[tm->tm_mon],\n                    tm->tm_year + 1900,\n                    tm->tm_hour,\n                    tm->tm_min,\n                    Curl_seconds[tm->tm_sec]);\n        result = client_write_header(data, headerbuf, headerbuflen);\n        if(result)\n          return result;\n      }                                                 \n#endif\n    }\n    break;\n  default:\n    infof(data, \"unsupported MDTM reply format\");\n    break;\n  case 550:                                                    \n                                                                  \n                                                                       \n    infof(data, \"MDTM failed: file does not exist or permission problem,\"\n          \" continuing\");\n    break;\n  }\n\n  if(data->set.timecondition) {\n    if((data->info.filetime > 0) && (data->set.timevalue > 0)) {\n      switch(data->set.timecondition) {\n      case CURL_TIMECOND_IFMODSINCE:\n      default:\n        if(data->info.filetime <= data->set.timevalue) {\n          infof(data, \"The requested document is not new enough\");\n          ftp->transfer = PPTRANSFER_NONE;                                \n          data->info.timecond = TRUE;\n          ftp_state(data, FTP_STOP);\n          return CURLE_OK;\n        }\n        break;\n      case CURL_TIMECOND_IFUNMODSINCE:\n        if(data->info.filetime > data->set.timevalue) {\n          infof(data, \"The requested document is not old enough\");\n          ftp->transfer = PPTRANSFER_NONE;                                \n          data->info.timecond = TRUE;\n          ftp_state(data, FTP_STOP);\n          return CURLE_OK;\n        }\n        break;\n      }             \n    }\n    else {\n      infof(data, \"Skipping time comparison\");\n    }\n  }\n\n  if(!result)\n    result = ftp_state_type(data);\n\n  return result;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "ftp_state_mdtm_resp"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"indirect\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "read_function",
+      "args": {
+        "name": "ftp_213_date"
+      },
+      "result": "static bool ftp_213_date(const char *p, int *year, int *month, int *day,\n                         int *hour, int *minute, int *second)\n{\n  size_t len = strlen(p);\n  if(len < 14)\n    return FALSE;\n  *year = twodigit(&p[0]) * 100 + twodigit(&p[2]);\n  *month = twodigit(&p[4]);\n  *day = twodigit(&p[6]);\n  *hour = twodigit(&p[8]);\n  *minute = twodigit(&p[10]);\n  *second = twodigit(&p[12]);\n\n  if((*month > 12) || (*day > 31) || (*hour > 23) || (*minute > 59) ||\n     (*second > 60))\n    return FALSE;\n  return TRUE;\n}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": false,
+        "guard_clamps": "full",
+        "pattern_present": false,
+        "reasoning": "In ftp_state_mdtm_resp(), the global table indexing happens only in the CURL_FTP_HTTPSTYLE_HEAD block, and it uses fields from struct tm produced by Curl_gmtime(filetime,&buffer), where filetime comes from Curl_getdate_capped() parsing a formatted string built from the MDTM 213 response.\n\nThe fuzzer-controlled MDTM response is parsed by ftp_213_date(), which rejects out-of-range components: month>12, hour>23, minute>59, second>60, etc. So the input cannot directly set tm fields.\n\nMore importantly, the indexed values are tm->tm_wday, tm->tm_mon, tm->tm_sec from Curl_gmtime(). Those are derived from a time_t value and should be normalized by the gmtime implementation: tm_mon is 0..11, tm_wday is 0..6, tm_sec is 0..60 (leap second). The code’s weekday indexing handles 0 specially (maps to 6) and otherwise uses tm_wday-1, which stays within 0..5.\n\nPotential concern: tm_sec==60 (leap second) could index Curl_seconds[60]. However, in curl these tables are sized to cover all valid values (seconds table typically has 61 entries 0..60). Without evidence of a smaller table, the claimed global-buffer-overflow is not established. Also, the fuzzer input cannot force Curl_gmtime() to return tm_sec==60/61; it depends on the platform time conversion and the computed time_t.\n\nNo crash evidence was produced (no reach_probe run), and the available guards/normalization disconfirm the claimed out-of-range tm_mon/wday path.",
+        "corrected_description": "The code formats a Last-Modified header using global string tables indexed by tm_wday/tm_mon/tm_sec from Curl_gmtime(). The only plausible OOB would be if Curl_seconds were not sized for tm_sec==60 (leap second) or if Curl_gmtime returned non-normalized fields, but the MDTM input is range-checked and gmtime is expected to normalize tm fields.",
+        "control_flow_to_bug": "curl_fuzzer_ftp -> FTP protocol state machine -> ftp_state_mdtm_resp(ftpcode==213) parses MDTM timestamp via ftp_213_date(); builds time string; data->info.filetime = Curl_getdate_capped(timebuf); if CURL_FTP_HTTPSTYLE_HEAD enabled and (data->req.no_body && ftpc->file && data->set.get_filetime && filetime>=0) then Curl_gmtime(filetime,&buffer) and msnprintf() indexes Curl_wkday/Curl_month/Curl_seconds with tm fields."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1078,
+      "output_tokens": 60,
+      "total_tokens": 1138,
+      "latency_ms": 1290
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 2115,
+      "output_tokens": 20,
+      "total_tokens": 2135,
+      "latency_ms": 1044
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2332,
+      "output_tokens": 601,
+      "total_tokens": 2933,
+      "latency_ms": 8827
+    }
+  ],
+  "token_totals": {
+    "input": 5525,
+    "output": 681,
+    "total": 6206,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: curl_fuzzer_ftp   Sanitizer: address\nFunction: ftp_state_mdtm_resp\nClaimed bug type: global-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): The Last-Modified header is built by indexing global tables with tm fields: `Curl_seconds[tm->tm_sec]`, `Curl_wkday[...]`, `Curl_month[tm->tm_mon]`. tm_sec can be 60/61 (leap second) and tm_mon can be out of the table's range, indexing past the global arrays.\n\nControl flow to the bug:\n  - curl_fuzzer_ftp; MDTM 213 reply carries a date parsed by ftp_213_date\n  - Curl_gmtime yields tm_sec==60/61 (leap second) or out-of-range tm_mon\n  - Curl_seconds[tm->tm_sec] / Curl_month[tm->tm_mon] read past the global array\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a global-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_Ulu8Fv06C5a5kJKqe6rCU4gG",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"ftp_state_mdtm_resp\"}"
+          }
+        },
+        {
+          "id": "call_lVZBcGWXlYww2OPeuOMOrB8K",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"ftp_state_mdtm_resp\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Ulu8Fv06C5a5kJKqe6rCU4gG",
+      "content": "static CURLcode ftp_state_mdtm_resp(struct Curl_easy *data,\n                                    int ftpcode)\n{\n  CURLcode result = CURLE_OK;\n  struct FTP *ftp = data->req.p.ftp;\n  struct connectdata *conn = data->conn;\n  struct ftp_conn *ftpc = &conn->proto.ftpc;\n\n  switch(ftpcode) {\n  case 213:\n    {\n                                                                          \n                                                                      \n      int year, month, day, hour, minute, second;\n      struct pingpong *pp = &ftpc->pp;\n      char *resp = Curl_dyn_ptr(&pp->recvbuf) + 4;\n      if(ftp_213_date(resp, &year, &month, &day, &hour, &minute, &second)) {\n                                         \n        char timebuf[24];\n        msnprintf(timebuf, sizeof(timebuf),\n                  \"%04d%02d%02d %02d:%02d:%02d GMT\",\n                  year, month, day, hour, minute, second);\n                                                    \n        data->info.filetime = Curl_getdate_capped(timebuf);\n      }\n\n#ifdef CURL_FTP_HTTPSTYLE_HEAD\n                                                                            \n                                                            \n\n      if(data->req.no_body &&\n         ftpc->file &&\n         data->set.get_filetime &&\n         (data->info.filetime >= 0) ) {\n        char headerbuf[128];\n        int headerbuflen;\n        time_t filetime = data->info.filetime;\n        struct tm buffer;\n        const struct tm *tm = &buffer;\n\n        putenv(\"TZ=right/UTC\");\n        result = Curl_gmtime(filetime, &buffer);\n        if(result)\n          return result;\n\n                                                                     \n        headerbuflen =\n          msnprintf(headerbuf, sizeof(headerbuf),\n            \"Last-Modified: %s, %02d %s %4d %02d:%02d and %s seconds GMT\\r\\n\",\n                    Curl_wkday[tm->tm_wday ? tm->tm_wday-1 : 6],\n                    tm->tm_mday,\n                    Curl_month[tm->tm_mon],\n                    tm->tm_year + 1900,\n                    tm->tm_hour,\n                    tm->tm_min,\n                    Curl_seconds[tm->tm_sec]);\n        result = client_write_header(data, headerbuf, headerbuflen);\n        if(result)\n          return result;\n      }                                                 \n#endif\n    }\n    break;\n  default:\n    infof(data, \"unsupported MDTM reply format\");\n    break;\n  case 550:                                                    \n                                                                  \n                                                                       \n    infof(data, \"MDTM failed: file does not exist or permission problem,\"\n          \" continuing\");\n    break;\n  }\n\n  if(data->set.timecondition) {\n    if((data->info.filetime > 0) && (data->set.timevalue > 0)) {\n      switch(data->set.timecondition) {\n      case CURL_TIMECOND_IFMODSINCE:\n      default:\n        if(data->info.filetime <= data->set.timevalue) {\n          infof(data, \"The requested document is not new enough\");\n          ftp->transfer = PPTRANSFER_NONE;                                \n          data->info.timecond = TRUE;\n          ftp_state(data, FTP_STOP);\n          return CURLE_OK;\n        }\n        break;\n      case CURL_TIMECOND_IFUNMODSINCE:\n        if(data->info.filetime > data->set.timevalue) {\n          infof(data, \"The requested document is not old enough\");\n          ftp->transfer = PPTRANSFER_NONE;                                \n          data->info.timecond = TRUE;\n          ftp_state(data, FTP_STOP);\n          return CURLE_OK;\n        }\n        break;\n      }             \n    }\n    else {\n      infof(data, \"Skipping time comparison\");\n    }\n  }\n\n  if(!result)\n    result = ftp_state_type(data);\n\n  return result;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_lVZBcGWXlYww2OPeuOMOrB8K",
+      "content": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"indirect\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_UTJ0uw7s9HMG3eHQi2NmbFJo",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"ftp_213_date\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_UTJ0uw7s9HMG3eHQi2NmbFJo",
+      "content": "static bool ftp_213_date(const char *p, int *year, int *month, int *day,\n                         int *hour, int *minute, int *second)\n{\n  size_t len = strlen(p);\n  if(len < 14)\n    return FALSE;\n  *year = twodigit(&p[0]) * 100 + twodigit(&p[2]);\n  *month = twodigit(&p[4]);\n  *day = twodigit(&p[6]);\n  *hour = twodigit(&p[8]);\n  *minute = twodigit(&p[10]);\n  *second = twodigit(&p[12]);\n\n  if((*month > 12) || (*day > 31) || (*hour > 23) || (*minute > 59) ||\n     (*second > 60))\n    return FALSE;\n  return TRUE;\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_fXD2NrrCjhTcrxXTc1i5CcpD",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":false,\"guard_clamps\":\"full\",\"pattern_present\":false,\"reasoning\":\"In ftp_state_mdtm_resp(), the global table indexing happens only in the CURL_FTP_HTTPSTYLE_HEAD block, and it uses fields from struct tm produced by Curl_gmtime(filetime,&buffer), where filetime comes from Curl_getdate_capped() parsing a formatted string built from the MDTM 213 response.\\n\\nThe fuzzer-controlled MDTM response is parsed by ftp_213_date(), which rejects out-of-range components: month>12, hour>23, minute>59, second>60, etc. So the input cannot directly set tm fields.\\n\\nMore importantly, the indexed values are tm->tm_wday, tm->tm_mon, tm->tm_sec from Curl_gmtime(). Those are derived from a time_t value and should be normalized by the gmtime implementation: tm_mon is 0..11, tm_wday is 0..6, tm_sec is 0..60 (leap second). The code’s weekday indexing handles 0 specially (maps to 6) and otherwise uses tm_wday-1, which stays within 0..5.\\n\\nPotential concern: tm_sec==60 (leap second) could index Curl_seconds[60]. However, in curl these tables are sized to cover all valid values (seconds table typically has 61 entries 0..60). Without evidence of a smaller table, the claimed global-buffer-overflow is not established. Also, the fuzzer input cannot force Curl_gmtime() to return tm_sec==60/61; it depends on the platform time conversion and the computed time_t.\\n\\nNo crash evidence was produced (no reach_probe run), and the available guards/normalization disconfirm the claimed out-of-range tm_mon/wday path.\",\"corrected_description\":\"The code formats a Last-Modified header using global string tables indexed by tm_wday/tm_mon/tm_sec from Curl_gmtime(). The only plausible OOB would be if Curl_seconds were not sized for tm_sec==60 (leap second) or if Curl_gmtime returned non-normalized fields, but the MDTM input is range-checked and gmtime is expected to normalize tm fields.\",\"control_flow_to_bug\":\"curl_fuzzer_ftp -> FTP protocol state machine -> ftp_state_mdtm_resp(ftpcode==213) parses MDTM timestamp via ftp_213_date(); builds time string; data->info.filetime = Curl_getdate_capped(timebuf); if CURL_FTP_HTTPSTYLE_HEAD enabled and (data->req.no_body && ftpc->file && data->set.get_filetime && filetime>=0) then Curl_gmtime(filetime,&buffer) and msnprintf() indexes Curl_wkday/Curl_month/Curl_seconds with tm fields.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_fXD2NrrCjhTcrxXTc1i5CcpD",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

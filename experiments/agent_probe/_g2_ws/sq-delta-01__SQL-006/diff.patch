@@ -1,0 +1,63 @@
+diff --git a/ext/misc/base85.c b/ext/misc/base85.c
+--- a/ext/misc/base85.c
++++ b/ext/misc/base85.c
+@@ -0,0 +1,59 @@
++static void base85(sqlite3_context *context, int na, sqlite3_value *av[]){
++  int nb, nc, nv = sqlite3_value_bytes(av[0]);
++  int nvMax = sqlite3_limit(sqlite3_context_db_handle(context),
++                            SQLITE_LIMIT_LENGTH, -1);
++  char *cBuf;
++  u8 *bBuf;
++  assert(na==1);
++  switch( sqlite3_value_type(av[0]) ){
++  case SQLITE_BLOB:
++    nb = nv;
++                                                  
++    nc = 5*(nv/4) + nv%4 + nv/64+1 + 2;
++    if( nvMax < nc ){
++      sqlite3_result_error(context, "blob expanded to base85 too big", -1);
++      return;
++    }
++    bBuf = (u8*)sqlite3_value_blob(av[0]);
++    if( !bBuf ){
++      if( SQLITE_NOMEM==sqlite3_errcode(sqlite3_context_db_handle(context)) ){
++        goto memFail;
++      }
++      sqlite3_result_text(context,"",-1,SQLITE_STATIC);
++      break;
++    }
++    cBuf = sqlite3_malloc(nc);
++    if( !cBuf ) goto memFail;
++    nc = (int)(toBase85(bBuf, nb, cBuf, "\n") - cBuf);
++    sqlite3_result_text(context, cBuf, nc, sqlite3_free);
++    break;
++  case SQLITE_TEXT:
++    nc = nv;
++    nb = 4*(nv/5) + nv%5;                       
++    if( nvMax < nb ){
++      sqlite3_result_error(context, "blob from base85 may be too big", -1);
++      return;
++    }else if( nb<1 ){
++      nb = 1;
++    }
++    cBuf = (char *)sqlite3_value_text(av[0]);
++    if( !cBuf ){
++      if( SQLITE_NOMEM==sqlite3_errcode(sqlite3_context_db_handle(context)) ){
++        goto memFail;
++      }
++      sqlite3_result_zeroblob(context, 0);
++      break;
++    }
++    bBuf = sqlite3_malloc(nb);
++    if( !bBuf ) goto memFail;
++    nb = (int)(fromBase85(cBuf, nc, bBuf) - bBuf);
++    sqlite3_result_blob(context, bBuf, nb, sqlite3_free);
++    break;
++  default:
++    sqlite3_result_error(context, "base85 accepts only blob or text.", -1);
++    return;
++  }
++  return;
++ memFail:
++  sqlite3_result_error(context, "base85 OOM", -1);
++}

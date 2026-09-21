@@ -1,0 +1,32 @@
+{
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-curl.git",
+  "project_name": "curl",
+  "task_type": "pov",
+  "scan_mode": "full",
+  "fuzz_tooling_url": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "fuzz_tooling_ref": "challenge-state/cu-full-01",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "curl_fuzzer"
+  ],
+  "remove_git": true,
+  "timeout_minutes": 45,
+  "budget_limit": 100.0,
+  "concurrency": 1,
+  "docker_image": "aixcc-afc/curl:latest",
+  "prebuilt_fuzzers": {
+    "curl_fuzzer": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/full/cu-full-01/bugs/curl-004/bin/address/curl_fuzzer"
+  },
+  "prebuild_dir": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/full/cu-full-01",
+  "work_id": "cu-full-01",
+  "model_profile": "current",
+  "pov_count": 1,
+  "fuzzer_sources": {
+    "curl_fuzzer": [
+      "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-full-01/curl_fuzzer/harness_src/fuzz_url.cc"
+    ]
+  },
+  "target_commit": "90596654ff69c94412c0d17d978085a4bdf0e49e"
+}

@@ -1,0 +1,22 @@
+{
+  "challenge": "mg-full-01",
+  "bug": "mongoose_0",
+  "tag": "mg-full-01__mongoose_0",
+  "round": "final-competition",
+  "scan_mode": "full",
+  "harness": "fuzz",
+  "fuzzer": "fuzz",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "mg_json_get"
+  ],
+  "crash_type": "stack-buffer-overflow",
+  "graphs_root": "/home/ze/fb-graphs/build/mg-full-01",
+  "source_root": "/home/ze/fb-graphs/build/mg-full-01/repo",
+  "callgraph": "/home/ze/fb-graphs/build/mg-full-01/graph-fuzz/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/mongoose:latest",
+  "project": "mongoose",
+  "blob": "/home/ze/fb-graphs/build/mg-full-01/bugs/mongoose_0/blob"
+}

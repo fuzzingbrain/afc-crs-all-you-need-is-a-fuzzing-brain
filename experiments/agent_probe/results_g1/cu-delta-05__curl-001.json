@@ -1,0 +1,181 @@
+{
+  "tag": "cu-delta-05__curl-001",
+  "gt": "dict_do",
+  "crash_type": "SEGV",
+  "tools_used": [
+    "check_reachability",
+    "read_function",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Read dict_do: it unconditionally does `user_end = strchr(path, '='); if(user_end) { ... user_start = strchr(path, '/') + 1; ... }`. There is no check that `strchr(path,'/')` is non-NULL before adding 1, so if the decoded path contains '=' but no '/', `user_start` becomes (char*)1 and later is passed to `sendf(data, user_start)` (when auth_start != \"debug\"), which will dereference invalid memory and can SEGV.\n\nAlso in same block: `combined = malloc(strlen(second_space) + strlen(passwd)); strcpy(combined, second_space); strcpy(combined + strlen(second_space), passwd);` lacks +1 for the NUL terminator, so the second strcpy writes one byte past the allocation (heap-buffer-overflow). No bounds checks exist.\n\nI could not run reach_probe due to missing ASan binary path in the harness environment, so evidence is from source inspection only; however the bug patterns are clear and unguarded.",
+    "corrected_description": "Two independent memory-safety bugs in dict_do’s auth parsing block (entered when decoded path contains '='): (1) NULL pointer arithmetic: `user_start = strchr(path,'/') + 1` without checking for '/', leading to invalid pointer passed to sendf/strcmp etc (likely SEGV). (2) Heap off-by-one overflow: `malloc(strlen(second_space)+strlen(passwd))` followed by two strcpy, missing space for the final NUL, causing 1-byte OOB write (ASan heap-buffer-overflow).",
+    "control_flow_to_bug": "curl_fuzzer_dict -> (URL parsing sets data->state.up.path from fuzzer input) -> dict_do -> Curl_urldecode(...,&path,...) -> if `strchr(path,'=')` non-NULL enter auth block -> (bug1) if decoded path has no '/', `strchr(path,'/')` returns NULL, `user_start` becomes invalid; if `strcmp(auth_start,\"debug\")` is nonzero then `sendf(data,user_start)` dereferences invalid pointer -> SEGV. Separately, after receiving server response into resp_buf and finding two spaces, it sets `passwd=auth_start`, allocates `combined` without +1 and does two strcpy -> 1-byte heap overflow -> ASan crash."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "dict_do"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 25}"
+    },
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "dict_do"
+      },
+      "result": "static CURLcode dict_do(struct Curl_easy *data, bool *done)\n{\n  char *word;\n  char *eword = NULL;\n  char *ppath;\n  char *database = NULL;\n  char *strategy = NULL;\n  char *nthdef = NULL;                                                  \n                                        \n  char *resp_buf = NULL;\n  char *user_start = NULL;\n  char *user_end = NULL;\n  char *auth_start = NULL;\n  char *auth_end = NULL;\n  char *first_space = NULL;\n  char *second_space = NULL;\n  char *passwd = NULL;\n  unsigned char *combined = NULL;\n  unsigned char md5_out[MD5_DIGEST_LEN];\n\n  CURLcode result;\n\n  char *path;\n\n  *done = TRUE;                      \n\n                                                 \n  result = Curl_urldecode(data->state.up.path, 0, &path, NULL, REJECT_CTRL);\n  if(result)\n    return result;\n\n                                     \n    user_end = strchr(path, '=');\n                                          \n    if(user_end) {\n      size_t resp_count = 0;\n      ssize_t bytes_recv;\n      resp_buf = malloc(1024);\n      memset(resp_buf, 0, 1024);\n                                                 \n      user_start = strchr(path, '/') + 1;\n      *user_end = (char)0;\n      auth_start = user_end + 1;\n      auth_end = strchr(path, '@');\n      if(auth_end) {\n        *auth_end = (char)0;\n      }\n      do {\n      result = sendf(data, \"CLIENT \" LIBCURL_NAME \" \" LIBCURL_VERSION \"\\r\\n\");\n      } while(result == CURLE_AGAIN);\n      if(result)\n        goto error;\n\n      if(strcmp(auth_start, \"debug\")) {\n        do {\n        result = sendf(data, \"Sending extra debug info...\");\n        } while(result == CURLE_AGAIN);\n        do {\n        result = sendf(data, user_start);\n        } while(result == CURLE_AGAIN);\n      }\n\n\n      do {\n      result = Curl_xfer_recv(data, (resp_buf + 1024 * resp_count),\n        1024, &bytes_recv);\n      } while(result == CURLE_AGAIN);\n      if(result)\n        goto error;\n\n      first_space = strchr(resp_buf, ' ');\n      if(!first_space)\n        goto error;\n      second_space = strchr(first_space + 1, ' ');\n      if(!second_space)\n        goto error;\n      second_space++;\n      passwd = auth_start;\n      combined = malloc(strlen(second_space) + strlen(passwd));\n      strcpy(combined, second_space);\n      strcpy(combined + strlen(second_space), passwd);\n      result = Curl_md5it(md5_out, combined, strlen(combined));\n      if(result)\n        goto error;\n      do {\n      result = sendf(data,\n\"AUTH %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\\r\\n\",\n      md5_out[0],\n      md5_out[1],\n      md5_out[2],\n      md5_out[3],\n      md5_out[4],\n      md5_out[5],\n      md5_out[6],\n      md5_out[7],\n      md5_out[8],\n      md5_out[9],\n      md5_out[10],\n      md5_out[11],\n      md5_out[12],\n      md5_out[13],\n      md5_out[14],\n      md5_out[15]);\n      } while(result == CURLE_AGAIN);\n      if(result)\n        goto error;\n    }\n\n\n\n\n\n  if(strncasecompare(path, DICT_MATCH, sizeof(DICT_MATCH)-1) ||\n     strncasecompare(path, DICT_MATCH2, sizeof(DICT_MATCH2)-1) ||\n     strncasecompare(path, DICT_MATCH3, sizeof(DICT_MATCH3)-1)) {\n\n    word = strchr(path, ':');\n    if(word) {\n      word++;\n      database = strchr(word, ':');\n      if(database) {\n        *database++ = (char)0;\n        strategy = strchr(database, ':');\n        if(strategy) {\n          *strategy++ = (char)0;\n          nthdef = strchr(strategy, ':');\n          if(nthdef) {\n            *nthdef = (char)0;\n          }\n        }\n      }\n    }\n\n    if(!word || (*word == (char)0)) {\n      infof(data, \"lookup word is missing\");\n      word = (char *)\"default\";\n    }\n    if(!database || (*database == (char)0)) {\n      database = (char *)\"!\";\n    }\n    if(!strategy || (*strategy == (char)0)) {\n      strategy = (char *)\".\";\n    }\n\n    eword = unescape_word(word);\n    if(!eword) {\n      result = CURLE_OUT_OF_MEMORY;\n      goto error;\n    }\n\n\n    do {\n    result = sendf(data,\n                   \"CLIENT \" LIBCURL_NAME \" \" LIBCURL_VERSION \"\\r\\n\"\n                   \"MATCH \"\n         …[truncated]"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to trigger user_end ('=') present but no '/' in path so strchr(path,'/') returns NULL\n    return b\"dict://example.com?user=debug@x\"\n",
+        "target": "dict_do"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-delta-05/bugs/curl-001/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Read dict_do: it unconditionally does `user_end = strchr(path, '='); if(user_end) { ... user_start = strchr(path, '/') + 1; ... }`. There is no check that `strchr(path,'/')` is non-NULL before adding 1, so if the decoded path contains '=' but no '/', `user_start` becomes (char*)1 and later is passed to `sendf(data, user_start)` (when auth_start != \"debug\"), which will dereference invalid memory and can SEGV.\n\nAlso in same block: `combined = malloc(strlen(second_space) + strlen(passwd)); strcpy(combined, second_space); strcpy(combined + strlen(second_space), passwd);` lacks +1 for the NUL terminator, so the second strcpy writes one byte past the allocation (heap-buffer-overflow). No bounds checks exist.\n\nI could not run reach_probe due to missing ASan binary path in the harness environment, so evidence is from source inspection only; however the bug patterns are clear and unguarded.",
+        "corrected_description": "Two independent memory-safety bugs in dict_do’s auth parsing block (entered when decoded path contains '='): (1) NULL pointer arithmetic: `user_start = strchr(path,'/') + 1` without checking for '/', leading to invalid pointer passed to sendf/strcmp etc (likely SEGV). (2) Heap off-by-one overflow: `malloc(strlen(second_space)+strlen(passwd))` followed by two strcpy, missing space for the final NUL, causing 1-byte OOB write (ASan heap-buffer-overflow).",
+        "control_flow_to_bug": "curl_fuzzer_dict -> (URL parsing sets data->state.up.path from fuzzer input) -> dict_do -> Curl_urldecode(...,&path,...) -> if `strchr(path,'=')` non-NULL enter auth block -> (bug1) if decoded path has no '/', `strchr(path,'/')` returns NULL, `user_start` becomes invalid; if `strcmp(auth_start,\"debug\")` is nonzero then `sendf(data,user_start)` dereferences invalid pointer -> SEGV. Separately, after receiving server response into resp_buf and finding two spaces, it sets `passwd=auth_start`, allocates `combined` without +1 and does two strcpy -> 1-byte heap overflow -> ASan crash."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1079,
+      "output_tokens": 52,
+      "total_tokens": 1131,
+      "latency_ms": 1202
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 3083,
+      "output_tokens": 69,
+      "total_tokens": 3152,
+      "latency_ms": 1466
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 3202,
+      "output_tokens": 531,
+      "total_tokens": 3733,
+      "latency_ms": 8650
+    }
+  ],
+  "token_totals": {
+    "input": 7364,
+    "output": 652,
+    "total": 8016,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: curl_fuzzer_dict   Sanitizer: address\nFunction: dict_do\nClaimed bug type: SEGV\nSuspicious-point description (from the finder — may be imprecise): Several unchecked pointer computations: `user_start = strchr(path,'/') + 1` (NULL+1 when no slash), and `combined = malloc(strlen(second_space)+strlen(passwd))` (no +1 for the terminator) followed by two strcpy that write a NUL past the allocation. A crafted DICT URL drives a wild pointer or heap over-write ending in a crash.\n\nControl flow to the bug:\n  - curl_fuzzer_dict; dict_do URL-decodes the path and parses user=auth@ syntax\n  - strchr(path,'/')+1 with no '/' yields a bogus user_start\n  - malloc(len2+lenpw) without +1, then strcpy(combined,...) + strcpy(combined+len2,...) writes the terminator OOB -> crash\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a SEGV\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_Wi2qp6b34mBd2ChQWYcr3y3f",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"dict_do\"}"
+          }
+        },
+        {
+          "id": "call_u8TUFTA9FG0ulfb78soVPc1s",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"dict_do\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Wi2qp6b34mBd2ChQWYcr3y3f",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 25}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_u8TUFTA9FG0ulfb78soVPc1s",
+      "content": "static CURLcode dict_do(struct Curl_easy *data, bool *done)\n{\n  char *word;\n  char *eword = NULL;\n  char *ppath;\n  char *database = NULL;\n  char *strategy = NULL;\n  char *nthdef = NULL;                                                  \n                                        \n  char *resp_buf = NULL;\n  char *user_start = NULL;\n  char *user_end = NULL;\n  char *auth_start = NULL;\n  char *auth_end = NULL;\n  char *first_space = NULL;\n  char *second_space = NULL;\n  char *passwd = NULL;\n  unsigned char *combined = NULL;\n  unsigned char md5_out[MD5_DIGEST_LEN];\n\n  CURLcode result;\n\n  char *path;\n\n  *done = TRUE;                      \n\n                                                 \n  result = Curl_urldecode(data->state.up.path, 0, &path, NULL, REJECT_CTRL);\n  if(result)\n    return result;\n\n                                     \n    user_end = strchr(path, '=');\n                                          \n    if(user_end) {\n      size_t resp_count = 0;\n      ssize_t bytes_recv;\n      resp_buf = malloc(1024);\n      memset(resp_buf, 0, 1024);\n                                                 \n      user_start = strchr(path, '/') + 1;\n      *user_end = (char)0;\n      auth_start = user_end + 1;\n      auth_end = strchr(path, '@');\n      if(auth_end) {\n        *auth_end = (char)0;\n      }\n      do {\n      result = sendf(data, \"CLIENT \" LIBCURL_NAME \" \" LIBCURL_VERSION \"\\r\\n\");\n      } while(result == CURLE_AGAIN);\n      if(result)\n        goto error;\n\n      if(strcmp(auth_start, \"debug\")) {\n        do {\n        result = sendf(data, \"Sending extra debug info...\");\n        } while(result == CURLE_AGAIN);\n        do {\n        result = sendf(data, user_start);\n        } while(result == CURLE_AGAIN);\n      }\n\n\n      do {\n      result = Curl_xfer_recv(data, (resp_buf + 1024 * resp_count),\n        1024, &bytes_recv);\n      } while(result == CURLE_AGAIN);\n      if(result)\n        goto error;\n\n      first_space = strchr(resp_buf, ' ');\n      if(!first_space)\n        goto error;\n      second_space = strchr(first_space + 1, ' ');\n      if(!second_space)\n        goto error;\n      second_space++;\n      passwd = auth_start;\n      combined = malloc(strlen(second_space) + strlen(passwd));\n      strcpy(combined, second_space);\n      strcpy(combined + strlen(second_space), passwd);\n      result = Curl_md5it(md5_out, combined, strlen(combined));\n      if(result)\n        goto error;\n      do {\n      result = sendf(data,\n\"AUTH %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\\r\\n\",\n      md5_out[0],\n      md5_out[1],\n      md5_out[2],\n      md5_out[3],\n      md5_out[4],\n      md5_out[5],\n      md5_out[6],\n      md5_out[7],\n      md5_out[8],\n      md5_out[9],\n      md5_out[10],\n      md5_out[11],\n      md5_out[12],\n      md5_out[13],\n      md5_out[14],\n      md5_out[15]);\n      } while(result == CURLE_AGAIN);\n      if(result)\n        goto error;\n    }\n\n\n\n\n\n  if(strncasecompare(path, DICT_MATCH, sizeof(DICT_MATCH)-1) ||\n     strncasecompare(path, DICT_MATCH2, sizeof(DICT_MATCH2)-1) ||\n     strncasecompare(path, DICT_MATCH3, sizeof(DICT_MATCH3)-1)) {\n\n    word = strchr(path, ':');\n    if(word) {\n      word++;\n      database = strchr(word, ':');\n      if(database) {\n        *database++ = (char)0;\n        strategy = strchr(database, ':');\n        if(strategy) {\n          *strategy++ = (char)0;\n          nthdef = strchr(strategy, ':');\n          if(nthdef) {\n            *nthdef = (char)0;\n          }\n        }\n      }\n    }\n\n    if(!word || (*word == (char)0)) {\n      infof(data, \"lookup word is missing\");\n      word = (char *)\"default\";\n    }\n    if(!database || (*database == (char)0)) {\n      database = (char *)\"!\";\n    }\n    if(!strategy || (*strategy == (char)0)) {\n      strategy = (char *)\".\";\n    }\n\n    eword = unescape_word(word);\n    if(!eword) {\n      result = CURLE_OUT_OF_MEMORY;\n      goto error;\n    }\n\n\n    do {\n    result = sendf(data,\n                   \"CLIENT \" LIBCURL_NAME \" \" LIBCURL_VERSION \"\\r\\n\"\n                   \"MATCH \"\n                   \"%s \"                  \n                   \"%s \"                  \n                   \"%s\\r\\n\"           \n                   \"QUIT\\r\\n\",\n                   database,\n                   strategy,\n                   eword);\n    } while(result == CURLE_AGAIN);\n\n    if(result) {\n      failf(data, \"Failed sending DICT request\");\n      goto error;\n    }\n    Curl_xfer_setup1(data, CURL_XFER_RECV, -1, FALSE);                \n  }\n  else if(strncasecompare(path, DICT_DEFINE, sizeof(DICT_DEFINE)-1) ||\n          strncasecompare(path, DICT_DEFINE2, sizeof(DICT_DEFINE2)-1) ||\n          strncasecompare(path, DICT_DEFINE3, sizeof(DICT_DEFINE3)-1)) {\n\n    word = strchr(path, ':');\n    if(word) {\n      word++;\n      database = strchr(word, ':');\n      if(database) {\n        *database++ = (char)0;\n        nthdef = strchr(database, ':');\n        if(nthdef) {\n          *nthdef = (char)0;\n        }\n      }\n    }\n\n    if(!word || (*word == (char)0)) {\n      infof(data, \"lookup word is missing\");\n      word = (char *)\"default\";\n    }\n    if(!database || (*database == (char)0)) {\n      database = (char *)\"!\";\n    }\n\n    eword = unescape_word(word);\n    if(!eword) {\n      result = CURLE_OUT_OF_MEMORY;\n      goto error;\n    }\n\n    do {\n    result = sendf(data,\n                   \"CLIENT \" LIBCURL_NAME \" \" LIBCURL_VERSION \"\\r\\n\"\n                   \"DEFINE \"\n                   \"%s \"                   \n                   \"%s\\r\\n\"            \n                   \"QUIT\\r\\n\",\n                   database,\n                   eword);\n    } while(result == CURLE_AGAIN);\n\n    if(result) {\n      failf(data, \"Failed sending DICT request\");\n      goto error;\n    }\n    Curl_xfer_setup1(data, CURL_XFER_RECV, -1, FALSE);\n  }\n  else {\n\n    ppath = strchr(path, '/');\n    if(ppath) {\n      int i;\n\n      ppath++;\n      for(i = 0; ppath[i]; i++) {\n        if(ppath[i] == ':')\n          ppath[i] = ' ';\n      }\n      do {\n      result = sendf(data,\n                     \"CLIENT \" LIBCURL_NAME \" \" LIBCURL_VERS"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_jDQsHM6IFtOzh9W8eWTMPPjM",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to trigger user_end ('=') present but no '/' in path so strchr(path,'/') returns NULL\\n    return b\\\"dict://example.com?user=debug@x\\\"\\n\",\"target\":\"dict_do\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_jDQsHM6IFtOzh9W8eWTMPPjM",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-delta-05/bugs/curl-001/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_K9t3x0rWUCM2QVGtbhwnsenA",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Read dict_do: it unconditionally does `user_end = strchr(path, '='); if(user_end) { ... user_start = strchr(path, '/') + 1; ... }`. There is no check that `strchr(path,'/')` is non-NULL before adding 1, so if the decoded path contains '=' but no '/', `user_start` becomes (char*)1 and later is passed to `sendf(data, user_start)` (when auth_start != \\\"debug\\\"), which will dereference invalid memory and can SEGV.\\n\\nAlso in same block: `combined = malloc(strlen(second_space) + strlen(passwd)); strcpy(combined, second_space); strcpy(combined + strlen(second_space), passwd);` lacks +1 for the NUL terminator, so the second strcpy writes one byte past the allocation (heap-buffer-overflow). No bounds checks exist.\\n\\nI could not run reach_probe due to missing ASan binary path in the harness environment, so evidence is from source inspection only; however the bug patterns are clear and unguarded.\",\"corrected_description\":\"Two independent memory-safety bugs in dict_do’s auth parsing block (entered when decoded path contains '='): (1) NULL pointer arithmetic: `user_start = strchr(path,'/') + 1` without checking for '/', leading to invalid pointer passed to sendf/strcmp etc (likely SEGV). (2) Heap off-by-one overflow: `malloc(strlen(second_space)+strlen(passwd))` followed by two strcpy, missing space for the final NUL, causing 1-byte OOB write (ASan heap-buffer-overflow).\",\"control_flow_to_bug\":\"curl_fuzzer_dict -> (URL parsing sets data->state.up.path from fuzzer input) -> dict_do -> Curl_urldecode(...,&path,...) -> if `strchr(path,'=')` non-NULL enter auth block -> (bug1) if decoded path has no '/', `strchr(path,'/')` returns NULL, `user_start` becomes invalid; if `strcmp(auth_start,\\\"debug\\\")` is nonzero then `sendf(data,user_start)` dereferences invalid pointer -> SEGV. Separately, after receiving server response into resp_buf and finding two spaces, it sets `passwd=auth_start`, allocates `combined` without +1 and does two strcpy -> 1-byte heap overflow -> ASan crash.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_K9t3x0rWUCM2QVGtbhwnsenA",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

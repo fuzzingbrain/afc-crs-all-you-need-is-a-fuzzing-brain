@@ -1,0 +1,33 @@
+{
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-libexif.git",
+  "project_name": "libexif",
+  "task_type": "pov",
+  "scan_mode": "delta",
+  "fuzz_tooling_url": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "fuzz_tooling_ref": "challenge-state/ex-delta-03",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "exif_from_data_fuzzer"
+  ],
+  "remove_git": true,
+  "timeout_minutes": 360,
+  "budget_limit": 100.0,
+  "concurrency": 1,
+  "docker_image": "aixcc-afc/libexif:latest",
+  "prebuilt_fuzzers": {
+    "exif_from_data_fuzzer": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/ex-delta-03/bugs/exif-002/bin/address/exif_from_data_fuzzer"
+  },
+  "prebuild_dir": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/ex-delta-03",
+  "work_id": "ex-delta-03",
+  "model_profile": "period-correct",
+  "pov_count": 1,
+  "base_commit": "33e52cd19e4df56fdb363d6ea40245e21d870c7b",
+  "delta_commit": "challenges/ex-delta-03",
+  "fuzzer_sources": {
+    "exif_from_data_fuzzer": [
+      "/home/ze/fbv2/experiments/agent_probe/prebuild/ex-delta-03/exif_from_data_fuzzer/harness_src/exif_from_data_fuzzer.cc"
+    ]
+  }
+}

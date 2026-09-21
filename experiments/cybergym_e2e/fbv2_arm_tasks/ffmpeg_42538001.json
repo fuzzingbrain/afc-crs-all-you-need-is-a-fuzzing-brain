@@ -1,0 +1,32 @@
+{
+  "project_name": "ffmpeg",
+  "task_type": "pov",
+  "scan_mode": "full",
+  "sanitizers": [
+    "memory"
+  ],
+  "fuzzers": [
+    "ffmpeg_AV_CODEC_ID_NOTCHLC_fuzzer"
+  ],
+  "workspace": "/tmp/claude-1000/e2e-fbv2-arm/ffmpeg_42538001",
+  "in_place": true,
+  "build_coverage": false,
+  "enable_static_analysis": true,
+  "docker_image": "cybergym/oss-fuzz:42538001-fix",
+  "prebuilt_fuzzers": {
+    "ffmpeg_AV_CODEC_ID_NOTCHLC_fuzzer": "/tmp/claude-1000/e2e-fbv2-arm/ffmpeg_42538001/prebuilt/ffmpeg_AV_CODEC_ID_NOTCHLC_fuzzer"
+  },
+  "work_id": "ffmpeg_42538001",
+  "fuzzer_sources": {
+    "ffmpeg_AV_CODEC_ID_NOTCHLC_fuzzer": [
+      "/tmp/claude-1000/e2e-fbv2-arm/ffmpeg_42538001/repo/ffmpeg/tools/target_dec_fuzzer.c"
+    ]
+  },
+  "model_profile": "period-correct",
+  "force_model": "gpt-5.5",
+  "pov_count": 1,
+  "budget_limit": 20.0,
+  "timeout_minutes": 90,
+  "concurrency": 5,
+  "prebuild_dir": "/tmp/claude-1000/e2e-fbv2-arm/ffmpeg_42538001/prebuild/ffmpeg_42538001"
+}

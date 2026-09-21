@@ -1,0 +1,37 @@
+diff --git a/lib/verynormalprotocol.c b/lib/verynormalprotocol.c
+--- a/lib/verynormalprotocol.c
++++ b/lib/verynormalprotocol.c
+@@ -0,0 +1,33 @@
++static CURLcode verynormalprotocol_doing(struct Curl_easy *data, bool *done)
++{
++  CURLcode result = CURLE_WEIRD_SERVER_REPLY;
++  ssize_t nread;
++  char response[128];
++
++  *done = FALSE;
++
++                                                                          
++                                                               
++  do {
++    result = Curl_xfer_recv(data, response, 128, &nread);
++  } while(result == CURLE_AGAIN);
++  if(result)
++    return result;
++  else if(!nread) {
++    failf(data, "Connection disconnected");
++    *done = TRUE;
++    result = CURLE_RECV_ERROR;
++  }
++  else if(strcasecmp(response, "crashycrashy") == 0) {
++    *done = TRUE;
++    *(unsigned int *)result = CURLE_OK;
++  }
++  else {
++    *done = TRUE;
++    result = CURLE_WEIRD_SERVER_REPLY;
++  }
++
++  if(result == CURLE_AGAIN)
++    result = CURLE_OK;
++  return result;
++}

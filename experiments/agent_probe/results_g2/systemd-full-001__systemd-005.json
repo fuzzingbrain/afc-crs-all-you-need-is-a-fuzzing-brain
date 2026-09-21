@@ -1,0 +1,197 @@
+{
+  "tag": "systemd-full-001__systemd-005",
+  "gt": "unsetp",
+  "crash_type": "double-free",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": false,
+    "guard_clamps": "none",
+    "pattern_present": false,
+    "reasoning": "Read unsetp: it is a tiny helper that unconditionally writes NULL through the passed address: `*(void**)p = NULL;`. There is no free() here, so the claimed double-free pattern is not present in this function.\n\nThe suspicious point is instead a potential invalid write/NULL-deref if a caller passes an invalid address (including NULL) as `p`. However, check_reachability reports unsetp is reachable indirectly at depth 3 but shows n_callers=0 (likely inlined/static helper; callgraph tool may not attribute callers). A reach_probe with a minimal `--help` input did not hit unsetp, so we have no runtime evidence that fuzz input can drive execution into unsetp with a bad argument.\n\nGiven current evidence: no double-free in unsetp; possible invalid write exists in principle but is unproven reachable with attacker-controlled `p` and unproven crash.",
+    "corrected_description": "Not a double-free. unsetp(void *p) performs an unconditional store through `p` (`*(void**)p = NULL;`). If any caller passes NULL or a non-writable/invalid address, this can cause an ASan-detectable SEGV (invalid write).",
+    "control_flow_to_bug": "Unproven by probe. Theoretical: fuzz entry (fuzz-systemctl-parse-argv) -> systemctl argument parsing -> some code path that calls unsetp(&ptr) to clear a pointer. Crash would require a buggy caller passing p==NULL or otherwise invalid (not the address of a writable pointer variable). No concrete input/path established."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": [
+      {
+        "target": "unsetp",
+        "hit": false,
+        "crashed": false,
+        "asan_type": null
+      }
+    ]
+  },
+  "score": 0.1,
+  "verdict": "WEAK/FP",
+  "basis": "LLM: pattern absent",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "unsetp"
+      },
+      "result": "static inline void unsetp(void *p) {\n                                                                            \n                                                        \n\n        *(void**)p = NULL;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "unsetp"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 3, \"reached_via\": \"indirect\", \"n_callers\": 0}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # systemctl parse-argv fuzz target: try minimal input\n    return b\"--help\\n\"\n",
+        "target": "unsetp"
+      },
+      "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": false,
+        "guard_clamps": "none",
+        "pattern_present": false,
+        "reasoning": "Read unsetp: it is a tiny helper that unconditionally writes NULL through the passed address: `*(void**)p = NULL;`. There is no free() here, so the claimed double-free pattern is not present in this function.\n\nThe suspicious point is instead a potential invalid write/NULL-deref if a caller passes an invalid address (including NULL) as `p`. However, check_reachability reports unsetp is reachable indirectly at depth 3 but shows n_callers=0 (likely inlined/static helper; callgraph tool may not attribute callers). A reach_probe with a minimal `--help` input did not hit unsetp, so we have no runtime evidence that fuzz input can drive execution into unsetp with a bad argument.\n\nGiven current evidence: no double-free in unsetp; possible invalid write exists in principle but is unproven reachable with attacker-controlled `p` and unproven crash.",
+        "corrected_description": "Not a double-free. unsetp(void *p) performs an unconditional store through `p` (`*(void**)p = NULL;`). If any caller passes NULL or a non-writable/invalid address, this can cause an ASan-detectable SEGV (invalid write).",
+        "control_flow_to_bug": "Unproven by probe. Theoretical: fuzz entry (fuzz-systemctl-parse-argv) -> systemctl argument parsing -> some code path that calls unsetp(&ptr) to clear a pointer. Crash would require a buggy caller passing p==NULL or otherwise invalid (not the address of a writable pointer variable). No concrete input/path established."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1026,
+      "output_tokens": 52,
+      "total_tokens": 1078,
+      "latency_ms": 1095
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1150,
+      "output_tokens": 53,
+      "total_tokens": 1203,
+      "latency_ms": 1101
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1232,
+      "output_tokens": 372,
+      "total_tokens": 1604,
+      "latency_ms": 5352
+    }
+  ],
+  "token_totals": {
+    "input": 3408,
+    "output": 477,
+    "total": 3885,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: fuzz-systemctl-parse-argv   Sanitizer: address\nFunction: unsetp\nClaimed bug type: double-free\nSuspicious-point description (from the finder — may be imprecise): Potential NULL pointer dereference / invalid write: unsetp(void *p) unconditionally performs `*(void**) p = NULL;` with no validation that `p` is non-NULL and points to writable memory holding a pointer. If any caller passes NULL (or an invalid pointer, or a pointer to read-only memory) as the address-to-clear, this becomes an ASan-detectable crash (SEGV on write). Root cause is missing parameter validation in a helper intended to clear a pointer via indirection.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a double-free\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_wI9qrytuRjp6XvXTWjaS7kfd",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"unsetp\"}"
+          }
+        },
+        {
+          "id": "call_APL2I8qdbF5e5i0Rv6OLLDWB",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"unsetp\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_wI9qrytuRjp6XvXTWjaS7kfd",
+      "content": "static inline void unsetp(void *p) {\n                                                                            \n                                                        \n\n        *(void**)p = NULL;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_APL2I8qdbF5e5i0Rv6OLLDWB",
+      "content": "{\"reachable\": true, \"call_depth\": 3, \"reached_via\": \"indirect\", \"n_callers\": 0}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_L3KGGHeibq6nZOUENycatEEM",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # systemctl parse-argv fuzz target: try minimal input\\n    return b\\\"--help\\\\n\\\"\\n\",\"target\":\"unsetp\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_L3KGGHeibq6nZOUENycatEEM",
+      "content": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_J9qHoVmNbmwDyK5wLYXjBOz9",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":false,\"guard_clamps\":\"none\",\"pattern_present\":false,\"reasoning\":\"Read unsetp: it is a tiny helper that unconditionally writes NULL through the passed address: `*(void**)p = NULL;`. There is no free() here, so the claimed double-free pattern is not present in this function.\\n\\nThe suspicious point is instead a potential invalid write/NULL-deref if a caller passes an invalid address (including NULL) as `p`. However, check_reachability reports unsetp is reachable indirectly at depth 3 but shows n_callers=0 (likely inlined/static helper; callgraph tool may not attribute callers). A reach_probe with a minimal `--help` input did not hit unsetp, so we have no runtime evidence that fuzz input can drive execution into unsetp with a bad argument.\\n\\nGiven current evidence: no double-free in unsetp; possible invalid write exists in principle but is unproven reachable with attacker-controlled `p` and unproven crash.\",\"corrected_description\":\"Not a double-free. unsetp(void *p) performs an unconditional store through `p` (`*(void**)p = NULL;`). If any caller passes NULL or a non-writable/invalid address, this can cause an ASan-detectable SEGV (invalid write).\",\"control_flow_to_bug\":\"Unproven by probe. Theoretical: fuzz entry (fuzz-systemctl-parse-argv) -> systemctl argument parsing -> some code path that calls unsetp(&ptr) to clear a pointer. Crash would require a buggy caller passing p==NULL or otherwise invalid (not the address of a writable pointer variable). No concrete input/path established.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_J9qHoVmNbmwDyK5wLYXjBOz9",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "unsetp"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Potential NULL pointer dereference / invalid write: unsetp(void *p) unconditionally performs `*(void**) p = NULL;` with no validation that `p` is non-NULL and points to writable memory holding a pointer. If any caller passes NULL (or an invalid pointer, or a pointer to read-only memory) as the address-to-clear, this becomes an ASan-detectable crash (SEGV on write). Root cause is missing parameter validation in a helper intended to clear a pointer via indirection.",
+  "finder_vuln_type": ""
+}

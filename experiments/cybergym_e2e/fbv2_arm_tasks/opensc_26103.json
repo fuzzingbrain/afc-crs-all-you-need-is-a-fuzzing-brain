@@ -1,0 +1,32 @@
+{
+  "project_name": "opensc",
+  "task_type": "pov",
+  "scan_mode": "full",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "fuzz_pkcs15_reader"
+  ],
+  "workspace": "/tmp/claude-1000/e2e-fbv2-arm/opensc_26103",
+  "in_place": true,
+  "build_coverage": false,
+  "enable_static_analysis": true,
+  "docker_image": "gcr.io/oss-fuzz-base/base-builder@sha256:fba1033c6a64433642ab97b6ea987ddaa9938e06596c6cace1c786130fc1461b",
+  "prebuilt_fuzzers": {
+    "fuzz_pkcs15_reader": "/tmp/claude-1000/e2e-fbv2-arm/opensc_26103/prebuilt/fuzz_pkcs15_reader"
+  },
+  "work_id": "opensc_26103",
+  "fuzzer_sources": {
+    "fuzz_pkcs15_reader": [
+      "/tmp/claude-1000/e2e-fbv2-arm/opensc_26103/repo/opensc/src/tests/fuzzing/fuzz_pkcs15_reader.c"
+    ]
+  },
+  "model_profile": "period-correct",
+  "force_model": "gpt-5.5",
+  "pov_count": 1,
+  "budget_limit": 20.0,
+  "timeout_minutes": 90,
+  "concurrency": 5,
+  "prebuild_dir": "/tmp/claude-1000/e2e-fbv2-arm/opensc_26103/prebuild/opensc_26103"
+}

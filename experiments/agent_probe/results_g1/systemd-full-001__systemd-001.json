@@ -1,0 +1,231 @@
+{
+  "tag": "systemd-full-001__systemd-001",
+  "gt": "udev_rule_parse_value",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source shows two unbounded scans for a closing quote: (1) leading-flag scan `for (k=str; *k!='\"'; k++) pos++;` has no `*k=='\\0'` check, so if input lacks a quote it will read past the NUL terminator (OOB read). (2) In the non-escaped branch, loop `for (j=m, i=m+1; *i!='\"'; i++, j++) { if (*i=='\\0') return -EINVAL; ... *j=*i; }` is bounded by NUL check.\n\nFor the claimed heap-buffer-overflow: in the escaped+prefix-match branch, it does `memcpy(str + pos - 1, unescaped, l + 1);` then writes `str[pos + l - 1]`, `str[pos + l]`, `str[pos + l + 1]`. Here `pos` counts bytes before the first quote, and `l` is unescaped length (<= original escaped length). There is no check that the original `str` allocation has room for the extra `*` and the two NULs at `pos+l+1`. If the original buffer is only sized to the input string length+1, then adding `*` plus an extra NUL can overflow by up to 2 bytes. Also `memcpy(str+pos-1, ..., l+1)` can overlap with source region in `str` (but source is `unescaped`, so fine) and can write starting at `pos-1` which assumes there is a flag byte to overwrite; if `pos==0` this underflows, but `is_prefix_match` implies at least one flag so `pos>=1`.\n\nHowever, I could not confirm reach in the provided harness with two probe inputs; `reach_probe` did not hit `udev_rule_parse_value`, so I cannot provide a crashing proof. Evidence is therefore limited to code inspection: the write pattern is present and appears unguarded, but actual exploitability depends on how `str` is allocated/passed by callers (whether it has spare capacity).",
+    "corrected_description": "Likely bug is an out-of-bounds write (heap-buffer-overflow) in the escaped+prefix-match ('e' and 'p' flags) path: after unescaping, the code appends `*` and two NUL terminators at `str[pos+l-1..pos+l+1]` without ensuring the destination buffer is large enough. Separately, there is an unbounded read in the initial flag scan if the input lacks a '\"' terminator.",
+    "control_flow_to_bug": "fuzzer entry -> caller parses a rule value string and passes a mutable NUL-terminated buffer `str` into udev_rule_parse_value(). Input must begin with valid flag letters (subset of e/i/p) followed by an opening quote. To hit the claimed overflow: include both 'e' and 'p' before the quote so `is_escaped && is_prefix_match` is true; include a closing quote so the scan for `i` terminates; then `cunescape_length()` returns `l` and the function executes `memcpy(str+pos-1, unescaped, l+1)` and writes `str[pos+l-1]='*'; str[pos+l]=0; str[pos+l+1]=0;` potentially past the original allocation end."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": [
+      {
+        "target": "udev_rule_parse_value",
+        "hit": false,
+        "crashed": false,
+        "asan_type": null
+      },
+      {
+        "target": "udev_rule_parse_value",
+        "hit": false,
+        "crashed": false,
+        "asan_type": null
+      }
+    ]
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "udev_rule_parse_value"
+      },
+      "result": "int udev_rule_parse_value(char *str, char **ret_value, char **ret_endpos, bool *ret_is_case_insensitive) {\n        char *i, *j, *m;\n        bool is_escaped = false, is_case_insensitive = false, is_prefix_match = false;\n        int pos = 0;\n\n        assert(str);\n        assert(ret_value);\n        assert(ret_endpos);\n        assert(ret_is_case_insensitive);\n\n                                            \n                            \n                                           \n                                 \n          \n                                                               \n        for (const char *k = str; *k != '\"'; k++) {\n                pos++;\n                if (*k == 'e')\n                        is_escaped = true;\n                else if (*k == 'i')\n                        is_case_insensitive = true;\n                else if (*k == 'p')\n                        is_prefix_match = true;\n                else\n                        return -EINVAL; \n        }\n\n                                           \n        if (str[pos] != '\"')\n                return -EINVAL;\n        \n        m = str + is_escaped + is_case_insensitive + is_prefix_match;\n\n        if (!is_escaped) {\n                                                         \n                for (j = m, i = m + 1; *i != '\"'; i++, j++) {\n                        if (*i == '\\0')\n                                return -EINVAL;\n                        if (i[0] == '\\\\' && i[1] == '\"')\n                                i++;\n                        *j = *i;\n                }\n                  \n                                                                             \n                                                               \n                   \n                if (is_prefix_match){\n                        j[0] = '*';\n                        j[1] = '\\0';\n                        j[2] = '\\0';\n                } else {\n                        j[0] = '\\0';\n                        j[1] = '\\0';\n                }\n                str = m;            \n        } else {\n                _cleanup_free_ char *unescaped = NULL;\n                ssize_t l;\n\n                                                    \n                for (i = m + 1; *i != '\"'; i++) {\n                        if (i[0] == '\\\\')\n                                i++;\n                        if (*i == '\\0')\n                                return -EINVAL;\n                }\n\n                l = cunescape_length(m + 1, i - (m + 1), 0, &unescaped);\n                if (l < 0)\n                        return l;\n\n                assert(l <= i - (m + 1));\n\n                  \n                                                                            \n                                                              \n                  \n                if (is_prefix_match){\n                                                                    \n                        memcpy(str + pos - 1, unescaped, l + 1);\n                        str[pos + l - 1] = '*';\n                        str[pos + l] = '\\0';\n                        str[pos + l + 1] = '\\0';\n                        m = str + pos - 1;\n\n                } else {\n                        memcpy(m, unescaped, l + 1);\n                        m[l] = '\\0';\n                        m[l + 1] = '\\0';\n                }\n                str = m;\n\n        }\n\n        *ret_value = str;\n        *ret_endpos = i + 1;\n        *ret_is_case_insensitive = is_case_insensitive;\n        return 0;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "udev_rule_parse_value"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 1, \"reached_via\": \"direct\", \"n_callers\": 2}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to trigger escaped+prefix path with minimal buffer.\n    # Format: flags then opening quote then content then closing quote.\n    # Use e and p flags: ep\"A\"\n    return b'ep\"A\"'\n",
+        "target": "udev_rule_parse_value"
+      },
+      "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "iter": 2,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Include full rule line likely expected by harness.\n    # Common udev rule: ACTION==\"add\", ENV{FOO}=\"...\"\n    return b'ACTION==\"add\", ENV{FOO}==ep\"A\"\\n'\n",
+        "target": "udev_rule_parse_value"
+      },
+      "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "iter": 3,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source shows two unbounded scans for a closing quote: (1) leading-flag scan `for (k=str; *k!='\"'; k++) pos++;` has no `*k=='\\0'` check, so if input lacks a quote it will read past the NUL terminator (OOB read). (2) In the non-escaped branch, loop `for (j=m, i=m+1; *i!='\"'; i++, j++) { if (*i=='\\0') return -EINVAL; ... *j=*i; }` is bounded by NUL check.\n\nFor the claimed heap-buffer-overflow: in the escaped+prefix-match branch, it does `memcpy(str + pos - 1, unescaped, l + 1);` then writes `str[pos + l - 1]`, `str[pos + l]`, `str[pos + l + 1]`. Here `pos` counts bytes before the first quote, and `l` is unescaped length (<= original escaped length). There is no check that the original `str` allocation has room for the extra `*` and the two NULs at `pos+l+1`. If the original buffer is only sized to the input string length+1, then adding `*` plus an extra NUL can overflow by up to 2 bytes. Also `memcpy(str+pos-1, ..., l+1)` can overlap with source region in `str` (but source is `unescaped`, so fine) and can write starting at `pos-1` which assumes there is a flag byte to overwrite; if `pos==0` this underflows, but `is_prefix_match` implies at least one flag so `pos>=1`.\n\nHowever, I could not confirm reach in the provided harness with two probe inputs; `reach_probe` did not hit `udev_rule_parse_value`, so I cannot provide a crashing proof. Evidence is therefore limited to code inspection: the write pattern is present and appears unguarded, but actual exploitability depends on how `str` is allocated/passed by callers (whether it has spare capacity).",
+        "corrected_description": "Likely bug is an out-of-bounds write (heap-buffer-overflow) in the escaped+prefix-match ('e' and 'p' flags) path: after unescaping, the code appends `*` and two NUL terminators at `str[pos+l-1..pos+l+1]` without ensuring the destination buffer is large enough. Separately, there is an unbounded read in the initial flag scan if the input lacks a '\"' terminator.",
+        "control_flow_to_bug": "fuzzer entry -> caller parses a rule value string and passes a mutable NUL-terminated buffer `str` into udev_rule_parse_value(). Input must begin with valid flag letters (subset of e/i/p) followed by an opening quote. To hit the claimed overflow: include both 'e' and 'p' before the quote so `is_escaped && is_prefix_match` is true; include a closing quote so the scan for `i` terminates; then `cunescape_length()` returns `l` and the function executes `memcpy(str+pos-1, unescaped, l+1)` and writes `str[pos+l-1]='*'; str[pos+l]=0; str[pos+l+1]=0;` potentially past the original allocation end."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1091,
+      "output_tokens": 58,
+      "total_tokens": 1149,
+      "latency_ms": 1156
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1969,
+      "output_tokens": 84,
+      "total_tokens": 2053,
+      "latency_ms": 2010
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2082,
+      "output_tokens": 88,
+      "total_tokens": 2170,
+      "latency_ms": 2856
+    },
+    {
+      "iter": 3,
+      "model": "gpt-5.2",
+      "input_tokens": 2199,
+      "output_tokens": 757,
+      "total_tokens": 2956,
+      "latency_ms": 10938
+    }
+  ],
+  "token_totals": {
+    "input": 7341,
+    "output": 987,
+    "total": 8328,
+    "llm_calls": 4
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: fuzz-udev-rule-parse-value   Sanitizer: address\nFunction: udev_rule_parse_value\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): The leading-flag scan `for (k = str; *k != '\"'; k++) pos++;` has no bound, and the prefix-match branch writes `str[pos + l - 1] = '*'`, `str[pos + l] = '\\0'`, `str[pos + l + 1] = '\\0'` (and memcpy at str+pos-1), indices derived from pos/l that run past the `str` allocation.\n\nControl flow to the bug:\n  - fuzz-udev-rule-parse-value feeds a rule value with e/i/p flags then a quote\n  - prefix-match ('p') path rewrites str using pos+l offsets\n  - writes at str[pos+l-1/+l/+l+1] exceed the str buffer -> heap overflow\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_j7HjHFPbxVWRzNrgQXuaxayo",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"udev_rule_parse_value\"}"
+          }
+        },
+        {
+          "id": "call_tyOyVP5IhyPm5JKJHlAf2fUc",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"udev_rule_parse_value\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_j7HjHFPbxVWRzNrgQXuaxayo",
+      "content": "int udev_rule_parse_value(char *str, char **ret_value, char **ret_endpos, bool *ret_is_case_insensitive) {\n        char *i, *j, *m;\n        bool is_escaped = false, is_case_insensitive = false, is_prefix_match = false;\n        int pos = 0;\n\n        assert(str);\n        assert(ret_value);\n        assert(ret_endpos);\n        assert(ret_is_case_insensitive);\n\n                                            \n                            \n                                           \n                                 \n          \n                                                               \n        for (const char *k = str; *k != '\"'; k++) {\n                pos++;\n                if (*k == 'e')\n                        is_escaped = true;\n                else if (*k == 'i')\n                        is_case_insensitive = true;\n                else if (*k == 'p')\n                        is_prefix_match = true;\n                else\n                        return -EINVAL; \n        }\n\n                                           \n        if (str[pos] != '\"')\n                return -EINVAL;\n        \n        m = str + is_escaped + is_case_insensitive + is_prefix_match;\n\n        if (!is_escaped) {\n                                                         \n                for (j = m, i = m + 1; *i != '\"'; i++, j++) {\n                        if (*i == '\\0')\n                                return -EINVAL;\n                        if (i[0] == '\\\\' && i[1] == '\"')\n                                i++;\n                        *j = *i;\n                }\n                  \n                                                                             \n                                                               \n                   \n                if (is_prefix_match){\n                        j[0] = '*';\n                        j[1] = '\\0';\n                        j[2] = '\\0';\n                } else {\n                        j[0] = '\\0';\n                        j[1] = '\\0';\n                }\n                str = m;            \n        } else {\n                _cleanup_free_ char *unescaped = NULL;\n                ssize_t l;\n\n                                                    \n                for (i = m + 1; *i != '\"'; i++) {\n                        if (i[0] == '\\\\')\n                                i++;\n                        if (*i == '\\0')\n                                return -EINVAL;\n                }\n\n                l = cunescape_length(m + 1, i - (m + 1), 0, &unescaped);\n                if (l < 0)\n                        return l;\n\n                assert(l <= i - (m + 1));\n\n                  \n                                                                            \n                                                              \n                  \n                if (is_prefix_match){\n                                                                    \n                        memcpy(str + pos - 1, unescaped, l + 1);\n                        str[pos + l - 1] = '*';\n                        str[pos + l] = '\\0';\n                        str[pos + l + 1] = '\\0';\n                        m = str + pos - 1;\n\n                } else {\n                        memcpy(m, unescaped, l + 1);\n                        m[l] = '\\0';\n                        m[l + 1] = '\\0';\n                }\n                str = m;\n\n        }\n\n        *ret_value = str;\n        *ret_endpos = i + 1;\n        *ret_is_case_insensitive = is_case_insensitive;\n        return 0;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_tyOyVP5IhyPm5JKJHlAf2fUc",
+      "content": "{\"reachable\": true, \"call_depth\": 1, \"reached_via\": \"direct\", \"n_callers\": 2}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_xLtz1lywnYKNTO98nnUiU2AQ",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to trigger escaped+prefix path with minimal buffer.\\n    # Format: flags then opening quote then content then closing quote.\\n    # Use e and p flags: ep\\\"A\\\"\\n    return b'ep\\\"A\\\"'\\n\",\"target\":\"udev_rule_parse_value\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_xLtz1lywnYKNTO98nnUiU2AQ",
+      "content": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_jSO1PxmCHFObz55Pifpj87az",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Include full rule line likely expected by harness.\\n    # Common udev rule: ACTION==\\\"add\\\", ENV{FOO}=\\\"...\\\"\\n    return b'ACTION==\\\"add\\\", ENV{FOO}==ep\\\"A\\\"\\\\n'\\n\",\"target\":\"udev_rule_parse_value\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_jSO1PxmCHFObz55Pifpj87az",
+      "content": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_paorcBTXXpPExuW4fV4Z0vBN",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source shows two unbounded scans for a closing quote: (1) leading-flag scan `for (k=str; *k!='\\\"'; k++) pos++;` has no `*k=='\\\\0'` check, so if input lacks a quote it will read past the NUL terminator (OOB read). (2) In the non-escaped branch, loop `for (j=m, i=m+1; *i!='\\\"'; i++, j++) { if (*i=='\\\\0') return -EINVAL; ... *j=*i; }` is bounded by NUL check.\\n\\nFor the claimed heap-buffer-overflow: in the escaped+prefix-match branch, it does `memcpy(str + pos - 1, unescaped, l + 1);` then writes `str[pos + l - 1]`, `str[pos + l]`, `str[pos + l + 1]`. Here `pos` counts bytes before the first quote, and `l` is unescaped length (<= original escaped length). There is no check that the original `str` allocation has room for the extra `*` and the two NULs at `pos+l+1`. If the original buffer is only sized to the input string length+1, then adding `*` plus an extra NUL can overflow by up to 2 bytes. Also `memcpy(str+pos-1, ..., l+1)` can overlap with source region in `str` (but source is `unescaped`, so fine) and can write starting at `pos-1` which assumes there is a flag byte to overwrite; if `pos==0` this underflows, but `is_prefix_match` implies at least one flag so `pos>=1`.\\n\\nHowever, I could not confirm reach in the provided harness with two probe inputs; `reach_probe` did not hit `udev_rule_parse_value`, so I cannot provide a crashing proof. Evidence is therefore limited to code inspection: the write pattern is present and appears unguarded, but actual exploitability depends on how `str` is allocated/passed by callers (whether it has spare capacity).\",\"corrected_description\":\"Likely bug is an out-of-bounds write (heap-buffer-overflow) in the escaped+prefix-match ('e' and 'p' flags) path: after unescaping, the code appends `*` and two NUL terminators at `str[pos+l-1..pos+l+1]` without ensuring the destination buffer is large enough. Separately, there is an unbounded read in the initial flag scan if the input lacks a '\\\"' terminator.\",\"control_flow_to_bug\":\"fuzzer entry -> caller parses a rule value string and passes a mutable NUL-terminated buffer `str` into udev_rule_parse_value(). Input must begin with valid flag letters (subset of e/i/p) followed by an opening quote. To hit the claimed overflow: include both 'e' and 'p' before the quote so `is_escaped && is_prefix_match` is true; include a closing quote so the scan for `i` terminates; then `cunescape_length()` returns `l` and the function executes `memcpy(str+pos-1, unescaped, l+1)` and writes `str[pos+l-1]='*'; str[pos+l]=0; str[pos+l+1]=0;` potentially past the original allocation end.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_paorcBTXXpPExuW4fV4Z0vBN",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

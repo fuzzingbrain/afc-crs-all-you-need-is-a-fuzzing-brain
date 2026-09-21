@@ -318,9 +318,9 @@ def grep_impl(
     else:
         cmd += ["-e", pattern, "."]
 
-    try:
-        proc = subprocess.run(
-            cmd,
+    def _run(c: List[str]):
+        return subprocess.run(
+            c,
             cwd=str(root),
             capture_output=True,
             text=True,
@@ -328,6 +328,20 @@ def grep_impl(
             errors="replace",
             timeout=120,
         )
+
+    try:
+        proc = _run(cmd)
+        # Agents naturally search for a literal token like ``func(`` to find a
+        # call/definition, but that is an invalid regex (unbalanced ``(``) and rg
+        # rejects it. When the pattern won't parse as a regex, retry once as a
+        # fixed string (-F) so the search does what the caller obviously meant
+        # instead of failing. Transparent: the caller still gets matches.
+        if proc.returncode > 1 and "regex parse error" in (proc.stderr or "").lower():
+            lit = list(cmd)
+            lit.insert(1, "--fixed-strings" if use_rg else "-F")
+            p2 = _run(lit)
+            if p2.returncode <= 1:
+                proc = p2
     except subprocess.TimeoutExpired:
         return _err(f"Search timed out after 120s for pattern: {pattern}")
     except OSError as exc:

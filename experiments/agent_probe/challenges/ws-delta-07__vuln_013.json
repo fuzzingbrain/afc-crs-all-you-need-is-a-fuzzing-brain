@@ -1,0 +1,19 @@
+{
+  "challenge": "ws-delta-07__vuln_013",
+  "source_root": "/home/ze/fbv2/experiments/agent_probe/_work/ws-delta-07/repo",
+  "workspace": "/home/ze/fbv2/experiments/agent_probe/_work/ws-delta-07",
+  "repo_subdir": "repo",
+  "diff_filename": "diff/ref.diff",
+  "fuzzer": "handler_gvcp",
+  "sanitizer": "address",
+  "scan_mode": "delta",
+  "changed_functions": [
+    "dissect_extended_bootstrap_register",
+    "dissect_register"
+  ],
+  "ground_truth_functions": [
+    "dissect_extended_bootstrap_register",
+    "dissect_register"
+  ],
+  "crash_type": "global-buffer-overflow"
+}

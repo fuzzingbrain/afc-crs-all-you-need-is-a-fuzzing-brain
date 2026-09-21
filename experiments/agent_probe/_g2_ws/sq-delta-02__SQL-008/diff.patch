@@ -1,0 +1,87 @@
+diff --git a/ext/lsm1/lsm_vtab.c b/ext/lsm1/lsm_vtab.c
+--- a/ext/lsm1/lsm_vtab.c
++++ b/ext/lsm1/lsm_vtab.c
+@@ -0,0 +1,83 @@
++static int lsm1BestIndex(
++  sqlite3_vtab *tab,
++  sqlite3_index_info *pIdxInfo
++){
++  int i;                                            
++  int idxNum = 99;                           
++  int nArg = 0;                                              
++  int argIdx = -1;                                                         
++  int iIdx2 = -1;                                         
++  int omit1 = 0;
++  int omit2 = 0;
++
++  const struct sqlite3_index_constraint *pConstraint;
++  pConstraint = pIdxInfo->aConstraint;
++  for(i=0; i<pIdxInfo->nConstraint; i++, pConstraint++){
++    if( pConstraint->usable==0 ) continue;
++    if( pConstraint->iColumn!=0 ) continue;
++    switch( pConstraint->op ){
++      case SQLITE_INDEX_CONSTRAINT_EQ: {
++        if( idxNum>0 ){
++          argIdx = i;
++          iIdx2 = -1;
++          idxNum = 0;
++          omit1 = 1;
++        }
++        break;
++      }
++      case SQLITE_INDEX_CONSTRAINT_GE:
++      case SQLITE_INDEX_CONSTRAINT_GT: {
++        if( idxNum==99 ){
++          argIdx = i;
++          idxNum = 2;
++          omit1 = pConstraint->op==SQLITE_INDEX_CONSTRAINT_GE;
++        }else if( idxNum==3 ){
++          iIdx2 = idxNum;
++          omit2 = omit1;
++          argIdx = i;
++          idxNum = 1;
++          omit1 = pConstraint->op==SQLITE_INDEX_CONSTRAINT_GE;
++        }
++        break;
++      }
++      case SQLITE_INDEX_CONSTRAINT_LE:
++      case SQLITE_INDEX_CONSTRAINT_LT: {
++        if( idxNum==99 ){
++          argIdx = i;
++          idxNum = 3;
++          omit1 = pConstraint->op==SQLITE_INDEX_CONSTRAINT_LE;
++        }else if( idxNum==2 ){
++          iIdx2 = i;
++          idxNum = 1;
++          omit1 = pConstraint->op==SQLITE_INDEX_CONSTRAINT_LE;
++        }
++        break;
++      }
++    }
++  }
++  if( argIdx>=0 ){
++    pIdxInfo->aConstraintUsage[argIdx].argvIndex = ++nArg;
++    pIdxInfo->aConstraintUsage[argIdx].omit = omit1;
++  }
++  if( iIdx2>=0 ){
++    pIdxInfo->aConstraintUsage[iIdx2].argvIndex = ++nArg;
++    pIdxInfo->aConstraintUsage[iIdx2].omit = omit2;
++  }
++  if( idxNum==0 ){
++    pIdxInfo->estimatedCost = (double)1;
++    pIdxInfo->estimatedRows = 1;
++    pIdxInfo->orderByConsumed = 1;
++  }else if( idxNum==1 ){
++    pIdxInfo->estimatedCost = (double)100;
++    pIdxInfo->estimatedRows = 100;
++  }else if( idxNum<99 ){
++    pIdxInfo->estimatedCost = (double)5000;
++    pIdxInfo->estimatedRows = 5000;
++  }else{
++                         
++    pIdxInfo->estimatedCost = (double)2147483647;
++    pIdxInfo->estimatedRows = 2147483647;
++  }
++  pIdxInfo->idxNum = idxNum;
++  return SQLITE_OK;
++}

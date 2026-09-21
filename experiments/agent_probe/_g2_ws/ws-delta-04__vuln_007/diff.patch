@@ -1,0 +1,382 @@
+diff --git a/epan/dissectors/packet-json.c b/epan/dissectors/packet-json.c
+--- a/epan/dissectors/packet-json.c
++++ b/epan/dissectors/packet-json.c
+@@ -0,0 +1,378 @@
++json_string_unescape(wmem_allocator_t *scope, const char *string, size_t *length_ptr)
++{
++	size_t read_index = 0;
++	size_t string_length = strlen(string);
++
++	wmem_strbuf_t* output_string_buffer = wmem_strbuf_new_sized(scope, string_length);
++
++	while (true)
++	{
++		                               
++		if (!(read_index < string_length))
++		{
++			break;
++		}
++
++		uint8_t current_character = string[read_index];
++
++		                                
++		if (current_character != '\\')
++		{
++			                                                         
++			                                                                                                 
++			int utf8_character_length = ws_utf8_char_len(current_character);
++
++			if (utf8_character_length <= 0)
++			{
++				break;
++			}
++
++			for (int i = 0; i < utf8_character_length; i++)
++			{
++				                               
++				if (!(read_index < string_length))
++				{
++					break;
++				}
++
++				current_character = string[read_index];
++				read_index++;
++				wmem_strbuf_append_c(output_string_buffer, current_character);
++			}
++		}
++		                            
++		else
++		{
++			read_index++;
++
++			                               
++			if (!(read_index < string_length))
++			{
++				break;
++			}
++
++			current_character = string[read_index];
++
++			if (current_character == '\"' || current_character == '\\' || current_character == '/')
++			{
++				read_index++;
++				wmem_strbuf_append_c(output_string_buffer, current_character);
++			}
++			else if (current_character == 'b')
++			{
++				read_index++;
++				wmem_strbuf_append_c(output_string_buffer, '\b');
++			}
++			else if (current_character == 'f')
++			{
++				read_index++;
++				wmem_strbuf_append_c(output_string_buffer, '\f');
++			}
++			else if (current_character == 'n')
++			{
++				read_index++;
++				wmem_strbuf_append_c(output_string_buffer, '\n');
++			}
++			else if (current_character == 'r')
++			{
++				read_index++;
++				wmem_strbuf_append_c(output_string_buffer, '\r');
++			}
++			else if (current_character == 't')
++			{
++				read_index++;
++				wmem_strbuf_append_c(output_string_buffer, '\t');
++			}
++			else if (current_character == 'U')
++			{
++				read_index++;
++				
++				uint32_t code_point = 0;
++				bool is_valid_unicode_character = true;
++	
++				for (int i = 0; i < 8; i++)
++				{
++					                               
++					if (!(read_index < string_length))
++					{
++						is_valid_unicode_character = false;
++						break;
++					}
++	
++					current_character = string[read_index];
++					read_index++;
++	
++					int nibble = ws_xton(current_character);
++	
++					if(nibble < 0)
++					{
++						is_valid_unicode_character = false;
++						break;
++					}
++	
++					code_point <<= 4;
++					code_point |= nibble;
++				}
++	
++				if ((IS_LEAD_SURROGATE(code_point)))
++				{
++					                               
++					if (!(read_index < string_length))
++					{
++						break;
++					}
++					current_character = string[read_index];
++	
++					if (current_character == '\\')
++					{
++						read_index++;
++	
++						                               
++						if (!(read_index < string_length))
++						{
++							break;
++						}
++	
++						current_character = string[read_index];
++						if (current_character == 'u') {
++							uint16_t lead_surrogate = code_point;
++							uint16_t trail_surrogate = 0;
++	
++							read_index++;
++	
++							for (int i = 0; i < 4; i++)
++							{
++								                               
++								if (!(read_index < string_length))
++								{
++									is_valid_unicode_character = false;
++									break;
++								}
++	
++								current_character = string[read_index];
++								read_index++;
++	
++								int nibble = ws_xton(current_character);
++	
++								if (nibble < 0)
++								{
++									is_valid_unicode_character = false;
++									break;
++								}
++	
++								trail_surrogate <<= 4;
++								trail_surrogate |= nibble;
++							}
++	
++							if ((IS_TRAIL_SURROGATE(trail_surrogate)))
++							{
++								code_point = SURROGATE_VALUE(lead_surrogate, trail_surrogate);
++							}
++							else
++							{
++								is_valid_unicode_character = false;
++							}
++						}
++						
++						else if (current_character == 'U') {
++							uint16_t lead_surrogate = code_point;
++							uint16_t trail_surrogate = 0;
++	
++							read_index++;
++	
++							for (int i = 0; i < 8; i++)
++							{
++								current_character = string[read_index];
++								read_index++;
++	
++								int nibble = ws_xton(current_character);
++	
++								trail_surrogate <<= 4;
++								trail_surrogate |= nibble;
++							}
++	
++							if ((IS_TRAIL_SURROGATE(trail_surrogate)))
++							{	
++								code_point = SURROGATE_VALUE(lead_surrogate, trail_surrogate);
++							}
++							else
++							{
++								is_valid_unicode_character = false;
++							}
++						}
++						else
++						{
++							read_index++;
++							is_valid_unicode_character = false;
++						}
++					}
++					else
++					{
++						read_index++;
++						is_valid_unicode_character = false;
++					}
++				}
++				else if ((IS_TRAIL_SURROGATE(code_point)))
++				{
++					is_valid_unicode_character = false;
++				}
++
++				if (is_valid_unicode_character)
++				{
++					if (g_unichar_validate(code_point) && g_unichar_isprint(code_point))
++					{
++						char length_test_buffer[6];
++						int utf8_character_length = (int)g_unichar_to_utf8(code_point, length_test_buffer);
++	
++						for (int i = 0; i < utf8_character_length; i++)
++						{
++							current_character = length_test_buffer[i];
++							wmem_strbuf_append_c(output_string_buffer, current_character);
++						}
++					}
++				}
++				else
++				{
++					wmem_strbuf_append_unichar_repl(output_string_buffer);
++				}
++			}
++			else if (current_character == 'u')
++			{
++				read_index++;
++
++				uint32_t code_point = 0;
++				bool is_valid_unicode_character = true;
++
++				for (int i = 0; i < 4; i++)
++				{
++					                               
++					if (!(read_index < string_length))
++					{
++						is_valid_unicode_character = false;
++						break;
++					}
++
++					current_character = string[read_index];
++					read_index++;
++
++					int nibble = ws_xton(current_character);
++
++					if(nibble < 0)
++					{
++						is_valid_unicode_character = false;
++						break;
++					}
++
++					code_point <<= 4;
++					code_point |= nibble;
++				}
++
++				if ((IS_LEAD_SURROGATE(code_point)))
++				{
++					                               
++					if (!(read_index < string_length))
++					{
++						break;
++					}
++					current_character = string[read_index];
++
++					if (current_character == '\\')
++					{
++						read_index++;
++
++						                               
++						if (!(read_index < string_length))
++						{
++							break;
++						}
++
++						current_character = string[read_index];
++						if (current_character == 'u') {
++							uint16_t lead_surrogate = code_point;
++							uint16_t trail_surrogate = 0;
++
++							read_index++;
++
++							for (int i = 0; i < 4; i++)
++							{
++								                               
++								if (!(read_index < string_length))
++								{
++									is_valid_unicode_character = false;
++									break;
++								}
++
++								current_character = string[read_index];
++								read_index++;
++
++								int nibble = ws_xton(current_character);
++
++								if (nibble < 0)
++								{
++									is_valid_unicode_character = false;
++									break;
++								}
++
++								trail_surrogate <<= 4;
++								trail_surrogate |= nibble;
++							}
++
++							if ((IS_TRAIL_SURROGATE(trail_surrogate)))
++							{
++								code_point = SURROGATE_VALUE(lead_surrogate, trail_surrogate);
++							}
++							else
++							{
++								is_valid_unicode_character = false;
++							}
++						}
++						else
++						{
++							read_index++;
++							is_valid_unicode_character = false;
++						}
++					}
++					else
++					{
++						read_index++;
++						is_valid_unicode_character = false;
++					}
++				}
++				else if ((IS_TRAIL_SURROGATE(code_point)))
++				{
++					is_valid_unicode_character = false;
++				}
++
++				if (is_valid_unicode_character)
++				{
++					if (g_unichar_validate(code_point) && g_unichar_isprint(code_point))
++					{
++						char length_test_buffer[6];
++						int utf8_character_length = (int)g_unichar_to_utf8(code_point, length_test_buffer);
++
++						for (int i = 0; i < utf8_character_length; i++)
++						{
++							current_character = length_test_buffer[i];
++							wmem_strbuf_append_c(output_string_buffer, current_character);
++
++						}
++					}
++				}
++				else
++				{
++					wmem_strbuf_append_unichar_repl(output_string_buffer);
++				}
++			}
++			else
++			{
++				                                                                    
++				DISSECTOR_ASSERT_NOT_REACHED();
++			}
++		}
++	}
++
++	if (length_ptr)
++		*length_ptr = wmem_strbuf_get_len(output_string_buffer);
++
++	return wmem_strbuf_finalize(output_string_buffer);
++}

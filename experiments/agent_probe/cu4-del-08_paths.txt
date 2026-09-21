@@ -1,0 +1,47 @@
+cu4-del-08 (curl-008 「maniac difficulty」, SEGV/NPD @ extremelygoodprtcl_sm) — 资料路径
+生成于 Mon Sep 14 19:56:52 UTC 2026  |  结果:3/3 已解,全部 By=G(POV agent);SP/global fuzzer 0 命中
+所有路径相对 /home/ze/fbv2(除 ground-truth 用绝对路径)
+================================================================
+
+== 3 个解出 run 的完整日志 ==
+[6aa712123cc78473f9752f74]
+  run 目录:     logs/curl_6aa712123cc78473f9752f74_20260913_211403/
+  worker.log:   logs/curl_6aa712123cc78473f9752f74_20260913_211403/worker/curl_fuzzer_ws_address/worker.log
+  POV 对话:     logs/curl_6aa712123cc78473f9752f74_20260913_211403/worker/curl_fuzzer_ws_address/agent/pov/POV_1_extremelygoodprtcl_s.conversation.json
+  POV agent log: logs/curl_6aa712123cc78473f9752f74_20260913_211403/worker/curl_fuzzer_ws_address/agent/pov/POV_1_extremelygoodprtcl_s.log
+  verify 对话:  logs/curl_6aa712123cc78473f9752f74_20260913_211403/worker/curl_fuzzer_ws_address/agent/sp/verify/SPV_1_extremelygoodprtcl_s.conversation.json
+  fuzzer 监控:  logs/curl_6aa712123cc78473f9752f74_20260913_211403/fuzzer/monitor.log
+  controller:   logs/curl_6aa712123cc78473f9752f74_20260913_211403/controller.log
+
+[6aa7141773fe89aa0b6c64c5]
+  run 目录:     logs/curl_6aa7141773fe89aa0b6c64c5_20260913_212240/
+  worker.log:   logs/curl_6aa7141773fe89aa0b6c64c5_20260913_212240/worker/curl_fuzzer_ws_address/worker.log
+  POV 对话:     logs/curl_6aa7141773fe89aa0b6c64c5_20260913_212240/worker/curl_fuzzer_ws_address/agent/pov/POV_1_extremelygoodprtcl_s.conversation.json
+  POV agent log: logs/curl_6aa7141773fe89aa0b6c64c5_20260913_212240/worker/curl_fuzzer_ws_address/agent/pov/POV_1_extremelygoodprtcl_s.log
+  verify 对话:  logs/curl_6aa7141773fe89aa0b6c64c5_20260913_212240/worker/curl_fuzzer_ws_address/agent/sp/verify/SPV_1_Curl_http_header.conversation.json
+  verify 对话:  logs/curl_6aa7141773fe89aa0b6c64c5_20260913_212240/worker/curl_fuzzer_ws_address/agent/sp/verify/SPV_2_extremelygoodprtcl_s.conversation.json
+  fuzzer 监控:  logs/curl_6aa7141773fe89aa0b6c64c5_20260913_212240/fuzzer/monitor.log
+  controller:   logs/curl_6aa7141773fe89aa0b6c64c5_20260913_212240/controller.log
+
+[6aa715952eaa45a962e5db55]
+  run 目录:     logs/curl_6aa715952eaa45a962e5db55_20260913_212901/
+  worker.log:   logs/curl_6aa715952eaa45a962e5db55_20260913_212901/worker/curl_fuzzer_ws_address/worker.log
+  POV 对话:     logs/curl_6aa715952eaa45a962e5db55_20260913_212901/worker/curl_fuzzer_ws_address/agent/pov/POV_1_extremelygoodprtcl_s.conversation.json
+  POV agent log: logs/curl_6aa715952eaa45a962e5db55_20260913_212901/worker/curl_fuzzer_ws_address/agent/pov/POV_1_extremelygoodprtcl_s.log
+  verify 对话:  logs/curl_6aa715952eaa45a962e5db55_20260913_212901/worker/curl_fuzzer_ws_address/agent/sp/verify/SPV_1_Curl_http_header.conversation.json
+  verify 对话:  logs/curl_6aa715952eaa45a962e5db55_20260913_212901/worker/curl_fuzzer_ws_address/agent/sp/verify/SPV_2_extremelygoodprtcl_s.conversation.json
+  fuzzer 监控:  logs/curl_6aa715952eaa45a962e5db55_20260913_212901/fuzzer/monitor.log
+  controller:   logs/curl_6aa715952eaa45a962e5db55_20260913_212901/controller.log
+
+== ground-truth / 答案(挑战方,绝对路径)==
+  bug 目录:     /home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/cu-delta-04/bugs/curl-008/
+  真崩溃栈:     /home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/cu-delta-04/bugs/curl-008/crash.txt
+  真 PoV blob:  /home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/cu-delta-04/bugs/curl-008/blob
+  bug.json:     /home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/cu-delta-04/bugs/curl-008/bug.json
+  repro.sh:     /home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/cu-delta-04/bugs/curl-008/repro.sh
+  预编译二进制: /home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/cu-delta-04/bugs/curl-008/bin/address/curl_fuzzer_ws
+
+== 任务配置 + 结果记录 ==
+  task JSON:    experiments/agent_probe/tasks/cu-delta-04__curl_fuzzer_ws.json
+  结果记录:     experiments/agent_probe/FINALS_RESULTS.md
+  本清单:       experiments/agent_probe/cu4-del-08_paths.txt

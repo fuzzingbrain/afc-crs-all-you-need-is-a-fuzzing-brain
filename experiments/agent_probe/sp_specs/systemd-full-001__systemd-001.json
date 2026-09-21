@@ -1,0 +1,23 @@
+{
+  "challenge": "systemd-full-001",
+  "bug": "systemd-001",
+  "tag": "systemd-full-001__systemd-001",
+  "round": "final-competition",
+  "scan_mode": "full",
+  "harness": "fuzz-udev-rule-parse-value",
+  "fuzzer": "fuzz-udev-rule-parse-value",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "check_token_delimiters",
+    "udev_rule_parse_value"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "graphs_root": "/home/ze/fb-graphs/build/systemd-full-001",
+  "source_root": "/home/ze/fb-graphs/build/systemd-full-001/repo",
+  "callgraph": "/home/ze/fb-graphs/build/systemd-full-001/graph-fuzz-link-parser/callgraph.json",
+  "binary_on_disk": "/home/ze/fb-graphs/build/systemd-full-001/bugs/systemd-001/bin/address/fuzz-udev-rule-parse-value",
+  "challenge_image": "aixcc-afc/systemd:latest",
+  "project": "systemd",
+  "blob": "/home/ze/fb-graphs/build/systemd-full-001/bugs/systemd-001/blob"
+}

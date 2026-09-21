@@ -1,0 +1,181 @@
+{
+  "tag": "ex-delta-01__exif-005",
+  "gt": "exif_get_sshort",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source of exif_get_sshort shows it only checks buf!=NULL then unconditionally reads buf[0] and buf[1] depending on byte order. There is no length parameter and no internal bounds check, so if any caller passes a pointer to the last byte of a heap-backed EXIF buffer, it will read 1 byte past; if it passes a pointer to the last 0 bytes (end), it will read 2 bytes past. check_reachability reports exif_get_sshort is reachable from the fuzzer (depth 4) and has multiple callers, consistent with being used for parsing EXIF/TIFF fields. I attempted a reach_probe to ground with an input that truncates an IFD entry so a 2-byte read crosses the end, but the probe infrastructure failed due to missing ASan binary path, so no runtime crash evidence was obtained. Thus evidence is code-level only: the unsafe pattern exists and is plausibly triggerable by truncated EXIF data, but not proven by crash here.",
+    "corrected_description": "Potential out-of-bounds heap read (1–2 bytes) in exif_get_sshort: it dereferences buf[0] and buf[1] after only a NULL check, with no length/bounds validation. If callers compute buf from an offset into the EXIF/TIFF buffer without ensuring at least 2 bytes remain, this becomes a heap-buffer-overread (ASan heap-buffer-overflow read).",
+    "control_flow_to_bug": "exif_from_data_fuzzer -> libexif EXIF/TIFF parsing of APP1/IFD structures -> a caller that reads a 16-bit field via exif_get_sshort(ptr, order) where ptr is derived from an offset into the EXIF buffer -> if the EXIF segment/IFD entry is truncated or an offset points to the last byte of the allocation, exif_get_sshort reads buf[0]/buf[1] past the heap buffer end."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "exif_get_sshort"
+      },
+      "result": "exif_get_sshort (const unsigned char *buf, ExifByteOrder order)\n{\n\tif (!buf) return 0;\n        switch (order) {\n        case EXIF_BYTE_ORDER_MOTOROLA:\n                return (((unsigned int)buf[0] << 8) | buf[1]);\n        case EXIF_BYTE_ORDER_INTEL:\n                return (((unsigned int)buf[1] << 8) | buf[0]);\n        }\n\n\t                      \n\treturn (0);\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "exif_get_sshort"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"direct\", \"n_callers\": 9}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Minimal JPEG with EXIF APP1 segment. We'll craft a tiny TIFF/IFD where a SHORT value\n    # is read from an offset that points to the last byte of the segment, causing 2-byte read.\n    import struct\n    \n    # JPEG SOI\n    out = bytearray(b\"\\xff\\xd8\")\n    \n    # Build EXIF payload\n    # APP1 marker 0xFFE1, length includes length bytes.\n    exif = bytearray(b\"Exif\\x00\\x00\")\n    \n    # TIFF header: Intel byte order 'II', 42, offset to IFD0 = 8\n    exif += b\"II\" + struct.pack(\"<H\", 42) + struct.pack(\"<I\", 8)\n    \n    # IFD0 at offset 8 from TIFF start (immediately after header)\n    # 1 entry\n    exif += struct.pack(\"<H\", 1)\n    \n    # Entry: tag=0x0100 (ImageWidth), type=SHORT (3), count=1\n    # value/offset field is 4 bytes; for SHORT count=1, value stored in first 2 bytes.\n    # But we will set count=2 so it expects 4 bytes? Actually SHORT count=2 => 4 bytes fits inline.\n    # We need a path that uses exif_get_sshort on a pointer into buffer, likely for reading tag/type/count.\n    # Instead, try to make the parser read the 'type' field at end of buffer.\n    # We'll truncate so that the IFD entry is incomplete: only 11 bytes of the 12-byte entry.\n    tag = 0x0100\n    typ = 3\n    cnt = 1\n    val = 0\n    entry = struct.pack(\"<H\", tag) + struct.pack(\"<H\", typ) + struct.pack(\"<I\", cnt) + struct.pack(\"<I\", val)\n    exif += entry[:-1]  # remove last byte to force read past end when reading val\n    \n    # next IFD offset (4 bytes) - omit entirely to keep buffer tight\n    \n    # Now wrap in APP1\n    app1_len = len(exif) + 2\n    out += b\"\\xff\\xe1\" + struct.pack(\">H\", app1_len) + exif\n    \n    # EOI\n    out += b\"\\xff\\xd9\"\n    return bytes(out)\n",
+        "target": "exif_get_sshort"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ex-delta-01/bugs/exif-005/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source of exif_get_sshort shows it only checks buf!=NULL then unconditionally reads buf[0] and buf[1] depending on byte order. There is no length parameter and no internal bounds check, so if any caller passes a pointer to the last byte of a heap-backed EXIF buffer, it will read 1 byte past; if it passes a pointer to the last 0 bytes (end), it will read 2 bytes past. check_reachability reports exif_get_sshort is reachable from the fuzzer (depth 4) and has multiple callers, consistent with being used for parsing EXIF/TIFF fields. I attempted a reach_probe to ground with an input that truncates an IFD entry so a 2-byte read crosses the end, but the probe infrastructure failed due to missing ASan binary path, so no runtime crash evidence was obtained. Thus evidence is code-level only: the unsafe pattern exists and is plausibly triggerable by truncated EXIF data, but not proven by crash here.",
+        "corrected_description": "Potential out-of-bounds heap read (1–2 bytes) in exif_get_sshort: it dereferences buf[0] and buf[1] after only a NULL check, with no length/bounds validation. If callers compute buf from an offset into the EXIF/TIFF buffer without ensuring at least 2 bytes remain, this becomes a heap-buffer-overread (ASan heap-buffer-overflow read).",
+        "control_flow_to_bug": "exif_from_data_fuzzer -> libexif EXIF/TIFF parsing of APP1/IFD structures -> a caller that reads a 16-bit field via exif_get_sshort(ptr, order) where ptr is derived from an offset into the EXIF buffer -> if the EXIF segment/IFD entry is truncated or an offset points to the last byte of the allocation, exif_get_sshort reads buf[0]/buf[1] past the heap buffer end."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1038,
+      "output_tokens": 58,
+      "total_tokens": 1096,
+      "latency_ms": 1529
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1255,
+      "output_tokens": 590,
+      "total_tokens": 1845,
+      "latency_ms": 8940
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1895,
+      "output_tokens": 444,
+      "total_tokens": 2339,
+      "latency_ms": 6789
+    }
+  ],
+  "token_totals": {
+    "input": 4188,
+    "output": 1092,
+    "total": 5280,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: exif_from_data_fuzzer   Sanitizer: address\nFunction: exif_get_sshort\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): Reads `buf[0]` and `buf[1]` with only a NULL check and no length parameter; when a caller invokes it near the end of the EXIF buffer, it reads 1-2 bytes past the heap allocation.\n\nControl flow to the bug:\n  - exif_from_data_fuzzer parses entries; a value offset lands at buffer end\n  - exif_get_sshort(buf, order) dereferences buf[0], buf[1] with no bounds\n  - heap over-read past the EXIF buffer\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_9QPKGQOJQ68gTA6TQBbvwZb8",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"exif_get_sshort\"}"
+          }
+        },
+        {
+          "id": "call_3EgIAxMipzwZ2Fihd3Yv5kiP",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"exif_get_sshort\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_9QPKGQOJQ68gTA6TQBbvwZb8",
+      "content": "exif_get_sshort (const unsigned char *buf, ExifByteOrder order)\n{\n\tif (!buf) return 0;\n        switch (order) {\n        case EXIF_BYTE_ORDER_MOTOROLA:\n                return (((unsigned int)buf[0] << 8) | buf[1]);\n        case EXIF_BYTE_ORDER_INTEL:\n                return (((unsigned int)buf[1] << 8) | buf[0]);\n        }\n\n\t                      \n\treturn (0);\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_3EgIAxMipzwZ2Fihd3Yv5kiP",
+      "content": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"direct\", \"n_callers\": 9}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_KfeH6Mjbapoy8SEOz7B8qnmF",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Minimal JPEG with EXIF APP1 segment. We'll craft a tiny TIFF/IFD where a SHORT value\\n    # is read from an offset that points to the last byte of the segment, causing 2-byte read.\\n    import struct\\n    \\n    # JPEG SOI\\n    out = bytearray(b\\\"\\\\xff\\\\xd8\\\")\\n    \\n    # Build EXIF payload\\n    # APP1 marker 0xFFE1, length includes length bytes.\\n    exif = bytearray(b\\\"Exif\\\\x00\\\\x00\\\")\\n    \\n    # TIFF header: Intel byte order 'II', 42, offset to IFD0 = 8\\n    exif += b\\\"II\\\" + struct.pack(\\\"<H\\\", 42) + struct.pack(\\\"<I\\\", 8)\\n    \\n    # IFD0 at offset 8 from TIFF start (immediately after header)\\n    # 1 entry\\n    exif += struct.pack(\\\"<H\\\", 1)\\n    \\n    # Entry: tag=0x0100 (ImageWidth), type=SHORT (3), count=1\\n    # value/offset field is 4 bytes; for SHORT count=1, value stored in first 2 bytes.\\n    # But we will set count=2 so it expects 4 bytes? Actually SHORT count=2 => 4 bytes fits inline.\\n    # We need a path that uses exif_get_sshort on a pointer into buffer, likely for reading tag/type/count.\\n    # Instead, try to make the parser read the 'type' field at end of buffer.\\n    # We'll truncate so that the IFD entry is incomplete: only 11 bytes of the 12-byte entry.\\n    tag = 0x0100\\n    typ = 3\\n    cnt = 1\\n    val = 0\\n    entry = struct.pack(\\\"<H\\\", tag) + struct.pack(\\\"<H\\\", typ) + struct.pack(\\\"<I\\\", cnt) + struct.pack(\\\"<I\\\", val)\\n    exif += entry[:-1]  # remove last byte to force read past end when reading val\\n    \\n    # next IFD offset (4 bytes) - omit entirely to keep buffer tight\\n    \\n    # Now wrap in APP1\\n    app1_len = len(exif) + 2\\n    out += b\\\"\\\\xff\\\\xe1\\\" + struct.pack(\\\">H\\\", app1_len) + exif\\n    \\n    # EOI\\n    out += b\\\"\\\\xff\\\\xd9\\\"\\n    return bytes(out)\\n\",\"target\":\"exif_get_sshort\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_KfeH6Mjbapoy8SEOz7B8qnmF",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ex-delta-01/bugs/exif-005/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_J4JqPmiDLVV6cqBLN92UAtXu",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source of exif_get_sshort shows it only checks buf!=NULL then unconditionally reads buf[0] and buf[1] depending on byte order. There is no length parameter and no internal bounds check, so if any caller passes a pointer to the last byte of a heap-backed EXIF buffer, it will read 1 byte past; if it passes a pointer to the last 0 bytes (end), it will read 2 bytes past. check_reachability reports exif_get_sshort is reachable from the fuzzer (depth 4) and has multiple callers, consistent with being used for parsing EXIF/TIFF fields. I attempted a reach_probe to ground with an input that truncates an IFD entry so a 2-byte read crosses the end, but the probe infrastructure failed due to missing ASan binary path, so no runtime crash evidence was obtained. Thus evidence is code-level only: the unsafe pattern exists and is plausibly triggerable by truncated EXIF data, but not proven by crash here.\",\"corrected_description\":\"Potential out-of-bounds heap read (1–2 bytes) in exif_get_sshort: it dereferences buf[0] and buf[1] after only a NULL check, with no length/bounds validation. If callers compute buf from an offset into the EXIF/TIFF buffer without ensuring at least 2 bytes remain, this becomes a heap-buffer-overread (ASan heap-buffer-overflow read).\",\"control_flow_to_bug\":\"exif_from_data_fuzzer -> libexif EXIF/TIFF parsing of APP1/IFD structures -> a caller that reads a 16-bit field via exif_get_sshort(ptr, order) where ptr is derived from an offset into the EXIF buffer -> if the EXIF segment/IFD entry is truncated or an offset points to the last byte of the allocation, exif_get_sshort reads buf[0]/buf[1] past the heap buffer end.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_J4JqPmiDLVV6cqBLN92UAtXu",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

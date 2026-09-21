@@ -1,0 +1,22 @@
+{
+  "challenge": "cu-full-01",
+  "bug": "curl-004",
+  "tag": "cu-full-01__curl-004",
+  "round": "pre-competition",
+  "scan_mode": "full",
+  "harness": "curl_fuzzer",
+  "fuzzer": "curl_fuzzer",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "file_do"
+  ],
+  "crash_type": "stack-buffer-overflow",
+  "graphs_root": "/home/ze/fb-graphs/build/cu-full-01",
+  "source_root": "/home/ze/fb-graphs/build/cu-full-01/repo",
+  "callgraph": "/home/ze/fb-graphs/build/cu-full-01/graph-curl_fuzzer/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/curl:latest",
+  "project": "curl",
+  "blob": "/home/ze/fb-graphs/build/cu-full-01/bugs/curl-004/blob"
+}

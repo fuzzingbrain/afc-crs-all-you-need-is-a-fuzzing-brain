@@ -1,0 +1,12 @@
+# Skipped by default: the 10 C targets the SoK annotates as unsolvable by parallel fuzzing
+# (16 cores x 6 h x 3 runs, union). Cite SoK Fig. 3 / KF5 instead of re-running them.
+cm1-fu-01
+cm1-fu-02
+cu2-del-06
+cu3-del-07
+cu4-del-03
+cu4-del-08
+cu5-del-02
+fp2-del-02
+mg1-del-01
+fp3-del-03

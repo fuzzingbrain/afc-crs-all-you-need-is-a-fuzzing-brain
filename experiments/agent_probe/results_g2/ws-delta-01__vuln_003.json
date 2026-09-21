@@ -1,0 +1,190 @@
+{
+  "tag": "ws-delta-01__vuln_003",
+  "gt": "dissect_ber_GeneralString",
+  "crash_type": "stack-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source shows potential OOB write when caller supplies name_string/name_len: max_len is set to name_len with no validation against actual allocation size of name_string. Then len (from BER length, tainted) is clamped only against max_len-1, and tvb_memcpy writes len bytes into str plus a NUL at str[len]. If name_len exceeds the real buffer capacity, this can overflow (stack or heap depending on caller buffer). There is also an underflow hazard if name_len==0: max_len-1 wraps to UINT32_MAX, disabling clamp and allowing huge memcpy; however typical callers likely pass positive lengths. No evidence of a guard that ties name_len to actual buffer size.\n\nI attempted to run reach_probe with a minimal GeneralString BER input, but the harness binary path was missing, so I could not obtain runtime reach/crash evidence. Therefore this is a code-based assessment only; actual crash depends on whether any reachable caller passes a too-large name_len relative to its buffer allocation (or 0).",
+    "corrected_description": "Potential out-of-bounds write in dissect_ber_GeneralString when called with external output buffer (name_string) and an incorrect name_len. The function trusts name_len as the destination capacity, clamps decoded len to max_len-1, then copies len bytes and writes a NUL terminator at str[len] without verifying that name_len matches the actual allocated size of name_string. If name_len is larger than the real buffer (or is 0 causing unsigned underflow), memcpy and/or the terminator write can overflow the destination (stack or heap depending on caller).",
+    "control_flow_to_bug": "Fuzzer entry -> handler_ber -> (indirect) caller of dissect_ber_GeneralString provides name_string!=NULL and name_len (assumed capacity) -> dissect_ber_identifier parses tag/class; must be Universal GeneralString (tag 0x1b) else returns early -> dissect_ber_length parses len from input -> clamp: if len >= (max_len-1) len=max_len-1 (max_len=name_len) -> tvb_memcpy(tvb, name_string, offset, len) -> name_string[len]=0 (overflow if name_len does not reflect actual allocation, or if name_len==0 underflows clamp)."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "dissect_ber_GeneralString"
+      },
+      "result": "dissect_ber_GeneralString(asn1_ctx_t *actx, proto_tree *tree, tvbuff_t *tvb, int offset, int hf_id, char *name_string, int name_len)\n{\n    int8_t      ber_class;\n    bool    pc;\n    int32_t     tag;\n    int         identifier_offset;\n    int         identifier_len;\n    uint32_t    len;\n    int         end_offset;\n    int         hoffset;\n    char        str_arr[256];\n    uint32_t    max_len;\n    char       *str;\n    proto_item *cause;\n\n    str = str_arr;\n    max_len = 255;\n    if (name_string) {\n        str = name_string;\n        max_len = name_len;\n    }\n\n    hoffset = offset;\n                                                     \n    identifier_offset = offset;\n    offset = dissect_ber_identifier(actx->pinfo, tree, tvb, offset, &ber_class, &pc, &tag);\n    identifier_len = offset - identifier_offset;\n    offset = dissect_ber_length(actx->pinfo, tree, tvb, offset, &len, NULL);\n    end_offset = offset + len;\n\n                                                             \n    if ( (ber_class != BER_CLASS_UNI)\n      || (tag != BER_UNI_TAG_GENSTR) ) {\n        tvb_ensure_bytes_exist(tvb, hoffset, 2);\n        cause = proto_tree_add_expert_format(\n            tree, actx->pinfo, &ei_ber_expected_general_string,\n            tvb, identifier_offset, identifier_len,\n            \"BER Error: GeneralString expected but class:%s(%d) %s tag:%d was unexpected\",\n            val_to_str_const(ber_class, ber_class_codes, \"Unknown\"),\n            ber_class, tfs_get_string(pc, &tfs_constructed_primitive),\n            tag);\n        if (decode_unexpected) {\n            proto_tree *unknown_tree = proto_item_add_subtree(cause, ett_ber_unknown);\n            dissect_unknown_ber(actx->pinfo, tvb, hoffset, unknown_tree);\n        }\n        return end_offset;\n    }\n\n    if (len >= (max_len - 1)) {\n        len = max_len - 1;\n    }\n\n    tvb_memcpy(tvb, str, offset, len);\n    str[len]=0;\n\n    if (hf_id > 0) {\n        proto_tree_add_string(tree, hf_id, tvb, offset, len, str);\n    }\n\n    return end_offset;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "dissect_ber_GeneralString"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"indirect\", \"n_callers\": 2}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Minimal BER: [tag=GeneralString 0x1b][len=1][\"A\"]\n    return bytes([0x1b, 0x01, 0x41])\n",
+        "target": "dissect_ber_GeneralString"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-delta-01/bugs/vuln_003/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source shows potential OOB write when caller supplies name_string/name_len: max_len is set to name_len with no validation against actual allocation size of name_string. Then len (from BER length, tainted) is clamped only against max_len-1, and tvb_memcpy writes len bytes into str plus a NUL at str[len]. If name_len exceeds the real buffer capacity, this can overflow (stack or heap depending on caller buffer). There is also an underflow hazard if name_len==0: max_len-1 wraps to UINT32_MAX, disabling clamp and allowing huge memcpy; however typical callers likely pass positive lengths. No evidence of a guard that ties name_len to actual buffer size.\n\nI attempted to run reach_probe with a minimal GeneralString BER input, but the harness binary path was missing, so I could not obtain runtime reach/crash evidence. Therefore this is a code-based assessment only; actual crash depends on whether any reachable caller passes a too-large name_len relative to its buffer allocation (or 0).",
+        "corrected_description": "Potential out-of-bounds write in dissect_ber_GeneralString when called with external output buffer (name_string) and an incorrect name_len. The function trusts name_len as the destination capacity, clamps decoded len to max_len-1, then copies len bytes and writes a NUL terminator at str[len] without verifying that name_len matches the actual allocated size of name_string. If name_len is larger than the real buffer (or is 0 causing unsigned underflow), memcpy and/or the terminator write can overflow the destination (stack or heap depending on caller).",
+        "control_flow_to_bug": "Fuzzer entry -> handler_ber -> (indirect) caller of dissect_ber_GeneralString provides name_string!=NULL and name_len (assumed capacity) -> dissect_ber_identifier parses tag/class; must be Universal GeneralString (tag 0x1b) else returns early -> dissect_ber_length parses len from input -> clamp: if len >= (max_len-1) len=max_len-1 (max_len=name_len) -> tvb_memcpy(tvb, name_string, offset, len) -> name_string[len]=0 (overflow if name_len does not reflect actual allocation, or if name_len==0 underflows clamp)."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1129,
+      "output_tokens": 62,
+      "total_tokens": 1191,
+      "latency_ms": 1133
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1823,
+      "output_tokens": 80,
+      "total_tokens": 1903,
+      "latency_ms": 1732
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1954,
+      "output_tokens": 513,
+      "total_tokens": 2467,
+      "latency_ms": 6765
+    }
+  ],
+  "token_totals": {
+    "input": 4906,
+    "output": 655,
+    "total": 5561,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: handler_ber   Sanitizer: address\nFunction: dissect_ber_GeneralString\nClaimed bug type: stack-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): Stack/heap buffer overflow due to incorrect max_len handling when caller supplies name_string/name_len. The function sets max_len=name_len (untrusted from caller) but does not validate it against the actual allocated size of name_string. It then clamps BER-decoded len with `if (len >= (max_len - 1)) len = max_len - 1;` and performs `tvb_memcpy(tvb, str, offset, len); str[len]=0;`. If caller passes a buffer of size N but provides name_len > N (or even name_len==N with off-by-one expectations), len may be clamped to a value that still exceeds the real buffer capacity, causing out-of-bounds write during memcpy and/or the null terminator write. ASan should detect the OOB write. Key variables/control flow: name_string!=NULL branch sets str/max_len; len from dissect_ber_length; clamp uses max_len-1; tvb_memcpy + str[len]=0.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a stack-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_85JoKGtCp9tHgxjyxLaNxh71",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"dissect_ber_GeneralString\"}"
+          }
+        },
+        {
+          "id": "call_c2YynUV5gsY9SRud71nqQ6fT",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"dissect_ber_GeneralString\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_85JoKGtCp9tHgxjyxLaNxh71",
+      "content": "dissect_ber_GeneralString(asn1_ctx_t *actx, proto_tree *tree, tvbuff_t *tvb, int offset, int hf_id, char *name_string, int name_len)\n{\n    int8_t      ber_class;\n    bool    pc;\n    int32_t     tag;\n    int         identifier_offset;\n    int         identifier_len;\n    uint32_t    len;\n    int         end_offset;\n    int         hoffset;\n    char        str_arr[256];\n    uint32_t    max_len;\n    char       *str;\n    proto_item *cause;\n\n    str = str_arr;\n    max_len = 255;\n    if (name_string) {\n        str = name_string;\n        max_len = name_len;\n    }\n\n    hoffset = offset;\n                                                     \n    identifier_offset = offset;\n    offset = dissect_ber_identifier(actx->pinfo, tree, tvb, offset, &ber_class, &pc, &tag);\n    identifier_len = offset - identifier_offset;\n    offset = dissect_ber_length(actx->pinfo, tree, tvb, offset, &len, NULL);\n    end_offset = offset + len;\n\n                                                             \n    if ( (ber_class != BER_CLASS_UNI)\n      || (tag != BER_UNI_TAG_GENSTR) ) {\n        tvb_ensure_bytes_exist(tvb, hoffset, 2);\n        cause = proto_tree_add_expert_format(\n            tree, actx->pinfo, &ei_ber_expected_general_string,\n            tvb, identifier_offset, identifier_len,\n            \"BER Error: GeneralString expected but class:%s(%d) %s tag:%d was unexpected\",\n            val_to_str_const(ber_class, ber_class_codes, \"Unknown\"),\n            ber_class, tfs_get_string(pc, &tfs_constructed_primitive),\n            tag);\n        if (decode_unexpected) {\n            proto_tree *unknown_tree = proto_item_add_subtree(cause, ett_ber_unknown);\n            dissect_unknown_ber(actx->pinfo, tvb, hoffset, unknown_tree);\n        }\n        return end_offset;\n    }\n\n    if (len >= (max_len - 1)) {\n        len = max_len - 1;\n    }\n\n    tvb_memcpy(tvb, str, offset, len);\n    str[len]=0;\n\n    if (hf_id > 0) {\n        proto_tree_add_string(tree, hf_id, tvb, offset, len, str);\n    }\n\n    return end_offset;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_c2YynUV5gsY9SRud71nqQ6fT",
+      "content": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"indirect\", \"n_callers\": 2}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_AmwRU8d1uXZTrVnjMAkBKsvx",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Minimal BER: [tag=GeneralString 0x1b][len=1][\\\"A\\\"]\\n    return bytes([0x1b, 0x01, 0x41])\\n\",\"target\":\"dissect_ber_GeneralString\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_AmwRU8d1uXZTrVnjMAkBKsvx",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-delta-01/bugs/vuln_003/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_PNQoY7j9o1eZX8nf2OrxRsGu",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source shows potential OOB write when caller supplies name_string/name_len: max_len is set to name_len with no validation against actual allocation size of name_string. Then len (from BER length, tainted) is clamped only against max_len-1, and tvb_memcpy writes len bytes into str plus a NUL at str[len]. If name_len exceeds the real buffer capacity, this can overflow (stack or heap depending on caller buffer). There is also an underflow hazard if name_len==0: max_len-1 wraps to UINT32_MAX, disabling clamp and allowing huge memcpy; however typical callers likely pass positive lengths. No evidence of a guard that ties name_len to actual buffer size.\\n\\nI attempted to run reach_probe with a minimal GeneralString BER input, but the harness binary path was missing, so I could not obtain runtime reach/crash evidence. Therefore this is a code-based assessment only; actual crash depends on whether any reachable caller passes a too-large name_len relative to its buffer allocation (or 0).\",\"corrected_description\":\"Potential out-of-bounds write in dissect_ber_GeneralString when called with external output buffer (name_string) and an incorrect name_len. The function trusts name_len as the destination capacity, clamps decoded len to max_len-1, then copies len bytes and writes a NUL terminator at str[len] without verifying that name_len matches the actual allocated size of name_string. If name_len is larger than the real buffer (or is 0 causing unsigned underflow), memcpy and/or the terminator write can overflow the destination (stack or heap depending on caller).\",\"control_flow_to_bug\":\"Fuzzer entry -> handler_ber -> (indirect) caller of dissect_ber_GeneralString provides name_string!=NULL and name_len (assumed capacity) -> dissect_ber_identifier parses tag/class; must be Universal GeneralString (tag 0x1b) else returns early -> dissect_ber_length parses len from input -> clamp: if len >= (max_len-1) len=max_len-1 (max_len=name_len) -> tvb_memcpy(tvb, name_string, offset, len) -> name_string[len]=0 (overflow if name_len does not reflect actual allocation, or if name_len==0 underflows clamp).\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_PNQoY7j9o1eZX8nf2OrxRsGu",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "dissect_ber_GeneralString"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Stack/heap buffer overflow due to incorrect max_len handling when caller supplies name_string/name_len. The function sets max_len=name_len (untrusted from caller) but does not validate it against the actual allocated size of name_string. It then clamps BER-decoded len with `if (len >= (max_len - 1)) len = max_len - 1;` and performs `tvb_memcpy(tvb, str, offset, len); str[len]=0;`. If caller passes a buffer of size N but provides name_len > N (or even name_len==N with off-by-one expectations), len may be clamped to a value that still exceeds the real buffer capacity, causing out-of-bounds write during memcpy and/or the null terminator write. ASan should detect the OOB write. Key variables/control flow: name_string!=NULL branch sets str/max_len; len from dissect_ber_length; clamp uses max_len-1; tvb_memcpy + str[len]=0.",
+  "finder_vuln_type": ""
+}

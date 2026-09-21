@@ -467,6 +467,28 @@ class AnalysisClient:
         Returns:
             Dict with 'updated' status
         """
+        # RQ2 ablation: FB_ABLATE_FREEZE_SP freezes the SP's *declared claim*
+        # (root-cause description + key control-flow) at the discovery-handoff
+        # version. Downstream verify/PoC may still record the verdict
+        # (is_checked/score), working evidence and pov_guidance, and reason over
+        # new evidence -- only the persistent rewrite of the hypothesis claim is
+        # disabled. This isolates "explicit maintained+propagated revision"
+        # (claim (i)) without touching agent reasoning.
+        import os as _os
+        if _os.environ.get("FB_ABLATE_FREEZE_SP", "").lower() in ("1", "true", "yes"):
+            description = None
+            important_controlflow = None
+
+        # RQ3 ablation: FB_ABLATE_NO_HANDOFF drops the verification->PoC handoff
+        # carried in pov_guidance (the verifier's concrete input directions /
+        # reach & execution findings written for the PoC agent). The no-handoff
+        # arm still keeps the revised claim, evidence and verification_notes
+        # (analysis summary) and its own dynamic-analysis tools -- only the
+        # verification-stage dynamic seed/guidance handoff is withheld, so the
+        # PoC agent must re-derive reach on its own. Orthogonal to RQ2/RQ4.
+        if _os.environ.get("FB_ABLATE_NO_HANDOFF", "").lower() in ("1", "true", "yes"):
+            pov_guidance = None
+
         params = {"id": sp_id}
         for _k, _v in (
             ("is_checked_by_verifier", is_checked_by_verifier),

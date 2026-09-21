@@ -1,0 +1,22 @@
+{
+  "challenge": "systemd-full-001",
+  "bug": "systemd-004",
+  "tag": "systemd-full-001__systemd-004",
+  "round": "final-competition",
+  "scan_mode": "full",
+  "harness": "fuzz-link-parser",
+  "fuzzer": "fuzz-link-parser",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "condition_free"
+  ],
+  "crash_type": "heap-use-after-free",
+  "graphs_root": "/home/ze/fb-graphs/build/systemd-full-001",
+  "source_root": "/home/ze/fb-graphs/build/systemd-full-001/repo",
+  "callgraph": "/home/ze/fb-graphs/build/systemd-full-001/graph-fuzz-link-parser/callgraph.json",
+  "binary_on_disk": "/home/ze/fb-graphs/build/systemd-full-001/bugs/systemd-004/bin/address/fuzz-link-parser",
+  "challenge_image": "aixcc-afc/systemd:latest",
+  "project": "systemd",
+  "blob": "/home/ze/fb-graphs/build/systemd-full-001/bugs/systemd-004/blob"
+}

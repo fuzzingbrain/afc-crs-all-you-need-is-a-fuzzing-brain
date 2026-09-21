@@ -1,0 +1,458 @@
+{
+  "av-delta-02__avif-002": {
+    "binary": "prebuild/av-delta-02/avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert/fuzzer/avif_fuzztest_yuvrgb",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/av-delta-02/bugs/avif-002/bin/address/avif_fuzztest_yuvrgb",
+    "harness_base": "avif_fuzztest_yuvrgb",
+    "size_mb": 93.2,
+    "asan": true,
+    "src_executable": false
+  },
+  "cm-full-01__lcms-001": {
+    "binary": "prebuild/cm-full-01/cms_postscript_fuzzer/fuzzer/cms_postscript_fuzzer",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/cm-full-01/bugs/lcms-001/bin/address/cms_postscript_fuzzer",
+    "harness_base": "cms_postscript_fuzzer",
+    "size_mb": 6.5,
+    "asan": true,
+    "src_executable": true
+  },
+  "cm-full-01__lcms-002": {
+    "binary": "prebuild/cm-full-01/cms_virtual_profile_fuzzer/fuzzer/cms_virtual_profile_fuzzer",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/cm-full-01/bugs/lcms-002/bin/address/cms_virtual_profile_fuzzer",
+    "harness_base": "cms_virtual_profile_fuzzer",
+    "size_mb": 6.5,
+    "asan": true,
+    "src_executable": true
+  },
+  "cu-delta-01__curl-005": {
+    "binary": "prebuild/cu-delta-01/curl_fuzzer_ws/fuzzer/curl_fuzzer_ws",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/cu-delta-01/bugs/curl-005/bin/address/curl_fuzzer_ws",
+    "harness_base": "curl_fuzzer_ws",
+    "size_mb": 14.3,
+    "asan": true,
+    "src_executable": true
+  },
+  "cu-delta-02__curl-006": {
+    "binary": "prebuild/cu-delta-02/curl_fuzzer_ws/fuzzer/curl_fuzzer_ws",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/cu-delta-02/bugs/curl-006/bin/address/curl_fuzzer_ws",
+    "harness_base": "curl_fuzzer_ws",
+    "size_mb": 14.3,
+    "asan": true,
+    "src_executable": true
+  },
+  "cu-delta-03__curl-007": {
+    "binary": "prebuild/cu-delta-03/curl_fuzzer_ws/fuzzer/curl_fuzzer_ws",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/cu-delta-03/bugs/curl-007/bin/address/curl_fuzzer_ws",
+    "harness_base": "curl_fuzzer_ws",
+    "size_mb": 14.4,
+    "asan": true,
+    "src_executable": true
+  },
+  "cu-delta-04__curl-003": {
+    "binary": "prebuild/cu-delta-04/curl_fuzzer_http/fuzzer/curl_fuzzer_http",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/cu-delta-04/bugs/curl-003/bin/address/curl_fuzzer_http",
+    "harness_base": "curl_fuzzer_http",
+    "size_mb": 14.4,
+    "asan": true,
+    "src_executable": true
+  },
+  "cu-delta-04__curl-008": {
+    "binary": "prebuild/cu-delta-04/curl_fuzzer_ws/fuzzer/curl_fuzzer_ws",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/cu-delta-04/bugs/curl-008/bin/address/curl_fuzzer_ws",
+    "harness_base": "curl_fuzzer_ws",
+    "size_mb": 14.4,
+    "asan": true,
+    "src_executable": true
+  },
+  "cu-delta-05__curl-001": {
+    "binary": "prebuild/cu-delta-05/curl_fuzzer_dict/fuzzer/curl_fuzzer_dict",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/cu-delta-05/bugs/curl-001/bin/address/curl_fuzzer_dict",
+    "harness_base": "curl_fuzzer_dict",
+    "size_mb": 14.3,
+    "asan": true,
+    "src_executable": true
+  },
+  "cu-delta-05__curl-002": {
+    "binary": "prebuild/cu-delta-05/curl_fuzzer_ftp/fuzzer/curl_fuzzer_ftp",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/cu-delta-05/bugs/curl-002/bin/address/curl_fuzzer_ftp",
+    "harness_base": "curl_fuzzer_ftp",
+    "size_mb": 14.3,
+    "asan": true,
+    "src_executable": true
+  },
+  "cu-full-01__curl-004": {
+    "binary": "prebuild/cu-full-01/curl_fuzzer/fuzzer/curl_fuzzer",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/full/cu-full-01/bugs/curl-004/bin/address/curl_fuzzer",
+    "harness_base": "curl_fuzzer",
+    "size_mb": 14.3,
+    "asan": true,
+    "src_executable": true
+  },
+  "da-full-01__dav1d-001": {
+    "binary": "prebuild/da-full-01/dav1d_fuzzer_mt@NO_OOM/fuzzer/dav1d_fuzzer_mt",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/da-full-01/bugs/dav1d-001/bin/address/dav1d_fuzzer_mt",
+    "harness_base": "dav1d_fuzzer_mt",
+    "size_mb": 9.6,
+    "asan": true,
+    "src_executable": false
+  },
+  "ex-delta-01__exif-003": {
+    "binary": "prebuild/ex-delta-01/exif_loader_fuzzer/fuzzer/exif_loader_fuzzer",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/ex-delta-01/bugs/exif-003/bin/address/exif_loader_fuzzer",
+    "harness_base": "exif_loader_fuzzer",
+    "size_mb": 6.1,
+    "asan": true,
+    "src_executable": true
+  },
+  "ex-delta-01__exif-004": {
+    "binary": "prebuild/ex-delta-01/exif_loader_fuzzer/fuzzer/exif_loader_fuzzer",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/ex-delta-01/bugs/exif-004/bin/address/exif_loader_fuzzer",
+    "harness_base": "exif_loader_fuzzer",
+    "size_mb": 6.1,
+    "asan": true,
+    "src_executable": true
+  },
+  "ex-delta-01__exif-005": {
+    "binary": "prebuild/ex-delta-01/exif_from_data_fuzzer/fuzzer/exif_from_data_fuzzer",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/ex-delta-01/bugs/exif-005/bin/address/exif_from_data_fuzzer",
+    "harness_base": "exif_from_data_fuzzer",
+    "size_mb": 6.1,
+    "asan": true,
+    "src_executable": true
+  },
+  "ex-delta-02__exif-001": {
+    "binary": "prebuild/ex-delta-02/exif_from_data_fuzzer/fuzzer/exif_from_data_fuzzer",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/ex-delta-02/bugs/exif-001/bin/address/exif_from_data_fuzzer",
+    "harness_base": "exif_from_data_fuzzer",
+    "size_mb": 6.1,
+    "asan": true,
+    "src_executable": true
+  },
+  "ex-delta-03__exif-002": {
+    "binary": "prebuild/ex-delta-03/exif_from_data_fuzzer/fuzzer/exif_from_data_fuzzer",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/ex-delta-03/bugs/exif-002/bin/address/exif_from_data_fuzzer",
+    "harness_base": "exif_from_data_fuzzer",
+    "size_mb": 6.1,
+    "asan": true,
+    "src_executable": true
+  },
+  "fp-delta-01__vuln_001": {
+    "binary": "prebuild/fp-delta-01/TestFuzzCryptoCertificateDataSetPEM/fuzzer/TestFuzzCryptoCertificateDataSetPEM",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/fp-delta-01/bugs/vuln_001/bin/address/TestFuzzCryptoCertificateDataSetPEM",
+    "harness_base": "TestFuzzCryptoCertificateDataSetPEM",
+    "size_mb": 10.2,
+    "asan": true,
+    "src_executable": true
+  },
+  "fp-delta-02__vuln_002": {
+    "binary": "prebuild/fp-delta-02/TestFuzzCryptoCertificateDataSetPEM/fuzzer/TestFuzzCryptoCertificateDataSetPEM",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/fp-delta-02/bugs/vuln_002/bin/address/TestFuzzCryptoCertificateDataSetPEM",
+    "harness_base": "TestFuzzCryptoCertificateDataSetPEM",
+    "size_mb": 10.2,
+    "asan": true,
+    "src_executable": true
+  },
+  "fp-delta-03__vuln_003": {
+    "binary": "prebuild/fp-delta-03/TestFuzzCodecs/fuzzer/TestFuzzCodecs",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/fp-delta-03/bugs/vuln_003/bin/address/TestFuzzCodecs",
+    "harness_base": "TestFuzzCodecs",
+    "size_mb": 13.5,
+    "asan": true,
+    "src_executable": true
+  },
+  "fp-full-01__vuln_004": {
+    "binary": "prebuild/fp-full-01/TestFuzzCoreServer/fuzzer/TestFuzzCoreServer",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/full/fp-full-01/bugs/vuln_004/bin/address/TestFuzzCoreServer",
+    "harness_base": "TestFuzzCoreServer",
+    "size_mb": 33.3,
+    "asan": true,
+    "src_executable": true
+  },
+  "fp-full-01__vuln_005": {
+    "binary": "prebuild/fp-full-01/TestFuzzCoreServer/fuzzer/TestFuzzCoreServer",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/full/fp-full-01/bugs/vuln_005/bin/address/TestFuzzCoreServer",
+    "harness_base": "TestFuzzCoreServer",
+    "size_mb": 33.3,
+    "asan": true,
+    "src_executable": true
+  },
+  "lx-delta-01__vuln_001": {
+    "binary": "prebuild/lx-delta-01/html/fuzzer/html",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/lx-delta-01/bugs/vuln_001/bin/address/html",
+    "harness_base": "html",
+    "size_mb": 12.9,
+    "asan": true,
+    "src_executable": true
+  },
+  "lx-delta-02__vuln_002": {
+    "binary": "prebuild/lx-delta-02/xml/fuzzer/xml",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/lx-delta-02/bugs/vuln_002/bin/address/xml",
+    "harness_base": "xml",
+    "size_mb": 12.9,
+    "asan": true,
+    "src_executable": true
+  },
+  "lx-delta-03__vuln_004": {
+    "binary": "prebuild/lx-delta-03/html/fuzzer/html",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/lx-delta-03/bugs/vuln_004/bin/address/html",
+    "harness_base": "html",
+    "size_mb": 12.9,
+    "asan": true,
+    "src_executable": true
+  },
+  "lx-full-01__vuln_003": {
+    "binary": "prebuild/lx-full-01/xml/fuzzer/xml",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/full/lx-full-01/bugs/vuln_003/bin/address/xml",
+    "harness_base": "xml",
+    "size_mb": 12.9,
+    "asan": true,
+    "src_executable": true
+  },
+  "lx-full-01__vuln_005": {
+    "binary": "prebuild/lx-full-01/api/fuzzer/api",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/full/lx-full-01/bugs/vuln_005/bin/address/api",
+    "harness_base": "api",
+    "size_mb": 13.2,
+    "asan": true,
+    "src_executable": true
+  },
+  "mg-delta-01__mongoose_1": {
+    "binary": "prebuild/mg-delta-01/fuzz/fuzzer/fuzz",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/mg-delta-01/bugs/mongoose_1/bin/address/fuzz",
+    "harness_base": "fuzz",
+    "size_mb": 5.8,
+    "asan": true,
+    "src_executable": true
+  },
+  "mg-delta-02__mongoose_2": {
+    "binary": "prebuild/mg-delta-02/fuzz/fuzzer/fuzz",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/mg-delta-02/bugs/mongoose_2/bin/address/fuzz",
+    "harness_base": "fuzz",
+    "size_mb": 5.7,
+    "asan": true,
+    "src_executable": true
+  },
+  "mg-full-01__mongoose_0": {
+    "binary": "prebuild/mg-full-01/fuzz/fuzzer/fuzz",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/mg-full-01/bugs/mongoose_0/bin/address/fuzz",
+    "harness_base": "fuzz",
+    "size_mb": 5.7,
+    "asan": true,
+    "src_executable": true
+  },
+  "shadowsocks-full-01__shadowsocks-libev_0": {
+    "binary": "prebuild/shadowsocks-full-01/json_fuzz/fuzzer/json_fuzz",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/shadowsocks-full-01/bugs/shadowsocks-libev_0/bin/address/json_fuzz",
+    "harness_base": "json_fuzz",
+    "size_mb": 6.5,
+    "asan": true,
+    "src_executable": true
+  },
+  "shadowsocks-full-01__shadowsocks-libev_1": {
+    "binary": "prebuild/shadowsocks-full-01/json_fuzz/fuzzer/json_fuzz",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/shadowsocks-full-01/bugs/shadowsocks-libev_1/bin/address/json_fuzz",
+    "harness_base": "json_fuzz",
+    "size_mb": 6.5,
+    "asan": true,
+    "src_executable": true
+  },
+  "shadowsocks-full-01__shadowsocks-libev_2": {
+    "binary": "prebuild/shadowsocks-full-01/json_fuzz/fuzzer/json_fuzz",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/shadowsocks-full-01/bugs/shadowsocks-libev_2/bin/address/json_fuzz",
+    "harness_base": "json_fuzz",
+    "size_mb": 6.5,
+    "asan": true,
+    "src_executable": true
+  },
+  "shadowsocks-full-01__shadowsocks-libev_3": {
+    "binary": "prebuild/shadowsocks-full-01/json_fuzz/fuzzer/json_fuzz",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/shadowsocks-full-01/bugs/shadowsocks-libev_3/bin/address/json_fuzz",
+    "harness_base": "json_fuzz",
+    "size_mb": 6.5,
+    "asan": true,
+    "src_executable": true
+  },
+  "shadowsocks-full-01__shadowsocks-libev_4": {
+    "binary": "prebuild/shadowsocks-full-01/json_fuzz/fuzzer/json_fuzz",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/shadowsocks-full-01/bugs/shadowsocks-libev_4/bin/address/json_fuzz",
+    "harness_base": "json_fuzz",
+    "size_mb": 6.5,
+    "asan": true,
+    "src_executable": true
+  },
+  "sq-delta-01__SQL-006": {
+    "binary": "prebuild/sq-delta-01/customfuzz3/fuzzer/customfuzz3",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/sq-delta-01/bugs/SQL-006/bin/address/customfuzz3",
+    "harness_base": "customfuzz3",
+    "size_mb": 17.5,
+    "asan": true,
+    "src_executable": true
+  },
+  "sq-delta-02__SQL-008": {
+    "binary": "prebuild/sq-delta-02/customfuzz3/fuzzer/customfuzz3",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/sq-delta-02/bugs/SQL-008/bin/address/customfuzz3",
+    "harness_base": "customfuzz3",
+    "size_mb": 19.1,
+    "asan": true,
+    "src_executable": true
+  },
+  "sq-delta-03__SQL-010": {
+    "binary": "prebuild/sq-delta-03/customfuzz3/fuzzer/customfuzz3",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/sq-delta-03/bugs/SQL-010/bin/address/customfuzz3",
+    "harness_base": "customfuzz3",
+    "size_mb": 19.1,
+    "asan": true,
+    "src_executable": true
+  },
+  "sq-full-01__SQL-003": {
+    "binary": "prebuild/sq-full-01/customfuzz3/fuzzer/customfuzz3",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/full/sq-full-01/bugs/SQL-003/bin/address/customfuzz3",
+    "harness_base": "customfuzz3",
+    "size_mb": 17.5,
+    "asan": true,
+    "src_executable": true
+  },
+  "sq-full-01__SQL-004": {
+    "binary": "prebuild/sq-full-01/customfuzz3/fuzzer/customfuzz3",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/full/sq-full-01/bugs/SQL-004/bin/address/customfuzz3",
+    "harness_base": "customfuzz3",
+    "size_mb": 17.5,
+    "asan": true,
+    "src_executable": true
+  },
+  "systemd-full-001__systemd-001": {
+    "binary": "prebuild/systemd-full-001/fuzz-udev-rule-parse-value/fuzzer/fuzz-udev-rule-parse-value",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/systemd-full-001/bugs/systemd-001/bin/address/fuzz-udev-rule-parse-value",
+    "harness_base": "fuzz-udev-rule-parse-value",
+    "size_mb": 6.6,
+    "asan": true,
+    "src_executable": true
+  },
+  "systemd-full-001__systemd-003": {
+    "binary": "prebuild/systemd-full-001/fuzz-catalog/fuzzer/fuzz-catalog",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/systemd-full-001/bugs/systemd-003/bin/address/fuzz-catalog",
+    "harness_base": "fuzz-catalog",
+    "size_mb": 4.9,
+    "asan": true,
+    "src_executable": true
+  },
+  "systemd-full-001__systemd-004": {
+    "binary": "prebuild/systemd-full-001/fuzz-link-parser/fuzzer/fuzz-link-parser",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/systemd-full-001/bugs/systemd-004/bin/address/fuzz-link-parser",
+    "harness_base": "fuzz-link-parser",
+    "size_mb": 6.0,
+    "asan": true,
+    "src_executable": true
+  },
+  "systemd-full-001__systemd-005": {
+    "binary": "prebuild/systemd-full-001/fuzz-systemctl-parse-argv/fuzzer/fuzz-systemctl-parse-argv",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/systemd-full-001/bugs/systemd-005/bin/address/fuzz-systemctl-parse-argv",
+    "harness_base": "fuzz-systemctl-parse-argv",
+    "size_mb": 6.3,
+    "asan": true,
+    "src_executable": true
+  },
+  "ws-delta-01__vuln_003": {
+    "binary": "prebuild/ws-delta-01/handler_ber/fuzzer/handler_ber",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/ws-delta-01/bugs/vuln_003/bin/address/handler_ber",
+    "harness_base": "handler_ber",
+    "size_mb": 477.2,
+    "asan": true,
+    "src_executable": true
+  },
+  "ws-delta-02__vuln_004": {
+    "binary": "prebuild/ws-delta-02/handler_icmp/fuzzer/handler_icmp",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/ws-delta-02/bugs/vuln_004/bin/address/handler_icmp",
+    "harness_base": "handler_icmp",
+    "size_mb": 477.2,
+    "asan": true,
+    "src_executable": true
+  },
+  "ws-delta-03__vuln_006": {
+    "binary": "prebuild/ws-delta-03/handler_irc/fuzzer/handler_irc",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/ws-delta-03/bugs/vuln_006/bin/address/handler_irc",
+    "harness_base": "handler_irc",
+    "size_mb": 477.2,
+    "asan": true,
+    "src_executable": true
+  },
+  "ws-delta-04__vuln_007": {
+    "binary": "prebuild/ws-delta-04/handler_json/fuzzer/handler_json",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/ws-delta-04/bugs/vuln_007/bin/address/handler_json",
+    "harness_base": "handler_json",
+    "size_mb": 477.2,
+    "asan": true,
+    "src_executable": true
+  },
+  "ws-delta-05__vuln_008": {
+    "binary": "prebuild/ws-delta-05/handler_netbios/fuzzer/handler_netbios",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/ws-delta-05/bugs/vuln_008/bin/address/handler_netbios",
+    "harness_base": "handler_netbios",
+    "size_mb": 477.2,
+    "asan": true,
+    "src_executable": true
+  },
+  "ws-delta-07__vuln_013": {
+    "binary": "prebuild/ws-delta-07/handler_gvcp/fuzzer/handler_gvcp",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/ws-delta-07/bugs/vuln_013/bin/address/handler_gvcp",
+    "harness_base": "handler_gvcp",
+    "size_mb": 477.2,
+    "asan": true,
+    "src_executable": true
+  },
+  "ws-full-01__vuln_001": {
+    "binary": "prebuild/ws-full-01/handler_openvpn.udp/fuzzer/handler_openvpn.udp",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/ws-full-01/bugs/vuln_001/bin/address/handler_openvpn.udp",
+    "harness_base": "handler_openvpn.udp",
+    "size_mb": 477.2,
+    "asan": true,
+    "src_executable": true
+  },
+  "ws-full-01__vuln_002": {
+    "binary": "prebuild/ws-full-01/handler_telnet/fuzzer/handler_telnet",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/ws-full-01/bugs/vuln_002/bin/address/handler_telnet",
+    "harness_base": "handler_telnet",
+    "size_mb": 477.2,
+    "asan": true,
+    "src_executable": true
+  },
+  "ws-full-01__vuln_005": {
+    "binary": "prebuild/ws-full-01/handler_bat.vis/fuzzer/handler_bat.vis",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/ws-full-01/bugs/vuln_005/bin/address/handler_bat.vis",
+    "harness_base": "handler_bat.vis",
+    "size_mb": 477.2,
+    "asan": true,
+    "src_executable": true
+  },
+  "ws-full-01__vuln_010": {
+    "binary": "prebuild/ws-full-01/handler_netbios/fuzzer/handler_netbios",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/ws-full-01/bugs/vuln_010/bin/address/handler_netbios",
+    "harness_base": "handler_netbios",
+    "size_mb": 477.2,
+    "asan": true,
+    "src_executable": true
+  },
+  "ws-full-01__vuln_011": {
+    "binary": "prebuild/ws-full-01/handler_aim/fuzzer/handler_aim",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/ws-full-01/bugs/vuln_011/bin/address/handler_aim",
+    "harness_base": "handler_aim",
+    "size_mb": 477.2,
+    "asan": true,
+    "src_executable": true
+  },
+  "ws-full-01__vuln_012": {
+    "binary": "prebuild/ws-full-01/handler_zbee_zdp/fuzzer/handler_zbee_zdp",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/ws-full-01/bugs/vuln_012/bin/address/handler_zbee_zdp",
+    "harness_base": "handler_zbee_zdp",
+    "size_mb": 477.2,
+    "asan": true,
+    "src_executable": true
+  },
+  "xz-full-01__xz-001": {
+    "binary": "prebuild/xz-full-01/fuzz_encode_stream/fuzzer/fuzz_encode_stream",
+    "binary_src": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/xz-full-01/bugs/xz-001/bin/address/fuzz_encode_stream",
+    "harness_base": "fuzz_encode_stream",
+    "size_mb": 5.4,
+    "asan": true,
+    "src_executable": true
+  }
+}

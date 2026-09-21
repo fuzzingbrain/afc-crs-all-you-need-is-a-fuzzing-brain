@@ -1,0 +1,22 @@
+{
+  "challenge": "ws-full-01",
+  "bug": "vuln_002",
+  "tag": "ws-full-01__vuln_002",
+  "round": "final-competition",
+  "scan_mode": "full",
+  "harness": "handler_telnet",
+  "fuzzer": "handler_telnet",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "memcpy"
+  ],
+  "crash_type": "heap-use-after-free",
+  "graphs_root": "/home/ze/fb-graphs/build/ws-full-01",
+  "source_root": "/home/ze/fb-graphs/build/ws-full-01/repo",
+  "callgraph": "/home/ze/fb-graphs/build/ws-full-01/graph-handler_telnet/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/wireshark:latest",
+  "project": "wireshark",
+  "blob": "/home/ze/fb-graphs/build/ws-full-01/bugs/vuln_002/blob"
+}

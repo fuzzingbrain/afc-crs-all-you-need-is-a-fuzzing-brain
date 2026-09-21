@@ -1,0 +1,181 @@
+{
+  "tag": "sq-full-01__SQL-003",
+  "gt": "rot13func",
+  "crash_type": "stack-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source shows stack buffer zTemp[100] and condition `if( nIn<=sizeof(zTemp) ) zOut=zTemp;`. Loop writes indices 0..nIn-1, then writes NUL terminator `zOut[i]=0` with i==nIn after loop. When nIn==100, this writes zTemp[100], 1 byte past end -> stack-buffer-overflow under ASan. nIn is derived from sqlite3_value_bytes(argv[0]) (SQL argument length), so fuzzer-controlled input can set nIn==100. No clamp prevents the off-by-one; correct guard should be `< sizeof(zTemp)` or buffer size 101.\n\nCould not run reach_probe due to missing ASan binary path in the environment (tool error), so evidence is from direct code inspection + reachability confirmation.",
+    "corrected_description": "Off-by-one stack-buffer-overflow in rot13func: when input length nIn equals 100, code selects stack buffer zTemp[100] via `nIn<=sizeof(zTemp)` and then writes the NUL terminator at index nIn (`zOut[i]=0`), overflowing by 1 byte. (The loop itself stays in-bounds for nIn==100.)",
+    "control_flow_to_bug": "Fuzzer input must cause SQLite to invoke SQL function rot13() implemented by rot13func with a non-NULL text argument whose byte length nIn==100. In rot13func: sqlite3_value_text/bytes read argument; branch `if( nIn<=sizeof(zTemp) )` selects stack buffer; for-loop runs i=0..99; then `zOut[i]=0` with i==100 writes one byte past zTemp, triggering ASan stack-buffer-overflow."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "rot13func"
+      },
+      "result": "static void rot13func(\n  sqlite3_context *context,\n  int argc,\n  sqlite3_value **argv\n){\n  const unsigned char *zIn;\n  int nIn;\n  unsigned char *zOut;\n  unsigned char *zToFree = 0;\n  int i;\n  unsigned char zTemp[100];\n  assert( argc==1 );\n  if( sqlite3_value_type(argv[0])==SQLITE_NULL ) return;\n  zIn = (const unsigned char*)sqlite3_value_text(argv[0]);\n  nIn = sqlite3_value_bytes(argv[0]);\n  if( nIn<=sizeof(zTemp) ){\n    zOut = zTemp;\n  }else{\n    zOut = zToFree = (unsigned char*)sqlite3_malloc64( nIn+1 );\n    if( zOut==0 ){\n      sqlite3_result_error_nomem(context);\n      return;\n    }\n  }\n  for(i=0; i<nIn; i++) zOut[i] = rot13(zIn[i]);\n  zOut[i] = 0;\n  sqlite3_result_text(context, (char*)zOut, i, SQLITE_TRANSIENT);\n  sqlite3_free(zToFree);\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "rot13func"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"indirect\", \"n_callers\": 6}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to drive SQLite to call the rot13 SQL function with a 100-byte argument.\n    # Many sqlite fuzzers accept SQL text as input.\n    s = \"SELECT rot13('\" + (\"A\"*100) + \"');\\n\"\n    return s.encode('ascii')\n",
+        "target": "rot13func"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/sq-full-01/bugs/SQL-003/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source shows stack buffer zTemp[100] and condition `if( nIn<=sizeof(zTemp) ) zOut=zTemp;`. Loop writes indices 0..nIn-1, then writes NUL terminator `zOut[i]=0` with i==nIn after loop. When nIn==100, this writes zTemp[100], 1 byte past end -> stack-buffer-overflow under ASan. nIn is derived from sqlite3_value_bytes(argv[0]) (SQL argument length), so fuzzer-controlled input can set nIn==100. No clamp prevents the off-by-one; correct guard should be `< sizeof(zTemp)` or buffer size 101.\n\nCould not run reach_probe due to missing ASan binary path in the environment (tool error), so evidence is from direct code inspection + reachability confirmation.",
+        "corrected_description": "Off-by-one stack-buffer-overflow in rot13func: when input length nIn equals 100, code selects stack buffer zTemp[100] via `nIn<=sizeof(zTemp)` and then writes the NUL terminator at index nIn (`zOut[i]=0`), overflowing by 1 byte. (The loop itself stays in-bounds for nIn==100.)",
+        "control_flow_to_bug": "Fuzzer input must cause SQLite to invoke SQL function rot13() implemented by rot13func with a non-NULL text argument whose byte length nIn==100. In rot13func: sqlite3_value_text/bytes read argument; branch `if( nIn<=sizeof(zTemp) )` selects stack buffer; for-loop runs i=0..99; then `zOut[i]=0` with i==100 writes one byte past zTemp, triggering ASan stack-buffer-overflow."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1067,
+      "output_tokens": 54,
+      "total_tokens": 1121,
+      "latency_ms": 1061
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1451,
+      "output_tokens": 97,
+      "total_tokens": 1548,
+      "latency_ms": 2972
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1598,
+      "output_tokens": 406,
+      "total_tokens": 2004,
+      "latency_ms": 5508
+    }
+  ],
+  "token_totals": {
+    "input": 4116,
+    "output": 557,
+    "total": 4673,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: customfuzz3   Sanitizer: address\nFunction: rot13func\nClaimed bug type: stack-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): `unsigned char zTemp[100]`; the guard is `if (nIn <= sizeof(zTemp)) zOut = zTemp;` (should be `<`). With nIn == 100, zOut = zTemp, the loop fills zTemp[0..99], then `zOut[i] = 0` writes zTemp[100] -- one byte past the stack buffer.\n\nControl flow to the bug:\n  - SELECT rot13(x) with x exactly 100 bytes of text\n  - nIn == sizeof(zTemp) still picks the stack buffer (<= off-by-one)\n  - zOut[100] = 0 writes past zTemp[100] -> stack overflow\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a stack-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_CJL3NKUxtCR8n5nISyjpn0mh",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"rot13func\"}"
+          }
+        },
+        {
+          "id": "call_vmhvvrZR9412YDzh5STCDtFI",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"rot13func\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_CJL3NKUxtCR8n5nISyjpn0mh",
+      "content": "static void rot13func(\n  sqlite3_context *context,\n  int argc,\n  sqlite3_value **argv\n){\n  const unsigned char *zIn;\n  int nIn;\n  unsigned char *zOut;\n  unsigned char *zToFree = 0;\n  int i;\n  unsigned char zTemp[100];\n  assert( argc==1 );\n  if( sqlite3_value_type(argv[0])==SQLITE_NULL ) return;\n  zIn = (const unsigned char*)sqlite3_value_text(argv[0]);\n  nIn = sqlite3_value_bytes(argv[0]);\n  if( nIn<=sizeof(zTemp) ){\n    zOut = zTemp;\n  }else{\n    zOut = zToFree = (unsigned char*)sqlite3_malloc64( nIn+1 );\n    if( zOut==0 ){\n      sqlite3_result_error_nomem(context);\n      return;\n    }\n  }\n  for(i=0; i<nIn; i++) zOut[i] = rot13(zIn[i]);\n  zOut[i] = 0;\n  sqlite3_result_text(context, (char*)zOut, i, SQLITE_TRANSIENT);\n  sqlite3_free(zToFree);\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_vmhvvrZR9412YDzh5STCDtFI",
+      "content": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"indirect\", \"n_callers\": 6}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_3JkJs1dWGqMSw6nO9JLa6xfM",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to drive SQLite to call the rot13 SQL function with a 100-byte argument.\\n    # Many sqlite fuzzers accept SQL text as input.\\n    s = \\\"SELECT rot13('\\\" + (\\\"A\\\"*100) + \\\"');\\\\n\\\"\\n    return s.encode('ascii')\\n\",\"target\":\"rot13func\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_3JkJs1dWGqMSw6nO9JLa6xfM",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/sq-full-01/bugs/SQL-003/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_Ehm5Zrv0zJevm1F7QmQDNc4Y",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source shows stack buffer zTemp[100] and condition `if( nIn<=sizeof(zTemp) ) zOut=zTemp;`. Loop writes indices 0..nIn-1, then writes NUL terminator `zOut[i]=0` with i==nIn after loop. When nIn==100, this writes zTemp[100], 1 byte past end -> stack-buffer-overflow under ASan. nIn is derived from sqlite3_value_bytes(argv[0]) (SQL argument length), so fuzzer-controlled input can set nIn==100. No clamp prevents the off-by-one; correct guard should be `< sizeof(zTemp)` or buffer size 101.\\n\\nCould not run reach_probe due to missing ASan binary path in the environment (tool error), so evidence is from direct code inspection + reachability confirmation.\",\"corrected_description\":\"Off-by-one stack-buffer-overflow in rot13func: when input length nIn equals 100, code selects stack buffer zTemp[100] via `nIn<=sizeof(zTemp)` and then writes the NUL terminator at index nIn (`zOut[i]=0`), overflowing by 1 byte. (The loop itself stays in-bounds for nIn==100.)\",\"control_flow_to_bug\":\"Fuzzer input must cause SQLite to invoke SQL function rot13() implemented by rot13func with a non-NULL text argument whose byte length nIn==100. In rot13func: sqlite3_value_text/bytes read argument; branch `if( nIn<=sizeof(zTemp) )` selects stack buffer; for-loop runs i=0..99; then `zOut[i]=0` with i==100 writes one byte past zTemp, triggering ASan stack-buffer-overflow.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Ehm5Zrv0zJevm1F7QmQDNc4Y",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

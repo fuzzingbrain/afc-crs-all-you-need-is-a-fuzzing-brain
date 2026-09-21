@@ -1,0 +1,217 @@
+{
+  "tag": "ws-full-01__vuln_001",
+  "gt": "dissect_openvpn_msg_common",
+  "crash_type": "stack-buffer-overflow",
+  "tools_used": [
+    "check_reachability",
+    "read_function",
+    "read_function",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source shows a real stack buffer `uint8_t buf[8]`. In the WKC/tls-crypt branch:\n\n```\nif ((openvpn_opcode == P_CONTROL_HARD_RESET_CLIENT_V3 || openvpn_opcode == P_CONTROL_WKC_V1)\n    && msg_length_remaining >= 2) {\n  wkc_len = tvb_get_ntohs(tvb, tvb_reported_length(tvb) - 2);\n  data_len = msg_length_remaining - wkc_len;\n  tvb_memcpy(tvb, buf, offset, data_len);\n  if (!strcmp((char*)&buf[0], \"OpenVPN\")) return 0;\n}\n```\n\n`data_len` is derived from packet length and the last 2 bytes (`wkc_len`) and is not bounded to 8 before copying into `buf[8]`. If `wkc_len` is small (e.g., 0) and `msg_length_remaining` is > 8, `tvb_memcpy` will write past `buf` causing a stack-buffer-overflow under ASan.\n\nThe finder’s description focusing on `pid_arraylength` is likely incorrect: the pid array loop only advances `offset` and adds items from the tvb; it does not write into `buf`. The actual overflow sink is `tvb_memcpy` into `buf` with attacker-controlled `data_len`.\n\nA reach_probe could not be executed due to missing ASan binary path in the environment, so no runtime crash evidence was gathered; conclusion is based on direct code inspection of an unbounded copy into a fixed stack buffer.",
+    "corrected_description": "Stack-buffer-overflow in `dissect_openvpn_msg_common`: in the WKC parsing path for opcodes `P_CONTROL_HARD_RESET_CLIENT_V3` or `P_CONTROL_WKC_V1`, the code computes `data_len = msg_length_remaining - wkc_len` from packet-controlled lengths and calls `tvb_memcpy(tvb, buf, offset, data_len)` where `buf` is only 8 bytes, with no clamp to 8.",
+    "control_flow_to_bug": "handler_openvpn.udp -> OpenVPN dissector -> dissect_openvpn_msg_common(tvb,...,offset). Conditions: opcode != P_DATA_V1 and opcode equals P_CONTROL_HARD_RESET_CLIENT_V3 or P_CONTROL_WKC_V1; after parsing 1-byte type and 8-byte sessionid (and optional tls_auth/tls_crypt fields), compute `msg_length_remaining = tvb_reported_length_remaining(tvb, offset)`; require `msg_length_remaining >= 2`. Then read `wkc_len` from last 2 bytes of packet, set `data_len = msg_length_remaining - wkc_len` (attacker-controlled), and call `tvb_memcpy(..., buf[8], ..., data_len)` causing overflow when `data_len > 8`."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "dissect_openvpn_msg_common"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 5}"
+    },
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "dissect_openvpn_msg_common"
+      },
+      "result": "dissect_openvpn_msg_common(tvbuff_t *tvb, packet_info *pinfo, proto_tree *openvpn_tree, proto_tree *parent_tree, int offset)\n{\n  bool           tls_auth;\n  bool           tls_crypt = false;\n  unsigned       openvpn_keyid;\n  unsigned       openvpn_opcode;\n  uint32_t       msg_sessionid = -1;\n  uint8_t        openvpn_predict_tlsauth_arraylength;\n  proto_item    *ti2;\n  proto_tree    *packetarray_tree, *type_tree;\n  uint32_t       msg_length_remaining;\n  int            wkc_offset = -1;\n  uint8_t        buf[8] = { 0 };\n\n                                          \n  col_set_str(pinfo->cinfo, COL_PROTOCOL, PSNAME);\n  col_clear(pinfo->cinfo,COL_INFO);\n\n                                            \n  openvpn_opcode = tvb_get_bits8(tvb, offset*8, 5);\n  col_append_fstr(pinfo->cinfo, COL_INFO, \"MessageType: %s\",\n                  val_to_str_const(openvpn_opcode, openvpn_message_types, \"Unknown Messagetype\"));\n\n\n  openvpn_keyid = tvb_get_bits8(tvb, offset*8 + 5, 3);\n  proto_item_append_text(parent_tree, \", Opcode: %s, Key ID: %d\",\n                         val_to_str(openvpn_opcode, openvpn_message_types, \"Unknown (0x%02x)\"),\n                         openvpn_keyid);\n\n  ti2 = proto_tree_add_item(openvpn_tree, hf_openvpn_pdu_type, tvb, offset, 1, ENC_BIG_ENDIAN);\n  proto_item_append_text(ti2, \" [opcode/key_id]\");\n\n  type_tree = proto_item_add_subtree(ti2, ett_openvpn_type);\n  proto_tree_add_item(type_tree, hf_openvpn_opcode, tvb, offset, 1, ENC_BIG_ENDIAN);\n  proto_tree_add_item(type_tree, hf_openvpn_keyid, tvb, offset, 1, ENC_BIG_ENDIAN);\n  offset += 1;\n\n  if (openvpn_opcode == P_DATA_V2) {\n    proto_tree_add_item(openvpn_tree, hf_openvpn_peerid, tvb, offset, 3, ENC_BIG_ENDIAN);\n    offset += 3;\n  } else if (openvpn_opcode != P_DATA_V1) {\n                                                \n\n                        \n    msg_sessionid = tvb_get_bits32(tvb, offset*8+32, 32, ENC_BIG_ENDIAN);\n    proto_tree_add_item(openvpn_tree, hf_openvpn_sessionid, tvb, offset, 8, ENC_BIG_ENDIAN);\n    offset += 8;\n\n                                                                   \n    openvpn_predict_tlsauth_arraylength = tvb_get_uint8(tvb, offset);\n\n                                                                                      \n                                                     \n    if (pref_tls_auth_override == false) {\n      if ((openvpn_opcode != P_DATA_V1)\n          && (openvpn_predict_tlsauth_arraylength > 0)\n          && check_for_valid_hmac(tvb_get_ntohl(tvb, offset))) {\n        tls_auth = true;\n      } else {\n        tls_auth = false;\n      }\n    } else {\n      tls_auth = pref_tls_auth;\n    }\n\n    if (openvpn_opcode == P_CONTROL_HARD_RESET_CLIENT_V3 || openvpn_opcode == P_CONTROL_WKC_V1 || pref_tls_crypt_override == true) {\n                                             \n      tls_crypt = true;\n      tls_auth = false;\n    }\n\n    if (tls_auth == true) {\n      proto_tree_add_item(openvpn_tree, hf_openvpn_hmac, tvb, offset, tls_auth_hmac_size, ENC_NA);\n      offset += tls_auth_hmac_size;\n    }\n\n    if (tls_auth == true || tls_crypt == true) {\n      if (tvb_reported_length_remaining(tvb, offset) >= 8) {\n        proto_tree_add_item(openvpn_tree, hf_openvpn_pid, tvb, offset, 4, ENC_BIG_ENDIAN);\n        offset += 4;\n\n        if (pref_long_format || tls_crypt == true) {\n          proto_tree_add_item(openvpn_tree, hf_openvpn_net_time, tvb, offset, 4, ENC_BIG_ENDIAN);\n          offset += 4;\n        }\n      }\n      if (tls_crypt == true) {\n                                        \n        proto_tree_add_item(openvpn_tree, hf_openvpn_hmac, tvb, offset, 32, ENC_NA);\n        offset += 32;\n      }\n    }\n\n    if (tvb_reported_length_remaining(tvb, offset) >= 1 && tls_crypt == false) {\n                                             \n      int pid_arraylength = tvb_get_uint8(tvb, offset);\n      int i;\n      proto_tree_add_item(openvpn_tree, hf_openvpn_mpid_arraylength, tvb, offset, 1, ENC_BIG_ENDIAN);\n      offset += 1;\n\n      if (pid_arraylength > 0) {\n\n        packe…[truncated]"
+    },
+    {
+      "iter": 1,
+      "tool": "read_function",
+      "args": {
+        "name": "dissect_openvpn_msg_common"
+      },
+      "result": "dissect_openvpn_msg_common(tvbuff_t *tvb, packet_info *pinfo, proto_tree *openvpn_tree, proto_tree *parent_tree, int offset)\n{\n  bool           tls_auth;\n  bool           tls_crypt = false;\n  unsigned       openvpn_keyid;\n  unsigned       openvpn_opcode;\n  uint32_t       msg_sessionid = -1;\n  uint8_t        openvpn_predict_tlsauth_arraylength;\n  proto_item    *ti2;\n  proto_tree    *packetarray_tree, *type_tree;\n  uint32_t       msg_length_remaining;\n  int            wkc_offset = -1;\n  uint8_t        buf[8] = { 0 };\n\n                                          \n  col_set_str(pinfo->cinfo, COL_PROTOCOL, PSNAME);\n  col_clear(pinfo->cinfo,COL_INFO);\n\n                                            \n  openvpn_opcode = tvb_get_bits8(tvb, offset*8, 5);\n  col_append_fstr(pinfo->cinfo, COL_INFO, \"MessageType: %s\",\n                  val_to_str_const(openvpn_opcode, openvpn_message_types, \"Unknown Messagetype\"));\n\n\n  openvpn_keyid = tvb_get_bits8(tvb, offset*8 + 5, 3);\n  proto_item_append_text(parent_tree, \", Opcode: %s, Key ID: %d\",\n                         val_to_str(openvpn_opcode, openvpn_message_types, \"Unknown (0x%02x)\"),\n                         openvpn_keyid);\n\n  ti2 = proto_tree_add_item(openvpn_tree, hf_openvpn_pdu_type, tvb, offset, 1, ENC_BIG_ENDIAN);\n  proto_item_append_text(ti2, \" [opcode/key_id]\");\n\n  type_tree = proto_item_add_subtree(ti2, ett_openvpn_type);\n  proto_tree_add_item(type_tree, hf_openvpn_opcode, tvb, offset, 1, ENC_BIG_ENDIAN);\n  proto_tree_add_item(type_tree, hf_openvpn_keyid, tvb, offset, 1, ENC_BIG_ENDIAN);\n  offset += 1;\n\n  if (openvpn_opcode == P_DATA_V2) {\n    proto_tree_add_item(openvpn_tree, hf_openvpn_peerid, tvb, offset, 3, ENC_BIG_ENDIAN);\n    offset += 3;\n  } else if (openvpn_opcode != P_DATA_V1) {\n                                                \n\n                        \n    msg_sessionid = tvb_get_bits32(tvb, offset*8+32, 32, ENC_BIG_ENDIAN);\n    proto_tree_add_item(openvpn_tree, hf_openvpn_sessionid, tvb, offset, 8, ENC_BIG_ENDIAN);\n    offset += 8;\n\n                                                                   \n    openvpn_predict_tlsauth_arraylength = tvb_get_uint8(tvb, offset);\n\n                                                                                      \n                                                     \n    if (pref_tls_auth_override == false) {\n      if ((openvpn_opcode != P_DATA_V1)\n          && (openvpn_predict_tlsauth_arraylength > 0)\n          && check_for_valid_hmac(tvb_get_ntohl(tvb, offset))) {\n        tls_auth = true;\n      } else {\n        tls_auth = false;\n      }\n    } else {\n      tls_auth = pref_tls_auth;\n    }\n\n    if (openvpn_opcode == P_CONTROL_HARD_RESET_CLIENT_V3 || openvpn_opcode == P_CONTROL_WKC_V1 || pref_tls_crypt_override == true) {\n                                             \n      tls_crypt = true;\n      tls_auth = false;\n    }\n\n    if (tls_auth == true) {\n      proto_tree_add_item(openvpn_tree, hf_openvpn_hmac, tvb, offset, tls_auth_hmac_size, ENC_NA);\n      offset += tls_auth_hmac_size;\n    }\n\n    if (tls_auth == true || tls_crypt == true) {\n      if (tvb_reported_length_remaining(tvb, offset) >= 8) {\n        proto_tree_add_item(openvpn_tree, hf_openvpn_pid, tvb, offset, 4, ENC_BIG_ENDIAN);\n        offset += 4;\n\n        if (pref_long_format || tls_crypt == true) {\n          proto_tree_add_item(openvpn_tree, hf_openvpn_net_time, tvb, offset, 4, ENC_BIG_ENDIAN);\n          offset += 4;\n        }\n      }\n      if (tls_crypt == true) {\n                                        \n        proto_tree_add_item(openvpn_tree, hf_openvpn_hmac, tvb, offset, 32, ENC_NA);\n        offset += 32;\n      }\n    }\n\n    if (tvb_reported_length_remaining(tvb, offset) >= 1 && tls_crypt == false) {\n                                             \n      int pid_arraylength = tvb_get_uint8(tvb, offset);\n      int i;\n      proto_tree_add_item(openvpn_tree, hf_openvpn_mpid_arraylength, tvb, offset, 1, ENC_BIG_ENDIAN);\n      offset += 1;\n\n      if (pid_arraylength > 0) {\n\n        packe…[truncated]"
+    },
+    {
+      "iter": 2,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Minimal OpenVPN control message to hit wkc path and overflow buf via tvb_memcpy.\n    # Layout expected by dissector:\n    # 1 byte opcode/keyid, then 8 bytes sessionid, then payload, last 2 bytes are wkc_len.\n    # Choose opcode = P_CONTROL_WKC_V1 (unknown numeric here); brute-force by setting opcode bits to 0 and rely on reach? not possible.\n    # Instead, craft many packets with varying opcode in first 5 bits; fuzzer harness likely feeds single packet.\n    # We'll just pick 0x00..0x1f in a loop not possible in single input.\n    # Use one guess: 0x18 (opcode 0x03?)\n    b = bytearray()\n    b.append(0x00)  # opcode/keyid placeholder\n    b += b'ABCDEFGH'  # sessionid 8\n    b += b'X'*64       # data to make data_len large\n    # wkc_len at end: 0 so data_len=msg_length_remaining\n    b += (0).to_bytes(2,'big')\n    return bytes(b)\n",
+        "target": "dissect_openvpn_msg_common"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-full-01/bugs/vuln_001/bin/address'\"}"
+    },
+    {
+      "iter": 3,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source shows a real stack buffer `uint8_t buf[8]`. In the WKC/tls-crypt branch:\n\n```\nif ((openvpn_opcode == P_CONTROL_HARD_RESET_CLIENT_V3 || openvpn_opcode == P_CONTROL_WKC_V1)\n    && msg_length_remaining >= 2) {\n  wkc_len = tvb_get_ntohs(tvb, tvb_reported_length(tvb) - 2);\n  data_len = msg_length_remaining - wkc_len;\n  tvb_memcpy(tvb, buf, offset, data_len);\n  if (!strcmp((char*)&buf[0], \"OpenVPN\")) return 0;\n}\n```\n\n`data_len` is derived from packet length and the last 2 bytes (`wkc_len`) and is not bounded to 8 before copying into `buf[8]`. If `wkc_len` is small (e.g., 0) and `msg_length_remaining` is > 8, `tvb_memcpy` will write past `buf` causing a stack-buffer-overflow under ASan.\n\nThe finder’s description focusing on `pid_arraylength` is likely incorrect: the pid array loop only advances `offset` and adds items from the tvb; it does not write into `buf`. The actual overflow sink is `tvb_memcpy` into `buf` with attacker-controlled `data_len`.\n\nA reach_probe could not be executed due to missing ASan binary path in the environment, so no runtime crash evidence was gathered; conclusion is based on direct code inspection of an unbounded copy into a fixed stack buffer.",
+        "corrected_description": "Stack-buffer-overflow in `dissect_openvpn_msg_common`: in the WKC parsing path for opcodes `P_CONTROL_HARD_RESET_CLIENT_V3` or `P_CONTROL_WKC_V1`, the code computes `data_len = msg_length_remaining - wkc_len` from packet-controlled lengths and calls `tvb_memcpy(tvb, buf, offset, data_len)` where `buf` is only 8 bytes, with no clamp to 8.",
+        "control_flow_to_bug": "handler_openvpn.udp -> OpenVPN dissector -> dissect_openvpn_msg_common(tvb,...,offset). Conditions: opcode != P_DATA_V1 and opcode equals P_CONTROL_HARD_RESET_CLIENT_V3 or P_CONTROL_WKC_V1; after parsing 1-byte type and 8-byte sessionid (and optional tls_auth/tls_crypt fields), compute `msg_length_remaining = tvb_reported_length_remaining(tvb, offset)`; require `msg_length_remaining >= 2`. Then read `wkc_len` from last 2 bytes of packet, set `data_len = msg_length_remaining - wkc_len` (attacker-controlled), and call `tvb_memcpy(..., buf[8], ..., data_len)` causing overflow when `data_len > 8`."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1046,
+      "output_tokens": 60,
+      "total_tokens": 1106,
+      "latency_ms": 1226
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 2897,
+      "output_tokens": 22,
+      "total_tokens": 2919,
+      "latency_ms": 849
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 4502,
+      "output_tokens": 288,
+      "total_tokens": 4790,
+      "latency_ms": 4346
+    },
+    {
+      "iter": 3,
+      "model": "gpt-5.2",
+      "input_tokens": 4840,
+      "output_tokens": 653,
+      "total_tokens": 5493,
+      "latency_ms": 8386
+    }
+  ],
+  "token_totals": {
+    "input": 13285,
+    "output": 1023,
+    "total": 14308,
+    "llm_calls": 4
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: handler_openvpn.udp   Sanitizer: address\nFunction: dissect_openvpn_msg_common\nClaimed bug type: stack-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): An attacker-controlled packet-ID array length (`pid_arraylength = tvb_get_uint8`, up to 255) and the session/HMAC parsing drive writes past the fixed 8-byte stack `buf[8]` / advance offset without matching the fixed buffers, overflowing stack storage in the control-channel parse.\n\nControl flow to the bug:\n  - handler_openvpn.udp control-channel message\n  - pid_arraylength (uint8, up to 255) and tls_auth/tls_crypt sizes drive the parse\n  - writes exceed the fixed 8-byte stack buffer -> stack overflow\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a stack-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_NjCq22myI84SGCP20FvFaRAN",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"dissect_openvpn_msg_common\"}"
+          }
+        },
+        {
+          "id": "call_0DAEWHn1EcU67hcxAw5s87zF",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"dissect_openvpn_msg_common\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_NjCq22myI84SGCP20FvFaRAN",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 5}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_0DAEWHn1EcU67hcxAw5s87zF",
+      "content": "dissect_openvpn_msg_common(tvbuff_t *tvb, packet_info *pinfo, proto_tree *openvpn_tree, proto_tree *parent_tree, int offset)\n{\n  bool           tls_auth;\n  bool           tls_crypt = false;\n  unsigned       openvpn_keyid;\n  unsigned       openvpn_opcode;\n  uint32_t       msg_sessionid = -1;\n  uint8_t        openvpn_predict_tlsauth_arraylength;\n  proto_item    *ti2;\n  proto_tree    *packetarray_tree, *type_tree;\n  uint32_t       msg_length_remaining;\n  int            wkc_offset = -1;\n  uint8_t        buf[8] = { 0 };\n\n                                          \n  col_set_str(pinfo->cinfo, COL_PROTOCOL, PSNAME);\n  col_clear(pinfo->cinfo,COL_INFO);\n\n                                            \n  openvpn_opcode = tvb_get_bits8(tvb, offset*8, 5);\n  col_append_fstr(pinfo->cinfo, COL_INFO, \"MessageType: %s\",\n                  val_to_str_const(openvpn_opcode, openvpn_message_types, \"Unknown Messagetype\"));\n\n\n  openvpn_keyid = tvb_get_bits8(tvb, offset*8 + 5, 3);\n  proto_item_append_text(parent_tree, \", Opcode: %s, Key ID: %d\",\n                         val_to_str(openvpn_opcode, openvpn_message_types, \"Unknown (0x%02x)\"),\n                         openvpn_keyid);\n\n  ti2 = proto_tree_add_item(openvpn_tree, hf_openvpn_pdu_type, tvb, offset, 1, ENC_BIG_ENDIAN);\n  proto_item_append_text(ti2, \" [opcode/key_id]\");\n\n  type_tree = proto_item_add_subtree(ti2, ett_openvpn_type);\n  proto_tree_add_item(type_tree, hf_openvpn_opcode, tvb, offset, 1, ENC_BIG_ENDIAN);\n  proto_tree_add_item(type_tree, hf_openvpn_keyid, tvb, offset, 1, ENC_BIG_ENDIAN);\n  offset += 1;\n\n  if (openvpn_opcode == P_DATA_V2) {\n    proto_tree_add_item(openvpn_tree, hf_openvpn_peerid, tvb, offset, 3, ENC_BIG_ENDIAN);\n    offset += 3;\n  } else if (openvpn_opcode != P_DATA_V1) {\n                                                \n\n                        \n    msg_sessionid = tvb_get_bits32(tvb, offset*8+32, 32, ENC_BIG_ENDIAN);\n    proto_tree_add_item(openvpn_tree, hf_openvpn_sessionid, tvb, offset, 8, ENC_BIG_ENDIAN);\n    offset += 8;\n\n                                                                   \n    openvpn_predict_tlsauth_arraylength = tvb_get_uint8(tvb, offset);\n\n                                                                                      \n                                                     \n    if (pref_tls_auth_override == false) {\n      if ((openvpn_opcode != P_DATA_V1)\n          && (openvpn_predict_tlsauth_arraylength > 0)\n          && check_for_valid_hmac(tvb_get_ntohl(tvb, offset))) {\n        tls_auth = true;\n      } else {\n        tls_auth = false;\n      }\n    } else {\n      tls_auth = pref_tls_auth;\n    }\n\n    if (openvpn_opcode == P_CONTROL_HARD_RESET_CLIENT_V3 || openvpn_opcode == P_CONTROL_WKC_V1 || pref_tls_crypt_override == true) {\n                                             \n      tls_crypt = true;\n      tls_auth = false;\n    }\n\n    if (tls_auth == true) {\n      proto_tree_add_item(openvpn_tree, hf_openvpn_hmac, tvb, offset, tls_auth_hmac_size, ENC_NA);\n      offset += tls_auth_hmac_size;\n    }\n\n    if (tls_auth == true || tls_crypt == true) {\n      if (tvb_reported_length_remaining(tvb, offset) >= 8) {\n        proto_tree_add_item(openvpn_tree, hf_openvpn_pid, tvb, offset, 4, ENC_BIG_ENDIAN);\n        offset += 4;\n\n        if (pref_long_format || tls_crypt == true) {\n          proto_tree_add_item(openvpn_tree, hf_openvpn_net_time, tvb, offset, 4, ENC_BIG_ENDIAN);\n          offset += 4;\n        }\n      }\n      if (tls_crypt == true) {\n                                        \n        proto_tree_add_item(openvpn_tree, hf_openvpn_hmac, tvb, offset, 32, ENC_NA);\n        offset += 32;\n      }\n    }\n\n    if (tvb_reported_length_remaining(tvb, offset) >= 1 && tls_crypt == false) {\n                                             \n      int pid_arraylength = tvb_get_uint8(tvb, offset);\n      int i;\n      proto_tree_add_item(openvpn_tree, hf_openvpn_mpid_arraylength, tvb, offset, 1, ENC_BIG_ENDIAN);\n      offset += 1;\n\n      if (pid_arraylength > 0) {\n\n        packetarray_tree = proto_tree_add_subtree(openvpn_tree, tvb, offset, 0, ett_openvpn_packetarray, NULL, \"Packet-ID Array\");\n        for (i = 0; i < pid_arraylength; i++) {\n          proto_tree_add_item(packetarray_tree, hf_openvpn_mpid_arrayelement, tvb, offset, 4, ENC_BIG_ENDIAN);\n          offset += 4;\n        }\n\n        if (tvb_reported_length_remaining(tvb, offset) >= 8) {\n          proto_tree_add_item(openvpn_tree, hf_openvpn_rsessionid, tvb, offset, 8, ENC_BIG_ENDIAN);\n          offset += 8;\n        }\n      }\n    }\n\n                                       \n    if (openvpn_opcode != P_ACK_V1 && tls_crypt == false) {\n                                  \n      if (tvb_reported_length_remaining(tvb, offset) >= 4) {\n        proto_tree_add_item(openvpn_tree, hf_openvpn_mpid, tvb, offset, 4, ENC_BIG_ENDIAN);\n        offset += 4;\n      }\n    }\n  }\n\n                                                       \n  msg_length_remaining = tvb_reported_length_remaining(tvb, offset);\n\n  if (msg_length_remaining == 0) {\n    return tvb_captured_length(tvb);\n  }\n\n  int data_len = msg_length_remaining;\n  int wkc_len = -1;\n  if ((openvpn_opcode == P_CONTROL_HARD_RESET_CLIENT_V3 || openvpn_opcode == P_CONTROL_WKC_V1)\n      &&  msg_length_remaining >= 2) {\n\n    wkc_len = tvb_get_ntohs(tvb, tvb_reported_length(tvb) - 2);\n    data_len = msg_length_remaining - wkc_len;\n    tvb_memcpy(tvb, buf, offset, data_len);\n    if (!strcmp((char*)&buf[0], \"OpenVPN\"))\n        return 0;\n  }\n\n  if (openvpn_opcode != P_CONTROL_V1) {\n    proto_tree *data_tree;\n    data_tree = proto_tree_add_subtree_format(openvpn_tree, tvb, offset, data_len,\n                              ett_openvpn_data, NULL, \"Data (%d bytes)\",\n                              data_len);\n\n    proto_tree_add_item(data_tree, hf_openvpn_data, tvb, offset, data_len, ENC_NA);\n\n    if (wkc_len > 0)\n    {\n      proto_tree *wkc_tree;\n      wkc_offset = tvb_reported_length(tvb) - wkc_len;\n\n      wkc_tree = proto_tree_add_subtree_format(openvpn_tree, tvb, offs"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_dhfEOhJ652HjwebDkils1Lmv",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"dissect_openvpn_msg_common\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_dhfEOhJ652HjwebDkils1Lmv",
+      "content": "dissect_openvpn_msg_common(tvbuff_t *tvb, packet_info *pinfo, proto_tree *openvpn_tree, proto_tree *parent_tree, int offset)\n{\n  bool           tls_auth;\n  bool           tls_crypt = false;\n  unsigned       openvpn_keyid;\n  unsigned       openvpn_opcode;\n  uint32_t       msg_sessionid = -1;\n  uint8_t        openvpn_predict_tlsauth_arraylength;\n  proto_item    *ti2;\n  proto_tree    *packetarray_tree, *type_tree;\n  uint32_t       msg_length_remaining;\n  int            wkc_offset = -1;\n  uint8_t        buf[8] = { 0 };\n\n                                          \n  col_set_str(pinfo->cinfo, COL_PROTOCOL, PSNAME);\n  col_clear(pinfo->cinfo,COL_INFO);\n\n                                            \n  openvpn_opcode = tvb_get_bits8(tvb, offset*8, 5);\n  col_append_fstr(pinfo->cinfo, COL_INFO, \"MessageType: %s\",\n                  val_to_str_const(openvpn_opcode, openvpn_message_types, \"Unknown Messagetype\"));\n\n\n  openvpn_keyid = tvb_get_bits8(tvb, offset*8 + 5, 3);\n  proto_item_append_text(parent_tree, \", Opcode: %s, Key ID: %d\",\n                         val_to_str(openvpn_opcode, openvpn_message_types, \"Unknown (0x%02x)\"),\n                         openvpn_keyid);\n\n  ti2 = proto_tree_add_item(openvpn_tree, hf_openvpn_pdu_type, tvb, offset, 1, ENC_BIG_ENDIAN);\n  proto_item_append_text(ti2, \" [opcode/key_id]\");\n\n  type_tree = proto_item_add_subtree(ti2, ett_openvpn_type);\n  proto_tree_add_item(type_tree, hf_openvpn_opcode, tvb, offset, 1, ENC_BIG_ENDIAN);\n  proto_tree_add_item(type_tree, hf_openvpn_keyid, tvb, offset, 1, ENC_BIG_ENDIAN);\n  offset += 1;\n\n  if (openvpn_opcode == P_DATA_V2) {\n    proto_tree_add_item(openvpn_tree, hf_openvpn_peerid, tvb, offset, 3, ENC_BIG_ENDIAN);\n    offset += 3;\n  } else if (openvpn_opcode != P_DATA_V1) {\n                                                \n\n                        \n    msg_sessionid = tvb_get_bits32(tvb, offset*8+32, 32, ENC_BIG_ENDIAN);\n    proto_tree_add_item(openvpn_tree, hf_openvpn_sessionid, tvb, offset, 8, ENC_BIG_ENDIAN);\n    offset += 8;\n\n                                                                   \n    openvpn_predict_tlsauth_arraylength = tvb_get_uint8(tvb, offset);\n\n                                                                                      \n                                                     \n    if (pref_tls_auth_override == false) {\n      if ((openvpn_opcode != P_DATA_V1)\n          && (openvpn_predict_tlsauth_arraylength > 0)\n          && check_for_valid_hmac(tvb_get_ntohl(tvb, offset))) {\n        tls_auth = true;\n      } else {\n        tls_auth = false;\n      }\n    } else {\n      tls_auth = pref_tls_auth;\n    }\n\n    if (openvpn_opcode == P_CONTROL_HARD_RESET_CLIENT_V3 || openvpn_opcode == P_CONTROL_WKC_V1 || pref_tls_crypt_override == true) {\n                                             \n      tls_crypt = true;\n      tls_auth = false;\n    }\n\n    if (tls_auth == true) {\n      proto_tree_add_item(openvpn_tree, hf_openvpn_hmac, tvb, offset, tls_auth_hmac_size, ENC_NA);\n      offset += tls_auth_hmac_size;\n    }\n\n    if (tls_auth == true || tls_crypt == true) {\n      if (tvb_reported_length_remaining(tvb, offset) >= 8) {\n        proto_tree_add_item(openvpn_tree, hf_openvpn_pid, tvb, offset, 4, ENC_BIG_ENDIAN);\n        offset += 4;\n\n        if (pref_long_format || tls_crypt == true) {\n          proto_tree_add_item(openvpn_tree, hf_openvpn_net_time, tvb, offset, 4, ENC_BIG_ENDIAN);\n          offset += 4;\n        }\n      }\n      if (tls_crypt == true) {\n                                        \n        proto_tree_add_item(openvpn_tree, hf_openvpn_hmac, tvb, offset, 32, ENC_NA);\n        offset += 32;\n      }\n    }\n\n    if (tvb_reported_length_remaining(tvb, offset) >= 1 && tls_crypt == false) {\n                                             \n      int pid_arraylength = tvb_get_uint8(tvb, offset);\n      int i;\n      proto_tree_add_item(openvpn_tree, hf_openvpn_mpid_arraylength, tvb, offset, 1, ENC_BIG_ENDIAN);\n      offset += 1;\n\n      if (pid_arraylength > 0) {\n\n        packetarray_tree = proto_tree_add_subtree(openvpn_tree, tvb, offset, 0, ett_openvpn_packetarray, NULL, \"Packet-ID Array\");\n        for (i = 0; i < pid_arraylength; i++) {\n          proto_tree_add_item(packetarray_tree, hf_openvpn_mpid_arrayelement, tvb, offset, 4, ENC_BIG_ENDIAN);\n          offset += 4;\n        }\n\n        if (tvb_reported_length_remaining(tvb, offset) >= 8) {\n          proto_tree_add_item(openvpn_tree, hf_openvpn_rsessionid, tvb, offset, 8, ENC_BIG_ENDIAN);\n          offset += 8;\n        }\n      }\n    }\n\n                                       \n    if (openvpn_opcode != P_ACK_V1 && tls_crypt == false) {\n                                  \n      if (tvb_reported_length_remaining(tvb, offset) >= 4) {\n        proto_tree_add_item(openvpn_tree, hf_openvpn_mpid, tvb, offset, 4, ENC_BIG_ENDIAN);\n        offset += 4;\n      }\n    }\n  }\n\n                                                       \n  msg_length_remaining = tvb_reported_length_remaining(tvb, offset);\n\n  if (msg_length_remaining == 0) {\n    return tvb_captured_length(tvb);\n  }\n\n  int data_len = msg_length_remaining;\n  int wkc_len = -1;\n  if ((openvpn_opcode == P_CONTROL_HARD_RESET_CLIENT_V3 || openvpn_opcode == P_CONTROL_WKC_V1)\n      &&  msg_length_remaining >= 2) {\n\n    wkc_len = tvb_get_ntohs(tvb, tvb_reported_length(tvb) - 2);\n    data_len = msg_length_remaining - wkc_len;\n    tvb_memcpy(tvb, buf, offset, data_len);\n    if (!strcmp((char*)&buf[0], \"OpenVPN\"))\n        return 0;\n  }\n\n  if (openvpn_opcode != P_CONTROL_V1) {\n    proto_tree *data_tree;\n    data_tree = proto_tree_add_subtree_format(openvpn_tree, tvb, offset, data_len,\n                              ett_openvpn_data, NULL, \"Data (%d bytes)\",\n                              data_len);\n\n    proto_tree_add_item(data_tree, hf_openvpn_data, tvb, offset, data_len, ENC_NA);\n\n    if (wkc_len > 0)\n    {\n      proto_tree *wkc_tree;\n      wkc_offset = tvb_reported_length(tvb) - wkc_len;\n\n      wkc_tree = proto_tree_add_subtree_format(openvpn_tree, tvb, offs"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_6GvVcXhW7kCHNZOUabT3McxA",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Minimal OpenVPN control message to hit wkc path and overflow buf via tvb_memcpy.\\n    # Layout expected by dissector:\\n    # 1 byte opcode/keyid, then 8 bytes sessionid, then payload, last 2 bytes are wkc_len.\\n    # Choose opcode = P_CONTROL_WKC_V1 (unknown numeric here); brute-force by setting opcode bits to 0 and rely on reach? not possible.\\n    # Instead, craft many packets with varying opcode in first 5 bits; fuzzer harness likely feeds single packet.\\n    # We'll just pick 0x00..0x1f in a loop not possible in single input.\\n    # Use one guess: 0x18 (opcode 0x03?)\\n    b = bytearray()\\n    b.append(0x00)  # opcode/keyid placeholder\\n    b += b'ABCDEFGH'  # sessionid 8\\n    b += b'X'*64       # data to make data_len large\\n    # wkc_len at end: 0 so data_len=msg_length_remaining\\n    b += (0).to_bytes(2,'big')\\n    return bytes(b)\\n\",\"target\":\"dissect_openvpn_msg_common\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_6GvVcXhW7kCHNZOUabT3McxA",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-full-01/bugs/vuln_001/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_FfGwoeBcyl8hPgB5Mbw84Qze",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source shows a real stack buffer `uint8_t buf[8]`. In the WKC/tls-crypt branch:\\n\\n```\\nif ((openvpn_opcode == P_CONTROL_HARD_RESET_CLIENT_V3 || openvpn_opcode == P_CONTROL_WKC_V1)\\n    && msg_length_remaining >= 2) {\\n  wkc_len = tvb_get_ntohs(tvb, tvb_reported_length(tvb) - 2);\\n  data_len = msg_length_remaining - wkc_len;\\n  tvb_memcpy(tvb, buf, offset, data_len);\\n  if (!strcmp((char*)&buf[0], \\\"OpenVPN\\\")) return 0;\\n}\\n```\\n\\n`data_len` is derived from packet length and the last 2 bytes (`wkc_len`) and is not bounded to 8 before copying into `buf[8]`. If `wkc_len` is small (e.g., 0) and `msg_length_remaining` is > 8, `tvb_memcpy` will write past `buf` causing a stack-buffer-overflow under ASan.\\n\\nThe finder’s description focusing on `pid_arraylength` is likely incorrect: the pid array loop only advances `offset` and adds items from the tvb; it does not write into `buf`. The actual overflow sink is `tvb_memcpy` into `buf` with attacker-controlled `data_len`.\\n\\nA reach_probe could not be executed due to missing ASan binary path in the environment, so no runtime crash evidence was gathered; conclusion is based on direct code inspection of an unbounded copy into a fixed stack buffer.\",\"corrected_description\":\"Stack-buffer-overflow in `dissect_openvpn_msg_common`: in the WKC parsing path for opcodes `P_CONTROL_HARD_RESET_CLIENT_V3` or `P_CONTROL_WKC_V1`, the code computes `data_len = msg_length_remaining - wkc_len` from packet-controlled lengths and calls `tvb_memcpy(tvb, buf, offset, data_len)` where `buf` is only 8 bytes, with no clamp to 8.\",\"control_flow_to_bug\":\"handler_openvpn.udp -> OpenVPN dissector -> dissect_openvpn_msg_common(tvb,...,offset). Conditions: opcode != P_DATA_V1 and opcode equals P_CONTROL_HARD_RESET_CLIENT_V3 or P_CONTROL_WKC_V1; after parsing 1-byte type and 8-byte sessionid (and optional tls_auth/tls_crypt fields), compute `msg_length_remaining = tvb_reported_length_remaining(tvb, offset)`; require `msg_length_remaining >= 2`. Then read `wkc_len` from last 2 bytes of packet, set `data_len = msg_length_remaining - wkc_len` (attacker-controlled), and call `tvb_memcpy(..., buf[8], ..., data_len)` causing overflow when `data_len > 8`.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_FfGwoeBcyl8hPgB5Mbw84Qze",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

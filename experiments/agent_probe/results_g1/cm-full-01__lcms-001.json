@@ -1,0 +1,181 @@
+{
+  "tag": "cm-full-01__lcms-001",
+  "gt": "EmitCIEBasedDEF",
+  "crash_type": "SEGV",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": false,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Read EmitCIEBasedDEF: it sets mpe = Pipeline->Elements and immediately calls cmsStageInputChannels(mpe) and cmsStageType(mpe) without checking mpe for NULL. Additionally, if the first stage is a CurveSet, it advances mpe = mpe->Next and then again calls cmsStageType(mpe) without checking for NULL. Thus, if Pipeline->Elements is NULL or if the pipeline consists solely of a CurveSet stage (no following stage), cmsStageType(mpe) will dereference NULL and can SEGV under ASan.\n\nHowever, I did not manage to run reach_probe due to missing ASan binary path in the environment, so I cannot provide runtime proof that a fuzzer input can construct such a pipeline in this harness. The code pattern is clearly present, but whether the harness can supply a pipeline with Elements==NULL or CurveSet-only depends on upstream pipeline construction/validation (not inspected here).",
+    "corrected_description": "Null-pointer dereference in EmitCIEBasedDEF: after consuming an initial CurveSet stage, mpe is advanced to mpe->Next and then used unconditionally in cmsStageType(mpe) (and potentially WriteCLUT), so a pipeline with only a CurveSet stage (or an empty pipeline) will crash.",
+    "control_flow_to_bug": "cms_postscript_fuzzer -> PostScript CRD/CSA generation -> EmitCIEBasedDEF(m, Pipeline, Intent, BlackPoint): set mpe=Pipeline->Elements; if first stage is cmsSigCurveSetElemType then mpe=mpe->Next; if mpe is NULL (no next stage) then cmsStageType(mpe) dereferences NULL causing SEGV."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.2,
+  "verdict": "WEAK/FP",
+  "basis": "operand not input-tainted",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "EmitCIEBasedDEF"
+      },
+      "result": "int EmitCIEBasedDEF(cmsIOHANDLER* m, cmsPipeline* Pipeline, cmsUInt32Number Intent, cmsCIEXYZ* BlackPoint)\n{\n    const char* PreMaj;\n    const char* PostMaj;\n    const char* PreMin, *PostMin;\n    cmsStage* mpe;\n        \n    mpe = Pipeline->Elements;\n\n    switch (cmsStageInputChannels(mpe)) {\n    case 3:\n        _cmsIOPrintf(m, \"[ /CIEBasedDEF\\n\");\n        PreMaj = \"<\";\n        PostMaj = \">\\n\";\n        PreMin = PostMin = \"\";\n        break;\n\n    case 4:\n        _cmsIOPrintf(m, \"[ /CIEBasedDEFG\\n\");\n        PreMaj = \"[\";\n        PostMaj = \"]\\n\";\n        PreMin = \"<\";\n        PostMin = \">\\n\";\n        break;\n\n    default:\n        return 0;\n\n    }\n\n    _cmsIOPrintf(m, \"<<\\n\");\n\n    if (cmsStageType(mpe) == cmsSigCurveSetElemType) {\n\n        _cmsIOPrintf(m, \"/DecodeDEF [ \");\n        EmitNGamma(m, cmsStageOutputChannels(mpe), _cmsStageGetPtrToCurveSet(mpe));\n        _cmsIOPrintf(m, \"]\\n\");\n\n        mpe = mpe ->Next;\n    }\n\n    if (cmsStageType(mpe) == cmsSigCLutElemType) {\n\n            _cmsIOPrintf(m, \"/Table \");\n            WriteCLUT(m, mpe, PreMaj, PostMaj, PreMin, PostMin, FALSE, (cmsColorSpaceSignature) 0);\n            _cmsIOPrintf(m, \"]\\n\");\n    }\n\n    EmitLab2XYZ(m);\n    EmitWhiteBlackD50(m, BlackPoint);\n    EmitIntent(m, Intent);\n\n    _cmsIOPrintf(m, \"   >>\\n\");\n    _cmsIOPrintf(m, \"]\\n\");\n\n    return 1;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "EmitCIEBasedDEF"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Minimal ICC profile-like blob; try to get postscript generator to build a pipeline\n    # This is a placeholder; likely won't reach EmitCIEBasedDEF without a valid ICC.\n    return b\"\\x00\"*256\n",
+        "target": "EmitCIEBasedDEF"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cm-full-01/bugs/lcms-001/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": false,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Read EmitCIEBasedDEF: it sets mpe = Pipeline->Elements and immediately calls cmsStageInputChannels(mpe) and cmsStageType(mpe) without checking mpe for NULL. Additionally, if the first stage is a CurveSet, it advances mpe = mpe->Next and then again calls cmsStageType(mpe) without checking for NULL. Thus, if Pipeline->Elements is NULL or if the pipeline consists solely of a CurveSet stage (no following stage), cmsStageType(mpe) will dereference NULL and can SEGV under ASan.\n\nHowever, I did not manage to run reach_probe due to missing ASan binary path in the environment, so I cannot provide runtime proof that a fuzzer input can construct such a pipeline in this harness. The code pattern is clearly present, but whether the harness can supply a pipeline with Elements==NULL or CurveSet-only depends on upstream pipeline construction/validation (not inspected here).",
+        "corrected_description": "Null-pointer dereference in EmitCIEBasedDEF: after consuming an initial CurveSet stage, mpe is advanced to mpe->Next and then used unconditionally in cmsStageType(mpe) (and potentially WriteCLUT), so a pipeline with only a CurveSet stage (or an empty pipeline) will crash.",
+        "control_flow_to_bug": "cms_postscript_fuzzer -> PostScript CRD/CSA generation -> EmitCIEBasedDEF(m, Pipeline, Intent, BlackPoint): set mpe=Pipeline->Elements; if first stage is cmsSigCurveSetElemType then mpe=mpe->Next; if mpe is NULL (no next stage) then cmsStageType(mpe) dereferences NULL causing SEGV."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1041,
+      "output_tokens": 58,
+      "total_tokens": 1099,
+      "latency_ms": 1135
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1645,
+      "output_tokens": 83,
+      "total_tokens": 1728,
+      "latency_ms": 1857
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1777,
+      "output_tokens": 382,
+      "total_tokens": 2159,
+      "latency_ms": 5681
+    }
+  ],
+  "token_totals": {
+    "input": 4463,
+    "output": 523,
+    "total": 4986,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: cms_postscript_fuzzer   Sanitizer: address\nFunction: EmitCIEBasedDEF\nClaimed bug type: SEGV\nSuspicious-point description (from the finder — may be imprecise): After the CurveSet stage is consumed, `mpe = mpe->Next` can become NULL, but the code then calls `cmsStageType(mpe)` (and WriteCLUT) without a NULL check, dereferencing a NULL pipeline stage.\n\nControl flow to the bug:\n  - PostScript CRD/CSA generation walks the profile pipeline\n  - EmitCIEBasedDEF advances mpe past the curve set: mpe = mpe->Next\n  - pipeline has no following CLUT stage -> mpe == NULL\n  - cmsStageType(mpe) dereferences NULL -> SEGV\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a SEGV\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_OD6LUKR8tlSptpnotVQewN2e",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"EmitCIEBasedDEF\"}"
+          }
+        },
+        {
+          "id": "call_Il9HokKl4qKYBfq8EXdFthik",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"EmitCIEBasedDEF\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_OD6LUKR8tlSptpnotVQewN2e",
+      "content": "int EmitCIEBasedDEF(cmsIOHANDLER* m, cmsPipeline* Pipeline, cmsUInt32Number Intent, cmsCIEXYZ* BlackPoint)\n{\n    const char* PreMaj;\n    const char* PostMaj;\n    const char* PreMin, *PostMin;\n    cmsStage* mpe;\n        \n    mpe = Pipeline->Elements;\n\n    switch (cmsStageInputChannels(mpe)) {\n    case 3:\n        _cmsIOPrintf(m, \"[ /CIEBasedDEF\\n\");\n        PreMaj = \"<\";\n        PostMaj = \">\\n\";\n        PreMin = PostMin = \"\";\n        break;\n\n    case 4:\n        _cmsIOPrintf(m, \"[ /CIEBasedDEFG\\n\");\n        PreMaj = \"[\";\n        PostMaj = \"]\\n\";\n        PreMin = \"<\";\n        PostMin = \">\\n\";\n        break;\n\n    default:\n        return 0;\n\n    }\n\n    _cmsIOPrintf(m, \"<<\\n\");\n\n    if (cmsStageType(mpe) == cmsSigCurveSetElemType) {\n\n        _cmsIOPrintf(m, \"/DecodeDEF [ \");\n        EmitNGamma(m, cmsStageOutputChannels(mpe), _cmsStageGetPtrToCurveSet(mpe));\n        _cmsIOPrintf(m, \"]\\n\");\n\n        mpe = mpe ->Next;\n    }\n\n    if (cmsStageType(mpe) == cmsSigCLutElemType) {\n\n            _cmsIOPrintf(m, \"/Table \");\n            WriteCLUT(m, mpe, PreMaj, PostMaj, PreMin, PostMin, FALSE, (cmsColorSpaceSignature) 0);\n            _cmsIOPrintf(m, \"]\\n\");\n    }\n\n    EmitLab2XYZ(m);\n    EmitWhiteBlackD50(m, BlackPoint);\n    EmitIntent(m, Intent);\n\n    _cmsIOPrintf(m, \"   >>\\n\");\n    _cmsIOPrintf(m, \"]\\n\");\n\n    return 1;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Il9HokKl4qKYBfq8EXdFthik",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_MEOO0mQWvAcyEqoz3mVX2RMF",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Minimal ICC profile-like blob; try to get postscript generator to build a pipeline\\n    # This is a placeholder; likely won't reach EmitCIEBasedDEF without a valid ICC.\\n    return b\\\"\\\\x00\\\"*256\\n\",\"target\":\"EmitCIEBasedDEF\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_MEOO0mQWvAcyEqoz3mVX2RMF",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cm-full-01/bugs/lcms-001/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_F8x8YETPntXhDixr7g7wsTuw",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":false,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Read EmitCIEBasedDEF: it sets mpe = Pipeline->Elements and immediately calls cmsStageInputChannels(mpe) and cmsStageType(mpe) without checking mpe for NULL. Additionally, if the first stage is a CurveSet, it advances mpe = mpe->Next and then again calls cmsStageType(mpe) without checking for NULL. Thus, if Pipeline->Elements is NULL or if the pipeline consists solely of a CurveSet stage (no following stage), cmsStageType(mpe) will dereference NULL and can SEGV under ASan.\\n\\nHowever, I did not manage to run reach_probe due to missing ASan binary path in the environment, so I cannot provide runtime proof that a fuzzer input can construct such a pipeline in this harness. The code pattern is clearly present, but whether the harness can supply a pipeline with Elements==NULL or CurveSet-only depends on upstream pipeline construction/validation (not inspected here).\",\"corrected_description\":\"Null-pointer dereference in EmitCIEBasedDEF: after consuming an initial CurveSet stage, mpe is advanced to mpe->Next and then used unconditionally in cmsStageType(mpe) (and potentially WriteCLUT), so a pipeline with only a CurveSet stage (or an empty pipeline) will crash.\",\"control_flow_to_bug\":\"cms_postscript_fuzzer -> PostScript CRD/CSA generation -> EmitCIEBasedDEF(m, Pipeline, Intent, BlackPoint): set mpe=Pipeline->Elements; if first stage is cmsSigCurveSetElemType then mpe=mpe->Next; if mpe is NULL (no next stage) then cmsStageType(mpe) dereferences NULL causing SEGV.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_F8x8YETPntXhDixr7g7wsTuw",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

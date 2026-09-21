@@ -1,0 +1,4 @@
+# Cloned challenge source + generated per-challenge workspaces (data, not code)
+_repos/
+_work/
+out_*.json

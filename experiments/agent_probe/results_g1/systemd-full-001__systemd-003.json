@@ -1,0 +1,188 @@
+{
+  "tag": "systemd-full-001__systemd-003",
+  "gt": "finish_item",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source of finish_item contains an explicit injected write: `if (payload[0] == ((ILLEGAL_CAT_ENTRY%10) + '0')) payload[ILLEGAL_CAT_ENTRY*100] = '\\0';`.\n\n- `payload` is a heap buffer passed in from the parser along with `payload_size` (asserted >0). There is no bounds check ensuring `ILLEGAL_CAT_ENTRY*100 < payload_size` before the write.\n- Therefore, if the trigger condition on `payload[0]` is satisfied and `ILLEGAL_CAT_ENTRY*100` exceeds the allocated payload length (very likely), this is a heap-buffer-overflow write detectable by ASan.\n\nHowever, a reach_probe attempt with guessed catalog syntax did not reach finish_item, so we do not yet have runtime proof that a fuzzer input can satisfy the parser constraints to call finish_item with a payload starting with the trigger digit. The bug pattern is present and would crash if reachable with such a payload, but we lack an input demonstrating reach/crash in this environment.",
+    "corrected_description": "Heap out-of-bounds write in finish_item: when `payload[0]` equals `((ILLEGAL_CAT_ENTRY%10)+'0')`, the code writes `payload[ILLEGAL_CAT_ENTRY*100] = '\\0'` without checking `payload_size`, potentially far past the heap allocation.",
+    "control_flow_to_bug": "fuzz-catalog entrypoint -> catalog parsing routine (caller of finish_item) -> finish_item(h,id,language,payload,payload_size) with payload_size>0 -> branch `payload[0] == ((ILLEGAL_CAT_ENTRY%10)+'0')` -> OOB write `payload[ILLEGAL_CAT_ENTRY*100] = '\\0'`."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": [
+      {
+        "target": "finish_item",
+        "hit": false,
+        "crashed": false,
+        "asan_type": null
+      }
+    ]
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "finish_item"
+      },
+      "result": "static int finish_item(\n                OrderedHashmap *h,\n                sd_id128_t id,\n                const char *language,\n                char *payload, size_t payload_size) {\n\n        _cleanup_free_ CatalogItem *i = NULL;\n        _cleanup_free_ char *combined = NULL;\n        char *prev;\n        int r;\n\n        assert(h);\n        assert(payload);\n        assert(payload_size > 0);\n        if (payload[0] == ((ILLEGAL_CAT_ENTRY%10) + '0')){\n                payload[ILLEGAL_CAT_ENTRY*100] = '\\0';\n        }\n\n        i = new0(CatalogItem, 1);\n        if (!i)\n                return log_oom();\n\n        i->id = id;\n        if (language) {\n                assert(strlen(language) > 1 && strlen(language) < 32);\n                strcpy(i->language, language);\n        }\n\n        prev = ordered_hashmap_get(h, i);\n        if (prev) {\n                                                             \n                combined = combine_entries(payload, prev);\n                if (!combined)\n                        return log_oom();\n\n                r = ordered_hashmap_update(h, i, combined);\n                if (r < 0)\n                        return log_error_errno(r, \"Failed to update catalog item: %m\");\n\n                TAKE_PTR(combined);\n                free(prev);\n        } else {\n                                \n                combined = memdup(payload, payload_size + 1);\n                if (!combined)\n                        return log_oom();\n\n                r = ordered_hashmap_put(h, i, combined);\n                if (r < 0)\n                        return log_error_errno(r, \"Failed to insert catalog item: %m\");\n\n                TAKE_PTR(i);\n                TAKE_PTR(combined);\n        }\n\n        return 0;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "finish_item"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 2, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to craft a minimal catalog entry whose payload begins with the trigger digit.\n    # We don't know the exact file format; provide a few common patterns.\n    d = str((0)%10)  # placeholder; will be overwritten by runtime? can't.\n    # We'll brute by including all digits at start of payload candidates.\n    # Use multiple entries separated by newlines.\n    lines = []\n    for ch in b\"0123456789\":\n        # entry: ID + space + lang + space + payload\n        lines.append(b\"0123456789abcdef0123456789abcdef en \" + bytes([ch]) + b\"AAAA\\n\")\n    return b\"\".join(lines)\n",
+        "target": "finish_item"
+      },
+      "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source of finish_item contains an explicit injected write: `if (payload[0] == ((ILLEGAL_CAT_ENTRY%10) + '0')) payload[ILLEGAL_CAT_ENTRY*100] = '\\0';`.\n\n- `payload` is a heap buffer passed in from the parser along with `payload_size` (asserted >0). There is no bounds check ensuring `ILLEGAL_CAT_ENTRY*100 < payload_size` before the write.\n- Therefore, if the trigger condition on `payload[0]` is satisfied and `ILLEGAL_CAT_ENTRY*100` exceeds the allocated payload length (very likely), this is a heap-buffer-overflow write detectable by ASan.\n\nHowever, a reach_probe attempt with guessed catalog syntax did not reach finish_item, so we do not yet have runtime proof that a fuzzer input can satisfy the parser constraints to call finish_item with a payload starting with the trigger digit. The bug pattern is present and would crash if reachable with such a payload, but we lack an input demonstrating reach/crash in this environment.",
+        "corrected_description": "Heap out-of-bounds write in finish_item: when `payload[0]` equals `((ILLEGAL_CAT_ENTRY%10)+'0')`, the code writes `payload[ILLEGAL_CAT_ENTRY*100] = '\\0'` without checking `payload_size`, potentially far past the heap allocation.",
+        "control_flow_to_bug": "fuzz-catalog entrypoint -> catalog parsing routine (caller of finish_item) -> finish_item(h,id,language,payload,payload_size) with payload_size>0 -> branch `payload[0] == ((ILLEGAL_CAT_ENTRY%10)+'0')` -> OOB write `payload[ILLEGAL_CAT_ENTRY*100] = '\\0'`."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1035,
+      "output_tokens": 52,
+      "total_tokens": 1087,
+      "latency_ms": 1259
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1551,
+      "output_tokens": 186,
+      "total_tokens": 1737,
+      "latency_ms": 3459
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1766,
+      "output_tokens": 405,
+      "total_tokens": 2171,
+      "latency_ms": 6024
+    }
+  ],
+  "token_totals": {
+    "input": 4352,
+    "output": 643,
+    "total": 4995,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: fuzz-catalog   Sanitizer: address\nFunction: finish_item\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): An injected trigger: `if (payload[0] == ((ILLEGAL_CAT_ENTRY%10)+'0')) payload[ILLEGAL_CAT_ENTRY*100] = '\\0';` writes at index ILLEGAL_CAT_ENTRY*100, far beyond payload_size -- an out-of-bounds heap write.\n\nControl flow to the bug:\n  - fuzz-catalog parses an entry; finish_item receives payload/payload_size\n  - payload[0] matches the trigger digit\n  - payload[ILLEGAL_CAT_ENTRY*100] = '\\0' writes past the payload allocation\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_aTtcsbPq8nydNlWhkZuA6a8l",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"finish_item\"}"
+          }
+        },
+        {
+          "id": "call_nYMfqk0AljrJ4IYoAmWRikKB",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"finish_item\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_aTtcsbPq8nydNlWhkZuA6a8l",
+      "content": "static int finish_item(\n                OrderedHashmap *h,\n                sd_id128_t id,\n                const char *language,\n                char *payload, size_t payload_size) {\n\n        _cleanup_free_ CatalogItem *i = NULL;\n        _cleanup_free_ char *combined = NULL;\n        char *prev;\n        int r;\n\n        assert(h);\n        assert(payload);\n        assert(payload_size > 0);\n        if (payload[0] == ((ILLEGAL_CAT_ENTRY%10) + '0')){\n                payload[ILLEGAL_CAT_ENTRY*100] = '\\0';\n        }\n\n        i = new0(CatalogItem, 1);\n        if (!i)\n                return log_oom();\n\n        i->id = id;\n        if (language) {\n                assert(strlen(language) > 1 && strlen(language) < 32);\n                strcpy(i->language, language);\n        }\n\n        prev = ordered_hashmap_get(h, i);\n        if (prev) {\n                                                             \n                combined = combine_entries(payload, prev);\n                if (!combined)\n                        return log_oom();\n\n                r = ordered_hashmap_update(h, i, combined);\n                if (r < 0)\n                        return log_error_errno(r, \"Failed to update catalog item: %m\");\n\n                TAKE_PTR(combined);\n                free(prev);\n        } else {\n                                \n                combined = memdup(payload, payload_size + 1);\n                if (!combined)\n                        return log_oom();\n\n                r = ordered_hashmap_put(h, i, combined);\n                if (r < 0)\n                        return log_error_errno(r, \"Failed to insert catalog item: %m\");\n\n                TAKE_PTR(i);\n                TAKE_PTR(combined);\n        }\n\n        return 0;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_nYMfqk0AljrJ4IYoAmWRikKB",
+      "content": "{\"reachable\": true, \"call_depth\": 2, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_qpp0cSe7lwssKFRJvv4GgDDQ",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to craft a minimal catalog entry whose payload begins with the trigger digit.\\n    # We don't know the exact file format; provide a few common patterns.\\n    d = str((0)%10)  # placeholder; will be overwritten by runtime? can't.\\n    # We'll brute by including all digits at start of payload candidates.\\n    # Use multiple entries separated by newlines.\\n    lines = []\\n    for ch in b\\\"0123456789\\\":\\n        # entry: ID + space + lang + space + payload\\n        lines.append(b\\\"0123456789abcdef0123456789abcdef en \\\" + bytes([ch]) + b\\\"AAAA\\\\n\\\")\\n    return b\\\"\\\".join(lines)\\n\",\"target\":\"finish_item\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_qpp0cSe7lwssKFRJvv4GgDDQ",
+      "content": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_1sWIZqaOsDf3Peh72nCxSSc0",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source of finish_item contains an explicit injected write: `if (payload[0] == ((ILLEGAL_CAT_ENTRY%10) + '0')) payload[ILLEGAL_CAT_ENTRY*100] = '\\\\0';`.\\n\\n- `payload` is a heap buffer passed in from the parser along with `payload_size` (asserted >0). There is no bounds check ensuring `ILLEGAL_CAT_ENTRY*100 < payload_size` before the write.\\n- Therefore, if the trigger condition on `payload[0]` is satisfied and `ILLEGAL_CAT_ENTRY*100` exceeds the allocated payload length (very likely), this is a heap-buffer-overflow write detectable by ASan.\\n\\nHowever, a reach_probe attempt with guessed catalog syntax did not reach finish_item, so we do not yet have runtime proof that a fuzzer input can satisfy the parser constraints to call finish_item with a payload starting with the trigger digit. The bug pattern is present and would crash if reachable with such a payload, but we lack an input demonstrating reach/crash in this environment.\",\"corrected_description\":\"Heap out-of-bounds write in finish_item: when `payload[0]` equals `((ILLEGAL_CAT_ENTRY%10)+'0')`, the code writes `payload[ILLEGAL_CAT_ENTRY*100] = '\\\\0'` without checking `payload_size`, potentially far past the heap allocation.\",\"control_flow_to_bug\":\"fuzz-catalog entrypoint -> catalog parsing routine (caller of finish_item) -> finish_item(h,id,language,payload,payload_size) with payload_size>0 -> branch `payload[0] == ((ILLEGAL_CAT_ENTRY%10)+'0')` -> OOB write `payload[ILLEGAL_CAT_ENTRY*100] = '\\\\0'`.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_1sWIZqaOsDf3Peh72nCxSSc0",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "challenge": "xz-full-01",
+  "bug": "xz-001",
+  "tag": "xz-full-01__xz-001",
+  "round": "final-competition",
+  "scan_mode": "full",
+  "harness": "fuzz_encode_stream",
+  "fuzzer": "fuzz_encode_stream",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "compute_tree_checksum"
+  ],
+  "crash_type": "heap-use-after-free",
+  "graphs_root": "/home/ze/fb-graphs/build/xz-full-01",
+  "source_root": "/home/ze/fb-graphs/build/xz-full-01/repo",
+  "callgraph": "/home/ze/fb-graphs/build/xz-full-01/graph-fuzz_encode_stream/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/xz:latest",
+  "project": "xz",
+  "blob": "/home/ze/fb-graphs/build/xz-full-01/bugs/xz-001/blob"
+}

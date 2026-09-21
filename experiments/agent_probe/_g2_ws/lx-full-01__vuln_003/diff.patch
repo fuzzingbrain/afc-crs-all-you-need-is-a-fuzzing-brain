@@ -1,0 +1,22 @@
+diff --git a/parser.c b/parser.c
+--- a/parser.c
++++ b/parser.c
+@@ -0,0 +1,18 @@
++xmlSBufAddEntitySecure(xmlSBuf *buf, const xmlChar *str, unsigned len) {
++    if (buf->max - buf->size < len) {
++        if (buf->code == XML_ERR_OK)
++            buf->code = XML_ERR_RESOURCE_LIMIT;
++        return;
++    }
++
++    if (buf->cap == 0) {
++                                                              
++                                                      
++        if (xmlSBufGrow(buf, len * 2) < 0)
++            return;
++    }
++
++    if (len > 0)
++        memcpy(buf->mem + buf->size, str, len);
++    buf->size += len;
++}

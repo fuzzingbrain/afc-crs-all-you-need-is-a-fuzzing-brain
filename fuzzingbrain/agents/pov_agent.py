@@ -411,14 +411,14 @@ class POVAgent(BaseAgent):
         description = suspicious_point.get("description", "No description")
         score = suspicious_point.get("score", 0.5)
 
-        message = f"""Generate a POV for the following suspicious point.
+        message = f"""Generate a PoC for the following suspicious point.
 
 ## Your Target Configuration (FIXED - cannot change)
 
 **Fuzzer**: `{self.fuzzer}`
 **Sanitizer**: `{self.sanitizer}`
 
-Your POV must:
+Your PoC must:
 1. Match the input format expected by `{self.fuzzer}`
 2. Trigger a crash detectable by `{self.sanitizer}` sanitizer
 3. Reach the vulnerable function through the fuzzer's call path
@@ -472,19 +472,10 @@ Your POV must:
 
         # Add POV guidance if available (from Verify agent)
         if suspicious_point.get("pov_guidance"):
-            message += f"""## POV Guidance (Reference from Verify Agent)
+            message += f"""## PoC Guidance (Reference from Verify Agent)
 
 {suspicious_point["pov_guidance"]}
 
-"""
-
-        source_hint = self.read_function_hint(function_name)
-        message += f"""## Your Task
-
-Follow the steps in your instructions to generate a PoV for `{function_name}`. Start
-from the pov_guidance above, call `create_pov` early (it auto-verifies each variant),
-and use `reach_probe` to see how far an input got. Begin by reading the vulnerable
-function: {source_hint}.
 """
 
         return message
@@ -610,9 +601,13 @@ function: {source_hint}.
         response = None
         consecutive_no_tool_calls = 0  # Track consecutive iterations without tool calls
         consecutive_llm_failures = 0  # Track consecutive LLM API failures (o3 timeouts)
-        max_consecutive_no_tools = 12  # Give up only after many refusals (reasoning
-        # models emit bare-text turns; a low threshold ended PoV early with most of the
-        # attempt/iteration budget unused — nudge them back instead of quitting fast)
+        consecutive_assessment = 0  # Consecutive "ASSESSMENT COMPLETE" (give-up) turns
+        # Early exit (user request): once the agent has clearly concluded it cannot
+        # crash — two consecutive bare-text turns OR two consecutive ASSESSMENT
+        # COMPLETE signals — stop instead of burning the rest of the iteration budget
+        # repeating the same conclusion. A single such turn can be the model thinking
+        # out loud, so require a streak of 2.
+        GIVE_UP_STREAK = 2
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -798,7 +793,7 @@ function: {source_hint}.
 2. What conditions are needed to trigger the vulnerability?
 3. What's different between your input and what the vulnerability needs?
 
-Use {source_hint} or reach_probe to understand better, then create a NEW POV with adjusted approach.""",
+Use {source_hint} or reach_probe to understand better, then create NEW PoCs with adjusted approach.""",
                                         "iteration": f"{iteration}/{self.max_iterations}",
                                         "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
                                     }
@@ -815,47 +810,58 @@ Use {source_hint} or reach_probe to understand better, then create a NEW POV wit
                     final_response = "POV SUCCESS! Found crashing input."
                     break
 
-                # Greedy mode nudge: if agent didn't call create_pov this iteration,
-                # inject a prompt pushing it to stop analyzing and generate a POV
-                if (
-                    self.pov_attempts < self._greedy_attempts_threshold
-                    and iteration > 2
-                    and not any(
-                        tc["function"]["name"] == "create_pov"
-                        for tc in response.tool_calls
-                    )
-                ):
-                    self.messages.append(
-                        {
-                            "role": "user",
-                            "content": (
-                                "GREEDY MODE: You are spending too much time analyzing. "
-                                "You have enough context. Call create_pov NOW with your "
-                                "best guess. You can refine after seeing the result. "
-                                "Do NOT call any more analysis tools before create_pov."
-                            ),
-                        }
-                    )
-                    self._log("Injected greedy mode nudge", level="DEBUG")
+                # Greedy nudge REMOVED (user request): the guard was `pov_attempts < 3`,
+                # which never advances while the agent does analysis instead of
+                # create_pov, so it re-fired every analysis turn (66x in one run) and
+                # spammed the context with "stop analyzing" while the agent legitimately
+                # needed to (re-)read source. No nudge now — do not bother the agent.
+
+                # Early exit on repeated ASSESSMENT COMPLETE (give-up on a tool-call
+                # turn): once the agent has textually concluded twice, stop rather than
+                # burn the rest of the budget repeating itself.
+                if response.content and "ASSESSMENT COMPLETE" in response.content.upper():
+                    consecutive_assessment += 1
+                    if consecutive_assessment >= GIVE_UP_STREAK:
+                        self._log(
+                            f"POV agent signaled ASSESSMENT COMPLETE x{consecutive_assessment} "
+                            f"— exiting early (no wasted iterations)",
+                            level="WARNING",
+                        )
+                        final_response = (
+                            "POV agent concluded ASSESSMENT COMPLETE twice; no crash found."
+                        )
+                        break
+                else:
+                    consecutive_assessment = 0
 
             else:
-                # No tool calls - LLM might be giving up
+                # No tool calls — the agent is talking instead of acting, i.e. giving up.
                 consecutive_no_tool_calls += 1
                 self._log(
-                    f"LLM stopped calling tools ({consecutive_no_tool_calls}/{max_consecutive_no_tools})",
+                    f"LLM emitted a bare-text turn ({consecutive_no_tool_calls}/{GIVE_UP_STREAK})",
                     level="WARNING",
                 )
 
-                # NEVER give up on no-tool turns: the run must use its full iteration
-                # budget (only a real crash or max_iterations/max_pov_attempts ends it).
-                # Just log and fall through to the nudge below, then continue the loop.
-                if consecutive_no_tool_calls >= max_consecutive_no_tools:
+                # Early exit (user request): two consecutive bare-text turns means the
+                # agent has stopped working — exit instead of spending the rest of the
+                # iteration budget. (A single one can be the model thinking out loud.)
+                if consecutive_no_tool_calls >= GIVE_UP_STREAK:
                     self._log(
-                        f"LLM emitted {consecutive_no_tool_calls} consecutive bare-text "
-                        f"turns — nudging hard and continuing (no early give-up)",
+                        f"POV agent emitted {consecutive_no_tool_calls} consecutive bare-text "
+                        f"turns — exiting early (gave up)",
                         level="WARNING",
                     )
-                    consecutive_no_tool_calls = 0  # reset so we keep nudging, not quit
+                    if response.content:
+                        self.messages.append(
+                            {
+                                "role": "assistant",
+                                "content": response.content,
+                                "iteration": f"{iteration}/{self.max_iterations}",
+                                "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
+                            }
+                        )
+                    final_response = "POV agent gave up (consecutive bare-text turns)."
+                    break
 
                 # Add the assistant's response
                 if response.content:
@@ -873,7 +879,7 @@ Use {source_hint} or reach_probe to understand better, then create a NEW POV wit
                 self.messages.append(
                     {
                         "role": "user",
-                        "content": f"""You still have {remaining_attempts} POV attempts remaining — you are NOT out of budget.
+                        "content": f"""You still have {remaining_attempts} PoC attempts remaining — you are NOT out of budget.
 
 Do NOT stop, and do NOT conclude "false positive" / "not reproducible": you may only stop when create_pov actually reports crashed. A vulnerability that you can REACH (confirm with reach_probe) is real; if it is not crashing yet, you have not shaped the triggering value correctly — that is a reason to iterate, not to quit.
 

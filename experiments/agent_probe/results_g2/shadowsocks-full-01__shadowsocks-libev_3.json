@@ -1,0 +1,298 @@
+{
+  "tag": "shadowsocks-full-01__shadowsocks-libev_3",
+  "gt": "json_parse_ex",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "read_function",
+    "read_function",
+    "read_function",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "full",
+    "pattern_present": false,
+    "reasoning": "In json_parse_ex, string_length is an unsigned int used during both passes of the two-pass parse. However, at the top of each iteration while in flag_string, the code checks `if (string_length > state.uint_max) goto e_overflow;` where state.uint_max is set to UINT_MAX-8. This check occurs before any increments/writes for the current character/escape sequence. Because the maximum increment per step is 4 bytes (UTF-8 encoding of \\u escapes), string_length cannot wrap around 32-bit without first exceeding UINT_MAX-8; it will trigger e_overflow before reaching UINT_MAX and thus before wrap. Therefore the claimed wraparound leading to under-allocation and second-pass heap OOB is disconfirmed by the guard.\n\nAlso, the second-pass writes use the same string_length progression as the first pass length computation; with the overflow guard, allocation size derived from first pass cannot be smaller due to wrap.\n\nI attempted to run a reach_probe but the ASan binary path was missing in this environment, so no dynamic reach/crash evidence could be collected.",
+    "corrected_description": "No heap-buffer-overflow from unsigned-int wrap in string_length: json_parse_ex guards string_length against exceeding UINT_MAX-8 before any per-character increments (max +4), preventing wraparound and preventing under-allocation/second-pass overwrite. If extremely long strings are provided, it should go to e_overflow instead.",
+    "control_flow_to_bug": "N/A (no confirmed crash). Relevant control flow for the suspicious area: json_parse_ex main loop -> enter flag_string when parsing a JSON string -> each iteration checks `if (string_length > state.uint_max) goto e_overflow;` before processing escapes/\\u and before any `string_add` or direct `string[string_length++]` writes; thus overflow is prevented."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.1,
+  "verdict": "WEAK/FP",
+  "basis": "LLM: pattern absent",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "json_parse_ex"
+      },
+      "result": "json_value * json_parse_ex (json_settings * settings,\n                            const json_char * json,\n                            size_t length,\n                            char * error_buf)\n{\n   json_char error [json_error_max];\n   const json_char * end;\n   json_value * top, * root, * alloc = 0;\n   json_state state = { 0 };\n   long flags;\n   long num_digits = 0, num_e = 0;\n   json_int_t num_fraction = 0;\n\n                    \n      \n   if (length >= 3 && ((unsigned char) json [0]) == 0xEF\n                   && ((unsigned char) json [1]) == 0xBB\n                   && ((unsigned char) json [2]) == 0xBF)\n   {\n      json += 3;\n      length -= 3;\n   }\n\n   error[0] = '\\0';\n   end = (json + length);\n\n   memcpy (&state.settings, settings, sizeof (json_settings));\n\n   if (!state.settings.mem_alloc)\n      state.settings.mem_alloc = default_alloc;\n\n   if (!state.settings.mem_free)\n      state.settings.mem_free = default_free;\n\n   memset (&state.uint_max, 0xFF, sizeof (state.uint_max));\n   memset (&state.ulong_max, 0xFF, sizeof (state.ulong_max));\n\n   state.uint_max -= 8;                                                       \n   state.ulong_max -= 8;\n\n   for (state.first_pass = 1; state.first_pass >= 0; -- state.first_pass)\n   {\n      json_uchar uchar;\n      unsigned char uc_b1, uc_b2, uc_b3, uc_b4;\n      json_char * string = 0;\n      unsigned int string_length = 0;\n\n      top = root = 0;\n      flags = flag_seek_value;\n\n      state.cur_line = 1;\n\n      for (state.ptr = json ;; ++ state.ptr)\n      {\n         json_char b = (state.ptr == end ? 0 : *state.ptr);\n         \n         if (flags & flag_string)\n         {\n            if (!b)\n            {  sprintf (error, \"Unexpected EOF in string (at %d:%d)\", line_and_col);\n               goto e_failed;\n            }\n\n            if (string_length > state.uint_max)\n               goto e_overflow;\n\n            if (flags & flag_escaped)\n            {\n               flags &= ~ flag_escaped;\n\n               switch (b)\n               {\n                  case 'b':  string_add ('\\b');  break;\n                  case 'f':  string_add ('\\f');  break;\n                  case 'n':  string_add ('\\n');  break;\n                  case 'r':  string_add ('\\r');  break;\n                  case 't':  string_add ('\\t');  break;\n                  case 'u':\n\n                    if (end - state.ptr < 4 || \n                        (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                    {\n                        sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                        goto e_failed;\n                    }\n\n                    uc_b1 = (uc_b1 << 4) | uc_b2;\n                    uc_b2 = (uc_b3 << 4) | uc_b4;\n                    uchar = (uc_b1 << 8) | uc_b2;\n\n                    if ((uchar & 0xF800) == 0xD800) {\n                        json_uchar uchar2;\n                        \n                        if (end - state.ptr < 6 || (*++ state.ptr) != '\\\\' || (*++ state.ptr) != 'u' ||\n                            (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                        {\n                            sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                            goto e_failed;\n                        }\n\n                        uc_b1 = (uc_b1 << 4) | uc_b2;\n                        uc_b2 = (uc_b3 << 4) | uc_b4;\n                        uchar2 = (uc_b1 << 8) | uc_b2;\n                        \n                        uchar = 0x010000 | ((uchar & 0x3FF) << 10) | (uchar2 & 0x3FF);\n                    }\n\n   …[truncated]"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "json_parse_ex"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 2, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "read_function",
+      "args": {
+        "name": "json_parse_ex"
+      },
+      "result": "json_value * json_parse_ex (json_settings * settings,\n                            const json_char * json,\n                            size_t length,\n                            char * error_buf)\n{\n   json_char error [json_error_max];\n   const json_char * end;\n   json_value * top, * root, * alloc = 0;\n   json_state state = { 0 };\n   long flags;\n   long num_digits = 0, num_e = 0;\n   json_int_t num_fraction = 0;\n\n                    \n      \n   if (length >= 3 && ((unsigned char) json [0]) == 0xEF\n                   && ((unsigned char) json [1]) == 0xBB\n                   && ((unsigned char) json [2]) == 0xBF)\n   {\n      json += 3;\n      length -= 3;\n   }\n\n   error[0] = '\\0';\n   end = (json + length);\n\n   memcpy (&state.settings, settings, sizeof (json_settings));\n\n   if (!state.settings.mem_alloc)\n      state.settings.mem_alloc = default_alloc;\n\n   if (!state.settings.mem_free)\n      state.settings.mem_free = default_free;\n\n   memset (&state.uint_max, 0xFF, sizeof (state.uint_max));\n   memset (&state.ulong_max, 0xFF, sizeof (state.ulong_max));\n\n   state.uint_max -= 8;                                                       \n   state.ulong_max -= 8;\n\n   for (state.first_pass = 1; state.first_pass >= 0; -- state.first_pass)\n   {\n      json_uchar uchar;\n      unsigned char uc_b1, uc_b2, uc_b3, uc_b4;\n      json_char * string = 0;\n      unsigned int string_length = 0;\n\n      top = root = 0;\n      flags = flag_seek_value;\n\n      state.cur_line = 1;\n\n      for (state.ptr = json ;; ++ state.ptr)\n      {\n         json_char b = (state.ptr == end ? 0 : *state.ptr);\n         \n         if (flags & flag_string)\n         {\n            if (!b)\n            {  sprintf (error, \"Unexpected EOF in string (at %d:%d)\", line_and_col);\n               goto e_failed;\n            }\n\n            if (string_length > state.uint_max)\n               goto e_overflow;\n\n            if (flags & flag_escaped)\n            {\n               flags &= ~ flag_escaped;\n\n               switch (b)\n               {\n                  case 'b':  string_add ('\\b');  break;\n                  case 'f':  string_add ('\\f');  break;\n                  case 'n':  string_add ('\\n');  break;\n                  case 'r':  string_add ('\\r');  break;\n                  case 't':  string_add ('\\t');  break;\n                  case 'u':\n\n                    if (end - state.ptr < 4 || \n                        (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                    {\n                        sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                        goto e_failed;\n                    }\n\n                    uc_b1 = (uc_b1 << 4) | uc_b2;\n                    uc_b2 = (uc_b3 << 4) | uc_b4;\n                    uchar = (uc_b1 << 8) | uc_b2;\n\n                    if ((uchar & 0xF800) == 0xD800) {\n                        json_uchar uchar2;\n                        \n                        if (end - state.ptr < 6 || (*++ state.ptr) != '\\\\' || (*++ state.ptr) != 'u' ||\n                            (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                        {\n                            sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                            goto e_failed;\n                        }\n\n                        uc_b1 = (uc_b1 << 4) | uc_b2;\n                        uc_b2 = (uc_b3 << 4) | uc_b4;\n                        uchar2 = (uc_b1 << 8) | uc_b2;\n                        \n                        uchar = 0x010000 | ((uchar & 0x3FF) << 10) | (uchar2 & 0x3FF);\n                    }\n\n   …[truncated]"
+    },
+    {
+      "iter": 2,
+      "tool": "read_function",
+      "args": {
+        "name": "json_parse_ex"
+      },
+      "result": "json_value * json_parse_ex (json_settings * settings,\n                            const json_char * json,\n                            size_t length,\n                            char * error_buf)\n{\n   json_char error [json_error_max];\n   const json_char * end;\n   json_value * top, * root, * alloc = 0;\n   json_state state = { 0 };\n   long flags;\n   long num_digits = 0, num_e = 0;\n   json_int_t num_fraction = 0;\n\n                    \n      \n   if (length >= 3 && ((unsigned char) json [0]) == 0xEF\n                   && ((unsigned char) json [1]) == 0xBB\n                   && ((unsigned char) json [2]) == 0xBF)\n   {\n      json += 3;\n      length -= 3;\n   }\n\n   error[0] = '\\0';\n   end = (json + length);\n\n   memcpy (&state.settings, settings, sizeof (json_settings));\n\n   if (!state.settings.mem_alloc)\n      state.settings.mem_alloc = default_alloc;\n\n   if (!state.settings.mem_free)\n      state.settings.mem_free = default_free;\n\n   memset (&state.uint_max, 0xFF, sizeof (state.uint_max));\n   memset (&state.ulong_max, 0xFF, sizeof (state.ulong_max));\n\n   state.uint_max -= 8;                                                       \n   state.ulong_max -= 8;\n\n   for (state.first_pass = 1; state.first_pass >= 0; -- state.first_pass)\n   {\n      json_uchar uchar;\n      unsigned char uc_b1, uc_b2, uc_b3, uc_b4;\n      json_char * string = 0;\n      unsigned int string_length = 0;\n\n      top = root = 0;\n      flags = flag_seek_value;\n\n      state.cur_line = 1;\n\n      for (state.ptr = json ;; ++ state.ptr)\n      {\n         json_char b = (state.ptr == end ? 0 : *state.ptr);\n         \n         if (flags & flag_string)\n         {\n            if (!b)\n            {  sprintf (error, \"Unexpected EOF in string (at %d:%d)\", line_and_col);\n               goto e_failed;\n            }\n\n            if (string_length > state.uint_max)\n               goto e_overflow;\n\n            if (flags & flag_escaped)\n            {\n               flags &= ~ flag_escaped;\n\n               switch (b)\n               {\n                  case 'b':  string_add ('\\b');  break;\n                  case 'f':  string_add ('\\f');  break;\n                  case 'n':  string_add ('\\n');  break;\n                  case 'r':  string_add ('\\r');  break;\n                  case 't':  string_add ('\\t');  break;\n                  case 'u':\n\n                    if (end - state.ptr < 4 || \n                        (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                    {\n                        sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                        goto e_failed;\n                    }\n\n                    uc_b1 = (uc_b1 << 4) | uc_b2;\n                    uc_b2 = (uc_b3 << 4) | uc_b4;\n                    uchar = (uc_b1 << 8) | uc_b2;\n\n                    if ((uchar & 0xF800) == 0xD800) {\n                        json_uchar uchar2;\n                        \n                        if (end - state.ptr < 6 || (*++ state.ptr) != '\\\\' || (*++ state.ptr) != 'u' ||\n                            (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                        {\n                            sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                            goto e_failed;\n                        }\n\n                        uc_b1 = (uc_b1 << 4) | uc_b2;\n                        uc_b2 = (uc_b3 << 4) | uc_b4;\n                        uchar2 = (uc_b1 << 8) | uc_b2;\n                        \n                        uchar = 0x010000 | ((uchar & 0x3FF) << 10) | (uchar2 & 0x3FF);\n                    }\n\n   …[truncated]"
+    },
+    {
+      "iter": 3,
+      "tool": "read_function",
+      "args": {
+        "name": "string_add"
+      },
+      "result": "(not found)"
+    },
+    {
+      "iter": 4,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to drive huge string_length via many \\u escapes.\n    # Likely won't reach overflow due to input size limits, but should reach string parsing.\n    n = 200000  # 200k * 6 ~ 1.2MB\n    s = '\"' + ('\\\\u0800'*n) + '\"'\n    return s.encode('ascii')\n",
+        "target": "json_parse_ex"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/shadowsocks-full-01/bugs/shadowsocks-libev_3/bin/address'\"}"
+    },
+    {
+      "iter": 5,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "full",
+        "pattern_present": false,
+        "reasoning": "In json_parse_ex, string_length is an unsigned int used during both passes of the two-pass parse. However, at the top of each iteration while in flag_string, the code checks `if (string_length > state.uint_max) goto e_overflow;` where state.uint_max is set to UINT_MAX-8. This check occurs before any increments/writes for the current character/escape sequence. Because the maximum increment per step is 4 bytes (UTF-8 encoding of \\u escapes), string_length cannot wrap around 32-bit without first exceeding UINT_MAX-8; it will trigger e_overflow before reaching UINT_MAX and thus before wrap. Therefore the claimed wraparound leading to under-allocation and second-pass heap OOB is disconfirmed by the guard.\n\nAlso, the second-pass writes use the same string_length progression as the first pass length computation; with the overflow guard, allocation size derived from first pass cannot be smaller due to wrap.\n\nI attempted to run a reach_probe but the ASan binary path was missing in this environment, so no dynamic reach/crash evidence could be collected.",
+        "corrected_description": "No heap-buffer-overflow from unsigned-int wrap in string_length: json_parse_ex guards string_length against exceeding UINT_MAX-8 before any per-character increments (max +4), preventing wraparound and preventing under-allocation/second-pass overwrite. If extremely long strings are provided, it should go to e_overflow instead.",
+        "control_flow_to_bug": "N/A (no confirmed crash). Relevant control flow for the suspicious area: json_parse_ex main loop -> enter flag_string when parsing a JSON string -> each iteration checks `if (string_length > state.uint_max) goto e_overflow;` before processing escapes/\\u and before any `string_add` or direct `string[string_length++]` writes; thus overflow is prevented."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1110,
+      "output_tokens": 54,
+      "total_tokens": 1164,
+      "latency_ms": 1040
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 2828,
+      "output_tokens": 19,
+      "total_tokens": 2847,
+      "latency_ms": 1274
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 4281,
+      "output_tokens": 19,
+      "total_tokens": 4300,
+      "latency_ms": 888
+    },
+    {
+      "iter": 3,
+      "model": "gpt-5.2",
+      "input_tokens": 5734,
+      "output_tokens": 18,
+      "total_tokens": 5752,
+      "latency_ms": 826
+    },
+    {
+      "iter": 4,
+      "model": "gpt-5.2",
+      "input_tokens": 5766,
+      "output_tokens": 115,
+      "total_tokens": 5881,
+      "latency_ms": 2167
+    },
+    {
+      "iter": 5,
+      "model": "gpt-5.2",
+      "input_tokens": 5935,
+      "output_tokens": 421,
+      "total_tokens": 6356,
+      "latency_ms": 6150
+    }
+  ],
+  "token_totals": {
+    "input": 25654,
+    "output": 646,
+    "total": 26300,
+    "llm_calls": 6
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: json_fuzz   Sanitizer: address\nFunction: json_parse_ex\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): Potential heap buffer overflow in second pass string decoding: `string_length` is tracked as `unsigned int` and incremented by up to 4 per escape/unicode sequence, while allocation for `top->u.string.ptr` (and object key storage via `top->_reserved.object_mem`) is presumably based on first-pass `string_length` calculations. If `string_length` overflows `unsigned int` during first pass (wraps) before the `if (string_length > state.uint_max) goto e_overflow;` check triggers, the first pass could compute a too-small length, allocate too-small buffer, then second pass writes using the wrapped `string_length` index (`string[string_length++] = ...` / `string_add`) causing ASan-detectable heap OOB write. Root cause: 32-bit `string_length` overflow/wrap before bounds check; mismatch between size computation and writes across two-pass design.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_9lNSrk4PkdOQ4g38wuhNrCKB",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"json_parse_ex\"}"
+          }
+        },
+        {
+          "id": "call_rrbHZzaSETFVYiHwCw26ZVeu",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"json_parse_ex\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_9lNSrk4PkdOQ4g38wuhNrCKB",
+      "content": "json_value * json_parse_ex (json_settings * settings,\n                            const json_char * json,\n                            size_t length,\n                            char * error_buf)\n{\n   json_char error [json_error_max];\n   const json_char * end;\n   json_value * top, * root, * alloc = 0;\n   json_state state = { 0 };\n   long flags;\n   long num_digits = 0, num_e = 0;\n   json_int_t num_fraction = 0;\n\n                    \n      \n   if (length >= 3 && ((unsigned char) json [0]) == 0xEF\n                   && ((unsigned char) json [1]) == 0xBB\n                   && ((unsigned char) json [2]) == 0xBF)\n   {\n      json += 3;\n      length -= 3;\n   }\n\n   error[0] = '\\0';\n   end = (json + length);\n\n   memcpy (&state.settings, settings, sizeof (json_settings));\n\n   if (!state.settings.mem_alloc)\n      state.settings.mem_alloc = default_alloc;\n\n   if (!state.settings.mem_free)\n      state.settings.mem_free = default_free;\n\n   memset (&state.uint_max, 0xFF, sizeof (state.uint_max));\n   memset (&state.ulong_max, 0xFF, sizeof (state.ulong_max));\n\n   state.uint_max -= 8;                                                       \n   state.ulong_max -= 8;\n\n   for (state.first_pass = 1; state.first_pass >= 0; -- state.first_pass)\n   {\n      json_uchar uchar;\n      unsigned char uc_b1, uc_b2, uc_b3, uc_b4;\n      json_char * string = 0;\n      unsigned int string_length = 0;\n\n      top = root = 0;\n      flags = flag_seek_value;\n\n      state.cur_line = 1;\n\n      for (state.ptr = json ;; ++ state.ptr)\n      {\n         json_char b = (state.ptr == end ? 0 : *state.ptr);\n         \n         if (flags & flag_string)\n         {\n            if (!b)\n            {  sprintf (error, \"Unexpected EOF in string (at %d:%d)\", line_and_col);\n               goto e_failed;\n            }\n\n            if (string_length > state.uint_max)\n               goto e_overflow;\n\n            if (flags & flag_escaped)\n            {\n               flags &= ~ flag_escaped;\n\n               switch (b)\n               {\n                  case 'b':  string_add ('\\b');  break;\n                  case 'f':  string_add ('\\f');  break;\n                  case 'n':  string_add ('\\n');  break;\n                  case 'r':  string_add ('\\r');  break;\n                  case 't':  string_add ('\\t');  break;\n                  case 'u':\n\n                    if (end - state.ptr < 4 || \n                        (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                    {\n                        sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                        goto e_failed;\n                    }\n\n                    uc_b1 = (uc_b1 << 4) | uc_b2;\n                    uc_b2 = (uc_b3 << 4) | uc_b4;\n                    uchar = (uc_b1 << 8) | uc_b2;\n\n                    if ((uchar & 0xF800) == 0xD800) {\n                        json_uchar uchar2;\n                        \n                        if (end - state.ptr < 6 || (*++ state.ptr) != '\\\\' || (*++ state.ptr) != 'u' ||\n                            (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                        {\n                            sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                            goto e_failed;\n                        }\n\n                        uc_b1 = (uc_b1 << 4) | uc_b2;\n                        uc_b2 = (uc_b3 << 4) | uc_b4;\n                        uchar2 = (uc_b1 << 8) | uc_b2;\n                        \n                        uchar = 0x010000 | ((uchar & 0x3FF) << 10) | (uchar2 & 0x3FF);\n                    }\n\n                    if (sizeof (json_char) >= sizeof (json_uchar) || (uchar <= 0x7F))\n                    {\n                       string_add ((json_char) uchar);\n                       break;\n                    }\n\n                    if (uchar <= 0x7FF)\n                    {\n                        if (state.first_pass)\n                           string_length += 2;\n                        else\n                        {  string [string_length ++] = 0xC0 | (uchar >> 6);\n                           string [string_length ++] = 0x80 | (uchar & 0x3F);\n                        }\n\n                        break;\n                    }\n\n                    if (uchar <= 0xFFFF) {\n                        if (state.first_pass)\n                           string_length += 3;\n                        else\n                        {  string [string_length ++] = 0xE0 | (uchar >> 12);\n                           string [string_length ++] = 0x80 | ((uchar >> 6) & 0x3F);\n                           string [string_length ++] = 0x80 | (uchar & 0x3F);\n                        }\n                        \n                        break;\n                    }\n\n                    if (state.first_pass)\n                       string_length += 4;\n                    else\n                    {  string [string_length ++] = 0xF0 | (uchar >> 18);\n                       string [string_length ++] = 0x80 | ((uchar >> 12) & 0x3F);\n                       string [string_length ++] = 0x80 | ((uchar >> 6) & 0x3F);\n                       string [string_length ++] = 0x80 | (uchar & 0x3F);\n                    }\n\n                    break;\n\n                  default:\n                     string_add (b);\n               };\n\n               continue;\n            }\n\n            if (b == '\\\\')\n            {\n               flags |= flag_escaped;\n               continue;\n            }\n\n            if (b == '\"')\n            {\n               if (!state.first_pass)\n                  string [string_length] = 0;\n\n               flags"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_rrbHZzaSETFVYiHwCw26ZVeu",
+      "content": "{\"reachable\": true, \"call_depth\": 2, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_SZTPzzktlb1Caebsty1NRnGQ",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"json_parse_ex\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_SZTPzzktlb1Caebsty1NRnGQ",
+      "content": "json_value * json_parse_ex (json_settings * settings,\n                            const json_char * json,\n                            size_t length,\n                            char * error_buf)\n{\n   json_char error [json_error_max];\n   const json_char * end;\n   json_value * top, * root, * alloc = 0;\n   json_state state = { 0 };\n   long flags;\n   long num_digits = 0, num_e = 0;\n   json_int_t num_fraction = 0;\n\n                    \n      \n   if (length >= 3 && ((unsigned char) json [0]) == 0xEF\n                   && ((unsigned char) json [1]) == 0xBB\n                   && ((unsigned char) json [2]) == 0xBF)\n   {\n      json += 3;\n      length -= 3;\n   }\n\n   error[0] = '\\0';\n   end = (json + length);\n\n   memcpy (&state.settings, settings, sizeof (json_settings));\n\n   if (!state.settings.mem_alloc)\n      state.settings.mem_alloc = default_alloc;\n\n   if (!state.settings.mem_free)\n      state.settings.mem_free = default_free;\n\n   memset (&state.uint_max, 0xFF, sizeof (state.uint_max));\n   memset (&state.ulong_max, 0xFF, sizeof (state.ulong_max));\n\n   state.uint_max -= 8;                                                       \n   state.ulong_max -= 8;\n\n   for (state.first_pass = 1; state.first_pass >= 0; -- state.first_pass)\n   {\n      json_uchar uchar;\n      unsigned char uc_b1, uc_b2, uc_b3, uc_b4;\n      json_char * string = 0;\n      unsigned int string_length = 0;\n\n      top = root = 0;\n      flags = flag_seek_value;\n\n      state.cur_line = 1;\n\n      for (state.ptr = json ;; ++ state.ptr)\n      {\n         json_char b = (state.ptr == end ? 0 : *state.ptr);\n         \n         if (flags & flag_string)\n         {\n            if (!b)\n            {  sprintf (error, \"Unexpected EOF in string (at %d:%d)\", line_and_col);\n               goto e_failed;\n            }\n\n            if (string_length > state.uint_max)\n               goto e_overflow;\n\n            if (flags & flag_escaped)\n            {\n               flags &= ~ flag_escaped;\n\n               switch (b)\n               {\n                  case 'b':  string_add ('\\b');  break;\n                  case 'f':  string_add ('\\f');  break;\n                  case 'n':  string_add ('\\n');  break;\n                  case 'r':  string_add ('\\r');  break;\n                  case 't':  string_add ('\\t');  break;\n                  case 'u':\n\n                    if (end - state.ptr < 4 || \n                        (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                    {\n                        sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                        goto e_failed;\n                    }\n\n                    uc_b1 = (uc_b1 << 4) | uc_b2;\n                    uc_b2 = (uc_b3 << 4) | uc_b4;\n                    uchar = (uc_b1 << 8) | uc_b2;\n\n                    if ((uchar & 0xF800) == 0xD800) {\n                        json_uchar uchar2;\n                        \n                        if (end - state.ptr < 6 || (*++ state.ptr) != '\\\\' || (*++ state.ptr) != 'u' ||\n                            (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                        {\n                            sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                            goto e_failed;\n                        }\n\n                        uc_b1 = (uc_b1 << 4) | uc_b2;\n                        uc_b2 = (uc_b3 << 4) | uc_b4;\n                        uchar2 = (uc_b1 << 8) | uc_b2;\n                        \n                        uchar = 0x010000 | ((uchar & 0x3FF) << 10) | (uchar2 & 0x3FF);\n                    }\n\n                    if (sizeof (json_char) >= sizeof (json_uchar) || (uchar <= 0x7F))\n                    {\n                       string_add ((json_char) uchar);\n                       break;\n                    }\n\n                    if (uchar <= 0x7FF)\n                    {\n                        if (state.first_pass)\n                           string_length += 2;\n                        else\n                        {  string [string_length ++] = 0xC0 | (uchar >> 6);\n                           string [string_length ++] = 0x80 | (uchar & 0x3F);\n                        }\n\n                        break;\n                    }\n\n                    if (uchar <= 0xFFFF) {\n                        if (state.first_pass)\n                           string_length += 3;\n                        else\n                        {  string [string_length ++] = 0xE0 | (uchar >> 12);\n                           string [string_length ++] = 0x80 | ((uchar >> 6) & 0x3F);\n                           string [string_length ++] = 0x80 | (uchar & 0x3F);\n                        }\n                        \n                        break;\n                    }\n\n                    if (state.first_pass)\n                       string_length += 4;\n                    else\n                    {  string [string_length ++] = 0xF0 | (uchar >> 18);\n                       string [string_length ++] = 0x80 | ((uchar >> 12) & 0x3F);\n                       string [string_length ++] = 0x80 | ((uchar >> 6) & 0x3F);\n                       string [string_length ++] = 0x80 | (uchar & 0x3F);\n                    }\n\n                    break;\n\n                  default:\n                     string_add (b);\n               };\n\n               continue;\n            }\n\n            if (b == '\\\\')\n            {\n               flags |= flag_escaped;\n               continue;\n            }\n\n            if (b == '\"')\n            {\n               if (!state.first_pass)\n                  string [string_length] = 0;\n\n               flags"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_tR5jtGRRZgnq8gInEuJsyGCS",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"json_parse_ex\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_tR5jtGRRZgnq8gInEuJsyGCS",
+      "content": "json_value * json_parse_ex (json_settings * settings,\n                            const json_char * json,\n                            size_t length,\n                            char * error_buf)\n{\n   json_char error [json_error_max];\n   const json_char * end;\n   json_value * top, * root, * alloc = 0;\n   json_state state = { 0 };\n   long flags;\n   long num_digits = 0, num_e = 0;\n   json_int_t num_fraction = 0;\n\n                    \n      \n   if (length >= 3 && ((unsigned char) json [0]) == 0xEF\n                   && ((unsigned char) json [1]) == 0xBB\n                   && ((unsigned char) json [2]) == 0xBF)\n   {\n      json += 3;\n      length -= 3;\n   }\n\n   error[0] = '\\0';\n   end = (json + length);\n\n   memcpy (&state.settings, settings, sizeof (json_settings));\n\n   if (!state.settings.mem_alloc)\n      state.settings.mem_alloc = default_alloc;\n\n   if (!state.settings.mem_free)\n      state.settings.mem_free = default_free;\n\n   memset (&state.uint_max, 0xFF, sizeof (state.uint_max));\n   memset (&state.ulong_max, 0xFF, sizeof (state.ulong_max));\n\n   state.uint_max -= 8;                                                       \n   state.ulong_max -= 8;\n\n   for (state.first_pass = 1; state.first_pass >= 0; -- state.first_pass)\n   {\n      json_uchar uchar;\n      unsigned char uc_b1, uc_b2, uc_b3, uc_b4;\n      json_char * string = 0;\n      unsigned int string_length = 0;\n\n      top = root = 0;\n      flags = flag_seek_value;\n\n      state.cur_line = 1;\n\n      for (state.ptr = json ;; ++ state.ptr)\n      {\n         json_char b = (state.ptr == end ? 0 : *state.ptr);\n         \n         if (flags & flag_string)\n         {\n            if (!b)\n            {  sprintf (error, \"Unexpected EOF in string (at %d:%d)\", line_and_col);\n               goto e_failed;\n            }\n\n            if (string_length > state.uint_max)\n               goto e_overflow;\n\n            if (flags & flag_escaped)\n            {\n               flags &= ~ flag_escaped;\n\n               switch (b)\n               {\n                  case 'b':  string_add ('\\b');  break;\n                  case 'f':  string_add ('\\f');  break;\n                  case 'n':  string_add ('\\n');  break;\n                  case 'r':  string_add ('\\r');  break;\n                  case 't':  string_add ('\\t');  break;\n                  case 'u':\n\n                    if (end - state.ptr < 4 || \n                        (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                        (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                    {\n                        sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                        goto e_failed;\n                    }\n\n                    uc_b1 = (uc_b1 << 4) | uc_b2;\n                    uc_b2 = (uc_b3 << 4) | uc_b4;\n                    uchar = (uc_b1 << 8) | uc_b2;\n\n                    if ((uchar & 0xF800) == 0xD800) {\n                        json_uchar uchar2;\n                        \n                        if (end - state.ptr < 6 || (*++ state.ptr) != '\\\\' || (*++ state.ptr) != 'u' ||\n                            (uc_b1 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b2 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b3 = hex_value (*++ state.ptr)) == 0xFF ||\n                            (uc_b4 = hex_value (*++ state.ptr)) == 0xFF)\n                        {\n                            sprintf (error, \"Invalid character value `%c` (at %d:%d)\", b, line_and_col);\n                            goto e_failed;\n                        }\n\n                        uc_b1 = (uc_b1 << 4) | uc_b2;\n                        uc_b2 = (uc_b3 << 4) | uc_b4;\n                        uchar2 = (uc_b1 << 8) | uc_b2;\n                        \n                        uchar = 0x010000 | ((uchar & 0x3FF) << 10) | (uchar2 & 0x3FF);\n                    }\n\n                    if (sizeof (json_char) >= sizeof (json_uchar) || (uchar <= 0x7F))\n                    {\n                       string_add ((json_char) uchar);\n                       break;\n                    }\n\n                    if (uchar <= 0x7FF)\n                    {\n                        if (state.first_pass)\n                           string_length += 2;\n                        else\n                        {  string [string_length ++] = 0xC0 | (uchar >> 6);\n                           string [string_length ++] = 0x80 | (uchar & 0x3F);\n                        }\n\n                        break;\n                    }\n\n                    if (uchar <= 0xFFFF) {\n                        if (state.first_pass)\n                           string_length += 3;\n                        else\n                        {  string [string_length ++] = 0xE0 | (uchar >> 12);\n                           string [string_length ++] = 0x80 | ((uchar >> 6) & 0x3F);\n                           string [string_length ++] = 0x80 | (uchar & 0x3F);\n                        }\n                        \n                        break;\n                    }\n\n                    if (state.first_pass)\n                       string_length += 4;\n                    else\n                    {  string [string_length ++] = 0xF0 | (uchar >> 18);\n                       string [string_length ++] = 0x80 | ((uchar >> 12) & 0x3F);\n                       string [string_length ++] = 0x80 | ((uchar >> 6) & 0x3F);\n                       string [string_length ++] = 0x80 | (uchar & 0x3F);\n                    }\n\n                    break;\n\n                  default:\n                     string_add (b);\n               };\n\n               continue;\n            }\n\n            if (b == '\\\\')\n            {\n               flags |= flag_escaped;\n               continue;\n            }\n\n            if (b == '\"')\n            {\n               if (!state.first_pass)\n                  string [string_length] = 0;\n\n               flags"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_AYOua4hEgjjqOdCXNlTXw0YB",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"string_add\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_AYOua4hEgjjqOdCXNlTXw0YB",
+      "content": "(not found)"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_lbWgP8jSVQGq3wqZLmI1qaBh",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to drive huge string_length via many \\\\u escapes.\\n    # Likely won't reach overflow due to input size limits, but should reach string parsing.\\n    n = 200000  # 200k * 6 ~ 1.2MB\\n    s = '\\\"' + ('\\\\\\\\u0800'*n) + '\\\"'\\n    return s.encode('ascii')\\n\",\"target\":\"json_parse_ex\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_lbWgP8jSVQGq3wqZLmI1qaBh",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/shadowsocks-full-01/bugs/shadowsocks-libev_3/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_L6UaHGhydULkkzeooQ76o9L9",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"full\",\"pattern_present\":false,\"reasoning\":\"In json_parse_ex, string_length is an unsigned int used during both passes of the two-pass parse. However, at the top of each iteration while in flag_string, the code checks `if (string_length > state.uint_max) goto e_overflow;` where state.uint_max is set to UINT_MAX-8. This check occurs before any increments/writes for the current character/escape sequence. Because the maximum increment per step is 4 bytes (UTF-8 encoding of \\\\u escapes), string_length cannot wrap around 32-bit without first exceeding UINT_MAX-8; it will trigger e_overflow before reaching UINT_MAX and thus before wrap. Therefore the claimed wraparound leading to under-allocation and second-pass heap OOB is disconfirmed by the guard.\\n\\nAlso, the second-pass writes use the same string_length progression as the first pass length computation; with the overflow guard, allocation size derived from first pass cannot be smaller due to wrap.\\n\\nI attempted to run a reach_probe but the ASan binary path was missing in this environment, so no dynamic reach/crash evidence could be collected.\" ,\"corrected_description\":\"No heap-buffer-overflow from unsigned-int wrap in string_length: json_parse_ex guards string_length against exceeding UINT_MAX-8 before any per-character increments (max +4), preventing wraparound and preventing under-allocation/second-pass overwrite. If extremely long strings are provided, it should go to e_overflow instead.\",\"control_flow_to_bug\":\"N/A (no confirmed crash). Relevant control flow for the suspicious area: json_parse_ex main loop -> enter flag_string when parsing a JSON string -> each iteration checks `if (string_length > state.uint_max) goto e_overflow;` before processing escapes/\\\\u and before any `string_add` or direct `string[string_length++]` writes; thus overflow is prevented.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_L6UaHGhydULkkzeooQ76o9L9",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "json_parse_ex"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Potential heap buffer overflow in second pass string decoding: `string_length` is tracked as `unsigned int` and incremented by up to 4 per escape/unicode sequence, while allocation for `top->u.string.ptr` (and object key storage via `top->_reserved.object_mem`) is presumably based on first-pass `string_length` calculations. If `string_length` overflows `unsigned int` during first pass (wraps) before the `if (string_length > state.uint_max) goto e_overflow;` check triggers, the first pass could compute a too-small length, allocate too-small buffer, then second pass writes using the wrapped `string_length` index (`string[string_length++] = ...` / `string_add`) causing ASan-detectable heap OOB write. Root cause: 32-bit `string_length` overflow/wrap before bounds check; mismatch between size computation and writes across two-pass design.",
+  "finder_vuln_type": ""
+}

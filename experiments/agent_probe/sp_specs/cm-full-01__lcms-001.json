@@ -1,0 +1,22 @@
+{
+  "challenge": "cm-full-01",
+  "bug": "lcms-001",
+  "tag": "cm-full-01__lcms-001",
+  "round": "final-competition",
+  "scan_mode": "full",
+  "harness": "cms_postscript_fuzzer",
+  "fuzzer": "cms_postscript_fuzzer",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "EmitCIEBasedDEF"
+  ],
+  "crash_type": "SEGV",
+  "graphs_root": "/home/ze/fb-graphs/build/cm-full-01",
+  "source_root": "/home/ze/fb-graphs/build/cm-full-01/repo",
+  "callgraph": "/home/ze/fb-graphs/build/cm-full-01/graph-cms_virtual_profile_fuzzer/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/lcms:latest",
+  "project": "lcms",
+  "blob": "/home/ze/fb-graphs/build/cm-full-01/bugs/lcms-001/blob"
+}

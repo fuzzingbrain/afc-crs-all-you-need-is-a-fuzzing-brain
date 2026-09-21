@@ -1,0 +1,55 @@
+{
+  "_id": "6aa82ccded1803c3f32c81a9",
+  "suspicious_point_id": "6aa82ccded1803c3f32c81a9",
+  "task_id": "6aa8291d8c104b75602c8197",
+  "direction_id": "6aa82bf0ed1803c3f32c819c",
+  "function_name": "EmitCIEBasedDEF",
+  "created_by_agent_id": "6aa82cc5b67c57b67f79ce4e",
+  "verified_by_agent_id": "6aa82ccdb67c57b67f79ce6a",
+  "sources": [
+    {
+      "harness_name": "cms_postscript_fuzzer",
+      "sanitizer": "address"
+    }
+  ],
+  "description": "Potential NULL dereference: After mpe = mpe->Next, mpe is used without checking for NULL. If the list ends, this could cause an out-of-bounds or invalid memory access.",
+  "status": "failed",
+  "processor_id": null,
+  "is_checked_by_verifier": true,
+  "is_crash_found": false,
+  "score": 0.8,
+  "proceed": true,
+  "priority": 0.242,
+  "evidence": {
+    "sanitizer_match": "confirmed",
+    "pattern": "confirmed",
+    "taint": "unknown",
+    "control_flow_correct": "confirmed",
+    "suppressed_upstream": "unknown",
+    "reached": "unknown",
+    "margin_value": null,
+    "margin_source": "unknown",
+    "clamp_observed_dyn": "unknown",
+    "crashed": "unknown"
+  },
+  "static_reachable": true,
+  "reachability_status": "unknown",
+  "reachability_reason": "",
+  "reachability_multiplier": 1.0,
+  "important_controlflow": [],
+  "merged_duplicates": [],
+  "verification_notes": "EmitCIEBasedDEF dereferences `mpe` twice. After advancing the list with `mpe = mpe->Next;`, no NULL check is performed before calling `cmsStageType(mpe)` again. If the pipeline contains only the first stage, `mpe->Next` may be NULL, leading to a NULL-pointer dereference that AddressSanitizer would report.\n\nCall chain: LLVMFuzzerTestOneInput → cmsGetPostScriptCSA → cmsGetPostScriptColorResource → WriteInputLUT → EmitCIEBasedDEF.  The profile and therefore the pipeline are built from the fuzzer-supplied data, so a crafted file could leave the CLUT stage absent and reach the NULL dereference.  No guard or upstream clamp was found.\n\nThe bug is address-sanitizer observable (invalid read).  Reachability is plausible through the PostScript CSA generation path, matching the static analysis flag.",
+  "pov_guidance": null,
+  "pov_id": null,
+  "pov_success_by": null,
+  "pov_attempted_by": [
+    {
+      "harness_name": "cms_postscript_fuzzer",
+      "sanitizer": "address"
+    }
+  ],
+  "created_at": "2026-09-14T17:20:13.259887",
+  "checked_at": "2026-09-14 17:21:48.166000",
+  "pov_generated_at": null,
+  "updated_at": "2026-09-14 18:38:10.861000"
+}

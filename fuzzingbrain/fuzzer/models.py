@@ -51,7 +51,10 @@ class FuzzerType(str, Enum):
 class GlobalFuzzerConfig:
     """Configuration for Global Fuzzer."""
 
-    fork_level: int = 2  # Parallelism (lower to save resources)
+    fork_level: int = 6  # Parallelism (=container cpus). Host is 32-core; the
+    # global fuzzer is the free "floor", so give it real cores (pure-fuzzer
+    # baseline used fork=2/cpus=3; 6 keeps it competitive without starving the
+    # 4 SP fuzzers + agent). Raised from 2.
     rss_limit_mb: int = 2048  # Memory limit
     max_time: int = 0  # Max runtime in seconds (0 = unlimited)
     timeout_per_input: int = 30  # Timeout per input in seconds

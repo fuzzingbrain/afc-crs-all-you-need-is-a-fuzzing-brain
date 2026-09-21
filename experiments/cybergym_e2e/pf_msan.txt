@@ -1,0 +1,9 @@
+libspectre/arvo_21670
+ffmpeg/oss-fuzz_42538001
+mruby/arvo_18756
+flac/arvo_38815
+quickjs/oss-fuzz_413552350
+ffmpeg/oss-fuzz_42537562
+mupdf/arvo_5865
+wolfssl/oss-fuzz_445773944
+ffmpeg/oss-fuzz_383825642

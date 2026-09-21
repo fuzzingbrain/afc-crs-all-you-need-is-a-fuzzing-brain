@@ -1,0 +1,224 @@
+{
+  "tag": "av-delta-02__avif-002",
+  "gt": "avifImageYUVAnyToRGBAnySlow",
+  "crash_type": "dynamic-stack-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "read_function",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source shows two VLAs on stack: `float uspill_image[image->width][image->height];` and `vspill_image[...]`. `image->width`/`height` come from decoded image metadata (fuzzer-controlled). There is no size cap before allocation. This is a dynamic stack allocation whose size is width*height*sizeof(float) per array (x2), so moderately large dimensions can exhaust stack and/or trigger ASan dynamic-stack-buffer-overflow/stack-overflow. The subsequent initialization loops and later reads use indices bounded by `x<image->width`, `y<image->height`, and `i<image->width`, `j<image->height`, matching the declared extents, so the primary risk is stack exhaustion rather than index mismatch. A reach_probe with empty input did not reach the function; no crash was demonstrated, but the unsafe VLA pattern is present and unguarded.",
+    "corrected_description": "Unbounded variable-length stack allocation based on attacker-controlled `image->width`/`image->height` in `avifImageYUVAnyToRGBAnySlow` (two `float [width][height]` VLAs). Likely leads to stack exhaustion / ASan dynamic-stack-buffer-overflow when dimensions are large. Indexing appears consistent with extents; overflow is from allocation size, not out-of-range i/j.",
+    "control_flow_to_bug": "YuvRgbFuzzTest.Convert -> decode AVIF into `avifImage` with attacker-controlled width/height -> reformat/conversion selects slow path `avifImageYUVAnyToRGBAnySlow` (notably when yuvHasColor && rgbHasColor && rgb->chromaUpsampling==AVIF_CHROMA_UPSAMPLING_SPILL && image->yuvFormat==YUV420 && state->yuv.mode==YUV_COEFFICIENTS) -> on entry, function allocates `uspill_image[width][height]` and `vspill_image[width][height]` on stack; large dimensions trigger stack overflow/dynamic-stack-buffer-overflow before/while initializing them."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": [
+      {
+        "target": "avifImageYUVAnyToRGBAnySlow",
+        "hit": false,
+        "crashed": false,
+        "asan_type": null
+      }
+    ]
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "avifImageYUVAnyToRGBAnySlow"
+      },
+      "result": "static avifResult avifImageYUVAnyToRGBAnySlow(const avifImage * image,\n                                              avifRGBImage * rgb,\n                                              const avifReformatState * state,\n                                              avifAlphaMultiplyMode alphaMultiplyMode)\n{\n                             \n    const float kr = state->yuv.kr;\n    const float kg = state->yuv.kg;\n    const float kb = state->yuv.kb;\n    float * unormFloatTableY = NULL;\n    float * unormFloatTableUV = NULL;\n    AVIF_CHECKERR(avifCreateYUVToRGBLookUpTables(&unormFloatTableY, &unormFloatTableUV, image->depth, state), AVIF_RESULT_OUT_OF_MEMORY);\n    const uint32_t yuvChannelBytes = state->yuv.channelBytes;\n    const uint32_t rgbPixelBytes = state->rgb.pixelBytes;\n\n                             \n    const uint8_t * yPlane = image->yuvPlanes[AVIF_CHAN_Y];\n    const uint8_t * uPlane = image->yuvPlanes[AVIF_CHAN_U];\n    const uint8_t * vPlane = image->yuvPlanes[AVIF_CHAN_V];\n    const uint8_t * aPlane = image->alphaPlane;\n    const uint32_t yRowBytes = image->yuvRowBytes[AVIF_CHAN_Y];\n    const uint32_t uRowBytes = image->yuvRowBytes[AVIF_CHAN_U];\n    const uint32_t vRowBytes = image->yuvRowBytes[AVIF_CHAN_V];\n    const uint32_t aRowBytes = image->alphaRowBytes;\n\n                                      \n    const avifBool yuvHasColor = (uPlane && vPlane && (image->yuvFormat != AVIF_PIXEL_FORMAT_YUV400));\n    const avifBool rgbHasColor = !avifRGBFormatIsGray(rgb->format);\n    const uint16_t yuvMaxChannel = (uint16_t)state->yuv.maxChannel;\n    const float rgbMaxChannelF = state->rgb.maxChannelF;\n\n                                                                                                  \n                                                                                                 \n                           \n    assert((alphaMultiplyMode == AVIF_ALPHA_MULTIPLY_MODE_NO_OP) || aPlane);\n\n    float uspill_image[image->width][image->height];\n    float vspill_image[image->width][image->height];\n    float total_spill = 0.0f;\n    float last_total_spill = 0.0f;\n    for (uint32_t x = 0; x<image->width;x++){\n        for (uint32_t y = 0; y<image->height;y++){\n            uspill_image[x][y] = 0.0f;\n            vspill_image[x][y] = 0.0f;\n        }\n    }\n\n    if (yuvHasColor && rgbHasColor \n        && rgb->chromaUpsampling == AVIF_CHROMA_UPSAMPLING_SPILL\n        && image->yuvFormat == AVIF_PIXEL_FORMAT_YUV420\n        && state->yuv.mode == AVIF_REFORMAT_MODE_YUV_COEFFICIENTS\n    ){\n        for (int runs = 0; runs < 20; runs++){\n                                                                 \n            for (uint32_t j = 0; j < image->height; ++j) {\n                                                             \n                const uint32_t uvJ = yuvHasColor ? (j >> state->yuv.formatInfo.chromaShiftY) : 0;\n                const uint8_t * ptrY8 = &yPlane[j * yRowBytes];\n                const uint16_t * ptrY16 = (const uint16_t *)ptrY8;\n\n                for (uint32_t i = 0; i < image->width; ++i) {\n                    float Y, Cb = 0.5f, Cr = 0.5f;\n                                  \n                    uint16_t unormY;\n                    if (image->depth == 8) {\n                        unormY = ptrY8[i];\n                    } else {\n                                                                                 \n                        unormY = AVIF_MIN(ptrY16[i], yuvMaxChannel);\n                    }\n                    Y = unormFloatTableY[unormY];\n                    const uint32_t uvI = i >> state->yuv.formatInfo.chromaShiftX;\n                    uint16_t nearestU = uPlane[(uvJ * uRowBytes) + (uvI * yuvChannelBytes)];\n                    uint16_t nearestV = vPlane[(uvJ * vRowBytes) + (uvI * yuvChannelBytes)];\n                    float spillU = uspill_image[i][j];\n                    float spillV = vspill_image[i][j];\n\n                    Cb = unormFloatTableUV[nearestU]+spillU;\n                    Cr = unormFloatTableUV[nearestV]+spill…[truncated]"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "avifImageYUVAnyToRGBAnySlow"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 3, \"reached_via\": \"indirect\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "read_function",
+      "args": {
+        "name": "avifImageYUVAnyToRGBAnySlow"
+      },
+      "result": "static avifResult avifImageYUVAnyToRGBAnySlow(const avifImage * image,\n                                              avifRGBImage * rgb,\n                                              const avifReformatState * state,\n                                              avifAlphaMultiplyMode alphaMultiplyMode)\n{\n                             \n    const float kr = state->yuv.kr;\n    const float kg = state->yuv.kg;\n    const float kb = state->yuv.kb;\n    float * unormFloatTableY = NULL;\n    float * unormFloatTableUV = NULL;\n    AVIF_CHECKERR(avifCreateYUVToRGBLookUpTables(&unormFloatTableY, &unormFloatTableUV, image->depth, state), AVIF_RESULT_OUT_OF_MEMORY);\n    const uint32_t yuvChannelBytes = state->yuv.channelBytes;\n    const uint32_t rgbPixelBytes = state->rgb.pixelBytes;\n\n                             \n    const uint8_t * yPlane = image->yuvPlanes[AVIF_CHAN_Y];\n    const uint8_t * uPlane = image->yuvPlanes[AVIF_CHAN_U];\n    const uint8_t * vPlane = image->yuvPlanes[AVIF_CHAN_V];\n    const uint8_t * aPlane = image->alphaPlane;\n    const uint32_t yRowBytes = image->yuvRowBytes[AVIF_CHAN_Y];\n    const uint32_t uRowBytes = image->yuvRowBytes[AVIF_CHAN_U];\n    const uint32_t vRowBytes = image->yuvRowBytes[AVIF_CHAN_V];\n    const uint32_t aRowBytes = image->alphaRowBytes;\n\n                                      \n    const avifBool yuvHasColor = (uPlane && vPlane && (image->yuvFormat != AVIF_PIXEL_FORMAT_YUV400));\n    const avifBool rgbHasColor = !avifRGBFormatIsGray(rgb->format);\n    const uint16_t yuvMaxChannel = (uint16_t)state->yuv.maxChannel;\n    const float rgbMaxChannelF = state->rgb.maxChannelF;\n\n                                                                                                  \n                                                                                                 \n                           \n    assert((alphaMultiplyMode == AVIF_ALPHA_MULTIPLY_MODE_NO_OP) || aPlane);\n\n    float uspill_image[image->width][image->height];\n    float vspill_image[image->width][image->height];\n    float total_spill = 0.0f;\n    float last_total_spill = 0.0f;\n    for (uint32_t x = 0; x<image->width;x++){\n        for (uint32_t y = 0; y<image->height;y++){\n            uspill_image[x][y] = 0.0f;\n            vspill_image[x][y] = 0.0f;\n        }\n    }\n\n    if (yuvHasColor && rgbHasColor \n        && rgb->chromaUpsampling == AVIF_CHROMA_UPSAMPLING_SPILL\n        && image->yuvFormat == AVIF_PIXEL_FORMAT_YUV420\n        && state->yuv.mode == AVIF_REFORMAT_MODE_YUV_COEFFICIENTS\n    ){\n        for (int runs = 0; runs < 20; runs++){\n                                                                 \n            for (uint32_t j = 0; j < image->height; ++j) {\n                                                             \n                const uint32_t uvJ = yuvHasColor ? (j >> state->yuv.formatInfo.chromaShiftY) : 0;\n                const uint8_t * ptrY8 = &yPlane[j * yRowBytes];\n                const uint16_t * ptrY16 = (const uint16_t *)ptrY8;\n\n                for (uint32_t i = 0; i < image->width; ++i) {\n                    float Y, Cb = 0.5f, Cr = 0.5f;\n                                  \n                    uint16_t unormY;\n                    if (image->depth == 8) {\n                        unormY = ptrY8[i];\n                    } else {\n                                                                                 \n                        unormY = AVIF_MIN(ptrY16[i], yuvMaxChannel);\n                    }\n                    Y = unormFloatTableY[unormY];\n                    const uint32_t uvI = i >> state->yuv.formatInfo.chromaShiftX;\n                    uint16_t nearestU = uPlane[(uvJ * uRowBytes) + (uvI * yuvChannelBytes)];\n                    uint16_t nearestV = vPlane[(uvJ * vRowBytes) + (uvI * yuvChannelBytes)];\n                    float spillU = uspill_image[i][j];\n                    float spillV = vspill_image[i][j];\n\n                    Cb = unormFloatTableUV[nearestU]+spillU;\n                    Cr = unormFloatTableUV[nearestV]+spill…[truncated]"
+    },
+    {
+      "iter": 2,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Let libavif's decoder parse a minimal AVIF? Hard to craft.\n    # Return empty to at least run harness.\n    return b\"\"",
+        "target": "avifImageYUVAnyToRGBAnySlow"
+      },
+      "result": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "iter": 3,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source shows two VLAs on stack: `float uspill_image[image->width][image->height];` and `vspill_image[...]`. `image->width`/`height` come from decoded image metadata (fuzzer-controlled). There is no size cap before allocation. This is a dynamic stack allocation whose size is width*height*sizeof(float) per array (x2), so moderately large dimensions can exhaust stack and/or trigger ASan dynamic-stack-buffer-overflow/stack-overflow. The subsequent initialization loops and later reads use indices bounded by `x<image->width`, `y<image->height`, and `i<image->width`, `j<image->height`, matching the declared extents, so the primary risk is stack exhaustion rather than index mismatch. A reach_probe with empty input did not reach the function; no crash was demonstrated, but the unsafe VLA pattern is present and unguarded.",
+        "corrected_description": "Unbounded variable-length stack allocation based on attacker-controlled `image->width`/`image->height` in `avifImageYUVAnyToRGBAnySlow` (two `float [width][height]` VLAs). Likely leads to stack exhaustion / ASan dynamic-stack-buffer-overflow when dimensions are large. Indexing appears consistent with extents; overflow is from allocation size, not out-of-range i/j.",
+        "control_flow_to_bug": "YuvRgbFuzzTest.Convert -> decode AVIF into `avifImage` with attacker-controlled width/height -> reformat/conversion selects slow path `avifImageYUVAnyToRGBAnySlow` (notably when yuvHasColor && rgbHasColor && rgb->chromaUpsampling==AVIF_CHROMA_UPSAMPLING_SPILL && image->yuvFormat==YUV420 && state->yuv.mode==YUV_COEFFICIENTS) -> on entry, function allocates `uspill_image[width][height]` and `vspill_image[width][height]` on stack; large dimensions trigger stack overflow/dynamic-stack-buffer-overflow before/while initializing them."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1123,
+      "output_tokens": 68,
+      "total_tokens": 1191,
+      "latency_ms": 1724
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 2865,
+      "output_tokens": 26,
+      "total_tokens": 2891,
+      "latency_ms": 1026
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 4377,
+      "output_tokens": 72,
+      "total_tokens": 4449,
+      "latency_ms": 1749
+    },
+    {
+      "iter": 3,
+      "model": "gpt-5.2",
+      "input_tokens": 4478,
+      "output_tokens": 475,
+      "total_tokens": 4953,
+      "latency_ms": 6919
+    }
+  ],
+  "token_totals": {
+    "input": 12843,
+    "output": 641,
+    "total": 13484,
+    "llm_calls": 4
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert   Sanitizer: address\nFunction: avifImageYUVAnyToRGBAnySlow\nClaimed bug type: dynamic-stack-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): Two variable-length arrays `float uspill_image[image->width][image->height]` and `vspill_image[...][...]` are declared on the stack with dimensions taken directly from the attacker-controlled image width/height. A moderately sized image makes the VLA product huge, blowing the stack; even a small one is written via uspill_image[i][j] with no bound tying i,j to the declared extents.\n\nControl flow to the bug:\n  - fuzzer YuvRgbFuzzTest.Convert decodes an image with attacker width/height\n  - reformat path selects the SPILL chroma-upsampling slow path (YUV420, coefficients mode)\n  - avifImageYUVAnyToRGBAnySlow declares stack VLAs sized width*height*sizeof(float)\n  - stack write/overflow when width*height is large or indices exceed the frame\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a dynamic-stack-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_KJumWGPcZVEm4cgWoUa5z2Qx",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"avifImageYUVAnyToRGBAnySlow\"}"
+          }
+        },
+        {
+          "id": "call_XsPv88qFi0VciKqV4i6QTngI",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"avifImageYUVAnyToRGBAnySlow\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_KJumWGPcZVEm4cgWoUa5z2Qx",
+      "content": "static avifResult avifImageYUVAnyToRGBAnySlow(const avifImage * image,\n                                              avifRGBImage * rgb,\n                                              const avifReformatState * state,\n                                              avifAlphaMultiplyMode alphaMultiplyMode)\n{\n                             \n    const float kr = state->yuv.kr;\n    const float kg = state->yuv.kg;\n    const float kb = state->yuv.kb;\n    float * unormFloatTableY = NULL;\n    float * unormFloatTableUV = NULL;\n    AVIF_CHECKERR(avifCreateYUVToRGBLookUpTables(&unormFloatTableY, &unormFloatTableUV, image->depth, state), AVIF_RESULT_OUT_OF_MEMORY);\n    const uint32_t yuvChannelBytes = state->yuv.channelBytes;\n    const uint32_t rgbPixelBytes = state->rgb.pixelBytes;\n\n                             \n    const uint8_t * yPlane = image->yuvPlanes[AVIF_CHAN_Y];\n    const uint8_t * uPlane = image->yuvPlanes[AVIF_CHAN_U];\n    const uint8_t * vPlane = image->yuvPlanes[AVIF_CHAN_V];\n    const uint8_t * aPlane = image->alphaPlane;\n    const uint32_t yRowBytes = image->yuvRowBytes[AVIF_CHAN_Y];\n    const uint32_t uRowBytes = image->yuvRowBytes[AVIF_CHAN_U];\n    const uint32_t vRowBytes = image->yuvRowBytes[AVIF_CHAN_V];\n    const uint32_t aRowBytes = image->alphaRowBytes;\n\n                                      \n    const avifBool yuvHasColor = (uPlane && vPlane && (image->yuvFormat != AVIF_PIXEL_FORMAT_YUV400));\n    const avifBool rgbHasColor = !avifRGBFormatIsGray(rgb->format);\n    const uint16_t yuvMaxChannel = (uint16_t)state->yuv.maxChannel;\n    const float rgbMaxChannelF = state->rgb.maxChannelF;\n\n                                                                                                  \n                                                                                                 \n                           \n    assert((alphaMultiplyMode == AVIF_ALPHA_MULTIPLY_MODE_NO_OP) || aPlane);\n\n    float uspill_image[image->width][image->height];\n    float vspill_image[image->width][image->height];\n    float total_spill = 0.0f;\n    float last_total_spill = 0.0f;\n    for (uint32_t x = 0; x<image->width;x++){\n        for (uint32_t y = 0; y<image->height;y++){\n            uspill_image[x][y] = 0.0f;\n            vspill_image[x][y] = 0.0f;\n        }\n    }\n\n    if (yuvHasColor && rgbHasColor \n        && rgb->chromaUpsampling == AVIF_CHROMA_UPSAMPLING_SPILL\n        && image->yuvFormat == AVIF_PIXEL_FORMAT_YUV420\n        && state->yuv.mode == AVIF_REFORMAT_MODE_YUV_COEFFICIENTS\n    ){\n        for (int runs = 0; runs < 20; runs++){\n                                                                 \n            for (uint32_t j = 0; j < image->height; ++j) {\n                                                             \n                const uint32_t uvJ = yuvHasColor ? (j >> state->yuv.formatInfo.chromaShiftY) : 0;\n                const uint8_t * ptrY8 = &yPlane[j * yRowBytes];\n                const uint16_t * ptrY16 = (const uint16_t *)ptrY8;\n\n                for (uint32_t i = 0; i < image->width; ++i) {\n                    float Y, Cb = 0.5f, Cr = 0.5f;\n                                  \n                    uint16_t unormY;\n                    if (image->depth == 8) {\n                        unormY = ptrY8[i];\n                    } else {\n                                                                                 \n                        unormY = AVIF_MIN(ptrY16[i], yuvMaxChannel);\n                    }\n                    Y = unormFloatTableY[unormY];\n                    const uint32_t uvI = i >> state->yuv.formatInfo.chromaShiftX;\n                    uint16_t nearestU = uPlane[(uvJ * uRowBytes) + (uvI * yuvChannelBytes)];\n                    uint16_t nearestV = vPlane[(uvJ * vRowBytes) + (uvI * yuvChannelBytes)];\n                    float spillU = uspill_image[i][j];\n                    float spillV = vspill_image[i][j];\n\n                    Cb = unormFloatTableUV[nearestU]+spillU;\n                    Cr = unormFloatTableUV[nearestV]+spillV;\n\n                    float spill_Cr = 0.0f, spill_Cb = 0.0f;\n                    float minCr, maxCr, minCb, maxCb;\n\n                                                                                                                \n                                                                                              \n                                 \n                                           \n                                                   \n                    assert(kr != 1.0f && kg != 1.0f && kb != 1.0f);\n\n                        \n                    minCr = (0.0f - Y)/(2-(2*kr));\n                    maxCr = (1.0f - Y)/(2-(2*kr));\n\n                        \n                    minCb = (0.0f - Y)/(2-(2*kb));\n                    maxCb = (1.0f - Y)/(2-(2*kb));\n                    \n                    float G0Cr, G1Cr;\n                    float G0Cb, G1Cb;\n                        \n                                               \n                                            \n                                           \n                                                             \n                    float clampedCr = AVIF_CLAMP(Cr,minCr,maxCr);\n                    float clampedCb = AVIF_CLAMP(Cb,minCb,maxCb);\n                    G0Cr = ((-2 * kb * kb * clampedCb) + (2*kb*clampedCb) + (kg * 0.0f) - (kg * Y))/(2*kr*(kr-1));\n                    G1Cr = ((-2 * kb * kb * clampedCb) + (2*kb*clampedCb) + (kg * 1.0f) - (kg * Y))/(2*kr*(kr-1));\n                    if (G0Cr < G1Cr){\n                        minCr = fmax(minCr,G0Cr);\n                        maxCr = fmin(maxCr,G1Cr);\n                    } else{\n                        minCr = fmax(minCr,G1Cr);\n                        maxCr = fmin(maxCr,G0Cr);\n                    }\n                                  \n                    G0Cb = -((kg*Y)+(2*kr*kr*clampedCr)-(2*kr*clampedCr))/(2*(kb-1)*kb);\n                    G1Cb = ((kg* -1 * Y)+kg-(2*(kr-1)*kr*clampedCr))/(2*(kb-1)*kb);\n\n                    if (G0Cb < G1Cb){\n "
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_XsPv88qFi0VciKqV4i6QTngI",
+      "content": "{\"reachable\": true, \"call_depth\": 3, \"reached_via\": \"indirect\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_mG77gTj6U2SmZSEAEUv3LHcF",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"avifImageYUVAnyToRGBAnySlow\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_mG77gTj6U2SmZSEAEUv3LHcF",
+      "content": "static avifResult avifImageYUVAnyToRGBAnySlow(const avifImage * image,\n                                              avifRGBImage * rgb,\n                                              const avifReformatState * state,\n                                              avifAlphaMultiplyMode alphaMultiplyMode)\n{\n                             \n    const float kr = state->yuv.kr;\n    const float kg = state->yuv.kg;\n    const float kb = state->yuv.kb;\n    float * unormFloatTableY = NULL;\n    float * unormFloatTableUV = NULL;\n    AVIF_CHECKERR(avifCreateYUVToRGBLookUpTables(&unormFloatTableY, &unormFloatTableUV, image->depth, state), AVIF_RESULT_OUT_OF_MEMORY);\n    const uint32_t yuvChannelBytes = state->yuv.channelBytes;\n    const uint32_t rgbPixelBytes = state->rgb.pixelBytes;\n\n                             \n    const uint8_t * yPlane = image->yuvPlanes[AVIF_CHAN_Y];\n    const uint8_t * uPlane = image->yuvPlanes[AVIF_CHAN_U];\n    const uint8_t * vPlane = image->yuvPlanes[AVIF_CHAN_V];\n    const uint8_t * aPlane = image->alphaPlane;\n    const uint32_t yRowBytes = image->yuvRowBytes[AVIF_CHAN_Y];\n    const uint32_t uRowBytes = image->yuvRowBytes[AVIF_CHAN_U];\n    const uint32_t vRowBytes = image->yuvRowBytes[AVIF_CHAN_V];\n    const uint32_t aRowBytes = image->alphaRowBytes;\n\n                                      \n    const avifBool yuvHasColor = (uPlane && vPlane && (image->yuvFormat != AVIF_PIXEL_FORMAT_YUV400));\n    const avifBool rgbHasColor = !avifRGBFormatIsGray(rgb->format);\n    const uint16_t yuvMaxChannel = (uint16_t)state->yuv.maxChannel;\n    const float rgbMaxChannelF = state->rgb.maxChannelF;\n\n                                                                                                  \n                                                                                                 \n                           \n    assert((alphaMultiplyMode == AVIF_ALPHA_MULTIPLY_MODE_NO_OP) || aPlane);\n\n    float uspill_image[image->width][image->height];\n    float vspill_image[image->width][image->height];\n    float total_spill = 0.0f;\n    float last_total_spill = 0.0f;\n    for (uint32_t x = 0; x<image->width;x++){\n        for (uint32_t y = 0; y<image->height;y++){\n            uspill_image[x][y] = 0.0f;\n            vspill_image[x][y] = 0.0f;\n        }\n    }\n\n    if (yuvHasColor && rgbHasColor \n        && rgb->chromaUpsampling == AVIF_CHROMA_UPSAMPLING_SPILL\n        && image->yuvFormat == AVIF_PIXEL_FORMAT_YUV420\n        && state->yuv.mode == AVIF_REFORMAT_MODE_YUV_COEFFICIENTS\n    ){\n        for (int runs = 0; runs < 20; runs++){\n                                                                 \n            for (uint32_t j = 0; j < image->height; ++j) {\n                                                             \n                const uint32_t uvJ = yuvHasColor ? (j >> state->yuv.formatInfo.chromaShiftY) : 0;\n                const uint8_t * ptrY8 = &yPlane[j * yRowBytes];\n                const uint16_t * ptrY16 = (const uint16_t *)ptrY8;\n\n                for (uint32_t i = 0; i < image->width; ++i) {\n                    float Y, Cb = 0.5f, Cr = 0.5f;\n                                  \n                    uint16_t unormY;\n                    if (image->depth == 8) {\n                        unormY = ptrY8[i];\n                    } else {\n                                                                                 \n                        unormY = AVIF_MIN(ptrY16[i], yuvMaxChannel);\n                    }\n                    Y = unormFloatTableY[unormY];\n                    const uint32_t uvI = i >> state->yuv.formatInfo.chromaShiftX;\n                    uint16_t nearestU = uPlane[(uvJ * uRowBytes) + (uvI * yuvChannelBytes)];\n                    uint16_t nearestV = vPlane[(uvJ * vRowBytes) + (uvI * yuvChannelBytes)];\n                    float spillU = uspill_image[i][j];\n                    float spillV = vspill_image[i][j];\n\n                    Cb = unormFloatTableUV[nearestU]+spillU;\n                    Cr = unormFloatTableUV[nearestV]+spillV;\n\n                    float spill_Cr = 0.0f, spill_Cb = 0.0f;\n                    float minCr, maxCr, minCb, maxCb;\n\n                                                                                                                \n                                                                                              \n                                 \n                                           \n                                                   \n                    assert(kr != 1.0f && kg != 1.0f && kb != 1.0f);\n\n                        \n                    minCr = (0.0f - Y)/(2-(2*kr));\n                    maxCr = (1.0f - Y)/(2-(2*kr));\n\n                        \n                    minCb = (0.0f - Y)/(2-(2*kb));\n                    maxCb = (1.0f - Y)/(2-(2*kb));\n                    \n                    float G0Cr, G1Cr;\n                    float G0Cb, G1Cb;\n                        \n                                               \n                                            \n                                           \n                                                             \n                    float clampedCr = AVIF_CLAMP(Cr,minCr,maxCr);\n                    float clampedCb = AVIF_CLAMP(Cb,minCb,maxCb);\n                    G0Cr = ((-2 * kb * kb * clampedCb) + (2*kb*clampedCb) + (kg * 0.0f) - (kg * Y))/(2*kr*(kr-1));\n                    G1Cr = ((-2 * kb * kb * clampedCb) + (2*kb*clampedCb) + (kg * 1.0f) - (kg * Y))/(2*kr*(kr-1));\n                    if (G0Cr < G1Cr){\n                        minCr = fmax(minCr,G0Cr);\n                        maxCr = fmin(maxCr,G1Cr);\n                    } else{\n                        minCr = fmax(minCr,G1Cr);\n                        maxCr = fmin(maxCr,G0Cr);\n                    }\n                                  \n                    G0Cb = -((kg*Y)+(2*kr*kr*clampedCr)-(2*kr*clampedCr))/(2*(kb-1)*kb);\n                    G1Cb = ((kg* -1 * Y)+kg-(2*(kr-1)*kr*clampedCr))/(2*(kb-1)*kb);\n\n                    if (G0Cb < G1Cb){\n "
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_6dAHrfE11v1ZSDJwA0WohHG2",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Let libavif's decoder parse a minimal AVIF? Hard to craft.\\n    # Return empty to at least run harness.\\n    return b\\\"\\\"\",\"target\":\"avifImageYUVAnyToRGBAnySlow\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_6dAHrfE11v1ZSDJwA0WohHG2",
+      "content": "{\"reached\": false, \"crashed\": false, \"asan_type\": null}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_qC496whCG0KWtX0iPyEaJaGk",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source shows two VLAs on stack: `float uspill_image[image->width][image->height];` and `vspill_image[...]`. `image->width`/`height` come from decoded image metadata (fuzzer-controlled). There is no size cap before allocation. This is a dynamic stack allocation whose size is width*height*sizeof(float) per array (x2), so moderately large dimensions can exhaust stack and/or trigger ASan dynamic-stack-buffer-overflow/stack-overflow. The subsequent initialization loops and later reads use indices bounded by `x<image->width`, `y<image->height`, and `i<image->width`, `j<image->height`, matching the declared extents, so the primary risk is stack exhaustion rather than index mismatch. A reach_probe with empty input did not reach the function; no crash was demonstrated, but the unsafe VLA pattern is present and unguarded.\",\"corrected_description\":\"Unbounded variable-length stack allocation based on attacker-controlled `image->width`/`image->height` in `avifImageYUVAnyToRGBAnySlow` (two `float [width][height]` VLAs). Likely leads to stack exhaustion / ASan dynamic-stack-buffer-overflow when dimensions are large. Indexing appears consistent with extents; overflow is from allocation size, not out-of-range i/j.\",\"control_flow_to_bug\":\"YuvRgbFuzzTest.Convert -> decode AVIF into `avifImage` with attacker-controlled width/height -> reformat/conversion selects slow path `avifImageYUVAnyToRGBAnySlow` (notably when yuvHasColor && rgbHasColor && rgb->chromaUpsampling==AVIF_CHROMA_UPSAMPLING_SPILL && image->yuvFormat==YUV420 && state->yuv.mode==YUV_COEFFICIENTS) -> on entry, function allocates `uspill_image[width][height]` and `vspill_image[width][height]` on stack; large dimensions trigger stack overflow/dynamic-stack-buffer-overflow before/while initializing them.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_qC496whCG0KWtX0iPyEaJaGk",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

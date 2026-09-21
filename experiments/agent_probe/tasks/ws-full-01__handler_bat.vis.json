@@ -1,0 +1,32 @@
+{
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-wireshark.git",
+  "project_name": "wireshark",
+  "task_type": "pov",
+  "scan_mode": "full",
+  "fuzz_tooling_url": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "fuzz_tooling_ref": "challenge-state/ws-full-01",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "handler_bat.vis"
+  ],
+  "remove_git": true,
+  "timeout_minutes": 120,
+  "budget_limit": 100.0,
+  "concurrency": 5,
+  "docker_image": "aixcc-afc/wireshark:latest",
+  "prebuilt_fuzzers": {
+    "handler_bat.vis": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/ws-full-01/bugs/vuln_005/bin/address/handler_bat.vis"
+  },
+  "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild_graphs/ws-full-01/handler_bat.vis",
+  "work_id": "ws-full-01",
+  "model_profile": "period-correct",
+  "pov_count": 1,
+  "fuzzer_sources": {
+    "handler_bat.vis": [
+      "/home/ze/fbv2/experiments/agent_probe/prebuild/_wireshark_harness/fuzzshark.c"
+    ]
+  },
+  "target_commit": "75ffccb4609488bcafe91d5652e31c27ad68d934"
+}

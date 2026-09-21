@@ -1,0 +1,32 @@
+{
+  "project_name": "flac",
+  "task_type": "pov",
+  "scan_mode": "full",
+  "sanitizers": [
+    "memory"
+  ],
+  "fuzzers": [
+    "fuzzer_decoder"
+  ],
+  "workspace": "/tmp/claude-1000/e2e-fbv2-arm/flac_38815",
+  "in_place": true,
+  "build_coverage": false,
+  "enable_static_analysis": true,
+  "docker_image": "n132/arvo:38815-fix",
+  "prebuilt_fuzzers": {
+    "fuzzer_decoder": "/tmp/claude-1000/e2e-fbv2-arm/flac_38815/prebuilt/fuzzer_decoder"
+  },
+  "work_id": "flac_38815",
+  "fuzzer_sources": {
+    "fuzzer_decoder": [
+      "/tmp/claude-1000/e2e-fbv2-arm/flac_38815/repo/flac-fuzzers/fuzzer_decoder.cpp"
+    ]
+  },
+  "model_profile": "period-correct",
+  "force_model": "gpt-5.5",
+  "pov_count": 1,
+  "budget_limit": 20.0,
+  "timeout_minutes": 90,
+  "concurrency": 5,
+  "prebuild_dir": "/tmp/claude-1000/e2e-fbv2-arm/flac_38815/prebuild/flac_38815"
+}

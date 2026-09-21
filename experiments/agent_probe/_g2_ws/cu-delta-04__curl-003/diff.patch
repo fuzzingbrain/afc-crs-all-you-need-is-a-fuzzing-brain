@@ -1,0 +1,373 @@
+diff --git a/lib/http.c b/lib/http.c
+--- a/lib/http.c
++++ b/lib/http.c
+@@ -0,0 +1,369 @@
++CURLcode Curl_http_header(struct Curl_easy *data,
++                          const char *hd, size_t hdlen)
++{
++  struct connectdata *conn = data->conn;
++  CURLcode result;
++  struct SingleRequest *k = &data->req;
++  const char *v;
++
++  switch(hd[0]) {
++  case 'a':
++  case 'A':
++#ifndef CURL_DISABLE_ALTSVC
++    v = (data->asi &&
++         ((data->conn->handler->flags & PROTOPT_SSL) ||
++#ifdef DEBUGBUILD
++                                                                      
++          getenv("CURL_ALTSVC_HTTP")
++#else
++          0
++#endif
++        )) ? HD_VAL(hd, hdlen, "Alt-Svc:") : NULL;
++    if(v) {
++                                           
++      enum alpnid id = (conn->httpversion == 30) ? ALPN_h3 :
++                         (conn->httpversion == 20) ? ALPN_h2 : ALPN_h1;
++      return Curl_altsvc_parse(data, data->asi, v, id, conn->host.name,
++                               curlx_uitous((unsigned int)conn->remote_port));
++    }
++#endif
++    break;
++  case 'c':
++  case 'C':
++                                                            
++    v = (!k->http_bodyless && !data->set.ignorecl) ?
++      HD_VAL(hd, hdlen, "Content-Length:") : NULL;
++    if(v) {
++      curl_off_t contentlength;
++      CURLofft offt = curlx_strtoofft(v, NULL, 10, &contentlength);
++
++      if(offt == CURL_OFFT_OK) {
++        k->size = contentlength;
++        k->maxdownload = k->size;
++      }
++      else if(offt == CURL_OFFT_FLOW) {
++                          
++        if(data->set.max_filesize) {
++          failf(data, "Maximum file size exceeded");
++          return CURLE_FILESIZE_EXCEEDED;
++        }
++        streamclose(conn, "overflow content-length");
++        infof(data, "Overflow Content-Length: value");
++      }
++      else {
++                                                 
++        failf(data, "Invalid Content-Length: value");
++        return CURLE_WEIRD_SERVER_REPLY;
++      }
++      return CURLE_OK;
++    }
++    v = (!k->http_bodyless && data->set.str[STRING_ENCODING]) ?
++      HD_VAL(hd, hdlen, "Content-Encoding:") : NULL;
++    if(v) {
++        
++                                                                 
++                                                                   
++                                                                   
++                                                                
++                                                                 
++         
++      return Curl_build_unencoding_stack(data, v, FALSE);
++    }
++                                                                   
++    v = HD_VAL(hd, hdlen, "Content-Type:");
++    if(v) {
++      char *contenttype = Curl_copy_header_value(hd);
++      if(!contenttype)
++        return CURLE_OUT_OF_MEMORY;
++      if(!*contenttype)
++                               
++        free(contenttype);
++      else {
++        Curl_safefree(data->info.contenttype);
++        data->info.contenttype = contenttype;
++      }
++      return CURLE_OK;
++    }
++    if(HD_IS_AND_SAYS(hd, hdlen, "Connection:", "close")) {
++        
++                                    
++                                                                
++                                                             
++                
++         
++      streamclose(conn, "Connection: close used");
++      return CURLE_OK;
++    }
++    if((conn->httpversion == 10) &&
++       HD_IS_AND_SAYS(hd, hdlen, "Connection:", "keep-alive")) {
++        
++                                                                 
++                                                           
++                                                      
++        
++                                     
++      connkeep(conn, "Connection keep-alive");
++      infof(data, "HTTP/1.0 connection set to keep alive");
++      return CURLE_OK;
++    }
++    v = !k->http_bodyless ? HD_VAL(hd, hdlen, "Content-Range:") : NULL;
++    if(v) {
++                                    
++                                     
++                              
++                                          
++
++                                                          
++                                                                 
++                                                     
++                                                              
++        
++
++      const char *ptr = v;
++
++                                                      
++      while(*ptr && !ISDIGIT(*ptr) && *ptr != '*')
++        ptr++;
++
++                                          
++      if(ISDIGIT(*ptr)) {
++        if(!curlx_strtoofft(ptr, NULL, 10, &k->offset)) {
++          if(data->state.resume_from == k->offset)
++                                                     
++            k->content_range = TRUE;
++        }
++      }
++      else if(k->httpcode < 300)
++        data->state.resume_from = 0;                     
++    }
++    break;
++  case 'l':
++  case 'L':
++    v = (!k->http_bodyless &&
++         (data->set.timecondition || data->set.get_filetime)) ?
++        HD_VAL(hd, hdlen, "Last-Modified:") : NULL;
++    if(v) {
++      k->timeofdoc = Curl_getdate_capped(v);
++      if(data->set.get_filetime)
++        data->info.filetime = k->timeofdoc;
++      return CURLE_OK;
++    }
++    if((k->httpcode >= 300 && k->httpcode < 400) &&
++            HD_IS(hd, hdlen, "Location:") &&
++            !data->req.location) {
++                                                                     
++      char *location = Curl_copy_header_value(hd);
++      if(!location)
++        return CURLE_OUT_OF_MEMORY;
++      if(!*location)
++                               
++        free(location);
++      else {
++        data->req.location = location;
++
++        if(data->set.http_follow_location) {
++          DEBUGASSERT(!data->req.newurl);
++          data->req.newurl = strdup(data->req.location);            
++          if(!data->req.newurl)
++            return CURLE_OUT_OF_MEMORY;
++
++                                                                    
++                                    
++          result = http_perhapsrewind(data, conn);
++          if(result)
++            return result;
++
++                                                             
++          data->state.this_is_a_follow = TRUE;
++        }
++      }
++    }
++    break;
++  case 'p':
++  case 'P':
++#ifndef CURL_DISABLE_PROXY
++    v = HD_VAL(hd, hdlen, "Proxy-Connection:");
++    if(v) {
++      if((conn->httpversion == 10) && conn->bits.httpproxy &&
++         HD_IS_AND_SAYS(hd, hdlen, "Proxy-Connection:", "keep-alive")) {
++          
++                                                               
++                                                           
++                                                          
++                                              
++           
++        connkeep(conn, "Proxy-Connection keep-alive");                   
++        infof(data, "HTTP/1.0 proxy connection set to keep alive");
++      }
++      else if((conn->httpversion == 11) && conn->bits.httpproxy &&
++              HD_IS_AND_SAYS(hd, hdlen, "Proxy-Connection:", "close")) {
++          
++                                                                       
++                                          
++           
++        connclose(conn, "Proxy-Connection: asked to close after done");
++        infof(data, "HTTP/1.1 proxy connection set close");
++      }
++      return CURLE_OK;
++    }
++#endif
++    if((407 == k->httpcode) && HD_IS(hd, hdlen, "Proxy-authenticate:")) {
++      char *auth = Curl_copy_header_value(hd);
++      if(!auth)
++        return CURLE_OUT_OF_MEMORY;
++      result = Curl_http_input_auth(data, TRUE, auth);
++      free(auth);
++      return result;
++    }
++#ifdef USE_SPNEGO
++    if(HD_IS(hd, hdlen, "Persistent-Auth:")) {
++      struct negotiatedata *negdata = &conn->negotiate;
++      struct auth *authp = &data->state.authhost;
++      if(authp->picked == CURLAUTH_NEGOTIATE) {
++        char *persistentauth = Curl_copy_header_value(hd);
++        if(!persistentauth)
++          return CURLE_OUT_OF_MEMORY;
++        negdata->noauthpersist = !!checkprefix("false", persistentauth);
++        negdata->havenoauthpersist = TRUE;
++        infof(data, "Negotiate: noauthpersist -> %d, header part: %s",
++              negdata->noauthpersist, persistentauth);
++        free(persistentauth);
++      }
++    }
++#endif
++    break;
++  case 'r':
++  case 'R':
++    v = HD_VAL(hd, hdlen, "Retry-After:");
++    if(v) {
++                                                   
++      curl_off_t retry_after = 0;                                
++                                                                    
++      (void)curlx_strtoofft(v, NULL, 10, &retry_after);
++      if(!retry_after) {
++        time_t date = Curl_getdate_capped(v);
++        if(-1 != date)
++                                                                 
++          retry_after = date - time(NULL);
++      }
++      data->info.retry_after = retry_after;               
++      return CURLE_OK;
++    }
++    break;
++  case 's':
++  case 'S':
++#if !defined(CURL_DISABLE_COOKIES)
++    v = (data->cookies && data->state.cookie_engine) ?
++        HD_VAL(hd, hdlen, "Set-Cookie:") : NULL;
++    if(v) {
++                                                                      
++                               
++      const char *host = data->state.aptr.cookiehost ?
++        data->state.aptr.cookiehost : conn->host.name;
++      const bool secure_context =
++        conn->handler->protocol&(CURLPROTO_HTTPS|CURLPROTO_WSS) ||
++        strcasecompare("localhost", host) ||
++        !strcmp(host, "127.0.0.1") ||
++        !strcmp(host, "::1");
++
++      Curl_share_lock(data, CURL_LOCK_DATA_COOKIE,
++                      CURL_LOCK_ACCESS_SINGLE);
++      Curl_cookie_add(data, data->cookies, TRUE, FALSE, v, host,
++                      data->state.up.path, secure_context);
++      Curl_share_unlock(data, CURL_LOCK_DATA_COOKIE);
++      return CURLE_OK;
++    }
++#endif
++#ifndef CURL_DISABLE_HSTS
++                                                                   
++    v = (data->hsts &&
++         ((conn->handler->flags & PROTOPT_SSL) ||
++#ifdef DEBUGBUILD
++                                                                       
++           getenv("CURL_HSTS_HTTP")
++#else
++           0
++#endif
++            )
++        ) ? HD_VAL(hd, hdlen, "Strict-Transport-Security:") : NULL;
++    if(v) {
++      CURLcode check =
++        Curl_hsts_parse(data->hsts, conn->host.name, v);
++      if(check)
++        infof(data, "Illegal STS header skipped");
++#ifdef DEBUGBUILD
++      else
++        infof(data, "Parsed STS header fine (%zu entries)",
++              Curl_llist_count(&data->hsts->list));
++#endif
++    }
++#endif
++    break;
++  case 't':
++  case 'T':
++                        
++                                                                        
++                                                                        
++                                                                          
++                                                                          
++                                                                   
++      
++                                                                  
++                                                                           
++       
++    v = (!k->http_bodyless &&
++         (data->state.httpreq != HTTPREQ_HEAD) &&
++         (k->httpcode != 304)) ?
++      HD_VAL(hd, hdlen, "Transfer-Encoding:") : NULL;
++    if(v) {
++                                                                         
++                      
++      result = Curl_build_unencoding_stack(data, v, TRUE);
++      if(result)
++        return result;
++      if(!k->chunk && data->set.http_transfer_encoding) {
++                                                                        
++                                                                   
++                                
++        connclose(conn, "HTTP/1.1 transfer-encoding without chunks");
++        k->ignore_cl = TRUE;
++      }
++      return CURLE_OK;
++    }
++    v = HD_VAL(hd, hdlen, "Trailer:");
++    if(v) {
++      data->req.resp_trailer = TRUE;
++      return CURLE_OK;
++    }
++    break;
++  case 'w':
++  case 'W':
++    if((401 == k->httpcode) && HD_IS(hd, hdlen, "WWW-Authenticate:")) {
++      char *auth = Curl_copy_header_value(hd);
++      if(!auth)
++        return CURLE_OUT_OF_MEMORY;
++      result = Curl_http_input_auth(data, FALSE, auth);
++      free(auth);
++      return result;
++    }
++    break;
++  case 'x':
++  case 'X':
++    if(HD_VAL(hd, hdlen, "X-Powered-By:")) {
++      char *xpoweredby = Curl_copy_header_value(hd);
++      if(!xpoweredby)
++        return CURLE_OUT_OF_MEMORY;
++      memcpy(data->req.xpoweredby, xpoweredby, strlen(xpoweredby));
++      free(xpoweredby);
++      return CURLE_OK;
++    }
++    break;
++  }
++
++  if(conn->handler->protocol & CURLPROTO_RTSP) {
++    result = Curl_rtsp_parseheader(data, hd);
++    if(result)
++      return result;
++  }
++  return CURLE_OK;
++}

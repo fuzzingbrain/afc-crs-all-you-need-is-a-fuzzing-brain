@@ -1,0 +1,28 @@
+{
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-sqlite3.git",
+  "project_name": "sqlite3",
+  "task_type": "pov",
+  "scan_mode": "delta",
+  "fuzz_tooling_url": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "fuzz_tooling_ref": "challenge-state/sq-delta-03",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "customfuzz3"
+  ],
+  "remove_git": true,
+  "timeout_minutes": 120,
+  "budget_limit": 150.0,
+  "concurrency": 5,
+  "docker_image": "aixcc-afc/sqlite3:latest",
+  "prebuilt_fuzzers": {
+    "customfuzz3": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/sq-delta-03/bugs/SQL-010/bin/address/customfuzz3"
+  },
+  "prebuild_dir": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/sq-delta-03",
+  "work_id": "sq-delta-03",
+  "model_profile": "period-correct",
+  "pov_count": 1,
+  "base_commit": "35af1ffb5dd21ae47332577c2b6c889da302b497",
+  "delta_commit": "challenges/sq-delta-03"
+}

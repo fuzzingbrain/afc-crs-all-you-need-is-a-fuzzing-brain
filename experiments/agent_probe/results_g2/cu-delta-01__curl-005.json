@@ -1,0 +1,190 @@
+{
+  "tag": "cu-delta-01__curl-005",
+  "gt": "verynormalprotocol_doing",
+  "crash_type": "SEGV",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": false,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source shows a definite invalid write: in branch `strcasecmp(response, \"crashycrashy\") == 0`, it executes `*(unsigned int *)result = CURLE_OK;` where `result` is a `CURLcode` enum/integer initialized to `CURLE_WEIRD_SERVER_REPLY` and only assigned return codes from `Curl_xfer_recv`. Casting this small integer to a pointer and writing through it will attempt to write to a low/invalid address (e.g., 0xNN), which should SEGV/ASan invalid write if executed.\n\nHowever, I could not run reach_probe because the ASan binary path was missing in the environment (`No such file or directory .../bin/address`). Therefore I have no runtime evidence that fuzzer input can actually make `response` equal to the magic string at the point of `strcasecmp`. Also, `response` is filled by `Curl_xfer_recv` with length 128 but the code does not NUL-terminate it before calling `strcasecmp`, so reaching the branch may depend on `Curl_xfer_recv` behavior (whether it appends NUL) and could also cause an out-of-bounds read in `strcasecmp` first.\n\nConclusion: the bug pattern is present in code and would crash if the branch is taken, but I lack execution proof that a fuzzer input can drive that exact branch in this harness/environment.",
+    "corrected_description": "Definite invalid memory write/SEGV if the `crashycrashy` branch is taken: `result` is a `CURLcode` integer, cast to `unsigned int*` and dereferenced (`*(unsigned int *)result = CURLE_OK;`). Additionally, `response` may be non-NUL-terminated when passed to `strcasecmp`, risking an out-of-bounds read before the branch decision.",
+    "control_flow_to_bug": "curl_fuzzer_ws -> (curl protocol dispatch) -> verynormalprotocol_doing(data, done): loop calling `Curl_xfer_recv(data, response, 128, &nread)` until not CURLE_AGAIN; require `result==0` and `nread>0`; require `strcasecmp(response, \"crashycrashy\")==0` (implies response buffer contains that NUL-terminated string as received); then executes `*(unsigned int *)result = CURLE_OK;` causing invalid write."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.2,
+  "verdict": "WEAK/FP",
+  "basis": "operand not input-tainted",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "verynormalprotocol_doing"
+      },
+      "result": "static CURLcode verynormalprotocol_doing(struct Curl_easy *data, bool *done)\n{\n  CURLcode result = CURLE_WEIRD_SERVER_REPLY;\n  ssize_t nread;\n  char response[128];\n\n  *done = FALSE;\n\n                                                                          \n                                                               \n  do {\n    result = Curl_xfer_recv(data, response, 128, &nread);\n  } while(result == CURLE_AGAIN);\n  if(result)\n    return result;\n  else if(!nread) {\n    failf(data, \"Connection disconnected\");\n    *done = TRUE;\n    result = CURLE_RECV_ERROR;\n  }\n  else if(strcasecmp(response, \"crashycrashy\") == 0) {\n    *done = TRUE;\n    *(unsigned int *)result = CURLE_OK;\n  }\n  else {\n    *done = TRUE;\n    result = CURLE_WEIRD_SERVER_REPLY;\n  }\n\n  if(result == CURLE_AGAIN)\n    result = CURLE_OK;\n  return result;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "verynormalprotocol_doing"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 274}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to drive the protocol handler to receive the magic string.\n    # Many curl fuzzers accept a pseudo-URL followed by payload; keep it simple.\n    return b\"verynormal://example\\r\\ncrashycrashy\\0\"",
+        "target": "verynormalprotocol_doing"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-delta-01/bugs/curl-005/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": false,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source shows a definite invalid write: in branch `strcasecmp(response, \"crashycrashy\") == 0`, it executes `*(unsigned int *)result = CURLE_OK;` where `result` is a `CURLcode` enum/integer initialized to `CURLE_WEIRD_SERVER_REPLY` and only assigned return codes from `Curl_xfer_recv`. Casting this small integer to a pointer and writing through it will attempt to write to a low/invalid address (e.g., 0xNN), which should SEGV/ASan invalid write if executed.\n\nHowever, I could not run reach_probe because the ASan binary path was missing in the environment (`No such file or directory .../bin/address`). Therefore I have no runtime evidence that fuzzer input can actually make `response` equal to the magic string at the point of `strcasecmp`. Also, `response` is filled by `Curl_xfer_recv` with length 128 but the code does not NUL-terminate it before calling `strcasecmp`, so reaching the branch may depend on `Curl_xfer_recv` behavior (whether it appends NUL) and could also cause an out-of-bounds read in `strcasecmp` first.\n\nConclusion: the bug pattern is present in code and would crash if the branch is taken, but I lack execution proof that a fuzzer input can drive that exact branch in this harness/environment.",
+        "corrected_description": "Definite invalid memory write/SEGV if the `crashycrashy` branch is taken: `result` is a `CURLcode` integer, cast to `unsigned int*` and dereferenced (`*(unsigned int *)result = CURLE_OK;`). Additionally, `response` may be non-NUL-terminated when passed to `strcasecmp`, risking an out-of-bounds read before the branch decision.",
+        "control_flow_to_bug": "curl_fuzzer_ws -> (curl protocol dispatch) -> verynormalprotocol_doing(data, done): loop calling `Curl_xfer_recv(data, response, 128, &nread)` until not CURLE_AGAIN; require `result==0` and `nread>0`; require `strcasecmp(response, \"crashycrashy\")==0` (implies response buffer contains that NUL-terminated string as received); then executes `*(unsigned int *)result = CURLE_OK;` causing invalid write."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1071,
+      "output_tokens": 58,
+      "total_tokens": 1129,
+      "latency_ms": 1206
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1415,
+      "output_tokens": 88,
+      "total_tokens": 1503,
+      "latency_ms": 2029
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1553,
+      "output_tokens": 528,
+      "total_tokens": 2081,
+      "latency_ms": 7168
+    }
+  ],
+  "token_totals": {
+    "input": 4039,
+    "output": 674,
+    "total": 4713,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: curl_fuzzer_ws   Sanitizer: address\nFunction: verynormalprotocol_doing\nClaimed bug type: SEGV\nSuspicious-point description (from the finder — may be imprecise): Arbitrary memory write / invalid pointer dereference due to type confusion: in the branch where `strcasecmp(response, \"crashycrashy\") == 0`, the code does `*(unsigned int *)result = CURLE_OK;` but `result` is a `CURLcode` value (enum/integer), not a pointer. Casting the integer error code to `unsigned int *` and dereferencing writes to an attacker-influenced address (typically small/invalid), which AddressSanitizer should detect as an invalid write/SEGV. Control flow: receive into stack `response[128]` via `Curl_xfer_recv`; if response matches the magic string, set `*done = TRUE` then perform the invalid write.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a SEGV\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_OEJunmyaKgoU6aK5caDVS0Qf",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"verynormalprotocol_doing\"}"
+          }
+        },
+        {
+          "id": "call_U9OQsgDbypbsdut9fq5toBdI",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"verynormalprotocol_doing\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_OEJunmyaKgoU6aK5caDVS0Qf",
+      "content": "static CURLcode verynormalprotocol_doing(struct Curl_easy *data, bool *done)\n{\n  CURLcode result = CURLE_WEIRD_SERVER_REPLY;\n  ssize_t nread;\n  char response[128];\n\n  *done = FALSE;\n\n                                                                          \n                                                               \n  do {\n    result = Curl_xfer_recv(data, response, 128, &nread);\n  } while(result == CURLE_AGAIN);\n  if(result)\n    return result;\n  else if(!nread) {\n    failf(data, \"Connection disconnected\");\n    *done = TRUE;\n    result = CURLE_RECV_ERROR;\n  }\n  else if(strcasecmp(response, \"crashycrashy\") == 0) {\n    *done = TRUE;\n    *(unsigned int *)result = CURLE_OK;\n  }\n  else {\n    *done = TRUE;\n    result = CURLE_WEIRD_SERVER_REPLY;\n  }\n\n  if(result == CURLE_AGAIN)\n    result = CURLE_OK;\n  return result;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_U9OQsgDbypbsdut9fq5toBdI",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 274}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_Gia3VVzhaaTIAv81rtvB9EFv",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to drive the protocol handler to receive the magic string.\\n    # Many curl fuzzers accept a pseudo-URL followed by payload; keep it simple.\\n    return b\\\"verynormal://example\\\\r\\\\ncrashycrashy\\\\0\\\"\",\"target\":\"verynormalprotocol_doing\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Gia3VVzhaaTIAv81rtvB9EFv",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-delta-01/bugs/curl-005/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_MntP04ITG3kMHTZ9A4hSZVvw",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":false,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source shows a definite invalid write: in branch `strcasecmp(response, \\\"crashycrashy\\\") == 0`, it executes `*(unsigned int *)result = CURLE_OK;` where `result` is a `CURLcode` enum/integer initialized to `CURLE_WEIRD_SERVER_REPLY` and only assigned return codes from `Curl_xfer_recv`. Casting this small integer to a pointer and writing through it will attempt to write to a low/invalid address (e.g., 0xNN), which should SEGV/ASan invalid write if executed.\\n\\nHowever, I could not run reach_probe because the ASan binary path was missing in the environment (`No such file or directory .../bin/address`). Therefore I have no runtime evidence that fuzzer input can actually make `response` equal to the magic string at the point of `strcasecmp`. Also, `response` is filled by `Curl_xfer_recv` with length 128 but the code does not NUL-terminate it before calling `strcasecmp`, so reaching the branch may depend on `Curl_xfer_recv` behavior (whether it appends NUL) and could also cause an out-of-bounds read in `strcasecmp` first.\\n\\nConclusion: the bug pattern is present in code and would crash if the branch is taken, but I lack execution proof that a fuzzer input can drive that exact branch in this harness/environment.\",\"corrected_description\":\"Definite invalid memory write/SEGV if the `crashycrashy` branch is taken: `result` is a `CURLcode` integer, cast to `unsigned int*` and dereferenced (`*(unsigned int *)result = CURLE_OK;`). Additionally, `response` may be non-NUL-terminated when passed to `strcasecmp`, risking an out-of-bounds read before the branch decision.\",\"control_flow_to_bug\":\"curl_fuzzer_ws -> (curl protocol dispatch) -> verynormalprotocol_doing(data, done): loop calling `Curl_xfer_recv(data, response, 128, &nread)` until not CURLE_AGAIN; require `result==0` and `nread>0`; require `strcasecmp(response, \\\"crashycrashy\\\")==0` (implies response buffer contains that NUL-terminated string as received); then executes `*(unsigned int *)result = CURLE_OK;` causing invalid write.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_MntP04ITG3kMHTZ9A4hSZVvw",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "verynormalprotocol_doing"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Arbitrary memory write / invalid pointer dereference due to type confusion: in the branch where `strcasecmp(response, \"crashycrashy\") == 0`, the code does `*(unsigned int *)result = CURLE_OK;` but `result` is a `CURLcode` value (enum/integer), not a pointer. Casting the integer error code to `unsigned int *` and dereferencing writes to an attacker-influenced address (typically small/invalid), which AddressSanitizer should detect as an invalid write/SEGV. Control flow: receive into stack `response[128]` via `Curl_xfer_recv`; if response matches the magic string, set `*done = TRUE` then perform the invalid write.",
+  "finder_vuln_type": ""
+}

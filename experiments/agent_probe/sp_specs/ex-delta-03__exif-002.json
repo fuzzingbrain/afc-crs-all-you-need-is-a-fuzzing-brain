@@ -1,0 +1,22 @@
+{
+  "challenge": "ex-delta-03",
+  "bug": "exif-002",
+  "tag": "ex-delta-03__exif-002",
+  "round": "final-competition",
+  "scan_mode": "delta",
+  "harness": "exif_from_data_fuzzer",
+  "fuzzer": "exif_from_data_fuzzer",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "exif_data_load_data_entry"
+  ],
+  "crash_type": "heap-buffer-overflow",
+  "graphs_root": "/home/ze/fb-graphs/build/ex-delta-03",
+  "source_root": "/home/ze/fb-graphs/build/ex-delta-03/repo",
+  "callgraph": "/home/ze/fb-graphs/build/ex-delta-03/graph-exif_from_data_fuzzer/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/libexif:latest",
+  "project": "libexif",
+  "blob": "/home/ze/fb-graphs/build/ex-delta-03/bugs/exif-002/blob"
+}

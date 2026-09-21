@@ -1,0 +1,17 @@
+{
+  "challenge": "fp-delta-01__vuln_001",
+  "source_root": "/home/ze/fbv2/experiments/agent_probe/_work/fp-delta-01/repo",
+  "workspace": "/home/ze/fbv2/experiments/agent_probe/_work/fp-delta-01",
+  "repo_subdir": "repo",
+  "diff_filename": "diff/ref.diff",
+  "fuzzer": "TestFuzzCryptoCertificateDataSetPEM",
+  "sanitizer": "address",
+  "scan_mode": "delta",
+  "changed_functions": [
+    "freerdp_bio_read_pem_with_policy"
+  ],
+  "ground_truth_functions": [
+    "freerdp_bio_read_pem_with_policy"
+  ],
+  "crash_type": "heap-buffer-overflow"
+}

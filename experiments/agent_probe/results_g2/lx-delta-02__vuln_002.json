@@ -1,0 +1,192 @@
+{
+  "tag": "lx-delta-02__vuln_002",
+  "gt": "xmlParseAttribute2",
+  "crash_type": "double-free",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "full",
+    "pattern_present": false,
+    "reasoning": "Read xmlParseAttribute2: internal_val is only used in xmlStrEqual(internal_val, ...) after being assigned from xmlStrndup(val,*len) and immediately checked for NULL (if NULL goto mem_error). There is no path where xmlStrEqual is called with internal_val==NULL. On mem_error it jumps to xmlErrMemory then error label, which frees val (if allocated) and returns; internal_val is not freed there, but it is NULL in that path. Therefore the finder’s claimed NULL deref/invalid read is not present.\n\nDouble-free: internal_val is freed in two places in the xml:tab branch: inside the final else (invalid value) it calls xmlFree(internal_val); then after the branch, the common `if (internal_val) xmlFree(internal_val);` frees it again. This is a real double-free if the xml:tab attribute value is not one of {default,preserve,expand,skip}. That is input-controllable (attribute value string).",
+    "corrected_description": "Double-free in xmlParseAttribute2: when parsing attribute xml:tab with an invalid value, internal_val is freed in the error else-branch and then freed again by the common cleanup `if (internal_val) xmlFree(internal_val);` after the branch. Not a NULL deref; NULL is checked after xmlStrndup.",
+    "control_flow_to_bug": "Fuzzer entry -> XML parser -> xmlParseAttribute2 called for each attribute. Conditions: parsed attribute has prefix == ctxt->str_xml (i.e., xml:*) and name == \"tab\". internal_val = xmlStrndup(val,*len) succeeds. Then value comparison fails all of: \"default\",\"preserve\",\"expand\",\"skip\" so it enters the final else, calls xmlFree(internal_val), falls through; internal_val remains non-NULL, so the subsequent `if (internal_val) xmlFree(internal_val);` triggers second free."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.1,
+  "verdict": "WEAK/FP",
+  "basis": "LLM: pattern absent",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "xmlParseAttribute2"
+      },
+      "result": "xmlParseAttribute2(xmlParserCtxtPtr ctxt,\n                   const xmlChar * pref, const xmlChar * elem,\n                   xmlHashedString * hprefix, xmlChar ** value,\n                   int *len, int *alloc)\n{\n    xmlHashedString hname;\n    const xmlChar *prefix, *name;\n    xmlChar *val = NULL, *internal_val = NULL;\n    int normalize = 0;\n    int isNamespace;\n\n    *value = NULL;\n    GROW;\n    hname = xmlParseQNameHashed(ctxt, hprefix);\n    if (hname.name == NULL) {\n        xmlFatalErrMsg(ctxt, XML_ERR_NAME_REQUIRED,\n                       \"error parsing attribute name\\n\");\n        return(hname);\n    }\n    name = hname.name;\n    prefix = hprefix->name;\n\n      \n                             \n       \n    if (ctxt->attsSpecial != NULL) {\n        int type;\n\n        type = (int) (ptrdiff_t) xmlHashQLookup2(ctxt->attsSpecial,\n                                                 pref, elem,\n                                                 prefix, name);\n        if (type != 0)\n            normalize = 1;\n    }\n\n      \n                     \n       \n    SKIP_BLANKS;\n    if (RAW == '=') {\n        NEXT;\n        SKIP_BLANKS;\n        isNamespace = (((prefix == NULL) && (name == ctxt->str_xmlns)) ||\n                       (prefix == ctxt->str_xmlns));\n        val = xmlParseAttValueInternal(ctxt, len, alloc, normalize,\n                                       isNamespace);\n        if (val == NULL)\n            goto error;\n    } else {\n        xmlFatalErrMsgStr(ctxt, XML_ERR_ATTRIBUTE_WITHOUT_VALUE,\n                          \"Specification mandates value for attribute %s\\n\",\n                          name);\n        goto error;\n    }\n\n    if (prefix == ctxt->str_xml) {\n          \n                                                            \n                                                                      \n                                                          \n           \n        if ((ctxt->pedantic) && (xmlStrEqual(name, BAD_CAST \"lang\"))) {\n            internal_val = xmlStrndup(val, *len);\n            if (internal_val == NULL)\n                goto mem_error;\n            if (!xmlCheckLanguageID(internal_val)) {\n                xmlWarningMsg(ctxt, XML_WAR_LANG_VALUE,\n                              \"Malformed value for xml:lang : %s\\n\",\n                              internal_val, NULL);\n            }\n        }\n\n          \n                                                             \n           \n        if (xmlStrEqual(name, BAD_CAST \"space\")) {\n            internal_val = xmlStrndup(val, *len);\n            if (internal_val == NULL)\n                goto mem_error;\n            if (xmlStrEqual(internal_val, BAD_CAST \"default\"))\n                *(ctxt->space) = 0;\n            else if (xmlStrEqual(internal_val, BAD_CAST \"preserve\"))\n                *(ctxt->space) = 1;\n            else {\n                xmlWarningMsg(ctxt, XML_WAR_SPACE_VALUE,\n                              \"Invalid value \\\"%s\\\" for xml:space : \\\"default\\\" or \\\"preserve\\\" expected\\n\",\n                              internal_val, NULL);\n            }\n        }\n          \n                                                           \n           \n        if (xmlStrEqual(name, BAD_CAST \"tab\")) {\n            internal_val = xmlStrndup(val, *len);\n            if (internal_val == NULL)\n                goto mem_error;\n            if (xmlStrEqual(internal_val, BAD_CAST \"default\"))\n                *(ctxt->tab) = 0;\n            else if (xmlStrEqual(internal_val, BAD_CAST \"preserve\"))\n                *(ctxt->tab) = 1;\n            else if (xmlStrEqual(internal_val, BAD_CAST \"expand\"))\n                *(ctxt->tab) = 2;\n            else if (xmlStrEqual(internal_val, BAD_CAST \"skip\"))\n                *(ctxt->tab) = 3;\n            else {\n                xmlWarningMsg(ctxt, XML_WAR_TAB_VALUE,\n                              \"Invalid value \\\"%s\\\" for xml:tab : \\\"default\\\", \\\"preserve\\\", \\\"expand\\\", or \\\"skip\\\" expected\\n\",\n                              internal_val, NULL);\n                xmlFree(internal_val);\n  …[truncated]"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "xmlParseAttribute2"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Minimal XML with an xml:space attribute to reach xmlParseAttribute2\n    return b\"<a xml:space='default'/>\"",
+        "target": "xmlParseAttribute2"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/lx-delta-02/bugs/vuln_002/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "full",
+        "pattern_present": false,
+        "reasoning": "Read xmlParseAttribute2: internal_val is only used in xmlStrEqual(internal_val, ...) after being assigned from xmlStrndup(val,*len) and immediately checked for NULL (if NULL goto mem_error). There is no path where xmlStrEqual is called with internal_val==NULL. On mem_error it jumps to xmlErrMemory then error label, which frees val (if allocated) and returns; internal_val is not freed there, but it is NULL in that path. Therefore the finder’s claimed NULL deref/invalid read is not present.\n\nDouble-free: internal_val is freed in two places in the xml:tab branch: inside the final else (invalid value) it calls xmlFree(internal_val); then after the branch, the common `if (internal_val) xmlFree(internal_val);` frees it again. This is a real double-free if the xml:tab attribute value is not one of {default,preserve,expand,skip}. That is input-controllable (attribute value string).",
+        "corrected_description": "Double-free in xmlParseAttribute2: when parsing attribute xml:tab with an invalid value, internal_val is freed in the error else-branch and then freed again by the common cleanup `if (internal_val) xmlFree(internal_val);` after the branch. Not a NULL deref; NULL is checked after xmlStrndup.",
+        "control_flow_to_bug": "Fuzzer entry -> XML parser -> xmlParseAttribute2 called for each attribute. Conditions: parsed attribute has prefix == ctxt->str_xml (i.e., xml:*) and name == \"tab\". internal_val = xmlStrndup(val,*len) succeeds. Then value comparison fails all of: \"default\",\"preserve\",\"expand\",\"skip\" so it enters the final else, calls xmlFree(internal_val), falls through; internal_val remains non-NULL, so the subsequent `if (internal_val) xmlFree(internal_val);` triggers second free."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1024,
+      "output_tokens": 56,
+      "total_tokens": 1080,
+      "latency_ms": 1143
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 2214,
+      "output_tokens": 62,
+      "total_tokens": 2276,
+      "latency_ms": 1303
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2328,
+      "output_tokens": 446,
+      "total_tokens": 2774,
+      "latency_ms": 5641
+    }
+  ],
+  "token_totals": {
+    "input": 5566,
+    "output": 564,
+    "total": 6130,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: xml   Sanitizer: address\nFunction: xmlParseAttribute2\nClaimed bug type: double-free\nSuspicious-point description (from the finder — may be imprecise): Potential NULL pointer dereference / invalid read in new xmlParseAttribute2: internal_val is assigned from xmlStrndup() in several branches, but code calls xmlStrEqual(internal_val, ...) without checking internal_val for NULL. Under OOM/failure injection (fuzzer uses xmlFuzzInjectFailure), xmlStrndup can return NULL, leading to ASan-detectable crash when xmlStrEqual dereferences NULL. Related: internal_val allocation sites at multiple points; comparisons via xmlStrEqual; error handling paths.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a double-free\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_tI6nvQNS8A59JxR2Kx7FtX5e",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"xmlParseAttribute2\"}"
+          }
+        },
+        {
+          "id": "call_H1Vi02FqQuVuvzkwB3VkoO7Y",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"xmlParseAttribute2\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_tI6nvQNS8A59JxR2Kx7FtX5e",
+      "content": "xmlParseAttribute2(xmlParserCtxtPtr ctxt,\n                   const xmlChar * pref, const xmlChar * elem,\n                   xmlHashedString * hprefix, xmlChar ** value,\n                   int *len, int *alloc)\n{\n    xmlHashedString hname;\n    const xmlChar *prefix, *name;\n    xmlChar *val = NULL, *internal_val = NULL;\n    int normalize = 0;\n    int isNamespace;\n\n    *value = NULL;\n    GROW;\n    hname = xmlParseQNameHashed(ctxt, hprefix);\n    if (hname.name == NULL) {\n        xmlFatalErrMsg(ctxt, XML_ERR_NAME_REQUIRED,\n                       \"error parsing attribute name\\n\");\n        return(hname);\n    }\n    name = hname.name;\n    prefix = hprefix->name;\n\n      \n                             \n       \n    if (ctxt->attsSpecial != NULL) {\n        int type;\n\n        type = (int) (ptrdiff_t) xmlHashQLookup2(ctxt->attsSpecial,\n                                                 pref, elem,\n                                                 prefix, name);\n        if (type != 0)\n            normalize = 1;\n    }\n\n      \n                     \n       \n    SKIP_BLANKS;\n    if (RAW == '=') {\n        NEXT;\n        SKIP_BLANKS;\n        isNamespace = (((prefix == NULL) && (name == ctxt->str_xmlns)) ||\n                       (prefix == ctxt->str_xmlns));\n        val = xmlParseAttValueInternal(ctxt, len, alloc, normalize,\n                                       isNamespace);\n        if (val == NULL)\n            goto error;\n    } else {\n        xmlFatalErrMsgStr(ctxt, XML_ERR_ATTRIBUTE_WITHOUT_VALUE,\n                          \"Specification mandates value for attribute %s\\n\",\n                          name);\n        goto error;\n    }\n\n    if (prefix == ctxt->str_xml) {\n          \n                                                            \n                                                                      \n                                                          \n           \n        if ((ctxt->pedantic) && (xmlStrEqual(name, BAD_CAST \"lang\"))) {\n            internal_val = xmlStrndup(val, *len);\n            if (internal_val == NULL)\n                goto mem_error;\n            if (!xmlCheckLanguageID(internal_val)) {\n                xmlWarningMsg(ctxt, XML_WAR_LANG_VALUE,\n                              \"Malformed value for xml:lang : %s\\n\",\n                              internal_val, NULL);\n            }\n        }\n\n          \n                                                             \n           \n        if (xmlStrEqual(name, BAD_CAST \"space\")) {\n            internal_val = xmlStrndup(val, *len);\n            if (internal_val == NULL)\n                goto mem_error;\n            if (xmlStrEqual(internal_val, BAD_CAST \"default\"))\n                *(ctxt->space) = 0;\n            else if (xmlStrEqual(internal_val, BAD_CAST \"preserve\"))\n                *(ctxt->space) = 1;\n            else {\n                xmlWarningMsg(ctxt, XML_WAR_SPACE_VALUE,\n                              \"Invalid value \\\"%s\\\" for xml:space : \\\"default\\\" or \\\"preserve\\\" expected\\n\",\n                              internal_val, NULL);\n            }\n        }\n          \n                                                           \n           \n        if (xmlStrEqual(name, BAD_CAST \"tab\")) {\n            internal_val = xmlStrndup(val, *len);\n            if (internal_val == NULL)\n                goto mem_error;\n            if (xmlStrEqual(internal_val, BAD_CAST \"default\"))\n                *(ctxt->tab) = 0;\n            else if (xmlStrEqual(internal_val, BAD_CAST \"preserve\"))\n                *(ctxt->tab) = 1;\n            else if (xmlStrEqual(internal_val, BAD_CAST \"expand\"))\n                *(ctxt->tab) = 2;\n            else if (xmlStrEqual(internal_val, BAD_CAST \"skip\"))\n                *(ctxt->tab) = 3;\n            else {\n                xmlWarningMsg(ctxt, XML_WAR_TAB_VALUE,\n                              \"Invalid value \\\"%s\\\" for xml:tab : \\\"default\\\", \\\"preserve\\\", \\\"expand\\\", or \\\"skip\\\" expected\\n\",\n                              internal_val, NULL);\n                xmlFree(internal_val);\n            }\n        }\n        if (internal_val) {\n            xmlFree(internal_val);\n        }\n    }\n\n    *value = val;\n    return (hname);\n\nmem_error:\n    xmlErrMemory(ctxt);\nerror:\n    if ((val != NULL) && (*alloc != 0))\n        xmlFree(val);\n    return(hname);\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_H1Vi02FqQuVuvzkwB3VkoO7Y",
+      "content": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_QnT0UrzkkQ8GZgGqgNgXKM4E",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Minimal XML with an xml:space attribute to reach xmlParseAttribute2\\n    return b\\\"<a xml:space='default'/>\\\"\",\"target\":\"xmlParseAttribute2\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_QnT0UrzkkQ8GZgGqgNgXKM4E",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/lx-delta-02/bugs/vuln_002/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_W9IVqv2u1uDGn7qmQiPslCVk",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"full\",\"pattern_present\":false,\"reasoning\":\"Read xmlParseAttribute2: internal_val is only used in xmlStrEqual(internal_val, ...) after being assigned from xmlStrndup(val,*len) and immediately checked for NULL (if NULL goto mem_error). There is no path where xmlStrEqual is called with internal_val==NULL. On mem_error it jumps to xmlErrMemory then error label, which frees val (if allocated) and returns; internal_val is not freed there, but it is NULL in that path. Therefore the finder’s claimed NULL deref/invalid read is not present.\\n\\nDouble-free: internal_val is freed in two places in the xml:tab branch: inside the final else (invalid value) it calls xmlFree(internal_val); then after the branch, the common `if (internal_val) xmlFree(internal_val);` frees it again. This is a real double-free if the xml:tab attribute value is not one of {default,preserve,expand,skip}. That is input-controllable (attribute value string).\",\"corrected_description\":\"Double-free in xmlParseAttribute2: when parsing attribute xml:tab with an invalid value, internal_val is freed in the error else-branch and then freed again by the common cleanup `if (internal_val) xmlFree(internal_val);` after the branch. Not a NULL deref; NULL is checked after xmlStrndup.\",\"control_flow_to_bug\":\"Fuzzer entry -> XML parser -> xmlParseAttribute2 called for each attribute. Conditions: parsed attribute has prefix == ctxt->str_xml (i.e., xml:*) and name == \\\"tab\\\". internal_val = xmlStrndup(val,*len) succeeds. Then value comparison fails all of: \\\"default\\\",\\\"preserve\\\",\\\"expand\\\",\\\"skip\\\" so it enters the final else, calls xmlFree(internal_val), falls through; internal_val remains non-NULL, so the subsequent `if (internal_val) xmlFree(internal_val);` triggers second free.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_W9IVqv2u1uDGn7qmQiPslCVk",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 3,
+    "sp_functions": [
+      "xmlParseAttribute2",
+      "xmlParseAttribute2",
+      "xmlParseAttribute2"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Potential NULL pointer dereference / invalid read in new xmlParseAttribute2: internal_val is assigned from xmlStrndup() in several branches, but code calls xmlStrEqual(internal_val, ...) without checking internal_val for NULL. Under OOM/failure injection (fuzzer uses xmlFuzzInjectFailure), xmlStrndup can return NULL, leading to ASan-detectable crash when xmlStrEqual dereferences NULL. Related: internal_val allocation sites at multiple points; comparisons via xmlStrEqual; error handling paths.",
+  "finder_vuln_type": ""
+}

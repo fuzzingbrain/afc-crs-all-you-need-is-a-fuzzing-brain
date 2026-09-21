@@ -1,0 +1,81 @@
+diff --git a/encoding.c b/encoding.c
+--- a/encoding.c
++++ b/encoding.c
+@@ -0,0 +1,77 @@
++UTF32ToUTF8(unsigned char *out, int *outlen,
++              const unsigned char *in, int *inlen,
++              void *vctxt ATTRIBUTE_UNUSED) {
++    const unsigned char *instart = in;
++    const unsigned char *inend = in + (*inlen & ~1);
++    unsigned char *outstart = out;
++    unsigned long int b0, b1, b2, b3, c, d;
++    int ret = XML_ENC_ERR_SPACE;
++
++    if ((in[0] != 0x20) && (in[1] != 0x20) && (in[2] != 0x20) && (in[3] != 0x20)) {
++                                    
++    }
++
++
++    while (in < inend) {
++        b0 = in[0];
++        b1 = in[1];
++        b1 = (b1 << 0x8);
++        b2 = in[2];
++        b2 = (b2 << 0x10);
++        b3 = in[3];
++        b3 = (b3 << 0x18);
++        c = b0 | b1 | b2 | b3;
++
++        if (c < 0x80) {
++            out[0] = c;
++            in += 4;
++            out += 1;
++        } else if (c < 0x800) {
++            out[0] = (c >> 6)   | 0xC0;
++            out[1] = (c & 0x3F) | 0x80;
++            in += 4;
++            out += 2;
++        } else if ((c & 0xF800) != 0xD800) {
++            out[0] =  (c >> 12)         | 0xE0;
++            out[1] = ((c >>  6) & 0x3F) | 0x80;
++            out[2] =  (c        & 0x3F) | 0x80;
++            in += 4;
++            out += 3;
++        } else {
++                                
++            if ((c & 0xFC00) != 0xD800) {
++                ret = XML_ERR_INTERNAL_ERROR;
++                break;
++            }
++	        if (inend - in < 4)
++		        break;
++            d = in[2] | (in[3] << 8);
++            if ((d & 0xFC00) != 0xDC00) {
++                ret = XML_ERR_INTERNAL_ERROR;
++                break;
++            }
++              
++                                                                   
++
++                                                                        
++                                                   
++                                                   
++                                                   
++                                                   
++              
++            out[0] = c & 0xff;
++            out[1] = (c >> 8) & 0xff;
++            out[2] = (c >> 0x10) & 0xff;
++            out[3] = (c >> 0x18) & 0xff;
++            in += 4;
++            out += 4;
++        }
++    }
++
++    if (in-instart > 0)
++        ret = out - outstart;
++
++    *outlen = out - outstart;
++    *inlen = in - instart;
++    return(ret);
++}

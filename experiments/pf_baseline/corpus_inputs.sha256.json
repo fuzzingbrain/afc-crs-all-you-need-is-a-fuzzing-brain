@@ -1,0 +1,10 @@
+{
+ "curl_fuzzer.tar.gz": "7a034aa7134985741f71abcef093ac6cfcf3e558763368524167adf7863616ba",
+ "exif-samples.tar.gz": "13731064f139e81fdb9c9a76b8194f27e6a1e9b8e66d763321777c0183e07dc5",
+ "afc-libexif.ex-delta-02.tar.gz": "fa55b2fc74ef2a52b036839830c2e501802bab8eacac1499d43ef813a2198cff",
+ "afc-libexif.ex-delta-03.tar.gz": "fe9c5a4158162d66ecdc412c4ddac6244159c823cc81ab10189e1196cfd317ba",
+ "afc-little-cms.tar.gz": "2c1d41361cdc507bf94e81c5b51b9118728b30bd265a92fd0bdb789f10960cda",
+ "dav1d.dec_fuzzer_seed_corpus.zip": "fc98a1f68fcf7cde14f81714d47cc453f6013dde71a2a0898bc30749c98c6673",
+ "dav1d.dav1d_fuzzer_seed_corpus.zip": "9b935330e6da37dcc4412e29c4465eaa11e0d24ad2bfd5654ed48268ec6da7a7",
+ "icc.dict": "0183cd8985b00f31a43977d30ec8fec68f51d312ef07fa90386cbfd014eb25e7"
+}

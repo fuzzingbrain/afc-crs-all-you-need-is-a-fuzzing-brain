@@ -1392,6 +1392,21 @@ class BaseAgent(ABC):
                 # Pass agent_id for unique context lookup
                 static_analysis_tools = self.include_static_analysis_tools
                 coverage_tools = self.include_coverage_tools
+                # RQ4 dynamic-analysis ablation. FB_ABLATE env gates the
+                # query-driven dynamic-feedback tools (reach_probe / check_clamp).
+                # "coarse"/"static": remove query-driven feedback; create_pov's
+                # crash + sanitizer backtrace (the coarse execution signal) stays.
+                # Single consumption point, so it uniformly affects every agent.
+                import os as _os
+                _ablate = _os.environ.get("FB_ABLATE", "").lower().strip()
+                _reach_tools = self.include_reach_probe_tools
+                if _ablate in ("coarse", "static", "static-only", "no_reach_probe"):
+                    _reach_tools = False
+                    self._log(
+                        f"[ABLATION FB_ABLATE={_ablate}] reach_probe/check_clamp "
+                        f"DISABLED for {agent_id}",
+                        level="INFO",
+                    )
                 mcp_server = create_isolated_mcp_server(
                     agent_id=agent_id,
                     worker_id=agent_id,  # Use agent_id for context isolation
@@ -1402,7 +1417,7 @@ class BaseAgent(ABC):
                     include_direction_tools=self.include_direction_tools,
                     include_static_analysis_tools=static_analysis_tools,
                     include_coverage_tools=coverage_tools,
-                    include_reach_probe_tools=self.include_reach_probe_tools,
+                    include_reach_probe_tools=_reach_tools,
                     include_diff_tool=self.include_diff_tool,
                 )
                 self._log(

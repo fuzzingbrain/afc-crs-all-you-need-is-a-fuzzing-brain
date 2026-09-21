@@ -1,0 +1,60 @@
+diff --git a/epan/dissectors/packet-netbios.c b/epan/dissectors/packet-netbios.c
+--- a/epan/dissectors/packet-netbios.c
++++ b/epan/dissectors/packet-netbios.c
+@@ -0,0 +1,56 @@
++dissect_netb_terminate_trace( tvbuff_t *tvb, packet_info *pinfo _U_, int offset, proto_tree *tree)
++
++{                                                            
++	proto_tree *ttree;
++    proto_item *tf;
++	uint8_t flag;
++	static const char hex_digits[16] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};
++	uint8_t *signature;
++	uint8_t byte;
++	int i = 0;
++	int index = 0;
++
++    if (!tree)
++        return 0;
++
++    tf = proto_tree_add_item(tree, hf_netb_cmd, tvb, offset + NB_COMMAND, 1, ENC_NA);
++    ttree = proto_item_add_subtree(tf, ett_netb_status);
++
++    proto_tree_add_item(ttree, hf_netb_trace_flags, tvb, offset + NB_DATA1, 1, ENC_NA);
++
++	flag = tvb_get_uint8(tvb, offset + NB_DATA1);
++
++	                                         
++	if (flag & 0x80) {
++		signature = g_malloc( NB_SIZE_HMAC + 1);
++	} else {
++		signature = g_malloc( NB_SIZE_TMAC + 1);
++	}
++
++	if (signature == NULL)
++		return 0;
++
++    proto_tree_add_item(ttree, hf_netb_trace_id, tvb, offset + NB_DATA2, 2, ENC_BIG_ENDIAN);
++    proto_tree_add_item(ttree, hf_netb_trace_timestamp, tvb, offset + NB_XMIT_CORL, 4, ENC_BIG_ENDIAN);
++    proto_tree_add_item(ttree, hf_netb_trace_reason, tvb, offset + NB_RMT_SES, 1, ENC_NA);
++    proto_tree_add_item(ttree, hf_netb_trace_initiator, tvb, offset + NB_INIT_NAME, 16, ENC_ASCII | ENC_NA);
++    proto_tree_add_item(ttree, hf_netb_trace_signature, tvb, offset + NB_SIGNATURE, 8, ENC_NA);
++
++	                                         
++	while ( tvb_offset_exists(tvb, offset + NB_SIGNATURE + i) ) {
++		byte = tvb_get_uint8(tvb, offset + NB_SIGNATURE + i);
++
++		signature[index++] = hex_digits[byte >> 4];
++		signature[index++] = hex_digits[byte & 0x0F];
++
++		i++;
++	}
++
++	signature[index] = '\0';
++	
++	proto_tree_add_string(ttree, hf_netb_trace_signature, tvb, offset + NB_SIGNATURE, i - 1, signature);
++
++	free(signature);
++
++	return 0;
++}

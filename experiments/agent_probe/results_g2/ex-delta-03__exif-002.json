@@ -1,0 +1,190 @@
+{
+  "tag": "ex-delta-03__exif-002",
+  "gt": "exif_data_load_data_entry",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Read exif_data_load_data_entry source: it immediately reads entry->tag = exif_get_short(d+offset+0), entry->format = exif_get_short(d+offset+2), entry->components = exif_get_long(d+offset+4) with no prior validation that offset+8 (or even offset+6) is within [0,size). Only after these reads does it compute s and then, if s>4, reads doff = exif_get_long(d+offset+8) (also unguarded) before checking doff>=size and s>size-doff. Therefore if caller supplies an offset near end of buffer (e.g., offset=size-2), the fixed-size field reads will access beyond d+size, causing an out-of-bounds read. Under ASan this manifests as heap-buffer-overflow (read) because d points to a heap buffer holding the fuzzer input. No clamp/guard exists before the sink reads; later checks do not prevent the initial OOB. I attempted to run reach_probe but the ASan binary path was missing in this environment, so no runtime confirmation is available.",
+    "corrected_description": "Heap-buffer-overflow (out-of-bounds read) in exif_data_load_data_entry: it reads 2/2/4 bytes at d+offset+0/2/4 (and potentially 4 bytes at d+offset+8 when s>4) before verifying that offset+8/offset+12 are within the input buffer size. Bounds checks occur only after these reads, so a truncated IFD entry can trigger OOB reads.",
+    "control_flow_to_bug": "exif_from_data_fuzzer -> exif_data_new_from_data / exif_data_load_data -> parse TIFF header -> parse IFD entries -> call exif_data_load_data_entry(data, entry, d, size, offset_of_entry). Condition to trigger: offset_of_entry points near end of provided buffer such that offset+4 (or offset+8) exceeds size; function performs exif_get_short/long reads before any size check, causing OOB read."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "exif_data_load_data_entry"
+      },
+      "result": "exif_data_load_data_entry (ExifData *data, ExifEntry *entry,\n\t\t\t   const unsigned char *d,\n\t\t\t   unsigned int size, unsigned int offset)\n{\n\tunsigned int s, doff;\n\n\tentry->tag        = exif_get_short (d + offset + 0, data->priv->order);\n\tentry->format     = exif_get_short (d + offset + 2, data->priv->order);\n\tentry->components = exif_get_long  (d + offset + 4, data->priv->order);\n\n\t                                                                     \n                        \n    \n\texif_log (data->priv->log, EXIF_LOG_CODE_DEBUG, \"ExifData\",\n\t\t  \"Loading entry 0x%x ('%s')...\", entry->tag,\n\t\t  exif_tag_get_name (entry->tag));\n\n\t                                              \n                                          \n\ts = exif_format_get_size(entry->format) * entry->components;\n\tif ((s < entry->components) || (s == 0)){\n\t\treturn 0;\n\t}\n\n\t  \n                                                        \n                                             \n    \n\tif (s > 4)\n\t\tdoff = exif_get_long (d + offset + 8, data->priv->order);\n\telse\n\t\tdoff = offset + 8;\n\n\t                   \n\tif (doff >= size) {\n\t\texif_log (data->priv->log, EXIF_LOG_CODE_DEBUG, \"ExifData\",\n\t\t\t\t  \"Tag starts past end of buffer (%u > %u)\", doff, size);\n\t\treturn 0;\n\t}\n\n\tif (s > size - doff) {\n\t\texif_log (data->priv->log, EXIF_LOG_CODE_DEBUG, \"ExifData\",\n\t\t\t\t  \"Tag data goes past end of buffer (%u > %u)\", doff+s, size);\n\t\treturn 0;\n\t}\n\n\tentry->data = exif_data_alloc (data, s);\n\tif (entry->data) {\n\t\tentry->size = s;\n\t\tmemcpy (entry->data, d + doff, s);\n\t} else {\n\t\tEXIF_LOG_NO_MEMORY(data->priv->log, \"ExifData\", s);\n\t\treturn 0;\n\t}\n\n\t                                                   \n\tif (entry->tag == EXIF_TAG_MAKER_NOTE) {\n\t\tif (!entry->data) {\n\t\t\texif_log (data->priv->log, EXIF_LOG_CODE_DEBUG, \"ExifData\",\n\t\t\t\t\t  \"MakerNote found with empty data\");\t\n\t\t} else if (entry->size > 6) {\n\t\t\texif_log (data->priv->log,\n\t\t\t\t\t       EXIF_LOG_CODE_DEBUG, \"ExifData\",\n\t\t\t\t\t       \"MakerNote found (%02x %02x %02x %02x \"\n\t\t\t\t\t       \"%02x %02x %02x...).\",\n\t\t\t\t\t       entry->data[0], entry->data[1], entry->data[2],\n\t\t\t\t\t       entry->data[3], entry->data[4], entry->data[5],\n\t\t\t\t\t       entry->data[6]);\n\t\t}\n\t\tdata->priv->offset_mnote = doff;\n\t}\n\treturn 1;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "exif_data_load_data_entry"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Minimal TIFF/EXIF-like blob to get parser to call exif_data_load_data_entry\n    # We'll craft: 'Exif\\0\\0' + TIFF header (II) + 0x2a + IFD0 offset=8\n    # Then IFD0 at offset 8: entry count=1, then one 12-byte entry but we truncate\n    # so that offset points near end and exif_data_load_data_entry reads past.\n    b = bytearray()\n    b += b\"Exif\\x00\\x00\"\n    b += b\"II\"          # little endian\n    b += (42).to_bytes(2,'little')\n    b += (8).to_bytes(4,'little')  # IFD0 offset from TIFF start\n    # IFD0 at TIFF+8 => overall offset 6+8=14\n    # entry count=1\n    b += (1).to_bytes(2,'little')\n    # Now start of entry (12 bytes). We'll provide only 6 bytes to force OOB on components read.\n    # tag=0x0100, format=3 (SHORT)\n    b += (0x0100).to_bytes(2,'little')\n    b += (3).to_bytes(2,'little')\n    # components field (4 bytes) missing/truncated -> OOB read when exif_get_long(d+offset+4)\n    b += b\"\\x01\\x00\"  # only 2 bytes of components\n    return bytes(b)\n",
+        "target": "exif_data_load_data_entry"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ex-delta-03/bugs/exif-002/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Read exif_data_load_data_entry source: it immediately reads entry->tag = exif_get_short(d+offset+0), entry->format = exif_get_short(d+offset+2), entry->components = exif_get_long(d+offset+4) with no prior validation that offset+8 (or even offset+6) is within [0,size). Only after these reads does it compute s and then, if s>4, reads doff = exif_get_long(d+offset+8) (also unguarded) before checking doff>=size and s>size-doff. Therefore if caller supplies an offset near end of buffer (e.g., offset=size-2), the fixed-size field reads will access beyond d+size, causing an out-of-bounds read. Under ASan this manifests as heap-buffer-overflow (read) because d points to a heap buffer holding the fuzzer input. No clamp/guard exists before the sink reads; later checks do not prevent the initial OOB. I attempted to run reach_probe but the ASan binary path was missing in this environment, so no runtime confirmation is available.",
+        "corrected_description": "Heap-buffer-overflow (out-of-bounds read) in exif_data_load_data_entry: it reads 2/2/4 bytes at d+offset+0/2/4 (and potentially 4 bytes at d+offset+8 when s>4) before verifying that offset+8/offset+12 are within the input buffer size. Bounds checks occur only after these reads, so a truncated IFD entry can trigger OOB reads.",
+        "control_flow_to_bug": "exif_from_data_fuzzer -> exif_data_new_from_data / exif_data_load_data -> parse TIFF header -> parse IFD entries -> call exif_data_load_data_entry(data, entry, d, size, offset_of_entry). Condition to trigger: offset_of_entry points near end of provided buffer such that offset+4 (or offset+8) exceeds size; function performs exif_get_short/long reads before any size check, causing OOB read."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1051,
+      "output_tokens": 60,
+      "total_tokens": 1111,
+      "latency_ms": 1059
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1956,
+      "output_tokens": 371,
+      "total_tokens": 2327,
+      "latency_ms": 4837
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2377,
+      "output_tokens": 473,
+      "total_tokens": 2850,
+      "latency_ms": 6132
+    }
+  ],
+  "token_totals": {
+    "input": 5384,
+    "output": 904,
+    "total": 6288,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: exif_from_data_fuzzer   Sanitizer: address\nFunction: exif_data_load_data_entry\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): Potential out-of-bounds read due to missing bounds check before reading tag/format/components fields: the function unconditionally reads exif_get_short(d+offset+0/2) and exif_get_long(d+offset+4) and later may read exif_get_long(d+offset+8) when s>4, but it only checks doff against size after these reads. If caller passes an offset near end of input (offset+8 or offset+12 beyond size), ASan can detect OOB read from d. Root cause: offset is not validated against size before fixed-size field reads.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_YuWalnFNAoW7XoF24bRvBaZ8",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"exif_data_load_data_entry\"}"
+          }
+        },
+        {
+          "id": "call_JwUnKcGtNSkjCoFLI9CjWjIH",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"exif_data_load_data_entry\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_YuWalnFNAoW7XoF24bRvBaZ8",
+      "content": "exif_data_load_data_entry (ExifData *data, ExifEntry *entry,\n\t\t\t   const unsigned char *d,\n\t\t\t   unsigned int size, unsigned int offset)\n{\n\tunsigned int s, doff;\n\n\tentry->tag        = exif_get_short (d + offset + 0, data->priv->order);\n\tentry->format     = exif_get_short (d + offset + 2, data->priv->order);\n\tentry->components = exif_get_long  (d + offset + 4, data->priv->order);\n\n\t                                                                     \n                        \n    \n\texif_log (data->priv->log, EXIF_LOG_CODE_DEBUG, \"ExifData\",\n\t\t  \"Loading entry 0x%x ('%s')...\", entry->tag,\n\t\t  exif_tag_get_name (entry->tag));\n\n\t                                              \n                                          \n\ts = exif_format_get_size(entry->format) * entry->components;\n\tif ((s < entry->components) || (s == 0)){\n\t\treturn 0;\n\t}\n\n\t  \n                                                        \n                                             \n    \n\tif (s > 4)\n\t\tdoff = exif_get_long (d + offset + 8, data->priv->order);\n\telse\n\t\tdoff = offset + 8;\n\n\t                   \n\tif (doff >= size) {\n\t\texif_log (data->priv->log, EXIF_LOG_CODE_DEBUG, \"ExifData\",\n\t\t\t\t  \"Tag starts past end of buffer (%u > %u)\", doff, size);\n\t\treturn 0;\n\t}\n\n\tif (s > size - doff) {\n\t\texif_log (data->priv->log, EXIF_LOG_CODE_DEBUG, \"ExifData\",\n\t\t\t\t  \"Tag data goes past end of buffer (%u > %u)\", doff+s, size);\n\t\treturn 0;\n\t}\n\n\tentry->data = exif_data_alloc (data, s);\n\tif (entry->data) {\n\t\tentry->size = s;\n\t\tmemcpy (entry->data, d + doff, s);\n\t} else {\n\t\tEXIF_LOG_NO_MEMORY(data->priv->log, \"ExifData\", s);\n\t\treturn 0;\n\t}\n\n\t                                                   \n\tif (entry->tag == EXIF_TAG_MAKER_NOTE) {\n\t\tif (!entry->data) {\n\t\t\texif_log (data->priv->log, EXIF_LOG_CODE_DEBUG, \"ExifData\",\n\t\t\t\t\t  \"MakerNote found with empty data\");\t\n\t\t} else if (entry->size > 6) {\n\t\t\texif_log (data->priv->log,\n\t\t\t\t\t       EXIF_LOG_CODE_DEBUG, \"ExifData\",\n\t\t\t\t\t       \"MakerNote found (%02x %02x %02x %02x \"\n\t\t\t\t\t       \"%02x %02x %02x...).\",\n\t\t\t\t\t       entry->data[0], entry->data[1], entry->data[2],\n\t\t\t\t\t       entry->data[3], entry->data[4], entry->data[5],\n\t\t\t\t\t       entry->data[6]);\n\t\t}\n\t\tdata->priv->offset_mnote = doff;\n\t}\n\treturn 1;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_JwUnKcGtNSkjCoFLI9CjWjIH",
+      "content": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_ZlqIlQwe8ShuD3SU2Bu4pPql",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Minimal TIFF/EXIF-like blob to get parser to call exif_data_load_data_entry\\n    # We'll craft: 'Exif\\\\0\\\\0' + TIFF header (II) + 0x2a + IFD0 offset=8\\n    # Then IFD0 at offset 8: entry count=1, then one 12-byte entry but we truncate\\n    # so that offset points near end and exif_data_load_data_entry reads past.\\n    b = bytearray()\\n    b += b\\\"Exif\\\\x00\\\\x00\\\"\\n    b += b\\\"II\\\"          # little endian\\n    b += (42).to_bytes(2,'little')\\n    b += (8).to_bytes(4,'little')  # IFD0 offset from TIFF start\\n    # IFD0 at TIFF+8 => overall offset 6+8=14\\n    # entry count=1\\n    b += (1).to_bytes(2,'little')\\n    # Now start of entry (12 bytes). We'll provide only 6 bytes to force OOB on components read.\\n    # tag=0x0100, format=3 (SHORT)\\n    b += (0x0100).to_bytes(2,'little')\\n    b += (3).to_bytes(2,'little')\\n    # components field (4 bytes) missing/truncated -> OOB read when exif_get_long(d+offset+4)\\n    b += b\\\"\\\\x01\\\\x00\\\"  # only 2 bytes of components\\n    return bytes(b)\\n\",\"target\":\"exif_data_load_data_entry\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ZlqIlQwe8ShuD3SU2Bu4pPql",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ex-delta-03/bugs/exif-002/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_qfOcvFXHynbqNZIrYavSZJe8",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Read exif_data_load_data_entry source: it immediately reads entry->tag = exif_get_short(d+offset+0), entry->format = exif_get_short(d+offset+2), entry->components = exif_get_long(d+offset+4) with no prior validation that offset+8 (or even offset+6) is within [0,size). Only after these reads does it compute s and then, if s>4, reads doff = exif_get_long(d+offset+8) (also unguarded) before checking doff>=size and s>size-doff. Therefore if caller supplies an offset near end of buffer (e.g., offset=size-2), the fixed-size field reads will access beyond d+size, causing an out-of-bounds read. Under ASan this manifests as heap-buffer-overflow (read) because d points to a heap buffer holding the fuzzer input. No clamp/guard exists before the sink reads; later checks do not prevent the initial OOB. I attempted to run reach_probe but the ASan binary path was missing in this environment, so no runtime confirmation is available.\",\"corrected_description\":\"Heap-buffer-overflow (out-of-bounds read) in exif_data_load_data_entry: it reads 2/2/4 bytes at d+offset+0/2/4 (and potentially 4 bytes at d+offset+8 when s>4) before verifying that offset+8/offset+12 are within the input buffer size. Bounds checks occur only after these reads, so a truncated IFD entry can trigger OOB reads.\",\"control_flow_to_bug\":\"exif_from_data_fuzzer -> exif_data_new_from_data / exif_data_load_data -> parse TIFF header -> parse IFD entries -> call exif_data_load_data_entry(data, entry, d, size, offset_of_entry). Condition to trigger: offset_of_entry points near end of provided buffer such that offset+4 (or offset+8) exceeds size; function performs exif_get_short/long reads before any size check, causing OOB read.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_qfOcvFXHynbqNZIrYavSZJe8",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "exif_data_load_data_entry"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Potential out-of-bounds read due to missing bounds check before reading tag/format/components fields: the function unconditionally reads exif_get_short(d+offset+0/2) and exif_get_long(d+offset+4) and later may read exif_get_long(d+offset+8) when s>4, but it only checks doff against size after these reads. If caller passes an offset near end of input (offset+8 or offset+12 beyond size), ASan can detect OOB read from d. Root cause: offset is not validated against size before fixed-size field reads.",
+  "finder_vuln_type": ""
+}

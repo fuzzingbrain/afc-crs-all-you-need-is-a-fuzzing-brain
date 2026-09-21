@@ -1,0 +1,13 @@
+{
+  "challenge": "lp-delta-01",
+  "source_root": "/home/ze/fbv2/workspace/libpng_6a96326609d2c5c3776f4d8d/repo",
+  "workspace": "/home/ze/fbv2/workspace/libpng_6a96326609d2c5c3776f4d8d",
+  "repo_subdir": "repo",
+  "diff_filename": "diff/ref.diff",
+  "fuzzer": "libpng_read_fuzzer",
+  "sanitizer": "address",
+  "scan_mode": "delta",
+  "changed_functions": ["png_handle_iCCP"],
+  "ground_truth_functions": ["png_handle_iCCP"],
+  "crash_type": "dynamic-stack-buffer-overflow"
+}

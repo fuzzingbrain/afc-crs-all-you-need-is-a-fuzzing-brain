@@ -1,0 +1,17 @@
+diff --git a/epan/dissectors/packet-aim.c b/epan/dissectors/packet-aim.c
+--- a/epan/dissectors/packet-aim.c
++++ b/epan/dissectors/packet-aim.c
+@@ -0,0 +1,13 @@
++aim_get_buddyname(wmem_allocator_t *pool, uint8_t **name, tvbuff_t *tvb, int offset)
++{
++	uint16_t buddyname_length;
++
++	*name = wmem_alloc(pool, 256);
++
++	buddyname_length = tvb_get_ntohs(tvb, offset);
++
++	if (pool)
++		memcpy(*name, tvb_get_ptr(tvb,offset,1), buddyname_length);
++
++	return buddyname_length;
++}

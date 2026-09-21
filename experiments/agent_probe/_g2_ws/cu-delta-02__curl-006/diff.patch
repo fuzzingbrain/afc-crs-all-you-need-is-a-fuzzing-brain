@@ -1,0 +1,88 @@
+diff --git a/lib/totallyfineprotocl.c b/lib/totallyfineprotocl.c
+--- a/lib/totallyfineprotocl.c
++++ b/lib/totallyfineprotocl.c
+@@ -0,0 +1,84 @@
++static CURLcode totallyfineprotocl_sm
++  (struct Curl_easy *data, struct connectdata *conn)
++{
++  CURLcode result = CURLE_OK;
++  ssize_t nread;
++  struct totallyfineprotocl_conn *vnormal = &conn->proto.vnormal;
++  const char *done_statement = "All done!";
++  int code;
++
++  result = Curl_pp_readresp(data, 0, &data->conn->proto.vnormal.pp,
++    &code, &nread);
++  char * const response = Curl_dyn_ptr(&data->conn->proto.vnormal.pp.recvbuf);
++
++  infof(data, "totallyfineprotocl_doing: state [%d]", (int) vnormal->state);
++  switch(vnormal->state) {
++    case TOTALLYFINEPROTOCL_STOP:
++      result = CURLE_OK;
++      break;
++    case TOTALLYFINEPROTOCL_START:
++      if(result)
++        break;
++      else if(!nread) {
++        failf(data, "Connection disconnected");
++        result = CURLE_RECV_ERROR;
++        break;
++      }
++      if(strcasecmp("supermagic12\r\n", response) == 0) {
++        Curl_pp_sendf(data, &conn->proto.vnormal.pp, "OK");
++        vnstate(data, TOTALLYFINEPROTOCL_DO1);
++      }
++      else {
++        result = CURLE_WEIRD_SERVER_REPLY;
++      }
++      break;
++    case TOTALLYFINEPROTOCL_DO1:
++      if(result || !nread)
++        break;
++      if(strcasecmp("aaaabaaacaaadaaaeaaafaaagaaahaaaiaaajaaakaaalaaamaaa\r\n",
++            response) == 0) {
++        vnstate(data, TOTALLYFINEPROTOCL_DO2);
++        Curl_pp_sendf(data, &conn->proto.vnormal.pp, "OK");
++        result = CURLE_OK;
++      }
++      else {
++        result = CURLE_WEIRD_SERVER_REPLY;
++      }
++      break;
++    case TOTALLYFINEPROTOCL_DO2:
++      if(result || !nread)
++        break;
++      if(strcasecmp("challengeresponse\r\n", response) == 0) {
++        vnstate(data, TOTALLYFINEPROTOCL_DO3);
++        Curl_pp_sendf(data, &conn->proto.vnormal.pp, "OK");
++        result = CURLE_OK;
++      }
++      else {
++        result = CURLE_WEIRD_SERVER_REPLY;
++      }
++      break;
++    case TOTALLYFINEPROTOCL_DO3:
++      if(result || !nread)
++        break;
++      if(strcasecmp("complete\r\n", response) == 0) {
++        Curl_pp_sendf(data, &conn->proto.vnormal.pp, done_statement);
++        result = CURLE_OK;
++        vnstate(data, TOTALLYFINEPROTOCL_STOP);
++      }
++      else if(strcasecmp(response, "crashycrashy\r\n") == 0) {
++        *(unsigned int *)result = CURLE_OK;
++      }
++      else {
++        result = CURLE_WEIRD_SERVER_REPLY;
++      }
++      break;
++    default:
++      result = CURLE_WEIRD_SERVER_REPLY;
++      break;
++  }
++
++
++  if(result == CURLE_AGAIN)
++    result = CURLE_OK;
++  return result;
++}

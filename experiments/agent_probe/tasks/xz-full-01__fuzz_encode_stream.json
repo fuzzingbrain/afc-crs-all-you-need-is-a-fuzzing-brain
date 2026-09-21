@@ -1,0 +1,33 @@
+{
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-xz.git",
+  "project_name": "xz",
+  "task_type": "pov",
+  "scan_mode": "full",
+  "fuzz_tooling_url": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "fuzz_tooling_ref": "challenge-state/xz-full-01",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "fuzz_encode_stream"
+  ],
+  "remove_git": true,
+  "timeout_minutes": 120,
+  "budget_limit": 100.0,
+  "concurrency": 5,
+  "docker_image": "aixcc-afc/xz:latest",
+  "prebuilt_fuzzers": {
+    "fuzz_encode_stream": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/xz-full-01/bugs/xz-001/bin/address/fuzz_encode_stream"
+  },
+  "prebuild_dir": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/xz-full-01",
+  "work_id": "xz-full-01",
+  "model_profile": "period-correct",
+  "pov_count": 1,
+  "target_commit": "8701b13098b9799808f2be1dc1c428e242186bb4",
+  "fuzzer_sources": {
+    "fuzz_encode_stream": [
+      "/home/ze/fbv2/experiments/agent_probe/prebuild/xz-full-01/fuzz_encode_stream/harness_src/fuzz_encode_stream.c",
+      "/home/ze/fbv2/experiments/agent_probe/prebuild/xz-full-01/fuzz_encode_stream/harness_src/fuzz_common.h"
+    ]
+  }
+}

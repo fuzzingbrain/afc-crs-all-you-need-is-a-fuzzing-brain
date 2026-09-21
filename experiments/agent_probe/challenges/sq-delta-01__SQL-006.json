@@ -1,0 +1,17 @@
+{
+  "challenge": "sq-delta-01__SQL-006",
+  "source_root": "/home/ze/fbv2/experiments/agent_probe/_work/sq-delta-01/repo",
+  "workspace": "/home/ze/fbv2/experiments/agent_probe/_work/sq-delta-01",
+  "repo_subdir": "repo",
+  "diff_filename": "diff/ref.diff",
+  "fuzzer": "customfuzz3",
+  "sanitizer": "address",
+  "scan_mode": "delta",
+  "changed_functions": [
+    "base85"
+  ],
+  "ground_truth_functions": [
+    "base85"
+  ],
+  "crash_type": "heap-buffer-overflow"
+}

@@ -1,0 +1,27 @@
+{
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-sqlite3.git",
+  "project_name": "sqlite3",
+  "task_type": "pov",
+  "scan_mode": "full",
+  "fuzz_tooling_url": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "fuzz_tooling_ref": "challenge-state/sq-full-01",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "customfuzz3"
+  ],
+  "remove_git": true,
+  "timeout_minutes": 45,
+  "budget_limit": 100.0,
+  "concurrency": 1,
+  "docker_image": "aixcc-afc/sqlite3:latest",
+  "prebuilt_fuzzers": {
+    "customfuzz3": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/full/sq-full-01/bugs/SQL-004/bin/address/customfuzz3"
+  },
+  "prebuild_dir": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/full/sq-full-01",
+  "work_id": "sq-full-01",
+  "model_profile": "current",
+  "pov_count": 1,
+  "target_commit": "e544ad403426518c69857d9c2d6b932e7c98a40d"
+}

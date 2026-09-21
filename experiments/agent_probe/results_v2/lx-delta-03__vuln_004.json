@@ -1,0 +1,362 @@
+{
+ "tag": "lx-delta-03__vuln_004",
+ "gt": "UTF32ToUTF8",
+ "crash_type": "heap-buffer-overflow",
+ "dynamic": {
+  "any_reach": true,
+  "any_crash": false,
+  "probes": [
+   {
+    "reached": {
+     "UTF32ToUTF8": false
+    },
+    "sink_reached": false,
+    "first_unreached": "UTF32ToUTF8",
+    "crashed": false,
+    "sanitizer_type": null,
+    "crash_frame": null,
+    "crash_matches_sp": null,
+    "asan_margin": null,
+    "operands": {}
+   },
+   {
+    "reached": {
+     "UTF32ToUTF8": false
+    },
+    "sink_reached": false,
+    "first_unreached": "UTF32ToUTF8",
+    "crashed": false,
+    "sanitizer_type": null,
+    "crash_frame": null,
+    "crash_matches_sp": null,
+    "asan_margin": null,
+    "operands": {}
+   },
+   {
+    "reached": {
+     "UTF32ToUTF8": false,
+     "xmlEncInputChunk": false,
+     "xmlEncOutputChunk": false
+    },
+    "sink_reached": false,
+    "first_unreached": "UTF32ToUTF8",
+    "crashed": false,
+    "sanitizer_type": null,
+    "crash_frame": null,
+    "crash_matches_sp": null,
+    "asan_margin": null,
+    "operands": {}
+   },
+   {
+    "reached": {
+     "UTF32ToUTF8": false,
+     "xmlEncInputChunk": true
+    },
+    "sink_reached": false,
+    "first_unreached": "UTF32ToUTF8",
+    "crashed": false,
+    "sanitizer_type": null,
+    "crash_frame": null,
+    "crash_matches_sp": null,
+    "asan_margin": null,
+    "operands": {}
+   },
+   {
+    "reached": {
+     "UTF32ToUTF8": false
+    },
+    "sink_reached": false,
+    "first_unreached": "UTF32ToUTF8",
+    "crashed": false,
+    "sanitizer_type": null,
+    "crash_frame": null,
+    "crash_matches_sp": null,
+    "asan_margin": null,
+    "operands": {}
+   },
+   {
+    "reached": {
+     "UTF32ToUTF8": false
+    },
+    "sink_reached": false,
+    "first_unreached": "UTF32ToUTF8",
+    "crashed": false,
+    "sanitizer_type": null,
+    "crash_frame": null,
+    "crash_matches_sp": null,
+    "asan_margin": null,
+    "operands": {}
+   },
+   {
+    "reached": {
+     "UTF32ToUTF8": false
+    },
+    "sink_reached": false,
+    "first_unreached": "UTF32ToUTF8",
+    "crashed": false,
+    "sanitizer_type": null,
+    "crash_frame": null,
+    "crash_matches_sp": null,
+    "asan_margin": null,
+    "operands": {}
+   }
+  ]
+ },
+ "raw_evidence": {
+  "pattern": "confirmed",
+  "taint": "confirmed",
+  "control_flow_correct": "unknown",
+  "suppressed_upstream": "refuted",
+  "sanitizer_class_unobservable": false,
+  "corrected_description": "Heap buffer overflow in UTF32ToUTF8 due to missing output buffer bounds checking. The function writes 1-4 bytes to the output buffer in each loop iteration without verifying sufficient space is available. With fuzzer-controlled input length and content, the output can exceed the allocated buffer size, especially when UTF-32 characters expand to multi-byte UTF-8 sequences.",
+  "control_flow_to_bug": "Fuzzer → HTML/XML parser → encoding conversion (xmlCharEncInput) → xmlEncInputChunk → UTF32ToUTF8 (via handler->input function pointer) → unbounded writes to output buffer at lines 2851, 2854-2855, 2858-2860, 2882-2885",
+  "reasoning": "\n## Evidence Summary\n\n### Pattern: CONFIRMED (by code reading)\nThe UTF32ToUTF8 function contains a clear heap-buffer-overflow pattern:\n- The function receives an output buffer `out` and its length `*outlen`\n- It writes to `out[0]`, `out[0..1]`, `out[0..2]`, or `out[0..3]` depending on the UTF-32 character value\n- **Critical flaw**: There is NO bounds checking before any write operations\n- The function only updates `*outlen` at the end (line 2891) but never validates available space before writing\n- Each loop iteration can write 1-4 bytes, but there's no check that `out` has sufficient remaining capacity\n\n### Taint: CONFIRMED (by code reading)\n- The `in` parameter (input buffer) is fuzzer-controlled\n- The `*inlen` parameter controls how much input is processed\n- The loop processes input in 4-byte chunks and produces variable-length output\n- Worst case: surrogate pair path writes 4 bytes per 4-byte input (1:1 ratio)\n- Best case for attacker: characters in range 0x800-0xFFFF write 3 bytes per 4-byte input\n- The output size is directly influenced by fuzzer-controlled input content and length\n\n### Control Flow: UNKNOWN (could not reach dynamically)\n- Static analysis shows the function is reachable (depth 4, 3 callers)\n- Callers: xmlEncInputChunk, xmlEncOutputChunk, xmlRelaxNGValidateDatatype\n- The function is called via function pointer through encoding handlers\n- Multiple reach_probe attempts failed to trigger UTF32ToUTF8 execution\n- This may be due to: (1) HTML fuzzer not configured for UTF-32 encoding, (2) need for specific encoding setup, or (3) indirect call path not triggered by simple inputs\n- However, static reachability is confirmed and the function exists in production code\n\n### Suppressed Upstream: REFUTED (by code reading)\n- Examined the caller xmlCharEncInput (encoding.c:1563): it calls xmlEncInputChunk with buffer pointers but does NOT validate output buffer size beforehand\n- The xmlCharEncInput function allocates/grows buffers but passes them to the encoding function without size validation\n- No upstream bounds checking found in the call chain\n- The vulnerability is NOT suppressed\n\n### Sanitizer Class: Observable (heap-buffer-overflow)\nThis is a memory-safety bug class that ASan can detect - writes beyond allocated heap buffer boundaries will trigger ASan.\n\n### Dynamic Testing: Could not reach\nDespite multiple attempts with various UTF-32 encoded inputs (UTF-32LE BOM, UTF-32BE BOM, XML encoding declarations, HTML meta tags), I could not trigger execution of UTF32ToUTF8 in the available turns. This does NOT mean the bug is absent - it means the specific input pattern to activate UTF-32 encoding conversion in the HTML fuzzer was not found.\n",
+  "generator_code": "\ndef generate() -> bytes:\n    # Best attempt: UTF-32LE encoded content with BOM\n    # UTF-32LE BOM: FF FE 00 00\n    content = b'\\xff\\xfe\\x00\\x00'\n    \n    # Add UTF-32LE encoded characters that will expand in UTF-8\n    # Use characters in the 2-byte UTF-8 range (0x80-0x7FF)\n    # and 3-byte range (0x800-0xFFFF) to maximize output size\n    \n    # Add many characters to increase chance of overflow\n    for i in range(2000):\n        # Character 0x0800 requires 3 bytes in UTF-8 but 4 in UTF-32\n        # UTF-32LE: little-endian\n        content += b'\\x00\\x08\\x00\\x00'\n    \n    # Add some surrogate pairs (worst case: 4 bytes out per 8 bytes in)\n    # High surrogate: 0xD800-0xDBFF\n    # Low surrogate: 0xDC00-0xDFFF\n    for i in range(100):\n        content += b'\\x00\\xd8\\x00\\x00'  # High surrogate\n        content += b'\\x00\\xdc\\x00\\x00'  # Low surrogate\n    \n    return content\n"
+ },
+ "modified_sp": {
+  "proceed": true,
+  "reject_reason": null,
+  "tier": "REACHED",
+  "priority": 0.4083,
+  "evidence_vector": {
+   "sanitizer_match": "confirmed",
+   "statically_reachable": "unknown",
+   "pattern": "confirmed",
+   "taint": "confirmed",
+   "suppressed_upstream": "refuted",
+   "control_flow_correct": "unknown",
+   "reached": "confirmed",
+   "margin": null,
+   "clamp_observed_dyn": "unknown",
+   "crashed": "unknown"
+  },
+  "corrected_description": "Heap buffer overflow in UTF32ToUTF8 due to missing output buffer bounds checking. The function writes 1-4 bytes to the output buffer in each loop iteration without verifying sufficient space is available. With fuzzer-controlled input length and content, the output can exceed the allocated buffer size, especially when UTF-32 characters expand to multi-byte UTF-8 sequences.",
+  "control_flow_to_bug": "Fuzzer → HTML/XML parser → encoding conversion (xmlCharEncInput) → xmlEncInputChunk → UTF32ToUTF8 (via handler->input function pointer) → unbounded writes to output buffer at lines 2851, 2854-2855, 2858-2860, 2882-2885",
+  "generator_code": "\ndef generate() -> bytes:\n    # Best attempt: UTF-32LE encoded content with BOM\n    # UTF-32LE BOM: FF FE 00 00\n    content = b'\\xff\\xfe\\x00\\x00'\n    \n    # Add UTF-32LE encoded characters that will expand in UTF-8\n    # Use characters in the 2-byte UTF-8 range (0x80-0x7FF)\n    # and 3-byte range (0x800-0xFFFF) to maximize output size\n    \n    # Add many characters to increase chance of overflow\n    for i in range(2000):\n        # Character 0x0800 requires 3 bytes in UTF-8 but 4 in UTF-32\n        # UTF-32LE: little-endian\n        content += b'\\x00\\x08\\x00\\x00'\n    \n    # Add some surrogate pairs (worst case: 4 bytes out per 8 bytes in)\n    # High surrogate: 0xD800-0xDBFF\n    # Low surrogate: 0xDC00-0xDFFF\n    for i in range(100):\n        content += b'\\x00\\xd8\\x00\\x00'  # High surrogate\n        content += b'\\x00\\xdc\\x00\\x00'  # Low surrogate\n    \n    return content\n",
+  "operand_readout": ""
+ },
+ "trajectory": [
+  {
+   "iter": 0,
+   "tool": "read_function",
+   "args": {
+    "name": "UTF32ToUTF8"
+   },
+   "result": "// encoding.c:2843\nint\nUTF32ToUTF8(unsigned char *out, int *outlen,\n              const unsigned char *in, int *inlen,\n              void *vctxt ATTRIBUTE_UNUSED) {\n    const unsigned char *instart = in;\n    const unsigned char *inend = in + (*inlen & ~1);\n    unsigned char *outstart = out;\n    unsigned long int b0, b1, b2, b3, c, d;\n    int ret = XML_ENC_ERR_SPACE;\n\n    if ((in[0] != 0x20) && (in[1] != 0x20) && (in[2] != 0x20) && (in[3] != 0x20)) {\n        /* bom is managed already */\n    }\n\n\n    while (in < inend) {\n        b0 = in[0];\n        b1 = in[1];\n        b1 = (b1 << 0x8);\n        b2 = in[2];\n        b2 = (b2 << 0x10);\n        b3 = in[3];\n        b3 = (b3 << 0x18);\n        c = b0 | b1 | b2 | b3;\n\n        if (c < 0x80) {\n            out[0] = c;\n            in += 4;\n            out += 1;\n        } else if (c < 0x800) {\n            out[0] = (c >> 6)   | 0xC0;\n            out[1] = (c & 0x3F) | 0x80;\n            in += 4;\n            out += 2;\n        } else if ((c & 0xF800) != 0xD800) {\n            out[0] =  (c >> 12)         | 0xE0;\n            out[1] = ((c >>  6) & 0x3F) | 0x80;\n            out[2] =  (c        & 0x3F) | 0x80;\n            in += 4;\n            out += 3;\n        } else {\n            /* Surrogate pair */\n            if ((c & 0xFC00) != 0xD800) {\n                ret = XML_ERR_INTERNAL_ERROR;\n                break;\n            }\n\t        if (inend - in < 4)\n\t\t        break;\n            d = in[2] | (in[3] << 8);\n            if ((d & 0xFC00) != 0xDC00) {\n                ret = XML_ERR_INTERNAL_ERROR;\n                break;\n            }\n            /*\n                simplified due to encoding errors encountered with:\n\n                c = (c << 10) + d - ((0xD800 << 10) + 0xDC00 - 0x10000);\n                out[0] =  (c >> 18)         | 0xF0;\n                out[1] = ((c >> 12) & 0x3F) | 0x80;\n                out[2] = ((c >>  6) & 0x3F) | 0x80;\n                out[3] =  (c        & 0x3F) | 0x80;\n            */\n            out[0] = c & 0xff;\n            out[1] = (c >> 8) & 0xff;\n            out[2] = (c >> 0x10) & 0xff;\n            out[3] = (c >> 0x18) & 0xff;\n            in += 4;\n            out += 4;\n        }\n    }\n\n    if (in-instart > 0)\n        ret = out - outstart;\n\n    *outlen = out - outstart;\n    *inlen = in - instart;\n    return(ret);\n}"
+  },
+  {
+   "iter": 0,
+   "tool": "check_reachability",
+   "args": {
+    "function_name": "UTF32ToUTF8"
+   },
+   "result": "{\"reachable\": true, \"call_depth\": 4, \"reached_by_fuzzers\": null, \"n_callers\": 3}"
+  },
+  {
+   "iter": 1,
+   "tool": "neighbors",
+   "args": {
+    "name": "UTF32ToUTF8"
+   },
+   "result": "{\"callers\": [\"xmlEncInputChunk\", \"xmlEncOutputChunk\", \"xmlRelaxNGValidateDatatype\"], \"callees\": [\"__sanitizer_cov_trace_const_cmp1\", \"__sanitizer_cov_trace_const_cmp4\", \"__sanitizer_cov_trace_const_cmp8\"]}"
+  },
+  {
+   "iter": 2,
+   "tool": "read_function",
+   "args": {
+    "name": "xmlEncInputChunk"
+   },
+   "result": "// encoding.c:1477\nint\nxmlEncInputChunk(xmlCharEncodingHandler *handler, unsigned char *out,\n                 int *outlen, const unsigned char *in, int *inlen) {\n    int ret;\n\n    if (handler->input != NULL) {\n        xmlCharEncConvFunc conv =\n            (xmlCharEncConvFunc) (void (*)(void)) handler->input;\n\n        ret = conv(out, outlen, in, inlen, handler->inputCtxt);\n        if (ret > 0)\n            ret = XML_ENC_ERR_SUCCESS;\n    }\n    else {\n        *outlen = 0;\n        *inlen = 0;\n        ret = XML_ENC_ERR_INTERNAL;\n    }\n\n    return(ret);\n}"
+  },
+  {
+   "iter": 2,
+   "tool": "read_function",
+   "args": {
+    "name": "xmlEncOutputChunk"
+   },
+   "result": "// encoding.c:1513\nstatic int\nxmlEncOutputChunk(xmlCharEncodingHandler *handler, unsigned char *out,\n                  int *outlen, const unsigned char *in, int *inlen) {\n    int ret;\n\n    if (handler->output != NULL) {\n        xmlCharEncConvFunc conv =\n            (xmlCharEncConvFunc) (void (*)(void)) handler->output;\n\n        ret = conv(out, outlen, in, inlen, handler->outputCtxt);\n        if (ret > 0)\n            ret = XML_ENC_ERR_SUCCESS;\n    }\n    else {\n        *outlen = 0;\n        *inlen = 0;\n        ret = XML_ENC_ERR_INTERNAL;\n    }\n\n    return(ret);\n}"
+  },
+  {
+   "iter": 3,
+   "tool": "reach_probe",
+   "args": {
+    "generator_code": "\ndef generate() -> bytes:\n    # Try to trigger UTF32 encoding conversion\n    # Create HTML with UTF-32 encoding declaration\n    html = b'<?xml version=\"1.0\" encoding=\"UTF-32\"?>'\n    html += b'<html>'\n    # Add UTF-32 encoded content (little-endian)\n    # Each character is 4 bytes in UTF-32\n    # Use characters that will expand in UTF-8\n    for i in range(100):\n        # UTF-32LE: 0x00000041 = 'A'\n        html += b'\\x41\\x00\\x00\\x00'\n    html += b'</html>'\n    return html\n",
+    "targets": [
+     "UTF32ToUTF8"
+    ]
+   },
+   "result": "{\"reached\": {\"UTF32ToUTF8\": false}, \"sink_reached\": false, \"first_unreached\": \"UTF32ToUTF8\", \"operands\": {}, \"asan_margin\": null, \"crashed\": false, \"sanitizer_type\": null, \"crash_frame\": null, \"crash_matches_sp\": null}"
+  },
+  {
+   "iter": 4,
+   "tool": "reach_probe",
+   "args": {
+    "generator_code": "\ndef generate() -> bytes:\n    # Create proper UTF-32LE encoded HTML\n    # UTF-32LE BOM: FF FE 00 00\n    content = b'\\xff\\xfe\\x00\\x00'\n    \n    # Simple HTML in UTF-32LE\n    # '<' = 0x3C, 'h' = 0x68, 't' = 0x74, 'm' = 0x6D, 'l' = 0x6C, '>' = 0x3E\n    html_str = '<html>test</html>'\n    for char in html_str:\n        code = ord(char)\n        # UTF-32LE: little-endian 4 bytes\n        content += bytes([code, 0, 0, 0])\n    \n    return content\n",
+    "targets": [
+     "UTF32ToUTF8"
+    ]
+   },
+   "result": "{\"reached\": {\"UTF32ToUTF8\": false}, \"sink_reached\": false, \"first_unreached\": \"UTF32ToUTF8\", \"operands\": {}, \"asan_margin\": null, \"crashed\": false, \"sanitizer_type\": null, \"crash_frame\": null, \"crash_matches_sp\": null}"
+  },
+  {
+   "iter": 5,
+   "tool": "read_function",
+   "args": {
+    "name": "xmlRelaxNGValidateDatatype"
+   },
+   "result": "// relaxng.c:8464\nstatic int\nxmlRelaxNGValidateDatatype(xmlRelaxNGValidCtxtPtr ctxt,\n                           const xmlChar * value,\n                           xmlRelaxNGDefinePtr define, xmlNodePtr node)\n{\n    int ret, tmp;\n    xmlRelaxNGTypeLibraryPtr lib;\n    void *result = NULL;\n    xmlRelaxNGDefinePtr cur;\n\n    if ((define == NULL) || (define->data == NULL)) {\n        return (-1);\n    }\n    lib = (xmlRelaxNGTypeLibraryPtr) define->data;\n    if (lib->check != NULL) {\n        if ((define->attrs != NULL) &&\n            (define->attrs->type == XML_RELAXNG_PARAM)) {\n            ret =\n                lib->check(lib->data, define->name, value, &result, node);\n        } else {\n            ret = lib->check(lib->data, define->name, value, NULL, node);\n        }\n    } else\n        ret = -1;\n    if (ret < 0) {\n        VALID_ERR2(XML_RELAXNG_ERR_TYPE, define->name);\n        if ((result != NULL) && (lib != NULL) && (lib->freef != NULL))\n            lib->freef(lib->data, result);\n        return (-1);\n    } else if (ret == 1) {\n        ret = 0;\n    } else if (ret == 2) {\n        VALID_ERR2P(XML_RELAXNG_ERR_DUPID, value);\n    } else {\n        VALID_ERR3P(XML_RELAXNG_ERR_TYPEVAL, define->name, value);\n        ret = -1;\n    }\n    cur = define->attrs;\n    while ((ret == 0) && (cur != NULL) && (cur->type == XML_RELAXNG_PARAM)) {\n        if (lib->facet != NULL) {\n            tmp = lib->facet(lib->data, define->name, cur->name,\n                             cur->value, value, result);\n            if (tmp != 0)\n                ret = -1;\n        }\n        cur = cur->next;\n    }\n    if ((ret == 0) && (define->content != NULL)) {\n        const xmlChar *oldvalue, *oldendvalue;\n\n        oldvalue = ctxt->state->value;\n        oldendvalue = ctxt->state->endvalue;\n        ctxt->state->value = (xmlChar *) value;\n        ctxt->state->endvalue = NULL;\n        ret = xmlRelaxNGValidateValue(ctxt, define->content);\n        ctxt->state->value = (xmlChar *) oldvalue;\n        ctxt->state->endvalue = (xmlChar *) oldendvalue;\n    }\n    if ((result != NULL) && (lib != NULL) && (lib->freef != NULL))\n        lib->freef(lib->data, result);\n    return (ret);\n}"
+  },
+  {
+   "iter": 6,
+   "tool": "read_function",
+   "args": {
+    "name": "xmlFindCharEncodingHandler"
+   },
+   "result": "// encoding.c:1063\nxmlCharEncodingHandlerPtr\nxmlFindCharEncodingHandler(const char *name) {\n    xmlCharEncodingHandler *ret;\n\n    /*\n     * This handler shouldn't be used, but we must return a non-NULL\n     * handler.\n     */\n    if ((xmlStrcasecmp(BAD_CAST name, BAD_CAST \"UTF-8\") == 0) ||\n        (xmlStrcasecmp(BAD_CAST name, BAD_CAST \"UTF8\") == 0))\n        return((xmlCharEncodingHandlerPtr)\n                &defaultHandlers[XML_CHAR_ENCODING_UTF8]);\n\n    xmlOpenCharEncodingHandler(name, 0, &ret);\n    return(ret);\n}"
+  },
+  {
+   "iter": 7,
+   "tool": "read_function",
+   "args": {
+    "name": "xmlOpenCharEncodingHandler"
+   },
+   "result": "// encoding.c:1044\nint\nxmlOpenCharEncodingHandler(const char *name, int output,\n                           xmlCharEncodingHandler **out) {\n    return(xmlCreateCharEncodingHandler(name, output, NULL, NULL, out));\n}"
+  },
+  {
+   "iter": 8,
+   "tool": "read_function",
+   "args": {
+    "name": "xmlCreateCharEncodingHandler"
+   },
+   "result": "// encoding.c:983\nint\nxmlCreateCharEncodingHandler(const char *name, int output,\n                             xmlCharEncConvImpl impl, void *implCtxt,\n                             xmlCharEncodingHandler **out) {\n    const xmlCharEncodingHandler *handler;\n    const char *norig, *nalias;\n    xmlCharEncoding enc;\n\n    if (out == NULL)\n        return(XML_ERR_ARGUMENT);\n    *out = NULL;\n\n    if (name == NULL)\n        return(XML_ERR_ARGUMENT);\n\n    norig = name;\n    nalias = xmlGetEncodingAlias(name);\n    if (nalias != NULL)\n\tname = nalias;\n\n    enc = xmlParseCharEncodingInternal(name);\n\n    /* Return NULL handler for UTF-8 */\n    if (enc == XML_CHAR_ENCODING_UTF8)\n        return(XML_ERR_OK);\n\n    if ((enc > 0) && ((size_t) enc < NUM_DEFAULT_HANDLERS)) {\n        handler = &defaultHandlers[enc];\n        if ((output ? handler->output : handler->input) != NULL) {\n            *out = (xmlCharEncodingHandler *) handler;\n            return(XML_ERR_OK);\n        }\n    }\n\n    return(xmlFindExtraHandler(norig, name, output, impl, implCtxt, out));\n}"
+  },
+  {
+   "iter": 9,
+   "tool": "read_function",
+   "args": {
+    "name": "xmlParseCharEncodingInternal"
+   },
+   "result": "// encoding.c:527\nstatic xmlCharEncoding\nxmlParseCharEncodingInternal(const char *name)\n{\n    const xmlEncTableEntry *entry;\n\n    if (name == NULL)\n       return(XML_CHAR_ENCODING_NONE);\n\n    entry = bsearch(name, xmlEncTable,\n                    sizeof(xmlEncTable) / sizeof(xmlEncTable[0]),\n                    sizeof(xmlEncTable[0]), xmlCompareEncTableEntries);\n    if (entry != NULL)\n        return(entry->enc);\n\n    return(XML_CHAR_ENCODING_ERROR);\n}"
+  },
+  {
+   "iter": 10,
+   "tool": "reach_probe",
+   "args": {
+    "generator_code": "\ndef generate() -> bytes:\n    # Try using meta tag to specify UTF-32 encoding\n    html = b'<html><head>'\n    html += b'<meta charset=\"UTF-32LE\">'\n    html += b'</head><body>'\n    # Add some content\n    html += b'A' * 1000\n    html += b'</body></html>'\n    return html\n",
+    "targets": [
+     "UTF32ToUTF8",
+     "xmlEncInputChunk",
+     "xmlEncOutputChunk"
+    ]
+   },
+   "result": "{\"reached\": {\"UTF32ToUTF8\": false, \"xmlEncInputChunk\": false, \"xmlEncOutputChunk\": false}, \"sink_reached\": false, \"first_unreached\": \"UTF32ToUTF8\", \"operands\": {}, \"asan_margin\": null, \"crashed\": false, \"sanitizer_type\": null, \"crash_frame\": null, \"crash_matches_sp\": null}"
+  },
+  {
+   "iter": 11,
+   "tool": "read_function",
+   "args": {
+    "name": "xmlParserInputBufferGrow"
+   },
+   "result": "// xmlIO.c:2145\nint\nxmlParserInputBufferGrow(xmlParserInputBufferPtr in, int len) {\n    int res = 0;\n\n    if ((in == NULL) || (in->error))\n        return(-1);\n\n    if (len < MINLEN)\n        len = MINLEN;\n\n    /*\n     * Call the read method for this I/O type.\n     */\n    if (in->readcallback != NULL) {\n        xmlBufPtr buf;\n\n        if (in->encoder == NULL) {\n            buf = in->buffer;\n        } else {\n            /*\n             * Some users only set 'encoder' and expect us to create\n             * the raw buffer lazily.\n             */\n            if (in->raw == NULL) {\n                in->raw = xmlBufCreate(XML_IO_BUFFER_SIZE);\n                if (in->raw == NULL) {\n                    in->error = XML_ERR_NO_MEMORY;\n                    return(-1);\n                }\n            }\n            buf = in->raw;\n        }\n\n        if (xmlBufGrow(buf, len) < 0) {\n            in->error = XML_ERR_NO_MEMORY;\n            return(-1);\n        }\n\n\tres = in->readcallback(in->context, (char *)xmlBufEnd(buf), len);\n\tif (res <= 0)\n\t    in->readcallback = endOfInput;\n        if (res < 0) {\n            if (res == -1)\n                in->error = XML_IO_UNKNOWN;\n            else\n                in->error = -res;\n            return(-1);\n        }\n\n        if (xmlBufAddLen(buf, res) < 0) {\n            in->error = XML_ERR_NO_MEMORY;\n            return(-1);\n        }\n    }\n\n    /*\n     * Handle encoding.\n     */\n    if (in->encoder != NULL) {\n        size_t sizeOut;\n\n        /*\n         * Don't convert whole buffer when reading from memory.\n         */\n        if (in->readcallback == NULL)\n            sizeOut = len;\n        else\n            sizeOut = SIZE_MAX;\n\n\tif (xmlCharEncInput(in, &sizeOut) < 0)\n\t    return(-1);\n        res = sizeOut;\n    }\n    return(res);\n}"
+  },
+  {
+   "iter": 12,
+   "tool": "read_function",
+   "args": {
+    "name": "xmlCharEncInput"
+   },
+   "result": "// encoding.c:1563\nint\nxmlCharEncInput(xmlParserInputBufferPtr input, size_t *sizeOut)\n{\n    xmlBufPtr out, in;\n    const xmlChar *dataIn;\n    size_t availIn;\n    size_t maxOut;\n    size_t totalIn, totalOut;\n    int ret;\n\n    out = input->buffer;\n    in = input->raw;\n\n    maxOut = *sizeOut;\n    totalOut = 0;\n\n    *sizeOut = 0;\n\n    availIn = xmlBufUse(in);\n    if (availIn == 0)\n        return(0);\n    dataIn = xmlBufContent(in);\n    totalIn = 0;\n\n    while (1) {\n        size_t availOut;\n        int completeOut, completeIn;\n        int c_out, c_in;\n\n        availOut = xmlBufAvail(out);\n        if (availOut > INT_MAX / 2)\n            availOut = INT_MAX / 2;\n\n        if (availOut < maxOut) {\n            c_out = availOut;\n            completeOut = 0;\n        } else {\n            c_out = maxOut;\n            completeOut = 1;\n        }\n\n        if (availIn > INT_MAX / 2) {\n            c_in = INT_MAX / 2;\n            completeIn = 0;\n        } else {\n            c_in = availIn;\n            completeIn = 1;\n        }\n\n        ret = xmlEncInputChunk(input->encoder, xmlBufEnd(out), &c_out,\n                               dataIn, &c_in);\n\n        totalIn += c_in;\n        dataIn += c_in;\n        availIn -= c_in;\n\n        totalOut += c_out;\n        maxOut -= c_out;\n        xmlBufAddLen(out, c_out);\n\n        if ((ret != XML_ENC_ERR_SUCCESS) && (ret != XML_ENC_ERR_SPACE)) {\n            input->error = xmlEncConvertError(ret);\n            return(ret);\n        }\n\n        if ((completeOut) && (completeIn))\n            break;\n        if ((completeOut) && (ret == XML_ENC_ERR_SPACE))\n            break;\n        if ((completeIn) && (ret == XML_ENC_ERR_SUCCESS))\n            break;\n\n        if (ret == XML_ENC_ERR_SPACE) {\n            if (xmlBufGrow(out, 4096) < 0) {\n                input->error = XML_ERR_NO_MEMORY;\n                return(XML_ENC_ERR_MEMORY);\n            }\n        }\n    }\n\n    xmlBufShrink(in, totalIn);\n\n    if (input->rawconsumed > ULONG_MAX - (unsigned long) totalIn)\n        input->rawconsumed = ULONG_MAX;\n    else\n        input->rawconsumed += totalIn;\n\n    *sizeOut = totalOut;\n    return(XML_ERR_OK);\n}"
+  },
+  {
+   "iter": 13,
+   "tool": "reach_probe",
+   "args": {
+    "generator_code": "\ndef generate() -> bytes:\n    # Try to create actual UTF-32LE content with BOM\n    # UTF-32LE BOM is FF FE 00 00\n    content = b'\\xff\\xfe\\x00\\x00'\n    \n    # Add a large amount of UTF-32 data that will expand when converted to UTF-8\n    # Use characters in the 2-byte UTF-8 range (0x80-0x7FF)\n    # For example, 0x00E9 (é) becomes 2 bytes in UTF-8\n    for i in range(500):\n        # Character 0x00E9 in UTF-32LE\n        content += b'\\xe9\\x00\\x00\\x00'\n    \n    return content\n",
+    "targets": [
+     "UTF32ToUTF8",
+     "xmlEncInputChunk"
+    ]
+   },
+   "result": "{\"reached\": {\"UTF32ToUTF8\": false, \"xmlEncInputChunk\": true}, \"sink_reached\": false, \"first_unreached\": \"UTF32ToUTF8\", \"operands\": {}, \"asan_margin\": null, \"crashed\": false, \"sanitizer_type\": null, \"crash_frame\": null, \"crash_matches_sp\": null}"
+  },
+  {
+   "iter": 14,
+   "tool": "reach_probe",
+   "args": {
+    "generator_code": "\ndef generate() -> bytes:\n    # Try UTF-32BE BOM (00 00 FE FF)\n    content = b'\\x00\\x00\\xfe\\xff'\n    \n    # Add UTF-32BE encoded data\n    # '<' = 0x0000003C in UTF-32BE\n    html_chars = '<html><body>test</body></html>'\n    for char in html_chars:\n        code = ord(char)\n        # UTF-32BE: big-endian 4 bytes\n        content += bytes([0, 0, (code >> 8) & 0xff, code & 0xff])\n    \n    return content\n",
+    "targets": [
+     "UTF32ToUTF8"
+    ]
+   },
+   "result": "{\"reached\": {\"UTF32ToUTF8\": false}, \"sink_reached\": false, \"first_unreached\": \"UTF32ToUTF8\", \"operands\": {}, \"asan_margin\": null, \"crashed\": false, \"sanitizer_type\": null, \"crash_frame\": null, \"crash_matches_sp\": null}"
+  },
+  {
+   "iter": 15,
+   "tool": "read_function",
+   "args": {
+    "name": "xmlGetCharEncodingHandler"
+   },
+   "result": "// encoding.c:948\nxmlCharEncodingHandlerPtr\nxmlGetCharEncodingHandler(xmlCharEncoding enc) {\n    xmlCharEncodingHandler *ret;\n\n    xmlLookupCharEncodingHandler(enc, &ret);\n    return(ret);\n}"
+  },
+  {
+   "iter": 16,
+   "tool": "read_function",
+   "args": {
+    "name": "xmlLookupCharEncodingHandler"
+   },
+   "result": "// encoding.c:908\nint\nxmlLookupCharEncodingHandler(xmlCharEncoding enc,\n                             xmlCharEncodingHandler **out) {\n    const xmlCharEncodingHandler *handler;\n\n    if (out == NULL)\n        return(XML_ERR_ARGUMENT);\n    *out = NULL;\n\n    if ((enc <= 0) || ((size_t) enc >= NUM_DEFAULT_HANDLERS))\n        return(XML_ERR_UNSUPPORTED_ENCODING);\n\n    /* Return NULL handler for UTF-8 */\n    if ((enc == XML_CHAR_ENCODING_UTF8) ||\n        (enc == XML_CHAR_ENCODING_NONE))\n        return(XML_ERR_OK);\n\n    handler = &defaultHandlers[enc];\n    if ((handler->input != NULL) || (handler->output != NULL)) {\n        *out = (xmlCharEncodingHandler *) handler;\n        return(XML_ERR_OK);\n    }\n\n    if (handler->name != NULL)\n        return(xmlFindExtraHandler(handler->name, handler->name, 0,\n                                   NULL, NULL, out));\n\n    return(XML_ERR_UNSUPPORTED_ENCODING);\n}"
+  },
+  {
+   "iter": 17,
+   "tool": "reach_probe",
+   "args": {
+    "generator_code": "\ndef generate() -> bytes:\n    # Try creating an XML document with UTF-32 encoding declaration\n    # and actual UTF-32 content\n    xml = b'<?xml version=\"1.0\" encoding=\"UTF-32\"?>'\n    xml += b'<root>test</root>'\n    return xml\n",
+    "targets": [
+     "UTF32ToUTF8"
+    ]
+   },
+   "result": "{\"reached\": {\"UTF32ToUTF8\": false}, \"sink_reached\": false, \"first_unreached\": \"UTF32ToUTF8\", \"operands\": {}, \"asan_margin\": null, \"crashed\": false, \"sanitizer_type\": null, \"crash_frame\": null, \"crash_matches_sp\": null}"
+  },
+  {
+   "iter": 18,
+   "tool": "read_function",
+   "args": {
+    "name": "xmlInitCharEncodingHandlers"
+   },
+   "result": "// encoding.c:682\nvoid\nxmlInitCharEncodingHandlers(void) {\n    xmlInitParser();\n}"
+  },
+  {
+   "iter": 19,
+   "tool": "reach_probe",
+   "args": {
+    "generator_code": "\ndef generate() -> bytes:\n    # Maybe the fuzzer needs actual UTF-32 bytes from the start\n    # Let's try UTF-32LE with proper structure\n    # UTF-32LE BOM\n    data = b'\\xff\\xfe\\x00\\x00'\n    \n    # Simple test string in UTF-32LE\n    # Each ASCII character becomes 4 bytes\n    test_str = 'AAAA'\n    for c in test_str:\n        code = ord(c)\n        data += bytes([code & 0xff, (code >> 8) & 0xff, 0, 0])\n    \n    # Add many more characters to potentially overflow\n    for i in range(1000):\n        data += b'\\x41\\x00\\x00\\x00'  # 'A' in UTF-32LE\n    \n    return data\n",
+    "targets": [
+     "UTF32ToUTF8"
+    ]
+   },
+   "result": "{\"reached\": {\"UTF32ToUTF8\": false}, \"sink_reached\": false, \"first_unreached\": \"UTF32ToUTF8\", \"operands\": {}, \"asan_margin\": null, \"crashed\": false, \"sanitizer_type\": null, \"crash_frame\": null, \"crash_matches_sp\": null}"
+  },
+  {
+   "iter": 20,
+   "tool": "submit_evidence",
+   "args": {
+    "pattern": "confirmed",
+    "taint": "confirmed",
+    "control_flow_correct": "unknown",
+    "suppressed_upstream": "refuted",
+    "sanitizer_class_unobservable": false,
+    "corrected_description": "Heap buffer overflow in UTF32ToUTF8 due to missing output buffer bounds checking. The function writes 1-4 bytes to the output buffer in each loop iteration without verifying sufficient space is available. With fuzzer-controlled input length and content, the output can exceed the allocated buffer size, especially when UTF-32 characters expand to multi-byte UTF-8 sequences.",
+    "control_flow_to_bug": "Fuzzer → HTML/XML parser → encoding conversion (xmlCharEncInput) → xmlEncInputChunk → UTF32ToUTF8 (via handler->input function pointer) → unbounded writes to output buffer at lines 2851, 2854-2855, 2858-2860, 2882-2885",
+    "reasoning": "\n## Evidence Summary\n\n### Pattern: CONFIRMED (by code reading)\nThe UTF32ToUTF8 function contains a clear heap-buffer-overflow pattern:\n- The function receives an output buffer `out` and its length `*outlen`\n- It writes to `out[0]`, `out[0..1]`, `out[0..2]`, or `out[0..3]` depending on the UTF-32 character value\n- **Critical flaw**: There is NO bounds checking before any write operations\n- The function only updates `*outlen` at the end (line 2891) but never validates available space before writing\n- Each loop iteration can write 1-4 bytes, but there's no check that `out` has sufficient remaining capacity\n\n### Taint: CONFIRMED (by code reading)\n- The `in` parameter (input buffer) is fuzzer-controlled\n- The `*inlen` parameter controls how much input is processed\n- The loop processes input in 4-byte chunks and produces variable-length output\n- Worst case: surrogate pair path writes 4 bytes per 4-byte input (1:1 ratio)\n- Best case for attacker: characters in range 0x800-0xFFFF write 3 bytes per 4-byte input\n- The output size is directly influenced by fuzzer-controlled input content and length\n\n### Control Flow: UNKNOWN (could not reach dynamically)\n- Static analysis shows the function is reachable (depth 4, 3 callers)\n- Callers: xmlEncInputChunk, xmlEncOutputChunk, xmlRelaxNGValidateDatatype\n- The function is called via function pointer through encoding handlers\n- Multiple reach_probe attempts failed to trigger UTF32ToUTF8 execution\n- This may be due to: (1) HTML fuzzer not configured for UTF-32 encoding, (2) need for specific encoding setup, or (3) indirect call path not triggered by simple inputs\n- However, static reachability is confirmed and the function exists in production code\n\n### Suppressed Upstream: REFUTED (by code reading)\n- Examined the caller xmlCharEncInput (encoding.c:1563): it calls xmlEncInputChunk with buffer pointers but does NOT validate output buffer size beforehand\n- The xmlCharEncInput function allocates/grows buffers but passes them to the encoding function without size validation\n- No upstream bounds checking found in the call chain\n- The vulnerability is NOT suppressed\n\n### Sanitizer Class: Observable (heap-buffer-overflow)\nThis is a memory-safety bug class that ASan can detect - writes beyond allocated heap buffer boundaries will trigger ASan.\n\n### Dynamic Testing: Could not reach\nDespite multiple attempts with various UTF-32 encoded inputs (UTF-32LE BOM, UTF-32BE BOM, XML encoding declarations, HTML meta tags), I could not trigger execution of UTF32ToUTF8 in the available turns. This does NOT mean the bug is absent - it means the specific input pattern to activate UTF-32 encoding conversion in the HTML fuzzer was not found.\n",
+    "generator_code": "\ndef generate() -> bytes:\n    # Best attempt: UTF-32LE encoded content with BOM\n    # UTF-32LE BOM: FF FE 00 00\n    content = b'\\xff\\xfe\\x00\\x00'\n    \n    # Add UTF-32LE encoded characters that will expand in UTF-8\n    # Use characters in the 2-byte UTF-8 range (0x80-0x7FF)\n    # and 3-byte range (0x800-0xFFFF) to maximize output size\n    \n    # Add many characters to increase chance of overflow\n    for i in range(2000):\n        # Character 0x0800 requires 3 bytes in UTF-8 but 4 in UTF-32\n        # UTF-32LE: little-endian\n        content += b'\\x00\\x08\\x00\\x00'\n    \n    # Add some surrogate pairs (worst case: 4 bytes out per 8 bytes in)\n    # High surrogate: 0xD800-0xDBFF\n    # Low surrogate: 0xDC00-0xDFFF\n    for i in range(100):\n        content += b'\\x00\\xd8\\x00\\x00'  # High surrogate\n        content += b'\\x00\\xdc\\x00\\x00'  # Low surrogate\n    \n    return content\n"
+   },
+   "result": "{\"received\": true}"
+  }
+ ],
+ "token_totals": {
+  "in": 166609,
+  "out": 5024,
+  "total": 171633,
+  "llm_calls": 21
+ }
+}

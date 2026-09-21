@@ -1,0 +1,77 @@
+diff --git a/epan/dissectors/packet-icmp.c b/epan/dissectors/packet-icmp.c
+--- a/epan/dissectors/packet-icmp.c
++++ b/epan/dissectors/packet-icmp.c
+@@ -0,0 +1,73 @@
++dissect_interface_identification_object(tvbuff_t * tvb, int offset,
++				     proto_tree * ext_object_tree,
++				     proto_item * tf_object)
++{
++	proto_item *ti;
++	uint16_t obj_length;
++	uint8_t c_type;
++	uint8_t ident_name[ICMP_MAX_IDENT_NAME_LENGTH];
++	bool unknown_object;
++	uint32_t afi;
++	uint32_t addr_length;
++
++	unknown_object = false;
++	                   
++	obj_length = tvb_get_ntohs(tvb, offset);
++
++	            
++	c_type = tvb_get_uint8(tvb, offset + 3);
++
++	proto_item_set_text(tf_object, "Interface Identification Object");
++	if (tvb_reported_length_remaining(tvb, offset) < 5) {
++		                                                                  
++		return true;
++	}
++
++	ti = proto_tree_add_uint(ext_object_tree, hf_icmp_ext_c_type, tvb, offset + 3, 1, c_type);
++	proto_item_append_text(ti, " (%s)", val_to_str(c_type, ext_echo_ident_str, "Unknown C-Type %u"));
++	offset += 4;
++
++	switch(c_type) {
++		case ICMP_EXT_ECHO_IDENT_NAME:
++			                                          
++			tvb_memcpy(tvb, ident_name, offset, obj_length - 4);
++
++			for (unsigned i = 0; i < obj_length - 4; i++)
++				if (!g_ascii_isprint(ident_name[i]))
++					break;
++
++			proto_tree_add_item(ext_object_tree, hf_icmp_int_ident_name_string, tvb, offset, obj_length - 4, ENC_ASCII);
++			break;
++		case ICMP_EXT_ECHO_IDENT_INDEX:
++			proto_tree_add_item(ext_object_tree, hf_icmp_int_ident_index, tvb, offset, 4, ENC_NA);
++			break;
++		case ICMP_EXT_ECHO_IDENT_ADDRESS:
++			proto_tree_add_item_ret_uint(ext_object_tree, hf_icmp_int_ident_afi, tvb, offset, 2, ENC_BIG_ENDIAN, &afi);
++			offset += 2;
++			proto_tree_add_item_ret_uint(ext_object_tree, hf_icmp_int_ident_addr_length, tvb, offset, 1, ENC_BIG_ENDIAN, &addr_length);
++			offset += 1;
++			proto_tree_add_item(ext_object_tree, hf_icmp_int_ident_reserved, tvb, offset, 1, ENC_NA);
++			offset += 1;
++			switch(afi){
++				case AFNUM_INET:           
++					while(addr_length >= 4 && tvb_reported_length_remaining(tvb, offset) >= 4) {
++						proto_tree_add_item(ext_object_tree, hf_icmp_int_ident_ipv4, tvb, offset, 4, ENC_BIG_ENDIAN);
++						offset += 4;
++						addr_length -= 4;
++					}
++					break;
++				case AFNUM_INET6:           
++					while(addr_length >= 16 && tvb_reported_length_remaining(tvb, offset) >= 16) {
++						proto_tree_add_item(ext_object_tree, hf_icmp_int_ident_ipv6, tvb, offset, 16, ENC_NA);
++						offset += 16;
++						addr_length -= 16;
++					}
++					break;
++				default:                 
++					proto_tree_add_item(ext_object_tree, hf_icmp_int_ident_address, tvb, offset, tvb_reported_length_remaining(tvb, offset), ENC_NA);
++			}
++	}
++
++	return unknown_object;
++
++}

@@ -1,0 +1,33 @@
+diff --git a/ext/lsm1/lsm_sorted.c b/ext/lsm1/lsm_sorted.c
+--- a/ext/lsm1/lsm_sorted.c
++++ b/ext/lsm1/lsm_sorted.c
+@@ -0,0 +1,29 @@
++static int fileToString(
++  lsm_db *pDb,                                       
++  char *aBuf, 
++  int nBuf, 
++  int nMin,
++  Segment *pSeg
++){
++  int i = 0;
++  if( pSeg ){
++    char *zSeg;
++
++    zSeg = segToString(pDb->pEnv, pSeg, nMin);
++    snprintf(&aBuf[i], nBuf-i, "%s", zSeg);
++    i += strlen(&aBuf[i]);
++    lsmFree(pDb->pEnv, zSeg);
++
++#ifdef LSM_LOG_FREELIST
++    lsmInfoArrayStructure(pDb, 1, pSeg->iFirst, &zSeg);
++    snprintf(&aBuf[i], nBuf-1, "    (%s)", zSeg);
++    i += strlen(&aBuf[i]);
++    lsmFree(pDb->pEnv, zSeg);
++#endif
++    aBuf[nBuf] = 0;
++  }else{
++    aBuf[0] = '\0';
++  }
++
++  return i;
++}

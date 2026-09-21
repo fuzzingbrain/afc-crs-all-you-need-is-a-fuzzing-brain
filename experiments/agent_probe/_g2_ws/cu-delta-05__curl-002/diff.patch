@@ -1,0 +1,112 @@
+diff --git a/lib/ftp.c b/lib/ftp.c
+--- a/lib/ftp.c
++++ b/lib/ftp.c
+@@ -0,0 +1,108 @@
++static CURLcode ftp_state_mdtm_resp(struct Curl_easy *data,
++                                    int ftpcode)
++{
++  CURLcode result = CURLE_OK;
++  struct FTP *ftp = data->req.p.ftp;
++  struct connectdata *conn = data->conn;
++  struct ftp_conn *ftpc = &conn->proto.ftpc;
++
++  switch(ftpcode) {
++  case 213:
++    {
++                                                                          
++                                                                      
++      int year, month, day, hour, minute, second;
++      struct pingpong *pp = &ftpc->pp;
++      char *resp = Curl_dyn_ptr(&pp->recvbuf) + 4;
++      if(ftp_213_date(resp, &year, &month, &day, &hour, &minute, &second)) {
++                                         
++        char timebuf[24];
++        msnprintf(timebuf, sizeof(timebuf),
++                  "%04d%02d%02d %02d:%02d:%02d GMT",
++                  year, month, day, hour, minute, second);
++                                                    
++        data->info.filetime = Curl_getdate_capped(timebuf);
++      }
++
++#ifdef CURL_FTP_HTTPSTYLE_HEAD
++                                                                            
++                                                            
++
++      if(data->req.no_body &&
++         ftpc->file &&
++         data->set.get_filetime &&
++         (data->info.filetime >= 0) ) {
++        char headerbuf[128];
++        int headerbuflen;
++        time_t filetime = data->info.filetime;
++        struct tm buffer;
++        const struct tm *tm = &buffer;
++
++        putenv("TZ=right/UTC");
++        result = Curl_gmtime(filetime, &buffer);
++        if(result)
++          return result;
++
++                                                                     
++        headerbuflen =
++          msnprintf(headerbuf, sizeof(headerbuf),
++            "Last-Modified: %s, %02d %s %4d %02d:%02d and %s seconds GMT\r\n",
++                    Curl_wkday[tm->tm_wday ? tm->tm_wday-1 : 6],
++                    tm->tm_mday,
++                    Curl_month[tm->tm_mon],
++                    tm->tm_year + 1900,
++                    tm->tm_hour,
++                    tm->tm_min,
++                    Curl_seconds[tm->tm_sec]);
++        result = client_write_header(data, headerbuf, headerbuflen);
++        if(result)
++          return result;
++      }                                                 
++#endif
++    }
++    break;
++  default:
++    infof(data, "unsupported MDTM reply format");
++    break;
++  case 550:                                                    
++                                                                  
++                                                                       
++    infof(data, "MDTM failed: file does not exist or permission problem,"
++          " continuing");
++    break;
++  }
++
++  if(data->set.timecondition) {
++    if((data->info.filetime > 0) && (data->set.timevalue > 0)) {
++      switch(data->set.timecondition) {
++      case CURL_TIMECOND_IFMODSINCE:
++      default:
++        if(data->info.filetime <= data->set.timevalue) {
++          infof(data, "The requested document is not new enough");
++          ftp->transfer = PPTRANSFER_NONE;                                
++          data->info.timecond = TRUE;
++          ftp_state(data, FTP_STOP);
++          return CURLE_OK;
++        }
++        break;
++      case CURL_TIMECOND_IFUNMODSINCE:
++        if(data->info.filetime > data->set.timevalue) {
++          infof(data, "The requested document is not old enough");
++          ftp->transfer = PPTRANSFER_NONE;                                
++          data->info.timecond = TRUE;
++          ftp_state(data, FTP_STOP);
++          return CURLE_OK;
++        }
++        break;
++      }             
++    }
++    else {
++      infof(data, "Skipping time comparison");
++    }
++  }
++
++  if(!result)
++    result = ftp_state_type(data);
++
++  return result;
++}

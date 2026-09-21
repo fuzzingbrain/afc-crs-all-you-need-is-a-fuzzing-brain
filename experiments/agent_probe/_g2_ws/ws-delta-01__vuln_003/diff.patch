@@ -1,0 +1,65 @@
+diff --git a/epan/dissectors/packet-ber.c b/epan/dissectors/packet-ber.c
+--- a/epan/dissectors/packet-ber.c
++++ b/epan/dissectors/packet-ber.c
+@@ -0,0 +1,61 @@
++dissect_ber_GeneralString(asn1_ctx_t *actx, proto_tree *tree, tvbuff_t *tvb, int offset, int hf_id, char *name_string, int name_len)
++{
++    int8_t      ber_class;
++    bool    pc;
++    int32_t     tag;
++    int         identifier_offset;
++    int         identifier_len;
++    uint32_t    len;
++    int         end_offset;
++    int         hoffset;
++    char        str_arr[256];
++    uint32_t    max_len;
++    char       *str;
++    proto_item *cause;
++
++    str = str_arr;
++    max_len = 255;
++    if (name_string) {
++        str = name_string;
++        max_len = name_len;
++    }
++
++    hoffset = offset;
++                                                     
++    identifier_offset = offset;
++    offset = dissect_ber_identifier(actx->pinfo, tree, tvb, offset, &ber_class, &pc, &tag);
++    identifier_len = offset - identifier_offset;
++    offset = dissect_ber_length(actx->pinfo, tree, tvb, offset, &len, NULL);
++    end_offset = offset + len;
++
++                                                             
++    if ( (ber_class != BER_CLASS_UNI)
++      || (tag != BER_UNI_TAG_GENSTR) ) {
++        tvb_ensure_bytes_exist(tvb, hoffset, 2);
++        cause = proto_tree_add_expert_format(
++            tree, actx->pinfo, &ei_ber_expected_general_string,
++            tvb, identifier_offset, identifier_len,
++            "BER Error: GeneralString expected but class:%s(%d) %s tag:%d was unexpected",
++            val_to_str_const(ber_class, ber_class_codes, "Unknown"),
++            ber_class, tfs_get_string(pc, &tfs_constructed_primitive),
++            tag);
++        if (decode_unexpected) {
++            proto_tree *unknown_tree = proto_item_add_subtree(cause, ett_ber_unknown);
++            dissect_unknown_ber(actx->pinfo, tvb, hoffset, unknown_tree);
++        }
++        return end_offset;
++    }
++
++    if (len >= (max_len - 1)) {
++        len = max_len - 1;
++    }
++
++    tvb_memcpy(tvb, str, offset, len);
++    str[len]=0;
++
++    if (hf_id > 0) {
++        proto_tree_add_string(tree, hf_id, tvb, offset, len, str);
++    }
++
++    return end_offset;
++}

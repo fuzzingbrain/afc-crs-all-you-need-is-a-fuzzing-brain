@@ -1,0 +1,36 @@
+{
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-curl.git",
+  "project_name": "curl",
+  "task_type": "pov",
+  "scan_mode": "delta",
+  "fuzz_tooling_url": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "fuzz_tooling_ref": "challenge-state/cu-delta-03",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "curl_fuzzer_ws"
+  ],
+  "remove_git": true,
+  "timeout_minutes": 360,
+  "budget_limit": 100.0,
+  "concurrency": 1,
+  "docker_image": "aixcc-afc/curl:latest",
+  "prebuilt_fuzzers": {
+    "curl_fuzzer_ws": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/cu-delta-03/bugs/curl-007/bin/address/curl_fuzzer_ws"
+  },
+  "prebuild_dir": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/delta/cu-delta-03",
+  "work_id": "cu-delta-03",
+  "model_profile": "period-correct",
+  "pov_count": 1,
+  "base_commit": "458897b4ba4d743c1dbc2fce0607dc3802b695e3",
+  "delta_commit": "challenges/cu-delta-03",
+  "fuzzer_sources": {
+    "curl_fuzzer_ws": [
+      "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-03/curl_fuzzer_ws/harness_src/curl_fuzzer.cc",
+      "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-03/curl_fuzzer_ws/harness_src/curl_fuzzer.h",
+      "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-03/curl_fuzzer_ws/harness_src/curl_fuzzer_callback.cc",
+      "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-03/curl_fuzzer_ws/harness_src/curl_fuzzer_tlv.cc"
+    ]
+  }
+}

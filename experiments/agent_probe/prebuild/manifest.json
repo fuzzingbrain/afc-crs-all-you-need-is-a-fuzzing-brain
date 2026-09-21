@@ -1,0 +1,1026 @@
+{
+  "graphs": {
+    "av-delta-02::avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/av-delta-02/avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+      "work_id": "av-delta-02",
+      "harness": "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+      "graph_dir": "/home/ze/fb-graphs/build/av-delta-02/graph-avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+      "valid": true,
+      "functions": 12351,
+      "callgraph_nodes": 10136
+    },
+    "cm-full-01::cms_postscript_fuzzer": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cm-full-01/cms_postscript_fuzzer",
+      "work_id": "cm-full-01",
+      "harness": "cms_postscript_fuzzer",
+      "graph_dir": "/home/ze/fb-graphs/build/cm-full-01/graph-cms_postscript_fuzzer",
+      "valid": true,
+      "functions": 1322,
+      "callgraph_nodes": 984
+    },
+    "cm-full-01::cms_virtual_profile_fuzzer": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cm-full-01/cms_virtual_profile_fuzzer",
+      "work_id": "cm-full-01",
+      "harness": "cms_virtual_profile_fuzzer",
+      "graph_dir": "/home/ze/fb-graphs/build/cm-full-01/graph-cms_virtual_profile_fuzzer",
+      "valid": true,
+      "functions": 1315,
+      "callgraph_nodes": 905
+    },
+    "cu-delta-01::curl_fuzzer_ws": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-01/curl_fuzzer_ws",
+      "work_id": "cu-delta-01",
+      "harness": "curl_fuzzer_ws",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-delta-01/graph-curl_fuzzer_ws",
+      "valid": true,
+      "functions": 24425,
+      "callgraph_nodes": 21577
+    },
+    "cu-delta-02::curl_fuzzer_ws": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-02/curl_fuzzer_ws",
+      "work_id": "cu-delta-02",
+      "harness": "curl_fuzzer_ws",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-delta-02/graph-curl_fuzzer_ws",
+      "valid": true,
+      "functions": 2803,
+      "callgraph_nodes": 2416
+    },
+    "cu-delta-03::curl_fuzzer_ws": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-03/curl_fuzzer_ws",
+      "work_id": "cu-delta-03",
+      "harness": "curl_fuzzer_ws",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-delta-03/graph-curl_fuzzer_ws",
+      "valid": true,
+      "functions": 2803,
+      "callgraph_nodes": 2416
+    },
+    "cu-delta-04::curl_fuzzer_http": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-04/curl_fuzzer_http",
+      "work_id": "cu-delta-04",
+      "harness": "curl_fuzzer_http",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-delta-04/graph-curl_fuzzer_http",
+      "valid": true,
+      "functions": 2810,
+      "callgraph_nodes": 2423
+    },
+    "cu-delta-04::curl_fuzzer_ws": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-04/curl_fuzzer_ws",
+      "work_id": "cu-delta-04",
+      "harness": "curl_fuzzer_ws",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-delta-04/graph-curl_fuzzer_ws",
+      "valid": true,
+      "functions": 2810,
+      "callgraph_nodes": 2423
+    },
+    "cu-delta-05::curl_fuzzer_dict": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-05/curl_fuzzer_dict",
+      "work_id": "cu-delta-05",
+      "harness": "curl_fuzzer_dict",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-delta-05/graph-curl_fuzzer_dict",
+      "valid": true,
+      "functions": 2797,
+      "callgraph_nodes": 2410
+    },
+    "cu-delta-05::curl_fuzzer_ftp": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-05/curl_fuzzer_ftp",
+      "work_id": "cu-delta-05",
+      "harness": "curl_fuzzer_ftp",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-delta-05/graph-curl_fuzzer_ftp",
+      "valid": true,
+      "functions": 2797,
+      "callgraph_nodes": 2410
+    },
+    "cu-full-01::curl_fuzzer": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-full-01/curl_fuzzer",
+      "work_id": "cu-full-01",
+      "harness": "curl_fuzzer",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-full-01/graph-curl_fuzzer",
+      "valid": true,
+      "functions": 24432,
+      "callgraph_nodes": 21586
+    },
+    "da-full-01::dav1d_fuzzer_mt@NO_OOM": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/da-full-01/dav1d_fuzzer_mt@NO_OOM",
+      "work_id": "da-full-01",
+      "harness": "dav1d_fuzzer_mt@NO_OOM",
+      "graph_dir": "/home/ze/fb-graphs/build/da-full-01/graph-dav1d_fuzzer_mt@NO_OOM",
+      "valid": true,
+      "functions": 493,
+      "callgraph_nodes": 396
+    },
+    "ex-delta-01::exif_loader_fuzzer": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ex-delta-01/exif_loader_fuzzer",
+      "work_id": "ex-delta-01",
+      "harness": "exif_loader_fuzzer",
+      "graph_dir": "/home/ze/fb-graphs/build/ex-delta-01/graph-exif_loader_fuzzer",
+      "valid": true,
+      "functions": 356,
+      "callgraph_nodes": 262
+    },
+    "ex-delta-01::exif_from_data_fuzzer": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ex-delta-01/exif_from_data_fuzzer",
+      "work_id": "ex-delta-01",
+      "harness": "exif_from_data_fuzzer",
+      "graph_dir": "/home/ze/fb-graphs/build/ex-delta-01/graph-exif_from_data_fuzzer",
+      "valid": true,
+      "functions": 358,
+      "callgraph_nodes": 259
+    },
+    "ex-delta-02::exif_from_data_fuzzer": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ex-delta-02/exif_from_data_fuzzer",
+      "work_id": "ex-delta-02",
+      "harness": "exif_from_data_fuzzer",
+      "graph_dir": "/home/ze/fb-graphs/build/ex-delta-02/graph-exif_from_data_fuzzer",
+      "valid": true,
+      "functions": 342,
+      "callgraph_nodes": 244
+    },
+    "ex-delta-03::exif_from_data_fuzzer": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ex-delta-03/exif_from_data_fuzzer",
+      "work_id": "ex-delta-03",
+      "harness": "exif_from_data_fuzzer",
+      "graph_dir": "/home/ze/fb-graphs/build/ex-delta-03/graph-exif_from_data_fuzzer",
+      "valid": true,
+      "functions": 358,
+      "callgraph_nodes": 259
+    },
+    "fp-delta-01::TestFuzzCryptoCertificateDataSetPEM": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/fp-delta-01/TestFuzzCryptoCertificateDataSetPEM",
+      "work_id": "fp-delta-01",
+      "harness": "TestFuzzCryptoCertificateDataSetPEM",
+      "graph_dir": "/home/ze/fb-graphs/build/fp-delta-01/graph-TestFuzzCryptoCertificateDataSetPEM",
+      "valid": true,
+      "functions": 8201,
+      "callgraph_nodes": 6153
+    },
+    "fp-delta-02::TestFuzzCryptoCertificateDataSetPEM": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/fp-delta-02/TestFuzzCryptoCertificateDataSetPEM",
+      "work_id": "fp-delta-02",
+      "harness": "TestFuzzCryptoCertificateDataSetPEM",
+      "graph_dir": "/home/ze/fb-graphs/build/fp-delta-02/graph-TestFuzzCryptoCertificateDataSetPEM",
+      "valid": true,
+      "functions": 8199,
+      "callgraph_nodes": 6151
+    },
+    "fp-delta-03::TestFuzzCodecs": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/fp-delta-03/TestFuzzCodecs",
+      "work_id": "fp-delta-03",
+      "harness": "TestFuzzCodecs",
+      "graph_dir": "/home/ze/fb-graphs/build/fp-delta-03/graph-TestFuzzCodecs",
+      "valid": true,
+      "functions": 8217,
+      "callgraph_nodes": 6180
+    },
+    "fp-full-01::TestFuzzCoreServer": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/fp-full-01/TestFuzzCoreServer",
+      "work_id": "fp-full-01",
+      "harness": "TestFuzzCoreServer",
+      "graph_dir": "/home/ze/fb-graphs/build/fp-full-01/graph-TestFuzzCoreServer",
+      "valid": true,
+      "functions": 8200,
+      "callgraph_nodes": 6196
+    },
+    "lx-delta-01::html": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/lx-delta-01/html",
+      "work_id": "lx-delta-01",
+      "harness": "html",
+      "graph_dir": "/home/ze/fb-graphs/build/lx-delta-01/graph-html",
+      "valid": true,
+      "functions": 3219,
+      "callgraph_nodes": 2103
+    },
+    "lx-delta-02::xml": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/lx-delta-02/xml",
+      "work_id": "lx-delta-02",
+      "harness": "xml",
+      "graph_dir": "/home/ze/fb-graphs/build/lx-delta-02/graph-xml",
+      "valid": true,
+      "functions": 3220,
+      "callgraph_nodes": 2056
+    },
+    "lx-delta-03::html": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/lx-delta-03/html",
+      "work_id": "lx-delta-03",
+      "harness": "html",
+      "graph_dir": "/home/ze/fb-graphs/build/lx-delta-03/graph-html",
+      "valid": true,
+      "functions": 3225,
+      "callgraph_nodes": 2104
+    },
+    "lx-full-01::xml": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/lx-full-01/xml",
+      "work_id": "lx-full-01",
+      "harness": "xml",
+      "graph_dir": "/home/ze/fb-graphs/build/lx-full-01/graph-xml",
+      "valid": true,
+      "functions": 3220,
+      "callgraph_nodes": 2057
+    },
+    "lx-full-01::api": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/lx-full-01/api",
+      "work_id": "lx-full-01",
+      "harness": "api",
+      "graph_dir": "/home/ze/fb-graphs/build/lx-full-01/graph-api",
+      "valid": true,
+      "functions": 3257,
+      "callgraph_nodes": 2196
+    },
+    "mg-delta-01::fuzz": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/mg-delta-01/fuzz",
+      "work_id": "mg-delta-01",
+      "harness": "fuzz",
+      "graph_dir": "/home/ze/fb-graphs/build/mg-delta-01/graph-fuzz",
+      "valid": true,
+      "functions": 294,
+      "callgraph_nodes": 173
+    },
+    "mg-delta-02::fuzz": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/mg-delta-02/fuzz",
+      "work_id": "mg-delta-02",
+      "harness": "fuzz",
+      "graph_dir": "/home/ze/fb-graphs/build/mg-delta-02/graph-fuzz",
+      "valid": true,
+      "functions": 283,
+      "callgraph_nodes": 157
+    },
+    "mg-full-01::fuzz": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/mg-full-01/fuzz",
+      "work_id": "mg-full-01",
+      "harness": "fuzz",
+      "graph_dir": "/home/ze/fb-graphs/build/mg-full-01/graph-fuzz",
+      "valid": true,
+      "functions": 283,
+      "callgraph_nodes": 157
+    },
+    "shadowsocks-full-01::json_fuzz": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/shadowsocks-full-01/json_fuzz",
+      "work_id": "shadowsocks-full-01",
+      "harness": "json_fuzz",
+      "graph_dir": "/home/ze/fb-graphs/build/shadowsocks-full-01/graph-json_fuzz",
+      "valid": true,
+      "functions": 890,
+      "callgraph_nodes": 211
+    },
+    "sq-delta-01::customfuzz3": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/sq-delta-01/customfuzz3",
+      "work_id": "sq-delta-01",
+      "harness": "customfuzz3",
+      "graph_dir": "/home/ze/fb-graphs/build/sq-delta-01/graph-customfuzz3",
+      "valid": true,
+      "functions": 3564,
+      "callgraph_nodes": 3469
+    },
+    "sq-delta-02::customfuzz3": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/sq-delta-02/customfuzz3",
+      "work_id": "sq-delta-02",
+      "harness": "customfuzz3",
+      "graph_dir": "/home/ze/fb-graphs/build/sq-delta-02/graph-customfuzz3",
+      "valid": true,
+      "functions": 4171,
+      "callgraph_nodes": 4012
+    },
+    "sq-delta-03::customfuzz3": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/sq-delta-03/customfuzz3",
+      "work_id": "sq-delta-03",
+      "harness": "customfuzz3",
+      "graph_dir": "/home/ze/fb-graphs/build/sq-delta-03/graph-customfuzz3",
+      "valid": true,
+      "functions": 4177,
+      "callgraph_nodes": 4033
+    },
+    "sq-full-01::customfuzz3": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/sq-full-01/customfuzz3",
+      "work_id": "sq-full-01",
+      "harness": "customfuzz3",
+      "graph_dir": "/home/ze/fb-graphs/build/sq-full-01/graph-customfuzz3",
+      "valid": true,
+      "functions": 3568,
+      "callgraph_nodes": 3473
+    },
+    "systemd-full-001::fuzz-udev-rule-parse-value": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/systemd-full-001/fuzz-udev-rule-parse-value",
+      "work_id": "systemd-full-001",
+      "harness": "fuzz-udev-rule-parse-value",
+      "graph_dir": "/home/ze/fb-graphs/build/systemd-full-001/graph-fuzz-udev-rule-parse-value",
+      "valid": true,
+      "functions": 12767,
+      "callgraph_nodes": 9507
+    },
+    "systemd-full-001::fuzz-catalog": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/systemd-full-001/fuzz-catalog",
+      "work_id": "systemd-full-001",
+      "harness": "fuzz-catalog",
+      "graph_dir": "/home/ze/fb-graphs/build/systemd-full-001/graph-fuzz-catalog",
+      "valid": true,
+      "functions": 12767,
+      "callgraph_nodes": 9516
+    },
+    "systemd-full-001::fuzz-link-parser": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/systemd-full-001/fuzz-link-parser",
+      "work_id": "systemd-full-001",
+      "harness": "fuzz-link-parser",
+      "graph_dir": "/home/ze/fb-graphs/build/systemd-full-001/graph-fuzz-link-parser",
+      "valid": true,
+      "functions": 12770,
+      "callgraph_nodes": 9512
+    },
+    "systemd-full-001::fuzz-systemctl-parse-argv": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/systemd-full-001/fuzz-systemctl-parse-argv",
+      "work_id": "systemd-full-001",
+      "harness": "fuzz-systemctl-parse-argv",
+      "graph_dir": "/home/ze/fb-graphs/build/systemd-full-001/graph-fuzz-systemctl-parse-argv",
+      "valid": true,
+      "functions": 12771,
+      "callgraph_nodes": 9631
+    },
+    "ws-delta-01::handler_ber": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-delta-01/handler_ber",
+      "work_id": "ws-delta-01",
+      "harness": "handler_ber",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-delta-01/graph-handler_ber",
+      "valid": true,
+      "functions": 95377,
+      "callgraph_nodes": 93295
+    },
+    "ws-delta-02::handler_icmp": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-delta-02/handler_icmp",
+      "work_id": "ws-delta-02",
+      "harness": "handler_icmp",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-delta-02/graph-handler_icmp",
+      "valid": true,
+      "functions": 95378,
+      "callgraph_nodes": 93296
+    },
+    "ws-delta-03::handler_irc": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-delta-03/handler_irc",
+      "work_id": "ws-delta-03",
+      "harness": "handler_irc",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-delta-03/graph-handler_irc",
+      "valid": true,
+      "functions": 95388,
+      "callgraph_nodes": 93306
+    },
+    "ws-delta-04::handler_json": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-delta-04/handler_json",
+      "work_id": "ws-delta-04",
+      "harness": "handler_json",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-delta-04/graph-handler_json",
+      "valid": true,
+      "functions": 95378,
+      "callgraph_nodes": 93296
+    },
+    "ws-delta-05::handler_netbios": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-delta-05/handler_netbios",
+      "work_id": "ws-delta-05",
+      "harness": "handler_netbios",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-delta-05/graph-handler_netbios",
+      "valid": true,
+      "functions": 95377,
+      "callgraph_nodes": 93295
+    },
+    "ws-delta-07::handler_gvcp": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-delta-07/handler_gvcp",
+      "work_id": "ws-delta-07",
+      "harness": "handler_gvcp",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-delta-07/graph-handler_gvcp",
+      "valid": true,
+      "functions": 95379,
+      "callgraph_nodes": 93296
+    },
+    "ws-full-01::handler_openvpn.udp": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-full-01/handler_openvpn.udp",
+      "work_id": "ws-full-01",
+      "harness": "handler_openvpn.udp",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-full-01/graph-handler_openvpn.udp",
+      "valid": true,
+      "functions": 95384,
+      "callgraph_nodes": 93301
+    },
+    "ws-full-01::handler_telnet": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-full-01/handler_telnet",
+      "work_id": "ws-full-01",
+      "harness": "handler_telnet",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-full-01/graph-handler_telnet",
+      "valid": true,
+      "functions": 95386,
+      "callgraph_nodes": 93303
+    },
+    "ws-full-01::handler_bat.vis": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-full-01/handler_bat.vis",
+      "work_id": "ws-full-01",
+      "harness": "handler_bat.vis",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-full-01/graph-handler_bat.vis",
+      "valid": true,
+      "functions": 95385,
+      "callgraph_nodes": 93302
+    },
+    "ws-full-01::handler_netbios": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-full-01/handler_netbios",
+      "work_id": "ws-full-01",
+      "harness": "handler_netbios",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-full-01/graph-handler_netbios",
+      "valid": true,
+      "functions": 95384,
+      "callgraph_nodes": 93301
+    },
+    "ws-full-01::handler_aim": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-full-01/handler_aim",
+      "work_id": "ws-full-01",
+      "harness": "handler_aim",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-full-01/graph-handler_aim",
+      "valid": true,
+      "functions": 95386,
+      "callgraph_nodes": 93303
+    },
+    "ws-full-01::handler_zbee_zdp": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-full-01/handler_zbee_zdp",
+      "work_id": "ws-full-01",
+      "harness": "handler_zbee_zdp",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-full-01/graph-handler_zbee_zdp",
+      "valid": true,
+      "functions": 95384,
+      "callgraph_nodes": 93301
+    },
+    "xz-full-01::fuzz_encode_stream": {
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/xz-full-01/fuzz_encode_stream",
+      "work_id": "xz-full-01",
+      "harness": "fuzz_encode_stream",
+      "graph_dir": "/home/ze/fb-graphs/build/xz-full-01/graph-fuzz_encode_stream",
+      "valid": true,
+      "functions": 625,
+      "callgraph_nodes": 467
+    }
+  },
+  "bugs": [
+    {
+      "bug": "av-delta-02__avif-002",
+      "challenge": "av-delta-02",
+      "harness": "avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+      "work_id": "av-delta-02",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/av-delta-02/avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+      "graph_dir": "/home/ze/fb-graphs/build/av-delta-02/graph-avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert",
+      "valid": true,
+      "binary": "prebuild/av-delta-02/avif_fuzztest_yuvrgb@YuvRgbFuzzTest.Convert/fuzzer/avif_fuzztest_yuvrgb"
+    },
+    {
+      "bug": "cm-full-01__lcms-001",
+      "challenge": "cm-full-01",
+      "harness": "cms_postscript_fuzzer",
+      "work_id": "cm-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cm-full-01/cms_postscript_fuzzer",
+      "graph_dir": "/home/ze/fb-graphs/build/cm-full-01/graph-cms_postscript_fuzzer",
+      "valid": true,
+      "binary": "prebuild/cm-full-01/cms_postscript_fuzzer/fuzzer/cms_postscript_fuzzer"
+    },
+    {
+      "bug": "cm-full-01__lcms-002",
+      "challenge": "cm-full-01",
+      "harness": "cms_virtual_profile_fuzzer",
+      "work_id": "cm-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cm-full-01/cms_virtual_profile_fuzzer",
+      "graph_dir": "/home/ze/fb-graphs/build/cm-full-01/graph-cms_virtual_profile_fuzzer",
+      "valid": true,
+      "binary": "prebuild/cm-full-01/cms_virtual_profile_fuzzer/fuzzer/cms_virtual_profile_fuzzer"
+    },
+    {
+      "bug": "cu-delta-01__curl-005",
+      "challenge": "cu-delta-01",
+      "harness": "curl_fuzzer_ws",
+      "work_id": "cu-delta-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-01/curl_fuzzer_ws",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-delta-01/graph-curl_fuzzer_ws",
+      "valid": true,
+      "binary": "prebuild/cu-delta-01/curl_fuzzer_ws/fuzzer/curl_fuzzer_ws"
+    },
+    {
+      "bug": "cu-delta-02__curl-006",
+      "challenge": "cu-delta-02",
+      "harness": "curl_fuzzer_ws",
+      "work_id": "cu-delta-02",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-02/curl_fuzzer_ws",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-delta-02/graph-curl_fuzzer_ws",
+      "valid": true,
+      "binary": "prebuild/cu-delta-02/curl_fuzzer_ws/fuzzer/curl_fuzzer_ws"
+    },
+    {
+      "bug": "cu-delta-03__curl-007",
+      "challenge": "cu-delta-03",
+      "harness": "curl_fuzzer_ws",
+      "work_id": "cu-delta-03",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-03/curl_fuzzer_ws",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-delta-03/graph-curl_fuzzer_ws",
+      "valid": true,
+      "binary": "prebuild/cu-delta-03/curl_fuzzer_ws/fuzzer/curl_fuzzer_ws"
+    },
+    {
+      "bug": "cu-delta-04__curl-003",
+      "challenge": "cu-delta-04",
+      "harness": "curl_fuzzer_http",
+      "work_id": "cu-delta-04",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-04/curl_fuzzer_http",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-delta-04/graph-curl_fuzzer_http",
+      "valid": true,
+      "binary": "prebuild/cu-delta-04/curl_fuzzer_http/fuzzer/curl_fuzzer_http"
+    },
+    {
+      "bug": "cu-delta-04__curl-008",
+      "challenge": "cu-delta-04",
+      "harness": "curl_fuzzer_ws",
+      "work_id": "cu-delta-04",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-04/curl_fuzzer_ws",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-delta-04/graph-curl_fuzzer_ws",
+      "valid": true,
+      "binary": "prebuild/cu-delta-04/curl_fuzzer_ws/fuzzer/curl_fuzzer_ws"
+    },
+    {
+      "bug": "cu-delta-05__curl-001",
+      "challenge": "cu-delta-05",
+      "harness": "curl_fuzzer_dict",
+      "work_id": "cu-delta-05",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-05/curl_fuzzer_dict",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-delta-05/graph-curl_fuzzer_dict",
+      "valid": true,
+      "binary": "prebuild/cu-delta-05/curl_fuzzer_dict/fuzzer/curl_fuzzer_dict"
+    },
+    {
+      "bug": "cu-delta-05__curl-002",
+      "challenge": "cu-delta-05",
+      "harness": "curl_fuzzer_ftp",
+      "work_id": "cu-delta-05",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-delta-05/curl_fuzzer_ftp",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-delta-05/graph-curl_fuzzer_ftp",
+      "valid": true,
+      "binary": "prebuild/cu-delta-05/curl_fuzzer_ftp/fuzzer/curl_fuzzer_ftp"
+    },
+    {
+      "bug": "cu-full-01__curl-004",
+      "challenge": "cu-full-01",
+      "harness": "curl_fuzzer",
+      "work_id": "cu-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/cu-full-01/curl_fuzzer",
+      "graph_dir": "/home/ze/fb-graphs/build/cu-full-01/graph-curl_fuzzer",
+      "valid": true,
+      "binary": "prebuild/cu-full-01/curl_fuzzer/fuzzer/curl_fuzzer"
+    },
+    {
+      "bug": "da-full-01__dav1d-001",
+      "challenge": "da-full-01",
+      "harness": "dav1d_fuzzer_mt@NO_OOM",
+      "work_id": "da-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/da-full-01/dav1d_fuzzer_mt@NO_OOM",
+      "graph_dir": "/home/ze/fb-graphs/build/da-full-01/graph-dav1d_fuzzer_mt@NO_OOM",
+      "valid": true,
+      "binary": "prebuild/da-full-01/dav1d_fuzzer_mt@NO_OOM/fuzzer/dav1d_fuzzer_mt"
+    },
+    {
+      "bug": "ex-delta-01__exif-003",
+      "challenge": "ex-delta-01",
+      "harness": "exif_loader_fuzzer",
+      "work_id": "ex-delta-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ex-delta-01/exif_loader_fuzzer",
+      "graph_dir": "/home/ze/fb-graphs/build/ex-delta-01/graph-exif_loader_fuzzer",
+      "valid": true,
+      "binary": "prebuild/ex-delta-01/exif_loader_fuzzer/fuzzer/exif_loader_fuzzer"
+    },
+    {
+      "bug": "ex-delta-01__exif-004",
+      "challenge": "ex-delta-01",
+      "harness": "exif_loader_fuzzer",
+      "work_id": "ex-delta-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ex-delta-01/exif_loader_fuzzer",
+      "graph_dir": "/home/ze/fb-graphs/build/ex-delta-01/graph-exif_loader_fuzzer",
+      "valid": true,
+      "binary": "prebuild/ex-delta-01/exif_loader_fuzzer/fuzzer/exif_loader_fuzzer"
+    },
+    {
+      "bug": "ex-delta-01__exif-005",
+      "challenge": "ex-delta-01",
+      "harness": "exif_from_data_fuzzer",
+      "work_id": "ex-delta-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ex-delta-01/exif_from_data_fuzzer",
+      "graph_dir": "/home/ze/fb-graphs/build/ex-delta-01/graph-exif_from_data_fuzzer",
+      "valid": true,
+      "binary": "prebuild/ex-delta-01/exif_from_data_fuzzer/fuzzer/exif_from_data_fuzzer"
+    },
+    {
+      "bug": "ex-delta-02__exif-001",
+      "challenge": "ex-delta-02",
+      "harness": "exif_from_data_fuzzer",
+      "work_id": "ex-delta-02",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ex-delta-02/exif_from_data_fuzzer",
+      "graph_dir": "/home/ze/fb-graphs/build/ex-delta-02/graph-exif_from_data_fuzzer",
+      "valid": true,
+      "binary": "prebuild/ex-delta-02/exif_from_data_fuzzer/fuzzer/exif_from_data_fuzzer"
+    },
+    {
+      "bug": "ex-delta-03__exif-002",
+      "challenge": "ex-delta-03",
+      "harness": "exif_from_data_fuzzer",
+      "work_id": "ex-delta-03",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ex-delta-03/exif_from_data_fuzzer",
+      "graph_dir": "/home/ze/fb-graphs/build/ex-delta-03/graph-exif_from_data_fuzzer",
+      "valid": true,
+      "binary": "prebuild/ex-delta-03/exif_from_data_fuzzer/fuzzer/exif_from_data_fuzzer"
+    },
+    {
+      "bug": "fp-delta-01__vuln_001",
+      "challenge": "fp-delta-01",
+      "harness": "TestFuzzCryptoCertificateDataSetPEM",
+      "work_id": "fp-delta-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/fp-delta-01/TestFuzzCryptoCertificateDataSetPEM",
+      "graph_dir": "/home/ze/fb-graphs/build/fp-delta-01/graph-TestFuzzCryptoCertificateDataSetPEM",
+      "valid": true,
+      "binary": "prebuild/fp-delta-01/TestFuzzCryptoCertificateDataSetPEM/fuzzer/TestFuzzCryptoCertificateDataSetPEM"
+    },
+    {
+      "bug": "fp-delta-02__vuln_002",
+      "challenge": "fp-delta-02",
+      "harness": "TestFuzzCryptoCertificateDataSetPEM",
+      "work_id": "fp-delta-02",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/fp-delta-02/TestFuzzCryptoCertificateDataSetPEM",
+      "graph_dir": "/home/ze/fb-graphs/build/fp-delta-02/graph-TestFuzzCryptoCertificateDataSetPEM",
+      "valid": true,
+      "binary": "prebuild/fp-delta-02/TestFuzzCryptoCertificateDataSetPEM/fuzzer/TestFuzzCryptoCertificateDataSetPEM"
+    },
+    {
+      "bug": "fp-delta-03__vuln_003",
+      "challenge": "fp-delta-03",
+      "harness": "TestFuzzCodecs",
+      "work_id": "fp-delta-03",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/fp-delta-03/TestFuzzCodecs",
+      "graph_dir": "/home/ze/fb-graphs/build/fp-delta-03/graph-TestFuzzCodecs",
+      "valid": true,
+      "binary": "prebuild/fp-delta-03/TestFuzzCodecs/fuzzer/TestFuzzCodecs"
+    },
+    {
+      "bug": "fp-full-01__vuln_004",
+      "challenge": "fp-full-01",
+      "harness": "TestFuzzCoreServer",
+      "work_id": "fp-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/fp-full-01/TestFuzzCoreServer",
+      "graph_dir": "/home/ze/fb-graphs/build/fp-full-01/graph-TestFuzzCoreServer",
+      "valid": true,
+      "binary": "prebuild/fp-full-01/TestFuzzCoreServer/fuzzer/TestFuzzCoreServer"
+    },
+    {
+      "bug": "fp-full-01__vuln_005",
+      "challenge": "fp-full-01",
+      "harness": "TestFuzzCoreServer",
+      "work_id": "fp-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/fp-full-01/TestFuzzCoreServer",
+      "graph_dir": "/home/ze/fb-graphs/build/fp-full-01/graph-TestFuzzCoreServer",
+      "valid": true,
+      "binary": "prebuild/fp-full-01/TestFuzzCoreServer/fuzzer/TestFuzzCoreServer"
+    },
+    {
+      "bug": "lx-delta-01__vuln_001",
+      "challenge": "lx-delta-01",
+      "harness": "html",
+      "work_id": "lx-delta-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/lx-delta-01/html",
+      "graph_dir": "/home/ze/fb-graphs/build/lx-delta-01/graph-html",
+      "valid": true,
+      "binary": "prebuild/lx-delta-01/html/fuzzer/html"
+    },
+    {
+      "bug": "lx-delta-02__vuln_002",
+      "challenge": "lx-delta-02",
+      "harness": "xml",
+      "work_id": "lx-delta-02",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/lx-delta-02/xml",
+      "graph_dir": "/home/ze/fb-graphs/build/lx-delta-02/graph-xml",
+      "valid": true,
+      "binary": "prebuild/lx-delta-02/xml/fuzzer/xml"
+    },
+    {
+      "bug": "lx-delta-03__vuln_004",
+      "challenge": "lx-delta-03",
+      "harness": "html",
+      "work_id": "lx-delta-03",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/lx-delta-03/html",
+      "graph_dir": "/home/ze/fb-graphs/build/lx-delta-03/graph-html",
+      "valid": true,
+      "binary": "prebuild/lx-delta-03/html/fuzzer/html"
+    },
+    {
+      "bug": "lx-full-01__vuln_003",
+      "challenge": "lx-full-01",
+      "harness": "xml",
+      "work_id": "lx-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/lx-full-01/xml",
+      "graph_dir": "/home/ze/fb-graphs/build/lx-full-01/graph-xml",
+      "valid": true,
+      "binary": "prebuild/lx-full-01/xml/fuzzer/xml"
+    },
+    {
+      "bug": "lx-full-01__vuln_005",
+      "challenge": "lx-full-01",
+      "harness": "api",
+      "work_id": "lx-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/lx-full-01/api",
+      "graph_dir": "/home/ze/fb-graphs/build/lx-full-01/graph-api",
+      "valid": true,
+      "binary": "prebuild/lx-full-01/api/fuzzer/api"
+    },
+    {
+      "bug": "mg-delta-01__mongoose_1",
+      "challenge": "mg-delta-01",
+      "harness": "fuzz",
+      "work_id": "mg-delta-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/mg-delta-01/fuzz",
+      "graph_dir": "/home/ze/fb-graphs/build/mg-delta-01/graph-fuzz",
+      "valid": true,
+      "binary": "prebuild/mg-delta-01/fuzz/fuzzer/fuzz"
+    },
+    {
+      "bug": "mg-delta-02__mongoose_2",
+      "challenge": "mg-delta-02",
+      "harness": "fuzz",
+      "work_id": "mg-delta-02",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/mg-delta-02/fuzz",
+      "graph_dir": "/home/ze/fb-graphs/build/mg-delta-02/graph-fuzz",
+      "valid": true,
+      "binary": "prebuild/mg-delta-02/fuzz/fuzzer/fuzz"
+    },
+    {
+      "bug": "mg-full-01__mongoose_0",
+      "challenge": "mg-full-01",
+      "harness": "fuzz",
+      "work_id": "mg-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/mg-full-01/fuzz",
+      "graph_dir": "/home/ze/fb-graphs/build/mg-full-01/graph-fuzz",
+      "valid": true,
+      "binary": "prebuild/mg-full-01/fuzz/fuzzer/fuzz"
+    },
+    {
+      "bug": "shadowsocks-full-01__shadowsocks-libev_0",
+      "challenge": "shadowsocks-full-01",
+      "harness": "json_fuzz",
+      "work_id": "shadowsocks-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/shadowsocks-full-01/json_fuzz",
+      "graph_dir": "/home/ze/fb-graphs/build/shadowsocks-full-01/graph-json_fuzz",
+      "valid": true,
+      "binary": "prebuild/shadowsocks-full-01/json_fuzz/fuzzer/json_fuzz"
+    },
+    {
+      "bug": "shadowsocks-full-01__shadowsocks-libev_1",
+      "challenge": "shadowsocks-full-01",
+      "harness": "json_fuzz",
+      "work_id": "shadowsocks-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/shadowsocks-full-01/json_fuzz",
+      "graph_dir": "/home/ze/fb-graphs/build/shadowsocks-full-01/graph-json_fuzz",
+      "valid": true,
+      "binary": "prebuild/shadowsocks-full-01/json_fuzz/fuzzer/json_fuzz"
+    },
+    {
+      "bug": "shadowsocks-full-01__shadowsocks-libev_2",
+      "challenge": "shadowsocks-full-01",
+      "harness": "json_fuzz",
+      "work_id": "shadowsocks-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/shadowsocks-full-01/json_fuzz",
+      "graph_dir": "/home/ze/fb-graphs/build/shadowsocks-full-01/graph-json_fuzz",
+      "valid": true,
+      "binary": "prebuild/shadowsocks-full-01/json_fuzz/fuzzer/json_fuzz"
+    },
+    {
+      "bug": "shadowsocks-full-01__shadowsocks-libev_3",
+      "challenge": "shadowsocks-full-01",
+      "harness": "json_fuzz",
+      "work_id": "shadowsocks-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/shadowsocks-full-01/json_fuzz",
+      "graph_dir": "/home/ze/fb-graphs/build/shadowsocks-full-01/graph-json_fuzz",
+      "valid": true,
+      "binary": "prebuild/shadowsocks-full-01/json_fuzz/fuzzer/json_fuzz"
+    },
+    {
+      "bug": "shadowsocks-full-01__shadowsocks-libev_4",
+      "challenge": "shadowsocks-full-01",
+      "harness": "json_fuzz",
+      "work_id": "shadowsocks-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/shadowsocks-full-01/json_fuzz",
+      "graph_dir": "/home/ze/fb-graphs/build/shadowsocks-full-01/graph-json_fuzz",
+      "valid": true,
+      "binary": "prebuild/shadowsocks-full-01/json_fuzz/fuzzer/json_fuzz"
+    },
+    {
+      "bug": "sq-delta-01__SQL-006",
+      "challenge": "sq-delta-01",
+      "harness": "customfuzz3",
+      "work_id": "sq-delta-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/sq-delta-01/customfuzz3",
+      "graph_dir": "/home/ze/fb-graphs/build/sq-delta-01/graph-customfuzz3",
+      "valid": true,
+      "binary": "prebuild/sq-delta-01/customfuzz3/fuzzer/customfuzz3"
+    },
+    {
+      "bug": "sq-delta-02__SQL-008",
+      "challenge": "sq-delta-02",
+      "harness": "customfuzz3",
+      "work_id": "sq-delta-02",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/sq-delta-02/customfuzz3",
+      "graph_dir": "/home/ze/fb-graphs/build/sq-delta-02/graph-customfuzz3",
+      "valid": true,
+      "binary": "prebuild/sq-delta-02/customfuzz3/fuzzer/customfuzz3"
+    },
+    {
+      "bug": "sq-delta-03__SQL-010",
+      "challenge": "sq-delta-03",
+      "harness": "customfuzz3",
+      "work_id": "sq-delta-03",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/sq-delta-03/customfuzz3",
+      "graph_dir": "/home/ze/fb-graphs/build/sq-delta-03/graph-customfuzz3",
+      "valid": true,
+      "binary": "prebuild/sq-delta-03/customfuzz3/fuzzer/customfuzz3"
+    },
+    {
+      "bug": "sq-full-01__SQL-003",
+      "challenge": "sq-full-01",
+      "harness": "customfuzz3",
+      "work_id": "sq-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/sq-full-01/customfuzz3",
+      "graph_dir": "/home/ze/fb-graphs/build/sq-full-01/graph-customfuzz3",
+      "valid": true,
+      "binary": "prebuild/sq-full-01/customfuzz3/fuzzer/customfuzz3"
+    },
+    {
+      "bug": "sq-full-01__SQL-004",
+      "challenge": "sq-full-01",
+      "harness": "customfuzz3",
+      "work_id": "sq-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/sq-full-01/customfuzz3",
+      "graph_dir": "/home/ze/fb-graphs/build/sq-full-01/graph-customfuzz3",
+      "valid": true,
+      "binary": "prebuild/sq-full-01/customfuzz3/fuzzer/customfuzz3"
+    },
+    {
+      "bug": "systemd-full-001__systemd-001",
+      "challenge": "systemd-full-001",
+      "harness": "fuzz-udev-rule-parse-value",
+      "work_id": "systemd-full-001",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/systemd-full-001/fuzz-udev-rule-parse-value",
+      "graph_dir": "/home/ze/fb-graphs/build/systemd-full-001/graph-fuzz-udev-rule-parse-value",
+      "valid": true,
+      "binary": "prebuild/systemd-full-001/fuzz-udev-rule-parse-value/fuzzer/fuzz-udev-rule-parse-value"
+    },
+    {
+      "bug": "systemd-full-001__systemd-003",
+      "challenge": "systemd-full-001",
+      "harness": "fuzz-catalog",
+      "work_id": "systemd-full-001",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/systemd-full-001/fuzz-catalog",
+      "graph_dir": "/home/ze/fb-graphs/build/systemd-full-001/graph-fuzz-catalog",
+      "valid": true,
+      "binary": "prebuild/systemd-full-001/fuzz-catalog/fuzzer/fuzz-catalog"
+    },
+    {
+      "bug": "systemd-full-001__systemd-004",
+      "challenge": "systemd-full-001",
+      "harness": "fuzz-link-parser",
+      "work_id": "systemd-full-001",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/systemd-full-001/fuzz-link-parser",
+      "graph_dir": "/home/ze/fb-graphs/build/systemd-full-001/graph-fuzz-link-parser",
+      "valid": true,
+      "binary": "prebuild/systemd-full-001/fuzz-link-parser/fuzzer/fuzz-link-parser"
+    },
+    {
+      "bug": "systemd-full-001__systemd-005",
+      "challenge": "systemd-full-001",
+      "harness": "fuzz-systemctl-parse-argv",
+      "work_id": "systemd-full-001",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/systemd-full-001/fuzz-systemctl-parse-argv",
+      "graph_dir": "/home/ze/fb-graphs/build/systemd-full-001/graph-fuzz-systemctl-parse-argv",
+      "valid": true,
+      "binary": "prebuild/systemd-full-001/fuzz-systemctl-parse-argv/fuzzer/fuzz-systemctl-parse-argv"
+    },
+    {
+      "bug": "ws-delta-01__vuln_003",
+      "challenge": "ws-delta-01",
+      "harness": "handler_ber",
+      "work_id": "ws-delta-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-delta-01/handler_ber",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-delta-01/graph-handler_ber",
+      "valid": true,
+      "binary": "prebuild/ws-delta-01/handler_ber/fuzzer/handler_ber"
+    },
+    {
+      "bug": "ws-delta-02__vuln_004",
+      "challenge": "ws-delta-02",
+      "harness": "handler_icmp",
+      "work_id": "ws-delta-02",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-delta-02/handler_icmp",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-delta-02/graph-handler_icmp",
+      "valid": true,
+      "binary": "prebuild/ws-delta-02/handler_icmp/fuzzer/handler_icmp"
+    },
+    {
+      "bug": "ws-delta-03__vuln_006",
+      "challenge": "ws-delta-03",
+      "harness": "handler_irc",
+      "work_id": "ws-delta-03",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-delta-03/handler_irc",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-delta-03/graph-handler_irc",
+      "valid": true,
+      "binary": "prebuild/ws-delta-03/handler_irc/fuzzer/handler_irc"
+    },
+    {
+      "bug": "ws-delta-04__vuln_007",
+      "challenge": "ws-delta-04",
+      "harness": "handler_json",
+      "work_id": "ws-delta-04",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-delta-04/handler_json",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-delta-04/graph-handler_json",
+      "valid": true,
+      "binary": "prebuild/ws-delta-04/handler_json/fuzzer/handler_json"
+    },
+    {
+      "bug": "ws-delta-05__vuln_008",
+      "challenge": "ws-delta-05",
+      "harness": "handler_netbios",
+      "work_id": "ws-delta-05",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-delta-05/handler_netbios",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-delta-05/graph-handler_netbios",
+      "valid": true,
+      "binary": "prebuild/ws-delta-05/handler_netbios/fuzzer/handler_netbios"
+    },
+    {
+      "bug": "ws-delta-07__vuln_013",
+      "challenge": "ws-delta-07",
+      "harness": "handler_gvcp",
+      "work_id": "ws-delta-07",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-delta-07/handler_gvcp",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-delta-07/graph-handler_gvcp",
+      "valid": true,
+      "binary": "prebuild/ws-delta-07/handler_gvcp/fuzzer/handler_gvcp"
+    },
+    {
+      "bug": "ws-full-01__vuln_001",
+      "challenge": "ws-full-01",
+      "harness": "handler_openvpn.udp",
+      "work_id": "ws-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-full-01/handler_openvpn.udp",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-full-01/graph-handler_openvpn.udp",
+      "valid": true,
+      "binary": "prebuild/ws-full-01/handler_openvpn.udp/fuzzer/handler_openvpn.udp"
+    },
+    {
+      "bug": "ws-full-01__vuln_002",
+      "challenge": "ws-full-01",
+      "harness": "handler_telnet",
+      "work_id": "ws-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-full-01/handler_telnet",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-full-01/graph-handler_telnet",
+      "valid": true,
+      "binary": "prebuild/ws-full-01/handler_telnet/fuzzer/handler_telnet"
+    },
+    {
+      "bug": "ws-full-01__vuln_005",
+      "challenge": "ws-full-01",
+      "harness": "handler_bat.vis",
+      "work_id": "ws-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-full-01/handler_bat.vis",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-full-01/graph-handler_bat.vis",
+      "valid": true,
+      "binary": "prebuild/ws-full-01/handler_bat.vis/fuzzer/handler_bat.vis"
+    },
+    {
+      "bug": "ws-full-01__vuln_010",
+      "challenge": "ws-full-01",
+      "harness": "handler_netbios",
+      "work_id": "ws-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-full-01/handler_netbios",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-full-01/graph-handler_netbios",
+      "valid": true,
+      "binary": "prebuild/ws-full-01/handler_netbios/fuzzer/handler_netbios"
+    },
+    {
+      "bug": "ws-full-01__vuln_011",
+      "challenge": "ws-full-01",
+      "harness": "handler_aim",
+      "work_id": "ws-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-full-01/handler_aim",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-full-01/graph-handler_aim",
+      "valid": true,
+      "binary": "prebuild/ws-full-01/handler_aim/fuzzer/handler_aim"
+    },
+    {
+      "bug": "ws-full-01__vuln_012",
+      "challenge": "ws-full-01",
+      "harness": "handler_zbee_zdp",
+      "work_id": "ws-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/ws-full-01/handler_zbee_zdp",
+      "graph_dir": "/home/ze/fb-graphs/build/ws-full-01/graph-handler_zbee_zdp",
+      "valid": true,
+      "binary": "prebuild/ws-full-01/handler_zbee_zdp/fuzzer/handler_zbee_zdp"
+    },
+    {
+      "bug": "xz-full-01__xz-001",
+      "challenge": "xz-full-01",
+      "harness": "fuzz_encode_stream",
+      "work_id": "xz-full-01",
+      "prebuild_dir": "/home/ze/fbv2/experiments/agent_probe/prebuild/xz-full-01/fuzz_encode_stream",
+      "graph_dir": "/home/ze/fb-graphs/build/xz-full-01/graph-fuzz_encode_stream",
+      "valid": true,
+      "binary": "prebuild/xz-full-01/fuzz_encode_stream/fuzzer/fuzz_encode_stream"
+    }
+  ]
+}

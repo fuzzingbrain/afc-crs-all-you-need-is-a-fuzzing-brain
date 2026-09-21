@@ -1,0 +1,181 @@
+{
+  "tag": "lx-delta-03__vuln_004",
+  "gt": "UTF32ToUTF8",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Read UTF32ToUTF8 source. It computes inend = in + (*inlen & ~1) and loops while (in < inend) but then unconditionally reads in[0..3] each iteration to assemble a 32-bit codepoint. If *inlen is 2 (or any value where inend-in < 4 but in < inend), the loop executes and reads past input buffer (OOB read). In the surrogate branch it has a check `if (inend - in < 4) break;` but that is too late: the initial in[0..3] read already happened. Additionally, there is no check of available output space against *outlen anywhere in the loop; it writes 1/2/3/4 bytes to out and advances out accordingly. In the surrogate branch it writes out[0..3] unconditionally. Therefore, if caller provides an output buffer smaller than required (common in incremental conversion APIs), this can cause heap-buffer-overflow (OOB write). The suspicious-point claim about `in[2..3] where only 2 bytes may remain` is slightly off: the OOB read happens even before surrogate handling due to unconditional in[0..3] read; and the inend masking `& ~1` is also wrong for UTF-32 (should be ~3). I could not run reach_probe due to missing ASan binary path in the environment, so no dynamic crash evidence was obtained.",
+    "corrected_description": "UTF32ToUTF8 has missing bounds checks: (1) it may read past the end of the input because it loops on `in < inend` where `inend = in + (*inlen & ~1)` and then unconditionally reads `in[0..3]` each iteration (needs at least 4 bytes, and should mask with ~3). (2) it never checks remaining output capacity (*outlen) before writing 1–4 bytes, including 4 bytes in the surrogate branch, so a too-small output buffer can be overflowed (heap-buffer-overflow if out is heap-allocated).",
+    "control_flow_to_bug": "HTML/XML encoding conversion path calls UTF32ToUTF8(out,outlen,in,inlen,...). Trigger OOB read by providing *inlen < 4 but >0 so that `in < inend` holds (e.g., *inlen==2) and the loop executes, then `b0=in[0]..b3=in[3]` reads past end. Trigger OOB write by ensuring caller passes an output buffer with insufficient remaining space (small *outlen) while input contains codepoints requiring 2–4 UTF-8 bytes; in particular, a surrogate codepoint (c in 0xD800..0xDBFF) takes the else-branch and writes out[0..3] without checking space."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "UTF32ToUTF8"
+      },
+      "result": "UTF32ToUTF8(unsigned char *out, int *outlen,\n              const unsigned char *in, int *inlen,\n              void *vctxt ATTRIBUTE_UNUSED) {\n    const unsigned char *instart = in;\n    const unsigned char *inend = in + (*inlen & ~1);\n    unsigned char *outstart = out;\n    unsigned long int b0, b1, b2, b3, c, d;\n    int ret = XML_ENC_ERR_SPACE;\n\n    if ((in[0] != 0x20) && (in[1] != 0x20) && (in[2] != 0x20) && (in[3] != 0x20)) {\n                                    \n    }\n\n\n    while (in < inend) {\n        b0 = in[0];\n        b1 = in[1];\n        b1 = (b1 << 0x8);\n        b2 = in[2];\n        b2 = (b2 << 0x10);\n        b3 = in[3];\n        b3 = (b3 << 0x18);\n        c = b0 | b1 | b2 | b3;\n\n        if (c < 0x80) {\n            out[0] = c;\n            in += 4;\n            out += 1;\n        } else if (c < 0x800) {\n            out[0] = (c >> 6)   | 0xC0;\n            out[1] = (c & 0x3F) | 0x80;\n            in += 4;\n            out += 2;\n        } else if ((c & 0xF800) != 0xD800) {\n            out[0] =  (c >> 12)         | 0xE0;\n            out[1] = ((c >>  6) & 0x3F) | 0x80;\n            out[2] =  (c        & 0x3F) | 0x80;\n            in += 4;\n            out += 3;\n        } else {\n                                \n            if ((c & 0xFC00) != 0xD800) {\n                ret = XML_ERR_INTERNAL_ERROR;\n                break;\n            }\n\t        if (inend - in < 4)\n\t\t        break;\n            d = in[2] | (in[3] << 8);\n            if ((d & 0xFC00) != 0xDC00) {\n                ret = XML_ERR_INTERNAL_ERROR;\n                break;\n            }\n              \n                                                                   \n\n                                                                        \n                                                   \n                                                   \n                                                   \n                                                   \n              \n            out[0] = c & 0xff;\n            out[1] = (c >> 8) & 0xff;\n            out[2] = (c >> 0x10) & 0xff;\n            out[3] = (c >> 0x18) & 0xff;\n            in += 4;\n            out += 4;\n        }\n    }\n\n    if (in-instart > 0)\n        ret = out - outstart;\n\n    *outlen = out - outstart;\n    *inlen = in - instart;\n    return(ret);\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "UTF32ToUTF8"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"indirect\", \"n_callers\": 3}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to drive HTML parser into UTF-32 encoding conversion with small output buffer.\n    # Provide an XML declaration forcing UTF-32 and include a surrogate code point.\n    # UTF-32LE bytes for U+D800 (high surrogate) followed by U+DC00 (low surrogate)\n    # plus some surrounding markup.\n    import struct\n    def u32le(x):\n        return struct.pack('<I', x)\n    payload = b'<?xml version=\"1.0\" encoding=\"UTF-32\"?>\\n<r>'\n    # In UTF-32LE, ASCII chars are 4 bytes each; but we are giving raw bytes.\n    # Many parsers expect BOM; add UTF-32LE BOM.\n    bom = b'\\xff\\xfe\\x00\\x00'\n    # Encode minimal '<r>' etc in UTF-32LE\n    text = '<r>'\n    text2 = '</r>'\n    utf32 = bom + b''.join(u32le(ord(ch)) for ch in text)\n    utf32 += u32le(0xD800) + u32le(0xDC00)\n    utf32 += b''.join(u32le(ord(ch)) for ch in text2)\n    return utf32\n",
+        "target": "UTF32ToUTF8"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/lx-delta-03/bugs/vuln_004/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Read UTF32ToUTF8 source. It computes inend = in + (*inlen & ~1) and loops while (in < inend) but then unconditionally reads in[0..3] each iteration to assemble a 32-bit codepoint. If *inlen is 2 (or any value where inend-in < 4 but in < inend), the loop executes and reads past input buffer (OOB read). In the surrogate branch it has a check `if (inend - in < 4) break;` but that is too late: the initial in[0..3] read already happened. Additionally, there is no check of available output space against *outlen anywhere in the loop; it writes 1/2/3/4 bytes to out and advances out accordingly. In the surrogate branch it writes out[0..3] unconditionally. Therefore, if caller provides an output buffer smaller than required (common in incremental conversion APIs), this can cause heap-buffer-overflow (OOB write). The suspicious-point claim about `in[2..3] where only 2 bytes may remain` is slightly off: the OOB read happens even before surrogate handling due to unconditional in[0..3] read; and the inend masking `& ~1` is also wrong for UTF-32 (should be ~3). I could not run reach_probe due to missing ASan binary path in the environment, so no dynamic crash evidence was obtained.",
+        "corrected_description": "UTF32ToUTF8 has missing bounds checks: (1) it may read past the end of the input because it loops on `in < inend` where `inend = in + (*inlen & ~1)` and then unconditionally reads `in[0..3]` each iteration (needs at least 4 bytes, and should mask with ~3). (2) it never checks remaining output capacity (*outlen) before writing 1–4 bytes, including 4 bytes in the surrogate branch, so a too-small output buffer can be overflowed (heap-buffer-overflow if out is heap-allocated).",
+        "control_flow_to_bug": "HTML/XML encoding conversion path calls UTF32ToUTF8(out,outlen,in,inlen,...). Trigger OOB read by providing *inlen < 4 but >0 so that `in < inend` holds (e.g., *inlen==2) and the loop executes, then `b0=in[0]..b3=in[3]` reads past end. Trigger OOB write by ensuring caller passes an output buffer with insufficient remaining space (small *outlen) while input contains codepoints requiring 2–4 UTF-8 bytes; in particular, a surrogate codepoint (c in 0xD800..0xDBFF) takes the else-branch and writes out[0..3] without checking space."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1052,
+      "output_tokens": 58,
+      "total_tokens": 1110,
+      "latency_ms": 1139
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1932,
+      "output_tokens": 311,
+      "total_tokens": 2243,
+      "latency_ms": 4644
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2295,
+      "output_tokens": 639,
+      "total_tokens": 2934,
+      "latency_ms": 8881
+    }
+  ],
+  "token_totals": {
+    "input": 5279,
+    "output": 1008,
+    "total": 6287,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: html   Sanitizer: address\nFunction: UTF32ToUTF8\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): The surrogate branch writes 4 bytes (`out[0..3]`) without checking remaining output space, and reads `in[0..3]` where only 2 bytes may remain (inend = in + (*inlen & ~1)); both over-run the buffers on crafted UTF-32 input.\n\nControl flow to the bug:\n  - html encoding conversion invokes UTF32ToUTF8\n  - input decodes to the surrogate path (c & 0xF800 == 0xD800)\n  - out[0..3] write / in[2..3] read exceed the buffer bounds -> heap overflow\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_zf8Gm5w7teZml29Vc1HD8zwq",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"UTF32ToUTF8\"}"
+          }
+        },
+        {
+          "id": "call_udIHaN4VFwF4pNZHVdN6rjD7",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"UTF32ToUTF8\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_zf8Gm5w7teZml29Vc1HD8zwq",
+      "content": "UTF32ToUTF8(unsigned char *out, int *outlen,\n              const unsigned char *in, int *inlen,\n              void *vctxt ATTRIBUTE_UNUSED) {\n    const unsigned char *instart = in;\n    const unsigned char *inend = in + (*inlen & ~1);\n    unsigned char *outstart = out;\n    unsigned long int b0, b1, b2, b3, c, d;\n    int ret = XML_ENC_ERR_SPACE;\n\n    if ((in[0] != 0x20) && (in[1] != 0x20) && (in[2] != 0x20) && (in[3] != 0x20)) {\n                                    \n    }\n\n\n    while (in < inend) {\n        b0 = in[0];\n        b1 = in[1];\n        b1 = (b1 << 0x8);\n        b2 = in[2];\n        b2 = (b2 << 0x10);\n        b3 = in[3];\n        b3 = (b3 << 0x18);\n        c = b0 | b1 | b2 | b3;\n\n        if (c < 0x80) {\n            out[0] = c;\n            in += 4;\n            out += 1;\n        } else if (c < 0x800) {\n            out[0] = (c >> 6)   | 0xC0;\n            out[1] = (c & 0x3F) | 0x80;\n            in += 4;\n            out += 2;\n        } else if ((c & 0xF800) != 0xD800) {\n            out[0] =  (c >> 12)         | 0xE0;\n            out[1] = ((c >>  6) & 0x3F) | 0x80;\n            out[2] =  (c        & 0x3F) | 0x80;\n            in += 4;\n            out += 3;\n        } else {\n                                \n            if ((c & 0xFC00) != 0xD800) {\n                ret = XML_ERR_INTERNAL_ERROR;\n                break;\n            }\n\t        if (inend - in < 4)\n\t\t        break;\n            d = in[2] | (in[3] << 8);\n            if ((d & 0xFC00) != 0xDC00) {\n                ret = XML_ERR_INTERNAL_ERROR;\n                break;\n            }\n              \n                                                                   \n\n                                                                        \n                                                   \n                                                   \n                                                   \n                                                   \n              \n            out[0] = c & 0xff;\n            out[1] = (c >> 8) & 0xff;\n            out[2] = (c >> 0x10) & 0xff;\n            out[3] = (c >> 0x18) & 0xff;\n            in += 4;\n            out += 4;\n        }\n    }\n\n    if (in-instart > 0)\n        ret = out - outstart;\n\n    *outlen = out - outstart;\n    *inlen = in - instart;\n    return(ret);\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_udIHaN4VFwF4pNZHVdN6rjD7",
+      "content": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"indirect\", \"n_callers\": 3}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_CbefULyG3FfnFtKP0Ch8YNQD",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to drive HTML parser into UTF-32 encoding conversion with small output buffer.\\n    # Provide an XML declaration forcing UTF-32 and include a surrogate code point.\\n    # UTF-32LE bytes for U+D800 (high surrogate) followed by U+DC00 (low surrogate)\\n    # plus some surrounding markup.\\n    import struct\\n    def u32le(x):\\n        return struct.pack('<I', x)\\n    payload = b'<?xml version=\\\"1.0\\\" encoding=\\\"UTF-32\\\"?>\\\\n<r>'\\n    # In UTF-32LE, ASCII chars are 4 bytes each; but we are giving raw bytes.\\n    # Many parsers expect BOM; add UTF-32LE BOM.\\n    bom = b'\\\\xff\\\\xfe\\\\x00\\\\x00'\\n    # Encode minimal '<r>' etc in UTF-32LE\\n    text = '<r>'\\n    text2 = '</r>'\\n    utf32 = bom + b''.join(u32le(ord(ch)) for ch in text)\\n    utf32 += u32le(0xD800) + u32le(0xDC00)\\n    utf32 += b''.join(u32le(ord(ch)) for ch in text2)\\n    return utf32\\n\",\"target\":\"UTF32ToUTF8\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_CbefULyG3FfnFtKP0Ch8YNQD",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/lx-delta-03/bugs/vuln_004/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_6GD3CIxPQJNonenFTEfV70GE",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Read UTF32ToUTF8 source. It computes inend = in + (*inlen & ~1) and loops while (in < inend) but then unconditionally reads in[0..3] each iteration to assemble a 32-bit codepoint. If *inlen is 2 (or any value where inend-in < 4 but in < inend), the loop executes and reads past input buffer (OOB read). In the surrogate branch it has a check `if (inend - in < 4) break;` but that is too late: the initial in[0..3] read already happened. Additionally, there is no check of available output space against *outlen anywhere in the loop; it writes 1/2/3/4 bytes to out and advances out accordingly. In the surrogate branch it writes out[0..3] unconditionally. Therefore, if caller provides an output buffer smaller than required (common in incremental conversion APIs), this can cause heap-buffer-overflow (OOB write). The suspicious-point claim about `in[2..3] where only 2 bytes may remain` is slightly off: the OOB read happens even before surrogate handling due to unconditional in[0..3] read; and the inend masking `& ~1` is also wrong for UTF-32 (should be ~3). I could not run reach_probe due to missing ASan binary path in the environment, so no dynamic crash evidence was obtained.\" ,\"corrected_description\":\"UTF32ToUTF8 has missing bounds checks: (1) it may read past the end of the input because it loops on `in < inend` where `inend = in + (*inlen & ~1)` and then unconditionally reads `in[0..3]` each iteration (needs at least 4 bytes, and should mask with ~3). (2) it never checks remaining output capacity (*outlen) before writing 1–4 bytes, including 4 bytes in the surrogate branch, so a too-small output buffer can be overflowed (heap-buffer-overflow if out is heap-allocated).\",\"control_flow_to_bug\":\"HTML/XML encoding conversion path calls UTF32ToUTF8(out,outlen,in,inlen,...). Trigger OOB read by providing *inlen < 4 but >0 so that `in < inend` holds (e.g., *inlen==2) and the loop executes, then `b0=in[0]..b3=in[3]` reads past end. Trigger OOB write by ensuring caller passes an output buffer with insufficient remaining space (small *outlen) while input contains codepoints requiring 2–4 UTF-8 bytes; in particular, a surrogate codepoint (c in 0xD800..0xDBFF) takes the else-branch and writes out[0..3] without checking space.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_6GD3CIxPQJNonenFTEfV70GE",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

@@ -1,0 +1,181 @@
+{
+  "tag": "ws-full-01__vuln_010",
+  "gt": "dissect_netb_terminate_trace",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source shows signature allocated to NB_SIZE_HMAC+1 or NB_SIZE_TMAC+1 based on flag bit 0x80. Then a while loop iterates over all remaining bytes starting at offset+NB_SIGNATURE using tvb_offset_exists, and for each byte writes two hex chars into signature[index++] twice. There is no check that index stays within the allocated size, so any packet with more than (NB_SIZE_* /2) bytes available at NB_SIGNATURE will overflow the heap buffer. The loop termination depends only on tvb length, which is fuzzer-controlled. After loop, signature[index]='\\0' also writes out of bounds once index exceeded. Also note mismatch free(signature) vs g_malloc (should be g_free), but primary issue is heap buffer overflow.",
+    "corrected_description": "Heap-buffer-overflow in dissect_netb_terminate_trace: signature is allocated to a fixed small size (NB_SIZE_HMAC+1 or NB_SIZE_TMAC+1) but the code hex-encodes all remaining bytes from tvb starting at NB_SIGNATURE into signature, writing 2 bytes per input byte without bounding index to the allocation; followed by an out-of-bounds NUL terminator write. (Additionally, g_malloc is paired with free instead of g_free.)",
+    "control_flow_to_bug": "handler_netbios -> NetBIOS command dispatch selects terminate-trace dissector -> dissect_netb_terminate_trace: tree!=NULL; reads flag at offset+NB_DATA1; allocates signature based on (flag & 0x80); then while(tvb_offset_exists(tvb, offset+NB_SIGNATURE+i)) { byte=tvb_get_uint8(...); signature[index++]=...; signature[index++]=...; i++; } If tvb has more than ~NB_SIZE_*/2 bytes available from NB_SIGNATURE to end, index exceeds allocation and heap-buffer-overflow occurs; then signature[index]='\\0' further OOB."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "dissect_netb_terminate_trace"
+      },
+      "result": "dissect_netb_terminate_trace( tvbuff_t *tvb, packet_info *pinfo _U_, int offset, proto_tree *tree)\n\n{                                                            \n\tproto_tree *ttree;\n    proto_item *tf;\n\tuint8_t flag;\n\tstatic const char hex_digits[16] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};\n\tuint8_t *signature;\n\tuint8_t byte;\n\tint i = 0;\n\tint index = 0;\n\n    if (!tree)\n        return 0;\n\n    tf = proto_tree_add_item(tree, hf_netb_cmd, tvb, offset + NB_COMMAND, 1, ENC_NA);\n    ttree = proto_item_add_subtree(tf, ett_netb_status);\n\n    proto_tree_add_item(ttree, hf_netb_trace_flags, tvb, offset + NB_DATA1, 1, ENC_NA);\n\n\tflag = tvb_get_uint8(tvb, offset + NB_DATA1);\n\n\t                                         \n\tif (flag & 0x80) {\n\t\tsignature = g_malloc( NB_SIZE_HMAC + 1);\n\t} else {\n\t\tsignature = g_malloc( NB_SIZE_TMAC + 1);\n\t}\n\n\tif (signature == NULL)\n\t\treturn 0;\n\n    proto_tree_add_item(ttree, hf_netb_trace_id, tvb, offset + NB_DATA2, 2, ENC_BIG_ENDIAN);\n    proto_tree_add_item(ttree, hf_netb_trace_timestamp, tvb, offset + NB_XMIT_CORL, 4, ENC_BIG_ENDIAN);\n    proto_tree_add_item(ttree, hf_netb_trace_reason, tvb, offset + NB_RMT_SES, 1, ENC_NA);\n    proto_tree_add_item(ttree, hf_netb_trace_initiator, tvb, offset + NB_INIT_NAME, 16, ENC_ASCII | ENC_NA);\n    proto_tree_add_item(ttree, hf_netb_trace_signature, tvb, offset + NB_SIGNATURE, 8, ENC_NA);\n\n\t                                         \n\twhile ( tvb_offset_exists(tvb, offset + NB_SIGNATURE + i) ) {\n\t\tbyte = tvb_get_uint8(tvb, offset + NB_SIGNATURE + i);\n\n\t\tsignature[index++] = hex_digits[byte >> 4];\n\t\tsignature[index++] = hex_digits[byte & 0x0F];\n\n\t\ti++;\n\t}\n\n\tsignature[index] = '\\0';\n\t\n\tproto_tree_add_string(ttree, hf_netb_trace_signature, tvb, offset + NB_SIGNATURE, i - 1, signature);\n\n\tfree(signature);\n\n\treturn 0;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "dissect_netb_terminate_trace"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 7}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to trigger terminate-trace with long trailing data.\n    # We don't know exact framing; provide a large blob with varying flag byte.\n    # Put 0x80 at some early position to select HMAC size.\n    data = bytearray(b\"\\x00\"*64)\n    data[0] = 0x00\n    data[1] = 0x00\n    data[2] = 0x80  # guess NB_DATA1\n    data += b\"A\"*5000\n    return bytes(data)\n",
+        "target": "dissect_netb_terminate_trace"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-full-01/bugs/vuln_010/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source shows signature allocated to NB_SIZE_HMAC+1 or NB_SIZE_TMAC+1 based on flag bit 0x80. Then a while loop iterates over all remaining bytes starting at offset+NB_SIGNATURE using tvb_offset_exists, and for each byte writes two hex chars into signature[index++] twice. There is no check that index stays within the allocated size, so any packet with more than (NB_SIZE_* /2) bytes available at NB_SIGNATURE will overflow the heap buffer. The loop termination depends only on tvb length, which is fuzzer-controlled. After loop, signature[index]='\\0' also writes out of bounds once index exceeded. Also note mismatch free(signature) vs g_malloc (should be g_free), but primary issue is heap buffer overflow.",
+        "corrected_description": "Heap-buffer-overflow in dissect_netb_terminate_trace: signature is allocated to a fixed small size (NB_SIZE_HMAC+1 or NB_SIZE_TMAC+1) but the code hex-encodes all remaining bytes from tvb starting at NB_SIGNATURE into signature, writing 2 bytes per input byte without bounding index to the allocation; followed by an out-of-bounds NUL terminator write. (Additionally, g_malloc is paired with free instead of g_free.)",
+        "control_flow_to_bug": "handler_netbios -> NetBIOS command dispatch selects terminate-trace dissector -> dissect_netb_terminate_trace: tree!=NULL; reads flag at offset+NB_DATA1; allocates signature based on (flag & 0x80); then while(tvb_offset_exists(tvb, offset+NB_SIGNATURE+i)) { byte=tvb_get_uint8(...); signature[index++]=...; signature[index++]=...; i++; } If tvb has more than ~NB_SIZE_*/2 bytes available from NB_SIGNATURE to end, index exceeds allocation and heap-buffer-overflow occurs; then signature[index]='\\0' further OOB."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1035,
+      "output_tokens": 62,
+      "total_tokens": 1097,
+      "latency_ms": 1303
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1784,
+      "output_tokens": 155,
+      "total_tokens": 1939,
+      "latency_ms": 2673
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1989,
+      "output_tokens": 436,
+      "total_tokens": 2425,
+      "latency_ms": 6241
+    }
+  ],
+  "token_totals": {
+    "input": 4808,
+    "output": 653,
+    "total": 5461,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: handler_netbios   Sanitizer: address\nFunction: dissect_netb_terminate_trace\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): `signature` is g_malloc'd to NB_SIZE_HMAC+1 or NB_SIZE_TMAC+1, but the while loop writes `signature[index++]` twice per input byte over `tvb_offset_exists(...)` (the whole remaining packet), with no bound on index vs the allocation, overflowing the heap buffer.\n\nControl flow to the bug:\n  - handler_netbios terminate-trace command\n  - loop over remaining bytes writes 2 hex chars per byte into signature[index++]\n  - index exceeds the small signature allocation -> heap overflow\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_b9U4CZZA5XqSeOGQz1NbsKLk",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"dissect_netb_terminate_trace\"}"
+          }
+        },
+        {
+          "id": "call_7mHBGea39KJs6jQiLRvxLQVI",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"dissect_netb_terminate_trace\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_b9U4CZZA5XqSeOGQz1NbsKLk",
+      "content": "dissect_netb_terminate_trace( tvbuff_t *tvb, packet_info *pinfo _U_, int offset, proto_tree *tree)\n\n{                                                            \n\tproto_tree *ttree;\n    proto_item *tf;\n\tuint8_t flag;\n\tstatic const char hex_digits[16] = {'0','1','2','3','4','5','6','7','8','9','a','b','c','d','e','f'};\n\tuint8_t *signature;\n\tuint8_t byte;\n\tint i = 0;\n\tint index = 0;\n\n    if (!tree)\n        return 0;\n\n    tf = proto_tree_add_item(tree, hf_netb_cmd, tvb, offset + NB_COMMAND, 1, ENC_NA);\n    ttree = proto_item_add_subtree(tf, ett_netb_status);\n\n    proto_tree_add_item(ttree, hf_netb_trace_flags, tvb, offset + NB_DATA1, 1, ENC_NA);\n\n\tflag = tvb_get_uint8(tvb, offset + NB_DATA1);\n\n\t                                         \n\tif (flag & 0x80) {\n\t\tsignature = g_malloc( NB_SIZE_HMAC + 1);\n\t} else {\n\t\tsignature = g_malloc( NB_SIZE_TMAC + 1);\n\t}\n\n\tif (signature == NULL)\n\t\treturn 0;\n\n    proto_tree_add_item(ttree, hf_netb_trace_id, tvb, offset + NB_DATA2, 2, ENC_BIG_ENDIAN);\n    proto_tree_add_item(ttree, hf_netb_trace_timestamp, tvb, offset + NB_XMIT_CORL, 4, ENC_BIG_ENDIAN);\n    proto_tree_add_item(ttree, hf_netb_trace_reason, tvb, offset + NB_RMT_SES, 1, ENC_NA);\n    proto_tree_add_item(ttree, hf_netb_trace_initiator, tvb, offset + NB_INIT_NAME, 16, ENC_ASCII | ENC_NA);\n    proto_tree_add_item(ttree, hf_netb_trace_signature, tvb, offset + NB_SIGNATURE, 8, ENC_NA);\n\n\t                                         \n\twhile ( tvb_offset_exists(tvb, offset + NB_SIGNATURE + i) ) {\n\t\tbyte = tvb_get_uint8(tvb, offset + NB_SIGNATURE + i);\n\n\t\tsignature[index++] = hex_digits[byte >> 4];\n\t\tsignature[index++] = hex_digits[byte & 0x0F];\n\n\t\ti++;\n\t}\n\n\tsignature[index] = '\\0';\n\t\n\tproto_tree_add_string(ttree, hf_netb_trace_signature, tvb, offset + NB_SIGNATURE, i - 1, signature);\n\n\tfree(signature);\n\n\treturn 0;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_7mHBGea39KJs6jQiLRvxLQVI",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 7}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_K5w9MPeYUPanI3vUpwOqZXFT",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to trigger terminate-trace with long trailing data.\\n    # We don't know exact framing; provide a large blob with varying flag byte.\\n    # Put 0x80 at some early position to select HMAC size.\\n    data = bytearray(b\\\"\\\\x00\\\"*64)\\n    data[0] = 0x00\\n    data[1] = 0x00\\n    data[2] = 0x80  # guess NB_DATA1\\n    data += b\\\"A\\\"*5000\\n    return bytes(data)\\n\",\"target\":\"dissect_netb_terminate_trace\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_K5w9MPeYUPanI3vUpwOqZXFT",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/ws-full-01/bugs/vuln_010/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_aQZ4AJ8GYqYeAYvA1H7UCKuV",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source shows signature allocated to NB_SIZE_HMAC+1 or NB_SIZE_TMAC+1 based on flag bit 0x80. Then a while loop iterates over all remaining bytes starting at offset+NB_SIGNATURE using tvb_offset_exists, and for each byte writes two hex chars into signature[index++] twice. There is no check that index stays within the allocated size, so any packet with more than (NB_SIZE_* /2) bytes available at NB_SIGNATURE will overflow the heap buffer. The loop termination depends only on tvb length, which is fuzzer-controlled. After loop, signature[index]='\\\\0' also writes out of bounds once index exceeded. Also note mismatch free(signature) vs g_malloc (should be g_free), but primary issue is heap buffer overflow.\",\"corrected_description\":\"Heap-buffer-overflow in dissect_netb_terminate_trace: signature is allocated to a fixed small size (NB_SIZE_HMAC+1 or NB_SIZE_TMAC+1) but the code hex-encodes all remaining bytes from tvb starting at NB_SIGNATURE into signature, writing 2 bytes per input byte without bounding index to the allocation; followed by an out-of-bounds NUL terminator write. (Additionally, g_malloc is paired with free instead of g_free.)\",\"control_flow_to_bug\":\"handler_netbios -> NetBIOS command dispatch selects terminate-trace dissector -> dissect_netb_terminate_trace: tree!=NULL; reads flag at offset+NB_DATA1; allocates signature based on (flag & 0x80); then while(tvb_offset_exists(tvb, offset+NB_SIGNATURE+i)) { byte=tvb_get_uint8(...); signature[index++]=...; signature[index++]=...; i++; } If tvb has more than ~NB_SIZE_*/2 bytes available from NB_SIGNATURE to end, index exceeds allocation and heap-buffer-overflow occurs; then signature[index]='\\\\0' further OOB.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_aQZ4AJ8GYqYeAYvA1H7UCKuV",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

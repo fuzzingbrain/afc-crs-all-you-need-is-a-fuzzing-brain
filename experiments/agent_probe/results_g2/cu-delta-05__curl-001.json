@@ -1,0 +1,192 @@
+{
+  "tag": "cu-delta-05__curl-001",
+  "gt": "dict_do",
+  "crash_type": "SEGV",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Read dict_do: in the auth-handshake block it does `combined = malloc(strlen(second_space) + strlen(passwd)); strcpy(combined, second_space); strcpy(combined + strlen(second_space), passwd);`.\n\nThis is a classic off-by-one heap overflow: allocation omits space for the final NUL terminator of the concatenated string. If both `second_space` and `passwd` are non-empty, the second strcpy writes `strlen(passwd)+1` bytes, so the final NUL lands 1 byte past the allocated buffer. ASan would typically report a heap-buffer-overflow write.\n\nAdditionally, `second_space` points into `resp_buf` filled by `Curl_xfer_recv`. Although `resp_buf` is memset to 0 initially, the code reads up to 1024 bytes into it without ensuring a NUL terminator after the received bytes. If the receive fills the buffer completely (1024 bytes) and contains no NUL, `strchr`/`strlen` can read past the allocation (heap-buffer-overflow read). The `resp_count` logic also uses `(resp_buf + 1024 * resp_count)` but `resp_buf` is only 1024 bytes, so if `resp_count` ever increments (it is initialized to 0 and never incremented in the shown snippet), it would be an immediate OOB write; however in the provided code resp_count stays 0.\n\nNo bounds checks/clamps exist before malloc/strcpy. The tainted values are: `passwd` from URL userinfo, and `second_space` from server response. A fuzzer input can control passwd directly; controlling second_space requires controlling the DICT server response, which may not be under fuzzer control in this harness. Therefore, while the overflow pattern is present and input reaches one operand, an actual crash depends on runtime environment/network response. I could not run reach_probe due to missing ASan binary path in this environment, so no dynamic proof of reach/crash was obtained.",
+    "corrected_description": "Definite off-by-one heap buffer overflow in `combined` during MD5 auth concatenation: `malloc(strlen(second_space)+strlen(passwd))` followed by two `strcpy` calls writes an extra NUL terminator past the allocation. Also potential heap OOB read if `resp_buf` lacks NUL terminator after recv and `strlen(second_space)` scans past 1024 bytes.",
+    "control_flow_to_bug": "curl_fuzzer_dict -> (libcurl DICT protocol state machine) -> dict_do(). Conditions: URL path contains '=' so `user_end=strchr(path,'=')` non-NULL; `user_start=strchr(path,'/')+1` and `auth_start=user_end+1`; `auth_end=strchr(path,'@')` non-NULL to terminate auth; then after `Curl_xfer_recv` fills resp_buf, response must contain at least two spaces so `first_space=strchr(resp_buf,' ')` and `second_space=strchr(first_space+1,' ')` succeed; then `second_space++` and `passwd=auth_start`; then `combined=malloc(strlen(second_space)+strlen(passwd))` and `strcpy`/`strcpy` trigger 1-byte heap overflow on final NUL."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "dict_do"
+      },
+      "result": "static CURLcode dict_do(struct Curl_easy *data, bool *done)\n{\n  char *word;\n  char *eword = NULL;\n  char *ppath;\n  char *database = NULL;\n  char *strategy = NULL;\n  char *nthdef = NULL;                                                  \n                                        \n  char *resp_buf = NULL;\n  char *user_start = NULL;\n  char *user_end = NULL;\n  char *auth_start = NULL;\n  char *auth_end = NULL;\n  char *first_space = NULL;\n  char *second_space = NULL;\n  char *passwd = NULL;\n  unsigned char *combined = NULL;\n  unsigned char md5_out[MD5_DIGEST_LEN];\n\n  CURLcode result;\n\n  char *path;\n\n  *done = TRUE;                      \n\n                                                 \n  result = Curl_urldecode(data->state.up.path, 0, &path, NULL, REJECT_CTRL);\n  if(result)\n    return result;\n\n                                     \n    user_end = strchr(path, '=');\n                                          \n    if(user_end) {\n      size_t resp_count = 0;\n      ssize_t bytes_recv;\n      resp_buf = malloc(1024);\n      memset(resp_buf, 0, 1024);\n                                                 \n      user_start = strchr(path, '/') + 1;\n      *user_end = (char)0;\n      auth_start = user_end + 1;\n      auth_end = strchr(path, '@');\n      if(auth_end) {\n        *auth_end = (char)0;\n      }\n      do {\n      result = sendf(data, \"CLIENT \" LIBCURL_NAME \" \" LIBCURL_VERSION \"\\r\\n\");\n      } while(result == CURLE_AGAIN);\n      if(result)\n        goto error;\n\n      if(strcmp(auth_start, \"debug\")) {\n        do {\n        result = sendf(data, \"Sending extra debug info...\");\n        } while(result == CURLE_AGAIN);\n        do {\n        result = sendf(data, user_start);\n        } while(result == CURLE_AGAIN);\n      }\n\n\n      do {\n      result = Curl_xfer_recv(data, (resp_buf + 1024 * resp_count),\n        1024, &bytes_recv);\n      } while(result == CURLE_AGAIN);\n      if(result)\n        goto error;\n\n      first_space = strchr(resp_buf, ' ');\n      if(!first_space)\n        goto error;\n      second_space = strchr(first_space + 1, ' ');\n      if(!second_space)\n        goto error;\n      second_space++;\n      passwd = auth_start;\n      combined = malloc(strlen(second_space) + strlen(passwd));\n      strcpy(combined, second_space);\n      strcpy(combined + strlen(second_space), passwd);\n      result = Curl_md5it(md5_out, combined, strlen(combined));\n      if(result)\n        goto error;\n      do {\n      result = sendf(data,\n\"AUTH %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\\r\\n\",\n      md5_out[0],\n      md5_out[1],\n      md5_out[2],\n      md5_out[3],\n      md5_out[4],\n      md5_out[5],\n      md5_out[6],\n      md5_out[7],\n      md5_out[8],\n      md5_out[9],\n      md5_out[10],\n      md5_out[11],\n      md5_out[12],\n      md5_out[13],\n      md5_out[14],\n      md5_out[15]);\n      } while(result == CURLE_AGAIN);\n      if(result)\n        goto error;\n    }\n\n\n\n\n\n  if(strncasecompare(path, DICT_MATCH, sizeof(DICT_MATCH)-1) ||\n     strncasecompare(path, DICT_MATCH2, sizeof(DICT_MATCH2)-1) ||\n     strncasecompare(path, DICT_MATCH3, sizeof(DICT_MATCH3)-1)) {\n\n    word = strchr(path, ':');\n    if(word) {\n      word++;\n      database = strchr(word, ':');\n      if(database) {\n        *database++ = (char)0;\n        strategy = strchr(database, ':');\n        if(strategy) {\n          *strategy++ = (char)0;\n          nthdef = strchr(strategy, ':');\n          if(nthdef) {\n            *nthdef = (char)0;\n          }\n        }\n      }\n    }\n\n    if(!word || (*word == (char)0)) {\n      infof(data, \"lookup word is missing\");\n      word = (char *)\"default\";\n    }\n    if(!database || (*database == (char)0)) {\n      database = (char *)\"!\";\n    }\n    if(!strategy || (*strategy == (char)0)) {\n      strategy = (char *)\".\";\n    }\n\n    eword = unescape_word(word);\n    if(!eword) {\n      result = CURLE_OUT_OF_MEMORY;\n      goto error;\n    }\n\n\n    do {\n    result = sendf(data,\n                   \"CLIENT \" LIBCURL_NAME \" \" LIBCURL_VERSION \"\\r\\n\"\n                   \"MATCH \"\n         …[truncated]"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "dict_do"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 25}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to craft a DICT URL with user/auth part to enter the auth block.\n    # libcurl URL syntax: dict://user=pass@host/...\n    return b\"dict://user=pass@127.0.0.1/\"",
+        "target": "dict_do"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-delta-05/bugs/curl-001/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Read dict_do: in the auth-handshake block it does `combined = malloc(strlen(second_space) + strlen(passwd)); strcpy(combined, second_space); strcpy(combined + strlen(second_space), passwd);`.\n\nThis is a classic off-by-one heap overflow: allocation omits space for the final NUL terminator of the concatenated string. If both `second_space` and `passwd` are non-empty, the second strcpy writes `strlen(passwd)+1` bytes, so the final NUL lands 1 byte past the allocated buffer. ASan would typically report a heap-buffer-overflow write.\n\nAdditionally, `second_space` points into `resp_buf` filled by `Curl_xfer_recv`. Although `resp_buf` is memset to 0 initially, the code reads up to 1024 bytes into it without ensuring a NUL terminator after the received bytes. If the receive fills the buffer completely (1024 bytes) and contains no NUL, `strchr`/`strlen` can read past the allocation (heap-buffer-overflow read). The `resp_count` logic also uses `(resp_buf + 1024 * resp_count)` but `resp_buf` is only 1024 bytes, so if `resp_count` ever increments (it is initialized to 0 and never incremented in the shown snippet), it would be an immediate OOB write; however in the provided code resp_count stays 0.\n\nNo bounds checks/clamps exist before malloc/strcpy. The tainted values are: `passwd` from URL userinfo, and `second_space` from server response. A fuzzer input can control passwd directly; controlling second_space requires controlling the DICT server response, which may not be under fuzzer control in this harness. Therefore, while the overflow pattern is present and input reaches one operand, an actual crash depends on runtime environment/network response. I could not run reach_probe due to missing ASan binary path in this environment, so no dynamic proof of reach/crash was obtained.",
+        "corrected_description": "Definite off-by-one heap buffer overflow in `combined` during MD5 auth concatenation: `malloc(strlen(second_space)+strlen(passwd))` followed by two `strcpy` calls writes an extra NUL terminator past the allocation. Also potential heap OOB read if `resp_buf` lacks NUL terminator after recv and `strlen(second_space)` scans past 1024 bytes.",
+        "control_flow_to_bug": "curl_fuzzer_dict -> (libcurl DICT protocol state machine) -> dict_do(). Conditions: URL path contains '=' so `user_end=strchr(path,'=')` non-NULL; `user_start=strchr(path,'/')+1` and `auth_start=user_end+1`; `auth_end=strchr(path,'@')` non-NULL to terminate auth; then after `Curl_xfer_recv` fills resp_buf, response must contain at least two spaces so `first_space=strchr(resp_buf,' ')` and `second_space=strchr(first_space+1,' ')` succeed; then `second_space++` and `passwd=auth_start`; then `combined=malloc(strlen(second_space)+strlen(passwd))` and `strcpy`/`strcpy` trigger 1-byte heap overflow on final NUL."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1044,
+      "output_tokens": 52,
+      "total_tokens": 1096,
+      "latency_ms": 1124
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 3047,
+      "output_tokens": 85,
+      "total_tokens": 3132,
+      "latency_ms": 1595
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 3182,
+      "output_tokens": 720,
+      "total_tokens": 3902,
+      "latency_ms": 9303
+    }
+  ],
+  "token_totals": {
+    "input": 7273,
+    "output": 857,
+    "total": 8130,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: curl_fuzzer_dict   Sanitizer: address\nFunction: dict_do\nClaimed bug type: SEGV\nSuspicious-point description (from the finder — may be imprecise): Heap buffer overflow in authentication MD5 concatenation: allocates `combined = malloc(strlen(second_space) + strlen(passwd))` but then does `strcpy(combined, second_space)` and `strcpy(combined + strlen(second_space), passwd)`, which writes both strings plus a NUL terminator. Missing `+1` for the final terminator causes 1-byte heap overflow; additionally if `resp_buf` is not NUL-terminated (recv data), `strlen(second_space)` can read past `resp_buf` and make allocation/strcpy sizes inconsistent. ASan should catch OOB write/read.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a SEGV\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_l805SRWuTVp4kzRl8VWnUX3e",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"dict_do\"}"
+          }
+        },
+        {
+          "id": "call_04n692Ri4lAqWJFic4Fxq0L1",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"dict_do\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_l805SRWuTVp4kzRl8VWnUX3e",
+      "content": "static CURLcode dict_do(struct Curl_easy *data, bool *done)\n{\n  char *word;\n  char *eword = NULL;\n  char *ppath;\n  char *database = NULL;\n  char *strategy = NULL;\n  char *nthdef = NULL;                                                  \n                                        \n  char *resp_buf = NULL;\n  char *user_start = NULL;\n  char *user_end = NULL;\n  char *auth_start = NULL;\n  char *auth_end = NULL;\n  char *first_space = NULL;\n  char *second_space = NULL;\n  char *passwd = NULL;\n  unsigned char *combined = NULL;\n  unsigned char md5_out[MD5_DIGEST_LEN];\n\n  CURLcode result;\n\n  char *path;\n\n  *done = TRUE;                      \n\n                                                 \n  result = Curl_urldecode(data->state.up.path, 0, &path, NULL, REJECT_CTRL);\n  if(result)\n    return result;\n\n                                     \n    user_end = strchr(path, '=');\n                                          \n    if(user_end) {\n      size_t resp_count = 0;\n      ssize_t bytes_recv;\n      resp_buf = malloc(1024);\n      memset(resp_buf, 0, 1024);\n                                                 \n      user_start = strchr(path, '/') + 1;\n      *user_end = (char)0;\n      auth_start = user_end + 1;\n      auth_end = strchr(path, '@');\n      if(auth_end) {\n        *auth_end = (char)0;\n      }\n      do {\n      result = sendf(data, \"CLIENT \" LIBCURL_NAME \" \" LIBCURL_VERSION \"\\r\\n\");\n      } while(result == CURLE_AGAIN);\n      if(result)\n        goto error;\n\n      if(strcmp(auth_start, \"debug\")) {\n        do {\n        result = sendf(data, \"Sending extra debug info...\");\n        } while(result == CURLE_AGAIN);\n        do {\n        result = sendf(data, user_start);\n        } while(result == CURLE_AGAIN);\n      }\n\n\n      do {\n      result = Curl_xfer_recv(data, (resp_buf + 1024 * resp_count),\n        1024, &bytes_recv);\n      } while(result == CURLE_AGAIN);\n      if(result)\n        goto error;\n\n      first_space = strchr(resp_buf, ' ');\n      if(!first_space)\n        goto error;\n      second_space = strchr(first_space + 1, ' ');\n      if(!second_space)\n        goto error;\n      second_space++;\n      passwd = auth_start;\n      combined = malloc(strlen(second_space) + strlen(passwd));\n      strcpy(combined, second_space);\n      strcpy(combined + strlen(second_space), passwd);\n      result = Curl_md5it(md5_out, combined, strlen(combined));\n      if(result)\n        goto error;\n      do {\n      result = sendf(data,\n\"AUTH %02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x%02x\\r\\n\",\n      md5_out[0],\n      md5_out[1],\n      md5_out[2],\n      md5_out[3],\n      md5_out[4],\n      md5_out[5],\n      md5_out[6],\n      md5_out[7],\n      md5_out[8],\n      md5_out[9],\n      md5_out[10],\n      md5_out[11],\n      md5_out[12],\n      md5_out[13],\n      md5_out[14],\n      md5_out[15]);\n      } while(result == CURLE_AGAIN);\n      if(result)\n        goto error;\n    }\n\n\n\n\n\n  if(strncasecompare(path, DICT_MATCH, sizeof(DICT_MATCH)-1) ||\n     strncasecompare(path, DICT_MATCH2, sizeof(DICT_MATCH2)-1) ||\n     strncasecompare(path, DICT_MATCH3, sizeof(DICT_MATCH3)-1)) {\n\n    word = strchr(path, ':');\n    if(word) {\n      word++;\n      database = strchr(word, ':');\n      if(database) {\n        *database++ = (char)0;\n        strategy = strchr(database, ':');\n        if(strategy) {\n          *strategy++ = (char)0;\n          nthdef = strchr(strategy, ':');\n          if(nthdef) {\n            *nthdef = (char)0;\n          }\n        }\n      }\n    }\n\n    if(!word || (*word == (char)0)) {\n      infof(data, \"lookup word is missing\");\n      word = (char *)\"default\";\n    }\n    if(!database || (*database == (char)0)) {\n      database = (char *)\"!\";\n    }\n    if(!strategy || (*strategy == (char)0)) {\n      strategy = (char *)\".\";\n    }\n\n    eword = unescape_word(word);\n    if(!eword) {\n      result = CURLE_OUT_OF_MEMORY;\n      goto error;\n    }\n\n\n    do {\n    result = sendf(data,\n                   \"CLIENT \" LIBCURL_NAME \" \" LIBCURL_VERSION \"\\r\\n\"\n                   \"MATCH \"\n                   \"%s \"                  \n                   \"%s \"                  \n                   \"%s\\r\\n\"           \n                   \"QUIT\\r\\n\",\n                   database,\n                   strategy,\n                   eword);\n    } while(result == CURLE_AGAIN);\n\n    if(result) {\n      failf(data, \"Failed sending DICT request\");\n      goto error;\n    }\n    Curl_xfer_setup1(data, CURL_XFER_RECV, -1, FALSE);                \n  }\n  else if(strncasecompare(path, DICT_DEFINE, sizeof(DICT_DEFINE)-1) ||\n          strncasecompare(path, DICT_DEFINE2, sizeof(DICT_DEFINE2)-1) ||\n          strncasecompare(path, DICT_DEFINE3, sizeof(DICT_DEFINE3)-1)) {\n\n    word = strchr(path, ':');\n    if(word) {\n      word++;\n      database = strchr(word, ':');\n      if(database) {\n        *database++ = (char)0;\n        nthdef = strchr(database, ':');\n        if(nthdef) {\n          *nthdef = (char)0;\n        }\n      }\n    }\n\n    if(!word || (*word == (char)0)) {\n      infof(data, \"lookup word is missing\");\n      word = (char *)\"default\";\n    }\n    if(!database || (*database == (char)0)) {\n      database = (char *)\"!\";\n    }\n\n    eword = unescape_word(word);\n    if(!eword) {\n      result = CURLE_OUT_OF_MEMORY;\n      goto error;\n    }\n\n    do {\n    result = sendf(data,\n                   \"CLIENT \" LIBCURL_NAME \" \" LIBCURL_VERSION \"\\r\\n\"\n                   \"DEFINE \"\n                   \"%s \"                   \n                   \"%s\\r\\n\"            \n                   \"QUIT\\r\\n\",\n                   database,\n                   eword);\n    } while(result == CURLE_AGAIN);\n\n    if(result) {\n      failf(data, \"Failed sending DICT request\");\n      goto error;\n    }\n    Curl_xfer_setup1(data, CURL_XFER_RECV, -1, FALSE);\n  }\n  else {\n\n    ppath = strchr(path, '/');\n    if(ppath) {\n      int i;\n\n      ppath++;\n      for(i = 0; ppath[i]; i++) {\n        if(ppath[i] == ':')\n          ppath[i] = ' ';\n      }\n      do {\n      result = sendf(data,\n                     \"CLIENT \" LIBCURL_NAME \" \" LIBCURL_VERS"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_04n692Ri4lAqWJFic4Fxq0L1",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 25}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_DkJroIOlCFijvpeNFllfQzoO",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to craft a DICT URL with user/auth part to enter the auth block.\\n    # libcurl URL syntax: dict://user=pass@host/...\\n    return b\\\"dict://user=pass@127.0.0.1/\\\"\",\"target\":\"dict_do\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_DkJroIOlCFijvpeNFllfQzoO",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-delta-05/bugs/curl-001/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_0l7EhDCJdGYFukWrHqKeog6q",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Read dict_do: in the auth-handshake block it does `combined = malloc(strlen(second_space) + strlen(passwd)); strcpy(combined, second_space); strcpy(combined + strlen(second_space), passwd);`.\\n\\nThis is a classic off-by-one heap overflow: allocation omits space for the final NUL terminator of the concatenated string. If both `second_space` and `passwd` are non-empty, the second strcpy writes `strlen(passwd)+1` bytes, so the final NUL lands 1 byte past the allocated buffer. ASan would typically report a heap-buffer-overflow write.\\n\\nAdditionally, `second_space` points into `resp_buf` filled by `Curl_xfer_recv`. Although `resp_buf` is memset to 0 initially, the code reads up to 1024 bytes into it without ensuring a NUL terminator after the received bytes. If the receive fills the buffer completely (1024 bytes) and contains no NUL, `strchr`/`strlen` can read past the allocation (heap-buffer-overflow read). The `resp_count` logic also uses `(resp_buf + 1024 * resp_count)` but `resp_buf` is only 1024 bytes, so if `resp_count` ever increments (it is initialized to 0 and never incremented in the shown snippet), it would be an immediate OOB write; however in the provided code resp_count stays 0.\\n\\nNo bounds checks/clamps exist before malloc/strcpy. The tainted values are: `passwd` from URL userinfo, and `second_space` from server response. A fuzzer input can control passwd directly; controlling second_space requires controlling the DICT server response, which may not be under fuzzer control in this harness. Therefore, while the overflow pattern is present and input reaches one operand, an actual crash depends on runtime environment/network response. I could not run reach_probe due to missing ASan binary path in this environment, so no dynamic proof of reach/crash was obtained.\" ,\"corrected_description\":\"Definite off-by-one heap buffer overflow in `combined` during MD5 auth concatenation: `malloc(strlen(second_space)+strlen(passwd))` followed by two `strcpy` calls writes an extra NUL terminator past the allocation. Also potential heap OOB read if `resp_buf` lacks NUL terminator after recv and `strlen(second_space)` scans past 1024 bytes.\",\"control_flow_to_bug\":\"curl_fuzzer_dict -> (libcurl DICT protocol state machine) -> dict_do(). Conditions: URL path contains '=' so `user_end=strchr(path,'=')` non-NULL; `user_start=strchr(path,'/')+1` and `auth_start=user_end+1`; `auth_end=strchr(path,'@')` non-NULL to terminate auth; then after `Curl_xfer_recv` fills resp_buf, response must contain at least two spaces so `first_space=strchr(resp_buf,' ')` and `second_space=strchr(first_space+1,' ')` succeed; then `second_space++` and `passwd=auth_start`; then `combined=malloc(strlen(second_space)+strlen(passwd))` and `strcpy`/`strcpy` trigger 1-byte heap overflow on final NUL.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_0l7EhDCJdGYFukWrHqKeog6q",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 3,
+    "sp_functions": [
+      "dict_do",
+      "dict_do",
+      "dict_do"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Heap buffer overflow in authentication MD5 concatenation: allocates `combined = malloc(strlen(second_space) + strlen(passwd))` but then does `strcpy(combined, second_space)` and `strcpy(combined + strlen(second_space), passwd)`, which writes both strings plus a NUL terminator. Missing `+1` for the final terminator causes 1-byte heap overflow; additionally if `resp_buf` is not NUL-terminated (recv data), `strlen(second_space)` can read past `resp_buf` and make allocation/strcpy sizes inconsistent. ASan should catch OOB write/read.",
+  "finder_vuln_type": ""
+}

@@ -1,0 +1,15 @@
+{
+  "tag": "ws-full-01__vuln_002",
+  "gt": "memcpy",
+  "finder": {
+    "sp_count": 0,
+    "sp_functions": [],
+    "found_gt": false
+  },
+  "score": null,
+  "verdict": "FINDER_MISS",
+  "dynamic": {
+    "probes": []
+  },
+  "basis": "finder did not flag the vulnerable function"
+}

@@ -1,0 +1,22 @@
+{
+  "challenge": "cu-delta-04__curl-003",
+  "fuzzer": "curl_fuzzer_http",
+  "sanitizer": "address",
+  "functions_indexed": 3691,
+  "ground_truth_functions": [
+    "Curl_http_header"
+  ],
+  "q1_finder": {
+    "sp_count": 0,
+    "sp_functions": [],
+    "found_ground_truth": false,
+    "matched_functions": []
+  },
+  "q2_verifier": {
+    "verdict_real": true,
+    "score": 0.95,
+    "is_important": true,
+    "reason": "CONFIRMED VULNERABILITY - Stack Buffer Overflow in X-Powered-By Header Parsing\n\n**Vulnerability Details**:\n- Location: lib/http.c:3017\n- Vulnerable code: `memcpy(data->req.xpoweredby, xpoweredby, strlen(xpoweredby));`\n- Buffer size: 64 bytes (defined in lib/request.h:103)\n- Issue: No bounds check - uses strlen(xpoweredby) as copy size instead of buffer capacity\n\n**Bug Pattern**:\n1. Server sends HT",
+    "target_function": "Curl_http_header"
+  }
+}

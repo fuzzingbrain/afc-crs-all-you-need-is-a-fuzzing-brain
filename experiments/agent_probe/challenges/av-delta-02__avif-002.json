@@ -1,0 +1,17 @@
+{
+  "challenge": "av-delta-02__avif-002",
+  "source_root": "/home/ze/fbv2/experiments/agent_probe/_work/av-delta-02/repo",
+  "workspace": "/home/ze/fbv2/experiments/agent_probe/_work/av-delta-02",
+  "repo_subdir": "repo",
+  "diff_filename": "diff/ref.diff",
+  "fuzzer": "avif_fuzztest_yuvrgb",
+  "sanitizer": "address",
+  "scan_mode": "delta",
+  "changed_functions": [
+    "avifImageYUVAnyToRGBAnySlow"
+  ],
+  "ground_truth_functions": [
+    "avifImageYUVAnyToRGBAnySlow"
+  ],
+  "crash_type": "dynamic-stack-buffer-overflow"
+}

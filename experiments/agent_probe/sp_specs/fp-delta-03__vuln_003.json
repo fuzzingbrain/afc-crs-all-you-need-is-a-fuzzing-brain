@@ -1,0 +1,22 @@
+{
+  "challenge": "fp-delta-03",
+  "bug": "vuln_003",
+  "tag": "fp-delta-03__vuln_003",
+  "round": "final-competition",
+  "scan_mode": "delta",
+  "harness": "TestFuzzCodecs",
+  "fuzzer": "TestFuzzCodecs",
+  "harness_kind": "libfuzzer",
+  "sanitizer": "address",
+  "ground_truth_functions": [
+    "rfx_process_message_metadata"
+  ],
+  "crash_type": "SEGV",
+  "graphs_root": "/home/ze/fb-graphs/build/fp-delta-03",
+  "source_root": "/home/ze/fb-graphs/build/fp-delta-03/repo",
+  "callgraph": "/home/ze/fb-graphs/build/fp-delta-03/graph-TestFuzzCodecs/callgraph.json",
+  "binary_on_disk": null,
+  "challenge_image": "aixcc-afc/freerdp:latest",
+  "project": "freerdp",
+  "blob": "/home/ze/fb-graphs/build/fp-delta-03/bugs/vuln_003/blob"
+}

@@ -22,6 +22,23 @@ def _dedup_model() -> Optional[str]:
     own default rather than on a name picked here -- the point of the change is
     that this module stops choosing.
     """
+    # Prefer the task's active router, which honours model_profile /
+    # FB_MODEL_PROFILE (e.g. period-correct -> GPT-4.1 for the utility role).
+    # The old path used get_default_config().get_model_for_task(FAST_JUDGMENT),
+    # whose hardcoded table (models.py) is all-Claude and ignores the profile.
+    # On an OpenAI-only run that resolved to Claude, failed auth, exhausted the
+    # all-Claude fallback chain, and left every SP un-deduplicated (duplicate
+    # SPs per function).
+    try:
+        from ..llms.routing import active_router, Role
+
+        info = active_router().model_for(Role.UTILITY)
+        mid = getattr(info, "id", None)
+        if mid:
+            return mid
+    except Exception as e:
+        logger.debug(f"[SPDedup] router unavailable, trying config default: {e}")
+
     try:
         from ..llms.config import get_default_config
         from ..llms.models import TaskType

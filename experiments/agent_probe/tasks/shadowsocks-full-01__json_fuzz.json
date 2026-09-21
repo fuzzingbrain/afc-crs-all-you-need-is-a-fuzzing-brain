@@ -1,0 +1,32 @@
+{
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-shadowsocks-libev.git",
+  "project_name": "shadowsocks",
+  "task_type": "pov",
+  "scan_mode": "full",
+  "fuzz_tooling_url": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "fuzz_tooling_ref": "challenge-state/shadowsocks-full-01",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "json_fuzz"
+  ],
+  "remove_git": true,
+  "timeout_minutes": 120,
+  "budget_limit": 100.0,
+  "concurrency": 5,
+  "docker_image": "aixcc-afc/shadowsocks:latest",
+  "prebuilt_fuzzers": {
+    "json_fuzz": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/shadowsocks-full-01/bugs/shadowsocks-libev_4/bin/address/json_fuzz"
+  },
+  "prebuild_dir": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/final-competition/full/shadowsocks-full-01",
+  "work_id": "shadowsocks-full-01",
+  "model_profile": "period-correct",
+  "pov_count": 4,
+  "target_commit": "752f84600ce8ab3620ac0ae284dc5f6ec689ee94",
+  "fuzzer_sources": {
+    "json_fuzz": [
+      "/home/ze/fbv2/experiments/agent_probe/prebuild/shadowsocks-full-01/json_fuzz/harness_src/json_fuzz.c"
+    ]
+  }
+}

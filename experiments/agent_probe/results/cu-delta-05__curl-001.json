@@ -1,0 +1,28 @@
+{
+  "challenge": "cu-delta-05__curl-001",
+  "fuzzer": "curl_fuzzer_dict",
+  "sanitizer": "address",
+  "functions_indexed": 3682,
+  "ground_truth_functions": [
+    "dict_do"
+  ],
+  "q1_finder": {
+    "sp_count": 3,
+    "sp_functions": [
+      "dict_do",
+      "dict_do",
+      "dict_do"
+    ],
+    "found_ground_truth": true,
+    "matched_functions": [
+      "dict_do"
+    ]
+  },
+  "q2_verifier": {
+    "verdict_real": true,
+    "score": 0.75,
+    "is_important": true,
+    "reason": "CONFIRMED VULNERABILITY PATTERN: Line 230 in dict.c shows user_start (from URL authentication field) passed directly to sendf() without format string wrapper. This is a classic CWE-134 format string vulnerability. The code path is reachable via DICT protocol handler when authentication is parsed. Format string bugs cause memory corruption (OOB reads/writes) which ASAN will detect. The diff explici",
+    "target_function": "dict_do"
+  }
+}

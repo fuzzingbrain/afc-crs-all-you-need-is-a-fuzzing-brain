@@ -1,0 +1,192 @@
+{
+  "tag": "cu-delta-04__curl-008",
+  "gt": "extremelygoodprtcl_sm",
+  "crash_type": "SEGV",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Read extremelygoodprtcl_sm: in EXTREMELYGOODPRTCL_START it requires nread==128, then sets `response = Curl_dyn_ptr(&...recvbuf)` and calls `encrypt(response, strlen(response), &key, &iv, ciphertext)` where `ciphertext` is a 256-byte stack array. There is no bound tying `strlen(response)` to `nread` and no explicit NUL-termination guarantee shown here; if recvbuf contains 128 bytes without a NUL, `strlen` will read past the received data (OOB read) until it finds a NUL, and the resulting length can be >256. Passing that length to `encrypt` can overflow `ciphertext` (stack buffer overflow) depending on encrypt implementation (likely writes at least plaintext_len plus padding). This is a real memory-safety pattern (OOB read + potential stack write overflow) driven by network/fuzzer-controlled response bytes. Additionally, in EXTREMELYGOODPRTCL_DO2 there is an unconditional invalid write `*(unsigned int *)result = CURLE_OK;` when response equals \"crashycrashy\\r\\n\"; since result is a small enum/int value, this is a near-NULL/invalid pointer dereference and should SEGV under ASan. I could not run reach_probe due to missing ASan binary path in the environment, so no runtime proof of crash/reach beyond static code evidence.",
+    "corrected_description": "The code contains (1) an unbounded `strlen(response)` on data read into Curl_dyn recvbuf with only a check `nread==128`, which can cause an out-of-bounds read and then a stack buffer overflow in `encrypt(..., plaintext_len, ..., unsigned char ciphertext[256])` if plaintext_len exceeds 256 (or encryption expands). (2) A definite SEGV/invalid write in EXTREMELYGOODPRTCL_DO2: if `strcasecmp(response, \"crashycrashy\\r\\n\")==0` it executes `*(unsigned int *)result = CURLE_OK;`, dereferencing an invalid pointer derived from the integer `result`.",
+    "control_flow_to_bug": "curl_fuzzer_ws -> (curl protocol dispatch) -> extremelygoodprtcl_sm. For START overflow path: state must be EXTREMELYGOODPRTCL_START; Curl_pp_readresp must return CURLE_OK with nread==128; recvbuf must contain 128 bytes without an early NUL so strlen reads past end and yields large length; encrypt then writes into stack `ciphertext[256]`. For definite SEGV path: progress state machine to EXTREMELYGOODPRTCL_DO2 (START sends base64, DO1 echoes it back, then DO2), then provide server response case-insensitively equal to \"crashycrashy\\r\\n\" to trigger `*(unsigned int *)result = CURLE_OK;`."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "extremelygoodprtcl_sm"
+      },
+      "result": "static CURLcode extremelygoodprtcl_sm\n  (struct Curl_easy *data, struct connectdata *conn)\n{\n  CURLcode result = CURLE_OK;\n  ssize_t nread;\n  struct extremelygoodprtcl_conn *vnormal = &conn->proto.vnormal;\n  const char *done_statement = \"All done!\";\n  int code;\n\n  result = Curl_pp_readresp(data, 0, &data->conn->proto.vnormal.pp,\n    &code, &nread);\n  char * const response = Curl_dyn_ptr(&data->conn->proto.vnormal.pp.recvbuf);\n\n  infof(data, \"extremelygoodprtcl_doing: state [%d]\", (int) vnormal->state);\n                                                        \n                             \n  switch(vnormal->state) {\n    case EXTREMELYGOODPRTCL_STOP:\n      result = CURLE_OK;\n      break;\n    case EXTREMELYGOODPRTCL_START:\n      if(result)\n        break;\n      else if(!nread) {\n        failf(data, \"Connection disconnected\");\n        result = CURLE_RECV_ERROR;\n        break;\n      }\n      else if(nread != 128) {\n        result = CURLE_WEIRD_SERVER_REPLY;\n        break;\n      }\n                         \n      unsigned char key[] = { 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,\n                            0x38, 0x39, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35,\n                            0x36, 0x37, 0x38, 0x39, 0x30, 0x31, 0x32, 0x33,\n                            0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x31\n                          };\n\n                        \n      unsigned char iv[] = { 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,\n                            0x38, 0x39, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35\n                          };\n\n        \n                                                                       \n                                                                           \n                           \n        \n      unsigned char ciphertext[256];\n\n      int ciphertext_len;\n\n                                 \n      ciphertext_len = encrypt(response, strlen(response), &key, &iv,\n                                ciphertext);\n\n      char *base64;\n      size_t b64len;\n      Curl_base64_encode(ciphertext, ciphertext_len, &base64, &b64len);\n      strcpy(vnormal->state1, base64);\n      vnormal->state1_len = b64len;\n      Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", base64);\n      free(base64);\n      vnstate(data, EXTREMELYGOODPRTCL_DO1);\n      break;\n    case EXTREMELYGOODPRTCL_DO1:\n      if(result || !nread)\n        break;\n      if(strncmp(vnormal->state1, response, vnormal->state1_len) == 0) {\n        vnstate(data, EXTREMELYGOODPRTCL_DO2);\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", \"OK\\r\\n\");\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    case EXTREMELYGOODPRTCL_DO2:\n      if(result || !nread)\n        break;\n      if(strcasecmp(\"complete\\r\\n\", response) == 0) {\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", \"OK\\r\\n\");\n        result = CURLE_OK;\n        vnstate(data, EXTREMELYGOODPRTCL_STOP);\n      }\n      else if(strcasecmp(response, \"crashycrashy\\r\\n\") == 0) {\n        *(unsigned int *)result = CURLE_OK;\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    default:\n      result = CURLE_WEIRD_SERVER_REPLY;\n      break;\n  }\n\n\n  if(result == CURLE_AGAIN)\n    result = CURLE_OK;\n  return result;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "extremelygoodprtcl_sm"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 25}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to drive protocol state machine to EXTREMELYGOODPRTCL_START and\n    # provide a 128-byte server reply without NUL to make strlen walk.\n    # Many curl fuzzers use a pseudo-server transcript separated by newlines.\n    # Provide 128 'A's then CRLF.\n    msg = b'A'*128 + b\"\\r\\n\"\n    return msg\n",
+        "target": "extremelygoodprtcl_sm"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-delta-04/bugs/curl-008/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Read extremelygoodprtcl_sm: in EXTREMELYGOODPRTCL_START it requires nread==128, then sets `response = Curl_dyn_ptr(&...recvbuf)` and calls `encrypt(response, strlen(response), &key, &iv, ciphertext)` where `ciphertext` is a 256-byte stack array. There is no bound tying `strlen(response)` to `nread` and no explicit NUL-termination guarantee shown here; if recvbuf contains 128 bytes without a NUL, `strlen` will read past the received data (OOB read) until it finds a NUL, and the resulting length can be >256. Passing that length to `encrypt` can overflow `ciphertext` (stack buffer overflow) depending on encrypt implementation (likely writes at least plaintext_len plus padding). This is a real memory-safety pattern (OOB read + potential stack write overflow) driven by network/fuzzer-controlled response bytes. Additionally, in EXTREMELYGOODPRTCL_DO2 there is an unconditional invalid write `*(unsigned int *)result = CURLE_OK;` when response equals \"crashycrashy\\r\\n\"; since result is a small enum/int value, this is a near-NULL/invalid pointer dereference and should SEGV under ASan. I could not run reach_probe due to missing ASan binary path in the environment, so no runtime proof of crash/reach beyond static code evidence.",
+        "corrected_description": "The code contains (1) an unbounded `strlen(response)` on data read into Curl_dyn recvbuf with only a check `nread==128`, which can cause an out-of-bounds read and then a stack buffer overflow in `encrypt(..., plaintext_len, ..., unsigned char ciphertext[256])` if plaintext_len exceeds 256 (or encryption expands). (2) A definite SEGV/invalid write in EXTREMELYGOODPRTCL_DO2: if `strcasecmp(response, \"crashycrashy\\r\\n\")==0` it executes `*(unsigned int *)result = CURLE_OK;`, dereferencing an invalid pointer derived from the integer `result`.",
+        "control_flow_to_bug": "curl_fuzzer_ws -> (curl protocol dispatch) -> extremelygoodprtcl_sm. For START overflow path: state must be EXTREMELYGOODPRTCL_START; Curl_pp_readresp must return CURLE_OK with nread==128; recvbuf must contain 128 bytes without an early NUL so strlen reads past end and yields large length; encrypt then writes into stack `ciphertext[256]`. For definite SEGV path: progress state machine to EXTREMELYGOODPRTCL_DO2 (START sends base64, DO1 echoes it back, then DO2), then provide server response case-insensitively equal to \"crashycrashy\\r\\n\" to trigger `*(unsigned int *)result = CURLE_OK;`."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1036,
+      "output_tokens": 60,
+      "total_tokens": 1096,
+      "latency_ms": 1126
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 2203,
+      "output_tokens": 120,
+      "total_tokens": 2323,
+      "latency_ms": 2268
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2373,
+      "output_tokens": 640,
+      "total_tokens": 3013,
+      "latency_ms": 8649
+    }
+  ],
+  "token_totals": {
+    "input": 5612,
+    "output": 820,
+    "total": 6432,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: curl_fuzzer_ws   Sanitizer: address\nFunction: extremelygoodprtcl_sm\nClaimed bug type: SEGV\nSuspicious-point description (from the finder — may be imprecise): Stack-based buffer overflow in EXTREMELYGOODPRTCL_START: response is obtained via Curl_dyn_ptr(recvbuf) and its length is taken with strlen(response) without enforcing that response is NUL-terminated or bounded to nread==128. That untrusted length is passed to encrypt(..., plaintext_len, ..., ciphertext[256]) which writes into a fixed 256-byte stack buffer; if strlen(response) > 256 (or encrypt expands), ciphertext overflows and ASan should catch. Related: response, nread, ciphertext[256], encrypt().\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a SEGV\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_KOX3kEBFpPgc0NJCKhHe0Oes",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"extremelygoodprtcl_sm\"}"
+          }
+        },
+        {
+          "id": "call_gNR28YU4VhXuLStKDcOtw8Pt",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"extremelygoodprtcl_sm\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_KOX3kEBFpPgc0NJCKhHe0Oes",
+      "content": "static CURLcode extremelygoodprtcl_sm\n  (struct Curl_easy *data, struct connectdata *conn)\n{\n  CURLcode result = CURLE_OK;\n  ssize_t nread;\n  struct extremelygoodprtcl_conn *vnormal = &conn->proto.vnormal;\n  const char *done_statement = \"All done!\";\n  int code;\n\n  result = Curl_pp_readresp(data, 0, &data->conn->proto.vnormal.pp,\n    &code, &nread);\n  char * const response = Curl_dyn_ptr(&data->conn->proto.vnormal.pp.recvbuf);\n\n  infof(data, \"extremelygoodprtcl_doing: state [%d]\", (int) vnormal->state);\n                                                        \n                             \n  switch(vnormal->state) {\n    case EXTREMELYGOODPRTCL_STOP:\n      result = CURLE_OK;\n      break;\n    case EXTREMELYGOODPRTCL_START:\n      if(result)\n        break;\n      else if(!nread) {\n        failf(data, \"Connection disconnected\");\n        result = CURLE_RECV_ERROR;\n        break;\n      }\n      else if(nread != 128) {\n        result = CURLE_WEIRD_SERVER_REPLY;\n        break;\n      }\n                         \n      unsigned char key[] = { 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,\n                            0x38, 0x39, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35,\n                            0x36, 0x37, 0x38, 0x39, 0x30, 0x31, 0x32, 0x33,\n                            0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x30, 0x31\n                          };\n\n                        \n      unsigned char iv[] = { 0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,\n                            0x38, 0x39, 0x30, 0x31, 0x32, 0x33, 0x34, 0x35\n                          };\n\n        \n                                                                       \n                                                                           \n                           \n        \n      unsigned char ciphertext[256];\n\n      int ciphertext_len;\n\n                                 \n      ciphertext_len = encrypt(response, strlen(response), &key, &iv,\n                                ciphertext);\n\n      char *base64;\n      size_t b64len;\n      Curl_base64_encode(ciphertext, ciphertext_len, &base64, &b64len);\n      strcpy(vnormal->state1, base64);\n      vnormal->state1_len = b64len;\n      Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", base64);\n      free(base64);\n      vnstate(data, EXTREMELYGOODPRTCL_DO1);\n      break;\n    case EXTREMELYGOODPRTCL_DO1:\n      if(result || !nread)\n        break;\n      if(strncmp(vnormal->state1, response, vnormal->state1_len) == 0) {\n        vnstate(data, EXTREMELYGOODPRTCL_DO2);\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", \"OK\\r\\n\");\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    case EXTREMELYGOODPRTCL_DO2:\n      if(result || !nread)\n        break;\n      if(strcasecmp(\"complete\\r\\n\", response) == 0) {\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"%s\", \"OK\\r\\n\");\n        result = CURLE_OK;\n        vnstate(data, EXTREMELYGOODPRTCL_STOP);\n      }\n      else if(strcasecmp(response, \"crashycrashy\\r\\n\") == 0) {\n        *(unsigned int *)result = CURLE_OK;\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    default:\n      result = CURLE_WEIRD_SERVER_REPLY;\n      break;\n  }\n\n\n  if(result == CURLE_AGAIN)\n    result = CURLE_OK;\n  return result;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_gNR28YU4VhXuLStKDcOtw8Pt",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 25}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_F4xFyIVxx0ogkw40ZyuuDPoa",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to drive protocol state machine to EXTREMELYGOODPRTCL_START and\\n    # provide a 128-byte server reply without NUL to make strlen walk.\\n    # Many curl fuzzers use a pseudo-server transcript separated by newlines.\\n    # Provide 128 'A's then CRLF.\\n    msg = b'A'*128 + b\\\"\\\\r\\\\n\\\"\\n    return msg\\n\",\"target\":\"extremelygoodprtcl_sm\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_F4xFyIVxx0ogkw40ZyuuDPoa",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-delta-04/bugs/curl-008/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_OyfPD9UbhhGyxCvMD7giAv5h",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Read extremelygoodprtcl_sm: in EXTREMELYGOODPRTCL_START it requires nread==128, then sets `response = Curl_dyn_ptr(&...recvbuf)` and calls `encrypt(response, strlen(response), &key, &iv, ciphertext)` where `ciphertext` is a 256-byte stack array. There is no bound tying `strlen(response)` to `nread` and no explicit NUL-termination guarantee shown here; if recvbuf contains 128 bytes without a NUL, `strlen` will read past the received data (OOB read) until it finds a NUL, and the resulting length can be >256. Passing that length to `encrypt` can overflow `ciphertext` (stack buffer overflow) depending on encrypt implementation (likely writes at least plaintext_len plus padding). This is a real memory-safety pattern (OOB read + potential stack write overflow) driven by network/fuzzer-controlled response bytes. Additionally, in EXTREMELYGOODPRTCL_DO2 there is an unconditional invalid write `*(unsigned int *)result = CURLE_OK;` when response equals \\\"crashycrashy\\\\r\\\\n\\\"; since result is a small enum/int value, this is a near-NULL/invalid pointer dereference and should SEGV under ASan. I could not run reach_probe due to missing ASan binary path in the environment, so no runtime proof of crash/reach beyond static code evidence.\",\"corrected_description\":\"The code contains (1) an unbounded `strlen(response)` on data read into Curl_dyn recvbuf with only a check `nread==128`, which can cause an out-of-bounds read and then a stack buffer overflow in `encrypt(..., plaintext_len, ..., unsigned char ciphertext[256])` if plaintext_len exceeds 256 (or encryption expands). (2) A definite SEGV/invalid write in EXTREMELYGOODPRTCL_DO2: if `strcasecmp(response, \\\"crashycrashy\\\\r\\\\n\\\")==0` it executes `*(unsigned int *)result = CURLE_OK;`, dereferencing an invalid pointer derived from the integer `result`.\",\"control_flow_to_bug\":\"curl_fuzzer_ws -> (curl protocol dispatch) -> extremelygoodprtcl_sm. For START overflow path: state must be EXTREMELYGOODPRTCL_START; Curl_pp_readresp must return CURLE_OK with nread==128; recvbuf must contain 128 bytes without an early NUL so strlen reads past end and yields large length; encrypt then writes into stack `ciphertext[256]`. For definite SEGV path: progress state machine to EXTREMELYGOODPRTCL_DO2 (START sends base64, DO1 echoes it back, then DO2), then provide server response case-insensitively equal to \\\"crashycrashy\\\\r\\\\n\\\" to trigger `*(unsigned int *)result = CURLE_OK;`.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_OyfPD9UbhhGyxCvMD7giAv5h",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 3,
+    "sp_functions": [
+      "extremelygoodprtcl_sm",
+      "extremelygoodprtcl_sm",
+      "extremelygoodprtcl_sm"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Stack-based buffer overflow in EXTREMELYGOODPRTCL_START: response is obtained via Curl_dyn_ptr(recvbuf) and its length is taken with strlen(response) without enforcing that response is NUL-terminated or bounded to nread==128. That untrusted length is passed to encrypt(..., plaintext_len, ..., ciphertext[256]) which writes into a fixed 256-byte stack buffer; if strlen(response) > 256 (or encrypt expands), ciphertext overflows and ASan should catch. Related: response, nread, ciphertext[256], encrypt().",
+  "finder_vuln_type": ""
+}

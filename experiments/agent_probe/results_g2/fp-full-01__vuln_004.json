@@ -1,0 +1,190 @@
+{
+  "tag": "fp-full-01__vuln_004",
+  "gt": "gcc_read_client_network_data",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "partial",
+    "pattern_present": true,
+    "reasoning": "Read gcc_read_client_network_data. It computes blockLength = Stream_GetRemainingLength(s), reads UINT8 channelCount into mcs->channelCount, then checks `blockLength < 4 + (UINT8)mcs->channelCount * 12`. This check is inconsistent with the subsequent per-channel parsing: inside the loop it reads `CHANNEL_NAME_LEN+1` bytes for Name plus 4 bytes for options (and does NOT read 12 bytes). Therefore the length check can pass while the loop consumes more bytes than available, leading to out-of-bounds reads from the stream buffer (heap-buffer-overflow in ASan) when the stream is shorter than `1 + channelCount*(CHANNEL_NAME_LEN+1+4)`.\n\nThe finder’s specific truncation concern is not supported by the code as shown: mcs->channelCount is read with Stream_Read_UINT8, so it is already 0..255; casting to UINT8 in the check is redundant and does not enable >255 values. However, there is still a real length-validation mismatch/under-check bug.\n\nAlso, there is a potential separate OOB write if mcs->channels is sized to CHANNEL_MAX_COUNT and the loop uses mcs->channelCount; but the code checks `mcs->channelCount > CHANNEL_MAX_COUNT` before the loop, so that part is guarded.\n\nAttempted reach_probe could not be executed due to missing ASan binary path in the environment, so no runtime crash evidence was obtained.",
+    "corrected_description": "Length validation bug (under-check) in gcc_read_client_network_data: it validates remaining length against `4 + channelCount*12` but then, for each channel, reads `CHANNEL_NAME_LEN+1` bytes plus a UINT32 options (and increments baseChannelId). If `CHANNEL_NAME_LEN+1+4 > 12` (likely), inputs can pass the check yet cause the stream reads to go past the end of the underlying buffer, producing an ASan-detectable heap-buffer-overflow read. The alleged integer truncation of channelCount is not the root cause because channelCount is read as UINT8.",
+    "control_flow_to_bug": "Fuzzer entry -> (caller chain per reachability, direct caller) -> gcc_read_client_network_data(wStream* s, rdpMcs* mcs):\n1) blockLength = Stream_GetRemainingLength(s); require >=4.\n2) Stream_Read_UINT8(s, mcs->channelCount).\n3) Passes flawed check: blockLength >= 4 + (UINT8)channelCount*12.\n4) Passes max count check: channelCount <= CHANNEL_MAX_COUNT.\n5) Enters for-loop i=0..channelCount-1; each iteration does Stream_Read(s, channel->Name, CHANNEL_NAME_LEN+1) then Stream_Read_UINT32(s, channel->options).\n6) If provided buffer length is between (4+channelCount*12) and the actual bytes consumed by the loop, Stream_Read will read beyond end of stream buffer -> heap-buffer-overflow read."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.5,
+  "verdict": "LIKELY",
+  "basis": "tainted, partial clamp (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "gcc_read_client_network_data"
+      },
+      "result": "BOOL gcc_read_client_network_data(wStream* s, rdpMcs* mcs)\n{\n\tWINPR_ASSERT(s);\n\tWINPR_ASSERT(mcs);\n\n\tconst size_t blockLength = Stream_GetRemainingLength(s);\n\tif (blockLength < 4)\n\t\treturn FALSE;\n\n\tStream_Read_UINT8(s, mcs->channelCount);                   \n\n\tif (blockLength < 4 + (UINT8)mcs->channelCount * 12)\n\t\treturn FALSE;\n\n\tif (mcs->channelCount > CHANNEL_MAX_COUNT)\n\t\treturn FALSE;\n\n\t                     \n\tfor (UINT32 i = 0; i < mcs->channelCount; i++)\n\t{\n\t\t   \n                \n                                                                    \n                                                                   \n                                                                \n     \n\t\trdpMcsChannel* channel = &mcs->channels[i];\n\t\tStream_Read(s, channel->Name, CHANNEL_NAME_LEN + 1);                     \n\n\t\tif (!memchr(channel->Name, 0, CHANNEL_NAME_LEN + 1))\n\t\t{\n\t\t\tWLog_ERR(\n\t\t\t    TAG,\n\t\t\t    \"protocol violation: received a static channel name with missing null-termination\");\n\t\t\treturn FALSE;\n\t\t}\n\n\t\tStream_Read_UINT32(s, channel->options);                        \n\t\tchannel->ChannelId = mcs->baseChannelId++;\n\t}\n\n\treturn TRUE;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "gcc_read_client_network_data"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to trigger truncation: channelCount=0xFF (255) so check uses 255*12,\n    # but loop reads (CHANNEL_NAME_LEN+1)+4 per channel.\n    # Provide only enough bytes to pass the check but not enough for loop.\n    channel_count = 255\n    # total payload after count byte: 3 bytes? Actually function requires blockLength>=4 then reads 1 byte.\n    # We'll craft a buffer of length exactly 4 + 255*12 = 3064 bytes.\n    total = 4 + channel_count*12\n    b = bytearray(total)\n    b[0] = channel_count\n    # rest zeros\n    return bytes(b)\n",
+        "target": "gcc_read_client_network_data"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/fp-full-01/bugs/vuln_004/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "partial",
+        "pattern_present": true,
+        "reasoning": "Read gcc_read_client_network_data. It computes blockLength = Stream_GetRemainingLength(s), reads UINT8 channelCount into mcs->channelCount, then checks `blockLength < 4 + (UINT8)mcs->channelCount * 12`. This check is inconsistent with the subsequent per-channel parsing: inside the loop it reads `CHANNEL_NAME_LEN+1` bytes for Name plus 4 bytes for options (and does NOT read 12 bytes). Therefore the length check can pass while the loop consumes more bytes than available, leading to out-of-bounds reads from the stream buffer (heap-buffer-overflow in ASan) when the stream is shorter than `1 + channelCount*(CHANNEL_NAME_LEN+1+4)`.\n\nThe finder’s specific truncation concern is not supported by the code as shown: mcs->channelCount is read with Stream_Read_UINT8, so it is already 0..255; casting to UINT8 in the check is redundant and does not enable >255 values. However, there is still a real length-validation mismatch/under-check bug.\n\nAlso, there is a potential separate OOB write if mcs->channels is sized to CHANNEL_MAX_COUNT and the loop uses mcs->channelCount; but the code checks `mcs->channelCount > CHANNEL_MAX_COUNT` before the loop, so that part is guarded.\n\nAttempted reach_probe could not be executed due to missing ASan binary path in the environment, so no runtime crash evidence was obtained.",
+        "corrected_description": "Length validation bug (under-check) in gcc_read_client_network_data: it validates remaining length against `4 + channelCount*12` but then, for each channel, reads `CHANNEL_NAME_LEN+1` bytes plus a UINT32 options (and increments baseChannelId). If `CHANNEL_NAME_LEN+1+4 > 12` (likely), inputs can pass the check yet cause the stream reads to go past the end of the underlying buffer, producing an ASan-detectable heap-buffer-overflow read. The alleged integer truncation of channelCount is not the root cause because channelCount is read as UINT8.",
+        "control_flow_to_bug": "Fuzzer entry -> (caller chain per reachability, direct caller) -> gcc_read_client_network_data(wStream* s, rdpMcs* mcs):\n1) blockLength = Stream_GetRemainingLength(s); require >=4.\n2) Stream_Read_UINT8(s, mcs->channelCount).\n3) Passes flawed check: blockLength >= 4 + (UINT8)channelCount*12.\n4) Passes max count check: channelCount <= CHANNEL_MAX_COUNT.\n5) Enters for-loop i=0..channelCount-1; each iteration does Stream_Read(s, channel->Name, CHANNEL_NAME_LEN+1) then Stream_Read_UINT32(s, channel->options).\n6) If provided buffer length is between (4+channelCount*12) and the actual bytes consumed by the loop, Stream_Read will read beyond end of stream buffer -> heap-buffer-overflow read."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1103,
+      "output_tokens": 58,
+      "total_tokens": 1161,
+      "latency_ms": 1146
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1545,
+      "output_tokens": 187,
+      "total_tokens": 1732,
+      "latency_ms": 3663
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1783,
+      "output_tokens": 678,
+      "total_tokens": 2461,
+      "latency_ms": 10615
+    }
+  ],
+  "token_totals": {
+    "input": 4431,
+    "output": 923,
+    "total": 5354,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: TestFuzzCoreServer   Sanitizer: address\nFunction: gcc_read_client_network_data\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): Potential heap/stack out-of-bounds read due to integer truncation/mismatch in length validation: function reads blockLength and channelCount from stream, then validates blockLength against 4 + (channelCount * 12) but uses a truncated (UINT8)mcs->channelCount (or otherwise narrower type) in the check while later looping with a wider UINT32 i up to channelCount, reading 12 bytes per iteration plus CHANNEL_NAME_LEN+1 bytes for name. If channelCount > 255, the length check may pass with a small required size while the loop performs many more iterations, advancing the stream beyond the available buffer and causing OOB reads detectable by AddressSanitizer. Related variables/control flow: blockLength re-check vs channelCount, CHANNEL_MAX_COUNT check ordering, for-loop over i reading channelId/options/name, Stream_Read/Stream_GetRemainingLength.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_aKwPKhzLtIdtUSGFVqLZMBcE",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"gcc_read_client_network_data\"}"
+          }
+        },
+        {
+          "id": "call_FJoh5L0sTIgTHmlsbv3bssR2",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"gcc_read_client_network_data\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_aKwPKhzLtIdtUSGFVqLZMBcE",
+      "content": "BOOL gcc_read_client_network_data(wStream* s, rdpMcs* mcs)\n{\n\tWINPR_ASSERT(s);\n\tWINPR_ASSERT(mcs);\n\n\tconst size_t blockLength = Stream_GetRemainingLength(s);\n\tif (blockLength < 4)\n\t\treturn FALSE;\n\n\tStream_Read_UINT8(s, mcs->channelCount);                   \n\n\tif (blockLength < 4 + (UINT8)mcs->channelCount * 12)\n\t\treturn FALSE;\n\n\tif (mcs->channelCount > CHANNEL_MAX_COUNT)\n\t\treturn FALSE;\n\n\t                     \n\tfor (UINT32 i = 0; i < mcs->channelCount; i++)\n\t{\n\t\t   \n                \n                                                                    \n                                                                   \n                                                                \n     \n\t\trdpMcsChannel* channel = &mcs->channels[i];\n\t\tStream_Read(s, channel->Name, CHANNEL_NAME_LEN + 1);                     \n\n\t\tif (!memchr(channel->Name, 0, CHANNEL_NAME_LEN + 1))\n\t\t{\n\t\t\tWLog_ERR(\n\t\t\t    TAG,\n\t\t\t    \"protocol violation: received a static channel name with missing null-termination\");\n\t\t\treturn FALSE;\n\t\t}\n\n\t\tStream_Read_UINT32(s, channel->options);                        \n\t\tchannel->ChannelId = mcs->baseChannelId++;\n\t}\n\n\treturn TRUE;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_FJoh5L0sTIgTHmlsbv3bssR2",
+      "content": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_9mDRnOY1lTsw7IUze5PQKhji",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to trigger truncation: channelCount=0xFF (255) so check uses 255*12,\\n    # but loop reads (CHANNEL_NAME_LEN+1)+4 per channel.\\n    # Provide only enough bytes to pass the check but not enough for loop.\\n    channel_count = 255\\n    # total payload after count byte: 3 bytes? Actually function requires blockLength>=4 then reads 1 byte.\\n    # We'll craft a buffer of length exactly 4 + 255*12 = 3064 bytes.\\n    total = 4 + channel_count*12\\n    b = bytearray(total)\\n    b[0] = channel_count\\n    # rest zeros\\n    return bytes(b)\\n\",\"target\":\"gcc_read_client_network_data\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_9mDRnOY1lTsw7IUze5PQKhji",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/fp-full-01/bugs/vuln_004/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_iVmRpsGXPjHJTpqnFF5IyAY2",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"partial\",\"pattern_present\":true,\"reasoning\":\"Read gcc_read_client_network_data. It computes blockLength = Stream_GetRemainingLength(s), reads UINT8 channelCount into mcs->channelCount, then checks `blockLength < 4 + (UINT8)mcs->channelCount * 12`. This check is inconsistent with the subsequent per-channel parsing: inside the loop it reads `CHANNEL_NAME_LEN+1` bytes for Name plus 4 bytes for options (and does NOT read 12 bytes). Therefore the length check can pass while the loop consumes more bytes than available, leading to out-of-bounds reads from the stream buffer (heap-buffer-overflow in ASan) when the stream is shorter than `1 + channelCount*(CHANNEL_NAME_LEN+1+4)`.\\n\\nThe finder’s specific truncation concern is not supported by the code as shown: mcs->channelCount is read with Stream_Read_UINT8, so it is already 0..255; casting to UINT8 in the check is redundant and does not enable >255 values. However, there is still a real length-validation mismatch/under-check bug.\\n\\nAlso, there is a potential separate OOB write if mcs->channels is sized to CHANNEL_MAX_COUNT and the loop uses mcs->channelCount; but the code checks `mcs->channelCount > CHANNEL_MAX_COUNT` before the loop, so that part is guarded.\\n\\nAttempted reach_probe could not be executed due to missing ASan binary path in the environment, so no runtime crash evidence was obtained.\" ,\"corrected_description\":\"Length validation bug (under-check) in gcc_read_client_network_data: it validates remaining length against `4 + channelCount*12` but then, for each channel, reads `CHANNEL_NAME_LEN+1` bytes plus a UINT32 options (and increments baseChannelId). If `CHANNEL_NAME_LEN+1+4 > 12` (likely), inputs can pass the check yet cause the stream reads to go past the end of the underlying buffer, producing an ASan-detectable heap-buffer-overflow read. The alleged integer truncation of channelCount is not the root cause because channelCount is read as UINT8.\" ,\"control_flow_to_bug\":\"Fuzzer entry -> (caller chain per reachability, direct caller) -> gcc_read_client_network_data(wStream* s, rdpMcs* mcs):\\n1) blockLength = Stream_GetRemainingLength(s); require >=4.\\n2) Stream_Read_UINT8(s, mcs->channelCount).\\n3) Passes flawed check: blockLength >= 4 + (UINT8)channelCount*12.\\n4) Passes max count check: channelCount <= CHANNEL_MAX_COUNT.\\n5) Enters for-loop i=0..channelCount-1; each iteration does Stream_Read(s, channel->Name, CHANNEL_NAME_LEN+1) then Stream_Read_UINT32(s, channel->options).\\n6) If provided buffer length is between (4+channelCount*12) and the actual bytes consumed by the loop, Stream_Read will read beyond end of stream buffer -> heap-buffer-overflow read.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_iVmRpsGXPjHJTpqnFF5IyAY2",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "gcc_read_client_network_data"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Potential heap/stack out-of-bounds read due to integer truncation/mismatch in length validation: function reads blockLength and channelCount from stream, then validates blockLength against 4 + (channelCount * 12) but uses a truncated (UINT8)mcs->channelCount (or otherwise narrower type) in the check while later looping with a wider UINT32 i up to channelCount, reading 12 bytes per iteration plus CHANNEL_NAME_LEN+1 bytes for name. If channelCount > 255, the length check may pass with a small required size while the loop performs many more iterations, advancing the stream beyond the available buffer and causing OOB reads detectable by AddressSanitizer. Related variables/control flow: blockLength re-check vs channelCount, CHANNEL_MAX_COUNT check ordering, for-loop over i reading channelId/options/name, Stream_Read/Stream_GetRemainingLength.",
+  "finder_vuln_type": ""
+}

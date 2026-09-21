@@ -1,0 +1,212 @@
+{
+  "tag": "mg-delta-01__mongoose_1",
+  "gt": "mg_pfn_iobuf_private",
+  "crash_type": "stack-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": false,
+    "guard_clamps": "full",
+    "pattern_present": false,
+    "reasoning": "Read mg_pfn_iobuf_private and mg_iobuf_resize. The suspicious point is about a possible overflow if mg_iobuf_resize fails and leaves io->size/io->buf unchanged, followed by writes.\n\nHowever, mg_pfn_iobuf_private performs bounds checks against io->size before every write:\n- Main write path requires `io->len + 2 <= io->size` before writing `io->buf[io->len++] = ch; io->buf[io->len] = 0;`.\n- Else path requires `io->len < io->size` before writing a single NUL at `io->buf[io->len++]`.\n\nIf resize fails (mg_iobuf_resize returns 0 and does not change io->buf/io->size), then `io->len + 2 <= io->size` will remain false (given the earlier condition `io->len + 2 > io->size` that triggered resize), and the else-if `io->len < io->size` is also false because `io->len + 2 > io->size` implies `io->len >= io->size - 1`, so the only case where `io->len < io->size` holds is `io->len == io->size - 1`, in which case writing one byte at index `size-1` is still in-bounds. Thus the code does not write past `io->buf[io->size-1]` even on resize failure.\n\nAlso, the claimed bug type is stack-buffer-overflow, but the buffer involved is `io->buf` (heap). There is no stack buffer here.\n\nI attempted to run reach_probe, but the ASan binary path was missing in this environment, so no dynamic reach/crash evidence could be collected.",
+    "corrected_description": "No stack-buffer-overflow here. The function writes into a heap buffer (mg_iobuf::buf) and guards all writes with checks against io->size; even if mg_iobuf_resize fails, the remaining else-if can only write a single NUL at index io->size-1, which is in-bounds. At most, resize failure may cause output truncation (missing terminator semantics), not a memory-safety overflow.",
+    "control_flow_to_bug": "No confirmed crashing memory-safety bug. Control flow in mg_pfn_iobuf_private: if expand && (len+2>size) call mg_iobuf_resize; then only write ch+NUL if (len+2<=size), else write single NUL only if (len<size). These conditions prevent out-of-bounds writes even when resize fails."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.1,
+  "verdict": "WEAK/FP",
+  "basis": "LLM: pattern absent",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "mg_pfn_iobuf_private"
+      },
+      "result": "static void mg_pfn_iobuf_private(char ch, void *param, bool expand) {\n  struct mg_iobuf *io = (struct mg_iobuf *) param;\n  if (expand && io->len + 2 > io->size) mg_iobuf_resize(io, io->len + 2);\n  if (io->len + 2 <= io->size) {\n    io->buf[io->len++] = (uint8_t) ch;\n    io->buf[io->len] = 0;\n  } else if (io->len < io->size) {\n    io->buf[io->len++] = 0;                             \n  }\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "mg_iobuf_resize"
+      },
+      "result": "int mg_iobuf_resize(struct mg_iobuf *io, size_t new_size) {\n  int ok = 1;\n  new_size = roundup(new_size, io->align);\n  if (new_size == 0) {\n    mg_bzero(io->buf, io->size);\n    free(io->buf);\n    io->buf = NULL;\n    io->len = io->size = 0;\n  } else if (new_size != io->size) {\n                                                                            \n                                                      \n    void *p = calloc(1, new_size);\n    if (p != NULL) {\n      size_t len = new_size < io->len ? new_size : io->len;\n      if (len > 0 && io->buf != NULL) memmove(p, io->buf, len);\n      mg_bzero(io->buf, io->size);\n      free(io->buf);\n      io->buf = (unsigned char *) p;\n      io->size = new_size;\n    } else {\n      ok = 0;\n      MG_ERROR((\"%lld->%lld\", (uint64_t) io->size, (uint64_t) new_size));\n    }\n  }\n  return ok;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "mg_pfn_iobuf_private"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"direct\", \"n_callers\": 7}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    return b\"A\"*1024\n",
+        "target": "mg_pfn_iobuf_private"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/mg-delta-01/bugs/mongoose_1/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": false,
+        "guard_clamps": "full",
+        "pattern_present": false,
+        "reasoning": "Read mg_pfn_iobuf_private and mg_iobuf_resize. The suspicious point is about a possible overflow if mg_iobuf_resize fails and leaves io->size/io->buf unchanged, followed by writes.\n\nHowever, mg_pfn_iobuf_private performs bounds checks against io->size before every write:\n- Main write path requires `io->len + 2 <= io->size` before writing `io->buf[io->len++] = ch; io->buf[io->len] = 0;`.\n- Else path requires `io->len < io->size` before writing a single NUL at `io->buf[io->len++]`.\n\nIf resize fails (mg_iobuf_resize returns 0 and does not change io->buf/io->size), then `io->len + 2 <= io->size` will remain false (given the earlier condition `io->len + 2 > io->size` that triggered resize), and the else-if `io->len < io->size` is also false because `io->len + 2 > io->size` implies `io->len >= io->size - 1`, so the only case where `io->len < io->size` holds is `io->len == io->size - 1`, in which case writing one byte at index `size-1` is still in-bounds. Thus the code does not write past `io->buf[io->size-1]` even on resize failure.\n\nAlso, the claimed bug type is stack-buffer-overflow, but the buffer involved is `io->buf` (heap). There is no stack buffer here.\n\nI attempted to run reach_probe, but the ASan binary path was missing in this environment, so no dynamic reach/crash evidence could be collected.",
+        "corrected_description": "No stack-buffer-overflow here. The function writes into a heap buffer (mg_iobuf::buf) and guards all writes with checks against io->size; even if mg_iobuf_resize fails, the remaining else-if can only write a single NUL at index io->size-1, which is in-bounds. At most, resize failure may cause output truncation (missing terminator semantics), not a memory-safety overflow.",
+        "control_flow_to_bug": "No confirmed crashing memory-safety bug. Control flow in mg_pfn_iobuf_private: if expand && (len+2>size) call mg_iobuf_resize; then only write ch+NUL if (len+2<=size), else write single NUL only if (len<size). These conditions prevent out-of-bounds writes even when resize fails."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1135,
+      "output_tokens": 77,
+      "total_tokens": 1212,
+      "latency_ms": 1158
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1680,
+      "output_tokens": 43,
+      "total_tokens": 1723,
+      "latency_ms": 1050
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1774,
+      "output_tokens": 595,
+      "total_tokens": 2369,
+      "latency_ms": 7139
+    }
+  ],
+  "token_totals": {
+    "input": 4589,
+    "output": 715,
+    "total": 5304,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: fuzz   Sanitizer: address\nFunction: mg_pfn_iobuf_private\nClaimed bug type: stack-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): Potential heap buffer overflow due to unchecked mg_iobuf_resize() failure. Control flow: when expand is true and io->len + 2 > io->size, code calls mg_iobuf_resize(io, io->len + 2) but does not verify that io->size/io->buf were actually updated (resize may fail and leave size unchanged). It then checks `io->len + 2 <= io->size`; if false but `io->len < io->size` is true, it writes a NUL byte via `io->buf[io->len++] = 0` without ensuring there is space for the required terminator semantics. If resize partially fails or io->size is stale relative to io->buf allocation, subsequent writes to io->buf[io->len] / io->buf[io->len++] can go past the allocated heap buffer. AddressSanitizer would detect this as a heap-buffer-overflow on the write. Related: struct mg_iobuf {buf,len,size}, mg_iobuf_resize().\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a stack-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_hKB3pkBkzXQpJkUGgM3pRy05",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"mg_pfn_iobuf_private\"}"
+          }
+        },
+        {
+          "id": "call_SoJTjCKrMqgB6Nu5nmXTe658",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"mg_iobuf_resize\"}"
+          }
+        },
+        {
+          "id": "call_QAo4LlfLuSBBuch58085afDh",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"mg_pfn_iobuf_private\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_hKB3pkBkzXQpJkUGgM3pRy05",
+      "content": "static void mg_pfn_iobuf_private(char ch, void *param, bool expand) {\n  struct mg_iobuf *io = (struct mg_iobuf *) param;\n  if (expand && io->len + 2 > io->size) mg_iobuf_resize(io, io->len + 2);\n  if (io->len + 2 <= io->size) {\n    io->buf[io->len++] = (uint8_t) ch;\n    io->buf[io->len] = 0;\n  } else if (io->len < io->size) {\n    io->buf[io->len++] = 0;                             \n  }\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_SoJTjCKrMqgB6Nu5nmXTe658",
+      "content": "int mg_iobuf_resize(struct mg_iobuf *io, size_t new_size) {\n  int ok = 1;\n  new_size = roundup(new_size, io->align);\n  if (new_size == 0) {\n    mg_bzero(io->buf, io->size);\n    free(io->buf);\n    io->buf = NULL;\n    io->len = io->size = 0;\n  } else if (new_size != io->size) {\n                                                                            \n                                                      \n    void *p = calloc(1, new_size);\n    if (p != NULL) {\n      size_t len = new_size < io->len ? new_size : io->len;\n      if (len > 0 && io->buf != NULL) memmove(p, io->buf, len);\n      mg_bzero(io->buf, io->size);\n      free(io->buf);\n      io->buf = (unsigned char *) p;\n      io->size = new_size;\n    } else {\n      ok = 0;\n      MG_ERROR((\"%lld->%lld\", (uint64_t) io->size, (uint64_t) new_size));\n    }\n  }\n  return ok;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_QAo4LlfLuSBBuch58085afDh",
+      "content": "{\"reachable\": true, \"call_depth\": 4, \"reached_via\": \"direct\", \"n_callers\": 7}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_kNdPYqjaMrTnZPcmfhrmpeJd",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    return b\\\"A\\\"*1024\\n\",\"target\":\"mg_pfn_iobuf_private\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_kNdPYqjaMrTnZPcmfhrmpeJd",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/mg-delta-01/bugs/mongoose_1/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_Ueup0sy69PfER6HonKhK0Sek",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":false,\"guard_clamps\":\"full\",\"pattern_present\":false,\"reasoning\":\"Read mg_pfn_iobuf_private and mg_iobuf_resize. The suspicious point is about a possible overflow if mg_iobuf_resize fails and leaves io->size/io->buf unchanged, followed by writes.\\n\\nHowever, mg_pfn_iobuf_private performs bounds checks against io->size before every write:\\n- Main write path requires `io->len + 2 <= io->size` before writing `io->buf[io->len++] = ch; io->buf[io->len] = 0;`.\\n- Else path requires `io->len < io->size` before writing a single NUL at `io->buf[io->len++]`.\\n\\nIf resize fails (mg_iobuf_resize returns 0 and does not change io->buf/io->size), then `io->len + 2 <= io->size` will remain false (given the earlier condition `io->len + 2 > io->size` that triggered resize), and the else-if `io->len < io->size` is also false because `io->len + 2 > io->size` implies `io->len >= io->size - 1`, so the only case where `io->len < io->size` holds is `io->len == io->size - 1`, in which case writing one byte at index `size-1` is still in-bounds. Thus the code does not write past `io->buf[io->size-1]` even on resize failure.\\n\\nAlso, the claimed bug type is stack-buffer-overflow, but the buffer involved is `io->buf` (heap). There is no stack buffer here.\\n\\nI attempted to run reach_probe, but the ASan binary path was missing in this environment, so no dynamic reach/crash evidence could be collected.\" ,\"corrected_description\":\"No stack-buffer-overflow here. The function writes into a heap buffer (mg_iobuf::buf) and guards all writes with checks against io->size; even if mg_iobuf_resize fails, the remaining else-if can only write a single NUL at index io->size-1, which is in-bounds. At most, resize failure may cause output truncation (missing terminator semantics), not a memory-safety overflow.\",\"control_flow_to_bug\":\"No confirmed crashing memory-safety bug. Control flow in mg_pfn_iobuf_private: if expand && (len+2>size) call mg_iobuf_resize; then only write ch+NUL if (len+2<=size), else write single NUL only if (len<size). These conditions prevent out-of-bounds writes even when resize fails.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_Ueup0sy69PfER6HonKhK0Sek",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "mg_pfn_iobuf_private"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Potential heap buffer overflow due to unchecked mg_iobuf_resize() failure. Control flow: when expand is true and io->len + 2 > io->size, code calls mg_iobuf_resize(io, io->len + 2) but does not verify that io->size/io->buf were actually updated (resize may fail and leave size unchanged). It then checks `io->len + 2 <= io->size`; if false but `io->len < io->size` is true, it writes a NUL byte via `io->buf[io->len++] = 0` without ensuring there is space for the required terminator semantics. If resize partially fails or io->size is stale relative to io->buf allocation, subsequent writes to io->buf[io->len] / io->buf[io->len++] can go past the allocated heap buffer. AddressSanitizer would detect this as a heap-buffer-overflow on the write. Related: struct mg_iobuf {buf,len,size}, mg_iobuf_resize().",
+  "finder_vuln_type": ""
+}

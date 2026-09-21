@@ -1,0 +1,181 @@
+{
+  "tag": "fp-delta-03__vuln_003",
+  "gt": "rfx_process_message_metadata",
+  "crash_type": "SEGV",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": false,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source of rfx_process_message_metadata contains an unconditional write `*(UINT64*)metadataBlock = metadataData;` after checking `*pExpectedBlockType == WBT_FRAME_END` and `magic == WF_MAGIC`. In the function body as read, `metadataBlock` and `metadataData` are not declared/initialized, so this is a wild 64-bit store through an indeterminate pointer, which would typically SEGV/ASan-crash when executed.\n\nHowever, without a successful reach_probe run (tool failed due to missing ASan binary path), we cannot empirically confirm that a fuzzer input can reach this exact compiled code path in the provided harness, nor that the store is actually present in the built artifact (it could be dead code, macro-expanded differently, or the snippet could be from an uncompiled variant). Based on the source alone, the crash would occur whenever the two preceding conditions are satisfied; the pointer is not derived from input but the control-flow to execute the store is input-driven (magic value and expected block type).",
+    "corrected_description": "Unconditional wild 64-bit write via indeterminate pointer: `*(UINT64*)metadataBlock = metadataData;` where `metadataBlock` is not defined/initialized in this function (and `metadataData` likewise). If this code is compiled as-is and executed, it will likely crash (SEGV/ASan) immediately after passing the magic check.",
+    "control_flow_to_bug": "TestFuzzCodecs -> RFX message parsing -> rfx_process_message_metadata(context,message,s,&expectedBlockType). Conditions: expectedBlockType must equal WBT_FRAME_END; stream must contain 4 bytes such that Stream_Read_UINT32 reads magic == WF_MAGIC. Then function executes `*(UINT64*)metadataBlock = metadataData;` causing a wild store and likely SEGV."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.2,
+  "verdict": "WEAK/FP",
+  "basis": "operand not input-tainted",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "rfx_process_message_metadata"
+      },
+      "result": "static INLINE BOOL rfx_process_message_metadata(RFX_CONTEXT* WINPR_RESTRICT context,\n\t\t\t\t\t\t\t\t\t\t\t\tRFX_MESSAGE* WINPR_RESTRICT message,\n\t\t\t\t\t\t\t\t\t\t\t\twStream* WINPR_RESTRICT s,\n\t\t\t\t\t\t\t\t\t\t\t\tUINT16* WINPR_RESTRICT pExpectedBlockType)\n{\n\tUINT32 magic = 0;\n\n\tWINPR_ASSERT(context);\n\tWINPR_ASSERT(context->priv);\n\tWINPR_ASSERT(message);\n\tWINPR_ASSERT(s);\n\tWINPR_ASSERT(pExpectedBlockType);\n\n\tif (*pExpectedBlockType != WBT_FRAME_END)\n\t{\n\t\tWLog_Print(context->priv->log, WLOG_ERROR, \"message unexpected wants WBT_FRAME_END (0x%x)\", *pExpectedBlockType);\n\t\treturn FALSE;\n\t}\n\n\tStream_Read_UINT32(s, magic);                                  \n\tif (magic != WF_MAGIC)\n\t{\n\t\tWLog_Print(context->priv->log, WLOG_ERROR, \"invalid magic number 0x%08\" PRIX32 \"\", magic);\n\t\treturn FALSE;\n\t}\n\t*(UINT64*)metadataBlock = metadataData;\n\treturn TRUE;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "rfx_process_message_metadata"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 3, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Minimal RFX-like blob; actual format unknown. Provide some bytes so Stream_Read_UINT32 can read.\n    return (0).to_bytes(4,'little') + b'A'*64\n",
+        "target": "rfx_process_message_metadata"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/fp-delta-03/bugs/vuln_003/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": false,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source of rfx_process_message_metadata contains an unconditional write `*(UINT64*)metadataBlock = metadataData;` after checking `*pExpectedBlockType == WBT_FRAME_END` and `magic == WF_MAGIC`. In the function body as read, `metadataBlock` and `metadataData` are not declared/initialized, so this is a wild 64-bit store through an indeterminate pointer, which would typically SEGV/ASan-crash when executed.\n\nHowever, without a successful reach_probe run (tool failed due to missing ASan binary path), we cannot empirically confirm that a fuzzer input can reach this exact compiled code path in the provided harness, nor that the store is actually present in the built artifact (it could be dead code, macro-expanded differently, or the snippet could be from an uncompiled variant). Based on the source alone, the crash would occur whenever the two preceding conditions are satisfied; the pointer is not derived from input but the control-flow to execute the store is input-driven (magic value and expected block type).",
+        "corrected_description": "Unconditional wild 64-bit write via indeterminate pointer: `*(UINT64*)metadataBlock = metadataData;` where `metadataBlock` is not defined/initialized in this function (and `metadataData` likewise). If this code is compiled as-is and executed, it will likely crash (SEGV/ASan) immediately after passing the magic check.",
+        "control_flow_to_bug": "TestFuzzCodecs -> RFX message parsing -> rfx_process_message_metadata(context,message,s,&expectedBlockType). Conditions: expectedBlockType must equal WBT_FRAME_END; stream must contain 4 bytes such that Stream_Read_UINT32 reads magic == WF_MAGIC. Then function executes `*(UINT64*)metadataBlock = metadataData;` causing a wild store and likely SEGV."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1026,
+      "output_tokens": 58,
+      "total_tokens": 1084,
+      "latency_ms": 1903
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1416,
+      "output_tokens": 74,
+      "total_tokens": 1490,
+      "latency_ms": 2068
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1542,
+      "output_tokens": 419,
+      "total_tokens": 1961,
+      "latency_ms": 7696
+    }
+  ],
+  "token_totals": {
+    "input": 3984,
+    "output": 551,
+    "total": 4535,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: TestFuzzCodecs   Sanitizer: address\nFunction: rfx_process_message_metadata\nClaimed bug type: SEGV\nSuspicious-point description (from the finder — may be imprecise): After validating the frame magic, the function executes `*(UINT64*)metadataBlock = metadataData;` writing a 64-bit value through an undeclared/garbage `metadataBlock` pointer -- a wild write.\n\nControl flow to the bug:\n  - TestFuzzCodecs feeds an RFX message; expected block == WBT_FRAME_END\n  - Stream_Read_UINT32 magic == WF_MAGIC passes\n  - *(UINT64*)metadataBlock = metadataData -> wild 64-bit write -> SEGV\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a SEGV\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_cj07caW3HlRNDAnLAzHDtExi",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"rfx_process_message_metadata\"}"
+          }
+        },
+        {
+          "id": "call_ljlffKyy9uMqxR5OVexQn1T1",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"rfx_process_message_metadata\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_cj07caW3HlRNDAnLAzHDtExi",
+      "content": "static INLINE BOOL rfx_process_message_metadata(RFX_CONTEXT* WINPR_RESTRICT context,\n\t\t\t\t\t\t\t\t\t\t\t\tRFX_MESSAGE* WINPR_RESTRICT message,\n\t\t\t\t\t\t\t\t\t\t\t\twStream* WINPR_RESTRICT s,\n\t\t\t\t\t\t\t\t\t\t\t\tUINT16* WINPR_RESTRICT pExpectedBlockType)\n{\n\tUINT32 magic = 0;\n\n\tWINPR_ASSERT(context);\n\tWINPR_ASSERT(context->priv);\n\tWINPR_ASSERT(message);\n\tWINPR_ASSERT(s);\n\tWINPR_ASSERT(pExpectedBlockType);\n\n\tif (*pExpectedBlockType != WBT_FRAME_END)\n\t{\n\t\tWLog_Print(context->priv->log, WLOG_ERROR, \"message unexpected wants WBT_FRAME_END (0x%x)\", *pExpectedBlockType);\n\t\treturn FALSE;\n\t}\n\n\tStream_Read_UINT32(s, magic);                                  \n\tif (magic != WF_MAGIC)\n\t{\n\t\tWLog_Print(context->priv->log, WLOG_ERROR, \"invalid magic number 0x%08\" PRIX32 \"\", magic);\n\t\treturn FALSE;\n\t}\n\t*(UINT64*)metadataBlock = metadataData;\n\treturn TRUE;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ljlffKyy9uMqxR5OVexQn1T1",
+      "content": "{\"reachable\": true, \"call_depth\": 3, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_QdmMmVcY58YCbOVfYuiFOP3D",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Minimal RFX-like blob; actual format unknown. Provide some bytes so Stream_Read_UINT32 can read.\\n    return (0).to_bytes(4,'little') + b'A'*64\\n\",\"target\":\"rfx_process_message_metadata\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_QdmMmVcY58YCbOVfYuiFOP3D",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/fp-delta-03/bugs/vuln_003/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_e7nBkDnqI0Oqm4wkEPOIIMmD",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":false,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source of rfx_process_message_metadata contains an unconditional write `*(UINT64*)metadataBlock = metadataData;` after checking `*pExpectedBlockType == WBT_FRAME_END` and `magic == WF_MAGIC`. In the function body as read, `metadataBlock` and `metadataData` are not declared/initialized, so this is a wild 64-bit store through an indeterminate pointer, which would typically SEGV/ASan-crash when executed.\\n\\nHowever, without a successful reach_probe run (tool failed due to missing ASan binary path), we cannot empirically confirm that a fuzzer input can reach this exact compiled code path in the provided harness, nor that the store is actually present in the built artifact (it could be dead code, macro-expanded differently, or the snippet could be from an uncompiled variant). Based on the source alone, the crash would occur whenever the two preceding conditions are satisfied; the pointer is not derived from input but the control-flow to execute the store is input-driven (magic value and expected block type).\",\"corrected_description\":\"Unconditional wild 64-bit write via indeterminate pointer: `*(UINT64*)metadataBlock = metadataData;` where `metadataBlock` is not defined/initialized in this function (and `metadataData` likewise). If this code is compiled as-is and executed, it will likely crash (SEGV/ASan) immediately after passing the magic check.\",\"control_flow_to_bug\":\"TestFuzzCodecs -> RFX message parsing -> rfx_process_message_metadata(context,message,s,&expectedBlockType). Conditions: expectedBlockType must equal WBT_FRAME_END; stream must contain 4 bytes such that Stream_Read_UINT32 reads magic == WF_MAGIC. Then function executes `*(UINT64*)metadataBlock = metadataData;` causing a wild store and likely SEGV.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_e7nBkDnqI0Oqm4wkEPOIIMmD",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+diff --git a/libfreerdp/core/gcc.c b/libfreerdp/core/gcc.c
+--- a/libfreerdp/core/gcc.c
++++ b/libfreerdp/core/gcc.c
+@@ -0,0 +1,43 @@
++BOOL gcc_read_client_network_data(wStream* s, rdpMcs* mcs)
++{
++	WINPR_ASSERT(s);
++	WINPR_ASSERT(mcs);
++
++	const size_t blockLength = Stream_GetRemainingLength(s);
++	if (blockLength < 4)
++		return FALSE;
++
++	Stream_Read_UINT8(s, mcs->channelCount);                   
++
++	if (blockLength < 4 + (UINT8)mcs->channelCount * 12)
++		return FALSE;
++
++	if (mcs->channelCount > CHANNEL_MAX_COUNT)
++		return FALSE;
++
++	                     
++	for (UINT32 i = 0; i < mcs->channelCount; i++)
++	{
++		   
++                
++                                                                    
++                                                                   
++                                                                
++     
++		rdpMcsChannel* channel = &mcs->channels[i];
++		Stream_Read(s, channel->Name, CHANNEL_NAME_LEN + 1);                     
++
++		if (!memchr(channel->Name, 0, CHANNEL_NAME_LEN + 1))
++		{
++			WLog_ERR(
++			    TAG,
++			    "protocol violation: received a static channel name with missing null-termination");
++			return FALSE;
++		}
++
++		Stream_Read_UINT32(s, channel->options);                        
++		channel->ChannelId = mcs->baseChannelId++;
++	}
++
++	return TRUE;
++}

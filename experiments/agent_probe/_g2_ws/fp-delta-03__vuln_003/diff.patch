@@ -1,0 +1,32 @@
+diff --git a/libfreerdp/codec/rfx.c b/libfreerdp/codec/rfx.c
+--- a/libfreerdp/codec/rfx.c
++++ b/libfreerdp/codec/rfx.c
+@@ -0,0 +1,28 @@
++static INLINE BOOL rfx_process_message_metadata(RFX_CONTEXT* WINPR_RESTRICT context,
++												RFX_MESSAGE* WINPR_RESTRICT message,
++												wStream* WINPR_RESTRICT s,
++												UINT16* WINPR_RESTRICT pExpectedBlockType)
++{
++	UINT32 magic = 0;
++
++	WINPR_ASSERT(context);
++	WINPR_ASSERT(context->priv);
++	WINPR_ASSERT(message);
++	WINPR_ASSERT(s);
++	WINPR_ASSERT(pExpectedBlockType);
++
++	if (*pExpectedBlockType != WBT_FRAME_END)
++	{
++		WLog_Print(context->priv->log, WLOG_ERROR, "message unexpected wants WBT_FRAME_END (0x%x)", *pExpectedBlockType);
++		return FALSE;
++	}
++
++	Stream_Read_UINT32(s, magic);                                  
++	if (magic != WF_MAGIC)
++	{
++		WLog_Print(context->priv->log, WLOG_ERROR, "invalid magic number 0x%08" PRIX32 "", magic);
++		return FALSE;
++	}
++	*(UINT64*)metadataBlock = metadataData;
++	return TRUE;
++}

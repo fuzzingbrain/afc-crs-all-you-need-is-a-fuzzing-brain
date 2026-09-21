@@ -1,0 +1,181 @@
+{
+  "tag": "cu-delta-01__curl-005",
+  "gt": "verynormalprotocol_doing",
+  "crash_type": "SEGV",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": "unknown",
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source shows a definite invalid write: in the branch `else if(strcasecmp(response, \"crashycrashy\") == 0)` it executes `*(unsigned int *)result = CURLE_OK;` where `result` is a `CURLcode` enum value, not a pointer. This casts a small integer (typically 0..~100) to `unsigned int*` and writes to that address, which is a wild/null-page write and should SEGV/ASan-crash when executed.\n\nHowever, the branch condition depends on `response` read by `Curl_xfer_recv(data, response, 128, &nread);` and the code does not ensure NUL-termination of `response` before calling `strcasecmp`, so the comparison itself may read out of bounds unless the received data includes a NUL. Still, if the received bytes begin with \"crashycrashy\\0\" the `strcasecmp` can succeed and then the wild write occurs.\n\nI attempted to run reach_probe to confirm runtime reach/crash, but the probe tool failed due to missing ASan binary path in this environment, so I cannot provide execution evidence. The code pattern alone strongly indicates a crash if the branch is reachable with a crafted server response.",
+    "corrected_description": "Wild pointer write due to casting a `CURLcode` enum/integer (`result`) to `unsigned int *` and dereferencing it: `*(unsigned int *)result = CURLE_OK;` executed when the received response string compares equal (case-insensitive) to \"crashycrashy\". Also, `strcasecmp(response, ...)` is called on a potentially non-NUL-terminated 128-byte buffer, which can cause an out-of-bounds read before the write.",
+    "control_flow_to_bug": "curl_fuzzer_ws -> (ws protocol handling) -> verynormalprotocol_doing(data, done): calls Curl_xfer_recv into local `char response[128]` until not CURLE_AGAIN; requires `result==CURLE_OK` and `nread>0`; received bytes must make `strcasecmp(response,\"crashycrashy\")==0` (practically: payload starts with \"crashycrashy\\0\" or otherwise NUL-terminated soon after). Then executes `*(unsigned int *)result = CURLE_OK;` causing SEGV/ASan crash."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "verynormalprotocol_doing"
+      },
+      "result": "static CURLcode verynormalprotocol_doing(struct Curl_easy *data, bool *done)\n{\n  CURLcode result = CURLE_WEIRD_SERVER_REPLY;\n  ssize_t nread;\n  char response[128];\n\n  *done = FALSE;\n\n                                                                          \n                                                               \n  do {\n    result = Curl_xfer_recv(data, response, 128, &nread);\n  } while(result == CURLE_AGAIN);\n  if(result)\n    return result;\n  else if(!nread) {\n    failf(data, \"Connection disconnected\");\n    *done = TRUE;\n    result = CURLE_RECV_ERROR;\n  }\n  else if(strcasecmp(response, \"crashycrashy\") == 0) {\n    *done = TRUE;\n    *(unsigned int *)result = CURLE_OK;\n  }\n  else {\n    *done = TRUE;\n    result = CURLE_WEIRD_SERVER_REPLY;\n  }\n\n  if(result == CURLE_AGAIN)\n    result = CURLE_OK;\n  return result;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "verynormalprotocol_doing"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 274}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to drive the ws protocol fuzzer to send/receive a frame whose payload\n    # becomes the protocol response buffer.\n    # Minimal attempt: just the ASCII token.\n    return b\"crashycrashy\\x00\" * 20\n",
+        "target": "verynormalprotocol_doing"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-delta-01/bugs/curl-005/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": "unknown",
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source shows a definite invalid write: in the branch `else if(strcasecmp(response, \"crashycrashy\") == 0)` it executes `*(unsigned int *)result = CURLE_OK;` where `result` is a `CURLcode` enum value, not a pointer. This casts a small integer (typically 0..~100) to `unsigned int*` and writes to that address, which is a wild/null-page write and should SEGV/ASan-crash when executed.\n\nHowever, the branch condition depends on `response` read by `Curl_xfer_recv(data, response, 128, &nread);` and the code does not ensure NUL-termination of `response` before calling `strcasecmp`, so the comparison itself may read out of bounds unless the received data includes a NUL. Still, if the received bytes begin with \"crashycrashy\\0\" the `strcasecmp` can succeed and then the wild write occurs.\n\nI attempted to run reach_probe to confirm runtime reach/crash, but the probe tool failed due to missing ASan binary path in this environment, so I cannot provide execution evidence. The code pattern alone strongly indicates a crash if the branch is reachable with a crafted server response.",
+        "corrected_description": "Wild pointer write due to casting a `CURLcode` enum/integer (`result`) to `unsigned int *` and dereferencing it: `*(unsigned int *)result = CURLE_OK;` executed when the received response string compares equal (case-insensitive) to \"crashycrashy\". Also, `strcasecmp(response, ...)` is called on a potentially non-NUL-terminated 128-byte buffer, which can cause an out-of-bounds read before the write.",
+        "control_flow_to_bug": "curl_fuzzer_ws -> (ws protocol handling) -> verynormalprotocol_doing(data, done): calls Curl_xfer_recv into local `char response[128]` until not CURLE_AGAIN; requires `result==CURLE_OK` and `nread>0`; received bytes must make `strcasecmp(response,\"crashycrashy\")==0` (practically: payload starts with \"crashycrashy\\0\" or otherwise NUL-terminated soon after). Then executes `*(unsigned int *)result = CURLE_OK;` causing SEGV/ASan crash."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1048,
+      "output_tokens": 60,
+      "total_tokens": 1108,
+      "latency_ms": 1545
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1392,
+      "output_tokens": 88,
+      "total_tokens": 1480,
+      "latency_ms": 1742
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1530,
+      "output_tokens": 528,
+      "total_tokens": 2058,
+      "latency_ms": 7654
+    }
+  ],
+  "token_totals": {
+    "input": 3970,
+    "output": 676,
+    "total": 4646,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: curl_fuzzer_ws   Sanitizer: address\nFunction: verynormalprotocol_doing\nClaimed bug type: SEGV\nSuspicious-point description (from the finder — may be imprecise): On the `crashycrashy` response branch the code executes `*(unsigned int *)result = CURLE_OK;` where `result` is a CURLcode (a small enum value), so its *value* (e.g. 0..~90) is reinterpreted as a pointer and written through: a wild pointer write.\n\nControl flow to the bug:\n  - fuzzer feeds the ws protocol; verynormalprotocol_doing reads a 128-byte response\n  - response equals \"crashycrashy\"\n  - *(unsigned int *)result = CURLE_OK writes through result-as-pointer -> SEGV\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a SEGV\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_LDNF7oc4PSieXHqju5IPg7NT",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"verynormalprotocol_doing\"}"
+          }
+        },
+        {
+          "id": "call_L6gLrmYuiYdN2xqZwdMhpG33",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"verynormalprotocol_doing\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_LDNF7oc4PSieXHqju5IPg7NT",
+      "content": "static CURLcode verynormalprotocol_doing(struct Curl_easy *data, bool *done)\n{\n  CURLcode result = CURLE_WEIRD_SERVER_REPLY;\n  ssize_t nread;\n  char response[128];\n\n  *done = FALSE;\n\n                                                                          \n                                                               \n  do {\n    result = Curl_xfer_recv(data, response, 128, &nread);\n  } while(result == CURLE_AGAIN);\n  if(result)\n    return result;\n  else if(!nread) {\n    failf(data, \"Connection disconnected\");\n    *done = TRUE;\n    result = CURLE_RECV_ERROR;\n  }\n  else if(strcasecmp(response, \"crashycrashy\") == 0) {\n    *done = TRUE;\n    *(unsigned int *)result = CURLE_OK;\n  }\n  else {\n    *done = TRUE;\n    result = CURLE_WEIRD_SERVER_REPLY;\n  }\n\n  if(result == CURLE_AGAIN)\n    result = CURLE_OK;\n  return result;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_L6gLrmYuiYdN2xqZwdMhpG33",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 274}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_tSYVyKS08M6IgawGCai2xKMy",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to drive the ws protocol fuzzer to send/receive a frame whose payload\\n    # becomes the protocol response buffer.\\n    # Minimal attempt: just the ASCII token.\\n    return b\\\"crashycrashy\\\\x00\\\" * 20\\n\",\"target\":\"verynormalprotocol_doing\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_tSYVyKS08M6IgawGCai2xKMy",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-delta-01/bugs/curl-005/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_PEGPvhyoAImidHgzwdbQAn5j",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":\"unknown\",\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source shows a definite invalid write: in the branch `else if(strcasecmp(response, \\\"crashycrashy\\\") == 0)` it executes `*(unsigned int *)result = CURLE_OK;` where `result` is a `CURLcode` enum value, not a pointer. This casts a small integer (typically 0..~100) to `unsigned int*` and writes to that address, which is a wild/null-page write and should SEGV/ASan-crash when executed.\\n\\nHowever, the branch condition depends on `response` read by `Curl_xfer_recv(data, response, 128, &nread);` and the code does not ensure NUL-termination of `response` before calling `strcasecmp`, so the comparison itself may read out of bounds unless the received data includes a NUL. Still, if the received bytes begin with \\\"crashycrashy\\\\0\\\" the `strcasecmp` can succeed and then the wild write occurs.\\n\\nI attempted to run reach_probe to confirm runtime reach/crash, but the probe tool failed due to missing ASan binary path in this environment, so I cannot provide execution evidence. The code pattern alone strongly indicates a crash if the branch is reachable with a crafted server response.\" ,\"corrected_description\":\"Wild pointer write due to casting a `CURLcode` enum/integer (`result`) to `unsigned int *` and dereferencing it: `*(unsigned int *)result = CURLE_OK;` executed when the received response string compares equal (case-insensitive) to \\\"crashycrashy\\\". Also, `strcasecmp(response, ...)` is called on a potentially non-NUL-terminated 128-byte buffer, which can cause an out-of-bounds read before the write.\",\"control_flow_to_bug\":\"curl_fuzzer_ws -> (ws protocol handling) -> verynormalprotocol_doing(data, done): calls Curl_xfer_recv into local `char response[128]` until not CURLE_AGAIN; requires `result==CURLE_OK` and `nread>0`; received bytes must make `strcasecmp(response,\\\"crashycrashy\\\")==0` (practically: payload starts with \\\"crashycrashy\\\\0\\\" or otherwise NUL-terminated soon after). Then executes `*(unsigned int *)result = CURLE_OK;` causing SEGV/ASan crash.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_PEGPvhyoAImidHgzwdbQAn5j",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

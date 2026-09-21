@@ -71,7 +71,7 @@ PROFILES: Dict[str, Profile] = {
         seed=GPT_4_1,
         verifier=O3,
         poc=O3,
-        utility=GPT_4_1_MINI,
+        utility=GPT_4_1,
         compression=GPT_4_1_NANO,
         base=O3,
     ),

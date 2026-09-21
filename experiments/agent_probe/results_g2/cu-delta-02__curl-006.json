@@ -1,0 +1,190 @@
+{
+  "tag": "cu-delta-02__curl-006",
+  "gt": "totallyfineprotocl_sm",
+  "crash_type": "SEGV",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Source shows a definite invalid write in TOTALLYFINEPROTOCL_DO3: `*(unsigned int *)result = CURLE_OK;` where `result` is a local `CURLcode` scalar (enum/int) initialized to CURLE_OK (0) and later set to other small constants. Casting that integer to `unsigned int*` and dereferencing writes to address equal to the numeric value of `result` (typically 0x0 or another small address), which is an ASan-detectable SEGV/invalid write.\n\nTrigger conditions in code: state must be TOTALLYFINEPROTOCL_DO3, `result==0` and `nread>0` (due to `if(result || !nread) break;`), and `strcasecmp(response, \"crashycrashy\\r\\n\")==0` must hold. `response` comes from `Curl_dyn_ptr(&pp.recvbuf)` filled by `Curl_pp_readresp`, i.e., network/server response data controlled by the fuzzer harness.\n\nI could not run reach_probe due to missing ASan binary path in this environment (tool error: address binary not found), so evidence is from direct source inspection + reachability confirmation only; no runtime crash captured here.",
+    "corrected_description": "Invalid write/SEGV due to treating a scalar CURLcode (`result`) as a pointer: in state TOTALLYFINEPROTOCL_DO3, if the received line equals \"crashycrashy\\r\\n\", code executes `*(unsigned int *)result = CURLE_OK;`, writing to address (uintptr_t)result (usually NULL), causing a crash.",
+    "control_flow_to_bug": "curl_fuzzer_ws harness drives curl state machine -> totallyfineprotocl_sm(conn,data) repeatedly. Must progress protocol states via exact server lines: in TOTALLYFINEPROTOCL_START receive \"supermagic12\\r\\n\" -> vnstate DO1; in DO1 receive \"aaaabaaacaaadaaaeaaafaaagaaahaaaiaaajaaakaaalaaamaaa\\r\\n\" -> vnstate DO2; in DO2 receive \"challengeresponse\\r\\n\" -> vnstate DO3; in DO3 with `result==CURLE_OK` and `nread>0`, receive \"crashycrashy\\r\\n\" -> execute `*(unsigned int *)result = CURLE_OK;` and crash."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "totallyfineprotocl_sm"
+      },
+      "result": "static CURLcode totallyfineprotocl_sm\n  (struct Curl_easy *data, struct connectdata *conn)\n{\n  CURLcode result = CURLE_OK;\n  ssize_t nread;\n  struct totallyfineprotocl_conn *vnormal = &conn->proto.vnormal;\n  const char *done_statement = \"All done!\";\n  int code;\n\n  result = Curl_pp_readresp(data, 0, &data->conn->proto.vnormal.pp,\n    &code, &nread);\n  char * const response = Curl_dyn_ptr(&data->conn->proto.vnormal.pp.recvbuf);\n\n  infof(data, \"totallyfineprotocl_doing: state [%d]\", (int) vnormal->state);\n  switch(vnormal->state) {\n    case TOTALLYFINEPROTOCL_STOP:\n      result = CURLE_OK;\n      break;\n    case TOTALLYFINEPROTOCL_START:\n      if(result)\n        break;\n      else if(!nread) {\n        failf(data, \"Connection disconnected\");\n        result = CURLE_RECV_ERROR;\n        break;\n      }\n      if(strcasecmp(\"supermagic12\\r\\n\", response) == 0) {\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"OK\");\n        vnstate(data, TOTALLYFINEPROTOCL_DO1);\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    case TOTALLYFINEPROTOCL_DO1:\n      if(result || !nread)\n        break;\n      if(strcasecmp(\"aaaabaaacaaadaaaeaaafaaagaaahaaaiaaajaaakaaalaaamaaa\\r\\n\",\n            response) == 0) {\n        vnstate(data, TOTALLYFINEPROTOCL_DO2);\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"OK\");\n        result = CURLE_OK;\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    case TOTALLYFINEPROTOCL_DO2:\n      if(result || !nread)\n        break;\n      if(strcasecmp(\"challengeresponse\\r\\n\", response) == 0) {\n        vnstate(data, TOTALLYFINEPROTOCL_DO3);\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"OK\");\n        result = CURLE_OK;\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    case TOTALLYFINEPROTOCL_DO3:\n      if(result || !nread)\n        break;\n      if(strcasecmp(\"complete\\r\\n\", response) == 0) {\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, done_statement);\n        result = CURLE_OK;\n        vnstate(data, TOTALLYFINEPROTOCL_STOP);\n      }\n      else if(strcasecmp(response, \"crashycrashy\\r\\n\") == 0) {\n        *(unsigned int *)result = CURLE_OK;\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    default:\n      result = CURLE_WEIRD_SERVER_REPLY;\n      break;\n  }\n\n\n  if(result == CURLE_AGAIN)\n    result = CURLE_OK;\n  return result;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "totallyfineprotocl_sm"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 25}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to drive the ws fuzzer harness to act as server and feed protocol lines.\n    # Provide the expected handshake sequence then the crash trigger.\n    lines = [\n        b\"supermagic12\\r\\n\",\n        b\"aaaabaaacaaadaaaeaaafaaagaaahaaaiaaajaaakaaalaaamaaa\\r\\n\",\n        b\"challengeresponse\\r\\n\",\n        b\"crashycrashy\\r\\n\",\n    ]\n    return b\"\".join(lines)\n",
+        "target": "totallyfineprotocl_sm"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-delta-02/bugs/curl-006/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Source shows a definite invalid write in TOTALLYFINEPROTOCL_DO3: `*(unsigned int *)result = CURLE_OK;` where `result` is a local `CURLcode` scalar (enum/int) initialized to CURLE_OK (0) and later set to other small constants. Casting that integer to `unsigned int*` and dereferencing writes to address equal to the numeric value of `result` (typically 0x0 or another small address), which is an ASan-detectable SEGV/invalid write.\n\nTrigger conditions in code: state must be TOTALLYFINEPROTOCL_DO3, `result==0` and `nread>0` (due to `if(result || !nread) break;`), and `strcasecmp(response, \"crashycrashy\\r\\n\")==0` must hold. `response` comes from `Curl_dyn_ptr(&pp.recvbuf)` filled by `Curl_pp_readresp`, i.e., network/server response data controlled by the fuzzer harness.\n\nI could not run reach_probe due to missing ASan binary path in this environment (tool error: address binary not found), so evidence is from direct source inspection + reachability confirmation only; no runtime crash captured here.",
+        "corrected_description": "Invalid write/SEGV due to treating a scalar CURLcode (`result`) as a pointer: in state TOTALLYFINEPROTOCL_DO3, if the received line equals \"crashycrashy\\r\\n\", code executes `*(unsigned int *)result = CURLE_OK;`, writing to address (uintptr_t)result (usually NULL), causing a crash.",
+        "control_flow_to_bug": "curl_fuzzer_ws harness drives curl state machine -> totallyfineprotocl_sm(conn,data) repeatedly. Must progress protocol states via exact server lines: in TOTALLYFINEPROTOCL_START receive \"supermagic12\\r\\n\" -> vnstate DO1; in DO1 receive \"aaaabaaacaaadaaaeaaafaaagaaahaaaiaaajaaakaaalaaamaaa\\r\\n\" -> vnstate DO2; in DO2 receive \"challengeresponse\\r\\n\" -> vnstate DO3; in DO3 with `result==CURLE_OK` and `nread>0`, receive \"crashycrashy\\r\\n\" -> execute `*(unsigned int *)result = CURLE_OK;` and crash."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1063,
+      "output_tokens": 60,
+      "total_tokens": 1123,
+      "latency_ms": 2176
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1952,
+      "output_tokens": 155,
+      "total_tokens": 2107,
+      "latency_ms": 2310
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2157,
+      "output_tokens": 546,
+      "total_tokens": 2703,
+      "latency_ms": 7393
+    }
+  ],
+  "token_totals": {
+    "input": 5172,
+    "output": 761,
+    "total": 5933,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: curl_fuzzer_ws   Sanitizer: address\nFunction: totallyfineprotocl_sm\nClaimed bug type: SEGV\nSuspicious-point description (from the finder — may be imprecise): Heap/stack memory corruption via arbitrary write: in state TOTALLYFINEPROTOCL_DO3, when the received response string equals \"crashycrashy\\r\\n\", code executes `*(unsigned int *)result = CURLE_OK;` where `result` is a CURLcode scalar (enum/integer) not a pointer. Casting this small integer value to `unsigned int*` and dereferencing performs a write to an attacker-influenced address (typically near NULL or small address), causing an AddressSanitizer-detectable invalid write/crash. Input is attacker-controlled via `response` from `Curl_pp_readresp()`/recv buffer, so fuzzer can trigger by providing that exact line.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a SEGV\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_BrfyxZJWiEDdwZX5V9n2C9WL",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"totallyfineprotocl_sm\"}"
+          }
+        },
+        {
+          "id": "call_qs1PCDSnlidBa2nCr6FZiFpI",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"totallyfineprotocl_sm\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_BrfyxZJWiEDdwZX5V9n2C9WL",
+      "content": "static CURLcode totallyfineprotocl_sm\n  (struct Curl_easy *data, struct connectdata *conn)\n{\n  CURLcode result = CURLE_OK;\n  ssize_t nread;\n  struct totallyfineprotocl_conn *vnormal = &conn->proto.vnormal;\n  const char *done_statement = \"All done!\";\n  int code;\n\n  result = Curl_pp_readresp(data, 0, &data->conn->proto.vnormal.pp,\n    &code, &nread);\n  char * const response = Curl_dyn_ptr(&data->conn->proto.vnormal.pp.recvbuf);\n\n  infof(data, \"totallyfineprotocl_doing: state [%d]\", (int) vnormal->state);\n  switch(vnormal->state) {\n    case TOTALLYFINEPROTOCL_STOP:\n      result = CURLE_OK;\n      break;\n    case TOTALLYFINEPROTOCL_START:\n      if(result)\n        break;\n      else if(!nread) {\n        failf(data, \"Connection disconnected\");\n        result = CURLE_RECV_ERROR;\n        break;\n      }\n      if(strcasecmp(\"supermagic12\\r\\n\", response) == 0) {\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"OK\");\n        vnstate(data, TOTALLYFINEPROTOCL_DO1);\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    case TOTALLYFINEPROTOCL_DO1:\n      if(result || !nread)\n        break;\n      if(strcasecmp(\"aaaabaaacaaadaaaeaaafaaagaaahaaaiaaajaaakaaalaaamaaa\\r\\n\",\n            response) == 0) {\n        vnstate(data, TOTALLYFINEPROTOCL_DO2);\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"OK\");\n        result = CURLE_OK;\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    case TOTALLYFINEPROTOCL_DO2:\n      if(result || !nread)\n        break;\n      if(strcasecmp(\"challengeresponse\\r\\n\", response) == 0) {\n        vnstate(data, TOTALLYFINEPROTOCL_DO3);\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, \"OK\");\n        result = CURLE_OK;\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    case TOTALLYFINEPROTOCL_DO3:\n      if(result || !nread)\n        break;\n      if(strcasecmp(\"complete\\r\\n\", response) == 0) {\n        Curl_pp_sendf(data, &conn->proto.vnormal.pp, done_statement);\n        result = CURLE_OK;\n        vnstate(data, TOTALLYFINEPROTOCL_STOP);\n      }\n      else if(strcasecmp(response, \"crashycrashy\\r\\n\") == 0) {\n        *(unsigned int *)result = CURLE_OK;\n      }\n      else {\n        result = CURLE_WEIRD_SERVER_REPLY;\n      }\n      break;\n    default:\n      result = CURLE_WEIRD_SERVER_REPLY;\n      break;\n  }\n\n\n  if(result == CURLE_AGAIN)\n    result = CURLE_OK;\n  return result;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_qs1PCDSnlidBa2nCr6FZiFpI",
+      "content": "{\"reachable\": true, \"call_depth\": 5, \"reached_via\": \"indirect\", \"n_callers\": 25}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_dH6iYmYwo7MfQsXGX7QWV8WX",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to drive the ws fuzzer harness to act as server and feed protocol lines.\\n    # Provide the expected handshake sequence then the crash trigger.\\n    lines = [\\n        b\\\"supermagic12\\\\r\\\\n\\\",\\n        b\\\"aaaabaaacaaadaaaeaaafaaagaaahaaaiaaajaaakaaalaaamaaa\\\\r\\\\n\\\",\\n        b\\\"challengeresponse\\\\r\\\\n\\\",\\n        b\\\"crashycrashy\\\\r\\\\n\\\",\\n    ]\\n    return b\\\"\\\".join(lines)\\n\",\"target\":\"totallyfineprotocl_sm\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_dH6iYmYwo7MfQsXGX7QWV8WX",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/cu-delta-02/bugs/curl-006/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_ondx03NUFbremyFvNcyf6rPS",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Source shows a definite invalid write in TOTALLYFINEPROTOCL_DO3: `*(unsigned int *)result = CURLE_OK;` where `result` is a local `CURLcode` scalar (enum/int) initialized to CURLE_OK (0) and later set to other small constants. Casting that integer to `unsigned int*` and dereferencing writes to address equal to the numeric value of `result` (typically 0x0 or another small address), which is an ASan-detectable SEGV/invalid write.\\n\\nTrigger conditions in code: state must be TOTALLYFINEPROTOCL_DO3, `result==0` and `nread>0` (due to `if(result || !nread) break;`), and `strcasecmp(response, \\\"crashycrashy\\\\r\\\\n\\\")==0` must hold. `response` comes from `Curl_dyn_ptr(&pp.recvbuf)` filled by `Curl_pp_readresp`, i.e., network/server response data controlled by the fuzzer harness.\\n\\nI could not run reach_probe due to missing ASan binary path in this environment (tool error: address binary not found), so evidence is from direct source inspection + reachability confirmation only; no runtime crash captured here.\" ,\"corrected_description\":\"Invalid write/SEGV due to treating a scalar CURLcode (`result`) as a pointer: in state TOTALLYFINEPROTOCL_DO3, if the received line equals \\\"crashycrashy\\\\r\\\\n\\\", code executes `*(unsigned int *)result = CURLE_OK;`, writing to address (uintptr_t)result (usually NULL), causing a crash.\" ,\"control_flow_to_bug\":\"curl_fuzzer_ws harness drives curl state machine -> totallyfineprotocl_sm(conn,data) repeatedly. Must progress protocol states via exact server lines: in TOTALLYFINEPROTOCL_START receive \\\"supermagic12\\\\r\\\\n\\\" -> vnstate DO1; in DO1 receive \\\"aaaabaaacaaadaaaeaaafaaagaaahaaaiaaajaaakaaalaaamaaa\\\\r\\\\n\\\" -> vnstate DO2; in DO2 receive \\\"challengeresponse\\\\r\\\\n\\\" -> vnstate DO3; in DO3 with `result==CURLE_OK` and `nread>0`, receive \\\"crashycrashy\\\\r\\\\n\\\" -> execute `*(unsigned int *)result = CURLE_OK;` and crash.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ondx03NUFbremyFvNcyf6rPS",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "totallyfineprotocl_sm"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Heap/stack memory corruption via arbitrary write: in state TOTALLYFINEPROTOCL_DO3, when the received response string equals \"crashycrashy\\r\\n\", code executes `*(unsigned int *)result = CURLE_OK;` where `result` is a CURLcode scalar (enum/integer) not a pointer. Casting this small integer value to `unsigned int*` and dereferencing performs a write to an attacker-influenced address (typically near NULL or small address), causing an AddressSanitizer-detectable invalid write/crash. Input is attacker-controlled via `response` from `Curl_pp_readresp()`/recv buffer, so fuzzer can trigger by providing that exact line.",
+  "finder_vuln_type": ""
+}

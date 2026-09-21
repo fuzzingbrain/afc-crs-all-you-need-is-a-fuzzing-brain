@@ -1,0 +1,217 @@
+{
+  "tag": "sq-delta-01__SQL-006",
+  "gt": "base85",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "read_function",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Read base85() and fromBase85(). In TEXT case, base85 computes output buffer size as nb = 4*(nv/5) + nv%5, mallocs nb, then calls fromBase85(cBuf,nc,bBuf) which writes decoded bytes to pOut without any bounds checks. fromBase85 has a special case: if *pIn=='z', it unconditionally writes 4 zero bytes and continues, consuming only 1 input char. Therefore decoded length can be up to 4*count('z') plus additional bytes from other groups, while allocated nb for nv chars is at most ~0.8*nv+4. For input consisting of many 'z' characters, required output is 4*nv but allocated is ~0.8*nv, causing heap-buffer-overflow. No guard clamps exist besides nvMax<nb and nb<1 fix; neither prevents overflow. Could not run reach_probe due to missing ASan binary path in environment, so no runtime crash evidence, but static code shows definite write past end for crafted text containing 'z'.",
+    "corrected_description": "Heap-buffer-overflow in base85() TEXT->blob conversion: output buffer size nb is underestimated (nb=4*(nv/5)+nv%5) and does not account for 'z' shorthand which expands 1 char to 4 bytes; fromBase85() writes 4 bytes per 'z' with no bounds checking, overflowing bBuf.",
+    "control_flow_to_bug": "SQL calls base85() with SQLITE_TEXT argument -> base85() TEXT case sets nc=nv and computes nb=4*(nv/5)+nv%5, allocates bBuf=sqlite3_malloc(nb) -> calls fromBase85(cBuf,nc,bBuf) -> in fromBase85 loop, when *pIn=='z' it writes four bytes to pOut and continues; with many 'z' characters, pOut advances beyond allocated bBuf causing heap-buffer-overflow."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "base85"
+      },
+      "result": "static void base85(sqlite3_context *context, int na, sqlite3_value *av[]){\n  int nb, nc, nv = sqlite3_value_bytes(av[0]);\n  int nvMax = sqlite3_limit(sqlite3_context_db_handle(context),\n                            SQLITE_LIMIT_LENGTH, -1);\n  char *cBuf;\n  u8 *bBuf;\n  assert(na==1);\n  switch( sqlite3_value_type(av[0]) ){\n  case SQLITE_BLOB:\n    nb = nv;\n                                                  \n    nc = 5*(nv/4) + nv%4 + nv/64+1 + 2;\n    if( nvMax < nc ){\n      sqlite3_result_error(context, \"blob expanded to base85 too big\", -1);\n      return;\n    }\n    bBuf = (u8*)sqlite3_value_blob(av[0]);\n    if( !bBuf ){\n      if( SQLITE_NOMEM==sqlite3_errcode(sqlite3_context_db_handle(context)) ){\n        goto memFail;\n      }\n      sqlite3_result_text(context,\"\",-1,SQLITE_STATIC);\n      break;\n    }\n    cBuf = sqlite3_malloc(nc);\n    if( !cBuf ) goto memFail;\n    nc = (int)(toBase85(bBuf, nb, cBuf, \"\\n\") - cBuf);\n    sqlite3_result_text(context, cBuf, nc, sqlite3_free);\n    break;\n  case SQLITE_TEXT:\n    nc = nv;\n    nb = 4*(nv/5) + nv%5;                       \n    if( nvMax < nb ){\n      sqlite3_result_error(context, \"blob from base85 may be too big\", -1);\n      return;\n    }else if( nb<1 ){\n      nb = 1;\n    }\n    cBuf = (char *)sqlite3_value_text(av[0]);\n    if( !cBuf ){\n      if( SQLITE_NOMEM==sqlite3_errcode(sqlite3_context_db_handle(context)) ){\n        goto memFail;\n      }\n      sqlite3_result_zeroblob(context, 0);\n      break;\n    }\n    bBuf = sqlite3_malloc(nb);\n    if( !bBuf ) goto memFail;\n    nb = (int)(fromBase85(cBuf, nc, bBuf) - bBuf);\n    sqlite3_result_blob(context, bBuf, nb, sqlite3_free);\n    break;\n  default:\n    sqlite3_result_error(context, \"base85 accepts only blob or text.\", -1);\n    return;\n  }\n  return;\n memFail:\n  sqlite3_result_error(context, \"base85 OOM\", -1);\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "base85"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"indirect\", \"n_callers\": 6}"
+    },
+    {
+      "iter": 1,
+      "tool": "read_function",
+      "args": {
+        "name": "fromBase85"
+      },
+      "result": "static u8* fromBase85( char *pIn, int ncIn, u8 *pOut ){\n  if( ncIn>0 && pIn[ncIn-1]=='\\n' ) --ncIn;\n  while( ncIn>0 ){\n    static signed char nboi[] = { 0, 0, 1, 2, 3, 4 };\n                                                   \n                                                            \n      \n    if( *pIn == 'z' ) {\n      pIn++;\n      *pOut++ = 0x0;\n      *pOut++ = 0x0;\n      *pOut++ = 0x0;\n      *pOut++ = 0x0;\n      continue;\n    }\n    char *pUse = skipNonB85(pIn, ncIn);\n    unsigned long qv = 0L;\n    int nti, nbo;\n    ncIn -= (pUse - pIn);\n    pIn = pUse;\n    nti = (ncIn>5)? 5 : ncIn;\n    nbo = nboi[nti];\n    if( nbo==0 ) break;\n    while( nti>0 ){\n      char c = *pIn++;\n      u8 cdo = B85_DNOS(c);\n      --ncIn;\n      if( cdo==0 ) break;\n      qv = 85 * qv + (c - cdo);\n      --nti;\n    }\n    nbo -= nti;                                                 \n    switch( nbo ){\n    case 4:\n      *pOut++ = (qv >> 24)&0xff;\n    case 3:\n      *pOut++ = (qv >> 16)&0xff;\n    case 2:\n      *pOut++ = (qv >> 8)&0xff;\n    case 1:\n      *pOut++ = qv&0xff;\n    case 0:\n      break;\n    }\n  }\n  return pOut;\n}"
+    },
+    {
+      "iter": 2,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Try to trigger TEXT->blob path with many 'z' which expands to 4 bytes each.\n    # Provide SQL that calls base85() on a text literal.\n    n = 2000\n    s = 'z'*n\n    sql = f\"SELECT base85('{s}');\\n\"\n    return sql.encode('ascii')\n",
+        "target": "fromBase85"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/sq-delta-01/bugs/SQL-006/bin/address'\"}"
+    },
+    {
+      "iter": 3,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Read base85() and fromBase85(). In TEXT case, base85 computes output buffer size as nb = 4*(nv/5) + nv%5, mallocs nb, then calls fromBase85(cBuf,nc,bBuf) which writes decoded bytes to pOut without any bounds checks. fromBase85 has a special case: if *pIn=='z', it unconditionally writes 4 zero bytes and continues, consuming only 1 input char. Therefore decoded length can be up to 4*count('z') plus additional bytes from other groups, while allocated nb for nv chars is at most ~0.8*nv+4. For input consisting of many 'z' characters, required output is 4*nv but allocated is ~0.8*nv, causing heap-buffer-overflow. No guard clamps exist besides nvMax<nb and nb<1 fix; neither prevents overflow. Could not run reach_probe due to missing ASan binary path in environment, so no runtime crash evidence, but static code shows definite write past end for crafted text containing 'z'.",
+        "corrected_description": "Heap-buffer-overflow in base85() TEXT->blob conversion: output buffer size nb is underestimated (nb=4*(nv/5)+nv%5) and does not account for 'z' shorthand which expands 1 char to 4 bytes; fromBase85() writes 4 bytes per 'z' with no bounds checking, overflowing bBuf.",
+        "control_flow_to_bug": "SQL calls base85() with SQLITE_TEXT argument -> base85() TEXT case sets nc=nv and computes nb=4*(nv/5)+nv%5, allocates bBuf=sqlite3_malloc(nb) -> calls fromBase85(cBuf,nc,bBuf) -> in fromBase85 loop, when *pIn=='z' it writes four bytes to pOut and continues; with many 'z' characters, pOut advances beyond allocated bBuf causing heap-buffer-overflow."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1048,
+      "output_tokens": 52,
+      "total_tokens": 1100,
+      "latency_ms": 1106
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1765,
+      "output_tokens": 19,
+      "total_tokens": 1784,
+      "latency_ms": 847
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 2210,
+      "output_tokens": 108,
+      "total_tokens": 2318,
+      "latency_ms": 2241
+    },
+    {
+      "iter": 3,
+      "model": "gpt-5.2",
+      "input_tokens": 2369,
+      "output_tokens": 447,
+      "total_tokens": 2816,
+      "latency_ms": 7595
+    }
+  ],
+  "token_totals": {
+    "input": 7392,
+    "output": 626,
+    "total": 8018,
+    "llm_calls": 4
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: customfuzz3   Sanitizer: address\nFunction: base85\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): The TEXT->blob path sizes the output as `nb = 4*(nv/5) + nv%5` and mallocs nb, then `fromBase85(cBuf, nc, bBuf)` decodes; the size formula under-estimates the decoded length for some base85 inputs, so fromBase85 writes past bBuf.\n\nControl flow to the bug:\n  - SELECT base85(x) with x a crafted base85 text value\n  - nb = 4*(nv/5)+nv%5 undersizes the output buffer\n  - fromBase85 writes decoded bytes past bBuf -> heap overflow\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_mYRFwuToHJFqkP3kNUJVr588",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"base85\"}"
+          }
+        },
+        {
+          "id": "call_5aoZ1X76P73LgR1QwJq985WW",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"base85\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_mYRFwuToHJFqkP3kNUJVr588",
+      "content": "static void base85(sqlite3_context *context, int na, sqlite3_value *av[]){\n  int nb, nc, nv = sqlite3_value_bytes(av[0]);\n  int nvMax = sqlite3_limit(sqlite3_context_db_handle(context),\n                            SQLITE_LIMIT_LENGTH, -1);\n  char *cBuf;\n  u8 *bBuf;\n  assert(na==1);\n  switch( sqlite3_value_type(av[0]) ){\n  case SQLITE_BLOB:\n    nb = nv;\n                                                  \n    nc = 5*(nv/4) + nv%4 + nv/64+1 + 2;\n    if( nvMax < nc ){\n      sqlite3_result_error(context, \"blob expanded to base85 too big\", -1);\n      return;\n    }\n    bBuf = (u8*)sqlite3_value_blob(av[0]);\n    if( !bBuf ){\n      if( SQLITE_NOMEM==sqlite3_errcode(sqlite3_context_db_handle(context)) ){\n        goto memFail;\n      }\n      sqlite3_result_text(context,\"\",-1,SQLITE_STATIC);\n      break;\n    }\n    cBuf = sqlite3_malloc(nc);\n    if( !cBuf ) goto memFail;\n    nc = (int)(toBase85(bBuf, nb, cBuf, \"\\n\") - cBuf);\n    sqlite3_result_text(context, cBuf, nc, sqlite3_free);\n    break;\n  case SQLITE_TEXT:\n    nc = nv;\n    nb = 4*(nv/5) + nv%5;                       \n    if( nvMax < nb ){\n      sqlite3_result_error(context, \"blob from base85 may be too big\", -1);\n      return;\n    }else if( nb<1 ){\n      nb = 1;\n    }\n    cBuf = (char *)sqlite3_value_text(av[0]);\n    if( !cBuf ){\n      if( SQLITE_NOMEM==sqlite3_errcode(sqlite3_context_db_handle(context)) ){\n        goto memFail;\n      }\n      sqlite3_result_zeroblob(context, 0);\n      break;\n    }\n    bBuf = sqlite3_malloc(nb);\n    if( !bBuf ) goto memFail;\n    nb = (int)(fromBase85(cBuf, nc, bBuf) - bBuf);\n    sqlite3_result_blob(context, bBuf, nb, sqlite3_free);\n    break;\n  default:\n    sqlite3_result_error(context, \"base85 accepts only blob or text.\", -1);\n    return;\n  }\n  return;\n memFail:\n  sqlite3_result_error(context, \"base85 OOM\", -1);\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_5aoZ1X76P73LgR1QwJq985WW",
+      "content": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"indirect\", \"n_callers\": 6}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_VnVAm0nlKR9BWUvIcvE64Qo5",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\":\"fromBase85\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_VnVAm0nlKR9BWUvIcvE64Qo5",
+      "content": "static u8* fromBase85( char *pIn, int ncIn, u8 *pOut ){\n  if( ncIn>0 && pIn[ncIn-1]=='\\n' ) --ncIn;\n  while( ncIn>0 ){\n    static signed char nboi[] = { 0, 0, 1, 2, 3, 4 };\n                                                   \n                                                            \n      \n    if( *pIn == 'z' ) {\n      pIn++;\n      *pOut++ = 0x0;\n      *pOut++ = 0x0;\n      *pOut++ = 0x0;\n      *pOut++ = 0x0;\n      continue;\n    }\n    char *pUse = skipNonB85(pIn, ncIn);\n    unsigned long qv = 0L;\n    int nti, nbo;\n    ncIn -= (pUse - pIn);\n    pIn = pUse;\n    nti = (ncIn>5)? 5 : ncIn;\n    nbo = nboi[nti];\n    if( nbo==0 ) break;\n    while( nti>0 ){\n      char c = *pIn++;\n      u8 cdo = B85_DNOS(c);\n      --ncIn;\n      if( cdo==0 ) break;\n      qv = 85 * qv + (c - cdo);\n      --nti;\n    }\n    nbo -= nti;                                                 \n    switch( nbo ){\n    case 4:\n      *pOut++ = (qv >> 24)&0xff;\n    case 3:\n      *pOut++ = (qv >> 16)&0xff;\n    case 2:\n      *pOut++ = (qv >> 8)&0xff;\n    case 1:\n      *pOut++ = qv&0xff;\n    case 0:\n      break;\n    }\n  }\n  return pOut;\n}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_nDmIHPR6AJVCg3hgMdg1UqdS",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Try to trigger TEXT->blob path with many 'z' which expands to 4 bytes each.\\n    # Provide SQL that calls base85() on a text literal.\\n    n = 2000\\n    s = 'z'*n\\n    sql = f\\\"SELECT base85('{s}');\\\\n\\\"\\n    return sql.encode('ascii')\\n\",\"target\":\"fromBase85\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_nDmIHPR6AJVCg3hgMdg1UqdS",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/sq-delta-01/bugs/SQL-006/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_3PxJYz0nN6Dqqz6LFo7uhfv6",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Read base85() and fromBase85(). In TEXT case, base85 computes output buffer size as nb = 4*(nv/5) + nv%5, mallocs nb, then calls fromBase85(cBuf,nc,bBuf) which writes decoded bytes to pOut without any bounds checks. fromBase85 has a special case: if *pIn=='z', it unconditionally writes 4 zero bytes and continues, consuming only 1 input char. Therefore decoded length can be up to 4*count('z') plus additional bytes from other groups, while allocated nb for nv chars is at most ~0.8*nv+4. For input consisting of many 'z' characters, required output is 4*nv but allocated is ~0.8*nv, causing heap-buffer-overflow. No guard clamps exist besides nvMax<nb and nb<1 fix; neither prevents overflow. Could not run reach_probe due to missing ASan binary path in environment, so no runtime crash evidence, but static code shows definite write past end for crafted text containing 'z'.\",\"corrected_description\":\"Heap-buffer-overflow in base85() TEXT->blob conversion: output buffer size nb is underestimated (nb=4*(nv/5)+nv%5) and does not account for 'z' shorthand which expands 1 char to 4 bytes; fromBase85() writes 4 bytes per 'z' with no bounds checking, overflowing bBuf.\",\"control_flow_to_bug\":\"SQL calls base85() with SQLITE_TEXT argument -> base85() TEXT case sets nc=nv and computes nb=4*(nv/5)+nv%5, allocates bBuf=sqlite3_malloc(nb) -> calls fromBase85(cBuf,nc,bBuf) -> in fromBase85 loop, when *pIn=='z' it writes four bytes to pOut and continues; with many 'z' characters, pOut advances beyond allocated bBuf causing heap-buffer-overflow.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_3PxJYz0nN6Dqqz6LFo7uhfv6",
+      "content": "{\"received\": true}"
+    }
+  ]
+}

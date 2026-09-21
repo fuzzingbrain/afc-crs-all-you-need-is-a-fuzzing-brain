@@ -180,6 +180,7 @@ class FuzzerManager:
             config=self.global_config,
             task_id=self.task_id,
             no_oom=is_no_oom(self.fuzzer_name),
+            sanitizer=self.sanitizer,
         )
 
         # Add initial seeds
@@ -368,6 +369,7 @@ class FuzzerManager:
             config=self.sp_config,
             task_id=self.task_id,
             no_oom=is_no_oom(self.fuzzer_name),
+            sanitizer=self.sanitizer,
         )
 
         # Register crash directory (with worker_id)

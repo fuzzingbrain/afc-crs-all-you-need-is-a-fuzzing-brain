@@ -1,0 +1,23 @@
+{
+  "challenge": "ws-delta-07__vuln_013",
+  "fuzzer": "handler_gvcp",
+  "sanitizer": "address",
+  "functions_indexed": 0,
+  "ground_truth_functions": [
+    "dissect_extended_bootstrap_register",
+    "dissect_register"
+  ],
+  "q1_finder": {
+    "sp_count": 0,
+    "sp_functions": [],
+    "found_ground_truth": false,
+    "matched_functions": []
+  },
+  "q2_verifier": {
+    "verdict_real": true,
+    "score": 0.95,
+    "is_important": true,
+    "reason": "CONFIRMED VULNERABILITY: Global buffer overflow in dissect_extended_bootstrap_register.\n\nVULNERABILITY DETAILS:\n- Global arrays gvcp_register_number[16] and gvcp_register_value[16] defined at lines 281-282\n- Counter gvcp_register_count initialized to 0 at line 283, NEVER RESET\n- dissect_extended_bootstrap_register (line 1494) writes to arrays without bounds check:\n  Line 1496: gvcp_register_number",
+    "target_function": "dissect_extended_bootstrap_register"
+  }
+}

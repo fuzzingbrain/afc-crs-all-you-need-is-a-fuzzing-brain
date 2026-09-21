@@ -1,0 +1,33 @@
+{
+  "project_name": "wolfssl",
+  "task_type": "pov",
+  "scan_mode": "full",
+  "sanitizers": [
+    "memory"
+  ],
+  "fuzzers": [
+    "fuzzer-wolfssl-client-randomize"
+  ],
+  "workspace": "/tmp/claude-1000/e2e-fbv2-arm/wolfssl_445773944",
+  "in_place": true,
+  "build_coverage": false,
+  "enable_static_analysis": true,
+  "docker_image": "cybergym/e2e:wolfssl",
+  "prebuilt_fuzzers": {
+    "fuzzer-wolfssl-client-randomize": "/tmp/claude-1000/e2e-fbv2-arm/wolfssl_445773944/prebuilt/fuzzer-wolfssl-client-randomize"
+  },
+  "work_id": "wolfssl_445773944",
+  "fuzzer_sources": {
+    "fuzzer-wolfssl-client-randomize": [
+      "/tmp/claude-1000/e2e-fbv2-arm/wolfssl_445773944/repo/wolf-ssl-ssh-fuzzers/oss-fuzz/projects/wolf-ssl-ssh/fuzzers/wolfssl-fuzzers/client.c",
+      "/tmp/claude-1000/e2e-fbv2-arm/wolfssl_445773944/repo/wolf-ssl-ssh-fuzzers/oss-fuzz/projects/wolf-ssl-ssh/fuzzers/include/fuzzers/shared.h"
+    ]
+  },
+  "model_profile": "period-correct",
+  "force_model": "gpt-5.5",
+  "pov_count": 1,
+  "budget_limit": 20.0,
+  "timeout_minutes": 90,
+  "concurrency": 5,
+  "prebuild_dir": "/tmp/claude-1000/e2e-fbv2-arm/wolfssl_445773944/prebuild/wolfssl_445773944"
+}

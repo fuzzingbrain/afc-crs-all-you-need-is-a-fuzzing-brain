@@ -1,0 +1,28 @@
+{
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-libxml2.git",
+  "project_name": "libxml2",
+  "task_type": "pov",
+  "scan_mode": "delta",
+  "fuzz_tooling_url": "https://github.com/aixcc-finals/oss-fuzz-aixcc.git",
+  "fuzz_tooling_ref": "challenge-state/lx-delta-02",
+  "sanitizers": [
+    "address"
+  ],
+  "fuzzers": [
+    "xml"
+  ],
+  "remove_git": true,
+  "timeout_minutes": 45,
+  "budget_limit": 20.0,
+  "concurrency": 1,
+  "docker_image": "aixcc-afc/libxml2:latest",
+  "prebuilt_fuzzers": {
+    "xml": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/lx-delta-02/bugs/vuln_002/bin/address/xml"
+  },
+  "prebuild_dir": "/home/ze/afc-crs-all-you-need-is-a-fuzzing-brain/examples/aixcc-challenges/pre-competition/delta/lx-delta-02",
+  "work_id": "lx-delta-02",
+  "model_profile": "current",
+  "pov_count": 1,
+  "base_commit": "0f876b983249cd3fb32b53d405f5985e83d8c3bd",
+  "delta_commit": "challenges/lx-delta-02"
+}

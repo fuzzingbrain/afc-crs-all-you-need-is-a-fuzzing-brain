@@ -1,0 +1,190 @@
+{
+  "tag": "fp-delta-02__vuln_002",
+  "gt": "x509_validate_subject_aternative_names",
+  "crash_type": "heap-buffer-overflow",
+  "tools_used": [
+    "read_function",
+    "check_reachability",
+    "reach_probe",
+    "submit_evidence"
+  ],
+  "evidence": {
+    "sanitizer_compatible": true,
+    "input_reaches_operand": true,
+    "guard_clamps": "none",
+    "pattern_present": true,
+    "reasoning": "Read x509_validate_subject_aternative_names: for each GEN_DNS SAN entry it allocates dns_name with malloc(strlen((char*)ASN1_STRING_get0_data(...)) + 1) then memcpy()s ASN1_STRING_length(...) bytes from the ASN1 buffer. If the ASN1 string contains embedded NULs, strlen() will stop early and allocate too small, while ASN1_STRING_length() counts full length, so memcpy will write past heap allocation => heap-buffer-overflow detectable by ASan. There is no check that ASN1_STRING_length <= strlen+1, and no use of ASN1_STRING_length for allocation. Also no explicit NUL termination after memcpy, so even without overflow verify_san may read past. Reachability tool confirms function is directly reachable from fuzzer entry (depth 6). Could not run reach_probe due to missing ASan binary path in environment, so no dynamic crash evidence collected.",
+    "corrected_description": "Heap-buffer-overflow in x509_validate_subject_aternative_names when copying SAN dNSName: allocation uses strlen(ASN1_STRING_get0_data)+1 but copy uses ASN1_STRING_length bytes, so embedded NUL in ASN1 data can cause under-allocation and memcpy overflow. Additionally, buffer may be unterminated after memcpy.",
+    "control_flow_to_bug": "Fuzzer entry TestFuzzCryptoCertificateDataSetPEM parses attacker-controlled PEM into X509 cert -> calls x509_validate_subject_aternative_names(cert) -> X509_get_ext_d2i(...NID_subject_alt_name...) returns STACK_OF(GENERAL_NAME) -> loop over GENERAL_NAME entries -> if gen_name->type==GEN_DNS -> malloc(strlen(ASN1_STRING_get0_data(dNSName))+1) -> memcpy(..., ASN1_STRING_length(dNSName)) triggers overflow when ASN1 data contains embedded NUL and length>strlen."
+  },
+  "dynamic": {
+    "any_reach": false,
+    "any_crash": false,
+    "probes": []
+  },
+  "score": 0.65,
+  "verdict": "LIKELY",
+  "basis": "unclamped tainted (no dynamic margin)",
+  "trajectory": [
+    {
+      "iter": 0,
+      "tool": "read_function",
+      "args": {
+        "name": "x509_validate_subject_aternative_names"
+      },
+      "result": "BOOL x509_validate_subject_aternative_names(const X509* cert) {\n    STACK_OF(GENERAL_NAME) *san_names = NULL;\n    int i, count;\n    char *dns_name = NULL;\n\tBOOL result = TRUE;\n\n                                          \n    san_names = X509_get_ext_d2i(cert, NID_subject_alt_name, NULL, NULL);\n    if (!san_names) {\n        goto end;\n    }\n\n    count = sk_GENERAL_NAME_num(san_names);\n\n    for (i = 0; i < count; i++) {\n        GENERAL_NAME *gen_name = sk_GENERAL_NAME_value(san_names, i);\n\n        if (gen_name->type == GEN_DNS) {\n\t\t\t                                          \n\t\t\tdns_name = malloc( strlen((char *)ASN1_STRING_get0_data(gen_name->d.dNSName)) + 1);\n\n\t\t\tif (dns_name == NULL)\n\t\t\t\tgoto end;\n\t\t\t\n\t\t\tmemcpy(dns_name, (char *)ASN1_STRING_get0_data(gen_name->d.dNSName),  \n\t\t\t\tASN1_STRING_length(gen_name->d.dNSName)) ;\n\t\t\t\n            if (!verify_san(dns_name)) {\n\t\t\t\tfree(dns_name);\n\t\t\t\tresult = FALSE;\n\t\t\t\tgoto end;\n            } else {\n\t\t\t\tfree(dns_name);\n            }\n        }\n    }\n\nend:\n    sk_GENERAL_NAME_pop_free(san_names, GENERAL_NAME_free);\n\n\treturn TRUE;\n}"
+    },
+    {
+      "iter": 0,
+      "tool": "check_reachability",
+      "args": {
+        "function_name": "x509_validate_subject_aternative_names"
+      },
+      "result": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "iter": 1,
+      "tool": "reach_probe",
+      "args": {
+        "generator_code": "def generate()->bytes:\n    # Minimal PEM cert with SAN containing embedded NUL in dNSName.\n    # Hard to handcraft; instead return empty to at least run.\n    return b\"\"",
+        "target": "x509_validate_subject_aternative_names"
+      },
+      "result": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/fp-delta-02/bugs/vuln_002/bin/address'\"}"
+    },
+    {
+      "iter": 2,
+      "tool": "submit_evidence",
+      "args": {
+        "sanitizer_compatible": true,
+        "input_reaches_operand": true,
+        "guard_clamps": "none",
+        "pattern_present": true,
+        "reasoning": "Read x509_validate_subject_aternative_names: for each GEN_DNS SAN entry it allocates dns_name with malloc(strlen((char*)ASN1_STRING_get0_data(...)) + 1) then memcpy()s ASN1_STRING_length(...) bytes from the ASN1 buffer. If the ASN1 string contains embedded NULs, strlen() will stop early and allocate too small, while ASN1_STRING_length() counts full length, so memcpy will write past heap allocation => heap-buffer-overflow detectable by ASan. There is no check that ASN1_STRING_length <= strlen+1, and no use of ASN1_STRING_length for allocation. Also no explicit NUL termination after memcpy, so even without overflow verify_san may read past. Reachability tool confirms function is directly reachable from fuzzer entry (depth 6). Could not run reach_probe due to missing ASan binary path in environment, so no dynamic crash evidence collected.",
+        "corrected_description": "Heap-buffer-overflow in x509_validate_subject_aternative_names when copying SAN dNSName: allocation uses strlen(ASN1_STRING_get0_data)+1 but copy uses ASN1_STRING_length bytes, so embedded NUL in ASN1 data can cause under-allocation and memcpy overflow. Additionally, buffer may be unterminated after memcpy.",
+        "control_flow_to_bug": "Fuzzer entry TestFuzzCryptoCertificateDataSetPEM parses attacker-controlled PEM into X509 cert -> calls x509_validate_subject_aternative_names(cert) -> X509_get_ext_d2i(...NID_subject_alt_name...) returns STACK_OF(GENERAL_NAME) -> loop over GENERAL_NAME entries -> if gen_name->type==GEN_DNS -> malloc(strlen(ASN1_STRING_get0_data(dNSName))+1) -> memcpy(..., ASN1_STRING_length(dNSName)) triggers overflow when ASN1 data contains embedded NUL and length>strlen."
+      },
+      "result": "{\"received\": true}"
+    }
+  ],
+  "token_log": [
+    {
+      "iter": 0,
+      "model": "gpt-5.2",
+      "input_tokens": 1066,
+      "output_tokens": 64,
+      "total_tokens": 1130,
+      "latency_ms": 1082
+    },
+    {
+      "iter": 1,
+      "model": "gpt-5.2",
+      "input_tokens": 1538,
+      "output_tokens": 73,
+      "total_tokens": 1611,
+      "latency_ms": 1642
+    },
+    {
+      "iter": 2,
+      "model": "gpt-5.2",
+      "input_tokens": 1663,
+      "output_tokens": 424,
+      "total_tokens": 2087,
+      "latency_ms": 5432
+    }
+  ],
+  "token_totals": {
+    "input": 4267,
+    "output": 561,
+    "total": 4828,
+    "llm_calls": 3
+  },
+  "full_messages": [
+    {
+      "role": "system",
+      "content": "You are a vulnerability verifier. All candidate functions are already\nreachable from the fuzzer — do NOT re-litigate reachability as pass/fail. Your job\nis to gather EVIDENCE about whether the reached code actually contains a\ncrashing memory-safety bug of the stated type, then submit it.\n\nGather evidence with the tools:\n- read_function(name): read the real source.\n- check_reachability(function_name): confirm the call graph (depth, direct/indirect).\n- reach_probe(generator_code, target): write Python `def generate()->bytes` that\n  produces an input aiming to REACH `target` (a function name or \"file.c:LINE\").\n  It runs the input on the real ASan binary under gdb and tells you whether the\n  target was reached and whether it crashed. A crash is proof; a reach grounds\n  your judgment. Only a real crash or reach can raise the score above the ceiling —\n  you cannot assert a high score from reading alone.\n- submit_evidence(...): report your structured findings (see its schema). Call it\n  once, last.\n\nTwo of the fields are NOT about scoring — they correct the SP for the downstream\nPoV stage, and you are the right one to write them because you just read the real\ncode (and maybe ran a reach_probe):\n- corrected_description: if the SP's stated bug type/description is wrong or\n  imprecise given the real code, write the accurate one (else restate it).\n- control_flow_to_bug: the real path from the fuzzer entry to the crash site — the\n  key functions, branches, and conditions that must hold to trigger it.\n\nDo NOT pass things \"when in doubt\". Report what the evidence shows. Absence of a\ncrash is not proof of safety; a proven clamp/guard on the tainted value IS\ndisconfirming."
+    },
+    {
+      "role": "user",
+      "content": "Verify this suspicious point.\n\nFuzzer: TestFuzzCryptoCertificateDataSetPEM   Sanitizer: address\nFunction: x509_validate_subject_aternative_names\nClaimed bug type: heap-buffer-overflow\nSuspicious-point description (from the finder — may be imprecise): Heap buffer overflow due to mismatched length calculation when copying SAN DNSName. The code allocates dns_name with malloc(strlen(ASN1_STRING_get0_data(...)) + 1), but then memcpy() copies ASN1_STRING_length(...) bytes. If the ASN1 string contains embedded NUL bytes, strlen() underestimates the true length while ASN1_STRING_length() includes all bytes, causing memcpy to write past the allocated buffer. This is AddressSanitizer-detectable as a heap-buffer-overflow during memcpy. Related: gen_name->d.dNSName, ASN1_STRING_get0_data, ASN1_STRING_length, dns_name allocation/copy.\n\nThe function is reachable (confirm with check_reachability if useful).\n\nRead the function, judge whether a fuzzer input can drive a heap-buffer-overflow\nthere, optionally reach_probe a candidate input to ground it, then submit_evidence."
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_tIkEI1PWRScXYjfrEhRODOD2",
+          "type": "function",
+          "function": {
+            "name": "read_function",
+            "arguments": "{\"name\": \"x509_validate_subject_aternative_names\"}"
+          }
+        },
+        {
+          "id": "call_ZuWkYdFRUJoTK2eujuBkxcyN",
+          "type": "function",
+          "function": {
+            "name": "check_reachability",
+            "arguments": "{\"function_name\": \"x509_validate_subject_aternative_names\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_tIkEI1PWRScXYjfrEhRODOD2",
+      "content": "BOOL x509_validate_subject_aternative_names(const X509* cert) {\n    STACK_OF(GENERAL_NAME) *san_names = NULL;\n    int i, count;\n    char *dns_name = NULL;\n\tBOOL result = TRUE;\n\n                                          \n    san_names = X509_get_ext_d2i(cert, NID_subject_alt_name, NULL, NULL);\n    if (!san_names) {\n        goto end;\n    }\n\n    count = sk_GENERAL_NAME_num(san_names);\n\n    for (i = 0; i < count; i++) {\n        GENERAL_NAME *gen_name = sk_GENERAL_NAME_value(san_names, i);\n\n        if (gen_name->type == GEN_DNS) {\n\t\t\t                                          \n\t\t\tdns_name = malloc( strlen((char *)ASN1_STRING_get0_data(gen_name->d.dNSName)) + 1);\n\n\t\t\tif (dns_name == NULL)\n\t\t\t\tgoto end;\n\t\t\t\n\t\t\tmemcpy(dns_name, (char *)ASN1_STRING_get0_data(gen_name->d.dNSName),  \n\t\t\t\tASN1_STRING_length(gen_name->d.dNSName)) ;\n\t\t\t\n            if (!verify_san(dns_name)) {\n\t\t\t\tfree(dns_name);\n\t\t\t\tresult = FALSE;\n\t\t\t\tgoto end;\n            } else {\n\t\t\t\tfree(dns_name);\n            }\n        }\n    }\n\nend:\n    sk_GENERAL_NAME_pop_free(san_names, GENERAL_NAME_free);\n\n\treturn TRUE;\n}"
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_ZuWkYdFRUJoTK2eujuBkxcyN",
+      "content": "{\"reachable\": true, \"call_depth\": 6, \"reached_via\": \"direct\", \"n_callers\": 1}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_bXYzjKMpYagGUbJWwnqw959v",
+          "type": "function",
+          "function": {
+            "name": "reach_probe",
+            "arguments": "{\"generator_code\":\"def generate()->bytes:\\n    # Minimal PEM cert with SAN containing embedded NUL in dNSName.\\n    # Hard to handcraft; instead return empty to at least run.\\n    return b\\\"\\\"\",\"target\":\"x509_validate_subject_aternative_names\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_bXYzjKMpYagGUbJWwnqw959v",
+      "content": "{\"error\": \"[Errno 2] No such file or directory: '/home/ze/fb-graphs/build/fp-delta-02/bugs/vuln_002/bin/address'\"}"
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "tool_calls": [
+        {
+          "id": "call_x0YUdopzdFjuZuSE8Zgjx4pH",
+          "type": "function",
+          "function": {
+            "name": "submit_evidence",
+            "arguments": "{\"sanitizer_compatible\":true,\"input_reaches_operand\":true,\"guard_clamps\":\"none\",\"pattern_present\":true,\"reasoning\":\"Read x509_validate_subject_aternative_names: for each GEN_DNS SAN entry it allocates dns_name with malloc(strlen((char*)ASN1_STRING_get0_data(...)) + 1) then memcpy()s ASN1_STRING_length(...) bytes from the ASN1 buffer. If the ASN1 string contains embedded NULs, strlen() will stop early and allocate too small, while ASN1_STRING_length() counts full length, so memcpy will write past heap allocation => heap-buffer-overflow detectable by ASan. There is no check that ASN1_STRING_length <= strlen+1, and no use of ASN1_STRING_length for allocation. Also no explicit NUL termination after memcpy, so even without overflow verify_san may read past. Reachability tool confirms function is directly reachable from fuzzer entry (depth 6). Could not run reach_probe due to missing ASan binary path in environment, so no dynamic crash evidence collected.\",\"corrected_description\":\"Heap-buffer-overflow in x509_validate_subject_aternative_names when copying SAN dNSName: allocation uses strlen(ASN1_STRING_get0_data)+1 but copy uses ASN1_STRING_length bytes, so embedded NUL in ASN1 data can cause under-allocation and memcpy overflow. Additionally, buffer may be unterminated after memcpy.\",\"control_flow_to_bug\":\"Fuzzer entry TestFuzzCryptoCertificateDataSetPEM parses attacker-controlled PEM into X509 cert -> calls x509_validate_subject_aternative_names(cert) -> X509_get_ext_d2i(...NID_subject_alt_name...) returns STACK_OF(GENERAL_NAME) -> loop over GENERAL_NAME entries -> if gen_name->type==GEN_DNS -> malloc(strlen(ASN1_STRING_get0_data(dNSName))+1) -> memcpy(..., ASN1_STRING_length(dNSName)) triggers overflow when ASN1 data contains embedded NUL and length>strlen.\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_x0YUdopzdFjuZuSE8Zgjx4pH",
+      "content": "{\"received\": true}"
+    }
+  ],
+  "finder": {
+    "sp_count": 1,
+    "sp_functions": [
+      "x509_validate_subject_aternative_names"
+    ],
+    "found_gt": true
+  },
+  "finder_sp_description": "Heap buffer overflow due to mismatched length calculation when copying SAN DNSName. The code allocates dns_name with malloc(strlen(ASN1_STRING_get0_data(...)) + 1), but then memcpy() copies ASN1_STRING_length(...) bytes. If the ASN1 string contains embedded NUL bytes, strlen() underestimates the true length while ASN1_STRING_length() includes all bytes, causing memcpy to write past the allocated buffer. This is AddressSanitizer-detectable as a heap-buffer-overflow during memcpy. Related: gen_name->d.dNSName, ASN1_STRING_get0_data, ASN1_STRING_length, dns_name allocation/copy.",
+  "finder_vuln_type": ""
+}
