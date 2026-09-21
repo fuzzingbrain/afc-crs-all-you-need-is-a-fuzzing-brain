@@ -1,0 +1,24 @@
+# What the test suite needs, on top of requirements.lock.
+#
+# Kept separate because these are not what a benchmark cell runs on: a cell only
+# ever imports the runtime set. Deliberately narrow -- the `dev` extra in
+# pyproject.toml also pulls the mkdocs/ruff/pre-commit toolchain, none of which
+# is needed to run `pytest tests`, and all of which slows a fresh clone down.
+#
+# pytest-asyncio is not optional: pyproject sets asyncio_mode = "auto", so
+# pytest fails to configure without it.
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+pytest-xdist==3.8.0
+pluggy==1.6.0
+iniconfig==2.3.0
+execnet==2.1.2
+coverage==7.16.1
+
+# Not test tooling -- optional provider/runtime backends that three test modules
+# import at collection time, so pytest cannot even collect the suite without
+# them. They are optional for RUNNING the agent (the bench cells use litellm),
+# which is why they are here and not in requirements.lock.
+portkey-ai==2.3.4
+swe-rex==1.4.0
