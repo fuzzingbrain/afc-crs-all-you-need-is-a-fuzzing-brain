@@ -1,4 +1,6 @@
 import re
+import shutil
+import pathlib
 import subprocess
 import sys
 from pathlib import Path
@@ -7,6 +9,20 @@ from unittest.mock import Mock, patch
 import pytest
 
 from minisweagent.run.mini import DEFAULT_CONFIG_FILE, app, main
+
+
+def _entry(name: str = "fb-agent") -> str:
+    """The fb-agent entry point, found without relying on PATH.
+
+    These tests used to spawn a bare "fb-agent", which works only if the venv
+    is activated. setup.sh tells people to run the suite as
+    `.venv/bin/python -m pytest tests -q` -- following that exact line gave
+    seven FileNotFoundError failures on a clean machine, which reads as a
+    broken checkout rather than an unset variable.
+    """
+    return shutil.which(name) or str(pathlib.Path(sys.executable).parent / name)
+
+
 
 
 def strip_ansi_codes(text: str) -> str:
@@ -353,7 +369,7 @@ def test_python_m_minisweagent_help():
 
 def test_fb_agent_help():
     """Test that the fb-agent script entry point help works."""
-    result = subprocess.run(["fb-agent", "--help"], capture_output=True, text=True, timeout=10)
+    result = subprocess.run([_entry(), "--help"], capture_output=True, text=True, timeout=10)
 
     assert result.returncode == 0
     assert "fb-agent" in strip_ansi_codes(result.stdout)
@@ -361,7 +377,7 @@ def test_fb_agent_help():
 
 def test_fb_agent_extra_help():
     """Test that fb-agent-extra --help works correctly."""
-    result = subprocess.run(["fb-agent-extra", "--help"], capture_output=True, text=True, timeout=10)
+    result = subprocess.run([_entry("fb-agent-extra"), "--help"], capture_output=True, text=True, timeout=10)
 
     assert result.returncode == 0
     clean_output = strip_ansi_codes(result.stdout)
@@ -384,7 +400,7 @@ def test_fb_agent_extra_subcommand_help(subcommand: str, aliases: list[str]):
     """Test that fb-agent-extra subcommands --help work correctly."""
     for alias in aliases:
         result = subprocess.run(
-            ["fb-agent-extra", alias, "--help"],
+            [_entry("fb-agent-extra"), alias, "--help"],
             capture_output=True,
             text=True,
             timeout=10,
@@ -398,7 +414,7 @@ def test_fb_agent_extra_subcommand_help(subcommand: str, aliases: list[str]):
 def test_fb_agent_extra_config_help():
     """Test that mini-extra config --help works correctly."""
     result = subprocess.run(
-        ["fb-agent-extra", "config", "--help"],
+        [_entry("fb-agent-extra"), "config", "--help"],
         capture_output=True,
         text=True,
         timeout=10,
