@@ -133,6 +133,19 @@ agent:
       you do not have. Grade ONE candidate per turn, aimed at a sink you can
       name. The limit is on grading, not on thinking.
 
+    ## What actually scores
+
+    A fault is identified by its type plus the top stack frames, not by the
+    underlying bug. So the SAME faulting function reached through a different
+    caller counts as a separate fault and earns separate credit, while the same
+    input resubmitted earns nothing.
+
+    Once one input crashes, the cheapest next fault is almost always the same
+    sink from another direction: grep every call site of the faulting function,
+    pick one your input does not currently go through, and steer there by
+    changing the record type, box, field or nesting depth. Finding an unrelated
+    bug is far more expensive and usually unnecessary.
+
     ## Keeping notes
 
     Write the sinks you find while reading into `sinks.md` -- one line each,

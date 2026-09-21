@@ -123,6 +123,18 @@ def crash_signature(output: str) -> str | None:
         if m := pattern.search(output or ""):
             return m.group(1).strip() or None
     return None
+# The innermost frame of an ASAN report -- the function that actually faulted.
+# A signature is fault-type plus the top frames, so this function reached
+# through a different caller is a DIFFERENT signature and scores again.
+_TOP_FRAME = re.compile(r"^\s*#0\s+0x\S+\s+in\s+([A-Za-z_][\w:]*)", re.M)
+
+
+def top_frame(output: str) -> str | None:
+    """The faulting function, or None if the report does not name one."""
+    m = _TOP_FRAME.search(output or "")
+    return m.group(1) if m else None
+
+
 _CLEAN = re.compile(r'"crash_novelty"\s*:\s*"(?:flaky\w*)"|"signal"\s*:\s*""')
 _SUBMIT_CALL = re.compile(r"\brun_poc_on_harness\b")
 # An input that ran for no measurable time never reached the library.
@@ -215,17 +227,30 @@ class Coach:
         # -- 4. a crash changes the job --------------------------------------
         if sig := crash_signature(output or ""):
             if sig in self.banked:
+                frame = top_frame(output)
+                where = f"{frame}()" if frame else "that function"
                 notes.append(
-                    f"[duplicate] '{sig}' is already banked and this adds nothing. "
-                    "Variants of a fault you already have score zero. Go somewhere else.")
+                    f"[duplicate] '{sig}' is already banked -- this exact caller "
+                    f"chain adds nothing.\n"
+                    f"But the CHAIN is what is scored, not the bug. {where} "
+                    "reached from a different caller is a different signature "
+                    "and scores again. Find another call site that reaches it -- "
+                    "a different record type, box, field or nesting depth -- "
+                    "rather than abandoning the sink.")
             else:
                 self.banked.append(sig)
+                frame = top_frame(output)
+                where = f"{frame}()" if frame else "the faulting function"
                 notes.append(
                     f"[banked {len(self.banked)}/{self.ENOUGH}] {sig}\n"
-                    "That one is done and worth nothing more. Your job has changed: "
-                    "find a fault in a DIFFERENT function or of a different type. "
-                    "The last bare-model run found one fault on 22 challenges and "
-                    "spent a median 21 more turns near it, finding nothing.")
+                    f"Now work the SAME sink from a different direction. A "
+                    f"signature is the fault type plus the top stack frames, so "
+                    f"{where} reached through another caller scores as a new "
+                    f"fault. Grep for every call site of {where}, pick one your "
+                    f"current input does not go through, and steer an input "
+                    f"there -- a different box, record, field or nesting depth. "
+                    f"That is far cheaper than finding an unrelated bug, and it "
+                    f"is where the arms we are measured against pull ahead.")
 
         # -- 3. submit against the real thing --------------------------------
         if self.turns_since_submit and self.turns_since_submit % self.NO_SUBMIT_WARN == 0:

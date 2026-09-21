@@ -92,12 +92,24 @@ def test_the_budget_is_on_every_single_turn():
 # ---- 4. a crash changes the job --------------------------------------------
 
 def test_a_new_crash_is_banked_and_redirects():
-    # 22 challenges found exactly one fault and spent a median 21 further turns
-    # near it, finding nothing. Worth 120 points.
+    """The redirect is now AT the same sink, not away from it.
+
+    It used to say "find a fault in a DIFFERENT function", on the evidence that
+    22 challenges found one fault and spent a median 21 further turns near it
+    for nothing. That evidence was about LINGERING -- resubmitting variants of
+    one input and hoping. It is not an argument against the specific move that
+    scores: a signature is the fault type plus the top frames, so the same
+    function through another caller is a new fault. claude-code banked
+    read_value|read_map_value where we had read_map_value|read_value, the same
+    recursive pair the other way up, and won avro-02 and avro-03 by one such
+    variant each. The nudge now names the faulting function and says to grep
+    its call sites, which is directed work rather than lingering.
+    """
     c = Coach(turn_limit=100, wall_limit_s=1800)
     notes = "\n".join(c.observe("run_poc_on_harness(/workspace/c1)", _crash(), 10, 60))
     assert "banked 1/3" in notes
-    assert "DIFFERENT function" in notes
+    assert "call site" in notes and "same sink" in notes.lower()
+    assert "DIFFERENT function" not in notes
     assert c.banked == ["heap-use-after-free /src/x.c:10 in foo"]
 
 
@@ -106,6 +118,7 @@ def test_the_same_crash_again_is_called_worthless():
     c.observe("run_poc_on_harness(/workspace/c1)", _crash(), 10, 60)
     notes = "\n".join(c.observe("run_poc_on_harness(/workspace/c2)", _crash(), 12, 70))
     assert "duplicate" in notes and "adds nothing" in notes
+    assert "different caller" in notes, "a repeat must still point at other call sites"
     assert c.banked == ["heap-use-after-free /src/x.c:10 in foo"], "a repeat must not count twice"
 
 
@@ -327,3 +340,37 @@ def test_the_grader_in_a_loop_is_still_blocked():
     msg = forbidden("for f in /workspace/*.bin; do run_poc_on_harness $f; done")
     assert msg and "loop" in msg
     assert "encouraged" in msg, "the refusal must say what IS allowed instead"
+
+
+def test_a_banked_crash_points_back_at_the_same_sink():
+    """A signature is type + top frames, so the same function through another
+    caller scores again. The coach used to say the opposite -- "that one is
+    done and worth nothing more... find a fault in a DIFFERENT function" --
+    and we lost avro-02 and avro-03 by exactly one such variant each, where
+    claude-code banked read_value|read_map_value against our
+    read_map_value|read_value: the same recursive pair, other way up.
+    """
+    from minisweagent.agents.fbbench_coach import Coach
+    out = ('==1==ERROR: AddressSanitizer: heap-buffer-overflow\n'
+           '    #0 0x55 in avifROStreamRead /src/stream.c:74:5\n'
+           '    #1 0x66 in avifParseItemInfoBox /src/read.c:1:1\n'
+           'SUMMARY: AddressSanitizer: heap-buffer-overflow in avifROStreamRead\n')
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    notes = "\n".join(c.observe("run_poc_on_harness('/workspace/a')", out, 5, 1.0))
+    assert "avifROStreamRead()" in notes, "the nudge must name the faulting function"
+    assert "call site" in notes
+    for wrong in ("DIFFERENT function", "worth nothing more"):
+        assert wrong not in notes
+
+
+def test_an_exact_duplicate_still_says_the_chain_is_what_repeats():
+    from minisweagent.agents.fbbench_coach import Coach
+    out = ('==1==ERROR: AddressSanitizer: heap-buffer-overflow\n'
+           '    #0 0x55 in avifROStreamRead /src/stream.c:74:5\n'
+           'SUMMARY: AddressSanitizer: heap-buffer-overflow in avifROStreamRead\n')
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    c.observe("run_poc_on_harness('/workspace/a')", out, 5, 1.0)
+    notes = "\n".join(c.observe("run_poc_on_harness('/workspace/b')", out, 6, 2.0))
+    assert "duplicate" in notes.lower()
+    assert "different caller" in notes
+    assert "Go somewhere else" not in notes
