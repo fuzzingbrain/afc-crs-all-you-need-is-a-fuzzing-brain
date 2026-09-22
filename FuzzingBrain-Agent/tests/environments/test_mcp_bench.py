@@ -198,6 +198,7 @@ def test_a_verdict_carries_what_the_candidate_reached(monkeypatch):
     from minisweagent.environments import mcp_bench as mb
     env = mb.McpBenchEnvironment.__new__(mb.McpBenchEnvironment)
     env._covered_before, env._asked_callers, env.probe_calls = None, set(), 0
+    env._min_size, env._min_size_read, env._guard_waived = None, True, set()
     env.config = type("C", (), {"timeout": 60})()
     calls = []
 
@@ -220,6 +221,7 @@ def test_an_input_that_never_entered_the_harness_is_named_as_such(monkeypatch):
     from minisweagent.environments import mcp_bench as mb
     env = mb.McpBenchEnvironment.__new__(mb.McpBenchEnvironment)
     env._covered_before, env._asked_callers, env.probe_calls = None, set(), 0
+    env._min_size, env._min_size_read, env._guard_waived = None, True, set()
     env.config = type("C", (), {"timeout": 60})()
     env._tool = lambda name, arguments, timeout=None: (
         {"harness_output": {"exit_code": 0, "stderr": "", "stdout": ""}}
@@ -234,9 +236,79 @@ def test_no_readable_target_means_no_note_and_no_crash():
     from minisweagent.environments import mcp_bench as mb
     env = mb.McpBenchEnvironment.__new__(mb.McpBenchEnvironment)
     env._covered_before, env._asked_callers, env.probe_calls = None, set(), 0
+    env._min_size, env._min_size_read, env._guard_waived = None, True, set()
     env.config = type("C", (), {"timeout": 60})()
     env._tool = lambda name, arguments, timeout=None: (
         {"harness_output": {"exit_code": 0, "stderr": "", "stdout": ""}}
         if name == "run_poc_on_harness" else {"stdout": "", "stderr": "not found"})
     out = env.execute({"tool": "run_poc_on_harness", "args": {"path": "/workspace/a"}})
     assert "[reach]" not in out["output"]
+
+
+# ------------------------------------------- refusing a candidate that cannot pass
+def _guard_env(harness_src, size, monkey_calls):
+    from minisweagent.environments import mcp_bench as mb
+    env = mb.McpBenchEnvironment.__new__(mb.McpBenchEnvironment)
+    env._covered_before, env._asked_callers, env.probe_calls = None, set(), 0
+    env._min_size, env._min_size_read, env._guard_waived = None, False, set()
+    env.config = type("C", (), {"timeout": 60})()
+
+    def fake_tool(name, arguments, timeout=None):
+        monkey_calls.append((name, arguments))
+        cmd = arguments.get("cmd", "")
+        if name == "run_poc_on_harness":
+            return {"harness_output": {"exit_code": 0, "stderr": "", "stdout": ""}}
+        if cmd.startswith("cat /challenge/harness"):
+            return {"stdout": harness_src}
+        if cmd.startswith("stat"):
+            return {"stdout": str(size)}
+        return {"stdout": ""}
+    env._tool = fake_tool
+    return env
+
+
+_SRC = ("int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {\n"
+        "  if (size < 8) return 0;\n  parse(data, size);\n}\n")
+
+
+def test_a_candidate_too_small_to_reach_the_library_is_not_graded():
+    """An empty file cannot pass a format check, so grading it buys nothing.
+
+    This is the move that cost us the one challenge we lost cleanly: we read
+    the format header at turn 6 and graded an EMPTY file at turn 13, while the
+    arm we are measured against spent four more turns and submitted the magic
+    bytes. Every one of our 25 candidates there died at the gate.
+    """
+    calls = []
+    env = _guard_env(_SRC, 0, calls)
+    out = env.execute({"tool": "run_poc_on_harness", "args": {"path": "/workspace/a"}})
+    assert "NOT GRADED" in out["output"] and "size < 8" in out["output"]
+    assert all(n != "run_poc_on_harness" for n, _ in calls), "the call must not be spent"
+
+
+def test_insisting_on_the_same_candidate_lets_it_through():
+    """The guard may be wrong; refusing a good candidate twice would be worse
+    than never refusing at all."""
+    calls = []
+    env = _guard_env(_SRC, 0, calls)
+    env.execute({"tool": "run_poc_on_harness", "args": {"path": "/workspace/a"}})
+    env.execute({"tool": "run_poc_on_harness", "args": {"path": "/workspace/a"}})
+    assert any(n == "run_poc_on_harness" for n, _ in calls)
+
+
+def test_a_big_enough_candidate_is_graded_normally():
+    calls = []
+    env = _guard_env(_SRC, 64, calls)
+    out = env.execute({"tool": "run_poc_on_harness", "args": {"path": "/workspace/a"}})
+    assert "NOT GRADED" not in out["output"]
+    assert any(n == "run_poc_on_harness" for n, _ in calls)
+
+
+def test_an_unreadable_guard_never_blocks():
+    """`size < sizeof(hdr)` cannot be resolved without compiling the target;
+    guessing a bound there would refuse candidates that were fine."""
+    calls = []
+    env = _guard_env("int LLVMFuzzerTestOneInput(const uint8_t *d, size_t size) {\n"
+                     "  if (size < sizeof(header_t)) return 0;\n}", 0, calls)
+    out = env.execute({"tool": "run_poc_on_harness", "args": {"path": "/workspace/a"}})
+    assert "NOT GRADED" not in out["output"]

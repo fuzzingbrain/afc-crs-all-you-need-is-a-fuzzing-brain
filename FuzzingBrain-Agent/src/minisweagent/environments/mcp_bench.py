@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import re
 
+from minisweagent.environments import entry_guards as eg
 from minisweagent.environments import reachability as rx
 import os
 import socket
@@ -95,6 +96,9 @@ class McpBenchEnvironment:
         self._covered_before: set[str] | None = None
         self._asked_callers: set[str] = set()
         self.probe_calls = 0
+        self._min_size: tuple[int, str] | None = None
+        self._min_size_read = False
+        self._guard_waived: set[str] = set()
         self._rpc("initialize", {})
 
     # -- the wire ----------------------------------------------------------
@@ -159,6 +163,9 @@ class McpBenchEnvironment:
         try:
             if name == "run_poc_on_harness":
                 path = args.get("path", "")
+                if refused := self._entry_guard(path, t):
+                    return {"output": refused, "returncode": 0,
+                            "exception_info": ""}
                 out = self._tool(name, {"path": path}, t)
                 text = _render_verdict(out)
                 text += self._reachability(path, out, t)
@@ -183,6 +190,38 @@ class McpBenchEnvironment:
         self._check_finished(output)
         return output
 
+
+
+    def _entry_guard(self, path: str, t: float) -> str:
+        """Refuse a candidate the harness will throw out, before grading it.
+
+        Not a judgement about the bug -- only about whether the input can reach
+        the library at all. A grading call spent on a file the entry check
+        rejects buys nothing, and that was the whole of two zero-scoring cells.
+
+        Deliberately timid: it only knows numeric size guards, it refuses a
+        given path once, and re-submitting the same path goes straight through.
+        Blocking a candidate that was actually fine is worse than saying
+        nothing, so anything it cannot read confidently it lets past.
+        """
+        if not path or path in self._guard_waived:
+            return ""
+        if not self._min_size_read:
+            self._min_size_read = True
+            src = self._probe("cat /challenge/harness/*.c /challenge/harness/*.cc "
+                              "/challenge/harness/*.cpp 2>/dev/null", t)
+            self._min_size = eg.min_size(src)
+        if not self._min_size:
+            return ""
+        need, guard = self._min_size
+        out = self._probe(f"stat -c %s {path} 2>/dev/null", t).strip()
+        if not out.isdigit():
+            return ""
+        size = int(out)
+        if size >= need:
+            return ""
+        self._guard_waived.add(path)      # insist once and it goes through
+        return eg.refusal(size, need, guard)
 
     # ------------------------------------------------ facts, not suggestions
     def _probe(self, cmd: str, t: float) -> str:
