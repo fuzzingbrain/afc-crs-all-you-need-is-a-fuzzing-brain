@@ -155,7 +155,8 @@ def run_discovery(*, llm, board: LeadBoard, workspace: str = ".",
     result = agent.run(opening)
     created = [ld.id for ld in board.all() if ld.id not in before]
     store.close_session(traj, {"stop_reason": result["stop_reason"], "steps": result["steps"],
-                               "created": created, "compactions": result["compactions"]})
+                               "created": created, "compactions": result["compactions"],
+                               "ledger": result.get("ledger")})
     return {"created": created, "n": len(created), "stop_reason": result["stop_reason"],
             "steps": result["steps"], "session": traj.paths[0] if traj.paths else None}
 
@@ -184,7 +185,8 @@ def run_verification(lead: Lead, *, llm, board: LeadBoard, workspace: str = ".",
     result = agent.run(_lead_brief(lead))
     sig, deepest, best, crash_text = _scan_outcome(agent, hnames)
     store.close_session(traj, {"stop_reason": result["stop_reason"], "crashed": bool(sig),
-                               "steps": result["steps"], "compactions": result["compactions"]})
+                               "steps": result["steps"], "compactions": result["compactions"],
+                               "ledger": result.get("ledger")})
     if sig and sig.crash_class:
         stored = store.save_candidate(ws, lead.id, lead.attempts, best)
         store.save_crash(ws, sig.key, stored or best, crash_text, lead.id)
@@ -231,7 +233,8 @@ def run_reproduction(lead: Lead, *, llm, board: LeadBoard, workspace: str = ".",
     result = agent.run(_lead_brief(lead))
     sig, deepest, best, crash_text = _scan_outcome(agent, harness_names)
     store.close_session(traj, {"stop_reason": result["stop_reason"], "crashed": bool(sig),
-                               "steps": result["steps"], "compactions": result["compactions"]})
+                               "steps": result["steps"], "compactions": result["compactions"],
+                               "ledger": result.get("ledger")})
     if sig and sig.crash_class:
         stored = store.save_candidate(ws, lead.id, attempt, best)
         store.save_crash(ws, sig.key, stored or best, crash_text, lead.id)
