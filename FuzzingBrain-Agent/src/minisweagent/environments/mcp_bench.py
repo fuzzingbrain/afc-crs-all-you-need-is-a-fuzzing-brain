@@ -21,6 +21,9 @@ tools themselves are the bench's, and they are the same for everyone.
 from __future__ import annotations
 
 import json
+import re
+
+from minisweagent.environments import reachability as rx
 import os
 import socket
 import threading
@@ -30,6 +33,16 @@ from pydantic import BaseModel
 
 from minisweagent.exceptions import Submitted
 from minisweagent.utils.serialize import recursive_merge
+
+_FRAME = re.compile(r"^\s*#0\s+0x\S+\s+in\s+([A-Za-z_][\w:]*)", re.M)
+
+
+def _top_frame(verdict: Any) -> str | None:
+    """The function that faulted, from the verdict the grader returned."""
+    blob = json.dumps(verdict) if not isinstance(verdict, str) else verdict
+    m = _FRAME.search(blob.replace("\\n", "\n"))
+    return m.group(1) if m else None
+
 
 def _render_verdict(out: Any) -> str:
     """The harness's own output first, as text, then the structured fields.
@@ -76,6 +89,12 @@ class McpBenchEnvironment:
         self._buf = b""
         self._id = 0
         self._lock = threading.Lock()
+        # reachability state: what the last candidate covered, which faulting
+        # functions have already been enumerated, and how many read-only
+        # queries this loop has spent that the model did not ask for.
+        self._covered_before: set[str] | None = None
+        self._asked_callers: set[str] = set()
+        self.probe_calls = 0
         self._rpc("initialize", {})
 
     # -- the wire ----------------------------------------------------------
@@ -139,8 +158,11 @@ class McpBenchEnvironment:
             name, args = "exec", {"cmd": action["command"]}
         try:
             if name == "run_poc_on_harness":
-                out = self._tool(name, {"path": args.get("path", "")}, t)
-                output = {"output": _render_verdict(out), "returncode": 0,
+                path = args.get("path", "")
+                out = self._tool(name, {"path": path}, t)
+                text = _render_verdict(out)
+                text += self._reachability(path, out, t)
+                output = {"output": text, "returncode": 0,
                           "exception_info": ""}
             elif name == "setup":
                 out = self._tool(name, {}, t)
@@ -160,6 +182,47 @@ class McpBenchEnvironment:
                       "extra": {"exception_type": type(e).__name__, "exception": str(e)}}
         self._check_finished(output)
         return output
+
+
+    # ------------------------------------------------ facts, not suggestions
+    def _probe(self, cmd: str, t: float) -> str:
+        """Run a read-only query against the target copy. Never the grader.
+
+        Counted in `probe_calls` so these are visible in the trajectory: the
+        loop is spending container time the model did not ask for, and a
+        benchmark result should not hide that.
+        """
+        try:
+            out = self._tool("exec", {"cmd": cmd, "timeout_s": int(min(t, 120))}, t)
+            self.probe_calls += 1
+            out = out if isinstance(out, dict) else {"stdout": str(out)}
+            return (out.get("stdout") or "") + (out.get("stderr") or "")
+        except Exception:  # noqa: BLE001 - a probe must never break a turn
+            return ""
+
+    def _reachability(self, path: str, verdict, t: float) -> str:
+        """What that candidate actually reached, appended to its verdict.
+
+        The model is told; it does not have to think to ask. Silent when the
+        bench does not mount a target copy, so an older bench still runs.
+        """
+        if not path:
+            return ""
+        notes: list[str] = []
+        covered, entry = rx.parse_coverage(self._probe(rx.coverage_cmd(path), t))
+        if entry is None and not covered:
+            return ""                      # no readable target; say nothing
+        if line := rx.coverage_note(covered, entry, self._covered_before):
+            notes.append(line)
+        self._covered_before = covered
+
+        frame = _top_frame(verdict)
+        if frame and frame not in self._asked_callers:
+            self._asked_callers.add(frame)
+            callers = rx.parse_callers(self._probe(rx.callers_cmd(frame), t), frame)
+            if line := rx.callers_note(frame, callers, covered):
+                notes.append(line)
+        return ("\n\n" + "\n".join(notes)) if notes else ""
 
     def _check_finished(self, output: dict):
         """Raises Submitted when the model issues the finish command.

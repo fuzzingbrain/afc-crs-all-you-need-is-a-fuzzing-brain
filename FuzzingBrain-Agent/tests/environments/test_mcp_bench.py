@@ -82,7 +82,11 @@ def test_the_model_names_the_tool_and_nothing_is_guessed(server):
     looking for a binary, and spend 30 turns never grading anything."""
     env = _env(server)
     env.execute({"tool": "run_poc_on_harness", "args": {"path": "/workspace/c1.bin"}})
-    assert server.calls[-1] == ("run_poc_on_harness", {"path": "/workspace/c1.bin"})
+    # Not calls[-1] any more: a graded candidate is followed by read-only
+    # reachability probes, which are exec calls. The grading call itself is
+    # what this test is about, and there must be exactly one of it.
+    graded = [c for c in server.calls if c[0] == "run_poc_on_harness"]
+    assert graded == [("run_poc_on_harness", {"path": "/workspace/c1.bin"})]
     env.execute({"tool": "exec", "args": {"cmd": "ls /challenge"}})
     assert server.calls[-1][0] == "exec" and server.calls[-1][1]["cmd"] == "ls /challenge"
     env.execute({"tool": "setup", "args": {}})
@@ -180,3 +184,59 @@ def test_content_blocks_alone_are_enough(tmp_path):
     srv = FakeServer(tmp_path / "s.sock", reply=lambda n, a: real)
     env = McpBenchEnvironment(socket_path=srv.path, timeout=5)
     assert env.execute({"command": "echo hi"})["output"] == "hi"
+
+
+# ------------------------------------------------ facts, not suggestions
+def test_a_verdict_carries_what_the_candidate_reached(monkeypatch):
+    """The loop asks the target what the input covered and appends one line.
+
+    Measured motivation: in five zero-scoring cells nearly every candidate was
+    thrown out before the library ran -- 25 of 25 on one -- and the verdict
+    said nothing about it. The agent never once asked on its own across 706
+    shell commands.
+    """
+    from minisweagent.environments import mcp_bench as mb
+    env = mb.McpBenchEnvironment.__new__(mb.McpBenchEnvironment)
+    env._covered_before, env._asked_callers, env.probe_calls = None, set(), 0
+    env.config = type("C", (), {"timeout": 60})()
+    calls = []
+
+    def fake_tool(name, arguments, timeout=None):
+        calls.append((name, arguments))
+        if name == "run_poc_on_harness":
+            return {"harness_output": {"exit_code": 0, "stderr": "", "stdout": ""}}
+        return {"stdout": "COVERED_FUNC: hits: 1 edges: 1/2 xmlParseDocument /s/p.c:1\n"
+                          "COVERED_FUNC: hits: 1 edges: 1/2 LLVMFuzzerTestOneInput /s/f.c:2\n"}
+    env._tool = fake_tool
+    out = env.execute({"tool": "run_poc_on_harness", "args": {"path": "/workspace/a"}})
+    assert "[reach] reached 2 functions" in out["output"]
+    assert env.probe_calls == 1, "probe calls must be counted, not hidden"
+    assert calls[0][0] == "run_poc_on_harness"
+    assert all(n != "run_poc_on_harness" for n, _ in calls[1:]), \
+        "a probe must never spend a grading call"
+
+
+def test_an_input_that_never_entered_the_harness_is_named_as_such(monkeypatch):
+    from minisweagent.environments import mcp_bench as mb
+    env = mb.McpBenchEnvironment.__new__(mb.McpBenchEnvironment)
+    env._covered_before, env._asked_callers, env.probe_calls = None, set(), 0
+    env.config = type("C", (), {"timeout": 60})()
+    env._tool = lambda name, arguments, timeout=None: (
+        {"harness_output": {"exit_code": 0, "stderr": "", "stdout": ""}}
+        if name == "run_poc_on_harness" else
+        {"stdout": "UNCOVERED_FUNC: hits: 0 edges: 0/24 LLVMFuzzerTestOneInput /s/f.c:2\n"})
+    out = env.execute({"tool": "run_poc_on_harness", "args": {"path": "/workspace/a"}})
+    assert "never entered the harness" in out["output"]
+
+
+def test_no_readable_target_means_no_note_and_no_crash():
+    """An older bench mounts no target copy; the agent must still run."""
+    from minisweagent.environments import mcp_bench as mb
+    env = mb.McpBenchEnvironment.__new__(mb.McpBenchEnvironment)
+    env._covered_before, env._asked_callers, env.probe_calls = None, set(), 0
+    env.config = type("C", (), {"timeout": 60})()
+    env._tool = lambda name, arguments, timeout=None: (
+        {"harness_output": {"exit_code": 0, "stderr": "", "stdout": ""}}
+        if name == "run_poc_on_harness" else {"stdout": "", "stderr": "not found"})
+    out = env.execute({"tool": "run_poc_on_harness", "args": {"path": "/workspace/a"}})
+    assert "[reach]" not in out["output"]
