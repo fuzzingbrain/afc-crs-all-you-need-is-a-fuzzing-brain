@@ -393,3 +393,44 @@ def test_the_gate_nudge_escalates_and_resets():
     assert "/challenge/src/test" in seen[2]
     c.observe("run_poc_on_harness('/w/b')", "duration_ms: 42\nexit_code: 0", 5, 2.0)
     assert c.gated == 0, "a candidate that gets through must unstick the run"
+
+
+def test_a_gated_verdict_hands_over_the_coverage_command_for_that_file():
+    """The agent ran 706 shell commands across ten cells and never once asked
+    the target what its input covered. Telling it in the task text did not
+    work; the command appears at the moment it is useful instead, with the
+    path it just graded already filled in."""
+    from minisweagent.agents.fbbench_coach import Coach
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    gated = "duration_ms: 0\nexit_code: 0"
+    for i in (1, 2, 3):
+        out = c.observe("run_poc_on_harness('/workspace/c7.bin')", gated, i, 1.0)
+    note = [x for x in out if x.startswith("[gate")][0]
+    assert "-print_coverage=1" in note
+    assert "/workspace/c7.bin" in note, "must name the file it just graded"
+    assert "LD_LIBRARY_PATH" in note, "several targets do not load without it"
+
+
+def test_a_banked_crash_hands_over_the_who_calls_query():
+    """The move that scores: a signature is the fault type plus the top
+    frames, so the other callers of the faulting function are the cheapest
+    further points. We lost two challenges by one such variant each."""
+    from minisweagent.agents.fbbench_coach import Coach
+    crash = ("==1==ERROR: AddressSanitizer: heap-buffer-overflow\n"
+             "    #0 0x55 in avifROStreamRead /src/stream.c:74\n"
+             "SUMMARY: AddressSanitizer: heap-buffer-overflow in avifROStreamRead\n")
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    out = c.observe("run_poc_on_harness('/workspace/a')", crash, 5, 1.0)
+    note = [x for x in out if x.startswith("[banked")][0]
+    assert "objdump" in note and "avifROStreamRead" in note
+
+
+def test_a_crash_with_no_named_frame_still_produces_a_clean_note():
+    """No #0 line means no function to query -- the note must not emit a
+    broken command with an empty pattern."""
+    from minisweagent.agents.fbbench_coach import Coach
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    out = c.observe("run_poc_on_harness('/workspace/a')",
+                    "SUMMARY: AddressSanitizer: SEGV on unknown address\n", 5, 1.0)
+    note = [x for x in out if x.startswith("[banked")][0]
+    assert "objdump" not in note

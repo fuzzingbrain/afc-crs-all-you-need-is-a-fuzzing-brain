@@ -129,6 +129,21 @@ def crash_signature(output: str) -> str | None:
 _TOP_FRAME = re.compile(r"^\s*#0\s+0x\S+\s+in\s+([A-Za-z_][\w:]*)", re.M)
 
 
+# Where the bench mounts a readable copy of the graded target. The agent gets
+# told this once in the task text; the nudges below repeat the exact command at
+# the moment it is useful, because an instruction read at turn 1 is not what a
+# model reaches for at turn 40.
+TARGET = "/usr/local/share/target/asan/harness"
+TARGET_LIBS = "/usr/local/share/target/sharedlibs"
+_CAND = re.compile(r"""run_poc_on_harness\s*\(?\s*['"]?(/\S+?)['"\)\s]""")
+
+
+def candidate_path(command: str) -> str | None:
+    """The file this turn asked the grader to run."""
+    m = _CAND.search(command or "")
+    return m.group(1) if m else None
+
+
 def top_frame(output: str) -> str | None:
     """The faulting function, or None if the report does not name one."""
     m = _TOP_FRAME.search(output or "")
@@ -256,7 +271,13 @@ class Coach:
                     f"current input does not go through, and steer an input "
                     f"there -- a different box, record, field or nesting depth. "
                     f"That is far cheaper than finding an unrelated bug, and it "
-                    f"is where the arms we are measured against pull ahead.")
+                    f"is where the arms we are measured against pull ahead.\n"
+                    + (f"Every caller, straight from the target binary:\n"
+                       f"  objdump -d --no-show-raw-insn {TARGET} | awk "
+                       f"'/^[0-9a-f]+ <.*>:/{{fn=$2}} /call/ && /{frame}/{{print fn}}'"
+                       f" | sort -u\n"
+                       f"Pick one your input does not already go through."
+                       if frame else ""))
 
         # -- 3. submit against the real thing --------------------------------
         if self.turns_since_submit and self.turns_since_submit % self.NO_SUBMIT_WARN == 0:
@@ -298,7 +319,15 @@ class Coach:
                     "unmodified. If that passes, mutate THAT from now on. If "
                     "there is no sample, list every `return 0` in the first 30 "
                     "lines of LLVMFuzzerTestOneInput and satisfy them one at a "
-                    "time.")
+                    "time.\n"
+                    f"To see exactly how far that input got, run it against the "
+                    f"readable copy of the target:\n"
+                    f"  LD_LIBRARY_PATH={TARGET_LIBS} {TARGET} -runs=1 "
+                    f"-print_coverage=1 {candidate_path(command) or '<your file>'}"
+                    f" 2>&1 | grep -E 'COVERED_FUNC' | head\n"
+                    "If LLVMFuzzerTestOneInput itself is UNCOVERED, the input "
+                    "never entered the harness at all and only the entry "
+                    "guards matter.")
         return notes
 
     # -- 1. don't let me stop ------------------------------------------------
