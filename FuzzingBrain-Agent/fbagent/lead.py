@@ -175,18 +175,28 @@ class LeadBoard:
 
     def _append(self, lead: Lead) -> None:
         lead.ts = _now()
-        with self.path.open("a") as f:
+        with self.path.open("a+") as f:
             try:
                 os.lockf(f.fileno(), os.F_LOCK, 0)
             except OSError:
                 pass
-            f.write(lead.to_json() + "\n")
-            f.flush()
+            # Fold anything appended by someone else since our last read BEFORE
+            # our own write, so the f.tell() below cannot jump the offset past
+            # an external line (an operator-injected Lead) and orphan it.
             try:
-                self._offset = f.tell()   # our own line is already in memory
+                f.seek(self._offset)
+                ext = f.read()
+                if ext:
+                    self._fold(ext, external=True)
             except OSError:
                 pass
-        self._leads[lead.id] = lead
+            f.write(lead.to_json() + "\n")   # O_APPEND: always lands at EOF
+            f.flush()
+            try:
+                self._offset = f.tell()
+            except OSError:
+                pass
+        self._leads[lead.id] = lead   # our write wins over any folded stale copy
 
     # ---- mutation ---------------------------------------------------------
     def create(self, **fields) -> Lead:

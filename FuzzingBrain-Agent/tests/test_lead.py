@@ -127,3 +127,25 @@ def test_board_picks_up_a_lead_injected_into_the_live_file(tmp_path):
     b2 = LeadBoard(tmp_path / ".fb" / "leads.jsonl")
     assert {ld.id for ld in b2.all()} == {own.id, "X01"}
     assert b2.create(function="baz", description="oob").id == "L02"
+
+
+
+def test_external_line_before_own_append_is_not_orphaned(tmp_path):
+    """The offset-jump bug: a board appends its own Lead while an externally
+    injected line sits unread between the last refresh and this append. The
+    append must fold that line in, not skip past it."""
+    import json
+    from fbagent.lead import LeadBoard, PENDING_VERIFY
+    path = tmp_path / ".fb" / "leads.jsonl"
+    b = LeadBoard(path)                       # opens empty, offset 0
+    # an external injection lands while the board holds nothing in memory yet
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as f:
+        f.write(json.dumps({"id": "X01", "function": "png_zlib_inflate",
+                            "description": "use-after-free", "status": PENDING_VERIFY,
+                            "origin": "injected/operator", "rev": 0}) + "\n")
+    # the board now creates its OWN Lead -- before this fix, _append set the
+    # offset past X01 and it was never seen again
+    own = b.create(function="foo", description="oob")
+    ids = {ld.id for ld in b.by_status(PENDING_VERIFY)}
+    assert ids == {"X01", own.id}
