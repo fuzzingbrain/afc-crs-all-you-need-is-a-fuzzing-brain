@@ -157,6 +157,15 @@ class _ReportingAgent(DefaultAgent):
                            wall_limit_s=self.config.wall_time_limit_seconds,
                            workspace=workspace)
         self._trace = workspace / ".fbagent-trace.jsonl"
+        # The verbatim model exchange lands beside the trace, so a cell carries
+        # the request as well as the dialogue. The bench copies the workspace
+        # out, so this travels with every other artefact without the bench
+        # needing to know it exists. Opt out with FBAGENT_EXCHANGE_LOG=none.
+        if os.environ.get("FBAGENT_EXCHANGE_LOG") is None:
+            os.environ["FBAGENT_EXCHANGE_LOG"] = str(
+                workspace / ".fbagent-exchange.jsonl")
+        elif os.environ["FBAGENT_EXCHANGE_LOG"].lower() in ("none", "off", "0"):
+            os.environ.pop("FBAGENT_EXCHANGE_LOG")
         self._trace.parent.mkdir(parents=True, exist_ok=True)
         self._trace.write_text("")
 

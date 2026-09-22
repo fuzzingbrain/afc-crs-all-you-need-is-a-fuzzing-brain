@@ -94,3 +94,50 @@ class TestLitellmModel:
         model = LitellmModel(model_name="gpt-4")
         result = model.format_observation_messages({"extra": {}}, [])
         assert result == []
+
+
+# ------------------------------------------------- the verbatim exchange
+def test_the_request_and_response_are_recorded_verbatim(tmp_path, monkeypatch):
+    """A run kept the dialogue but not the REQUEST.
+
+    report.html renders the reasoning, the tool calls and the results, which is
+    the conversation -- but not the assembled message array as it went over the
+    wire, with the tool schemas and sampling parameters. That is reconstructable
+    because the agent builds it deterministically, and "reconstructable" is not
+    "auditable": a reviewer asking what exactly was sent on turn 40 should get
+    the bytes.
+    """
+    import json
+    from minisweagent.models.litellm_model import LitellmModel
+    log = tmp_path / "exchange.jsonl"
+    monkeypatch.setenv("FBAGENT_EXCHANGE_LOG", str(log))
+    m = LitellmModel.__new__(LitellmModel)
+    m.config = type("C", (), {"model_name": "test-model", "model_kwargs": {"api_key": "SECRET"}})()
+    m._tools = lambda: [{"function": {"name": "exec"}}]
+    class R:
+        def model_dump(self, mode=None): return {"choices": [{"message": {"content": "hi"}}]}
+    m._record_exchange([{"role": "user", "content": "find the bug"}], R(), {"temperature": 0})
+    rec = json.loads(log.read_text().strip())
+    assert rec["request"]["messages"] == [{"role": "user", "content": "find the bug"}]
+    assert rec["request"]["tools"] == [{"function": {"name": "exec"}}]
+    assert rec["request"]["kwargs"] == {"temperature": 0}
+    assert rec["response"]["choices"][0]["message"]["content"] == "hi"
+    assert "SECRET" not in log.read_text(), "credentials must never be written"
+
+
+def test_nothing_is_written_when_the_log_is_not_configured(tmp_path, monkeypatch):
+    from minisweagent.models.litellm_model import LitellmModel
+    monkeypatch.delenv("FBAGENT_EXCHANGE_LOG", raising=False)
+    m = LitellmModel.__new__(LitellmModel)
+    m.config = type("C", (), {"model_name": "x", "model_kwargs": {}})()
+    m._tools = lambda: []
+    m._record_exchange([{"role": "user", "content": "x"}], object(), {})  # must not raise
+
+
+def test_a_logging_failure_never_breaks_a_run(tmp_path, monkeypatch):
+    from minisweagent.models.litellm_model import LitellmModel
+    monkeypatch.setenv("FBAGENT_EXCHANGE_LOG", str(tmp_path / "nope" / "deep" / "x.jsonl"))
+    m = LitellmModel.__new__(LitellmModel)
+    m.config = type("C", (), {"model_name": "x", "model_kwargs": {}})()
+    m._tools = lambda: []
+    m._record_exchange([{"role": "user", "content": "x"}], object(), {})  # must not raise

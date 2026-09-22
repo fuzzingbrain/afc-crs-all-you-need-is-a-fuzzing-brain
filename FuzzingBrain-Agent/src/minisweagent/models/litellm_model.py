@@ -91,9 +91,11 @@ class LitellmModel:
         return set_cache_control(prepared, mode=self.config.set_cache_control)
 
     def query(self, messages: list[dict[str, str]], **kwargs) -> dict:
+        sent = self._prepare_messages_for_api(messages)
         for attempt in retry(logger=logger, abort_exceptions=self.abort_exceptions):
             with attempt:
-                response = self._query(self._prepare_messages_for_api(messages), **kwargs)
+                response = self._query(sent, **kwargs)
+        self._record_exchange(sent, response, kwargs)
         cost_output = self._calculate_cost(response)
         GLOBAL_MODEL_STATS.add(cost_output["cost"])
         # Note: all model.query() implementations must persist the response and cost on FormatError.
@@ -116,6 +118,46 @@ class LitellmModel:
             "timestamp": time.time(),
         }
         return message
+
+    # ------------------------------------------------------- the raw exchange
+    # What we send and what comes back, verbatim, one JSON object per call.
+    #
+    # The run already keeps the dialogue -- reasoning, tool calls, results --
+    # and report.html renders it. What it did not keep was the REQUEST: the
+    # assembled message array as it went over the wire, with the tool schemas
+    # and sampling parameters. That is reconstructable in principle, because
+    # the agent builds it deterministically, but "reconstructable" is not
+    # "auditable", and a reviewer asking what exactly was sent on turn 40
+    # deserves the bytes rather than an argument.
+    #
+    # Off unless FBAGENT_EXCHANGE_LOG names a file, so it costs nothing when
+    # nobody is looking. It never raises: a logging failure must not end a run.
+    def _record_exchange(self, sent: list[dict], response, kwargs: dict) -> None:
+        path = os.environ.get("FBAGENT_EXCHANGE_LOG")
+        if not path:
+            return
+        try:
+            try:
+                raw = response.model_dump(mode="json")
+            except Exception:  # noqa: BLE001
+                raw = {"repr": repr(response)}
+            rec = {
+                "t": time.time(),
+                "model": self.config.model_name,
+                "request": {
+                    "messages": sent,
+                    "tools": self._tools(),
+                    "kwargs": {k: v for k, v in kwargs.items() if k != "api_key"},
+                    "model_kwargs": {k: v for k, v in
+                                     (self.config.model_kwargs or {}).items()
+                                     if "key" not in k.lower()},
+                },
+                "response": raw,
+            }
+            with open(path, "a") as f:
+                f.write(json.dumps(rec, default=str) + "\n")
+        except Exception:  # noqa: BLE001
+            logger.debug("exchange log failed", exc_info=True)
 
     def _calculate_cost(self, response) -> dict[str, float]:
         try:
