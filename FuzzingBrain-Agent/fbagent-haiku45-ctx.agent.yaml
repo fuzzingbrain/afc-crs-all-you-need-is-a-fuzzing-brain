@@ -1,0 +1,9 @@
+# FuzzingBrain-Agent with context management (reversible eviction + LEDGER +
+# per-agent record), Haiku 4.5, $10 cap, no voluntary stop before the cap.
+#   cd /home/ze/FB-Bench/FuzzingBrain-Bench && .venv/bin/fb-bench run libpng-01 \
+#     --agent /home/ze/fb-agent-ctx/FuzzingBrain-Agent/fbagent-haiku45-ctx.agent.yaml \
+#     --model claude-haiku-4-5 --timeout 1800 -o ctx-libpng-haiku
+name: fbagent-haiku45-ctx
+command: "python3 -m fbagent.run --timeout {timeout} --model claude-haiku-4-5 --max-usd 10 --min-spend-frac 1.0"
+shell_env: FBAGENT_SHELL
+network: blocked

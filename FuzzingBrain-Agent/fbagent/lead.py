@@ -121,13 +121,18 @@ class LeadBoard:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._leads: dict[str, Lead] = {}
         self._seq = 0
+        self._offset = 0          # bytes of the file already folded into memory
         self._load()
 
     # ---- persistence ------------------------------------------------------
-    def _load(self) -> None:
-        if not self.path.is_file():
-            return
-        for line in self.path.read_text().splitlines():
+    def _fold(self, text: str, external: bool = False) -> int:
+        """Fold jsonl lines into memory. `external` lines (appended by someone
+        other than this board -- an operator injecting a Lead with
+        tools/add_lead.py, another process) only ADD unknown ids or ADOPT a
+        record with a higher rev than the one held, so this board's own state
+        is never rolled back by a stale line. Returns lines taken."""
+        taken = 0
+        for line in text.splitlines():
             line = line.strip()
             if not line:
                 continue
@@ -136,10 +141,37 @@ class LeadBoard:
             except json.JSONDecodeError:
                 continue
             lead = Lead(**{k: v for k, v in d.items() if k in Lead.__dataclass_fields__})
+            held = self._leads.get(lead.id)
+            if external and held is not None and lead.rev <= held.rev:
+                continue
             self._leads[lead.id] = lead   # last line for an id wins
-        for lid in self._leads:
-            n = int(re.sub(r"\D", "", lid) or 0)
+            taken += 1
+            n = int(re.sub(r"\D", "", lead.id) or 0)
             self._seq = max(self._seq, n)
+        return taken
+
+    def _load(self) -> None:
+        if not self.path.is_file():
+            return
+        text = self.path.read_text()
+        self._fold(text)
+        self._offset = len(text.encode("utf-8"))
+
+    def _refresh(self) -> int:
+        """Pick up lines appended to the file since we last read it: a Lead
+        injected into a LIVE run (tools/add_lead.py) shows up on the next
+        query, with no restart. Returns the number of records adopted."""
+        try:
+            size = self.path.stat().st_size
+        except OSError:
+            return 0
+        if size <= self._offset:
+            return 0
+        with self.path.open("rb") as f:
+            f.seek(self._offset)
+            chunk = f.read()
+        self._offset += len(chunk)
+        return self._fold(chunk.decode("utf-8", errors="replace"), external=True)
 
     def _append(self, lead: Lead) -> None:
         lead.ts = _now()
@@ -149,6 +181,11 @@ class LeadBoard:
             except OSError:
                 pass
             f.write(lead.to_json() + "\n")
+            f.flush()
+            try:
+                self._offset = f.tell()   # our own line is already in memory
+            except OSError:
+                pass
         self._leads[lead.id] = lead
 
     # ---- mutation ---------------------------------------------------------
@@ -202,12 +239,15 @@ class LeadBoard:
 
     # ---- queries ----------------------------------------------------------
     def get(self, lead_id: str) -> Lead | None:
+        self._refresh()
         return self._leads.get(lead_id)
 
     def all(self) -> list[Lead]:
+        self._refresh()
         return list(self._leads.values())
 
     def by_status(self, status: str) -> list[Lead]:
+        self._refresh()
         return [ld for ld in self._leads.values() if ld.status == status]
 
     def solved_signatures(self) -> set[str]:

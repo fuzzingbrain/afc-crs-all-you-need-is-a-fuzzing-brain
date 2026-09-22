@@ -1,0 +1,9 @@
+# Three-stage pipeline (discovery -> verification -> reproduction) with context
+# management + a streamed session per stage, Haiku 4.5, $10 cap.
+#   cd /home/ze/FB-Bench/FuzzingBrain-Bench && .venv/bin/fb-bench run avro-03 \
+#     --agent /home/ze/fb-agent-ctx/FuzzingBrain-Agent/fbagent-3stage-haiku45-ctx.agent.yaml \
+#     --model claude-haiku-4-5 --timeout 1800 -o ctx-3stage-avro-haiku
+name: fbagent-3stage-haiku45-ctx
+command: "python3 -m fbagent.run_stages --timeout {timeout} --model claude-haiku-4-5 --max-usd 10"
+shell_env: FBAGENT_SHELL
+network: blocked

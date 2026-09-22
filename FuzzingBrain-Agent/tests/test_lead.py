@@ -98,3 +98,32 @@ def test_append_only_audit_trail(tmp_path):
     b.update(lead.id, allowed=None, attempts=1)
     lines = [l for l in p.read_text().splitlines() if l.strip()]
     assert len(lines) == 3                    # create + set_status + update, nothing overwritten
+
+
+def test_board_picks_up_a_lead_injected_into_the_live_file(tmp_path):
+    """tools/add_lead.py appends to the file while a controller holds the board
+    in memory: the next query folds the new line in, and a stale external line
+    for a known id never rolls back what the board holds."""
+    import json
+    import subprocess
+    import sys
+    from pathlib import Path
+    from fbagent.lead import LeadBoard, PENDING_VERIFY
+    b = LeadBoard(tmp_path / ".fb" / "leads.jsonl")
+    own = b.create(function="foo", description="heap-buffer-overflow in foo")
+    tool = Path(__file__).resolve().parents[1] / "tools" / "add_lead.py"
+    subprocess.run([sys.executable, str(tool), str(tmp_path), "--function", "bar",
+                    "--description", "use-after-free in bar"], check=True, capture_output=True)
+    ids = {ld.id for ld in b.by_status(PENDING_VERIFY)}
+    assert ids == {own.id, "X01"}
+    assert b.get("X01").origin == "injected/operator"
+    # a stale line for our own Lead (lower rev) is ignored
+    b.update(own.id, allowed=None, score=0.9)
+    with (tmp_path / ".fb" / "leads.jsonl").open("a") as f:
+        stale = json.loads(own.to_json()); stale["score"] = 0.1; stale["rev"] = 0
+        f.write(json.dumps(stale) + "\n")
+    assert b.get(own.id).score == 0.9
+    # a fresh board opened on the file sees both, and numbering continues after L01
+    b2 = LeadBoard(tmp_path / ".fb" / "leads.jsonl")
+    assert {ld.id for ld in b2.all()} == {own.id, "X01"}
+    assert b2.create(function="baz", description="oob").id == "L02"
