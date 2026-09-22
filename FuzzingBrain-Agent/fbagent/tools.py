@@ -153,6 +153,21 @@ _TRACE_RES = WORKSPACE / ".fbbench" / "trace_res"
 # It is copied into the request so the bench needs nothing from this package.
 _TRACER_PY = Path(__file__).resolve().with_name("gdb_tracer.py")
 
+# Whether anything is actually answering on the bridge. The directory existing
+# proves only that `submit` is wired, not that a trace responder is listening.
+# Where none is, every call used to wait the full 220 seconds before giving up:
+# 18 calls across the recorded D5 runs returned 8 timeouts and zero reports, and
+# each timeout cost 220s of a 1800s cell. So the first call probes briefly and,
+# if nothing has even claimed the request, every later call fails immediately.
+_TRACE_PROBE_S = 8.0
+_trace_bridge_dead = False
+_trace_seen = False   # a responder has answered at least once
+
+
+def _mark_trace_alive() -> None:
+    global _trace_seen
+    _trace_seen = True
+
 
 def _parse_trace_legacy(raw: str, target: str) -> str:
     """The pre-tracer report, for a bench that still runs the one-breakpoint
@@ -481,6 +496,7 @@ def trace(input: str, target: str = "", verbose: bool = False) -> str:
     has no graded binary): this drops the input, the gdb-side script and the
     target list on the `.fbbench` bridge, reads the raw gdb output back, and
     turns the tracer's JSON events into the report here."""
+    global _trace_bridge_dead
     inp = Path(input)
     if not inp.is_file():
         return f"error: no input file at {input!r}; write your candidate bytes there first."
@@ -496,6 +512,10 @@ def trace(input: str, target: str = "", verbose: bool = False) -> str:
         return _summarize_trace(_TRACE_CACHE[key], targets, verbose=bool(verbose))
     if not _TRACE_REQ.parent.is_dir():
         return "error: trace unavailable — not running under the bench harness (no bridge)."
+    if _trace_bridge_dead:
+        return ("error: trace is unavailable in this environment (no debugger bridge "
+                "answered earlier in this run). Read the run time on ./submit's clean "
+                "verdict instead: non-zero means the target did real work on your input.")
     _TRACE_REQ.mkdir(parents=True, exist_ok=True)
     rid = f"{time.time_ns()}-{os.getpid()}"
     try:
@@ -505,17 +525,34 @@ def trace(input: str, target: str = "", verbose: bool = False) -> str:
     except OSError as e:
         return f"error: could not post trace request: {e}"
     res = _TRACE_RES / rid
-    for _ in range(1100):                               # ~220s; the bridge caps gdb at 180s
+    waited = 0.0
+    while waited < 220.0:                               # the bridge caps gdb at 180s
         if res.exists():
             raw = res.read_text()
             res.unlink(missing_ok=True)
+            _mark_trace_alive()
             if raw.startswith("error:"):
                 return raw.strip()
             if len(_TRACE_CACHE) >= _TRACE_CACHE_MAX:
                 _TRACE_CACHE.pop(next(iter(_TRACE_CACHE)))
             _TRACE_CACHE[key] = raw
             return _summarize_trace(raw, targets, verbose=bool(verbose))
+        # The responder claims a request by removing its `.tgt` the moment it
+        # picks it up, so a `.tgt` still sitting here means nobody is home --
+        # whereas the `.bin` stays for the whole run and proves nothing. That
+        # distinction is what lets a gdb run that legitimately takes two minutes
+        # avoid being mistaken for an absent bridge.
+        if not _trace_seen and waited >= _TRACE_PROBE_S \
+                and (_TRACE_REQ / f"{rid}.tgt").exists():
+            _trace_bridge_dead = True
+            (_TRACE_REQ / f"{rid}.bin").unlink(missing_ok=True)
+            (_TRACE_REQ / f"{rid}.tgt").unlink(missing_ok=True)
+            return ("error: trace is unavailable -- no debugger bridge is answering in "
+                    "this environment, so reachability cannot be confirmed this way. "
+                    "Use the run time on ./submit's clean verdict instead: a non-zero "
+                    "time means the target did real work on your input.")
         time.sleep(0.2)
+        waited += 0.2
     return "error: trace timed out waiting for the bridge."
 
 

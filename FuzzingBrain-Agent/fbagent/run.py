@@ -16,6 +16,7 @@ import json
 import os
 import sys
 
+from fbagent import progress
 from fbagent.agent import Agent
 from fbagent.llm import LLM
 from fbagent.prompts import OPENING, SYSTEM  # noqa: F401 -- OPENING kept for callers
@@ -150,6 +151,12 @@ def main() -> int:
                   max_tokens=args.max_tokens, max_usd=args.max_usd,
                   deadline_s=args.timeout, min_spend_fraction=args.min_spend_frac)
 
+    import uuid as _uuid
+    progress.start(str(_uuid.uuid4()), {
+        "model": llm.model, "max_usd": agent.max_usd,
+        "min_spend_frac": agent.min_spend_fraction, "timeout_s": args.timeout,
+        "cwd": os.getcwd()})
+
     recon: list = []
     opening = opening_with_recon(recon)
     print(f"[fbagent] model={llm.model} max_usd={agent.max_usd} "
@@ -168,6 +175,8 @@ def main() -> int:
     records = [{"step": 0, "kind": "system", "text": system}]
     records += recon
     records += [{"step": 0, "kind": "opening", "text": opening}]
+    progress.finish(result.get('stop_reason'), result.get('steps') or 0,
+                    llm.cost_usd)
     records += agent.trace()          # max_chars=0 -> every tool output in full
 
     # The agent's own archive — like Claude Code's session store, it is the
