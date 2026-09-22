@@ -119,6 +119,22 @@ The bench's external arm is what normally produces that directory and that
 
 - loop, four tools, prompt caching, standard SDK usage (streaming, error
   handling, `is_error`) — **done**, and it solves avro-03 graded by the bench.
-- **context management (compaction / context editing)** — not yet. The runs so
-  far stay well under the context window; this is for long challenges and is the
-  next thing to own, the same way the cache is owned here.
+- **context management** — done, fbv2's design (`docs/CONTEXT_COMPRESSION_DESIGN.md`
+  there) on this loop: before each call the live context is compacted
+  *mechanically*, no summarizer model. Old large tool results leave the window
+  reversibly: a pure read (`read`/`glob`/`grep`/`gates`) becomes a stub saying to
+  call it again, anything else is stored under `.fbagent-ctx/<session>/` and its
+  stub carries a ref `recall(ref)` restores verbatim. Facts pulled
+  deterministically from `./submit` verdicts and `trace` reports, plus whatever
+  the model pins with `note`, form a LEDGER message right after the opening,
+  rewritten on every compaction. `fbagent/context.py` holds the pieces.
+- **the record** — every agent instance streams its trajectory as it runs:
+  meta line, system, opening, every text/thinking/tool call/tool result in
+  full, every nudge, one `compaction` event per compaction (what left, the
+  ledger, and a snapshot file of the context the model sees next), and an end
+  line. `run.py` writes `~/.fbagent/projects/<slug>/<uuid>.jsonl` and tees to
+  `.fbagent-trace.jsonl`; the three-stage roles write
+  `.fb/sessions/<role>-<lead>-<n>.jsonl` (discovery included, as
+  `discovery-board-<round>`). Compaction rewrites the live context only, never
+  the record. `tools/session.py <file>` summarises one; `--step N` shows a step
+  in full; `--at N` reconstructs what the model saw going into step N.

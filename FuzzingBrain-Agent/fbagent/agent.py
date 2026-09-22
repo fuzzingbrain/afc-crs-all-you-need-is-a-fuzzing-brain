@@ -19,6 +19,9 @@ import time
 
 import anthropic
 
+from . import progress as progress_mod
+from .context import (IDEMPOTENT_TOOLS, LEDGER_HEADER, EvictStore, Ledger, Trajectory,
+                      context_tool_schemas)
 from .llm import LLM
 from .tools import SCHEMAS, run_tool
 
@@ -45,6 +48,43 @@ def _is_tool_result_turn(m: dict) -> bool:
     c = m.get("content")
     return (m.get("role") == "user" and isinstance(c, list) and c
             and all(isinstance(b, dict) and b.get("type") == "tool_result" for b in c))
+
+
+def _bget(b, attr, default=None):
+    """A field of a content block, whether it is the SDK object the API returned
+    or the plain dict compaction rebuilt it into."""
+    if isinstance(b, dict):
+        return b.get(attr, default)
+    return getattr(b, attr, default)
+
+
+def _block_plain(b) -> dict:
+    """A content block as a plain dict, whatever the API returned it as."""
+    if isinstance(b, dict):
+        return b
+    kind = getattr(b, "type", None)
+    if kind == "text":
+        return {"type": "text", "text": getattr(b, "text", "") or ""}
+    if kind == "thinking":
+        return {"type": "thinking", "thinking": getattr(b, "thinking", "") or ""}
+    if kind == "tool_use":
+        return {"type": "tool_use", "id": getattr(b, "id", ""),
+                "name": getattr(b, "name", ""), "input": dict(getattr(b, "input", None) or {})}
+    try:
+        return dict(b.model_dump())
+    except Exception:  # noqa: BLE001
+        return {"type": str(kind), "repr": str(b)[:2000]}
+
+
+def _blocks_plain(content):
+    if isinstance(content, str):
+        return content
+    return [_block_plain(b) for b in content]
+
+
+def _is_ledger_turn(m: dict) -> bool:
+    c = m.get("content")
+    return m.get("role") == "user" and isinstance(c, str) and c.startswith(LEDGER_HEADER)
 
 
 def _block_chars(b) -> int:
@@ -89,18 +129,42 @@ class Agent:
     guillotines a run the time budget would still allow.
     """
 
+    # Defaults for the context machinery, at class level so an instance built
+    # bare in a test (Agent.__new__) still has them.
+    _traj: Trajectory | None = None
+    _evict: EvictStore | None = None
+    _ledger: Ledger | None = None
+    _log: list | None = None
+    _tool_names: dict | None = None
+    _tool_args: dict | None = None
+
     def __init__(self, system: str, llm: LLM | None = None,
                  max_steps: int = 0, max_tokens: int = 0, max_usd: float = 0.0,
                  deadline_s: float | None = None, min_spend_fraction: float = 0.5,
-                 tools: list | None = None, tool_runner=None):
+                 tools: list | None = None, tool_runner=None,
+                 traj: Trajectory | None = None, evict_dir=None,
+                 context_tools: bool = True):
         self.system = system
         self.llm = llm or LLM()
         # Which tools this instance exposes and who runs them. A role (discovery
         # / verify / reproduce) passes its own whitelist + a runner bound to the
         # LeadBoard; the default is the full built-in tool set. This is what lets
         # one loop serve every stage without the loop itself changing.
-        self.tools = tools if tools is not None else SCHEMAS
+        self.tools = list(tools if tools is not None else SCHEMAS)
         self._run_tool = tool_runner if tool_runner is not None else run_tool
+        # The context machinery (context.py): the permanent record of the run,
+        # the store an evicted result goes to, and the pinned facts. `note` and
+        # `recall` are the loop's own tools -- they act on this instance's
+        # context, so the loop answers them before any runner sees them.
+        self._traj = traj if traj is not None else Trajectory()
+        self._evict = EvictStore(evict_dir)
+        self._ledger = Ledger()
+        self._log = self._traj.records
+        self._tool_names = {}      # tool_use_id -> tool name
+        self._tool_args = {}       # tool_use_id -> tool input
+        if context_tools:
+            have = {s["name"] for s in self.tools}
+            self.tools += [s for s in context_tool_schemas() if s["name"] not in have]
         self.max_steps = max_steps          # 0 = no step cap
         self.max_tokens = max_tokens        # 0 = no token cap
         self.max_usd = max_usd              # 0 = no spend cap
@@ -201,29 +265,95 @@ class Agent:
             self._tokens_per_char = real / sent
 
     def _compact_history(self, keep_recent: int, large_chars: int) -> int:
-        """Elide big OLD tool-result bodies in place; return chars reclaimed.
-        Keeps the tool_use_id/is_error (so the call<->result pairing stays valid),
-        spares the newest `keep_recent` tool-result turns and any small body, and
-        is idempotent (an already-elided body is skipped)."""
+        """Evict big OLD tool-result bodies out of the window; return chars
+        reclaimed. Keeps the tool_use_id/is_error (so the call<->result pairing
+        stays valid), spares the newest `keep_recent` tool-result turns and any
+        small body, and is idempotent (an already-evicted body is skipped).
+
+        Reversible (fbv2's design): a result of a pure read is replaced by a
+        stub naming the call to repeat; any other result is stored (EvictStore)
+        and its stub carries the ref `recall` restores it by. The permanent
+        record (the trajectory) keeps the body regardless."""
         idxs = [i for i, m in enumerate(self.messages) if _is_tool_result_turn(m)]
         old = idxs[:-keep_recent] if keep_recent > 0 else idxs
         reclaimed = 0
+        names = self._tool_names or {}
+        args = self._tool_args or {}
         for i in old:
             new_blocks = []
             for b in self.messages[i]["content"]:
                 body = str(b.get("content") or "")
-                if (not body.startswith(_ELIDED_PREFIX)
-                        and len(body) > large_chars):
-                    reclaimed += len(body)
-                    nb = dict(b)
-                    nb["content"] = (f"{_ELIDED_PREFIX} tool output was "
-                                     f"{len(body)} chars, removed to save context; "
-                                     f"re-run the tool if you need it again]")
-                    new_blocks.append(nb)
-                else:
+                if body.startswith(_ELIDED_PREFIX) or len(body) <= large_chars:
                     new_blocks.append(b)
+                    continue
+                reclaimed += len(body)
+                tid = b.get("tool_use_id")
+                name = names.get(tid, "?")
+                nb = dict(b)
+                if name in IDEMPOTENT_TOOLS:
+                    a = json.dumps(args.get(tid) or {}, default=str)[:80]
+                    nb["content"] = (f"{_ELIDED_PREFIX} {name} {a} · {len(body)} chars "
+                                     f"removed to save context; call {name} again to "
+                                     f"see it]")
+                elif self._evict is not None:
+                    ref = self._evict.store(body)
+                    if self._evicted_refs is None:
+                        self._evicted_refs = []
+                    self._evicted_refs.append(ref)
+                    nb["content"] = (f"{_ELIDED_PREFIX} #{ref} · {name} · {len(body)} "
+                                     f"chars removed to save context; recall({ref}) "
+                                     f"restores it verbatim]")
+                else:
+                    nb["content"] = (f"{_ELIDED_PREFIX} tool output was {len(body)} "
+                                     f"chars, removed to save context; re-run the "
+                                     f"tool if you need it again]")
+                new_blocks.append(nb)
             self.messages[i] = {**self.messages[i], "content": new_blocks}
         return reclaimed
+
+    _evicted_refs: list | None = None     # refs stored since the last compaction event
+
+    def _sync_ledger(self) -> None:
+        """Render the ledger as the one pinned user message right after the
+        opening (inserted the first time, rewritten in place after). Only ever
+        called from a compaction, so the prompt-cache prefix it invalidates is
+        one compaction already invalidated."""
+        if not self._ledger or len(self._ledger) == 0:
+            return
+        body = self._ledger.render()
+        for m in self.messages:
+            if _is_ledger_turn(m):
+                m["content"] = body
+                return
+        idx = 1 if self.messages else 0
+        self.messages.insert(idx, {"role": "user", "content": body})
+
+    def _record_compaction(self, trigger: str, reclaimed: int) -> None:
+        """One trajectory event per compaction: what left the window (refs),
+        what the ledger said, and a snapshot of the context as it now stands --
+        exactly what the model sees on the next call. The snapshot goes beside
+        the evict store (it is the compacted list, so it is bounded by the
+        window); the trajectory line names the file."""
+        refs, self._evicted_refs = list(self._evicted_refs or []), []
+        if self._traj is None:
+            return
+        snap = None
+        if self._evict is not None and self._evict.dir is not None:
+            try:
+                d = self._evict.dir / "context"
+                d.mkdir(parents=True, exist_ok=True)
+                p = d / f"step-{self.steps:05d}.json"
+                p.write_text(json.dumps(
+                    {"step": self.steps, "trigger": trigger, "system": self.system,
+                     "messages": [{"role": m["role"], "content": _blocks_plain(m["content"])}
+                                  for m in self.messages]}, default=str))
+                snap = str(p)
+            except OSError:
+                snap = None
+        self._traj.write({"step": self.steps, "kind": "compaction", "trigger": trigger,
+                          "reclaimed_chars": reclaimed, "evicted_refs": refs,
+                          "ledger": dict(self._ledger.facts) if self._ledger else {},
+                          "context_chars": self._measure_chars(), "context_snapshot": snap})
 
     def _compact_assistant_history(self, keep_recent: int, large_chars: int) -> int:
         """Elide the OWN output of OLD assistant turns: big tool-call ARGS (the
@@ -294,6 +424,8 @@ class Agent:
             reclaimed += r
         if reclaimed:
             self.compactions += 1
+            self._sync_ledger()
+            self._record_compaction("pre-call", reclaimed)
         return reclaimed
 
     def _progress_note(self) -> str | None:
@@ -327,9 +459,78 @@ class Agent:
             return 0.0
         return max(0.0, min(1.0, 1.0 - remaining / total))
 
+    # --- the record: every message, as it is appended, in full ------------------
+    def _rec(self, rec: dict) -> None:
+        if self._traj is not None:
+            rec.setdefault("step", self.steps)
+            self._traj.write(rec)
+
+    def _append_user_text(self, text: str, kind: str) -> None:
+        """A string user turn injected by the loop (opening, nudge, continue)."""
+        self.messages.append({"role": "user", "content": text})
+        self._rec({"kind": kind, "text": text})
+
+    def _append_assistant(self, content) -> None:
+        self.messages.append({"role": "assistant", "content": content})
+        for b in content:
+            kind = _bget(b, "type")
+            if kind == "text" and (_bget(b, "text") or "").strip():
+                self._rec({"kind": "text", "text": _bget(b, "text")})
+            elif kind == "thinking" and (_bget(b, "thinking") or "").strip():
+                self._rec({"kind": "thinking", "text": _bget(b, "thinking")})
+            elif kind == "tool_use":
+                tid, name = _bget(b, "id"), _bget(b, "name")
+                inp = dict(_bget(b, "input") or {})
+                if self._tool_names is not None:
+                    self._tool_names[tid] = name
+                    self._tool_args[tid] = inp
+                self._rec({"kind": "tool_call", "tool": name, "input": inp, "id": tid})
+
+    def _append_results(self, results: list[dict], note: str | None) -> None:
+        blocks = list(results)
+        if note:
+            blocks.append({"type": "text", "text": note})
+        self.messages.append({"role": "user", "content": blocks})
+        names = self._tool_names or {}
+        for r in results:
+            self._rec({"kind": "tool_result", "tool": names.get(r.get("tool_use_id"), "?"),
+                       "id": r.get("tool_use_id"),
+                       "is_error": bool(r.get("is_error", False)),
+                       "output": str(r.get("content", "")), "truncated": False,
+                       "cost_usd": self.step_cost.get(self.steps)})
+        if note:
+            self._rec({"kind": "progress_note", "text": note})
+
+    def _dispatch(self, name: str, args: dict) -> tuple[str, bool]:
+        """The loop's own tools first (they act on this context), then the runner."""
+        if name == "recall":
+            try:
+                ref = int(args.get("ref"))
+            except (TypeError, ValueError):
+                return f"error: recall needs an integer ref, got {args.get('ref')!r}", True
+            body = self._evict.load(ref) if self._evict is not None else None
+            if body is None:
+                return (f"error: no evicted result #{ref} (a pure read is restored by "
+                        f"calling the tool again)"), True
+            return body, False
+        if name == "note":
+            key = str(args.get("key", "")).strip()
+            val = str(args.get("value", "")).strip()
+            if not key or not val:
+                return "error: note needs both key and value", True
+            if self._ledger is not None:
+                self._ledger.extract("note", args, "")
+            return f"noted [{key}]; it stays in your context across compaction.", False
+        out, err = self._run_tool(name, args)
+        if self._ledger is not None and not err:
+            self._ledger.extract(name, args, out)
+        return out, err
+
     def run(self, opening: str) -> dict:
         """Run to a natural stop or the budget, and report what happened."""
-        self.messages.append({"role": "user", "content": opening})
+        self._rec({"step": 0, "kind": "system", "text": self.system})
+        self.steps = 0
+        self._append_user_text(opening, "opening")
 
         while True:
             over = self._out_of_budget()
@@ -338,7 +539,7 @@ class Agent:
                 break
 
             self.steps += 1
-            # Pre-call compaction: elide old large tool outputs BEFORE sending so
+            # Pre-call compaction: evict old large tool outputs BEFORE sending so
             # a turn that just appended a lot cannot overflow the window on this
             # call. Keyed off the model's real window (Haiku 200k, Opus 1M).
             self._compact_to_fit()
@@ -354,9 +555,11 @@ class Agent:
                 # the run degrades instead of dying with most of its budget unused
                 # -- the exact failure that capped the Haiku D5 cells at ~$4.
                 if _is_context_overflow(e):
-                    self._compact_history(keep_recent=0, large_chars=1)
-                    self._compact_assistant_history(keep_recent=2, large_chars=1)
+                    r = self._compact_history(keep_recent=0, large_chars=1)
+                    r += self._compact_assistant_history(keep_recent=2, large_chars=1)
                     self.compactions += 1
+                    self._sync_ledger()
+                    self._record_compaction("overflow-400", r)
                     try:
                         resp = self.llm.call(self.system, self.messages, self.tools)
                     except anthropic.APIError as e2:
@@ -374,7 +577,7 @@ class Agent:
 
             # Append the assistant turn verbatim: the content blocks (text,
             # thinking, tool_use) have to go back unchanged for the next turn.
-            self.messages.append({"role": "assistant", "content": resp.content})
+            self._append_assistant(resp.content)
 
             if resp.stop_reason != "tool_use":
                 reason = resp.stop_reason or "end_turn"
@@ -388,10 +591,10 @@ class Agent:
                     self._consecutive_trunc += 1
                     if self._consecutive_trunc <= _MAX_CONSECUTIVE_TRUNC:
                         self.forced_continuations += 1
-                        self.messages.append({"role": "user", "content":
+                        self._append_user_text(
                             "(Your previous reply hit the output limit before it "
                             "finished. Continue from where you left off; be concise "
-                            "and make a tool call.)"})
+                            "and make a tool call.)", "continue")
                         continue
                     self.stop_reason = "max_tokens (repeated truncation)"
                     break
@@ -399,7 +602,7 @@ class Agent:
                 # different bug rather than an end — the budget is there to spend.
                 if self._keep_hunting(reason):
                     self.forced_continuations += 1
-                    self.messages.append({"role": "user", "content": self._nudge()})
+                    self._append_user_text(self._nudge(), "nudge")
                     continue
                 self.stop_reason = reason
                 break
@@ -409,12 +612,13 @@ class Agent:
             # user turn — splitting them trains the model out of parallel calls.
             results = []
             for block in resp.content:
-                if getattr(block, "type", None) != "tool_use":
+                if _bget(block, "type") != "tool_use":
                     continue
-                output, is_error = self._run_tool(block.name, dict(block.input or {}))
+                output, is_error = self._dispatch(_bget(block, "name"),
+                                                  dict(_bget(block, "input") or {}))
                 result = {
                     "type": "tool_result",
-                    "tool_use_id": block.id,
+                    "tool_use_id": _bget(block, "id"),
                     "content": output,
                 }
                 if is_error:
@@ -435,17 +639,17 @@ class Agent:
                                 _verdicts.append(ln[:120])
                 progress_mod.step(
                     n=self.steps, cost=self.llm.cost_usd,
-                    tools=[b.name for b in resp.content
-                           if getattr(b, "type", None) == "tool_use"],
+                    tools=[_bget(b, "name") for b in resp.content
+                           if _bget(b, "type") == "tool_use"],
                     verdicts=_verdicts[:6])
             except Exception:  # noqa: BLE001 - reporting never breaks the run
                 pass
 
-            note = self._progress_note()
-            if note:
-                results = results + [{"type": "text", "text": note}]
-            self.messages.append({"role": "user", "content": results})
+            self._append_results(results, self._progress_note())
 
+        self._rec({"kind": "stop", "reason": self.stop_reason,
+                   "cost_usd": round(self.llm.cost_usd, 4),
+                   "compactions": self.compactions})
         return {
             "stop_reason": self.stop_reason,
             "steps": self.steps,
@@ -453,10 +657,14 @@ class Agent:
             "cache_hit_rate": round(self.llm.cache_hit_rate, 3),
             "forced_continuations": self.forced_continuations,
             "compactions": self.compactions,
+            "ledger": dict(self._ledger.facts) if self._ledger else {},
         }
 
     def transcript_text(self) -> str:
-        """The assistant's visible text across the run, for a log."""
+        """The assistant's visible text across the run, for a log. Read from
+        the record (complete), falling back to the live messages."""
+        if self._log:
+            return "\n\n".join(r["text"] for r in self._log if r.get("kind") == "text")
         out = []
         for m in self.messages:
             if m["role"] != "assistant":
@@ -464,25 +672,42 @@ class Agent:
             content = m["content"]
             if isinstance(content, list):
                 for b in content:
-                    if getattr(b, "type", None) == "text":
-                        out.append(b.text)
+                    if _bget(b, "type") == "text":
+                        out.append(_bget(b, "text"))
         return "\n\n".join(out)
 
-
     def trace(self, max_chars: int = 0) -> list[dict]:
-        """Every step, flat, from the raw message list — the honest record.
+        """Every step, flat — the honest record.
 
         `transcript_text` above is the model's visible prose only; this is what
         the run actually did: each tool call with its arguments and each tool
-        result in full. `max_chars <= 0` (the default) keeps every output whole —
-        the complete log, exactly what the model saw; a positive value caps each
-        field for a compact view. A tool result names its tool by matching the id
-        the call was issued under.
-        """
+        result in full, plus the loop's own events (opening, nudges, compactions,
+        stop). It comes from the trajectory record, written as each message was
+        appended, so compaction of the live context never touches it: a
+        ./submit crash at step 12 is still here at step 400. `max_chars <= 0`
+        (the default) keeps every output whole; a positive value caps each
+        text/output field for a compact view (`truncated` marks a capped
+        result). A bare instance with no record falls back to scanning the
+        live messages."""
         def _cap(s: str) -> tuple[str, bool]:
             if max_chars and len(s) > max_chars:
                 return s[:max_chars], True
             return s, False
+
+        if self._log:
+            out = []
+            for r in self._log:
+                if r.get("kind") == "system":
+                    continue           # the archive writers add it themselves
+                r = dict(r)
+                if max_chars:
+                    for f in ("text", "output"):
+                        if isinstance(r.get(f), str):
+                            r[f], t = _cap(r[f])
+                            if t and f == "output":
+                                r["truncated"] = True
+                out.append(r)
+            return out
 
         records: list[dict] = []
         names: dict[str, str] = {}   # tool_use_id -> tool name
@@ -494,16 +719,17 @@ class Agent:
                 if not isinstance(content, list):
                     continue
                 for b in content:
-                    kind = getattr(b, "type", None)
-                    if kind == "text" and (b.text or "").strip():
-                        records.append({"step": step, "kind": "text", "text": b.text})
-                    elif kind == "thinking" and (getattr(b, "thinking", "") or "").strip():
-                        txt, _ = _cap(b.thinking)
+                    kind = _bget(b, "type")
+                    if kind == "text" and (_bget(b, "text") or "").strip():
+                        records.append({"step": step, "kind": "text", "text": _bget(b, "text")})
+                    elif kind == "thinking" and (_bget(b, "thinking") or "").strip():
+                        txt, _ = _cap(_bget(b, "thinking"))
                         records.append({"step": step, "kind": "thinking", "text": txt})
                     elif kind == "tool_use":
-                        names[b.id] = b.name
+                        names[_bget(b, "id")] = _bget(b, "name")
                         records.append({"step": step, "kind": "tool_call",
-                                        "tool": b.name, "input": dict(b.input or {})})
+                                        "tool": _bget(b, "name"),
+                                        "input": dict(_bget(b, "input") or {})})
             elif m["role"] == "user" and isinstance(content, list):
                 for b in content:
                     if isinstance(b, dict) and b.get("type") == "tool_result":
@@ -514,8 +740,6 @@ class Agent:
                             "is_error": bool(b.get("is_error", False)),
                             "output": out,
                             "truncated": truncated,
-                            # cumulative $ when this result came back, so a crash
-                            # here reads as "found at $X".
                             "cost_usd": self.step_cost.get(step),
                         })
         return records

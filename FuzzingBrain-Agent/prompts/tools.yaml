@@ -58,6 +58,29 @@ trace:
     target: "optional: function(s) to report reached / returned status for, comma-separated (e.g. the sink you are aiming for and the parser on the way to it)"
     verbose: "optional, default false: true adds the live arguments at the stop, every function reached with call counts, and the full call sequence"
 
+note:
+  description: >
+    Pin a fact you have established so it survives context compaction. Your
+    older tool outputs are removed from your context as the run grows; the
+    facts you pin here are shown back to you, verbatim, after every
+    compaction. Pin what you would hate to re-derive: the input format the
+    harness demands, a check you confirmed must be passed (with file:line), a
+    hypothesis you ruled out and why, which candidate reached how far. One
+    fact per call; the same key overwrites. Keep it to one or two lines.
+  params:
+    key: "short identifier for the fact, e.g. 'format', 'gate:png_read_info', 'ruled-out:chunk-len'"
+    value: "the fact itself, one or two lines, with file:line where it came from"
+
+recall:
+  description: >
+    Bring back an evicted tool result verbatim. When compaction removes an old
+    result from your context it leaves a stub like "[elided: #12 · bash · 8210
+    chars ...; recall(12) restores it]"; call recall with that number to see
+    the full output again. Results of pure reads (read, glob, grep, gates) are
+    not stored -- call the tool again instead.
+  params:
+    ref: "the number in the stub, e.g. 12"
+
 diversify:
   description: >
     Deterministic Furthest-Point-First target picker. Give it the functions

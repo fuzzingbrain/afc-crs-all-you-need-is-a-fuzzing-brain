@@ -131,26 +131,33 @@ def _deepest_from_trace(output: str) -> str:
 
 def run_discovery(*, llm, board: LeadBoard, workspace: str = ".",
                   harness: str = "", sanitizer: str = "address",
-                  deadline_s: float | None = None, max_usd: float = 0.0) -> dict:
+                  deadline_s: float | None = None, max_usd: float = 0.0,
+                  round_no: int = 1) -> dict:
     """Explore the reachable code from the harness and create Leads for the
     sanitizer's crash classes. Free-exploration mode (the model drives the read);
-    a worklist can feed candidate functions later. Returns the Leads created."""
+    a worklist can feed candidate functions later. Returns the Leads created.
+    `round_no` names this round's session record (.fb/sessions/discovery-board-<n>)."""
     ws = Path(workspace)
     before = {ld.id for ld in board.all()}
+    traj, ctx_dir = store.open_session(ws, "discovery", "board", round_no,
+                                       {"harness": harness, "sanitizer": sanitizer})
     system = ("\n\n".join([_role_prompt("discovery"),
                            "## Sanitizer guidance (" + sanitizer + ")\n" + guidance_for(sanitizer),
                            "## Harness source\n\n" + harness_source(ws)]))
     schemas, runner = lead_tools.build("discovery", board, origin="discovery/llm",
                                        harness=harness, sanitizer=sanitizer)
     agent = Agent(system, llm=llm, tools=schemas, tool_runner=runner,
-                  deadline_s=deadline_s, max_usd=max_usd, min_spend_fraction=0.0)
+                  deadline_s=deadline_s, max_usd=max_usd, min_spend_fraction=0.0,
+                  traj=traj, evict_dir=ctx_dir)
     opening = ("Find the operations in this project's harness-reachable code that "
                "could crash the sanitizer, and record each as a Lead with "
                "create_lead. Start at the harness and follow the code it drives.")
     result = agent.run(opening)
     created = [ld.id for ld in board.all() if ld.id not in before]
+    store.close_session(traj, {"stop_reason": result["stop_reason"], "steps": result["steps"],
+                               "created": created, "compactions": result["compactions"]})
     return {"created": created, "n": len(created), "stop_reason": result["stop_reason"],
-            "steps": result["steps"]}
+            "steps": result["steps"], "session": traj.paths[0] if traj.paths else None}
 
 
 def run_verification(lead: Lead, *, llm, board: LeadBoard, workspace: str = ".",
@@ -169,12 +176,15 @@ def run_verification(lead: Lead, *, llm, board: LeadBoard, workspace: str = ".",
     schemas, runner = lead_tools.build("verify", board, lead_id=lead.id,
                                        harness=lead.harness, sanitizer=lead.sanitizer,
                                        with_trace=not java)
+    traj, ctx_dir = store.open_session(ws, "verify", lead.id, lead.attempts,
+                                       {"function": lead.function})
     agent = Agent(system, llm=llm, tools=schemas, tool_runner=runner,
-                  deadline_s=deadline_s, max_usd=max_usd, min_spend_fraction=0.0)
+                  deadline_s=deadline_s, max_usd=max_usd, min_spend_fraction=0.0,
+                  traj=traj, evict_dir=ctx_dir)
     result = agent.run(_lead_brief(lead))
     sig, deepest, best, crash_text = _scan_outcome(agent, hnames)
-    store.archive_session(ws, "verify", lead.id, lead.attempts, agent,
-                          {"stop_reason": result["stop_reason"], "crashed": bool(sig)})
+    store.close_session(traj, {"stop_reason": result["stop_reason"], "crashed": bool(sig),
+                               "steps": result["steps"], "compactions": result["compactions"]})
     if sig and sig.crash_class:
         stored = store.save_candidate(ws, lead.id, lead.attempts, best)
         store.save_crash(ws, sig.key, stored or best, crash_text, lead.id)
@@ -213,12 +223,15 @@ def run_reproduction(lead: Lead, *, llm, board: LeadBoard, workspace: str = ".",
                                        harness=lead.harness, sanitizer=lead.sanitizer,
                                        with_trace=not java)
     attempt = lead.attempts + 1
+    traj, ctx_dir = store.open_session(ws, "reproduce", lead.id, attempt,
+                                       {"function": lead.function})
     agent = Agent(system, llm=llm, tools=schemas, tool_runner=runner,
-                  deadline_s=deadline_s, max_usd=max_usd, min_spend_fraction=0.0)
+                  deadline_s=deadline_s, max_usd=max_usd, min_spend_fraction=0.0,
+                  traj=traj, evict_dir=ctx_dir)
     result = agent.run(_lead_brief(lead))
     sig, deepest, best, crash_text = _scan_outcome(agent, harness_names)
-    store.archive_session(ws, "reproduce", lead.id, attempt, agent,
-                          {"stop_reason": result["stop_reason"], "crashed": bool(sig)})
+    store.close_session(traj, {"stop_reason": result["stop_reason"], "crashed": bool(sig),
+                               "steps": result["steps"], "compactions": result["compactions"]})
     if sig and sig.crash_class:
         stored = store.save_candidate(ws, lead.id, attempt, best)
         store.save_crash(ws, sig.key, stored or best, crash_text, lead.id)

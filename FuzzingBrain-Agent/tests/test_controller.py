@@ -39,7 +39,8 @@ def test_full_loop_solves_and_gates(tmp_path, monkeypatch):
     b = LeadBoard(tmp_path / ".fb" / "leads.jsonl")
 
     # discovery: create three Leads
-    def disc(*, llm, board, workspace, harness, sanitizer, deadline_s, max_usd):
+    def disc(*, llm, board, workspace, harness, sanitizer, deadline_s, max_usd,
+             round_no=1):
         board.create(function="good", description="heap-buffer-overflow", harness=harness)
         board.create(function="weak", description="use-after-free", harness=harness)
         board.create(function="fp", description="out-of-bounds", harness=harness)

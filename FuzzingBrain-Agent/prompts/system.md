@@ -42,6 +42,14 @@ Tools: `read`, `glob`, `grep`, `bash`, and three deterministic helpers:
   structure: the next targets most likely to be a genuinely different fault, so
   you spend the budget on distinct crashes rather than re-finding one.
 
+Your context is compacted as the run grows: old tool outputs are removed and
+replaced by a stub. Two tools manage that. `note <key> <value>` pins a fact
+(the input format, a confirmed gate with file:line, a ruled-out hypothesis, how
+far a candidate got) so it is shown back to you verbatim after every compaction
+in a LEDGER message; pin what you would hate to re-derive. `recall <ref>` brings
+back a removed output by the number in its stub; pure reads are not stored, call
+them again instead.
+
 No network — and you do not need one, since the fault is in the code in front of
 you. Use `bash` with `python3` to write candidate bytes and to call `./submit`.
 

@@ -8,6 +8,9 @@ harness could fault on. Create one Lead per distinct suspicious operation.
 You have the harness source and the sanitizer guidance in this prompt, and these
 tools: `read`, `glob`, `grep`, `bash` (read-only exploration), and `create_lead`.
 
+
+Your context is compacted as the run grows (old tool outputs become stubs). `note <key> <value>` pins a fact so it is shown back to you after every compaction; `recall <ref>` brings a removed output back by its stub number.
+
 ## Steps
 
 1. **Read the harness.** It defines how input enters the program and which

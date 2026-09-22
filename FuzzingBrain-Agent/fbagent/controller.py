@@ -135,7 +135,8 @@ def run_task(*, llm, workspace: str = ".", max_usd: float = 0.0,
         cap = min(max_usd, before_cost + (disc_cap - disc_spent)) if max_usd else 0.0
         d = roles.run_discovery(llm=llm, board=board, workspace=str(ws),
                                 harness=harness, sanitizer=sanitizer,
-                                deadline_s=remaining_s(), max_usd=cap)
+                                deadline_s=remaining_s(), max_usd=cap,
+                                round_no=disc_rounds[0])
         disc_spent += getattr(llm, "cost_usd", 0.0) - before_cost
         new = len({ld.id for ld in board.all()} - before_ids)
         log.append({"stage": "discovery", "new": new, **d})

@@ -31,47 +31,59 @@ def _project_slug(cwd) -> str:
     return str(Path(cwd).resolve()).replace("/", "-").replace("\\", "-")
 
 
-def _archive(records: list, result: dict, llm, agent) -> str | None:
-    """Persist this run the way Claude Code persists a session — the agent's own
-    store, not the harness's, written for *every* run whatever the task:
+def _open_archive(llm, agent_budgets: dict, timeout_s: int):
+    """Open this run's record the way Claude Code keeps a session — the agent's
+    own store, not the harness's, written for *every* run whatever the task:
 
         ~/.fbagent/projects/<project-slug>/<session-uuid>.jsonl
 
     one JSONL file per session, keyed by a fresh UUID, under a folder named for
-    the working directory. The first line is a meta record (model, budgets,
-    cost, outcome); the rest are the full transcript — system, opening, every
-    step. Best-effort: a failure here never fails the run, and the root is
-    overridable with FBAGENT_HOME. Returns the file path, or None on failure."""
-    import os
+    the working directory. It is STREAMED: the first line is a meta record
+    (model, budgets), then every message as it happens, then an end record
+    with the outcome — so a run killed mid-flight keeps everything up to the
+    kill, and compaction of the live context never touches it. The same record
+    tees to `.fbagent-trace.jsonl` in the working directory, which the bench
+    copies out as trace.jsonl. Evicted tool results and per-compaction context
+    snapshots go beside it under `.fbagent-ctx/<session>/`. Best-effort: a
+    failure here never fails the run; the root is overridable with FBAGENT_HOME.
+    Returns (trajectory, session_id, session_path, evict_dir)."""
     import uuid
     from datetime import datetime, timezone
     from pathlib import Path
+    from fbagent.context import Trajectory
+    sid = str(uuid.uuid4())
+    session_path = None
+    paths = []
     try:
         home = Path(os.environ.get("FBAGENT_HOME") or (Path.home() / ".fbagent"))
         proj = home / "projects" / _project_slug(Path.cwd())
         proj.mkdir(parents=True, exist_ok=True)
-        sid = str(uuid.uuid4())
-        meta = {"kind": "meta", "session": sid, "cwd": str(Path.cwd().resolve()),
+        session_path = str(proj / f"{sid}.jsonl")
+        paths.append(session_path)
+    except Exception as e:  # noqa: BLE001 — archiving must never take the run down
+        print(f"[archive] session store unavailable: {e}", file=sys.stderr)
+    paths.append(str(Path.cwd() / ".fbagent-trace.jsonl"))
+    try:
+        (Path.cwd() / ".fbagent-trace.jsonl").unlink(missing_ok=True)
+    except OSError:
+        pass
+    traj = Trajectory(paths)
+    traj.write({"kind": "meta", "session": sid, "cwd": str(Path.cwd().resolve()),
                 "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-                "model": llm.model, "served_model": getattr(llm, "served_model", None),
-                "effort": getattr(llm, "effort", None),
+                "model": llm.model, "effort": getattr(llm, "effort", None),
                 "reasoning": getattr(llm, "reasoning", None),
+                "timeout_s": timeout_s, "budgets": agent_budgets})
+    return traj, sid, session_path, str(Path.cwd() / ".fbagent-ctx" / sid)
+
+
+def _close_archive(traj, result: dict, llm) -> None:
+    traj.write({"kind": "end", "served_model": getattr(llm, "served_model", None),
                 "stop_reason": result.get("stop_reason"), "steps": result.get("steps"),
                 "cost_usd": round(llm.cost_usd, 4),
                 "cache_hit_rate": result.get("cache_hit_rate"), "usage": result.get("usage"),
                 "forced_continuations": result.get("forced_continuations"),
-                "budgets": {"max_steps": agent.max_steps, "max_tokens": agent.max_tokens,
-                            "max_usd": agent.max_usd,
-                            "min_spend_frac": agent.min_spend_fraction}}
-        path = proj / f"{sid}.jsonl"
-        with path.open("w") as f:
-            f.write(json.dumps(meta) + "\n")
-            for rec in records:
-                f.write(json.dumps(rec) + "\n")
-        return str(path)
-    except Exception as e:  # noqa: BLE001 — archiving must never take the run down
-        print(f"[archive] skipped: {e}", file=sys.stderr)
-        return None
+                "compactions": result.get("compactions"), "ledger": result.get("ledger")})
+    traj.close()
 
 
 def main() -> int:
@@ -147,18 +159,27 @@ def main() -> int:
                    "Do not build or run a fuzzer (libFuzzer, AFL, honggfuzz).")
 
     llm = LLM(model=args.model) if args.model else LLM()
+    budgets = {"max_steps": args.max_steps, "max_tokens": args.max_tokens,
+               "max_usd": args.max_usd, "min_spend_frac": args.min_spend_frac}
+    traj, sid, session_path, evict_dir = _open_archive(llm, budgets, args.timeout)
     agent = Agent(system, llm=llm, max_steps=args.max_steps,
                   max_tokens=args.max_tokens, max_usd=args.max_usd,
-                  deadline_s=args.timeout, min_spend_fraction=args.min_spend_frac)
+                  deadline_s=args.timeout, min_spend_fraction=args.min_spend_frac,
+                  traj=traj, evict_dir=evict_dir)
 
-    import uuid as _uuid
-    progress.start(str(_uuid.uuid4()), {
+    progress.start(sid, {
         "model": llm.model, "max_usd": agent.max_usd,
         "min_spend_frac": agent.min_spend_fraction, "timeout_s": args.timeout,
-        "cwd": os.getcwd()})
+        "cwd": os.getcwd(), "session": session_path})
 
+    # The recon generation trace (how the worklist was computed — files, entry,
+    # graph, reachability) goes into the record ahead of the agent's own
+    # system + opening, so a reader can audit the ground the agent was handed
+    # and how that ground was produced, not just what the agent did.
     recon: list = []
     opening = opening_with_recon(recon)
+    for rec in recon:
+        traj.write({"step": 0, **rec})
     print(f"[fbagent] model={llm.model} max_usd={agent.max_usd} "
           f"min_spend_frac={agent.min_spend_fraction} timeout_s={args.timeout}",
           flush=True)
@@ -167,30 +188,12 @@ def main() -> int:
         print(f"[fbagent] WARNING: requested {llm.model} but API served "
               f"{llm.served_model}", file=sys.stderr)
 
-    # The complete trajectory: the system prompt, then the recon generation trace
-    # (how the worklist was computed — files, entry, graph, reachability), then
-    # the opening the model actually saw, then every step un-truncated. Leading
-    # with system + recon + opening is what lets a reader audit not just what the
-    # agent did but the ground it was handed and how that ground was produced.
-    records = [{"step": 0, "kind": "system", "text": system}]
-    records += recon
-    records += [{"step": 0, "kind": "opening", "text": opening}]
+    # The record was streamed as the run went (system, opening, every step);
+    # close it with the outcome. It is already at ~/.fbagent/projects/... and at
+    # .fbagent-trace.jsonl, which the bench copies out to the cell as trace.jsonl.
     progress.finish(result.get('stop_reason'), result.get('steps') or 0,
                     llm.cost_usd)
-    records += agent.trace()          # max_chars=0 -> every tool output in full
-
-    # The agent's own archive — like Claude Code's session store, it is the
-    # agent's, not the harness's, and it happens for every run whatever the task:
-    # ~/.fbagent/projects/<project-slug>/<session-uuid>.jsonl.
-    session_path = _archive(records, result, llm, agent)
-
-    # The bench copies whatever the agent leaves at `.fbagent-trace.jsonl` out to
-    # the cell as trace.jsonl, so the same complete record also goes there — no
-    # bench change needed, it just preserves the file the agent already writes.
-    from pathlib import Path
-    with (Path.cwd() / ".fbagent-trace.jsonl").open("w") as tf:
-        for rec in records:
-            tf.write(json.dumps(rec) + "\n")
+    _close_archive(traj, result, llm)
 
     # A compact record to stdout; the bench keeps this as the agent log.
     print(agent.transcript_text())
@@ -203,6 +206,7 @@ def main() -> int:
         "cost_usd": round(llm.cost_usd, 4),
         "cache_hit_rate": result["cache_hit_rate"],
         "usage": result["usage"],
+        "compactions": result.get("compactions"),
         "archived_to": session_path,
     }, indent=2))
     return 0

@@ -33,18 +33,57 @@ def _sig_slug(signature: str) -> str:
     return re.sub(r"[^A-Za-z0-9_.-]+", "_", signature or "unknown")[:120] or "unknown"
 
 
-def archive_session(ws, role: str, lead_id: str, attempt: int, agent, meta: dict) -> str | None:
-    """Write one agent instance's full trace to .fb/sessions/<role>-<lead>-<n>.jsonl:
-    a meta line, then every step (agent.trace()), so a run is auditable per stage."""
+def session_paths(ws, role: str, lead_id: str, attempt: int) -> tuple[Path, Path]:
+    """Where one agent instance's record lives:
+        .fb/sessions/<role>-<lead>-<n>.jsonl   the trajectory (streamed)
+        .fb/ctx/<role>-<lead>-<n>/             evicted results + context snapshots
+    """
+    name = f"{role}-{lead_id}-{attempt}"
+    return _fb(ws) / "sessions" / f"{name}.jsonl", _fb(ws) / "ctx" / name
+
+
+def open_session(ws, role: str, lead_id: str, attempt: int, meta: dict | None = None):
+    """Start one agent instance's record: returns (Trajectory, evict_dir). The
+    trajectory streams every message as it happens (see context.py), so the
+    file is complete-so-far at any moment -- a run killed mid-flight keeps
+    everything up to the kill, and compaction of the live context never touches
+    it. The first line is a meta record naming the role, Lead and attempt."""
+    from .context import Trajectory
+    path, ctx = session_paths(ws, role, lead_id, attempt)
     try:
-        d = _fb(ws) / "sessions"
-        d.mkdir(parents=True, exist_ok=True)
-        path = d / f"{role}-{lead_id}-{attempt}.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists():           # a re-run of the same (role, lead, attempt)
+            path.unlink()
+    except OSError:
+        pass
+    traj = Trajectory([path])
+    traj.write({"kind": "meta", "role": role, "lead": lead_id, "attempt": attempt,
+                "ts": _now(), **(meta or {})})
+    return traj, ctx
+
+
+def close_session(traj, meta: dict) -> None:
+    """The closing line of a session record: the outcome, once known."""
+    try:
+        traj.write({"kind": "end", "ts": _now(), **meta})
+        traj.close()
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def archive_session(ws, role: str, lead_id: str, attempt: int, agent, meta: dict) -> str | None:
+    """Write one agent instance's full trace in one go (an agent that was not
+    given a streamed session): a meta line, then every record of agent.trace(),
+    then an end line. Streamed sessions (open_session) do not need this."""
+    try:
+        path, _ = session_paths(ws, role, lead_id, attempt)
+        path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w") as f:
             f.write(json.dumps({"kind": "meta", "role": role, "lead": lead_id,
                                 "attempt": attempt, "ts": _now(), **meta}) + "\n")
             for rec in agent.trace():
                 f.write(json.dumps(rec, default=str) + "\n")
+            f.write(json.dumps({"kind": "end", "ts": _now(), **meta}) + "\n")
         return str(path)
     except Exception as e:  # noqa: BLE001 — archiving must never fail a run
         return f"(session archive skipped: {e})"

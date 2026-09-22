@@ -10,6 +10,9 @@ You have the harness source in this prompt and these tools: `read`, `glob`,
 with `python3`), test it with `./submit <file>`. `./submit` is the only judge
 that matters — a crash there is the goal.
 
+
+Your context is compacted as the run grows (old tool outputs become stubs). `note <key> <value>` pins a fact so it is shown back to you after every compaction; `recall <ref>` brings a removed output back by its stub number.
+
 ## Steps
 
 1. **Read the harness.** It defines how your bytes become the program's input —

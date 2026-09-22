@@ -63,12 +63,12 @@ reproduce that contract, we do not define it.
 
 ## Consciously deferred (not a deviation — scoped out, documented)
 
-- The **in-context pinned ledger** (design §5): facts surviving compaction
-  *within one long agent run*. Needs `agent.py` hooks that would collide with
-  the parallel work on that file; the mechanical compaction already prevents
-  overflow, and cross-stage/cross-attempt memory is carried by the Lead board.
-  (The `.fb/ledger.jsonl` *file* — the per-stage experiment log — is implemented
-  in `store.py`.)
+- ~~The **in-context pinned ledger** (design §5)~~ — now implemented in
+  `fbagent/context.py` + the `agent.py` hooks, ported from **fbv2**
+  `agents/base.py::_compress_context` (reversible eviction, `recall`, the
+  deterministic ledger; its Phase 3 `note` tool added here). Cross-stage /
+  cross-attempt memory is still the Lead board. (The `.fb/ledger.jsonl` *file*
+  — the per-stage experiment log — is a different thing, in `store.py`.)
 - **UBSan** and **Java dynamic trace** (JVMTI/jdb) — named, not built.
 - **evidence_score.py** structured verdict contract — the basic version uses the
   LLM's score; fbv2's recall-first rule is expressed in the prompt, not code.

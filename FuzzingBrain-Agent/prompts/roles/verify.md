@@ -10,6 +10,9 @@ You have the harness source in this prompt and these tools: `read`, `glob`,
 `grep`, `bash`, `trace`, and `update_lead` (which records your verdict). `bash`
 runs `./submit <file>` — the only judge of a real crash.
 
+
+Your context is compacted as the run grows (old tool outputs become stubs). `note <key> <value>` pins a fact so it is shown back to you after every compaction; `recall <ref>` brings a removed output back by its stub number.
+
 ## Steps
 
 1. **Read the harness and the Lead.** The Lead names a function, a described
