@@ -34,9 +34,17 @@ _FN = re.compile(r"^[0-9a-f]+ <([^>]+)>:")
 
 
 def coverage_cmd(path: str) -> str:
-    """Ask the target which functions this input reached."""
+    """Ask the target which functions this input reached.
+
+    Only the COVERED lines and the entry point, never the UNCOVERED ones. A
+    large target prints one line per function -- 12248 of them on one challenge
+    -- and the bench truncates a command's stdout at 128 KB. Asking for
+    everything got 1188 alphabetically-first UNCOVERED lines, no entry line and
+    no covered line, so the note silently produced nothing on precisely the
+    cell it exists for. What is reached is a short list; what is not is noise.
+    """
     return (f"LD_LIBRARY_PATH={TARGET_LIBS} {TARGET} -runs=1 -print_coverage=1 "
-            f"{path} 2>&1 | grep -E '^(UN)?COVERED_FUNC:'")
+            f"{path} 2>&1 | grep -E '^COVERED_FUNC:|{ENTRY}' | head -400")
 
 
 def parse_coverage(text: str) -> tuple[set[str], bool | None]:
