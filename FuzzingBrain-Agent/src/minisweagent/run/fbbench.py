@@ -342,6 +342,15 @@ def main(
     # the conversation up to the kill -- the same reason the report is published
     # per turn rather than at exit.
     config.setdefault("agent", {})["output_path"] = workspace / ".fbbench" / "traj.json"
+    # The bench's own system prompt, when it supplies one. Prepended rather than
+    # substituted: it is the brief every arm is measured against, and what
+    # follows is this agent's own scaffolding, which is where our differences
+    # are supposed to live. Claude Code is given the same text the same way,
+    # through --append-system-prompt, so neither arm loses its own instructions.
+    if bench_system := os.environ.get("FBBENCH_SYSTEM_PROMPT"):
+        own = config["agent"].get("system_template", "")
+        config["agent"]["system_template"] = (
+            bench_system + ("\n\n" + own if own else ""))
 
     agent = _ReportingAgent(
         get_model(config=config.get("model", {})),

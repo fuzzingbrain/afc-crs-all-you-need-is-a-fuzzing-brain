@@ -440,3 +440,22 @@ def _answer(ws: Path, text: str, timeout: float = 20.0) -> str:
 # the challenge image now and runs gdb itself), and the $SHELL sandbox check
 # (there is no host shell -- every action is an MCP call, covered directly by
 # tests/environments/test_mcp_bench.py).
+
+
+def test_the_bench_system_prompt_is_prepended_not_substituted(monkeypatch):
+    """The bench's brief is what every arm is measured against; this agent's own
+    system_template is its scaffolding. Both must be present, in that order --
+    Claude Code gets the same text the same way via --append-system-prompt."""
+    import os, yaml
+    from pathlib import Path
+    from minisweagent.run import fbbench as fb
+    cfg_path = Path(fb.DEFAULT_CONFIG_FILE)
+    own = yaml.safe_load(cfg_path.read_text())["agent"]["system_template"]
+    monkeypatch.setenv("FBBENCH_SYSTEM_PROMPT", "BENCH-BRIEF-MARKER")
+    config = {"agent": {"system_template": own}}
+    # the same two lines run/fbbench.py applies
+    bench_system = os.environ["FBBENCH_SYSTEM_PROMPT"]
+    config["agent"]["system_template"] = bench_system + "\n\n" + own
+    t = config["agent"]["system_template"]
+    assert t.startswith("BENCH-BRIEF-MARKER")
+    assert own in t, "the agent's own scaffolding must survive"
