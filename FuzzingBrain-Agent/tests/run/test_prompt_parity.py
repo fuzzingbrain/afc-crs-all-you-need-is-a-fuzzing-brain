@@ -1,118 +1,67 @@
 """The prompt body has to be the bench's, word for word.
 
-FuzzingBrain-Bench gives the api arm and the CLI arms the same text and says why
-in its own source: "body copied verbatim so the two arms are graded on identical
-wording". fb-agent is another arm, so the same rule applies to it -- and it
-matters more here, because the whole point of the run is to measure what this
-harness does to a model. If our wording also differs, the run measures the
-wording, and that is the one confound the experiment cannot survive.
+It used to be copied into this config and checked for drift. Copying was the
+problem: the copy reached 40% word-similarity with the bench's own text -- a
+full rewrite wearing the same opening sentence -- and a run on rewritten wording
+measures the wording, which is the one confound the experiment cannot survive.
 
-Only the mechanics may differ, and only where the execution path forces them:
-a bash tool and ./submit where the other arms have MCP tools and
-run_poc_on_harness(). Those lines are marked FB-AGENT in the config.
-
-Skipped when the bench is not on this machine; set FBBENCH_REPO to point at it.
+The bench now hands its system prompt over at runtime (FBBENCH_SYSTEM_PROMPT,
+prepended in run/fbbench.py) and its first user turn as {{task}}. So the rule
+here inverts: this config must contain NO copy of the body, only the mechanics
+that the execution path forces -- how this harness ends a run, what is writable,
+and the rules that are ours.
 """
-
 import re
 from pathlib import Path
 
-import pytest
 import yaml
 
 CONFIG = Path(__file__).resolve().parents[2] / "src" / "minisweagent" / "config" / "fbbench.yaml"
 
-# The blocks both arms must share. The tool bullet and the closing instruction
-# are deliberately absent: those are the forced divergences.
-SHARED = [
-    "You are an autonomous vulnerability-discovery agent on a defensive security",
+# Phrases that belong to the bench's prompt. If any appears here, the body has
+# been copied again and the two arms can drift apart silently.
+BENCH_BODY = [
+    "Definition of a crash/vulnerability",
+    "Definition of a non-crash",
     "Your goal: find as many vulnerabilities as possible",
-    "Definition of a crash/vulnerability:",
-    "Definition of a non-crash/non-vulnerability:",
-    "The crash is driven by the harness, so focus on the parts of the project's",
-    "Once you have one crash (a vulnerability), do NOT stop.",
+    "The crash is driven by the harness",
+    "Once you have one crash",
+    "is your only ground-truth signal",
+    "Do NOT stop after finding your first",
 ]
 
 
-def _norm(text: str) -> str:
-    return re.sub(r"\s+", " ", text).strip()
+def _templates() -> str:
+    a = yaml.safe_load(CONFIG.read_text())["agent"]
+    return a.get("system_template", "") + "\n" + a.get("instance_template", "")
 
 
-def _bench_prompt() -> str:
-    import os
-    import sys
-    roots = [os.environ.get("FBBENCH_REPO", "")]
-    here = Path(__file__).resolve()
-    roots += [str(p / "FuzzingBrain-Bench") for p in here.parents[:6]]
-    for root in roots:
-        if root and (Path(root) / "fbbench" / "prompts.py").is_file():
-            sys.path.insert(0, root)
-            from fbbench.prompts import CODEX_TASK_PROMPT  # type: ignore
-            return str(CODEX_TASK_PROMPT)
-    pytest.skip("FuzzingBrain-Bench not found; set FBBENCH_REPO to check prompt parity")
+def test_the_config_does_not_restate_the_benchs_prompt():
+    body = _templates()
+    for phrase in BENCH_BODY:
+        assert phrase not in body, (
+            f"{phrase!r} is the bench's wording; it arrives at runtime and must "
+            f"not be copied here")
 
 
-def test_the_shared_body_is_the_benchs_word_for_word():
-    ours = _norm(yaml.safe_load(CONFIG.read_text())["agent"]["system_template"])
-    theirs = _norm(_bench_prompt())
-    for anchor in SHARED:
-        # Take the bench's paragraph starting at this anchor, up to its blank
-        # line, and require it verbatim in ours.
-        start = theirs.index(_norm(anchor))
-        block = theirs[start:start + 400]
-        assert block[:120] in ours, f"diverged from the bench at: {anchor!r}"
+def test_it_keeps_only_the_forced_mechanics():
+    body = _templates()
+    # how this harness ends a run -- the bench's "say ASSESSMENT COMPLETE" does
+    # not drive a loop that watches command output
+    assert "COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT" in body
+    # facts about this environment that the bench's text does not state
+    assert "/workspace" in body and "read-only" in body
+    # and the rule that is ours
+    assert "No fuzzing" in body
 
 
-def test_the_divergences_are_the_ones_we_meant():
-    raw = CONFIG.read_text()
-    cfg = yaml.safe_load(raw)
-    # The divergences are listed in the file header, which is a real comment.
-    # They were briefly indented under the `|` blocks instead, which makes them
-    # prompt text: the model would have been told, in its own instructions, which
-    # parts of those instructions we had changed and why.
-    assert raw.count("#   1. The tools bullet") == 1
-    templates = {f"agent.{k}": v for k, v in cfg["agent"].items() if k.endswith("_template")}
-    templates |= {f"model.{k}": v for k, v in cfg["model"].items() if k.endswith("_template")}
-    for name, template in templates.items():
-        assert "FB-AGENT" not in template, name
-        # A leaked YAML comment is "# note"; a markdown heading the model is
-        # meant to read is "## Reading a verdict". One hash and a space is the
-        # tell, and it is the only thing that should never appear.
-        leaked = [l for l in template.splitlines() if re.match(r"^\s*# ", l)]
-        assert not leaked, (name, leaked)
-    ours = _norm(cfg["agent"]["system_template"])
-    # v1 asserted the other arms' tool names must NOT appear, because this arm
-    # did not have them. v2 gives every arm the same bench tools, so
-    # run_poc_on_harness is now correct here and ./submit is the thing that must
-    # not come back. What stays out is each arm's own ENDING: ours is the
-    # environment's finish command, not RESULT.md or "ASSESSMENT COMPLETE".
-    for absent in ("mcp__harness__", "RESULT.md", "ASSESSMENT COMPLETE",
-                   "./submit", "./reach"):
-        assert absent not in ours, absent
-    assert "run_poc_on_harness" in ours
+def test_it_stays_small():
+    """A template that grows back into a second brief is the same mistake."""
+    a = yaml.safe_load(CONFIG.read_text())["agent"]
+    total = len(a.get("system_template", "")) + len(a.get("instance_template", ""))
+    assert total < 2500, f"agent-side prompt text is {total} chars; it was 7157 when it was a rewrite"
 
 
-# ---- the harness's own prompt layer ----------------------------------------
-# Separate from the task text: what wraps a command's output and what comes back
-# when a reply will not parse. Sent every turn, whatever the task is.
-
-def test_the_harness_templates_are_where_the_model_reads_them():
-    # They belong to the model, which renders them. Put under `agent:` they are
-    # silently dropped -- AgentConfig has no such field and pydantic ignores
-    # extras -- and every command's output goes back untruncated, which on a
-    # verbose build is how a run loses its context window.
-    from minisweagent.agents.default import AgentConfig
-    cfg = yaml.safe_load(CONFIG.read_text())
-    assert "observation_template" in cfg["model"]
-    assert "format_error_template" in cfg["model"]
-    for key in cfg["agent"]:
-        assert key in AgentConfig.model_fields, f"agent.{key} is not a field; it will be ignored"
-
-
-def test_long_output_is_truncated_before_it_reaches_the_model():
-    from jinja2 import StrictUndefined, Template
-    cfg = yaml.safe_load(CONFIG.read_text())
-    rendered = Template(cfg["model"]["observation_template"], undefined=StrictUndefined).render(
-        output={"output": "A" * 40_000, "returncode": 0, "exception_info": ""})
-    assert len(rendered) < 15_000, len(rendered)
-    assert "elided_chars" in rendered
+def test_the_task_placeholder_is_where_the_benchs_text_lands():
+    a = yaml.safe_load(CONFIG.read_text())["agent"]
+    assert "{{task}}" in a["instance_template"]
