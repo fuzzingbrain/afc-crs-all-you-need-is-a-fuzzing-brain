@@ -1,19 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 """Per-role tool sets: a whitelist of the built-in navigation tools plus the
-Lead-board tools a stage needs, and a runner bound to one LeadBoard.
+VulnHypothesis-board tools a stage needs, and a runner bound to one HypothesisPool.
 
 Agent takes `tools` (the schema list it exposes) and `tool_runner` (who runs a
 call); this module builds both for a given role, so one loop serves discovery,
 verification and reproduction without the loop changing. The built-in tools
 (read / glob / grep / bash / trace / gates) come from tools.py unchanged; the
-Lead tools (create_lead / update_lead) write to the board here, never touching
+VulnHypothesis tools (create_hypothesis / update_hypothesis) write to the board here, never touching
 tools.py.
 
 Tool sets (basic, ASan):
-  discovery   : read glob grep bash + create_lead
-  verify      : read glob grep bash trace + update_lead
+  discovery   : read glob grep bash + create_hypothesis
+  verify      : read glob grep bash trace + update_hypothesis
   reproduce   : read glob grep bash trace gates          (no board tool; the
-                controller banks a submit-backed crash on the Lead itself)
+                controller banks a submit-backed crash on the VulnHypothesis itself)
 """
 # Provenance: original. Per-agent isolated tool set follows Claude Code
 # subagents / fbv2's per-agent MCP factory. See PROVENANCE.md.
@@ -22,19 +22,19 @@ from __future__ import annotations
 from typing import Callable
 
 from . import tools as _tools
-from .lead import _DISCOVERY_FIELDS, _VERIFY_FIELDS, LeadBoard
+from .hypothesis import _DISCOVERY_FIELDS, _VERIFY_FIELDS, HypothesisPool
 
 ROLE_TOOLS = {
-    "discovery": ["read", "glob", "grep", "bash", "create_lead"],
-    "verify": ["read", "glob", "grep", "bash", "trace", "update_lead"],
+    "discovery": ["read", "glob", "grep", "bash", "create_hypothesis"],
+    "verify": ["read", "glob", "grep", "bash", "trace", "update_hypothesis"],
     "reproduce": ["read", "glob", "grep", "bash", "trace", "gates"],
 }
 
 # JSON schemas for the two board tools, in the same shape tools.py uses.
-_CREATE_LEAD_SCHEMA = {
-    "name": "create_lead",
+_CREATE_HYPOTHESIS_SCHEMA = {
+    "name": "create_hypothesis",
     "description": (
-        "Record a suspicious point as a Lead: one crash-related operation you "
+        "Record a suspicious point as a VulnHypothesis: one crash-related operation you "
         "believe could make the sanitizer-instrumented harness crash. Create "
         "one per distinct operation. The score reflects only what the code shows, "
         "not the bug's type or importance."),
@@ -49,10 +49,10 @@ _CREATE_LEAD_SCHEMA = {
         "required": ["function", "description"],
     },
 }
-_UPDATE_LEAD_SCHEMA = {
-    "name": "update_lead",
+_UPDATE_HYPOTHESIS_SCHEMA = {
+    "name": "update_hypothesis",
     "description": (
-        "Record your verification verdict on this Lead in one call: the "
+        "Record your verification verdict on this VulnHypothesis in one call: the "
         "confidence score, the concrete evidence (facts FOR and AGAINST, each "
         "with file:line or a trace result), and pov_guidance (a seed and how far "
         "it got). Score reflects only whether the bug is real and reachable by "
@@ -69,14 +69,14 @@ _UPDATE_LEAD_SCHEMA = {
         "required": ["score", "evidence"],
     },
 }
-_BOARD_SCHEMAS = {"create_lead": _CREATE_LEAD_SCHEMA, "update_lead": _UPDATE_LEAD_SCHEMA}
+_BOARD_SCHEMAS = {"create_hypothesis": _CREATE_HYPOTHESIS_SCHEMA, "update_hypothesis": _UPDATE_HYPOTHESIS_SCHEMA}
 
 
-def build(role: str, board: LeadBoard, *, lead_id: str | None = None,
+def build(role: str, board: HypothesisPool, *, vh_id: str | None = None,
           origin: str = "", harness: str = "", sanitizer: str = "address",
           with_trace: bool = True):
-    """Return (schemas, runner) for `role`. `lead_id` is the Lead a verify /
-    reproduce instance is working (create_lead ignores it). The runner sends
+    """Return (schemas, runner) for `role`. `vh_id` is the VulnHypothesis a verify /
+    reproduce instance is working (create_hypothesis ignores it). The runner sends
     board tools to `board` and everything else to tools.run_tool.
 
     `with_trace=False` drops the gdb `trace` tool — it is C/C++ only, so a
@@ -91,23 +91,23 @@ def build(role: str, board: LeadBoard, *, lead_id: str | None = None,
             schemas.append(builtin[n])
 
     def runner(name: str, args: dict) -> tuple[str, bool]:
-        if name == "create_lead":
+        if name == "create_hypothesis":
             fields = {k: v for k, v in args.items() if k in _DISCOVERY_FIELDS}
             fields.update(origin=origin, harness=harness, sanitizer=sanitizer)
-            lead = board.create(**fields)
-            return (f"created {lead.id} on {lead.function} "
-                    f"[{lead.crash_class or 'unspecified'}]", False)
-        if name == "update_lead":
-            if not lead_id:
-                return ("error: update_lead called with no Lead in scope", True)
+            vh = board.create(**fields)
+            return (f"created {vh.id} on {vh.function} "
+                    f"[{vh.crash_class or 'unspecified'}]", False)
+        if name == "update_hypothesis":
+            if not vh_id:
+                return ("error: update_hypothesis called with no VulnHypothesis in scope", True)
             fields = {k: v for k, v in args.items() if k in _VERIFY_FIELDS}
-            lead = board.update(lead_id, allowed=_VERIFY_FIELDS, **fields)
-            return (f"updated {lead.id}: score={lead.score}", False)
+            vh = board.update(vh_id, allowed=_VERIFY_FIELDS, **fields)
+            return (f"updated {vh.id}: score={vh.score}", False)
         return _tools.run_tool(name, args)
 
     return schemas, runner
 
 
-def make_runner(role: str, board: LeadBoard, **kw) -> Callable[[str, dict], tuple[str, bool]]:
+def make_runner(role: str, board: HypothesisPool, **kw) -> Callable[[str, dict], tuple[str, bool]]:
     """Just the runner (schemas discarded), for tests."""
     return build(role, board, **kw)[1]

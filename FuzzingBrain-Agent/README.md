@@ -134,7 +134,7 @@ The bench's external arm is what normally produces that directory and that
   ledger, and a snapshot file of the context the model sees next), and an end
   line. `run.py` writes `~/.fbagent/projects/<slug>/<uuid>.jsonl` and tees to
   `.fbagent-trace.jsonl`; the three-stage roles write
-  `.fb/sessions/<role>-<lead>-<n>.jsonl` (discovery included, as
+  `.fb/sessions/<role>-<vh>-<n>.jsonl` (discovery included, as
   `discovery-board-<round>`). Compaction rewrites the live context only, never
   the record. `tools/session.py <file>` summarises one; `--step N` shows a step
   in full; `--at N` reconstructs what the model saw going into step N.

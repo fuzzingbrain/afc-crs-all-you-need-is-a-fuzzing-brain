@@ -9,8 +9,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from fbagent import lead_tools, roles  # noqa: E402
-from fbagent.lead import LeadBoard, crash_class  # noqa: E402
+from fbagent import hypothesis_tools, roles  # noqa: E402
+from fbagent.hypothesis import HypothesisPool, crash_class  # noqa: E402
 from fbagent.sanitizer_guidance import guidance_for  # noqa: E402
 from fbagent.signature import signature_from_submit  # noqa: E402
 
@@ -26,10 +26,10 @@ def test_is_java():
 
 
 def test_java_target_drops_trace_tool():
-    b = LeadBoard(Path("/tmp/nonexistent-board-x.jsonl"))
-    c_tools = {s["name"] for s in lead_tools.build("reproduce", b, lead_id="L1",
+    b = HypothesisPool(Path("/tmp/nonexistent-board-x.jsonl"))
+    c_tools = {s["name"] for s in hypothesis_tools.build("reproduce", b, vh_id="L1",
                                                    with_trace=True)[0]}
-    j_tools = {s["name"] for s in lead_tools.build("reproduce", b, lead_id="L1",
+    j_tools = {s["name"] for s in hypothesis_tools.build("reproduce", b, vh_id="L1",
                                                    with_trace=False)[0]}
     assert "trace" in c_tools
     assert "trace" not in j_tools
@@ -50,7 +50,7 @@ def test_java_submit_signature_parses():
 
 
 def test_java_crash_classes_dedup(tmp_path):
-    b = LeadBoard(tmp_path / "leads.jsonl")
+    b = HypothesisPool(tmp_path / "hypotheses.jsonl")
     a = b.create(function="decode", description="ClassCastException on a bad tag",
                  origin="discovery/llm", sanitizer="jazzer")
     dup = b.create(function="decode", description="another classcastexception path",

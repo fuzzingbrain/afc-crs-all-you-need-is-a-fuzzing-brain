@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """The controller: code, not a model. One while loop that ties the three stages
-together over a LeadBoard, allocates the budget, and applies the status gate.
+together over a HypothesisPool, allocates the budget, and applies the status gate.
 
-    discovery (once, a budget slice) -> Leads
-    verify every pending Lead        -> score; >=0.5 proceeds, else rejected
-    reproduce the best pending Lead  -> a submit-backed crash, or deepest reached
-    repeat until the budget or the deadline runs out, or no Lead is left
+    discovery (once, a budget slice) -> hypotheses
+    verify every pending VulnHypothesis        -> score; >=0.5 proceeds, else rejected
+    reproduce the best pending VulnHypothesis  -> a submit-backed crash, or deepest reached
+    repeat until the budget or the deadline runs out, or no VulnHypothesis is left
 
-Every decision here is mechanical — which Lead next is a sort, how much budget
+Every decision here is mechanical — which VulnHypothesis next is a sort, how much budget
 is a fraction, when to stop is a threshold — so no model sits in this loop and
 no scorer signal is anywhere near it. The one shared LLM makes every stage spend
 against one global cap: an Agent stops when the shared llm.cost_usd hits max_usd,
@@ -21,17 +21,17 @@ import time
 from pathlib import Path
 
 from . import roles
-from .lead import (FAILED, GENERATING_POV, PENDING_POV, PENDING_VERIFY,
-                   POV_GENERATED, REJECTED, Lead, LeadBoard)
+from .hypothesis import (FAILED, GENERATING_POV, PENDING_POV, PENDING_VERIFY,
+                   POV_GENERATED, REJECTED, VulnHypothesis, HypothesisPool)
 
-VERIFY_GATE = 0.5          # a Lead proceeds to reproduction at/above this score
-MAX_ATTEMPTS = 3           # reproduction tries per Lead before it is failed
-DISCOVERY_BUDGET_FRAC = 0.20   # of the spend cap, reserved for finding Leads
+VERIFY_GATE = 0.5          # a VulnHypothesis proceeds to reproduction at/above this score
+MAX_ATTEMPTS = 3           # reproduction tries per VulnHypothesis before it is failed
+DISCOVERY_BUDGET_FRAC = 0.20   # of the spend cap, reserved for finding hypotheses
 MAX_DISCOVERY_ROUNDS = 4   # initial + re-runs when the pool drains; bounds the loop
 
 
-def _fpf_pick(board: LeadBoard, ctx) -> Lead | None:
-    """Furthest-Point-First: of the pending Leads, the one whose function is
+def _fpf_pick(board: HypothesisPool, ctx) -> VulnHypothesis | None:
+    """Furthest-Point-First: of the pending hypotheses, the one whose function is
     farthest in the call graph from the functions already solved — so the next
     reproduction aims at a DISTINCT fault, not the basin of the one just found
     (the 'stalls on the easy bug' failure the metric punishes). Ties, and any
@@ -82,12 +82,12 @@ def _read_bench(workspace: Path) -> tuple[str, str]:
 
 
 def run_task(*, llm, workspace: str = ".", max_usd: float = 0.0,
-             deadline_s: float | None = None, board: LeadBoard | None = None,
+             deadline_s: float | None = None, board: HypothesisPool | None = None,
              discovery_frac: float = DISCOVERY_BUDGET_FRAC) -> dict:
     """Run one challenge end to end. `llm` is shared across all stages so its
     cost is the global spend. Returns a summary with the distinct crashes found."""
     ws = Path(workspace)
-    board = board or LeadBoard(ws / ".fb" / "leads.jsonl")
+    board = board or HypothesisPool(ws / ".fb" / "hypotheses.jsonl")
     harness, sanitizer = _read_bench(ws)
     deadline = (time.time() + deadline_s) if deadline_s else None
 
@@ -112,7 +112,7 @@ def run_task(*, llm, workspace: str = ".", max_usd: float = 0.0,
         ctx = None
 
     # Discovery is capped at a slice of the whole-task spend, even across the
-    # re-runs the loop does when the pool drains (diversity: go find more Leads
+    # re-runs the loop does when the pool drains (diversity: go find more hypotheses
     # rather than re-poke the ones that failed).
     disc_cap = max_usd * discovery_frac if max_usd else 0.0
     disc_spent = 0.0
@@ -120,7 +120,7 @@ def run_task(*, llm, workspace: str = ".", max_usd: float = 0.0,
     disc_rounds = [0]
 
     def discover() -> int:
-        """Run one discovery round; return the number of NEW Leads it added
+        """Run one discovery round; return the number of NEW hypotheses it added
         (measured from the board, not trusted from the stage's own count).
         Bounded by the discovery budget slice AND a round cap, so the drain-and-
         rediscover loop always terminates even with no spend cap."""
@@ -148,41 +148,41 @@ def run_task(*, llm, workspace: str = ".", max_usd: float = 0.0,
 
     # --- verify + reproduce loop --------------------------------------------
     while not out_of_budget():
-        for lead in board.by_status(PENDING_VERIFY):
+        for vh in board.by_status(PENDING_VERIFY):
             if out_of_budget():
                 break
-            v = roles.run_verification(lead, llm=llm, board=board, workspace=str(ws),
+            v = roles.run_verification(vh, llm=llm, board=board, workspace=str(ws),
                                        deadline_s=remaining_s(), max_usd=max_usd,
                                        harness_names=hnames)
             log.append({"stage": "verify", **v})
-            fresh = board.get(lead.id)
+            fresh = board.get(vh.id)
             if fresh.status in (POV_GENERATED,):     # verify stumbled a crash
                 continue
-            board.set_status(lead.id, PENDING_POV if fresh.score >= VERIFY_GATE else REJECTED)
+            board.set_status(vh.id, PENDING_POV if fresh.score >= VERIFY_GATE else REJECTED)
 
-        lead = _fpf_pick(board, ctx)
-        if lead is None:
+        vh = _fpf_pick(board, ctx)
+        if vh is None:
             # the pending pool drained: run discovery again for a DISTINCT fault
             # (bounded by the discovery budget slice), and stop only when it can
-            # no longer produce a new Lead.
+            # no longer produce a new VulnHypothesis.
             if board.by_status(PENDING_VERIFY):
-                continue                             # new Leads to verify first
+                continue                             # new hypotheses to verify first
             if out_of_budget() or discover() == 0:
                 break
             continue
-        board.set_status(lead.id, GENERATING_POV)
-        r = roles.run_reproduction(lead, llm=llm, board=board, workspace=str(ws),
+        board.set_status(vh.id, GENERATING_POV)
+        r = roles.run_reproduction(vh, llm=llm, board=board, workspace=str(ws),
                                    deadline_s=remaining_s(), max_usd=max_usd,
                                    harness_names=hnames)
         log.append({"stage": "reproduce", **r})
-        fresh = board.get(lead.id)
+        fresh = board.get(vh.id)
         if fresh.status != POV_GENERATED:
-            board.set_status(lead.id, FAILED if fresh.attempts >= MAX_ATTEMPTS else PENDING_POV)
+            board.set_status(vh.id, FAILED if fresh.attempts >= MAX_ATTEMPTS else PENDING_POV)
 
     sigs = board.solved_signatures()
     return {
         "harness": harness, "sanitizer": sanitizer,
-        "leads": len(board.all()),
+        "hypotheses": len(board.all()),
         "solved": len(sigs), "signatures": sorted(sigs),
         "cost_usd": round(getattr(llm, "cost_usd", 0.0), 4),
         "stop": "budget" if out_of_budget() else "no_leads_left",

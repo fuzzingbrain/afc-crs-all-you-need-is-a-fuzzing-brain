@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """The reproduction role: builds the Agent with the reproduce toolset, runs it,
-and banks a submit-backed crash on the Lead or records the deepest point. The
+and banks a submit-backed crash on the VulnHypothesis or records the deepest point. The
 LLM is faked (scripted turns), so no network — this pins the wiring and the
 outcome scanner, not model behavior."""
 from __future__ import annotations
@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fbagent import roles  # noqa: E402
-from fbagent.lead import POV_GENERATED, LeadBoard  # noqa: E402
+from fbagent.hypothesis import POV_GENERATED, HypothesisPool  # noqa: E402
 
 
 # ---- a fake LLM that plays scripted assistant turns ------------------------
@@ -60,7 +60,7 @@ CLEAN_VERDICT = ("clean: the harness ran to completion with no sanitizer fault. 
 
 
 def _board(tmp_path):
-    return LeadBoard(tmp_path / ".fb" / "leads.jsonl")
+    return HypothesisPool(tmp_path / ".fb" / "hypotheses.jsonl")
 
 
 def test_reproduction_banks_submit_crash(tmp_path, monkeypatch):
@@ -71,18 +71,18 @@ def test_reproduction_banks_submit_crash(tmp_path, monkeypatch):
                         else ("wrote candidate", False))
     monkeypatch.setattr(roles, "harness_source", lambda ws, **k: "(harness)")
     b = _board(tmp_path)
-    lead = b.create(function="cupsUTF8ToCharset", description="heap-buffer-overflow",
+    vh = b.create(function="cupsUTF8ToCharset", description="heap-buffer-overflow",
                     harness="harness/harness.cc")
-    b.set_status(lead.id, "generating_pov")
+    b.set_status(vh.id, "generating_pov")
     llm = _FakeLLM([
         _tool_use("c1", "bash", {"command": "python3 -c \"open('/tmp/x','wb').write(b'\\xc3')\""}),
         _tool_use("c2", "bash", {"command": "./submit /tmp/x"}),
         _done("ASSESSMENT COMPLETE — crashed at cupsUTF8ToCharset"),
     ])
-    out = roles.run_reproduction(lead, llm=llm, board=b, workspace=str(tmp_path))
+    out = roles.run_reproduction(vh, llm=llm, board=b, workspace=str(tmp_path))
     assert out["crashed"] is True
     assert "cupsUTF8ToCharset" in out["signature"]
-    got = b.get(lead.id)
+    got = b.get(vh.id)
     assert got.status == POV_GENERATED and got.signature == out["signature"]
     assert got.best_candidate == "/tmp/x"
 
@@ -99,8 +99,8 @@ def test_reproduction_records_deepest_on_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(T, "run_tool", fake)
     monkeypatch.setattr(roles, "harness_source", lambda ws, **k: "(harness)")
     b = _board(tmp_path)
-    lead = b.create(function="png_read_end", description="heap-buffer-overflow")
-    b.set_status(lead.id, "generating_pov")
+    vh = b.create(function="png_read_end", description="heap-buffer-overflow")
+    b.set_status(vh.id, "generating_pov")
     llm = _FakeLLM([
         _tool_use("c1", "bash", {"command": "./submit /tmp/y"}),
         _tool_use("c2", "trace", {"input": "/tmp/y"}),
@@ -112,10 +112,10 @@ def test_reproduction_records_deepest_on_failure(tmp_path, monkeypatch):
             return (trace_out, False)
         return fake(n, a)
     monkeypatch.setattr(T, "run_tool", fake2)
-    out = roles.run_reproduction(lead, llm=llm, board=b, workspace=str(tmp_path))
+    out = roles.run_reproduction(vh, llm=llm, board=b, workspace=str(tmp_path))
     assert out["crashed"] is False
     assert "png_get_uint_31" in out["deepest_reached"]
-    got = b.get(lead.id)
+    got = b.get(vh.id)
     assert got.attempts == 1 and "png_get_uint_31" in got.deepest_reached
 
 

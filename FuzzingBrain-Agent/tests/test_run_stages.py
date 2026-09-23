@@ -29,7 +29,7 @@ def test_main_runs_controller_and_writes_usage(tmp_path, monkeypatch):
 
     def fake_run_task(*, llm, workspace, max_usd, deadline_s, discovery_frac):
         captured.update(max_usd=max_usd, deadline_s=deadline_s, ws=workspace)
-        return {"harness": "harness/h.cc", "sanitizer": "address", "leads": 2,
+        return {"harness": "harness/h.cc", "sanitizer": "address", "hypotheses": 2,
                 "solved": 1, "signatures": ["heap-buffer-overflow|foo@x.c:1"],
                 "cost_usd": 1.23, "stop": "no_leads_left",
                 "log": [{"stage": "discovery", "n": 2}, {"stage": "reproduce", "crashed": True}]}

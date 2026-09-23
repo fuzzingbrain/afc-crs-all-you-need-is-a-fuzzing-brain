@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
-"""Inject a Lead into a run's board -- live or before it starts.
+"""Inject a VulnHypothesis into a run's board -- live or before it starts.
 
-    python3 tools/add_lead.py <workspace> --function read_map_value \
+    python3 tools/add_hypothesis.py <workspace> --function read_map_value \
         --description "allocation-size-too-big: block_count from the input sizes the map alloc" \
         [--file src/datum_read.c:123] [--controlflow "read_value -> read_map_value -> avro_default_allocator"]
 
-Appends one pending_verify Lead to <workspace>/.fb/leads.jsonl with an
+Appends one pending_verify VulnHypothesis to <workspace>/.fb/hypotheses.jsonl with an
 operator id (X01, X02, ...) and origin `injected/operator`. A running
-controller picks it up on its next board query (LeadBoard._refresh), so the
-verify -> reproduce stages take it like any discovery Lead; a board opened
-later loads it with the rest. Meant for probes -- a run with an injected Lead
+controller picks it up on its next board query (HypothesisPool._refresh), so the
+verify -> reproduce stages take it like any discovery VulnHypothesis; a board opened
+later loads it with the rest. Meant for probes -- a run with an injected VulnHypothesis
 is not a scored result.
 """
 from __future__ import annotations
@@ -35,7 +35,7 @@ def main() -> int:
     ap.add_argument("--sanitizer", default="address")
     a = ap.parse_args()
 
-    board = Path(a.workspace) / ".fb" / "leads.jsonl"
+    board = Path(a.workspace) / ".fb" / "hypotheses.jsonl"
     board.parent.mkdir(parents=True, exist_ok=True)
     n = 0
     if board.is_file():

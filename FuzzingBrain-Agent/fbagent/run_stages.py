@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Entry point for the three-stage pipeline: discovery -> verification ->
-reproduction, over a LeadBoard, driven by the code controller.
+reproduction, over a HypothesisPool, driven by the code controller.
 
     python3 -m fbagent.run_stages --timeout 900 --model claude-opus-5 --max-usd 20
 
@@ -8,7 +8,7 @@ Started by the bench (or a person) in the staged challenge directory, where
 `./submit`, the trace bridge, and bench.yaml already exist. Unlike run.py (the
 single-loop agent), this runs the multi-stage controller. It writes the same
 records run.py does so the bench can read them: .fbbench/usage.json for cost,
-and .fb/ holds the Lead board, candidates, and per-stage sessions.
+and .fb/ holds the VulnHypothesis board, candidates, and per-stage sessions.
 """
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ def main() -> int:
               f"{llm.served_model}", file=sys.stderr)
     print("\n" + "=" * 60)
     # the per-stage log can be long; print the headline + one line per stage
-    head = {k: summary[k] for k in ("harness", "sanitizer", "leads", "solved",
+    head = {k: summary[k] for k in ("harness", "sanitizer", "hypotheses", "solved",
                                     "signatures", "cost_usd", "stop")}
     print(json.dumps(head, indent=2))
     for e in summary.get("log", []):

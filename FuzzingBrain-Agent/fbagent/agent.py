@@ -148,7 +148,7 @@ class Agent:
         self.llm = llm or LLM()
         # Which tools this instance exposes and who runs them. A role (discovery
         # / verify / reproduce) passes its own whitelist + a runner bound to the
-        # LeadBoard; the default is the full built-in tool set. This is what lets
+        # HypothesisPool; the default is the full built-in tool set. This is what lets
         # one loop serve every stage without the loop itself changing.
         self.tools = list(tools if tools is not None else SCHEMAS)
         self._run_tool = tool_runner if tool_runner is not None else run_tool

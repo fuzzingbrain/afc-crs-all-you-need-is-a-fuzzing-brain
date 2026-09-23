@@ -11,7 +11,7 @@
     python3 tools/session.py <session.jsonl> --ledger     the pinned facts, as last rendered
 
 Works on ~/.fbagent/projects/<slug>/<uuid>.jsonl (run.py) and on
-.fb/sessions/<role>-<lead>-<n>.jsonl (the three-stage roles) alike: the record
+.fb/sessions/<role>-<vh>-<n>.jsonl (the three-stage roles) alike: the record
 format is the same. The record is the permanent, un-compacted history; the
 `--at` view is the compacted context, reconstructed from the snapshot the loop
 wrote at each compaction (`context_snapshot` on the compaction event).
@@ -45,7 +45,7 @@ def _one_line(s: str, n: int = 100) -> str:
 def summary(recs: list[dict]) -> None:
     meta = recs[0] if recs and recs[0].get("kind") == "meta" else {}
     end = recs[-1] if recs and recs[-1].get("kind") in ("end", "stop") else {}
-    print("session:", meta.get("session") or f"{meta.get('role')}-{meta.get('lead')}-{meta.get('attempt')}")
+    print("session:", meta.get("session") or f"{meta.get('role')}-{meta.get('vh')}-{meta.get('attempt')}")
     print("model:", meta.get("model"), "| stop:", end.get("stop_reason") or end.get("reason"),
           "| cost:", end.get("cost_usd"), "| compactions:", end.get("compactions"))
     kinds = Counter(r.get("kind") for r in recs)
