@@ -83,7 +83,9 @@ def _read_bench(workspace: Path) -> tuple[str, str]:
 
 def run_task(*, llm, workspace: str = ".", max_usd: float = 0.0,
              deadline_s: float | None = None, board: HypothesisPool | None = None,
-             discovery_frac: float = DISCOVERY_BUDGET_FRAC) -> dict:
+             discovery_frac: float = DISCOVERY_BUDGET_FRAC,
+             verify_gate: float = VERIFY_GATE, max_attempts: int = MAX_ATTEMPTS,
+             max_discovery_rounds: int = MAX_DISCOVERY_ROUNDS) -> dict:
     """Run one challenge end to end. `llm` is shared across all stages so its
     cost is the global spend. Returns a summary with the distinct crashes found."""
     ws = Path(workspace)
@@ -125,7 +127,7 @@ def run_task(*, llm, workspace: str = ".", max_usd: float = 0.0,
         Bounded by the discovery budget slice AND a round cap, so the drain-and-
         rediscover loop always terminates even with no spend cap."""
         nonlocal disc_spent
-        if disc_rounds[0] >= MAX_DISCOVERY_ROUNDS:
+        if disc_rounds[0] >= max_discovery_rounds:
             return 0
         if disc_cap and disc_spent >= disc_cap:
             return 0
@@ -158,7 +160,7 @@ def run_task(*, llm, workspace: str = ".", max_usd: float = 0.0,
             fresh = board.get(vh.id)
             if fresh.status in (POV_GENERATED,):     # verify stumbled a crash
                 continue
-            board.set_status(vh.id, PENDING_POV if fresh.score >= VERIFY_GATE else REJECTED)
+            board.set_status(vh.id, PENDING_POV if fresh.score >= verify_gate else REJECTED)
 
         vh = _fpf_pick(board, ctx)
         if vh is None:
@@ -177,7 +179,7 @@ def run_task(*, llm, workspace: str = ".", max_usd: float = 0.0,
         log.append({"stage": "reproduce", **r})
         fresh = board.get(vh.id)
         if fresh.status != POV_GENERATED:
-            board.set_status(vh.id, FAILED if fresh.attempts >= MAX_ATTEMPTS else PENDING_POV)
+            board.set_status(vh.id, FAILED if fresh.attempts >= max_attempts else PENDING_POV)
 
     sigs = board.solved_signatures()
     return {

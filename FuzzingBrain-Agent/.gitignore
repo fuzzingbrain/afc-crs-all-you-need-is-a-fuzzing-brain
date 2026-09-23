@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 fb-bench-report/
 research/
+research/reference_harnesses/
