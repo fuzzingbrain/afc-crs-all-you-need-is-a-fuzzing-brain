@@ -10,10 +10,10 @@ four distinct faults on a challenge the bare model solved.
                         13 of 30 minutes. 241 points were left unclaimed and
                         nothing interrupted a single one of them.
   2 SHOW ME REACH       The 7 zeros submitted MORE than the wins (18 vs 11) and
-                        scored nothing. skia-01: a 24-byte answer, 37 candidates
+                        scored nothing. One: a 24-byte answer, 37 candidates
                         in the right size band, no way to know if any of them
                         even selected the right filter.
-  3 SUBMIT, DON'T MODEL jq-01: 77 exec calls, ONE submission, 30 minutes, built
+  3 SUBMIT, DON'T MODEL One run: 77 exec calls, ONE submission, 30 minutes, built
                         its own harness and trusted it over the real oracle.
   4 A CRASH CHANGES THE JOB
                         22 challenges found exactly one fault (median 5
@@ -21,11 +21,11 @@ four distinct faults on a challenge the bare model solved.
                         finding nothing. Distinct signatures score; variants do
                         not. Worth 120 points.
   5 BUDGET IN FRONT OF ME
-                        One budget note at turn 30, nothing until 60. skia-01
+                        One budget note at turn 30, nothing until 60. A run
                         quit at turn 53 writing "I've run out of investigation
                         budget" with 47 turns and 20 minutes in hand.
 
-And the prohibition: NO FUZZING. Not because it worked -- it did not, jq-01 is
+And the prohibition: NO FUZZING. Not because it worked -- it did not, one run is
 the proof -- but because under guidance it is the failure that scales. Two
 shapes are blocked, for different reasons: building or running a fuzzer (a
 parallel oracle that can disagree with the graded one), and looping ./submit
@@ -200,8 +200,8 @@ class Coach:
     #
     # Not a flat quota. Most of the corpus does not HAVE three faults: of the 22
     # challenges the bare model scored exactly one on, not a single one has ever
-    # yielded a second across every run on record -- opc-ua-01 over eight
-    # attempts, graal-01 and libwebp-01 over four. Flogging a one-fault
+    # yielded a second across every run on record -- one over eight
+    # attempts, two others over four. Flogging a one-fault
     # challenge toward a quota of three buys nothing and costs real money; this
     # run spent $8.64 against the bare model's $4.61.
     #
@@ -303,8 +303,8 @@ class Coach:
                     "there.")
             else:
                 # Escalation, because the gentle version was not working: on
-                # systemd-01 all 25 graded candidates were rejected here, and
-                # on flatbuffers-03 17 of 18. Every one of those turns bought
+                # one run all 25 graded candidates were rejected here, and
+                # on another 17 of 18. Every one of those turns bought
                 # nothing, and no amount of bug reasoning can pay for them.
                 notes.append(
                     f"[gate x{self.gated}] STOP hunting the bug. {self.gated} of "

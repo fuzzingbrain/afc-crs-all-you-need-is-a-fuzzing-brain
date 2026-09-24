@@ -1,0 +1,23 @@
+# fb-agent driving Qwen3.8-27B served from TAMU HPRC.
+#
+#   fb-bench run <bugs> --agent fb-agent-hprc --model qwen3.8:27b
+#
+# Identical to fb-agent.agent.yaml except for the two -c flags: fbbench.yaml is
+# the agent's normal config, hprc_qwen.yaml points litellm at the vLLM server
+# through the ssh tunnel on localhost:8000. Start the server and the tunnel
+# first; without them every model call is refused and the cell ends early.
+name: fb-agent-hprc
+
+command: >
+  python3 -m fb_agent
+  --workspace {workspace}
+  --mcp-socket {mcp_socket}
+  --task "{opening}"
+  --model {model}
+  --max-turns {max_turns}
+  --timeout {timeout}
+  -c fbbench -c hprc_qwen
+
+# Recorded in score.json. The agent does reach one address -- the tunnelled
+# model server on localhost -- and nothing else.
+network: blocked

@@ -224,7 +224,7 @@ class _ReportingAgent(DefaultAgent):
 
         "Re-read your notes" is advice; the notes themselves are a handle. The
         bare model's failures were not from having nothing left to try -- on
-        opc-ua-01 it had read the whole decoder, crashed one function, and spent
+        one run it had read the whole decoder, crashed one function, and spent
         52 turns near it."""
         f = Path(self.env.config.cwd or ".") / "sinks.md"
         try:
@@ -273,7 +273,7 @@ class _ReportingAgent(DefaultAgent):
     #
     # Firing once instead of three times does flip it (-3.1%), but -3% is inside
     # run-to-run noise and not worth a live-run risk. Cost work should go after
-    # output tokens instead: on fwupd-01, 92k output tokens re-read ~41 times are
+    # output tokens instead: in one run, 92k output tokens re-read ~41 times are
     # 57% of the cache-read bill, so a thinking token really costs ~$45/MTok, not
     # $25. See fb-agent-compaction-and-reach.pdf, and arXiv 2606.11213 S5, which
     # reports the same net-negative-for-caching result independently.
