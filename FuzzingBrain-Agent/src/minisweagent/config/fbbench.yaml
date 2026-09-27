@@ -71,6 +71,8 @@ agent:
       the grader in a loop. Grade ONE candidate per turn, chosen deliberately.
       Writing several candidates in one command is fine; it is only the grading
       that is one at a time.
+    - Never run the harness binary without an input file, or with `--help`:
+      libFuzzer then starts fuzzing, and the command hangs until it times out.
   turn_limit: 0
   cost_limit: 0
   wall_time_limit_seconds: 0

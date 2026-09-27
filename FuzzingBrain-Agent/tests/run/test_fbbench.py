@@ -133,6 +133,34 @@ def test_the_agent_grades_a_candidate_and_the_whole_report_comes_back(tmp_path):
     assert "crash_novelty: new" in convo
 
 
+def test_only_a_graded_crash_is_banked_in_a_live_run(tmp_path):
+    """Through the real loop, because the unit tests could not see this: a
+    grader call's `command` is only its path, so the coach never recognised a
+    submission, and it banked whatever crash it saw in any tool's output. The
+    live avro-03 run found three faults with exec, was told `[banked 3/3]`,
+    submitted nothing and scored zero."""
+    asan = ("==1==ERROR: AddressSanitizer: heap-use-after-free\n"
+            "    #0 0x1 in parse /src/p.c:42\n"
+            "SUMMARY: AddressSanitizer: heap-use-after-free /src/p.c:42 in parse")
+    verdict = {"harness_output": {"exit_code": 1, "signal": "SIGABRT", "stdout": "",
+                                  "stderr": asan},
+               "crash_novelty": "new", "duration_ms": 7}
+    ws = _stage(tmp_path, verdict)
+    (ws / "asan.txt").write_text(asan + "\n")
+    r = _run(ws, [
+        _say("Running the target myself.", "cat /workspace/asan.txt"),
+        _grade("Submitting it.", "/workspace/c1"),
+        _say("Done.", _DONE),
+    ])
+    assert r.returncode == 0, r.stderr[-2000:]
+    traj = json.loads((ws / ".fbbench" / "traj.json").read_text())
+    shown = [str(m.get("content", "")) for m in traj["messages"]]
+    after_exec = next(s for s in shown if "[not submitted]" in s)
+    assert "banked 1/3" not in after_exec
+    assert "0/3 distinct faults banked" in after_exec
+    assert any("banked 1/3" in s for s in shown), "the graded crash must bank"
+
+
 def test_turns_and_tokens_land_where_the_bench_looks_for_them(tmp_path):
     ws = _stage(tmp_path)
     r = _run(ws, [_say("One.", "echo one"), _say("Done.", _DONE)])

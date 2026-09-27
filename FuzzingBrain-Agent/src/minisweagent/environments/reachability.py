@@ -25,11 +25,18 @@ from __future__ import annotations
 
 import re
 
-TARGET = "/usr/local/share/target/asan/harness"
-TARGET_LIBS = "/usr/local/share/target/sharedlibs"
+# The graded binary as fb-bench-v2 images ship it. The v1 path,
+# /usr/local/share/target/asan/harness, no longer exists in them: every
+# coverage and caller query built from it failed with "No such file", and the
+# [reach] notes silently never appeared. The coach's hints use these too.
+TARGET = "/opt/fbbench/oracle/binaries/vuln/asan/harness"
+TARGET_LIBS = "/opt/fbbench/oracle/binaries/vuln/sharedlibs"
 ENTRY = "LLVMFuzzerTestOneInput"
 
-_COV = re.compile(r"^(UN)?COVERED_FUNC:.*?\s(\S+)\s+\S+:\d+", re.M)
+# The name is everything between the edge count and the file:line -- a C++
+# signature has spaces in its parameter list, and taking the last token before
+# the location turned ots::OTSContext::Message(int, char const*, ...) into "...)".
+_COV = re.compile(r"^(UN)?COVERED_FUNC:\s*hits:\s*\d+\s+edges:\s*\S+\s+(.+?)\s+\S+:\d+\s*$", re.M)
 _FN = re.compile(r"^[0-9a-f]+ <([^>]+)>:")
 
 
@@ -43,8 +50,14 @@ def coverage_cmd(path: str) -> str:
     no covered line, so the note silently produced nothing on precisely the
     cell it exists for. What is reached is a short list; what is not is noise.
     """
-    return (f"LD_LIBRARY_PATH={TARGET_LIBS} {TARGET} -runs=1 -print_coverage=1 "
-            f"{path} 2>&1 | grep -E '^COVERED_FUNC:|{ENTRY}' | head -400")
+    # As a one-file corpus in a fresh directory, not as a file argument. Run as
+    # a file, libFuzzer reports every function UNCOVERED -- the harness entry
+    # included, "hits: 0" -- for an input that plainly ran, so the note would
+    # say "never entered the harness" about inputs that did. Loaded as a corpus
+    # the counts are real. A reused directory reports nothing, hence mktemp.
+    return (f'd=$(mktemp -d) && cp {path} "$d"/ && '
+            f'LD_LIBRARY_PATH={TARGET_LIBS} {TARGET} -runs=0 -print_coverage=1 "$d" '
+            f"2>&1 | grep -E '^COVERED_FUNC:|{ENTRY}' | head -400; rm -rf \"$d\"")
 
 
 def parse_coverage(text: str) -> tuple[set[str], bool | None]:
@@ -57,6 +70,7 @@ def parse_coverage(text: str) -> tuple[set[str], bool | None]:
     covered: set[str] = set()
     entry: bool | None = None
     for un, name in _COV.findall(text or ""):
+        name = name.split("(")[0]
         if not un:
             covered.add(name)
         if name == ENTRY:

@@ -126,15 +126,39 @@ def crash_signature(output: str) -> str | None:
 # The innermost frame of an ASAN report -- the function that actually faulted.
 # A signature is fault-type plus the top frames, so this function reached
 # through a different caller is a DIFFERENT signature and scores again.
-_TOP_FRAME = re.compile(r"^\s*#0\s+0x\S+\s+in\s+([A-Za-z_][\w:]*)", re.M)
+_FRAME = re.compile(
+    r"^\s*#\d+\s+(?:0x\S+\s+in\s+)?((?:\(anonymous namespace\)::)?[A-Za-z_~][\w:~]*)", re.M)
+# Frames that are the sanitizer, libFuzzer or libc reporting the fault rather
+# than the code that caused it. A libFuzzer out-of-memory report starts with
+# eight of them, and the note once told the model to grep for every caller of
+# __sanitizer_print_stack_trace.
+_RUNTIME_FRAME = re.compile(
+    r"^(__|_start$|main$|fuzzer::|std::|abort$|raise$|malloc$|calloc$|realloc$|free$"
+    r"|operator |LLVMFuzzer)")
+# The grader's own verdict on whether a crash is new. It is the only judge of
+# what scores: the coach's signature keeps line numbers, the grader's is the
+# top application frames, and on a live ots-01 run the coach called three of
+# the four crashes that scored "duplicate" and one that did not "banked".
+_NOVELTY = re.compile(r"""crash_novelty["']?\s*:\s*["']?([a-z_]+)""")
+# Whether a leak is a finding depends on the challenge: three are graded with
+# LeakSanitizer and score leaks; on the rest an input whose only finding is a
+# leak comes back from the grader clean. setup() says which, in its output.
+_LEAK = re.compile(r"LeakSanitizer|leaked in \d+ allocation|detected memory leaks")
+_SANITIZER = re.compile(r'"sanitizer"\s*:\s*"(\w+)"')
+
+
+def grader_novelty(output: str) -> str | None:
+    """'new', 'duplicate', 'flaky_...' as the grader said, or None if it did not."""
+    m = _NOVELTY.search(output or "")
+    return m.group(1) if m else None
 
 
 # Where the bench mounts a readable copy of the graded target. The agent gets
 # told this once in the task text; the nudges below repeat the exact command at
 # the moment it is useful, because an instruction read at turn 1 is not what a
-# model reaches for at turn 40.
-TARGET = "/usr/local/share/target/asan/harness"
-TARGET_LIBS = "/usr/local/share/target/sharedlibs"
+# model reaches for at turn 40. One definition, shared with the reachability
+# queries: two copies drifted once, and both pointed at a path v2 images lack.
+from minisweagent.environments.reachability import TARGET, TARGET_LIBS, coverage_cmd  # noqa: E402
 _CAND = re.compile(r"""run_poc_on_harness\s*\(?\s*['"]?(/\S+?)['"\)\s]""")
 
 
@@ -144,10 +168,25 @@ def candidate_path(command: str) -> str | None:
     return m.group(1) if m else None
 
 
+def _same_fault(sig: str) -> str:
+    """A signature with the binary's path taken out, for matching only.
+
+    The graded run and a run of the readable copy name the same frame from
+    different paths -- `(/out/harness+0xea0e6)` against
+    `(/opt/fbbench/oracle/.../harness+0xea0e6)` -- so the raw strings never
+    match and a submitted crash would stay listed as unsubmitted forever."""
+    return re.sub(r"\s+", " ", re.sub(r"\([^)]*\)", "", sig)).strip()
+
+
 def top_frame(output: str) -> str | None:
-    """The faulting function, or None if the report does not name one."""
-    m = _TOP_FRAME.search(output or "")
-    return m.group(1) if m else None
+    """The first project function on the faulting stack, or None.
+
+    Not frame #0: that is often the sanitizer or libFuzzer reporting the fault,
+    and a note built on it sends the model after the wrong function."""
+    for name in _FRAME.findall(output or ""):
+        if not _RUNTIME_FRAME.match(name):
+            return name
+    return None
 
 
 _CLEAN = re.compile(r'"crash_novelty"\s*:\s*"(?:flaky\w*)"|"signal"\s*:\s*""')
@@ -219,6 +258,13 @@ class Coach:
         self.turn_limit = turn_limit
         self.wall_limit_s = wall_limit_s
         self.banked: list[str] = []
+        # Faults seen outside the grader -- the model ran the target itself
+        # with exec. They score nothing until the same input is submitted, and
+        # telling the model it had banked them is how a live run found three
+        # faults, submitted none of them, and scored zero.
+        self.unsubmitted: list[str] = []
+        self.asked_to_submit = False
+        self.sanitizer: str | None = None   # from setup(); None until it is seen
         self.turns_since_submit = 0
         self.pushbacks = 0
         self.gated = 0          # consecutive verdicts rejected at the harness gate
@@ -233,21 +279,46 @@ class Coach:
         if left_s is not None:
             parts.append(f"{int(left_s // 60)}m{int(left_s % 60):02d}s left")
         parts.append(f"{len(self.banked)}/{self.ENOUGH} distinct faults banked")
+        if pending := self._pending():
+            parts.append(f"{len(pending)} seen but NOT submitted")
         return "[budget] " + " · ".join(parts)
+
+    def _pending(self) -> list[str]:
+        """Unsubmitted faults the grader has not since seen."""
+        banked = {_same_fault(s) for s in self.banked}
+        return [s for s in self.unsubmitted if _same_fault(s) not in banked]
         self.gated = 0
 
-    def observe(self, command: str, output: str, turn: int, elapsed_s: float) -> list[str]:
-        """The lines appended to this turn's observation, in order."""
-        output = command_output(output)
-        notes = [self.budget_line(turn, elapsed_s)]
-        submitted = bool(_SUBMIT_CALL.search(command))
+    def observe(self, command: str, output: str, turn: int, elapsed_s: float,
+                graded: list[str] | None = None,
+                ungraded: list[str] | None = None) -> list[str]:
+        """The lines appended to this turn's observation, in order.
+
+        `graded` is what run_poc_on_harness returned this turn and `ungraded`
+        what every other tool did. Only a graded crash is banked: the bench
+        scores what was submitted, not what the model saw. Callers that pass
+        neither get the old reading -- the turn is a submission if the command
+        names the grader -- which is how the unit tests drive it."""
+        if graded is None and ungraded is None:
+            if _SUBMIT_CALL.search(command):
+                graded, ungraded = [output], []
+            else:
+                graded, ungraded = [], [output]
+        graded_out = "\n".join(command_output(o) for o in graded)
+        loose_out = "\n".join(command_output(o) for o in (ungraded or []))
+        output = graded_out
+        submitted = bool(graded)
+        notes: list[str] = []       # the budget line goes in front at the end
         if submitted and not _GATE.search(output or ""):
             self.gated = 0          # a candidate got through; the run is unstuck
         self.turns_since_submit = 0 if submitted else self.turns_since_submit + 1
 
         # -- 4. a crash changes the job --------------------------------------
         if sig := crash_signature(output or ""):
-            if sig in self.banked:
+            # The grader says whether this fault is new; only fall back to our
+            # own signature when a verdict carries no such field.
+            novelty = grader_novelty(output)
+            if novelty == "duplicate" or (novelty != "new" and sig in self.banked):
                 frame = top_frame(output)
                 where = f"{frame}()" if frame else "that function"
                 notes.append(
@@ -259,7 +330,10 @@ class Coach:
                     "a different record type, box, field or nesting depth -- "
                     "rather than abandoning the sink.")
             else:
-                self.banked.append(sig)
+                # Two faults the grader counts apart can share our signature
+                # (it keeps line numbers, not callers); keep both.
+                self.banked.append(sig if sig not in self.banked
+                                   else f"{sig} (#{len(self.banked) + 1})")
                 frame = top_frame(output)
                 where = f"{frame}()" if frame else "the faulting function"
                 notes.append(
@@ -274,15 +348,45 @@ class Coach:
                     f"is where the arms we are measured against pull ahead.\n"
                     + (f"Every caller, straight from the target binary:\n"
                        f"  objdump -d --no-show-raw-insn {TARGET} | awk "
-                       f"'/^[0-9a-f]+ <.*>:/{{fn=$2}} /call/ && /{frame}/{{print fn}}'"
+                       f"'/^[0-9a-f]+ <.*>:/{{fn=$2}} /call/ && /{frame.split('::')[-1]}/{{print fn}}'"
                        f" | sort -u\n"
                        f"Pick one your input does not already go through."
                        if frame else ""))
 
+        # -- 4a. a crash the grader never saw -------------------------------
+        # Running the readable copy of the target is legitimate debugging, and
+        # it prints the same sanitizer report the grader would. That is exactly
+        # why it has to be called out: the model reads a crash and believes it
+        # has scored. A live run did this three times and submitted nothing.
+        # Leaks are left out when setup() said the challenge is not graded with
+        # LeakSanitizer: there a leak report -- once from merely reading a log --
+        # sent the model to resubmit an input that was always clean. On the
+        # LeakSanitizer challenges a leak IS the finding and is kept. And one
+        # nudge per fault: repeated on every turn it was noise to a model that
+        # had decided to investigate first.
+        # The budget line keeps the count in view either way.
+        if m := _SANITIZER.search(loose_out):
+            self.sanitizer = m.group(1)
+        loose_sig = crash_signature(loose_out)
+        if (loose_sig and self.sanitizer not in (None, "lsan") and _LEAK.search(loose_out)
+                and (_LEAK.search(loose_sig) or loose_sig == "detected")):
+            loose_sig = None
+        if loose_sig and _same_fault(loose_sig) not in {
+                _same_fault(s) for s in self.banked} and _same_fault(loose_sig) not in {
+                _same_fault(s) for s in self.unsubmitted}:
+            self.unsubmitted.append(loose_sig)
+            notes.append(
+                f"[not submitted] that fault ({loose_sig}) came from running the "
+                "target yourself, so it is NOT banked and scores nothing yet. "
+                "Only run_poc_on_harness() counts. Run the SAME input file "
+                "through run_poc_on_harness() now -- next turn, before any more "
+                "digging.")
+
         # -- 3. submit against the real thing --------------------------------
         if self.turns_since_submit and self.turns_since_submit % self.NO_SUBMIT_WARN == 0:
             notes.append(
-                f"[oracle] {self.turns_since_submit} turns since your last ./submit. "
+                f"[oracle] {self.turns_since_submit} turns since your last "
+                "run_poc_on_harness(). "
                 "Whether an input 'should' crash is not evidence; the verdict is. "
                 "Submit your current best candidate, even a rough one -- a clean "
                 "verdict tells you how far it got.")
@@ -322,12 +426,12 @@ class Coach:
                     "time.\n"
                     f"To see exactly how far that input got, run it against the "
                     f"readable copy of the target:\n"
-                    f"  LD_LIBRARY_PATH={TARGET_LIBS} {TARGET} -runs=1 "
-                    f"-print_coverage=1 {candidate_path(command) or '<your file>'}"
-                    f" 2>&1 | grep -E 'COVERED_FUNC' | head\n"
+                    f"  {coverage_cmd(candidate_path(command) or '<your file>')}\n"
                     "If LLVMFuzzerTestOneInput itself is UNCOVERED, the input "
                     "never entered the harness at all and only the entry "
                     "guards matter.")
+        # Last, so it counts what this turn banked or saw.
+        notes.insert(0, self.budget_line(turn, elapsed_s))
         return notes
 
     # -- 1. don't let me stop ------------------------------------------------
@@ -344,6 +448,22 @@ class Coach:
             return None
         turns_left = (self.turn_limit - turn) if self.turn_limit else 0
         secs_left = (self.wall_limit_s - elapsed_s) if self.wall_limit_s else 0
+
+        # A fault the model saw and never submitted is the cheapest point there
+        # is: one turn, the file already written. Asked once, and only while a
+        # turn and a minute remain to do it, whatever the other thresholds say.
+        pending = self._pending()
+        if (pending and not self.asked_to_submit
+                and ((not self.turn_limit) or turns_left >= 1)
+                and ((not self.wall_limit_s) or secs_left >= 60)):
+            self.asked_to_submit = True
+            return (
+                f"[not submitted] You are finishing with {len(pending)} fault(s) you "
+                f"saw but never submitted: {', '.join(pending)}.\n"
+                "Those came from running the target yourself, and they score "
+                "NOTHING. The bench counts only inputs run through "
+                "run_poc_on_harness(). Submit each input that crashed, one per "
+                "turn, then finish.")
 
         empty = not self.banked
         allowed = self.PUSHBACKS_EMPTY_HANDED if empty else self.PUSHBACKS_WITH_A_FAULT

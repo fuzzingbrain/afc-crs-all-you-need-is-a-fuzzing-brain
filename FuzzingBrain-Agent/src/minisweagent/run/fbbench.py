@@ -242,13 +242,26 @@ class _ReportingAgent(DefaultAgent):
         # model was actually shown, truncation and all.
         observations = super().execute_actions(message)
         actions = (message.get("extra") or {}).get("actions", [])
-        commands = " ; ".join(a.get("command", "") for a in actions)
+        # A grader call's `command` is only its path, so the coach -- which
+        # looks for the grader's name -- never recognised a single submission
+        # in a live run. Name it here.
+        commands = " ; ".join(
+            f"run_poc_on_harness({a.get('command', '')})"
+            if a.get("tool") == "run_poc_on_harness" else a.get("command", "")
+            for a in actions)
         # Pair each result with the name its call was given, so the report shows
         # a submit's verdict under `submit` and not under a wall of `bash`.
         names = [a.get("tool") or tool_label(a.get("command", ""))[0]
                  for a in actions] or ["exec"]
+        # Which results the grader produced. Only those can bank a fault; a
+        # crash in an exec result is the model running the target itself.
+        graded, ungraded = [], []
+        for i, obs in enumerate(observations):
+            (graded if names[min(i, len(names) - 1)] == "run_poc_on_harness"
+             else ungraded).append(_text_of(obs))
         notes = self.coach.observe(commands, "\n".join(_text_of(o) for o in observations),
-                                   self.n_turns, time.time() - self._start_time)
+                                   self.n_turns, time.time() - self._start_time,
+                                   graded=graded, ungraded=ungraded)
         if notes and observations:
             _append(observations[-1], "\n\n" + "\n".join(notes))
         for i, obs in enumerate(observations):
