@@ -487,3 +487,16 @@ def test_the_bench_system_prompt_is_prepended_not_substituted(monkeypatch):
     t = config["agent"]["system_template"]
     assert t.startswith("BENCH-BRIEF-MARKER")
     assert own in t, "the agent's own scaffolding must survive"
+
+
+def test_the_bench_can_point_an_episode_at_its_own_model_server():
+    """Several copies of one self-hosted model: the bench gives each episode a
+    server and passes it as FB_AGENT_API_BASE, over whatever the config says."""
+    sys.path.insert(0, str(REPO / "src"))
+    from minisweagent.run.fbbench import _apply_endpoint
+    config = {"model": {"model_kwargs": {"api_base": "http://localhost:8000/v1", "top_p": 0.95}}}
+    _apply_endpoint(config, {"FB_AGENT_API_BASE": "http://localhost:8001/v1"})
+    assert config["model"]["model_kwargs"] == {"api_base": "http://localhost:8001/v1", "top_p": 0.95}
+    untouched = {"model": {"model_kwargs": {"api_base": "http://localhost:8000/v1"}}}
+    _apply_endpoint(untouched, {})
+    assert untouched["model"]["model_kwargs"]["api_base"] == "http://localhost:8000/v1"

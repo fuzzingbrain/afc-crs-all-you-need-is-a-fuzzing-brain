@@ -329,6 +329,16 @@ class _ReportingAgent(DefaultAgent):
 # access claudecode and codex always had. A bench-side tracer only this arm
 # could call was the asymmetry, not the fix for it.
 
+def _apply_endpoint(config: dict, environ) -> None:
+    """Point the model at the server the bench handed this episode, if any.
+
+    With several copies of a self-hosted model the bench gives each episode
+    its own server for the whole run (FBBENCH_AGENT_ENDPOINTS) and passes it
+    here, so one config -- hprc_qwen.yaml -- serves every copy."""
+    if base := environ.get("FB_AGENT_API_BASE"):
+        config.setdefault("model", {}).setdefault("model_kwargs", {})["api_base"] = base
+
+
 @app.command(help="Run fb-agent on one staged FuzzingBrain-Bench challenge.")
 def main(
     workspace: Path = typer.Option(..., "--workspace", help="Where the agent writes its own artefacts; bind-mounted to /workspace in the challenge image."),
@@ -351,6 +361,7 @@ def main(
         "environment": {"environment_class": "mcp_bench",
                         "socket_path": mcp_socket or os.environ.get("FBBENCH_MCP_SOCKET", "")},
     })
+    _apply_endpoint(config, os.environ)
     # DefaultAgent.run() re-saves this after every turn, so a killed run keeps
     # the conversation up to the kill -- the same reason the report is published
     # per turn rather than at exit.
