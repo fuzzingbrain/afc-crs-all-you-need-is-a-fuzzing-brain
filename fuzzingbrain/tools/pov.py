@@ -36,7 +36,7 @@ from ..core.docker_limits import docker_resource_args
 from ..core.fuzzer_spec import (
     is_no_oom,
     libfuzzer_oom_flags,
-    staged_ld_library_path,
+    run_lib_docker_args,
     NO_OOM_MEMORY_MB,
 )
 from ..core.models import POV
@@ -1410,12 +1410,14 @@ def _run_fuzzer_docker(
     work_dir = blob_path.parent
     memory_mb = NO_OOM_MEMORY_MB if no_oom else 4096
 
-    # Staged shared libs (the binary's $ORIGIN runpath dirs plus vendored fallback
-    # libs) live under fuzzer_dir; the loader needs them on LD_LIBRARY_PATH because a
-    # NEEDED like libsystemd-shared -> libcap.so.2 is transitive and DT_RUNPATH does
-    # not carry across. Without this the systemd binaries abort at load (rc=127) and
-    # every PoV silently reads as "no crash".
-    ld_library_path = staged_ld_library_path(fuzzer_dir, "/fuzzers")
+    # Staged shared libs (the binary's $ORIGIN runpath dirs plus the vendored
+    # fallback libs under analyzer/runtime_libs) must be on LD_LIBRARY_PATH: a
+    # NEEDED like libsystemd-shared -> libcap.so.2 is transitive and DT_RUNPATH
+    # does not carry across, and libc++-dynamic fuzzers (binutils) need a libc++
+    # the base images lack. Without this the binary aborts at load (rc=127) and
+    # every PoV silently reads as "no crash". The vendored dir is mounted
+    # separately and appended last (see run_lib_docker_args).
+    vendor_lib_args, ld_library_path = run_lib_docker_args(fuzzer_dir, "/fuzzers")
 
     def run_with_image(image: str):
         """Run fuzzer with specified docker image."""
@@ -1445,6 +1447,7 @@ def _run_fuzzer_docker(
                 if ld_library_path
                 else []
             ),
+            *vendor_lib_args,
             "-v",
             f"{fuzzer_dir}:/fuzzers:ro",
             "-v",

@@ -87,3 +87,52 @@ def staged_ld_library_path(
     for rel in sorted(rels, key=str):
         parts.append(mount_point if rel == Path(".") else f"{mount_point}/{rel}")
     return ":".join(parts)
+
+
+# Vendored fallback shared libs (fuzzingbrain/analyzer/runtime_libs): libs some
+# prebuilt fuzzers NEED but that are in neither the binary tree nor the run image
+# (e.g. libcap.so.2 for systemd; libc++.so.1/libc++abi.so.1/libunwind.so.1 for
+# fuzzers that dynamically link libc++ — base-builder/base-runner ship only the
+# static libc++.a). Extracted to be glibc-Focal compatible.
+RUNTIME_LIBS_DIR = (
+    Path(__file__).resolve().parent.parent / "analyzer" / "runtime_libs"
+)
+
+
+def vendored_libs_docker_args(mount_point: str = "/vendorlibs") -> Tuple[List[str], str]:
+    """Docker ``-v`` args + container path for the vendored fallback libs.
+
+    Returns ``([], "")`` when there are none. The caller appends the returned
+    path LAST on ``LD_LIBRARY_PATH`` so a vendored lib is only ever used for a
+    NEEDED that the binary tree and the image do not provide -- it never shadows
+    a lib the image already ships (those dirs come first). A binary that does not
+    NEED any of these libs is unaffected: the loader only loads NEEDED entries.
+    """
+    try:
+        if RUNTIME_LIBS_DIR.is_dir() and any(RUNTIME_LIBS_DIR.glob("*.so*")):
+            return (["-v", f"{RUNTIME_LIBS_DIR}:{mount_point}:ro"], mount_point)
+    except Exception:
+        pass
+    return ([], "")
+
+
+def run_lib_docker_args(
+    fuzzer_dir: Union[str, Path], mount_point: str = "/fuzzers"
+) -> Tuple[List[str], str]:
+    """Combined lib wiring for running a prebuilt fuzzer in Docker.
+
+    Returns ``(extra_docker_args, ld_library_path)`` covering both the libs
+    staged next to the binary (``mount_point``) and the vendored fallback libs
+    (mounted separately, appended last). ``extra_docker_args`` are additional
+    ``-v`` mounts to add to the ``docker run`` command; ``ld_library_path`` is
+    the value to pass as ``-e LD_LIBRARY_PATH=...`` (``""`` when nothing is
+    needed, so the caller can skip setting it).
+    """
+    parts: List[str] = []
+    staged = staged_ld_library_path(fuzzer_dir, mount_point)
+    if staged:
+        parts.append(staged)
+    vargs, vpath = vendored_libs_docker_args()
+    if vpath:
+        parts.append(vpath)
+    return vargs, ":".join(parts)

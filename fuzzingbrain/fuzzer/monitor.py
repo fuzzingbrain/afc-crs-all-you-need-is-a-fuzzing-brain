@@ -24,7 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from loguru import logger
 
 from ..core.docker_limits import docker_resource_args
-from ..core.fuzzer_spec import staged_ld_library_path
+from ..core.fuzzer_spec import run_lib_docker_args
 from .models import CRASH_ARTIFACT_PREFIXES, CrashRecord
 from .signature import compute_signature
 
@@ -948,8 +948,9 @@ class FuzzerMonitor:
         fuzzer_binary = fuzzer_path.name
         work_dir = crash_path.parent
         # Resolve staged $ORIGIN/vendored shared libs (e.g. systemd's
-        # libsystemd-shared -> libcap.so.2) so the binary actually loads.
-        ld_library_path = staged_ld_library_path(fuzzer_dir, "/fuzzers")
+        # libsystemd-shared -> libcap.so.2; libc++ for libc++-dynamic fuzzers)
+        # so the binary actually loads. Vendored dir mounted separately.
+        vendor_lib_args, ld_library_path = run_lib_docker_args(fuzzer_dir, "/fuzzers")
 
         def _run_with_image(image: str):
             cmd = [
@@ -976,6 +977,7 @@ class FuzzerMonitor:
                     if ld_library_path
                     else []
                 ),
+                *vendor_lib_args,
                 "-v",
                 f"{fuzzer_dir}:/fuzzers:ro",
                 "-v",

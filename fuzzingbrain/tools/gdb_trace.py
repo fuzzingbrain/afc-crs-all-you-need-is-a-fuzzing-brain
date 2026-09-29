@@ -60,21 +60,107 @@ def stage_project_libs(project: str, elf_host_path: str, image: str = None) -> P
     return out
 
 
+# Operand capture runs in gdb's embedded Python (gdb 15 ships it) and reads
+# values through the frame API. Three capture points, each overwriting its slot:
+#   sink  -- the sink breakpoint (args + locals)
+#   last  -- every target breakpoint (args only: at a function's entry its
+#            locals are not initialised yet)
+#   crash -- after the run stops on a signal, the deepest application frame,
+#            i.e. the top of the stack once sanitizer/libc frames are skipped
+#            (args + locals)
+# One FBOPS line carries all three back; _parse picks sink > crash > last.
+_GDB_PY = r'''python
+import json as _fbj
+_fb = {"sink": None, "last": None, "crash": None}
+_FB_OPS = _fbj.loads(%r)
+_FB_SKIP_FN = ("__asan", "__sanitizer", "__interceptor", "__ubsan", "__lsan",
+               "__msan", "__GI_", "__libc", "__pthread", "pthread_kill", "raise",
+               "abort")
+_FB_SKIP_PATH = ("sysdeps", "compiler-rt", "sanitizer_common", "/asan/", "/libc",
+                 "nptl")
+def _fb_vars(frame, want_locals):
+    out = {}
+    try:
+        blk = frame.block()
+    except Exception:
+        return out
+    while blk is not None:
+        for sym in blk:
+            if sym.name in out:
+                continue
+            if not (sym.is_argument or (want_locals and sym.is_variable)):
+                continue
+            try:
+                out[sym.name] = str(sym.value(frame))[:200]
+            except Exception:
+                out[sym.name] = "<unavailable>"
+            if len(out) >= 40:
+                return out
+        if blk.function is not None:
+            break
+        blk = blk.superblock
+    return out
+def _fb_cap(frame, want_locals):
+    frame.select()
+    if _FB_OPS:
+        vals = {}
+        for lab, ex in _FB_OPS.items():
+            try:
+                vals[lab] = str(gdb.parse_and_eval(ex))[:200]
+            except Exception as e:
+                vals[lab] = "<error: %%s>" %% str(e)[:80]
+    else:
+        vals = _fb_vars(frame, want_locals)
+    sal = frame.find_sal()
+    path = sal.symtab.filename if sal.symtab else "?"
+    return {"at": "%%s @ %%s:%%s" %% (frame.name(), path, sal.line), "values": vals}
+def _fb_app_frame():
+    f = gdb.newest_frame()
+    while f is not None:
+        fn = f.name() or ""
+        sal = f.find_sal()
+        path = sal.symtab.filename if sal.symtab else ""
+        if fn and path and not fn.startswith(_FB_SKIP_FN) \
+                and not any(s in path for s in _FB_SKIP_PATH):
+            return f
+        f = f.older()
+    return None
+end'''
+
+_GDB_PY_AFTER_RUN = '''python
+try:
+    if gdb.selected_inferior().pid != 0:
+        _f = _fb_app_frame()
+        if _f is not None:
+            _fb["crash"] = _fb_cap(_f, True)
+except Exception:
+    pass
+print("FBOPS " + _fbj.dumps(_fb))
+end'''
+
+
 def _gen_script(targets: List[str], sink: Optional[str], operands: Dict[str, str]) -> str:
     lines = ["set pagination off", "set confirm off", "set breakpoint pending on",
              # /projlibs = libs staged from the project image; /b/blibs = libs
              # shipped next to the binary (e.g. systemd's libsystemd-shared).
              "set environment LD_LIBRARY_PATH=/projlibs:/b/blibs:/b",
-             "handle SIGSEGV SIGABRT SIGBUS SIGFPE stop nopass"]
-    for t in targets or []:
-        lines += [f"break {t}", "commands", "  silent", f'  printf "HIT:{t}\\n"',
-                  "  continue", "end"]
-    if sink:
-        lines += [f"break {sink}", "commands", "  silent",
-                  f'  printf "HIT-SINK:{sink}\\n"',
-                  '  printf "STATE-BEGIN\\n"', "  info args", "  info locals",
-                  '  printf "STATE-END\\n"', "  continue", "end"]
+             "handle SIGSEGV SIGABRT SIGBUS SIGFPE stop nopass",
+             _GDB_PY % json.dumps(operands or {})]
+    # One breakpoint per location. A sink that is also a target shares that
+    # target's breakpoint: with two breakpoints on one address, the `continue`
+    # in the first one's commands skips the second's, so HIT-SINK never printed.
+    locs = list(dict.fromkeys(list(targets or []) + ([sink] if sink else [])))
+    for loc in locs:
+        body = ["  silent"]
+        if loc in (targets or []):
+            body += [f'  printf "HIT:{loc}\\n"',
+                     '  python _fb["last"] = _fb_cap(gdb.selected_frame(), False)']
+        if loc == sink:
+            body += [f'  printf "HIT-SINK:{loc}\\n"',
+                     '  python _fb["sink"] = _fb_cap(gdb.selected_frame(), True)']
+        lines += [f"break {loc}", "commands", *body, "  continue", "end"]
     lines += ["run",
+              _GDB_PY_AFTER_RUN,
               'if $_siginfo',
               '  printf "CRASHED:1\\n"',
               "  bt 8",
@@ -86,17 +172,20 @@ def _gen_script(targets: List[str], sink: Optional[str], operands: Dict[str, str
 def _parse(out: str, targets: List[str], sink: Optional[str], operands: Dict[str, str]) -> Dict[str, Any]:
     reached = {t: (f"HIT:{t}" in out) for t in (targets or [])}
     sink_reached = bool(sink and f"HIT-SINK:{sink}" in out)
-    # operand values from the LAST info-dump before the crash (loop -> overflow iter)
-    states = re.findall(r"STATE-BEGIN(.*?)STATE-END", out, re.S)
-    ops = {}
-    if states and operands:
-        last = states[-1]
-        for label, expr in operands.items():
-            # match "<name> = <value>" for the base variable name in expr
-            var = re.sub(r"[^A-Za-z0-9_].*", "", expr.strip().lstrip("(").lstrip("*"))
-            m = re.search(rf"\b{re.escape(var)}\s*=\s*([^\n]+)", last)
-            if m:
-                ops[label] = m.group(1).strip()
+    # operand values captured in-gdb (see _GDB_PY): the sink if it was reached,
+    # else the top of the stack at a crash, else the last target function hit.
+    ops, ops_at, ops_source = {}, None, None
+    fm = re.search(r"^FBOPS (\{.*\})\s*$", out, re.M)
+    if fm:
+        try:
+            captured = json.loads(fm.group(1))
+        except ValueError:
+            captured = {}
+        for source in ("sink", "crash", "last"):
+            slot = captured.get(source)
+            if slot:
+                ops, ops_at, ops_source = slot.get("values") or {}, slot.get("at"), source
+                break
     # margin straight from the ASan report (reliable): "N bytes after/before M-byte region"
     asan_margin = None
     am = re.search(r"located (\d+) bytes (after|before) (?:the )?\w*\s*(\d+)-byte region", out)
@@ -135,7 +224,8 @@ def _parse(out: str, targets: List[str], sink: Optional[str], operands: Dict[str
     # first target (in the given order) NOT reached
     first_unreached = next((t for t in (targets or []) if not reached[t]), None)
     return {"reached": reached, "sink_reached": sink_reached, "first_unreached": first_unreached,
-            "operands": ops, "asan_margin": asan_margin, "crashed": crashed,
+            "operands": ops, "operands_at": ops_at, "operands_source": ops_source,
+            "asan_margin": asan_margin, "crashed": crashed,
             # Attribution precedence: ASan report type > UBSan type (when a
             # SIGABRT-triggering fatal UB fired) > the raw signal name (SEGV/
             # ABRT/BUS/FPE/ILL, since gdb catches the inferior's signal before

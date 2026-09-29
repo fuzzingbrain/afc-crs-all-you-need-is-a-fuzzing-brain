@@ -164,8 +164,8 @@ GPT_5_MINI = ModelInfo(
 )
 
 GPT_5 = ModelInfo(
-    id="gpt-5",
-    alias="gpt-5",
+    id="gpt-5-2025-08-07",  # PINNED snapshot (cutoff 2024-09-30, pre-CyberGym = clean).
+    alias="gpt-5",          # bare "gpt-5" is a rolling alias -> may resolve to a newer, contaminated snapshot server-side.
     provider=Provider.OPENAI,
     name="GPT-5",
     description="OpenAI flagship model",
@@ -469,7 +469,7 @@ FALLBACK_CHAINS: Dict[str, List[ModelInfo]] = {
     CLAUDE_HAIKU_4_5.id: [CLAUDE_SONNET_4_5, CLAUDE_OPUS_4_5],
     # OpenAI fallbacks -> stay within OpenAI (Anthropic is rate-limited; a GPT run
     # must never cross over to Claude).
-    GPT_5.id: [GPT_5_2, GPT_5_MINI],
+    GPT_5.id: [],  # NO fallback: gpt-5.2/gpt-5-mini are post-CyberGym (contaminated). Fail loudly rather than silently swap to a dirty model.
     GPT_5_2.id: [GPT_5, GPT_5_MINI],
     GPT_5_6_SOL.id: [GPT_5_6_TERRA, GPT_5, GPT_5_MINI],
     GPT_5_6_TERRA.id: [GPT_5, GPT_5_2, GPT_5_MINI],

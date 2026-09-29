@@ -569,6 +569,7 @@ def _register_reach_probe_tools(mcp: FastMCP) -> None:
         generator_code: str,
         targets: List[str] = None,
         sink: str = None,
+        operands: Dict[str, str] = None,
         sp_function: str = None,
         sp_crash_type: str = None,
     ) -> Dict[str, Any]:
@@ -576,18 +577,29 @@ def _register_reach_probe_tools(mcp: FastMCP) -> None:
         Run ONE candidate input through the ASan fuzzer under gdb-15 and return
         dynamic evidence: which target functions were reached, whether it crashed
         (+ sanitizer type and crash frame), the exact overflow margin from the ASan
-        report (negative = past the boundary), and whether the crash matches the SP.
+        report (negative = past the boundary), whether the crash matches the SP,
+        and the runtime values of variables at one program point (`operands`).
 
         Use this to CONFIRM the SP is reachable/triggerable. Iterate: read the code,
         write a better generator, probe again. Reaching or crashing is worth more
-        than any amount of reading. Record the returned reached/crashed/asan_margin as
-        facts in update_suspicious_point's `evidence` (a crash means score = 1.0).
+        than any amount of reading. Record the returned reached/crashed/asan_margin/
+        operands as facts in update_suspicious_point's `evidence` (a crash means
+        score = 1.0).
+
+        `operands` is read at: the `sink` if it was reached; otherwise the top of
+        the stack if the input crashed (the deepest frame of project code); otherwise
+        the last `targets` function that was hit (its arguments). `operands_at` says
+        which function/line the values came from.
 
         Args:
             generator_code: Python defining `def generate(variant: int) -> bytes`
                             that returns the input bytes to feed the fuzzer.
             targets: function names to set breakpoints on (report which were hit).
-            sink: optional single function to break at and dump args/locals.
+            sink: optional function name or `file.c:LINE` to read variables at;
+                  a line inside the function gives initialised locals.
+            operands: optional {label: C expression} to evaluate at that point,
+                      e.g. {"len": "len", "cap": "buf->size"}; omit to get all
+                      arguments (and locals at a sink or crash).
             sp_function: the SP's function name (for crash_matches_sp).
             sp_crash_type: the SP's claimed bug class (for crash_matches_sp).
         """
@@ -597,6 +609,7 @@ def _register_reach_probe_tools(mcp: FastMCP) -> None:
             generator_code=generator_code,
             targets=targets,
             sink=sink,
+            operands=operands,
             sp_function=sp_function,
             sp_crash_type=sp_crash_type,
         )

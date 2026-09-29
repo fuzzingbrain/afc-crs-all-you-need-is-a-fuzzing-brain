@@ -591,6 +591,10 @@ class BaseAgent(ABC):
                 parts.append(f"first_unreached={data.get('first_unreached')}")
             if data.get("crash_frame"):
                 parts.append(f"crash_frame={data.get('crash_frame')}")
+            ops = data.get("operands")
+            if isinstance(ops, dict) and ops:
+                shown = ", ".join(f"{k}={v}" for k, v in list(ops.items())[:4])
+                parts.append(f"operands@{data.get('operands_at')}: {shown[:160]}")
             if parts:
                 # A crashing/sink-reaching probe is the load-bearing one; give it
                 # its own key so it is not overwritten by a later shallow probe.

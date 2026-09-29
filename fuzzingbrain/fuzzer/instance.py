@@ -17,7 +17,7 @@ from loguru import logger
 from ..core.docker_limits import docker_resource_args, task_label_args
 from ..core.fuzzer_spec import (
     libfuzzer_oom_flags,
-    staged_ld_library_path,
+    run_lib_docker_args,
     NO_OOM_MEMORY_MB,
 )
 from .models import (
@@ -120,6 +120,10 @@ class FuzzerInstance:
         fuzzer_dir = self.fuzzer_path.parent
         fuzzer_name = self.fuzzer_path.name
 
+        # Libs staged next to the binary + vendored fallback libs (libc++ etc.);
+        # vendored dir mounted separately and appended last (see run_lib_docker_args).
+        vendor_lib_args, _ld_library_path = run_lib_docker_args(fuzzer_dir, "/fuzzers")
+
         # Base command
         cmd = [
             "docker",
@@ -170,8 +174,8 @@ class FuzzerInstance:
                 "-e",
                 _san_opt,
                 *(
-                    ["-e", f"LD_LIBRARY_PATH={staged_ld_library_path(fuzzer_dir, '/fuzzers')}"]
-                    if staged_ld_library_path(fuzzer_dir, "/fuzzers")
+                    ["-e", f"LD_LIBRARY_PATH={_ld_library_path}"]
+                    if _ld_library_path
                     else []
                 ),
             ]
@@ -180,6 +184,7 @@ class FuzzerInstance:
         # Mount volumes
         cmd.extend(
             [
+                *vendor_lib_args,
                 "-v",
                 f"{fuzzer_dir}:/fuzzers:ro",
                 "-v",

@@ -27,10 +27,24 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Sequence
 
 # ASan/UBSan/LSan report the class in different places and spellings.
-_ASAN_ERROR = re.compile(r"ERROR: \w*Sanitizer: ([a-zA-Z0-9_-]+)")
+# MemorySanitizer prints "WARNING: MemorySanitizer: use-of-uninitialized-value"
+# (WARNING, not ERROR) -- under MSAN_OPTIONS=halt_on_error=1 (what the verifier
+# uses) that still aborts the process, so it IS a crash. The old ERROR-only
+# regex discarded every MSan finding as NOT A CRASH; accept WARNING too.
+_ASAN_ERROR = re.compile(r"(?:ERROR|WARNING): \w*Sanitizer: ([a-zA-Z0-9_-]+)")
 _UBSAN_LINE = re.compile(r"runtime error: (.+?)(?:\s*\(|$)", re.MULTILINE)
 _LSAN_LEAK = re.compile(r"(?:ERROR: LeakSanitizer|SUMMARY: .*LeakSanitizer)")
-_LIBFUZZER_DEADLY = re.compile(r"(?:DEADLYSIGNAL|SEGV on unknown address)")
+# libFuzzer prints "==N== ERROR: libFuzzer: deadly signal" (and a matching
+# SUMMARY line) for a fault it caught via its own signal handler -- SIGABRT
+# (abort()/assert), SIGSEGV, SIGFPE, etc. -- when no sanitizer report was
+# emitted. The message is lowercase with a space, so the old DEADLYSIGNAL token
+# never matched it and every such crash was discarded as NOT A CRASH (binutils'
+# disassemblers abort() heavily). "fuzz target exited" is deliberately NOT here:
+# a target calling exit() on its own is not a fault.
+_LIBFUZZER_DEADLY = re.compile(
+    r"(?:DEADLYSIGNAL|SEGV on unknown address|libFuzzer:\s*deadly signal)",
+    re.IGNORECASE,
+)
 
 # "#3 0x55f0 in mg_vxprintf /src/mongoose/mongoose.c:1234:9"
 # The function is everything between "in " and the path, because a demangled

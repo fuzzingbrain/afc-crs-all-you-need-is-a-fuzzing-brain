@@ -8,6 +8,7 @@ Unified LLM client with multi-provider support and automatic fallback.
 import asyncio
 import os
 import time
+from types import SimpleNamespace
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Dict, Iterator, List, Optional, Union
 
@@ -113,6 +114,97 @@ def _is_openai_new_api_model(model_id: str) -> bool:
         if model_lower.startswith(prefix):
             return True
     return False
+
+
+# gpt-5.5 / gpt-5.6 reject function tools together with reasoning on
+# /v1/chat/completions ("400 ... use /v1/responses"), so every agent call on them
+# failed and fell back to another model. These go through the Responses API; the
+# result is reshaped into a chat-completion object, so _parse_response, cost
+# recording and the fallback logic see the usual shape.
+RESPONSES_API_MODELS = ("gpt-5.5", "gpt-5.6")
+
+
+def _is_responses_api_model(model_id: str) -> bool:
+    return model_id.lower().startswith(RESPONSES_API_MODELS)
+
+
+def _text_of(content: Any) -> str:
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(
+            p.get("text", "") if isinstance(p, dict) else str(p)
+            for p in content
+            if not isinstance(p, dict) or p.get("type") in ("text", "input_text", "output_text")
+        )
+    return str(content)
+
+
+def _field(obj: Any, name: str, default: Any = None) -> Any:
+    return obj.get(name, default) if isinstance(obj, dict) else getattr(obj, name, default)
+
+
+def _to_responses_request(params: Dict[str, Any]) -> Dict[str, Any]:
+    """chat.completions params -> responses.create kwargs."""
+    items: List[Dict[str, Any]] = []
+    for m in params["messages"]:
+        role = _field(m, "role")
+        if role == "tool":
+            items.append({"type": "function_call_output",
+                          "call_id": _field(m, "tool_call_id"),
+                          "output": _text_of(_field(m, "content"))})
+            continue
+        text = _text_of(_field(m, "content"))
+        if role != "assistant" or text:
+            items.append({"role": role, "content": text})
+        if role == "assistant":
+            for tc in _field(m, "tool_calls") or []:
+                fn = _field(tc, "function")
+                items.append({"type": "function_call",
+                              "call_id": _field(tc, "id"),
+                              "name": _field(fn, "name"),
+                              "arguments": _field(fn, "arguments") or "{}"})
+    req: Dict[str, Any] = {"model": params["model"], "input": items, "store": False}
+    if params.get("max_completion_tokens"):
+        req["max_output_tokens"] = params["max_completion_tokens"]
+    if params.get("reasoning_effort"):
+        req["reasoning"] = {"effort": params["reasoning_effort"]}
+    if params.get("tools"):
+        req["tools"] = [
+            {"type": "function", **{k: v for k, v in t["function"].items()
+                                    if k in ("name", "description", "parameters", "strict")}}
+            if t.get("type") == "function" and "function" in t else t
+            for t in params["tools"]
+        ]
+    tc = params.get("tool_choice")
+    if isinstance(tc, dict) and "function" in tc:
+        req["tool_choice"] = {"type": "function", "name": tc["function"]["name"]}
+    elif tc:
+        req["tool_choice"] = tc
+    return req
+
+
+def _from_responses(resp: Any) -> Any:
+    """Responses API result -> object shaped like a chat completion."""
+    calls = [
+        SimpleNamespace(id=it.call_id, type="function",
+                        function=SimpleNamespace(name=it.name, arguments=it.arguments))
+        for it in (resp.output or []) if getattr(it, "type", "") == "function_call"
+    ]
+    u = resp.usage
+    usage = SimpleNamespace(
+        prompt_tokens=u.input_tokens, completion_tokens=u.output_tokens,
+        total_tokens=u.total_tokens,
+        prompt_tokens_details=SimpleNamespace(
+            cached_tokens=getattr(getattr(u, "input_tokens_details", None), "cached_tokens", 0) or 0),
+    ) if u else None
+    finish = "tool_calls" if calls else ("length" if resp.status == "incomplete" else "stop")
+    message = SimpleNamespace(role="assistant", content=resp.output_text or None,
+                              tool_calls=calls or None)
+    return SimpleNamespace(id=resp.id, model=resp.model, usage=usage,
+                           choices=[SimpleNamespace(index=0, message=message, finish_reason=finish)])
 
 
 def _is_xai_model(model_id: str) -> bool:
@@ -643,12 +735,12 @@ class LLMClient:
         }
         ml = model_id.lower()
 
-        # Reasoning models (o1/o3/o4) reject any temperature other than the
-        # default 1.0 (400 BadRequest) -> the call fails and silently falls back
-        # to another model. Only pass a custom temperature to models that accept
-        # it (gpt-5 family); never to the o-series.
-        if temperature != 1.0 and ml.startswith("gpt-5"):
-            params["temperature"] = temperature
+        # Reasoning models (o1/o3/o4 AND the gpt-5 first-gen family) reject any
+        # temperature other than the default 1.0 (400 BadRequest) -> the call
+        # fails and silently falls back to another model (e.g. gpt-5 -> gpt-5.2).
+        # This whole path is the reasoning path (always sets max_completion_tokens
+        # below), so never send a custom temperature here; let it default to 1.0.
+        # (do not pass params["temperature"] for reasoning models)
 
         # Reasoning models (o1/o3/gpt-5 family) spend the completion budget on
         # hidden reasoning tokens FIRST. Agents pass max_tokens~2000, which the
@@ -659,9 +751,19 @@ class LLMClient:
         REASONING_FLOOR = 32000
         params["max_completion_tokens"] = max(max_tokens or 0, REASONING_FLOOR)
 
+        # gpt-5 defaults to medium/high reasoning effort -> 77s median call latency
+        # (some calls 5 min), which starves the agents: an SP-find/POV agent gets
+        # only a handful of iterations inside the 90 min / $20 budget and never
+        # commits a create_suspicious_point / create_pov. "low" cuts call latency
+        # ~5-10x so the pipeline actually makes progress.
+        if ml.startswith("gpt-5"):
+            params["reasoning_effort"] = "low"
+
         if tools:
             params["tools"] = tools
 
+        if _is_responses_api_model(model_id):
+            return _from_responses(client.responses.create(**_to_responses_request(params)))
         return client.chat.completions.create(**params)
 
     def _prepare_call_params(
@@ -1148,16 +1250,26 @@ class LLMClient:
                 )
 
                 params = {"model": model_id, "messages": messages}
-                # o-series reject any non-default temperature (400) -> only gpt-5
-                # family takes a custom one. Reasoning models eat the completion
-                # budget on hidden reasoning, so floor max_completion_tokens.
-                if temperature != 1.0 and model_id.lower().startswith("gpt-5"):
-                    params["temperature"] = temperature
+                # Reasoning models (o-series AND gpt-5 first-gen) reject any
+                # non-default temperature (400) -> the call fails and silently
+                # falls back to another model (gpt-5 -> gpt-5.2, contaminated).
+                # This branch is reasoning-only (floors max_completion_tokens),
+                # so never send a custom temperature; let it default to 1.0.
                 params["max_completion_tokens"] = max(max_tokens or 0, 32000)
+                # gpt-5 defaults to medium/high reasoning effort -> ~77s median
+                # call latency, starving the agents (few iterations in budget, no
+                # create_suspicious_point/create_pov). "low" cuts latency ~5-10x.
+                if model_id.lower().startswith("gpt-5"):
+                    params["reasoning_effort"] = "low"
                 if tools:
                     params["tools"] = tools
 
-                response = await client.chat.completions.create(**params)
+                if _is_responses_api_model(model_id):
+                    response = _from_responses(
+                        await client.responses.create(**_to_responses_request(params))
+                    )
+                else:
+                    response = await client.chat.completions.create(**params)
 
             else:
                 # Use litellm for other models

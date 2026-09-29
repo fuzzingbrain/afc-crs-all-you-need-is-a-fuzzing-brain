@@ -250,31 +250,26 @@ class AgentPipeline:
             )
 
             if sp is None:
-                # No work available - check if we should exit
+                # No work available.
+                #
+                # DO NOT exit on an empty queue. The task's real end is owned by
+                # the dispatcher, which revokes the workers on POV target / budget
+                # limit / the per-task celery timeout. The old early-exit (SP
+                # finding done + queue drained) cut guided work short: the finder
+                # does a single full scan and the verifier drains it in seconds,
+                # so on tasks the first scan misses (e.g. freetype tt_size_reset)
+                # the whole agent phase died in ~4 min and only blind global
+                # fuzzing ran for the remaining ~86 min. Stay alive until the
+                # clock or the budget ends the task, so late SPs -- e.g. ones
+                # raised from fuzzer-found crashes -- still get verified/attempted.
                 idle_cycles += 1
-
-                # Only consider exiting if upstream (SP Finding) is done
-                if self._sp_finding_done:
-                    # Check if there are any remaining pending_verify SPs
-                    pending_count = self.repos.suspicious_points.count_by_status(
-                        self.task_id,
-                        status="pending_verify",
-                        harness_name=self.fuzzer,
-                        sanitizer=self.sanitizer,
-                    )
-                    if pending_count == 0 and idle_cycles >= 5:
-                        # SP Finding done + no pending work + waited a bit = exit
-                        logger.info(
-                            f"[Pipeline:{agent_id}] SP Finding done, no more work, exiting"
-                        )
-                        break
 
                 # Log status periodically
                 if idle_cycles % 30 == 0:
                     status = (
                         "waiting for SP Finding"
                         if not self._sp_finding_done
-                        else "draining queue"
+                        else "idle, staying alive until timeout/budget"
                     )
                     logger.debug(
                         f"[Pipeline:{agent_id}] Idle cycle {idle_cycles}, {status}"
@@ -443,51 +438,20 @@ class AgentPipeline:
             )
 
             if sp is None:
-                # No work available - check if we should exit
+                # No work available. Do NOT exit on an empty queue -- see the
+                # matching note in _run_verify_agent. The POV worker stays alive
+                # until the dispatcher revokes it (POV target / budget / per-task
+                # timeout), so a pending_pov raised later (from continued
+                # verification or a fuzzer-found crash) is still attempted instead
+                # of the whole agent phase dying the moment the first scan drains.
                 idle_cycles += 1
-
-                # Only consider exiting if upstream (SP Finding) is done
-                # Once SP Finding is done, both verify and POV will drain their queues
-                if self._sp_finding_done:
-                    # Check if there are any remaining pending_pov or verifying SPs
-                    pending_pov = self.repos.suspicious_points.count_by_status(
-                        self.task_id,
-                        status="pending_pov",
-                        harness_name=self.fuzzer,
-                        sanitizer=self.sanitizer,
-                    )
-                    # Also check if verify is still producing (pending_verify or verifying)
-                    pending_verify = self.repos.suspicious_points.count_by_status(
-                        self.task_id,
-                        status="pending_verify",
-                        harness_name=self.fuzzer,
-                        sanitizer=self.sanitizer,
-                    )
-                    verifying = self.repos.suspicious_points.count_by_status(
-                        self.task_id,
-                        status="verifying",
-                        harness_name=self.fuzzer,
-                        sanitizer=self.sanitizer,
-                    )
-
-                    # Exit only when: SP Finding done + no pending_pov + no pending_verify + no verifying
-                    if (
-                        pending_pov == 0
-                        and pending_verify == 0
-                        and verifying == 0
-                        and idle_cycles >= 5
-                    ):
-                        logger.info(
-                            f"[Pipeline:{agent_id}] All upstream done, no more work, exiting"
-                        )
-                        break
 
                 # Log status periodically
                 if idle_cycles % 30 == 0:
                     status = (
                         "waiting for upstream"
                         if not self._sp_finding_done
-                        else "draining queue"
+                        else "idle, staying alive until timeout/budget"
                     )
                     logger.debug(
                         f"[Pipeline:{agent_id}] Idle cycle {idle_cycles}, {status}"
