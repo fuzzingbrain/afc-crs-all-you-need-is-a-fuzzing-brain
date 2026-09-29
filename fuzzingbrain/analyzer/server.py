@@ -309,6 +309,11 @@ class AnalysisServer:
 
         self.ready = True
         self._log(f"Analysis Server ready at {self.socket_path}")
+        self._log(
+            "[ABLATION] FB_ABLATE_ONE_VH_PER_FN="
+            + ("ON: one VH per function goes to verification/PoC (earliest kept)"
+               if self._one_vh_per_function() else "off")
+        )
 
         # Return result (server continues running)
         return AnalyzeResult(
@@ -1581,9 +1586,14 @@ class AnalysisServer:
         important_controlflow: str,
         direction_id: str = "",
         agent_id: str = "",
+        suppressed_by: str = "",
     ) -> str:
-        """Sync: Create and save a new SP."""
-        from ..core.models import SuspiciousPoint
+        """Sync: Create and save a new SP.
+
+        `suppressed_by` (one-VH-per-function ablation) saves it as SUPPRESSED:
+        recorded like any other SP, but never claimed for verification or PoC.
+        """
+        from ..core.models import SuspiciousPoint, SPStatus
 
         sp = SuspiciousPoint(
             task_id=self.task_id,
@@ -1595,8 +1605,32 @@ class AnalysisServer:
             score=score,
             important_controlflow=important_controlflow,
         )
+        if suppressed_by:
+            sp.status = SPStatus.SUPPRESSED.value
         self.repos.suspicious_points.save(sp)
+        if suppressed_by:
+            self.repos.suspicious_points.collection.update_one(
+                {"_id": ObjectId(sp.suspicious_point_id)},
+                {"$set": {"suppressed_by": suppressed_by}},
+            )
         return sp.suspicious_point_id
+
+    @staticmethod
+    def _one_vh_per_function() -> bool:
+        """Ablation: at most one VH per function goes on to verification/PoC.
+
+        FB_ABLATE_ONE_VH_PER_FN=1. The finder still produces and records every
+        VH; the earliest created one in a function is kept, every later one is
+        saved as SUPPRESSED. Off by default.
+        """
+        return os.environ.get("FB_ABLATE_ONE_VH_PER_FN", "").lower() in ("1", "true", "yes")
+
+    def _vh_function_lock(self, function_name: str) -> asyncio.Lock:
+        """One lock per function, so two concurrent creates cannot both be first."""
+        locks = self.__dict__.setdefault("_vh_fn_locks", {})
+        if function_name not in locks:
+            locks[function_name] = asyncio.Lock()
+        return locks[function_name]
 
     async def _create_suspicious_point(self, params: dict) -> dict:
         """
@@ -1618,6 +1652,24 @@ class AnalysisServer:
         important_controlflow = params.get("important_controlflow", "")
         direction_id = params.get("direction_id", "")
         agent_id = params.get("agent_id", "")  # Agent that created this SP
+
+        if self._one_vh_per_function():
+            async with self._vh_function_lock(function_name):
+                return await self._create_suspicious_point_body(params, one_vh=True)
+        return await self._create_suspicious_point_body(params, one_vh=False)
+
+    async def _create_suspicious_point_body(self, params: dict, one_vh: bool) -> dict:
+        """_create_suspicious_point, after the ablation gate is decided."""
+        from ..core.sp_dedup import check_sp_duplicate_async
+
+        function_name = params.get("function_name", "")
+        harness_name = params.get("harness_name", "")
+        sanitizer = params.get("sanitizer", "")
+        description = params.get("description", "")
+        score = params.get("score", 0.0)
+        important_controlflow = params.get("important_controlflow", "")
+        direction_id = params.get("direction_id", "")
+        agent_id = params.get("agent_id", "")
 
         # Check for duplicates in the same function (MongoDB query in thread pool)
         existing_sp_dicts = await self._run_sync(
@@ -1652,6 +1704,20 @@ class AnalysisServer:
                     "message": f"Merged with existing SP in {function_name}",
                 }
 
+        # One-VH-per-function ablation: the function already has a VH, so this
+        # one is recorded but held back. The kept VH is the earliest created
+        # one that was not itself suppressed.
+        suppressed_by = ""
+        if one_vh and existing_sp_dicts:
+            kept = [
+                d for d in existing_sp_dicts
+                if d.get("status") != "suppressed"
+            ] or existing_sp_dicts
+            kept.sort(key=lambda d: str(d.get("created_at") or ""))
+            suppressed_by = str(
+                kept[0].get("suspicious_point_id") or kept[0].get("_id") or "?"
+            )
+
         # No duplicate found - create new SP (MongoDB in thread pool)
         sp_id = await self._run_sync(
             self._save_new_sp_sync,
@@ -1663,7 +1729,17 @@ class AnalysisServer:
             important_controlflow,
             direction_id,
             agent_id,
+            suppressed_by,
         )
+
+        if suppressed_by:
+            self._log(
+                f"[ABLATION one-VH-per-function] SP {sp_id} in {function_name} "
+                f"recorded as SUPPRESSED (kept: {suppressed_by[:8]}...)"
+            )
+            # Same answer as a normal create: the finder must not behave
+            # differently because of the ablation.
+            return {"id": sp_id, "created": True, "merged": False, "suppressed": True}
 
         self._log(
             f"Created suspicious point: {sp_id} in {function_name} "

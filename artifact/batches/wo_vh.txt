@@ -1,0 +1,27 @@
+# Ablation wo-VH (one VH per function): same 21 CPVs / 17 tasks as batch1, run with FB_ABLATE_ONE_VH_PER_FN=1.
+# CPVs that share a task (ss1-fu-00..04 -> json_fuzz) are run once.
+# delta
+cu2-del-06
+cu3-del-07
+cu4-del-03
+cu4-del-08
+cu5-del-01
+cu5-del-02
+ex2-del-01
+fp2-del-02
+mg1-del-01
+mg2-del-02
+fp3-del-03
+# full
+# cm1-fu-01   (not in this run)
+# cm1-fu-02   (not in this run)
+mg1-fu-00
+ss1-fu-00
+ss1-fu-01
+ss1-fu-02
+ss1-fu-03
+ss1-fu-04
+sd1-fu-04
+sd1-fu-05
+da1-fu-01
+ws1-fu-05

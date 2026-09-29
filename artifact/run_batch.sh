@@ -13,6 +13,7 @@
 #   FORCE_MODEL  unset = the task's model_profile (period-correct: gpt-4.1 + o3)
 #   MODELS       per-role override on the profile, e.g. MODELS=poc=gpt-4.1
 #   POV_COUNT    unset = the task's pov_count
+#   FB_ABLATE_*  ablation switches are inherited by the run and logged in the header
 #   MIN_FREE_GB  wait for this much MemAvailable before starting a task (default 16)
 #   TIMEOUT_MARGIN_MIN  hard kill this long after the task's own timeout (default 20)
 #   PREFLIGHT    default 1: run each prebuilt fuzzer once on an empty input first and
@@ -62,6 +63,8 @@ PY
 )" || { echo "$PLAN" >&2; exit 1; }
 
 N="$(printf '%s\n' "$PLAN" | wc -l)"
+ABL="$(env | grep -E '^FB_ABLATE' | tr '\n' ' ')"
+log "git: $(git -C "$FB_ROOT" rev-parse --abbrev-ref HEAD)@$(git -C "$FB_ROOT" rev-parse --short HEAD)  ablation: ${ABL:-none}"
 log "batch $NAME: $N tasks -> $OUT (budget=${BUDGET:-task} concurrency=$CONCURRENCY force_model=${FORCE_MODEL:-profile} models=${MODELS:-profile} pov_count=${POV_COUNT:-task})"
 
 if [ "${DRY_RUN:-0}" = 1 ]; then
@@ -152,7 +155,9 @@ try:
         s = re.search(r"SUMMARY: \S+: (\S+) (\S+)", p.get("sanitizer_output") or "")
         where = f"{s.group(1)}@{s.group(2).split('/')[-1]}" if s else (p.get("vuln_type") or "?")
         sigs.setdefault(p.get("signature") or str(p["_id"]), f"{where}[{p.get('source')}]")
-    print(f"{cost:.2f}\t{len(sigs)}\t{'; '.join(sigs.values())}")
+    vh = db.suspicious_points.count_documents({"task_id": oid})
+    vh_sup = db.suspicious_points.count_documents({"task_id": oid, "status": "suppressed"})
+    print(f"{cost:.2f}\t{len(sigs)}\t{'; '.join(sigs.values())} || VH={vh} suppressed={vh_sup}")
 except Exception as e:
     print(f"?\t?\tsummary failed: {e}")
 PY

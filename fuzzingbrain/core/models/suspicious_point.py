@@ -31,6 +31,8 @@ class SPStatus(str, Enum):
 
     # Terminal states
     FAILED = "failed"  # Processing failed
+    # Ablation FB_ABLATE_ONE_VH_PER_FN: recorded, never verified or PoC'd
+    SUPPRESSED = "suppressed"
     SKIPPED = "skipped"  # Skipped (e.g., unreachable)
 
 
