@@ -1389,6 +1389,12 @@ class BaseAgent(ABC):
             # Allow subclasses to configure context (set sp_id, direction_id, etc.)
             self._configure_context(ctx)
 
+            # Record the log location now, not at the end: the dashboard reads the
+            # transcript through it while the agent runs, and an agent that fails
+            # or is killed never reaches the end.
+            if self._log_file:
+                ctx.set_log_path(str(self._log_file))
+
             # Update LLMClient with agent_id for call tracking
             self.llm_client.agent_id = agent_id
 
@@ -1456,8 +1462,6 @@ class BaseAgent(ABC):
                     "iterations": self.total_iterations,
                     "tool_calls": self.total_tool_calls,
                 }
-                if self._log_file:
-                    ctx.log_path = str(self._log_file)
 
             except Exception as e:
                 self._log(f"Agent run failed: {e}", level="ERROR")

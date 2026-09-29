@@ -614,6 +614,10 @@ Your PoC must:
         while iteration < self.max_iterations:
             iteration += 1
             self.total_iterations += 1
+            # Persisted per iteration like the base loop does; this loop bypasses it,
+            # so the dashboard showed every POV agent at iteration 0.
+            if self._context:
+                self._context.increment_iteration()
 
             # Update iteration in POV context (use unique ObjectId for thread-safety)
             update_pov_iteration(iteration, worker_id=self.mcp_context_id)

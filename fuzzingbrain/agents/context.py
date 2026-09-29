@@ -326,6 +326,16 @@ class AgentContext:
         self.seeds_generated = count
         self._mark_dirty_and_maybe_save()
 
+    def set_log_path(self, log_path: str) -> None:
+        """Record where this agent's log (and its .conversation.json) lives.
+
+        Persisted at once, while the agent is still running: the dashboard finds
+        the transcript through this field, so setting it only when the run ended
+        hid every long-running, failed or killed agent's transcript.
+        """
+        self.log_path = log_path
+        self._save_to_db(force=True)
+
     def set_pov_progress(self, iteration: int, attempt: int) -> None:
         """Update POV progress and persist."""
         self.pov_iteration = iteration
