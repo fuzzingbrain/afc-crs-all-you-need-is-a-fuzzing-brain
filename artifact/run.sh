@@ -6,6 +6,7 @@
 #   artifact/run.sh --dry-run <task>          resolve + check paths, don't run
 #   BUDGET=20 CONCURRENCY=1 artifact/run.sh <task>   override the paper setting
 #   FORCE_MODEL=gpt-4.1 artifact/run.sh <task>       every agent role on one model
+#   MODELS=poc=gpt-4.1 artifact/run.sh <task>        per-role model override on the profile
 #   POV_COUNT=4 artifact/run.sh <task>               stop after N distinct bugs (0 = never)
 #   EVAL_PORT=18080 (default)                         eval server the run reports to
 #
@@ -17,8 +18,10 @@ set -euo pipefail
 ART="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FB_ROOT="$(dirname "$ART")"
 DRY=0
-[ "${1:-}" = "--dry-run" ] && { DRY=1; shift; }
-TASK="${1:?usage: run.sh [--dry-run] <task.json relative to artifact/>}"
+ARGS=()
+for a in "$@"; do [ "$a" = "--dry-run" ] && DRY=1 || ARGS+=("$a"); done
+[ "${#ARGS[@]}" -eq 1 ] || { echo "usage: run.sh [--dry-run] <task.json relative to artifact/>" >&2; exit 2; }
+TASK="${ARGS[0]}"
 [ -f "$TASK" ] || TASK="$ART/$TASK"
 [ -f "$TASK" ] || { echo "no such task: $1" >&2; exit 1; }
 
@@ -48,6 +51,9 @@ if os.environ.get("CONCURRENCY"):
     t["concurrency"] = int(os.environ["CONCURRENCY"])
 if os.environ.get("FORCE_MODEL"):
     t["force_model"] = os.environ["FORCE_MODEL"]
+if os.environ.get("MODELS"):
+    # per-role override on top of the profile, e.g. MODELS=poc=gpt-4.1,verifier=o3
+    t["models"] = {**(t.get("models") or {}), **dict(kv.split("=", 1) for kv in os.environ["MODELS"].split(",") if kv)}
 if os.environ.get("POV_COUNT"):
     t["pov_count"] = int(os.environ["POV_COUNT"])
 bad = []
@@ -63,7 +69,7 @@ for h, srcs in t.get("fuzzer_sources", {}).items():
 if bad:
     sys.exit("MISSING:\n  " + "\n  ".join(bad))
 json.dump(t, open(os.path.join(run_dir, "task.json"), "w"), indent=2)
-print(f"resolved -> {run_dir}/task.json (budget={t.get('budget_limit')} concurrency={t.get('concurrency')} force_model={t.get('force_model')} pov_count={t.get('pov_count')})")
+print(f"resolved -> {run_dir}/task.json (budget={t.get('budget_limit')} concurrency={t.get('concurrency')} force_model={t.get('force_model')} pov_count={t.get('pov_count')} models={t.get('models')})")
 PY
 
 if grep -q '"in_place": true' "$RUN_DIR/task.json"; then

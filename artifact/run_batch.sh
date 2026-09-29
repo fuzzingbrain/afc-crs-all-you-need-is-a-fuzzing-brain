@@ -11,6 +11,7 @@
 #   BUDGET       default: each task file's paper budget (delta $30, full $100); a number overrides
 #   CONCURRENCY  default 5
 #   FORCE_MODEL  unset = the task's model_profile (period-correct: gpt-4.1 + o3)
+#   MODELS       per-role override on the profile, e.g. MODELS=poc=gpt-4.1
 #   POV_COUNT    unset = the task's pov_count
 #   MIN_FREE_GB  wait for this much MemAvailable before starting a task (default 16)
 #   TIMEOUT_MARGIN_MIN  hard kill this long after the task's own timeout (default 20)
@@ -30,6 +31,7 @@ MIN_FREE_GB="${MIN_FREE_GB:-16}"
 MARGIN="${TIMEOUT_MARGIN_MIN:-20}"
 NAME="$(basename "$LIST" .txt)"
 OUT="${BATCH_DIR:-$FB_ROOT/workspace/batches/${NAME}_$(date +%Y%m%d_%H%M%S)}"
+[ "${DRY_RUN:-0}" = 1 ] && OUT="$(mktemp -d)"   # a plan check leaves nothing behind
 mkdir -p "$OUT"
 RESULTS="$OUT/results.tsv"
 [ -f "$RESULTS" ] || printf "task\tcpvs\ttask_id\texit\treason\tcost\tminutes\tdistinct_bugs\tbugs\n" > "$RESULTS"
@@ -60,7 +62,7 @@ PY
 )" || { echo "$PLAN" >&2; exit 1; }
 
 N="$(printf '%s\n' "$PLAN" | wc -l)"
-log "batch $NAME: $N tasks -> $OUT (budget=${BUDGET:-task} concurrency=$CONCURRENCY force_model=${FORCE_MODEL:-profile} pov_count=${POV_COUNT:-task})"
+log "batch $NAME: $N tasks -> $OUT (budget=${BUDGET:-task} concurrency=$CONCURRENCY force_model=${FORCE_MODEL:-profile} models=${MODELS:-profile} pov_count=${POV_COUNT:-task})"
 
 if [ "${DRY_RUN:-0}" = 1 ]; then
   i=0
