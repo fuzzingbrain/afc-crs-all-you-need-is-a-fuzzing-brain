@@ -227,6 +227,14 @@ def command_output(observation: str) -> str:
     return observation or ""
 
 
+def gdb_offered(environ=None) -> bool:
+    """Whether the bench offered gdb in this episode, read off the system
+    prompt it hands the agent. Outside the bench (no prompt), assume it did."""
+    import os
+    prompt = (environ if environ is not None else os.environ).get("FBBENCH_SYSTEM_PROMPT")
+    return True if prompt is None else "`gdb`" in prompt
+
+
 class Coach:
     """Tracks what the run has banked and what it is neglecting."""
 
@@ -255,6 +263,11 @@ class Coach:
     MIN_SECONDS_LEFT = 300       # ... and this much clock, so it can act on it
 
     def __init__(self, turn_limit: int, wall_limit_s: int, workspace=None):
+        # Name gdb only when the bench offered it. The bench's own system
+        # prompt says so (its tools note); a run with --no-gdb, and every JVM
+        # challenge, offers none, and a hint pointing at a debugger the model
+        # cannot run costs it turns.
+        self.gdb = gdb_offered()
         self.turn_limit = turn_limit
         self.wall_limit_s = wall_limit_s
         self.banked: list[str] = []
@@ -397,14 +410,17 @@ class Coach:
         if _GATE.search(output or ""):
             self.gated += 1
             if self.gated < self.GATE_ESCALATE:
+                how = ("gdb is available here: break on the first library "
+                       "function you expect to reach and see whether you get "
+                       "there." if self.gdb else
+                       "Run the coverage command from your instructions on it "
+                       "and see whether the first library function you expect "
+                       "to reach shows up.")
                 notes.append(
                     "[gate] the harness threw that input out before the library "
                     "saw it -- it ran for no measurable time. Nothing about its "
                     "contents matters yet: re-read the entry checks in the "
-                    "harness and work out which one you are failing. gdb is on "
-                    "PATH on every challenge; break on the first library "
-                    "function you expect to reach and see whether you get "
-                    "there.")
+                    "harness and work out which one you are failing. " + how)
             else:
                 # Escalation, because the gentle version was not working: on
                 # one run all 25 graded candidates were rejected here, and

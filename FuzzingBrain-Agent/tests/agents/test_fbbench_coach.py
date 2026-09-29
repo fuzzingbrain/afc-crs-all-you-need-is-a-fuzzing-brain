@@ -579,3 +579,25 @@ def test_coverage_is_asked_as_a_corpus_and_reads_cpp_names():
         "COVERED_FUNC: hits: 1 edges: 2/7 LLVMFuzzerTestOneInput /src/harness/harness.cc:16\n")
     assert covered == {"ots::OTSContext::Message", "LLVMFuzzerTestOneInput"}
     assert entry is True
+
+
+def test_the_gate_hint_offers_gdb_only_when_the_bench_did(monkeypatch):
+    """A run with --no-gdb, or a JVM challenge, has no gdb in the bench's
+    tools note; the coach must not send the model after one."""
+    from minisweagent.agents.fbbench_coach import gdb_offered
+    with_gdb = "...\n- You also have `gdb` and a readable copy of that binary, at /x: ..."
+    without = "...\n- You also have a readable copy of that binary, at /x: ..."
+    assert gdb_offered({"FBBENCH_SYSTEM_PROMPT": with_gdb})
+    assert not gdb_offered({"FBBENCH_SYSTEM_PROMPT": without})
+    assert gdb_offered({})                     # outside the bench: unchanged
+
+    monkeypatch.setenv("FBBENCH_SYSTEM_PROMPT", without)
+    notes = "\n".join(Coach(turn_limit=100, wall_limit_s=1800)
+                      .observe("run_poc_on_harness(/workspace/c1)", _gate(), 5, 40))
+    assert "threw that input out" in notes and "gdb" not in notes
+    assert "coverage command" in notes
+
+    monkeypatch.setenv("FBBENCH_SYSTEM_PROMPT", with_gdb)
+    notes = "\n".join(Coach(turn_limit=100, wall_limit_s=1800)
+                      .observe("run_poc_on_harness(/workspace/c1)", _gate(), 5, 40))
+    assert "gdb is available here" in notes
