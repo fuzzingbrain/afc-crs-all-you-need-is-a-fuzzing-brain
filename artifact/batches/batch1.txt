@@ -13,8 +13,8 @@ mg1-del-01
 mg2-del-02
 fp3-del-03
 # full
-cm1-fu-01
-cm1-fu-02
+# cm1-fu-01   (not in this run)
+# cm1-fu-02   (not in this run)
 mg1-fu-00
 ss1-fu-00
 ss1-fu-01

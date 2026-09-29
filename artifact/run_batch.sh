@@ -8,7 +8,7 @@
 #
 # The list holds CPV ids (artifact/aixcc/index.json); CPVs sharing a task run once.
 # Settings (env, passed through to run.sh):
-#   BUDGET       default 20; BUDGET=task keeps each task file's paper budget
+#   BUDGET       default: each task file's paper budget (delta $30, full $100); a number overrides
 #   CONCURRENCY  default 5
 #   FORCE_MODEL  unset = the task's model_profile (period-correct: gpt-4.1 + o3)
 #   POV_COUNT    unset = the task's pov_count
@@ -24,7 +24,7 @@ LIST="${1:?usage: run_batch.sh <list of CPV ids>}"
 [ -f "$LIST" ] || { echo "no such list: $LIST" >&2; exit 1; }
 
 export CONCURRENCY="${CONCURRENCY:-5}"
-BUDGET="${BUDGET:-20}"
+BUDGET="${BUDGET:-task}"
 if [ "$BUDGET" = task ]; then unset BUDGET; else export BUDGET; fi
 MIN_FREE_GB="${MIN_FREE_GB:-16}"
 MARGIN="${TIMEOUT_MARGIN_MIN:-20}"
