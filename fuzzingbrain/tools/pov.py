@@ -15,6 +15,7 @@ Context isolation:
 
 import base64
 import os
+import re
 import threading
 import uuid
 from contextvars import ContextVar
@@ -369,13 +370,45 @@ def _duplicate_signature(ctx, output: str, fuzzer: str):
             if getattr(prior, "signature", "") == sig.short:
                 return {
                     "signature": sig.short,
+                    "key": sig.key,
                     "describe": sig.describe(),
                     "first_pov_id": str(getattr(prior, "pov_id", "")),
+                    "found_by": getattr(prior, "source", "") or "agent",
                 }
         return None
     except Exception as e:
         logger.debug(f"[POV] Could not check for duplicate signature: {e}")
         return None
+
+
+# Who holds a crash already on record, in the words the agent is told.
+_FOUND_BY = {
+    "global_fuzzer": "the fuzzer",
+    "sp_fuzzer": "the fuzzer",
+    "agent": "a PoV agent (you or another one)",
+}
+
+# The first line of a sanitizer / libFuzzer report in a run's output.
+_REPORT_START = re.compile(
+    r"^.*(?:==\d+==\s*(?:ERROR|WARNING):|runtime error:|deadly signal"
+    r"|DEADLYSIGNAL|SEGV on unknown address|assertion failed).*$",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+
+def _output_excerpt(output: str, limit: int = 1500) -> str:
+    """Raw output of a crashing run, for the agent.
+
+    From the sanitizer report's first line -- the class, the faulting frame and
+    the stack are what tell the agent which bug it hit. If no report line is
+    recognised, the tail of the run, where libFuzzer's crash lines are.
+    """
+    if not output:
+        return ""
+    m = _REPORT_START.search(output)
+    if m:
+        return output[m.start() : m.start() + limit]
+    return output[-limit:]
 
 def create_pov_impl(generator_code: str, worker_id: str = None) -> Dict[str, Any]:
     """
@@ -987,12 +1020,22 @@ def _create_pov_core(
     # Auto-verify all generated POVs
     verify_results = []
     successful_povs = []
+    duplicate_povs = []
     cross_fuzzer_hits = 0
 
     for pov_id in pov_ids:
         # First verify on current fuzzer
         result = _verify_pov_core(pov_id=pov_id, worker_id=ctx_worker_id)
         verify_results.append(result)
+        if result.get("duplicate"):
+            # It crashed, but into a bug already on record: not a finding, so
+            # not a success -- and not copied to the other fuzzers below, where
+            # the copies would be saved as successful and counted as new bugs.
+            duplicate_povs.append(pov_id)
+            logger.info(
+                f"[POV] = POV {pov_id[:8]} crashed into a known bug on {current_fuzzer_name}"
+            )
+            continue
         if result.get("crashed"):
             successful_povs.append(pov_id)
             logger.info(
@@ -1051,29 +1094,45 @@ def _create_pov_core(
     # Return results with verification info
     # Extract key info from verify_results for Agent feedback
     verify_details = []
+    duplicate_message = ""
     for i, result in enumerate(verify_results):
         detail = {
             "variant": i + 1,
             "crashed": result.get("crashed", False),
         }
-        if result.get("crashed"):
+        # A crash (new or duplicate) carries its signature and raw sanitizer
+        # report; a clean run only the summary.
+        if result.get("duplicate"):
+            detail["duplicate"] = True
             detail["vuln_type"] = result.get("vuln_type")
+            detail["signature"] = result.get("signature", "")
+            detail["output_excerpt"] = result.get("output_excerpt", "")
+            duplicate_message = duplicate_message or result.get("message", "")
+        elif result.get("crashed"):
+            detail["vuln_type"] = result.get("vuln_type")
+            detail["signature"] = result.get("signature", "")
+            detail["output_excerpt"] = result.get("output_excerpt", "")
         else:
             # Include LLM-generated summary for non-crash cases
             detail["output_summary"] = result.get("output_summary", "No details")
         verify_details.append(detail)
 
-    return {
+    out = {
         "success": True,
         "pov_ids": pov_ids,
         "attempt": current_attempt,
         "count": len(pov_ids),
         "verified": len(verify_results),
+        # New findings only; a crash into a known bug is counted under duplicates.
         "crashed": len(successful_povs),
+        "duplicates": len(duplicate_povs),
         "cross_fuzzer_hits": cross_fuzzer_hits,
         "successful_pov_ids": successful_povs,
         "verify_details": verify_details,
     }
+    if duplicate_message:
+        out["duplicate_message"] = duplicate_message
+    return out
 
 
 @tools_mcp.tool
@@ -1119,8 +1178,10 @@ def create_pov(
             "pov_ids": ["id1", "id2", "id3"],  # 3 POV IDs for verification
             "attempt": N,
             "count": 3,
-            "crashed": 0,  # Number that triggered crash
+            "crashed": 0,  # Number that triggered a NEW crash
+            "duplicates": 0,  # Number that crashed into an already-found bug
             "successful_pov_ids": [],  # IDs of successful POVs
+            "verify_details": [...],  # per variant: signature, output_excerpt
         }
     """
     err = _ensure_context()
@@ -1648,24 +1709,28 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
                 )
             except Exception as e:
                 logger.debug(f"[POV] Could not record duplicate: {e}")
+            who = _FOUND_BY.get(dup["found_by"], dup["found_by"])
             return {
                 "success": False,
                 "crashed": True,
                 "duplicate": True,
-                "signature": dup["signature"],
+                # The readable key, not the stored hash: the agent has to see
+                # which class and which frames make this crash the known one.
+                "signature": dup["key"],
+                "found_by": dup["found_by"],
                 "vuln_type": vuln_type,
                 "message": (
-                    "DUPLICATE FOUND. This crash has already been found -- by "
-                    f"you or by another agent. It is {dup['describe']} "
-                    f"(signature {dup['signature']}), and a report for it "
-                    "already exists.\n\n"
-                    "Do not submit this input again. To find something new, "
-                    "produce a PoC that crashes with a DIFFERENT signature: a "
-                    "different sanitizer class, or a fault in a different "
-                    "function. Look at another suspicious point, another code "
-                    "path, or another part of the input format."
+                    f"DUPLICATE. This crash has already been found by {who}: "
+                    f"{dup['describe']} (signature {dup['key']}). It is not a "
+                    "new finding.\n\n"
+                    "Do not submit this input again -- try something else. A "
+                    "new finding must crash with a DIFFERENT signature: a "
+                    "different sanitizer error, or a fault at a different "
+                    "location. Compare the sanitizer output below with the "
+                    "vulnerability you are targeting."
                 ),
                 "sanitizer_output": output[:3000],
+                "output_excerpt": _output_excerpt(output),
             }
 
         # Prepare POV data for packaging (BEFORE saving is_successful=True)
@@ -1739,13 +1804,16 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
         pov.verified_at = datetime.now()
         repos.povs.save(pov)
 
-    # Return minimal info - LLM mainly needs crash status and vuln_type
+    # A crash comes back with its raw report (excerpted), not only a verdict. A
+    # clean run does not: its output is noise, and the summary covers it.
     if crashed:
         return {
             "success": True,
             "crashed": True,
             "vuln_type": vuln_type,
+            "signature": _sig.key if _sig else "",
             "summary": f"CRASH DETECTED: {vuln_type}",
+            "output_excerpt": _output_excerpt(output),
         }
     else:
         # For non-crash, extract meaningful info using fast LLM

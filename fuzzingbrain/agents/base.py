@@ -613,6 +613,17 @@ class BaseAgent(ABC):
                 facts.append(
                     ("pov:closest", f"create_pov not-crashed asan_margin={data.get('asan_margin')}")
                 )
+            # Crashes into already-found bugs: one fact per signature, so the agent
+            # still knows what not to resubmit after the result itself is evicted.
+            for d in data.get("verify_details") or []:
+                if isinstance(d, dict) and d.get("duplicate") and d.get("signature"):
+                    facts.append(
+                        (
+                            f"pov:dup:{d['signature'][:80]}",
+                            "create_pov crashed into an ALREADY-FOUND bug "
+                            f"(duplicate, does not count): {d['signature']}",
+                        )
+                    )
         return facts
 
     def _sync_ledger_message(self) -> None:

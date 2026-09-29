@@ -197,6 +197,8 @@ class POVAgent(BaseAgent):
         self.pov_attempts = 0
         self.successful_pov_id: Optional[str] = None
         self.pov_success = False
+        # create_pov batches whose only crashes were already-found bugs
+        self.duplicate_hits = 0
 
     @property
     def agent_name(self) -> str:
@@ -771,7 +773,48 @@ Your PoC must:
                     if tool_name == "create_pov":
                         try:
                             result = json.loads(tool_result)
-                            if result.get("success") and not result.get("crashed"):
+                            if (
+                                result.get("success")
+                                and not result.get("crashed")
+                                and result.get("duplicates")
+                            ):
+                                # Crashed, but only into bugs already on record
+                                # (by the fuzzer or an agent). Not a success; say
+                                # so every time and keep the agent going.
+                                self.duplicate_hits += 1
+                                known = sorted(
+                                    {
+                                        d.get("signature", "")
+                                        for d in result.get("verify_details") or []
+                                        if d.get("duplicate")
+                                    }
+                                    - {""}
+                                )
+                                self.messages.append(
+                                    {
+                                        "role": "user",
+                                        "content": (
+                                            "Your input crashed, but the crash is a DUPLICATE: "
+                                            "it has already been found. It does not count and "
+                                            "does not finish your task.\n\n"
+                                            + (result.get("duplicate_message") or "")
+                                            + "\n\nAlready-found signature(s):\n"
+                                            + "\n".join(f"- {s}" for s in known)
+                                            + "\n\nTry something else: build an input whose "
+                                            "crash has a DIFFERENT signature. Read the "
+                                            "output_excerpt of each variant to see where it "
+                                            "crashed, and compare that with the vulnerability "
+                                            "described in your suspicious point."
+                                        ),
+                                        "iteration": f"{iteration}/{self.max_iterations}",
+                                        "pov_attempt": f"{self.pov_attempts}/{self.max_pov_attempts}",
+                                    }
+                                )
+                                self._log(
+                                    f"Duplicate crash #{self.duplicate_hits}: {known}",
+                                    level="INFO",
+                                )
+                            elif result.get("success") and not result.get("crashed"):
                                 details = result.get("verify_details") or []
                                 hint = "; ".join(
                                     d.get("output_summary", "")
@@ -932,6 +975,7 @@ Call create_pov (or reach_probe to diagnose) with NEW generator code NOW — eve
         self.pov_attempts = 0
         self.successful_pov_id = None
         self.pov_success = False
+        self.duplicate_hits = 0
 
         # The POV context is registered in _configure_context, which run_async
         # calls once it has minted the agent_id the MCP tools query by.
