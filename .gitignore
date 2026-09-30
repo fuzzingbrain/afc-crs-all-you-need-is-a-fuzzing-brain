@@ -66,3 +66,6 @@ fuzzingbrain/dashboard
 examples/aixcc-challenges/**/mongodb/
 examples/aixcc-challenges/**/bugs/*/bin/
 dynamic-analysis/
+
+# Experiments: data, runs and one-off scripts, kept out of git
+experiments/
