@@ -110,6 +110,7 @@ class FuzzerManager:
         # Seed tracking
         self.direction_seeds: List[SeedInfo] = []
         self.fp_seeds: List[SeedInfo] = []
+        self.probe_seeds: List[SeedInfo] = []
 
         # The task's allowance of concurrent fuzzers, shared with every other
         # worker through Redis. Slot names carry the worker id because every
@@ -311,6 +312,56 @@ class FuzzerManager:
         logger.debug(
             f"[FuzzerManager:{self.worker_id}] Added FP seed: "
             f"sp={sp_id[:8]}, size={len(seed)}"
+        )
+        return seed_path
+
+    def add_probe_seed(self, seed: bytes, sp_id: str, to_sp_fuzzer: bool) -> Path:
+        """
+        Add an input an agent built with reach_probe / check_clamp.
+
+        A probe input is aimed at one SP and often reaches it, which makes it a
+        good seed. `to_sp_fuzzer` puts it in that SP's fuzzer corpus (a PoV agent's
+        probe, next to its create_pov variants); otherwise in the Global corpus (a
+        verifier's probe: the SP fuzzer does not exist yet at verification time).
+        A fuzzer that is not running yet picks the file up from its corpus
+        directory when it starts.
+
+        Args:
+            seed: Raw input bytes
+            sp_id: SP the probe was aimed at
+            to_sp_fuzzer: SP fuzzer corpus instead of the Global one
+
+        Returns:
+            Path to saved seed file
+        """
+        seed_hash = hashlib.sha1(seed).hexdigest()
+        name = f"probe_{sp_id[:8]}_{seed_hash[:8]}"
+        if to_sp_fuzzer:
+            if sp_id in self.sp_fuzzers:
+                seed_path = self.sp_fuzzers[sp_id].add_seed(seed, name)
+            else:
+                sp_corpus_dir = self.sp_base_dir / sp_id / "corpus"
+                sp_corpus_dir.mkdir(parents=True, exist_ok=True)
+                seed_path = sp_corpus_dir / name
+                seed_path.write_bytes(seed)
+        elif self.global_fuzzer:
+            seed_path = self.global_fuzzer.add_seed(seed, name)
+        else:
+            seed_path = self.global_corpus_dir / name
+            seed_path.write_bytes(seed)
+
+        self.probe_seeds.append(
+            SeedInfo(
+                seed_path=str(seed_path),
+                seed_hash=seed_hash,
+                seed_size=len(seed),
+                source="probe",
+                sp_id=sp_id,
+            )
+        )
+        logger.debug(
+            f"[FuzzerManager:{self.worker_id}] Added probe seed: sp={sp_id[:8]}, "
+            f"{'SP' if to_sp_fuzzer else 'Global'} corpus, size={len(seed)}"
         )
         return seed_path
 
@@ -555,6 +606,7 @@ class FuzzerManager:
             "seed_counts": {
                 "direction_seeds": len(self.direction_seeds),
                 "fp_seeds": len(self.fp_seeds),
+                "probe_seeds": len(self.probe_seeds),
             },
         }
 
