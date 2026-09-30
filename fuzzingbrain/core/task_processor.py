@@ -1049,6 +1049,12 @@ class TaskProcessor:
                         logger.info(
                             f"Task completed: POV target reached ({result.get('pov_count', 0)} POVs)"
                         )
+                    elif result["status"] == "all_agents_finished":
+                        task.mark_completed()
+                        logger.info(
+                            f"Task completed: all agents finished, no fuzzers "
+                            f"({result.get('pov_count', 0)} POVs)"
+                        )
                     elif result["status"] == "budget_exceeded":
                         task.mark_error(result.get("error", "Budget limit exceeded"))
                         logger.warning(

@@ -26,6 +26,7 @@ from typing import Any, Dict, Optional
 from loguru import logger
 
 from ..agents import SPVerifier, POVAgent
+from ..core.ablation import no_fuzzers
 from ..core.models import SPStatus
 from ..db import RepositoryManager
 from ..tools.analyzer import set_analyzer_context
@@ -217,6 +218,36 @@ class AgentPipeline:
         logger.info("[Pipeline] Shutdown requested")
         self._shutdown = True
 
+    # Idle polls before a drained queue counts as final (no-fuzzer ablation).
+    DRAINED_IDLE_CYCLES = 5
+
+    def _drained(self, agent_id: str, idle_cycles: int, pov_side: bool) -> bool:
+        """No-fuzzer ablation: whether this agent's work is over for good.
+
+        Only with FB_ABLATE_NO_FUZZERS, after SP finding is done, and after a few
+        idle polls. A verify agent is done when nothing waits for or is under
+        verification. A PoV agent is additionally done only when no SP is left
+        that this worker could claim or is still working on -- a verification
+        in progress can still raise one. An unreadable database is never drained.
+        """
+        if not (no_fuzzers() and self._sp_finding_done):
+            return False
+        if idle_cycles < self.DRAINED_IDLE_CYCLES:
+            return False
+        to_verify, to_pov = self.repos.suspicious_points.count_outstanding(
+            self.task_id,
+            self.fuzzer,
+            self.sanitizer,
+            self.config.pov_min_score,
+        )
+        if to_verify != 0 or (pov_side and to_pov != 0):
+            return False
+        logger.info(
+            f"[Pipeline:{agent_id}] No fuzzers and no work left "
+            f"(to verify={to_verify}, to PoV={to_pov}); agent exiting"
+        )
+        return True
+
     async def _run_verify_agent(self, agent_id: str):
         """
         Run a verification agent loop.
@@ -263,6 +294,11 @@ class AgentPipeline:
                 # clock or the budget ends the task, so late SPs -- e.g. ones
                 # raised from fuzzer-found crashes -- still get verified/attempted.
                 idle_cycles += 1
+
+                # Without fuzzers nothing raises an SP once the finder is done,
+                # so a drained queue is final: exit and let the task end.
+                if self._drained(agent_id, idle_cycles, pov_side=False):
+                    break
 
                 # Log status periodically
                 if idle_cycles % 30 == 0:
@@ -445,6 +481,10 @@ class AgentPipeline:
                 # verification or a fuzzer-found crash) is still attempted instead
                 # of the whole agent phase dying the moment the first scan drains.
                 idle_cycles += 1
+
+                # Without fuzzers: see _run_verify_agent.
+                if self._drained(agent_id, idle_cycles, pov_side=True):
+                    break
 
                 # Log status periodically
                 if idle_cycles % 30 == 0:

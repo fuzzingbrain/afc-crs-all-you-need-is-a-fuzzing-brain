@@ -17,6 +17,7 @@ from typing import List, Dict, Any, Optional
 from bson import ObjectId
 
 from .logging import logger
+from .ablation import no_fuzzers
 from .config import Config
 from .docker_limits import docker_resource_args
 from .models import Task, Fuzzer, FuzzerStatus, Worker, WorkerStatus
@@ -1018,6 +1019,8 @@ def generate(variant: int = 1) -> bytes:
 
         Note: "All workers completed" does NOT end the task!
         Global Fuzzer continues running until one of the above conditions.
+        Exception: with FB_ABLATE_NO_FUZZERS there is no Global Fuzzer, so the
+        task ends ("all_agents_finished") once every worker has finished.
 
         Args:
             timeout_minutes: Maximum time to wait in minutes
@@ -1155,6 +1158,25 @@ def generate(variant: int = 1) -> bytes:
 
                     if on_progress:
                         on_progress(status)
+
+                # ================================================================
+                # Exit condition 4 (no-fuzzer ablation): all workers finished.
+                # Without fuzzers nothing runs once the agents are done, so
+                # waiting out the clock would only idle.
+                # ================================================================
+                if no_fuzzers() and self.is_complete():
+                    logger.info(
+                        f"All workers finished and no fuzzers are running "
+                        f"(FB_ABLATE_NO_FUZZERS); ending the task with "
+                        f"{current_pov_count} POV(s)"
+                    )
+                    self._stop_everything()
+                    return {
+                        "status": "all_agents_finished",
+                        "elapsed_minutes": elapsed.total_seconds() / 60,
+                        "pov_count": current_pov_count,
+                        **self.get_status(),
+                    }
 
                 # ================================================================
                 # All workers completed: Enter "Global Fuzzer Only" mode

@@ -465,6 +465,60 @@ class SuspiciousPointRepository(BaseRepository[SuspiciousPoint]):
             }
         )
 
+    def count_outstanding(
+        self,
+        task_id: str,
+        harness_name: str,
+        sanitizer: str,
+        min_score: float,
+    ) -> tuple:
+        """Work still open for one worker: (to verify, to PoV).
+
+        To verify: SPs pending or under verification. To PoV: SPs this worker
+        could still claim -- the same query as claim_for_pov, so a low-score or
+        already-attempted SP does not count -- plus SPs one of its agents is
+        working on now. Returns (-1, -1) when the database cannot be read, which
+        callers must treat as "not drained".
+        """
+        try:
+            from ..core.models import SPStatus
+
+            tid = ObjectId(task_id)
+            src = {"$elemMatch": {"harness_name": harness_name, "sanitizer": sanitizer}}
+            to_verify = self.collection.count_documents(
+                {
+                    "task_id": tid,
+                    "sources": src,
+                    "status": {
+                        "$in": [SPStatus.PENDING_VERIFY.value, SPStatus.VERIFYING.value]
+                    },
+                }
+            )
+            claimable = self.collection.count_documents(
+                {
+                    "task_id": tid,
+                    "sources": src,
+                    "status": {
+                        "$in": [SPStatus.PENDING_POV.value, SPStatus.GENERATING_POV.value]
+                    },
+                    "score": {"$gte": min_score},
+                    "pov_success_by": None,
+                    "pov_attempted_by": {"$not": src},
+                }
+            )
+            in_flight = self.collection.count_documents(
+                {
+                    "task_id": tid,
+                    "sources": src,
+                    "status": SPStatus.GENERATING_POV.value,
+                    "pov_attempted_by": src,
+                }
+            )
+            return to_verify, claimable + in_flight
+        except Exception as e:
+            logger.error(f"Failed to count outstanding SPs: {e}")
+            return -1, -1
+
     def count_by_status(
         self,
         task_id: str,

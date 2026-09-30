@@ -1091,6 +1091,10 @@ def create_final_summary(
         lines.append(
             "│" + "  Exit Reason:   POV target reached".ljust(table_width) + "│"
         )
+    elif exit_reason == "all_agents_finished":
+        lines.append(
+            "│" + "  Exit Reason:   All agents finished".ljust(table_width) + "│"
+        )
     elif exit_reason == "cancelled":
         lines.append(
             "│" + "  Exit Reason:   CANCELLED BY USER (Ctrl+C)".ljust(table_width) + "│"

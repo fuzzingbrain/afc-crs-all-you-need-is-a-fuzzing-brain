@@ -6,7 +6,6 @@ Dispatches work to the appropriate strategy based on job type.
 This is the main entry point for worker logic.
 """
 
-import os
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -14,6 +13,7 @@ from ..core import logger
 from ..db import RepositoryManager
 from ..analyzer import AnalysisClient
 from ..core.config import DEFAULT_MAX_PARALLEL_FUZZERS
+from ..core.ablation import no_fuzzers as _ablate_no_fuzzers
 from ..fuzzer import (
     FuzzerManager,
     register_fuzzer_manager,
@@ -43,16 +43,6 @@ def build_harness_source_blob(paths) -> str:
         except Exception:
             continue
     return "\n----\n".join(blocks)
-
-
-def _ablate_no_fuzzers() -> bool:
-    """Ablation: run without the Global and SP fuzzers (FB_ABLATE_NO_FUZZERS=1).
-
-    No FuzzerManager is created, so no fuzzer, crash monitor or fuzzer seeds
-    (delta / FP / direction seeds only feed the fuzzers); every PoV comes from
-    a PoV agent's create_pov. Off by default.
-    """
-    return os.environ.get("FB_ABLATE_NO_FUZZERS", "").lower() in ("1", "true", "yes")
 
 
 class WorkerExecutor:
