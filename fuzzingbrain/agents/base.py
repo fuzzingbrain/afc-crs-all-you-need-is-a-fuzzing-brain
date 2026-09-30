@@ -1473,6 +1473,10 @@ class BaseAgent(ABC):
 
         # Context exits here, automatically persisting to MongoDB
 
+        from ..tools.probe_corpus import clear_probe_sink
+
+        clear_probe_sink(agent_id)
+
         self.end_time = datetime.now()
         duration = (self.end_time - self.start_time).total_seconds()
 

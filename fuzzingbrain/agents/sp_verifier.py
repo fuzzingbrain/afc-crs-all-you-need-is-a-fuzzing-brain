@@ -273,6 +273,21 @@ class SPVerifier(BaseAgent):
 
         return "\n".join(lines)
 
+    def _configure_context(self, ctx) -> None:
+        """reach_probe / check_clamp inputs join the Global fuzzer corpus: the SP
+        fuzzer does not exist yet while the SP is being verified."""
+        if not self.suspicious_point:
+            return
+        from ..fuzzer import get_fuzzer_manager
+        from ..tools.probe_corpus import set_probe_sink
+
+        sp_id = self.suspicious_point.get(
+            "suspicious_point_id"
+        ) or self.suspicious_point.get("_id")
+        set_probe_sink(
+            ctx.agent_id, get_fuzzer_manager(self.worker_id), sp_id, to_sp_fuzzer=False
+        )
+
     def _get_agent_metadata(self) -> dict:
         """Get metadata for agent banner."""
         sp_id = ""

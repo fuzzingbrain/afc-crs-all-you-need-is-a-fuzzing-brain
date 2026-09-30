@@ -224,7 +224,7 @@ class SeedInfo:
     seed_path: str = ""
     seed_hash: str = ""
     seed_size: int = 0
-    source: str = ""  # "direction" | "fp" | "pov_blob"
+    source: str = ""  # "direction" | "fp" | "pov_blob" | "probe"
     direction_id: Optional[str] = None
     sp_id: Optional[str] = None
     created_at: datetime = field(default_factory=datetime.now)
