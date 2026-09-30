@@ -26,6 +26,7 @@ from typing import Any, Dict, Optional
 from loguru import logger
 
 from ..agents import SPVerifier, POVAgent
+from ..core.ablation import no_verifier
 from ..core.models import SPStatus
 from ..db import RepositoryManager
 from ..tools.analyzer import set_analyzer_context
@@ -140,6 +141,14 @@ class AgentPipeline:
         self.sanitizer = sanitizer
         self.scan_mode = scan_mode
         self.config = config or PipelineConfig()
+        if no_verifier():
+            # Without a verifier nothing screens SPs out, so no score floor
+            # either: every SP the finder records is attempted.
+            self.config.pov_min_score = 0.0
+            logger.info(
+                "[ABLATION] FB_ABLATE_NO_VERIFIER=ON: every SP goes straight to "
+                "PoV generation (no verification, no score floor)"
+            )
         self.output_dir = output_dir
         self.log_dir = log_dir
         self.workspace_path = workspace_path
@@ -287,6 +296,24 @@ class AgentPipeline:
             sp_start_time = time_module.time()
             claimed_sp_id = sp.suspicious_point_id
             try:
+                if no_verifier():
+                    # Hand the SP on untouched: the finder's score is kept and
+                    # orders the PoV queue; no evidence, notes or guidance.
+                    self.repos.suspicious_points.complete_verify(
+                        sp.suspicious_point_id,
+                        is_crash_found=False,
+                        score=sp.score,
+                        proceed=True,
+                        priority=sp.score,
+                        proceed_to_pov=True,
+                    )
+                    claimed_sp_id = None
+                    logger.info(
+                        f"[Pipeline:{agent_id}] [ABLATION no verifier] SP "
+                        f"{sp.suspicious_point_id} -> PoV (finder score {sp.score})"
+                    )
+                    continue
+
                 logger.info(
                     f"[Pipeline:{agent_id}] Verifying SP {sp.suspicious_point_id}"
                 )
