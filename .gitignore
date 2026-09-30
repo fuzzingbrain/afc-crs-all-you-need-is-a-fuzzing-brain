@@ -69,3 +69,8 @@ dynamic-analysis/
 
 # Experiments: data, runs and one-off scripts, kept out of git
 experiments/
+
+# FMS baseline: outputs, cache, and the verbatim upstream copy
+FMS/runs/
+FMS/cache/
+FMS/legacy/
