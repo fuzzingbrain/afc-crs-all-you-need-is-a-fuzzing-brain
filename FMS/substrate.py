@@ -84,6 +84,7 @@ class Task:
     graph_dir: Path          # .../mongodb with functions.json + callgraph.json
     harness_src: str         # concatenated fuzzer_sources
     focus: str               # project_src_dir basename stem = project
+    pov_count: int = 1        # distinct-bug target (stop rule), from the task
 
     @classmethod
     def load(cls, task_json: str | Path) -> "Task":
@@ -107,6 +108,7 @@ class Task:
             graph_dir=Path(t["prebuild_dir"]) / "mongodb",
             harness_src=harness,
             focus=t["project_name"],
+            pov_count=int(t.get("pov_count", 1) or 1),
         )
 
     def diff(self) -> str:
@@ -282,3 +284,128 @@ def bind_legacy(llm: LLM, log: Callable[[str], None]) -> None:
     import FMS.legacy_funcs as L
     L._LLM = lambda messages, model: llm(messages, model)
     L._LOG = log
+
+
+# --------------------------------------------------------------------------- #
+# Background fuzzer (the legacy parallel libFuzzer path)
+# --------------------------------------------------------------------------- #
+class BackgroundFuzzer:
+    """A libFuzzer campaign on the prebuilt binary, run alongside the strategy.
+
+    Mirrors the legacy CRS's parallel libFuzzer that consumed the seed corpus the
+    strategies dropped into ``<fuzzer>_seed_corpus``. Same Docker plumbing and
+    crash indicators as run_blob. Crashes are picked up by a poller thread, each
+    re-run once to capture a clean sanitizer report, and recorded as fuzzer PoVs.
+    """
+
+    def __init__(self, task: "Task", corpus_dir: Path, out_dir: Path,
+                 log: Callable[[str], None]):
+        self.task = task
+        self.corpus = corpus_dir
+        self.crashes = out_dir / "fuzzer_crashes"
+        self.out = out_dir
+        self.log = log
+        self.corpus.mkdir(parents=True, exist_ok=True)
+        self.crashes.mkdir(parents=True, exist_ok=True)
+        self.proc: Optional[subprocess.Popen] = None
+        self.name = f"fms_fuzz_{uuid.uuid4().hex[:8]}"
+        self._seen: set[str] = set()
+        self._stop = False
+        self._thread = None
+        self.povs: list[dict] = []
+        self._sigs: set[str] = set()
+
+    def _cmd(self) -> list[str]:
+        fuzzer_dir = self.task.fuzzer_path.parent
+        no_oom = is_no_oom(self.task.fuzzer)
+        mem = NO_OOM_MEMORY_MB if no_oom else 4096
+        vendor_args, ld = run_lib_docker_args(fuzzer_dir, "/fuzzers")
+        return [
+            "docker", "run", "--rm", "--name", self.name,
+            "--platform", "linux/amd64",
+            *docker_resource_args(memory_mb=mem, cpus=6),
+            "-e", "FUZZING_ENGINE=libfuzzer",
+            "-e", f"SANITIZER={self.task.sanitizer}",
+            "-e", "ARCHITECTURE=x86_64",
+            "-e", f"PROJECT_NAME={self.task.project}",
+            "-e", "ASAN_OPTIONS=detect_leaks=0",
+            *(["-e", f"LD_LIBRARY_PATH={ld}"] if ld else []),
+            *vendor_args,
+            "-v", f"{fuzzer_dir}:/fuzzers:ro",
+            "-v", f"{self.corpus}:/corpus",
+            "-v", f"{self.crashes}:/crashes",
+            self.task.docker_image,
+            f"/fuzzers/{self.task.fuzzer}",
+            "/corpus", "-artifact_prefix=/crashes/",
+            "-fork=6", "-ignore_crashes=1",
+            *(libfuzzer_oom_flags(True) if no_oom else ["-rss_limit_mb=4096"]),
+            "-timeout=30",
+        ]
+
+    def start(self) -> None:
+        import threading
+        self.proc = subprocess.Popen(self._cmd(), stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
+        self.log(f"background fuzzer started ({self.name})")
+        self._thread = threading.Thread(target=self._poll, daemon=True)
+        self._thread.start()
+
+    def _poll(self) -> None:
+        while not self._stop:
+            try:
+                for f in sorted(self.crashes.iterdir()):
+                    if not f.is_file() or f.name in self._seen:
+                        continue
+                    self._seen.add(f.name)
+                    crashed, out = run_blob(self.task, str(f), self.log)
+                    if not crashed:
+                        continue
+                    self._record(f, out)
+            except Exception:  # noqa: BLE001
+                pass
+            time.sleep(10)
+
+    def _record(self, crash_file: Path, out: str) -> None:
+        import FMS.legacy_funcs as L
+        crash = L.extract_crash_output(out)
+        loc = _crash_site(crash)
+        if loc in self._sigs:
+            return
+        self._sigs.add(loc)
+        d = self.out / "successful_povs"
+        d.mkdir(parents=True, exist_ok=True)
+        cid = uuid.uuid4().hex[:8]
+        (d / f"pov_{cid}_fuzzer.bin").write_bytes(crash_file.read_bytes())
+        (d / f"fuzzer_output_{cid}_fuzzer.txt").write_text(crash)
+        meta = {"source": "fuzzer", "fuzzer_name": self.task.fuzzer,
+                "sanitizer": self.task.sanitizer, "project_name": self.task.project,
+                "site": loc}
+        (d / f"pov_metadata_{cid}_fuzzer.json").write_text(json.dumps(meta, indent=2))
+        self.povs.append(meta)
+        self.log(f"FUZZER POV {loc}")
+
+    def stop(self) -> None:
+        self._stop = True
+        try:
+            subprocess.run(["docker", "kill", self.name],
+                          capture_output=True, timeout=30)
+        except Exception:  # noqa: BLE001
+            pass
+        if self.proc:
+            try:
+                self.proc.wait(timeout=10)
+            except Exception:  # noqa: BLE001
+                self.proc.kill()
+        if self._thread:
+            self._thread.join(timeout=5)
+
+
+def _crash_site(crash: str) -> str:
+    """A crude crash signature: sanitizer class + first project frame."""
+    import re
+    cls = ""
+    m = re.search(r"(?:ERROR|WARNING): \w*Sanitizer: ([a-z0-9-]+)", crash)
+    if m:
+        cls = m.group(1)
+    fr = re.search(r"#\d+ 0x[0-9a-f]+ in \S+ (/?[^\s:]+:\d+)", crash)
+    return f"{cls}@{fr.group(1).split('/')[-1]}" if fr else (cls or "unknown")

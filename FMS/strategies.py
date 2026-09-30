@@ -85,6 +85,10 @@ class Run:
         self.povs: list[dict] = []
         self.xp0 = out_dir / "xp0"
         self.xp0.mkdir(parents=True, exist_ok=True)
+        # Non-crashing blobs are dropped here for the background fuzzer to pick up
+        # (legacy <fuzzer>_seed_corpus). Set by run_delta / run_full.
+        self.corpus = out_dir / "corpus"
+        self.corpus.mkdir(parents=True, exist_ok=True)
 
     # ---- doPoV loop (legacy doPoV / doPoV_full) -------------------------- #
     def do_pov(self, initial_msg: str, max_iter: int) -> bool:
@@ -127,6 +131,11 @@ class Run:
                     if crashed:
                         self._save_pov(pov_id, model, it, code, blob, fout)
                         break
+                    # feed the non-crashing input to the background fuzzer
+                    try:
+                        (self.corpus / f"seed_{uuid.uuid4().hex[:8]}.bin").write_bytes(blob.read_bytes())
+                    except OSError:
+                        pass
                 if crashed:
                     found = True
                     model_success += 1
