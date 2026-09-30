@@ -343,6 +343,12 @@ class POVAgent(BaseAgent):
         # only point where the id the tools will query is knowable.
         self._setup_pov_context(ctx.agent_id)
 
+        # reach_probe / check_clamp inputs join this SP's fuzzer corpus.
+        if self.suspicious_point:
+            from ..tools.probe_corpus import set_probe_sink
+
+            set_probe_sink(ctx.agent_id, self.fuzzer_manager, ctx.sp_id, to_sp_fuzzer=True)
+
     @property
     def system_prompt(self) -> str:
         """Get system prompt with the full harness source appended (cached)."""

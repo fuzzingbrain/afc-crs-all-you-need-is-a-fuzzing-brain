@@ -111,7 +111,7 @@ def create_isolated_mcp_server(
         # Verify-stage dynamic reach-probe (independent of POV tools): the
         # SPVerifier gets execution evidence without a pre-existing PoV.
         if include_reach_probe_tools:
-            _register_reach_probe_tools(mcp)
+            _register_reach_probe_tools(mcp, worker_id=worker_id)
 
     return mcp
 
@@ -554,14 +554,18 @@ def _register_sp_read_update_tools(mcp: FastMCP) -> None:
         return get_suspicious_point_impl(suspicious_point_id)
 
 
-def _register_reach_probe_tools(mcp: FastMCP) -> None:
+def _register_reach_probe_tools(mcp: FastMCP, worker_id: str = None) -> None:
     """Register the verify-stage dynamic reach-probe tools (gdb-15 execution).
 
     The verifier does not have a PoV, so it authors a candidate input and runs
     it through the ASan binary under gdb to obtain execution FACTS (reach / crash
     / margin) that it cannot fabricate. These upgrade the PoV-queue ordering; they
     never floor a real SP (recall-first). A dynamically observed clamp is the one
-    execution fact that disconfirms."""
+    execution fact that disconfirms.
+
+    Each probe input is also kept as a fuzzer seed (tools/probe_corpus.py), looked
+    up by the agent id this server is bound to."""
+    bound_worker_id = worker_id
 
     @mcp.tool
     @async_tool
@@ -612,6 +616,7 @@ def _register_reach_probe_tools(mcp: FastMCP) -> None:
             operands=operands,
             sp_function=sp_function,
             sp_crash_type=sp_crash_type,
+            probe_agent_id=bound_worker_id,
         )
 
     @mcp.tool
@@ -645,6 +650,9 @@ def _register_reach_probe_tools(mcp: FastMCP) -> None:
         blobs, err = _execute_generator_code(generator_code or "", num_variants=1)
         if err or not blobs:
             return {"error": f"generator failed: {err or 'no bytes'}"}
+        from .probe_corpus import add_probe_input
+
+        add_probe_input(bound_worker_id, blobs[0], "check_clamp")
         from .gdb_trace import _argv_tmpl_for
         try:
             return _check_clamp(str(elf), _argv_tmpl_for(fuzzer_name), blobs[0],

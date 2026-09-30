@@ -402,10 +402,13 @@ def reach_probe(generator_code: str,
                 operands: Dict[str, str] = None,
                 sp_function: str = None,
                 sp_crash_type: str = None,
-                timeout: int = 150) -> Dict[str, Any]:
+                timeout: int = 150,
+                probe_agent_id: str = None) -> Dict[str, Any]:
     """Run one LLM-authored candidate input through the ASan fuzzer under gdb-15
     and return dynamic reach/crash/margin evidence. Context (ASan ELF, fuzzer
-    name, project, docker image) comes from the run's coverage/reach context."""
+    name, project, docker image) comes from the run's coverage/reach context.
+    The input is also kept as a fuzzer seed for `probe_agent_id`
+    (tools/probe_corpus.py)."""
     from .coverage import (get_reach_context, get_coverage_context,
                            get_asan_fuzzer_dir, get_docker_image)
     from .pov import _execute_generator_code
@@ -433,6 +436,9 @@ def reach_probe(generator_code: str,
     blobs, err = _execute_generator_code(generator_code or "", num_variants=1)
     if err or not blobs:
         return {"error": f"generator failed: {err or 'no bytes produced'}"}
+    from .probe_corpus import add_probe_input
+
+    add_probe_input(probe_agent_id, blobs[0], "reach_probe")
 
     _, no_oom, _ = parse_fuzzer_spec(fuzzer_name or "")
     mem = NO_OOM_MEMORY_MB if no_oom else 2048
