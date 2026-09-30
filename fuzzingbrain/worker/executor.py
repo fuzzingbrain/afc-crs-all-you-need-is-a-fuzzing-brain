@@ -6,6 +6,7 @@ Dispatches work to the appropriate strategy based on job type.
 This is the main entry point for worker logic.
 """
 
+import os
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -42,6 +43,16 @@ def build_harness_source_blob(paths) -> str:
         except Exception:
             continue
     return "\n----\n".join(blocks)
+
+
+def _ablate_no_fuzzers() -> bool:
+    """Ablation: run without the Global and SP fuzzers (FB_ABLATE_NO_FUZZERS=1).
+
+    No FuzzerManager is created, so no fuzzer, crash monitor or fuzzer seeds
+    (delta / FP / direction seeds only feed the fuzzers); every PoV comes from
+    a PoV agent's create_pov. Off by default.
+    """
+    return os.environ.get("FB_ABLATE_NO_FUZZERS", "").lower() in ("1", "true", "yes")
 
 
 class WorkerExecutor:
@@ -113,7 +124,12 @@ class WorkerExecutor:
         self.scan_mode = scan_mode
         self.log_dir = Path(log_dir) if log_dir else None
         self.docker_image = docker_image
-        self.enable_fuzzer_worker = enable_fuzzer_worker
+        self.enable_fuzzer_worker = enable_fuzzer_worker and not _ablate_no_fuzzers()
+        logger.info(
+            "[ABLATION] FB_ABLATE_NO_FUZZERS="
+            + ("ON: no Global / SP fuzzers, PoVs come from the agents only"
+               if _ablate_no_fuzzers() else "off")
+        )
         self.max_parallel_fuzzers = max_parallel_fuzzers
         self.sp_max_count = sp_max_count
         self.celery_job_id = celery_job_id
