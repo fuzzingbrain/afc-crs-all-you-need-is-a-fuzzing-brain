@@ -1,0 +1,44 @@
+# Ablation wo-fuzzers, full AIxCC set: 40 CPVs minus 4 that cannot be found by construction.
+# CPVs that share a task (ss1-fu-00..04 -> json_fuzz) are run once.
+# delta
+# av2-del-02   (excluded: mechanically unreachable)
+cu2-del-06
+cu3-del-07
+cu4-del-03
+cu4-del-08
+cu5-del-01
+cu5-del-02
+ex2-del-01
+ex3-del-02
+fp2-del-02
+fp3-del-03
+lx3-del-04
+mg1-del-01
+mg2-del-02
+ws1-del-03
+ws2-del-04
+ws3-del-06
+ws4-del-07
+ws5-del-08
+ws7-del-13
+# full
+# cm1-fu-01   (excluded: mechanically unreachable)
+# cm1-fu-02   (excluded: mechanically unreachable)
+da1-fu-01
+mg1-fu-00
+sd1-fu-01
+sd1-fu-03
+sd1-fu-04
+# sd1-fu-05   (excluded: mechanically unreachable)
+ss1-fu-00
+ss1-fu-01
+ss1-fu-02
+ss1-fu-03
+ss1-fu-04
+ws1-fu-01
+ws1-fu-02
+ws1-fu-05
+ws1-fu-10
+ws1-fu-11
+ws1-fu-12
+xz1-fu-01
