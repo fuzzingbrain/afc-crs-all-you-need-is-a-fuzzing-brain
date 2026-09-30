@@ -264,6 +264,11 @@ class LLM:
         self.budget = budget
         self.log = log
 
+    # The baseline is OpenAI-only (period-correct). The FBv2 client has an
+    # internal Claude fallback; any non-OpenAI result is discarded so the numbers
+    # are clean, though its (small) spend is still counted.
+    _OPENAI = ("o3", "gpt-4.1", "gpt-4o", "o4", "gpt-5", "chatgpt-4o")
+
     def __call__(self, messages: list[dict], model_name: str) -> tuple[str, bool]:
         if self.budget.over():
             return "", False
@@ -273,9 +278,20 @@ class LLM:
         except Exception as e:  # noqa: BLE001
             self.log(f"llm error {model_name}: {str(e)[:160]}")
             return "", False
-        cost = getattr(resp, "cost", 0.0) or 0.0
+        from fuzzingbrain.llms.client import _calculate_cost
+        try:
+            _, _, cost = _calculate_cost(
+                resp.model, resp.input_tokens, resp.output_tokens,
+                getattr(resp, "cache_read_tokens", 0),
+                getattr(resp, "cache_creation_tokens", 0))
+        except Exception:  # noqa: BLE001
+            cost = 0.0
         self.budget.spent += cost
         self.budget.calls += 1
+        used = (resp.model or "").lower()
+        if not any(k in used for k in self._OPENAI):
+            self.log(f"discarded non-OpenAI fallback: {resp.model}")
+            return "", False
         return (resp.content or ""), bool(resp.content)
 
 
@@ -301,9 +317,9 @@ class BackgroundFuzzer:
     def __init__(self, task: "Task", corpus_dir: Path, out_dir: Path,
                  log: Callable[[str], None]):
         self.task = task
-        self.corpus = corpus_dir
-        self.crashes = out_dir / "fuzzer_crashes"
-        self.out = out_dir
+        self.corpus = Path(corpus_dir).resolve()
+        self.crashes = (Path(out_dir) / "fuzzer_crashes").resolve()
+        self.out = Path(out_dir).resolve()
         self.log = log
         self.corpus.mkdir(parents=True, exist_ok=True)
         self.crashes.mkdir(parents=True, exist_ok=True)
@@ -344,8 +360,17 @@ class BackgroundFuzzer:
 
     def start(self) -> None:
         import threading
-        self.proc = subprocess.Popen(self._cmd(), stdout=subprocess.DEVNULL,
-                                     stderr=subprocess.DEVNULL)
+        # libFuzzer fork mode exits immediately on an empty corpus, so seed one
+        # minimal input; the strategy's non-crashing blobs join it as they arrive.
+        try:
+            seed = self.corpus / "seed_initial"
+            if not any(self.corpus.iterdir()):
+                seed.write_bytes(b"\x00" * 8)
+        except OSError:
+            pass
+        self._flog = open(self.out / "fuzzer.log", "a")
+        self.proc = subprocess.Popen(self._cmd(), stdout=self._flog,
+                                     stderr=subprocess.STDOUT)
         self.log(f"background fuzzer started ({self.name})")
         self._thread = threading.Thread(target=self._poll, daemon=True)
         self._thread.start()

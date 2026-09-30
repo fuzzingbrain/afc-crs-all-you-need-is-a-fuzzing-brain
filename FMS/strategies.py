@@ -87,7 +87,7 @@ class Run:
         self.xp0.mkdir(parents=True, exist_ok=True)
         # Non-crashing blobs are dropped here for the background fuzzer to pick up
         # (legacy <fuzzer>_seed_corpus). Set by run_delta / run_full.
-        self.corpus = out_dir / "corpus"
+        self.corpus = (out_dir / "corpus").resolve()
         self.corpus.mkdir(parents=True, exist_ok=True)
 
     # ---- doPoV loop (legacy doPoV / doPoV_full) -------------------------- #
