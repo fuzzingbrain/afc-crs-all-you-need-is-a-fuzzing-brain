@@ -89,6 +89,13 @@ class Run:
         # (legacy <fuzzer>_seed_corpus). Set by run_delta / run_full.
         self.corpus = (out_dir / "corpus").resolve()
         self.corpus.mkdir(parents=True, exist_ok=True)
+        self.bg = None   # background fuzzer; set by run.py so the strategy stops
+                         # when a POV already exists (legacy has_successful_pov).
+
+    def _pov_exists(self) -> bool:
+        """A POV has been found by this strategy or the background fuzzer -- the
+        legacy has_successful_pov check (glob of successful_povs* / the POV dir)."""
+        return bool(self.povs) or bool(self.bg and self.bg.povs)
 
     # ---- doPoV loop (legacy doPoV / doPoV_full) -------------------------- #
     def do_pov(self, initial_msg: str, max_iter: int) -> bool:
@@ -104,6 +111,8 @@ class Run:
             for it in range(1, max_iter + 1):
                 if self.llm.budget.over():
                     break
+                if self._pov_exists():
+                    return True
                 text, ok = self.llm(messages, model)
                 if not ok:
                     # Transient API error/rate-limit: back off so one blip does not
@@ -191,8 +200,9 @@ class Run:
 # --------------------------------------------------------------------------- #
 # delta
 # --------------------------------------------------------------------------- #
-def run_delta(task: Task, llm: LLM, out_dir: Path, log: Callable[[str], None]) -> dict:
+def run_delta(task: Task, llm: LLM, out_dir: Path, log: Callable[[str], None], bg=None) -> dict:
     run = Run(task, llm, out_dir, log)
+    run.bg = bg
     diff = task.diff()
     if len(diff) > 50000:
         diff = L.process_large_diff(diff, None)
@@ -238,8 +248,9 @@ def _rank(g: Graph, reachable: list[dict], llm: LLM, log) -> list[dict]:
     return []
 
 
-def run_full(task: Task, llm: LLM, out_dir: Path, log: Callable[[str], None]) -> dict:
+def run_full(task: Task, llm: LLM, out_dir: Path, log: Callable[[str], None], bg=None) -> dict:
     run = Run(task, llm, out_dir, log)
+    run.bg = bg
     g = Graph(task)
     reachable = g.reachable()
     log(f"reachable={len(reachable)}")

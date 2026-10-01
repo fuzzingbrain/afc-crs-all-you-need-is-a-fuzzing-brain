@@ -7,7 +7,7 @@
 
 Picks xs0_delta or xs1_c_full from the task's scan_mode. A background libFuzzer
 (the legacy parallel path) fuzzes the prebuilt binary alongside the strategy,
-consuming the seeds the strategy drops. The run stops when the task's pov_count
+consuming the seeds the strategy drops. The run stops at the first POV from any
 distinct bugs are found, or on budget / timeout -- the same stop rule ZBH used.
 """
 from __future__ import annotations
@@ -60,7 +60,7 @@ def main() -> int:
     bind_legacy(llm, log)
 
     log(f"F(MS) {task.mode} {task.tid} fuzzer={task.fuzzer} "
-        f"pov_target={task.pov_count} budget=${args.budget} timeout={args.timeout}min "
+        f"pov_target=1 (first POV) budget=${args.budget} timeout={args.timeout}min "
         f"bg_fuzzer={not args.no_fuzzer}")
     started = time.time()
 
@@ -76,19 +76,20 @@ def main() -> int:
 
     strat_povs = []
     try:
-        result = run_delta(task, llm, out, log) if task.mode == "delta" \
-            else run_full(task, llm, out, log)
+        result = run_delta(task, llm, out, log, bg) if task.mode == "delta" \
+            else run_full(task, llm, out, log, bg)
         strat_povs = result.get("povs", [])
     except Exception as e:  # noqa: BLE001
         import traceback
         log(f"ERROR: {e}\n{traceback.format_exc()}")
         result = {"error": str(e), "povs": []}
 
-    # Keep the fuzzer running until the target is met or the clock/budget ends,
-    # so F(MS) gets the same fuzzing time ZBH did.
+    # The competition stops the task at the FIRST POV from any source (the Go
+    # scheduler's 5s ticker cancels every strategy once one POV file appears).
+    # So: if the strategy already found one, stop now; otherwise let the fuzzer
+    # run until it finds the first crash or the deadline.
     if bg is not None:
-        while (_distinct(strat_povs, bg.povs) < task.pov_count
-               and time.time() < deadline):
+        while (_distinct(strat_povs, bg.povs) < 1 and time.time() < deadline):
             time.sleep(15)
         bg.stop()
 
@@ -97,7 +98,7 @@ def main() -> int:
         "task": task.tid, "fuzzer": task.fuzzer, "mode": task.mode,
         "minutes": round((time.time() - started) / 60, 1),
         "cost": round(budget.spent, 4), "llm_calls": budget.calls,
-        "pov_target": task.pov_count,
+        "pov_target": 1,
         "strategy_povs": len(strat_povs),
         "fuzzer_povs": len(fuzzer_povs),
         "distinct": _distinct(strat_povs, fuzzer_povs),
@@ -105,7 +106,7 @@ def main() -> int:
         "fuzzer_pov_sites": [p.get("site") for p in fuzzer_povs],
     })
     (out / "result.json").write_text(json.dumps(result, indent=2))
-    log(f"DONE distinct={result['distinct']}/{task.pov_count} "
+    log(f"DONE distinct={result['distinct']}/1 "
         f"(strategy={result['strategy_povs']} fuzzer={result['fuzzer_povs']}) "
         f"cost=${result['cost']} {result['minutes']}min")
     return 0 if result["success"] else 1
