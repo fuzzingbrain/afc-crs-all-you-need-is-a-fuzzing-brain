@@ -66,7 +66,7 @@ def main() -> int:
     def run_one(cpv: str, e: dict) -> str:
         mins, budget = FULL if e["mode"] == "full" else DELTA
         rdir = out / cpv
-        cmd = [PY, str(ROOT / "FMS/run.py"), str(ROOT / e["task"]),
+        cmd = [PY, str(ROOT / "FMS/run.py"), str(ROOT / "artifact" / e["task"]),
                "--budget", str(budget), "--timeout", str(mins), "--out", str(rdir)]
         hard = int((mins + MARGIN_MIN) * 60)
         log(f"start {cpv} ({e['mode']}, {mins}min/${budget})")
