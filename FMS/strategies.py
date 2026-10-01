@@ -26,8 +26,8 @@ from typing import Callable
 import FMS.legacy_funcs as L
 from FMS.substrate import Budget, Graph, LLM, Task, run_blob
 
-MAX_ITER_DELTA = 5      # xs0_delta MAX_ITERATIONS
-MAX_ITER_FULL = 3       # xs1_c_full main override (:5369)
+MAX_ITER_DELTA = 5      # xs0_delta MAX_ITERATIONS (legacy); passes repeat via the outer re-run loop
+MAX_ITER_FULL = 3       # xs1_c_full main override (legacy); passes repeat via the outer re-run loop
 MAX_BLOBS = 6           # x.bin, x1.bin .. x5.bin
 CHUNK = 100
 RANK_MODELS = ["o3", "gpt-4.1"]              # period-correct; legacy [o3,opus-4,3.7,sonnet-4]
@@ -207,8 +207,17 @@ def run_delta(task: Task, llm: LLM, out_dir: Path, log: Callable[[str], None], b
     if len(diff) > 50000:
         diff = L.process_large_diff(diff, None)
     prompt = L.create_commit_based_prompt(task.harness_src, diff, task.sanitizer, "c")
-    run.do_pov(prompt, MAX_ITER_DELTA)
-    return {"strategy": "xs0_delta", "povs": run.povs, "diff_bytes": len(task.diff())}
+    # Re-run the strategy pass until a PoV is found or budget/time runs out, so
+    # F(MS) uses the same budget ZBH does. Each pass is a fresh doPoV (new
+    # conversation; temperature 1.0 gives variation). A pass that finds a crash
+    # stops immediately (do_pov returns at the first PoV / has_successful_pov).
+    passes = 0
+    while not run.povs and not llm.budget.over():
+        passes += 1
+        run.do_pov(prompt, MAX_ITER_DELTA)
+    log(f"delta passes={passes}")
+    return {"strategy": "xs0_delta", "povs": run.povs,
+            "diff_bytes": len(task.diff()), "passes": passes}
 
 
 # --------------------------------------------------------------------------- #
@@ -262,17 +271,25 @@ def run_full(task: Task, llm: LLM, out_dir: Path, log: Callable[[str], None], bg
     # Legacy runs candidates in a pool and terminates on the first success OR when
     # len<=10 (i.e. after the first candidate). We run sequentially, same effect:
     # stop at the first candidate that produces a PoV, or after processing the set.
-    for vf in reachable_vul:
-        if llm.budget.over():
-            break
-        name = (vf.get("name") or vf.get("Name") or "").strip()
-        path = g.call_path(name)
-        cp_prompt = L.create_call_path_info_prompt(path, "c")
-        body = g.body(name)
-        single = [{"name": name, "body": body,
-                   "score": vf.get("score"), "reason": vf.get("reason", "")}]
-        initial = L.create_full_scan_prompt(task.harness_src, task.sanitizer, "c",
-                                            cp_prompt, single, single)
-        if run.do_pov(initial, MAX_ITER_FULL):
-            break
-    return {"strategy": "xs1_c_full", "ranked": len(ranked), "povs": run.povs}
+    # Re-run the candidate sweep until a PoV or budget/time runs out, so F(MS)
+    # uses the same budget ZBH does; each sweep re-processes all candidates with
+    # fresh conversations. Stop at the first PoV.
+    passes = 0
+    while not run.povs and not llm.budget.over():
+        passes += 1
+        for vf in reachable_vul:
+            if llm.budget.over() or run.povs:
+                break
+            name = (vf.get("name") or vf.get("Name") or "").strip()
+            path = g.call_path(name)
+            cp_prompt = L.create_call_path_info_prompt(path, "c")
+            body = g.body(name)
+            single = [{"name": name, "body": body,
+                       "score": vf.get("score"), "reason": vf.get("reason", "")}]
+            initial = L.create_full_scan_prompt(task.harness_src, task.sanitizer, "c",
+                                                cp_prompt, single, single)
+            if run.do_pov(initial, MAX_ITER_FULL):
+                break
+    log(f"full passes={passes}")
+    return {"strategy": "xs1_c_full", "ranked": len(ranked), "povs": run.povs,
+            "passes": passes}
