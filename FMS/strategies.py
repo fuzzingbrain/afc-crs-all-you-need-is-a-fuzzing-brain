@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Callable
 
 import FMS.legacy_funcs as L
-from FMS.substrate import Budget, Graph, LLM, Task, run_blob, _crash_site
+from FMS.substrate import Budget, Graph, LLM, Task, run_blob
 
 MAX_ITER_DELTA = 5      # xs0_delta MAX_ITERATIONS
 MAX_ITER_FULL = 3       # xs1_c_full main override (:5369)
@@ -83,8 +83,6 @@ class Run:
         self.log = log
         self.system = L.SYSTEM_PROMPT_FULL  # identical to delta's
         self.povs: list[dict] = []
-        self.sites: set[str] = set()   # distinct crash sites found so far
-        self.target: int = 1           # stop at this many distinct sites (pov_count+1)
         self.xp0 = out_dir / "xp0"
         self.xp0.mkdir(parents=True, exist_ok=True)
         # Non-crashing blobs are dropped here for the background fuzzer to pick up
@@ -101,6 +99,7 @@ class Run:
                 break
             messages = [{"role": "system", "content": self.system},
                         {"role": "user", "content": initial_msg}]
+            model_success = 0
             fails = 0
             for it in range(1, max_iter + 1):
                 if self.llm.budget.over():
@@ -148,14 +147,13 @@ class Run:
                         pass
                 if crashed:
                     found = True
-                    # Stop only once we have pov_count+1 distinct crash sites, so a
-                    # non-target (e.g. shallow harness) crash does not end the hunt.
-                    if len(self.sites) >= self.target:
-                        return True
+                    model_success += 1
                     messages.append({"role": "user", "content":
                         "Great job! You've successfully triggered the vulnerability. "
                         "Now create a different test case that triggers a different code "
                         "path. Please provide a new Python script that creates a different x.bin file."})
+                    if model_success >= 1:
+                        break
                 else:
                     if it == 1:
                         msg = (f"Fuzzer output:\n{L.truncate_output(fout, 200)}\n\n"
@@ -172,23 +170,22 @@ class Run:
                                 "important to me. If you generate a successful blob, I "
                                 "will tip you 2000 dollars.")
                     messages.append({"role": "user", "content": msg})
+            if model_success >= 1:
+                break
         return found
 
     def _save_pov(self, pov_id, model, it, code, blob, fout):
         d = self.out / "successful_povs"
         d.mkdir(parents=True, exist_ok=True)
         crash = L.extract_crash_output(fout)
-        site = _crash_site(crash)
-        self.sites.add(site)
         (d / f"pov_{pov_id}_{model}_{it}.py").write_text(code)
         (d / f"test_blob_{pov_id}_{model}_{it}.bin").write_bytes(Path(blob).read_bytes())
         (d / f"fuzzer_output_{pov_id}_{model}_{it}.txt").write_text(crash)
         meta = {"model": model, "iteration": it, "fuzzer_name": self.task.fuzzer,
-                "sanitizer": self.task.sanitizer, "project_name": self.task.project,
-                "site": site}
+                "sanitizer": self.task.sanitizer, "project_name": self.task.project}
         (d / f"pov_metadata_{pov_id}_{model}_{it}.json").write_text(json.dumps(meta, indent=2))
         self.povs.append(meta)
-        self.log(f"POV SUCCESS {model} it{it} @ {site} ({len(self.sites)}/{self.target})")
+        self.log(f"POV SUCCESS {model} it{it}")
 
 
 # --------------------------------------------------------------------------- #
@@ -196,7 +193,6 @@ class Run:
 # --------------------------------------------------------------------------- #
 def run_delta(task: Task, llm: LLM, out_dir: Path, log: Callable[[str], None]) -> dict:
     run = Run(task, llm, out_dir, log)
-    run.target = task.pov_count + 1
     diff = task.diff()
     if len(diff) > 50000:
         diff = L.process_large_diff(diff, None)
@@ -244,7 +240,6 @@ def _rank(g: Graph, reachable: list[dict], llm: LLM, log) -> list[dict]:
 
 def run_full(task: Task, llm: LLM, out_dir: Path, log: Callable[[str], None]) -> dict:
     run = Run(task, llm, out_dir, log)
-    run.target = task.pov_count + 1
     g = Graph(task)
     reachable = g.reachable()
     log(f"reachable={len(reachable)}")
@@ -267,7 +262,6 @@ def run_full(task: Task, llm: LLM, out_dir: Path, log: Callable[[str], None]) ->
                    "score": vf.get("score"), "reason": vf.get("reason", "")}]
         initial = L.create_full_scan_prompt(task.harness_src, task.sanitizer, "c",
                                             cp_prompt, single, single)
-        run.do_pov(initial, MAX_ITER_FULL)
-        if len(run.sites) >= run.target:
+        if run.do_pov(initial, MAX_ITER_FULL):
             break
     return {"strategy": "xs1_c_full", "ranked": len(ranked), "povs": run.povs}
