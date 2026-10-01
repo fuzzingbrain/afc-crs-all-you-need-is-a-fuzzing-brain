@@ -251,6 +251,23 @@ class Budget:
         return self.spent >= self.dollars or self.remaining_seconds() <= 0
 
 
+# Competition-period model prices (AIxCC finals 2025-08), $/million tokens.
+COMPETITION_PRICES = {
+    "o3": (2.0, 8.0),
+    "gpt-4.1": (2.0, 8.0),
+    "gpt-4.1-mini": (0.4, 1.6),
+    "gpt-4.1-nano": (0.1, 0.4),
+}
+
+
+def _price_for(model_id: str) -> tuple:
+    """(input, output) $/M for a model id, matching by alias substring."""
+    for alias in sorted(COMPETITION_PRICES, key=len, reverse=True):
+        if alias in model_id:
+            return COMPETITION_PRICES[alias]
+    return (2.0, 8.0)  # default to the gpt-4.1/o3 rate
+
+
 class LLM:
     """Thin LLM client over FBv2's client, returning legacy (text, ok)."""
 
@@ -270,22 +287,41 @@ class LLM:
     _OPENAI = ("o3", "gpt-4.1", "gpt-4o", "o4", "gpt-5", "chatgpt-4o")
 
     def __call__(self, messages: list[dict], model_name: str) -> tuple[str, bool]:
-        if self.budget.over():
-            return "", False
+        # Retry a failed call (transient rate-limit / outage) until it succeeds
+        # or the budget/deadline is hit, so a shared-key rate-limit window costs
+        # wall clock rather than the iteration/candidate budget.
+        attempt = 0
+        while not self.budget.over():
+            text, ok = self._call_once(messages, model_name)
+            if ok:
+                return text, True
+            attempt += 1
+            self.log(f"llm call failed ({model_name}) attempt {attempt}; backing off")
+            time.sleep(min(60, 10 * attempt))
+        return "", False
+
+    def _call_once(self, messages: list[dict], model_name: str) -> tuple[str, bool]:
+        # Clear the client's tried-models set before every call, as the FBv2
+        # agents do. The set is persistent on the client; without this, the first
+        # exhausted fallback chain poisons it and every later call fails instantly
+        # without touching the API.
+        try:
+            self._c.reset_tried_models()
+        except Exception:  # noqa: BLE001
+            pass
         try:
             resp = self._c.call(messages, model=model_name, temperature=1.0,
                                  max_tokens=8192, timeout=900)
         except Exception as e:  # noqa: BLE001
-            self.log(f"llm error {model_name}: {str(e)[:160]}")
+            self.log(f"llm error {model_name}: {str(e)[:120]}")
             return "", False
-        from fuzzingbrain.llms.client import _calculate_cost
-        try:
-            _, _, cost = _calculate_cost(
-                resp.model, resp.input_tokens, resp.output_tokens,
-                getattr(resp, "cache_read_tokens", 0),
-                getattr(resp, "cache_creation_tokens", 0))
-        except Exception:  # noqa: BLE001
-            cost = 0.0
+        # Competition-period prices (AIxCC finals, 2025-08), pinned so the cost is
+        # reproducible regardless of the FBv2 table. o3 had been cut to $2/$8 in
+        # 2025-06; gpt-4.1 was $2/$8 from launch. $/million (input, output).
+        used = (resp.model or model_name).lower()
+        price_in, price_out = _price_for(used)
+        cost = (resp.input_tokens / 1_000_000) * price_in \
+            + (resp.output_tokens / 1_000_000) * price_out
         self.budget.spent += cost
         self.budget.calls += 1
         used = (resp.model or "").lower()
@@ -339,7 +375,7 @@ class BackgroundFuzzer:
         return [
             "docker", "run", "--rm", "--name", self.name,
             "--platform", "linux/amd64",
-            *docker_resource_args(memory_mb=mem, cpus=6),
+            *docker_resource_args(memory_mb=mem, cpus=2),
             "-e", "FUZZING_ENGINE=libfuzzer",
             "-e", f"SANITIZER={self.task.sanitizer}",
             "-e", "ARCHITECTURE=x86_64",
@@ -353,7 +389,7 @@ class BackgroundFuzzer:
             self.task.docker_image,
             f"/fuzzers/{self.task.fuzzer}",
             "/corpus", "-artifact_prefix=/crashes/",
-            "-fork=6", "-ignore_crashes=1",
+            "-fork=2", "-ignore_crashes=1",
             *(libfuzzer_oom_flags(True) if no_oom else ["-rss_limit_mb=4096"]),
             "-timeout=30",
         ]

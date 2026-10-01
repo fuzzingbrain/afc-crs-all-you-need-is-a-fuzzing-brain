@@ -100,12 +100,21 @@ class Run:
             messages = [{"role": "system", "content": self.system},
                         {"role": "user", "content": initial_msg}]
             model_success = 0
+            fails = 0
             for it in range(1, max_iter + 1):
                 if self.llm.budget.over():
                     break
                 text, ok = self.llm(messages, model)
                 if not ok:
+                    # Transient API error/rate-limit: back off so one blip does not
+                    # burn the whole candidate/iteration budget in seconds.
+                    fails += 1
+                    if fails >= 6:
+                        self.log("too many consecutive LLM failures; abandoning this target")
+                        return found
+                    time.sleep(min(30, 5 * fails))
                     continue
+                fails = 0
                 low = text.lower()
                 if any(p in low for p in ("cannot comply", "can't comply",
                                           "against my", "ethical guidelines")):
