@@ -24,12 +24,10 @@ from FMS.strategies import run_delta, run_full, Run                         # no
 
 
 def _distinct(strategy_povs: list, fuzzer_povs: list) -> int:
-    """Distinct bugs = fuzzer sites (already deduped) + strategy successes.
-
-    The strategy does not signature its PoVs, so each strategy success counts;
-    fuzzer PoVs are deduped by crash site in BackgroundFuzzer.
-    """
-    return len(strategy_povs) + len(fuzzer_povs)
+    """Distinct bugs = union of crash sites from the strategy and the fuzzer."""
+    sites = {p.get("site") for p in strategy_povs} | {p.get("site") for p in fuzzer_povs}
+    sites.discard(None)
+    return len(sites)
 
 
 def main() -> int:
@@ -87,7 +85,8 @@ def main() -> int:
     # Keep the fuzzer running until the target is met or the clock/budget ends,
     # so F(MS) gets the same fuzzing time ZBH did.
     if bg is not None:
-        while (_distinct(strat_povs, bg.povs) < task.pov_count
+        target = task.pov_count + 1
+        while (_distinct(strat_povs, bg.povs) < target
                and time.time() < deadline):
             time.sleep(15)
         bg.stop()
@@ -97,7 +96,7 @@ def main() -> int:
         "task": task.tid, "fuzzer": task.fuzzer, "mode": task.mode,
         "minutes": round((time.time() - started) / 60, 1),
         "cost": round(budget.spent, 4), "llm_calls": budget.calls,
-        "pov_target": task.pov_count,
+        "pov_target": task.pov_count + 1,
         "strategy_povs": len(strat_povs),
         "fuzzer_povs": len(fuzzer_povs),
         "distinct": _distinct(strat_povs, fuzzer_povs),
