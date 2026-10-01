@@ -212,7 +212,7 @@ def run_delta(task: Task, llm: LLM, out_dir: Path, log: Callable[[str], None], b
     # conversation; temperature 1.0 gives variation). A pass that finds a crash
     # stops immediately (do_pov returns at the first PoV / has_successful_pov).
     passes = 0
-    while not run.povs and not llm.budget.over():
+    while not run._pov_exists() and not llm.budget.over():
         passes += 1
         run.do_pov(prompt, MAX_ITER_DELTA)
     log(f"delta passes={passes}")
@@ -275,10 +275,10 @@ def run_full(task: Task, llm: LLM, out_dir: Path, log: Callable[[str], None], bg
     # uses the same budget ZBH does; each sweep re-processes all candidates with
     # fresh conversations. Stop at the first PoV.
     passes = 0
-    while not run.povs and not llm.budget.over():
+    while not run._pov_exists() and not llm.budget.over():
         passes += 1
         for vf in reachable_vul:
-            if llm.budget.over() or run.povs:
+            if llm.budget.over() or run._pov_exists():
                 break
             name = (vf.get("name") or vf.get("Name") or "").strip()
             path = g.call_path(name)
