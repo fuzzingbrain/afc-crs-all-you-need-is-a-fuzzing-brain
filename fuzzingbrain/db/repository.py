@@ -6,7 +6,7 @@ CRUD operations for all FuzzingBrain models.
 """
 
 from datetime import datetime
-from typing import Optional, List, TypeVar, Generic, Type
+from typing import Optional, List, TypeVar, Generic, Type, Dict
 from pymongo.database import Database
 from pymongo.collection import Collection
 from bson import ObjectId
@@ -1816,6 +1816,35 @@ class CallGraphNodeRepository(BaseRepository[CallGraphNode]):
         return self.find_all(
             {"task_id": ObjectId(task_id), "fuzzer_id": fuzzer_id, "call_depth": depth}
         )
+
+    def get_entry_function_names(self, task_id: str, fuzzer_name: str) -> List[str]:
+        """Names of the fuzzer's entry nodes (call_depth == 0) for one fuzzer.
+
+        These ARE real call-graph nodes (the harness entry, e.g.
+        LLVMFuzzerTestOneInput), so a callees-BFS seeded from them traverses the
+        graph correctly — unlike the planner's fully-qualified C++ entry names,
+        which do not match the graph's short node names.
+        """
+        try:
+            cursor = self.collection.find(
+                {"task_id": ObjectId(task_id), "fuzzer_name": fuzzer_name,
+                 "call_depth": 0},
+                {"function_name": 1},
+            )
+            return [d["function_name"] for d in cursor if d.get("function_name")]
+        except Exception as e:
+            logger.warning(f"get_entry_function_names failed for {fuzzer_name}: {e}")
+            return []
+
+    def count_for_fuzzer(self, task_id: str, fuzzer_name: str) -> int:
+        """Number of call-graph nodes for one fuzzer (its reachable-set size)."""
+        try:
+            return self.collection.count_documents(
+                {"task_id": ObjectId(task_id), "fuzzer_name": fuzzer_name}
+            )
+        except Exception as e:
+            logger.warning(f"count_for_fuzzer failed for {fuzzer_name}: {e}")
+            return 0
 
     def save_many(self, nodes: List[CallGraphNode]) -> int:
         """

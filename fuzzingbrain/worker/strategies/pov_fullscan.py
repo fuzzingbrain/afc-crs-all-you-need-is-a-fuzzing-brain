@@ -588,17 +588,49 @@ class POVFullscanStrategy(POVBaseStrategy):
         Uses a deque so the frontier is popped in O(1); the old ``list.pop(0)``
         was O(n) per step, i.e. O(n^2) over a 90k-node Wireshark graph.
         """
+        depth = self._bfs_callees(entry_functions)
+
+        # Fallback when the entry-name BFS collapses. The planner names a
+        # direction's entry_functions by reading source, as fully qualified C++
+        # names ("parquet::arrow::FileReaderBuilder::Open"), while the call graph
+        # stores short/demangled node names ("Open"). find_callees then matches
+        # nothing and BFS stops at the entries ("Total reachable: 2-3"), emptying
+        # the big pool and collapsing coverage to the small pool. When that
+        # happens, re-seed the BFS from the fuzzer's own entry nodes
+        # (call_depth == 0, e.g. LLVMFuzzerTestOneInput) — those ARE real graph
+        # nodes, so the traversal walks the actual reachable set. C targets whose
+        # names already match never collapse, so this never fires for them.
+        node_count = self.repos.callgraph_nodes.count_for_fuzzer(
+            self.task_id, self.fuzzer
+        )
+        if node_count and len(depth) < 0.1 * node_count:
+            fuzzer_entries = self.repos.callgraph_nodes.get_entry_function_names(
+                self.task_id, self.fuzzer
+            )
+            self.log_warning(
+                f"Entry BFS reached only {len(depth)} of ~{node_count} nodes "
+                f"(entry-name/graph-name mismatch); re-seeding from fuzzer entry "
+                f"{fuzzer_entries}"
+            )
+            if fuzzer_entries:
+                depth = self._bfs_callees(fuzzer_entries)
+
+        return depth
+
+    def _bfs_callees(self, seeds: List[str]) -> Dict[str, int]:
+        """BFS over callees from `seeds`, returning {function_name: hop distance}.
+
+        deque (O(1) pop) so a 90k-node graph is linear, not quadratic.
+        """
         depth: Dict[str, int] = {}
         queue = deque()
-        for entry in entry_functions:
-            if entry not in depth:
-                depth[entry] = 0
-                queue.append(entry)
-
+        for s in seeds:
+            if s not in depth:
+                depth[s] = 0
+                queue.append(s)
         while queue:
             func_name = queue.popleft()
             d = depth[func_name]
-
             callees = self.repos.callgraph_nodes.find_callees(
                 self.task_id, self.fuzzer, func_name
             )
@@ -606,7 +638,6 @@ class POVFullscanStrategy(POVBaseStrategy):
                 if callee not in depth:
                     depth[callee] = d + 1
                     queue.append(callee)
-
         return depth
 
     def _resolve_function(self, name: str):
