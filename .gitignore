@@ -74,3 +74,18 @@ experiments/
 FMS/runs/
 FMS/cache/
 FMS/legacy/
+# --- Packaging: experiment DATA stays OUT of the code repo ---
+# artifact/ holds graphs, prebuilt fuzzers, rq outputs (~32 GB). Distributed as
+# a separate DATA bundle, never committed here. The small scaffold scripts
+# (run.sh, run_batch.sh, preflight.py, batches/batch1.txt) stay tracked.
+artifact/*
+!artifact/run.sh
+!artifact/run_batch.sh
+!artifact/preflight.py
+!artifact/batches
+artifact/batches/*
+!artifact/batches/batch1.txt
+
+# Staged runtime shared libraries for prebuilt fuzzers (binaries, rebuildable).
+fuzzingbrain/analyzer/runtime_libs/*.so
+fuzzingbrain/analyzer/runtime_libs/*.so.*
