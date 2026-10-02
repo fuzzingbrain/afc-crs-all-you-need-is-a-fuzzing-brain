@@ -751,13 +751,11 @@ class LLMClient:
         REASONING_FLOOR = 32000
         params["max_completion_tokens"] = max(max_tokens or 0, REASONING_FLOOR)
 
-        # gpt-5 defaults to medium/high reasoning effort -> 77s median call latency
-        # (some calls 5 min), which starves the agents: an SP-find/POV agent gets
-        # only a handful of iterations inside the 90 min / $20 budget and never
-        # commits a create_suspicious_point / create_pov. "low" cuts call latency
-        # ~5-10x so the pipeline actually makes progress.
+        # gpt-5 runs at its default reasoning effort = "medium" (set explicitly so
+        # the value is pinned in the repo, not left to the provider default). This
+        # is the configuration used for the paper runs.
         if ml.startswith("gpt-5"):
-            params["reasoning_effort"] = "low"
+            params["reasoning_effort"] = "medium"
 
         if tools:
             params["tools"] = tools
@@ -1256,11 +1254,10 @@ class LLMClient:
                 # This branch is reasoning-only (floors max_completion_tokens),
                 # so never send a custom temperature; let it default to 1.0.
                 params["max_completion_tokens"] = max(max_tokens or 0, 32000)
-                # gpt-5 defaults to medium/high reasoning effort -> ~77s median
-                # call latency, starving the agents (few iterations in budget, no
-                # create_suspicious_point/create_pov). "low" cuts latency ~5-10x.
+                # gpt-5 runs at its default reasoning effort = "medium" (pinned
+                # explicitly). This is the configuration used for the paper runs.
                 if model_id.lower().startswith("gpt-5"):
-                    params["reasoning_effort"] = "low"
+                    params["reasoning_effort"] = "medium"
                 if tools:
                     params["tools"] = tools
 
