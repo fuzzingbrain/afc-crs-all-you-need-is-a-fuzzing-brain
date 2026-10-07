@@ -132,6 +132,31 @@ def test_reading_without_submitting_gets_nagged():
     nags = [n for n in seen if "turns since your last run_poc_on_harness()" in n]
     assert len(nags) == 1, "once per NO_SUBMIT_WARN turns, not every turn after"
     assert "12 turns since" in nags[0]
+    assert "STOP" not in nags[0], "the first reminder is the gentle one"
+
+
+def test_the_second_reminder_on_is_an_order_not_a_hint():
+    """libpng-01 / Opus 5, 2026-10-07: one verdict at turn 14, then 85 turns of
+    reading through eight gentle reminders, cost cap, zero. From the second
+    reminder on the note says stop, says what the next action is, and says
+    why waiting is not free."""
+    c = Coach(turn_limit=10000, wall_limit_s=3600)
+    seen = []
+    for turn in range(1, 38):
+        seen += c.observe("sed -n 100,200p src/x.c", "<output/>", turn, turn * 10)
+    nags = [n for n in seen if "run_poc_on_harness()" in n and "turns since" in n]
+    assert len(nags) == 3
+    assert "STOP reading" not in nags[0]
+    assert nags[1].startswith("[oracle x2] STOP reading. 24 turns") and "1 reminder ignored" in nags[1]
+    assert nags[2].startswith("[oracle x3] STOP reading. 36 turns") and "2 reminders ignored" in nags[2]
+    assert "Your next action is run_poc_on_harness()" in nags[2]
+    # a submission resets it to the gentle one
+    c.observe("run_poc_on_harness(/workspace/c1)", "duration_ms: 400\nexit_code: 0", 38, 400)
+    seen = []
+    for turn in range(39, 51):
+        seen += c.observe("sed -n 1,9p src/y.c", "<output/>", turn, turn * 10)
+    nags = [n for n in seen if "turns since your last run_poc_on_harness()" in n]
+    assert len(nags) == 1 and "STOP" not in nags[0]
 
 
 def test_a_crash_from_running_the_target_yourself_is_not_banked():
