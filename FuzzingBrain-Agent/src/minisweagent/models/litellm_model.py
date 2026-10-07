@@ -12,7 +12,8 @@ from pydantic import BaseModel
 from minisweagent.exceptions import FormatError
 from minisweagent.models import GLOBAL_MODEL_STATS
 from minisweagent.models.utils.actions_toolcall import (
-    BENCH_TOOLS,
+    BENCH_TOOLS,  # noqa: F401 - the fallback; bench_tools() is what is sent
+    bench_tools,
     BASH_TOOL,
     format_toolcall_observation_messages,
     parse_toolcall_actions,
@@ -182,10 +183,11 @@ class LitellmModel:
     def _tools(self) -> list[dict]:
         """Which tool surface this run drives.
 
-        `tool_set: bench` is FuzzingBrain-Bench's own three tools, declared to
+        `tool_set: bench` is FuzzingBrain-Bench's own tools -- the list the
+        episode's server advertised (see McpBenchEnvironment.tools), declared to
         the model so it calls them by name. The default stays the single bash
         tool, so every other use of this fork is untouched."""
-        return BENCH_TOOLS if getattr(self.config, "tool_set", "") == "bench" else [BASH_TOOL]
+        return bench_tools() if getattr(self.config, "tool_set", "") == "bench" else [BASH_TOOL]
 
     def _parse_actions(self, response) -> list[dict]:
         """Parse tool calls from the response. Raises FormatError if unknown tool."""

@@ -601,3 +601,20 @@ def test_the_gate_hint_offers_gdb_only_when_the_bench_did(monkeypatch):
     notes = "\n".join(Coach(turn_limit=100, wall_limit_s=1800)
                       .observe("run_poc_on_harness(/workspace/c1)", _gate(), 5, 40))
     assert "gdb is available here" in notes
+
+
+def test_the_gate_hint_names_the_call_graph_only_when_offered(tmp_path, monkeypatch):
+    """The bench's tools note says call_path() where the image has a graph and the
+    run is not --no-callgraph; the coach reads that, like it reads `gdb`."""
+    from minisweagent.agents.fbbench_coach import Coach, callgraph_offered
+    assert callgraph_offered({}) is False
+    assert callgraph_offered({"FBBENCH_SYSTEM_PROMPT": "- You also have `gdb` ..."}) is False
+    assert callgraph_offered({"FBBENCH_SYSTEM_PROMPT": "... call_path() (shortest chain ..."}) is True
+    monkeypatch.setenv("FBBENCH_SYSTEM_PROMPT", "- You also have `gdb`. - ... call_path() ...")
+    c = Coach(turn_limit=100, wall_limit_s=3600, workspace=tmp_path)
+    notes = "\n".join(c.observe("run_poc_on_harness(/workspace/c1)", _gate(), 5, 40))
+    assert "threw that input out" in notes and "gdb" in notes and "call_path()" in notes
+    monkeypatch.setenv("FBBENCH_SYSTEM_PROMPT", "- You also have `gdb`.")
+    c = Coach(turn_limit=100, wall_limit_s=3600, workspace=tmp_path)
+    notes = "\n".join(c.observe("run_poc_on_harness(/workspace/c1)", _gate(), 5, 40))
+    assert "call_path" not in notes

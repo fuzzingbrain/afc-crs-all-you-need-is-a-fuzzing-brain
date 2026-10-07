@@ -376,9 +376,15 @@ def main(
         config["agent"]["system_template"] = (
             bench_system + ("\n\n" + own if own else ""))
 
+    env = get_environment(config.get("environment", {}), default_type="mcp_bench")
+    # The model is declared the tools this episode's server advertises, so a
+    # tool the bench adds is callable here without a copy of its schema.
+    if tools := getattr(env, "tools", None):
+        from minisweagent.models.utils.actions_toolcall import set_bench_tools
+        set_bench_tools(tools)
     agent = _ReportingAgent(
         get_model(config=config.get("model", {})),
-        get_environment(config.get("environment", {}), default_type="mcp_bench"),
+        env,
         workspace=workspace, model_name=model_name, **config.get("agent", {}),
     )
 

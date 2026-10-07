@@ -44,12 +44,7 @@ class FakeServer:
                 if not line.strip():
                     continue
                 msg = json.loads(line)
-                if msg.get("method") == "tools/call":
-                    p = msg["params"]
-                    self.calls.append((p["name"], p.get("arguments", {})))
-                    result = self.reply(p["name"], p.get("arguments", {}))
-                else:
-                    result = {"protocolVersion": "2024-11-05"}
+                result = self._result(msg)
                 out = (json.dumps({"jsonrpc": "2.0", "id": msg["id"],
                                    "result": result}) + "\n").encode()
                 if self.chunk:                      # dribble it out in pieces
@@ -57,6 +52,14 @@ class FakeServer:
                         conn.sendall(out[i:i + self.chunk])
                 else:
                     conn.sendall(out)
+
+
+    def _result(self, msg):
+        if msg.get("method") == "tools/call":
+            p = msg["params"]
+            self.calls.append((p["name"], p.get("arguments", {})))
+            return self.reply(p["name"], p.get("arguments", {}))
+        return {"protocolVersion": "2024-11-05"}
 
 
 @pytest.fixture
@@ -312,3 +315,44 @@ def test_an_unreadable_guard_never_blocks():
                      "  if (size < sizeof(header_t)) return 0;\n}", 0, calls)
     out = env.execute({"tool": "run_poc_on_harness", "args": {"path": "/workspace/a"}})
     assert "NOT GRADED" not in out["output"]
+
+
+# ---------------------------------------------------------------- tools/list
+class _ListingServer(FakeServer):
+    """A fake that advertises tools, the way the real server does once the image
+    carries a call graph."""
+    TOOLS = [
+        {"name": "setup", "description": "task info", "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "exec", "description": "shell", "inputSchema": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]}},
+        {"name": "run_poc_on_harness", "description": "oracle", "inputSchema": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]}},
+        {"name": "get_callers", "description": "static call graph", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
+    ]
+
+    def _result(self, msg):
+        if msg.get("method") == "tools/list":
+            return {"tools": self.TOOLS}
+        return super()._result(msg)
+
+
+def test_the_tool_surface_is_what_the_server_advertises(tmp_path):
+    server = _ListingServer(tmp_path / "s.sock",
+                            reply=lambda name, args: {"function": {"name": args.get("name")}, "callers": [], "total": 0})
+    env = _env(server)
+    assert [t["function"]["name"] for t in env.tools] == ["setup", "exec", "run_poc_on_harness", "get_callers"]
+    assert env.tools[3]["function"]["description"] == "static call graph"
+    assert env.tools[3]["function"]["parameters"]["required"] == ["name"]
+    # ...and an advertised tool is dispatched by its name, answer shown as it came
+    out = env.execute({"tool": "get_callers", "args": {"name": "parse"}})
+    assert server.calls[-1] == ("get_callers", {"name": "parse"})
+    assert json.loads(out["output"]) == {"function": {"name": "parse"}, "callers": [], "total": 0}
+    assert out["returncode"] == 0 and not out["exception_info"]
+
+
+def test_a_server_without_a_listing_leaves_the_fallback(server):
+    """The fakes elsewhere in this file answer nothing for tools/list; the model
+    then keeps the hand-written three, exactly as before."""
+    env = _env(server)
+    assert env.tools == [] and env.tool_names == set()
+    # an unknown name is still an exec, not a crash
+    env.execute({"tool": "get_callers", "args": {"cmd": "echo x"}})
+    assert server.calls[-1][0] == "exec"

@@ -71,6 +71,43 @@ BENCH_TOOLS = [
 ]
 _BENCH_BY_NAME = {t["function"]["name"]: t for t in BENCH_TOOLS}
 
+# What this run actually drives. The copy above is the fallback; a live bench
+# server answers tools/list, and McpBenchEnvironment hands that answer here, so
+# a tool the bench adds (the call-graph tools, 2026-10) reaches the model the
+# day the image ships it, with the server's own description, and not when
+# someone remembers to copy it in.
+_bench_tools: list[dict] = list(BENCH_TOOLS)
+
+
+def mcp_tools_to_openai(tools: list[dict]) -> list[dict]:
+    """An MCP tools/list entry {name, description, inputSchema} as the
+    {"type": "function", ...} shape the model APIs take."""
+    out = []
+    for t in tools or []:
+        name = (t or {}).get("name")
+        if not name:
+            continue
+        schema = t.get("inputSchema") or {"type": "object", "properties": {}}
+        out.append({"type": "function", "function": {
+            "name": name,
+            "description": t.get("description") or "",
+            "parameters": schema,
+        }})
+    return out
+
+
+def set_bench_tools(tools: list[dict]) -> list[dict]:
+    """Replace the bench tool surface with the server's own list (OpenAI shape).
+    An empty list leaves the fallback in place."""
+    global _bench_tools
+    if tools:
+        _bench_tools = list(tools)
+    return _bench_tools
+
+
+def bench_tools() -> list[dict]:
+    return _bench_tools
+
 
 def parse_toolcall_actions(
     tool_calls: list, *, format_error_template: str, template_kwargs: dict | None = None,
@@ -111,8 +148,9 @@ def parse_toolcall_actions(
         elif not isinstance(args, dict):
             error_msg += f"Arguments to {name!r} must be an object."
         else:
-            spec = _BENCH_BY_NAME.get(name) or BASH_TOOL
-            for req in spec["function"]["parameters"].get("required", []):
+            by_name = {t["function"]["name"]: t for t in (tools or [])}
+            spec = by_name.get(name) or _BENCH_BY_NAME.get(name) or BASH_TOOL
+            for req in (spec["function"].get("parameters") or {}).get("required", []):
                 if req not in args:
                     error_msg += f"Missing {req!r} argument in {name!r} call."
         if error_msg:

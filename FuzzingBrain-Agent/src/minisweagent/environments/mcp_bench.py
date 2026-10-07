@@ -100,6 +100,21 @@ class McpBenchEnvironment:
         self._min_size_read = False
         self._guard_waived: set[str] = set()
         self._rpc("initialize", {})
+        # The tool surface is the server's to declare. Three tools in every
+        # image; four more (get_callers, get_callees, call_path, query_graph)
+        # where the image carries a call graph and the run is not --no-callgraph.
+        # A server that does not answer tools/list (the test fakes) leaves the
+        # model on the hand-written fallback in actions_toolcall.
+        self.tools: list[dict] = self._discover_tools()
+        self.tool_names: set[str] = {t["function"]["name"] for t in self.tools}
+
+    def _discover_tools(self) -> list[dict]:
+        from minisweagent.models.utils.actions_toolcall import mcp_tools_to_openai
+        try:
+            res = self._rpc("tools/list", {}, timeout=60)
+        except Exception:  # noqa: BLE001
+            return []
+        return mcp_tools_to_openai((res or {}).get("tools") or []) if isinstance(res, dict) else []
 
     # -- the wire ----------------------------------------------------------
     def _rpc(self, method: str, params: dict, timeout: float | None = None) -> Any:
@@ -174,6 +189,13 @@ class McpBenchEnvironment:
             elif name == "setup":
                 out = self._tool(name, {}, t)
                 output = {"output": json.dumps(out, indent=2), "returncode": 0,
+                          "exception_info": ""}
+            elif name != "exec" and name in self.tool_names:
+                # Any other tool the server advertised -- the call-graph tools
+                # today -- goes through by name, and its structured answer is
+                # shown to the model as it came.
+                out = self._tool(name, args, t)
+                output = {"output": json.dumps(out, indent=1), "returncode": 0,
                           "exception_info": ""}
             else:
                 args.setdefault("timeout_s", int(t))

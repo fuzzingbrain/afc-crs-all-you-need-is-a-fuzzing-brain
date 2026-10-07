@@ -146,3 +146,32 @@ class TestBashTool:
         assert BASH_TOOL["function"]["name"] == "bash"
         assert "command" in BASH_TOOL["function"]["parameters"]["properties"]
         assert "command" in BASH_TOOL["function"]["parameters"]["required"]
+
+
+class TestBenchToolsFollowTheServer:
+    def test_the_fallback_is_the_hand_copy(self):
+        from minisweagent.models.utils.actions_toolcall import BENCH_TOOLS, bench_tools, set_bench_tools
+        set_bench_tools([])
+        assert bench_tools() == BENCH_TOOLS
+
+    def test_an_mcp_listing_becomes_the_surface(self):
+        from minisweagent.models.utils.actions_toolcall import (
+            BENCH_TOOLS, bench_tools, mcp_tools_to_openai, set_bench_tools)
+        listing = [{"name": "exec", "description": "d", "inputSchema": {"type": "object", "properties": {"cmd": {"type": "string"}}, "required": ["cmd"]}},
+                   {"name": "call_path", "description": "chain", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
+                   {"name": "", "description": "ignored"}]
+        tools = mcp_tools_to_openai(listing)
+        assert [t["function"]["name"] for t in tools] == ["exec", "call_path"]
+        try:
+            set_bench_tools(tools)
+            assert bench_tools() == tools
+            # parse knows the new tool and checks ITS required arguments
+            tc = MagicMock(); tc.id = "1"; tc.function.name = "call_path"; tc.function.arguments = "{}"
+            with pytest.raises(FormatError) as exc:
+                parse_toolcall_actions([tc], format_error_template="{{ error }}", tools=tools)
+            assert "Missing 'name'" in exc.value.messages[0]["content"]
+            tc.function.arguments = '{"name": "parse"}'
+            acts = parse_toolcall_actions([tc], format_error_template="{{ error }}", tools=tools)
+            assert acts == [{"tool": "call_path", "args": {"name": "parse"}, "command": "", "tool_call_id": "1"}]
+        finally:
+            set_bench_tools(BENCH_TOOLS)

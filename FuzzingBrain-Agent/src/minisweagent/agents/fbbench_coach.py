@@ -235,6 +235,16 @@ def gdb_offered(environ=None) -> bool:
     return True if prompt is None else "`gdb`" in prompt
 
 
+def callgraph_offered(environ=None) -> bool:
+    """Whether the bench offered the static call graph (its tools note names
+    call_path()). Read the same way as gdb, for the same reason: a run with
+    --no-callgraph, or an image without a graph, must not be sent to a tool it
+    does not have. Outside the bench, assume not -- it is the newer of the two."""
+    import os
+    prompt = (environ if environ is not None else os.environ).get("FBBENCH_SYSTEM_PROMPT")
+    return False if prompt is None else "call_path()" in prompt
+
+
 class Coach:
     """Tracks what the run has banked and what it is neglecting."""
 
@@ -268,6 +278,7 @@ class Coach:
         # challenge, offers none, and a hint pointing at a debugger the model
         # cannot run costs it turns.
         self.gdb = gdb_offered()
+        self.callgraph = callgraph_offered()
         self.turn_limit = turn_limit
         self.wall_limit_s = wall_limit_s
         self.banked: list[str] = []
@@ -416,6 +427,12 @@ class Coach:
                        "Run the coverage command from your instructions on it "
                        "and see whether the first library function you expect "
                        "to reach shows up.")
+                if self.callgraph:
+                    # The static view of the same question: which checks sit
+                    # between the entry and the function the input is aimed at.
+                    how += (" call_path() on that function lists the chain from "
+                            "the harness entry to it; every function on that "
+                            "chain before it is a check your input has to pass.")
                 notes.append(
                     "[gate] the harness threw that input out before the library "
                     "saw it -- it ran for no measurable time. Nothing about its "
