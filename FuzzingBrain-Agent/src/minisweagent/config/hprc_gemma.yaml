@@ -1,0 +1,21 @@
+# Gemma 4 31B QAT (W4A16) on TAMU HPRC, layered over fbbench.yaml by
+# fb-agent-hprc-gemma.agent.yaml. Same tunnel and endpoint as hprc_qwen.yaml;
+# only the sampling differs, which is Gemma's model card.
+model:
+  model_kwargs:
+    custom_llm_provider: openai
+    # 8001, not 8000: Gemma's server runs alongside the Qwen GGUF server, each
+    # behind its own tunnel port.
+    api_base: http://localhost:8001/v1
+    api_key: none
+    temperature: 1.0
+    top_p: 0.95
+    extra_body:
+      top_k: 64
+      # Gemma 4's template leaves thinking off unless asked; Qwen thinks by
+      # default, so without this the two would not be run the same way.
+      chat_template_kwargs:
+        enable_thinking: true
+  # litellm has no price for a self-hosted model; without this every turn
+  # raises instead of recording $0.
+  cost_tracking: ignore_errors

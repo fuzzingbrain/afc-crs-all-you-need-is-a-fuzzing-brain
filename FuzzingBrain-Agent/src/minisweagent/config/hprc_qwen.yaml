@@ -1,0 +1,20 @@
+# Qwen3.8-27B on TAMU HPRC, layered over fbbench.yaml by fb-agent-hprc.agent.yaml.
+#
+# The model runs under vLLM on a FASTER GPU node; an ssh tunnel on this machine
+# forwards localhost:8000 to it. The bench names the model `qwen3.8:27b` (the
+# ":" keeps it on its keyless, $0 local path), so the server is started with
+# that as one of its --served-model-name values and litellm is told to treat
+# it as a plain OpenAI-compatible endpoint.
+model:
+  model_kwargs:
+    custom_llm_provider: openai
+    api_base: http://localhost:8000/v1
+    api_key: none
+    # Qwen's model card: thinking mode, which it also advises for agentic coding.
+    temperature: 1.0
+    top_p: 0.95
+    extra_body:
+      top_k: 20
+  # litellm has no price for a self-hosted model; without this every turn
+  # raises instead of recording $0.
+  cost_tracking: ignore_errors

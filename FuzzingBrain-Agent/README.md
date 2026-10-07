@@ -1,122 +1,125 @@
-# FuzzingBrain-Agent
+# fb-agent
 
-A from-scratch agent that reads a fuzz target's source, reasons about where a
-fault lives, and produces an input that crashes it. The loop is ours — not a
-wrapper around a third-party CLI — so the two things a framework hides are ours
-to control: the prompt cache, and (next) context management.
+The FuzzingBrain agent: an LLM agent that reads a fuzzing harness and the
+library under it, and writes inputs that crash it.
+
+It is a fork of [mini-swe-agent](https://github.com/SWE-agent/mini-swe-agent)
+(v2.4.6). Almost all of the code is theirs — see [NOTICE.md](NOTICE.md) for
+attribution and [LICENSE.md](LICENSE.md) for the MIT licence it is distributed
+under. The import path is still `minisweagent`; only the name the agent goes by
+is fb-agent.
+
+## Why this base
+
+It is small enough to read end to end (~5,300 lines), its agent loop is one
+190-line file, it already speaks structured tool calls with Anthropic prompt
+caching, and it carries a test suite we can keep green while we change it.
+
+## What we changed
+
+Everything after the initial import commit. `git log` on this directory is the
+honest list; the two that matter so far:
+
+- **No dollar cap.** Upstream stops at `$3`. The benchmark's `api` arm — a bare
+  model, which is what we are measured against — has no money cap, so neither
+  may we. `cost_limit` is `0` in code and in every shipped config.
+- **Budgeted in turns.** Upstream counts *steps* and charges a turn for every
+  model call, including re-draws after an unparseable reply. The benchmark's
+  api arm charges one turn per iteration and re-draws up to three times free,
+  so a parse failure cost this agent a turn and cost a bare model nothing.
+  `turn_limit`/`n_turns` now mean what `max_turns`/`turns_used` mean there.
+
+`tests/agents/test_budget_parity.py` guards both, because both are the kind of
+thing that silently drifts back and quietly invalidates a comparison.
+
+## Running it on the benchmark
+
+From a fresh clone, on any machine:
 
 ```bash
-# through the bench, the standard way:
-fb-bench run avro-03 --agent fbagent-native
+./setup.sh
+fb-bench run avro-03 --agent "$PWD/fb-agent.agent.yaml" --model claude-opus-5
 ```
 
-## Why it exists
+`setup.sh` creates `.venv` beside itself and installs `requirements.lock` — the
+exact versions the recorded cells ran on. That is the only setup step. There is
+no interpreter to nominate, nothing to activate, and nothing to install
+globally; `fb_agent.py` finds `.venv` on its own. Re-running it is safe.
 
-An earlier version drove `omp` (a third-party coding CLI). It worked, but the
-agent loop, the context handling, and the prompt caching all lived inside a
-binary we did not write and could not tune. This version replaces that binary
-with about 520 lines of our own: one model, one loop, four tools, and the Anthropic
-API driven directly. Everything the model does, and everything we send it, is
-in this folder.
+Two things it cannot do for you:
 
-## What's here
+- **A model API key.** The bench reads it from its own `.env` (e.g.
+  `ANTHROPIC_API_KEY=...`), the same way it does for every other arm.
+- **Docker.** The bench runs the sealed challenge image; the agent itself never
+  touches it.
 
-```
-fbagent/
-├── agent.py   the loop — linear message-append, the shape mini-swe-agent proved
-├── llm.py     the model call + the prompt-cache policy (the reason we wrote our own)
-├── tools.py   read / glob / grep / bash — schema shape here, text from prompts/
-├── prompts.py the one door to every word the model reads
-└── run.py     entry point: run once in the challenge directory
-prompts/       all model-facing text, kept out of the code
-├── system.md    the system prompt
-├── opening.md   the first user message
-└── tools.yaml   the tool descriptions
-fbagent-native.agent.yaml   the bench manifest — five lines that plug it into fb-bench
-```
-
-### The loop (`agent.py`)
-
-The whole state is one growing message list. Each step: call the model, append
-its turn verbatim, run whatever tools it asked for, append the results, repeat —
-until it stops asking or the budget (steps / wall clock) runs out. No planner,
-no branching, no hidden memory. A survived API error ends the run cleanly rather
-than crashing it, so a candidate already submitted is still graded.
-
-### The cache policy (`llm.py`)
-
-This is why the loop is ours. Prompt caching is a prefix match, rendered
-`tools → system → messages`, so we put a breakpoint on the stable things (the
-tool schemas, the system prompt) and move one breakpoint to the tail of the
-history each turn. The grown prefix is then a cache *read* on the next turn, and
-only the newest exchange is billed in full. On a 20-step run that is about a
-**0.91 cache-read rate** — the number to watch: if it falls toward zero, a
-breakpoint is being invalidated. It is reported at the end of every run.
-
-The call is streamed (`messages.stream()` + `get_final_message()`) because a
-hard turn with adaptive thinking at `xhigh` effort can run for minutes, past a
-non-streaming HTTP timeout. Model is `claude-opus-5`; both are overridable with
-`FBAGENT_MODEL` / `FBAGENT_EFFORT`.
-
-### The tools (`tools.py`)
-
-`read` / `glob` / `grep` to navigate the source; `bash` to build a candidate
-(with `python3`) and test it (`./submit <file>`). Paths are confined to the
-working directory. `bash` runs through the sandbox shell the bench provides in
-`$FBAGENT_SHELL` — the Docker socket masked, the network blocked — so a tool
-cannot reach the sealed answer or fetch a published PoC. A failed tool comes
-back to the model marked `is_error`, not passed off as data.
-
-## How it runs
-
-The agent knows nothing about Docker, the challenge image, or grading. The bench
-hands it two things and grades the rest:
-
-1. a directory of the challenge source (staged from the sealed image — the
-   answer is not in it), which becomes the working directory;
-2. a `./submit <file>` command that runs a candidate on the sealed harness and
-   returns the verdict.
-
-The agent reads the source, tests candidates through `./submit`, and stops when
-one crashes. The bench documents the contract every external agent plugs into in its
-own `docs/external-agents.md`.
-
-### Registering the name
-
-`--agent fbagent-native` resolves the manifest from a search path. Register once:
+`--agent` takes a path, so nothing has to be registered. If you would rather
+type a name than a path, symlink the manifest once — this is a convenience, not
+a requirement:
 
 ```bash
 mkdir -p ~/.config/fbbench/agents
-ln -s "$PWD/fbagent-native.agent.yaml" ~/.config/fbbench/agents/fbagent-native.agent.yaml
+ln -s "$PWD/fb-agent.agent.yaml" ~/.config/fbbench/agents/fb-agent.agent.yaml
+fb-bench run avro-03 --agent fb-agent --model claude-opus-5
 ```
 
-or point `$FBBENCH_AGENTS` at this directory, or pass the full path to `--agent`.
+The bench stages the challenge, drops a `./submit <file>` beside it and runs
+`fb-agent.agent.yaml`'s command in that directory. Submission and grading are
+the bench's: `./submit` answers `crash: <signature>` or `clean: no fault |
+target ran N ms | N bytes`, and a judge on the other side grades and persists
+every candidate as it arrives. The agent gets all of that by having a bash tool,
+which is most of why this base was chosen.
 
-## Keys and environment
+What the agent owes back, all in `src/minisweagent/run/fbbench.py`:
 
-This folder lives inside the FuzzingBrain v2 repo and shares its `.env` and its
-virtualenv. `ANTHROPIC_API_KEY` is read from `../.env` if the environment does
-not already carry it, and the v2 venv is added to `sys.path` if `anthropic` is
-not importable under the interpreter the bench happens to launch — so there is
-nothing to install or export a second time.
+| | where the bench reads it |
+|---|---|
+| turns used | the last JSON object it printed on stdout |
+| tokens | `.fbbench/usage.json` in the workspace |
+| the dialogue | `.fbagent-trace.jsonl`, which becomes `transcript.jsonl` + `report.html` |
 
-## Standalone
+All three are rewritten after **every** turn. The bench hard-kills on the wall
+clock with no grace period — no other arm gets one either — so anything written
+only at exit is lost exactly when the run cost the most.
 
-To drive the loop without the bench, run it in a directory that already holds
-the challenge source and a `./submit`:
+## What the agent adds
+
+`agents/fbbench_coach.py`. Every rule is a measured failure from the bare-model
+run over the same 77 challenges (338/579), and carries the number that justifies
+it — a coaching rule with no evidence behind it is what cost the previous agent
+four distinct faults on a challenge the bare model solved.
+
+| | what it does | what it costs not to |
+|---|---|---|
+| **Don't stop** | refuses a finish while budget remains and fewer than 3 faults are banked, and hands back the agent's own `sinks.md` | 69 of 77 runs ended "ASSESSMENT COMPLETE"; **one** was stopped by the budget. Median 49/100 turns, 13/30 minutes. 241 points unclaimed |
+| **Reach** | `./reach <file> <function>` breaks on that function under gdb and says whether the input got there | the 7 zeros submitted *more* than the wins (18 vs 11). skia-01: 24-byte answer, 37 candidates in the right size band, no way to know if any selected the right filter |
+| **Submit** | nags after 12 turns without `./submit`; blocks fuzzers and `./submit` loops | jq-01: 77 exec calls, **one** submission, 30 minutes, zero |
+| **A crash changes the job** | banks the signature, says so, and redirects to a different sink; calls a repeat worthless | 22 challenges found one fault and spent a median 21 further turns near it. 120 points |
+| **Budget** | on every observation: turns left, minutes left, faults banked | one note at turn 30, nothing until 60. skia-01 quit at turn 53 writing "I've run out of investigation budget" with 47 turns and 20 minutes left |
+
+Two limits are deliberate. Three banked signatures always allows a finish (a
+fourth scores nothing), and the refusal gives up after three attempts — an agent
+that can never stop is a worse bug than one that stops early.
+
+**No fuzzing.** Building or driving a fuzzer is blocked before the command runs,
+and so is looping `./submit`. The first is a second oracle that can disagree
+with the graded one. The second is turn-budget laundering: the bare model grades
+one input per tool call and cannot batch, so a shell loop would not be a better
+agent, it would be a different experiment. Compiling a reproducer to read a
+stack trace stays legal — the guard is narrow on purpose.
+
+## Running the tests
 
 ```bash
-cd <a staged challenge dir>
-python3 -m fbagent.run --timeout 900
+pip install -e ".[dev]"
+pytest tests
 ```
 
-The bench's external arm is what normally produces that directory and that
-`submit`; standalone is for poking at the loop directly.
+`tests/environments/extra/` needs optional extras (`modal`, `contree`) and a
+host that permits unprivileged user namespaces for `bubblewrap`; skip those
+directories if you have neither.
 
-## What's done, and what's next
+## Upstream docs
 
-- loop, four tools, prompt caching, standard SDK usage (streaming, error
-  handling, `is_error`) — **done**, and it solves avro-03 graded by the bench.
-- **context management (compaction / context editing)** — not yet. The runs so
-  far stay well under the context window; this is for long challenges and is the
-  next thing to own, the same way the cache is owned here.
+The agent, environment, model and config layers are unchanged in shape, so
+upstream's documentation still applies: https://mini-swe-agent.com/latest/

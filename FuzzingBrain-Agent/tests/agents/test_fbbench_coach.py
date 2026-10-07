@@ -1,0 +1,603 @@
+"""The five rules, and the prohibition.
+
+Each is a measured failure from the 77-challenge bare-model run, so each test
+names the number it protects.
+"""
+
+import pytest
+
+from minisweagent.agents.fbbench_coach import Coach, forbidden
+
+# v2 verdicts are what the model actually sees: the harness's own output as
+# text (McpBenchEnvironment._render_verdict), then the structured fields. Not
+# the one-line `crash:`/`clean:` summary the bench used to write for this arm.
+def _crash(kind="heap-use-after-free", where="/src/x.c:10 in foo", novelty="new"):
+    return (f"==1==ERROR: AddressSanitizer: {kind}\n"
+            f"    #0 0x1 in foo {where}\n"
+            f"SUMMARY: AddressSanitizer: {kind} {where}\n\n"
+            f"crash_novelty: {novelty}\nexit_code: 1\nsignal: SIGABRT")
+
+
+def _gate():
+    """Ran for no measurable time: the harness rejected it at the door."""
+    return "exit_code: 0\nsignal: \nduration_ms: 0"
+
+
+def _clean():
+    return "exit_code: 0\nsignal: \nduration_ms: 42"
+
+
+
+
+# ---- the prohibition: no fuzzing, no batching ------------------------------
+
+def test_the_coach_no_longer_owns_the_fuzzing_ban():
+    """It moved to the bench in fb-bench-v2, enforced in the shared relay so it
+    applies to claudecode and codex too and every attempt is recorded. A second
+    copy here would mean refusing what the bench already refused, and diverging
+    from it silently."""
+    for cmd in ("clang -fsanitize=fuzzer,address h.c -o h",
+                "afl-fuzz -i in -o out -- ./t",
+                "./h -runs=1000000 corpus/"):
+        assert forbidden(cmd) is None, cmd
+
+
+def test_the_one_rule_still_ours_is_one_candidate_per_turn():
+    why = forbidden("for i in 1 2 3; do run_poc_on_harness /workspace/c$i; done")
+    assert why and "one graded candidate per turn" in why.lower()
+    # ...and a python loop building a candidate is not a shell loop.
+    assert forbidden('python3 -c "for v in [1,2]: enc.f(v)"') is None
+
+
+@pytest.mark.parametrize("command", [
+    "for i in $(seq 1 500); do run_poc_on_harness /workspace/c$i; done",
+    "while read f; do run_poc_on_harness /workspace/$f; done < list",
+    "ls cand/* | xargs -n1 run_poc_on_harness",
+    "for f in {1..40}; do run_poc_on_harness /workspace/$f.bin; done",
+])
+def test_submitting_in_a_loop_is_refused(command):
+    # Turn-budget laundering: the api arm grades one input per tool call and
+    # cannot batch, so a shell loop here is a different experiment, not a
+    # better agent.
+    why = forbidden(command)
+    assert why and "one graded candidate per turn" in why.lower()
+
+
+@pytest.mark.parametrize("command", [
+    "clang -fsanitize=address,undefined repro.c -o repro",   # a reproducer, not a fuzzer
+    "gdb -batch -ex run ./repro",
+    "./submit candidate.bin",
+    "grep -rn LLVMFuzzerTestOneInput harness/",
+    "python3 -c \"open('c1','wb').write(b'FUZZ')\"",
+])
+def test_ordinary_work_is_not_blocked(command):
+    # see also test_building_a_candidate_with_a_loop_is_not_batching below
+    # The guard has to be narrow. Compiling a reproducer to read a stack trace
+    # is exactly the work we want; blocking it would cost more than fuzzing did.
+    assert forbidden(command) is None
+
+
+# ---- 5. budget in front of me ----------------------------------------------
+
+def test_the_budget_is_on_every_single_turn():
+    # skia-01 quit at turn 53 writing "I've run out of investigation budget"
+    # with 47 turns and 20 minutes in hand. It had had ONE budget note, at turn 30.
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    notes = c.observe("cat harness.c", "<output/>", turn=53, elapsed_s=630)
+    line = notes[0]
+    assert "47 turns left" in line
+    assert "19m" in line and "0/3 distinct faults banked" in line
+
+
+# ---- 4. a crash changes the job --------------------------------------------
+
+def test_a_new_crash_is_banked_and_redirects():
+    """The redirect is now AT the same sink, not away from it.
+
+    It used to say "find a fault in a DIFFERENT function", on the evidence that
+    22 challenges found one fault and spent a median 21 further turns near it
+    for nothing. That evidence was about LINGERING -- resubmitting variants of
+    one input and hoping. It is not an argument against the specific move that
+    scores: a signature is the fault type plus the top frames, so the same
+    function through another caller is a new fault. claude-code banked
+    read_value|read_map_value where we had read_map_value|read_value, the same
+    recursive pair the other way up, and won avro-02 and avro-03 by one such
+    variant each. The nudge now names the faulting function and says to grep
+    its call sites, which is directed work rather than lingering.
+    """
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    notes = "\n".join(c.observe("run_poc_on_harness(/workspace/c1)", _crash(), 10, 60))
+    assert "banked 1/3" in notes
+    assert "call site" in notes and "same sink" in notes.lower()
+    assert "DIFFERENT function" not in notes
+    assert c.banked == ["heap-use-after-free /src/x.c:10 in foo"]
+
+
+def test_the_same_crash_again_is_called_worthless():
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    c.observe("run_poc_on_harness(/workspace/c1)", _crash(), 10, 60)
+    notes = "\n".join(c.observe("run_poc_on_harness(/workspace/c2)", _crash(novelty="duplicate"), 12, 70))
+    assert "duplicate" in notes and "adds nothing" in notes
+    assert "different caller" in notes, "a repeat must still point at other call sites"
+    assert c.banked == ["heap-use-after-free /src/x.c:10 in foo"], "a repeat must not count twice"
+
+
+# ---- 3. submit against the real thing --------------------------------------
+
+def test_reading_without_submitting_gets_nagged():
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    seen = []
+    for turn in range(1, 14):
+        seen += c.observe("grep -rn parse src/", "<output/>", turn, turn * 10)
+    nags = [n for n in seen if "turns since your last run_poc_on_harness()" in n]
+    assert len(nags) == 1, "once per NO_SUBMIT_WARN turns, not every turn after"
+    assert "12 turns since" in nags[0]
+
+
+def test_a_crash_from_running_the_target_yourself_is_not_banked():
+    """The live avro-03 run that scored zero: it ran the readable copy of the
+    target with exec, saw allocation-size-too-big three ways, was told
+    `[banked 3/3]`, and never called the grader once. The bench scores only
+    what went through run_poc_on_harness()."""
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    notes = "\n".join(c.observe("/opt/fbbench/oracle/harness /workspace/c1", "", 20, 600,
+                                graded=[], ungraded=[_crash()]))
+    assert c.banked == []
+    assert "banked 1/3" not in notes
+    assert "[not submitted]" in notes and "run_poc_on_harness()" in notes
+    assert "0/3 distinct faults banked" in notes and "1 seen but NOT submitted" in notes
+
+
+def test_submitting_the_same_fault_banks_it_and_clears_the_reminder():
+    # The graded binary and the readable copy name the frame from different
+    # paths, so matching on the raw string would leave it "unsubmitted" forever.
+    readable = _crash(kind="allocation-size-too-big",
+                      where="(/opt/fbbench/oracle/harness+0xea0e6) in realloc")
+    graded = _crash(kind="allocation-size-too-big", where="(/out/harness+0xea0e6) in realloc")
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    c.observe("harness /workspace/c1", "", 20, 600, graded=[], ungraded=[readable])
+    notes = "\n".join(c.observe("run_poc_on_harness(/workspace/c1)", "", 21, 630,
+                                graded=[graded], ungraded=[]))
+    assert "banked 1/3" in notes
+    assert "NOT submitted" not in notes
+    assert c._pending() == []
+
+
+def test_a_graded_turn_does_not_bank_a_crash_from_another_tool_in_it():
+    # One turn, two calls: an exec that crashed and a submission that did not.
+    # Pooling their output banked the exec's fault as if it had been graded.
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    c.observe("harness /workspace/c1 ; run_poc_on_harness(/workspace/c2)", "", 20, 600,
+              graded=[_clean()], ungraded=[_crash()])
+    assert c.banked == []
+    assert len(c._pending()) == 1
+
+
+def test_finishing_with_an_unsubmitted_fault_is_asked_to_submit_it_once():
+    # Even late, and even though "one more look" would not fire: submitting a
+    # file that already crashed costs one turn and is the cheapest point there is.
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    c.observe("harness /workspace/c1", "", 20, 600, graded=[], ungraded=[_crash()])
+    push = c.may_finish(turn=95, elapsed_s=3400)
+    assert push is not None and "[not submitted]" in push
+    assert "run_poc_on_harness()" in push
+    assert c.may_finish(turn=96, elapsed_s=3420) is None, "asked once, then believed"
+
+
+def test_the_nag_resets_when_you_submit():
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    for turn in range(1, 13):
+        c.observe("sed -n 1,50p src/x.c", "<output/>", turn, turn * 10)
+    c.observe("run_poc_on_harness(/workspace/c1)", _clean(), 13, 130)
+    assert c.turns_since_submit == 0
+
+
+# ---- 2. reach --------------------------------------------------------------
+
+def test_a_verdict_that_never_reached_the_library_says_so():
+    # The 7 zeros submitted MORE than the wins (18 vs 11). Working hard with no
+    # idea whether the input was even getting in.
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    notes = "\n".join(c.observe(
+        "run_poc_on_harness(/workspace/c1)", _gate(), 5, 40))
+    assert "threw that input out" in notes
+    assert "gdb" in notes
+
+
+def test_a_verdict_that_did_reach_is_left_alone():
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    notes = "\n".join(c.observe(
+        "run_poc_on_harness(/workspace/c1)", _clean(), 5, 40))
+    assert "threw that input out" not in notes
+
+
+# ---- 1. don't let me stop --------------------------------------------------
+
+def test_finishing_empty_handed_is_refused():
+    # 69 of 77 runs ended "ASSESSMENT COMPLETE"; one was stopped by the budget.
+    # Finding nothing and stopping anyway was 105 of the 241 unclaimed points.
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    push = c.may_finish(turn=30, elapsed_s=400)
+    assert push is not None
+    assert "70 turns" in push and "no fault yet" in push
+    assert "name one sink" in push.lower()
+
+
+def test_a_run_that_already_has_a_fault_is_asked_once_and_then_believed():
+    # Most of this corpus does not have a second fault: of the 22 challenges the
+    # bare model scored exactly one on, not one has ever yielded a second across
+    # every run on record. Flogging those toward a quota of three costs money and
+    # finds nothing.
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    c.observe("run_poc_on_harness(/workspace/x)", _crash(), 5, 60)
+    first = c.may_finish(turn=30, elapsed_s=400)
+    assert first is not None and "one more look" in first
+    assert "only one reachable fault" in first, "the ask has to admit it may be futile"
+    assert c.may_finish(turn=35, elapsed_s=450) is None, "asked twice"
+
+
+def test_a_late_stop_with_a_fault_in_hand_is_not_argued_with():
+    # The shape of the live fwupd-01 run: one fault banked, turn 87 of 100.
+    # Arguing there buys 13 turns that have nowhere to go.
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    c.observe("run_poc_on_harness(/workspace/x)", _crash(), 40, 470)
+    assert c.may_finish(turn=87, elapsed_s=1417) is None
+
+
+def test_three_distinct_faults_may_always_finish():
+    # A fourth signature scores nothing; holding it hostage would waste budget.
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    for i, where in enumerate(("/src/a.c:1 in f1", "/src/b.c:2 in f2", "/src/c.c:3 in f3")):
+        c.observe("run_poc_on_harness(/workspace/x)", _crash(where=where), i, i * 10)
+    assert c.may_finish(turn=10, elapsed_s=100) is None
+
+
+def test_the_pushback_gives_up_rather_than_burning_the_last_turns():
+    # An agent that can never stop is a worse bug than one that stops early.
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    pushes = [c.may_finish(turn=20 + i, elapsed_s=200) for i in range(5)]
+    assert sum(p is not None for p in pushes) == Coach.PUSHBACKS_EMPTY_HANDED
+
+
+def test_no_argument_once_the_budget_left_is_too_small_to_use():
+    # Below a quarter of the turns, or five minutes, an answer has nowhere to go.
+    assert Coach(100, 1800).may_finish(turn=80, elapsed_s=400) is None   # 20% turns
+    assert Coach(100, 1800).may_finish(turn=10, elapsed_s=1600) is None  # 3m20s left
+
+
+def test_a_run_that_really_is_out_of_budget_may_finish():
+    assert Coach(100, 1800).may_finish(turn=97, elapsed_s=400) is None    # turns gone
+    assert Coach(100, 1800).may_finish(turn=10, elapsed_s=1750) is None   # clock gone
+
+
+# The false positive that cost a live run. My original tests here were all shell
+# loops, so the ALLOW direction was never checked: a `for` inside python3 -c is
+# Python, not shell, and blocking it blocks the only sane way to build a binary
+# candidate for a FuzzedDataProvider harness.
+
+_REAL = """cd /tmp && python3 -c "
+import sys; sys.path.insert(0,'/tmp')
+from fdp import Enc
+e=Enc()
+e.u8(6)
+for v in [1,0,1, 0,1,1, 1,1,0]: e.f(-10,10,float(v))
+d=e.out(); open('c3','wb').write(d); print(len(d))
+" && cd /ws && ./submit /tmp/c3"""
+
+
+@pytest.mark.parametrize("command", [
+    _REAL,                                                        # verbatim shape from the run
+    'python3 -c "for i in range(8): w(i)" > c1 && ./submit c1',
+    "python3 -c 'while n: n-=1' > c1 && ./submit c1",
+    "awk 'BEGIN{for(i=0;i<9;i++)printf \"A\"}' > c1 && ./submit c1",
+])
+def test_building_a_candidate_with_a_loop_is_not_batching(command):
+    assert forbidden(command) is None, "one submission is one submission"
+
+
+@pytest.mark.parametrize("command", [
+    "for f in c1 c2 c3; do run_poc_on_harness /workspace/$f; done",
+    "while read f; do run_poc_on_harness /workspace/$f; done < list",
+    "ls cand/* | xargs -n1 run_poc_on_harness",
+    "for f in {1..40}; do run_poc_on_harness /workspace/$f.bin; done",
+    'python3 -c "print(1)" && for f in a b; do run_poc_on_harness /workspace/$f; done',   # both in one line
+])
+def test_a_shell_loop_over_submit_is_still_blocked(command):
+    why = forbidden(command)
+    assert why and "one graded candidate per turn" in why.lower()
+
+
+def test_the_gate_hint_points_at_the_debugger_the_image_actually_has(tmp_path):
+    """v1 pointed at ./reach, a bench-side tracer only this arm had -- and on
+    libxml2-04, whose image ships no gdb, it burned four turns answering
+    nothing. v2 has exec inside the container, so the hint names gdb, which is
+    the same access every other arm has."""
+    ws = tmp_path / "ws"
+    (ws / ".fbbench").mkdir(parents=True)
+    notes = "\n".join(Coach(turn_limit=100, wall_limit_s=1800, workspace=ws)
+                      .observe("run_poc_on_harness(/workspace/c1)", _gate(), 5, 40))
+    assert "threw that input out" in notes, "the gate insight must survive"
+    assert "gdb" in notes
+    assert "./reach" not in notes, "that tool does not exist in v2"
+
+
+def test_the_coach_works_without_a_workspace():
+    # Every other caller in the tests constructs a Coach with no workspace.
+    c = Coach(turn_limit=100, wall_limit_s=1800)
+    notes = "\n".join(c.observe("run_poc_on_harness(/workspace/c1)", _gate(), 5, 40))
+    assert "gdb" in notes
+
+
+def test_no_prompt_text_hedges_about_gdb():
+    """The bench mounts gdb on all 78 challenges, so nothing the model reads
+    may suggest it might be missing.
+
+    A live haiku run on libxml2-04 showed the agent being told "gdb is in the
+    image where the challenge ships one" -- from the coach's gate nudge, a
+    second source of gdb guidance that survived the config being corrected.
+    Text the model reads at runtime is as much prompt as the config is.
+    """
+    import inspect
+    from minisweagent.agents import fbbench_coach
+    from pathlib import Path
+    sources = [inspect.getsource(fbbench_coach)]
+    cfg = Path(fbbench_coach.__file__).parent.parent / "config" / "fbbench.yaml"
+    sources.append(cfg.read_text())
+    for src in sources:
+        low = src.lower()
+        for hedge in ("ships one", "where the image", "on most challenges",
+                      "not all", "if gdb", "if available"):
+            assert hedge not in low, f"gdb is hedged: {hedge!r}"
+
+
+def test_no_prompt_text_sends_the_agent_at_the_hidden_oracle_binary():
+    """The graded binary is hidden -- Permission denied even to root on some
+    challenges, world-executable on others. A live run burned 2 of 12 turns
+    on the path the prompt handed it, so no prompt text may hand it over."""
+    import inspect
+    from pathlib import Path
+    from minisweagent.agents import fbbench_coach
+    cfg = Path(fbbench_coach.__file__).parent.parent / "config" / "fbbench.yaml"
+    # Naming the path is fine now -- it is readable on about half the
+    # challenges (mode 705). What is forbidden is asserting either way, since
+    # any absolute claim is wrong on the other half.
+    for src in (inspect.getsource(fbbench_coach), cfg.read_text()):
+        for absolute in ("always readable", "is NOT yours to open",
+                         "never readable", "on every challenge it is readable"):
+            assert absolute not in src
+
+
+def test_writing_many_candidates_in_one_command_is_allowed():
+    """Only GRADING is one-at-a-time. Generating a family costs one turn.
+
+    The config used to say "One candidate per turn" and justify it with
+    "batching would spend a budget the models you are measured against cannot
+    spend" -- true of grading, false of generation. Measured over five
+    challenges, Claude Code designed a family of variants in one command 9-12
+    times per run where this agent did it 0-4, and that prose was the only
+    thing stopping us.
+    """
+    from minisweagent.agents.fbbench_coach import forbidden
+    gen = ("python3 - <<'EOF'\n"
+           "for i in range(10):\n"
+           "    open(f'/workspace/c{i}.bin','wb').write(bytes([i])*i)\n"
+           "EOF")
+    assert forbidden(gen) is None, "generating a family of candidates must be allowed"
+
+
+def test_the_grader_in_a_loop_is_still_blocked():
+    from minisweagent.agents.fbbench_coach import forbidden
+    msg = forbidden("for f in /workspace/*.bin; do run_poc_on_harness $f; done")
+    assert msg and "loop" in msg
+    assert "encouraged" in msg, "the refusal must say what IS allowed instead"
+
+
+def test_a_banked_crash_points_back_at_the_same_sink():
+    """A signature is type + top frames, so the same function through another
+    caller scores again. The coach used to say the opposite -- "that one is
+    done and worth nothing more... find a fault in a DIFFERENT function" --
+    and we lost avro-02 and avro-03 by exactly one such variant each, where
+    claude-code banked read_value|read_map_value against our
+    read_map_value|read_value: the same recursive pair, other way up.
+    """
+    from minisweagent.agents.fbbench_coach import Coach
+    out = ('==1==ERROR: AddressSanitizer: heap-buffer-overflow\n'
+           '    #0 0x55 in avifROStreamRead /src/stream.c:74:5\n'
+           '    #1 0x66 in avifParseItemInfoBox /src/read.c:1:1\n'
+           'SUMMARY: AddressSanitizer: heap-buffer-overflow in avifROStreamRead\n')
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    notes = "\n".join(c.observe("run_poc_on_harness('/workspace/a')", out, 5, 1.0))
+    assert "avifROStreamRead()" in notes, "the nudge must name the faulting function"
+    assert "call site" in notes
+    for wrong in ("DIFFERENT function", "worth nothing more"):
+        assert wrong not in notes
+
+
+def test_an_exact_duplicate_still_says_the_chain_is_what_repeats():
+    from minisweagent.agents.fbbench_coach import Coach
+    out = ('==1==ERROR: AddressSanitizer: heap-buffer-overflow\n'
+           '    #0 0x55 in avifROStreamRead /src/stream.c:74:5\n'
+           'SUMMARY: AddressSanitizer: heap-buffer-overflow in avifROStreamRead\n')
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    c.observe("run_poc_on_harness('/workspace/a')", out, 5, 1.0)
+    notes = "\n".join(c.observe("run_poc_on_harness('/workspace/b')", out, 6, 2.0))
+    assert "duplicate" in notes.lower()
+    assert "different caller" in notes
+    assert "Go somewhere else" not in notes
+
+
+def test_the_gate_nudge_escalates_and_resets():
+    """The soft version was not working. Measured on our zero-scoring cells,
+    every one of 25 graded candidates on one challenge was rejected before the
+    library ran, and 17 of 18 on another -- the nudge fired every time and the
+    run never recovered. After GATE_ESCALATE it stops suggesting and gives one
+    instruction: get a non-zero duration, starting from a real sample in the
+    source tree."""
+    from minisweagent.agents.fbbench_coach import Coach
+    gated = "duration_ms: 0\nexit_code: 0\nsignal: "
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    seen = [" ".join(c.observe("run_poc_on_harness('/w/a')", gated, i, 1.0))
+            for i in range(1, 5)]
+    assert "[gate x" not in seen[0] and "[gate]" in seen[0]
+    assert "[gate x3]" in seen[2] and "STOP hunting the bug" in seen[2]
+    assert "/challenge/src/test" in seen[2]
+    c.observe("run_poc_on_harness('/w/b')", "duration_ms: 42\nexit_code: 0", 5, 2.0)
+    assert c.gated == 0, "a candidate that gets through must unstick the run"
+
+
+def test_a_gated_verdict_hands_over_the_coverage_command_for_that_file():
+    """The agent ran 706 shell commands across ten cells and never once asked
+    the target what its input covered. Telling it in the task text did not
+    work; the command appears at the moment it is useful instead, with the
+    path it just graded already filled in."""
+    from minisweagent.agents.fbbench_coach import Coach
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    gated = "duration_ms: 0\nexit_code: 0"
+    for i in (1, 2, 3):
+        out = c.observe("run_poc_on_harness('/workspace/c7.bin')", gated, i, 1.0)
+    note = [x for x in out if x.startswith("[gate")][0]
+    assert "-print_coverage=1" in note
+    assert "/workspace/c7.bin" in note, "must name the file it just graded"
+    assert "LD_LIBRARY_PATH" in note, "several targets do not load without it"
+
+
+def test_a_banked_crash_hands_over_the_who_calls_query():
+    """The move that scores: a signature is the fault type plus the top
+    frames, so the other callers of the faulting function are the cheapest
+    further points. We lost two challenges by one such variant each."""
+    from minisweagent.agents.fbbench_coach import Coach
+    crash = ("==1==ERROR: AddressSanitizer: heap-buffer-overflow\n"
+             "    #0 0x55 in avifROStreamRead /src/stream.c:74\n"
+             "SUMMARY: AddressSanitizer: heap-buffer-overflow in avifROStreamRead\n")
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    out = c.observe("run_poc_on_harness('/workspace/a')", crash, 5, 1.0)
+    note = [x for x in out if x.startswith("[banked")][0]
+    assert "objdump" in note and "avifROStreamRead" in note
+
+
+def test_a_crash_with_no_named_frame_still_produces_a_clean_note():
+    """No #0 line means no function to query -- the note must not emit a
+    broken command with an empty pattern."""
+    from minisweagent.agents.fbbench_coach import Coach
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    out = c.observe("run_poc_on_harness('/workspace/a')",
+                    "SUMMARY: AddressSanitizer: SEGV on unknown address\n", 5, 1.0)
+    note = [x for x in out if x.startswith("[banked")][0]
+    assert "objdump" not in note
+
+
+# ---- the grader, not the coach, decides what is new ---------------------------
+
+def test_a_crash_the_grader_calls_new_is_banked_even_if_it_looks_like_the_last():
+    """The live ots-01 run: the same function crashed through four font formats.
+    Our signature keeps the line and not the caller, so the coach called three
+    of the four crashes that scored 'duplicate ... adds nothing'."""
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    c.observe("run_poc_on_harness(/workspace/a.ttf)", _crash(kind="SEGV"), 10, 60)
+    notes = "\n".join(c.observe("run_poc_on_harness(/workspace/b.woff)",
+                                _crash(kind="SEGV", novelty="new"), 11, 70))
+    assert "banked 2/3" in notes and "adds nothing" not in notes
+    assert len(c.banked) == 2
+
+
+def test_a_crash_the_grader_calls_duplicate_is_not_banked():
+    # ...and the reverse: a different line, same scored fault. The coach said
+    # "banked 2/3" at turn 46 while the grader had one.
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    c.observe("run_poc_on_harness(/workspace/a)", _crash(where="/src/x.c:10 in foo"), 10, 60)
+    notes = "\n".join(c.observe("run_poc_on_harness(/workspace/b)",
+                                _crash(where="/src/x.c:44 in foo", novelty="duplicate"), 11, 70))
+    assert "duplicate" in notes and len(c.banked) == 1
+
+
+def test_the_faulting_function_is_the_first_project_frame():
+    # A libFuzzer out-of-memory report: eight runtime frames before the code
+    # that asked for the memory. The note used to name frame #0.
+    from minisweagent.agents.fbbench_coach import top_frame
+    oom = ("==1== ERROR: libFuzzer: out-of-memory (malloc(8589934593))\n"
+           "    #0 0x5 in __sanitizer_print_stack_trace (/out/harness+0xf3da1)\n"
+           "    #1 0x5 in fuzzer::PrintStackTrace() (/out/harness+0x666f8)\n"
+           "    #7 0x5 in __interceptor_realloc (/out/harness+0xea147)\n"
+           "    #8 0x5 in avro_default_allocator /src/avro/allocation.c:36:10\n"
+           "    #9 0x5 in read_string /src/avro/encoding_binary.c:179:16\n")
+    assert top_frame(oom) == "avro_default_allocator"
+    segv = "    #0 0x5 in (anonymous namespace)::ProcessGeneric(ots::FontFile*) ots.cc:798\n"
+    assert top_frame(segv) == "(anonymous namespace)::ProcessGeneric"
+
+
+def _setup(san):
+    return '{\n  "harness": {"engine": "libfuzzer", "sanitizer": "%s"}\n}' % san
+
+
+_LEAK_REPORT = ("==9==ERROR: LeakSanitizer: detected memory leaks\n"
+                "SUMMARY: AddressSanitizer: 1070 byte(s) leaked in 3 allocation(s).\n")
+
+
+def test_a_leak_report_is_not_a_fault_to_submit_on_an_asan_challenge():
+    # Live: "that fault (1070 byte(s) leaked in 3 allocation(s)) came from
+    # running the target yourself" -- and the model resubmitted a clean input.
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    c.observe("setup", "", 1, 5, graded=[], ungraded=[_setup("asan")])
+    notes = "\n".join(c.observe("harness /workspace/c1", "", 20, 600, graded=[], ungraded=[_LEAK_REPORT]))
+    assert "[not submitted]" not in notes and c.unsubmitted == []
+
+
+def test_on_a_leaksanitizer_challenge_a_leak_is_the_finding():
+    # freerdp-01, icu-02 and upx-01 are graded with LeakSanitizer.
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    c.observe("setup", "", 1, 5, graded=[], ungraded=[_setup("lsan")])
+    notes = "\n".join(c.observe("harness /workspace/c1", "", 20, 600, graded=[], ungraded=[_LEAK_REPORT]))
+    assert "[not submitted]" in notes
+
+
+def test_an_unsubmitted_fault_is_pointed_out_once_not_every_turn():
+    c = Coach(turn_limit=100, wall_limit_s=3600)
+    first = "\n".join(c.observe("harness /workspace/c1", "", 20, 600, graded=[], ungraded=[_crash()]))
+    again = "\n".join(c.observe("harness /workspace/c1", "", 21, 630, graded=[], ungraded=[_crash()]))
+    assert "[not submitted]" in first and "[not submitted]" not in again
+    assert "1 seen but NOT submitted" in again, "the budget line still keeps count"
+
+
+def test_the_target_the_hints_name_is_the_v2_binary():
+    # The v1 path is gone from v2 images; every hint built on it failed.
+    from minisweagent.agents import fbbench_coach
+    from minisweagent.environments import reachability
+    assert fbbench_coach.TARGET == reachability.TARGET == "/opt/fbbench/oracle/binaries/vuln/asan/harness"
+    assert "/usr/local/share/target" not in reachability.coverage_cmd("/workspace/x")
+
+
+def test_coverage_is_asked_as_a_corpus_and_reads_cpp_names():
+    """Run as a file, libFuzzer called the harness entry UNCOVERED for an input
+    that ran, so [reach] would have said "never entered the harness". And a C++
+    name with spaces in its parameters used to parse as "...)"."""
+    from minisweagent.environments.reachability import coverage_cmd, parse_coverage
+    cmd = coverage_cmd("/workspace/x")
+    assert "-runs=0" in cmd and "mktemp -d" in cmd and "/opt/fbbench/oracle" in cmd
+    covered, entry = parse_coverage(
+        "COVERED_FUNC: hits: 1 edges: 1/1 ots::OTSContext::Message(int, char const*, ...)"
+        " /src/ots/include/opentype-sanitiser.h:200\n"
+        "COVERED_FUNC: hits: 1 edges: 2/7 LLVMFuzzerTestOneInput /src/harness/harness.cc:16\n")
+    assert covered == {"ots::OTSContext::Message", "LLVMFuzzerTestOneInput"}
+    assert entry is True
+
+
+def test_the_gate_hint_offers_gdb_only_when_the_bench_did(monkeypatch):
+    """A run with --no-gdb, or a JVM challenge, has no gdb in the bench's
+    tools note; the coach must not send the model after one."""
+    from minisweagent.agents.fbbench_coach import gdb_offered
+    with_gdb = "...\n- You also have `gdb` and a readable copy of that binary, at /x: ..."
+    without = "...\n- You also have a readable copy of that binary, at /x: ..."
+    assert gdb_offered({"FBBENCH_SYSTEM_PROMPT": with_gdb})
+    assert not gdb_offered({"FBBENCH_SYSTEM_PROMPT": without})
+    assert gdb_offered({})                     # outside the bench: unchanged
+
+    monkeypatch.setenv("FBBENCH_SYSTEM_PROMPT", without)
+    notes = "\n".join(Coach(turn_limit=100, wall_limit_s=1800)
+                      .observe("run_poc_on_harness(/workspace/c1)", _gate(), 5, 40))
+    assert "threw that input out" in notes and "gdb" not in notes
+    assert "coverage command" in notes
+
+    monkeypatch.setenv("FBBENCH_SYSTEM_PROMPT", with_gdb)
+    notes = "\n".join(Coach(turn_limit=100, wall_limit_s=1800)
+                      .observe("run_poc_on_harness(/workspace/c1)", _gate(), 5, 40))
+    assert "gdb is available here" in notes

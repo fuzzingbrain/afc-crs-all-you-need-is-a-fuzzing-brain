@@ -1,0 +1,131 @@
+# fb-agent on FuzzingBrain-Bench.
+#
+# The prompt body below is FuzzingBrain-Bench's own, copied verbatim from
+# fbbench/prompts.py::CODEX_TASK_PROMPT -- the text the bare-model (api) and
+# claudecode arms are given. That is the bench's convention, in its own words:
+# "body copied verbatim so the two arms are graded on identical wording". It is
+# not politeness. We are trying to measure what this harness does to a model;
+# if our wording is also different, the run measures the wording instead, and
+# that is the one comparison we cannot afford to confound.
+#
+# THE THREE DIVERGENCES, all forced by the execution path. They are listed here
+# rather than inline because anything indented under a `|` block is part of the
+# prompt -- these notes were briefly inside it, and would have been sent to the
+# model as instructions.
+#
+#   1. The tools bullet. The other arms name the MCP set and
+#      run_poc_on_harness() as six native tools; ours offers the SAME tools
+#      through one command per turn. The tools are the bench's and are
+#      identical; how an agent surfaces them to its model is its own design,
+#      and that is the scaffolding being compared.
+#   2. The ending. The api arm stops on "ASSESSMENT COMPLETE" and the CLI arms
+#      write RESULT.md; ours must be the command the environment watches for.
+#   3. The instance template's mechanics: how to read a run_poc_on_harness()
+#      result, and where the agent is standing. /challenge is read-only and
+#      /workspace is not, which a one-command-per-turn agent has to be told
+#      because it cannot discover it without spending a turn.
+#
+# Nothing else is added. Advice we have not measured is how the last agent lost
+# Opus 5 four distinct faults, and tests/run/test_prompt_parity.py fails if this
+# drifts from the bench or grows a fourth divergence.
+#
+# The `model:` section below is the OTHER prompt -- the harness's own, sent every
+# turn regardless of the task: how a command's output is wrapped, and what comes
+# back when a reply cannot be parsed. It is upstream's, unchanged. It lives under
+# `model:` because that is who renders it; an earlier version of this file put
+# the observation template under `agent:`, where AgentConfig has no such field
+# and pydantic quietly dropped it, so every command's output went back untruncated.
+agent:
+  system_template: |
+    How to finish, which is the one thing this harness needs stated differently:
+    when you are certain there are no more distinct vulnerabilities reachable
+    through the harness, run `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT` on its
+    own, with no other command. Saying it is not enough here -- it has to be a
+    command, and you cannot continue after it.
+  instance_template: |
+    {{task}}
+
+    ## This environment
+
+    - Your working directory is `/challenge` and it is **read-only**: the source
+      under `./src`, the harness under `./harness`. Write candidates and scripts
+      to `/workspace` or `/tmp`, which are writable.
+    - Every command runs in a NEW shell starting in `/challenge`. `cd` and
+      environment variables do not carry over, so use absolute paths.
+    - Write binary inputs with a tool rather than by pasting bytes -- e.g.
+      `python3 -c "open('/workspace/c1','wb').write(b'...')"` or `printf`. Keep
+      each candidate in its own file.
+
+    ## Reading a verdict
+
+    - A duration of zero and no fault means the harness threw the input out
+      before the library ever saw it. Nothing about its contents matters yet --
+      find the entry check you are failing.
+    - Two candidates that fault the same way in the same place are the SAME
+      vulnerability and count once. The same function reached through a
+      different caller is a different one.
+
+    ## Rules
+
+    - **No fuzzing.** Building or running a fuzzer is blocked, and so is putting
+      the grader in a loop. Grade ONE candidate per turn, chosen deliberately.
+      Writing several candidates in one command is fine; it is only the grading
+      that is one at a time.
+    - Never run the harness binary without an input file, or with `--help`:
+      libFuzzer then starts fuzzing, and the command hangs until it times out.
+  turn_limit: 0
+  cost_limit: 0
+  wall_time_limit_seconds: 0
+
+environment:
+  environment_class: local
+  # A build or a slow grading round trip is minutes, not seconds. The grader
+  # alone waits up to 180s for a verdict, so upstream's 30 would kill the one
+  # command the agent most needs to finish.
+  timeout: 300
+
+model:
+  observation_template: |
+    {%- if output.output | length < 10000 -%}
+    {
+      "returncode": {{ output.returncode }},
+      "output": {{ output.output | tojson }}
+      {%- if output.exception_info %}, "exception_info": {{ output.exception_info | tojson }}{% endif %}
+    }
+    {%- else -%}
+    {
+      "returncode": {{ output.returncode }},
+      "output_head": {{ output.output[:5000] | tojson }},
+      "output_tail": {{ output.output[-5000:] | tojson }},
+      "elided_chars": {{ output.output | length - 10000 }},
+      "warning": "Output too long."
+      {%- if output.exception_info %}, "exception_info": {{ output.exception_info | tojson }}{% endif %}
+    }
+    {%- endif -%}
+  format_error_template: |
+    {% if finish_reason is defined and (finish_reason == "length" or (finish_reason == "tool_calls" and not has_tool_calls)) -%}
+    Your previous response reached the output token limit (finish_reason={{ finish_reason }}) before you produced a tool call, so it was cut off. Respond more concisely and finish with exactly one bash tool call. If you need to think more, do so briefly.
+    {%- else -%}
+    Tool call error:
+
+    <error>
+    {{error}}
+    </error>
+
+    Here is general guidance on how to submit correct toolcalls:
+
+    Every response needs to use the 'bash' tool at least once to execute commands.
+
+    Call the bash tool with your command as the argument:
+    - Tool: bash
+    - Arguments: {"command": "your_command_here"}
+
+    If you want to end the task, please issue the following command: `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT`
+    without any other command.
+    {%- endif %}
+  # The bench's own three tools, declared to the model so it calls them by
+  # name. Driving them through one bash-shaped action meant the grader was a
+  # magic string, and a model that sees a shell treats everything as a shell.
+  tool_set: bench
+  model_kwargs:
+    drop_params: true
