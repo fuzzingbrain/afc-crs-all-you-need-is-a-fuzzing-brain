@@ -5,7 +5,7 @@
 *.egg-info/
 
 # Virtual environments
-**/venv/
+**/venv
 
 **/paper/**
 # Workspace / runtime data
