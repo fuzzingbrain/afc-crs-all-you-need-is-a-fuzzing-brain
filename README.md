@@ -148,9 +148,7 @@ target ─▶ analyze ─▶ build fuzzers ─▶ direction planning ─▶ sp-g
 A scan partitions the codebase into directions, reasons about suspicious points
 (potential vulnerabilities), constructs candidate PoV inputs, and verifies every
 crash before it is reported. See [`documentation/`](documentation/) for the full
-architecture, agent design, and Suspicious-Point lifecycle, and
-[`docs/FUSION_DESIGN.md`](docs/FUSION_DESIGN.md) for the breadth/depth fusion
-roadmap.
+architecture, agent design, and Suspicious-Point lifecycle.
 
 ## Modes
 

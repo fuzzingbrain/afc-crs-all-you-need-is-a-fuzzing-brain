@@ -85,3 +85,6 @@ artifact/batches/*
 # Staged runtime shared libraries for prebuilt fuzzers (binaries, rebuildable).
 fuzzingbrain/analyzer/runtime_libs/*.so
 fuzzingbrain/analyzer/runtime_libs/*.so.*
+
+# Working notes and design drafts; kept locally, not in the repo
+docs/
