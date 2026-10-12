@@ -298,31 +298,19 @@ class WorkerLLMBuffer:
                 self._records = batch + self._records
             return len(tool_batch)
 
-    def cleanup_redis_keys(self, task_id: str = "", worker_id: str = "") -> None:
-        """Clean up Redis counter keys for completed task/worker."""
-        if not self._redis:
+    def cleanup_redis_keys(self, worker_id: str) -> None:
+        """Clean up this worker's Redis counter key.
+
+        The task's counters are not this worker's to delete: the other workers
+        are still adding to them and the dispatcher's budget check reads them.
+        The dispatcher deletes them when the whole task is over.
+        """
+        if not self._redis or not worker_id:
             return
-
-        keys_to_delete = []
-        if task_id:
-            keys_to_delete.extend(
-                [
-                    f"{self.COUNTER_PREFIX}:task:{task_id}:cost",
-                    f"{self.COUNTER_PREFIX}:task:{task_id}:calls",
-                ]
-            )
-        if worker_id:
-            keys_to_delete.extend(
-                [
-                    f"{self.COUNTER_PREFIX}:worker:{worker_id}:cost",
-                ]
-            )
-
-        if keys_to_delete:
-            try:
-                self._redis.delete(*keys_to_delete)
-            except Exception as e:
-                logger.warning(f"Failed to cleanup Redis keys: {e}")
+        try:
+            self._redis.delete(f"{self.COUNTER_PREFIX}:worker:{worker_id}:cost")
+        except Exception as e:
+            logger.warning(f"Failed to cleanup Redis keys: {e}")
 
 
 def _update_aggregates(mongo_db, docs: list) -> None:

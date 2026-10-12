@@ -234,10 +234,7 @@ class WorkerContext:
             from ..llms.buffer import set_worker_buffer
 
             if getattr(self, "_llm_buffer", None):
-                self._llm_buffer.cleanup_redis_keys(
-                    task_id=self.task_id,
-                    worker_id=self.worker_id,
-                )
+                self._llm_buffer.cleanup_redis_keys(worker_id=self.worker_id)
                 self._llm_buffer.stop()
                 logger.info(f"Worker {self.worker_id[:8]}: LLM buffer stopped")
             set_worker_buffer(None)

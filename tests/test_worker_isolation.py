@@ -209,7 +209,7 @@ class TestWorkerContextExitFailure:
 
         # Simulate __exit__ logic (from context.py lines 196-219)
         try:
-            buffer.cleanup_redis_keys(task_id=task_id, worker_id="fake")
+            buffer.cleanup_redis_keys(worker_id="fake")
             buffer.stop()
         except Exception:
             pass

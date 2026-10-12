@@ -450,8 +450,17 @@ def generate(variant: int = 1) -> bytes:
         return max(redis_cost, mongo_cost)
 
     def _close_redis(self) -> None:
-        """Close Redis connection."""
+        """Delete the task's cost counters, then close the Redis connection.
+
+        Only here: every worker adds to these counters, so the task's are
+        deleted once the whole task is over, not when the first worker ends.
+        """
         if self._redis:
+            prefix = f"fuzzingbrain:counters:task:{self.task.task_id}"
+            try:
+                self._redis.delete(f"{prefix}:cost", f"{prefix}:calls")
+            except Exception as e:
+                logger.warning(f"Failed to delete the task's Redis counters: {e}")
             try:
                 self._redis.close()
             except Exception:
