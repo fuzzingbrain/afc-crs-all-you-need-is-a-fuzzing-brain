@@ -439,6 +439,11 @@ class VulnerabilityHypothesis(Base):
         CheckConstraint(
             "sink_line IS NULL OR sink_code IS NOT NULL", name="sink_line_needs_code"
         ),
+        # Only a VH injected by hand may lack the sink line.
+        CheckConstraint(
+            "created_by_agent_id IS NULL OR sink_code IS NOT NULL",
+            name="agent_vh_has_sink",
+        ),
         # What a worker picks next: its own, in a status, best score first.
         Index("ix_vh_worker_status_score", "worker_id", "status", "score"),
     )
@@ -513,11 +518,12 @@ class PocAttempt(Base):
             _in("status", ("pending", "crashed", "no_crash", "error")), name="status"
         ),
         CheckConstraint(_in("sanitizer", SANITIZERS), name="sanitizer"),
-        # The input ran on a binary that exists.
+        # The input ran on a binary that exists (a reference, see _ref).
         ForeignKeyConstraint(
             ["harness_id", "sanitizer"],
             ["harness_binaries.harness_id", "harness_binaries.sanitizer"],
-            ondelete="CASCADE",
+            deferrable=True,
+            initially="DEFERRED",
         ),
         CheckConstraint(
             "(crash_id IS NOT NULL) = (status = 'crashed')", name="crash_iff_crashed"
@@ -623,7 +629,8 @@ class LLMMessage(Base):
 class LLMCall(Base):
     """One model call, failed calls included. Every cost total sums these.
 
-    Token counts and cost a model does not report are NULL, never 0.
+    Token counts and cost a model does not report are NULL, never 0; a failed
+    call may report no tokens at all.
     """
 
     __tablename__ = "llm_calls"
@@ -639,6 +646,11 @@ class LLMCall(Base):
             "(output_message_id IS NOT NULL) = success", name="output_iff_success"
         ),
         CheckConstraint("error_msg IS NULL OR NOT success", name="error_only_failed"),
+        # Every model reports these on success; a failed call may have none.
+        CheckConstraint(
+            "NOT success OR (input_tokens IS NOT NULL AND output_tokens IS NOT NULL)",
+            name="tokens_on_success",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, Identity(), primary_key=True)
@@ -655,8 +667,8 @@ class LLMCall(Base):
     # The parameters actually sent, after per-model rewriting.
     params: Mapped[dict] = mapped_column(JSONB, nullable=False)
     provider: Mapped[str] = mapped_column(Text, nullable=False)
-    input_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
-    output_tokens: Mapped[int] = mapped_column(Integer, nullable=False)
+    input_tokens: Mapped[Optional[int]] = mapped_column(Integer)
+    output_tokens: Mapped[Optional[int]] = mapped_column(Integer)
     cache_read_tokens: Mapped[Optional[int]] = mapped_column(Integer)
     cache_creation_tokens: Mapped[Optional[int]] = mapped_column(Integer)
     reasoning_tokens: Mapped[Optional[int]] = mapped_column(Integer)

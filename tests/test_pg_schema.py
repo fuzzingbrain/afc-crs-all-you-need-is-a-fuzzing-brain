@@ -68,13 +68,20 @@ def conn(schema_url):
 
 
 def refused(conn, stmt):
-    """True if the database rejects ``stmt`` with an integrity error."""
+    """True if the database rejects ``stmt`` with an integrity error.
+
+    References are checked at commit; they are forced here so a dangling one
+    counts too, then deferred again for the rest of the test.
+    """
     savepoint = conn.begin_nested()
     try:
         conn.execute(stmt)
+        conn.execute(text("SET CONSTRAINTS ALL IMMEDIATE"))
     except IntegrityError:
         savepoint.rollback()
         return True
+    finally:
+        conn.execute(text("SET CONSTRAINTS ALL DEFERRED"))
     savepoint.rollback()
     return False
 
@@ -308,6 +315,17 @@ def test_a_sink_line_needs_the_quoted_sink(conn, world):
         VulnerabilityHypothesis.id == world["vh"]).values(sink_line=42))
 
 
+def test_only_an_injected_vh_may_lack_the_sink(conn, world):
+    finder = an_agent(conn, world["run"], world["worker"], "DeltaVHGenerator")
+    assert refused(conn, insert(VulnerabilityHypothesis).values(
+        id=_id(), run_id=world["run"], worker_id=world["worker"],
+        created_by_agent_id=finder, function_file="png.c",
+        function_name="png_read_row", finder_description="d", description="d",
+        finder_score=0.6, score=0.6, status="pending_verify"))
+    a_vh(conn, world["run"], world["worker"], created_by_agent_id=finder,
+         sink_code="memcpy(buf, src, len);")
+
+
 def test_a_vh_status_moves_only_from_the_state_it_was_in(conn, world):
     """The conditional update that replaces claiming: one of two wins."""
     claim = update(VulnerabilityHypothesis).where(
@@ -326,6 +344,9 @@ def test_an_attempt_must_run_on_a_binary_that_was_built(conn, world):
     assert refused(conn, insert(PocAttempt).values(
         **an_attempt_values(world, agent_id, sanitizer="undefined")))
     conn.execute(insert(PocAttempt).values(**an_attempt_values(world, agent_id)))
+    # and that binary cannot be removed from under the attempt
+    assert refused(conn, HarnessBinary.__table__.delete().where(
+        HarnessBinary.harness_id == world["harness"]))
 
 
 def test_each_source_fills_its_own_columns(conn, world):
@@ -446,6 +467,15 @@ def test_unreported_counts_stay_null_and_negative_ones_are_refused(conn, world):
     add(conn, LLMCall, **_call_values(world["run"]))  # no cache / reasoning / cost
     assert refused(conn, insert(LLMCall).values(
         **_call_values(world["run"], cache_read_tokens=-1)))
+
+
+def test_a_failed_call_may_have_no_tokens_but_a_successful_one_must(conn, world):
+    add(conn, LLMCall, **_call_values(
+        world["run"], input_tokens=None, output_tokens=None))
+    reply = _a_message(conn, world["run"], {"reply": True})
+    assert refused(conn, insert(LLMCall).values(**_call_values(
+        world["run"], success=True, error_msg=None, output_message_id=reply,
+        input_tokens=None)))
 
 
 def test_a_reply_exists_exactly_when_the_call_succeeded(conn, world):
