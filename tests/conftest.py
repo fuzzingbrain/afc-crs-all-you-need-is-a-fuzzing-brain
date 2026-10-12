@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 """Shared fixtures for FuzzingBrain tests."""
 
+import shutil
+import subprocess
+import time
+import uuid as _uuid
+
 import pytest
 import mongomock
 
@@ -89,3 +94,83 @@ def _test_watchdog(request):
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, previous)
+
+
+# ---------------------------------------------------------------------------
+# PostgreSQL
+#
+# Schema tests need a real server: CHECK constraints, foreign keys and
+# ON CONFLICT are what they test. FUZZINGBRAIN_TEST_PG_URL names a server to
+# use; otherwise one is started in a capped, labelled container for the
+# session. Either way the tests work in a database of their own, created and
+# dropped here, never in one that already exists.
+# ---------------------------------------------------------------------------
+
+PG_IMAGE = "postgres:18"
+PG_TEST_LABEL = "fuzzingbrain.test=pg"
+
+
+def _start_pg_container() -> tuple:
+    from fuzzingbrain.core.docker_limits import docker_resource_args
+
+    name = f"fb-test-pg-{_uuid.uuid4().hex[:8]}"
+    subprocess.run(
+        ["docker", "run", "-d", "--rm", "--name", name, "--label", PG_TEST_LABEL,
+         *docker_resource_args(1024, 1.0),
+         "-e", "POSTGRES_USER=fb", "-e", "POSTGRES_PASSWORD=fbtest",
+         "-p", "127.0.0.1::5432", PG_IMAGE],
+        check=True, capture_output=True, timeout=120,
+    )
+    port = subprocess.run(
+        ["docker", "port", name, "5432/tcp"],
+        check=True, capture_output=True, text=True, timeout=30,
+    ).stdout.strip().rsplit(":", 1)[1]
+    return name, f"postgresql://fb:fbtest@127.0.0.1:{port}/postgres"
+
+
+def _wait_for_pg(url: str, seconds: float = 60) -> None:
+    import psycopg
+
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            psycopg.connect(url, connect_timeout=2).close()
+            return
+        except psycopg.OperationalError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.5)
+
+
+@pytest.fixture(scope="session")
+def pg_server():
+    """A libpq URL for a PostgreSQL server's maintenance database."""
+    url = os.environ.get("FUZZINGBRAIN_TEST_PG_URL")
+    container = None
+    if not url:
+        if not shutil.which("docker"):
+            pytest.skip("no FUZZINGBRAIN_TEST_PG_URL and no docker to start PostgreSQL")
+        container, url = _start_pg_container()
+    try:
+        _wait_for_pg(url)
+        yield url
+    finally:
+        if container:
+            subprocess.run(["docker", "rm", "-f", container],
+                           capture_output=True, timeout=60)
+
+
+@pytest.fixture
+def fresh_pg(pg_server):
+    """An empty database for one test; a SQLAlchemy URL to it."""
+    import psycopg
+
+    name = f"fb_test_{_uuid.uuid4().hex[:12]}"
+    with psycopg.connect(pg_server, autocommit=True) as conn:
+        conn.execute(f'CREATE DATABASE "{name}"')
+    base = pg_server.rsplit("/", 1)[0]
+    try:
+        yield f"{base.replace('postgresql://', 'postgresql+psycopg://', 1)}/{name}"
+    finally:
+        with psycopg.connect(pg_server, autocommit=True) as conn:
+            conn.execute(f'DROP DATABASE IF EXISTS "{name}" WITH (FORCE)')

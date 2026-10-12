@@ -52,6 +52,9 @@ redis>=5.0.0
 # Database
 pymongo>=4.6.0
 motor>=3.3.0  # Async MongoDB driver
+sqlalchemy>=2.0,<2.1  # PostgreSQL schema and queries (fuzzingbrain/db/pg)
+psycopg[binary]>=3.2,<4
+alembic>=1.13,<2  # schema migrations
 
 # HTTP Client
 httpx>=0.27.0
