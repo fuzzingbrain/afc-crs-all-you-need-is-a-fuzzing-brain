@@ -32,223 +32,131 @@ from ..db import RepositoryManager
 
 
 class WorkspaceSetup:
-    """Handles workspace creation and validation"""
+    """Lays out the run's output directory: repo/, fuzz-tooling/, results/, logs/."""
 
     def __init__(self, config: Config, task: Task):
         self.config = config
         self.task = task
 
     def setup(self) -> Tuple[bool, str]:
-        """
-        Setup workspace for the task.
-
-        When --workspace is provided (from FuzzingBrain.sh), use it directly.
-        Otherwise, create a new workspace under ./workspace/
-
-        Returns:
-            (success, message)
-        """
+        """Create the run directory (resolved from `output` by the entry point)."""
         try:
-            if self.config.workspace:
-                # Workspace already created by shell script, use it directly
-                task_workspace = Path(self.config.workspace)
-                logger.info(f"Using existing workspace: {task_workspace}")
-            else:
-                # Create new workspace (API/MCP mode)
-                workspace_root = Path("workspace")
-                project_name = self.task.project_name or "unknown"
-                task_workspace = (
-                    workspace_root / f"{project_name}_{self.task.task_id[:8]}"
-                )
-                task_workspace.mkdir(parents=True, exist_ok=True)
-                logger.info(f"Created workspace: {task_workspace}")
-
-            # Ensure subdirectories exist
-            (task_workspace / "repo").mkdir(exist_ok=True)
-            (task_workspace / "results").mkdir(exist_ok=True)
-            (task_workspace / "results" / "povs").mkdir(exist_ok=True)
-            (task_workspace / "results" / "patches").mkdir(exist_ok=True)
+            task_workspace = Path(self.config.workspace)
+            task_workspace.mkdir(parents=True, exist_ok=True)
+            (task_workspace / "results" / "povs").mkdir(parents=True, exist_ok=True)
+            (task_workspace / "results" / "patches").mkdir(parents=True, exist_ok=True)
             (task_workspace / "logs").mkdir(exist_ok=True)
 
-            # Update task paths
             self.task.task_path = str(task_workspace)
             self.task.src_path = str(task_workspace / "repo")
-
-            logger.info(f"Workspace setup complete: {task_workspace}")
+            logger.info(f"Workspace: {task_workspace}")
             return True, str(task_workspace)
-
         except Exception as e:
             logger.error(f"Failed to setup workspace: {e}")
             return False, str(e)
 
+    @staticmethod
+    def _git(repo: Path, *args: str, timeout: int = 120) -> None:
+        """Run git in `repo`; a failure raises, so a wrong revision is never scanned."""
+        r = subprocess.run(
+            ["git", "-C", str(repo), *args],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        if r.returncode != 0:
+            raise RuntimeError(f"git {' '.join(args)}: {r.stderr.strip()}")
+
     def clone_repository(self) -> Tuple[bool, str]:
-        """
-        Clone the repository if repo_url is provided.
+        """Put the source in repo/: clone repo_url, or copy repo_path, then check out.
 
-        Returns:
-            (success, message)
+        full scans check out target_commit; delta scans check out delta_commit
+        (default HEAD) and need base_commit's history for the diff, so neither
+        is a shallow clone when a commit is named.
         """
-        if not self.config.repo_url:
-            # Repo already cloned by FuzzingBrain.sh or using existing workspace
-            logger.info("Repository already available, skipping clone")
-            return True, "Skipped"
-
         repo_path = Path(self.task.src_path)
+        if repo_path.exists():
+            return False, f"{repo_path} already exists"
 
-        # Check if already cloned
-        if (repo_path / ".git").exists():
-            logger.info(f"Repository already exists at {repo_path}")
-            return True, "Already exists"
+        if self.config.scan_mode == "delta":
+            checkout = self.config.delta_commit
+            need_history = True
+        else:
+            checkout = self.config.target_commit
+            need_history = bool(checkout)
 
         try:
-            logger.info(f"Cloning {self.config.repo_url} to {repo_path}")
-            target = (self.config.target_commit or "").strip()
-            if target:
-                # A specific (often non-tip) commit is required -- e.g. a full
-                # challenge pinned to its vulnerable revision. A shallow clone of
-                # the default branch would silently give the wrong source (a
-                # patched HEAD), so clone with history and check the commit out.
-                clone_cmd = ["git", "clone", self.config.repo_url, str(repo_path)]
-                clone_timeout = 600
+            if self.config.repo_path:
+                # Copy, never link: checkout, remove_git and the build all write
+                # to this tree, and none of that may reach the user's directory.
+                logger.info(f"Copying {self.config.repo_path} to {repo_path}")
+                shutil.copytree(self.config.repo_path, repo_path, symlinks=True)
             else:
-                clone_cmd = ["git", "clone", "--depth", "1", self.config.repo_url, str(repo_path)]
-                clone_timeout = 300
-            result = subprocess.run(
-                clone_cmd, capture_output=True, text=True, timeout=clone_timeout
-            )
-
-            if result.returncode != 0:
-                logger.error(f"Git clone failed: {result.stderr}")
-                return False, result.stderr
-
-            if target:
-                co = subprocess.run(
-                    ["git", "-C", str(repo_path), "checkout", "--detach", target],
-                    capture_output=True, text=True, timeout=120,
+                logger.info(f"Cloning {self.config.repo_url} to {repo_path}")
+                clone = ["git", "clone"]
+                if not need_history:
+                    clone += ["--depth", "1"]
+                r = subprocess.run(
+                    clone + [self.config.repo_url, str(repo_path)],
+                    capture_output=True, text=True,
+                    timeout=600 if need_history else 300,
                 )
-                if co.returncode != 0:
-                    logger.error(f"git checkout {target} failed: {co.stderr}")
-                    return False, f"checkout {target}: {co.stderr}"
-                logger.info(f"Checked out target_commit {target[:12]}")
+                if r.returncode != 0:
+                    return False, f"git clone failed: {r.stderr.strip()}"
 
-            logger.info("Repository cloned successfully")
-            return True, "Cloned"
-
+            if checkout:
+                self._git(repo_path, "checkout", "--detach", checkout)
+                logger.info(f"Checked out {checkout}")
+            if self.config.scan_mode == "delta":
+                # Fail here, not at diff time, when the base is not in history.
+                self._git(repo_path, "cat-file", "-e", f"{self.config.base_commit}^{{commit}}")
+            return True, "Ready"
         except subprocess.TimeoutExpired:
-            logger.error("Git clone timed out")
-            return False, "Clone timed out"
+            return False, "timed out fetching the source"
         except Exception as e:
-            logger.error(f"Failed to clone repository: {e}")
             return False, str(e)
 
     def setup_fuzz_tooling(self) -> Tuple[bool, str]:
+        """Put the OSS-Fuzz style tooling in fuzz-tooling/.
+
+        Prebuilt binaries need none: build/out/ under it is created when they
+        are placed. Otherwise a local fuzz_tooling_path wins over the URL.
         """
-        Setup fuzz-tooling directory.
+        fuzz_tooling_path = Path(self.task.task_path) / "fuzz-tooling"
+        self.task.fuzz_tooling_path = str(fuzz_tooling_path)
 
-        Returns:
-            (success, message)
-        """
-        task_workspace = Path(self.task.task_path)
-        fuzz_tooling_path = task_workspace / "fuzz-tooling"
+        if self.config.is_prebuilt:
+            fuzz_tooling_path.mkdir(parents=True, exist_ok=True)
+            self.task.is_fuzz_tooling_provided = False
+            return True, "Not needed (prebuilt binaries)"
 
-        if self.config.fuzz_tooling_url:
-            # Clone fuzz-tooling from URL (or use existing)
-            try:
-                if fuzz_tooling_path.exists():
-                    # Check if .git exists - if not, remove and re-clone
-                    if not (fuzz_tooling_path / ".git").exists():
-                        logger.warning(
-                            "Fuzz-tooling missing .git directory, re-cloning..."
-                        )
-                        shutil.rmtree(fuzz_tooling_path)
-                    else:
-                        logger.info("Fuzz-tooling directory exists, skipping clone")
+        try:
+            if self.config.fuzz_tooling_path:
+                logger.info(f"Copying fuzz-tooling from {self.config.fuzz_tooling_path}")
+                shutil.copytree(
+                    self.config.fuzz_tooling_path, fuzz_tooling_path, symlinks=True
+                )
+            else:
+                url, ref = self.config.fuzz_tooling_url, self.config.fuzz_tooling_ref
+                logger.info(f"Cloning fuzz-tooling from {url}" + (f" @ {ref}" if ref else ""))
+                r = subprocess.run(
+                    ["git", "clone", "--depth", "1", url, str(fuzz_tooling_path)],
+                    capture_output=True, text=True, timeout=300,
+                )
+                if r.returncode != 0:
+                    return False, f"fuzz-tooling clone failed: {r.stderr.strip()}"
+                if ref:
+                    # Fetch then check out, so a branch, tag or commit all work.
+                    self._git(fuzz_tooling_path, "fetch", "--depth", "1", "origin", ref)
+                    self._git(fuzz_tooling_path, "checkout", "-f", "FETCH_HEAD")
+        except subprocess.TimeoutExpired:
+            return False, "timed out fetching fuzz-tooling"
+        except Exception as e:
+            return False, str(e)
 
-                if not fuzz_tooling_path.exists():
-                    logger.info(
-                        f"Cloning fuzz-tooling from {self.config.fuzz_tooling_url}"
-                    )
-                    result = subprocess.run(
-                        [
-                            "git",
-                            "clone",
-                            "--depth",
-                            "1",
-                            self.config.fuzz_tooling_url,
-                            str(fuzz_tooling_path),
-                        ],
-                        capture_output=True,
-                        text=True,
-                        timeout=300,
-                    )
-
-                    if result.returncode != 0:
-                        logger.error(f"Fuzz-tooling clone failed: {result.stderr}")
-                        return False, result.stderr
-
-                # Checkout to specific ref if provided
-                fuzz_tooling_ref = getattr(self.config, "fuzz_tooling_ref", None)
-                if fuzz_tooling_ref:
-                    logger.info(f"Checking out fuzz-tooling to ref: {fuzz_tooling_ref}")
-                    # Fetch the ref first (needed for shallow clones)
-                    subprocess.run(
-                        ["git", "fetch", "--depth", "1", "origin", fuzz_tooling_ref],
-                        cwd=str(fuzz_tooling_path),
-                        capture_output=True,
-                        timeout=120,
-                    )
-                    # Force checkout FETCH_HEAD (shallow clone may have different files on default branch)
-                    result = subprocess.run(
-                        ["git", "checkout", "-f", "FETCH_HEAD"],
-                        cwd=str(fuzz_tooling_path),
-                        capture_output=True,
-                        text=True,
-                        timeout=60,
-                    )
-                    if result.returncode != 0:
-                        logger.warning(
-                            f"Fuzz-tooling checkout warning: {result.stderr}"
-                        )
-
-                self.task.fuzz_tooling_path = str(fuzz_tooling_path)
-                self.task.is_fuzz_tooling_provided = True
-                return True, "Ready"
-
-            except Exception as e:
-                logger.error(f"Failed to setup fuzz-tooling: {e}")
-                return False, str(e)
-
-        elif self.config.fuzz_tooling_path:
-            # Copy from local path
-            try:
-                source = Path(self.config.fuzz_tooling_path)
-                if source.exists():
-                    shutil.copytree(source, fuzz_tooling_path, dirs_exist_ok=True)
-                    self.task.fuzz_tooling_path = str(fuzz_tooling_path)
-                    self.task.is_fuzz_tooling_provided = True
-                    return True, "Copied"
-                else:
-                    return False, f"Fuzz-tooling path not found: {source}"
-
-            except Exception as e:
-                logger.error(f"Failed to copy fuzz-tooling: {e}")
-                return False, str(e)
-
-        else:
-            # Check if fuzz-tooling exists in workspace (set up by FuzzingBrain.sh)
-            if fuzz_tooling_path.exists() and (fuzz_tooling_path / "projects").exists():
-                self.task.fuzz_tooling_path = str(fuzz_tooling_path)
-                self.task.is_fuzz_tooling_provided = True
-                return True, "Found existing"
-
-            # No fuzz-tooling provided
-            logger.warning(
-                "No fuzz-tooling found. Current version only supports OSS-Fuzz based projects."
-            )
-            logger.warning(
-                "Please ensure the project exists in OSS-Fuzz or provide --fuzz-tooling-url"
-            )
-            return True, "Not provided"
+        project = self.config.ossfuzz_project_name or self.task.project_name
+        if not (fuzz_tooling_path / "projects" / project).is_dir():
+            return False, f"fuzz-tooling has no projects/{project}"
+        self.task.is_fuzz_tooling_provided = True
+        return True, "Ready"
 
 
 class FuzzerDiscovery:
@@ -800,13 +708,13 @@ class TaskProcessor:
                         raise Exception(f"Failed to generate diff for delta scan: {e}")
 
             # Step 4: Discover fuzzers
-            if self.config.fuzzer_filter:
+            if self.config.fuzzers:
                 # Use explicitly specified fuzzers from config
                 logger.info(
-                    f"Step 4: Using {len(self.config.fuzzer_filter)} fuzzers from config"
+                    f"Step 4: Using {len(self.config.fuzzers)} fuzzers from config"
                 )
                 fuzzers = []
-                for fuzzer_name in self.config.fuzzer_filter:
+                for fuzzer_name in self.config.fuzzers:
                     fuzzer = Fuzzer(
                         task_id=task.task_id,
                         fuzzer_name=fuzzer_name,
@@ -847,7 +755,6 @@ class TaskProcessor:
             for line in format_banner(
                 report,
                 remove_git=self.config.remove_git,
-                network_blocked=self.config.no_network,
                 confined_to=f"{task_path.name}/repo",
             ):
                 logger.info(line)
@@ -880,23 +787,16 @@ class TaskProcessor:
                 language="c",  # TODO: detect language
                 ossfuzz_project_name=self.config.ossfuzz_project_name,
                 log_dir=str(log_dir) if log_dir else None,
-                prebuild_dir=self.config.prebuild_dir,
-                work_id=self.config.work_id,
+                prebuild_dir=self.config.prebuild_graph_dir,
                 fuzzer_sources=self.config.fuzzer_sources,
-                enable_static_analysis=self.config.enable_static_analysis,
                 build_coverage=self.config.build_coverage,
-                prebuilt_fuzzers=self.config.prebuilt_fuzzers,
+                prebuilt_fuzzers=self.config.prebuilt_binaries,
             )
 
             logger.info(f"Analyzer request: sanitizers={self.config.sanitizers}")
             logger.info("Waiting for Analyzer to complete (this may take a while)...")
 
-            # Run analyzer: in CLI mode run directly; in API mode use Celery task
-            if self.config.api_mode:
-                celery_result = run_analyzer.delay(analyze_request.to_dict())
-                result_dict = celery_result.get(timeout=3600)  # 1 hour timeout
-            else:
-                result_dict = run_analyzer(analyze_request.to_dict())
+            result_dict = run_analyzer(analyze_request.to_dict())
 
             analyze_result = AnalyzeResult.from_dict(result_dict)
 
@@ -988,24 +888,21 @@ class TaskProcessor:
             # Store analyze_result for dispatcher to use
             self._analyze_result = analyze_result
 
-            # Step 6: Start infrastructure (CLI mode only)
+            # Step 6: Start infrastructure
             logger.info("Step 6: Starting infrastructure")
             from .infrastructure import InfrastructureManager
 
-            infra = None
-            if not self.config.api_mode:
-                log_dir = get_log_dir()
-
-                # This is the number that decides how many workers run at
-                # once -- it overrides the one in celery_app's settings, so
-                # that one is not the answer to "what is our concurrency".
-                infra = InfrastructureManager(
-                    redis_url=self.config.redis_url,
-                    concurrency=self.config.concurrency.celery_workers,
-                    task_id=task.task_id,
-                )
-                if not infra.start(log_dir=str(log_dir) if log_dir else None):
-                    raise Exception("Failed to start infrastructure (Redis/Celery)")
+            log_dir = get_log_dir()
+            # This is the number that decides how many workers run at
+            # once -- it overrides the one in celery_app's settings, so
+            # that one is not the answer to "what is our concurrency".
+            infra = InfrastructureManager(
+                redis_url=self.config.redis_url,
+                concurrency=self.config.concurrency.celery_workers,
+                task_id=task.task_id,
+            )
+            if not infra.start(log_dir=str(log_dir) if log_dir else None):
+                raise Exception("Failed to start infrastructure (Redis/Celery)")
 
             try:
                 # Step 7: Dispatch workers
@@ -1017,7 +914,7 @@ class TaskProcessor:
                     self.config,
                     self.repos,
                     analyze_result=self._analyze_result,
-                    celery_queue=infra.queue_name if infra else None,
+                    celery_queue=infra.queue_name,
                 )
                 jobs = dispatcher.dispatch(fuzzers)
 
@@ -1032,120 +929,107 @@ class TaskProcessor:
                 task.updated_at = datetime.now()
                 self.repos.tasks.save(task)
 
-                # Step 8: Wait for completion (CLI mode) or return (API mode)
-                if not self.config.api_mode:
-                    logger.info("Step 8: Waiting for workers to complete")
-                    timeout = self.config.timeout_minutes or 60
-                    result = dispatcher.wait_for_completion(timeout_minutes=timeout)
+                # Step 8: Wait for completion
+                logger.info("Step 8: Waiting for workers to complete")
+                result = dispatcher.wait_for_completion(
+                    timeout_minutes=self.config.timeout_minutes
+                )
 
-                    # Mark task as complete
-                    if result["status"] == "completed":
-                        if result["failed"] == 0:
-                            task.mark_completed()
-                        else:
-                            task.mark_error(f"{result['failed']} workers failed")
-                    elif result["status"] == "pov_target_reached":
+                # Mark task as complete
+                if result["status"] == "completed":
+                    if result["failed"] == 0:
                         task.mark_completed()
-                        logger.info(
-                            f"Task completed: POV target reached ({result.get('pov_count', 0)} POVs)"
-                        )
-                    elif result["status"] == "budget_exceeded":
-                        task.mark_error(result.get("error", "Budget limit exceeded"))
-                        logger.warning(
-                            f"Task stopped: {result.get('error', 'Budget limit exceeded')}"
-                        )
                     else:
-                        task.mark_error(f"Timeout after {timeout} minutes")
-
-                    # Use update() instead of save() to avoid overwriting
-                    # llm_cost/llm_calls fields that buffer.$inc has accumulated
-                    updates = {
-                        "status": task.status.value,
-                        "updated_at": task.updated_at,
-                    }
-                    if task.error_msg:
-                        updates["error_msg"] = task.error_msg
-                    self.repos.tasks.update(task.task_id, updates)
-
-                    # Redis counter cleanup is handled by WorkerContext.__exit__
-
-                    # Get worker results for summary
-                    worker_results = dispatcher.get_results()
-
-                    # Count merged duplicates for dedup stats
-                    dedup_count = 0
-                    try:
-                        sps_with_merges = (
-                            self.repos.suspicious_points.find_with_merged_duplicates(
-                                task.task_id
-                            )
-                        )
-                        for sp in sps_with_merges:
-                            dedup_count += len(sp.merged_duplicates)
-                    except Exception as e:
-                        logger.warning(f"Failed to count merged duplicates: {e}")
-
-                    # Read cost from database
-                    task_doc = self.repos.tasks.collection.find_one(
-                        {"_id": ObjectId(task.task_id)},
-                        {"llm_cost": 1},
+                        task.mark_error(f"{result['failed']} workers failed")
+                elif result["status"] == "pov_target_reached":
+                    task.mark_completed()
+                    logger.info(
+                        f"Task completed: POV target reached ({result.get('pov_count', 0)} POVs)"
                     )
-                    total_cost = (task_doc or {}).get("llm_cost", 0.0)
-
-                    # Create and output final summary with worker colors via loguru
-                    summary = create_final_summary(
-                        project_name=project_name,
-                        task_id=task.task_id,
-                        workers=worker_results,
-                        total_elapsed_minutes=result.get("elapsed_minutes", 0),
-                        use_color=True,
-                        dedup_count=dedup_count,
-                        total_cost=total_cost,
-                        budget_limit=self.config.budget_limit,
-                        exit_reason=result.get("status", "completed"),
-                        verified_povs=result.get("pov_count"),
+                elif result["status"] == "budget_exceeded":
+                    task.mark_error(result.get("error", "Budget limit exceeded"))
+                    logger.warning(
+                        f"Task stopped: {result.get('error', 'Budget limit exceeded')}"
                     )
-                    # Reset terminal settings before output (subprocess may have changed them)
-                    os.system("stty sane 2>/dev/null")
-
-                    # Print clean summary to console without log prefixes to avoid wrapping
-                    # Add ANSI reset at the end to ensure terminal state is restored
-                    sys.stdout.write("\n" + summary + "\n\033[0m")
-                    sys.stdout.flush()
-
-                    # Append plain summary (no ANSI codes) to log file for record
-                    log_dir = get_log_dir()
-                    if log_dir:
-                        plain_summary = WorkerColors.strip(summary)
-                        with open(
-                            Path(log_dir) / "fuzzingbrain.log", "a", encoding="utf-8"
-                        ) as f:
-                            f.write("\n" + plain_summary + "\n")
-
-                    logger.info("Final summary written to console and log file")
-
-                    return {
-                        "task_id": task.task_id,
-                        "status": result["status"],
-                        "message": f"Completed {result['completed']}/{result['total']} workers",
-                        "workspace": task.task_path,
-                        "fuzzers": [f.fuzzer_name for f in successful_fuzzers],
-                        "workers": worker_results,
-                        "elapsed_minutes": result.get("elapsed_minutes", 0),
-                    }
                 else:
-                    # API mode: return immediately
-                    return {
-                        "task_id": task.task_id,
-                        "status": "running",
-                        "message": f"Dispatched {len(jobs)} workers.",
-                        "workspace": task.task_path,
-                        "fuzzers": [f.fuzzer_name for f in successful_fuzzers],
-                        "workers": [
-                            j.get("display_name", f"{j['fuzzer']}_{j['sanitizer']}")
-                            for j in jobs
-                        ],
-                    }
+                    task.mark_error(f"Timeout after {self.config.timeout_minutes} minutes")
+
+                # Use update() instead of save() to avoid overwriting
+                # llm_cost/llm_calls fields that buffer.$inc has accumulated
+                updates = {
+                    "status": task.status.value,
+                    "updated_at": task.updated_at,
+                }
+                if task.error_msg:
+                    updates["error_msg"] = task.error_msg
+                self.repos.tasks.update(task.task_id, updates)
+
+                # Redis counter cleanup is handled by WorkerContext.__exit__
+
+                # Get worker results for summary
+                worker_results = dispatcher.get_results()
+
+                # Count merged duplicates for dedup stats
+                dedup_count = 0
+                try:
+                    sps_with_merges = (
+                        self.repos.suspicious_points.find_with_merged_duplicates(
+                            task.task_id
+                        )
+                    )
+                    for sp in sps_with_merges:
+                        dedup_count += len(sp.merged_duplicates)
+                except Exception as e:
+                    logger.warning(f"Failed to count merged duplicates: {e}")
+
+                # Read cost from database
+                task_doc = self.repos.tasks.collection.find_one(
+                    {"_id": ObjectId(task.task_id)},
+                    {"llm_cost": 1},
+                )
+                total_cost = (task_doc or {}).get("llm_cost", 0.0)
+
+                # Create and output final summary with worker colors via loguru
+                summary = create_final_summary(
+                    project_name=project_name,
+                    task_id=task.task_id,
+                    workers=worker_results,
+                    total_elapsed_minutes=result.get("elapsed_minutes", 0),
+                    use_color=True,
+                    dedup_count=dedup_count,
+                    total_cost=total_cost,
+                    budget_limit=self.config.budget_limit,
+                    exit_reason=result.get("status", "completed"),
+                    verified_povs=result.get("pov_count"),
+                )
+                # Reset terminal settings before output (subprocess may have changed them)
+                os.system("stty sane 2>/dev/null")
+
+                # Print clean summary to console without log prefixes to avoid wrapping
+                # Add ANSI reset at the end to ensure terminal state is restored
+                sys.stdout.write("\n" + summary + "\n\033[0m")
+                sys.stdout.flush()
+
+                # Append plain summary (no ANSI codes) to log file for record
+                log_dir = get_log_dir()
+                if log_dir:
+                    plain_summary = WorkerColors.strip(summary)
+                    with open(
+                        Path(log_dir) / "fuzzingbrain.log", "a", encoding="utf-8"
+                    ) as f:
+                        f.write("\n" + plain_summary + "\n")
+
+                logger.info("Final summary written to console and log file")
+
+                return {
+                    "task_id": task.task_id,
+                    "status": result["status"],
+                    "message": f"Completed {result['completed']}/{result['total']} workers",
+                    "workspace": task.task_path,
+                    "fuzzers": [f.fuzzer_name for f in successful_fuzzers],
+                    "workers": worker_results,
+                    "elapsed_minutes": result.get("elapsed_minutes", 0),
+                }
 
             finally:
                 # Close cached LLM httpx clients (prevents SSL transport warnings)
@@ -1160,9 +1044,8 @@ class TaskProcessor:
                     logger.info("Stopping Analysis Server...")
                     stop_analysis_server(task.task_path)
 
-                # Stop infrastructure (CLI mode only)
-                if infra:
-                    infra.stop()
+                # Stop infrastructure
+                infra.stop()
 
         except Exception as e:
             logger.exception(f"Task processing failed: {e}")

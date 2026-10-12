@@ -1,0 +1,46 @@
+{
+  "project_name": "mongoose",
+  "output": "mg-full-01",
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-mongoose.git",
+  "scan_mode": "full",
+  "target_commit": "bfc0ea79ca75c08a61d2eea9f4d5722bd298179c",
+  "task_type": "pov",
+  "timeout_minutes": 120,
+  "budget_limit": 100.0,
+  "pov_count": 1,
+  "remove_git": true,
+  "models": {
+    "finder": "gpt-4.1",
+    "verifier": "o3",
+    "poc": "o3",
+    "seed": "gpt-4.1",
+    "utility": "gpt-4.1"
+  },
+  "allow_fallback": false,
+  "fuzzer": {
+    "fuzzers": [
+      "fuzz"
+    ],
+    "engine": "libfuzzer",
+    "sanitizers": [
+      "address"
+    ],
+    "sources": {
+      "fuzz": [
+        "artifact/aixcc/mg-full-01/harness_src/fuzz/fuzz.c"
+      ]
+    },
+    "docker_image": "aixcc-afc/mongoose:latest",
+    "prebuilt": {
+      "binaries": {
+        "address": {
+          "fuzz": "artifact/aixcc/mg-full-01/fuzzers/fuzz/fuzz"
+        }
+      }
+    }
+  },
+  "analysis": {
+    "prebuild_graph_dir": "artifact/aixcc/mg-full-01/graph/fuzz"
+  },
+  "concurrency": 5
+}

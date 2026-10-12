@@ -2,13 +2,22 @@
 """
 FuzzingBrain Configuration
 
-Handles configuration from environment variables, JSON files, and CLI arguments.
+A run is described by one JSON task file; any field in it can also be given, or
+overridden, on the command line. Everything about the run lives there. The
+environment (.env) holds only API keys and where MongoDB and Redis are.
+
+The JSON layout, every field and its rules are in FIELDS below; docs/task_full.jsonc
+is the annotated copy.
 """
 
+import argparse
 import json
 import os
-from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from dataclasses import MISSING, dataclass, field
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+from bson import ObjectId
 
 # How many fuzzer containers one task may run at once. Lives here, with the
 # other defaults, so the fuzzer package can read it without the configuration
@@ -54,49 +63,25 @@ class ConcurrencyConfig:
     dict to set one field at a time.
     """
 
-    celery_workers: int = 8  # Workers running at once
-    sp_find_agents: int = 5  # Concurrent SP-find agents inside a worker
-    verify_agents: int = 5  # Concurrent SP verification agents
-    pov_agents: int = 5  # Concurrent POV generation agents
-
-    # Delta and the older full strategy were tuned differently; keeping them
-    # separate preserves that rather than flattening three call sites into one.
-    delta_verify_agents: int = 2
-    delta_pov_agents: int = 5
-
-    @classmethod
-    def serial(cls) -> "ConcurrencyConfig":
-        """One of everything. What a shared or small machine should use."""
-        return cls(**{f: 1 for f in cls.__dataclass_fields__})
+    # Serial by default, so a first run cannot swamp the machine; experiments
+    # raise it explicitly.
+    celery_workers: int = 1  # Workers running at once
+    sp_find_agents: int = 1  # Concurrent SP-find agents inside a worker
+    verify_agents: int = 1  # Concurrent SP verification agents
+    pov_agents: int = 1  # Concurrent POV generation agents
 
     @classmethod
     def from_value(cls, value) -> "ConcurrencyConfig":
-        """Accept `1`, `{"pov_agents": 2}`, or nothing.
+        """Accept `1`, `{"pov_agents": 2}`, or nothing. Values are checked by Config.
 
         A bare integer sets every field, so a task file can say
         `"concurrency": 1` and mean it.
         """
         if value is None:
             return cls()
-        if isinstance(value, (int, float)):
-            n = max(1, int(value))
-            return cls(**{f: n for f in cls.__dataclass_fields__})
-        known = {f: getattr(cls, f) for f in cls.__dataclass_fields__}
-        return cls(**{k: max(1, int(value.get(k, v))) for k, v in known.items()})
-
-    @classmethod
-    def from_env(cls) -> "ConcurrencyConfig":
-        """FUZZINGBRAIN_CONCURRENCY=1 sets everything; per-field names also work."""
-        whole = os.environ.get("FUZZINGBRAIN_CONCURRENCY")
-        base = cls.from_value(int(whole)) if whole else cls()
-        for name in cls.__dataclass_fields__:
-            raw = os.environ.get(f"FUZZINGBRAIN_CONCURRENCY_{name.upper()}")
-            if raw:
-                try:
-                    setattr(base, name, max(1, int(raw)))
-                except ValueError:
-                    pass
-        return base
+        if isinstance(value, int):
+            return cls(**{f: value for f in cls.__dataclass_fields__})
+        return cls(**value)
 
     def to_dict(self) -> Dict[str, int]:
         return {f: getattr(self, f) for f in self.__dataclass_fields__}
@@ -167,372 +152,720 @@ class ScoringConfig:
         return {f: getattr(self, f) for f in self.__dataclass_fields__}
 
 
+# The FuzzingBrain checkout. Relative paths in a task file resolve against it,
+# and every run's output lands under its workspace/ unless given an absolute path.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE_ROOT = REPO_ROOT / "workspace"
+
+OFFICIAL_OSS_FUZZ = "https://github.com/google/oss-fuzz.git"
+
+# Agent roles that take a model. A task names a model for every one of them, or
+# pins all of them with force_model; there is no implicit default.
+ROLES = ("finder", "verifier", "poc", "seed", "utility")
+
+SANITIZERS = ("address", "memory", "undefined", "thread")
+# Accepted so a task can name it and be told it is not there yet.
+SANITIZERS_ENABLED = ("address", "memory", "undefined")
+SCAN_MODES = ("full", "delta")
+# Accepted so a task can say what it wants and be told it is not there yet,
+# rather than being told the value is invalid.
+TASK_TYPES = ("pov", "patch", "pov-patch", "harness")
+ENGINES = ("libfuzzer", "afl", "honggfuzz", "centipede")
+
+
+def _env(name: str, default: str) -> str:
+    return os.environ.get(name) or default
+
+
+def resolve_path(path: str) -> str:
+    """Absolute paths as given; relative ones against the FuzzingBrain checkout."""
+    p = Path(path).expanduser()
+    return str(p if p.is_absolute() else REPO_ROOT / p)
+
+
+@dataclass(frozen=True)
+class Field:
+    """One task-file field: where it sits in the JSON and what it holds.
+
+    The JSON reader, the command-line flags and the summary are all generated
+    from FIELDS, so a field exists in all three or in none.
+    """
+
+    path: Tuple[str, ...]  # location in the JSON, e.g. ("fuzzer", "engine")
+    attr: str  # Config attribute; the flag is --attr with dashes
+    kind: str  # str | int | float | bool | list | json | concurrency
+    help: str
+    is_path: bool = False  # resolve against REPO_ROOT
+
+    @property
+    def key(self) -> str:
+        return ".".join(self.path)
+
+    @property
+    def flag(self) -> str:
+        return "--" + self.attr.replace("_", "-")
+
+
+FIELDS: Tuple[Field, ...] = (
+    Field(("project_name",), "project_name", "str", "Project name (required)"),
+    Field(
+        ("output",),
+        "output",
+        "str",
+        "Output directory: absolute path, or a name / relative path under workspace/ "
+        "(default workspace/<project>_<run id>)",
+    ),
+    # 1. Target
+    Field(("repo_url",), "repo_url", "str", "Git URL of the source (or --repo-path)"),
+    Field(
+        ("repo_path",),
+        "repo_path",
+        "str",
+        "Local source tree, copied into the output (or --repo-url)",
+        is_path=True,
+    ),
+    Field(("scan_mode",), "scan_mode", "str", "full | delta"),
+    Field(("target_commit",), "target_commit", "str", "full: commit to scan"),
+    Field(("base_commit",), "base_commit", "str", "delta: commit before the change"),
+    Field(
+        ("delta_commit",),
+        "delta_commit",
+        "str",
+        "delta: commit after the change (default HEAD)",
+    ),
+    # 2. Task and limits
+    Field(("task_type",), "task_type", "str", "pov (the only one implemented)"),
+    Field(("timeout_minutes",), "timeout_minutes", "int", "Wall-clock limit in minutes"),
+    Field(("budget_limit",), "budget_limit", "float", "LLM budget in dollars; 0 = unlimited"),
+    Field(("pov_count",), "pov_count", "int", "Stop after N verified PoVs; 0 = never"),
+    Field(
+        ("remove_git",),
+        "remove_git",
+        "bool",
+        "Delete .git from the workspace so history cannot leak the answer",
+    ),
+    # 3. Models
+    Field(
+        ("models",),
+        "models",
+        "json",
+        'Model per role, all five: {"finder","verifier","poc","seed","utility"} (or --force-model)',
+    ),
+    Field(("force_model",), "force_model", "str", "One model for every role (or --models)"),
+    Field(
+        ("allow_fallback",),
+        "allow_fallback",
+        "bool",
+        "On a model failure, switch to another model instead of retrying and then stopping",
+    ),
+    # 4. Fuzzer
+    Field(("fuzzer", "fuzzers"), "fuzzers", "list", "Only these fuzzers, comma-separated; empty = all"),
+    Field(("fuzzer", "engine"), "engine", "str", "libfuzzer (the only one implemented)"),
+    Field(("fuzzer", "sanitizers"), "sanitizers", "list", "Sanitizers, comma-separated"),
+    Field(
+        ("fuzzer", "detect_leaks"),
+        "detect_leaks",
+        "bool",
+        "Count LeakSanitizer reports as crashes (ASan builds; default off)",
+    ),
+    Field(
+        ("fuzzer", "sources"),
+        "fuzzer_sources",
+        "json",
+        "Harness sources: {fuzzer: [file, ...]}",
+        is_path=True,
+    ),
+    Field(
+        ("fuzzer", "docker_image"),
+        "docker_image",
+        "str",
+        "Image the fuzzers run in (required with prebuilt binaries)",
+    ),
+    Field(
+        ("fuzzer", "prebuilt", "binaries"),
+        "prebuilt_binaries",
+        "json",
+        "Prebuilt fuzzers: {sanitizer: {fuzzer: binary}}; skips the build",
+        is_path=True,
+    ),
+    Field(("fuzzer", "build", "fuzz_tooling_url"), "fuzz_tooling_url", "str", "OSS-Fuzz style tooling repo"),
+    Field(("fuzzer", "build", "fuzz_tooling_ref"), "fuzz_tooling_ref", "str", "Branch or tag of the tooling repo"),
+    Field(
+        ("fuzzer", "build", "fuzz_tooling_path"),
+        "fuzz_tooling_path",
+        "str",
+        "Local tooling checkout; used instead of the URL",
+        is_path=True,
+    ),
+    Field(
+        ("fuzzer", "build", "ossfuzz_project_name"),
+        "ossfuzz_project_name",
+        "str",
+        "Directory under projects/ (default: project name)",
+    ),
+    Field(("fuzzer", "build", "build_coverage"), "build_coverage", "bool", "Also build the coverage fuzzer"),
+    # 5. Analysis data
+    Field(
+        ("analysis", "prebuild_graph_dir"),
+        "prebuild_graph_dir",
+        "str",
+        "Prebuilt call graph (directory holding mongodb/functions.json, callgraph.json)",
+        is_path=True,
+    ),
+    # 6. Concurrency and resources
+    Field(("concurrency",), "concurrency", "concurrency", "One number for everything, or a JSON object"),
+    Field(("max_parallel_fuzzers",), "max_parallel_fuzzers", "int", "Fuzzer containers running at once, task-wide"),
+    Field(("fuzzer_worker",), "fuzzer_worker", "json", "Fuzzer worker settings (JSON object)"),
+)
+
+# Objects that only group fields.
+_SECTIONS = {("fuzzer",), ("fuzzer", "prebuilt"), ("fuzzer", "build"), ("analysis",)}
+
+# Keys an older task file may still carry, and what became of each, by JSON path.
+_OLD_KEYS = {
+    "task_id": "removed: FuzzingBrain generates the run id",
+    "workspace": 'renamed to "output"',
+    "in_place": "removed",
+    "sanitizers": 'moved to "fuzzer.sanitizers"',
+    "fuzzers": 'moved to "fuzzer.fuzzers"',
+    "fuzzer_filter": 'moved to "fuzzer.fuzzers"',
+    "fuzzer_sources": 'moved to "fuzzer.sources"',
+    "fuzzer.fuzzer_sources": 'renamed to "fuzzer.sources"',
+    "docker_image": 'moved to "fuzzer.docker_image"',
+    "prebuilt_fuzzers": 'moved to "fuzzer.prebuilt.binaries", now grouped by sanitizer',
+    "fuzz_tooling_url": 'moved to "fuzzer.build.fuzz_tooling_url"',
+    "fuzz_tooling_ref": 'moved to "fuzzer.build.fuzz_tooling_ref"',
+    "fuzz_tooling_path": 'moved to "fuzzer.build.fuzz_tooling_path"',
+    "ossfuzz_project_name": 'moved to "fuzzer.build.ossfuzz_project_name"',
+    "build_coverage": 'moved to "fuzzer.build.build_coverage"',
+    "prebuild_dir": 'renamed to "analysis.prebuild_graph_dir"',
+    "work_id": "removed: the graph is imported from analysis.prebuild_graph_dir alone",
+    "enable_static_analysis": "removed: introspector is no longer supported",
+    "model_profile": 'removed: name a model for every role in "models", or use "force_model"',
+    "strict_models": 'replaced by "allow_fallback" (inverted; default false)',
+    "allow_expensive_fallback": "removed",
+    "no_network": "removed: it was never enforced",
+    "scoring": "removed",
+    "mongodb_url": "moved to .env (MONGODB_URL)",
+    "mongodb_db": "moved to .env (MONGODB_DB)",
+    "redis_url": "moved to .env (REDIS_URL)",
+    "commit_id": "removed (patch mode)",
+    "fuzzer_name": "removed (patch mode)",
+    "gen_blob": "removed (patch mode)",
+    "input": "removed (patch mode)",
+    "targets": "removed (harness mode)",
+}
+
+
+# Fields that exclude each other. A flag for one side clears what the task file
+# set on the other, so the command line can switch a run from one to the other;
+# both sides from the same source is still an error, as validate() reports.
+_EXCLUSIVE = (
+    (("force_model",), ("models",)),
+    (("repo_url",), ("repo_path",)),
+    (("target_commit",), ("base_commit", "delta_commit")),
+)
+
+
+class ConfigError(ValueError):
+    """The task cannot run as written. Carries every problem found, not just the first."""
+
+    def __init__(self, errors: List[str]):
+        self.errors = errors
+        super().__init__("\n".join(errors))
+
+
 @dataclass
 class Config:
-    """FuzzingBrain configuration"""
+    """One run of FuzzingBrain. Built from a task file and/or the command line."""
 
-    # Mode
-    mcp_mode: bool = False
+    # Generated per run, never read from a task file.
+    task_id: str = field(default_factory=lambda: str(ObjectId()))
 
-    # Task identification
-    task_id: Optional[str] = None
+    project_name: Optional[str] = None
+    output: Optional[str] = None
 
-    # Workspace
-    workspace: Optional[str] = None
-    in_place: bool = False
+    # 1. Target
+    repo_url: Optional[str] = None
+    repo_path: Optional[str] = None
+    scan_mode: str = "full"
+    target_commit: Optional[str] = None
+    base_commit: Optional[str] = None
+    delta_commit: Optional[str] = None
 
-    # Task configuration
-    task_type: str = "pov"  # pov | patch | pov-patch | harness
-    scan_mode: str = "full"  # full | delta
+    # 2. Task and limits
+    task_type: str = "pov"
+    timeout_minutes: int = 30
+    budget_limit: float = 20.0  # dollars, 0 = unlimited
+    pov_count: int = 1  # stop after N verified PoVs, 0 = never
+    # .aixcc is always removed from the workspace and is not a switch: it holds
+    # the vulnerability location, a reference POV and the reference patch.
+    remove_git: bool = False
+
+    # 3. Models
+    models: Dict[str, str] = field(default_factory=dict)
+    force_model: Optional[str] = None
+    allow_fallback: bool = False
+
+    # 4. Fuzzer
+    fuzzers: List[str] = field(default_factory=list)  # empty = all
+    engine: str = "libfuzzer"
     sanitizers: List[str] = field(default_factory=lambda: ["address"])
+    detect_leaks: bool = False
+    fuzzer_sources: Dict[str, List[str]] = field(default_factory=dict)
+    # Image the fuzzer binaries run in; it supplies their runtime libraries. PoV
+    # verification and the fuzzer monitor both run the binary here.
+    docker_image: Optional[str] = None
+    # {sanitizer: {fuzzer: binary}}. When set, the binaries are copied into
+    # build/out/<project>_<sanitizer>/ and nothing is compiled.
+    prebuilt_binaries: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    fuzz_tooling_url: str = OFFICIAL_OSS_FUZZ
+    fuzz_tooling_ref: Optional[str] = None
+    fuzz_tooling_path: Optional[str] = None
+    ossfuzz_project_name: Optional[str] = None
     # Coverage is a separate build from the sanitizers and is usually worth the
     # ~5s it costs: four agent tools read it, and trace_pov uses it to add
     # detail. It is optional because a run can be deliberately restricted to
-    # what one ASAN build gives -- and because "not asked for" must not be
-    # reported as "the coverage build failed".
+    # what one ASAN build gives.
     build_coverage: bool = True
-    timeout_minutes: int = 30
-    pov_count: int = 1  # Stop after N verified POVs (0 = unlimited)
+
+    # 5. Analysis data
+    prebuild_graph_dir: Optional[str] = None
+
+    # 6. Concurrency and resources
+    concurrency: ConcurrencyConfig = field(default_factory=ConcurrencyConfig)
     # How many fuzzer containers the whole task may run at once. Every worker
     # runs a global fuzzer and every POV agent starts one for its suspicious
     # point, so without a ceiling the count is workers x (1 + agents) and the
     # machine spends its cores on context switches instead of on executions.
     max_parallel_fuzzers: int = DEFAULT_MAX_PARALLEL_FUZZERS
-
-    # The thresholds the agents judge by. See ScoringConfig.
-    scoring: ScoringConfig = field(default_factory=ScoringConfig)
-
-    # How many of everything runs at once. See ConcurrencyConfig.
-    concurrency: ConcurrencyConfig = field(default_factory=ConcurrencyConfig)
-
-    # Fuzzer Worker configuration
     fuzzer_worker: FuzzerWorkerConfig = field(default_factory=FuzzerWorkerConfig)
 
-    # Budget configuration (env: FUZZINGBRAIN_BUDGET_LIMIT, FUZZINGBRAIN_ALLOW_EXPENSIVE_FALLBACK)
-    budget_limit: float = 50.0  # Max cost in dollars (0 = unlimited)
-    allow_expensive_fallback: bool = (
-        False  # Allow fallback to expensive models (opus, gpt-5.2-pro)
-    )
+    # Infrastructure, from .env only.
+    mongodb_url: str = field(default_factory=lambda: _env("MONGODB_URL", "mongodb://localhost:27017"))
+    mongodb_db: str = field(default_factory=lambda: _env("MONGODB_DB", "fuzzingbrain"))
+    redis_url: str = field(default_factory=lambda: _env("REDIS_URL", "redis://localhost:6379/0"))
 
-    # Fuzzer filter (env: FUZZINGBRAIN_FUZZER_FILTER)
-    fuzzer_filter: List[str] = field(
-        default_factory=list
-    )  # Only dispatch workers for these fuzzers (empty = all)
+    # The run's directory, resolved from `output` by resolve_output().
+    workspace: Optional[str] = None
 
-    # Evaluation posture (env: FUZZINGBRAIN_REMOVE_GIT, FUZZINGBRAIN_NO_NETWORK)
-    # .aixcc is always removed from the workspace and is not a switch: it holds
-    # the vulnerability location, a reference POV and the reference patch.
-    remove_git: bool = False  # Also delete .git, so history cannot recover it
-    no_network: bool = False  # Deny network egress to agent-executed commands
+    # Attributes the task file or command line set explicitly.
+    given: set = field(default_factory=set, repr=False)
 
-    # Repository
-    repo_url: Optional[str] = None
-    repo_path: Optional[str] = None
-    project_name: Optional[str] = None
-    ossfuzz_project_name: Optional[str] = (
-        None  # OSS-Fuzz project name (may differ from project_name)
-    )
-    target_commit: Optional[str] = None  # Target commit for full scan
-
-    # Delta scan commits (used when scan_mode is delta)
-    base_commit: Optional[str] = None
-    delta_commit: Optional[str] = None
-
-    # Fuzz tooling
-    fuzz_tooling_url: Optional[str] = None
-    fuzz_tooling_ref: Optional[str] = None  # Branch/tag for fuzz-tooling
-    fuzz_tooling_path: Optional[str] = None
-
-    # Patch mode specific
-    commit_id: Optional[str] = None
-    fuzzer_name: Optional[str] = None
-    gen_blob: Optional[str] = None
-    input_blob: Optional[str] = None  # Base64 encoded
-
-    # Harness mode specific
-    targets: List[dict] = field(default_factory=list)
-
-    # Infrastructure
-    redis_url: str = "redis://localhost:6379/0"
-    mongodb_url: str = "mongodb://localhost:27017"
-    mongodb_db: str = "fuzzingbrain"
-
-    # MCP server
-    mcp_host: str = "0.0.0.0"
-    mcp_port: int = 8000
-
-    # REST API server
-    api_mode: bool = False
-    api_host: str = "0.0.0.0"
-    api_port: int = 18080
-
-    # Prebuild data (for skipping introspector build)
-    prebuild_dir: Optional[str] = None  # Path to prebuild/{work_id}/ directory
-    work_id: Optional[str] = None  # Work ID for prebuild data remapping
-
-    # Introspector static analysis is a decoupled, opt-in module. Off by
-    # default: production builds skip it and agents navigate via code tools.
-    enable_static_analysis: bool = False
-
-    # Fuzzer source paths (fuzzer_name -> list of source file paths)
-    fuzzer_sources: Dict[str, List[str]] = field(default_factory=dict)
-
-    # Prebuilt fuzzer binaries (fuzzer_name -> path to an already-built binary).
-    # When set, the analyzer copies each into build/out/<project>_<sanitizer>/ and
-    # SKIPS the OSS-Fuzz compile entirely -- "bring your own built fuzzer". Pair
-    # with --prebuild-dir/--enable-static-analysis to also skip the graph build.
-    prebuilt_fuzzers: Dict[str, str] = field(default_factory=dict)
-
-    # Docker image the fuzzer binary actually runs in (has its runtime libs). PoV
-    # verification and the fuzzer monitor run the binary here. Defaults to
-    # gcr.io/oss-fuzz/<project> when unset; a prebuilt/imported binary must set
-    # this to the image it was BUILT in (e.g. aixcc-afc/<project>:latest), or the
-    # verify container is missing its shared libs and every real crash is missed.
-    docker_image: Optional[str] = None
-
-    # Model routing -- the single source of truth for role -> model lives in
-    # llms/routing.py. These carry the task file's choice to the worker boundary,
-    # where a ModelRouter is built (task fields win over env). model_profile picks
-    # a named bundle, models overrides one role, force_model pins every role, and
-    # strict_models makes a pinned model's auth/quota failure fail loud.
-    model_profile: Optional[str] = None
-    model_overrides: Dict[str, str] = field(default_factory=dict)
-    force_model: Optional[str] = None
-    strict_models: bool = False
+    # ------------------------------------------------------------------ load
 
     @classmethod
     def from_json(cls, json_path: str) -> "Config":
-        """Load configuration from JSON file"""
-        with open(json_path, "r") as f:
-            data = json.load(f)
+        """Load a task file. Unknown or outdated keys are errors, not ignored."""
+        try:
+            with open(json_path, "r") as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            raise ConfigError([f"task file not found: {json_path}"])
+        except json.JSONDecodeError as e:
+            raise ConfigError([f"{json_path}: not valid JSON: {e}"])
+        if not isinstance(data, dict):
+            raise ConfigError([f"{json_path}: the top level must be a JSON object"])
 
-        # Parse fuzzer_worker config if present
-        fw_data = data.get("fuzzer_worker", {})
-        fuzzer_worker = FuzzerWorkerConfig(
-            enabled=fw_data.get("enabled", True),
-            global_fork_level=fw_data.get("global_fork_level", 2),
-            global_rss_limit_mb=fw_data.get("global_rss_limit_mb", 2048),
-            global_max_time=fw_data.get("global_max_time", 3600),
-            global_timeout_per_input=fw_data.get("global_timeout_per_input", 30),
-            sp_fork_level=fw_data.get("sp_fork_level", 1),
-            sp_rss_limit_mb=fw_data.get("sp_rss_limit_mb", 1024),
-            sp_max_count=fw_data.get("sp_max_count", 5),
-            crash_check_interval=fw_data.get("crash_check_interval", 5.0),
-        )
+        config = cls()
+        errors = config._apply_json(data)
+        if errors:
+            raise ConfigError([f"{json_path}: {e}" for e in errors])
+        return config
 
-        return cls(
-            workspace=data.get("workspace"),
-            task_id=data.get("task_id"),
-            in_place=bool(data.get("in_place", False)),
-            # Evaluation posture. These were reachable only from the command
-            # line and the environment, so a task file -- the form a challenge
-            # run is actually written in -- could not express them, and a
-            # `"remove_git": true` in one was read by nothing and reported by
-            # nothing. A flag or environment variable can still turn them on
-            # over a task file that leaves them off; neither can turn them off.
-            remove_git=bool(data.get("remove_git", False)),
-            no_network=bool(data.get("no_network", False)),
-            enable_static_analysis=bool(data.get("enable_static_analysis", False)),
-            allow_expensive_fallback=bool(data.get("allow_expensive_fallback", False)),
-            task_type=data.get("task_type", "pov"),
-            scan_mode=data.get("scan_mode", "full"),
-            sanitizers=data.get("sanitizers", ["address"]),
-            build_coverage=bool(data.get("build_coverage", True)),
-            timeout_minutes=data.get("timeout_minutes", 30),
-            pov_count=data.get("pov_count", 1),
-            max_parallel_fuzzers=int(
-                data.get("max_parallel_fuzzers", DEFAULT_MAX_PARALLEL_FUZZERS)
-            ),
-            scoring=ScoringConfig.from_dict(data.get("scoring")),
-            concurrency=ConcurrencyConfig.from_value(data.get("concurrency")),
-            budget_limit=float(data.get("budget_limit") or 0)
-            if data.get("budget_limit") is not None
-            else 50.0,
-            fuzzer_worker=fuzzer_worker,
-            repo_url=data.get("repo_url"),
-            repo_path=data.get("repo_path"),
-            project_name=data.get("project_name"),
-            ossfuzz_project_name=data.get("ossfuzz_project_name")
-            or data.get("ossfuzz_project"),
-            target_commit=(data.get("target_commit") or "").strip() or None,
-            base_commit=(data.get("base_commit") or "").strip() or None,
-            delta_commit=(data.get("delta_commit") or "").strip() or None,
-            fuzz_tooling_url=data.get("fuzz_tooling_url"),
-            fuzz_tooling_ref=data.get("fuzz_tooling_ref"),
-            fuzz_tooling_path=data.get("fuzz_tooling_path"),
-            commit_id=data.get("commit_id"),
-            fuzzer_name=data.get("fuzzer_name"),
-            gen_blob=data.get("gen_blob"),
-            input_blob=data.get("input"),
-            targets=data.get("targets", []),
-            redis_url=data.get("redis_url", "redis://localhost:6379/0"),
-            mongodb_url=data.get("mongodb_url", "mongodb://localhost:27017"),
-            mongodb_db=data.get("mongodb_db", "fuzzingbrain"),
-            fuzzer_filter=data.get("fuzzer_filter") or data.get("fuzzers") or [],
-            prebuild_dir=data.get("prebuild_dir"),
-            work_id=data.get("work_id"),
-            fuzzer_sources=data.get("fuzzer_sources", {}),
-            prebuilt_fuzzers=data.get("prebuilt_fuzzers", {}),
-            docker_image=data.get("docker_image"),
-            model_profile=data.get("model_profile"),
-            model_overrides=data.get("models", {}) or {},
-            force_model=data.get("force_model"),
-            strict_models=bool(data.get("strict_models", False)),
-        )
+    def _apply_json(self, data: dict) -> List[str]:
+        errors: List[str] = []
+        by_path = {f.path: f for f in FIELDS}
 
-    @classmethod
-    def from_env(cls) -> "Config":
-        """Load configuration from environment variables"""
-        sanitizers = os.environ.get("FUZZINGBRAIN_SANITIZERS", "address")
+        def walk(obj: dict, prefix: Tuple[str, ...]) -> None:
+            for key, value in obj.items():
+                path = prefix + (key,)
+                if path in _SECTIONS:
+                    if not isinstance(value, dict):
+                        errors.append(f'"{".".join(path)}" must be an object')
+                    elif path == ("fuzzer", "prebuilt") and "binaries" not in value:
+                        errors.append('"fuzzer.prebuilt" has no "binaries"')
+                    else:
+                        walk(value, path)
+                elif path in by_path:
+                    try:
+                        self._set(by_path[path], value)
+                    except (TypeError, ValueError) as e:
+                        errors.append(f'"{".".join(path)}": {e}')
+                elif ".".join(path) in _OLD_KEYS:
+                    errors.append(f'"{".".join(path)}" is no longer accepted: {_OLD_KEYS[".".join(path)]}')
+                else:
+                    errors.append(f'unknown field "{".".join(path)}"')
 
-        # Parse fuzzer_worker config from env
-        fuzzer_worker = FuzzerWorkerConfig(
-            enabled=os.environ.get("FUZZINGBRAIN_FUZZER_WORKER_ENABLED", "true").lower()
-            in ("true", "1", "yes"),
-            global_fork_level=int(
-                os.environ.get("FUZZINGBRAIN_GLOBAL_FORK_LEVEL", "2")
-            ),
-            global_rss_limit_mb=int(
-                os.environ.get("FUZZINGBRAIN_GLOBAL_RSS_LIMIT_MB", "2048")
-            ),
-            global_max_time=int(os.environ.get("FUZZINGBRAIN_GLOBAL_MAX_TIME", "3600")),
-            sp_fork_level=int(os.environ.get("FUZZINGBRAIN_SP_FORK_LEVEL", "1")),
-            sp_rss_limit_mb=int(os.environ.get("FUZZINGBRAIN_SP_RSS_LIMIT_MB", "1024")),
-            sp_max_count=int(os.environ.get("FUZZINGBRAIN_SP_MAX_COUNT", "5")),
-        )
-
-        return cls(
-            mcp_mode=os.environ.get("FUZZINGBRAIN_MCP", "").lower() == "true",
-            workspace=os.environ.get("FUZZINGBRAIN_WORKSPACE"),
-            task_type=os.environ.get("FUZZINGBRAIN_TASK_TYPE", "pov"),
-            scan_mode=os.environ.get("FUZZINGBRAIN_SCAN_MODE", "full"),
-            sanitizers=sanitizers.split(","),
-            timeout_minutes=int(os.environ.get("FUZZINGBRAIN_TIMEOUT", "30")),
-            fuzzer_worker=fuzzer_worker,
-            # Budget configuration
-            budget_limit=float(os.environ.get("FUZZINGBRAIN_BUDGET_LIMIT", "50.0")),
-            allow_expensive_fallback=os.environ.get(
-                "FUZZINGBRAIN_ALLOW_EXPENSIVE_FALLBACK", "false"
-            ).lower()
-            in ("true", "1", "yes"),
-            # Introspector static analysis (opt-in; off by default)
-            enable_static_analysis=os.environ.get(
-                "FUZZINGBRAIN_ENABLE_STATIC_ANALYSIS", "false"
-            ).lower()
-            in ("true", "1", "yes"),
-            # Fuzzer filter (comma-separated list)
-            fuzzer_filter=[
-                f.strip()
-                for f in os.environ.get("FUZZINGBRAIN_FUZZER_FILTER", "").split(",")
-                if f.strip()
-            ],
-            # Infrastructure
-            redis_url=os.environ.get("REDIS_URL", "redis://localhost:6379/0"),
-            mongodb_url=os.environ.get("MONGODB_URL", "mongodb://localhost:27017"),
-            mongodb_db=os.environ.get("MONGODB_DB", "fuzzingbrain"),
-            mcp_host=os.environ.get("MCP_HOST", "0.0.0.0"),
-            mcp_port=int(os.environ.get("MCP_PORT", "8000")),
-            api_mode=os.environ.get("FUZZINGBRAIN_API", "").lower() == "true",
-            api_host=os.environ.get("API_HOST", "0.0.0.0"),
-            api_port=int(os.environ.get("API_PORT", "18080")),
-            max_parallel_fuzzers=int(
-                os.environ.get(
-                    "FUZZINGBRAIN_MAX_PARALLEL_FUZZERS",
-                    str(DEFAULT_MAX_PARALLEL_FUZZERS),
-                )
-            ),
-            scoring=ScoringConfig.from_env(),
-            concurrency=ConcurrencyConfig.from_env(),
-        )
-
-    def merge(self, other: "Config") -> "Config":
-        """Merge another config into this one (other takes precedence for non-None values)"""
-        for field_name in self.__dataclass_fields__:
-            other_val = getattr(other, field_name)
-            if other_val is not None and other_val != getattr(Config, field_name, None):
-                setattr(self, field_name, other_val)
-        return self
-
-    def validate(self) -> List[str]:
-        """Validate configuration, return list of errors"""
-        errors = []
-
-        if self.mcp_mode or self.api_mode:
-            # Server mode doesn't need workspace
-            return errors
-
-        # Check job type
-        if self.task_type not in ["pov", "patch", "pov-patch", "harness"]:
-            errors.append(f"Invalid task_type: {self.task_type}")
-
-        # Check workspace or repo
-        if not self.workspace and not self.repo_url and not self.repo_path:
-            errors.append("Must provide workspace, repo_url, or repo_path")
-
-        # Delta scan validation
-        if self.delta_commit and not self.base_commit:
-            errors.append("delta_commit requires base_commit")
-
-        # Patch mode validation
-        if self.task_type == "patch":
-            if not self.gen_blob and not self.input_blob:
-                errors.append("patch mode requires gen_blob or input")
-            if self.gen_blob and self.input_blob:
-                errors.append("gen_blob and input are mutually exclusive")
-
-        # Harness mode validation
-        if self.task_type == "harness":
-            if not self.targets:
-                errors.append("harness mode requires targets")
-
-        # Sanitizer validation
-        valid_sanitizers = ["address", "memory", "undefined"]
-        for san in self.sanitizers:
-            if san not in valid_sanitizers:
-                errors.append(f"Invalid sanitizer: {san}")
-
+        walk(data, ())
         return errors
 
-    def to_dict(self) -> dict:
-        """Convert to dictionary"""
-        return {
-            "mcp_mode": self.mcp_mode,
-            "api_mode": self.api_mode,
-            "workspace": self.workspace,
-            "in_place": self.in_place,
-            "task_type": self.task_type,
-            "scan_mode": self.scan_mode,
-            "sanitizers": self.sanitizers,
-            "timeout_minutes": self.timeout_minutes,
-            "pov_count": self.pov_count,
-            "fuzzer_worker": {
-                "enabled": self.fuzzer_worker.enabled,
-                "global_fork_level": self.fuzzer_worker.global_fork_level,
-                "global_rss_limit_mb": self.fuzzer_worker.global_rss_limit_mb,
-                "global_max_time": self.fuzzer_worker.global_max_time,
-                "global_timeout_per_input": self.fuzzer_worker.global_timeout_per_input,
-                "sp_fork_level": self.fuzzer_worker.sp_fork_level,
-                "sp_rss_limit_mb": self.fuzzer_worker.sp_rss_limit_mb,
-                "sp_max_count": self.fuzzer_worker.sp_max_count,
-                "crash_check_interval": self.fuzzer_worker.crash_check_interval,
-            },
-            "repo_url": self.repo_url,
-            "repo_path": self.repo_path,
-            "project_name": self.project_name,
-            "ossfuzz_project_name": self.ossfuzz_project_name,
-            "target_commit": self.target_commit,
-            "base_commit": self.base_commit,
-            "delta_commit": self.delta_commit,
-            "fuzz_tooling_url": self.fuzz_tooling_url,
-            "fuzz_tooling_ref": self.fuzz_tooling_ref,
-            "fuzz_tooling_path": self.fuzz_tooling_path,
-            "commit_id": self.commit_id,
-            "fuzzer_name": self.fuzzer_name,
-            "targets": self.targets,
-            "max_parallel_fuzzers": self.max_parallel_fuzzers,
-            "scoring": self.scoring.to_dict(),
-            "concurrency": self.concurrency.to_dict(),
-            "redis_url": self.redis_url,
-            "mongodb_url": self.mongodb_url,
-            "mongodb_db": self.mongodb_db,
+    def _set(self, spec: Field, value: Any) -> None:
+        """Type-check one value and store it. `value` may come from JSON or a flag."""
+        if value is None:
+            return
+        kind = spec.kind
+        if kind == "str":
+            if not isinstance(value, str):
+                raise TypeError("expected a string")
+            value = value.strip() or None
+            if value is None:
+                return
+        elif kind == "int":
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise TypeError("expected an integer")
+        elif kind == "float":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise TypeError("expected a number")
+            value = float(value)
+        elif kind == "bool":
+            if not isinstance(value, bool):
+                raise TypeError("expected true or false")
+        elif kind == "list":
+            if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+                raise TypeError("expected a list of strings")
+        elif kind == "concurrency":
+            if isinstance(value, bool) or not isinstance(value, (int, dict)):
+                raise TypeError("expected a number or an object")
+            if isinstance(value, dict):
+                unknown = set(value) - set(ConcurrencyConfig.__dataclass_fields__)
+                if unknown:
+                    raise ValueError(f"unknown keys {sorted(unknown)}")
+                for k, v in value.items():
+                    if isinstance(v, bool) or not isinstance(v, int) or v < 1:
+                        raise ValueError(f"{k} must be an integer of at least 1")
+            elif value < 1:
+                raise ValueError("must be at least 1")
+            value = ConcurrencyConfig.from_value(value)
+        elif kind == "json":
+            value = self._parse_json_field(spec, value)
+
+        if spec.is_path:
+            value = self._resolve_paths(spec, value)
+        setattr(self, spec.attr, value)
+        self.given.add(spec.attr)
+
+    @staticmethod
+    def _parse_json_field(spec: Field, value: Any) -> Any:
+        if spec.attr == "models":
+            if not isinstance(value, dict) or not all(
+                isinstance(k, str) and isinstance(v, str) for k, v in value.items()
+            ):
+                raise TypeError("expected an object of role -> model id")
+            unknown = set(value) - set(ROLES)
+            if unknown:
+                raise ValueError(f"unknown roles {sorted(unknown)}; roles are {list(ROLES)}")
+            return dict(value)
+        if spec.attr == "fuzzer_sources":
+            if not isinstance(value, dict) or not all(
+                isinstance(v, list) and all(isinstance(p, str) for p in v)
+                for v in value.values()
+            ):
+                raise TypeError("expected an object of fuzzer -> list of files")
+            return {k: list(v) for k, v in value.items()}
+        if spec.attr == "prebuilt_binaries":
+            if not isinstance(value, dict) or not all(
+                isinstance(v, dict) and all(isinstance(p, str) for p in v.values())
+                for v in value.values()
+            ):
+                raise TypeError("expected an object of sanitizer -> {fuzzer: binary}")
+            return {san: dict(bins) for san, bins in value.items()}
+        if spec.attr == "fuzzer_worker":
+            if not isinstance(value, dict):
+                raise TypeError("expected an object")
+            known = FuzzerWorkerConfig.__dataclass_fields__
+            unknown = set(value) - set(known)
+            if unknown:
+                raise ValueError(f"unknown keys {sorted(unknown)}")
+            return FuzzerWorkerConfig(**value)
+        raise TypeError(f"no parser for {spec.attr}")
+
+    @staticmethod
+    def _resolve_paths(spec: Field, value: Any) -> Any:
+        if spec.attr == "fuzzer_sources":
+            return {k: [resolve_path(p) for p in v] for k, v in value.items()}
+        if spec.attr == "prebuilt_binaries":
+            return {
+                san: {name: resolve_path(p) for name, p in bins.items()}
+                for san, bins in value.items()
+            }
+        return resolve_path(value)
+
+    # -------------------------------------------------------------- command line
+
+    @staticmethod
+    def add_arguments(parser: argparse.ArgumentParser) -> None:
+        """One flag per task-file field. A flag overrides the same field in --config."""
+        groups = {
+            "": parser.add_argument_group("task"),
+            "fuzzer": parser.add_argument_group("fuzzer"),
+            "analysis": parser.add_argument_group("analysis"),
         }
+        for spec in FIELDS:
+            group = groups.get(spec.path[0], groups[""])
+            dest = spec.attr
+            help_text = f"{spec.help}  [{spec.key}]"
+            if spec.kind == "bool":
+                group.add_argument(
+                    spec.flag, dest=dest, action=argparse.BooleanOptionalAction,
+                    default=None, help=help_text,
+                )
+            elif spec.kind == "int":
+                group.add_argument(spec.flag, dest=dest, type=int, default=None, help=help_text)
+            elif spec.kind == "float":
+                group.add_argument(spec.flag, dest=dest, type=float, default=None, help=help_text)
+            else:
+                group.add_argument(spec.flag, dest=dest, type=str, default=None, help=help_text)
+
+    def apply_args(self, args: argparse.Namespace) -> None:
+        """Apply the flags that were given on top of whatever the task file set."""
+        from_file = set(self.given)
+        flagged = {s.attr for s in FIELDS if getattr(args, s.attr, None) is not None}
+        for a, b in _EXCLUSIVE:
+            for mine, other in ((a, b), (b, a)):
+                if flagged & set(mine):
+                    for attr in set(other) & from_file - flagged:
+                        self._reset(attr)
+        # Switching scan_mode drops the task file's commits for the other mode.
+        if "scan_mode" in flagged:
+            other = ("base_commit", "delta_commit") if args.scan_mode == "full" else ("target_commit",)
+            for attr in set(other) & from_file - flagged:
+                self._reset(attr)
+
+        errors = []
+        for spec in FIELDS:
+            raw = getattr(args, spec.attr, None)
+            if raw is None:
+                continue
+            try:
+                if spec.kind == "list":
+                    raw = [v.strip() for v in raw.split(",") if v.strip()]
+                elif spec.kind == "json":
+                    raw = json.loads(raw)
+                elif spec.kind == "concurrency":
+                    raw = int(raw) if raw.strip().isdigit() else json.loads(raw)
+                self._set(spec, raw)
+            except (TypeError, ValueError) as e:
+                errors.append(f"{spec.flag}: {e}")
+        if errors:
+            raise ConfigError(errors)
+
+    def _reset(self, attr: str) -> None:
+        f = self.__dataclass_fields__[attr]
+        default = f.default_factory() if f.default_factory is not MISSING else f.default
+        setattr(self, attr, default)
+        self.given.discard(attr)
+
+    # ------------------------------------------------------------------ derived
+
+    @property
+    def is_prebuilt(self) -> bool:
+        return bool(self.prebuilt_binaries)
+
+    def resolve_output(self) -> str:
+        """The run's directory: absolute as given, otherwise under workspace/."""
+        if self.output:
+            out = Path(self.output).expanduser()
+            out = out if out.is_absolute() else WORKSPACE_ROOT / out
+        else:
+            out = WORKSPACE_ROOT / f"{self.project_name}_{self.task_id}"
+        self.workspace = str(out)
+        return self.workspace
+
+    def models_in_use(self) -> List[str]:
+        if self.force_model:
+            return [self.force_model]
+        return sorted(set(self.models.values()))
+
+    # ----------------------------------------------------------------- validate
+
+    def validate(self) -> List[str]:
+        """Every reason this task cannot run as written. Empty means it can."""
+        e: List[str] = []
+
+        if not self.project_name:
+            e.append("project_name is required")
+
+        # Target
+        if bool(self.repo_url) == bool(self.repo_path):
+            e.append("give exactly one of repo_url and repo_path")
+        if self.repo_path and not Path(self.repo_path).is_dir():
+            e.append(f"repo_path is not a directory: {self.repo_path}")
+        if self.scan_mode not in SCAN_MODES:
+            e.append(f"scan_mode must be one of {list(SCAN_MODES)}, not {self.scan_mode!r}")
+        elif self.scan_mode == "delta":
+            if not self.base_commit:
+                e.append("scan_mode delta needs base_commit")
+            if self.target_commit:
+                e.append("target_commit is for scan_mode full; delta uses base_commit and delta_commit")
+        else:
+            if self.base_commit or self.delta_commit:
+                e.append("base_commit and delta_commit are for scan_mode delta")
+
+        # Task and limits
+        if self.task_type not in TASK_TYPES:
+            e.append(f"task_type must be one of {list(TASK_TYPES)}, not {self.task_type!r}")
+        elif self.task_type != "pov":
+            e.append(f"task_type {self.task_type!r} is not available: this version enables only 'pov'")
+        if self.timeout_minutes <= 0:
+            e.append("timeout_minutes must be positive")
+        if self.budget_limit < 0:
+            e.append("budget_limit must be 0 (unlimited) or positive")
+        if self.pov_count < 0:
+            e.append("pov_count must be 0 (never stop) or positive")
+
+        # Models
+        if self.force_model and self.models:
+            e.append("give force_model or models, not both")
+        elif not self.force_model:
+            missing = [r for r in ROLES if not self.models.get(r)]
+            if not self.models:
+                e.append(f"no model given: set force_model, or models for every role {list(ROLES)}")
+            elif missing:
+                e.append(f"models is missing roles {missing}; every role needs a model")
+
+        # Fuzzer
+        if self.engine not in ENGINES:
+            e.append(f"fuzzer.engine must be one of {list(ENGINES)}, not {self.engine!r}")
+        elif self.engine != "libfuzzer":
+            e.append(f"fuzzer.engine {self.engine!r} is not available: this version enables only 'libfuzzer'")
+        if "prebuilt_binaries" in self.given and not self.prebuilt_binaries:
+            # Empty would silently mean "build from OSS-Fuzz" instead.
+            e.append("fuzzer.prebuilt.binaries is empty")
+        if self.is_prebuilt:
+            e.extend(self._validate_prebuilt())
+        e.extend(self._check_sanitizers())
+        for name, files in self.fuzzer_sources.items():
+            if not files:
+                e.append(f"fuzzer.sources[{name!r}] is empty")
+            for f in files:
+                if not Path(f).is_file():
+                    e.append(f"fuzzer.sources[{name!r}]: no such file {f}")
+
+        if not self.is_prebuilt:
+            if self.fuzz_tooling_path and not Path(self.fuzz_tooling_path).is_dir():
+                e.append(f"fuzzer.build.fuzz_tooling_path is not a directory: {self.fuzz_tooling_path}")
+
+        # Analysis data
+        if self.prebuild_graph_dir:
+            mongodb = Path(self.prebuild_graph_dir) / "mongodb"
+            for name in ("functions.json", "callgraph.json"):
+                if not (mongodb / name).is_file():
+                    e.append(f"analysis.prebuild_graph_dir: missing {mongodb / name}")
+
+        # Resources
+        if self.max_parallel_fuzzers < 1:
+            e.append("max_parallel_fuzzers must be at least 1")
+
+        # Output
+        if self.workspace:
+            out = Path(self.workspace)
+            # The source is copied into the output; inside the source, the copy
+            # would copy itself.
+            if self.repo_path and out.resolve().is_relative_to(Path(self.repo_path).resolve()):
+                e.append(f"output {out} is inside repo_path {self.repo_path}")
+            if out.exists() and not out.is_dir():
+                e.append(f"output {out} is a file, not a directory")
+            elif out.exists() and any(out.iterdir()):
+                e.append(
+                    f"output {out} already exists and is not empty; "
+                    "choose another output or remove it (runs are not resumed)"
+                )
+        return e
+
+    def _check_sanitizers(self) -> List[str]:
+        # After _validate_prebuilt, which replaces the list with the binaries' keys.
+        e: List[str] = []
+        where = "fuzzer.prebuilt.binaries" if self.is_prebuilt else "fuzzer.sanitizers"
+        if not self.sanitizers:
+            e.append(f"{where} is empty")
+        dup = sorted({s for s in self.sanitizers if self.sanitizers.count(s) > 1})
+        if dup:
+            e.append(f"{where}: {dup} listed more than once")
+        if self.detect_leaks and "address" not in self.sanitizers:
+            e.append("fuzzer.detect_leaks needs the address sanitizer (LeakSanitizer is part of ASan)")
+        bad = [s for s in self.sanitizers if s not in SANITIZERS]
+        if bad:
+            e.append(f"{where}: unknown sanitizers {bad}; known: {list(SANITIZERS)}")
+        for s in self.sanitizers:
+            if s in SANITIZERS and s not in SANITIZERS_ENABLED:
+                e.append(f"sanitizer {s!r} is not available: this version enables "
+                         f"{list(SANITIZERS_ENABLED)}")
+        return e
+
+    def _validate_prebuilt(self) -> List[str]:
+        e: List[str] = []
+        if not self.docker_image:
+            e.append(
+                "fuzzer.docker_image is required with prebuilt binaries: "
+                "FuzzingBrain cannot tell which image they were built in"
+            )
+        # Nothing is built, so a build setting would be silently ignored.
+        build = [f.key for f in FIELDS if f.path[:2] == ("fuzzer", "build") and f.attr in self.given]
+        if build:
+            e.append(f"fuzzer.prebuilt and fuzzer.build are exclusive; remove {build}")
+        # The sanitizers are the ones binaries were supplied for.
+        supplied = list(self.prebuilt_binaries)
+        if "sanitizers" in self.given and sorted(self.sanitizers) != sorted(supplied):
+            e.append(
+                f"fuzzer.sanitizers {self.sanitizers} does not match the sanitizers "
+                f"in fuzzer.prebuilt.binaries {supplied}"
+            )
+        self.sanitizers = supplied
+
+        names = set()
+        for san, bins in self.prebuilt_binaries.items():
+            if not bins:
+                e.append(f"fuzzer.prebuilt.binaries[{san!r}] is empty")
+            for name, path in bins.items():
+                names.add(name)
+                if not Path(path).is_file():
+                    e.append(f"fuzzer.prebuilt.binaries[{san!r}][{name!r}]: no such file {path}")
+        for name in self.fuzzers:
+            if name not in names:
+                e.append(f"fuzzer.fuzzers names {name!r}, which has no prebuilt binary")
+        # A harness's source cannot be recovered from its binary, and an empty
+        # one silently feeds the finder nothing.
+        for name in self.fuzzers or sorted(names):
+            if not self.fuzzer_sources.get(name):
+                e.append(f"fuzzer.sources has no entry for {name!r} (required with prebuilt binaries)")
+        return e
+
+    # ------------------------------------------------------------------ output
+
+    def summary(self) -> List[Tuple[str, str]]:
+        """(label, value) pairs for the start-up summary."""
+        rows = [
+            ("Project", self.project_name or ""),
+            ("Run id", self.task_id),
+            ("Output", self.workspace or ""),
+            ("Source", self.repo_url or self.repo_path or ""),
+            ("Mode", f"{self.task_type} / {self.scan_mode}"),
+        ]
+        if self.scan_mode == "delta":
+            rows.append(("Delta", f"{self.base_commit}..{self.delta_commit or 'HEAD'}"))
+        elif self.target_commit:
+            rows.append(("Commit", self.target_commit))
+        if self.force_model:
+            rows.append(("Model", f"{self.force_model} (all roles)"))
+        else:
+            rows.append(("Models", ", ".join(f"{r}={self.models.get(r)}" for r in ROLES)))
+        rows.append(("Fallback", "allowed" if self.allow_fallback else "off"))
+        fuzzers = ", ".join(self.fuzzers) if self.fuzzers else "all"
+        leaks = "leaks on" if self.detect_leaks else "leaks off"
+        rows.append(("Fuzzers", f"{fuzzers}  [{self.engine}; {', '.join(self.sanitizers)}; {leaks}]"))
+        if self.is_prebuilt:
+            rows.append(("Build", f"prebuilt, image {self.docker_image}"))
+        else:
+            tooling = self.fuzz_tooling_path or self.fuzz_tooling_url
+            ref = f"@{self.fuzz_tooling_ref}" if self.fuzz_tooling_ref else ""
+            rows.append(("Build", f"{tooling}{ref}"))
+        rows.append(("Call graph", self.prebuild_graph_dir or "none"))
+        rows.append(("Limits", f"{self.timeout_minutes} min, "
+                     f"{'$%.2f' % self.budget_limit if self.budget_limit else 'no budget limit'}, "
+                     f"{f'stop after {self.pov_count} PoV' if self.pov_count else 'no PoV limit'}"))
+        c = self.concurrency
+        rows.append(("Concurrency", f"workers {c.celery_workers}, agents "
+                     f"{c.sp_find_agents}/{c.verify_agents}/{c.pov_agents}, "
+                     f"fuzzers {self.max_parallel_fuzzers}"))
+        return rows

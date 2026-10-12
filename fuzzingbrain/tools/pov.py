@@ -34,6 +34,7 @@ from .coverage import (
 )
 from ..core.docker_limits import docker_resource_args
 from ..core.fuzzer_spec import (
+    asan_options,
     is_no_oom,
     libfuzzer_oom_flags,
     run_lib_docker_args,
@@ -1436,10 +1437,9 @@ def _run_fuzzer_docker(
             f"SANITIZER={sanitizer}",
             "-e",
             "ARCHITECTURE=x86_64",
-            # No challenge here is a leak bug; incidental dissector leaks under
-            # LSan would verify as bogus PoVs. Keep it off (matches the fuzzer).
+            # Same leak setting as the fuzzer (fuzzer.detect_leaks).
             "-e",
-            "ASAN_OPTIONS=detect_leaks=0",
+            asan_options(),
             "-e",
             "FUZZ_VERBOSE=1",  # Enable verbose output for debugging
             *(

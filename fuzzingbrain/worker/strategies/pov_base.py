@@ -637,8 +637,8 @@ class POVBaseStrategy(BaseStrategy):
         # Configure pipeline
         concurrency = get_concurrency()
         config = PipelineConfig(
-            num_verify_agents=concurrency.delta_verify_agents,
-            num_pov_agents=concurrency.delta_pov_agents,
+            num_verify_agents=concurrency.verify_agents,
+            num_pov_agents=concurrency.pov_agents,
             pov_min_score=0.5,  # Minimum score to proceed to POV
             poll_interval=1.0,  # Poll every 1 second
             max_idle_cycles=10,  # Exit after 10 idle cycles

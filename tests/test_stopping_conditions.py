@@ -49,8 +49,9 @@ def _make_dispatcher(
     config.budget_limit = budget_limit
     config.pov_count = pov_count
     config.sanitizers = ["address"]
-    config.fuzzer_filter = None
+    config.fuzzers = []
     config.ossfuzz_project_name = "test_project"
+    config.redis_url = "redis://localhost:6379/0"
 
     repos = MagicMock()
 

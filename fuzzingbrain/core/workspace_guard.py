@@ -170,7 +170,6 @@ def assert_workspace_clean(workspace: Path, require_no_git: bool = False) -> Non
 def format_banner(
     report: SanitizeReport,
     remove_git: bool,
-    network_blocked: bool,
     confined_to: str,
 ) -> List[str]:
     """The lines a run prints about its own posture.
@@ -199,7 +198,5 @@ def format_banner(
     return [
         f"  {ANSWER_DIR:<14} {answers}",
         f"  {GIT_DIR:<14} {git}",
-        f"  {'agent network':<14} "
-        f"{'blocked' if network_blocked else 'allowed (no agent tool performs network I/O today)'}",
         f"  {'workspace':<14} confined to {confined_to}",
     ]

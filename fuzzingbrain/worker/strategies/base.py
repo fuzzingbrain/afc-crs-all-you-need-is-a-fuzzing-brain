@@ -19,7 +19,7 @@ class BaseStrategy(ABC):
     Base class for worker strategies.
 
     Each strategy implements the core logic for a specific job type:
-    - POVStrategy: Find vulnerabilities, generate POVs
+    - POVDeltaStrategy / POVFullscanStrategy: Find vulnerabilities, generate POVs
     - PatchStrategy: Generate patches for existing POVs
     - HarnessStrategy: Generate new fuzz harnesses
     """

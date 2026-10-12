@@ -176,11 +176,10 @@ class AnalysisServer:
         language: str = "c",
         log_dir: Optional[str] = None,
         prebuild_dir: Optional[str] = None,
-        work_id: Optional[str] = None,
         fuzzer_sources: Optional[Dict[str, Union[str, List[str]]]] = None,
         enable_static_analysis: bool = False,
         build_coverage: bool = True,
-        prebuilt_fuzzers: Optional[Dict[str, str]] = None,
+        prebuilt_fuzzers: Optional[Dict[str, Dict[str, str]]] = None,
     ):
         # Store task_id as ObjectId for consistent MongoDB queries
         # String representation is used for socket paths and logging
@@ -192,7 +191,6 @@ class AnalysisServer:
         self.language = language
         self.log_dir = log_dir
         self.prebuild_dir = Path(prebuild_dir) if prebuild_dir else None
-        self.work_id = work_id
         self.fuzzer_sources = fuzzer_sources or {}
         # Introspector static analysis is opt-in; off by default in production.
         self.enable_static_analysis = enable_static_analysis
@@ -283,7 +281,7 @@ class AnalysisServer:
         self._log(f"Starting Analysis Server for task {self.task_id}")
 
         # Initialize database
-        config = Config.from_env()
+        config = Config()  # infrastructure settings come from .env
         db = MongoDB.connect(config.mongodb_url, config.mongodb_db)
         self.repos = init_repos(db)
 
@@ -302,7 +300,15 @@ class AnalysisServer:
             )
 
         # Phase 2: Import static analysis
-        await self._import_phase()
+        try:
+            await self._import_phase()
+        except RuntimeError as e:
+            return AnalyzeResult(
+                success=False,
+                task_id=self.task_id,
+                error_msg=str(e),
+                build_duration_seconds=self.build_duration,
+            )
 
         # Phase 3: Start server
         await self._start_server()
@@ -370,7 +376,7 @@ class AnalysisServer:
         skip_introspector = not self.enable_static_analysis
         if skip_introspector:
             self._log("Static analysis disabled, skipping introspector build")
-        elif self.prebuild_dir and self.work_id:
+        elif self.prebuild_dir:
             mongodb_dir = self.prebuild_dir / "mongodb"
             if mongodb_dir.exists() and (mongodb_dir / "functions.json").exists():
                 skip_introspector = True
@@ -415,34 +421,24 @@ class AnalysisServer:
         self._log("Phase 2: Importing static analysis data")
         import_start = time.time()
 
-        # Check for prebuild data first
-        if self.prebuild_dir and self.work_id:
-            mongodb_dir = self.prebuild_dir / "mongodb"
-            if mongodb_dir.exists():
-                self._log(f"Found prebuild data at {self.prebuild_dir}")
-
-                # Import from prebuild
-                loop = asyncio.get_event_loop()
-                success, msg = await loop.run_in_executor(
-                    None,
-                    import_from_prebuild,
-                    self.task_id,
-                    self.work_id,
-                    self.prebuild_dir,
-                    self.repos,
-                    self._log,
-                )
-
-                self.analysis_duration = time.time() - import_start
-
-                if success:
-                    self._log(f"Prebuild import completed: {msg}")
-                    return
-                else:
-                    self._log(
-                        f"Prebuild import failed: {msg}, falling back to introspector",
-                        "WARN",
-                    )
+        # A prebuilt graph the task asked for must load: running on without it
+        # would look like a normal run while the agents work blind.
+        if self.prebuild_dir:
+            self._log(f"Importing prebuilt call graph from {self.prebuild_dir}")
+            loop = asyncio.get_event_loop()
+            success, msg = await loop.run_in_executor(
+                None,
+                import_from_prebuild,
+                self.task_id,
+                self.prebuild_dir,
+                self.repos,
+                self._log,
+            )
+            self.analysis_duration = time.time() - import_start
+            if not success:
+                raise RuntimeError(f"Prebuilt call graph import failed: {msg}")
+            self._log(f"Prebuild import completed: {msg}")
+            return
 
         # Fallback to introspector import
         if not self.introspector_path:

@@ -25,8 +25,7 @@ class AnalyzeRequest:
     language: str = "c"  # "c" / "cpp" / "java"
     ossfuzz_project_name: Optional[str] = None  # OSS-Fuzz project name if different
     log_dir: Optional[str] = None  # Log directory path
-    prebuild_dir: Optional[str] = None  # Path to prebuild data directory
-    work_id: Optional[str] = None  # Work ID for prebuild data remapping
+    prebuild_dir: Optional[str] = None  # Prebuilt call graph (holds mongodb/)
     fuzzer_sources: Dict[str, Union[str, List[str]]] = field(
         default_factory=dict
     )  # fuzzer_name -> source_path or list of source_paths
@@ -35,9 +34,9 @@ class AnalyzeRequest:
     # opt-in module (see fuzzingbrain/analyzer).
     enable_static_analysis: bool = False
     build_coverage: bool = True
-    # Prebuilt fuzzer binaries (fuzzer_name -> path). When set, the analyzer
-    # copies them into build/out and skips the OSS-Fuzz compile.
-    prebuilt_fuzzers: Dict[str, str] = field(default_factory=dict)
+    # Prebuilt fuzzer binaries ({sanitizer: {fuzzer_name: path}}). When set, the
+    # analyzer copies them into build/out and skips the OSS-Fuzz compile.
+    prebuilt_fuzzers: Dict[str, Dict[str, str]] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -49,7 +48,6 @@ class AnalyzeRequest:
             "ossfuzz_project_name": self.ossfuzz_project_name,
             "log_dir": self.log_dir,
             "prebuild_dir": self.prebuild_dir,
-            "work_id": self.work_id,
             "fuzzer_sources": self.fuzzer_sources,
             "enable_static_analysis": self.enable_static_analysis,
             "build_coverage": self.build_coverage,
@@ -67,7 +65,6 @@ class AnalyzeRequest:
             ossfuzz_project_name=data.get("ossfuzz_project_name"),
             log_dir=data.get("log_dir"),
             prebuild_dir=data.get("prebuild_dir"),
-            work_id=data.get("work_id"),
             fuzzer_sources=data.get("fuzzer_sources", {}),
             enable_static_analysis=data.get("enable_static_analysis", False),
             build_coverage=data.get("build_coverage", True),

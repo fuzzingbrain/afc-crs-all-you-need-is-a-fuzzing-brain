@@ -86,7 +86,7 @@ def test_api_keys(config: LLMConfig) -> dict:
         print(f"\n  Available Providers: {', '.join(available)}")
     else:
         print("\n  ⚠️  No API Keys configured!")
-        print("  Edit fuzzingbrain/llm_config.yaml or set environment variables")
+        print("  Set the API keys in .env")
 
     return results
 
@@ -118,7 +118,6 @@ def test_each_provider(config: LLMConfig, api_results: dict) -> dict:
         test_config = LLMConfig(
             default_model=model,
             fallback_enabled=False,
-            api_keys=config.api_keys,
         )
         client = LLMClient(test_config)
 
@@ -253,8 +252,7 @@ def main():
         if providers_configured == 0:
             print_status("LLM Module", False, "Need API Key")
             print("\n  📝 Setup steps:")
-            print("     1. Copy fuzzingbrain/llm_config.yaml")
-            print("        -> fuzzingbrain/llm_config.local.yaml")
+            print("     1. Copy .env.example -> .env")
             print("     2. Fill in your API Key(s)")
             print("     3. Run this test again")
         else:

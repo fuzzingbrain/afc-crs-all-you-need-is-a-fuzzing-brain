@@ -68,7 +68,7 @@ class Task:
     project_name: Optional[str] = None
     ossfuzz_project_name: Optional[str] = None
     sanitizers: List[str] = field(default_factory=lambda: ["address"])
-    timeout_minutes: int = 60
+    timeout_minutes: int = 30
     pov_count: int = 1
     budget_limit: float = 50.0
 
@@ -161,7 +161,7 @@ class Task:
             project_name=data.get("project_name"),
             ossfuzz_project_name=data.get("ossfuzz_project_name"),
             sanitizers=data.get("sanitizers", ["address"]),
-            timeout_minutes=data.get("timeout_minutes", 60),
+            timeout_minutes=data.get("timeout_minutes", 30),
             pov_count=data.get("pov_count", 1),
             budget_limit=data.get("budget_limit", 50.0),
             target_commit=data.get("target_commit"),

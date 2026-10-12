@@ -136,3 +136,20 @@ def run_lib_docker_args(
     if vpath:
         parts.append(vpath)
     return vargs, ":".join(parts)
+
+
+# Whether LeakSanitizer reports count as crashes (fuzzer.detect_leaks). Off by
+# default: an incidental leak in a dissector would otherwise verify as a PoV and
+# stop the run. The fuzzer, PoV verification and crash re-verification must agree
+# on what a crash is, so all three take ASAN_OPTIONS from asan_options(). Set once
+# per process: by the controller from its config, by a worker from its assignment.
+_detect_leaks = False
+
+
+def set_detect_leaks(on: bool) -> None:
+    global _detect_leaks
+    _detect_leaks = bool(on)
+
+
+def asan_options() -> str:
+    return f"ASAN_OPTIONS=detect_leaks={1 if _detect_leaks else 0}"

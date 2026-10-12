@@ -22,7 +22,6 @@ from ..analysis import extract_functions_from_file
 
 def import_from_prebuild(
     task_id: str,
-    work_id: str,
     prebuild_dir: Path,
     repos,  # RepositoryManager
     log_callback=None,
@@ -30,13 +29,12 @@ def import_from_prebuild(
     """
     Import pre-built static analysis data from JSON files.
 
-    Prebuild data was generated with work_id as task_id.
-    This function remaps all IDs to use the new task_id.
+    Every record is stored under this run's task_id; the ids the files carry
+    from the run that produced them are not used.
 
     Args:
-        task_id: New task ID for this run
-        work_id: Original work_id used during prebuild
-        prebuild_dir: Path to prebuild/{work_id}/ directory
+        task_id: Task ID for this run
+        prebuild_dir: Directory holding mongodb/functions.json and callgraph.json
         repos: RepositoryManager for database access
         log_callback: Optional logging callback
 
@@ -61,11 +59,7 @@ def import_from_prebuild(
         if not (mongodb_dir / fname).exists():
             return False, f"Required file not found: {mongodb_dir / fname}"
 
-    # Prebuild uses task_id format: "prebuild_{work_id}"
-    prebuild_task_id = f"prebuild_{work_id}"
-
     log(f"Importing prebuild data from {mongodb_dir}")
-    log(f"Remapping IDs: {prebuild_task_id} -> {task_id}")
 
     stats = {
         "functions": 0,
@@ -78,13 +72,6 @@ def import_from_prebuild(
             functions_data = json.load(f)
 
         for doc in functions_data:
-            # Remap IDs: replace prebuild_task_id prefix with new task_id
-            old_func_id = doc.get("function_id", "")
-            if old_func_id.startswith(f"{prebuild_task_id}_"):
-                new_func_id = f"{task_id}_{old_func_id[len(prebuild_task_id) + 1 :]}"
-            else:
-                new_func_id = f"{task_id}_{doc.get('name', '')}"
-
             function = Function(
                 task_id=task_id,
                 name=doc.get("name", ""),
@@ -106,15 +93,6 @@ def import_from_prebuild(
             callgraph_data = json.load(f)
 
         for doc in callgraph_data:
-            # Remap node_id
-            old_node_id = doc.get("node_id", "")
-            if old_node_id.startswith(f"{prebuild_task_id}_"):
-                # node_id format: {task_id}_{fuzzer_id}_{function_name}
-                suffix = old_node_id[len(prebuild_task_id) + 1 :]
-                new_node_id = f"{task_id}_{suffix}"
-            else:
-                new_node_id = f"{task_id}_{doc.get('fuzzer_id', '')}_{doc.get('function_name', '')}"
-
             node = CallGraphNode(
                 task_id=task_id,
                 fuzzer_id=doc.get("fuzzer_id", ""),

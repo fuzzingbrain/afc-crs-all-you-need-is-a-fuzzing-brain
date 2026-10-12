@@ -1,0 +1,50 @@
+{
+  "project_name": "curl",
+  "output": "cu-delta-05",
+  "repo_url": "https://github.com/AIxCyberChallenge/afc-curl.git",
+  "scan_mode": "delta",
+  "base_commit": "150028193bf61131c2436e3f4f76631e5d0a21d7",
+  "delta_commit": "challenges/cu-delta-05",
+  "task_type": "pov",
+  "timeout_minutes": 60,
+  "budget_limit": 30.0,
+  "pov_count": 1,
+  "remove_git": true,
+  "models": {
+    "finder": "gpt-4.1",
+    "verifier": "o3",
+    "poc": "o3",
+    "seed": "gpt-4.1",
+    "utility": "gpt-4.1"
+  },
+  "allow_fallback": false,
+  "fuzzer": {
+    "fuzzers": [
+      "curl_fuzzer_dict"
+    ],
+    "engine": "libfuzzer",
+    "sanitizers": [
+      "address"
+    ],
+    "sources": {
+      "curl_fuzzer_dict": [
+        "artifact/aixcc/cu-delta-05/harness_src/curl_fuzzer_dict/curl_fuzzer.cc",
+        "artifact/aixcc/cu-delta-05/harness_src/curl_fuzzer_dict/curl_fuzzer.h",
+        "artifact/aixcc/cu-delta-05/harness_src/curl_fuzzer_dict/curl_fuzzer_callback.cc",
+        "artifact/aixcc/cu-delta-05/harness_src/curl_fuzzer_dict/curl_fuzzer_tlv.cc"
+      ]
+    },
+    "docker_image": "aixcc-afc/curl:latest",
+    "prebuilt": {
+      "binaries": {
+        "address": {
+          "curl_fuzzer_dict": "artifact/aixcc/cu-delta-05/fuzzers/curl_fuzzer_dict/curl_fuzzer_dict"
+        }
+      }
+    }
+  },
+  "analysis": {
+    "prebuild_graph_dir": "artifact/aixcc/cu-delta-05/graph/curl_fuzzer_dict"
+  },
+  "concurrency": 5
+}

@@ -21,10 +21,10 @@ _concurrency: Optional[ConcurrencyConfig] = None
 
 
 def get_concurrency() -> ConcurrencyConfig:
-    """This run's concurrency; the environment's, until a run sets it."""
+    """This run's concurrency; the defaults until a run sets it."""
     global _concurrency
     if _concurrency is None:
-        _concurrency = ConcurrencyConfig.from_env()
+        _concurrency = ConcurrencyConfig()
     return _concurrency
 
 

@@ -24,7 +24,7 @@ from typing import Any, Callable, Dict, List, Optional, Set
 from loguru import logger
 
 from ..core.docker_limits import docker_resource_args
-from ..core.fuzzer_spec import run_lib_docker_args
+from ..core.fuzzer_spec import asan_options, run_lib_docker_args
 from .models import CRASH_ARTIFACT_PREFIXES, CrashRecord
 from .signature import compute_signature
 
@@ -968,10 +968,9 @@ class FuzzerMonitor:
                 f"SANITIZER={sanitizer}",
                 "-e",
                 "ARCHITECTURE=x86_64",
-                # No leak challenges here; don't let an incidental LSan leak
-                # re-verify as a crash (matches the fuzzer + create_pov).
+                # Same leak setting as the fuzzer (fuzzer.detect_leaks).
                 "-e",
-                "ASAN_OPTIONS=detect_leaks=0",
+                asan_options(),
                 *(
                     ["-e", f"LD_LIBRARY_PATH={ld_library_path}"]
                     if ld_library_path

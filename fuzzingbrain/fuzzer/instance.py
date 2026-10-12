@@ -16,6 +16,7 @@ from loguru import logger
 
 from ..core.docker_limits import docker_resource_args, task_label_args
 from ..core.fuzzer_spec import (
+    asan_options,
     libfuzzer_oom_flags,
     run_lib_docker_args,
     NO_OOM_MEMORY_MB,
@@ -155,14 +156,13 @@ class FuzzerInstance:
 
         # Environment variables. SANITIZER and the *_OPTIONS must match the task's
         # actual sanitizer (was hard-coded to address, which is wrong for memory/
-        # undefined builds). detect_leaks=0 for ASan (an incidental leak must not be
-        # promoted to a bogus PoV that stops the run); halt_on_error for MSan/UBSan
-        # so a finding aborts and libFuzzer records it.
+        # undefined builds). detect_leaks for ASan follows fuzzer.detect_leaks;
+        # halt_on_error for MSan/UBSan so a finding aborts and libFuzzer records it.
         _san_opt = {
-            "address": "ASAN_OPTIONS=detect_leaks=0",
+            "address": asan_options(),
             "memory": "MSAN_OPTIONS=halt_on_error=1",
             "undefined": "UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1",
-        }.get(self.sanitizer, "ASAN_OPTIONS=detect_leaks=0")
+        }.get(self.sanitizer, asan_options())
         cmd.extend(
             [
                 "-e",

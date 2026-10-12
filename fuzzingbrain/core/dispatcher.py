@@ -19,6 +19,7 @@ from bson import ObjectId
 from .logging import logger
 from .config import Config
 from .docker_limits import docker_resource_args
+from .fuzzer_spec import asan_options
 from .models import Task, Fuzzer, FuzzerStatus, Worker, WorkerStatus
 from ..db import RepositoryManager
 from ..analyzer import AnalyzeResult
@@ -332,6 +333,8 @@ def generate(variant: int = 1) -> bytes:
                 f"SANITIZER={sanitizer}",
                 "-e",
                 "ARCHITECTURE=x86_64",
+                "-e",
+                asan_options(),
                 "-v",
                 f"{fuzzer_dir}:/fuzzers:ro",
                 "-v",
@@ -482,19 +485,19 @@ def generate(variant: int = 1) -> bytes:
             return []
 
         # Apply fuzzer filter if specified
-        if self.config.fuzzer_filter:
-            filter_set = set(self.config.fuzzer_filter)
+        if self.config.fuzzers:
+            filter_set = set(self.config.fuzzers)
             before_count = len(successful_fuzzers)
             successful_fuzzers = [
                 f for f in successful_fuzzers if f.fuzzer_name in filter_set
             ]
             logger.info(
-                f"Fuzzer filter applied: {before_count} -> {len(successful_fuzzers)} fuzzers (filter: {self.config.fuzzer_filter})"
+                f"Fuzzer filter applied: {before_count} -> {len(successful_fuzzers)} fuzzers (filter: {self.config.fuzzers})"
             )
 
             if not successful_fuzzers:
                 logger.warning(
-                    f"No fuzzers match the filter: {self.config.fuzzer_filter}"
+                    f"No fuzzers match the filter: {self.config.fuzzers}"
                 )
                 return []
 
@@ -630,11 +633,12 @@ def generate(variant: int = 1) -> bytes:
             "log_dir": str(log_dir) if log_dir else None,
             # Image the fuzzer binary runs in (has its libs); PoV verify uses it.
             "docker_image": self.config.docker_image,
+            "detect_leaks": self.config.detect_leaks,
             # Model routing -- built into a ModelRouter at the worker boundary.
-            "model_profile": self.config.model_profile,
-            "models": self.config.model_overrides,
+            "models": self.config.models,
             "force_model": self.config.force_model,
-            "strict_models": self.config.strict_models,
+            # allow_fallback=false: a failing model is not swapped for another.
+            "strict_models": not self.config.allow_fallback,
             # Pre-built fuzzer info from Analyzer
             "fuzzer_binary_path": fuzzer_binary_path,
             "build_dir": build_dir,
@@ -659,10 +663,9 @@ def generate(variant: int = 1) -> bytes:
             # beginning and read by nothing until now.
             "sp_max_count": self.config.fuzzer_worker.sp_max_count,
             # A worker is its own process and reads none of the main process's
-            # configuration, so the agent counts and the score thresholds have
-            # to travel with the assignment.
+            # configuration, so the agent counts have to travel with the
+            # assignment.
             "concurrency": self.config.concurrency.to_dict(),
-            "scoring": self.config.scoring.to_dict(),
             # {fuzzer: [abs source path, ...]} manually set in the task file.
             # Travels here so the worker can read the harness source from disk
             # into an in-memory cache instead of hitting the Analysis Server.

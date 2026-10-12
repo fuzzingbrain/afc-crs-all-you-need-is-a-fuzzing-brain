@@ -132,21 +132,19 @@ def test_assert_ignores_history_when_remove_git_is_off(workspace):
 def test_banner_states_what_was_enforced(workspace):
     report = sanitize_workspace(workspace, remove_git=True, diff_ready=True)
     lines = format_banner(
-        report, remove_git=True, network_blocked=True, confined_to="libpng_task/repo"
+        report, remove_git=True, confined_to="libpng_task/repo"
     )
     text = "\n".join(lines)
     assert "removed (3 paths)" in text
-    assert "blocked" in text
     assert "libpng_task/repo" in text
 
 
 def test_banner_explains_a_kept_git(workspace):
     report = sanitize_workspace(workspace, remove_git=True, diff_ready=False)
     text = "\n".join(
-        format_banner(report, remove_git=True, network_blocked=False, confined_to="x")
+        format_banner(report, remove_git=True, confined_to="x")
     )
     assert "kept -- the delta diff" in text
-    assert "no agent tool performs network I/O today" in text
 
 
 def test_banner_does_not_claim_removal_when_nothing_was_there(tmp_path):
@@ -154,7 +152,7 @@ def test_banner_does_not_claim_removal_when_nothing_was_there(tmp_path):
     (ws / "repo").mkdir(parents=True)
     report = sanitize_workspace(ws)
     text = "\n".join(
-        format_banner(report, remove_git=False, network_blocked=False, confined_to="x")
+        format_banner(report, remove_git=False, confined_to="x")
     )
     assert "not present" in text
     assert "remove_git off" in text

@@ -89,15 +89,11 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     sp_max_count = assignment.get("sp_max_count")
     fuzzer_sources = assignment.get("fuzzer_sources")
 
-    # Install this run's concurrency and thresholds before anything reads them.
+    # Install this run's concurrency before anything reads it.
     from ..core.concurrency import set_concurrency
-    from ..core.config import ConcurrencyConfig, ScoringConfig
-    from ..core.scoring import set_scoring
+    from ..core.config import ConcurrencyConfig
 
-    if assignment.get("concurrency"):
-        set_concurrency(ConcurrencyConfig.from_value(assignment["concurrency"]))
-    if assignment.get("scoring"):
-        set_scoring(ScoringConfig.from_dict(assignment["scoring"]))
+    set_concurrency(ConcurrencyConfig.from_value(assignment["concurrency"]))
 
     # Display name for logging (not ObjectId)
     display_name = f"{fuzzer}_{sanitizer}"
@@ -138,7 +134,6 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
     _router = ModelRouter.from_sources(
         task={
-            "model_profile": assignment.get("model_profile"),
             "models": assignment.get("models"),
             "force_model": assignment.get("force_model"),
             "strict_models": assignment.get("strict_models"),
@@ -146,11 +141,15 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     )
     set_active_router(_router)
 
+    from ..core.fuzzer_spec import set_detect_leaks
+
+    set_detect_leaks(assignment["detect_leaks"])
+
     # Initialize database connection for this worker process
     try:
         from ..core import Config
 
-        config = Config.from_env()
+        config = Config()  # infrastructure settings come from .env
         db = MongoDB.connect(config.mongodb_url, config.mongodb_db)
         repos = init_repos(db)
         # Persist the resolved role -> model map so the run is reproducible and
@@ -158,10 +157,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         try:
             repos.tasks.update(
                 task_id,
-                {
-                    "model_profile": _router.profile,
-                    "model_routing": _router.resolved_map(),
-                },
+                {"model_routing": _router.resolved_map()},
             )
         except Exception as e:  # non-fatal: the loguru summary already logged it
             logger.debug(f"could not persist model routing: {e}")

@@ -123,10 +123,6 @@ class TestTheCeilingIsConfigurable:
     def test_default(self):
         assert Config().max_parallel_fuzzers == DEFAULT_MAX_PARALLEL_FUZZERS
 
-    def test_environment_overrides_it(self, monkeypatch):
-        monkeypatch.setenv("FUZZINGBRAIN_MAX_PARALLEL_FUZZERS", "4")
-        assert Config.from_env().max_parallel_fuzzers == 4
-
     def test_a_task_file_sets_it(self, tmp_path):
         import json
 

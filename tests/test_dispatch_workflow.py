@@ -7,7 +7,7 @@ Tests the Task → Worker dispatch flow.
 Business invariants under test:
 1. N successful fuzzers × M sanitizers = exactly N×M workers dispatched
 2. Only fuzzers with status=SUCCESS are dispatched (FAILED/PENDING/BUILDING are skipped)
-3. fuzzer_filter restricts dispatch to named fuzzers only
+3. fuzzers restricts dispatch to named fuzzers only
 4. Each worker's assignment carries correct task_id, fuzzer, sanitizer, scan_mode
 5. Each worker gets an isolated (distinct) workspace
 6. One dispatch failure does not block the rest
@@ -56,13 +56,13 @@ def _make_task(task_id: str = None, tmp_path: Path = None) -> Task:
 
 def _make_config(
     sanitizers: List[str] = None,
-    fuzzer_filter: List[str] = None,
+    fuzzers: List[str] = None,
     timeout_minutes: int = 30,
 ) -> Config:
     """Create a Config for testing."""
     return Config(
         sanitizers=sanitizers or ["address"],
-        fuzzer_filter=fuzzer_filter or [],
+        fuzzers=fuzzers or [],
         ossfuzz_project_name="libpng",
         timeout_minutes=timeout_minutes,
         budget_limit=50.0,
@@ -217,7 +217,7 @@ class TestStatusFiltering:
 
 class TestFuzzerFilter:
     """
-    Business rule: when fuzzer_filter is set, only named fuzzers are dispatched
+    Business rule: when fuzzers is set, only named fuzzers are dispatched
     even if other fuzzers built successfully. Filter + status are AND conditions.
     """
 
@@ -227,7 +227,7 @@ class TestFuzzerFilter:
         """3 successful fuzzers, filter=["fuzz_png"] → only fuzz_png dispatched."""
         dispatcher = _make_dispatcher(
             _make_task(tmp_path=tmp_path),
-            _make_config(fuzzer_filter=["fuzz_png"]),
+            _make_config(fuzzers=["fuzz_png"]),
         )
         mock_workspace.return_value = str(tmp_path / "ws")
         mock_celery.return_value = {"celery_id": "c", "fuzzer": "", "sanitizer": ""}
@@ -248,7 +248,7 @@ class TestFuzzerFilter:
         """Filter names a fuzzer that doesn't exist → zero workers."""
         dispatcher = _make_dispatcher(
             _make_task(tmp_path=tmp_path),
-            _make_config(fuzzer_filter=["nonexistent"]),
+            _make_config(fuzzers=["nonexistent"]),
         )
         fuzzers = [_make_fuzzer("fuzz_png"), _make_fuzzer("fuzz_icc")]
         assert dispatcher.dispatch(fuzzers) == []
@@ -262,7 +262,7 @@ class TestFuzzerFilter:
         """Filter matches fuzz_icc but it FAILED → zero workers for fuzz_icc."""
         dispatcher = _make_dispatcher(
             _make_task(tmp_path=tmp_path),
-            _make_config(fuzzer_filter=["fuzz_png", "fuzz_icc"]),
+            _make_config(fuzzers=["fuzz_png", "fuzz_icc"]),
         )
         mock_workspace.return_value = str(tmp_path / "ws")
         mock_celery.return_value = {"celery_id": "c", "fuzzer": "", "sanitizer": ""}

@@ -229,7 +229,7 @@ class AnalyzerBuilder:
         max_parallel: int = None,
         skip_introspector: bool = False,
         analyzer_only_log_callback=None,
-        prebuilt_fuzzers: Optional[Dict[str, str]] = None,
+        prebuilt_fuzzers: Optional[Dict[str, Dict[str, str]]] = None,
     ):
         """
         Initialize AnalyzerBuilder.
@@ -320,17 +320,18 @@ class AnalyzerBuilder:
         """Copy user-supplied prebuilt fuzzer binaries into
         ``build/out/<project>_<sanitizer>/`` and skip all compilation.
 
-        The map is ``{fuzzer_name: path_to_built_binary}``. Sibling artifacts next
+        The map is ``{sanitizer: {fuzzer_name: path_to_built_binary}}``; the
+        sanitizers built are exactly its keys. Sibling artifacts next
         to the binary (``<name>.options``, ``<name>_seed_corpus.zip``) are carried
         over when present. Coverage and introspector builds are skipped; the call
         graph is expected to come from ``--prebuild-dir`` instead.
         """
         start = time.time()
         placed = 0
-        for sanitizer in self.sanitizers:
+        for sanitizer, binaries in self.prebuilt_fuzzers.items():
             out_dir = self.build_out_base / f"{self.project_name}_{sanitizer}"
             out_dir.mkdir(parents=True, exist_ok=True)
-            for name, src in self.prebuilt_fuzzers.items():
+            for name, src in binaries.items():
                 src_path = Path(src)
                 if not src_path.exists():
                     return False, f"prebuilt fuzzer not found: {name} -> {src}"

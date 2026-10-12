@@ -2,23 +2,17 @@
 """
 LLM Configuration
 
-Configuration management for LLM clients.
-Supports loading from YAML config file, environment variables, or code.
+Configuration management for LLM clients. API keys come from .env only.
 
 Priority (highest to lowest):
 1. Code parameters (client.call(model=...))
 2. Environment variables (LLM_DEFAULT_MODEL, etc.)
-3. Config file (llm_config.local.yaml or llm_config.yaml)
-4. Default values
+3. Default values
 """
 
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Dict, List, Optional
-
-import yaml
-from loguru import logger
 
 from .models import (
     ModelInfo,
@@ -28,22 +22,6 @@ from .models import (
     DEFAULT_FALLBACK,
     get_model_by_id,
 )
-
-# Config file search paths
-CONFIG_FILENAMES = ["llm_config.local.yaml", "llm_config.yaml"]
-
-
-def _find_config_file() -> Optional[Path]:
-    """Find config file in fuzzingbrain directory"""
-    # Get the fuzzingbrain package directory
-    package_dir = Path(__file__).parent.parent
-
-    for filename in CONFIG_FILENAMES:
-        config_path = package_dir / filename
-        if config_path.exists():
-            return config_path
-
-    return None
 
 
 @dataclass
@@ -67,8 +45,10 @@ class LLMConfig:
     )
 
     # Generation parameters
-    temperature: float = 0.7
-    max_tokens: Optional[int] = None  # None = use model default
+    # The values every run used while llm_config.yaml set them; kept so new
+    # results stay comparable with old ones.
+    temperature: float = 0.1
+    max_tokens: Optional[int] = 8192
     top_p: float = 1.0
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
@@ -81,9 +61,6 @@ class LLMConfig:
     max_retries: int = 2
     retry_delay: float = 1.0  # Base delay, exponential backoff applied
 
-    # API Keys (override environment variables)
-    api_keys: Dict[str, str] = field(default_factory=dict)
-
     # Logging
     log_requests: bool = True
     log_responses: bool = False  # Can be verbose
@@ -92,22 +69,7 @@ class LLMConfig:
     config_source: str = "default"
 
     def get_api_key(self, provider: Provider) -> Optional[str]:
-        """Get API key for a provider, checking config then environment"""
-        # Provider key mapping
-        provider_key_map = {
-            Provider.OPENAI: ["openai", "OPENAI"],
-            Provider.ANTHROPIC: ["anthropic", "ANTHROPIC"],
-            Provider.GOOGLE: ["google", "GOOGLE", "gemini", "GEMINI"],
-            Provider.XAI: ["xai", "XAI"],
-            Provider.DEEPSEEK: ["deepseek", "DEEPSEEK"],
-        }
-
-        # Check config first (case-insensitive)
-        for key in provider_key_map.get(provider, []):
-            if key in self.api_keys and self.api_keys[key]:
-                return self.api_keys[key]
-
-        # Check environment variables
+        """The provider's API key, from the environment (.env)."""
         env_var_map = {
             Provider.OPENAI: "OPENAI_API_KEY",
             Provider.ANTHROPIC: "ANTHROPIC_API_KEY",
@@ -134,56 +96,6 @@ class LLMConfig:
         if task_type in self.task_models:
             return self.task_models[task_type]
         return self.default_model
-
-    @classmethod
-    def from_yaml(cls, path: Path) -> "LLMConfig":
-        """Load config from YAML file"""
-        with open(path, "r", encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-
-        config = cls()
-        config.config_source = str(path)
-
-        # API Keys
-        if "api_keys" in data:
-            config.api_keys = {k: v for k, v in data["api_keys"].items() if v}
-
-        # Default model
-        if "default_model" in data:
-            model = get_model_by_id(data["default_model"])
-            if model:
-                config.default_model = model
-
-        # Task-specific models
-        if "task_models" in data:
-            for task_name, model_id in data["task_models"].items():
-                try:
-                    task_type = TaskType(task_name)
-                    model = get_model_by_id(model_id)
-                    if model:
-                        config.task_models[task_type] = model
-                except ValueError:
-                    pass  # Invalid task type, skip
-
-        # Fallback settings
-        if "fallback" in data:
-            fb = data["fallback"]
-            if "enabled" in fb:
-                config.fallback_enabled = fb["enabled"]
-            if "max_attempts" in fb:
-                config.max_fallback_attempts = fb["max_attempts"]
-
-        # Generation parameters
-        if "generation" in data:
-            gen = data["generation"]
-            if "temperature" in gen:
-                config.temperature = float(gen["temperature"])
-            if "max_tokens" in gen:
-                config.max_tokens = int(gen["max_tokens"])
-            if "timeout" in gen:
-                config.timeout = float(gen["timeout"])
-
-        return config
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
@@ -240,23 +152,10 @@ class LLMConfig:
         """
         Load config with priority:
         1. Environment variables (override)
-        2. Config file (llm_config.local.yaml or llm_config.yaml)
-        3. Default values
+        2. Default values
         """
-        # Try to find config file first
-        config_path = _find_config_file()
-
-        if config_path:
-            try:
-                config = cls.from_yaml(config_path)
-                logger.debug(f"Loaded LLM config from {config_path}")
-            except Exception as e:
-                logger.warning(f"Failed to load config from {config_path}: {e}")
-                config = cls()
-                config.config_source = "default (yaml load failed)"
-        else:
-            config = cls()
-            config.config_source = "default"
+        config = cls()
+        config.config_source = "default"
 
         # Override with environment variables
         env_model = os.environ.get("LLM_DEFAULT_MODEL")

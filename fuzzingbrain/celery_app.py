@@ -109,7 +109,7 @@ def on_worker_init(**kwargs):
         from .core import Config
         from .db import MongoDB
 
-        config = Config.from_env()
+        config = Config()  # infrastructure settings come from .env
         MongoDB.connect(config.mongodb_url, config.mongodb_db)
     except Exception as e:
         logger.warning(f"Failed to connect MongoDB in worker init: {e}")

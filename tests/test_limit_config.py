@@ -8,26 +8,12 @@ boundary, so a set limit is never silently dropped.
 """
 
 import json
-import sys
 
 from fuzzingbrain.core.config import Config
 from fuzzingbrain.analyzer.models import AnalyzeRequest
-from fuzzingbrain.main import create_config_from_args, parse_args
 
 
 class TestBudgetPlumbing:
-    def test_budget_from_env(self, monkeypatch):
-        monkeypatch.setenv("FUZZINGBRAIN_BUDGET_LIMIT", "20")
-        cfg = Config.from_env()
-        assert cfg.budget_limit == 20.0
-
-    def test_budget_zero_from_cli_is_honored_as_unlimited(self, monkeypatch):
-        # --budget 0 means "unlimited" (dispatcher guards on budget_limit > 0).
-        # A falsy check would silently drop the 0 and keep the default ceiling.
-        monkeypatch.setattr(sys, "argv", ["fuzzingbrain", "--budget", "0"])
-        cfg = create_config_from_args(parse_args())
-        assert cfg.budget_limit == 0
-
     def test_budget_from_json(self, tmp_path):
         p = tmp_path / "task.json"
         p.write_text(json.dumps({"budget_limit": 12.5}))
@@ -36,40 +22,27 @@ class TestBudgetPlumbing:
 
     def test_budget_default_is_finite(self):
         # A sane non-zero default so an unconfigured run still has a ceiling.
-        assert Config().budget_limit > 0
+        assert Config().budget_limit == 20.0
 
-    def test_timeout_from_env(self, monkeypatch):
-        monkeypatch.setenv("FUZZINGBRAIN_TIMEOUT", "5")
-        cfg = Config.from_env()
-        assert cfg.timeout_minutes == 5
+    def test_timeout_default(self):
+        assert Config().timeout_minutes == 30
 
 
-class TestStaticAnalysisFlagPlumbing:
-    """The introspector opt-in flag must survive the analyzer process boundary."""
+class TestPrebuiltGraphPlumbing:
+    """The prebuilt graph directory must survive the analyzer process boundary."""
 
-    def test_default_off(self):
-        assert Config().enable_static_analysis is False
-        assert (
-            AnalyzeRequest(
-                task_id="t", task_path="p", project_name="x", sanitizers=["address"]
-            ).enable_static_analysis
-            is False
-        )
-
-    def test_env_can_enable(self, monkeypatch):
-        monkeypatch.setenv("FUZZINGBRAIN_ENABLE_STATIC_ANALYSIS", "true")
-        assert Config.from_env().enable_static_analysis is True
-
-    def test_request_roundtrip_preserves_flag(self):
+    def test_request_roundtrip_preserves_graph_and_binaries(self):
         req = AnalyzeRequest(
             task_id="t",
             task_path="p",
             project_name="x",
             sanitizers=["address"],
-            enable_static_analysis=True,
+            prebuild_dir="/g",
+            prebuilt_fuzzers={"address": {"fuzz": "/b/fuzz"}},
         )
         restored = AnalyzeRequest.from_dict(req.to_dict())
-        assert restored.enable_static_analysis is True
+        assert restored.prebuild_dir == "/g"
+        assert restored.prebuilt_fuzzers == {"address": {"fuzz": "/b/fuzz"}}
 
 
 class TestPerCallTimeout:
