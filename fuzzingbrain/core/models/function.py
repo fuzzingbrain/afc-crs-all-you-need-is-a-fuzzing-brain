@@ -20,9 +20,9 @@ class Function:
     """
     Function stores extracted metadata from source code.
 
-    Each function is stored once per task, regardless of how many
-    fuzzers can reach it. The function_id is {task_id}_{name} to
-    ensure uniqueness within a task.
+    Each function is stored once per run, regardless of how many
+    fuzzers can reach it. The function_id is {run_id}_{name} to
+    ensure uniqueness within a run.
 
     Data comes from two sources:
     - OSS-Fuzz introspector: name, file_path, lines, complexity
@@ -30,8 +30,8 @@ class Function:
     """
 
     # Identifiers
-    function_id: str = ""  # {task_id}_{name}
-    task_id: str = ""
+    function_id: str = ""  # {run_id}_{name}
+    run_id: str = ""
 
     # Function info (from introspector)
     name: str = ""  # Function name, e.g., "parse_config"
@@ -60,15 +60,15 @@ class Function:
 
     def __post_init__(self):
         """Auto-generate function_id if not set"""
-        if not self.function_id and self.task_id and self.name:
-            self.function_id = f"{self.task_id}_{self.name}"
+        if not self.function_id and self.run_id and self.name:
+            self.function_id = f"{self.run_id}_{self.name}"
 
     def to_dict(self) -> dict:
         """Convert to dictionary for MongoDB storage and JSON serialization"""
         return {
-            "_id": self.function_id,  # Composite key: {task_id}_{name}
+            "_id": self.function_id,  # Composite key: {run_id}_{name}
             # Note: function_id removed - use _id only
-            "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "run_id": ObjectId(self.run_id) if self.run_id else None,
             "name": self.name,
             "file_path": self.file_path,
             "start_line": self.start_line,
@@ -94,13 +94,13 @@ class Function:
             created_at = datetime.now()
 
         # Handle ObjectId conversion
-        task_id = data.get("task_id", "")
-        if isinstance(task_id, ObjectId):
-            task_id = str(task_id)
+        run_id = data.get("run_id", "")
+        if isinstance(run_id, ObjectId):
+            run_id = str(run_id)
 
         return cls(
             function_id=data.get("function_id", data.get("_id", "")),
-            task_id=task_id,
+            run_id=run_id,
             name=data.get("name", ""),
             file_path=data.get("file_path", ""),
             start_line=data.get("start_line", 0),

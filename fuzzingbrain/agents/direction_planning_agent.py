@@ -49,7 +49,7 @@ class DirectionPlanningAgent(BaseAgent):
         self,
         fuzzer: str = "",
         sanitizer: str = "",
-        task_id: str = "",
+        run_id: str = "",
         worker_id: str = "",
         llm_client: Optional[LLMClient] = None,
         model: Optional[Union[ModelInfo, str]] = None,
@@ -65,7 +65,7 @@ class DirectionPlanningAgent(BaseAgent):
         Args:
             fuzzer: Fuzzer name
             sanitizer: Sanitizer type (for context)
-            task_id: Task ID
+            run_id: Run ID
             worker_id: Worker ID
             llm_client: LLM client
             model: Model to use
@@ -79,7 +79,7 @@ class DirectionPlanningAgent(BaseAgent):
             model=model,
             max_iterations=max_iterations,
             verbose=verbose,
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
             log_dir=log_dir,
             fuzzer=fuzzer,

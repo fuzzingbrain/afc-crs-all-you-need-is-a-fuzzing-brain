@@ -66,7 +66,7 @@ class POVReportAgent(BaseAgent):
         max_iterations: int = 15,  # Fewer iterations needed for report writing
         verbose: bool = False,
         # Context
-        task_id: str = "",
+        run_id: str = "",
         worker_id: str = "",
         log_dir: Optional[Path] = None,
         # Database access for updating POV
@@ -80,7 +80,7 @@ class POVReportAgent(BaseAgent):
             llm_client: LLM client instance
             max_iterations: Maximum agent iterations
             verbose: Whether to log progress
-            task_id: Task ID for context
+            run_id: Run ID for context
             worker_id: Worker ID for context
             log_dir: Directory for logs
             repos: Database repository manager (for updating POV)
@@ -90,7 +90,7 @@ class POVReportAgent(BaseAgent):
             model=model,  # supplied by the caller via routing (Role.UTILITY)
             max_iterations=max_iterations,
             verbose=verbose,
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
             log_dir=log_dir,
         )

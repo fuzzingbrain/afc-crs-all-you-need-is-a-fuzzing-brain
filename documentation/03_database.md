@@ -74,12 +74,12 @@ $ docker-compose down                    # Stop all services
 │                                                                  │
 │  ┌───────────────┐  ┌───────────────┐  ┌───────────────┐        │
 │  │   api.py      │  │ mcp_server.py │  │ processor.py  │        │
-│  │   (REST API)  │  │ (MCP Protocol)│  │ (Task Proc)   │        │
+│  │   (REST API)  │  │ (MCP Protocol)│  │ (Run Proc)    │        │
 │  │               │  │               │  │               │        │
 │  │ get_repos()───┼──┼───get_repos()─┼──┼──get_repos()  │        │
 │  │      │        │  │       │       │  │      │        │        │
 │  │      ▼        │  │       ▼       │  │      ▼        │        │
-│  │ repos.tasks   │  │  repos.tasks  │  │ repos.tasks   │        │
+│  │ repos.runs    │  │  repos.runs   │  │ repos.runs    │        │
 │  │ repos.povs    │  │  repos.povs   │  │ repos.fuzzers │        │
 │  │ repos.patches │  │               │  │ repos.workers │        │
 │  └───────────────┘  └───────────────┘  └───────────────┘        │
@@ -92,7 +92,7 @@ $ docker-compose down                    # Stop all services
 │                  (Docker: fuzzingbrain-mongodb)                  │
 │                                                                  │
 │   Database: fuzzingbrain                                         │
-│   Collections: tasks, povs, patches, workers, fuzzers,          │
+│   Collections: runs, povs, patches, workers, fuzzers,          │
 │                suspicious_points, directions                     │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -137,26 +137,26 @@ JSON configuration file:
 
 | Repository | Collection | Primary Methods |
 |------------|------------|-----------------|
-| TaskRepository | tasks | find_pending(), find_running(), add_pov(), add_patch() |
-| POVRepository | povs | find_by_task(), find_successful_by_task(), deactivate() |
-| PatchRepository | patches | find_by_pov(), find_valid_by_task(), update_checks() |
+| RunRepository | runs | find_pending(), find_running(), add_pov(), add_patch() |
+| POVRepository | povs | find_by_run(), find_successful_by_run(), deactivate() |
+| PatchRepository | patches | find_by_pov(), find_valid_by_run(), update_checks() |
 | WorkerRepository | workers | find_by_fuzzer(), update_strategy(), update_results() |
-| FuzzerRepository | fuzzers | find_successful_by_task(), find_by_name() |
+| FuzzerRepository | fuzzers | find_successful_by_run(), find_by_name() |
 | SuspiciousPointRepository | suspicious_points | find_unchecked(), find_real(), find_by_score() |
-| DirectionRepository | directions | find_by_task(), find_active() |
+| DirectionRepository | directions | find_by_run(), find_active() |
 
 ## Data Models
 
-### Task
+### Run
 
 Represents a single analysis task.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| task_id | str | UUID identifier |
+| run_id | str | UUID identifier |
 | task_type | JobType | pov / patch / pov-patch / harness |
 | scan_mode | ScanMode | full / delta |
-| status | TaskStatus | pending / running / completed / error |
+| status | RunStatus | pending / running / completed / error |
 | task_path | str | Workspace path |
 | src_path | str | Source code path |
 | fuzz_tooling_path | str | Fuzz-tooling path |
@@ -176,7 +176,7 @@ Example MongoDB document:
 ```json
 {
     "_id": "a1b2c3d4",
-    "task_id": "a1b2c3d4",
+    "run_id": "a1b2c3d4",
     "task_type": "pov-patch",
     "scan_mode": "full",
     "status": "running",
@@ -200,7 +200,7 @@ Proof-of-Vulnerability representing a fuzzing input that triggers a bug.
 | Field | Type | Description |
 |-------|------|-------------|
 | pov_id | str | UUID identifier |
-| task_id | str | Parent task |
+| run_id | str | Parent run |
 | suspicious_point_id | str | Associated SP |
 | generation_id | str | Shared ID for blobs from same create_pov call |
 | iteration | int | Agent loop iteration when created |
@@ -229,7 +229,7 @@ Represents a fix for a vulnerability.
 | Field | Type | Description |
 |-------|------|-------------|
 | patch_id | str | UUID identifier |
-| task_id | str | Parent task |
+| run_id | str | Parent run |
 | pov_id | str | Fixed POV (optional) |
 | patch_content | str | Diff content |
 | description | str | Patch description |
@@ -247,9 +247,9 @@ Execution unit for a {fuzzer, sanitizer} pair.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| worker_id | str | Format: `{task_id}__{fuzzer}__{sanitizer}` |
+| worker_id | str | Format: `{run_id}__{fuzzer}__{sanitizer}` |
 | celery_job_id | str | Celery task ID |
-| task_id | str | Parent task |
+| run_id | str | Parent run |
 | job_type | str | pov / patch / harness |
 | fuzzer | str | Fuzzer name |
 | sanitizer | str | address / memory / undefined |
@@ -270,7 +270,7 @@ Tracks fuzzer build status.
 | Field | Type | Description |
 |-------|------|-------------|
 | fuzzer_id | str | UUID identifier |
-| task_id | str | Parent task |
+| run_id | str | Parent run |
 | fuzzer_name | str | Executable name (e.g., fuzz_png) |
 | source_path | str | Source file path |
 | repo_name | str | Project name |
@@ -287,7 +287,7 @@ Potential vulnerability with structured description.
 | Field | Type | Description |
 |-------|------|-------------|
 | suspicious_point_id | str | UUID identifier |
-| task_id | str | Parent task |
+| run_id | str | Parent run |
 | direction_id | str | Associated direction |
 | function_name | str | Containing function |
 | description | str | Control flow description (not line numbers) |
@@ -321,7 +321,7 @@ Logical partition of codebase for analysis.
 | Field | Type | Description |
 |-------|------|-------------|
 | direction_id | str | UUID identifier |
-| task_id | str | Parent task |
+| run_id | str | Parent run |
 | name | str | Direction name |
 | risk_level | str | high / medium / low |
 | risk_reason | str | Risk assessment rationale |
@@ -337,8 +337,8 @@ Function metadata for analysis tracking.
 
 | Field | Type | Description |
 |-------|------|-------------|
-| function_id | str | Format: `{task_id}_{name}` |
-| task_id | str | Parent task |
+| function_id | str | Format: `{run_id}_{name}` |
+| run_id | str | Parent run |
 | name | str | Function name |
 | file_path | str | Source file |
 | start_line | int | Start line |
@@ -357,7 +357,7 @@ Crash discovered by fuzzer.
 | Field | Type | Description |
 |-------|------|-------------|
 | crash_id | str | UUID identifier |
-| task_id | str | Parent task |
+| run_id | str | Parent run |
 | crash_path | str | Crash file path |
 | crash_hash | str | SHA1 hash for deduplication |
 | vuln_type | str | heap-buffer-overflow, use-after-free, etc. |
@@ -369,29 +369,29 @@ Crash discovered by fuzzer.
 
 ## Repository Methods
 
-### TaskRepository
+### RunRepository
 
 | Method | Description |
 |--------|-------------|
 | save(task) | Save task (upsert) |
-| find_by_id(task_id) | Find by ID |
-| find_pending() | Find pending tasks |
-| find_running() | Find running tasks |
+| find_by_id(run_id) | Find by ID |
+| find_pending() | Find pending runs |
+| find_running() | Find running runs |
 | find_by_project(name) | Find by project name |
-| update_status(task_id, status, error_msg) | Update status |
-| add_pov(task_id, pov_id) | Add POV reference |
-| add_patch(task_id, patch_id) | Add Patch reference |
-| delete(task_id) | Delete task |
+| update_status(run_id, status, error_msg) | Update status |
+| add_pov(run_id, pov_id) | Add POV reference |
+| add_patch(run_id, patch_id) | Add Patch reference |
+| delete(run_id) | Delete run |
 
 ### POVRepository
 
 | Method | Description |
 |--------|-------------|
 | save(pov) | Save POV |
-| find_by_task(task_id) | Find all POVs for task |
-| find_active_by_task(task_id) | Find active POVs |
-| find_successful_by_task(task_id) | Find verified POVs |
-| find_by_harness(task_id, harness) | Find by harness name |
+| find_by_run(run_id) | Find all POVs for run |
+| find_active_by_run(run_id) | Find active POVs |
+| find_successful_by_run(run_id) | Find verified POVs |
+| find_by_harness(run_id, harness) | Find by harness name |
 | mark_successful(pov_id) | Mark as successful |
 | deactivate(pov_id) | Mark as duplicate |
 
@@ -400,14 +400,14 @@ Crash discovered by fuzzer.
 | Method | Description |
 |--------|-------------|
 | save(sp) | Save SP |
-| find_by_task(task_id) | Find all SPs for task |
-| find_by_function(task_id, function_name) | Find by function |
-| find_unchecked(task_id) | Find unverified SPs |
-| find_real(task_id) | Find confirmed vulnerabilities |
-| find_important(task_id) | Find high-priority SPs |
-| find_by_score(task_id, min_score) | Find by minimum score |
-| find_pending_verify(task_id) | Find awaiting verification |
-| find_pending_pov(task_id, min_score) | Find awaiting POV generation |
+| find_by_run(run_id) | Find all SPs for run |
+| find_by_function(run_id, function_name) | Find by function |
+| find_unchecked(run_id) | Find unverified SPs |
+| find_real(run_id) | Find confirmed vulnerabilities |
+| find_important(run_id) | Find high-priority SPs |
+| find_by_score(run_id, min_score) | Find by minimum score |
+| find_pending_verify(run_id) | Find awaiting verification |
+| find_pending_pov(run_id, min_score) | Find awaiting POV generation |
 | claim_for_verify(sp_id, agent_id) | Atomic claim for verification |
 | claim_for_pov(sp_id, agent_id) | Atomic claim for POV generation |
 | mark_checked(sp_id, is_crash_found, notes) | Mark as verified |
@@ -430,41 +430,41 @@ Crash discovered by fuzzer.
 For production environments:
 
 ```javascript
-// Task query optimization
-db.tasks.createIndex({ "status": 1 })
-db.tasks.createIndex({ "project_name": 1 })
-db.tasks.createIndex({ "created_at": -1 })
+// Run query optimization
+db.runs.createIndex({ "status": 1 })
+db.runs.createIndex({ "project_name": 1 })
+db.runs.createIndex({ "created_at": -1 })
 
 // POV query optimization
-db.povs.createIndex({ "task_id": 1 })
-db.povs.createIndex({ "task_id": 1, "is_active": 1 })
-db.povs.createIndex({ "task_id": 1, "harness_name": 1 })
+db.povs.createIndex({ "run_id": 1 })
+db.povs.createIndex({ "run_id": 1, "is_active": 1 })
+db.povs.createIndex({ "run_id": 1, "harness_name": 1 })
 
 // Patch query optimization
-db.patches.createIndex({ "task_id": 1 })
+db.patches.createIndex({ "run_id": 1 })
 db.patches.createIndex({ "pov_id": 1 })
 
 // Worker query optimization
-db.workers.createIndex({ "task_id": 1 })
+db.workers.createIndex({ "run_id": 1 })
 db.workers.createIndex({ "status": 1 })
 
 // Fuzzer query optimization
-db.fuzzers.createIndex({ "task_id": 1 })
-db.fuzzers.createIndex({ "task_id": 1, "fuzzer_name": 1 })
+db.fuzzers.createIndex({ "run_id": 1 })
+db.fuzzers.createIndex({ "run_id": 1, "fuzzer_name": 1 })
 
 // SuspiciousPoint query optimization
-db.suspicious_points.createIndex({ "task_id": 1 })
-db.suspicious_points.createIndex({ "task_id": 1, "status": 1 })
-db.suspicious_points.createIndex({ "task_id": 1, "is_important": -1, "score": -1 })
+db.suspicious_points.createIndex({ "run_id": 1 })
+db.suspicious_points.createIndex({ "run_id": 1, "status": 1 })
+db.suspicious_points.createIndex({ "run_id": 1, "is_important": -1, "score": -1 })
 
 // Direction query optimization
-db.directions.createIndex({ "task_id": 1 })
-db.directions.createIndex({ "task_id": 1, "status": 1 })
+db.directions.createIndex({ "run_id": 1 })
+db.directions.createIndex({ "run_id": 1, "status": 1 })
 
 // Function query optimization
-db.functions.createIndex({ "task_id": 1 })
-db.functions.createIndex({ "task_id": 1, "name": 1 })
-db.functions.createIndex({ "task_id": 1, "analyzed_by_directions": 1 })
+db.functions.createIndex({ "run_id": 1 })
+db.functions.createIndex({ "run_id": 1, "name": 1 })
+db.functions.createIndex({ "run_id": 1, "analyzed_by_directions": 1 })
 ```
 
 ## Error Handling
@@ -501,8 +501,8 @@ docker exec -it fuzzingbrain-mongodb mongosh
 # Inside MongoDB shell
 use fuzzingbrain
 show collections
-db.tasks.countDocuments()
-db.tasks.find({ status: "running" })
+db.runs.countDocuments()
+db.runs.find({ status: "running" })
 db.povs.find({ is_successful: true, is_active: true })
 db.suspicious_points.find({ status: "verified", score: { $gte: 0.7 } })
 ```

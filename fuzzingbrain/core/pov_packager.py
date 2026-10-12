@@ -47,7 +47,7 @@ class POVPackager:
     def __init__(
         self,
         results_dir: str,
-        task_id: str = "",
+        run_id: str = "",
         worker_id: str = "",
         repos: Any = None,
         analyzer_socket_path: str = None,
@@ -57,7 +57,7 @@ class POVPackager:
 
         Args:
             results_dir: Path to results directory (e.g., workspace/results)
-            task_id: Task ID for context (needed for report agent tools)
+            run_id: Run ID for context (needed for report agent tools)
             worker_id: Worker ID for context
             repos: Database repository manager (for updating POV)
             analyzer_socket_path: Path to analyzer socket (for code analysis tools)
@@ -65,8 +65,8 @@ class POVPackager:
         self.results_dir = Path(results_dir)
         self.povs_dir = self.results_dir / "povs"
         self.povs_dir.mkdir(parents=True, exist_ok=True)
-        self.task_id = task_id
-        self.worker_id = worker_id or f"report_{task_id[:8]}"
+        self.run_id = run_id
+        self.worker_id = worker_id or f"report_{run_id[:8]}"
 
         # Store analyzer context for restoration in new event loop
         self.analyzer_socket_path = analyzer_socket_path
@@ -84,7 +84,7 @@ class POVPackager:
 
             self._report_agent = POVReportAgent(
                 model=model_for(Role.UTILITY),
-                task_id=self.task_id,
+                run_id=self.run_id,
                 worker_id=self.worker_id,
                 repos=self.repos,
             )
@@ -187,7 +187,7 @@ class POVPackager:
         raw_pov_id = pov.get("pov_id") or pov.get("_id")
         pov_clean = {
             "pov_id": str(raw_pov_id) if raw_pov_id else None,
-            "task_id": pov.get("task_id"),
+            "run_id": pov.get("run_id"),
             "suspicious_point_id": pov.get("suspicious_point_id"),
             "harness_name": pov.get("harness_name"),
             "sanitizer": pov.get("sanitizer"),
@@ -213,7 +213,7 @@ class POVPackager:
         if sp is None:
             sp_clean = {
                 "suspicious_point_id": None,
-                "task_id": None,
+                "run_id": None,
                 "function_name": "fuzzer-discovered",
                 "file_path": None,
                 "line_number": None,
@@ -228,7 +228,7 @@ class POVPackager:
             raw_sp_id = sp.get("suspicious_point_id") or sp.get("_id")
             sp_clean = {
                 "suspicious_point_id": str(raw_sp_id) if raw_sp_id else None,
-                "task_id": sp.get("task_id"),
+                "run_id": sp.get("run_id"),
                 "function_name": sp.get("function_name"),
                 "file_path": sp.get("file_path"),
                 "line_number": sp.get("line_number"),

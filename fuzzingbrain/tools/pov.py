@@ -63,7 +63,7 @@ _current_worker_id: ContextVar[Optional[str]] = ContextVar(
 
 
 def set_pov_context(
-    task_id: str,
+    run_id: str,
     worker_id: str,
     output_dir: Path,
     repos: RepositoryManager,
@@ -83,7 +83,7 @@ def set_pov_context(
     Each concurrent POV agent gets its own isolated context, identified by worker_id.
 
     Args:
-        task_id: Current task ID
+        run_id: Current run ID
         worker_id: Current worker ID
         output_dir: Directory to save POV blob files
         repos: Database repository manager
@@ -98,7 +98,7 @@ def set_pov_context(
         agent_id: Agent ObjectId for tracking which POVAgent created POVs
     """
     ctx = {
-        "task_id": task_id,
+        "run_id": run_id,
         "worker_id": worker_id,
         "output_dir": Path(output_dir).absolute() if output_dir else None,
         "repos": repos,
@@ -288,7 +288,7 @@ def _ensure_context(worker_id: str = None) -> Optional[Dict[str, Any]]:
     else:
         ctx = _get_current_context()
 
-    if ctx is None or ctx.get("task_id") is None:
+    if ctx is None or ctx.get("run_id") is None:
         return {
             "success": False,
             "error": (
@@ -360,10 +360,10 @@ def _duplicate_signature(ctx, output: str, fuzzer: str):
         if not sig:
             return None
         repos = ctx.get("repos")
-        task_id = ctx.get("task_id", "")
-        if repos is None or not task_id:
+        run_id = ctx.get("run_id", "")
+        if repos is None or not run_id:
             return None
-        for prior in repos.povs.find_by_task(task_id) or []:
+        for prior in repos.povs.find_by_run(run_id) or []:
             if not getattr(prior, "is_successful", False):
                 continue
             if getattr(prior, "duplicate_of", None):
@@ -880,7 +880,7 @@ def _create_pov_core(
         worker_id: Explicit worker_id for context lookup (preferred over ContextVar)
     """
     ctx = _get_context_by_worker_id(worker_id) if worker_id else _get_current_context()
-    task_id = ctx["task_id"]
+    run_id = ctx["run_id"]
     ctx_worker_id = ctx["worker_id"]
     output_dir = ctx["output_dir"]
 
@@ -927,11 +927,11 @@ def _create_pov_core(
     if not blobs:
         return {"success": False, "error": "Generator code produced no blobs"}
 
-    # Create output directory: povs/{task_id}/{ctx_worker_id}/attempt_{n}/
+    # Create output directory: povs/{run_id}/{ctx_worker_id}/attempt_{n}/
     attempt_dir = None
     if output_dir:
         attempt_dir = (
-            output_dir / task_id / ctx_worker_id / f"attempt_{current_attempt:03d}"
+            output_dir / run_id / ctx_worker_id / f"attempt_{current_attempt:03d}"
         )
         attempt_dir.mkdir(parents=True, exist_ok=True)
 
@@ -974,7 +974,7 @@ def _create_pov_core(
         # Create POV record
         pov = POV(
             pov_id=pov_id,
-            task_id=task_id,
+            run_id=run_id,
             suspicious_point_id=suspicious_point_id,
             generation_id=generation_id,
             agent_id=ctx.get("agent_id"),  # Track which POVAgent created this
@@ -1008,7 +1008,7 @@ def _create_pov_core(
     )
 
     # Get all available fuzzers for cross-fuzzer verification
-    all_fuzzers = repos.fuzzers.find_by_task(task_id)
+    all_fuzzers = repos.fuzzers.find_by_run(run_id)
     current_fuzzer_name = ctx.get("fuzzer", "")
     other_fuzzers = [
         f for f in all_fuzzers if f.fuzzer_name != current_fuzzer_name and f.binary_path
@@ -1067,7 +1067,7 @@ def _create_pov_core(
                         cross_pov_id = generate_id()
                         cross_pov = POV(
                             pov_id=cross_pov_id,
-                            task_id=task_id,
+                            run_id=run_id,
                             suspicious_point_id=suspicious_point_id,
                             generation_id=generation_id,
                             agent_id=ctx.get("agent_id"),  # Inherit from original POV
@@ -1750,25 +1750,25 @@ def _verify_pov_core(pov_id: str, worker_id: str = None) -> Dict[str, Any]:
         # This ensures report is generated before dispatcher can stop
         try:
             workspace_path = ctx.get("workspace_path")
-            task_id = ctx.get("task_id", "")
+            run_id = ctx.get("run_id", "")
             ctx_worker_id = ctx.get("worker_id", "")
             if workspace_path:
-                # Get TASK workspace (not worker workspace)
-                # Worker workspace: {task_workspace}/worker_workspace/{harness_sanitizer}/
-                # Task workspace: {task_workspace}/
+                # Get RUN workspace (not worker workspace)
+                # Worker workspace: {run_workspace}/worker_workspace/{harness_sanitizer}/
+                # Run workspace: {run_workspace}/
                 worker_ws = Path(workspace_path)
                 if "worker_workspace" in str(worker_ws):
-                    task_workspace = worker_ws.parent.parent
+                    run_workspace = worker_ws.parent.parent
                 else:
-                    task_workspace = worker_ws
-                results_dir = task_workspace / "results"
+                    run_workspace = worker_ws
+                results_dir = run_workspace / "results"
                 # Capture analyzer context for restoration in packager's new event loop
                 from .analyzer import get_analyzer_context
 
                 analyzer_socket = get_analyzer_context()
                 packager = POVPackager(
                     str(results_dir),
-                    task_id=task_id,
+                    run_id=run_id,
                     worker_id=ctx_worker_id,
                     repos=repos,
                     analyzer_socket_path=analyzer_socket,

@@ -21,9 +21,9 @@ from fuzzingbrain.analyzer.server import (
     select_by_path_suffix,
 )
 from fuzzingbrain.core.docker_limits import (
-    TASK_LABEL,
-    kill_task_containers,
-    task_label_args,
+    RUN_LABEL,
+    kill_run_containers,
+    run_label_args,
 )
 
 
@@ -70,19 +70,19 @@ class _Collection:
         return [
             dict(d)
             for d in self.docs
-            if d["task_id"] == query["task_id"] and pat.search(d["file_path"])
+            if d["run_id"] == query["run_id"] and pat.search(d["file_path"])
         ]
 
 
 def test_sync_lookup_finds_functions_for_a_repo_relative_diff_path():
     tid = ObjectId()
     docs = [
-        {"_id": 1, "task_id": tid, "name": "Curl_getn_scheme_handler", "file_path": "url.c"},
-        {"_id": 2, "task_id": tid, "name": "curl_url", "file_path": "urlapi.c"},
-        {"_id": 3, "task_id": ObjectId(), "name": "other_task", "file_path": "url.c"},
+        {"_id": 1, "run_id": tid, "name": "Curl_getn_scheme_handler", "file_path": "url.c"},
+        {"_id": 2, "run_id": tid, "name": "curl_url", "file_path": "urlapi.c"},
+        {"_id": 3, "run_id": ObjectId(), "name": "other_run", "file_path": "url.c"},
     ]
     server = SimpleNamespace(
-        task_id=tid,
+        run_id=tid,
         repos=SimpleNamespace(functions=SimpleNamespace(collection=_Collection(docs))),
     )
     got = AnalysisServer._get_functions_by_file_sync(server, "lib/url.c")
@@ -91,12 +91,12 @@ def test_sync_lookup_finds_functions_for_a_repo_relative_diff_path():
     assert AnalysisServer._get_functions_by_file_sync(server, "") == []
 
 
-def test_task_label_args():
-    assert task_label_args("abc") == ["--label", f"{TASK_LABEL}=abc"]
-    assert task_label_args("") == []
+def test_run_label_args():
+    assert run_label_args("abc") == ["--label", f"{RUN_LABEL}=abc"]
+    assert run_label_args("") == []
 
 
-def test_kill_task_containers_kills_only_what_the_label_lists():
+def test_kill_run_containers_kills_only_what_the_label_lists():
     calls = []
 
     def fake_run(cmd, **kw):
@@ -106,16 +106,16 @@ def test_kill_task_containers_kills_only_what_the_label_lists():
         return SimpleNamespace(stdout="", returncode=0)
 
     with patch("fuzzingbrain.core.docker_limits.subprocess.run", side_effect=fake_run):
-        assert kill_task_containers("t1") == 2
-    assert calls[0] == ["docker", "ps", "-q", "--filter", f"label={TASK_LABEL}=t1"]
+        assert kill_run_containers("t1") == 2
+    assert calls[0] == ["docker", "ps", "-q", "--filter", f"label={RUN_LABEL}=t1"]
     assert calls[1] == ["docker", "kill", "aaa", "bbb"]
 
 
-def test_kill_task_containers_is_a_no_op_without_matches():
+def test_kill_run_containers_is_a_no_op_without_matches():
     with patch(
         "fuzzingbrain.core.docker_limits.subprocess.run",
         return_value=SimpleNamespace(stdout="", returncode=0),
     ) as run:
-        assert kill_task_containers("t1") == 0
+        assert kill_run_containers("t1") == 0
         assert run.call_count == 1
-    assert kill_task_containers("") == 0
+    assert kill_run_containers("") == 0

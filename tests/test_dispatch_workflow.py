@@ -2,13 +2,13 @@
 """
 Dispatch Workflow Tests
 
-Tests the Task → Worker dispatch flow.
+Tests the Run → Worker dispatch flow.
 
 Business invariants under test:
 1. N successful fuzzers × M sanitizers = exactly N×M workers dispatched
 2. Only fuzzers with status=SUCCESS are dispatched (FAILED/PENDING/BUILDING are skipped)
 3. fuzzers restricts dispatch to named fuzzers only
-4. Each worker's assignment carries correct task_id, fuzzer, sanitizer, scan_mode
+4. Each worker's assignment carries correct run_id, fuzzer, sanitizer, scan_mode
 5. Each worker gets an isolated (distinct) workspace
 6. One dispatch failure does not block the rest
 """
@@ -19,7 +19,7 @@ from unittest.mock import patch, MagicMock
 
 from bson import ObjectId
 
-from fuzzingbrain.core.models.task import Task, JobType, ScanMode, TaskStatus
+from fuzzingbrain.core.models.run import Run, JobType, ScanMode, RunStatus
 from fuzzingbrain.core.models.fuzzer import Fuzzer, FuzzerStatus
 from fuzzingbrain.core.config import Config
 from fuzzingbrain.core.dispatcher import WorkerDispatcher
@@ -34,22 +34,22 @@ def _make_fuzzer(name: str, status: FuzzerStatus = FuzzerStatus.SUCCESS) -> Fuzz
     """Create a Fuzzer with given name and status."""
     return Fuzzer(
         fuzzer_id=str(ObjectId()),
-        task_id=str(ObjectId()),
+        run_id=str(ObjectId()),
         fuzzer_name=name,
         status=status,
     )
 
 
-def _make_task(task_id: str = None, tmp_path: Path = None) -> Task:
-    """Create a Task for testing."""
-    tid = task_id or str(ObjectId())
-    task_path = str(tmp_path) if tmp_path else "/tmp/test_task"
-    return Task(
-        task_id=tid,
+def _make_run(run_id: str = None, tmp_path: Path = None) -> Run:
+    """Create a Run for testing."""
+    tid = run_id or str(ObjectId())
+    workspace_path = str(tmp_path) if tmp_path else "/tmp/test_run"
+    return Run(
+        run_id=tid,
         task_type=JobType.POV,
         scan_mode=ScanMode.FULL,
-        status=TaskStatus.RUNNING,
-        task_path=task_path,
+        status=RunStatus.RUNNING,
+        workspace_path=workspace_path,
         project_name="libpng",
     )
 
@@ -71,14 +71,14 @@ def _make_config(
 
 
 def _make_dispatcher(
-    task: Task,
+    run: Run,
     config: Config,
     repos: MagicMock = None,
 ) -> WorkerDispatcher:
     """Create a WorkerDispatcher with mocked dependencies."""
     repos = repos or MagicMock()
     dispatcher = WorkerDispatcher(
-        task=task,
+        run=run,
         config=config,
         repos=repos,
         analyze_result=None,
@@ -102,7 +102,7 @@ class TestPairGeneration:
     def test_single_fuzzer_single_sanitizer(self, tmp_path):
         """1 × 1 = 1"""
         dispatcher = _make_dispatcher(
-            _make_task(tmp_path=tmp_path), _make_config(sanitizers=["address"])
+            _make_run(tmp_path=tmp_path), _make_config(sanitizers=["address"])
         )
         pairs = dispatcher._generate_pairs([_make_fuzzer("fuzz_png")], ["address"])
 
@@ -111,7 +111,7 @@ class TestPairGeneration:
 
     def test_cartesian_product(self, tmp_path):
         """2 fuzzers × 3 sanitizers = 6 unique pairs, no duplicates."""
-        dispatcher = _make_dispatcher(_make_task(tmp_path=tmp_path), _make_config())
+        dispatcher = _make_dispatcher(_make_run(tmp_path=tmp_path), _make_config())
         fuzzers = [_make_fuzzer("fuzz_a"), _make_fuzzer("fuzz_b")]
         sanitizers = ["address", "memory", "undefined"]
         pairs = dispatcher._generate_pairs(fuzzers, sanitizers)
@@ -127,7 +127,7 @@ class TestPairGeneration:
 
     def test_zero_fuzzers_zero_workers(self, tmp_path):
         """No fuzzers = no pairs (not an error)."""
-        dispatcher = _make_dispatcher(_make_task(tmp_path=tmp_path), _make_config())
+        dispatcher = _make_dispatcher(_make_run(tmp_path=tmp_path), _make_config())
         assert dispatcher._generate_pairs([], ["address"]) == []
 
 
@@ -148,7 +148,7 @@ class TestStatusFiltering:
         self, mock_workspace, mock_celery, tmp_path
     ):
         """4 fuzzers with different statuses → only the SUCCESS one is dispatched."""
-        dispatcher = _make_dispatcher(_make_task(tmp_path=tmp_path), _make_config())
+        dispatcher = _make_dispatcher(_make_run(tmp_path=tmp_path), _make_config())
         mock_workspace.return_value = str(tmp_path / "ws")
         mock_celery.return_value = {"celery_id": "c1", "fuzzer": "", "sanitizer": ""}
 
@@ -170,7 +170,7 @@ class TestStatusFiltering:
         self, mock_workspace, mock_celery, tmp_path
     ):
         """If every fuzzer failed to build, zero workers are dispatched."""
-        dispatcher = _make_dispatcher(_make_task(tmp_path=tmp_path), _make_config())
+        dispatcher = _make_dispatcher(_make_run(tmp_path=tmp_path), _make_config())
         fuzzers = [
             _make_fuzzer("a", FuzzerStatus.FAILED),
             _make_fuzzer("b", FuzzerStatus.FAILED),
@@ -186,7 +186,7 @@ class TestStatusFiltering:
         self, mock_workspace, mock_celery, tmp_path
     ):
         """Empty input → zero workers, no crash."""
-        dispatcher = _make_dispatcher(_make_task(tmp_path=tmp_path), _make_config())
+        dispatcher = _make_dispatcher(_make_run(tmp_path=tmp_path), _make_config())
         assert dispatcher.dispatch([]) == []
         mock_celery.assert_not_called()
 
@@ -197,7 +197,7 @@ class TestStatusFiltering:
     ):
         """3 successful fuzzers × 1 sanitizer = exactly 3 workers."""
         dispatcher = _make_dispatcher(
-            _make_task(tmp_path=tmp_path), _make_config(sanitizers=["address"])
+            _make_run(tmp_path=tmp_path), _make_config(sanitizers=["address"])
         )
         mock_workspace.return_value = str(tmp_path / "ws")
         mock_celery.return_value = {"celery_id": "c", "fuzzer": "", "sanitizer": ""}
@@ -226,7 +226,7 @@ class TestFuzzerFilter:
     def test_filter_selects_subset(self, mock_workspace, mock_celery, tmp_path):
         """3 successful fuzzers, filter=["fuzz_png"] → only fuzz_png dispatched."""
         dispatcher = _make_dispatcher(
-            _make_task(tmp_path=tmp_path),
+            _make_run(tmp_path=tmp_path),
             _make_config(fuzzers=["fuzz_png"]),
         )
         mock_workspace.return_value = str(tmp_path / "ws")
@@ -247,7 +247,7 @@ class TestFuzzerFilter:
     def test_filter_no_match_zero_workers(self, mock_workspace, mock_celery, tmp_path):
         """Filter names a fuzzer that doesn't exist → zero workers."""
         dispatcher = _make_dispatcher(
-            _make_task(tmp_path=tmp_path),
+            _make_run(tmp_path=tmp_path),
             _make_config(fuzzers=["nonexistent"]),
         )
         fuzzers = [_make_fuzzer("fuzz_png"), _make_fuzzer("fuzz_icc")]
@@ -261,7 +261,7 @@ class TestFuzzerFilter:
     ):
         """Filter matches fuzz_icc but it FAILED → zero workers for fuzz_icc."""
         dispatcher = _make_dispatcher(
-            _make_task(tmp_path=tmp_path),
+            _make_run(tmp_path=tmp_path),
             _make_config(fuzzers=["fuzz_png", "fuzz_icc"]),
         )
         mock_workspace.return_value = str(tmp_path / "ws")
@@ -297,10 +297,10 @@ class TestCeleryAssignment:
     @patch("fuzzingbrain.worker.tasks.run_worker.apply_async")
     def test_assignment_has_required_fields(self, mock_apply, mock_log_dir, tmp_path):
         """Assignment must contain every field that run_worker() destructures."""
-        task_id = str(ObjectId())
-        task = _make_task(task_id=task_id, tmp_path=tmp_path)
+        run_id = str(ObjectId())
+        run = _make_run(run_id=run_id, tmp_path=tmp_path)
         config = _make_config()
-        dispatcher = _make_dispatcher(task, config)
+        dispatcher = _make_dispatcher(run, config)
 
         mock_result = MagicMock()
         mock_result.id = "celery-job-123"
@@ -321,7 +321,7 @@ class TestCeleryAssignment:
 
         # Required fields that run_worker() reads with [] (KeyError if missing)
         required_keys = [
-            "task_id",
+            "run_id",
             "fuzzer",
             "sanitizer",
             "task_type",
@@ -332,7 +332,7 @@ class TestCeleryAssignment:
             assert key in assignment, f"Assignment missing required field: {key}"
 
         # Verify values are correct (not just present)
-        assert assignment["task_id"] == task_id
+        assert assignment["run_id"] == run_id
         assert assignment["fuzzer"] == "fuzz_png"
         assert assignment["sanitizer"] == "address"
         assert assignment["task_type"] == "pov"
@@ -345,9 +345,9 @@ class TestCeleryAssignment:
         self, mock_apply, mock_log_dir, tmp_path
     ):
         """2 fuzzers × 2 sanitizers: each Celery call gets its own fuzzer+sanitizer."""
-        task = _make_task(tmp_path=tmp_path)
+        run = _make_run(tmp_path=tmp_path)
         config = _make_config(sanitizers=["address", "memory"])
-        dispatcher = _make_dispatcher(task, config)
+        dispatcher = _make_dispatcher(run, config)
 
         mock_result = MagicMock()
         mock_result.id = "celery-job"
@@ -378,9 +378,9 @@ class TestCeleryAssignment:
         self, mock_apply, mock_log_dir, tmp_path
     ):
         """Celery time_limit must match config.timeout_minutes × 60."""
-        task = _make_task(tmp_path=tmp_path)
+        run = _make_run(tmp_path=tmp_path)
         config = _make_config(timeout_minutes=45)
-        dispatcher = _make_dispatcher(task, config)
+        dispatcher = _make_dispatcher(run, config)
 
         mock_result = MagicMock()
         mock_result.id = "celery-job"
@@ -408,7 +408,7 @@ class TestWorkspaceIsolation:
 
     def test_different_pairs_get_different_workspaces(self, tmp_path):
         """Two distinct pairs must produce two distinct workspace paths."""
-        dispatcher = _make_dispatcher(_make_task(tmp_path=tmp_path), _make_config())
+        dispatcher = _make_dispatcher(_make_run(tmp_path=tmp_path), _make_config())
         ws_a = dispatcher._create_worker_workspace(
             {"fuzzer": "fuzz_png", "sanitizer": "address"}
         )
@@ -421,7 +421,7 @@ class TestWorkspaceIsolation:
 
     def test_workspace_is_clean_on_redispatch(self, tmp_path):
         """Re-dispatching same pair gives a clean workspace (no leftover files)."""
-        dispatcher = _make_dispatcher(_make_task(tmp_path=tmp_path), _make_config())
+        dispatcher = _make_dispatcher(_make_run(tmp_path=tmp_path), _make_config())
         pair = {"fuzzer": "fuzz_png", "sanitizer": "address"}
 
         ws = dispatcher._create_worker_workspace(pair)
@@ -434,7 +434,7 @@ class TestWorkspaceIsolation:
 
     def test_workspace_has_results_dir(self, tmp_path):
         """Every workspace must have a results/ directory for outputs."""
-        dispatcher = _make_dispatcher(_make_task(tmp_path=tmp_path), _make_config())
+        dispatcher = _make_dispatcher(_make_run(tmp_path=tmp_path), _make_config())
         ws = dispatcher._create_worker_workspace(
             {"fuzzer": "fuzz_png", "sanitizer": "address"}
         )
@@ -458,7 +458,7 @@ class TestFaultTolerance:
         self, mock_workspace, mock_celery, tmp_path
     ):
         """3 fuzzers, first one fails to dispatch → 2 still succeed."""
-        dispatcher = _make_dispatcher(_make_task(tmp_path=tmp_path), _make_config())
+        dispatcher = _make_dispatcher(_make_run(tmp_path=tmp_path), _make_config())
         mock_workspace.return_value = str(tmp_path / "ws")
 
         call_count = [0]
@@ -487,7 +487,7 @@ class TestFaultTolerance:
         self, mock_workspace, mock_celery, tmp_path
     ):
         """If workspace creation fails for one pair, others still proceed."""
-        dispatcher = _make_dispatcher(_make_task(tmp_path=tmp_path), _make_config())
+        dispatcher = _make_dispatcher(_make_run(tmp_path=tmp_path), _make_config())
 
         call_count = [0]
 

@@ -23,7 +23,7 @@ The default entry mode. Starts a FastAPI server on port 8080.
 | POST | `/api/v1/patch` | Generate patches |
 | POST | `/api/v1/pov-patch` | POV + Patch combo |
 | POST | `/api/v1/harness` | Generate harnesses |
-| GET | `/api/v1/status/{task_id}` | Get task status |
+| GET | `/api/v1/status/{run_id}` | Get task status |
 | GET | `/api/v1/tasks` | List all tasks |
 
 ## Test

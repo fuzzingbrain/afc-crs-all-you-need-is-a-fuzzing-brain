@@ -10,7 +10,7 @@ This module handles all build and static analysis tasks:
 - Provide query API via Analysis Server
 
 Architecture:
-- Analysis Server: Long-running service per task
+- Analysis Server: Long-running service per run
 - Analysis Client: SDK for Workers/Agents to query
 - Communication: Unix Domain Socket (JSON RPC)
 """
@@ -30,7 +30,7 @@ __all__ = [
     "AnalyzeRequest",
     "AnalyzeResult",
     "FuzzerInfo",
-    # Tasks
+    # Runs
     "run_analyzer",
     "start_analysis_server",
     "stop_analysis_server",

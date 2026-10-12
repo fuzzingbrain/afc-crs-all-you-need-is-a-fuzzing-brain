@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 """
-Task Viewer - Generate a web page to view task details
+Run Viewer - Generate a web page to view run details
 
 Usage:
-    python view_task.py <task_id>
-    python view_task.py  # Interactive mode
+    python view_run.py <run_id>
+    python view_run.py  # Interactive mode
 """
 
 import argparse
@@ -18,14 +18,14 @@ from pathlib import Path
 from pymongo import MongoClient
 
 
-def find_conversations(task_id: str) -> list:
-    """Find all conversation JSON files for a task."""
+def find_conversations(run_id: str) -> list:
+    """Find all conversation JSON files for a run."""
     conversations = []
     logs_dir = Path("logs")
 
-    # Find task log directory
-    for task_dir in logs_dir.glob(f"*_{task_id}_*"):
-        agent_dir = task_dir / "agent"
+    # Find run log directory
+    for run_dir in logs_dir.glob(f"*_{run_id}_*"):
+        agent_dir = run_dir / "agent"
         if agent_dir.exists():
             for conv_file in agent_dir.glob("*.conversation.json"):
                 try:
@@ -78,30 +78,30 @@ def extract_tool_calls(conversations: list) -> list:
     return tool_calls
 
 
-def get_task_data(task_id: str) -> dict:
-    """Fetch all task-related data from MongoDB."""
+def get_run_data(run_id: str) -> dict:
+    """Fetch all run-related data from MongoDB."""
     import re
 
     client = MongoClient("mongodb://localhost:27017")
     db = client["fuzzingbrain"]
 
     # Try exact match first, then partial match
-    task = db.tasks.find_one({"task_id": task_id})
-    if not task:
-        # Try partial match - task_id might be embedded in a longer ID
-        task = db.tasks.find_one({"task_id": re.compile(task_id)})
+    run = db.runs.find_one({"run_id": run_id})
+    if not run:
+        # Try partial match - run_id might be embedded in a longer ID
+        run = db.runs.find_one({"run_id": re.compile(run_id)})
 
-    # Get the actual task_id from the found task for consistent queries
-    actual_task_id = task["task_id"] if task else task_id
+    # Get the actual run_id from the found run for consistent queries
+    actual_run_id = run["run_id"] if run else run_id
 
-    # Get workers for this task
-    workers = list(db.workers.find({"task_id": actual_task_id}))
+    # Get workers for this run
+    workers = list(db.workers.find({"run_id": actual_run_id}))
 
-    # Get suspicious points for this task
-    suspicious_points = list(db.suspicious_points.find({"task_id": actual_task_id}))
+    # Get suspicious points for this run
+    suspicious_points = list(db.suspicious_points.find({"run_id": actual_run_id}))
 
-    # Get POVs for this task
-    povs = list(db.povs.find({"task_id": actual_task_id}))
+    # Get POVs for this run
+    povs = list(db.povs.find({"run_id": actual_run_id}))
 
     # Convert ObjectId to string
     for w in workers:
@@ -110,17 +110,17 @@ def get_task_data(task_id: str) -> dict:
         sp["_id"] = str(sp["_id"])
     for pov in povs:
         pov["_id"] = str(pov["_id"])
-    if task:
-        task["_id"] = str(task["_id"])
+    if run:
+        run["_id"] = str(run["_id"])
 
-    # Get conversations - use actual_task_id for consistent matching
-    conversations = find_conversations(actual_task_id)
+    # Get conversations - use actual_run_id for consistent matching
+    conversations = find_conversations(actual_run_id)
 
     # Extract tool calls
     tool_calls = extract_tool_calls(conversations)
 
     return {
-        "task": task,
+        "run": run,
         "workers": workers,
         "suspicious_points": suspicious_points,
         "povs": povs,
@@ -129,9 +129,9 @@ def get_task_data(task_id: str) -> dict:
     }
 
 
-def generate_html(task_id: str, data: dict) -> str:
-    """Generate HTML content for the task viewer."""
-    task = data["task"]
+def generate_html(run_id: str, data: dict) -> str:
+    """Generate HTML content for the run viewer."""
+    run = data["run"]
     workers = data["workers"]
     suspicious_points = data["suspicious_points"]
     povs = data.get("povs", [])
@@ -512,7 +512,7 @@ def generate_html(task_id: str, data: dict) -> str:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Task {task_id} - FuzzingBrain Viewer</title>
+    <title>Run {run_id} - FuzzingBrain Viewer</title>
     <style>
         * {{ box-sizing: border-box; margin: 0; padding: 0; }}
         body {{
@@ -525,13 +525,13 @@ def generate_html(task_id: str, data: dict) -> str:
         .container {{ max-width: 1400px; margin: 0 auto; }}
         h1 {{ color: #00d4ff; margin-bottom: 10px; }}
         h2 {{ color: #ff6b6b; margin: 30px 0 15px; border-bottom: 2px solid #333; padding-bottom: 10px; }}
-        .task-info {{
+        .run-info {{
             background: #16213e;
             border-radius: 10px;
             padding: 20px;
             margin-bottom: 20px;
         }}
-        .task-info-grid {{
+        .run-info-grid {{
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
             gap: 15px;
@@ -955,34 +955,34 @@ def generate_html(task_id: str, data: dict) -> str:
 </head>
 <body>
     <div class="container">
-        <h1>FuzzingBrain Task Viewer</h1>
+        <h1>FuzzingBrain Run Viewer</h1>
         <p class="generated-time">Generated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
 
-        <div class="task-info">
-            <div class="task-info-grid">
+        <div class="run-info">
+            <div class="run-info-grid">
                 <div class="info-item">
-                    <div class="info-label">Task ID</div>
-                    <div class="info-value">{task_id}</div>
+                    <div class="info-label">Run ID</div>
+                    <div class="info-value">{run_id}</div>
                 </div>
                 <div class="info-item">
                     <div class="info-label">Project</div>
-                    <div class="info-value">{task.get("project_name", "N/A") if task else "N/A"}</div>
+                    <div class="info-value">{run.get("project_name", "N/A") if run else "N/A"}</div>
                 </div>
                 <div class="info-item">
                     <div class="info-label">Status</div>
-                    <div class="info-value">{task.get("status", "N/A") if task else "N/A"}</div>
+                    <div class="info-value">{run.get("status", "N/A") if run else "N/A"}</div>
                 </div>
                 <div class="info-item">
                     <div class="info-label">Scan Mode</div>
-                    <div class="info-value">{task.get("scan_mode", "N/A") if task else "N/A"}</div>
+                    <div class="info-value">{run.get("scan_mode", "N/A") if run else "N/A"}</div>
                 </div>
                 <div class="info-item">
                     <div class="info-label">Job Type</div>
-                    <div class="info-value">{task.get("task_type", "N/A") if task else "N/A"}</div>
+                    <div class="info-value">{run.get("task_type", "N/A") if run else "N/A"}</div>
                 </div>
                 <div class="info-item">
                     <div class="info-label">Created</div>
-                    <div class="info-value">{task.get("created_at", "N/A") if task else "N/A"}</div>
+                    <div class="info-value">{run.get("created_at", "N/A") if run else "N/A"}</div>
                 </div>
             </div>
         </div>
@@ -1106,31 +1106,31 @@ def generate_html(task_id: str, data: dict) -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="View task details in a web page")
-    parser.add_argument("task_id", nargs="?", help="Task ID to view")
+    parser = argparse.ArgumentParser(description="View run details in a web page")
+    parser.add_argument("run_id", nargs="?", help="Run ID to view")
     args = parser.parse_args()
 
-    # Get task ID
-    task_id = args.task_id
-    if not task_id:
-        task_id = input("Enter Task ID: ").strip()
-        if not task_id:
-            print("Error: Task ID is required")
+    # Get run ID
+    run_id = args.run_id
+    if not run_id:
+        run_id = input("Enter Run ID: ").strip()
+        if not run_id:
+            print("Error: Run ID is required")
             sys.exit(1)
 
-    print(f"Fetching data for task: {task_id}")
+    print(f"Fetching data for run: {run_id}")
 
     # Fetch data
-    data = get_task_data(task_id)
+    data = get_run_data(run_id)
 
-    if not data["task"] and not data["workers"] and not data["suspicious_points"]:
-        print(f"Warning: No data found for task {task_id}")
+    if not data["run"] and not data["workers"] and not data["suspicious_points"]:
+        print(f"Warning: No data found for run {run_id}")
 
     # Generate HTML
-    html = generate_html(task_id, data)
+    html = generate_html(run_id, data)
 
     # Create output directory
-    output_dir = Path(f"task_view_{task_id}")
+    output_dir = Path(f"run_view_{run_id}")
     output_dir.mkdir(exist_ok=True)
 
     # Write HTML file

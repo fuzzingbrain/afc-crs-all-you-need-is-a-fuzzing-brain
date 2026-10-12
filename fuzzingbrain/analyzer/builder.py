@@ -218,7 +218,7 @@ class AnalyzerBuilder:
 
     def __init__(
         self,
-        task_path: str,
+        workspace_path: str,
         project_name: str,
         sanitizers: List[str],
         build_coverage: bool = True,
@@ -235,7 +235,7 @@ class AnalyzerBuilder:
         Initialize AnalyzerBuilder.
 
         Args:
-            task_path: Path to task workspace (contains repo/, fuzz-tooling/)
+            workspace_path: Path to run workspace (contains repo/, fuzz-tooling/)
             project_name: Project name
             sanitizers: List of sanitizers to build (e.g., ["address", "memory"])
             ossfuzz_project_name: OSS-Fuzz project name if different from project_name
@@ -246,7 +246,7 @@ class AnalyzerBuilder:
             skip_introspector: Skip introspector build (when using prebuild data)
             analyzer_only_log_callback: Optional callback for analyzer-only logging (not to main log)
         """
-        self.task_path = Path(task_path)
+        self.workspace_path = Path(workspace_path)
         self.project_name = ossfuzz_project_name or project_name
         self.sanitizers = sanitizers
         self.build_coverage = build_coverage
@@ -257,8 +257,8 @@ class AnalyzerBuilder:
         self.log_dir = Path(log_dir) if log_dir else None
         self.parallel = parallel
 
-        self.repo_path = self.task_path / "repo"
-        self.fuzz_tooling_path = self.task_path / "fuzz-tooling"
+        self.repo_path = self.workspace_path / "repo"
+        self.fuzz_tooling_path = self.workspace_path / "fuzz-tooling"
         self.build_out_base = self.fuzz_tooling_path / "build" / "out"
 
         # Resource monitor for parallel builds
@@ -784,7 +784,7 @@ class AnalyzerBuilder:
         Returns:
             Path to temp directory, or None if failed
         """
-        temp_dir = self.task_path / f"fuzz-tooling-{sanitizer}"
+        temp_dir = self.workspace_path / f"fuzz-tooling-{sanitizer}"
 
         try:
             # Remove if exists
@@ -811,7 +811,7 @@ class AnalyzerBuilder:
         Returns:
             Path to temp directory, or None if failed
         """
-        temp_dir = self.task_path / f"repo-{sanitizer}"
+        temp_dir = self.workspace_path / f"repo-{sanitizer}"
 
         try:
             # Remove if exists

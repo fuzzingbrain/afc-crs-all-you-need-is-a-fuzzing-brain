@@ -86,7 +86,7 @@ cleanup_task() {
   if [ -n "$tid" ]; then
     pkill -KILL -f "celery -A fuzzingbrain.*$tid" 2>/dev/null
     local c
-    c="$(docker ps -aq --filter "label=fuzzingbrain.task=$tid")"
+    c="$(docker ps -aq --filter "label=fuzzingbrain.run=$tid")"
     [ -n "$c" ] && docker rm -f $c >/dev/null 2>&1
     for c in $(docker ps -aq --filter "ancestor=aixcc-afc/$proj:latest"); do
       docker inspect "$c" --format '{{range .Mounts}}{{.Source}} {{end}}' 2>/dev/null \
@@ -146,17 +146,17 @@ try:
     oid = ObjectId(tid)
     import os
     os.makedirs(f"{out}/db", exist_ok=True)
-    for c in ["tasks", "workers", "agents", "suspicious_points", "povs", "llm_calls"]:
-        q = {"_id": oid} if c == "tasks" else {"task_id": {"$in": [oid, tid]}}
+    for c in ["runs", "workers", "agents", "suspicious_points", "povs", "llm_calls"]:
+        q = {"_id": oid} if c == "runs" else {"run_id": {"$in": [oid, tid]}}
         open(f"{out}/db/{c}.json", "w").write(json_util.dumps(list(db[c].find(q))))
-    cost = sum(c.get("cost", 0) or 0 for c in db.llm_calls.find({"task_id": {"$in": [oid, tid]}}))
+    cost = sum(c.get("cost", 0) or 0 for c in db.llm_calls.find({"run_id": {"$in": [oid, tid]}}))
     sigs = {}
-    for p in db.povs.find({"task_id": oid, "is_successful": True}):
+    for p in db.povs.find({"run_id": oid, "is_successful": True}):
         s = re.search(r"SUMMARY: \S+: (\S+) (\S+)", p.get("sanitizer_output") or "")
         where = f"{s.group(1)}@{s.group(2).split('/')[-1]}" if s else (p.get("vuln_type") or "?")
         sigs.setdefault(p.get("signature") or str(p["_id"]), f"{where}[{p.get('source')}]")
-    vh = db.suspicious_points.count_documents({"task_id": oid})
-    vh_sup = db.suspicious_points.count_documents({"task_id": oid, "status": "suppressed"})
+    vh = db.suspicious_points.count_documents({"run_id": oid})
+    vh_sup = db.suspicious_points.count_documents({"run_id": oid, "status": "suppressed"})
     print(f"{cost:.2f}\t{len(sigs)}\t{'; '.join(sigs.values())} || VH={vh} suppressed={vh_sup}")
 except Exception as e:
     print(f"?\t?\tsummary failed: {e}")

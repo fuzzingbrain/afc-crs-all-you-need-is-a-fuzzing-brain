@@ -13,7 +13,7 @@ from fuzzingbrain.core.utils import safe_object_id, is_valid_object_id
 from fuzzingbrain.core.models import (
     SuspiciousPoint,
     Direction,
-    Task,
+    Run,
     Fuzzer,
     POV,
     LLMCall,
@@ -102,7 +102,7 @@ class TestSuspiciousPointModel:
         """to_dict should work with valid ObjectIds."""
         sp = SuspiciousPoint(
             suspicious_point_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             direction_id=str(ObjectId()),
             function_name="test_func",
             processor_id=str(ObjectId()),  # Valid ObjectId
@@ -116,7 +116,7 @@ class TestSuspiciousPointModel:
         """to_dict should handle non-ObjectId processor_id (e.g., 'verify_1')."""
         sp = SuspiciousPoint(
             suspicious_point_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             function_name="test_func",
             processor_id="verify_1",  # NOT a valid ObjectId
         )
@@ -128,7 +128,7 @@ class TestSuspiciousPointModel:
         """from_dict should correctly parse to_dict output."""
         original = SuspiciousPoint(
             suspicious_point_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             function_name="test_func",
             score=0.8,
         )
@@ -145,7 +145,7 @@ class TestDirectionModel:
         """to_dict should work with valid ObjectIds."""
         direction = Direction(
             direction_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             name="Test Direction",
             processor_id=str(ObjectId()),
         )
@@ -157,7 +157,7 @@ class TestDirectionModel:
         """to_dict should handle non-ObjectId processor_id."""
         direction = Direction(
             direction_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             name="Test Direction",
             processor_id="spg_agent_1",  # NOT a valid ObjectId
         )
@@ -168,7 +168,7 @@ class TestDirectionModel:
         """from_dict should correctly parse to_dict output."""
         original = Direction(
             direction_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             name="Test Direction",
             risk_reason="Test risk reason",
         )
@@ -185,7 +185,7 @@ class TestWorkerModel:
         """to_dict should produce valid MongoDB document."""
         worker = Worker(
             worker_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             fuzzer="test_fuzzer",
             sanitizer="address",
         )
@@ -195,16 +195,16 @@ class TestWorkerModel:
         assert result["fuzzer"] == "test_fuzzer"
 
 
-class TestTaskModel:
-    """Tests for Task model."""
+class TestRunModel:
+    """Tests for Run model."""
 
     def test_to_dict_basic(self):
         """to_dict should produce valid MongoDB document."""
-        task = Task(
-            task_id=str(ObjectId()),
+        run = Run(
+            run_id=str(ObjectId()),
             project_name="test_project",
         )
-        result = task.to_dict()
+        result = run.to_dict()
         assert "_id" in result
         assert isinstance(result["_id"], ObjectId)
 
@@ -216,7 +216,7 @@ class TestFuzzerModel:
         """Fuzzer with UUID-style ID should use safe_object_id."""
         fuzzer = Fuzzer(
             fuzzer_id="a1b2c3d4-e5f6-7890-abcd-ef1234567890",  # UUID format
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             fuzzer_name="test_fuzzer",
         )
         result = fuzzer.to_dict()
@@ -230,7 +230,7 @@ class TestCallGraphNodeModel:
     def test_to_dict_with_fuzzer_name_as_id(self):
         """CallGraphNode with fuzzer name as fuzzer_id should work."""
         node = CallGraphNode(
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             fuzzer_id="libpng_read_fuzzer",  # Fuzzer name, not ObjectId
             fuzzer_name="libpng_read_fuzzer",
             function_name="test_func",
@@ -247,7 +247,7 @@ class TestPOVModel:
         """to_dict should produce valid MongoDB document."""
         pov = POV(
             pov_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             suspicious_point_id=str(ObjectId()),
             gen_blob="test code",  # Correct field name
         )
@@ -265,7 +265,7 @@ class TestLLMCallModel:
             call_id=str(ObjectId()),
             agent_id=str(ObjectId()),
             worker_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             model="claude-3-sonnet",
             input_tokens=100,
             output_tokens=50,

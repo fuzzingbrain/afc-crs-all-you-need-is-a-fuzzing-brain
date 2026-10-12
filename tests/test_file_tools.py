@@ -14,8 +14,8 @@ needs_rg = pytest.mark.skipif(RG is None, reason="ripgrep is not installed")
 
 @pytest.fixture
 def workspace(tmp_path):
-    """A workspace shaped like a real task: repo/, diff/, and answers to hide."""
-    ws = tmp_path / "task"
+    """A workspace shaped like a real run: repo/, diff/, and answers to hide."""
+    ws = tmp_path / "run"
     repo = ws / "repo"
     (repo / "src").mkdir(parents=True)
     (repo / ".aixcc" / "vulns" / "vuln_001").mkdir(parents=True)

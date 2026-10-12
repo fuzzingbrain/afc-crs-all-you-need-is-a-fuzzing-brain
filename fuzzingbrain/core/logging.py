@@ -3,7 +3,7 @@
 FuzzingBrain Logging Framework
 
 Centralized logging configuration using loguru.
-Each task run creates a dedicated log directory.
+Each run creates a dedicated log directory.
 """
 
 import sys
@@ -61,7 +61,7 @@ sys.excepthook = _global_exception_handler
 # Remove default handler
 logger.remove()
 
-# Global log directory for current task
+# Global log directory for current run
 _current_log_dir: Optional[Path] = None
 
 # =============================================================================
@@ -93,7 +93,7 @@ def create_log_directories(log_dir: Path, workers: list = None) -> None:
     Create the log directory structure.
 
     Args:
-        log_dir: Base log directory for this task
+        log_dir: Base log directory for this run
         workers: Optional list of (fuzzer, sanitizer) tuples to create worker dirs
     """
     # Create top-level directories
@@ -301,8 +301,8 @@ def get_logo(role: str = "controller") -> str:
 LOGO = get_logo("controller")
 
 
-def _create_task_header(metadata: Dict[str, Any]) -> str:
-    """Create a formatted task metadata header"""
+def _create_run_header(metadata: Dict[str, Any]) -> str:
+    """Create a formatted run metadata header"""
     # Calculate max key length for alignment
     max_key_len = max(len(str(k)) for k in metadata.keys() if metadata[k] is not None)
 
@@ -321,7 +321,7 @@ def _create_task_header(metadata: Dict[str, Any]) -> str:
 
     lines = []
     lines.append("┌" + "─" * width + "┐")
-    lines.append("│" + " TASK METADATA ".center(width) + "│")
+    lines.append("│" + " RUN METADATA ".center(width) + "│")
     lines.append("├" + "─" * width + "┤")
 
     for content in content_lines:
@@ -513,13 +513,13 @@ def get_agent_banner_and_header(metadata: Dict[str, Any]) -> str:
 
 
 def get_log_dir() -> Optional[Path]:
-    """Get current task's log directory"""
+    """Get current run's log directory"""
     return _current_log_dir
 
 
 def set_log_dir(log_dir: Union[str, Path]) -> Path:
     """
-    Set current task's log directory.
+    Set current run's log directory.
 
     Used by worker processes to set the log directory from assignment.
     The directory must already exist (created by main process).
@@ -537,24 +537,24 @@ def set_log_dir(log_dir: Union[str, Path]) -> Path:
 
 def setup_logging(
     project_name: str,
-    task_id: str,
+    run_id: str,
     base_dir: Optional[Path] = None,
     console_level: str = "INFO",
     file_level: str = "DEBUG",
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Path:
     """
-    Setup logging for a task run.
+    Setup logging for a run.
 
-    Creates a log directory: {base_dir}/{project_name}_{task_id}_{timestamp}/
+    Creates a log directory: {base_dir}/{project_name}_{run_id}_{timestamp}/
 
     Args:
         project_name: Project name (e.g., "libpng")
-        task_id: Task ID (e.g., "abc12345")
+        run_id: Run ID (e.g., "abc12345")
         base_dir: Base directory for logs (default: ./logs)
         console_level: Log level for console output
         file_level: Log level for file output
-        metadata: Optional task metadata to include in log header
+        metadata: Optional run metadata to include in log header
 
     Returns:
         Path to the log directory
@@ -569,7 +569,7 @@ def setup_logging(
         base_dir = Path(__file__).parent.parent.parent / "logs"
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = base_dir / f"{project_name}_{task_id}_{timestamp}"
+    log_dir = base_dir / f"{project_name}_{run_id}_{timestamp}"
     log_dir.mkdir(parents=True, exist_ok=True)
 
     _current_log_dir = log_dir
@@ -588,7 +588,7 @@ def setup_logging(
             metadata = {}
         # Add default metadata
         default_metadata = {
-            "Task ID": task_id,
+            "Run ID": run_id,
             "Project": project_name,
             "Start Time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Log Directory": str(log_dir),
@@ -596,7 +596,7 @@ def setup_logging(
         # Merge with provided metadata (provided takes precedence)
         full_metadata = {**default_metadata, **metadata}
 
-        f.write(_create_task_header(full_metadata))
+        f.write(_create_run_header(full_metadata))
         f.write("\n")
 
     # Console handler - colored, concise
@@ -862,7 +862,7 @@ def setup_console_only(level: str = "INFO"):
     )
 
 
-def add_task_log(name: str, level: str = "DEBUG") -> Path:
+def add_run_log(name: str, level: str = "DEBUG") -> Path:
     """
     Add a separate log file for a specific component.
 
@@ -882,24 +882,24 @@ def add_task_log(name: str, level: str = "DEBUG") -> Path:
         log_file,
         level=level,
         format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {message}",
-        filter=lambda record: record["extra"].get("task_log") == name,
+        filter=lambda record: record["extra"].get("run_log") == name,
         encoding="utf-8",
     )
 
     return log_file
 
 
-def get_task_logger(name: str):
+def get_run_logger(name: str):
     """
-    Get a logger bound to a specific task log.
+    Get a logger bound to a specific run log.
 
     Args:
-        name: Task log name
+        name: Run log name
 
     Returns:
         Bound logger instance
     """
-    return logger.bind(task_log=name)
+    return logger.bind(run_log=name)
 
 
 def create_worker_summary(
@@ -960,7 +960,7 @@ def create_worker_summary(
 
 def create_final_summary(
     project_name: str,
-    task_id: str,
+    run_id: str,
     workers: list,
     total_elapsed_minutes: float = 0,
     use_color: bool = False,
@@ -971,18 +971,18 @@ def create_final_summary(
     verified_povs: Optional[int] = None,
 ) -> str:
     """
-    Create final task summary with all workers results.
+    Create final run summary with all workers results.
 
     Args:
         project_name: Project name
-        task_id: Task ID
+        run_id: Run ID
         workers: List of worker result dicts
         total_elapsed_minutes: Total elapsed time in minutes
         use_color: Whether to use ANSI colors for console output
         dedup_count: Number of SPs merged as duplicates
         total_cost: Total API cost in dollars
         budget_limit: Budget limit in dollars (0 = unlimited)
-        exit_reason: Why the task ended (completed, budget_exceeded, timeout, etc.)
+        exit_reason: Why the run ended (completed, budget_exceeded, timeout, etc.)
 
     Returns:
         Formatted summary string
@@ -1035,9 +1035,9 @@ def create_final_summary(
     lines.append("│" + " EXECUTION SUMMARY ".center(table_width) + "│")
     lines.append("├" + "─" * table_width + "┤")
 
-    # Task info
+    # Run info
     lines.append("│" + f"  Project:       {project_name}".ljust(table_width) + "│")
-    lines.append("│" + f"  Task ID:       {task_id[:16]}...".ljust(table_width) + "│")
+    lines.append("│" + f"  Run ID:        {run_id[:16]}...".ljust(table_width) + "│")
     lines.append(
         "│"
         + f"  Total Time:    {total_elapsed_minutes:.1f} minutes".ljust(table_width)
@@ -1277,8 +1277,8 @@ __all__ = [
     "get_worker_banner_and_header",
     "get_analyzer_banner_and_header",
     "get_agent_banner_and_header",
-    "add_task_log",
-    "get_task_logger",
+    "add_run_log",
+    "get_run_logger",
     "get_worker_logger",
     "get_analyzer_logger",
     "get_celery_logger",

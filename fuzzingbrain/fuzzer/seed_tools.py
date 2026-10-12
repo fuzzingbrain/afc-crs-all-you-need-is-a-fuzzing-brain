@@ -40,7 +40,7 @@ _active_seed_worker_id: Optional[str] = None
 
 
 def set_seed_context(
-    task_id: str,
+    run_id: str,
     worker_id: str,
     direction_id: Optional[str] = None,
     sp_id: Optional[str] = None,
@@ -54,7 +54,7 @@ def set_seed_context(
     Set the context for Seed tools (thread-safe).
 
     Args:
-        task_id: Current task ID
+        run_id: Current run ID
         worker_id: Current worker ID
         direction_id: Direction ID being processed (for direction seeds)
         sp_id: SP ID being processed (for FP seeds)
@@ -65,7 +65,7 @@ def set_seed_context(
         workspace_path: Path to workspace directory
     """
     ctx = {
-        "task_id": task_id,
+        "run_id": run_id,
         "worker_id": worker_id,
         "direction_id": direction_id,
         "sp_id": sp_id,
@@ -195,7 +195,7 @@ def _ensure_context(worker_id: str = None) -> Optional[Dict[str, Any]]:
     else:
         ctx = _get_current_context()
 
-    if ctx is None or ctx.get("task_id") is None:
+    if ctx is None or ctx.get("run_id") is None:
         return {
             "success": False,
             "error": (
@@ -310,7 +310,7 @@ def create_seed_impl(
         return err
 
     ctx = _get_context_by_worker_id(worker_id) if worker_id else _get_current_context()
-    task_id = ctx.get("task_id", "")
+    run_id = ctx.get("run_id", "")
     ctx_worker_id = ctx.get("worker_id", "")
     direction_id = ctx.get("direction_id")
     sp_id = ctx.get("sp_id")

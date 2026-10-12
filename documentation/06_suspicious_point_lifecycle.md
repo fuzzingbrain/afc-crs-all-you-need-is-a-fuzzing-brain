@@ -11,7 +11,7 @@ A Suspicious Point represents a potential vulnerability with structured metadata
 | Field | Type | Description |
 |-------|------|-------------|
 | sp_id | str | Unique identifier (UUID) |
-| task_id | str | Parent task reference |
+| run_id | str | Parent run reference |
 | worker_id | str | Creating worker reference |
 | direction_id | str | Associated direction |
 | fuzzer | str | Target fuzzer name |

@@ -25,7 +25,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from .core import (  # noqa: E402
     Config,
-    Task,
+    Run,
     JobType,
     ScanMode,
     setup_logging,
@@ -71,12 +71,12 @@ atexit.register(reset_terminal)
 # =============================================================================
 
 _shutdown_requested = False
-_current_task_id: Optional[str] = None
+_current_run_id: Optional[str] = None
 
 
 def signal_handler(signum, frame):
     """Handle Ctrl+C gracefully"""
-    global _shutdown_requested, _repos, _current_task_id
+    global _shutdown_requested, _repos, _current_run_id
     if _shutdown_requested:
         # Second Ctrl+C - force exit
         print("\n\033[0;31m[FORCE]\033[0m Forcing shutdown...")
@@ -88,25 +88,25 @@ def signal_handler(signum, frame):
         "\n\033[1;33m[INTERRUPT]\033[0m Shutting down gracefully... (Press Ctrl+C again to force)"
     )
 
-    # If no task was started, exit immediately
-    if not _repos or not _current_task_id:
+    # If no run was started, exit immediately
+    if not _repos or not _current_run_id:
         reset_terminal()
         sys.exit(0)
 
-    # Mark workers and task as cancelled (scoped to current task only)
+    # Mark workers and run as cancelled (scoped to current run only)
     try:
         from bson import ObjectId as _ObjectId
 
-        task_oid = (
-            _ObjectId(_current_task_id)
-            if len(_current_task_id) == 24
-            else _current_task_id
+        run_oid = (
+            _ObjectId(_current_run_id)
+            if len(_current_run_id) == 24
+            else _current_run_id
         )
 
-        # Update workers for THIS task only
+        # Update workers for THIS run only
         result = _repos.workers.collection.update_many(
             {
-                "task_id": task_oid,
+                "run_id": run_oid,
                 "status": {"$in": ["pending", "building", "running"]},
             },
             {
@@ -118,10 +118,10 @@ def signal_handler(signum, frame):
         )
         worker_count = result.modified_count
 
-        # Update THIS task only
-        task_result = _repos.tasks.collection.update_one(
+        # Update THIS run only
+        run_result = _repos.runs.collection.update_one(
             {
-                "_id": task_oid,
+                "_id": run_oid,
                 "status": {"$in": ["pending", "running"]},
             },
             {
@@ -131,15 +131,15 @@ def signal_handler(signum, frame):
                 }
             },
         )
-        task_count = task_result.modified_count
+        run_count = run_result.modified_count
 
-        # Cancel in-memory agents for this task
+        # Cancel in-memory agents for this run
         try:
             from .agents.context import get_all_agent_contexts, force_cleanup_agents
             from .db import get_database
 
             for ctx in get_all_agent_contexts().values():
-                if ctx.task_id == _current_task_id and ctx.status == "running":
+                if ctx.run_id == _current_run_id and ctx.status == "running":
                     try:
                         ctx.cancel()
                     except Exception:
@@ -151,29 +151,29 @@ def signal_handler(signum, frame):
             except Exception:
                 db = None
             if db is not None:
-                force_cleanup_agents(_current_task_id, db)
+                force_cleanup_agents(_current_run_id, db)
         except Exception:
             pass
 
-        if worker_count > 0 or task_count > 0:
+        if worker_count > 0 or run_count > 0:
             print(
-                f"\033[1;33m[INTERRUPT]\033[0m Marked {worker_count} worker(s) and {task_count} task(s) as cancelled"
+                f"\033[1;33m[INTERRUPT]\033[0m Marked {worker_count} worker(s) and {run_count} run(s) as cancelled"
             )
 
-        # Display summary for current task
+        # Display summary for current run
         try:
             from .core.logging import create_final_summary
             from datetime import datetime
 
-            recent_task = _repos.tasks.collection.find_one({"_id": task_oid})
-            if recent_task:
-                task_id = str(
-                    recent_task.get("task_id") or recent_task.get("_id") or "unknown"
+            recent_run = _repos.runs.collection.find_one({"_id": run_oid})
+            if recent_run:
+                run_id = str(
+                    recent_run.get("run_id") or recent_run.get("_id") or "unknown"
                 )
-                project_name = recent_task.get("project_name", "unknown")
+                project_name = recent_run.get("project_name", "unknown")
 
-                # Get workers for this task
-                workers = list(_repos.workers.collection.find({"task_id": task_oid}))
+                # Get workers for this run
+                workers = list(_repos.workers.collection.find({"run_id": run_oid}))
                 worker_results = []
                 for w in workers:
                     started = w.get("started_at")
@@ -187,7 +187,7 @@ def signal_handler(signum, frame):
                     # Query SP count from database
                     sp_count = _repos.suspicious_points.count(
                         {
-                            "task_id": task_oid,
+                            "run_id": run_oid,
                             "sources": {
                                 "$elemMatch": {
                                     "harness_name": fuzzer,
@@ -202,7 +202,7 @@ def signal_handler(signum, frame):
                         str(sp.get("suspicious_point_id") or sp.get("_id"))
                         for sp in _repos.suspicious_points.collection.find(
                             {
-                                "task_id": task_oid,
+                                "run_id": run_oid,
                                 "sources": {
                                     "$elemMatch": {
                                         "harness_name": fuzzer,
@@ -223,7 +223,7 @@ def signal_handler(signum, frame):
                                 sp_oids.append(x)
                         pov_count = _repos.povs.count(
                             {
-                                "task_id": task_oid,
+                                "run_id": run_oid,
                                 "suspicious_point_id": {"$in": sp_oids},
                                 "is_successful": True,
                             }
@@ -231,7 +231,7 @@ def signal_handler(signum, frame):
                     # Also count fuzzer-discovered POVs
                     fuzzer_pov_count = _repos.povs.count(
                         {
-                            "task_id": task_oid,
+                            "run_id": run_oid,
                             "harness_name": fuzzer,
                             "sanitizer": sanitizer,
                             "suspicious_point_id": {"$in": ["", None]},
@@ -253,16 +253,16 @@ def signal_handler(signum, frame):
                     )
 
                 # Read cost from database
-                total_cost = recent_task.get("llm_cost", 0.0)
-                budget_limit = recent_task.get("budget_limit", 0.0)
+                total_cost = recent_run.get("llm_cost", 0.0)
+                budget_limit = recent_run.get("budget_limit", 0.0)
 
                 # Calculate elapsed time
-                created_at = recent_task.get("created_at", datetime.now())
+                created_at = recent_run.get("created_at", datetime.now())
                 elapsed_minutes = (datetime.now() - created_at).total_seconds() / 60
 
                 summary = create_final_summary(
                     project_name=project_name,
-                    task_id=task_id,
+                    run_id=run_id,
                     workers=worker_results,
                     total_elapsed_minutes=elapsed_minutes,
                     use_color=True,
@@ -401,17 +401,17 @@ def parse_args(argv=None) -> argparse.Namespace:
 
 
 # =============================================================================
-# Create/Run Task
+# The Run record
 # =============================================================================
 
-def create_task_from_config(config: Config) -> Task:
-    """The Task record the pipeline and the database work with."""
+def create_run(config: Config) -> Run:
+    """The Run record the pipeline and the database work with."""
     workspace = config.workspace
-    return Task(
-        task_id=config.task_id,
+    return Run(
+        run_id=config.run_id,
         task_type=JobType(config.task_type),
         scan_mode=ScanMode(config.scan_mode),
-        task_path=workspace,
+        workspace_path=workspace,
         src_path=f"{workspace}/repo",
         fuzz_tooling_path=f"{workspace}/fuzz-tooling",
         diff_path=f"{workspace}/diff" if config.scan_mode == "delta" else None,
@@ -433,26 +433,26 @@ def create_task_from_config(config: Config) -> Task:
 
 def run_task(config: Config) -> dict:
     """Run one task end to end. Every way of starting FuzzingBrain ends here."""
-    global _current_task_id
-    task = create_task_from_config(config)
-    _current_task_id = task.task_id
+    global _current_run_id
+    run = create_run(config)
+    _current_run_id = run.run_id
 
     log_dir = setup_logging(
         config.project_name,
-        task.task_id,
+        run.run_id,
         metadata={label: value for label, value in config.summary()},
     )
     setup_celery_logging()
     print_info(f"Logs: {log_dir}")
-    print_step("Starting task processing pipeline...")
+    print_step("Starting run processing pipeline...")
 
-    from .core.task_processor import process_task as run_processor
+    from .core.run_processor import process_run
 
-    result = run_processor(task, config, get_repos())
+    result = process_run(run, config, get_repos())
 
     print("")
     if result["status"] == "error":
-        print_error(f"Task failed: {result['message']}")
+        print_error(f"Run failed: {result['message']}")
     else:
         print_info(f"Status: {result['status']}")
         print_info(f"Message: {result['message']}")
@@ -526,7 +526,7 @@ def main(argv=None) -> int:
 
     # 8. Output directory
     Path(config.workspace).mkdir(parents=True, exist_ok=True)
-    (Path(config.workspace) / "run_id").write_text(config.task_id + "\n")
+    (Path(config.workspace) / "run_id").write_text(config.run_id + "\n")
 
     # 9. Run
     set_detect_leaks(config.detect_leaks)

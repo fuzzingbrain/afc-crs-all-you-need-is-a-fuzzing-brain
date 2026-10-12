@@ -20,16 +20,16 @@ class TestAgentContext:
 
     def test_context_creation_with_valid_ids(self):
         """Context should be created with valid ObjectIds."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         worker_id = str(ObjectId())
 
         ctx = AgentContext(
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
             agent_type="SPVerifier",
         )
 
-        assert ctx.task_id == task_id
+        assert ctx.run_id == run_id
         assert ctx.worker_id == worker_id
         assert ctx.agent_type == "SPVerifier"
         # agent_id should be auto-generated ObjectId
@@ -38,14 +38,14 @@ class TestAgentContext:
     def test_context_to_dict(self):
         """to_dict should produce valid dictionary."""
         ctx = AgentContext(
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             worker_id=str(ObjectId()),
             agent_type="SPVerifier",
         )
 
         result = ctx.to_dict()
         assert "agent_id" in result
-        assert "task_id" in result
+        assert "run_id" in result
         assert "worker_id" in result
         assert "agent_type" in result
 
@@ -56,17 +56,17 @@ class TestSPVerifier:
     def test_instantiation_with_valid_worker_id(self):
         """SPVerifier should accept valid ObjectId worker_id."""
         worker_id = str(ObjectId())
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
 
         verifier = SPVerifier(
             fuzzer="test_fuzzer",
             sanitizer="address",
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
         )
 
         assert verifier.worker_id == worker_id
-        assert verifier.task_id == task_id
+        assert verifier.run_id == run_id
 
     def test_set_context_method_exists(self):
         """SPVerifier should have set_context method (not set_verify_context)."""
@@ -102,7 +102,7 @@ class TestPOVAgent:
     def test_instantiation_with_valid_worker_id(self):
         """POVAgent should accept valid ObjectId worker_id."""
         worker_id = str(ObjectId())
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
 
         # Mock repos to avoid database dependency
         mock_repos = MagicMock()
@@ -110,13 +110,13 @@ class TestPOVAgent:
         agent = POVAgent(
             fuzzer="test_fuzzer",
             sanitizer="address",
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
             repos=mock_repos,
         )
 
         assert agent.worker_id == worker_id
-        assert agent.task_id == task_id
+        assert agent.run_id == run_id
 
 
 class TestSuspiciousPointToDict:
@@ -126,7 +126,7 @@ class TestSuspiciousPointToDict:
         """Should handle valid ObjectId processor_id."""
         sp = SuspiciousPoint(
             suspicious_point_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             function_name="test_func",
             processor_id=str(ObjectId()),
         )
@@ -139,7 +139,7 @@ class TestSuspiciousPointToDict:
         """Should handle non-ObjectId processor_id like 'verify_1'."""
         sp = SuspiciousPoint(
             suspicious_point_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             function_name="test_func",
             processor_id="verify_1",
         )
@@ -152,7 +152,7 @@ class TestSuspiciousPointToDict:
         """Should handle None processor_id."""
         sp = SuspiciousPoint(
             suspicious_point_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             function_name="test_func",
             processor_id=None,
         )

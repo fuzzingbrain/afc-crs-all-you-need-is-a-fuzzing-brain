@@ -52,14 +52,14 @@ class TestDirectionFunctionsSurviveWithoutAnIndex:
         from fuzzingbrain.worker.strategies.pov_fullscan import POVFullscanStrategy
 
         class _Functions:
-            def find_by_name(self, task_id, name):
+            def find_by_name(self, run_id, name):
                 return found.get(name)
 
         class _Repos:
             functions = _Functions()
 
         s = object.__new__(POVFullscanStrategy)
-        s.task_id = "t1"
+        s.run_id = "t1"
         s.repos = _Repos()
         return s
 
@@ -68,7 +68,7 @@ class TestDirectionFunctionsSurviveWithoutAnIndex:
         func = s._resolve_function("xmlParseCDSect")
         assert func is not None
         assert func.name == "xmlParseCDSect"
-        assert func.task_id == "t1"
+        assert func.run_id == "t1"
         # No body: the SP agent reads it with Read/Grep, which is what it does
         # for an indexed function whose content is stale anyway.
         assert func.content == ""
@@ -77,7 +77,7 @@ class TestDirectionFunctionsSurviveWithoutAnIndex:
     def test_indexed_name_is_returned_unchanged(self):
         from fuzzingbrain.core.models.function import Function
 
-        real = Function(task_id="t1", name="xmlParseCDSect", content="int f(){}")
+        real = Function(run_id="t1", name="xmlParseCDSect", content="int f(){}")
         s = self._strategy({"xmlParseCDSect": real})
         assert s._resolve_function("xmlParseCDSect") is real
 
@@ -151,7 +151,7 @@ class TestAFuzzerCrashCarriesItsSignature:
 
     def test_the_worker_promotion_path_records_it(self):
         # The worker-local FuzzerManager monitor is the single crash->POV
-        # promoter (the task-level dispatcher monitor no longer wires on_crash),
+        # promoter (the run-level dispatcher monitor no longer wires on_crash),
         # so the live promotion path must carry the signature onto the POV too.
         import inspect
 
@@ -165,7 +165,7 @@ class TestAFuzzerCrashCarriesItsSignature:
         from fuzzingbrain.fuzzer.models import CrashRecord
 
         rec = CrashRecord(
-            task_id="0" * 24,
+            run_id="0" * 24,
             worker_id="1" * 24,
             crash_path="/x",
             crash_hash="h",

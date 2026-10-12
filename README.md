@@ -73,11 +73,11 @@ what to expect. Measured at 14.6 minutes and $2.14 against its $20 cap.
 ### What a run leaves behind
 
 ```
-workspace/<project>_<task_id>/results/
+workspace/<project>_<run_id>/results/
 ├── povs/        # verified proof-of-vulnerability inputs
 ├── patches/     # proposed fixes
 └── report.json  # run summary
-logs/<project>_<task_id>_<timestamp>/
+logs/<project>_<run_id>_<timestamp>/
 ```
 
 Nothing is reported that has not crashed a real build: every candidate input is

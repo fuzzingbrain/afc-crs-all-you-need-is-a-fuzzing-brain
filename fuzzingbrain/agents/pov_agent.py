@@ -36,7 +36,7 @@ class POVResult:
     # Identifiers
     pov_id: str = ""
     suspicious_point_id: str = ""
-    task_id: str = ""
+    run_id: str = ""
 
     # Status
     success: bool = False
@@ -60,7 +60,7 @@ class POVResult:
         return {
             "pov_id": self.pov_id,
             "suspicious_point_id": self.suspicious_point_id,
-            "task_id": self.task_id,
+            "run_id": self.run_id,
             "success": self.success,
             "crashed": self.crashed,
             "vuln_type": self.vuln_type,
@@ -117,7 +117,7 @@ class POVAgent(BaseAgent):
         max_pov_attempts: int = 20,
         verbose: bool = True,
         # Context
-        task_id: str = "",
+        run_id: str = "",
         worker_id: str = "",
         output_dir: Optional[Path] = None,
         log_dir: Optional[Path] = None,
@@ -149,7 +149,7 @@ class POVAgent(BaseAgent):
             max_iterations: Maximum agent loop iterations (default 300)
             max_pov_attempts: Maximum POV generation attempts (default 40)
             verbose: Whether to log progress
-            task_id: Task ID
+            run_id: Run ID
             worker_id: Worker ID
             output_dir: Directory to save POV files
             log_dir: Directory for log files
@@ -167,7 +167,7 @@ class POVAgent(BaseAgent):
             model=model,
             max_iterations=max_iterations,
             verbose=verbose,
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
             log_dir=log_dir,
             index=index,
@@ -371,12 +371,12 @@ class POVAgent(BaseAgent):
         if self._fuzzer_source is not None:
             return self._fuzzer_source
 
-        if not self.repos or not self.task_id or not self.fuzzer:
+        if not self.repos or not self.run_id or not self.fuzzer:
             return None
 
         try:
             # Get fuzzer info from database
-            fuzzer_obj = self.repos.fuzzers.find_by_name(self.task_id, self.fuzzer)
+            fuzzer_obj = self.repos.fuzzers.find_by_name(self.run_id, self.fuzzer)
             if not fuzzer_obj or not fuzzer_obj.source_path:
                 logger.warning(
                     f"[POVAgent] Fuzzer source path not found for {self.fuzzer}"
@@ -511,7 +511,7 @@ Your PoC must:
         fuzzer_source = self._load_fuzzer_source()
 
         set_pov_context(
-            task_id=self.task_id,
+            run_id=self.run_id,
             worker_id=agent_id,  # The id run_async bound the MCP server to
             output_dir=self.output_dir,
             repos=self.repos,
@@ -997,7 +997,7 @@ Call create_pov (or reach_probe to diagnose) with NEW generator code NOW — eve
             self._log(f"POV generation failed: {e}", level="ERROR")
             return POVResult(
                 suspicious_point_id=sp_id,
-                task_id=self.task_id,
+                run_id=self.run_id,
                 success=False,
                 error_msg=str(e),
                 iterations=self.total_iterations,
@@ -1008,7 +1008,7 @@ Call create_pov (or reach_probe to diagnose) with NEW generator code NOW — eve
         result = POVResult(
             pov_id=self.successful_pov_id or "",
             suspicious_point_id=sp_id,
-            task_id=self.task_id,
+            run_id=self.run_id,
             success=self.pov_success,
             crashed=self.pov_success,
             iterations=self.total_iterations,

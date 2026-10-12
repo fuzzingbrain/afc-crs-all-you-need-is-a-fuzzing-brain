@@ -7,8 +7,8 @@ Contains core business logic, configuration, and models.
 
 from .config import Config, FuzzerWorkerConfig
 
-# NOTE: task_processor and dispatcher are NOT imported here to avoid circular dependency
-# Import directly: from fuzzingbrain.core.task_processor import TaskProcessor, process_task
+# NOTE: run_processor and dispatcher are NOT imported here to avoid circular dependency
+# Import directly: from fuzzingbrain.core.run_processor import RunProcessor, process_run
 # Import directly: from fuzzingbrain.core.dispatcher import WorkerDispatcher
 from .fuzzer_builder import FuzzerBuilder
 from .infrastructure import InfrastructureManager, RedisManager, CeleryWorkerManager
@@ -18,15 +18,15 @@ from .logging import (
     setup_celery_logging,
     setup_console_only,
     get_log_dir,
-    add_task_log,
-    get_task_logger,
+    add_run_log,
+    get_run_logger,
     get_analyzer_banner_and_header,
 )
 
 # Re-export models
 from .models import (
-    Task,
-    TaskStatus,
+    Run,
+    RunStatus,
     JobType,
     ScanMode,
     POV,
@@ -41,8 +41,8 @@ __all__ = [
     # Config
     "Config",
     "FuzzerWorkerConfig",
-    # NOTE: TaskProcessor, process_task, WorkerDispatcher not exported (circular dependency)
-    # Import directly: from fuzzingbrain.core.task_processor import TaskProcessor, process_task
+    # NOTE: RunProcessor, process_run, WorkerDispatcher not exported (circular dependency)
+    # Import directly: from fuzzingbrain.core.run_processor import RunProcessor, process_run
     # Import directly: from fuzzingbrain.core.dispatcher import WorkerDispatcher
     # Builder
     "FuzzerBuilder",
@@ -56,12 +56,12 @@ __all__ = [
     "setup_celery_logging",
     "setup_console_only",
     "get_log_dir",
-    "add_task_log",
-    "get_task_logger",
+    "add_run_log",
+    "get_run_logger",
     "get_analyzer_banner_and_header",
     # Models
-    "Task",
-    "TaskStatus",
+    "Run",
+    "RunStatus",
     "JobType",
     "ScanMode",
     "POV",

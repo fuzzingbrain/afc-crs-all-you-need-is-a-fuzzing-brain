@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""How many fuzzers are allowed to run at once, across the whole task.
+"""How many fuzzers are allowed to run at once, across the whole run.
 
 Nothing in the system used to count them. A worker starts one global fuzzer, and
 every POV agent that picks up a suspicious point starts another for that SP, so
@@ -9,9 +9,9 @@ parallelism and become contention: every fuzzer runs slower, the builds that
 share the box time out waiting for CPU, and the run reports "no crash found"
 because nothing got enough cycles to find one.
 
-The budget is task-wide rather than per-worker because workers are separate
+The budget is run-wide rather than per-worker because workers are separate
 Celery processes; a counter inside one of them bounds nothing. Redis holds the
-slots, keyed by task, with the holder's pid recorded so a worker that dies
+slots, keyed by run, with the holder's pid recorded so a worker that dies
 without releasing does not leak its slot forever -- the next acquirer notices
 the pid is gone and takes it back.
 
@@ -77,17 +77,17 @@ def _pid_alive(pid: int) -> bool:
 
 
 class FuzzerBudget:
-    """The task's allowance of concurrently running fuzzers."""
+    """The run's allowance of concurrently running fuzzers."""
 
     def __init__(
         self,
-        task_id: str,
+        run_id: str,
         limit: int = DEFAULT_MAX_PARALLEL_FUZZERS,
         redis_url: Optional[str] = None,
     ):
-        self.task_id = task_id
+        self.run_id = run_id
         self.limit = max(1, int(limit))
-        self.key = f"fb:fuzzer:slots:{task_id}"
+        self.key = f"fb:fuzzer:slots:{run_id}"
         self._redis = None
         url = redis_url or os.getenv("REDIS_URL", "redis://localhost:6379/0")
         try:
@@ -149,7 +149,7 @@ class FuzzerBudget:
     # -- the two operations that matter -------------------------------------
 
     def acquire(self, slot_id: str, kind: str = "fuzzer") -> bool:
-        """Take a slot for `slot_id`, or report that the task is at its limit.
+        """Take a slot for `slot_id`, or report that the run is at its limit.
 
         Re-acquiring a slot already held by this id succeeds: a fuzzer that is
         restarted keeps the slot it already had rather than needing a free one.
@@ -173,7 +173,7 @@ class FuzzerBudget:
                     return True
                 logger.warning(
                     f"[FuzzerBudget] {kind} '{slot_id}' refused: {self.limit} "
-                    f"fuzzers already running for task {self.task_id}"
+                    f"fuzzers already running for run {self.run_id}"
                 )
                 return False
             except Exception as e:
@@ -214,7 +214,7 @@ class FuzzerBudget:
             pass
 
     def clear(self) -> None:
-        """Drop the whole task's ledger. For the dispatcher, once it is over."""
+        """Drop the whole run's ledger. For the dispatcher, once it is over."""
         with _local_lock:
             _local_slots.clear()
         if self._redis is None:

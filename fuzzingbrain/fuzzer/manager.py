@@ -5,7 +5,7 @@ Fuzzer Manager
 Worker-level manager for fuzzer instances.
 Manages Global Fuzzer and SP Fuzzer Pool.
 
-Note: FuzzerMonitor is now Task-level (passed in from Dispatcher).
+Note: FuzzerMonitor is now Run-level (passed in from Dispatcher).
 """
 
 import hashlib
@@ -34,13 +34,13 @@ class FuzzerManager:
     Responsibilities:
     - Manage Global Fuzzer for this worker
     - Manage SP Fuzzer Pool for this worker
-    - Register/unregister crash directories with Task-level FuzzerMonitor
+    - Register/unregister crash directories with Run-level FuzzerMonitor
     - Seed routing (Direction/FP -> Global, POV blob -> SP)
     """
 
     def __init__(
         self,
-        task_id: str,
+        run_id: str,
         worker_id: str,
         fuzzer_path: Path,
         docker_image: str,
@@ -56,7 +56,7 @@ class FuzzerManager:
         Initialize FuzzerManager.
 
         Args:
-            task_id: Parent task ID
+            run_id: Parent run ID
             worker_id: Worker identifier
             fuzzer_path: Path to fuzzer binary
             docker_image: Docker image for running fuzzers
@@ -65,10 +65,10 @@ class FuzzerManager:
             sanitizer: Sanitizer type
             global_config: Configuration for Global Fuzzer
             sp_config: Configuration for SP Fuzzers
-            crash_monitor: Task-level FuzzerMonitor (shared across workers)
-            max_parallel_fuzzers: task-wide ceiling on running fuzzers
+            crash_monitor: Run-level FuzzerMonitor (shared across workers)
+            max_parallel_fuzzers: run-wide ceiling on running fuzzers
         """
-        self.task_id = task_id
+        self.run_id = run_id
         self.worker_id = worker_id
         self.fuzzer_path = Path(fuzzer_path)
         self.docker_image = docker_image
@@ -86,14 +86,14 @@ class FuzzerManager:
         # SP Fuzzer Pool: sp_id -> FuzzerInstance
         self.sp_fuzzers: Dict[str, FuzzerInstance] = {}
 
-        # Task-level Crash Monitor (shared, passed from Dispatcher)
+        # Run-level Crash Monitor (shared, passed from Dispatcher)
         # If not provided, create a worker-local one (for backward compatibility)
         if crash_monitor is not None:
             self.crash_monitor = crash_monitor
             self._owns_crash_monitor = False
         else:
             # Backward compatibility: create worker-local monitor
-            self.crash_monitor = FuzzerMonitor(task_id=task_id)
+            self.crash_monitor = FuzzerMonitor(run_id=run_id)
             self._owns_crash_monitor = True
 
         # Directories
@@ -112,10 +112,10 @@ class FuzzerManager:
         self.fp_seeds: List[SeedInfo] = []
         self.probe_seeds: List[SeedInfo] = []
 
-        # The task's allowance of concurrent fuzzers, shared with every other
+        # The run's allowance of concurrent fuzzers, shared with every other
         # worker through Redis. Slot names carry the worker id because every
         # worker calls its own global fuzzer "global".
-        self.budget = FuzzerBudget(task_id=task_id, limit=max_parallel_fuzzers)
+        self.budget = FuzzerBudget(run_id=run_id, limit=max_parallel_fuzzers)
 
         logger.info(
             f"[{worker_id}] ╔══════════════════════════════════════════════════════════════╗"
@@ -133,7 +133,7 @@ class FuzzerManager:
         )
 
     def _slot(self, instance_id: str) -> str:
-        """This fuzzer's name in the task-wide ledger.
+        """This fuzzer's name in the run-wide ledger.
 
         The worker id is part of it because every worker names its own global
         fuzzer "global", and two workers must not share one slot.
@@ -162,10 +162,10 @@ class FuzzerManager:
 
         # Take a slot before spending anything on setup. The global fuzzer is
         # started first, before this worker's POV agents ask for theirs, so it
-        # is the one that gets a slot when the task is near its ceiling.
+        # is the one that gets a slot when the run is near its ceiling.
         if not self.budget.acquire(self._slot("global"), kind="global fuzzer"):
             logger.warning(
-                f"[{self.worker_id}] Global fuzzer not started: the task is at "
+                f"[{self.worker_id}] Global fuzzer not started: the run is at "
                 f"its limit of {self.budget.limit} concurrent fuzzers"
             )
             return False
@@ -179,7 +179,7 @@ class FuzzerManager:
             crashes_dir=self.global_crashes_dir,
             fuzzer_type=FuzzerType.GLOBAL,
             config=self.global_config,
-            task_id=self.task_id,
+            run_id=self.run_id,
             no_oom=is_no_oom(self.fuzzer_name),
             sanitizer=self.sanitizer,
         )
@@ -394,11 +394,11 @@ class FuzzerManager:
             return False
 
         # An SP fuzzer is a bonus alongside the POV agent, not a requirement:
-        # when the task is at its ceiling the agent runs without one, which is
+        # when the run is at its ceiling the agent runs without one, which is
         # why the caller treats False as "carry on" rather than as an error.
         if not self.budget.acquire(self._slot(sp_id), kind="SP fuzzer"):
             logger.info(
-                f"[{self.worker_id}] SP fuzzer for {sp_id[:8]} skipped: the task "
+                f"[{self.worker_id}] SP fuzzer for {sp_id[:8]} skipped: the run "
                 f"is at its limit of {self.budget.limit} concurrent fuzzers"
             )
             return False
@@ -418,7 +418,7 @@ class FuzzerManager:
             crashes_dir=sp_crashes_dir,
             fuzzer_type=FuzzerType.SP,
             config=self.sp_config,
-            task_id=self.task_id,
+            run_id=self.run_id,
             no_oom=is_no_oom(self.fuzzer_name),
             sanitizer=self.sanitizer,
         )
@@ -596,7 +596,7 @@ class FuzzerManager:
             Status dictionary
         """
         status = {
-            "task_id": self.task_id,
+            "run_id": self.run_id,
             "worker_id": self.worker_id,
             "fuzzer_name": self.fuzzer_name,
             "sanitizer": self.sanitizer,
@@ -679,7 +679,7 @@ class FuzzerManager:
         """
         Shutdown all fuzzers for this worker.
 
-        Note: Does NOT stop the FuzzerMonitor (that's Task-level, managed by Dispatcher).
+        Note: Does NOT stop the FuzzerMonitor (that's Run-level, managed by Dispatcher).
         """
         logger.info(f"[FuzzerManager:{self.worker_id}] Shutting down...")
 

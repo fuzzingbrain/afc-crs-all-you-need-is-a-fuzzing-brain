@@ -9,7 +9,7 @@ Business invariants under test:
 2. fuzzer is system-injected from ContextVar, not from LLM
 3. Invalid risk_level is rejected before reaching the server
 4. Created directions have PENDING status so find_pending() can retrieve them
-5. find_pending filters by task_id + fuzzer (cross-task/cross-fuzzer isolation)
+5. find_pending filters by run_id + fuzzer (cross-run/cross-fuzzer isolation)
 6. Direction planning failure → empty list → pipeline doesn't crash
 """
 
@@ -47,10 +47,10 @@ def _mock_client_create_success(direction_id=None):
     return client
 
 
-def _make_direction(task_id, fuzzer, name="test_dir", risk_level="high"):
+def _make_direction(run_id, fuzzer, name="test_dir", risk_level="high"):
     """Create a Direction with given fields."""
     return Direction(
-        task_id=task_id,
+        run_id=run_id,
         fuzzer=fuzzer,
         name=name,
         risk_level=risk_level,
@@ -218,7 +218,7 @@ class TestRiskLevelValidation:
 class TestDirectionPendingHandoff:
     """
     Business rule: a newly created Direction must have status=PENDING.
-    find_pending(task_id, fuzzer) must return it.
+    find_pending(run_id, fuzzer) must return it.
     If status is wrong, find_pending won't find it and it's dead.
     """
 
@@ -229,75 +229,75 @@ class TestDirectionPendingHandoff:
 
     def test_save_and_find_pending_returns_direction(self, direction_repo):
         """Save a direction → find_pending must return it."""
-        task_id = str(ObjectId())
-        d = _make_direction(task_id, "fuzz_png", name="Chunk Parsing")
+        run_id = str(ObjectId())
+        d = _make_direction(run_id, "fuzz_png", name="Chunk Parsing")
         direction_repo.save(d)
 
-        found = direction_repo.find_pending(task_id, "fuzz_png")
+        found = direction_repo.find_pending(run_id, "fuzz_png")
         assert len(found) == 1
         assert found[0].name == "Chunk Parsing"
         assert found[0].status == "pending"
 
     def test_find_pending_excludes_completed(self, direction_repo):
         """Completed directions must NOT appear in find_pending."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
 
-        pending = _make_direction(task_id, "fuzz_png", name="pending_dir")
-        completed = _make_direction(task_id, "fuzz_png", name="completed_dir")
+        pending = _make_direction(run_id, "fuzz_png", name="pending_dir")
+        completed = _make_direction(run_id, "fuzz_png", name="completed_dir")
         completed.status = DirectionStatus.COMPLETED.value
 
         direction_repo.save(pending)
         direction_repo.save(completed)
 
-        found = direction_repo.find_pending(task_id, "fuzz_png")
+        found = direction_repo.find_pending(run_id, "fuzz_png")
         assert len(found) == 1
         assert found[0].name == "pending_dir"
 
     def test_find_pending_isolates_by_fuzzer(self, direction_repo):
         """find_pending(fuzzer='fuzz_png') must not return fuzz_icc's directions."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
 
-        d_png = _make_direction(task_id, "fuzz_png", name="png_dir")
-        d_icc = _make_direction(task_id, "fuzz_icc", name="icc_dir")
+        d_png = _make_direction(run_id, "fuzz_png", name="png_dir")
+        d_icc = _make_direction(run_id, "fuzz_icc", name="icc_dir")
 
         direction_repo.save(d_png)
         direction_repo.save(d_icc)
 
-        found_png = direction_repo.find_pending(task_id, "fuzz_png")
-        found_icc = direction_repo.find_pending(task_id, "fuzz_icc")
+        found_png = direction_repo.find_pending(run_id, "fuzz_png")
+        found_icc = direction_repo.find_pending(run_id, "fuzz_icc")
 
         assert len(found_png) == 1
         assert found_png[0].name == "png_dir"
         assert len(found_icc) == 1
         assert found_icc[0].name == "icc_dir"
 
-    def test_find_pending_isolates_by_task(self, direction_repo):
-        """Directions from task A must not appear when querying task B."""
-        task_a = str(ObjectId())
-        task_b = str(ObjectId())
+    def test_find_pending_isolates_by_run(self, direction_repo):
+        """Directions from run A must not appear when querying run B."""
+        run_a = str(ObjectId())
+        run_b = str(ObjectId())
 
-        d_a = _make_direction(task_a, "fuzz_png", name="task_a_dir")
-        d_b = _make_direction(task_b, "fuzz_png", name="task_b_dir")
+        d_a = _make_direction(run_a, "fuzz_png", name="run_a_dir")
+        d_b = _make_direction(run_b, "fuzz_png", name="run_b_dir")
 
         direction_repo.save(d_a)
         direction_repo.save(d_b)
 
-        found_a = direction_repo.find_pending(task_a, "fuzz_png")
-        found_b = direction_repo.find_pending(task_b, "fuzz_png")
+        found_a = direction_repo.find_pending(run_a, "fuzz_png")
+        found_b = direction_repo.find_pending(run_b, "fuzz_png")
 
         assert len(found_a) == 1
-        assert found_a[0].name == "task_a_dir"
+        assert found_a[0].name == "run_a_dir"
         assert len(found_b) == 1
-        assert found_b[0].name == "task_b_dir"
+        assert found_b[0].name == "run_b_dir"
 
     def test_multiple_directions_all_returned(self, direction_repo):
         """3 pending directions → find_pending returns all 3."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         for i in range(3):
-            d = _make_direction(task_id, "fuzz_png", name=f"dir_{i}")
+            d = _make_direction(run_id, "fuzz_png", name=f"dir_{i}")
             direction_repo.save(d)
 
-        found = direction_repo.find_pending(task_id, "fuzz_png")
+        found = direction_repo.find_pending(run_id, "fuzz_png")
         assert len(found) == 3
 
 
@@ -318,7 +318,7 @@ class TestPlanningFailureHandling:
 
         # Create a minimal mock executor
         executor = MagicMock()
-        executor.task_id = str(ObjectId())
+        executor.run_id = str(ObjectId())
         executor.worker_id = str(ObjectId())
         executor.fuzzer = "fuzz_png"
         executor.sanitizer = "address"
@@ -350,7 +350,7 @@ class TestPlanningFailureHandling:
         from fuzzingbrain.worker.strategies.pov_fullscan import POVFullscanStrategy
 
         executor = MagicMock()
-        executor.task_id = str(ObjectId())
+        executor.run_id = str(ObjectId())
         executor.worker_id = str(ObjectId())
         executor.fuzzer = "fuzz_png"
         executor.sanitizer = "address"
@@ -507,7 +507,7 @@ class TestCreatedByAgentId:
 
         server = AnalysisServer.__new__(AnalysisServer)
         server.repos = repos
-        server.task_id = str(ObjectId())
+        server.run_id = str(ObjectId())
 
         agent_id = str(ObjectId())
         result = server._create_direction_sync(

@@ -26,10 +26,10 @@ FuzzingBrain supports four entry modes:
 | POST | `/api/v1/patch` | Generate patches |
 | POST | `/api/v1/pov-patch` | Full POV + Patch pipeline |
 | POST | `/api/v1/harness` | Generate harnesses |
-| GET | `/api/v1/status/{task_id}` | Query task status |
+| GET | `/api/v1/status/{run_id}` | Query task status |
 | GET | `/api/v1/tasks` | List all tasks |
-| GET | `/api/v1/pov/{task_id}` | Get POV results |
-| GET | `/api/v1/patch/{task_id}` | Get Patch results |
+| GET | `/api/v1/pov/{run_id}` | Get POV results |
+| GET | `/api/v1/patch/{run_id}` | Get Patch results |
 
 ### Request Parameters
 
@@ -51,13 +51,13 @@ FuzzingBrain supports four entry modes:
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | pov_id | str | Yes | POV to fix |
-| task_id | str | Yes | Parent task |
+| run_id | str | Yes | Parent run |
 
 ### Response Format
 
 ```json
 {
-    "task_id": "abc123",
+    "run_id": "abc123",
     "status": "pending",
     "message": "POV scan started for https://github.com/example/repo.git"
 }
@@ -93,9 +93,9 @@ External MCP tools exposed for AI agent integration:
 ┌─────────────────────────────────────────────────────────────────┐
 │                     2. Task Creation                             │
 │                                                                  │
-│   Create Task model with:                                        │
-│   - task_id (UUID)                                               │
-│   - task_type (pov/patch/pov-patch/harness)                     │
+│   Create Run model with:                                         │
+│   - run_id (UUID)                                                │
+│   - task_type (pov/patch/pov-patch/harness)                      │
 │   - scan_mode (full/delta)                                       │
 │   - status = "pending"                                           │
 │                              │                                   │
@@ -108,7 +108,7 @@ External MCP tools exposed for AI agent integration:
 │                     3. Workspace Setup                           │
 │                                                                  │
 │   Create directory structure:                                    │
-│   workspace/{project}_{task_id}/                                 │
+│   workspace/{project}_{run_id}/                                  │
 │   ├── repo/              ← Clone repository                      │
 │   ├── fuzz-tooling/      ← Clone/copy fuzz-tooling               │
 │   ├── diff/              ← Generate diff (delta mode)            │
@@ -416,11 +416,11 @@ find_call_path(callgraph, target_function)
 
 Query via REST API:
 ```
-GET /api/v1/status/{task_id}
+GET /api/v1/status/{run_id}
 
 Response:
 {
-    "task_id": "abc123",
+    "run_id": "abc123",
     "status": "running",
     "workers": {
         "total": 6,

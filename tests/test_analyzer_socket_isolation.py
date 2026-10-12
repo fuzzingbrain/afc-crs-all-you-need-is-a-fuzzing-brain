@@ -3,8 +3,8 @@
 AnalysisClient Socket Isolation Tests
 
 Architecture:
-- Each TASK starts its own Analysis Server (Unix socket per task workspace)
-- Each WORKER connects to its task's analyzer socket via AnalysisClient
+- Each RUN starts its own Analysis Server (Unix socket per run workspace)
+- Each WORKER connects to its run's analyzer socket via AnalysisClient
 - Within a worker, multiple AGENTS share the same client via _client_cache
   keyed by (socket_path, client_id)
 - Agents issue parallel tool calls via asyncio.to_thread(), all hitting
@@ -12,8 +12,8 @@ Architecture:
 
 Risks tested:
 - Parallel tool calls from one agent race on socket recv() without Lock
-- Task A's analyzer crash must not affect Task B's analyzer
-- Analyzer server restart mid-task must not leak stale data
+- Run A's analyzer crash must not affect Run B's analyzer
+- Analyzer server restart mid-run must not leak stale data
 
 The mock server adds artificial delay to amplify race windows,
 making concurrency bugs deterministic instead of flaky.
@@ -244,28 +244,28 @@ class TestParallelToolCalls:
         client.close()
 
 
-class TestTaskAnalyzerIsolation:
+class TestRunAnalyzerIsolation:
     """
-    Each task has its own Analysis Server on a separate Unix socket.
-    Task A's analyzer crashing must NOT affect Task B's analyzer.
+    Each run has its own Analysis Server on a separate Unix socket.
+    Run A's analyzer crashing must NOT affect Run B's analyzer.
 
-    Real scenario: Task A's target binary triggers an OOM in the analyzer
-    server → Task A's socket dies. Task B on a different target has its
+    Real scenario: Run A's target binary triggers an OOM in the analyzer
+    server → Run A's socket dies. Run B on a different target has its
     own analyzer server and must keep working.
     """
 
-    def test_two_tasks_independent_analyzer_connections(self, tmp_path):
+    def test_two_runs_independent_analyzer_connections(self, tmp_path):
         """
-        Task A and Task B each have their own analyzer server.
-        Task A's worker disconnects → Task B's worker still works.
+        Run A and Run B each have their own analyzer server.
+        Run A's worker disconnects → Run B's worker still works.
         """
         sock_path = str(tmp_path / "shared_analyzer.sock")
         server = MockAnalysisServer(sock_path)
         server.start()
 
         try:
-            client_a = AnalysisClient(sock_path, timeout=5.0, client_id="task_a_worker")
-            client_b = AnalysisClient(sock_path, timeout=5.0, client_id="task_b_worker")
+            client_a = AnalysisClient(sock_path, timeout=5.0, client_id="run_a_worker")
+            client_b = AnalysisClient(sock_path, timeout=5.0, client_id="run_b_worker")
 
             # Both work initially
             resp_a = client_a._request("get_function", {"name": "func_a"})
@@ -273,10 +273,10 @@ class TestTaskAnalyzerIsolation:
             assert resp_a["params"]["name"] == "func_a"
             assert resp_b["params"]["name"] == "func_b"
 
-            # Task A's worker disconnects (simulating crash/cleanup)
+            # Run A's worker disconnects (simulating crash/cleanup)
             client_a.close()
 
-            # Task B's worker must still work — independent connection
+            # Run B's worker must still work — independent connection
             resp_b2 = client_b._request("get_callees", {"function": "main"})
             assert resp_b2["method"] == "get_callees"
             assert resp_b2["params"]["function"] == "main"
@@ -285,13 +285,13 @@ class TestTaskAnalyzerIsolation:
         finally:
             server.stop()
 
-    def test_task_analyzer_crash_does_not_propagate(self, tmp_path):
+    def test_run_analyzer_crash_does_not_propagate(self, tmp_path):
         """
-        Task A's analyzer server crashes (socket dies).
-        Task B's analyzer server on a different socket is unaffected.
+        Run A's analyzer server crashes (socket dies).
+        Run B's analyzer server on a different socket is unaffected.
         """
-        sock_a = str(tmp_path / "task_a_analyzer.sock")
-        sock_b = str(tmp_path / "task_b_analyzer.sock")
+        sock_a = str(tmp_path / "run_a_analyzer.sock")
+        sock_b = str(tmp_path / "run_b_analyzer.sock")
 
         server_a = MockAnalysisServer(sock_a)
         server_b = MockAnalysisServer(sock_b)
@@ -306,13 +306,13 @@ class TestTaskAnalyzerIsolation:
             assert client_a._request("ping")["method"] == "ping"
             assert client_b._request("ping")["method"] == "ping"
 
-            # Task A's analyzer crashes — its client's next request fails
+            # Run A's analyzer crashes — its client's next request fails
             server_a.stop()
 
             with pytest.raises((ConnectionError, OSError, RuntimeError)):
                 client_a._request("get_function", {"name": "dead"})
 
-            # Task B's analyzer is unaffected (different server, different socket)
+            # Run B's analyzer is unaffected (different server, different socket)
             resp = client_b._request("get_function", {"name": "alive"})
             assert resp["params"]["name"] == "alive"
 
@@ -327,7 +327,7 @@ class TestSocketReconnection:
     After a socket error, AnalysisClient._connect() creates a new socket.
     Test that the new connection doesn't carry leftover data from the old one.
 
-    Real scenario: analyzer server restarts mid-task (e.g., OOM kill).
+    Real scenario: analyzer server restarts mid-run (e.g., OOM kill).
     The client reconnects and must not get stale responses.
     """
 

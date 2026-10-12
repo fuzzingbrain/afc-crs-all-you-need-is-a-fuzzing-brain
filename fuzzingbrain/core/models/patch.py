@@ -26,7 +26,7 @@ class Patch:
 
     # Identifiers
     patch_id: str = field(default_factory=generate_id)
-    task_id: str = ""  # Required: which task does this patch belong to
+    run_id: str = ""  # Required: which run does this patch belong to
     pov_id: Optional[str] = None  # Optional: which POV is this patch fixing
 
     # Patch content
@@ -56,7 +56,7 @@ class Patch:
         return {
             "_id": ObjectId(self.patch_id) if self.patch_id else ObjectId(),
             # Note: patch_id removed - use _id only
-            "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "run_id": ObjectId(self.run_id) if self.run_id else None,
             "pov_id": ObjectId(self.pov_id) if self.pov_id else None,
             "patch_content": self.patch_content,
             "description": self.description,
@@ -78,9 +78,9 @@ class Patch:
         if isinstance(patch_id, ObjectId):
             patch_id = str(patch_id)
 
-        task_id = data.get("task_id", "")
-        if isinstance(task_id, ObjectId):
-            task_id = str(task_id)
+        run_id = data.get("run_id", "")
+        if isinstance(run_id, ObjectId):
+            run_id = str(run_id)
 
         pov_id = data.get("pov_id")
         if isinstance(pov_id, ObjectId):
@@ -88,7 +88,7 @@ class Patch:
 
         return cls(
             patch_id=patch_id or generate_id(),
-            task_id=task_id,
+            run_id=run_id,
             pov_id=pov_id,
             patch_content=data.get("patch_content"),
             description=data.get("description"),

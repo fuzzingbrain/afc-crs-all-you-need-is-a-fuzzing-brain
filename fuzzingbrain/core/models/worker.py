@@ -3,7 +3,7 @@
 Worker Model - CRS execution unit
 
 Uses MongoDB ObjectId as primary key for proper hierarchical linking:
-    Task (ObjectId)
+    Run (ObjectId)
     └── Worker (ObjectId)
         └── Agent (ObjectId)
 """
@@ -41,7 +41,7 @@ class Worker:
     # Identifiers - ObjectId based
     worker_id: str = ""  # ObjectId string (set by WorkerContext)
     celery_job_id: Optional[str] = None  # Celery task ID
-    task_id: str = ""  # Parent Task ObjectId
+    run_id: str = ""  # Parent Run ObjectId
 
     # Assignment
     task_type: str = "pov"  # pov | patch | harness
@@ -112,7 +112,7 @@ class Worker:
             "_id": ObjectId(self.worker_id) if self.worker_id else ObjectId(),
             # Note: worker_id removed - use _id only
             "celery_job_id": self.celery_job_id,
-            "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "run_id": ObjectId(self.run_id) if self.run_id else None,
             "task_type": self.task_type,
             "fuzzer": self.fuzzer,
             "sanitizer": self.sanitizer,
@@ -160,14 +160,14 @@ class Worker:
         if isinstance(worker_id, ObjectId):
             worker_id = str(worker_id)
 
-        task_id = data.get("task_id")
-        if isinstance(task_id, ObjectId):
-            task_id = str(task_id)
+        run_id = data.get("run_id")
+        if isinstance(run_id, ObjectId):
+            run_id = str(run_id)
 
         return cls(
             worker_id=worker_id or "",
             celery_job_id=data.get("celery_job_id"),
-            task_id=task_id or "",
+            run_id=run_id or "",
             task_type=data.get("task_type", "pov"),
             fuzzer=data.get("fuzzer", ""),
             sanitizer=data.get("sanitizer", "address"),

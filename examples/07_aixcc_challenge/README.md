@@ -25,7 +25,7 @@ posture banner is where you confirm it did:
 ```
 .aixcc         removed (1 path)
 .git           kept (remove_git off)
-workspace      confined to curl_<task_id>/repo
+workspace      confined to curl_<run_id>/repo
 ```
 
 If that line reads `not present`, sanitisation did not run and the findings from

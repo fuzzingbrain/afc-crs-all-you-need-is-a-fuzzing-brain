@@ -345,7 +345,7 @@ class LLMClient:
         response = client.call_with_tools(messages, tools=tool_definitions)
 
         # With context for LLM call tracking
-        client = LLMClient(agent_id="...", worker_id="...", task_id="...")
+        client = LLMClient(agent_id="...", worker_id="...", run_id="...")
     """
 
     # Class variable to track event loop for cache invalidation
@@ -356,7 +356,7 @@ class LLMClient:
         config: Optional[LLMConfig] = None,
         agent_id: str = "",
         worker_id: str = "",
-        task_id: str = "",
+        run_id: str = "",
     ):
         self.config = config or get_default_config()
         self._tried_models: set = set()
@@ -369,7 +369,7 @@ class LLMClient:
         # Context for LLM call tracking
         self.agent_id = agent_id
         self.worker_id = worker_id
-        self.task_id = task_id
+        self.run_id = run_id
 
     def reset_tried_models(self) -> None:
         """Reset the set of tried models (call between independent requests)"""
@@ -408,7 +408,7 @@ class LLMClient:
         call = LLMCall(
             agent_id=self.agent_id,
             worker_id=self.worker_id,
-            task_id=self.task_id,
+            run_id=self.run_id,
             model=response.model,
             provider=response.provider,
             input_tokens=response.input_tokens,
@@ -455,7 +455,7 @@ class LLMClient:
         call = LLMCall(
             agent_id=self.agent_id,
             worker_id=self.worker_id,
-            task_id=self.task_id,
+            run_id=self.run_id,
             model=response.model,
             provider=response.provider,
             input_tokens=response.input_tokens,
@@ -895,7 +895,7 @@ class LLMClient:
         )
 
         # LLM usage is now tracked via AgentContext and MongoDB
-        # Cost tracking handled at Task level via database queries
+        # Cost tracking handled at Run level via database queries
 
         return result
 

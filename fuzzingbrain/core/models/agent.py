@@ -5,7 +5,7 @@ Agent Model - Agent type definitions and registry
 Provides standardized agent type names for consistent storage and querying.
 
 Hierarchy:
-    Task (ObjectId)
+    Run (ObjectId)
     └── Worker (ObjectId)
         └── Agent (ObjectId)
             └── LLMCall (ObjectId)

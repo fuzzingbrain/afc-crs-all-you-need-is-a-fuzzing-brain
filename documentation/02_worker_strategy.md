@@ -16,7 +16,7 @@ A Worker is the execution unit of FuzzingBrain. Each Worker handles a specific `
 ## Worker Definition
 
 ```
-Worker ID Format: {task_id}__{fuzzer}__{sanitizer}
+Worker ID Format: {run_id}__{fuzzer}__{sanitizer}
 Example: ef963ac5__libpng_read_fuzzer__address
 ```
 
@@ -26,9 +26,9 @@ Note: Double underscore `__` is used as separator because fuzzer names contain s
 
 | Field | Type | Description |
 |-------|------|-------------|
-| worker_id | str | Format: `{task_id}__{fuzzer}__{sanitizer}` |
+| worker_id | str | Format: `{run_id}__{fuzzer}__{sanitizer}` |
 | celery_job_id | str | Celery task ID for status tracking |
-| task_id | str | Parent task reference |
+| run_id | str | Parent run reference |
 | job_type | str | pov / patch / harness |
 | fuzzer | str | Assigned fuzzer name |
 | sanitizer | str | address / memory / undefined |

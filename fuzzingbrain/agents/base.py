@@ -90,7 +90,7 @@ class BaseAgent(ABC):
         verbose: bool = True,
         temperature: Optional[float] = None,
         # Logging context
-        task_id: str = "",
+        run_id: str = "",
         worker_id: str = "",
         log_dir: Optional[Path] = None,
         # New: for numbered log files
@@ -108,7 +108,7 @@ class BaseAgent(ABC):
             max_iterations: Maximum tool call iterations to prevent infinite loops
             verbose: Whether to log detailed progress
             temperature: LLM temperature (uses class default_temperature if None)
-            task_id: Task ID for logging context
+            run_id: Run ID for logging context
             worker_id: Worker ID for logging context
             log_dir: Directory for log files
             index: Agent index for numbered log files (1-based)
@@ -117,7 +117,7 @@ class BaseAgent(ABC):
             sanitizer: Sanitizer name for log path
         """
         self.llm_client = llm_client or LLMClient(
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
         )
         self.model = model
@@ -128,7 +128,7 @@ class BaseAgent(ABC):
         )
 
         # Logging context
-        self.task_id = task_id
+        self.run_id = run_id
         self.worker_id = worker_id
         self.log_dir = log_dir
         self.index = index
@@ -270,7 +270,7 @@ class BaseAgent(ABC):
         """Whether the function index and call graph tools are worth offering.
 
         Asked of the analysis server at connect time rather than threaded down
-        from the task, because it is a fact about this run's data, not about
+        from the run, because it is a fact about this run's data, not about
         what kind of agent this is. The two collections are filled by one
         import from one introspector output, and the prebuild path refuses to
         load unless both files are present, so a single count decides all of
@@ -302,7 +302,7 @@ class BaseAgent(ABC):
     def _analysis_status(self) -> dict:
         """The analysis server's status, fetched once per agent.
 
-        Asked of the server rather than threaded down from the task, because
+        Asked of the server rather than threaded down from the run, because
         what a run produced is a fact about its data, not about the kind of
         agent reading it.
 
@@ -394,7 +394,7 @@ class BaseAgent(ABC):
         return {
             "Agent": self.agent_name,
             "Worker ID": self.worker_id,
-            "Task ID": self.task_id,
+            "Run ID": self.run_id,
         }
 
     def _configure_context(self, ctx: AgentContext) -> None:
@@ -710,7 +710,7 @@ class BaseAgent(ABC):
         self._agent_logger = logger.bind(
             agent=self.agent_name,
             agent_instance_id=self._agent_instance_id,
-            task_id=self.task_id,
+            run_id=self.run_id,
             worker_id=self.worker_id,
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
@@ -785,7 +785,7 @@ class BaseAgent(ABC):
         self._agent_logger = logger.bind(
             agent=self.agent_name,
             agent_instance_id=self._agent_instance_id,
-            task_id=self.task_id,
+            run_id=self.run_id,
             worker_id=self.worker_id,
             fuzzer=fuzzer,
             sanitizer=sanitizer,
@@ -797,8 +797,8 @@ class BaseAgent(ABC):
             "{level: <8}",
             "{extra[agent]}",
         ]
-        if self.task_id:
-            format_parts.append("task:{extra[task_id]}")
+        if self.run_id:
+            format_parts.append("run:{extra[run_id]}")
         if self.worker_id:
             format_parts.append("worker:{extra[worker_id]}")
         if fuzzer:
@@ -922,7 +922,7 @@ class BaseAgent(ABC):
                 json.dump(
                     {
                         "agent": self.agent_name,
-                        "task_id": self.task_id,
+                        "run_id": self.run_id,
                         "worker_id": self.worker_id,
                         "fuzzer": fuzzer,
                         "sanitizer": sanitizer,
@@ -1119,7 +1119,7 @@ class BaseAgent(ABC):
                 tool_name=tool_name,
                 success=success,
                 latency_ms=latency_ms,
-                task_id=getattr(ctx, "task_id", "") if ctx else "",
+                run_id=getattr(ctx, "run_id", "") if ctx else "",
                 worker_id=getattr(ctx, "worker_id", "") if ctx else "",
                 agent_id=getattr(ctx, "agent_id", "") if ctx else "",
                 error=error,
@@ -1365,7 +1365,7 @@ class BaseAgent(ABC):
 
         self.start_time = datetime.now()
         self._log("Starting agent run", level="INFO")
-        self._log(f"Task ID: {self.task_id}", level="INFO")
+        self._log(f"Run ID: {self.run_id}", level="INFO")
         self._log(f"Worker ID: {self.worker_id}", level="INFO")
 
         initial_message = self.get_initial_message(**kwargs)
@@ -1375,7 +1375,7 @@ class BaseAgent(ABC):
         # This provides unique ObjectId and lifecycle management for each agent instance
         # All state is persisted to MongoDB automatically
         with AgentContext(
-            task_id=self.task_id,
+            run_id=self.run_id,
             worker_id=self.worker_id,
             agent_type=self.agent_name,
             target=self.target_name,
@@ -1508,7 +1508,7 @@ class BaseAgent(ABC):
         """Get agent statistics."""
         stats = {
             "agent": self.agent_name,
-            "task_id": self.task_id,
+            "run_id": self.run_id,
             "worker_id": self.worker_id,
             "total_iterations": self.total_iterations,
             "total_tool_calls": self.total_tool_calls,

@@ -123,7 +123,7 @@ class SeedAgent(BaseAgent):
 
     def __init__(
         self,
-        task_id: str,
+        run_id: str,
         worker_id: str,
         fuzzer: str,
         sanitizer: str,
@@ -143,7 +143,7 @@ class SeedAgent(BaseAgent):
         Initialize SeedAgent.
 
         Args:
-            task_id: Task ID
+            run_id: Run ID
             worker_id: Worker ID
             fuzzer: Fuzzer name
             sanitizer: Sanitizer type
@@ -163,7 +163,7 @@ class SeedAgent(BaseAgent):
             model=model,
             max_iterations=max_iterations,
             verbose=True,
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
             log_dir=log_dir,
             index=index,
@@ -245,7 +245,7 @@ class SeedAgent(BaseAgent):
         # Set seed context using ctx.agent_id (the actual ObjectId used by MCP tools)
         # This MUST happen here, after AgentContext is created but before MCP server starts
         set_seed_context(
-            task_id=self.task_id,
+            run_id=self.run_id,
             worker_id=ctx.agent_id,  # Use the SAME agent_id that MCP server will use
             direction_id=self.direction_id,
             sp_id=self.sp_id,
@@ -607,7 +607,7 @@ Generate seeds NOW or this run will produce nothing useful."""
         identified during delta-scan analysis.
 
         Args:
-            delta_id: Unique identifier for this delta scan (e.g., task_id)
+            delta_id: Unique identifier for this delta scan (e.g., run_id)
             changed_functions: List of changed function info dicts, each containing:
                 - function: Function name
                 - file: File path

@@ -29,7 +29,7 @@ def convert_to_html(json_path: str, output_path: str = None):
     messages = data.get("messages", [])
     meta = {
         "agent": data.get("agent", ""),
-        "task_id": data.get("task_id", ""),
+        "run_id": data.get("run_id", ""),
         "worker_id": data.get("worker_id", ""),
         "fuzzer": data.get("fuzzer", ""),
         "sanitizer": data.get("sanitizer", ""),
@@ -200,7 +200,7 @@ def convert_to_html(json_path: str, output_path: str = None):
         <h1>POV Generation Conversation</h1>
         <div class="meta-info">
             <div class="meta-item"><strong>Agent:</strong> {meta["agent"]}</div>
-            <div class="meta-item"><strong>Task:</strong> {meta["task_id"]}</div>
+            <div class="meta-item"><strong>Run:</strong> {meta["run_id"]}</div>
             <div class="meta-item"><strong>Worker:</strong> {meta["worker_id"]}</div>
             <div class="meta-item"><strong>Fuzzer:</strong> {meta["fuzzer"]}</div>
             <div class="meta-item"><strong>Sanitizer:</strong> {meta["sanitizer"]}</div>

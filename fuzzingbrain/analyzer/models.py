@@ -18,8 +18,8 @@ class AnalyzeRequest:
     Contains all information needed to build and analyze a project.
     """
 
-    task_id: str
-    task_path: str  # workspace/task_id_{timestamp}/
+    run_id: str
+    workspace_path: str  # workspace/<project>_<run_id>/
     project_name: str
     sanitizers: List[str]  # ["address", "memory", "undefined"]
     language: str = "c"  # "c" / "cpp" / "java"
@@ -40,8 +40,8 @@ class AnalyzeRequest:
 
     def to_dict(self) -> dict:
         return {
-            "task_id": self.task_id,
-            "task_path": self.task_path,
+            "run_id": self.run_id,
+            "workspace_path": self.workspace_path,
             "project_name": self.project_name,
             "sanitizers": self.sanitizers,
             "language": self.language,
@@ -57,8 +57,8 @@ class AnalyzeRequest:
     @classmethod
     def from_dict(cls, data: dict) -> "AnalyzeRequest":
         return cls(
-            task_id=data["task_id"],
-            task_path=data["task_path"],
+            run_id=data["run_id"],
+            workspace_path=data["workspace_path"],
             project_name=data["project_name"],
             sanitizers=data.get("sanitizers", ["address"]),
             language=data.get("language", "c"),
@@ -110,7 +110,7 @@ class AnalyzeResult:
     """
 
     success: bool
-    task_id: str
+    run_id: str
 
     # Fuzzer information (all successfully built fuzzers)
     fuzzers: List[FuzzerInfo] = field(default_factory=list)
@@ -147,7 +147,7 @@ class AnalyzeResult:
     def to_dict(self) -> dict:
         return {
             "success": self.success,
-            "task_id": self.task_id,
+            "run_id": self.run_id,
             "fuzzers": [f.to_dict() for f in self.fuzzers],
             "build_paths": self.build_paths,
             "coverage_fuzzer_path": self.coverage_fuzzer_path,
@@ -168,7 +168,7 @@ class AnalyzeResult:
     def from_dict(cls, data: dict) -> "AnalyzeResult":
         return cls(
             success=data["success"],
-            task_id=data["task_id"],
+            run_id=data["run_id"],
             fuzzers=[FuzzerInfo.from_dict(f) for f in data.get("fuzzers", [])],
             build_paths=data.get("build_paths", {}),
             coverage_fuzzer_path=data.get("coverage_fuzzer_path"),

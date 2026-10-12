@@ -32,7 +32,7 @@ FuzzingBrain uses **Celery** as the distributed task queue with **Redis** as bot
 │                                                                  │
 │   - Task queue: fuzzingbrain:celery                              │
 │   - Result storage: fuzzingbrain:celery:results                  │
-│   - Function cache: fuzzingbrain:{task_id}:{fuzzer}:functions    │
+│   - Function cache: fuzzingbrain:{run_id}:{fuzzer}:functions     │
 └─────────────────────────────────────────────────────────────────┘
                               │
           ┌───────────────────┼───────────────────┐
@@ -117,7 +117,7 @@ The `run_worker` task receives an assignment dictionary:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| task_id | str | Parent task ID |
+| run_id | str | Parent run ID |
 | fuzzer | str | Fuzzer name |
 | sanitizer | str | Sanitizer type |
 | job_type | str | pov / patch / harness |
@@ -168,7 +168,7 @@ For each task with successfully built fuzzers:
 For each fuzzer in successful_fuzzers:
     For each sanitizer in [address, memory, undefined]:
         Create assignment:
-            - task_id
+            - run_id
             - fuzzer name
             - sanitizer
             - job_type
@@ -183,7 +183,7 @@ For each fuzzer in successful_fuzzers:
 ### Monitoring Workers
 
 ```
-Get all workers for task_id
+Get all workers for run_id
 Count by status:
     - total
     - pending
@@ -242,9 +242,9 @@ For CLI mode (direct execution), FuzzingBrain manages infrastructure automatical
 
 | Key Pattern | Purpose | TTL |
 |-------------|---------|-----|
-| `fuzzingbrain:{task_id}:{fuzzer}:functions` | Function metadata cache | Task lifetime |
-| `fuzzingbrain:{task_id}:callgraph` | Call graph cache | Task lifetime |
-| `fuzzingbrain:{task_id}:paths:{src}:{dst}` | Path finding cache | Task lifetime |
+| `fuzzingbrain:{run_id}:{fuzzer}:functions` | Function metadata cache | Task lifetime |
+| `fuzzingbrain:{run_id}:callgraph` | Call graph cache | Task lifetime |
+| `fuzzingbrain:{run_id}:paths:{src}:{dst}` | Path finding cache | Task lifetime |
 
 ### Cache Benefits
 

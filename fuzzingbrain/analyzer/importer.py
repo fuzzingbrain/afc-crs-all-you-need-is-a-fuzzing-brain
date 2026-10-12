@@ -21,7 +21,7 @@ from ..analysis import extract_functions_from_file
 
 
 def import_from_prebuild(
-    task_id: str,
+    run_id: str,
     prebuild_dir: Path,
     repos,  # RepositoryManager
     log_callback=None,
@@ -29,11 +29,11 @@ def import_from_prebuild(
     """
     Import pre-built static analysis data from JSON files.
 
-    Every record is stored under this run's task_id; the ids the files carry
+    Every record is stored under this run's run_id; the ids the files carry
     from the run that produced them are not used.
 
     Args:
-        task_id: Task ID for this run
+        run_id: Run ID
         prebuild_dir: Directory holding mongodb/functions.json and callgraph.json
         repos: RepositoryManager for database access
         log_callback: Optional logging callback
@@ -73,7 +73,7 @@ def import_from_prebuild(
 
         for doc in functions_data:
             function = Function(
-                task_id=task_id,
+                run_id=run_id,
                 name=doc.get("name", ""),
                 file_path=doc.get("file_path", ""),
                 start_line=doc.get("start_line", 0),
@@ -94,7 +94,7 @@ def import_from_prebuild(
 
         for doc in callgraph_data:
             node = CallGraphNode(
-                task_id=task_id,
+                run_id=run_id,
                 fuzzer_id=doc.get("fuzzer_id", ""),
                 fuzzer_name=doc.get("fuzzer_name", ""),
                 function_name=doc.get("function_name", ""),
@@ -127,7 +127,7 @@ class StaticAnalysisImporter:
 
     def __init__(
         self,
-        task_id: str,
+        run_id: str,
         introspector_path: str,
         repo_path: str,
         repos,  # RepositoryManager
@@ -137,13 +137,13 @@ class StaticAnalysisImporter:
         Initialize importer.
 
         Args:
-            task_id: Task ID for database records
+            run_id: Run ID for database records
             introspector_path: Path to introspector output (contains inspector/)
             repo_path: Path to source repository
             repos: RepositoryManager for database access
             log_callback: Optional logging callback
         """
-        self.task_id = task_id
+        self.run_id = run_id
         self.introspector_path = Path(introspector_path)
         self.repo_path = Path(repo_path)
         self.repos = repos
@@ -426,7 +426,7 @@ class StaticAnalysisImporter:
         reached_by = func.get("reached_by_fuzzers", [])
 
         function = Function(
-            task_id=self.task_id,
+            run_id=self.run_id,
             name=func["name"],
             file_path=func.get("file_path", ""),
             start_line=func.get("start_line", 0),
@@ -479,7 +479,7 @@ class StaticAnalysisImporter:
 
             for fuzzer in reached_by:
                 node = CallGraphNode(
-                    task_id=self.task_id,
+                    run_id=self.run_id,
                     fuzzer_id=fuzzer,
                     fuzzer_name=fuzzer,
                     function_name=name,

@@ -25,9 +25,9 @@ class FuzzerStatus(str, Enum):
 @dataclass
 class Fuzzer:
     """
-    Fuzzer tracks the build status of each fuzzer in a task.
+    Fuzzer tracks the build status of each fuzzer in a run.
 
-    A Task may have multiple fuzzers, each needs to be built separately.
+    A Run may have multiple fuzzers, each needs to be built separately.
     The Controller manages fuzzer builds and assigns successful ones to Workers.
 
     Status flow: pending -> building -> success / failed
@@ -35,7 +35,7 @@ class Fuzzer:
 
     # Identifiers
     fuzzer_id: str = field(default_factory=generate_id)
-    task_id: str = ""
+    run_id: str = ""
 
     # Fuzzer info
     fuzzer_name: str = ""  # Executable name, e.g., "fuzz_png"
@@ -62,7 +62,7 @@ class Fuzzer:
         return {
             "_id": _id,
             # Note: fuzzer_id removed - use _id only
-            "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "run_id": ObjectId(self.run_id) if self.run_id else None,
             "fuzzer_name": self.fuzzer_name,
             "source_path": self.source_path,
             "repo_name": self.repo_name,
@@ -81,13 +81,13 @@ class Fuzzer:
         if isinstance(fuzzer_id, ObjectId):
             fuzzer_id = str(fuzzer_id)
 
-        task_id = data.get("task_id", "")
-        if isinstance(task_id, ObjectId):
-            task_id = str(task_id)
+        run_id = data.get("run_id", "")
+        if isinstance(run_id, ObjectId):
+            run_id = str(run_id)
 
         return cls(
             fuzzer_id=fuzzer_id or generate_id(),
-            task_id=task_id,
+            run_id=run_id,
             fuzzer_name=data.get("fuzzer_name", ""),
             source_path=data.get("source_path"),
             repo_name=data.get("repo_name"),

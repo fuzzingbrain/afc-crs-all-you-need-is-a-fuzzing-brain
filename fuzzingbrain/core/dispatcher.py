@@ -7,7 +7,7 @@ Handles worker task dispatch:
 2. Create worker workspaces
 3. Dispatch Celery tasks
 4. Monitor progress
-5. Task-level FuzzerMonitor management
+5. Run-level FuzzerMonitor management
 """
 
 import shutil
@@ -20,7 +20,7 @@ from .logging import logger
 from .config import Config
 from .docker_limits import docker_resource_args
 from .fuzzer_spec import asan_options
-from .models import Task, Fuzzer, FuzzerStatus, Worker, WorkerStatus
+from .models import Run, Fuzzer, FuzzerStatus, Worker, WorkerStatus
 from ..db import RepositoryManager
 from ..analyzer import AnalyzeResult
 from ..fuzzer.monitor import FuzzerMonitor
@@ -38,7 +38,7 @@ class WorkerDispatcher:
 
     def __init__(
         self,
-        task: Task,
+        run: Run,
         config: Config,
         repos: RepositoryManager,
         analyze_result: AnalyzeResult = None,
@@ -48,25 +48,25 @@ class WorkerDispatcher:
         Initialize WorkerDispatcher.
 
         Args:
-            task: Task object
+            run: Run object
             config: Configuration
             repos: Database repository manager
             analyze_result: Result from Code Analyzer (contains pre-built fuzzer paths)
-            celery_queue: Task-scoped Celery queue name for worker isolation
+            celery_queue: Run-scoped Celery queue name for worker isolation
         """
-        self.task = task
+        self.run = run
         self.config = config
         self.repos = repos
-        self.project_name = config.ossfuzz_project_name or task.project_name
+        self.project_name = config.ossfuzz_project_name or run.project_name
         self.analyze_result = analyze_result
         self.celery_queue = celery_queue
         self.pov_count_target = config.pov_count  # Target POV count (0 = unlimited)
-        self._task_oid = ObjectId(task.task_id)  # Cached ObjectId for MongoDB queries
+        self._run_oid = ObjectId(run.run_id)  # Cached ObjectId for MongoDB queries
 
         # Redis client for real-time budget reads (millisecond latency vs MongoDB's 2-7s)
         self._redis = self._connect_redis(config.redis_url)
 
-        # Task-level FuzzerMonitor (auto-discovers crash directories)
+        # Run-level FuzzerMonitor (auto-discovers crash directories)
         docker_image = self.config.docker_image or f"gcr.io/oss-fuzz/{self.project_name}"
 
         # Get log directory for FuzzerMonitor log file
@@ -78,15 +78,15 @@ class WorkerDispatcher:
         # own Celery process with its own FuzzerManager monitor, which registers
         # the exact prebuilt fuzzer_path/docker_image and wires on_crash to
         # promote crashes to scored POVs (see WorkerExecutor). Wiring on_crash on
-        # this task-level auto-discovery monitor too made BOTH monitors process
+        # this run-level auto-discovery monitor too made BOTH monitors process
         # every crash file (they have independent _processed_artifacts and live
         # in different processes), producing duplicate POV records for one bug
         # and contradictory CRASH FOUND / NOT A CRASH logs. The worker monitor is
-        # the single promoter; this task-level monitor stays for get_stats() and
-        # task-wide crash logging only.
+        # the single promoter; this run-level monitor stays for get_stats() and
+        # run-wide crash logging only.
         self.crash_monitor: Optional[FuzzerMonitor] = FuzzerMonitor(
-            task_id=task.task_id,
-            workspace_path=Path(task.task_path),
+            run_id=run.run_id,
+            workspace_path=Path(run.workspace_path),
             auto_discover=True,
             docker_image=docker_image,
             on_crash=None,
@@ -149,8 +149,8 @@ class WorkerDispatcher:
 
             # 3. Create POV record
             pov_id = generate_id()
-            task_workspace = Path(self.task.task_path)
-            results_dir = task_workspace / "results"
+            run_workspace = Path(self.run.workspace_path)
+            results_dir = run_workspace / "results"
             povs_dir = results_dir / "povs"
             povs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -172,7 +172,7 @@ class WorkerDispatcher:
                         agent_doc = db.agents.find_one(
                             {
                                 "sp_id": crash_record.sp_id,
-                                "task_id": ObjectId(self.task.task_id),
+                                "run_id": ObjectId(self.run.run_id),
                                 "agent_type": "POVAgent",
                             }
                         )
@@ -188,7 +188,7 @@ class WorkerDispatcher:
 
             pov = POV(
                 pov_id=pov_id,
-                task_id=self.task.task_id,
+                run_id=self.run.run_id,
                 suspicious_point_id=crash_record.sp_id or "",  # SP ID if from SP Fuzzer
                 generation_id=generate_id(),
                 source=source,  # Track POV source
@@ -236,7 +236,7 @@ def generate(variant: int = 1) -> bytes:
             )
             packager = POVPackager(
                 str(results_dir),
-                task_id=self.task.task_id,
+                run_id=self.run.run_id,
                 worker_id=crash_record.worker_id,
                 repos=self.repos,
                 analyzer_socket_path=analyzer_socket,
@@ -250,7 +250,7 @@ def generate(variant: int = 1) -> bytes:
                 logger.info(f"[FuzzerMonitor] ✅ POV {pov_id[:8]} packaged: {zip_path}")
                 # Activate POV
                 self.repos.povs.update(pov_id, {"is_successful": True})
-                self.repos.tasks.add_pov(self.task.task_id, pov_id)
+                self.repos.runs.add_pov(self.run.run_id, pov_id)
                 logger.info(f"[FuzzerMonitor] ✅ POV {pov_id[:8]} activated!")
 
                 # Update worker's pov_generated count
@@ -417,7 +417,7 @@ def generate(variant: int = 1) -> bytes:
 
     def _get_realtime_cost(self) -> float:
         """
-        Get real-time task cost from Redis + MongoDB cross-check.
+        Get real-time run cost from Redis + MongoDB cross-check.
 
         Uses the higher of Redis and MongoDB values to guard against
         either source being stale or incomplete.
@@ -428,7 +428,7 @@ def generate(variant: int = 1) -> bytes:
         if self._redis:
             try:
                 cost_str = self._redis.get(
-                    f"{COUNTER_PREFIX}:task:{self.task.task_id}:cost"
+                    f"{COUNTER_PREFIX}:run:{self.run.run_id}:cost"
                 )
                 if cost_str is not None:
                     redis_cost = float(cost_str)
@@ -438,11 +438,11 @@ def generate(variant: int = 1) -> bytes:
         # Always check MongoDB as well (sub-ms for _id lookup)
         mongo_cost = 0.0
         try:
-            task_doc = self.repos.tasks.collection.find_one(
-                {"_id": self._task_oid},
+            run_doc = self.repos.runs.collection.find_one(
+                {"_id": self._run_oid},
                 {"llm_cost": 1},
             )
-            mongo_cost = (task_doc or {}).get("llm_cost", 0.0)
+            mongo_cost = (run_doc or {}).get("llm_cost", 0.0)
         except Exception:
             pass
 
@@ -450,17 +450,17 @@ def generate(variant: int = 1) -> bytes:
         return max(redis_cost, mongo_cost)
 
     def _close_redis(self) -> None:
-        """Delete the task's cost counters, then close the Redis connection.
+        """Delete the run's cost counters, then close the Redis connection.
 
-        Only here: every worker adds to these counters, so the task's are
-        deleted once the whole task is over, not when the first worker ends.
+        Only here: every worker adds to these counters, so the run's are
+        deleted once the whole run is over, not when the first worker ends.
         """
         if self._redis:
-            prefix = f"fuzzingbrain:counters:task:{self.task.task_id}"
+            prefix = f"fuzzingbrain:counters:run:{self.run.run_id}"
             try:
                 self._redis.delete(f"{prefix}:cost", f"{prefix}:calls")
             except Exception as e:
-                logger.warning(f"Failed to delete the task's Redis counters: {e}")
+                logger.warning(f"Failed to delete the run's Redis counters: {e}")
             try:
                 self._redis.close()
             except Exception:
@@ -471,7 +471,7 @@ def generate(variant: int = 1) -> bytes:
         """
         Dispatch worker tasks for all {fuzzer, sanitizer} pairs.
 
-        Also starts the Task-level FuzzerMonitor.
+        Also starts the Run-level FuzzerMonitor.
 
         Args:
             fuzzers: List of successfully built fuzzers
@@ -479,11 +479,11 @@ def generate(variant: int = 1) -> bytes:
         Returns:
             List of dispatched job info
         """
-        # Start Task-level FuzzerMonitor
+        # Start Run-level FuzzerMonitor
         if self.crash_monitor:
             self.crash_monitor.start_monitoring()
             logger.info(
-                f"Started Task-level FuzzerMonitor (auto-discover={self.crash_monitor.auto_discover})"
+                f"Started Run-level FuzzerMonitor (auto-discover={self.crash_monitor.auto_discover})"
             )
 
         # Filter to only successful fuzzers
@@ -517,7 +517,7 @@ def generate(variant: int = 1) -> bytes:
         pairs = self._generate_pairs(successful_fuzzers, sanitizers)
         logger.info(f"Generated {len(pairs)} worker assignments")
 
-        # Create worker workspaces and dispatch tasks
+        # Create worker workspaces and dispatch Celery tasks
         jobs = []
         for pair in pairs:
             try:
@@ -563,7 +563,7 @@ def generate(variant: int = 1) -> bytes:
         """
         Create isolated workspace for a worker.
 
-        Workers share the main task workspace's repo/, fuzz-tooling/, and diff/
+        Workers share the main run workspace's repo/, fuzz-tooling/, and diff/
         directories (read-only). Only worker-specific output directories are created.
 
         Args:
@@ -576,9 +576,9 @@ def generate(variant: int = 1) -> bytes:
         sanitizer = pair["sanitizer"]
 
         # Worker workspace path
-        task_workspace = Path(self.task.task_path)
+        run_workspace = Path(self.run.workspace_path)
         worker_workspace = (
-            task_workspace
+            run_workspace
             / "worker_workspace"
             / f"{self.project_name}_{fuzzer}_{sanitizer}"
         )
@@ -630,14 +630,14 @@ def generate(variant: int = 1) -> bytes:
             build_dir = self.analyze_result.build_paths.get(sanitizer)
 
         # Prepare assignment - WorkerContext will create Worker record
-        task_workspace = Path(self.task.task_path)
+        run_workspace = Path(self.run.workspace_path)
         assignment = {
-            "task_id": self.task.task_id,
+            "run_id": self.run.run_id,
             "fuzzer": fuzzer,
             "sanitizer": sanitizer,
-            "task_type": self.task.task_type.value,
+            "task_type": self.run.task_type.value,
             "workspace_path": workspace_path,
-            "task_workspace_path": str(task_workspace),
+            "run_workspace_path": str(run_workspace),
             "project_name": self.project_name,
             "log_dir": str(log_dir) if log_dir else None,
             # Image the fuzzer binary runs in (has its libs); PoV verify uses it.
@@ -659,13 +659,13 @@ def generate(variant: int = 1) -> bytes:
             if self.analyze_result
             else None,
             # Scan mode and diff path for delta mode
-            "scan_mode": self.task.scan_mode.value,
-            "diff_path": str(task_workspace / "diff" / "ref.diff")
-            if self.task.scan_mode.value == "delta"
+            "scan_mode": self.run.scan_mode.value,
+            "diff_path": str(run_workspace / "diff" / "ref.diff")
+            if self.run.scan_mode.value == "delta"
             else None,
             "budget_limit": self.config.budget_limit,
             "pov_count": self.config.pov_count,
-            # Task-wide, not per-worker: each worker enforces it against the
+            # Run-wide, not per-worker: each worker enforces it against the
             # same Redis ledger, so the sum across workers is what is capped.
             "max_parallel_fuzzers": self.config.max_parallel_fuzzers,
             # Per-worker, unlike the ceiling above. Configured since the
@@ -711,7 +711,7 @@ def generate(variant: int = 1) -> bytes:
 
     def get_status(self) -> Dict[str, Any]:
         """
-        Get status of all workers for this task.
+        Get status of all workers for this run.
 
         Also checks Celery task status to detect workers that failed
         before updating the database.
@@ -725,8 +725,8 @@ def generate(variant: int = 1) -> bytes:
         from celery.result import AsyncResult
         from ..celery_app import app
 
-        # Query workers by task_id (ObjectId)
-        workers = self.repos.workers.find_by_task(self.task.task_id)
+        # Query workers by run_id (ObjectId)
+        workers = self.repos.workers.find_by_run(self.run.run_id)
 
         status = {
             "total": len(workers),
@@ -801,7 +801,7 @@ def generate(variant: int = 1) -> bytes:
         evidence that it repeats another.
         """
         try:
-            rows = list(self.repos.povs.find_by_task(str(self.task.task_id)) or [])
+            rows = list(self.repos.povs.find_by_run(str(self.run.run_id)) or [])
         except Exception as e:
             logger.warning(f"Could not read POVs to count distinct bugs: {e}")
             rows = []
@@ -827,7 +827,7 @@ def generate(variant: int = 1) -> bytes:
         # never hide one that was found.
         try:
             return self.repos.povs.count(
-                {"task_id": self._task_oid, "is_successful": True}
+                {"run_id": self._run_oid, "is_successful": True}
             )
         except Exception:
             return 0
@@ -848,7 +848,7 @@ def generate(variant: int = 1) -> bytes:
         from ..agents.context import cancel_agents_by_worker, force_cleanup_agents
         from ..db import get_database
 
-        workers = self.repos.workers.find_by_task(self.task.task_id)
+        workers = self.repos.workers.find_by_run(self.run.run_id)
 
         for worker in workers:
             if worker.status.value in ["pending", "building", "running"]:
@@ -884,13 +884,13 @@ def generate(variant: int = 1) -> bytes:
         except Exception:
             db = None
         if db is not None:
-            force_cleanup_agents(self.task.task_id, db)
+            force_cleanup_agents(self.run.run_id, db)
 
     def shutdown_all_fuzzers(self) -> None:
         """
         Shutdown all Global Fuzzers and FuzzerMonitors.
 
-        Called when task truly ends (timeout/budget/pov_target/manual).
+        Called when run truly ends (timeout/budget/pov_target/manual).
         This performs final sweep to catch any remaining crashes.
         """
         import asyncio
@@ -898,7 +898,7 @@ def generate(variant: int = 1) -> bytes:
 
         logger.info("Shutting down all Global Fuzzers...")
 
-        workers = self.repos.workers.find_by_task(self.task.task_id)
+        workers = self.repos.workers.find_by_run(self.run.run_id)
         shutdown_count = 0
 
         for worker in workers:
@@ -933,13 +933,13 @@ def generate(variant: int = 1) -> bytes:
         # The managers above live in the Celery worker process, not here, so
         # that loop finds nothing once the worker has been revoked -- and the
         # revoke's SIGTERM stops the Python side only, leaving the fuzzer
-        # containers running. Find them by the task label instead.
+        # containers running. Find them by the run label instead.
         try:
-            from .docker_limits import kill_task_containers
+            from .docker_limits import kill_run_containers
 
-            kill_task_containers(str(self.task.task_id))
+            kill_run_containers(str(self.run.run_id))
         except Exception as e:
-            logger.warning(f"Could not sweep the task's containers: {e}")
+            logger.warning(f"Could not sweep the run's containers: {e}")
 
         # The slot ledger outlives the processes that held slots in it, so
         # whatever is still listed belongs to a worker that is already gone.
@@ -947,27 +947,27 @@ def generate(variant: int = 1) -> bytes:
             from ..fuzzer.budget import FuzzerBudget
 
             FuzzerBudget(
-                task_id=str(self.task.task_id),
+                run_id=str(self.run.run_id),
                 limit=self.config.max_parallel_fuzzers,
             ).clear()
         except Exception as e:
             logger.debug(f"Could not clear the fuzzer slot ledger: {e}")
 
-        # Stop Task-level FuzzerMonitor (includes final sweep)
+        # Stop Run-level FuzzerMonitor (includes final sweep)
         if self.crash_monitor:
             self.crash_monitor.stop_monitoring()
             crash_stats = self.crash_monitor.get_stats()
             logger.info(
-                f"Task-level FuzzerMonitor stopped: "
+                f"Run-level FuzzerMonitor stopped: "
                 f"{crash_stats['total_crashes']} crashes found"
             )
 
     # How long the whole shutdown path gets. Every step in it talks to
     # MongoDB, Redis or Docker, and each of those can stop answering exactly
-    # when a task is ending badly -- which is when this runs. A run once spent
+    # when a run is ending badly -- which is when this runs. A run once spent
     # a hundred minutes here, on a machine deep in swap, because one
-    # find_by_task took eight minutes to time out and there were several of
-    # them. The task was already over; the only thing still happening was the
+    # find_by_run took eight minutes to time out and there were several of
+    # them. The run was already over; the only thing still happening was the
     # shutdown refusing to end.
     SHUTDOWN_DEADLINE_SECONDS = 120.0
 
@@ -977,7 +977,7 @@ def generate(variant: int = 1) -> bytes:
         Runs on a daemon thread so that a call wedged inside a database driver
         cannot hold the process open past the deadline: when the time is up
         this returns, the thread is abandoned, and the caller reports the
-        result the task actually had.
+        result the run actually had.
 
         Returns True if the shutdown finished, False if it was abandoned.
         """
@@ -1009,7 +1009,7 @@ def generate(variant: int = 1) -> bytes:
         logger.error(
             f"Shutdown did not finish within {seconds:.0f}s and is being "
             f"abandoned; containers or database handles may outlive this "
-            f"process. Reporting the task's result now."
+            f"process. Reporting the run's result now."
         )
         return False
 
@@ -1020,15 +1020,15 @@ def generate(variant: int = 1) -> bytes:
         on_progress: callable = None,
     ) -> Dict[str, Any]:
         """
-        Wait for task to complete (CLI mode).
+        Wait for run to complete (CLI mode).
 
-        Task ends when one of:
+        Run ends when one of:
         - Timeout reached
         - Budget exceeded
         - POV target reached
         - User manual shutdown (Ctrl+C)
 
-        Note: "All workers completed" does NOT end the task!
+        Note: "All workers completed" does NOT end the run!
         Global Fuzzer continues running until one of the above conditions.
 
         Args:
@@ -1059,17 +1059,17 @@ def generate(variant: int = 1) -> bytes:
         # at the bottom, so a loop that stops sleeping stops being a poll loop
         # and becomes an allocation loop. One did: sixty-two gigabytes in about
         # four minutes, then a machine that had to be power-cycled. A poll loop
-        # should fail as a hung task, not as a dead host.
+        # should fail as a hung run, not as a dead host.
         poll_seconds = max(int(poll_interval), 1)
         max_polls = int(timeout_delta.total_seconds() // poll_seconds) + 10
         polls = 0
 
         if self.pov_count_target > 0:
             logger.info(
-                f"Waiting for task to complete (timeout: {timeout_minutes}min, pov_target: {self.pov_count_target})"
+                f"Waiting for run to complete (timeout: {timeout_minutes}min, pov_target: {self.pov_count_target})"
             )
         else:
-            logger.info(f"Waiting for task to complete (timeout: {timeout_minutes}min)")
+            logger.info(f"Waiting for run to complete (timeout: {timeout_minutes}min)")
 
         try:
             while True:
@@ -1083,7 +1083,7 @@ def generate(variant: int = 1) -> bytes:
                     if polls > max_polls:
                         logger.error(
                             f"Polled {polls} times in {elapsed.total_seconds():.0f}s, "
-                            f"past the {max_polls} this task's {timeout_minutes}min "
+                            f"past the {max_polls} this run's {timeout_minutes}min "
                             f"timeout allows. The loop is not waiting between "
                             f"passes; stopping it before it costs the machine."
                         )
@@ -1200,14 +1200,14 @@ def generate(variant: int = 1) -> bytes:
         Returns:
             List of worker results with duration info and SP count
         """
-        workers = self.repos.workers.find_by_task(self.task.task_id)
+        workers = self.repos.workers.find_by_run(self.run.run_id)
         results = []
 
         for worker in workers:
             # Count SPs for this worker (by sources array with $elemMatch)
             sp_count = self.repos.suspicious_points.count(
                 {
-                    "task_id": self._task_oid,
+                    "run_id": self._run_oid,
                     "sources": {
                         "$elemMatch": {
                             "harness_name": worker.fuzzer,
@@ -1221,7 +1221,7 @@ def generate(variant: int = 1) -> bytes:
             # (SPs where this worker's description was merged into existing SP)
             merged_count = self.repos.suspicious_points.count(
                 {
-                    "task_id": self._task_oid,
+                    "run_id": self._run_oid,
                     "merged_duplicates": {
                         "$elemMatch": {
                             "harness_name": worker.fuzzer,
@@ -1244,7 +1244,7 @@ def generate(variant: int = 1) -> bytes:
                 sp.suspicious_point_id
                 for sp in self.repos.suspicious_points.find_all(
                     {
-                        "task_id": self._task_oid,
+                        "run_id": self._run_oid,
                         "sources": {
                             "$elemMatch": {
                                 "harness_name": worker.fuzzer,
@@ -1266,7 +1266,7 @@ def generate(variant: int = 1) -> bytes:
                         worker_sp_oids.append(sp_id)
                 actual_pov_count = self.repos.povs.count(
                     {
-                        "task_id": self._task_oid,
+                        "run_id": self._run_oid,
                         "suspicious_point_id": {"$in": worker_sp_oids},
                         "is_successful": True,
                     }
@@ -1278,7 +1278,7 @@ def generate(variant: int = 1) -> bytes:
             # These have suspicious_point_id="" because they were found directly by the fuzzer
             fuzzer_discovered_count = self.repos.povs.count(
                 {
-                    "task_id": self._task_oid,
+                    "run_id": self._run_oid,
                     "harness_name": worker.fuzzer,
                     "sanitizer": worker.sanitizer,
                     "suspicious_point_id": {"$in": ["", None]},

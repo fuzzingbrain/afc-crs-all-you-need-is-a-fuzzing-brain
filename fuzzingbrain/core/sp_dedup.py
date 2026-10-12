@@ -22,7 +22,7 @@ def _dedup_model() -> Optional[str]:
     own default rather than on a name picked here -- the point of the change is
     that this module stops choosing.
     """
-    # Prefer the task's active router, which honours model_profile /
+    # Prefer the run's active router, which honours model_profile /
     # FB_MODEL_PROFILE (e.g. period-correct -> GPT-4.1 for the utility role).
     # The old path used get_default_config().get_model_for_task(FAST_JUDGMENT),
     # whose hardcoded table (models.py) is all-Claude and ignores the profile.

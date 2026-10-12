@@ -2,7 +2,7 @@
 """
 Crash Monitor
 
-Task-level background monitoring of all fuzzer crash directories.
+Run-level background monitoring of all fuzzer crash directories.
 Uses threading for independent execution (not affected by asyncio event loop lifecycle).
 
 Handles deduplication, verification, and reporting.
@@ -115,7 +115,7 @@ def _is_recoverable_ubsan_only(output: str) -> bool:
 
 class FuzzerMonitor:
     """
-    Task-level Crash Monitor.
+    Run-level Crash Monitor.
 
     Runs as a background thread to monitor crash directories from all workers.
     Thread-based design ensures monitoring continues regardless of asyncio event loop state.
@@ -136,7 +136,7 @@ class FuzzerMonitor:
 
     def __init__(
         self,
-        task_id: str,
+        run_id: str,
         workspace_path: Optional[Path] = None,
         check_interval: float = 5.0,
         dedupe_enabled: bool = True,
@@ -151,8 +151,8 @@ class FuzzerMonitor:
         Initialize FuzzerMonitor.
 
         Args:
-            task_id: Parent task ID
-            workspace_path: Task workspace path (required for auto-discovery)
+            run_id: Parent run ID
+            workspace_path: Run workspace path (required for auto-discovery)
             check_interval: Seconds between directory checks
             dedupe_enabled: Whether to deduplicate crashes
             signature_frame_depth: Project frames that make up a crash signature
@@ -162,7 +162,7 @@ class FuzzerMonitor:
             log_dir: Directory for fuzzer_monitor.log (defaults to workspace_path)
             repos: RepositoryManager for querying Worker info (optional)
         """
-        self.task_id = task_id
+        self.run_id = run_id
         self.workspace_path = Path(workspace_path) if workspace_path else None
         self.check_interval = check_interval
         self.dedupe_enabled = dedupe_enabled
@@ -208,7 +208,7 @@ class FuzzerMonitor:
         self._active_fuzzers: Dict[str, ActiveFuzzerInfo] = {}
 
         # Dedicated Loguru logger for FuzzerMonitor
-        self._monitor_logger = logger.bind(monitor=task_id)
+        self._monitor_logger = logger.bind(monitor=run_id)
         self._log_sink_id: Optional[int] = None
         self._log_path: Optional[Path] = None
         # Use log_dir if provided, otherwise fall back to workspace_path
@@ -223,7 +223,7 @@ class FuzzerMonitor:
             self._log_path = fuzzer_log_dir / "monitor.log"
 
         logger.debug(
-            f"[FuzzerMonitor:{task_id}] Initialized (thread-based, "
+            f"[FuzzerMonitor:{run_id}] Initialized (thread-based, "
             f"auto_discover={auto_discover})"
         )
 
@@ -266,7 +266,7 @@ class FuzzerMonitor:
                 self._verification_context[worker_id] = (fuzzer_path, docker_image)
 
         logger.debug(
-            f"[FuzzerMonitor:{self.task_id}] Added watch: {crash_dir} "
+            f"[FuzzerMonitor:{self.run_id}] Added watch: {crash_dir} "
             f"(worker={worker_id}, source={source})"
         )
 
@@ -288,7 +288,7 @@ class FuzzerMonitor:
             ]
 
         logger.debug(
-            f"[FuzzerMonitor:{self.task_id}] Removed watch: worker={worker_id}, source={source}"
+            f"[FuzzerMonitor:{self.run_id}] Removed watch: worker={worker_id}, source={source}"
         )
 
     def remove_all_worker_watches(self, worker_id: str) -> None:
@@ -304,7 +304,7 @@ class FuzzerMonitor:
             self.watch_dirs = [w for w in self.watch_dirs if w.worker_id != worker_id]
 
         logger.debug(
-            f"[FuzzerMonitor:{self.task_id}] Removed all watches for worker={worker_id}"
+            f"[FuzzerMonitor:{self.run_id}] Removed all watches for worker={worker_id}"
         )
 
     def start_monitoring(self) -> None:
@@ -321,7 +321,7 @@ class FuzzerMonitor:
             try:
                 # Filter to only log messages from this monitor
                 def monitor_filter(record):
-                    return record["extra"].get("monitor") == self.task_id
+                    return record["extra"].get("monitor") == self.run_id
 
                 self._log_sink_id = logger.add(
                     self._log_path,
@@ -334,25 +334,25 @@ class FuzzerMonitor:
                 # Log startup info
                 self._log("=" * 70)
                 self._log("CRASH MONITOR STARTED")
-                self._log(f"Task ID: {self.task_id}")
+                self._log(f"Run ID: {self.run_id}")
                 self._log(f"Workspace: {self.workspace_path}")
                 self._log(f"Auto-discover: {self.auto_discover}")
                 self._log(f"Check interval: {self.check_interval}s")
                 self._log("=" * 70)
             except Exception as e:
                 logger.warning(
-                    f"[FuzzerMonitor:{self.task_id}] Failed to setup log file: {e}"
+                    f"[FuzzerMonitor:{self.run_id}] Failed to setup log file: {e}"
                 )
                 self._log_sink_id = None
 
         self._running = True
         self._monitor_thread = threading.Thread(
             target=self._monitor_loop,
-            name=f"FuzzerMonitor-{self.task_id}",
+            name=f"FuzzerMonitor-{self.run_id}",
             daemon=True,  # Auto-exit when main process exits
         )
         self._monitor_thread.start()
-        logger.info(f"[FuzzerMonitor:{self.task_id}] Started monitoring thread")
+        logger.info(f"[FuzzerMonitor:{self.run_id}] Started monitoring thread")
 
     def _log(self, message: str, level: str = "INFO") -> None:
         """
@@ -383,13 +383,13 @@ class FuzzerMonitor:
             self._monitor_thread.join(timeout=10.0)
             if self._monitor_thread.is_alive():
                 logger.warning(
-                    f"[FuzzerMonitor:{self.task_id}] Monitor thread did not exit cleanly"
+                    f"[FuzzerMonitor:{self.run_id}] Monitor thread did not exit cleanly"
                 )
 
         self._monitor_thread = None
 
         # Final sweep
-        logger.debug(f"[FuzzerMonitor:{self.task_id}] Running final sweep...")
+        logger.debug(f"[FuzzerMonitor:{self.run_id}] Running final sweep...")
         with self._lock:
             entries_to_check = list(self.watch_dirs)
 
@@ -398,7 +398,7 @@ class FuzzerMonitor:
                 self._check_directory(watch_entry)
             except Exception as e:
                 logger.warning(
-                    f"[FuzzerMonitor:{self.task_id}] Final sweep error for {watch_entry.path}: {e}"
+                    f"[FuzzerMonitor:{self.run_id}] Final sweep error for {watch_entry.path}: {e}"
                 )
 
         # Log summary and close dedicated log file
@@ -430,13 +430,13 @@ class FuzzerMonitor:
             self._log_sink_id = None
 
         logger.info(
-            f"[FuzzerMonitor:{self.task_id}] Stopped monitoring "
+            f"[FuzzerMonitor:{self.run_id}] Stopped monitoring "
             f"(found {len(self.crash_records)} total crashes)"
         )
 
     def _monitor_loop(self) -> None:
         """Background monitoring loop (runs in separate thread)."""
-        logger.debug(f"[FuzzerMonitor:{self.task_id}] Monitor loop started")
+        logger.debug(f"[FuzzerMonitor:{self.run_id}] Monitor loop started")
 
         while self._running:
             try:
@@ -457,17 +457,17 @@ class FuzzerMonitor:
                         self._check_directory(watch_entry)
                     except Exception as e:
                         logger.error(
-                            f"[FuzzerMonitor:{self.task_id}] Error checking {watch_entry.path}: {e}"
+                            f"[FuzzerMonitor:{self.run_id}] Error checking {watch_entry.path}: {e}"
                         )
 
                 # Wait before next check
                 time.sleep(self.check_interval)
 
             except Exception as e:
-                logger.error(f"[FuzzerMonitor:{self.task_id}] Monitor loop error: {e}")
+                logger.error(f"[FuzzerMonitor:{self.run_id}] Monitor loop error: {e}")
                 time.sleep(self.check_interval)
 
-        logger.debug(f"[FuzzerMonitor:{self.task_id}] Monitor loop exited")
+        logger.debug(f"[FuzzerMonitor:{self.run_id}] Monitor loop exited")
 
     def _discover_crash_directories(self) -> List[WatchEntry]:
         """
@@ -703,11 +703,11 @@ class FuzzerMonitor:
         Returns:
             Path to fuzzer binary, or None if not found
         """
-        # fuzz-tooling/build/out lives at the TASK workspace root, not under the
+        # fuzz-tooling/build/out lives at the RUN workspace root, not under the
         # per-worker directory. Auto-discovery iterates worker_workspace/<worker>/,
         # so searching only worker_dir/fuzz-tooling never finds the binary in
         # prebuilt mode and verification is skipped (every crash -> NOT A CRASH).
-        # Search both the worker dir and the task workspace root.
+        # Search both the worker dir and the run workspace root.
         roots = [worker_dir]
         if self.workspace_path and self.workspace_path not in roots:
             roots.append(self.workspace_path)
@@ -762,7 +762,7 @@ class FuzzerMonitor:
 
             except Exception as e:
                 logger.error(
-                    f"[FuzzerMonitor:{self.task_id}] Error processing {crash_file}: {e}"
+                    f"[FuzzerMonitor:{self.run_id}] Error processing {crash_file}: {e}"
                 )
 
     def _handle_crash(
@@ -785,7 +785,7 @@ class FuzzerMonitor:
             CrashRecord if successfully handled
         """
         logger.info(
-            f"[FuzzerMonitor:{self.task_id}] New crash: {crash_path.name} "
+            f"[FuzzerMonitor:{self.run_id}] New crash: {crash_path.name} "
             f"(worker={watch_entry.worker_id}, source={watch_entry.source})"
         )
 
@@ -870,7 +870,7 @@ class FuzzerMonitor:
 
         # Create crash record
         record = CrashRecord(
-            task_id=self.task_id,
+            run_id=self.run_id,
             worker_id=watch_entry.worker_id,
             crash_path=str(crash_path),
             crash_hash=crash_hash,
@@ -909,10 +909,10 @@ class FuzzerMonitor:
             try:
                 self.on_crash(record)
             except Exception as e:
-                logger.error(f"[FuzzerMonitor:{self.task_id}] Callback error: {e}")
+                logger.error(f"[FuzzerMonitor:{self.run_id}] Callback error: {e}")
 
         logger.info(
-            f"[FuzzerMonitor:{self.task_id}] Crash recorded: {record.crash_id[:8]} "
+            f"[FuzzerMonitor:{self.run_id}] Crash recorded: {record.crash_id[:8]} "
             f"worker={watch_entry.worker_id[:16]}... vuln_type={vuln_type}"
         )
 
@@ -987,7 +987,7 @@ class FuzzerMonitor:
                 f"/work/{crash_path.name}",
             ]
 
-            logger.debug(f"[FuzzerMonitor:{self.task_id}] Verifying: {' '.join(cmd)}")
+            logger.debug(f"[FuzzerMonitor:{self.run_id}] Verifying: {' '.join(cmd)}")
 
             result = subprocess.run(
                 cmd,
@@ -1007,7 +1007,7 @@ class FuzzerMonitor:
                 or "GLIBC" in combined_output
             ) and docker_image != FALLBACK_IMAGE:
                 logger.warning(
-                    f"[FuzzerMonitor:{self.task_id}] Library error with {docker_image}, "
+                    f"[FuzzerMonitor:{self.run_id}] Library error with {docker_image}, "
                     f"falling back to {FALLBACK_IMAGE}"
                 )
                 returncode, combined_output = _run_with_image(FALLBACK_IMAGE)
@@ -1018,7 +1018,7 @@ class FuzzerMonitor:
             # cleanly) is not a crash -- e.g. dav1d msac.c unsigned wrap.
             if crashed and returncode == 0 and _is_recoverable_ubsan_only(combined_output):
                 logger.info(
-                    f"[FuzzerMonitor:{self.task_id}] recoverable UBSAN, clean exit -- not a crash"
+                    f"[FuzzerMonitor:{self.run_id}] recoverable UBSAN, clean exit -- not a crash"
                 )
                 crashed = False
             vuln_type = self._parse_vuln_type(combined_output) if crashed else None

@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Task Model - Represents a single FuzzingBrain task
+Run Model - one execution of a task
 """
 
 from dataclasses import dataclass, field
@@ -13,8 +13,8 @@ from bson import ObjectId
 from ..utils import generate_id
 
 
-class TaskStatus(str, Enum):
-    """Task status enum"""
+class RunStatus(str, Enum):
+    """Run status enum"""
 
     PENDING = "pending"
     RUNNING = "running"
@@ -40,11 +40,12 @@ class ScanMode(str, Enum):
 
 
 @dataclass
-class Task:
+class Run:
     """
-    Task represents a single FuzzingBrain task.
+    One execution of a task. The task file describes what to do; a run is one
+    attempt at it, with its own id, workspace, status and results.
 
-    A task can be:
+    What it does is the task's task_type:
     - Finding POVs (proof-of-vulnerability)
     - Generating patches
     - POV + Patch combo
@@ -52,13 +53,13 @@ class Task:
     """
 
     # Core identifiers
-    task_id: str = field(default_factory=generate_id)
+    run_id: str = field(default_factory=generate_id)
     task_type: JobType = JobType.POV_PATCH
     scan_mode: ScanMode = ScanMode.FULL
-    status: TaskStatus = TaskStatus.PENDING
+    status: RunStatus = RunStatus.PENDING
 
     # Paths
-    task_path: Optional[str] = None  # Workspace path
+    workspace_path: Optional[str] = None  # Workspace path
     src_path: Optional[str] = None  # Source code path (repo)
     fuzz_tooling_path: Optional[str] = None  # Fuzzing tooling path
     diff_path: Optional[str] = None  # Delta scan diff file path
@@ -105,11 +106,11 @@ class Task:
     def to_dict(self) -> dict:
         """Convert to dictionary for MongoDB storage"""
         return {
-            "_id": ObjectId(self.task_id) if self.task_id else ObjectId(),
+            "_id": ObjectId(self.run_id) if self.run_id else ObjectId(),
             "task_type": self.task_type.value,
             "scan_mode": self.scan_mode.value,
             "status": self.status.value,
-            "task_path": self.task_path,
+            "workspace_path": self.workspace_path,
             "src_path": self.src_path,
             "fuzz_tooling_path": self.fuzz_tooling_path,
             "diff_path": self.diff_path,
@@ -141,19 +142,19 @@ class Task:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Task":
-        """Create Task from dictionary"""
+    def from_dict(cls, data: dict) -> "Run":
+        """Create Run from dictionary"""
         # Handle ObjectId conversion
-        task_id = data.get("task_id") or data.get("_id")
-        if isinstance(task_id, ObjectId):
-            task_id = str(task_id)
+        run_id = data.get("run_id") or data.get("_id")
+        if isinstance(run_id, ObjectId):
+            run_id = str(run_id)
 
         return cls(
-            task_id=task_id,
+            run_id=run_id,
             task_type=JobType(data.get("task_type", "pov-patch")),
             scan_mode=ScanMode(data.get("scan_mode", "full")),
-            status=TaskStatus(data.get("status", "pending")),
-            task_path=data.get("task_path"),
+            status=RunStatus(data.get("status", "pending")),
+            workspace_path=data.get("workspace_path"),
             src_path=data.get("src_path"),
             fuzz_tooling_path=data.get("fuzz_tooling_path"),
             diff_path=data.get("diff_path"),
@@ -189,17 +190,17 @@ class Task:
         )
 
     def mark_running(self):
-        """Mark task as running"""
-        self.status = TaskStatus.RUNNING
+        """Mark run as running"""
+        self.status = RunStatus.RUNNING
         self.updated_at = datetime.now()
 
     def mark_completed(self):
-        """Mark task as completed"""
-        self.status = TaskStatus.COMPLETED
+        """Mark run as completed"""
+        self.status = RunStatus.COMPLETED
         self.updated_at = datetime.now()
 
     def mark_error(self, msg: str):
-        """Mark task as error"""
-        self.status = TaskStatus.ERROR
+        """Mark run as error"""
+        self.status = RunStatus.ERROR
         self.error_msg = msg
         self.updated_at = datetime.now()

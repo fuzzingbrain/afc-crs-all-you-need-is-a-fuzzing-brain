@@ -9,7 +9,7 @@ This is the ONLY place where Worker records are created and persisted.
 Dispatcher does NOT create Worker records - it only dispatches Celery tasks.
 
 Hierarchy:
-    Task (ObjectId)
+    Run (ObjectId)
     └── Worker (ObjectId)  ← Created here
         └── Agent (ObjectId)
 
@@ -63,13 +63,13 @@ class WorkerContext:
     Features:
     - Unique ObjectId for isolation and persistence
     - Context manager for automatic lifecycle management
-    - Links to parent Task via task_id (ObjectId)
+    - Links to parent Run via run_id (ObjectId)
     - All child Agents link back via worker_id (ObjectId)
     - Periodic persistence to MongoDB 'workers' collection
     - Real-time status updates
 
     Usage:
-        with WorkerContext(task_id, fuzzer, sanitizer) as ctx:
+        with WorkerContext(run_id, fuzzer, sanitizer) as ctx:
             # ctx.worker_id is unique ObjectId
             # Pass ctx.worker_id to all Agents
             ctx.increment_agents_spawned()  # Auto-persists
@@ -88,7 +88,7 @@ class WorkerContext:
 
     def __init__(
         self,
-        task_id: str,
+        run_id: str,
         fuzzer: str,
         sanitizer: str,
         scan_mode: str = "full",
@@ -101,7 +101,7 @@ class WorkerContext:
         Initialize worker context.
 
         Args:
-            task_id: Task ID (MongoDB ObjectId string)
+            run_id: Run ID (MongoDB ObjectId string)
             fuzzer: Fuzzer name
             sanitizer: Sanitizer type
             scan_mode: Scan mode ("full" or "delta")
@@ -113,8 +113,8 @@ class WorkerContext:
         # Unique identifier - MongoDB ObjectId
         self.worker_id = str(ObjectId())
 
-        # Parent Task linkage (ObjectId)
-        self.task_id = task_id
+        # Parent Run linkage (ObjectId)
+        self.run_id = run_id
 
         # Celery job ID (for tracking)
         self.celery_job_id = celery_job_id
@@ -217,7 +217,7 @@ class WorkerContext:
         self.ended_at = datetime.now()
 
         if exc_type and exc_type.__name__ in ("Terminated", "SystemExit", "KeyboardInterrupt"):
-            # The controller revokes every worker once the task is over
+            # The controller revokes every worker once the run is over
             # (target reached, budget, timeout); billiard delivers that as
             # Terminated(-signum). Recording it as "failed: -241" made a run
             # that had just found its POV read like a crash.
@@ -244,7 +244,7 @@ class WorkerContext:
         # Persist final state to MongoDB with retry.
         # Layer 1: Retry with backoff for transient DB failures.
         # Layer 2: If all retries fail, keep in memory registry so
-        #          get_workers_by_task() returns correct status via in-memory merge.
+        #          get_workers_by_run() returns correct status via in-memory merge.
         saved = False
         for attempt in range(3):
             saved = self._save_to_db(force=True)
@@ -296,7 +296,7 @@ class WorkerContext:
                     "_id": safe_object_id(self.worker_id),
                     # Note: worker_id removed - use _id only
                     "celery_job_id": self.celery_job_id,
-                    "task_id": safe_object_id(self.task_id),
+                    "run_id": safe_object_id(self.run_id),
                     # Identity
                     "task_type": self.task_type,
                     "fuzzer": self.fuzzer,
@@ -480,7 +480,7 @@ class WorkerContext:
         """Convert to dictionary for serialization."""
         return {
             "worker_id": self.worker_id,
-            "task_id": self.task_id,
+            "run_id": self.run_id,
             "fuzzer": self.fuzzer,
             "sanitizer": self.sanitizer,
             "scan_mode": self.scan_mode,
@@ -554,7 +554,7 @@ def get_worker_status(worker_id: str) -> Optional[Dict[str, Any]]:
         if doc:
             # Convert ObjectId to string
             doc["worker_id"] = str(doc.pop("_id"))
-            doc["task_id"] = str(doc["task_id"]) if doc.get("task_id") else None
+            doc["run_id"] = str(doc["run_id"]) if doc.get("run_id") else None
             return doc
 
     except Exception:
@@ -563,12 +563,12 @@ def get_worker_status(worker_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def get_workers_by_task(task_id: str) -> list:
+def get_workers_by_run(run_id: str) -> list:
     """
-    Get all workers for a task.
+    Get all workers for a run.
 
     Args:
-        task_id: Task ID (ObjectId string)
+        run_id: Run ID (ObjectId string)
 
     Returns:
         List of worker status dicts
@@ -582,10 +582,10 @@ def get_workers_by_task(task_id: str) -> list:
         if db is None:
             return workers
 
-        cursor = db.workers.find({"task_id": ObjectId(task_id)})
+        cursor = db.workers.find({"run_id": ObjectId(run_id)})
         for doc in cursor:
             doc["worker_id"] = str(doc.pop("_id"))
-            doc["task_id"] = str(doc["task_id"]) if doc.get("task_id") else None
+            doc["run_id"] = str(doc["run_id"]) if doc.get("run_id") else None
             workers.append(doc)
 
     except Exception:
@@ -594,7 +594,7 @@ def get_workers_by_task(task_id: str) -> list:
     # Merge with in-memory data (for running workers with fresher stats)
     in_memory = get_all_worker_contexts()
     for ctx in in_memory.values():
-        if ctx.task_id == task_id:
+        if ctx.run_id == run_id:
             # Replace or add in-memory version
             found = False
             for i, w in enumerate(workers):

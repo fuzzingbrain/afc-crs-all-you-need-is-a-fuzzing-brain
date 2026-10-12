@@ -63,7 +63,7 @@ class POVDeltaStrategy(POVBaseStrategy):
             sanitizer=self.sanitizer,
             model=model_for(Role.FINDER),
             verbose=True,
-            task_id=self.task_id,
+            run_id=self.run_id,
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
             max_iterations=self.SP_ITERATIONS_WITH_INDEX,
@@ -353,7 +353,7 @@ class POVDeltaStrategy(POVBaseStrategy):
         """Save diff reachability report to results directory."""
         report = {
             "timestamp": datetime.now().isoformat(),
-            "task_id": self.task_id,
+            "run_id": self.run_id,
             "fuzzer": self.fuzzer,
             "sanitizer": self.sanitizer,
             "scan_mode": self.scan_mode,
@@ -462,14 +462,14 @@ class POVDeltaStrategy(POVBaseStrategy):
         agent_log_dir = self.agent_log_dir
         seed_agent = SeedAgent(
             model=model_for(Role.SEED),
-            task_id=self.task_id,
+            run_id=self.run_id,
             worker_id=self.worker_id,  # ObjectId for MongoDB linking
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             fuzzer_manager=fuzzer_manager,
             repos=self.repos,
             fuzzer_source=self.executor.harness_source(),  # full harness
-            workspace_path=self.executor.task_workspace_path,
+            workspace_path=self.executor.run_workspace_path,
             log_dir=agent_log_dir,
             max_iterations=15,  # Allow more iterations for delta seeds (with urgency forcing on last 2)
             index=1,  # Single seed agent for delta
@@ -492,7 +492,7 @@ class POVDeltaStrategy(POVBaseStrategy):
 
             result = loop.run_until_complete(
                 seed_agent.generate_delta_seeds(
-                    delta_id=self.task_id,
+                    delta_id=self.run_id,
                     changed_functions=changed_functions,
                     suspicious_points=sp_context,
                     diff_content=diff_content,

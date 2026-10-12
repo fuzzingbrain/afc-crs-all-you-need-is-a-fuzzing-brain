@@ -3,10 +3,10 @@
 Worker Isolation Tests
 
 Simulates real Celery worker process behavior:
-- Celery worker processes are reused across tasks
+- Celery worker processes are reused across runs
 - WorkerContext lifecycle: __enter__ creates buffer, __exit__ cleans up
 - LLMClient reads buffer via module-level get_worker_buffer()
-- The real risk: state leaking between sequential tasks in the same process
+- The real risk: state leaking between sequential runs in the same process
 """
 
 from unittest.mock import MagicMock, patch
@@ -26,11 +26,11 @@ from fuzzingbrain.worker.context import (
 )
 
 
-def _make_call(worker_id: str, task_id: str, cost: float = 0.1) -> LLMCall:
-    """Helper: create an LLMCall bound to a specific worker and task."""
+def _make_call(worker_id: str, run_id: str, cost: float = 0.1) -> LLMCall:
+    """Helper: create an LLMCall bound to a specific worker and run."""
     return LLMCall(
         worker_id=worker_id,
-        task_id=task_id,
+        run_id=run_id,
         agent_id=str(ObjectId()),
         model="test-model",
         cost=cost,
@@ -39,7 +39,7 @@ def _make_call(worker_id: str, task_id: str, cost: float = 0.1) -> LLMCall:
     )
 
 
-def _simulate_worker_lifecycle(task_id: str, fuzzer: str, n_calls: int = 3):
+def _simulate_worker_lifecycle(run_id: str, fuzzer: str, n_calls: int = 3):
     """
     Simulate what happens inside a real Celery worker task:
     WorkerContext enter -> LLM calls via buffer -> WorkerContext exit.
@@ -50,7 +50,7 @@ def _simulate_worker_lifecycle(task_id: str, fuzzer: str, n_calls: int = 3):
     buffer = WorkerLLMBuffer(redis_url="", mongo_db=mock_db)
 
     ctx = WorkerContext(
-        task_id=task_id,
+        run_id=run_id,
         fuzzer=fuzzer,
         sanitizer="address",
     )
@@ -67,7 +67,7 @@ def _simulate_worker_lifecycle(task_id: str, fuzzer: str, n_calls: int = 3):
     # Simulate agent LLM calls (this is what LLMClient._record_llm_call does)
     for i in range(n_calls):
         current_buffer = get_worker_buffer()
-        current_buffer.record(_make_call(worker_id, task_id, cost=float(i + 1)))
+        current_buffer.record(_make_call(worker_id, run_id, cost=float(i + 1)))
 
     # Simulate __exit__: stop buffer, clear global
     buffer.stop()
@@ -84,77 +84,77 @@ def _simulate_worker_lifecycle(task_id: str, fuzzer: str, n_calls: int = 3):
 class TestCeleryProcessReuse:
     """
     Simulates the real scenario: a single Celery worker process
-    runs Task A, then Task B sequentially. Tests that Task B
-    gets a clean environment with no leftover state from Task A.
+    runs Run A, then Run B sequentially. Tests that Run B
+    gets a clean environment with no leftover state from Run A.
     """
 
-    def test_task_b_does_not_inherit_task_a_buffer(self):
+    def test_run_b_does_not_inherit_run_a_buffer(self):
         """
-        After Task A's WorkerContext exits, get_worker_buffer() must
-        return None. Task B must not accidentally write to Task A's buffer.
+        After Run A's WorkerContext exits, get_worker_buffer() must
+        return None. Run B must not accidentally write to Run A's buffer.
         """
-        task_a_id = str(ObjectId())
-        task_b_id = str(ObjectId())
+        run_a_id = str(ObjectId())
+        run_b_id = str(ObjectId())
 
         worker_a_id = str(ObjectId())
         worker_b_id = str(ObjectId())
 
-        # --- Task A lifecycle ---
+        # --- Run A lifecycle ---
         buffer_a = WorkerLLMBuffer(redis_url="", mongo_db=None)
         set_worker_buffer(buffer_a)
-        buffer_a.record(_make_call(worker_a_id, task_a_id, cost=1.0))
+        buffer_a.record(_make_call(worker_a_id, run_a_id, cost=1.0))
 
-        # Task A exits
+        # Run A exits
         set_worker_buffer(None)
 
-        # --- Between tasks: this is the state Celery process is in ---
+        # --- Between runs: this is the state Celery process is in ---
         assert get_worker_buffer() is None, (
-            "Buffer must be None between tasks — Task B would write to Task A's buffer"
+            "Buffer must be None between runs — Run B would write to Run A's buffer"
         )
 
-        # --- Task B lifecycle ---
+        # --- Run B lifecycle ---
         buffer_b = WorkerLLMBuffer(redis_url="", mongo_db=None)
         set_worker_buffer(buffer_b)
-        buffer_b.record(_make_call(worker_b_id, task_b_id, cost=2.0))
+        buffer_b.record(_make_call(worker_b_id, run_b_id, cost=2.0))
 
-        # Verify Task B's buffer has only Task B's records
+        # Verify Run B's buffer has only Run B's records
         assert len(buffer_b._records) == 1
-        assert buffer_b._records[0]["task_id"] == ObjectId(task_b_id)
+        assert buffer_b._records[0]["run_id"] == ObjectId(run_b_id)
 
-        # Verify Task A's buffer still has only Task A's records (not polluted by B)
+        # Verify Run A's buffer still has only Run A's records (not polluted by B)
         assert len(buffer_a._records) == 1
-        assert buffer_a._records[0]["task_id"] == ObjectId(task_a_id)
+        assert buffer_a._records[0]["run_id"] == ObjectId(run_a_id)
 
         set_worker_buffer(None)
 
-    def test_task_b_records_go_to_task_b_db(self):
+    def test_run_b_records_go_to_run_b_db(self):
         """
-        Full lifecycle simulation: Task A runs and flushes to DB_A,
-        then Task B runs and flushes to DB_B. No cross-contamination.
+        Full lifecycle simulation: Run A runs and flushes to DB_A,
+        then Run B runs and flushes to DB_B. No cross-contamination.
         """
-        task_a_id = str(ObjectId())
-        task_b_id = str(ObjectId())
+        run_a_id = str(ObjectId())
+        run_b_id = str(ObjectId())
 
         worker_a_id, db_a, flushed_a = _simulate_worker_lifecycle(
-            task_a_id, "fuzzer_a", n_calls=2
+            run_a_id, "fuzzer_a", n_calls=2
         )
         worker_b_id, db_b, flushed_b = _simulate_worker_lifecycle(
-            task_b_id, "fuzzer_b", n_calls=3
+            run_b_id, "fuzzer_b", n_calls=3
         )
 
-        # Task A flushed exactly 2 records, all belonging to Task A
+        # Run A flushed exactly 2 records, all belonging to Run A
         assert len(flushed_a) == 2
         for rec in flushed_a:
-            assert rec["task_id"] == ObjectId(task_a_id)
+            assert rec["run_id"] == ObjectId(run_a_id)
             assert rec["worker_id"] == ObjectId(worker_a_id)
 
-        # Task B flushed exactly 3 records, all belonging to Task B
+        # Run B flushed exactly 3 records, all belonging to Run B
         assert len(flushed_b) == 3
         for rec in flushed_b:
-            assert rec["task_id"] == ObjectId(task_b_id)
+            assert rec["run_id"] == ObjectId(run_b_id)
             assert rec["worker_id"] == ObjectId(worker_b_id)
 
-        # Global buffer is clean after both tasks
+        # Global buffer is clean after both runs
         assert get_worker_buffer() is None
 
     def test_buffer_stop_flushes_remaining_records(self):
@@ -162,7 +162,7 @@ class TestCeleryProcessReuse:
         When WorkerContext.__exit__ calls buffer.stop(), all buffered
         records must be flushed to MongoDB. Nothing should be lost.
         """
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         mock_db = MagicMock()
         buffer = WorkerLLMBuffer(redis_url="", mongo_db=mock_db)
         buffer.start()
@@ -170,7 +170,7 @@ class TestCeleryProcessReuse:
 
         # Record 5 calls (these sit in memory, not yet flushed)
         for i in range(5):
-            buffer.record(_make_call(str(ObjectId()), task_id, cost=1.0))
+            buffer.record(_make_call(str(ObjectId()), run_id, cost=1.0))
 
         # stop() triggers final flush
         buffer.stop()
@@ -188,17 +188,17 @@ class TestCeleryProcessReuse:
 class TestWorkerContextExitFailure:
     """
     Tests what happens when WorkerContext.__exit__ fails partially.
-    The buffer must still be cleaned up to prevent leaking to the next task.
+    The buffer must still be cleaned up to prevent leaking to the next run.
     """
 
     def test_buffer_cleared_even_if_stop_raises(self):
         """
         If buffer.stop() raises an exception, set_worker_buffer(None)
-        must still be called. Otherwise the next task inherits a broken buffer.
+        must still be called. Otherwise the next run inherits a broken buffer.
 
         This tests the actual __exit__ code path.
         """
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
 
         # Create a buffer that will explode on stop()
         buffer = WorkerLLMBuffer(redis_url="", mongo_db=None)
@@ -218,7 +218,7 @@ class TestWorkerContextExitFailure:
 
         # The critical assertion: global buffer must be None
         assert get_worker_buffer() is None, (
-            "Buffer leaked after stop() failure — next task will write to broken buffer"
+            "Buffer leaked after stop() failure — next run will write to broken buffer"
         )
 
     def test_records_not_lost_on_flush_failure(self):
@@ -226,15 +226,15 @@ class TestWorkerContextExitFailure:
         If MongoDB insert_many fails during flush, records must be
         put back into the buffer (not silently dropped).
         """
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         mock_db = MagicMock()
         mock_db.llm_calls.insert_many.side_effect = Exception("MongoDB down")
 
         buffer = WorkerLLMBuffer(redis_url="", mongo_db=mock_db)
 
         # Record some calls
-        buffer.record(_make_call(str(ObjectId()), task_id, cost=1.0))
-        buffer.record(_make_call(str(ObjectId()), task_id, cost=2.0))
+        buffer.record(_make_call(str(ObjectId()), run_id, cost=1.0))
+        buffer.record(_make_call(str(ObjectId()), run_id, cost=2.0))
 
         # Flush fails
         count = buffer._flush()
@@ -250,7 +250,7 @@ class TestWorkerContextExitFailure:
         buffer.stop() must retry the final flush. If the first attempt
         fails but the second succeeds, no records should be lost.
         """
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         mock_db = MagicMock()
 
         # First insert_many fails, second succeeds
@@ -262,8 +262,8 @@ class TestWorkerContextExitFailure:
         buffer = WorkerLLMBuffer(redis_url="", mongo_db=mock_db)
         buffer.start()
 
-        buffer.record(_make_call(str(ObjectId()), task_id, cost=1.0))
-        buffer.record(_make_call(str(ObjectId()), task_id, cost=2.0))
+        buffer.record(_make_call(str(ObjectId()), run_id, cost=1.0))
+        buffer.record(_make_call(str(ObjectId()), run_id, cost=2.0))
 
         buffer.stop()
 
@@ -282,16 +282,16 @@ class TestWorkerContextExitFailure:
         If all 3 flush attempts fail, stop() must log an error
         indicating how many records were lost.
         """
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         mock_db = MagicMock()
         mock_db.llm_calls.insert_many.side_effect = Exception("DB permanently down")
 
         buffer = WorkerLLMBuffer(redis_url="", mongo_db=mock_db)
         buffer.start()
 
-        buffer.record(_make_call(str(ObjectId()), task_id, cost=1.0))
-        buffer.record(_make_call(str(ObjectId()), task_id, cost=2.0))
-        buffer.record(_make_call(str(ObjectId()), task_id, cost=3.0))
+        buffer.record(_make_call(str(ObjectId()), run_id, cost=1.0))
+        buffer.record(_make_call(str(ObjectId()), run_id, cost=2.0))
+        buffer.record(_make_call(str(ObjectId()), run_id, cost=3.0))
 
         buffer.stop()
 
@@ -317,7 +317,7 @@ class TestWorkerContextRegistry:
     def test_enter_registers_exit_unregisters(self):
         """Worker appears in registry on enter, disappears on exit."""
         ctx = WorkerContext(
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             fuzzer="test_fuzzer",
             sanitizer="address",
         )
@@ -344,7 +344,7 @@ class TestWorkerContextRegistry:
         return stale data.
         """
         ctx = WorkerContext(
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             fuzzer="test_fuzzer",
             sanitizer="address",
         )
@@ -365,15 +365,15 @@ class TestWorkerContextRegistry:
 
     def test_revoked_worker_is_stopped_not_failed(self):
         """
-        The controller revokes every worker once the task is over, and
+        The controller revokes every worker once the run is over, and
         billiard delivers that SIGTERM as Terminated(-signum). That is the
-        task ending, not the worker breaking: it must not be recorded as
+        run ending, not the worker breaking: it must not be recorded as
         failed with an error of "-241".
         """
         from billiard.exceptions import Terminated
 
         ctx = WorkerContext(
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             fuzzer="test_fuzzer",
             sanitizer="address",
         )

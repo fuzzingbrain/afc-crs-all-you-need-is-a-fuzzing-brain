@@ -234,9 +234,9 @@ class TestSPInitialState:
 
     def test_sp_saved_with_pending_verify_found_by_claim(self, sp_repo):
         """Save SP → claim_for_verify must find it."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         sp = SuspiciousPoint(
-            task_id=task_id,
+            run_id=run_id,
             function_name="parse_chunk",
             description="heap overflow",
             score=0.8,
@@ -245,7 +245,7 @@ class TestSPInitialState:
         sp_repo.save(sp)
 
         claimed = sp_repo.claim_for_verify(
-            task_id=task_id,
+            run_id=run_id,
             processor_id=str(ObjectId()),
         )
 
@@ -254,32 +254,32 @@ class TestSPInitialState:
 
     def test_created_by_agent_id_persisted(self, sp_repo):
         """created_by_agent_id from server must round-trip through DB."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         agent_id = str(ObjectId())
 
         sp = SuspiciousPoint(
-            task_id=task_id,
+            run_id=run_id,
             function_name="f",
             created_by_agent_id=agent_id,
             sources=[{"harness_name": "fuzz_png", "sanitizer": "address"}],
         )
         sp_repo.save(sp)
 
-        found = sp_repo.find_by_task(task_id)
+        found = sp_repo.find_by_run(run_id)
         assert len(found) == 1
         assert found[0].created_by_agent_id == agent_id
 
     def test_sources_contain_harness_and_sanitizer(self, sp_repo):
         """The sources array must record which harness/sanitizer discovered this SP."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         sp = SuspiciousPoint(
-            task_id=task_id,
+            run_id=run_id,
             function_name="f",
             sources=[{"harness_name": "fuzz_png", "sanitizer": "address"}],
         )
         sp_repo.save(sp)
 
-        found = sp_repo.find_by_task(task_id)
+        found = sp_repo.find_by_run(run_id)
         assert len(found) == 1
         assert found[0].sources == [
             {"harness_name": "fuzz_png", "sanitizer": "address"}
@@ -287,18 +287,18 @@ class TestSPInitialState:
 
     def test_direction_id_persisted(self, sp_repo):
         """SP must record which direction it belongs to."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         direction_id = str(ObjectId())
 
         sp = SuspiciousPoint(
-            task_id=task_id,
+            run_id=run_id,
             function_name="f",
             direction_id=direction_id,
             sources=[{"harness_name": "fuzz_png", "sanitizer": "address"}],
         )
         sp_repo.save(sp)
 
-        found = sp_repo.find_by_task(task_id)
+        found = sp_repo.find_by_run(run_id)
         assert len(found) == 1
         assert found[0].direction_id == direction_id
 

@@ -46,9 +46,9 @@ class POVBaseStrategy(BaseStrategy):
 
     def _setup_tool_contexts(self) -> None:
         """Set up contexts for MCP tools."""
-        # Set code viewer context using main task workspace (shared repo/diff)
+        # Set code viewer context using main run workspace (shared repo/diff)
         set_code_viewer_context(
-            workspace_path=str(self.executor.task_workspace_path),
+            workspace_path=str(self.executor.run_workspace_path),
             repo_subdir="repo",
             diff_filename="diff/ref.diff",
             project_name=self.project_name,
@@ -231,7 +231,7 @@ class POVBaseStrategy(BaseStrategy):
             step_start = time.time()
 
             # Get latest points from DB
-            all_points = self.repos.suspicious_points.find_by_task(self.task_id)
+            all_points = self.repos.suspicious_points.find_by_run(self.run_id)
             sorted_points = self._sort_by_priority(all_points)
 
             # Count high-confidence bugs. The bar is configured, not
@@ -312,7 +312,7 @@ class POVBaseStrategy(BaseStrategy):
             scan_mode=self.scan_mode,  # Use strategy's scan_mode for verify prompt
             model=model_for(Role.VERIFIER),
             verbose=True,
-            task_id=self.task_id,
+            run_id=self.run_id,
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
             index=1,  # Single agent for sequential verification
@@ -414,7 +414,7 @@ class POVBaseStrategy(BaseStrategy):
                 # Create SeedAgent for this FP
                 seed_agent = SeedAgent(
                     model=model_for(Role.SEED),
-                    task_id=self.task_id,
+                    run_id=self.run_id,
                     worker_id=self.worker_id,  # ObjectId for MongoDB linking
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
@@ -478,7 +478,7 @@ class POVBaseStrategy(BaseStrategy):
             List of SuspiciousPoint objects
         """
         try:
-            return self.repos.suspicious_points.find_by_task(self.task_id)
+            return self.repos.suspicious_points.find_by_run(self.run_id)
         except Exception as e:
             self.log_error(f"Failed to get suspicious points from DB: {e}")
             return []
@@ -523,14 +523,14 @@ class POVBaseStrategy(BaseStrategy):
         self.log_info(f"Saving {len(suspicious_points)} suspicious points report...")
 
         # Re-fetch all points from DB to get latest values (agent may have updated them)
-        fresh_points = self.repos.suspicious_points.find_by_task(self.task_id)
+        fresh_points = self.repos.suspicious_points.find_by_run(self.run_id)
         if not fresh_points:
             fresh_points = suspicious_points  # Fallback to in-memory if DB query fails
 
         # Save summary to results file
         report = {
             "timestamp": datetime.now().isoformat(),
-            "task_id": self.task_id,
+            "run_id": self.run_id,
             "fuzzer": self.fuzzer,
             "sanitizer": self.sanitizer,
             "scan_mode": self.scan_mode,
@@ -578,9 +578,9 @@ class POVBaseStrategy(BaseStrategy):
         # Common fuzzer source extensions
         extensions = [".cc", ".c", ".cpp"]
 
-        # Try fuzz-tooling directory in main task workspace (shared, read-only)
+        # Try fuzz-tooling directory in main run workspace (shared, read-only)
         fuzz_tooling_dir = (
-            self.executor.task_workspace_path
+            self.executor.run_workspace_path
             / "fuzz-tooling"
             / "projects"
             / self.project_name
@@ -623,7 +623,7 @@ class POVBaseStrategy(BaseStrategy):
             set_coverage_context(
                 coverage_fuzzer_dir=coverage_fuzzer_dir,
                 project_name=self.project_name,
-                src_dir=self.executor.task_workspace_path / "repo",
+                src_dir=self.executor.run_workspace_path / "repo",
                 docker_image=self.executor.docker_image,
                 work_dir=self.results_path / "coverage_work",
             )
@@ -657,7 +657,7 @@ class POVBaseStrategy(BaseStrategy):
 
         # Create pipeline
         pipeline = AgentPipeline(
-            task_id=self.task_id,
+            run_id=self.run_id,
             repos=self.repos,
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
@@ -665,7 +665,7 @@ class POVBaseStrategy(BaseStrategy):
             config=config,
             output_dir=self.povs_path,
             log_dir=self.agent_log_dir,
-            workspace_path=self.executor.task_workspace_path,
+            workspace_path=self.executor.run_workspace_path,
             worker_id=self.worker_id,  # For SP Fuzzer lifecycle
             fuzzer_code=fuzzer_code,
             fuzzer_source=self.executor.harness_source(),  # full harness for verifier

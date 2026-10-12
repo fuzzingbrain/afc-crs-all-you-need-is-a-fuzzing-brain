@@ -16,10 +16,10 @@ import pytest
 from fuzzingbrain.analyzer.server import AnalysisServer
 
 
-def _server(task_path, project_name="curl", coverage_path=None):
+def _server(workspace_path, project_name="curl", coverage_path=None):
     """A server object with only the attributes the lookup touches."""
     srv = AnalysisServer.__new__(AnalysisServer)
-    srv.task_path = Path(task_path)
+    srv.workspace_path = Path(workspace_path)
     srv.project_name = project_name
     srv.coverage_path = str(coverage_path) if coverage_path else None
     return srv

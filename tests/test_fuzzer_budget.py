@@ -1,6 +1,6 @@
 """The ceiling on how many fuzzers run at once.
 
-The count that matters is the task's, not the worker's: workers are separate
+The count that matters is the run's, not the worker's: workers are separate
 Celery processes, so a limit that lives inside one of them bounds nothing. These
 tests run against Redis when it is there -- that is the only place the
 cross-process claim can actually be checked -- and against the in-process
@@ -27,12 +27,12 @@ def clean_process_slots():
 
 
 @pytest.fixture
-def task_budget(request):
-    """A budget on a task id nothing else uses, cleared afterwards."""
+def run_budget(request):
+    """A budget on a run id nothing else uses, cleared afterwards."""
     made = []
 
     def _make(limit):
-        b = FuzzerBudget(task_id=f"test-{os.getpid()}-{request.node.name}", limit=limit)
+        b = FuzzerBudget(run_id=f"test-{os.getpid()}-{request.node.name}", limit=limit)
         b.clear()
         made.append(b)
         return b
@@ -43,52 +43,52 @@ def task_budget(request):
 
 
 class TestTheLimitHolds:
-    def test_the_eleventh_fuzzer_is_refused(self, task_budget):
-        b = task_budget(10)
+    def test_the_eleventh_fuzzer_is_refused(self, run_budget):
+        b = run_budget(10)
         assert all(b.acquire(f"w{i}:global") for i in range(10))
         assert not b.acquire("w10:global")
         assert b.in_use() == 10
 
-    def test_releasing_one_lets_the_next_in(self, task_budget):
-        b = task_budget(2)
+    def test_releasing_one_lets_the_next_in(self, run_budget):
+        b = run_budget(2)
         assert b.acquire("a") and b.acquire("b")
         assert not b.acquire("c")
         b.release("a")
         assert b.acquire("c")
         assert b.in_use() == 2
 
-    def test_reacquiring_your_own_slot_is_not_a_new_one(self, task_budget):
+    def test_reacquiring_your_own_slot_is_not_a_new_one(self, run_budget):
         # A global fuzzer is restarted after a crash; it keeps the slot it had
-        # rather than being refused because the task is full.
-        b = task_budget(1)
+        # rather than being refused because the run is full.
+        b = run_budget(1)
         assert b.acquire("w0:global")
         assert b.acquire("w0:global")
         assert b.in_use() == 1
 
-    def test_a_limit_below_one_is_still_one(self, task_budget):
-        assert task_budget(0).limit == 1
+    def test_a_limit_below_one_is_still_one(self, run_budget):
+        assert run_budget(0).limit == 1
 
-    def test_two_tasks_do_not_share_a_ceiling(self, task_budget):
-        a = task_budget(1)
-        other = FuzzerBudget(task_id=a.task_id + "-second", limit=1)
+    def test_two_runs_do_not_share_a_ceiling(self, run_budget):
+        a = run_budget(1)
+        other = FuzzerBudget(run_id=a.run_id + "-second", limit=1)
         other.clear()
         try:
             assert a.acquire("x")
-            assert other.acquire("x"), "a full task blocked an unrelated one"
+            assert other.acquire("x"), "a full run blocked an unrelated one"
         finally:
             other.clear()
 
 
 class TestSlotsSurviveTheirHolders:
-    def test_a_dead_holder_does_not_keep_its_slot(self, task_budget):
-        b = task_budget(1)
+    def test_a_dead_holder_does_not_keep_its_slot(self, run_budget):
+        b = run_budget(1)
         if b._redis is None:
             pytest.skip("pid reclamation is a Redis-backed behaviour")
         import json
         import time
 
         # A worker that was killed between acquiring and releasing: its pid is
-        # gone, and without reclamation the task would sit one under its limit
+        # gone, and without reclamation the run would sit one under its limit
         # for the rest of the run.
         b._redis.hset(
             b.key,
@@ -100,8 +100,8 @@ class TestSlotsSurviveTheirHolders:
         assert b.in_use() == 1
         assert b.acquire("live"), "the dead worker's slot was never given back"
 
-    def test_a_live_holder_keeps_its_slot(self, task_budget):
-        b = task_budget(1)
+    def test_a_live_holder_keeps_its_slot(self, run_budget):
+        b = run_budget(1)
         if b._redis is None:
             pytest.skip("pid reclamation is a Redis-backed behaviour")
         assert b.acquire("mine")
@@ -112,7 +112,7 @@ class TestWithoutRedis:
     def test_the_limit_still_binds_inside_one_process(self, monkeypatch):
         # Redis down must not read as "no limit": the run would then start as
         # many fuzzers as it likes, which is the failure this exists to stop.
-        b = FuzzerBudget(task_id="no-redis", limit=3)
+        b = FuzzerBudget(run_id="no-redis", limit=3)
         b._redis = None
         assert [b.acquire(f"f{i}") for i in range(4)] == [True, True, True, False]
         b.release("f0")
@@ -131,7 +131,7 @@ class TestTheCeilingIsConfigurable:
         assert Config.from_json(str(f)).max_parallel_fuzzers == 6
 
     def test_it_reaches_the_worker(self):
-        # The ceiling is task-wide, so it has to survive the trip from the
+        # The ceiling is run-wide, so it has to survive the trip from the
         # dispatcher's config into a Celery worker's own process.
         import inspect
 
@@ -175,7 +175,7 @@ class TestTheManagerAsksBeforeItSpends:
         binary.parent.mkdir(parents=True, exist_ok=True)
         binary.write_bytes(b"")
         m = FuzzerManager(
-            task_id=f"mgr-{os.getpid()}-{limit}",
+            run_id=f"mgr-{os.getpid()}-{limit}",
             worker_id="w0",
             fuzzer_path=binary,
             docker_image="none",
@@ -221,9 +221,9 @@ class TestTheManagerAsksBeforeItSpends:
 class TestThePerWorkerSPCeiling:
     """sp_max_count, which was configurable everywhere and read nowhere.
 
-    It is the per-worker complement to the task-wide budget: one worker with
+    It is the per-worker complement to the run-wide budget: one worker with
     twelve POV agents would otherwise start twelve SP fuzzers and take the
-    whole task's allowance for itself.
+    whole run's allowance for itself.
     """
 
     def test_the_config_reaches_the_fuzzer(self):
@@ -255,7 +255,7 @@ class TestThePerWorkerSPCeiling:
         binary.parent.mkdir(parents=True, exist_ok=True)
         binary.write_bytes(b"")
         m = FuzzerManager(
-            task_id=f"spcap-{os.getpid()}",
+            run_id=f"spcap-{os.getpid()}",
             worker_id="w0",
             fuzzer_path=binary,
             docker_image="none",

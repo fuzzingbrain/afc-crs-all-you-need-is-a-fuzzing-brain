@@ -33,8 +33,8 @@ class TestPrebuiltGraphPlumbing:
 
     def test_request_roundtrip_preserves_graph_and_binaries(self):
         req = AnalyzeRequest(
-            task_id="t",
-            task_path="p",
+            run_id="t",
+            workspace_path="p",
             project_name="x",
             sanitizers=["address"],
             prebuild_dir="/g",

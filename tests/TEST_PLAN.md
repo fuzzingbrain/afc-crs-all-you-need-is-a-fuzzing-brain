@@ -34,7 +34,7 @@ Bugs here cause tasks to fail, hang, or lose data.
 | 7 | `worker/context.py` | `test_worker_context.py` | `__enter__`/`__exit__` lifecycle, buffer start/stop, DB record creation (worker + agents), cleanup on exception, idempotent exit |
 | 8 | `worker/executor.py` | `test_worker_executor.py` | Strategy selection (delta vs fullscan), execution flow, error propagation |
 | 9 | `worker/pipeline.py` | `test_worker_pipeline.py` | Agent sequencing, iteration limits, early termination on POV found, failure handling |
-| 10 | `core/task_processor.py` | `test_task_processor.py` | Workspace setup, fuzzer discovery, `update()` vs `save()` for status changes, summary generation |
+| 10 | `core/run_processor.py` | `test_task_processor.py` | Workspace setup, fuzzer discovery, `update()` vs `save()` for status changes, summary generation |
 
 ### P2 — Agent Logic
 

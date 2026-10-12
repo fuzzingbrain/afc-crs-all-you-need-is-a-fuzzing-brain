@@ -49,7 +49,7 @@ def test_an_unknown_key_is_refused(tmp_path):
 
 def test_the_run_id_is_generated_and_unique(tmp_path):
     a, b = _cfg(tmp_path), _cfg(tmp_path)
-    assert len(a.task_id) == 24 and a.task_id != b.task_id
+    assert len(a.run_id) == 24 and a.run_id != b.run_id
 
 
 def test_relative_paths_resolve_against_the_checkout(tmp_path):
@@ -69,7 +69,7 @@ def test_output_resolution(tmp_path, output, expected):
 
 def test_output_defaults_to_project_and_run_id(tmp_path):
     cfg = _cfg(tmp_path)
-    assert cfg.resolve_output() == str(WORKSPACE_ROOT / f"curl_{cfg.task_id}")
+    assert cfg.resolve_output() == str(WORKSPACE_ROOT / f"curl_{cfg.run_id}")
 
 
 def test_a_flag_overrides_the_task_file(tmp_path):

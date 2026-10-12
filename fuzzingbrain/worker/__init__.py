@@ -9,7 +9,7 @@ Contains worker execution logic:
 - context: Worker isolation with MongoDB ObjectId
 
 Hierarchy:
-    Task (ObjectId)
+    Run (ObjectId)
     └── Worker (ObjectId) ← WorkerContext provides this
         └── Agent (ObjectId) ← AgentContext provides this
 """
@@ -23,7 +23,7 @@ from .context import (
     get_all_worker_contexts,
     # Monitoring API
     get_worker_status,
-    get_workers_by_task,
+    get_workers_by_run,
     get_active_workers,
 )
 
@@ -37,6 +37,6 @@ __all__ = [
     "get_all_worker_contexts",
     # Monitoring API
     "get_worker_status",
-    "get_workers_by_task",
+    "get_workers_by_run",
     "get_active_workers",
 ]

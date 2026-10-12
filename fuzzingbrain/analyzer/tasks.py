@@ -3,7 +3,7 @@
 Analyzer Celery Tasks
 
 Celery task for running the Analysis Server.
-Called by Controller, starts a long-running server for the task.
+Called by Controller, starts a long-running server for the run.
 """
 
 import asyncio
@@ -23,8 +23,8 @@ from .server import AnalysisServer
 
 
 def _run_server_process(
-    task_id: str,
-    task_path: str,
+    run_id: str,
+    workspace_path: str,
     project_name: str,
     sanitizers: list,
     ossfuzz_project_name: Optional[str],
@@ -58,8 +58,8 @@ def _run_server_process(
     # Create and run server
     async def run():
         server = AnalysisServer(
-            task_id=task_id,
-            task_path=task_path,
+            run_id=run_id,
+            workspace_path=workspace_path,
             project_name=project_name,
             sanitizers=sanitizers,
             ossfuzz_project_name=ossfuzz_project_name,
@@ -97,7 +97,7 @@ def _run_server_process(
         result_queue.put(
             AnalyzeResult(
                 success=False,
-                task_id=task_id,
+                run_id=run_id,
                 error_msg=str(e),
             ).to_dict()
         )
@@ -106,7 +106,7 @@ def _run_server_process(
 @app.task(bind=True, name="analyzer.start_server")
 def start_analysis_server(_self, request_dict: dict) -> dict:
     """
-    Start the Analysis Server for a task.
+    Start the Analysis Server for a run.
 
     This task:
     1. Spawns a subprocess running the Analysis Server
@@ -123,9 +123,9 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
         AnalyzeResult as dict (includes socket_path for client connections)
     """
     request = AnalyzeRequest.from_dict(request_dict)
-    task_id = request.task_id
+    run_id = request.run_id
 
-    logger.info(f"[Analyzer] Starting Analysis Server for task {task_id}")
+    logger.info(f"[Analyzer] Starting Analysis Server for run {run_id}")
     logger.info(f"[Analyzer] Project: {request.project_name}")
     logger.info(f"[Analyzer] Sanitizers: {request.sanitizers}")
     if request.prebuild_dir:
@@ -138,8 +138,8 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
     process = multiprocessing.Process(
         target=_run_server_process,
         args=(
-            request.task_id,
-            request.task_path,
+            request.run_id,
+            request.workspace_path,
             request.project_name,
             request.sanitizers,
             request.ossfuzz_project_name,
@@ -159,13 +159,13 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
     logger.info(f"[Analyzer] Server process started: PID {process.pid}")
 
     # Save PID and socket path for later cleanup
-    pid_file = Path(request.task_path) / "analyzer.pid"
+    pid_file = Path(request.workspace_path) / "analyzer.pid"
     with open(pid_file, "w") as f:
         f.write(str(process.pid))
 
-    socket_info_file = Path(request.task_path) / "analyzer.socket"
+    socket_info_file = Path(request.workspace_path) / "analyzer.socket"
     with open(socket_info_file, "w") as f:
-        f.write(f"/tmp/fuzzingbrain_{task_id}.sock")
+        f.write(f"/tmp/fuzzingbrain_{run_id}.sock")
 
     # Wait for server to become ready (or fail)
     try:
@@ -176,7 +176,7 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
         if result.success:
             logger.info(f"[Analyzer] Server ready: {len(result.fuzzers)} fuzzers")
             logger.info(
-                f"[Analyzer] Socket: {Path(request.task_path) / 'analyzer.sock'}"
+                f"[Analyzer] Socket: {Path(request.workspace_path) / 'analyzer.sock'}"
             )
         else:
             logger.error(f"[Analyzer] Server failed: {result.error_msg}")
@@ -186,7 +186,7 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
                 process.join(timeout=5)
 
         # Add socket path to result (use /tmp to avoid path length limit)
-        result_dict["socket_path"] = f"/tmp/fuzzingbrain_{task_id}.sock"
+        result_dict["socket_path"] = f"/tmp/fuzzingbrain_{run_id}.sock"
         result_dict["server_pid"] = process.pid
 
         return result_dict
@@ -200,24 +200,24 @@ def start_analysis_server(_self, request_dict: dict) -> dict:
 
         return AnalyzeResult(
             success=False,
-            task_id=task_id,
+            run_id=run_id,
             error_msg=str(e),
         ).to_dict()
 
 
-def stop_analysis_server(task_path: str) -> bool:
+def stop_analysis_server(workspace_path: str) -> bool:
     """
-    Stop the Analysis Server for a task.
+    Stop the Analysis Server for a run.
 
     Args:
-        task_path: Path to task directory
+        workspace_path: Path to the run workspace
 
     Returns:
         True if server was stopped
     """
-    task_path = Path(task_path)
-    pid_file = task_path / "analyzer.pid"
-    socket_info_file = task_path / "analyzer.socket"
+    workspace_path = Path(workspace_path)
+    pid_file = workspace_path / "analyzer.pid"
+    socket_info_file = workspace_path / "analyzer.socket"
 
     # Read socket path from file
     socket_path = None

@@ -27,7 +27,7 @@ class AnalysisClient:
     Client for querying the Analysis Server.
 
     Usage:
-        client = AnalysisClient("/path/to/task/analyzer.sock")
+        client = AnalysisClient("/path/to/run/analyzer.sock")
         func = client.get_function("png_read_info")
         callees = client.get_callees("png_read_info")
     """

@@ -239,7 +239,7 @@ FuzzingBrain employs a dual-layer fuzzer architecture combining LLM analysis wit
 ## Workspace Structure
 
 ```
-workspace/{task_id}/
+workspace/{run_id}/
 ├── repo/                          # Cloned source code
 ├── fuzz-tooling/                  # OSS-Fuzz tooling
 │   ├── infra/helper.py

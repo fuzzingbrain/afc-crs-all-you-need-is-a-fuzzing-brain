@@ -104,7 +104,7 @@ class AgentPipeline:
 
     def __init__(
         self,
-        task_id: str,
+        run_id: str,
         repos: RepositoryManager,
         fuzzer: str = "",
         sanitizer: str = "address",
@@ -122,7 +122,7 @@ class AgentPipeline:
         Initialize the pipeline.
 
         Args:
-            task_id: Task ID
+            run_id: Run ID
             repos: Database repository manager
             fuzzer: Fuzzer name (for agent context)
             sanitizer: Sanitizer type
@@ -134,7 +134,7 @@ class AgentPipeline:
             mcp_socket_path: MCP socket path for analyzer context
             worker_id: Worker ID for FuzzerManager lookup
         """
-        self.task_id = task_id
+        self.run_id = run_id
         self.repos = repos
         self.fuzzer = fuzzer
         self.sanitizer = sanitizer
@@ -176,7 +176,7 @@ class AgentPipeline:
         Returns:
             Pipeline statistics
         """
-        logger.info(f"[Pipeline] Starting pipeline for task {self.task_id}")
+        logger.info(f"[Pipeline] Starting pipeline for run {self.run_id}")
         logger.info(
             f"[Pipeline] Config: {self.config.num_verify_agents} verify agents, {self.config.num_pov_agents} POV agents"
         )
@@ -243,7 +243,7 @@ class AgentPipeline:
         while not self._shutdown:
             # Try to claim a task (filter by fuzzer/sanitizer for worker isolation)
             sp = self.repos.suspicious_points.claim_for_verify(
-                self.task_id,
+                self.run_id,
                 agent_id,
                 harness_name=self.fuzzer,
                 sanitizer=self.sanitizer,
@@ -252,7 +252,7 @@ class AgentPipeline:
             if sp is None:
                 # No work available.
                 #
-                # DO NOT exit on an empty queue. The task's real end is owned by
+                # DO NOT exit on an empty queue. The run's real end is owned by
                 # the dispatcher, which revokes the workers on POV target / budget
                 # limit / the per-task celery timeout. The old early-exit (SP
                 # finding done + queue drained) cut guided work short: the finder
@@ -260,7 +260,7 @@ class AgentPipeline:
                 # so on tasks the first scan misses (e.g. freetype tt_size_reset)
                 # the whole agent phase died in ~4 min and only blind global
                 # fuzzing ran for the remaining ~86 min. Stay alive until the
-                # clock or the budget ends the task, so late SPs -- e.g. ones
+                # clock or the budget ends the run, so late SPs -- e.g. ones
                 # raised from fuzzer-found crashes -- still get verified/attempted.
                 idle_cycles += 1
 
@@ -300,7 +300,7 @@ class AgentPipeline:
                     sanitizer=self.sanitizer,
                     scan_mode=self.scan_mode,  # Use pipeline's scan_mode
                     model=model_for(Role.VERIFIER),
-                    task_id=self.task_id,
+                    run_id=self.run_id,
                     worker_id=self.worker_id,  # Use actual worker_id, not agent_id
                     log_dir=self.log_dir,
                     index=agent_index,
@@ -430,7 +430,7 @@ class AgentPipeline:
         while not self._shutdown:
             # Try to claim a task (filter by fuzzer/sanitizer for worker isolation)
             sp = self.repos.suspicious_points.claim_for_pov(
-                self.task_id,
+                self.run_id,
                 agent_id,
                 min_score=self.config.pov_min_score,
                 harness_name=self.fuzzer,
@@ -497,7 +497,7 @@ class AgentPipeline:
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,
                     model=model_for(Role.POC),
-                    task_id=self.task_id,
+                    run_id=self.run_id,
                     worker_id=self.worker_id,  # Use actual worker_id, not agent_id
                     output_dir=self.output_dir,
                     log_dir=self.log_dir,
@@ -582,7 +582,7 @@ class AgentPipeline:
 
 
 async def run_pipeline(
-    task_id: str,
+    run_id: str,
     repos: RepositoryManager,
     fuzzer: str = "",
     sanitizer: str = "address",
@@ -606,7 +606,7 @@ async def run_pipeline(
     Convenience function to run the pipeline.
 
     Args:
-        task_id: Task ID
+        run_id: Run ID
         repos: Database repository manager
         fuzzer: Fuzzer name
         sanitizer: Sanitizer type
@@ -638,7 +638,7 @@ async def run_pipeline(
     )
 
     pipeline = AgentPipeline(
-        task_id=task_id,
+        run_id=run_id,
         repos=repos,
         fuzzer=fuzzer,
         sanitizer=sanitizer,

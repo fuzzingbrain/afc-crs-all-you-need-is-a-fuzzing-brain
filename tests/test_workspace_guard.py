@@ -27,7 +27,7 @@ def _answer_dir(tree):
 
 @pytest.fixture
 def workspace(tmp_path):
-    ws = tmp_path / "libpng_task"
+    ws = tmp_path / "libpng_run"
     for name in ("repo", "repo-address", "repo-coverage"):
         tree = ws / name
         (tree / "src").mkdir(parents=True)
@@ -132,11 +132,11 @@ def test_assert_ignores_history_when_remove_git_is_off(workspace):
 def test_banner_states_what_was_enforced(workspace):
     report = sanitize_workspace(workspace, remove_git=True, diff_ready=True)
     lines = format_banner(
-        report, remove_git=True, confined_to="libpng_task/repo"
+        report, remove_git=True, confined_to="libpng_run/repo"
     )
     text = "\n".join(lines)
     assert "removed (3 paths)" in text
-    assert "libpng_task/repo" in text
+    assert "libpng_run/repo" in text
 
 
 def test_banner_explains_a_kept_git(workspace):
@@ -196,13 +196,13 @@ def _source(module_path):
 def test_sanitisation_runs_from_the_shared_pipeline():
     """Not from an entry point: the pipeline is what every entry point reaches
     (plain URL, flags, JSON file, REST API, MCP server)."""
-    src = _source("fuzzingbrain/core/task_processor.py")
+    src = _source("fuzzingbrain/core/run_processor.py")
     assert "sanitize_workspace(" in src
 
 
 def test_sanitisation_precedes_the_assertion():
     """Cleaning after the check would make the check meaningless."""
-    src = _source("fuzzingbrain/core/task_processor.py")
+    src = _source("fuzzingbrain/core/run_processor.py")
     assert src.index("sanitize_workspace(") < src.index("assert_workspace_clean(")
 
 
@@ -213,4 +213,4 @@ def test_no_entry_point_sanitises_on_its_own():
 
 def test_the_posture_is_reported_where_it_is_enforced():
     """A run has to be able to prove from its log what was enforced."""
-    assert "format_banner(" in _source("fuzzingbrain/core/task_processor.py")
+    assert "format_banner(" in _source("fuzzingbrain/core/run_processor.py")

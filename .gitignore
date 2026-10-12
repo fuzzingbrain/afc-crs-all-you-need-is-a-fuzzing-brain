@@ -23,7 +23,7 @@ work/
 !tests/test_*
 test_trace_output/
 
-task_view_*/
+run_view_*/
 documentation/analysis/
 experiment/
 

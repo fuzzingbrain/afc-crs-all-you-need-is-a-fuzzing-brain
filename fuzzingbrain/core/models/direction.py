@@ -46,7 +46,7 @@ class Direction:
 
     # Identifiers
     direction_id: str = field(default_factory=generate_id)
-    task_id: str = ""  # Which task this belongs to
+    run_id: str = ""  # Which run this belongs to
     fuzzer: str = ""  # Which fuzzer this direction is for
 
     # Agent reference (ObjectId stored as string)
@@ -85,7 +85,7 @@ class Direction:
         return {
             "_id": ObjectId(self.direction_id) if self.direction_id else ObjectId(),
             "direction_id": self.direction_id,
-            "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "run_id": ObjectId(self.run_id) if self.run_id else None,
             "created_by_agent_id": ObjectId(self.created_by_agent_id)
             if self.created_by_agent_id
             else None,
@@ -130,9 +130,9 @@ class Direction:
         if isinstance(direction_id, ObjectId):
             direction_id = str(direction_id)
 
-        task_id = data.get("task_id", "")
-        if isinstance(task_id, ObjectId):
-            task_id = str(task_id)
+        run_id = data.get("run_id", "")
+        if isinstance(run_id, ObjectId):
+            run_id = str(run_id)
 
         created_by_agent_id = data.get("created_by_agent_id")
         if isinstance(created_by_agent_id, ObjectId):
@@ -144,7 +144,7 @@ class Direction:
 
         return cls(
             direction_id=direction_id or generate_id(),
-            task_id=task_id,
+            run_id=run_id,
             created_by_agent_id=created_by_agent_id,
             fuzzer=data.get("fuzzer", ""),
             name=data.get("name", ""),

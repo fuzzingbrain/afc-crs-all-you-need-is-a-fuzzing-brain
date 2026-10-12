@@ -20,15 +20,15 @@ class CallGraphNode:
     CallGraphNode stores call graph relationships for a specific fuzzer.
 
     Each fuzzer has its own set of reachable functions and call relationships.
-    The node_id is {task_id}_{fuzzer_id}_{function_name} to ensure uniqueness.
+    The node_id is {run_id}_{fuzzer_id}_{function_name} to ensure uniqueness.
 
     Data comes from OSS-Fuzz introspector output, which is generated
     automatically during the fuzzer build process.
     """
 
     # Identifiers
-    node_id: str = ""  # {task_id}_{fuzzer_id}_{function_name}
-    task_id: str = ""
+    node_id: str = ""  # {run_id}_{fuzzer_id}_{function_name}
+    run_id: str = ""
     fuzzer_id: str = ""
     fuzzer_name: str = ""  # Redundant for convenience
 
@@ -45,16 +45,16 @@ class CallGraphNode:
 
     def __post_init__(self):
         """Auto-generate node_id if not set"""
-        if not self.node_id and self.task_id and self.fuzzer_id and self.function_name:
-            self.node_id = f"{self.task_id}_{self.fuzzer_id}_{self.function_name}"
+        if not self.node_id and self.run_id and self.fuzzer_id and self.function_name:
+            self.node_id = f"{self.run_id}_{self.fuzzer_id}_{self.function_name}"
 
     def to_dict(self) -> dict:
         """Convert to dictionary for MongoDB storage"""
         # Use safe_object_id for fuzzer_id to handle fuzzer names from introspector
         return {
-            "_id": self.node_id,  # Composite key: {task_id}_{fuzzer_id}_{function_name}
+            "_id": self.node_id,  # Composite key: {run_id}_{fuzzer_id}_{function_name}
             # Note: node_id removed - use _id only
-            "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "run_id": ObjectId(self.run_id) if self.run_id else None,
             "fuzzer_id": safe_object_id(self.fuzzer_id),
             "fuzzer_name": self.fuzzer_name,
             "function_name": self.function_name,
@@ -68,9 +68,9 @@ class CallGraphNode:
     def from_dict(cls, data: dict) -> "CallGraphNode":
         """Create CallGraphNode from dictionary"""
         # Handle ObjectId conversion
-        task_id = data.get("task_id", "")
-        if isinstance(task_id, ObjectId):
-            task_id = str(task_id)
+        run_id = data.get("run_id", "")
+        if isinstance(run_id, ObjectId):
+            run_id = str(run_id)
 
         fuzzer_id = data.get("fuzzer_id", "")
         if isinstance(fuzzer_id, ObjectId):
@@ -78,7 +78,7 @@ class CallGraphNode:
 
         return cls(
             node_id=data.get("node_id", data.get("_id", "")),
-            task_id=task_id,
+            run_id=run_id,
             fuzzer_id=fuzzer_id,
             fuzzer_name=data.get("fuzzer_name", ""),
             function_name=data.get("function_name", ""),

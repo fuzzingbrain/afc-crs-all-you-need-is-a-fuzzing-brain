@@ -90,7 +90,7 @@ class SPVerifier(BaseAgent):
         model: Optional[Union[ModelInfo, str]] = None,
         max_iterations: int = 15,
         verbose: bool = True,
-        task_id: str = "",
+        run_id: str = "",
         worker_id: str = "",
         log_dir: Optional[Path] = None,
         index: int = 0,
@@ -108,7 +108,7 @@ class SPVerifier(BaseAgent):
             model: Model to use
             max_iterations: Maximum iterations
             verbose: Whether to log progress
-            task_id: Task ID for logging
+            run_id: Run ID for logging
             worker_id: Worker ID for logging
             log_dir: Directory for log files
             index: Agent index for numbered log files
@@ -120,7 +120,7 @@ class SPVerifier(BaseAgent):
             model=model,
             max_iterations=max_iterations,
             verbose=verbose,
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
             log_dir=log_dir,
             index=index,

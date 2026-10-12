@@ -48,7 +48,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
     Args:
         assignment: Dictionary containing:
-            - task_id: str
+            - run_id: str
             - fuzzer: str
             - sanitizer: str
             - task_type: str (pov | patch | pov-patch | harness)
@@ -59,11 +59,11 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Result dictionary with status and findings
     """
-    task_id = assignment["task_id"]
+    run_id = assignment["run_id"]
     fuzzer = assignment["fuzzer"]
     sanitizer = assignment["sanitizer"]
     workspace_path = assignment["workspace_path"]
-    task_workspace_path = assignment.get("task_workspace_path")
+    run_workspace_path = assignment.get("run_workspace_path")
     task_type = assignment["task_type"]
     project_name = assignment["project_name"]
     log_dir = assignment.get("log_dir")
@@ -81,7 +81,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     scan_mode = assignment.get("scan_mode", "full")
     diff_path = assignment.get("diff_path")
 
-    # The task's ceiling on concurrently running fuzzers, enforced by every
+    # The run's ceiling on concurrently running fuzzers, enforced by every
     # worker against a shared ledger.
     max_parallel_fuzzers = assignment.get(
         "max_parallel_fuzzers", DEFAULT_MAX_PARALLEL_FUZZERS
@@ -101,7 +101,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
     # Build worker metadata for logging
     worker_metadata = {
         "Display Name": display_name,
-        "Task ID": task_id,
+        "Run ID": run_id,
         "Project": project_name,
         "Fuzzer": fuzzer,
         "Sanitizer": sanitizer,
@@ -155,8 +155,8 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
         # Persist the resolved role -> model map so the run is reproducible and
         # the report can show exactly which model ran each role (design §8).
         try:
-            repos.tasks.update(
-                task_id,
+            repos.runs.update(
+                run_id,
                 {"model_routing": _router.resolved_map()},
             )
         except Exception as e:  # non-fatal: the loguru summary already logged it
@@ -184,13 +184,13 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
         executor = WorkerExecutor(
             workspace_path=workspace_path,
-            task_workspace_path=task_workspace_path,
+            run_workspace_path=run_workspace_path,
             project_name=project_name,
             fuzzer=fuzzer,
             sanitizer=sanitizer,
             task_type=task_type,
             repos=repos,
-            task_id=task_id,
+            run_id=run_id,
             scan_mode=scan_mode,
             fuzzer_binary_path=fuzzer_binary_path,
             analysis_socket_path=analysis_socket_path,

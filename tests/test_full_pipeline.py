@@ -2,7 +2,7 @@
 """
 Full Pipeline Integration Test
 
-Tests the complete flow from Task -> Worker -> Agents -> POV
+Tests the complete flow from Run -> Worker -> Agents -> POV
 without calling real LLM APIs.
 
 Run with: pytest tests/test_full_pipeline.py -v
@@ -14,14 +14,14 @@ from bson import ObjectId
 
 # Models
 from fuzzingbrain.core.models import (
-    Task,
+    Run,
     SuspiciousPoint,
     Direction,
     POV,
 )
 from fuzzingbrain.core.models.worker import Worker
 from fuzzingbrain.core.models.suspicious_point import SPStatus
-from fuzzingbrain.core.models.task import ScanMode
+from fuzzingbrain.core.models.run import ScanMode
 
 # Agents
 from fuzzingbrain.agents import (
@@ -40,37 +40,37 @@ from fuzzingbrain.worker.pipeline import AgentPipeline, PipelineConfig
 # Worker context
 
 
-class TestTaskToWorkerFlow:
-    """Test Task -> Worker creation flow."""
+class TestRunToWorkerFlow:
+    """Test Run -> Worker creation flow."""
 
-    def test_task_creation(self):
-        """Task should be created with valid ObjectId."""
-        task = Task(
-            task_id=str(ObjectId()),
+    def test_run_creation(self):
+        """Run should be created with valid ObjectId."""
+        run = Run(
+            run_id=str(ObjectId()),
             project_name="libpng",
             scan_mode=ScanMode.FULL,
         )
 
-        assert ObjectId.is_valid(task.task_id)
-        assert task.project_name == "libpng"
+        assert ObjectId.is_valid(run.run_id)
+        assert run.project_name == "libpng"
 
         # to_dict should work
-        task_dict = task.to_dict()
-        assert "_id" in task_dict
-        assert isinstance(task_dict["_id"], ObjectId)
+        run_dict = run.to_dict()
+        assert "_id" in run_dict
+        assert isinstance(run_dict["_id"], ObjectId)
 
     def test_worker_creation(self):
         """Worker should be created with valid ObjectId references."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         worker = Worker(
             worker_id=str(ObjectId()),
-            task_id=task_id,
+            run_id=run_id,
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
         )
 
         assert ObjectId.is_valid(worker.worker_id)
-        assert worker.task_id == task_id
+        assert worker.run_id == run_id
 
         # to_dict should work
         worker_dict = worker.to_dict()
@@ -83,27 +83,27 @@ class TestDirectionPlanningAgent:
 
     def test_agent_instantiation(self):
         """DirectionPlanningAgent should instantiate correctly."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         worker_id = str(ObjectId())
 
         agent = DirectionPlanningAgent(
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
         )
 
-        assert agent.task_id == task_id
+        assert agent.run_id == run_id
         assert agent.worker_id == worker_id
         assert agent.fuzzer == "libpng_read_fuzzer"
 
     def test_agent_context_creation(self):
         """AgentContext should be creatable for Direction agent."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         worker_id = str(ObjectId())
 
         ctx = AgentContext(
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
             agent_type="DirectionPlanningAgent",
             target="full_scan",
@@ -120,7 +120,7 @@ class TestSPGenerators:
 
     def test_full_sp_generator_instantiation(self):
         """FullSPGenerator should instantiate correctly."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         worker_id = str(ObjectId())
         direction_id = str(ObjectId())
 
@@ -134,7 +134,7 @@ class TestSPGenerators:
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
             direction_id=direction_id,
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
         )
 
@@ -143,7 +143,7 @@ class TestSPGenerators:
 
     def test_large_sp_generator_instantiation(self):
         """LargeFullSPGenerator should instantiate correctly."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         worker_id = str(ObjectId())
 
         agent = LargeFullSPGenerator(
@@ -155,7 +155,7 @@ class TestSPGenerators:
             callees=[],
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
         )
 
@@ -163,13 +163,13 @@ class TestSPGenerators:
 
     def test_delta_sp_generator_instantiation(self):
         """DeltaSPGenerator should instantiate correctly."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         worker_id = str(ObjectId())
 
         agent = DeltaSPGenerator(
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
         )
 
@@ -181,14 +181,14 @@ class TestSPVerifier:
 
     def test_verifier_instantiation(self):
         """SPVerifier should instantiate correctly."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         worker_id = str(ObjectId())
 
         verifier = SPVerifier(
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
             scan_mode=ScanMode.FULL,
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
         )
 
@@ -223,7 +223,7 @@ class TestSPVerifier:
 
         sp = SuspiciousPoint(
             suspicious_point_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             function_name="png_read_row",
             processor_id="verify_1",  # Non-ObjectId string
         )
@@ -242,14 +242,14 @@ class TestPOVAgent:
 
     def test_pov_agent_instantiation(self):
         """POVAgent should instantiate correctly."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         worker_id = str(ObjectId())
         mock_repos = MagicMock()
 
         agent = POVAgent(
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
             repos=mock_repos,
         )
@@ -263,12 +263,12 @@ class TestAgentPipeline:
 
     def test_pipeline_instantiation(self):
         """AgentPipeline should instantiate correctly."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         worker_id = str(ObjectId())
         mock_repos = MagicMock()
 
         pipeline = AgentPipeline(
-            task_id=task_id,
+            run_id=run_id,
             repos=mock_repos,
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
@@ -276,7 +276,7 @@ class TestAgentPipeline:
             worker_id=worker_id,
         )
 
-        assert pipeline.task_id == task_id
+        assert pipeline.run_id == run_id
         assert pipeline.worker_id == worker_id
         assert pipeline.fuzzer == "libpng_read_fuzzer"
 
@@ -296,7 +296,7 @@ class TestSuspiciousPointFlow:
         """SP should be creatable with pending_verify status."""
         sp = SuspiciousPoint(
             suspicious_point_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             direction_id=str(ObjectId()),
             function_name="png_read_row",
             status=SPStatus.PENDING_VERIFY.value,
@@ -313,7 +313,7 @@ class TestSuspiciousPointFlow:
         """SP should transition to verifying when claimed."""
         sp = SuspiciousPoint(
             suspicious_point_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             function_name="png_read_row",
             status=SPStatus.PENDING_VERIFY.value,
             processor_id=None,
@@ -331,7 +331,7 @@ class TestSuspiciousPointFlow:
         """High-score verified SP should go to pending_pov."""
         sp = SuspiciousPoint(
             suspicious_point_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             function_name="png_read_row",
             status=SPStatus.VERIFYING.value,
             score=0.8,
@@ -349,7 +349,7 @@ class TestSuspiciousPointFlow:
         """Low-score verified SP should stay verified (no POV)."""
         sp = SuspiciousPoint(
             suspicious_point_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             function_name="png_read_row",
             status=SPStatus.VERIFYING.value,
             score=0.3,
@@ -371,7 +371,7 @@ class TestDirectionFlow:
         """Direction should be creatable."""
         direction = Direction(
             direction_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             fuzzer="libpng_read_fuzzer",
             name="PNG Chunk Parsing",
             core_functions=["png_handle_IHDR", "png_handle_IDAT"],
@@ -385,7 +385,7 @@ class TestDirectionFlow:
         """Direction should be claimable with processor_id."""
         direction = Direction(
             direction_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             name="Test Direction",
             processor_id=None,
         )
@@ -405,7 +405,7 @@ class TestPOVFlow:
         """POV should be creatable."""
         pov = POV(
             pov_id=str(ObjectId()),
-            task_id=str(ObjectId()),
+            run_id=str(ObjectId()),
             suspicious_point_id=str(ObjectId()),
             agent_id=str(ObjectId()),
             gen_blob="import struct\nblob = struct.pack(...)",
@@ -426,20 +426,20 @@ class TestFullPipelineIntegration:
 
     def test_complete_flow_objects(self):
         """Test creating all objects in a complete flow."""
-        # 1. Create Task
-        task_id = str(ObjectId())
-        task = Task(
-            task_id=task_id,
+        # 1. Create Run
+        run_id = str(ObjectId())
+        run = Run(
+            run_id=run_id,
             project_name="libpng",
             scan_mode=ScanMode.FULL,
         )
-        assert task.to_dict()  # Should not crash
+        assert run.to_dict()  # Should not crash
 
         # 2. Create Worker
         worker_id = str(ObjectId())
         worker = Worker(
             worker_id=worker_id,
-            task_id=task_id,
+            run_id=run_id,
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
         )
@@ -449,7 +449,7 @@ class TestFullPipelineIntegration:
         direction_id = str(ObjectId())
         direction = Direction(
             direction_id=direction_id,
-            task_id=task_id,
+            run_id=run_id,
             fuzzer="libpng_read_fuzzer",
             name="Image Row Processing",
             processor_id=worker_id,  # Valid ObjectId
@@ -460,7 +460,7 @@ class TestFullPipelineIntegration:
         sp_id = str(ObjectId())
         sp = SuspiciousPoint(
             suspicious_point_id=sp_id,
-            task_id=task_id,
+            run_id=run_id,
             direction_id=direction_id,
             function_name="png_read_row",
             status=SPStatus.PENDING_VERIFY.value,
@@ -473,7 +473,7 @@ class TestFullPipelineIntegration:
         verifier = SPVerifier(
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
         )
         verifier.set_context(suspicious_point=sp_dict)
@@ -487,7 +487,7 @@ class TestFullPipelineIntegration:
 
         pov = POV(
             pov_id=str(ObjectId()),
-            task_id=task_id,
+            run_id=run_id,
             suspicious_point_id=sp_id,
             agent_id=str(ObjectId()),
             gen_blob="blob = b'PNG...'",
@@ -495,7 +495,7 @@ class TestFullPipelineIntegration:
         assert pov.to_dict()  # Should not crash
 
         print("\n=== Full Pipeline Flow Test PASSED ===")
-        print(f"Task: {task_id[:8]}...")
+        print(f"Run: {run_id[:8]}...")
         print(f"Worker: {worker_id[:8]}...")
         print(f"Direction: {direction.name}")
         print(f"SP: {sp.function_name} (score={sp.score})")
@@ -507,12 +507,12 @@ class TestAgentInstantiationInPipeline:
 
     def test_verify_agent_like_pipeline(self):
         """Simulate how pipeline creates verify agent."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         worker_id = str(ObjectId())  # Real worker_id from pipeline
 
         sp = SuspiciousPoint(
             suspicious_point_id=str(ObjectId()),
-            task_id=task_id,
+            run_id=run_id,
             function_name="test_func",
             processor_id="verify_1",  # Set by claim
         )
@@ -523,7 +523,7 @@ class TestAgentInstantiationInPipeline:
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
             scan_mode=ScanMode.FULL,
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,  # Should be real worker_id, not "verify_1"
             index=agent_index,
             target_name=sp.function_name or "",
@@ -537,7 +537,7 @@ class TestAgentInstantiationInPipeline:
 
     def test_pov_agent_like_pipeline(self):
         """Simulate how pipeline creates POV agent."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         worker_id = str(ObjectId())
         mock_repos = MagicMock()
 
@@ -545,7 +545,7 @@ class TestAgentInstantiationInPipeline:
         pov_agent = POVAgent(
             fuzzer="libpng_read_fuzzer",
             sanitizer="address",
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,  # Should be real worker_id
             repos=mock_repos,
         )

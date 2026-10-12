@@ -32,10 +32,10 @@ from fuzzingbrain.tools.suspicious_points import (
 # =========================================================================
 
 
-def _make_sp(task_id, function_name="parse_chunk", score=0.7, status=None):
+def _make_sp(run_id, function_name="parse_chunk", score=0.7, status=None):
     """Create an SP for testing."""
     sp = SuspiciousPoint(
-        task_id=task_id,
+        run_id=run_id,
         function_name=function_name,
         description=f"potential overflow in {function_name}",
         score=score,
@@ -67,64 +67,64 @@ class TestClaimForVerify:
 
     def test_claim_transitions_to_verifying(self, sp_repo):
         """Claimed SP must have status=VERIFYING."""
-        task_id = str(ObjectId())
-        sp = _make_sp(task_id)
+        run_id = str(ObjectId())
+        sp = _make_sp(run_id)
         sp_repo.save(sp)
 
-        claimed = sp_repo.claim_for_verify(task_id, processor_id=str(ObjectId()))
+        claimed = sp_repo.claim_for_verify(run_id, processor_id=str(ObjectId()))
 
         assert claimed is not None
         assert claimed.status == SPStatus.VERIFYING.value
 
     def test_claim_sets_processor_id(self, sp_repo):
         """Claimed SP must have processor_id set to the claiming agent."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
         agent_id = str(ObjectId())
-        sp = _make_sp(task_id)
+        sp = _make_sp(run_id)
         sp_repo.save(sp)
 
-        claimed = sp_repo.claim_for_verify(task_id, processor_id=agent_id)
+        claimed = sp_repo.claim_for_verify(run_id, processor_id=agent_id)
 
         assert claimed.processor_id == agent_id
 
     def test_already_claimed_not_double_claimed(self, sp_repo):
         """Once claimed (VERIFYING), a second claim must return None."""
-        task_id = str(ObjectId())
-        sp = _make_sp(task_id)
+        run_id = str(ObjectId())
+        sp = _make_sp(run_id)
         sp_repo.save(sp)
 
-        first = sp_repo.claim_for_verify(task_id, processor_id=str(ObjectId()))
-        second = sp_repo.claim_for_verify(task_id, processor_id=str(ObjectId()))
+        first = sp_repo.claim_for_verify(run_id, processor_id=str(ObjectId()))
+        second = sp_repo.claim_for_verify(run_id, processor_id=str(ObjectId()))
 
         assert first is not None
         assert second is None
 
     def test_claim_priority_important_first(self, sp_repo):
         """is_important=True SP must be claimed before is_important=False."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
 
-        normal = _make_sp(task_id, function_name="normal", score=0.9)
-        important = _make_sp(task_id, function_name="important", score=0.3)
+        normal = _make_sp(run_id, function_name="normal", score=0.9)
+        important = _make_sp(run_id, function_name="important", score=0.3)
         important.priority = 1.0
 
         sp_repo.save(normal)
         sp_repo.save(important)
 
-        claimed = sp_repo.claim_for_verify(task_id, processor_id=str(ObjectId()))
+        claimed = sp_repo.claim_for_verify(run_id, processor_id=str(ObjectId()))
 
         assert claimed.function_name == "important"
 
     def test_claim_priority_high_score_first(self, sp_repo):
         """Among equal importance, higher score claimed first."""
-        task_id = str(ObjectId())
+        run_id = str(ObjectId())
 
-        low = _make_sp(task_id, function_name="low_score", score=0.3)
-        high = _make_sp(task_id, function_name="high_score", score=0.9)
+        low = _make_sp(run_id, function_name="low_score", score=0.3)
+        high = _make_sp(run_id, function_name="high_score", score=0.9)
 
         sp_repo.save(low)
         sp_repo.save(high)
 
-        claimed = sp_repo.claim_for_verify(task_id, processor_id=str(ObjectId()))
+        claimed = sp_repo.claim_for_verify(run_id, processor_id=str(ObjectId()))
 
         assert claimed.function_name == "high_score"
 
@@ -143,8 +143,8 @@ class TestCompleteVerifyRouting:
 
     def test_important_high_score_goes_to_pov(self, sp_repo):
         """is_important=True, score=0.9, proceed_to_pov=True → PENDING_POV."""
-        task_id = str(ObjectId())
-        sp = _make_sp(task_id, status=SPStatus.VERIFYING.value)
+        run_id = str(ObjectId())
+        sp = _make_sp(run_id, status=SPStatus.VERIFYING.value)
         sp_repo.save(sp)
 
         sp_repo.complete_verify(
@@ -160,8 +160,8 @@ class TestCompleteVerifyRouting:
 
     def test_not_important_stays_verified(self, sp_repo):
         """is_important=False, proceed_to_pov=False → VERIFIED (terminal)."""
-        task_id = str(ObjectId())
-        sp = _make_sp(task_id, status=SPStatus.VERIFYING.value)
+        run_id = str(ObjectId())
+        sp = _make_sp(run_id, status=SPStatus.VERIFYING.value)
         sp_repo.save(sp)
 
         sp_repo.complete_verify(
@@ -177,8 +177,8 @@ class TestCompleteVerifyRouting:
 
     def test_complete_verify_releases_processor_lock(self, sp_repo):
         """After complete_verify, processor_id must be None (released)."""
-        task_id = str(ObjectId())
-        sp = _make_sp(task_id, status=SPStatus.VERIFYING.value)
+        run_id = str(ObjectId())
+        sp = _make_sp(run_id, status=SPStatus.VERIFYING.value)
         sp.processor_id = str(ObjectId())  # locked
         sp_repo.save(sp)
 
@@ -195,8 +195,8 @@ class TestCompleteVerifyRouting:
 
     def test_complete_verify_sets_is_checked(self, sp_repo):
         """After complete_verify, is_checked_by_verifier must be True."""
-        task_id = str(ObjectId())
-        sp = _make_sp(task_id, status=SPStatus.VERIFYING.value)
+        run_id = str(ObjectId())
+        sp = _make_sp(run_id, status=SPStatus.VERIFYING.value)
         sp_repo.save(sp)
 
         sp_repo.complete_verify(
@@ -322,7 +322,7 @@ class TestVerifiedByTracking:
 
         server = AnalysisServer.__new__(AnalysisServer)
         server.repos = repos
-        server.task_id = str(ObjectId())
+        server.run_id = str(ObjectId())
         server._log = lambda *args, **kwargs: None
 
         # Mock _run_sync to directly call the sync function (bypass executor)
@@ -365,7 +365,7 @@ class TestVerifiedByTracking:
 
         server = AnalysisServer.__new__(AnalysisServer)
         server.repos = repos
-        server.task_id = str(ObjectId())
+        server.run_id = str(ObjectId())
         server._log = lambda *args, **kwargs: None
 
         async def fake_run_sync(func, *args, **kwargs):
@@ -406,8 +406,8 @@ class TestReleaseClaimOnFailure:
 
     def test_release_claim_reverts_to_pending(self, sp_repo):
         """release_claim → status back to PENDING_VERIFY, processor_id cleared."""
-        task_id = str(ObjectId())
-        sp = _make_sp(task_id, status=SPStatus.VERIFYING.value)
+        run_id = str(ObjectId())
+        sp = _make_sp(run_id, status=SPStatus.VERIFYING.value)
         sp.processor_id = str(ObjectId())
         sp_repo.save(sp)
 
@@ -419,13 +419,13 @@ class TestReleaseClaimOnFailure:
 
     def test_released_sp_can_be_reclaimed(self, sp_repo):
         """After release_claim, another agent must be able to claim it."""
-        task_id = str(ObjectId())
-        sp = _make_sp(task_id, status=SPStatus.VERIFYING.value)
+        run_id = str(ObjectId())
+        sp = _make_sp(run_id, status=SPStatus.VERIFYING.value)
         sp.processor_id = str(ObjectId())
         sp_repo.save(sp)
 
         sp_repo.release_claim(sp.suspicious_point_id, SPStatus.PENDING_VERIFY.value)
 
-        reclaimed = sp_repo.claim_for_verify(task_id, processor_id=str(ObjectId()))
+        reclaimed = sp_repo.claim_for_verify(run_id, processor_id=str(ObjectId()))
         assert reclaimed is not None
         assert reclaimed.suspicious_point_id == sp.suspicious_point_id

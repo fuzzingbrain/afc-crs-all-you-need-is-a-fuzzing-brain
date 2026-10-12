@@ -13,7 +13,7 @@ from .context import (
     # Monitoring API
     get_agent_status,
     get_agents_by_worker,
-    get_agents_by_task,
+    get_agents_by_run,
     get_active_agents,
 )
 from .pov_agent import POVAgent, POVResult
@@ -38,7 +38,7 @@ __all__ = [
     # Monitoring API
     "get_agent_status",
     "get_agents_by_worker",
-    "get_agents_by_task",
+    "get_agents_by_run",
     "get_active_agents",
     # Direction
     "DirectionPlanningAgent",

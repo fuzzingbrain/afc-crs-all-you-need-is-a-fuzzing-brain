@@ -2,7 +2,7 @@
 """
 Worker Cleanup
 
-Cleans up worker workspace after task completion.
+Cleans up worker workspace after run completion.
 Only removes git-tracked files, keeps all generated files.
 """
 
@@ -17,7 +17,7 @@ def cleanup_worker_workspace(workspace_path: str, keep_results: bool = True):
     """
     Clean up worker workspace after completion.
 
-    Workers share the main task workspace's repo/, fuzz-tooling/, and diff/
+    Workers share the main run workspace's repo/, fuzz-tooling/, and diff/
     (read-only), so there is nothing to clean in those directories.
     Only worker-specific output directories exist here (results/, fuzzer_worker/).
 

@@ -3,7 +3,7 @@
 Analysis Server
 
 A long-running service that provides code analysis queries.
-Runs one instance per task, communicates via Unix Domain Socket.
+Runs one instance per run, communicates via Unix Domain Socket.
 """
 
 import asyncio
@@ -157,7 +157,7 @@ def _get_function_name_variants(name: str) -> List[str]:
 
 class AnalysisServer:
     """
-    Analysis Server for a single task.
+    Analysis Server for a single run.
 
     Provides:
     - Fuzzer build management
@@ -168,8 +168,8 @@ class AnalysisServer:
 
     def __init__(
         self,
-        task_id: str,
-        task_path: str,
+        run_id: str,
+        workspace_path: str,
         project_name: str,
         sanitizers: List[str],
         ossfuzz_project_name: Optional[str] = None,
@@ -181,10 +181,10 @@ class AnalysisServer:
         build_coverage: bool = True,
         prebuilt_fuzzers: Optional[Dict[str, Dict[str, str]]] = None,
     ):
-        # Store task_id as ObjectId for consistent MongoDB queries
+        # Store run_id as ObjectId for consistent MongoDB queries
         # String representation is used for socket paths and logging
-        self.task_id = ObjectId(task_id) if isinstance(task_id, str) else task_id
-        self.task_path = Path(task_path)
+        self.run_id = ObjectId(run_id) if isinstance(run_id, str) else run_id
+        self.workspace_path = Path(workspace_path)
         self.project_name = project_name
         self.sanitizers = sanitizers
         self.ossfuzz_project_name = ossfuzz_project_name
@@ -198,8 +198,8 @@ class AnalysisServer:
         self.prebuilt_fuzzers = prebuilt_fuzzers or {}
 
         # Socket path in /tmp to avoid path length limit (108 chars max for Unix sockets)
-        # Use task_id to ensure uniqueness
-        self.socket_path = Path(f"/tmp/fuzzingbrain_{self.task_id}.sock")
+        # Use run_id to ensure uniqueness
+        self.socket_path = Path(f"/tmp/fuzzingbrain_{self.run_id}.sock")
 
         # Server state
         self.server: Optional[asyncio.AbstractServer] = None
@@ -224,7 +224,7 @@ class AnalysisServer:
         # Query log for experiment tracking
         self.query_log: List[Dict[str, Any]] = []
 
-        # Path cache for find_all_paths (task-level cache)
+        # Path cache for find_all_paths (run-level cache)
         self._path_cache: Dict[tuple, dict] = {}
 
         # Thread pool for running blocking MongoDB operations
@@ -278,7 +278,7 @@ class AnalysisServer:
             AnalyzeResult with build information
         """
         self.start_time = datetime.now()
-        self._log(f"Starting Analysis Server for task {self.task_id}")
+        self._log(f"Starting Analysis Server for run {self.run_id}")
 
         # Initialize database
         config = Config()  # infrastructure settings come from .env
@@ -294,7 +294,7 @@ class AnalysisServer:
         if not build_success:
             return AnalyzeResult(
                 success=False,
-                task_id=self.task_id,
+                run_id=self.run_id,
                 error_msg="Build failed",
                 build_duration_seconds=self.build_duration,
             )
@@ -305,7 +305,7 @@ class AnalysisServer:
         except RuntimeError as e:
             return AnalyzeResult(
                 success=False,
-                task_id=self.task_id,
+                run_id=self.run_id,
                 error_msg=str(e),
                 build_duration_seconds=self.build_duration,
             )
@@ -319,7 +319,7 @@ class AnalysisServer:
         # Return result (server continues running)
         return AnalyzeResult(
             success=True,
-            task_id=self.task_id,
+            run_id=self.run_id,
             fuzzers=self.fuzzers,
             build_paths=self.build_paths,
             coverage_fuzzer_path=self.coverage_path,
@@ -338,11 +338,11 @@ class AnalysisServer:
         """Setup server-specific logging."""
 
         log_path = Path(self.log_dir)
-        log_file = log_path / f"analyzer_{self.task_id}.log"
+        log_file = log_path / f"analyzer_{self.run_id}.log"
         self._analyzer_log_file = log_file
 
         metadata = {
-            "Task ID": self.task_id,
+            "Run ID": self.run_id,
             "Project": self.project_name,
             "Sanitizers": ", ".join(self.sanitizers),
             "Language": self.language,
@@ -383,7 +383,7 @@ class AnalysisServer:
                 self._log("Prebuild data detected, will skip introspector build")
 
         builder = AnalyzerBuilder(
-            task_path=str(self.task_path),
+            workspace_path=str(self.workspace_path),
             project_name=self.project_name,
             sanitizers=self.sanitizers,
             build_coverage=self.build_coverage,
@@ -429,7 +429,7 @@ class AnalysisServer:
             success, msg = await loop.run_in_executor(
                 None,
                 import_from_prebuild,
-                self.task_id,
+                self.run_id,
                 self.prebuild_dir,
                 self.repos,
                 self._log,
@@ -446,9 +446,9 @@ class AnalysisServer:
             return
 
         importer = StaticAnalysisImporter(
-            task_id=self.task_id,
+            run_id=self.run_id,
             introspector_path=self.introspector_path,
-            repo_path=str(self.task_path / "repo"),
+            repo_path=str(self.workspace_path / "repo"),
             repos=self.repos,
             log_callback=self._log,
         )
@@ -718,7 +718,7 @@ class AnalysisServer:
     def _get_status(self) -> dict:
         """Get server status."""
         return {
-            "task_id": self.task_id,
+            "run_id": self.run_id,
             "ready": self.ready,
             "running": self.running,
             "start_time": self.start_time.isoformat() if self.start_time else None,
@@ -743,7 +743,7 @@ class AnalysisServer:
             return 0
         try:
             return self.repos.callgraph_nodes.collection.count_documents(
-                {"task_id": self.task_id}
+                {"run_id": self.run_id}
             )
         except Exception:
             return 0
@@ -754,7 +754,7 @@ class AnalysisServer:
             return 0
         try:
             return self.repos.functions.collection.count_documents(
-                {"task_id": self.task_id}
+                {"run_id": self.run_id}
             )
         except Exception:
             return 0
@@ -769,7 +769,7 @@ class AnalysisServer:
         for func_name in _get_function_name_variants(name):
             func = self.repos.functions.collection.find_one(
                 {
-                    "task_id": self.task_id,
+                    "run_id": self.run_id,
                     "name": func_name,
                 }
             )
@@ -798,7 +798,7 @@ class AnalysisServer:
             return []
         cursor = self.repos.functions.collection.find(
             {
-                "task_id": self.task_id,
+                "run_id": self.run_id,
                 "file_path": {"$regex": pattern},
             }
         )
@@ -818,7 +818,7 @@ class AnalysisServer:
         """Sync implementation of _search_functions."""
         cursor = self.repos.functions.collection.find(
             {
-                "task_id": self.task_id,
+                "run_id": self.run_id,
                 "name": {"$regex": pattern, "$options": "i"},
             }
         ).limit(limit)
@@ -857,14 +857,14 @@ class AnalysisServer:
         if Path(file_path).exists():
             resolved_path = Path(file_path)
         else:
-            # Try relative to task_path/repo
-            repo_path = self.task_path / "repo"
+            # Try relative to workspace_path/repo
+            repo_path = self.workspace_path / "repo"
 
             # Try stripping /src/ prefix (common in OSS-Fuzz)
             relative = file_path.lstrip("/")
             candidates = [
                 repo_path / relative,
-                self.task_path / relative,
+                self.workspace_path / relative,
             ]
 
             if file_path.startswith("/src/"):
@@ -969,7 +969,7 @@ class AnalysisServer:
 
     def _build_repo_function_index(self) -> Dict[str, str]:
         cache: Dict[str, str] = {}
-        repo = self.task_path / "repo"
+        repo = self.workspace_path / "repo"
         exts = {".c", ".cc", ".cpp", ".cxx", ".c++"}
         skip = {".git", "fuzz-tooling", "aflplusplus", "afl", "libfuzzer"}
         parsed = 0
@@ -993,7 +993,7 @@ class AnalysisServer:
     def _resolve_source_file(self, source_path: str) -> Optional[Path]:
         """Resolve a source path to an actual file on disk.
 
-        Tries absolute path, fuzz-tooling/, repo/, and task_path/.
+        Tries absolute path, fuzz-tooling/, repo/, and workspace_path/.
 
         Returns:
             Path if found, None otherwise.
@@ -1004,9 +1004,9 @@ class AnalysisServer:
                 return abs_path
         else:
             for base in [
-                self.task_path / "fuzz-tooling",
-                self.task_path / "repo",
-                self.task_path,
+                self.workspace_path / "fuzz-tooling",
+                self.workspace_path / "repo",
+                self.workspace_path,
             ]:
                 candidate = base / source_path
                 if candidate.exists():
@@ -1047,10 +1047,10 @@ class AnalysisServer:
         into its output tree -- which is where a harness kept outside the
         project's own repository ends up.
         """
-        roots = [self.task_path / "repo"]
+        roots = [self.workspace_path / "repo"]
         if self.project_name:
             roots.append(
-                self.task_path / "fuzz-tooling" / "projects" / self.project_name
+                self.workspace_path / "fuzz-tooling" / "projects" / self.project_name
             )
         if self.coverage_path:
             roots.append(Path(self.coverage_path))
@@ -1151,7 +1151,7 @@ class AnalysisServer:
         if not source_paths and self.repos:
             try:
                 db_fuzzer = self.repos.fuzzers.find_by_name(
-                    self.task_id, fuzzer_info.name
+                    self.run_id, fuzzer_info.name
                 )
                 if db_fuzzer and db_fuzzer.source_path:
                     source_paths.append(db_fuzzer.source_path)
@@ -1161,7 +1161,7 @@ class AnalysisServer:
         # Priority 4: the filesystem. All three lookups above need the build to
         # have reported a source path, and none of them fires when a run names
         # its fuzzers explicitly (`--fuzzers`, or `fuzzers` in a task file):
-        # task_processor creates those records without one. On curl that made
+        # run_processor creates those records without one. On curl that made
         # this tool -- the one its own description tells the agent to call
         # first -- fail on every call, and the agent burned four of its fifty
         # iterations retrying it.
@@ -1227,7 +1227,7 @@ class AnalysisServer:
         for func_name in _get_function_name_variants(function):
             node = self.repos.callgraph_nodes.collection.find_one(
                 {
-                    "task_id": self.task_id,
+                    "run_id": self.run_id,
                     "function_name": func_name,
                 }
             )
@@ -1252,7 +1252,7 @@ class AnalysisServer:
         for func_name in _get_function_name_variants(function):
             node = self.repos.callgraph_nodes.collection.find_one(
                 {
-                    "task_id": self.task_id,
+                    "run_id": self.run_id,
                     "function_name": func_name,
                 }
             )
@@ -1316,7 +1316,7 @@ class AnalysisServer:
             # Check if func1 exists in callgraph
             func1_exists = self.repos.callgraph_nodes.collection.find_one(
                 {
-                    "task_id": self.task_id,
+                    "run_id": self.run_id,
                     "function_name": func1,
                 }
             )
@@ -1328,7 +1328,7 @@ class AnalysisServer:
             entry_points = list(
                 self.repos.callgraph_nodes.collection.find(
                     {
-                        "task_id": self.task_id,
+                        "run_id": self.run_id,
                         "call_depth": 0,
                     }
                 ).distinct("function_name")
@@ -1366,7 +1366,7 @@ class AnalysisServer:
 
             node = self.repos.callgraph_nodes.collection.find_one(
                 {
-                    "task_id": self.task_id,
+                    "run_id": self.run_id,
                     "function_name": current,
                 }
             )
@@ -1414,7 +1414,7 @@ class AnalysisServer:
         Find all call paths from func1 to func2.
 
         Uses DFS with depth limiting and path count limiting.
-        Results are cached at task level.
+        Results are cached at run level.
         """
         if not func1 or not func2 or not self.repos:
             return {
@@ -1457,7 +1457,7 @@ class AnalysisServer:
             for func_name in func_variants:
                 node = self.repos.callgraph_nodes.collection.find_one(
                     {
-                        "task_id": self.task_id,
+                        "run_id": self.run_id,
                         "function_name": func_name,
                     }
                 )
@@ -1477,7 +1477,7 @@ class AnalysisServer:
         for func_name in func_variants:
             node = self.repos.callgraph_nodes.collection.find_one(
                 {
-                    "task_id": self.task_id,
+                    "run_id": self.run_id,
                     "fuzzer_name": fuzzer,
                     "function_name": func_name,
                 }
@@ -1501,7 +1501,7 @@ class AnalysisServer:
 
     def _get_reachable_functions_sync(self, fuzzer: str) -> List[str]:
         """Sync implementation of _get_reachable_functions."""
-        query = {"task_id": self.task_id}
+        query = {"run_id": self.run_id}
         if fuzzer != "LLVMFuzzerTestOneInput":
             query["fuzzer_name"] = fuzzer
         cursor = self.repos.callgraph_nodes.collection.find(query)
@@ -1518,7 +1518,7 @@ class AnalysisServer:
         # Get all functions
         all_functions = set()
         cursor = self.repos.functions.collection.find(
-            {"task_id": self.task_id},
+            {"run_id": self.run_id},
             {"name": 1},
         )
         for func in cursor:
@@ -1542,7 +1542,7 @@ class AnalysisServer:
     def _find_existing_sps_sync(self, function_name: str) -> List[dict]:
         """Sync: Find existing SPs for a function."""
         existing_sps = self.repos.suspicious_points.find_by_function(
-            self.task_id, function_name
+            self.run_id, function_name
         )
         return [sp.to_dict() for sp in existing_sps] if existing_sps else []
 
@@ -1582,7 +1582,7 @@ class AnalysisServer:
         from ..core.models import SuspiciousPoint
 
         sp = SuspiciousPoint(
-            task_id=self.task_id,
+            run_id=self.run_id,
             function_name=function_name,
             direction_id=direction_id,
             created_by_agent_id=agent_id if agent_id else None,
@@ -1738,15 +1738,15 @@ class AnalysisServer:
     ) -> dict:
         """Sync implementation of _list_suspicious_points."""
         if filter_unchecked:
-            points = self.repos.suspicious_points.find_unchecked(self.task_id)
+            points = self.repos.suspicious_points.find_unchecked(self.run_id)
         elif filter_real:
-            points = self.repos.suspicious_points.find_real(self.task_id)
+            points = self.repos.suspicious_points.find_real(self.run_id)
         elif filter_important:
-            points = self.repos.suspicious_points.find_important(self.task_id)
+            points = self.repos.suspicious_points.find_important(self.run_id)
         else:
-            points = self.repos.suspicious_points.find_by_task(self.task_id)
+            points = self.repos.suspicious_points.find_by_run(self.run_id)
 
-        counts = self.repos.suspicious_points.count_by_status(self.task_id)
+        counts = self.repos.suspicious_points.count_by_status(self.run_id)
 
         return {
             "suspicious_points": [sp.to_dict() for sp in points],
@@ -1795,7 +1795,7 @@ class AnalysisServer:
 
         agent_id = params.get("agent_id", "")
         direction = Direction(
-            task_id=self.task_id,
+            run_id=self.run_id,
             created_by_agent_id=agent_id if agent_id else None,
             name=params.get("name", ""),
             risk_level=params.get("risk_level", "medium"),
@@ -1835,15 +1835,15 @@ class AnalysisServer:
     ) -> dict:
         """Sync implementation of _list_directions."""
         if fuzzer:
-            directions = self.repos.directions.find_by_fuzzer(self.task_id, fuzzer)
+            directions = self.repos.directions.find_by_fuzzer(self.run_id, fuzzer)
         else:
-            directions = self.repos.directions.find_by_task(self.task_id)
+            directions = self.repos.directions.find_by_run(self.run_id)
 
         if status:
             directions = [d for d in directions if d.status == status]
 
         directions.sort(key=lambda d: d.get_priority_score(), reverse=True)
-        stats = self.repos.directions.get_stats(self.task_id, fuzzer)
+        stats = self.repos.directions.get_stats(self.run_id, fuzzer)
 
         return {
             "directions": [_serialize_doc(d.to_dict()) for d in directions],
@@ -1875,7 +1875,7 @@ class AnalysisServer:
 
     def _claim_direction_sync(self, fuzzer: str, processor_id: str) -> Optional[dict]:
         """Sync implementation of _claim_direction."""
-        direction = self.repos.directions.claim(self.task_id, fuzzer, processor_id)
+        direction = self.repos.directions.claim(self.run_id, fuzzer, processor_id)
         if direction:
             return {
                 "direction": _serialize_doc(direction.to_dict()),
@@ -1956,7 +1956,7 @@ class AnalysisServer:
 
         # Save query log
         if self.log_dir and self.query_log:
-            log_file = Path(self.log_dir) / f"analyzer_{self.task_id}_queries.json"
+            log_file = Path(self.log_dir) / f"analyzer_{self.run_id}_queries.json"
             with open(log_file, "w") as f:
                 json.dump(self.query_log, f, indent=2)
             self._log(f"Query log saved: {len(self.query_log)} queries")
@@ -1973,8 +1973,8 @@ class AnalysisServer:
 
 
 async def run_server(
-    task_id: str,
-    task_path: str,
+    run_id: str,
+    workspace_path: str,
     project_name: str,
     sanitizers: List[str],
     ossfuzz_project_name: Optional[str] = None,
@@ -1988,8 +1988,8 @@ async def run_server(
     Server continues running in background.
     """
     server = AnalysisServer(
-        task_id=task_id,
-        task_path=task_path,
+        run_id=run_id,
+        workspace_path=workspace_path,
         project_name=project_name,
         sanitizers=sanitizers,
         ossfuzz_project_name=ossfuzz_project_name,

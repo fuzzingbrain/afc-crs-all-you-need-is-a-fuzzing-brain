@@ -24,7 +24,7 @@ class POV:
 
     # Identifiers
     pov_id: str = field(default_factory=generate_id)
-    task_id: str = ""  # Required: which task does this POV belong to
+    run_id: str = ""  # Required: which run does this POV belong to
     suspicious_point_id: str = ""  # Which suspicious point this POV is for
     generation_id: str = (
         ""  # Group POVs from same generation (same code, multiple variants)
@@ -86,7 +86,7 @@ class POV:
         return {
             "_id": ObjectId(self.pov_id) if self.pov_id else ObjectId(),
             "pov_id": self.pov_id,
-            "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "run_id": ObjectId(self.run_id) if self.run_id else None,
             "suspicious_point_id": ObjectId(self.suspicious_point_id)
             if self.suspicious_point_id
             else None,
@@ -124,9 +124,9 @@ class POV:
         if isinstance(pov_id, ObjectId):
             pov_id = str(pov_id)
 
-        task_id = data.get("task_id", "")
-        if isinstance(task_id, ObjectId):
-            task_id = str(task_id)
+        run_id = data.get("run_id", "")
+        if isinstance(run_id, ObjectId):
+            run_id = str(run_id)
 
         agent_id = data.get("agent_id")
         if isinstance(agent_id, ObjectId):
@@ -142,7 +142,7 @@ class POV:
 
         return cls(
             pov_id=pov_id or generate_id(),
-            task_id=task_id,
+            run_id=run_id,
             suspicious_point_id=suspicious_point_id,
             generation_id=data.get("generation_id", ""),
             agent_id=agent_id,

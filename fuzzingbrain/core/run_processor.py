@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """
-Task Processor
+Run Processor
 
-Core business logic for processing FuzzingBrain tasks.
+Core business logic for processing FuzzingBrain runs.
 This module handles:
 1. Workspace setup and validation
 2. Repository cloning/setup
 3. Fuzzer discovery and building
-4. Task dispatch to workers
+4. Run dispatch to workers
 """
 
 import os
@@ -27,30 +27,30 @@ from .workspace_guard import (
     format_banner,
     sanitize_workspace,
 )
-from .models import Task, TaskStatus, Fuzzer, FuzzerStatus
+from .models import Run, RunStatus, Fuzzer, FuzzerStatus
 from ..db import RepositoryManager
 
 
 class WorkspaceSetup:
     """Lays out the run's output directory: repo/, fuzz-tooling/, results/, logs/."""
 
-    def __init__(self, config: Config, task: Task):
+    def __init__(self, config: Config, run: Run):
         self.config = config
-        self.task = task
+        self.run = run
 
     def setup(self) -> Tuple[bool, str]:
         """Create the run directory (resolved from `output` by the entry point)."""
         try:
-            task_workspace = Path(self.config.workspace)
-            task_workspace.mkdir(parents=True, exist_ok=True)
-            (task_workspace / "results" / "povs").mkdir(parents=True, exist_ok=True)
-            (task_workspace / "results" / "patches").mkdir(parents=True, exist_ok=True)
-            (task_workspace / "logs").mkdir(exist_ok=True)
+            run_workspace = Path(self.config.workspace)
+            run_workspace.mkdir(parents=True, exist_ok=True)
+            (run_workspace / "results" / "povs").mkdir(parents=True, exist_ok=True)
+            (run_workspace / "results" / "patches").mkdir(parents=True, exist_ok=True)
+            (run_workspace / "logs").mkdir(exist_ok=True)
 
-            self.task.task_path = str(task_workspace)
-            self.task.src_path = str(task_workspace / "repo")
-            logger.info(f"Workspace: {task_workspace}")
-            return True, str(task_workspace)
+            self.run.workspace_path = str(run_workspace)
+            self.run.src_path = str(run_workspace / "repo")
+            logger.info(f"Workspace: {run_workspace}")
+            return True, str(run_workspace)
         except Exception as e:
             logger.error(f"Failed to setup workspace: {e}")
             return False, str(e)
@@ -72,7 +72,7 @@ class WorkspaceSetup:
         (default HEAD) and need base_commit's history for the diff, so neither
         is a shallow clone when a commit is named.
         """
-        repo_path = Path(self.task.src_path)
+        repo_path = Path(self.run.src_path)
         if repo_path.exists():
             return False, f"{repo_path} already exists"
 
@@ -120,12 +120,12 @@ class WorkspaceSetup:
         Prebuilt binaries need none: build/out/ under it is created when they
         are placed. Otherwise a local fuzz_tooling_path wins over the URL.
         """
-        fuzz_tooling_path = Path(self.task.task_path) / "fuzz-tooling"
-        self.task.fuzz_tooling_path = str(fuzz_tooling_path)
+        fuzz_tooling_path = Path(self.run.workspace_path) / "fuzz-tooling"
+        self.run.fuzz_tooling_path = str(fuzz_tooling_path)
 
         if self.config.is_prebuilt:
             fuzz_tooling_path.mkdir(parents=True, exist_ok=True)
-            self.task.is_fuzz_tooling_provided = False
+            self.run.is_fuzz_tooling_provided = False
             return True, "Not needed (prebuilt binaries)"
 
         try:
@@ -152,10 +152,10 @@ class WorkspaceSetup:
         except Exception as e:
             return False, str(e)
 
-        project = self.config.ossfuzz_project_name or self.task.project_name
+        project = self.config.ossfuzz_project_name or self.run.project_name
         if not (fuzz_tooling_path / "projects" / project).is_dir():
             return False, f"fuzz-tooling has no projects/{project}"
-        self.task.is_fuzz_tooling_provided = True
+        self.run.is_fuzz_tooling_provided = True
         return True, "Ready"
 
 
@@ -165,7 +165,7 @@ class FuzzerDiscovery:
 
     Layer 1: Pattern matching (fuzz_*.c, *_fuzzer.c, etc.)
     Layer 2: LLVMFuzzerTestOneInput function search
-    Layer 3: Analyzer result fallback (handled in TaskProcessor)
+    Layer 3: Analyzer result fallback (handled in RunProcessor)
     """
 
     # Common fuzzer file patterns
@@ -181,8 +181,8 @@ class FuzzerDiscovery:
         "fuzzer_*.cpp",
     ]
 
-    def __init__(self, task: Task, config: Config, repos: RepositoryManager):
-        self.task = task
+    def __init__(self, run: Run, config: Config, repos: RepositoryManager):
+        self.run = run
         self.config = config
         self.repos = repos
 
@@ -221,9 +221,9 @@ class FuzzerDiscovery:
     def _discover_by_pattern(self, fuzzers: List[Fuzzer], seen_names: set):
         """Layer 1: Pattern matching on filenames"""
         # Search in OSS-Fuzz project directory
-        if self.task.fuzz_tooling_path:
-            fuzz_tooling = Path(self.task.fuzz_tooling_path)
-            ossfuzz_project = self.config.ossfuzz_project_name or self.task.project_name
+        if self.run.fuzz_tooling_path:
+            fuzz_tooling = Path(self.run.fuzz_tooling_path)
+            ossfuzz_project = self.config.ossfuzz_project_name or self.run.project_name
             if ossfuzz_project:
                 project_dir = fuzz_tooling / "projects" / ossfuzz_project
                 if project_dir.exists():
@@ -234,8 +234,8 @@ class FuzzerDiscovery:
                             )
 
         # Search in source repo
-        if self.task.src_path:
-            repo_path = Path(self.task.src_path)
+        if self.run.src_path:
+            repo_path = Path(self.run.src_path)
             if repo_path.exists():
                 for pattern in self.FUZZER_PATTERNS:
                     for fuzzer_file in repo_path.glob(f"**/{pattern}"):
@@ -248,17 +248,17 @@ class FuzzerDiscovery:
         search_paths = []
 
         # Add OSS-Fuzz project directory
-        if self.task.fuzz_tooling_path:
-            fuzz_tooling = Path(self.task.fuzz_tooling_path)
-            ossfuzz_project = self.config.ossfuzz_project_name or self.task.project_name
+        if self.run.fuzz_tooling_path:
+            fuzz_tooling = Path(self.run.fuzz_tooling_path)
+            ossfuzz_project = self.config.ossfuzz_project_name or self.run.project_name
             if ossfuzz_project:
                 project_dir = fuzz_tooling / "projects" / ossfuzz_project
                 if project_dir.exists():
                     search_paths.append(project_dir)
 
         # Add source repo
-        if self.task.src_path:
-            repo_path = Path(self.task.src_path)
+        if self.run.src_path:
+            repo_path = Path(self.run.src_path)
             if repo_path.exists():
                 search_paths.append(repo_path)
 
@@ -312,10 +312,10 @@ class FuzzerDiscovery:
             rel_path = str(fuzzer_file)
 
         fuzzer = Fuzzer(
-            task_id=self.task.task_id,
+            run_id=self.run.run_id,
             fuzzer_name=fuzzer_name,
             source_path=rel_path,
-            repo_name=self.task.project_name,
+            repo_name=self.run.project_name,
             status=FuzzerStatus.PENDING,
         )
         fuzzers.append(fuzzer)
@@ -328,11 +328,11 @@ class FuzzerDiscovery:
             logger.debug(f"Saved fuzzer: {fuzzer.fuzzer_name}")
 
 
-class TaskProcessor:
+class RunProcessor:
     """
-    Main task processor.
+    Main run processor.
 
-    Orchestrates the task processing pipeline:
+    Orchestrates the run processing pipeline:
     1. Setup workspace
     2. Clone repository
     3. Discover fuzzers
@@ -342,7 +342,7 @@ class TaskProcessor:
 
     def __init__(self, config: Config, repos: RepositoryManager):
         """
-        Initialize task processor
+        Initialize run processor
 
         Args:
             config: Configuration object
@@ -622,26 +622,26 @@ class TaskProcessor:
                 f.write(footer + "\n")
                 f.write("\n")
 
-    def process(self, task: Task) -> dict:
+    def process(self, run: Run) -> dict:
         """
-        Process a task.
+        Process a run.
 
         Args:
-            task: Task to process
+            run: Run to process
 
         Returns:
-            Result dictionary with task_id, status, message
+            Result dictionary with run_id, status, message
         """
-        logger.info(f"Processing task: {task.task_id}")
+        logger.info(f"Processing run: {run.run_id}")
 
-        # Save task to database
-        task.mark_running()
-        self.repos.tasks.save(task)
+        # Save run to database
+        run.mark_running()
+        self.repos.runs.save(run)
 
         try:
             # Step 1: Setup workspace
             logger.info("Step 1: Setting up workspace")
-            workspace_setup = WorkspaceSetup(self.config, task)
+            workspace_setup = WorkspaceSetup(self.config, run)
 
             success, msg = workspace_setup.setup()
             if not success:
@@ -659,19 +659,19 @@ class TaskProcessor:
             if not success:
                 raise Exception(f"Fuzz-tooling setup failed: {msg}")
 
-            # Update task in database with new paths
-            self.repos.tasks.save(task)
+            # Update run in database with new paths
+            self.repos.runs.save(run)
 
             # Step 3.5: Generate diff for delta scan (before build to fail fast)
             if self.config.scan_mode == "delta" and self.config.base_commit:
-                diff_path = Path(task.task_path) / "diff"
+                diff_path = Path(run.workspace_path) / "diff"
                 diff_file = diff_path / "ref.diff"
 
                 if not diff_file.exists():
                     logger.info("Generating diff for delta scan...")
                     diff_path.mkdir(parents=True, exist_ok=True)
 
-                    repo_path = Path(task.task_path) / "repo"
+                    repo_path = Path(run.workspace_path) / "repo"
                     delta_commit = self.config.delta_commit or "HEAD"
 
                     try:
@@ -716,9 +716,9 @@ class TaskProcessor:
                 fuzzers = []
                 for fuzzer_name in self.config.fuzzers:
                     fuzzer = Fuzzer(
-                        task_id=task.task_id,
+                        run_id=run.run_id,
                         fuzzer_name=fuzzer_name,
-                        repo_name=task.project_name,
+                        repo_name=run.project_name,
                         status=FuzzerStatus.PENDING,
                     )
                     fuzzers.append(fuzzer)
@@ -726,7 +726,7 @@ class TaskProcessor:
                     logger.info(f"  - {fuzzer_name}")
             else:
                 logger.info("Step 4: Discovering fuzzers")
-                fuzzer_discovery = FuzzerDiscovery(task, self.config, self.repos)
+                fuzzer_discovery = FuzzerDiscovery(run, self.config, self.repos)
                 fuzzers = fuzzer_discovery.discover_fuzzers()
 
                 if not fuzzers:
@@ -744,10 +744,10 @@ class TaskProcessor:
             # still held its own answer. It sits after Step 3.5 so a delta run's
             # diff already exists, and before the build so nothing is compiled
             # from a tree that has not been cleaned.
-            task_path = Path(task.task_path)
-            diff_ready = (task_path / "diff" / "ref.diff").exists()
+            workspace_path = Path(run.workspace_path)
+            diff_ready = (workspace_path / "diff" / "ref.diff").exists()
             report = sanitize_workspace(
-                task_path,
+                workspace_path,
                 remove_git=self.config.remove_git,
                 diff_ready=diff_ready if self.config.scan_mode == "delta" else True,
             )
@@ -755,7 +755,7 @@ class TaskProcessor:
             for line in format_banner(
                 report,
                 remove_git=self.config.remove_git,
-                confined_to=f"{task_path.name}/repo",
+                confined_to=f"{workspace_path.name}/repo",
             ):
                 logger.info(line)
 
@@ -764,7 +764,7 @@ class TaskProcessor:
             # findings are worthless is the exact failure being prevented, and
             # it is what caught the gap described above.
             assert_workspace_clean(
-                task_path,
+                workspace_path,
                 require_no_git=self.config.remove_git,
             )
 
@@ -772,7 +772,7 @@ class TaskProcessor:
             from ..analyzer import AnalyzeRequest, AnalyzeResult
             from ..analyzer.tasks import run_analyzer
 
-            project_name = self.config.ossfuzz_project_name or task.project_name
+            project_name = self.config.ossfuzz_project_name or run.project_name
             analyze_result = None
 
             logger.info("Step 5: Running Code Analyzer")
@@ -780,8 +780,8 @@ class TaskProcessor:
             # Create analyze request
             log_dir = get_log_dir()
             analyze_request = AnalyzeRequest(
-                task_id=task.task_id,
-                task_path=task.task_path,
+                run_id=run.run_id,
+                workspace_path=run.workspace_path,
                 project_name=project_name,
                 sanitizers=self.config.sanitizers,
                 language="c",  # TODO: detect language
@@ -832,10 +832,10 @@ class TaskProcessor:
                         continue
                     seen_names.add(fi.name)
                     fuzzer = Fuzzer(
-                        task_id=task.task_id,
+                        run_id=run.run_id,
                         fuzzer_name=fi.name,
                         source_path="",  # Unknown from build output
-                        repo_name=task.project_name,
+                        repo_name=run.project_name,
                         status=FuzzerStatus.SUCCESS,
                         binary_path=fi.binary_path,
                     )
@@ -867,10 +867,10 @@ class TaskProcessor:
                     if fi.name in discovered_names:
                         continue
                     fuzzer = Fuzzer(
-                        task_id=task.task_id,
+                        run_id=run.run_id,
                         fuzzer_name=fi.name,
                         source_path="",
-                        repo_name=task.project_name,
+                        repo_name=run.project_name,
                         status=FuzzerStatus.SUCCESS,
                         binary_path=fi.binary_path,
                     )
@@ -899,7 +899,7 @@ class TaskProcessor:
             infra = InfrastructureManager(
                 redis_url=self.config.redis_url,
                 concurrency=self.config.concurrency.celery_workers,
-                task_id=task.task_id,
+                run_id=run.run_id,
             )
             if not infra.start(log_dir=str(log_dir) if log_dir else None):
                 raise Exception("Failed to start infrastructure (Redis/Celery)")
@@ -910,7 +910,7 @@ class TaskProcessor:
                 from .dispatcher import WorkerDispatcher
 
                 dispatcher = WorkerDispatcher(
-                    task,
+                    run,
                     self.config,
                     self.repos,
                     analyze_result=self._analyze_result,
@@ -924,10 +924,10 @@ class TaskProcessor:
                 # Log dispatch summary
                 self._log_dispatch_summary(jobs, project_name)
 
-                # Mark task as running
-                task.status = TaskStatus.RUNNING
-                task.updated_at = datetime.now()
-                self.repos.tasks.save(task)
+                # Mark run as running
+                run.status = RunStatus.RUNNING
+                run.updated_at = datetime.now()
+                self.repos.runs.save(run)
 
                 # Step 8: Wait for completion
                 logger.info("Step 8: Waiting for workers to complete")
@@ -935,34 +935,34 @@ class TaskProcessor:
                     timeout_minutes=self.config.timeout_minutes
                 )
 
-                # Mark task as complete
+                # Mark run as complete
                 if result["status"] == "completed":
                     if result["failed"] == 0:
-                        task.mark_completed()
+                        run.mark_completed()
                     else:
-                        task.mark_error(f"{result['failed']} workers failed")
+                        run.mark_error(f"{result['failed']} workers failed")
                 elif result["status"] == "pov_target_reached":
-                    task.mark_completed()
+                    run.mark_completed()
                     logger.info(
-                        f"Task completed: POV target reached ({result.get('pov_count', 0)} POVs)"
+                        f"Run completed: POV target reached ({result.get('pov_count', 0)} POVs)"
                     )
                 elif result["status"] == "budget_exceeded":
-                    task.mark_error(result.get("error", "Budget limit exceeded"))
+                    run.mark_error(result.get("error", "Budget limit exceeded"))
                     logger.warning(
-                        f"Task stopped: {result.get('error', 'Budget limit exceeded')}"
+                        f"Run stopped: {result.get('error', 'Budget limit exceeded')}"
                     )
                 else:
-                    task.mark_error(f"Timeout after {self.config.timeout_minutes} minutes")
+                    run.mark_error(f"Timeout after {self.config.timeout_minutes} minutes")
 
                 # Use update() instead of save() to avoid overwriting
                 # llm_cost/llm_calls fields that buffer.$inc has accumulated
                 updates = {
-                    "status": task.status.value,
-                    "updated_at": task.updated_at,
+                    "status": run.status.value,
+                    "updated_at": run.updated_at,
                 }
-                if task.error_msg:
-                    updates["error_msg"] = task.error_msg
-                self.repos.tasks.update(task.task_id, updates)
+                if run.error_msg:
+                    updates["error_msg"] = run.error_msg
+                self.repos.runs.update(run.run_id, updates)
 
                 # Redis counter cleanup is handled by WorkerContext.__exit__
 
@@ -974,7 +974,7 @@ class TaskProcessor:
                 try:
                     sps_with_merges = (
                         self.repos.suspicious_points.find_with_merged_duplicates(
-                            task.task_id
+                            run.run_id
                         )
                     )
                     for sp in sps_with_merges:
@@ -983,16 +983,16 @@ class TaskProcessor:
                     logger.warning(f"Failed to count merged duplicates: {e}")
 
                 # Read cost from database
-                task_doc = self.repos.tasks.collection.find_one(
-                    {"_id": ObjectId(task.task_id)},
+                run_doc = self.repos.runs.collection.find_one(
+                    {"_id": ObjectId(run.run_id)},
                     {"llm_cost": 1},
                 )
-                total_cost = (task_doc or {}).get("llm_cost", 0.0)
+                total_cost = (run_doc or {}).get("llm_cost", 0.0)
 
                 # Create and output final summary with worker colors via loguru
                 summary = create_final_summary(
                     project_name=project_name,
-                    task_id=task.task_id,
+                    run_id=run.run_id,
                     workers=worker_results,
                     total_elapsed_minutes=result.get("elapsed_minutes", 0),
                     use_color=True,
@@ -1022,10 +1022,10 @@ class TaskProcessor:
                 logger.info("Final summary written to console and log file")
 
                 return {
-                    "task_id": task.task_id,
+                    "run_id": run.run_id,
                     "status": result["status"],
                     "message": f"Completed {result['completed']}/{result['total']} workers",
-                    "workspace": task.task_path,
+                    "workspace": run.workspace_path,
                     "fuzzers": [f.fuzzer_name for f in successful_fuzzers],
                     "workers": worker_results,
                     "elapsed_minutes": result.get("elapsed_minutes", 0),
@@ -1038,40 +1038,40 @@ class TaskProcessor:
                 LLMClient.close_all()
 
                 # Stop Analysis Server
-                if task and task.task_path:
+                if run and run.workspace_path:
                     from ..analyzer.tasks import stop_analysis_server
 
                     logger.info("Stopping Analysis Server...")
-                    stop_analysis_server(task.task_path)
+                    stop_analysis_server(run.workspace_path)
 
                 # Stop infrastructure
                 infra.stop()
 
         except Exception as e:
-            logger.exception(f"Task processing failed: {e}")
-            task.mark_error(str(e))
-            self.repos.tasks.update(
-                task.task_id,
+            logger.exception(f"Run processing failed: {e}")
+            run.mark_error(str(e))
+            self.repos.runs.update(
+                run.run_id,
                 {
-                    "status": task.status.value,
-                    "error_msg": task.error_msg,
-                    "updated_at": task.updated_at,
+                    "status": run.status.value,
+                    "error_msg": run.error_msg,
+                    "updated_at": run.updated_at,
                 },
             )
 
             return {
-                "task_id": task.task_id,
+                "run_id": run.run_id,
                 "status": "error",
                 "message": str(e),
             }
 
 
-def process_task(task: Task, config: Config, repos: RepositoryManager = None) -> dict:
+def process_run(run: Run, config: Config, repos: RepositoryManager = None) -> dict:
     """
-    Process a task - main entry point.
+    Process a run - main entry point.
 
     Args:
-        task: Task to process
+        run: Run to process
         config: Configuration
         repos: RepositoryManager instance (optional, gets global instance from main.py if not provided)
 
@@ -1084,5 +1084,5 @@ def process_task(task: Task, config: Config, repos: RepositoryManager = None) ->
 
         repos = get_repos()
 
-    processor = TaskProcessor(config, repos)
-    return processor.process(task)
+    processor = RunProcessor(config, repos)
+    return processor.process(run)

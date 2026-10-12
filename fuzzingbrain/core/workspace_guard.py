@@ -20,7 +20,7 @@ but it costs the ability to regenerate a delta diff in that workspace -- so it
 is a switch, and it refuses to run before the diff exists.
 
 Sanitisation runs on the Python side only, from
-:func:`fuzzingbrain.core.task_processor.TaskProcessor.process`. That is the one
+:func:`fuzzingbrain.core.run_processor.RunProcessor.process`. That is the one
 place every entry point reaches -- the shell wrapper's plain-URL and flag forms,
 a JSON task file, the REST API, the MCP server. An earlier version called it
 from ``main.setup_workspace`` instead, which serves the JSON form alone, so
@@ -45,7 +45,7 @@ __all__ = [
 ANSWER_DIR = ".aixcc"
 GIT_DIR = ".git"
 
-# Source trees inside a task workspace: the checkout plus the per-sanitizer
+# Source trees inside a run workspace: the checkout plus the per-sanitizer
 # copies the analyzer builder makes from it. Every path that creates a
 # workspace uses this layout -- main.setup_workspace, the cybergym and
 # external-harness importers -- so a tree outside these names would be missed
@@ -104,7 +104,7 @@ def sanitize_workspace(
     """Delete the answer directory, and optionally the git history.
 
     Args:
-        workspace: The task workspace, holding ``repo/`` and any ``repo-*/`` copies.
+        workspace: The run workspace, holding ``repo/`` and any ``repo-*/`` copies.
         remove_git: Also delete ``.git``. Off by default: local development wants
             git, and reusing a workspace for a second delta run needs it.
         diff_ready: Whether the delta diff has already been generated. When

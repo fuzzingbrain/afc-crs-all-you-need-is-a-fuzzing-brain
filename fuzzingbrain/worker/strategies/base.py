@@ -38,7 +38,7 @@ class BaseStrategy(ABC):
         self.project_name = executor.project_name
         self.fuzzer = executor.fuzzer
         self.sanitizer = executor.sanitizer
-        self.task_id = executor.task_id
+        self.run_id = executor.run_id
         self.worker_id = executor.worker_id
         self.repos = executor.repos
         # scan_mode is defined as property in POVBaseStrategy

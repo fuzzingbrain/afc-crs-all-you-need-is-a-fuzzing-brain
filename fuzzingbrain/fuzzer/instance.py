@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional, Union
 
 from loguru import logger
 
-from ..core.docker_limits import docker_resource_args, task_label_args
+from ..core.docker_limits import docker_resource_args, run_label_args
 from ..core.fuzzer_spec import (
     asan_options,
     libfuzzer_oom_flags,
@@ -49,7 +49,7 @@ class FuzzerInstance:
         crashes_dir: Path,
         fuzzer_type: FuzzerType = FuzzerType.GLOBAL,
         config: Union[GlobalFuzzerConfig, SPFuzzerConfig] = None,
-        task_id: str = "",
+        run_id: str = "",
         no_oom: bool = False,
         sanitizer: str = "address",
     ):
@@ -64,11 +64,11 @@ class FuzzerInstance:
             crashes_dir: Directory for crash outputs
             fuzzer_type: GLOBAL or SP
             config: Fuzzer configuration
-            task_id: Owning task; stamped on the container as a label so the
+            run_id: Owning run; stamped on the container as a label so the
                 controller can kill it after the worker process is gone
         """
         self.instance_id = instance_id
-        self.task_id = str(task_id or "")
+        self.run_id = str(run_id or "")
         self.fuzzer_path = Path(fuzzer_path)
         self.docker_image = docker_image
         self.corpus_dir = Path(corpus_dir)
@@ -134,7 +134,7 @@ class FuzzerInstance:
             "linux/amd64",
             "--entrypoint",
             "",  # Bypass base-runner's entrypoint
-            *task_label_args(self.task_id),
+            *run_label_args(self.run_id),
         ]
 
         # Cap the container itself: fork mode runs fork_level children, each
@@ -154,7 +154,7 @@ class FuzzerInstance:
             )
         )
 
-        # Environment variables. SANITIZER and the *_OPTIONS must match the task's
+        # Environment variables. SANITIZER and the *_OPTIONS must match the run's
         # actual sanitizer (was hard-coded to address, which is wrong for memory/
         # undefined builds). detect_leaks for ASan follows fuzzer.detect_leaks;
         # halt_on_error for MSan/UBSan so a finding aborts and libFuzzer records it.

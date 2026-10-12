@@ -351,7 +351,7 @@ class TestSeedTools:
         # Set context with a specific worker_id
         test_worker_id = "test_worker_12345"
         set_seed_context(
-            task_id="task_001",
+            run_id="run_001",
             worker_id=test_worker_id,
             direction_id="dir_001",
             fuzzer_manager=None,
@@ -362,7 +362,7 @@ class TestSeedTools:
         # Retrieve context by worker_id
         ctx = get_seed_context(test_worker_id)
         assert ctx is not None
-        assert ctx["task_id"] == "task_001"
+        assert ctx["run_id"] == "run_001"
         assert ctx["worker_id"] == test_worker_id
         assert ctx["direction_id"] == "dir_001"
         assert ctx["fuzzer"] == "test_fuzzer"
@@ -383,7 +383,7 @@ class TestSeedTools:
         # This simulates what happens in the MCP tool - the worker_id is bound in closure
         test_worker_id = "mcp_bound_worker_id"
         set_seed_context(
-            task_id="task_002",
+            run_id="run_002",
             worker_id=test_worker_id,
             direction_id="dir_002",
             fuzzer_manager=None,
@@ -471,7 +471,7 @@ class TestSeedAgentContextFlow:
             from fuzzingbrain.fuzzer.seed_agent import SeedAgent
 
             agent = SeedAgent(
-                task_id="task_001",
+                run_id="run_001",
                 worker_id="worker_001",
                 fuzzer="test_fuzzer",
                 sanitizer="address",

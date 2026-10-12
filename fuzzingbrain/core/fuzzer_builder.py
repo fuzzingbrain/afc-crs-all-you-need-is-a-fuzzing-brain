@@ -19,7 +19,7 @@ from typing import List, Tuple, Optional
 from .logging import logger, get_log_dir
 from .config import Config
 from .docker_limits import docker_resource_args
-from .models import Task
+from .models import Run
 from ..builder import BuildJob, collect_fuzzers, run_build, truncate_output
 from ..builder.engine import DEFAULT_BUILD_TIMEOUT_S
 
@@ -70,27 +70,27 @@ class FuzzerBuilder:
         ".gz",
     }
 
-    def __init__(self, task: Task, config: Config):
+    def __init__(self, run: Run, config: Config):
         """
         Initialize FuzzerBuilder.
 
         Args:
-            task: Task object with paths
+            run: Run object with paths
             config: Configuration object
         """
-        self.task = task
+        self.run = run
         self.config = config
-        self.project_name = config.ossfuzz_project_name or task.project_name
+        self.project_name = config.ossfuzz_project_name or run.project_name
 
         # Shared coverage fuzzer path (accessible by all Workers)
-        self.task_path = Path(task.task_path) if task.task_path else None
+        self.workspace_path = Path(run.workspace_path) if run.workspace_path else None
         self.coverage_fuzzer_path: Optional[Path] = None
         self.static_analysis_path: Optional[Path] = None
-        if self.task_path:
+        if self.workspace_path:
             self.coverage_fuzzer_path = (
-                self.task_path / "results" / "coverage_fuzzer" / self.project_name
+                self.workspace_path / "results" / "coverage_fuzzer" / self.project_name
             )
-            self.static_analysis_path = self.task_path / "static_analysis"
+            self.static_analysis_path = self.workspace_path / "static_analysis"
 
     def build(self) -> Tuple[bool, List[str], str]:
         """
@@ -107,10 +107,10 @@ class FuzzerBuilder:
         logger.info(f"Building fuzzers for project: {self.project_name}")
 
         # Validate paths
-        if not self.task.fuzz_tooling_path:
+        if not self.run.fuzz_tooling_path:
             return False, [], "fuzz_tooling_path not set"
 
-        if not self.task.src_path:
+        if not self.run.src_path:
             return False, [], "src_path not set"
 
         # Step 1: Run helper.py to build fuzzers with address sanitizer
@@ -162,9 +162,9 @@ class FuzzerBuilder:
         build_log_path = log_dir / f"build_fuzzer{log_suffix}.log" if log_dir else None
 
         job = BuildJob(
-            fuzz_tooling_path=Path(self.task.fuzz_tooling_path),
+            fuzz_tooling_path=Path(self.run.fuzz_tooling_path),
             project=self.project_name,
-            src_path=Path(self.task.src_path),
+            src_path=Path(self.run.src_path),
             sanitizer=sanitizer,
             log_path=build_log_path,
             timeout_s=DEFAULT_BUILD_TIMEOUT_S,
@@ -196,7 +196,7 @@ class FuzzerBuilder:
 
     def _collect_fuzzers(self) -> List[str]:
         """Scan build/out and collect built fuzzers (delegates to the engine)."""
-        fuzzers = collect_fuzzers(Path(self.task.fuzz_tooling_path), self.project_name)
+        fuzzers = collect_fuzzers(Path(self.run.fuzz_tooling_path), self.project_name)
         logger.info(f"Collected {len(fuzzers)} fuzzers")
         return fuzzers
 
@@ -215,7 +215,7 @@ class FuzzerBuilder:
             Full path to the fuzzer binary
         """
         return str(
-            Path(self.task.fuzz_tooling_path)
+            Path(self.run.fuzz_tooling_path)
             / "build"
             / "out"
             / self.project_name
@@ -266,7 +266,7 @@ class FuzzerBuilder:
             dest_path: Destination directory
         """
         out_dir = (
-            Path(self.task.fuzz_tooling_path) / "build" / "out" / self.project_name
+            Path(self.run.fuzz_tooling_path) / "build" / "out" / self.project_name
         )
 
         if not out_dir.exists():
@@ -296,8 +296,8 @@ class FuzzerBuilder:
         """
         # Directories that Docker may have created with root ownership
         dirs_to_fix = [
-            Path(self.task.fuzz_tooling_path) / "build",
-            Path(self.task.src_path) if self.task.src_path else None,
+            Path(self.run.fuzz_tooling_path) / "build",
+            Path(self.run.src_path) if self.run.src_path else None,
         ]
 
         for dir_path in dirs_to_fix:
@@ -399,7 +399,7 @@ class FuzzerBuilder:
             List of collected file paths
         """
         out_dir = (
-            Path(self.task.fuzz_tooling_path) / "build" / "out" / self.project_name
+            Path(self.run.fuzz_tooling_path) / "build" / "out" / self.project_name
         )
         inspector_dir = out_dir / "inspector"
 

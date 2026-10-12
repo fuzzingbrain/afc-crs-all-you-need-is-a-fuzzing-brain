@@ -57,7 +57,7 @@ class SuspiciousPoint:
 
     # Identifiers
     suspicious_point_id: str = field(default_factory=generate_id)
-    task_id: str = ""  # Which task this belongs to
+    run_id: str = ""  # Which run this belongs to
     function_name: str = ""  # Which function this belongs to
     direction_id: str = ""  # Which direction this belongs to (SP Find v2)
 
@@ -143,7 +143,7 @@ class SuspiciousPoint:
             if self.suspicious_point_id
             else ObjectId(),
             "suspicious_point_id": self.suspicious_point_id,
-            "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "run_id": ObjectId(self.run_id) if self.run_id else None,
             "direction_id": ObjectId(self.direction_id) if self.direction_id else None,
             "function_name": self.function_name,
             "created_by_agent_id": ObjectId(self.created_by_agent_id)
@@ -203,9 +203,9 @@ class SuspiciousPoint:
         if isinstance(suspicious_point_id, ObjectId):
             suspicious_point_id = str(suspicious_point_id)
 
-        task_id = data.get("task_id", "")
-        if isinstance(task_id, ObjectId):
-            task_id = str(task_id)
+        run_id = data.get("run_id", "")
+        if isinstance(run_id, ObjectId):
+            run_id = str(run_id)
 
         direction_id = data.get("direction_id", "")
         if isinstance(direction_id, ObjectId):
@@ -239,7 +239,7 @@ class SuspiciousPoint:
 
         return cls(
             suspicious_point_id=suspicious_point_id or generate_id(),
-            task_id=task_id,
+            run_id=run_id,
             function_name=data.get("function_name", ""),
             direction_id=direction_id,
             created_by_agent_id=created_by_agent_id,

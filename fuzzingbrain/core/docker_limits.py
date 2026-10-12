@@ -2,7 +2,7 @@
 
 libFuzzer's -rss_limit_mb only bounds the fuzzer's own allocator, and only
 while the process is healthy: ASAN overhead, forked children, and hung
-containers all escape it. Without cgroup caps a single task can spawn enough
+containers all escape it. Without cgroup caps a single run can spawn enough
 containers to exhaust host memory and livelock the machine (no swap means
 the kernel thrashes instead of OOM-killing). Every heavyweight `docker run`
 call site takes its limits from here so a runaway container is killed by
@@ -15,14 +15,14 @@ from typing import List
 
 from loguru import logger
 
-# Every long-running container a task spawns carries this label, so the
+# Every long-running container a run spawns carries this label, so the
 # controller can find them again without a handle to the process that
 # started them. The fuzzers are launched inside the Celery worker process;
-# when the task ends the controller revokes that worker with SIGTERM, which
+# when the run ends the controller revokes that worker with SIGTERM, which
 # kills the Python side but not the `docker run` clients it forked, and
 # certainly not the containers behind them. Six curl fuzzers were found
-# still running hours after their tasks had reported "POV target reached".
-TASK_LABEL = "fuzzingbrain.task"
+# still running hours after their runs had reported "POV target reached".
+RUN_LABEL = "fuzzingbrain.run"
 
 
 def docker_resource_args(memory_mb: int, cpus: float) -> List[str]:
@@ -45,26 +45,26 @@ def docker_resource_args(memory_mb: int, cpus: float) -> List[str]:
     ]
 
 
-def task_label_args(task_id: str) -> List[str]:
-    """Docker-run flags tagging a container with the task that owns it."""
-    return ["--label", f"{TASK_LABEL}={task_id}"] if task_id else []
+def run_label_args(run_id: str) -> List[str]:
+    """Docker-run flags tagging a container with the run that owns it."""
+    return ["--label", f"{RUN_LABEL}={run_id}"] if run_id else []
 
 
-def kill_task_containers(task_id: str, timeout: float = 30.0) -> int:
-    """Kill every container labelled with this task. Returns how many.
+def kill_run_containers(run_id: str, timeout: float = 30.0) -> int:
+    """Kill every container labelled with this run. Returns how many.
 
     Bounded by ``timeout`` per docker call, because this runs on the
     shutdown path where a wedged daemon must not hold the process open.
     """
-    if not task_id:
+    if not run_id:
         return 0
     try:
         listed = subprocess.run(
-            ["docker", "ps", "-q", "--filter", f"label={TASK_LABEL}={task_id}"],
+            ["docker", "ps", "-q", "--filter", f"label={RUN_LABEL}={run_id}"],
             capture_output=True, text=True, timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError) as e:
-        logger.warning(f"Could not list containers for task {task_id}: {e}")
+        logger.warning(f"Could not list containers for run {run_id}: {e}")
         return 0
     ids = listed.stdout.split()
     if not ids:
@@ -75,7 +75,7 @@ def kill_task_containers(task_id: str, timeout: float = 30.0) -> int:
             capture_output=True, text=True, timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError) as e:
-        logger.warning(f"Could not kill {len(ids)} container(s) of task {task_id}: {e}")
+        logger.warning(f"Could not kill {len(ids)} container(s) of run {run_id}: {e}")
         return 0
-    logger.info(f"Killed {len(ids)} leftover container(s) of task {task_id}")
+    logger.info(f"Killed {len(ids)} leftover container(s) of run {run_id}")
     return len(ids)

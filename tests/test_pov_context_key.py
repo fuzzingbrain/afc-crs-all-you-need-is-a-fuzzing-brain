@@ -32,7 +32,7 @@ def agent():
         P._pov_contexts.clear()
     a = POVAgent(
         fuzzer="libpng_read_fuzzer",
-        task_id="3aa25c01736d484da8d6374b",
+        run_id="3aa25c01736d484da8d6374b",
         worker_id=STORE_KEY,
         repos=object(),  # only stored, never called here
         fuzzer_code="int LLVMFuzzerTestOneInput(const uint8_t *d, size_t n){return 0;}",

@@ -6,7 +6,7 @@
 #
 # With no task files it takes every <challenge>__<harness>.json under the
 # pre-competition examples (delta first, then full). Each run gets its own
-# task_id, its own log, a hard wall-clock cap independent of the app's own
+# run_id, its own log, a hard wall-clock cap independent of the app's own
 # timeout, and a teardown that kills the process group, anything else still
 # naming the task, and every container carrying the task's label -- before the
 # next run starts and again on Ctrl+C. Results accumulate in <out>/results.tsv;
@@ -68,7 +68,7 @@ teardown() {
   fi
   if [ -n "$CUR_TID" ]; then
     pkill -KILL -f "$CUR_TID" 2>/dev/null
-    ids=$(docker ps -q --filter "label=fuzzingbrain.task=$CUR_TID" 2>/dev/null)
+    ids=$(docker ps -q --filter "label=fuzzingbrain.run=$CUR_TID" 2>/dev/null)
     [ -n "$ids" ] && docker kill $ids >/dev/null 2>&1
   fi
   CUR_PGID=""; CUR_TID=""

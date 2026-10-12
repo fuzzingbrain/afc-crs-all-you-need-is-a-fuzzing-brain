@@ -39,9 +39,9 @@ def load_sp_config(sp_name: str) -> dict:
 
 
 async def main(sp_name: str):
-    # 加载 SP 配置获取 task_id
+    # 加载 SP 配置获取 run_id
     sp = load_sp_config(sp_name)
-    task_id = sp.get("task_id", "48a64b24")
+    run_id = sp.get("run_id", "48a64b24")
 
     # 从 sp_name 推断项目名
     if sp_name.startswith("ws-"):
@@ -51,7 +51,7 @@ async def main(sp_name: str):
     else:
         project_name = sp_name.split("-")[0]
 
-    workspace = Path(f"./workspace/{project_name}_{task_id}")
+    workspace = Path(f"./workspace/{project_name}_{run_id}")
 
     # 预构建目录 - 根据项目不同有不同结构
     if project_name == "wireshark":
@@ -62,7 +62,7 @@ async def main(sp_name: str):
     print("Starting Analysis Server...")
     print(f"SP: {sp_name}")
     print(f"Project: {project_name}")
-    print(f"Task ID: {task_id}")
+    print(f"Run ID: {run_id}")
     print(f"Workspace: {workspace}")
     print(f"Prebuild dir: {prebuild_dir}")
 
@@ -70,8 +70,8 @@ async def main(sp_name: str):
     MongoDB.connect()
 
     server = AnalysisServer(
-        task_id=task_id,
-        task_path=str(workspace),
+        run_id=run_id,
+        workspace_path=str(workspace),
         project_name=project_name,
         sanitizers=["address"],
         ossfuzz_project=project_name,

@@ -52,10 +52,10 @@ filenames are load-bearing — the importer looks for `callgraph.json`, not
 `cyclomatic_complexity`, `reached_by_fuzzers` and `language`.
 
 **Edges** (`callgraph.json`) carry `function_name`, `callers`, `callees`,
-`call_depth`, `fuzzer_name` and `fuzzer_id`. Only `task_id` and `function_name`
+`call_depth`, `fuzzer_name` and `fuzzer_id`. Only `run_id` and `function_name`
 are ever used as query keys, so a stale `fuzzer_id` is harmless.
 
-Both files use `prebuild_<work_id>` as their `task_id`; the importer remaps it to
+Both files use `prebuild_<work_id>` as their `run_id`; the importer remaps it to
 the live task id on load.
 
 ## Loading a graph

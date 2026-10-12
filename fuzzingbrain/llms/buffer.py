@@ -147,17 +147,17 @@ class WorkerLLMBuffer:
             try:
                 pipe = self._redis.pipeline(transaction=False)
                 cmd_names = []
-                if call.task_id:
+                if call.run_id:
                     pipe.incrbyfloat(
-                        f"{self.COUNTER_PREFIX}:task:{call.task_id}:cost",
+                        f"{self.COUNTER_PREFIX}:run:{call.run_id}:cost",
                         call.cost,
                     )
-                    cmd_names.append("task:cost")
-                    pipe.incr(f"{self.COUNTER_PREFIX}:task:{call.task_id}:calls")
-                    cmd_names.append("task:calls")
+                    cmd_names.append("run:cost")
+                    pipe.incr(f"{self.COUNTER_PREFIX}:run:{call.run_id}:calls")
+                    cmd_names.append("run:calls")
                 else:
                     logger.warning(
-                        f"Redis: call has no task_id (worker={call.worker_id}, "
+                        f"Redis: call has no run_id (worker={call.worker_id}, "
                         f"agent={call.agent_id}, cost=${call.cost:.4f})"
                     )
                 if call.worker_id:
@@ -179,7 +179,7 @@ class WorkerLLMBuffer:
                         name = cmd_names[i] if i < len(cmd_names) else f"cmd[{i}]"
                         logger.error(
                             f"Redis pipeline cmd '{name}' failed: {res} "
-                            f"(task={call.task_id}, worker={call.worker_id})"
+                            f"(run={call.run_id}, worker={call.worker_id})"
                         )
             except Exception as e:
                 logger.warning(f"Redis INCRBYFLOAT failed: {e}")
@@ -193,7 +193,7 @@ class WorkerLLMBuffer:
         tool_name: str,
         success: bool,
         latency_ms: int,
-        task_id: str = "",
+        run_id: str = "",
         worker_id: str = "",
         agent_id: str = "",
         error: str = "",
@@ -208,7 +208,7 @@ class WorkerLLMBuffer:
             "created_at": datetime.now(),
         }
         for name, value in (
-            ("task_id", task_id),
+            ("run_id", run_id),
             ("worker_id", worker_id),
             ("agent_id", agent_id),
         ):
@@ -256,7 +256,7 @@ class WorkerLLMBuffer:
         Flush accumulated records to MongoDB.
 
         1. insert_many into llm_calls collection
-        2. $inc aggregates on tasks/workers/agents collections
+        2. $inc aggregates on runs/workers/agents collections
 
         Returns:
             Number of records flushed
@@ -301,9 +301,9 @@ class WorkerLLMBuffer:
     def cleanup_redis_keys(self, worker_id: str) -> None:
         """Clean up this worker's Redis counter key.
 
-        The task's counters are not this worker's to delete: the other workers
+        The run's counters are not this worker's to delete: the other workers
         are still adding to them and the dispatcher's budget check reads them.
-        The dispatcher deletes them when the whole task is over.
+        The dispatcher deletes them when the whole run is over.
         """
         if not self._redis or not worker_id:
             return
@@ -315,7 +315,7 @@ class WorkerLLMBuffer:
 
 def _update_aggregates(mongo_db, docs: list) -> None:
     """
-    Update aggregated LLM usage fields in Task, Worker, Agent collections.
+    Update aggregated LLM usage fields in Run, Worker, Agent collections.
 
     Groups docs by ID and uses $inc for atomic updates.
 
@@ -323,7 +323,7 @@ def _update_aggregates(mongo_db, docs: list) -> None:
         mongo_db: MongoDB database instance
         docs: List of LLMCall dicts (from to_dict())
     """
-    task_stats = defaultdict(lambda: {"calls": 0, "cost": 0.0, "input": 0, "output": 0})
+    run_stats = defaultdict(lambda: {"calls": 0, "cost": 0.0, "input": 0, "output": 0})
     worker_stats = defaultdict(
         lambda: {"calls": 0, "cost": 0.0, "input": 0, "output": 0}
     )
@@ -332,18 +332,18 @@ def _update_aggregates(mongo_db, docs: list) -> None:
     )
 
     for doc in docs:
-        task_id = doc.get("task_id")
+        run_id = doc.get("run_id")
         worker_id = doc.get("worker_id")
         agent_id = doc.get("agent_id")
         cost = doc.get("cost", 0.0)
         input_tokens = doc.get("input_tokens", 0)
         output_tokens = doc.get("output_tokens", 0)
 
-        if task_id:
-            task_stats[task_id]["calls"] += 1
-            task_stats[task_id]["cost"] += cost
-            task_stats[task_id]["input"] += input_tokens
-            task_stats[task_id]["output"] += output_tokens
+        if run_id:
+            run_stats[run_id]["calls"] += 1
+            run_stats[run_id]["cost"] += cost
+            run_stats[run_id]["input"] += input_tokens
+            run_stats[run_id]["output"] += output_tokens
 
         if worker_id:
             worker_stats[worker_id]["calls"] += 1
@@ -357,14 +357,14 @@ def _update_aggregates(mongo_db, docs: list) -> None:
             agent_stats[agent_id]["input"] += input_tokens
             agent_stats[agent_id]["output"] += output_tokens
 
-    # Update Task collection
-    for task_id, stats in task_stats.items():
+    # Update Run collection
+    for run_id, stats in run_stats.items():
         try:
-            mongo_db.tasks.update_one(
+            mongo_db.runs.update_one(
                 {
-                    "_id": task_id
-                    if isinstance(task_id, ObjectId)
-                    else ObjectId(task_id)
+                    "_id": run_id
+                    if isinstance(run_id, ObjectId)
+                    else ObjectId(run_id)
                 },
                 {
                     "$inc": {
@@ -376,7 +376,7 @@ def _update_aggregates(mongo_db, docs: list) -> None:
                 },
             )
         except Exception as e:
-            logger.warning(f"Failed to update task aggregates: {e}")
+            logger.warning(f"Failed to update run aggregates: {e}")
 
     # Update Worker collection
     for worker_id, stats in worker_stats.items():

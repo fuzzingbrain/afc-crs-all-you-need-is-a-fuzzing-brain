@@ -99,12 +99,12 @@ class RedisManager:
     def stop(self):
         """Stop Redis if we started it and no other processes need it.
 
-        In practice, Redis is shared across concurrent tasks (same port).
-        We intentionally leave Redis running so other tasks aren't disrupted.
-        Redis is lightweight and will be reused by subsequent tasks.
+        In practice, Redis is shared across concurrent runs (same port).
+        We intentionally leave Redis running so other runs aren't disrupted.
+        Redis is lightweight and will be reused by subsequent runs.
         """
-        # Don't kill Redis — it may be shared by concurrent tasks.
-        # Redis is lightweight and persists safely between task runs.
+        # Don't kill Redis — it may be shared by concurrent runs.
+        # Redis is lightweight and persists safely between runs.
         if self._redis_process:
             logger.info("Leaving Redis running (shared resource)")
             self._redis_process = None
@@ -119,7 +119,7 @@ class CeleryWorkerManager:
 
         Args:
             concurrency: Number of concurrent worker processes
-            queue_name: Task-scoped queue name for isolation (default: "celery,workers")
+            queue_name: Run-scoped queue name for isolation (default: "celery,workers")
         """
         self.concurrency = concurrency
         self.queue_name = queue_name or "celery,workers"
@@ -216,7 +216,7 @@ class InfrastructureManager:
     _instance: Optional["InfrastructureManager"] = None
 
     def __init__(
-        self, redis_url: str = None, concurrency: int = 15, task_id: str = None
+        self, redis_url: str = None, concurrency: int = 15, run_id: str = None
     ):
         """
         Initialize infrastructure manager.
@@ -224,12 +224,12 @@ class InfrastructureManager:
         Args:
             redis_url: Redis URL
             concurrency: Celery worker concurrency
-            task_id: Task ID for queue isolation (prevents concurrent tasks from interfering)
+            run_id: Run ID for queue isolation (prevents concurrent runs from interfering)
         """
         self.redis = RedisManager(redis_url)
-        # Use task-scoped queue so each task's Celery pool is isolated
-        if task_id:
-            self.queue_name = f"workers_{task_id}"
+        # Use run-scoped queue so each run's Celery pool is isolated
+        if run_id:
+            self.queue_name = f"workers_{run_id}"
         else:
             self.queue_name = "celery,workers"
         self.celery = CeleryWorkerManager(concurrency, queue_name=self.queue_name)

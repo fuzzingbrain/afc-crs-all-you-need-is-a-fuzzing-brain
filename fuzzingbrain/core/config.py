@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from bson import ObjectId
 
-# How many fuzzer containers one task may run at once. Lives here, with the
+# How many fuzzer containers one run may have at once. Lives here, with the
 # other defaults, so the fuzzer package can read it without the configuration
 # having to import the fuzzer package back.
 DEFAULT_MAX_PARALLEL_FUZZERS = 10
@@ -49,7 +49,7 @@ class FuzzerWorkerConfig:
 
 @dataclass
 class ConcurrencyConfig:
-    """How many of everything a task may run at once.
+    """How many of everything a run may have at once.
 
     These numbers lived as literals in four strategy files and the Celery
     settings, which meant "run this serially" was not a thing anyone could ask
@@ -314,7 +314,7 @@ FIELDS: Tuple[Field, ...] = (
     ),
     # 6. Concurrency and resources
     Field(("concurrency",), "concurrency", "concurrency", "One number for everything, or a JSON object"),
-    Field(("max_parallel_fuzzers",), "max_parallel_fuzzers", "int", "Fuzzer containers running at once, task-wide"),
+    Field(("max_parallel_fuzzers",), "max_parallel_fuzzers", "int", "Fuzzer containers running at once, run-wide"),
     Field(("fuzzer_worker",), "fuzzer_worker", "json", "Fuzzer worker settings (JSON object)"),
 )
 
@@ -380,7 +380,7 @@ class Config:
     """One run of FuzzingBrain. Built from a task file and/or the command line."""
 
     # Generated per run, never read from a task file.
-    task_id: str = field(default_factory=lambda: str(ObjectId()))
+    run_id: str = field(default_factory=lambda: str(ObjectId()))
 
     project_name: Optional[str] = None
     output: Optional[str] = None
@@ -434,7 +434,7 @@ class Config:
 
     # 6. Concurrency and resources
     concurrency: ConcurrencyConfig = field(default_factory=ConcurrencyConfig)
-    # How many fuzzer containers the whole task may run at once. Every worker
+    # How many fuzzer containers the whole run may have at once. Every worker
     # runs a global fuzzer and every POV agent starts one for its suspicious
     # point, so without a ceiling the count is workers x (1 + agents) and the
     # machine spends its cores on context switches instead of on executions.
@@ -668,7 +668,7 @@ class Config:
             out = Path(self.output).expanduser()
             out = out if out.is_absolute() else WORKSPACE_ROOT / out
         else:
-            out = WORKSPACE_ROOT / f"{self.project_name}_{self.task_id}"
+            out = WORKSPACE_ROOT / f"{self.project_name}_{self.run_id}"
         self.workspace = str(out)
         return self.workspace
 
@@ -837,7 +837,7 @@ class Config:
         """(label, value) pairs for the start-up summary."""
         rows = [
             ("Project", self.project_name or ""),
-            ("Run id", self.task_id),
+            ("Run id", self.run_id),
             ("Output", self.workspace or ""),
             ("Source", self.repo_url or self.repo_path or ""),
             ("Mode", f"{self.task_type} / {self.scan_mode}"),

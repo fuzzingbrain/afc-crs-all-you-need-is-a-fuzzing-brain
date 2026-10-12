@@ -11,7 +11,7 @@ Names and parameter shapes follow the Claude Code tools of the same names, so a
 model does not have to learn a second convention. Three deliberate differences:
 
 - Paths are workspace-relative, not absolute. Agents never see host paths, and
-  every path is resolved and checked to land inside the task workspace.
+  every path is resolved and checked to land inside the run workspace.
 - ``Glob`` sorts by path, not by modification time. Analysis runs should give the
   same answer twice.
 - ``.aixcc`` and ``.git`` are refused. Workspace preparation is what actually

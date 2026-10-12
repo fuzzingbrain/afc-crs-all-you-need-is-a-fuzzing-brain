@@ -2,16 +2,16 @@
 """
 FuzzingBrain Data Models
 
-Models for Task, POV, Patch, Worker, Fuzzer, Function, CallGraphNode, etc.
+Models for Run, POV, Patch, Worker, Fuzzer, Function, CallGraphNode, etc.
 
 Hierarchy (ObjectId-based):
-    Task
+    Run
     └── Worker
         └── Agent
             └── LLMCall
 """
 
-from .task import Task, TaskStatus, JobType, ScanMode
+from .run import Run, RunStatus, JobType, ScanMode
 from .pov import POV
 from .patch import Patch
 from .worker import Worker, WorkerStatus
@@ -24,8 +24,8 @@ from .llm_call import LLMCall
 from .agent import AgentType
 
 __all__ = [
-    "Task",
-    "TaskStatus",
+    "Run",
+    "RunStatus",
     "JobType",
     "ScanMode",
     "POV",

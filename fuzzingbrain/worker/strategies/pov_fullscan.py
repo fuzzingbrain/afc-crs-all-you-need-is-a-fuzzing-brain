@@ -112,7 +112,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             pipeline_stats = asyncio.run(self._run_full_pipeline())
 
             # Collect results
-            all_points = self.repos.suspicious_points.find_by_task(self.task_id)
+            all_points = self.repos.suspicious_points.find_by_run(self.run_id)
             result["suspicious_points_found"] = len(all_points)
             result["suspicious_points_verified"] = pipeline_stats.sp_verified
             result["pov_generated"] = pipeline_stats.pov_generated
@@ -156,7 +156,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             model=model_for(Role.VERIFIER),
-            task_id=self.task_id,
+            run_id=self.run_id,
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
             max_iterations=100,
@@ -180,7 +180,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         phase1_duration = time.time() - phase1_start
         self.log_info(f"Phase 1 completed in {phase1_duration:.1f}s")
 
-        return self.repos.directions.find_pending(self.task_id, self.fuzzer)
+        return self.repos.directions.find_pending(self.run_id, self.fuzzer)
 
     async def _run_direction_planning_async(self) -> List:
         """Run direction planning phase asynchronously."""
@@ -197,7 +197,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             model=model_for(Role.VERIFIER),
-            task_id=self.task_id,
+            run_id=self.run_id,
             worker_id=self.worker_id,
             log_dir=agent_log_dir,
             max_iterations=100,
@@ -221,7 +221,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         phase1_duration = time.time() - phase1_start
         self.log_info(f"Phase 1 completed in {phase1_duration:.1f}s")
 
-        return self.repos.directions.find_pending(self.task_id, self.fuzzer)
+        return self.repos.directions.find_pending(self.run_id, self.fuzzer)
 
     async def _run_full_pipeline(self):
         """
@@ -272,16 +272,16 @@ class POVFullscanStrategy(POVBaseStrategy):
     # =========================================================================
 
     def _get_vuln_hint(self) -> str:
-        """Read an optional vulnerability description from the task workspace.
+        """Read an optional vulnerability description from the run workspace.
 
         When a target is imported with a known bug report (e.g. a benchmark
-        prompt), the importer drops it at ``<task_workspace>/DESCRIPTION.txt``.
+        prompt), the importer drops it at ``<run_workspace>/DESCRIPTION.txt``.
         Feeding it to direction planning focuses the search instead of letting
         the agent explore the whole codebase blind. Absent file -> "" (the agent
         runs fully autonomously, unchanged).
         """
         try:
-            ws = getattr(self.executor, "task_workspace_path", None)
+            ws = getattr(self.executor, "run_workspace_path", None)
             if not ws:
                 return ""
             desc = ws / "DESCRIPTION.txt"
@@ -375,7 +375,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             set_coverage_context(
                 coverage_fuzzer_dir=coverage_fuzzer_dir,
                 project_name=self.project_name,
-                src_dir=self.executor.task_workspace_path / "repo",
+                src_dir=self.executor.run_workspace_path / "repo",
                 docker_image=self.executor.docker_image,
                 work_dir=self.results_path / "coverage_work",
             )
@@ -404,7 +404,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         )
 
         pipeline = AgentPipeline(
-            task_id=self.task_id,
+            run_id=self.run_id,
             repos=self.repos,
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
@@ -412,7 +412,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             config=config,
             output_dir=self.results_path / "povs",
             log_dir=self.agent_log_dir,
-            workspace_path=self.executor.task_workspace_path,
+            workspace_path=self.executor.run_workspace_path,
             fuzzer_code=fuzzer_code,
             fuzzer_source=self.executor.harness_source(),  # full harness for verifier
             mcp_socket_path=self.executor.analysis_socket_path,
@@ -549,7 +549,7 @@ class POVFullscanStrategy(POVBaseStrategy):
         self, direction_id: str, functions_analyzed: int
     ) -> None:
         try:
-            sps = self.repos.suspicious_points.find_by_task(self.task_id) or []
+            sps = self.repos.suspicious_points.find_by_run(self.run_id) or []
             sp_count = sum(
                 1
                 for sp in sps
@@ -601,11 +601,11 @@ class POVFullscanStrategy(POVBaseStrategy):
         # nodes, so the traversal walks the actual reachable set. C targets whose
         # names already match never collapse, so this never fires for them.
         node_count = self.repos.callgraph_nodes.count_for_fuzzer(
-            self.task_id, self.fuzzer
+            self.run_id, self.fuzzer
         )
         if node_count and len(depth) < 0.1 * node_count:
             fuzzer_entries = self.repos.callgraph_nodes.get_entry_function_names(
-                self.task_id, self.fuzzer
+                self.run_id, self.fuzzer
             )
             self.log_warning(
                 f"Entry BFS reached only {len(depth)} of ~{node_count} nodes "
@@ -632,7 +632,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             func_name = queue.popleft()
             d = depth[func_name]
             callees = self.repos.callgraph_nodes.find_callees(
-                self.task_id, self.fuzzer, func_name
+                self.run_id, self.fuzzer, func_name
             )
             for callee in callees or []:
                 if callee not in depth:
@@ -653,14 +653,14 @@ class POVFullscanStrategy(POVBaseStrategy):
         points, having looked at nothing. The log read like there was nothing to
         examine rather than like the pool had been emptied.
         """
-        func = self.repos.functions.find_by_name(self.task_id, name)
+        func = self.repos.functions.find_by_name(self.run_id, name)
         if func:
             return func
         from ...core.models.function import Function
 
         return Function(
-            function_id=f"{self.task_id}_{name}",
-            task_id=self.task_id,
+            function_id=f"{self.run_id}_{name}",
+            run_id=self.run_id,
             name=name,
         )
 
@@ -815,13 +815,13 @@ class POVFullscanStrategy(POVBaseStrategy):
         try:
             callers = (
                 self.repos.callgraph_nodes.find_callers(
-                    self.task_id, self.fuzzer, func.name
+                    self.run_id, self.fuzzer, func.name
                 )
                 or []
             )
             callees = (
                 self.repos.callgraph_nodes.find_callees(
-                    self.task_id, self.fuzzer, func.name
+                    self.run_id, self.fuzzer, func.name
                 )
                 or []
             )
@@ -860,7 +860,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                 sanitizer=self.sanitizer,
                 model=model_for(Role.FINDER),
                 direction_id=direction_id,
-                task_id=self.task_id,
+                run_id=self.run_id,
                 worker_id=self.worker_id,
                 log_dir=agent_log_dir,
                 index=index,  # For log file naming: SPG_{index}_{function_name}.log
@@ -878,7 +878,7 @@ class POVFullscanStrategy(POVBaseStrategy):
                 sanitizer=self.sanitizer,
                 model=model_for(Role.FINDER),
                 direction_id=direction_id,
-                task_id=self.task_id,
+                run_id=self.run_id,
                 worker_id=self.worker_id,
                 log_dir=agent_log_dir,
                 index=index,  # For log file naming: SPG_{index}_{function_name}.log
@@ -921,7 +921,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             small_pool_total += len(direction.entry_functions or [])
 
         # Big pool stats
-        all_functions = self.repos.functions.find_by_task(self.task_id)
+        all_functions = self.repos.functions.find_by_run(self.run_id)
         big_pool_total = len(all_functions) if all_functions else 0
 
         # Analyzed counts
@@ -979,7 +979,7 @@ class POVFullscanStrategy(POVBaseStrategy):
             """Run a single SeedAgent and return result."""
             try:
                 seed_agent = SeedAgent(
-                    task_id=self.task_id,
+                    run_id=self.run_id,
                     worker_id=self.worker_id,  # ObjectId for MongoDB linking
                     fuzzer=self.fuzzer,
                     sanitizer=self.sanitizer,

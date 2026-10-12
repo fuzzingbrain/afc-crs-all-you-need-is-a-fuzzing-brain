@@ -6,7 +6,7 @@ Provides isolated runtime context for each Agent instance.
 Uses MongoDB ObjectId as unique identifier for both runtime isolation and persistence.
 
 Hierarchy:
-    Task (ObjectId)
+    Run (ObjectId)
     └── Worker (ObjectId)
         └── Agent (ObjectId)
 
@@ -57,7 +57,7 @@ class AgentContext:
     - Real-time status updates
 
     Usage:
-        with AgentContext(task_id, worker_id, "POVAgent") as ctx:
+        with AgentContext(run_id, worker_id, "POVAgent") as ctx:
             # ctx.agent_id is unique
             # Tools can look up ctx by agent_id
             ctx.increment_iteration()  # Auto-persists periodically
@@ -78,7 +78,7 @@ class AgentContext:
 
     def __init__(
         self,
-        task_id: str,
+        run_id: str,
         worker_id: str,
         agent_type: str,
         target: str = "",
@@ -89,7 +89,7 @@ class AgentContext:
         Initialize agent context.
 
         Args:
-            task_id: Task ID (MongoDB ObjectId string)
+            run_id: Run ID (MongoDB ObjectId string)
             worker_id: Worker ID (MongoDB ObjectId string)
             agent_type: Agent class name (e.g., "POVAgent", "FullSPGenerator")
             target: Target being analyzed (function_name or sp_id)
@@ -100,7 +100,7 @@ class AgentContext:
         self.agent_id = str(ObjectId())
 
         # Identity
-        self.task_id = task_id
+        self.run_id = run_id
         self.worker_id = worker_id
         self.agent_type = agent_type
         self.target = target
@@ -246,7 +246,7 @@ class AgentContext:
                     "_id": safe_object_id(
                         self.agent_id
                     ),  # May be ObjectId or custom string
-                    "task_id": safe_object_id(self.task_id),
+                    "run_id": safe_object_id(self.run_id),
                     # Store worker_id as ObjectId reference for proper foreign key linking
                     "worker_id": safe_object_id(self.worker_id),
                     "agent_type": self.agent_type,
@@ -371,7 +371,7 @@ class AgentContext:
         """Convert to dictionary for serialization."""
         return {
             "agent_id": self.agent_id,
-            "task_id": self.task_id,
+            "run_id": self.run_id,
             "worker_id": self.worker_id,
             "agent_type": self.agent_type,
             "target": self.target,
@@ -443,7 +443,7 @@ def get_agent_status(agent_id: str) -> Optional[Dict[str, Any]]:
         if doc:
             # Convert ObjectId to string
             doc["agent_id"] = str(doc.pop("_id"))
-            doc["task_id"] = str(doc["task_id"]) if doc.get("task_id") else None
+            doc["run_id"] = str(doc["run_id"]) if doc.get("run_id") else None
             doc["worker_id"] = str(doc["worker_id"]) if doc.get("worker_id") else None
             return doc
 
@@ -475,7 +475,7 @@ def get_agents_by_worker(worker_id: str) -> list:
         cursor = db.agents.find({"worker_id": ObjectId(worker_id)})
         for doc in cursor:
             doc["agent_id"] = str(doc.pop("_id"))
-            doc["task_id"] = str(doc["task_id"]) if doc.get("task_id") else None
+            doc["run_id"] = str(doc["run_id"]) if doc.get("run_id") else None
             doc["worker_id"] = str(doc["worker_id"]) if doc.get("worker_id") else None
             agents.append(doc)
 
@@ -499,12 +499,12 @@ def get_agents_by_worker(worker_id: str) -> list:
     return agents
 
 
-def get_agents_by_task(task_id: str) -> list:
+def get_agents_by_run(run_id: str) -> list:
     """
-    Get all agents for a task.
+    Get all agents for a run.
 
     Args:
-        task_id: Task ID (ObjectId string)
+        run_id: Run ID (ObjectId string)
 
     Returns:
         List of agent status dicts
@@ -518,10 +518,10 @@ def get_agents_by_task(task_id: str) -> list:
         if db is None:
             return agents
 
-        cursor = db.agents.find({"task_id": ObjectId(task_id)})
+        cursor = db.agents.find({"run_id": ObjectId(run_id)})
         for doc in cursor:
             doc["agent_id"] = str(doc.pop("_id"))
-            doc["task_id"] = str(doc["task_id"]) if doc.get("task_id") else None
+            doc["run_id"] = str(doc["run_id"]) if doc.get("run_id") else None
             doc["worker_id"] = str(doc["worker_id"]) if doc.get("worker_id") else None
             agents.append(doc)
 
@@ -531,7 +531,7 @@ def get_agents_by_task(task_id: str) -> list:
     # Merge with in-memory data
     in_memory = get_all_agent_contexts()
     for ctx in in_memory.values():
-        if ctx.task_id == task_id:
+        if ctx.run_id == run_id:
             found = False
             for i, a in enumerate(agents):
                 if a["agent_id"] == ctx.agent_id:
@@ -578,15 +578,15 @@ def cancel_agents_by_worker(worker_id: str) -> int:
     return cancelled
 
 
-def force_cleanup_agents(task_id: str, db) -> int:
+def force_cleanup_agents(run_id: str, db) -> int:
     """
-    Force-update any still-running agent records in MongoDB for a task.
+    Force-update any still-running agent records in MongoDB for a run.
 
     Catches agents whose in-memory cancel did not persist
     (e.g. process was killed before __exit__).
 
     Args:
-        task_id: Task ID (ObjectId string)
+        run_id: Run ID (ObjectId string)
         db: MongoDB database handle
 
     Returns:
@@ -594,12 +594,12 @@ def force_cleanup_agents(task_id: str, db) -> int:
     """
     try:
         result = db.agents.update_many(
-            {"task_id": ObjectId(task_id), "status": "running"},
+            {"run_id": ObjectId(run_id), "status": "running"},
             {"$set": {"status": "cancelled", "ended_at": datetime.now()}},
         )
         count = result.modified_count
         if count:
-            logger.info(f"Force-cleaned {count} zombie agent(s) for task {task_id[:8]}")
+            logger.info(f"Force-cleaned {count} zombie agent(s) for run {run_id[:8]}")
         return count
     except Exception as e:
         logger.warning(f"force_cleanup_agents failed: {e}")

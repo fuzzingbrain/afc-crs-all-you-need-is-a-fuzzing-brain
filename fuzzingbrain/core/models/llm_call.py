@@ -5,7 +5,7 @@ LLM Call Model
 Represents a single LLM API call for tracking and cost analysis.
 
 Hierarchy:
-    Task (ObjectId)
+    Run (ObjectId)
     └── Worker (ObjectId)
         └── Agent (ObjectId)
             └── LLMCall (ObjectId)
@@ -34,7 +34,7 @@ class LLMCall:
     call_id: str = ""  # ObjectId string
     agent_id: str = ""  # Parent Agent ObjectId
     worker_id: str = ""  # Grandparent Worker ObjectId
-    task_id: str = ""  # Great-grandparent Task ObjectId
+    run_id: str = ""  # Great-grandparent Run ObjectId
 
     # Model info
     model: str = ""  # e.g., "claude-sonnet-4-20250514"
@@ -74,7 +74,7 @@ class LLMCall:
             # Note: call_id removed - use _id only
             "agent_id": ObjectId(self.agent_id) if self.agent_id else None,
             "worker_id": ObjectId(self.worker_id) if self.worker_id else None,
-            "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "run_id": ObjectId(self.run_id) if self.run_id else None,
             "model": self.model,
             "provider": self.provider,
             "input_tokens": self.input_tokens,
@@ -95,7 +95,7 @@ class LLMCall:
             "call_id": self.call_id,
             "agent_id": self.agent_id,
             "worker_id": self.worker_id,
-            "task_id": self.task_id,
+            "run_id": self.run_id,
             "model": self.model,
             "provider": self.provider,
             "input_tokens": self.input_tokens,
@@ -126,9 +126,9 @@ class LLMCall:
         if isinstance(worker_id, ObjectId):
             worker_id = str(worker_id)
 
-        task_id = data.get("task_id")
-        if isinstance(task_id, ObjectId):
-            task_id = str(task_id)
+        run_id = data.get("run_id")
+        if isinstance(run_id, ObjectId):
+            run_id = str(run_id)
 
         # Handle datetime
         created_at = data.get("created_at")
@@ -141,7 +141,7 @@ class LLMCall:
             call_id=call_id or "",
             agent_id=agent_id or "",
             worker_id=worker_id or "",
-            task_id=task_id or "",
+            run_id=run_id or "",
             model=data.get("model", ""),
             provider=data.get("provider", "anthropic"),
             input_tokens=data.get("input_tokens", 0),

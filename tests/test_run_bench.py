@@ -42,7 +42,7 @@ def test_cap_rank_orders_by_fired_flags():
 
 
 def test_locate_blobs_finds_attempt_blobs(tmp_path):
-    d = tmp_path / "povs" / "task1" / "worker1" / "attempt_001"
+    d = tmp_path / "povs" / "run1" / "worker1" / "attempt_001"
     d.mkdir(parents=True)
     (d / "v1.bin").write_bytes(b"crash")
     (d / "v2.bin").write_bytes(b"")  # empty -> skipped

@@ -8,7 +8,7 @@ MongoDB connection and repository pattern for all models.
 from .connection import MongoDB, get_database
 from .repository import (
     BaseRepository,
-    TaskRepository,
+    RunRepository,
     POVRepository,
     PatchRepository,
     WorkerRepository,
@@ -24,7 +24,7 @@ __all__ = [
     "get_database",
     # Repositories
     "BaseRepository",
-    "TaskRepository",
+    "RunRepository",
     "POVRepository",
     "PatchRepository",
     "WorkerRepository",

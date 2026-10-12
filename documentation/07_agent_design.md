@@ -122,7 +122,7 @@ Direction record saved to MongoDB:
 | Field | Type | Description |
 |-------|------|-------------|
 | direction_id | str | Unique identifier |
-| task_id | str | Parent task |
+| run_id | str | Parent run |
 | worker_id | str | Parent worker |
 | name | str | Human-readable name |
 | description | str | Direction purpose |

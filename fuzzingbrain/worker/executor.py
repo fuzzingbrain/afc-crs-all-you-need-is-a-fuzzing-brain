@@ -63,7 +63,7 @@ class WorkerExecutor:
         sanitizer: str,
         task_type: str,
         repos: RepositoryManager,
-        task_id: str,
+        run_id: str,
         scan_mode: str = "full",
         fuzzer_binary_path: str = None,
         analysis_socket_path: str = None,
@@ -72,7 +72,7 @@ class WorkerExecutor:
         docker_image: str = "gcr.io/oss-fuzz-base/base-runner",
         enable_fuzzer_worker: bool = True,
         celery_job_id: str = None,
-        task_workspace_path: str = None,
+        run_workspace_path: str = None,
         max_parallel_fuzzers: int = DEFAULT_MAX_PARALLEL_FUZZERS,
         sp_max_count: Optional[int] = None,
         fuzzer_sources: Optional[dict] = None,
@@ -87,29 +87,29 @@ class WorkerExecutor:
             sanitizer: Sanitizer (address, memory, undefined)
             task_type: Job type (pov, patch, pov-patch, harness)
             repos: Database repository manager
-            task_id: Parent task ID
+            run_id: Parent run ID
             scan_mode: Scan mode ("full" or "delta")
             fuzzer_binary_path: Path to pre-built fuzzer binary (from Analyzer)
             analysis_socket_path: Path to Analysis Server socket for code queries
             diff_path: Path to diff file (required for delta mode)
-            log_dir: Main task log directory for agent logs
+            log_dir: Main run log directory for agent logs
             docker_image: Docker image for running fuzzers
             enable_fuzzer_worker: Whether to enable FuzzerManager (default True)
             celery_job_id: Celery task ID (for WorkerContext tracking)
-            task_workspace_path: Path to main task workspace (shared repo/fuzz-tooling/diff)
-            max_parallel_fuzzers: task-wide ceiling on running fuzzers
+            run_workspace_path: Path to main run workspace (shared repo/fuzz-tooling/diff)
+            max_parallel_fuzzers: run-wide ceiling on running fuzzers
             sp_max_count: per-worker ceiling on running SP fuzzers
         """
         self.workspace_path = Path(workspace_path)
-        self.task_workspace_path = (
-            Path(task_workspace_path) if task_workspace_path else self.workspace_path
+        self.run_workspace_path = (
+            Path(run_workspace_path) if run_workspace_path else self.workspace_path
         )
         self.project_name = project_name
         self.fuzzer = fuzzer
         self.sanitizer = sanitizer
         self.task_type = task_type
         self.repos = repos
-        self.task_id = task_id
+        self.run_id = run_id
         self.scan_mode = scan_mode
         self.log_dir = Path(log_dir) if log_dir else None
         self.docker_image = docker_image
@@ -148,7 +148,7 @@ class WorkerExecutor:
             else:
                 self.diff_path = diff_p
         else:
-            self.diff_path = self.task_workspace_path / "diff" / "ref.diff"
+            self.diff_path = self.run_workspace_path / "diff" / "ref.diff"
 
         # Paths
         self.results_path = self.workspace_path / "results"
@@ -172,12 +172,12 @@ class WorkerExecutor:
         """
         if self._worker_context:
             return self._worker_context.worker_id
-        return f"worker_{self.task_id}_{self.fuzzer}_{self.sanitizer}"
+        return f"worker_{self.run_id}_{self.fuzzer}_{self.sanitizer}"
 
     @property
     def worker_display_name(self) -> str:
         """Get human-readable worker name for logging."""
-        return f"worker_{self.task_id}_{self.fuzzer}_{self.sanitizer}"
+        return f"worker_{self.run_id}_{self.fuzzer}_{self.sanitizer}"
 
     @property
     def fuzzer_manager(self) -> Optional[FuzzerManager]:
@@ -195,7 +195,7 @@ class WorkerExecutor:
 
                         sp_config = SPFuzzerConfig(max_count=int(self.sp_max_count))
                     self._fuzzer_manager = FuzzerManager(
-                        task_id=self.task_id,
+                        run_id=self.run_id,
                         worker_id=self.worker_id,
                         fuzzer_path=self.fuzzer_binary_path,
                         docker_image=self.docker_image,
@@ -204,7 +204,7 @@ class WorkerExecutor:
                         sanitizer=self.sanitizer,
                         sp_config=sp_config,
                         max_parallel_fuzzers=self.max_parallel_fuzzers,
-                        # Note: crash_monitor is Task-level (in Dispatcher), not Worker-level
+                        # Note: crash_monitor is Run-level (in Dispatcher), not Worker-level
                     )
                     # Wire the worker-local monitor's crash callback so that
                     # crashes found by the Global / SP fuzzers get promoted to
@@ -290,8 +290,8 @@ class WorkerExecutor:
 
             pov_id = generate_id()
 
-            # Get task workspace for results
-            results_dir = self.task_workspace_path / "results"
+            # Get run workspace for results
+            results_dir = self.run_workspace_path / "results"
             povs_dir = results_dir / "povs"
             povs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -315,7 +315,7 @@ class WorkerExecutor:
                         agent_doc = db.agents.find_one(
                             {
                                 "sp_id": crash_record.sp_id,
-                                "task_id": ObjectId(self.task_id),
+                                "run_id": ObjectId(self.run_id),
                                 "agent_type": "POVAgent",
                             }
                         )
@@ -331,7 +331,7 @@ class WorkerExecutor:
 
             pov = POV(
                 pov_id=pov_id,
-                task_id=self.task_id,
+                run_id=self.run_id,
                 suspicious_point_id=crash_record.sp_id or "",  # SP ID if from SP Fuzzer
                 generation_id=generate_id(),  # Unique generation ID
                 source=source,  # Track POV source
@@ -382,7 +382,7 @@ def generate(variant: int = 1) -> bytes:
             # 3. Package POV with report, then activate
             packager = POVPackager(
                 str(results_dir),
-                task_id=self.task_id,
+                run_id=self.run_id,
                 worker_id=self.worker_id,
                 repos=self.repos,
                 analyzer_socket_path=self.analysis_socket_path,
@@ -437,7 +437,7 @@ def generate(variant: int = 1) -> bytes:
 
                 # 2. Activate POV (now dispatcher will detect it)
                 self.repos.povs.update(pov_id, {"is_successful": True})
-                self.repos.tasks.add_pov(self.task_id, pov_id)
+                self.repos.runs.add_pov(self.run_id, pov_id)
                 logger.info(
                     f"[{self.worker_display_name}] ✅ POV {pov_id[:8]} activated!"
                 )
@@ -485,7 +485,7 @@ def generate(variant: int = 1) -> bytes:
 
                 # 2. Activate POV (now dispatcher will detect it)
                 self.repos.povs.update(pov_id, {"is_successful": True})
-                self.repos.tasks.add_pov(self.task_id, pov_id)
+                self.repos.runs.add_pov(self.run_id, pov_id)
                 logger.info(
                     f"[{self.worker_display_name}] ✅ POV {pov_id[:8]} activated!"
                 )
@@ -592,7 +592,7 @@ def generate(variant: int = 1) -> bytes:
             self._analysis_client = None
 
         # Only shutdown SP Fuzzers, keep Global Fuzzer running
-        # Global Fuzzer will be shut down by Dispatcher when task truly ends
+        # Global Fuzzer will be shut down by Dispatcher when run truly ends
         if self._fuzzer_manager:
             import asyncio
 
@@ -679,7 +679,7 @@ def generate(variant: int = 1) -> bytes:
         Uses WorkerContext for proper isolation and MongoDB linking.
 
         Hierarchy:
-            Task (ObjectId)
+            Run (ObjectId)
             └── Worker (ObjectId) ← WorkerContext provides this
                 └── Agent (ObjectId) ← AgentContext provides this
 
@@ -693,7 +693,7 @@ def generate(variant: int = 1) -> bytes:
         # Create WorkerContext for isolation
         # This creates the Worker record in MongoDB with unique ObjectId
         with WorkerContext(
-            task_id=self.task_id,
+            run_id=self.run_id,
             fuzzer=self.fuzzer,
             sanitizer=self.sanitizer,
             scan_mode=self.scan_mode,

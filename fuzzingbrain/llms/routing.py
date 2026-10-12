@@ -228,7 +228,7 @@ class ModelRouter:
         return self._resolved[role].source
 
     def resolved_map(self) -> Dict[str, str]:
-        """role -> model id, for persistence with the task and the run report."""
+        """role -> model id, for persistence with the run record and the run report."""
         return {r.value: res.model.id for r, res in self._resolved.items()}
 
     def log_summary(self) -> None:
@@ -247,11 +247,11 @@ class ModelRouter:
 
 
 # ---------------------------------------------------------------------------
-# Task-scoped active router (transitional bridge to full DI)
+# Run-scoped active router (transitional bridge to full DI)
 #
 # Built once at the worker boundary (worker.tasks.run_worker) and read by every
 # agent call site via ``model_for(role)``. A FuzzingBrain worker process handles
-# one task, so a module global is task-scoped. This is the single access point
+# one run, so a module global is run-scoped. This is the single access point
 # that replaces ``stage_model`` and the scattered ``or CLAUDE_X`` picks.
 # Follow-up: thread the router through constructors (DI) and drop the global.
 # ---------------------------------------------------------------------------
@@ -259,14 +259,14 @@ _active_router: Optional[ModelRouter] = None
 
 
 def set_active_router(router: ModelRouter) -> None:
-    """Install the task's router at the boundary and log its resolved map."""
+    """Install the run's router at the boundary and log its resolved map."""
     global _active_router
     _active_router = router
     router.log_summary()
 
 
 def active_router() -> ModelRouter:
-    """The task's router, or a lazily-built one from env + the default profile."""
+    """The run's router, or a lazily-built one from env + the default profile."""
     global _active_router
     if _active_router is None:
         _active_router = ModelRouter.from_sources()

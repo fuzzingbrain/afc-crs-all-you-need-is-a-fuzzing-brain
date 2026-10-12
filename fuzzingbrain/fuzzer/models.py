@@ -82,7 +82,7 @@ class CrashRecord:
     """
 
     crash_id: str = field(default_factory=generate_id)
-    task_id: str = ""
+    run_id: str = ""
     worker_id: str = ""  # Worker that found this crash
     crash_path: str = ""
     crash_hash: str = ""  # SHA1 for deduplication
@@ -108,7 +108,7 @@ class CrashRecord:
         return {
             "_id": ObjectId(self.crash_id) if self.crash_id else ObjectId(),
             "crash_id": self.crash_id,
-            "task_id": ObjectId(self.task_id) if self.task_id else None,
+            "run_id": ObjectId(self.run_id) if self.run_id else None,
             "worker_id": ObjectId(self.worker_id) if self.worker_id else None,
             "crash_path": self.crash_path,
             "crash_hash": self.crash_hash,
@@ -134,9 +134,9 @@ class CrashRecord:
         if isinstance(crash_id, ObjectId):
             crash_id = str(crash_id)
 
-        task_id = data.get("task_id", "")
-        if isinstance(task_id, ObjectId):
-            task_id = str(task_id)
+        run_id = data.get("run_id", "")
+        if isinstance(run_id, ObjectId):
+            run_id = str(run_id)
 
         worker_id = data.get("worker_id", "")
         if isinstance(worker_id, ObjectId):
@@ -144,7 +144,7 @@ class CrashRecord:
 
         return cls(
             crash_id=crash_id or generate_id(),
-            task_id=task_id,
+            run_id=run_id,
             worker_id=worker_id,
             crash_path=data.get("crash_path", ""),
             crash_hash=data.get("crash_hash", ""),
