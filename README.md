@@ -3,7 +3,7 @@
 
 # All You Need Is a Fuzzing Brain
 
-<img src="https://img.shields.io/badge/Python-3.11-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python">
+<img src="https://img.shields.io/badge/Python-3.13-blue?style=for-the-badge&logo=python&logoColor=white" alt="Python">
 <img src="https://img.shields.io/badge/Docker-Required-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker">
 <img src="https://img.shields.io/badge/License-Apache_2.0-green?style=for-the-badge" alt="License">
 
@@ -26,7 +26,7 @@ patches — with every finding dynamically verified to eliminate hallucinations.
 | Requirement | Notes |
 |---|---|
 | **Docker** | Running, and your user able to run containers (`docker ps` without `sudo`) |
-| **Python** | Not required up front — `uv` fetches the version in `.python-version` (3.11), so the run does not depend on whatever `python3` happens to be first on `PATH` |
+| **Python** | Not required up front — `uv` fetches the version in `.python-version` (3.13), so the run does not depend on whatever `python3` happens to be first on `PATH` |
 | **One LLM API key** | Anthropic, OpenAI, or Google Gemini |
 | **Linux** | Recommended; OSS-Fuzz builds are happiest there |
 | **Disk** | Tens of GB. An OSS-Fuzz build tree is several GB per target and large projects (wireshark, freerdp) transiently need far more |
@@ -41,7 +41,7 @@ cp .env.example .env
 $EDITOR .env          # add at least one API key
 ```
 
-The first run installs `uv`, builds `venv/` on Python 3.11, installs
+The first run installs `uv`, builds `venv/` on Python 3.13, installs
 `requirements.txt` and starts the MongoDB and Redis containers. `--help` prints
 options without doing any of that.
 
@@ -179,7 +179,7 @@ See [`examples/`](examples/) for runnable configurations of each mode.
 
 ```bash
 # the pinned interpreter; `./FuzzingBrain.sh --help` does this for you
-python3.11 -m venv venv && ./venv/bin/pip install -r requirements.txt
+python3.13 -m venv venv && ./venv/bin/pip install -r requirements.txt
 ./venv/bin/python -m pytest tests/
 ```
 
