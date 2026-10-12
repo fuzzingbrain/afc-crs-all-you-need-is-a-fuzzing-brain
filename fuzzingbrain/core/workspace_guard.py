@@ -21,11 +21,10 @@ is a switch, and it refuses to run before the diff exists.
 
 Sanitisation runs on the Python side only, from
 :func:`fuzzingbrain.core.run_processor.RunProcessor.process`. That is the one
-place every entry point reaches -- the shell wrapper's plain-URL and flag forms,
-a JSON task file, the REST API, the MCP server. An earlier version called it
-from ``main.setup_workspace`` instead, which serves the JSON form alone, so
-``./FuzzingBrain.sh <git_url>`` built against a tree that still held its own
-answer until :func:`assert_workspace_clean` stopped the run.
+place every run passes through, whatever started it. An earlier version called
+it from ``main.setup_workspace`` instead, which only one of the then entry points
+used, so the others built against a tree that still held its own answer until
+:func:`assert_workspace_clean` stopped the run.
 """
 
 import shutil

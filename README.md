@@ -37,48 +37,25 @@ patches — with every finding dynamically verified to eliminate hallucinations.
 git clone https://github.com/fuzzingbrain/afc-crs-all-you-need-is-a-fuzzing-brain.git
 cd afc-crs-all-you-need-is-a-fuzzing-brain
 
-cp .env.example .env
+./setup.sh            # uv, venv on Python 3.13, dependencies, .env
 $EDITOR .env          # add at least one API key
 ```
 
-The first run installs `uv`, builds `venv/` on Python 3.13, installs
-`requirements.txt` and starts the MongoDB and Redis containers. `--help` prints
-options without doing any of that.
+`setup.sh` is safe to re-run. PostgreSQL and Redis are started in containers
+on the first run if they are not already reachable at the URLs in `.env`.
 
-## Run an example
+## Run
+
+One entry point, one JSON task file:
 
 ```bash
-./FuzzingBrain.sh examples/07_aixcc_challenge/cu-delta-02.json
+./venv/bin/python -m fuzzingbrain.main --config examples/aixcc/cu-delta-05.json --budget-limit 20
 ```
 
-A delta scan of an AIxCC Final Competition challenge, every reference pinned to
-a commit. It has a known defect and a reference PoV, so you can tell whether the
-run worked — [`examples/07_aixcc_challenge`](examples/07_aixcc_challenge) says
-what to expect. Measured at 14.6 minutes and $2.14 against its $20 cap.
-
-| Example | What it does |
-|---|---|
-| [`examples/07_aixcc_challenge`](examples/07_aixcc_challenge) | The task file above, and what its result should look like |
-| [`examples/04_json_config`](examples/04_json_config) | Runs driven by a JSON task file instead of flags |
-| [`examples/03_local_scan`](examples/03_local_scan) | Full scan from a GitHub URL |
-| [`examples/05_delta_scan`](examples/05_delta_scan) | Scan only what changed between two commits |
-| [`examples/06_job_types`](examples/06_job_types) | `pov`, `patch` and `harness` task types |
-| [`examples/01_rest_api`](examples/01_rest_api) | REST server on port 18080 |
-| [`examples/02_mcp_server`](examples/02_mcp_server) | MCP server, to drive from an MCP client |
-
-> Examples 03, 05 and 06 target a `libpng` fork that does not currently build:
-> OSS-Fuzz's `libpng` recipe copies `build.sh` out of `pnggroup/libpng@master`,
-> so upstream tooling compiles a harness the pinned commit does not contain.
-
-### What a run leaves behind
-
-```
-workspace/<project>_<run_id>/results/
-├── povs/        # verified proof-of-vulnerability inputs
-├── patches/     # proposed fixes
-└── report.json  # run summary
-logs/<project>_<run_id>_<timestamp>/
-```
+Every field of the task file is also a flag, and a flag overrides the file
+(`--help` lists them). `--check` validates the task and stops before doing any
+work. [`examples/aixcc/`](examples/aixcc) holds two real task files, one delta
+scan and one full scan.
 
 Nothing is reported that has not crashed a real build: every candidate input is
 executed against the built fuzzer and kept only if the sanitizer fires.
@@ -86,56 +63,8 @@ executed against the built fuzzer and kept only if the sanitizer fires.
 > **Pick a build-ready target.** The fuzzer has to build before any bug hunting
 > starts, and a target that built last month may not build today: an OSS-Fuzz
 > recipe that clones a dependency at `master` picks up whatever is there now.
-> Check `logs/<run>/build/*.log` first when a run reports nothing — a failed
-> build and a clean scan do not look alike there, but they can in a summary.
-
-## Usage
-
-```
-./FuzzingBrain.sh [OPTIONS] [TARGET]
-```
-
-| TARGET | Behavior |
-|---|---|
-| `<git_url>` | Clone the repo and scan it |
-| `<json_file>` | Load a task configuration from JSON |
-| `<workspace_path>` | Reuse an existing workspace directory |
-| `<project_name>` | Continue an existing `workspace/<project_name>` |
-| _(none)_ | Start a server (REST API by default) |
-
-Common options:
-
-| Option | Description |
-|---|---|
-| `--budget <usd>` | **LLM spend cap in USD** (strongly recommended, e.g. `--budget 20`) |
-| `--scan-mode <full\|delta>` | Full scan (default) or delta scan |
-| `-b <commit>` / `-d <commit>` | Base / delta commit (delta scan) |
-| `-v <commit>` | Target a specific commit for a full scan |
-| `--task-type <pov-patch\|pov\|patch\|harness>` | What to produce (default `pov-patch`) |
-| `--project <name>` | OSS-Fuzz project name, if auto-detection misses |
-| `--sanitizers <list>` | Comma-separated, e.g. `address,undefined` (default `address`) |
-| `--timeout <min>` | Overall timeout (default 60) |
-| `--pov-count <N>` | Stop after N verified PoVs (`0` = unlimited) |
-| `--api` / `--mcp` | Start the REST API / MCP server instead of scanning |
-| `--docker` | Run everything inside a container (no local Python needed) |
-
-Run `./FuzzingBrain.sh --help` for the full list.
-
-### Examples
-
-```bash
-# Full scan with a $20 budget cap
-./FuzzingBrain.sh --budget 20 <git_url>
-
-# Delta scan between two commits
-./FuzzingBrain.sh -b <base> -d <delta> https://github.com/user/repo.git
-
-# PoV only, undefined-behavior sanitizer, 30-minute cap
-./FuzzingBrain.sh --task-type pov --sanitizers undefined --timeout 30 <git_url>
-
-# Start the REST API server (port 18080)
-./FuzzingBrain.sh --api
-```
+> Check the build logs first when a run reports nothing — a failed build and a
+> clean scan do not look alike there, but they can in a summary.
 
 ## How it works
 
@@ -147,39 +76,23 @@ target ─▶ analyze ─▶ build fuzzers ─▶ direction planning ─▶ sp-g
 
 A scan partitions the codebase into directions, reasons about suspicious points
 (potential vulnerabilities), constructs candidate PoV inputs, and verifies every
-crash before it is reported. See [`documentation/`](documentation/) for the full
-architecture, agent design, and Suspicious-Point lifecycle.
-
-## Modes
-
-| Mode | Command | Use case |
-|---|---|---|
-| Local scan | `./FuzzingBrain.sh <target>` | One-off analysis from the CLI |
-| REST API | `./FuzzingBrain.sh --api` | Web / CI integration (port 18080) |
-| MCP server | `./FuzzingBrain.sh --mcp` | Drive from an MCP client (e.g. Claude Desktop) |
-| Docker | `./FuzzingBrain.sh --docker <target>` | No local Python; everything containerized |
-
-See [`examples/`](examples/) for runnable configurations of each mode.
+crash before it is reported.
 
 ## Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| `.env file created … add your API keys` | Edit `.env`, add a key, re-run |
-| `API key was rejected by its provider` | The key is revoked/rotated/wrong account. Replace it in `.env`. A scan refuses to start rather than build for 10 minutes and report 0 PoVs |
-| Need to run without a working key | `FUZZINGBRAIN_SKIP_KEY_CHECK=1` skips the preflight; `--api` / `--mcp` already start without one |
-| Fuzzer build fails immediately | The target doesn't match its OSS-Fuzz build script; pin a commit with `-v`, or pick a build-ready target |
+| `Model check failed … no API key for <provider> in .env` | Add that provider's key to `.env`; the run refuses to start without the keys its models need |
+| Fuzzer build fails immediately | The target doesn't match its OSS-Fuzz build script; pin `target_commit`, or pick a build-ready target |
 | `docker: permission denied` | Add your user to the `docker` group, or run with sufficient privileges |
-| Dependencies re-install on every run | The hash in `venv/.deps_installed` no longer matches `requirements.txt` — expected after editing it. Delete that file to force a reinstall on purpose |
-| Wrong Python in `venv/` | The venv is rebuilt automatically when it is not on the version in `.python-version`; `rm -rf venv` if it is wedged |
-| Delta scan finds nothing in under a second | No call graph, so the diff maps to no functions. Pass `--prebuild-dir` (see [`examples/aixcc-challenges/`](examples/aixcc-challenges/)) |
-| Want to reset infra | `docker rm -f fuzzingbrain-mongodb fuzzingbrain-redis` |
+| Wrong Python in `venv/` | Re-run `./setup.sh`; `rm -rf venv` first if it is wedged |
+| Delta scan finds nothing in under a second | No call graph, so the diff maps to no functions. Set `analysis.prebuild_graph_dir` (see [`examples/aixcc-challenges/`](examples/aixcc-challenges/)) |
+| Want to reset infra | `docker rm -f fuzzingbrain-postgres fuzzingbrain-redis` (data stays in their volumes) |
 
 ## Development
 
 ```bash
-# the pinned interpreter; `./FuzzingBrain.sh --help` does this for you
-python3.13 -m venv venv && ./venv/bin/pip install -r requirements.txt
+./setup.sh
 ./venv/bin/python -m pytest tests/
 ```
 

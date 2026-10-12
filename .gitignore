@@ -24,7 +24,6 @@ work/
 test_trace_output/
 
 run_view_*/
-documentation/analysis/
 experiment/
 
 # Test / coverage artifacts

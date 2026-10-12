@@ -8,7 +8,6 @@
 #   FORCE_MODEL=gpt-4.1 artifact/run.sh <task>       every agent role on one model
 #   MODELS=poc=gpt-4.1 artifact/run.sh <task>        per-role model override on the profile
 #   POV_COUNT=4 artifact/run.sh <task>               stop after N distinct bugs (0 = never)
-#   EVAL_PORT=18080 (default)                         eval server the run reports to
 #
 # The task JSON stores paths as $ARTIFACT/...; they are resolved to this
 # directory. CyberGym cases run in place, so repo/ and fuzz-tooling/ are copied
@@ -85,4 +84,4 @@ if [ "$DRY" = 1 ]; then
   echo "dry run ok"; rm -rf "$RUN_DIR"; exit 0
 fi
 cd "$FB_ROOT"
-exec ./FuzzingBrain.sh --eval-port "${EVAL_PORT:-18080}" "$RUN_DIR/task.json"
+exec ./venv/bin/python -m fuzzingbrain.main --config "$RUN_DIR/task.json"

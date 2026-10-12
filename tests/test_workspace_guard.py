@@ -181,9 +181,9 @@ def test_builder_copies_exclude_answers_and_history(workspace, tmp_path):
 #
 # The tests above prove sanitisation works when it runs. They said nothing
 # about whether it runs, and it did not: the call lived in
-# main.setup_workspace, which serves the JSON entry point alone, so
-# `./FuzzingBrain.sh <git_url>` -- the first example in the README -- reached
-# the build with .aixcc still in the tree. assert_workspace_clean caught it and
+# main.setup_workspace, which only the JSON entry point used, so a run started
+# from a plain git URL -- the first example in the README then -- reached the
+# build with .aixcc still in the tree. assert_workspace_clean caught it and
 # aborted the run, which is the design working, but the example was dead.
 
 

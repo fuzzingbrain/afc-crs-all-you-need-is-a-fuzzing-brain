@@ -193,7 +193,8 @@ def build_workspace(
         overwrite: Replace ``dest`` if it exists.
 
     Returns:
-        The workspace path (pass to ``FuzzingBrain.sh <path>`` / ``--workspace``).
+        The workspace path; its ``repo/`` and ``fuzz-tooling/`` are the task's
+        ``--repo-path`` and ``--fuzz-tooling-path``.
     """
     dest = Path(dest)
     oss_fuzz_dir = Path(oss_fuzz_dir)
@@ -266,7 +267,10 @@ def _main(argv: Optional[List[str]] = None) -> int:
         overwrite=args.overwrite,
     )
     print(f"workspace ready: {ws}")
-    print(f"run: ./FuzzingBrain.sh {ws} --task-type pov --pov-count 1")
+    print(
+        f"run: python -m fuzzingbrain.main --config <task.json>"
+        f" --repo-path {ws}/repo --fuzz-tooling-path {ws}/fuzz-tooling"
+    )
     return 0
 
 
