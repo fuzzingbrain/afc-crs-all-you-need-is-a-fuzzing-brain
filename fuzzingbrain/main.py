@@ -18,8 +18,8 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-# Keys and the MongoDB/Redis URLs live in the repo's .env. Loaded before the
-# imports below and before any config is read, so MONGODB_URL there is the one
+# Keys and the PostgreSQL/Redis URLs live in the repo's .env. Loaded before the
+# imports below and before any config is read, so POSTGRES_URL there is the one
 # this process connects to. A variable already in the environment wins.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -37,10 +37,11 @@ from .core.fuzzer_spec import set_detect_leaks  # noqa: E402
 from .core.environment import (  # noqa: E402
     check_api_keys,
     check_docker,
-    ensure_mongodb,
+    ensure_postgres,
     ensure_redis,
 )
-from .db import MongoDB, RepositoryManager, init_repos  # noqa: E402
+from .db import RepositoryManager, connect_repositories  # noqa: E402
+from .db.pg import migrate  # noqa: E402
 
 
 # =============================================================================
@@ -331,15 +332,11 @@ def init_database(config: Config) -> RepositoryManager:
     if _repos is not None:
         return _repos
 
-    print_info("Connecting to MongoDB...")
     try:
-        db = MongoDB.connect(config.mongodb_url, config.mongodb_db)
-        _repos = init_repos(db)
-        print_info(f"Connected to database: {config.mongodb_db}")
+        _repos = connect_repositories()
         return _repos
     except Exception as e:
-        print_error(f"Failed to connect to MongoDB: {e}")
-        print_error("Make sure MongoDB is running (check: docker ps)")
+        print_error(str(e))
         sys.exit(1)
 
 
@@ -518,10 +515,11 @@ def main(argv=None) -> int:
         print_info("Task is valid (--check: not running)")
         return 0
 
-    # 7. Database and queue
-    for err in (ensure_mongodb(config.mongodb_url), ensure_redis(config.redis_url)):
+    # 7. Database and queue; the schema is brought up to date before anything writes
+    for err in (ensure_postgres(config.postgres_url), ensure_redis(config.redis_url)):
         if err:
             _fail("Environment check failed", [err])
+    migrate(config.postgres_url)
     init_database(config)
 
     # 8. Output directory

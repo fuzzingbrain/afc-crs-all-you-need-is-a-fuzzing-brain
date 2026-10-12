@@ -1,13 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 services:
-  fb-mongo:
-    image: mongo:8.2
-    container_name: fb-mongo
+  fb-postgres:
+    image: postgres:18
+    container_name: fb-postgres
     restart: unless-stopped
+    environment:
+      POSTGRES_USER: fuzzingbrain
+      POSTGRES_PASSWORD: fuzzingbrain
+      POSTGRES_DB: fuzzingbrain
     volumes:
-      - fb-mongo-data:/data/db
+      - fb-postgres-data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      test: ["CMD", "pg_isready", "-U", "fuzzingbrain", "-d", "fuzzingbrain"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -34,8 +38,7 @@ services:
       - ${PWD}:${PWD}:ro
       - ${PWD}/logs:/app/logs
     environment:
-      MONGODB_URL: "mongodb://fb-mongo:27017"
-      MONGODB_DB: "fuzzingbrain"
+      POSTGRES_URL: "postgresql+psycopg://fuzzingbrain:fuzzingbrain@fb-postgres:5432/fuzzingbrain"
       REDIS_URL: "redis://fb-redis:6379/0"
       RUNNING_IN_DOCKER: "true"
       FUZZINGBRAIN_WORKSPACE_BASE: "${FUZZINGBRAIN_HOST_WORKSPACE:-${PWD}/workspace}"
@@ -43,7 +46,7 @@ services:
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
       GEMINI_API_KEY: "${GEMINI_API_KEY}"
     depends_on:
-      fb-mongo:
+      fb-postgres:
         condition: service_healthy
       fb-redis:
         condition: service_healthy
@@ -51,5 +54,5 @@ services:
       - task
 
 volumes:
-  fb-mongo-data:
+  fb-postgres-data:
   fb-redis-data:

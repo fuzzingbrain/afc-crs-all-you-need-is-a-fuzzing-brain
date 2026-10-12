@@ -4,7 +4,7 @@ FuzzingBrain Configuration
 
 A run is described by one JSON task file; any field in it can also be given, or
 overridden, on the command line. Everything about the run lives there. The
-environment (.env) holds only API keys and where MongoDB and Redis are.
+environment (.env) holds only API keys and where PostgreSQL and Redis are.
 
 The JSON layout, every field and its rules are in FIELDS below; docs/task_full.jsonc
 is the annotated copy.
@@ -346,9 +346,10 @@ _OLD_KEYS = {
     "allow_expensive_fallback": "removed",
     "no_network": "removed: it was never enforced",
     "scoring": "removed",
-    "mongodb_url": "moved to .env (MONGODB_URL)",
-    "mongodb_db": "moved to .env (MONGODB_DB)",
+    "mongodb_url": "removed: the run database is PostgreSQL (POSTGRES_URL in .env)",
+    "mongodb_db": "removed: the run database is PostgreSQL (POSTGRES_URL in .env)",
     "redis_url": "moved to .env (REDIS_URL)",
+    "postgres_url": "belongs in .env (POSTGRES_URL)",
     "commit_id": "removed (patch mode)",
     "fuzzer_name": "removed (patch mode)",
     "gen_blob": "removed (patch mode)",
@@ -442,8 +443,10 @@ class Config:
     fuzzer_worker: FuzzerWorkerConfig = field(default_factory=FuzzerWorkerConfig)
 
     # Infrastructure, from .env only.
-    mongodb_url: str = field(default_factory=lambda: _env("MONGODB_URL", "mongodb://localhost:27017"))
-    mongodb_db: str = field(default_factory=lambda: _env("MONGODB_DB", "fuzzingbrain"))
+    postgres_url: str = field(default_factory=lambda: _env(
+        "POSTGRES_URL",
+        "postgresql+psycopg://fuzzingbrain:fuzzingbrain@localhost:5432/fuzzingbrain",
+    ))
     redis_url: str = field(default_factory=lambda: _env("REDIS_URL", "redis://localhost:6379/0"))
 
     # The run's directory, resolved from `output` by resolve_output().

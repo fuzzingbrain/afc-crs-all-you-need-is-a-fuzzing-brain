@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Start-up checks: Docker, MongoDB, Redis and the API keys a task needs.
+"""Start-up checks: Docker, PostgreSQL, Redis and the API keys a task needs.
 
 Each check returns an error message, or None when it passed, so main() can
 report every problem in one go and stop before any work starts.
@@ -10,12 +10,12 @@ import socket
 import subprocess
 import time
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Callable, Dict, Iterable, List, Optional
 from urllib.parse import urlparse
 
 
 def in_docker() -> bool:
-    """Running inside a container (docker-compose manages MongoDB and Redis then)."""
+    """Running inside a container (docker-compose manages the database and Redis then)."""
     if Path("/.dockerenv").exists() or os.environ.get("RUNNING_IN_DOCKER"):
         return True
     try:
@@ -55,12 +55,26 @@ def _container_state(name: str) -> Optional[str]:
 
 
 def ensure_service(
-    name: str, url: str, container: str, image: str, inner_port: int, volume: str
+    name: str,
+    url: str,
+    container: str,
+    image: str,
+    inner_port: int,
+    volume: str,
+    data_dir: str = "/data",
+    env: Optional[Dict[str, str]] = None,
+    ready: Optional[Callable[[], bool]] = None,
 ) -> Optional[str]:
-    """Make sure a service answers at `url`, starting its container if it is ours to start."""
+    """Make sure a service answers at `url`, starting its container if it is ours to start.
+
+    `ready` says whether the service actually answers; without it an open port
+    is taken as enough.
+    """
     parsed = urlparse(url)
     host, port = parsed.hostname or "localhost", parsed.port or inner_port
-    if _reachable(host, port):
+    if ready is None:
+        ready = lambda: _reachable(host, port)  # noqa: E731
+    if ready():
         return None
     if in_docker() or host not in ("localhost", "127.0.0.1"):
         return f"{name} is not reachable at {host}:{port}"
@@ -71,11 +85,13 @@ def ensure_service(
     elif state is not None:
         subprocess.run(["docker", "start", container], capture_output=True)
     else:
+        env_args = [arg for k, v in (env or {}).items() for arg in ("-e", f"{k}={v}")]
         r = subprocess.run(
             [
                 "docker", "run", "-d", "--name", container, "--restart=always",
                 "-p", f"127.0.0.1:{port}:{inner_port}",
-                "-v", f"{volume}:/data" + ("/db" if name == "MongoDB" else ""),
+                "-v", f"{volume}:{data_dir}",
+                *env_args,
                 image,
             ],
             capture_output=True, text=True,
@@ -83,17 +99,44 @@ def ensure_service(
         if r.returncode != 0:
             return f"could not start {name} container: {r.stderr.strip()}"
 
-    for _ in range(20):
-        if _reachable(host, port):
+    # A first start initialises the data directory, which takes a while.
+    for _ in range(60):
+        if ready():
             return None
         time.sleep(1)
     return f"{name} container {container} did not come up on {host}:{port}"
 
 
-def ensure_mongodb(url: str) -> Optional[str]:
+def _postgres_answers(url: str) -> bool:
+    """A query goes through (an open port alone may be Docker's proxy)."""
+    from sqlalchemy import create_engine, text
+    from sqlalchemy.pool import NullPool
+
+    engine = create_engine(url, poolclass=NullPool, connect_args={"connect_timeout": 2})
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
+    finally:
+        engine.dispose()
+
+
+def ensure_postgres(url: str) -> Optional[str]:
+    """The run database. A container we start takes its user, password and
+    database name from the URL, so the URL in .env is all there is to set."""
+    parsed = urlparse(url)
     return ensure_service(
-        "MongoDB", url, "fuzzingbrain-mongodb", "mongo:8.2", 27017,
-        "fuzzingbrain-mongodb-data",
+        "PostgreSQL", url, "fuzzingbrain-postgres", "postgres:18", 5432,
+        "fuzzingbrain-postgres-data",
+        data_dir="/var/lib/postgresql",
+        env={
+            "POSTGRES_USER": parsed.username or "fuzzingbrain",
+            "POSTGRES_PASSWORD": parsed.password or "fuzzingbrain",
+            "POSTGRES_DB": parsed.path.lstrip("/") or "fuzzingbrain",
+        },
+        ready=lambda: _postgres_answers(url),
     )
 
 

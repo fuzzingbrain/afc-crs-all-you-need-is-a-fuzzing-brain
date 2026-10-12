@@ -103,17 +103,6 @@ def on_worker_init(**kwargs):
 
     sys.excepthook = handle_exception
 
-    # Initialize MongoDB connection for this worker process
-    # WorkerContext will create per-worker LLM buffers on __enter__
-    try:
-        from .core import Config
-        from .db import MongoDB
-
-        config = Config()  # infrastructure settings come from .env
-        MongoDB.connect(config.mongodb_url, config.mongodb_db)
-    except Exception as e:
-        logger.warning(f"Failed to connect MongoDB in worker init: {e}")
-
 
 @worker_process_shutdown.connect
 def on_worker_shutdown(**kwargs):

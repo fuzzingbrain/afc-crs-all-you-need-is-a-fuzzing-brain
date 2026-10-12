@@ -33,8 +33,7 @@ from .builder import AnalyzerBuilder
 from .importer import StaticAnalysisImporter, import_from_prebuild
 from .models import AnalyzeResult, FuzzerInfo
 from ..analysis import extract_functions_from_file
-from ..db import MongoDB, init_repos
-from ..core import Config
+from ..db import connect_repositories
 from ..core.logging import get_analyzer_banner_and_header
 
 
@@ -281,9 +280,7 @@ class AnalysisServer:
         self._log(f"Starting Analysis Server for run {self.run_id}")
 
         # Initialize database
-        config = Config()  # infrastructure settings come from .env
-        db = MongoDB.connect(config.mongodb_url, config.mongodb_db)
-        self.repos = init_repos(db)
+        self.repos = connect_repositories()
 
         # Setup logging
         if self.log_dir:

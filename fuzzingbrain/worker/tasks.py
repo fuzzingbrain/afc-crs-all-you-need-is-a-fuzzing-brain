@@ -22,7 +22,7 @@ from ..core.logging import (
     setup_worker_logging,
     create_worker_summary,
 )
-from ..db import MongoDB, init_repos
+from ..db import connect_repositories
 
 
 # Capture any uncaught exceptions at module level
@@ -147,11 +147,7 @@ def run_worker(self, assignment: Dict[str, Any]) -> Dict[str, Any]:
 
     # Initialize database connection for this worker process
     try:
-        from ..core import Config
-
-        config = Config()  # infrastructure settings come from .env
-        db = MongoDB.connect(config.mongodb_url, config.mongodb_db)
-        repos = init_repos(db)
+        repos = connect_repositories()
         # Persist the resolved role -> model map so the run is reproducible and
         # the report can show exactly which model ran each role (design §8).
         try:

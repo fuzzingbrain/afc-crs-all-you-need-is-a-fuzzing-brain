@@ -65,9 +65,9 @@ if ! docker image inspect v2-fb-task >/dev/null 2>&1; then
     docker compose build fb-task
 fi
 
-# Start MongoDB and Redis via compose
-echo "[INFO] Starting infrastructure (MongoDB + Redis)..."
-if ! docker compose up -d fb-mongo fb-redis 2>/dev/null; then
+# Start PostgreSQL and Redis via compose
+echo "[INFO] Starting infrastructure (PostgreSQL + Redis)..."
+if ! docker compose up -d fb-postgres fb-redis 2>/dev/null; then
     # Fix Docker 28 + nftables compatibility: create missing isolation chains
     echo "[WARN] Docker network creation failed, attempting nftables fix..."
     if command -v nft &>/dev/null; then
@@ -77,7 +77,7 @@ if ! docker compose up -d fb-mongo fb-redis 2>/dev/null; then
         sudo iptables -t filter -N DOCKER-ISOLATION-STAGE-1 2>/dev/null || true
         sudo iptables -t filter -N DOCKER-ISOLATION-STAGE-2 2>/dev/null || true
     fi
-    docker compose up -d fb-mongo fb-redis
+    docker compose up -d fb-postgres fb-redis
 fi
 
 # Build extra args
