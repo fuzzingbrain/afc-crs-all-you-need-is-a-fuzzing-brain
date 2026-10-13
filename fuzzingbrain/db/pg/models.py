@@ -42,7 +42,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSON, JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 # Stable constraint names, so a migration can drop or alter one by name.
@@ -219,7 +219,7 @@ class GraphHarness(Base):
         ForeignKey("graphs.id", ondelete="CASCADE")
     )
     harness_id: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("harnesses.id", ondelete="CASCADE")
+        ForeignKey("harnesses.id", ondelete="CASCADE"), index=True
     )
     n_reachable: Mapped[int] = mapped_column(Integer, nullable=False)
     max_depth: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -328,7 +328,7 @@ class Agent(Base):
     # agents <-> crashes / VHs / logic groups point at each other; these three
     # are added after the tables exist.
     crash_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        _ref("crashes.id", use_alter=True)
+        _ref("crashes.id", use_alter=True), index=True
     )
     function_file: Mapped[Optional[str]] = mapped_column(Text)
     function_name: Mapped[Optional[str]] = mapped_column(Text)
@@ -338,7 +338,7 @@ class Agent(Base):
         index=True,
     )
     lg_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        _ref("logic_groups.id", use_alter=True)
+        _ref("logic_groups.id", use_alter=True), index=True
     )
     status: Mapped[str] = mapped_column(Text, nullable=False)
     end_reason: Mapped[Optional[str]] = mapped_column(Text)
@@ -368,7 +368,7 @@ class LogicGroup(Base):
         _ref("workers.id"), nullable=False, index=True
     )
     created_by_agent_id: Mapped[uuid.UUID] = mapped_column(
-        _ref("agents.id"), nullable=False
+        _ref("agents.id"), nullable=False, index=True
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     risk_level: Mapped[str] = mapped_column(Text, nullable=False)
@@ -406,7 +406,7 @@ class FunctionAnalysis(Base):
     function_start_line: Mapped[int] = mapped_column(Integer)
     function_end_line: Mapped[int] = mapped_column(Integer, nullable=False)
     agent_id: Mapped[uuid.UUID] = mapped_column(
-        _ref("agents.id"), nullable=False
+        _ref("agents.id"), nullable=False, index=True
     )
     analyzed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
@@ -458,13 +458,13 @@ class VulnerabilityHypothesis(Base):
     sink_code: Mapped[Optional[str]] = mapped_column(Text)
     sink_line: Mapped[Optional[int]] = mapped_column(Integer)
     lg_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        _ref("logic_groups.id")
+        _ref("logic_groups.id"), index=True
     )
     # NULL: the configured default sanitizer, resolved when a PoC runs.
     sanitizer: Mapped[Optional[str]] = mapped_column(Text)
     # NULL: injected by hand rather than found by an agent.
     created_by_agent_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        _ref("agents.id")
+        _ref("agents.id"), index=True
     )
     finder_description: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False)
@@ -559,7 +559,7 @@ class PocAttempt(Base):
         _ref("vulnerability_hypotheses.id"), index=True
     )
     worker_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        _ref("workers.id")
+        _ref("workers.id"), index=True
     )
     agent_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         _ref("agents.id"), index=True
@@ -606,7 +606,11 @@ LLM_ROLES = ("lg_planner", "finder", "verifier", "poc", "seed", "utility")
 
 
 class LLMMessage(Base):
-    """A message sent to or received from a model, stored once per run."""
+    """A message sent to or received from a model, stored once per run.
+
+    `content` is json, not jsonb: it keeps the text exactly as written, and
+    jsonb refuses a NUL character (\\u0000), which a tool result can carry.
+    """
 
     __tablename__ = "llm_messages"
     __table_args__ = (
@@ -622,7 +626,7 @@ class LLMMessage(Base):
     )
     sha256: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(Text, nullable=False)
-    content: Mapped[Any] = mapped_column(JSONB, nullable=False)
+    content: Mapped[Any] = mapped_column(JSON, nullable=False)
     created_at: Mapped[datetime] = _created_at()
 
 
@@ -682,7 +686,7 @@ class LLMCall(Base):
         ARRAY(BigInteger), nullable=False
     )
     output_message_id: Mapped[Optional[int]] = mapped_column(
-        _ref("llm_messages.id")
+        _ref("llm_messages.id"), index=True
     )
     created_at: Mapped[datetime] = _created_at()
 
@@ -702,7 +706,7 @@ class ToolCall(Base):
         _ref("llm_calls.id"), nullable=False, index=True
     )
     result_message_id: Mapped[Optional[int]] = mapped_column(
-        _ref("llm_messages.id")
+        _ref("llm_messages.id"), index=True
     )
     tool_name: Mapped[str] = mapped_column(Text, nullable=False)
     success: Mapped[bool] = mapped_column(Boolean, nullable=False)

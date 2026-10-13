@@ -449,6 +449,13 @@ def test_a_message_is_stored_once_per_run(conn, world):
     assert conn.scalar(select(func.count()).select_from(LLMMessage)) == 1
 
 
+def test_a_message_keeps_a_nul_character(conn, world):
+    content = {"tool_result": "PNG\x00\x00\x1a"}
+    stored = _a_message(conn, world["run"], content)
+    assert conn.scalar(select(LLMMessage.content).where(
+        LLMMessage.id == stored)) == content
+
+
 def test_a_call_input_reads_back_in_the_order_it_was_sent(conn, world):
     ids = [_a_message(conn, world["run"], {"n": n}) for n in (3, 1, 2)]
     reply = _a_message(conn, world["run"], {"reply": True})

@@ -98,7 +98,7 @@ def upgrade() -> None:
     sa.Column('run_id', sa.UUID(), nullable=False),
     sa.Column('sha256', sa.Text(), nullable=False),
     sa.Column('role', sa.Text(), nullable=False),
-    sa.Column('content', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
+    sa.Column('content', postgresql.JSON(astext_type=sa.Text()), nullable=False),
     sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=False),
     sa.CheckConstraint("role IN ('system', 'user', 'assistant', 'tool')", name=op.f('ck_llm_messages_role')),
     sa.ForeignKeyConstraint(['run_id'], ['runs.id'], name=op.f('fk_llm_messages_run_id_runs'), ondelete='CASCADE'),
@@ -115,6 +115,7 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['harness_id'], ['harnesses.id'], name=op.f('fk_graph_harnesses_harness_id_harnesses'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('graph_id', 'harness_id', name=op.f('pk_graph_harnesses'))
     )
+    op.create_index(op.f('ix_graph_harnesses_harness_id'), 'graph_harnesses', ['harness_id'], unique=False)
     op.create_table('harness_binaries',
     sa.Column('harness_id', sa.UUID(), nullable=False),
     sa.Column('sanitizer', sa.Text(), nullable=False),
@@ -183,6 +184,8 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['worker_id'], ['workers.id'], name=op.f('fk_agents_worker_id_workers'), initially='DEFERRED', deferrable=True),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_agents'))
     )
+    op.create_index(op.f('ix_agents_crash_id'), 'agents', ['crash_id'], unique=False)
+    op.create_index(op.f('ix_agents_lg_id'), 'agents', ['lg_id'], unique=False)
     op.create_index(op.f('ix_agents_run_id'), 'agents', ['run_id'], unique=False)
     op.create_index(op.f('ix_agents_vh_id'), 'agents', ['vh_id'], unique=False)
     op.create_index(op.f('ix_agents_worker_id'), 'agents', ['worker_id'], unique=False)
@@ -219,6 +222,7 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['worker_id'], ['workers.id'], name=op.f('fk_llm_calls_worker_id_workers'), initially='DEFERRED', deferrable=True),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_llm_calls'))
     )
+    op.create_index(op.f('ix_llm_calls_output_message_id'), 'llm_calls', ['output_message_id'], unique=False)
     op.create_index(op.f('ix_llm_calls_agent_id'), 'llm_calls', ['agent_id'], unique=False)
     op.create_index(op.f('ix_llm_calls_run_id'), 'llm_calls', ['run_id'], unique=False)
     op.create_index(op.f('ix_llm_calls_worker_id'), 'llm_calls', ['worker_id'], unique=False)
@@ -241,6 +245,7 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['worker_id'], ['workers.id'], name=op.f('fk_logic_groups_worker_id_workers'), initially='DEFERRED', deferrable=True),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_logic_groups'))
     )
+    op.create_index(op.f('ix_logic_groups_created_by_agent_id'), 'logic_groups', ['created_by_agent_id'], unique=False)
     op.create_index(op.f('ix_logic_groups_run_id'), 'logic_groups', ['run_id'], unique=False)
     op.create_index(op.f('ix_logic_groups_worker_id'), 'logic_groups', ['worker_id'], unique=False)
     op.create_table('function_analysis',
@@ -256,6 +261,7 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['lg_id'], ['logic_groups.id'], name=op.f('fk_function_analysis_lg_id_logic_groups'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('lg_id', 'function_file', 'function_name', 'function_start_line', name=op.f('pk_function_analysis'))
     )
+    op.create_index(op.f('ix_function_analysis_agent_id'), 'function_analysis', ['agent_id'], unique=False)
     op.create_table('tool_calls',
     sa.Column('id', sa.BigInteger(), sa.Identity(always=False), nullable=False),
     sa.Column('run_id', sa.UUID(), nullable=False),
@@ -273,6 +279,7 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['run_id'], ['runs.id'], name=op.f('fk_tool_calls_run_id_runs'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_tool_calls'))
     )
+    op.create_index(op.f('ix_tool_calls_result_message_id'), 'tool_calls', ['result_message_id'], unique=False)
     op.create_index(op.f('ix_tool_calls_llm_call_id'), 'tool_calls', ['llm_call_id'], unique=False)
     op.create_index(op.f('ix_tool_calls_run_id'), 'tool_calls', ['run_id'], unique=False)
     op.create_table('vulnerability_hypotheses',
@@ -309,6 +316,8 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['worker_id'], ['workers.id'], name=op.f('fk_vulnerability_hypotheses_worker_id_workers'), initially='DEFERRED', deferrable=True),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_vulnerability_hypotheses'))
     )
+    op.create_index(op.f('ix_vulnerability_hypotheses_created_by_agent_id'), 'vulnerability_hypotheses', ['created_by_agent_id'], unique=False)
+    op.create_index(op.f('ix_vulnerability_hypotheses_lg_id'), 'vulnerability_hypotheses', ['lg_id'], unique=False)
     op.create_index('ix_vh_worker_status_score', 'vulnerability_hypotheses', ['worker_id', 'status', 'score'], unique=False)
     op.create_index(op.f('ix_vulnerability_hypotheses_run_id'), 'vulnerability_hypotheses', ['run_id'], unique=False)
     op.create_table('poc_attempts',
@@ -345,6 +354,7 @@ def upgrade() -> None:
     sa.ForeignKeyConstraint(['worker_id'], ['workers.id'], name=op.f('fk_poc_attempts_worker_id_workers'), initially='DEFERRED', deferrable=True),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_poc_attempts'))
     )
+    op.create_index(op.f('ix_poc_attempts_worker_id'), 'poc_attempts', ['worker_id'], unique=False)
     op.create_index(op.f('ix_poc_attempts_agent_id'), 'poc_attempts', ['agent_id'], unique=False)
     op.create_index(op.f('ix_poc_attempts_crash_id'), 'poc_attempts', ['crash_id'], unique=False)
     op.create_index(op.f('ix_poc_attempts_run_id'), 'poc_attempts', ['run_id'], unique=False)
@@ -384,28 +394,38 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_poc_attempts_run_id'), table_name='poc_attempts')
     op.drop_index(op.f('ix_poc_attempts_crash_id'), table_name='poc_attempts')
     op.drop_index(op.f('ix_poc_attempts_agent_id'), table_name='poc_attempts')
+    op.drop_index(op.f('ix_poc_attempts_worker_id'), table_name='poc_attempts')
     op.drop_table('poc_attempts')
     op.drop_index(op.f('ix_vulnerability_hypotheses_run_id'), table_name='vulnerability_hypotheses')
     op.drop_index('ix_vh_worker_status_score', table_name='vulnerability_hypotheses')
+    op.drop_index(op.f('ix_vulnerability_hypotheses_created_by_agent_id'), table_name='vulnerability_hypotheses')
+    op.drop_index(op.f('ix_vulnerability_hypotheses_lg_id'), table_name='vulnerability_hypotheses')
     op.drop_table('vulnerability_hypotheses')
     op.drop_index(op.f('ix_tool_calls_run_id'), table_name='tool_calls')
     op.drop_index(op.f('ix_tool_calls_llm_call_id'), table_name='tool_calls')
+    op.drop_index(op.f('ix_tool_calls_result_message_id'), table_name='tool_calls')
     op.drop_table('tool_calls')
+    op.drop_index(op.f('ix_function_analysis_agent_id'), table_name='function_analysis')
     op.drop_table('function_analysis')
     op.drop_index(op.f('ix_logic_groups_worker_id'), table_name='logic_groups')
     op.drop_index(op.f('ix_logic_groups_run_id'), table_name='logic_groups')
+    op.drop_index(op.f('ix_logic_groups_created_by_agent_id'), table_name='logic_groups')
     op.drop_table('logic_groups')
     op.drop_index(op.f('ix_llm_calls_worker_id'), table_name='llm_calls')
     op.drop_index(op.f('ix_llm_calls_run_id'), table_name='llm_calls')
     op.drop_index(op.f('ix_llm_calls_agent_id'), table_name='llm_calls')
+    op.drop_index(op.f('ix_llm_calls_output_message_id'), table_name='llm_calls')
     op.drop_table('llm_calls')
     op.drop_index(op.f('ix_agents_worker_id'), table_name='agents')
     op.drop_index(op.f('ix_agents_vh_id'), table_name='agents')
     op.drop_index(op.f('ix_agents_run_id'), table_name='agents')
+    op.drop_index(op.f('ix_agents_crash_id'), table_name='agents')
+    op.drop_index(op.f('ix_agents_lg_id'), table_name='agents')
     op.drop_table('agents')
     op.drop_index(op.f('ix_workers_run_id'), table_name='workers')
     op.drop_table('workers')
     op.drop_table('harness_binaries')
+    op.drop_index(op.f('ix_graph_harnesses_harness_id'), table_name='graph_harnesses')
     op.drop_table('graph_harnesses')
     op.drop_table('llm_messages')
     op.drop_index(op.f('ix_harnesses_run_id'), table_name='harnesses')
