@@ -102,3 +102,28 @@ def test_original_messages_not_mutated():
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def test_message_before_a_trailing_progress_line_is_a_breakpoint():
+    # The agent loop swaps its trailing progress line every turn; the prefix
+    # the next turn can reuse ends on the tool result just before it.
+    params = {
+        "model": "claude-sonnet-4-5",
+        "messages": [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "task"},
+            {"role": "assistant", "content": None,
+             "tool_calls": [{"id": "t1", "type": "function",
+                             "function": {"name": "Read", "arguments": "{}"}}]},
+            {"role": "tool", "tool_call_id": "t1", "content": "file body"},
+            {"role": "user", "content": "[progress] 5 iterations left"},
+        ],
+    }
+    _apply_prompt_caching(params)
+    m = params["messages"]
+    assert isinstance(m[3]["content"], list) and m[3]["content"][0]["cache_control"]
+    assert isinstance(m[4]["content"], list) and m[4]["content"][0]["cache_control"]
+    assert m[2]["content"] is None and "cache_control" not in str(m[2])
+    assert m[1]["content"] == "task"
+    marks = sum(str(x).count("cache_control") for x in m)
+    assert marks == 3  # system + tool result + progress; tools would make 4

@@ -232,20 +232,33 @@ def _apply_prompt_caching(params: dict) -> None:
             else:
                 new_messages.append(msg)
 
-        # Incremental conversation caching (breakpoint 3): cache the prefix up
-        # to the last message. Only plain-string content without tool_calls, to
-        # avoid disturbing tool-call/tool-result message shapes.
-        last = new_messages[-1]
-        last_content = last.get("content")
-        if (
-            last.get("role") != "system"
-            and isinstance(last_content, str)
-            and last_content
-            and not last.get("tool_calls")
-        ):
-            cached_last = dict(last)
-            cached_last["content"] = as_cached_block(last_content)
-            new_messages[-1] = cached_last
+        # Incremental conversation caching (breakpoints 3 and 4): the last
+        # message, and the last one before it. The agent loop replaces its
+        # trailing progress line every turn, so a prefix that ends on the last
+        # message is never sent again; the one ending just before it is, and
+        # that is what the next turn reads. Only plain-string content without
+        # tool_calls is marked (tool results included), to avoid disturbing
+        # tool-call message shapes.
+        def cacheable(msg: dict) -> bool:
+            content = msg.get("content")
+            return (
+                msg.get("role") != "system"
+                and isinstance(content, str)
+                and bool(content)
+                and not msg.get("tool_calls")
+            )
+
+        marked = []
+        if cacheable(new_messages[-1]):
+            marked.append(len(new_messages) - 1)
+        for i in range(len(new_messages) - 2, 0, -1):
+            if cacheable(new_messages[i]):
+                marked.append(i)
+                break
+        for i in marked:
+            cached = dict(new_messages[i])
+            cached["content"] = as_cached_block(cached["content"])
+            new_messages[i] = cached
 
         params["messages"] = new_messages
 
