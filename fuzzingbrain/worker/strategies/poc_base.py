@@ -304,7 +304,6 @@ class POCBaseStrategy(BaseStrategy):
         config = PipelineConfig(
             num_verify_agents=concurrency.verify_agents,
             num_poc_agents=concurrency.poc_agents,
-            poc_min_score=0.5,  # Minimum score to proceed to PoC
             poll_interval=1.0,  # Poll every 1 second
             max_idle_cycles=10,  # Exit after 10 idle cycles
             max_iterations=100,  # Max PoC agent iterations

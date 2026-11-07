@@ -394,7 +394,6 @@ class POCFullscanStrategy(POCBaseStrategy):
         config = PipelineConfig(
             num_verify_agents=concurrency.verify_agents,
             num_poc_agents=concurrency.poc_agents,
-            poc_min_score=0.5,
             poll_interval=2.0,
             max_idle_cycles=30,
             max_iterations=150,      # room for reach_probe diagnosis + create_poc (user: 150)

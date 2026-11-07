@@ -22,6 +22,7 @@ from .prompts import (
 )
 from ..llms import LLMClient, ModelInfo
 from .types import AgentType
+from ..db.store import VH_POC_THRESHOLD
 
 
 class VHVerifier(BaseAgent):
@@ -370,7 +371,7 @@ class VHVerifier(BaseAgent):
                     _s = tool_args.get("score")
                     _crash = bool(tool_args.get("is_crash_found"))
                     _priority = round(float(_s), 3) if _s is not None else 0.0
-                    _proceed = bool((_s is not None and _s >= 0.5) or _crash)
+                    _proceed = bool((_s is not None and _s >= VH_POC_THRESHOLD) or _crash)
                     self.verify_result = {
                         "proceed": _proceed,
                         "priority": _priority,
