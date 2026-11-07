@@ -65,7 +65,13 @@ def test_role_defaults_keep_the_refusing_roles_on_claude():
     assert roles["poc"].backend == "claude"
     assert roles["breaker"].backend == "claude"
     assert roles["fp_seed"].backend == "claude"
+    # Measured live: codex refused the seed role three times for three, before
+    # its first turn, while these ran on codex in the same runs.
+    assert roles["seed"].backend == "claude"
     assert roles["finder"].backend == "codex"
+    assert roles["mapper"].backend == "codex"
+    assert roles["discoverer"].backend == "codex"
+    assert roles["researcher"].backend == "codex"
 
 
 def test_backends_used_covers_the_fallback():

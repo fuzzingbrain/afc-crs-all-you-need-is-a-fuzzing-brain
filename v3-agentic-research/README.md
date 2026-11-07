@@ -108,8 +108,11 @@ submitted. A run is auditable after the fact without re-running anything.
 Roles get only their own tools. Each role's default backend is in
 `fbv3/config.py`: the roles that reproduce or trigger a bug default to Claude,
 because the ChatGPT plan's filter refuses those prompts (AGF measured this);
-the rest default to Codex. On a rate limit or a refusal the pool retries on the
-other subscription.
+the rest default to Codex. The seed role is on Claude for the same reason,
+measured here -- codex refused it in every live run, before its first turn,
+while the mapper, finder, discoverer and researcher ran on codex in those same
+runs. On a rate limit, a refusal, or a session that dies before doing anything,
+the pool retries on the other subscription.
 
 ## The harness principles
 

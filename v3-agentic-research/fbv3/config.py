@@ -61,12 +61,18 @@ def _default_roles() -> dict[str, RoleConfig]:
     # directed_seed measured this -- so those default to Claude; the analysis
     # roles default to Codex. Any role falls back to the other backend on a
     # rate limit or a content flag when ``agents.fallback`` is on.
+    #
+    # The seed role is on Claude for the same reason, measured here: codex
+    # refused it in every live run (three for three, before its first turn,
+    # with a service-side gate that is neither a content flag nor a rate
+    # limit), while the mapper, the finder, the discoverer and the researcher
+    # ran on codex in those same runs without trouble.
     return {
         "discoverer": RoleConfig("codex", timeout_s=1200, max_turns=60),
         "researcher": RoleConfig("codex", timeout_s=1200, max_turns=60),
         "harness": RoleConfig("claude", timeout_s=1800, max_turns=80),
         "reviewer": RoleConfig("claude", timeout_s=1500, max_turns=60),
-        "seed": RoleConfig("codex", timeout_s=900, max_turns=40),
+        "seed": RoleConfig("claude", timeout_s=900, max_turns=40),
         "mapper": RoleConfig("codex", timeout_s=1200, max_turns=60),
         "breaker": RoleConfig("claude", timeout_s=1200, max_turns=60),
         "finder": RoleConfig("codex", timeout_s=900, max_turns=40),
