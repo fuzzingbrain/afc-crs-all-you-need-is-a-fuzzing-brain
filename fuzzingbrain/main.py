@@ -13,6 +13,7 @@ import atexit
 import os
 import signal
 import sys
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -69,6 +70,8 @@ atexit.register(reset_terminal)
 
 _shutdown_requested = False
 _current_run_id: Optional[str] = None
+_current_out: Optional[Path] = None
+_started_at: float = 0.0
 
 
 def signal_handler(signum, frame):
@@ -100,6 +103,11 @@ def signal_handler(signum, frame):
         workers = _store.end_open_workers(_current_run_id, "cancelled")
         agents = _store.end_running_agents(run_id=_current_run_id, status="cancelled")
         _store.end_run(_current_run_id, "cancelled")
+        if _current_out is not None:
+            from .core.run_processor import write_result
+
+            write_result(_current_out, _store, _current_run_id, "cancelled", None,
+                         (time.monotonic() - _started_at) / 60)
         print(
             f"\033[1;33m[INTERRUPT]\033[0m Run cancelled "
             f"({workers} worker(s), {agents} agent(s) stopped)"
@@ -231,7 +239,7 @@ def code_version() -> Optional[str]:
 
 def run_task(config: Config) -> dict:
     """Run one task end to end. Every way of starting FuzzingBrain ends here."""
-    global _current_run_id
+    global _current_run_id, _current_out, _started_at
     # Everything this run writes goes under its output: logs/ and events.jsonl.
     from .core.events import set_events_path
     from .core.logging import get_logo
@@ -256,6 +264,8 @@ def run_task(config: Config) -> dict:
         label=config.label,
     )
     _current_run_id = config.run_id
+    _current_out = out
+    _started_at = time.monotonic()
 
     print_info(f"Logs: {log_file.parent}")
     print_step("Starting run processing pipeline...")
