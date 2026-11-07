@@ -188,9 +188,19 @@ checked again for its key source.
 ## Tests
 
 ```sh
-python -m pytest            # 224 tests, no docker, no network, no agent
-python -m pytest -m docker  # the ones that build and run containers
+python -m pytest            # 227 tests, no docker, no network, no agent
+python -m pytest -m docker  # 6 more that really build and run containers (~30s)
 ```
+
+The docker set needs one OSS-Fuzz project image and covers the machinery an
+agent drives: the project's own build compiling a candidate harness, a compile
+error keeping the line numbers the agent wrote, an overlay the build ignores
+being refused, the workspace container (writable /ws, read-only source, no
+network, the tools present), a generator producing inputs inside it, and the
+built target running from its runtime bundle.
+
+    FBV3_TEST_IMAGE=gcr.io/oss-fuzz/libpng FBV3_TEST_OVERLAY=/src/libpng_read_fuzzer.cc \
+        python -m pytest -m docker
 
 The suite covers what a naive port gets wrong: the finder and verifier
 thresholds, the fp-seed branch, the PoC attempt limit, that only a reproduced
